@@ -14,6 +14,7 @@ import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { identify, projectId } from "./project.ts";
 import { readSource, readUnit } from "./read.ts";
+import { checkFindings, parseDiff, selectForReview } from "./review.ts";
 import { searchSources, searchUnits, type UnitHit } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
@@ -198,6 +199,82 @@ server.registerTool(
       return text(framed(parts.join("\n\n")));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
+    }
+  },
+);
+
+const DIFF = z
+  .string()
+  .min(1)
+  .max(2_000_000)
+  .describe("The change under review as a unified diff (git diff output)");
+/** The lane's verdict when Sphica cannot answer: never read as "no decision applies". */
+const notChecked = (e: unknown) =>
+  text(
+    `Decision lane: not checked. Sphica unavailable: ${head(reason(e), 300)}. Report the decision check as not run, not as passed.`,
+    true,
+  );
+
+server.registerTool(
+  "review_select",
+  {
+    title: "Past decisions a change touches",
+    description:
+      "For a code review: the active decisions, constraints, and implementation records this diff touches (records anchored to a changed path, " +
+      "and records with no code location that forbid or defer an option an added line names). Judge each against the diff, then check the verdicts with review_check.",
+    inputSchema: { diff: DIFF, cwd: CWD },
+    annotations: READ_ONLY,
+  },
+  async (a) => {
+    try {
+      const p = await projectOf(a.cwd);
+      if (typeof p === "string") return notChecked(new Error(p));
+      const files = parseDiff(a.diff);
+      const hits = await selectForReview(db, p.id, files);
+      if (!hits.length)
+        return text(`Decision lane: checked. No active record applies to the ${files.length} changed files.`);
+      return text(
+        `Decision lane: checked. ${hits.length} records apply; read each before judging it.\n${framed(
+          hits
+            .map(
+              (u) =>
+                `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 300)} [${u.because}]`,
+            )
+            .join("\n"),
+        )}`,
+      );
+    } catch (e) {
+      return notChecked(e);
+    }
+  },
+);
+
+server.registerTool(
+  "review_check",
+  {
+    title: "Check decision verdicts",
+    description:
+      "Checks a reviewer's verdicts on the records review_select returned. Each finding: outcome (violation, complies, unrelated, undetermined), " +
+      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number. Returns the problems, or none.",
+    inputSchema: {
+      diff: DIFF,
+      findings: z.array(z.record(z.string(), z.unknown())).max(50),
+      cwd: CWD,
+    },
+    annotations: READ_ONLY,
+  },
+  async (a) => {
+    try {
+      const p = await projectOf(a.cwd);
+      if (typeof p === "string") return notChecked(new Error(p));
+      const problems = await checkFindings(db, p.id, parseDiff(a.diff), a.findings);
+      return text(
+        problems.length
+          ? `${problems.length} problems:\n${problems.map((x) => `- ${x}`).join("\n")}`
+          : "No problems: every verdict is backed.",
+      );
+    } catch (e) {
+      return notChecked(e);
     }
   },
 );

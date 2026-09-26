@@ -1,0 +1,166 @@
+// The decision lane of a code review: which active records a diff touches, and whether a reviewer's verdicts about them are backed.
+// A record applies when the diff changes a path it is anchored to, or, for a record with no code location that says not to do something
+// (or to defer it), when an added line names one of its options. Candidates and superseded records never apply.
+import type { Kysely } from "kysely";
+import { z } from "zod";
+import type { DB } from "./db-types.ts";
+
+export type FileDiff = { path: string; added: string[]; lines: number[] };
+
+/** The changed files of a unified diff (`git diff` output), with each added line and its line number in the new file. */
+export function parseDiff(text: string): FileDiff[] {
+  const files: FileDiff[] = [];
+  let cur: FileDiff | null = null;
+  let line = 0;
+  for (const raw of text.split(/\r?\n/)) {
+    const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(raw);
+    if (to) {
+      cur = to[1] === "/dev/null" ? null : { path: to[1] ?? "", added: [], lines: [] };
+      if (cur) files.push(cur);
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (hunk) {
+      line = Number(hunk[1]);
+      continue;
+    }
+    if (!cur || raw.startsWith("---")) continue;
+    if (raw.startsWith("+")) {
+      cur.added.push(raw.slice(1));
+      cur.lines.push(line++);
+    } else if (!raw.startsWith("-") && !raw.startsWith("\\")) line++;
+  }
+  return files;
+}
+
+export type Applicable = {
+  id: number;
+  key: string;
+  kind: string;
+  stance: string | null;
+  text: string;
+  because: string;
+};
+
+/** Active, supported, sourced records the diff touches, each with why it applies. */
+export async function selectForReview(
+  db: Kysely<DB>,
+  projectId: number,
+  files: FileDiff[],
+): Promise<Applicable[]> {
+  const paths = files.map((f) => f.path);
+  const live = db
+    .selectFrom("unit as u")
+    .where("u.project_id", "=", projectId)
+    .where("u.lifecycle", "=", "active")
+    .where("u.extraction", "=", "supported")
+    .where("u.unsourced", "=", 0);
+  const anchored = paths.length
+    ? await live
+        .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+        .where("a.path", "in", paths)
+        .where("a.retired_at", "is", null)
+        .select(["u.id", "u.key", "u.kind", "u.stance", "u.text", "a.path", "a.symbol"])
+        .orderBy("u.id")
+        .execute()
+    : [];
+  const out = new Map<number, Applicable>();
+  for (const a of anchored)
+    if (!out.has(a.id))
+      out.set(a.id, {
+        id: a.id,
+        key: a.key,
+        kind: a.kind,
+        stance: a.stance,
+        text: a.text,
+        because: `anchored to ${a.path}${a.symbol ? ` ${a.symbol}` : ""}`,
+      });
+  // Location-free don't and defer records: an added line naming one of their options (inside an identifier too: sendTelemetry)
+  const added = files.flatMap((f) => f.added.map((l) => ({ path: f.path, text: l.toLowerCase() })));
+  const free = await live
+    .where("u.stance", "in", ["dont", "defer"])
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("unit_anchor as a")
+            .select("a.id")
+            .whereRef("a.unit_id", "=", "u.id")
+            .where("a.retired_at", "is", null),
+        ),
+      ),
+    )
+    .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .execute();
+  const options = free.length
+    ? await db
+        .selectFrom("unit_option")
+        .select(["unit_id", "text"])
+        .where(
+          "unit_id",
+          "in",
+          free.map((u) => u.id),
+        )
+        .execute()
+    : [];
+  for (const u of free) {
+    if (out.has(u.id)) continue;
+    for (const o of options.filter((x) => x.unit_id === u.id && x.text.trim().length >= 3)) {
+      const name = o.text.normalize("NFKC").toLowerCase();
+      const hit = added.find((l) => l.text.includes(name));
+      if (hit) {
+        out.set(u.id, {
+          id: u.id,
+          key: u.key,
+          kind: u.kind,
+          stance: u.stance,
+          text: u.text,
+          because: `an added line in ${hit.path} names the option ${o.text}`,
+        });
+        break;
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+const Finding = z
+  .object({
+    outcome: z.enum(["violation", "complies", "unrelated", "undetermined"]),
+    unit: z.string().min(1),
+    reason: z.string().optional(),
+    /** Changed code the verdict rests on: a path in the diff and a line added there */
+    evidence: z
+      .object({ path: z.string().min(1), line: z.number().int().positive() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+const Findings = z.array(Finding).max(50);
+
+/** Problems with a reviewer's verdicts: a violation or compliance must name an applicable record, give a reason, and point at changed code. */
+export async function checkFindings(
+  db: Kysely<DB>,
+  projectId: number,
+  files: FileDiff[],
+  raw: unknown,
+): Promise<string[]> {
+  const parsed = Findings.safeParse(raw);
+  if (!parsed.success) return parsed.error.issues.map((i) => `findings.${i.path.join(".")}: ${i.message}`);
+  const applicable = new Set((await selectForReview(db, projectId, files)).map((u) => u.key));
+  const problems: string[] = [];
+  for (const [i, f] of parsed.data.entries()) {
+    const at = `findings.${i} (${f.outcome} ${f.unit})`;
+    if (f.outcome !== "violation" && f.outcome !== "complies") continue;
+    if (!applicable.has(f.unit))
+      problems.push(`${at}: not a record this diff touches; cite one review_select returned`);
+    if (!f.reason?.trim()) problems.push(`${at}: give the reason, tying the record to the change`);
+    if (!f.evidence) problems.push(`${at}: needs evidence in the changed code (a path and an added line)`);
+    else {
+      const file = files.find((x) => x.path === f.evidence?.path);
+      if (!file) problems.push(`${at}: evidence path ${f.evidence.path} is not in the diff`);
+      else if (!file.lines.includes(f.evidence.line))
+        problems.push(`${at}: evidence line ${f.evidence.line} is not an added line of ${file.path}`);
+    }
+  }
+  return problems;
+}

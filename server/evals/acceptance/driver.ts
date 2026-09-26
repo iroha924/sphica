@@ -18,6 +18,7 @@ import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
 import { readSource, readUnit } from "../../src/read.ts";
+import { type Applicable, checkFindings, parseDiff, selectForReview } from "../../src/review.ts";
 import { searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import type { Step, World } from "./load.ts";
@@ -158,6 +159,14 @@ export async function createDriver(world: World): Promise<Driver> {
       ...(await Promise.all(anchored.map((a) => inject({ event: "pre_edit", path: a.path })))),
     ].join("\n");
   };
+
+  /** The decision lane's last selection, whether it could run, and the last verdict check. */
+  let applicable: Applicable[] = [];
+  let lane = "";
+  let validation: string[] = [];
+  /** A one-file diff as git prints it */
+  const diffOf = (d: { path: string; add: string }) =>
+    `--- a/${d.path}\n+++ b/${d.path}\n@@ -1,0 +1,1 @@\n+${d.add}\n`;
 
   /** The last search's hits and the last read's text, for expectations about them. */
   let found: UnitHit[] = [];
@@ -433,6 +442,26 @@ export async function createDriver(world: World): Promise<Driver> {
         const at = step.as_of as { time: string; read: string };
         lastRead =
           (await readUnit(db(), await projectId(), at.read, repo, new Date(at.time).toISOString())) ?? "";
+        return;
+      }
+      if (step.review_select && typeof step.review_select === "object") {
+        const d = (step.review_select as { diff: { path: string; add: string } }).diff;
+        // A fresh reader, as the MCP server opens one: a missing database must show as not checked
+        const r = openReader(file);
+        try {
+          applicable = await selectForReview(r, await projectId().catch(() => -1), parseDiff(diffOf(d)));
+          lane = "checked";
+        } catch {
+          applicable = [];
+          lane = "not_checked";
+        } finally {
+          await r.destroy();
+        }
+        return;
+      }
+      if (step.review_validate && typeof step.review_validate === "object") {
+        const v = step.review_validate as { findings: unknown };
+        validation = await checkFindings(db(), await projectId(), [], v.findings);
         return;
       }
       if (step.inject && typeof step.inject === "object") {
@@ -841,6 +870,37 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (typeof e.read_contains === "string") {
         assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
+        return;
+      }
+      if (typeof e.applicable_include === "string") {
+        assert.ok(
+          applicable.some((u) => u.key === e.applicable_include),
+          applicable.map((u) => u.key).join(", "),
+        );
+        return;
+      }
+      if (Array.isArray(e.applicable_not_include)) {
+        for (const k of e.applicable_not_include as string[])
+          assert.ok(!applicable.some((u) => u.key === k), k);
+        return;
+      }
+      if (e.applicable_empty === true) {
+        assert.deepEqual(
+          applicable.map((u) => u.key),
+          [],
+        );
+        return;
+      }
+      if (typeof e.lane === "string") {
+        assert.equal(lane, e.lane);
+        return;
+      }
+      if (Array.isArray(e.validation_problems_contain)) {
+        for (const w of e.validation_problems_contain as string[])
+          assert.ok(
+            validation.some((p) => p.includes(w)),
+            validation.join(" | "),
+          );
         return;
       }
       if (Array.isArray(e.context_contains)) {

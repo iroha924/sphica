@@ -443,7 +443,13 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
       `server instructions are ${[...instructions].length} characters`,
     );
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["read", "search", "status"]);
+    assert.deepEqual(tools.map((t) => t.name).sort(), [
+      "read",
+      "review_check",
+      "review_select",
+      "search",
+      "status",
+    ]);
     for (const t of tools)
       assert.ok([...(t.description ?? "")].length <= 2048, `${t.name} description is too long`);
   } finally {

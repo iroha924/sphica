@@ -1,5 +1,5 @@
-// Runs the acceptance cases against the product through its public entry points. Not part of verify until each layer is implemented:
-// `bun run acceptance` reports every case, and a layer joins verify once all its cases pass (plan step 1).
+// Runs the acceptance cases against the product through its public entry points (plan step 1). Every layer passes, so verify runs them all
+// (`bun run acceptance`); a new case that fails keeps verify red until the feature is built.
 import { test } from "node:test";
 import { createDriver } from "./driver.ts";
 import { type Case, loadAcceptance, type Step } from "./load.ts";
