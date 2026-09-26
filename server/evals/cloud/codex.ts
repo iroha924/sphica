@@ -108,8 +108,11 @@ const patch = execFileSync(
 fs.writeFileSync(path.join(dir, "patch.diff"), patch);
 const tools = (r.stdout ?? "").split("\n").flatMap((l) => {
   try {
-    const e = JSON.parse(l) as { item?: { type?: string; server?: string; tool?: string } };
-    return e.item?.type === "mcp_tool_call" ? [`${e.item.server}.${e.item.tool}`] : [];
+    // Each call appears as item.started and item.completed; count the start only
+    const e = JSON.parse(l) as { type?: string; item?: { type?: string; server?: string; tool?: string } };
+    return e.type === "item.started" && e.item?.type === "mcp_tool_call"
+      ? [`${e.item.server}.${e.item.tool}`]
+      : [];
   } catch {
     return [];
   }
