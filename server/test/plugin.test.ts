@@ -364,7 +364,7 @@ test("MCP serverInfo reports the manifest version", async () => {
   }
 });
 
-test("MCP recall and read return failures with isError and a non-empty reason", async () => {
+test("MCP tools return failures with isError and a non-empty reason", async () => {
   // A thrown error makes the SDK return only error.message. Return failures with a reason (the same reason() as the CLI).
   // all_projects avoids depending on where it runs. The database points to a missing path (the owner's ~/.sphica stays untouched).
   const client = new Client({ name: "test", version: "0" });
@@ -381,14 +381,9 @@ test("MCP recall and read return failures with isError and a non-empty reason", 
     }),
   );
   try {
-    for (const [name, args] of [
-      ["recall", { question: "x", all_projects: true }],
-      ["read", { refs: ["k:1"], all_projects: true }],
-    ] as const) {
-      const r = await client.callTool({ name, arguments: args });
-      assert.equal(r.isError, true, name);
-      assert.match(JSON.stringify(r.content), /sphica: failed \(No database at/, name);
-    }
+    const r = await client.callTool({ name: "status", arguments: { cwd: path.join(SRC, "..", "..") } });
+    assert.equal(r.isError, true);
+    assert.match(JSON.stringify(r.content), /Sphica unavailable: No database at/);
   } finally {
     await client.close();
   }
@@ -430,7 +425,7 @@ test("without a repository, same version with different content suggests reinsta
 
 // Claude Code cuts server instructions and tool descriptions at 2,048 characters (mcp.md in 2.1.280). A cut would
 // deliver the search guidance half missing, and nobody would notice.
-test("MCP server instructions and tool descriptions fit in 2,048 characters and name the owner and Japanese search", async () => {
+test("MCP server instructions and tool descriptions fit in 2,048 characters", async () => {
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StdioClientTransport({
@@ -448,27 +443,12 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters and 
       `server instructions are ${[...instructions].length} characters`,
     );
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name).sort(), ["check_path", "read", "recall"]);
-    // The agent reads these, so "me" must name the owner, not the agent ("you").
-    const recall = tools.find((t) => t.name === "recall");
-    assert.match(recall?.description ?? "", /what the owner \(the person you work for\) said/);
-    // Saved records are often Japanese, so the guidance must keep asking for Japanese search terms too.
-    assert.match(instructions, /often in Japanese/);
+    assert.deepEqual(tools.map((t) => t.name).sort(), ["status"]);
     for (const t of tools)
       assert.ok([...(t.description ?? "")].length <= 2048, `${t.name} description is too long`);
   } finally {
     await client.close();
   }
-});
-
-// Unless the limit is checked after framing, the response goes over by the frame size. MCP responses always go through framedWithin.
-test("MCP adds the frame only through framedWithin", () => {
-  const src = fs.readFileSync(
-    path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/mcp.ts"),
-    "utf8",
-  );
-  assert.deepEqual(src.match(/(?<![\w.])framed\(/g) ?? [], []);
-  assert.ok(src.includes("framedWithin("), "calls framedWithin");
 });
 
 // An unregistered project name comes from the remote spelling. Copying it without a length cap goes over the limit.
@@ -489,7 +469,7 @@ test("the response fits the limit even with a long unregistered project name", a
     }),
   );
   try {
-    const r = await client.callTool({ name: "recall", arguments: { question: "x", cwd: repo } });
+    const r = await client.callTool({ name: "status", arguments: { cwd: repo } });
     const t = (r.content as { text: string }[])[0]?.text ?? "";
     assert.match(t, /is not registered with Sphica/);
     assert.ok(Buffer.byteLength(t) <= 4096, `${Buffer.byteLength(t)} bytes`);

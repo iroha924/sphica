@@ -71,79 +71,49 @@ export function insert(db: TempDb, table: string, v: Values): number {
   return Number(r?.rowid);
 }
 
-/** Inserts one trace knowledge record, creating the conversation if needed. */
-export function knowledge(
-  db: TempDb,
-  projectId: number,
-  v: Values & { source_key: string; body: string },
-): number {
-  const conversation = `00000000-0000-8000-8000-${String(projectId).padStart(12, "0")}`;
+/** Inserts one coding session (id as given) and returns its id. */
+export function session(db: TempDb, projectId: number, id = "s1", host = "claude-code"): string {
   db.owner
     .prepare(
-      "insert into conversation (id, project_id, origin, external_id, started_at) values (?, ?, 'claude-code', ?, ?) on conflict do nothing",
+      "insert into session (id, project_id, host, external_id, started_at) values (?, ?, ?, ?, ?) on conflict do nothing",
     )
-    .run(conversation, projectId, `trace-${projectId}`, at("2026-09-01T00:00:00Z"));
-  return insert(db, "knowledge", {
-    project_id: projectId,
-    conversation_id: conversation,
-    kind: "finding",
-    occurred_at: at("2026-09-10T00:00:00Z"),
-    content_hash: hash(),
-    ...v,
-  });
+    .run(id, projectId, host, `ext-${id}`, at("2026-09-01T00:00:00Z"));
+  return id;
 }
 
-/** Inserts one harvested record for pull request `number`, creating the pull_request row if needed. */
-export function harvested(
-  db: TempDb,
-  projectId: number,
-  v: Values & { number: number; key: string; body: string; title?: string },
-): number {
-  const { number, key, title = `PR ${v.number}`, ...rest } = v;
-  db.owner
-    .prepare(
-      "insert into pull_request (project_id, number, title, state) values (?, ?, ?, 'merged') on conflict do nothing",
-    )
-    .run(projectId, number, title);
-  const pr = Number(
-    db.owner.prepare("select id from pull_request where project_id = ? and number = ?").get(projectId, number)
-      ?.id,
-  );
-  return insert(db, "knowledge", {
-    project_id: projectId,
-    pull_request_id: pr,
-    kind: "finding",
-    source_key: `pr:${number}#${key}`,
-    heading: `PR #${number}: ${title}`,
-    occurred_at: at("2026-09-10T00:00:00Z"),
-    content_hash: hash(),
-    ...rest,
-  });
-}
-
-/** Inserts one coding session message and returns its id. */
+/** Inserts one session message as a source and returns its id. */
 export function message(
   db: TempDb,
   projectId: number,
-  v: { id: string; body: string; speaker?: string; sent?: string; indexed?: number; session?: string },
-): string {
-  const session = v.session ?? "s1";
-  const conversation = `c-${projectId}-${session}`;
-  db.owner
-    .prepare(
-      "insert into conversation (id, project_id, origin, external_id, started_at) values (?, ?, 'claude-code', ?, ?) on conflict do nothing",
-    )
-    .run(conversation, projectId, session, at("2026-09-01T00:00:00Z"));
-  insert(db, "message", {
-    id: v.id,
-    conversation_id: conversation,
+  v: { id: string; text: string; speaker?: "owner" | "assistant"; sent?: string; session?: string },
+): number {
+  const s = session(db, projectId, v.session ?? "s1");
+  const speaker = v.speaker ?? "owner";
+  return insert(db, "source", {
+    project_id: projectId,
+    kind: "session_message",
+    artifact: `session:${s}`,
     external_id: v.id,
-    speaker_kind: v.speaker ?? "self",
-    body: v.body,
-    original_bytes: Buffer.byteLength(v.body),
-    sent_at: at(v.sent ?? "2026-09-10T00:00:00Z"),
+    revision: 1,
+    session_id: s,
+    author_kind: speaker,
+    created_at: at(v.sent ?? "2026-09-10T00:00:00Z"),
+    available_at: at(v.sent ?? "2026-09-10T00:00:00Z"),
+    captured_at: at(v.sent ?? "2026-09-10T00:00:00Z"),
+    text: v.text,
+    original_bytes: Buffer.byteLength(v.text),
     content_hash: hash(),
-    indexed: v.indexed ?? 1,
+    indexed: speaker === "owner" ? 1 : 0,
   });
-  return v.id;
+}
+
+/** Inserts one extraction run and returns its id. */
+export function run(db: TempDb, projectId: number, origin = "trace", target = "session:s1"): number {
+  return insert(db, "extraction_run", {
+    project_id: projectId,
+    origin,
+    target,
+    status: "running",
+    started_at: at("2026-09-10T00:00:00Z"),
+  });
 }

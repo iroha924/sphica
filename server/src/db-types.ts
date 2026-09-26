@@ -9,111 +9,124 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export interface CaptureConversation {
-  branch: string | null;
-  external_id: string | null;
-  id: string | null;
-  origin: string | null;
-  project_id: number | null;
-  started_at: string | null;
+export interface AppliedDraft {
+  applied_at: string;
+  draft_id: string;
+  run_id: number;
+}
+
+export interface ArtifactLink {
+  from_artifact: string;
+  kind: string;
+  project_id: number;
+  to_artifact: string;
+}
+
+export interface CaptureDelivery {
+  at: string | null;
+  chars: number | null;
+  eligible: number | null;
+  event: string | null;
+  omitted: number | null;
+  outcome: string | null;
+  path: string | null;
+  reason: string | null;
+  session_id: string | null;
+}
+
+export interface CaptureDeliveryUnit {
+  delivery_id: number | null;
+  unit_id: number | null;
+}
+
+export interface CaptureEdit {
+  observed_at: string | null;
+  path: string | null;
+  session_id: string | null;
+  tool_event_id: string | null;
+  turn_id: string | null;
+  via: string | null;
 }
 
 export interface CaptureMessage {
-  body: string | null;
+  captured_at: string | null;
   content_hash: Buffer | null;
-  conversation_id: string | null;
+  created_at: string | null;
   external_id: string | null;
-  id: string | null;
-  indexed: number | null;
   original_bytes: number | null;
-  sent_at: string | null;
-  speaker_kind: string | null;
+  redacted: number | null;
+  session_id: string | null;
+  speaker: string | null;
+  text: string | null;
   truncated: number | null;
   turn_id: string | null;
 }
 
-export interface CaptureMessageFile {
-  action: string | null;
-  message_id: string | null;
-  path: string | null;
+export interface CaptureSession {
+  branch: string | null;
+  external_id: string | null;
+  host: string | null;
+  id: string | null;
+  project_id: number | null;
+  started_at: string | null;
 }
 
-export interface Conversation {
-  branch: string | null;
-  external_id: string;
-  id: string;
+export interface Delivery {
+  at: string;
+  chars: Generated<number>;
+  eligible: Generated<number>;
+  event: string;
+  id: Generated<number>;
+  omitted: Generated<number>;
+  outcome: string;
+  path: string | null;
+  reason: string | null;
+  session_id: string | null;
+}
+
+export interface DeliveryUnit {
+  delivery_id: number;
+  unit_id: number;
+}
+
+export interface EditObservation {
+  id: Generated<number>;
+  observed_at: string;
+  path: string;
+  session_id: string;
+  tool_event_id: string | null;
+  turn_id: string | null;
+  via: string;
+}
+
+export interface ExternalReference {
+  added_at: string;
+  id: Generated<number>;
+  owner_source_id: number;
+  project_id: number;
+  span_end: number;
+  span_start: number;
+  url: string;
+}
+
+export interface ExtractionRun {
+  finished_at: string | null;
+  id: Generated<number>;
+  input_bytes: number | null;
   origin: string;
   project_id: number;
-  started_at: string;
-}
-
-export interface Knowledge {
-  body: string;
-  command: string | null;
-  confidence: string | null;
-  confirmation: string | null;
-  content_hash: Buffer;
-  conversation_id: string | null;
-  decision_id: number | null;
-  downsides: ColumnType<string[], string | undefined, string>;
-  heading: string | null;
-  id: Generated<number>;
-  kind: string;
-  occurred_at: string;
-  project_id: number;
-  pull_request_id: number | null;
   reason: string | null;
-  refs: ColumnType<string[], string | undefined, string>;
-  source_key: string;
-  status: string | null;
-  superseded_by_id: number | null;
-  work_item_id: number | null;
+  session_id: string | null;
+  started_at: string;
+  status: string;
+  target: string;
 }
 
-export interface KnowledgeFile {
-  knowledge_id: number;
-  line_end: number | null;
-  line_start: number | null;
-  path: string;
-  role: string;
-}
-
-export interface KnowledgeSearchText {
-  b: string | null;
-  e: string | null;
-  h: string | null;
-  id: number | null;
-}
-
-export interface KnowledgeTerms {
-  content_hash: Buffer;
-  knowledge_id: Generated<number>;
-  source: string;
-  terms: string;
-  written_at: string;
-}
-
-export interface Message {
-  body: string;
-  content_hash: Buffer;
-  conversation_id: string;
+export interface OwnerIdentity {
+  bound_at: string;
   external_id: string;
-  id: string;
-  indexed: number;
-  original_bytes: number;
-  sent_at: string;
-  seq: Generated<number>;
-  speaker_kind: string;
-  truncated: Generated<number>;
-  turn_id: string | null;
-}
-
-export interface MessageFile {
-  action: string;
-  line_end: number | null;
-  line_start: number | null;
-  message_id: string;
-  path: string;
+  login: string | null;
+  provider: string;
 }
 
 export interface Project {
@@ -123,42 +136,217 @@ export interface Project {
   name: string;
 }
 
-export interface PullRequest {
-  github_id: number | null;
-  harvested_at: string | null;
-  id: Generated<number>;
-  number: number;
+export interface Session {
+  branch: string | null;
+  external_id: string;
+  host: string;
+  id: string;
   project_id: number;
-  state: string;
-  title: string;
+  started_at: string;
+}
+
+export interface Source {
+  artifact: string;
+  author_association: string | null;
+  author_external_id: string | null;
+  author_kind: string;
+  author_login: string | null;
+  available_at: string | null;
+  blob_sha: string | null;
+  captured_at: string;
+  commit_sha: string | null;
+  content_hash: Buffer;
+  created_at: string;
+  diff_hunk: string | null;
+  event_kind: string | null;
+  external_id: string;
+  id: Generated<number>;
+  indexed: number;
+  kind: string;
+  line_end: number | null;
+  line_start: number | null;
+  original_bytes: number;
+  parent_external_id: string | null;
+  path: string | null;
+  project_id: number;
+  redacted: Generated<number>;
+  revision: number;
+  session_id: string | null;
+  text: string;
+  truncated: Generated<number>;
+  turn_id: string | null;
   url: string | null;
 }
 
-export interface WorkItem {
-  conversation_id: string | null;
+export interface SourceProcessing {
+  outcome: string;
+  run_id: number;
+  source_id: number;
+}
+
+export interface SphicaGeneration {
+  generation: number;
+}
+
+export interface Unit {
+  content_hash: Buffer;
+  created_at: string;
+  extraction: string;
+  extraction_reason: string | null;
+  id: Generated<number>;
+  key: string;
+  kind: string;
+  lifecycle: Generated<string>;
+  no_code_surface: string | null;
+  project_id: number;
+  revision: Generated<number>;
+  revisit_when: string | null;
+  run_id: number;
+  scope_note: string | null;
+  stance: string | null;
+  text: string;
+  unsourced: Generated<number>;
+  why: string | null;
+}
+
+export interface UnitAdoption {
+  added_at: string;
+  id: Generated<number>;
+  retracted_at: string | null;
+  retraction_reason: string | null;
+  retraction_source_id: number | null;
+  retraction_span_end: number | null;
+  retraction_span_start: number | null;
+  route: string;
+  run_id: number;
+  source_id: number;
+  span_end: number;
+  span_start: number;
+  unit_id: number;
+}
+
+export interface UnitAlias {
+  added_at: string;
+  content_hash: Buffer;
+  id: Generated<number>;
+  run_id: number;
+  terms: string;
+  unit_id: number;
+}
+
+export interface UnitAnchor {
+  added_at: string;
+  commit_sha: string | null;
+  edit_observation_id: number | null;
+  excerpt: string | null;
+  id: Generated<number>;
+  line_end: number | null;
+  line_start: number | null;
+  path: string;
+  replaced_by: number | null;
+  retired_at: string | null;
+  role: string;
+  run_id: number;
+  symbol: string | null;
+  unit_id: number;
+}
+
+export interface UnitEvidence {
+  added_at: string;
+  id: Generated<number>;
+  option_id: number | null;
+  reported_speaker: string | null;
+  retracted_at: string | null;
+  retraction_reason: string | null;
+  retraction_source_id: number | null;
+  retraction_span_end: number | null;
+  retraction_span_start: number | null;
+  role: string;
+  run_id: number;
+  source_id: number;
+  span_end: number;
+  span_start: number;
+  unit_id: number;
+}
+
+export interface UnitLink {
+  added_at: string;
+  from_unit: number;
+  kind: string;
+  resolution: string | null;
+  resolved_at: string | null;
+  run_id: number;
+  to_unit: number;
+}
+
+export interface UnitOption {
+  id: Generated<number>;
+  outcome: string;
+  position: number;
+  text: string;
+  unit_id: number;
+  why: string | null;
+}
+
+export interface UnitSearchText {
+  alias: string | null;
+  body: string | null;
+  id: number | null;
+  ident: string | null;
+}
+
+export interface UnitState {
+  at: string;
+  from_state: string | null;
+  id: Generated<number>;
+  reason: string;
+  run_id: number;
+  source_id: number | null;
+  to_state: string;
+  unit_id: number;
+}
+
+export interface Work {
+  branch: string | null;
   current: string;
   goal: string;
   id: Generated<number>;
-  next: ColumnType<string[], string | undefined, string>;
+  key: string;
+  next: Generated<string>;
   project_id: number;
-  source_key: string;
+  run_id: number | null;
   status: string;
   title: string;
   updated_at: string;
 }
 
 export interface DB {
-  capture_conversation: CaptureConversation;
+  applied_draft: AppliedDraft;
+  artifact_link: ArtifactLink;
+  capture_delivery: CaptureDelivery;
+  capture_delivery_unit: CaptureDeliveryUnit;
+  capture_edit: CaptureEdit;
   capture_message: CaptureMessage;
-  capture_message_file: CaptureMessageFile;
-  conversation: Conversation;
-  knowledge: Knowledge;
-  knowledge_file: KnowledgeFile;
-  knowledge_search_text: KnowledgeSearchText;
-  knowledge_terms: KnowledgeTerms;
-  message: Message;
-  message_file: MessageFile;
+  capture_session: CaptureSession;
+  delivery: Delivery;
+  delivery_unit: DeliveryUnit;
+  edit_observation: EditObservation;
+  external_reference: ExternalReference;
+  extraction_run: ExtractionRun;
+  owner_identity: OwnerIdentity;
   project: Project;
-  pull_request: PullRequest;
-  work_item: WorkItem;
+  session: Session;
+  source: Source;
+  source_processing: SourceProcessing;
+  sphica_generation: SphicaGeneration;
+  unit: Unit;
+  unit_adoption: UnitAdoption;
+  unit_alias: UnitAlias;
+  unit_anchor: UnitAnchor;
+  unit_evidence: UnitEvidence;
+  unit_link: UnitLink;
+  unit_option: UnitOption;
+  unit_search_text: UnitSearchText;
+  unit_state: UnitState;
+  work: Work;
 }

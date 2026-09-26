@@ -8,6 +8,7 @@ import { after, before, test } from "node:test";
 import {
   answersOf,
   captureNotice,
+  current,
   fit,
   isOwnerTurn,
   MAX_MESSAGE,
@@ -19,8 +20,7 @@ import {
   spoolDir,
   write,
 } from "../src/capture.ts";
-import { conversationId } from "../src/knowledge.ts";
-import { bytes, mask, sha256, uuidFrom } from "../src/text.ts";
+import { bytes, mask, sha256 } from "../src/text.ts";
 import { project, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
@@ -57,7 +57,11 @@ test("subagents, children started by an agent, and headless turns without the ma
 
 test("a message over 128 KiB keeps only its start and end and records the original size", () => {
   const small = fit("短い");
-  assert.deepEqual(small, { body: "短い", truncated: false, originalBytes: bytes("短い") });
+  assert.deepEqual(small, { body: "短い", truncated: false, redacted: false, originalBytes: bytes("短い") });
+  // A masked message says so and keeps the size it arrived with
+  const masked = fit("key sk-proj-abcdefghijklmnopqrstuvwxyz0123");
+  assert.equal(masked.redacted, true);
+  assert.equal(masked.originalBytes, bytes("key sk-proj-abcdefghijklmnopqrstuvwxyz0123"));
   const big = `${"頭".repeat(20_000)}${"中".repeat(50_000)}${"尾".repeat(20_000)}`;
   const got = fit(big);
   assert.equal(got.truncated, true);
@@ -280,7 +284,7 @@ const spooled = (): Spooled[] => {
 };
 const reset = () => fs.rmSync(spoolDir(), { recursive: true, force: true });
 /** Hides the second half of ids built from the body so only the shape is compared. */
-const shape = (id: string) => id.replace(/:(self|assistant):[0-9a-f]{16}$/, ":$1:<hash>");
+const shape = (id: string) => id.replace(/:(owner|assistant):[0-9a-f]{16}$/, ":$1:<hash>");
 
 test("owner messages, the last AI reply, and edited files go into the queue", () => {
   reset();
@@ -323,11 +327,11 @@ test("owner messages, the last AI reply, and edited files go into the queue", ()
   assert.equal(r.flush, true, "Stop sends");
   const got = spooled();
   const messages = got.filter((x) => x.kind === "message");
-  const files = got.filter((x) => x.kind === "file");
+  const edits = got.filter((x) => x.kind === "edit");
   assert.deepEqual(
     messages.map((m) => (m.kind === "message" ? [shape(m.id), m.speaker, m.project] : [])),
     [
-      ["p1:self:<hash>", "self", "git:github.com/o/r"],
+      ["p1:owner:<hash>", "owner", "git:github.com/o/r"],
       ["p1:assistant:<hash>", "assistant", "git:github.com/o/r"],
     ],
   );
@@ -336,14 +340,14 @@ test("owner messages, the last AI reply, and edited files go into the queue", ()
   // The second half of the id comes from the masked body (building it from the unmasked body would let weak keys be brute-forced against the masked body).
   assert.equal(
     said?.id,
-    `p1:self:${sha256(said?.body ?? "")
+    `p1:owner:${sha256(said?.body ?? "")
       .toString("hex")
       .slice(0, 16)}`,
   );
   assert.deepEqual(
-    files.map((f) => (f.kind === "file" ? [f.path, f.action, f.message] : [])),
-    [["db/schema.sql", "edit", said?.id]],
-    "files only read (Read) are not recorded",
+    edits.map((f) => (f.kind === "edit" ? f.path : "")),
+    ["db/schema.sql"],
+    "files only read (Read) and files outside the repository are not recorded",
   );
 });
 
@@ -367,7 +371,7 @@ test("notifications and relayed messages are not owner messages, and all message
       tool_name: "Edit",
       tool_input: { file_path: path.join(repoDir, file) },
     });
-  // Files touched before the owner has said anything have nothing to link to, so they are not written.
+  // Edits are observations of their own; one before the owner has said anything is kept too.
   edit("p0", "a.ts");
   // Messages that arrive mid-turn come with the running turn's id.
   for (const p of [
@@ -402,17 +406,19 @@ test("notifications and relayed messages are not owner messages, and all message
   assert.deepEqual(messages.map((m) => [shape(m.id), m.body]).sort(), [
     ["p1:assistant:<hash>", "伝言も確かめた。"],
     ["p1:assistant:<hash>", "作り直した。"],
-    ["p1:self:<hash>", "DB を作り直す"],
-    ["p1:self:<hash>", "やっぱり role も分けて"],
-    ["p1:self:<hash>", "急ぎで"],
-    ["p1:self:<hash>", "急ぎで"],
+    ["p1:owner:<hash>", "DB を作り直す"],
+    ["p1:owner:<hash>", "やっぱり role も分けて"],
+    ["p1:owner:<hash>", "急ぎで"],
+    ["p1:owner:<hash>", "急ぎで"],
   ]);
   // Only the message that arrived twice shares an id; the others differ (equal ids collapse into one row by the unique constraint).
   assert.equal(new Set(messages.map((m) => m.id)).size, messages.length - 1);
-  const last = messages.find((m) => m.body === "急ぎで")?.id;
   assert.deepEqual(
-    got.flatMap((f) => (f.kind === "file" ? [[f.path, f.message]] : [])),
-    [["b.ts", last]],
+    got.flatMap((f) => (f.kind === "edit" ? [[f.turn, f.path]] : [])),
+    [
+      ["p0", "a.ts"],
+      ["p2", "b.ts"],
+    ],
   );
 });
 
@@ -435,44 +441,72 @@ test("drops notifications with text after the closing tag, and keeps owner quest
   );
 });
 
-test("when writing to the database, files link to the queued owner message id, not the turn", async () => {
+test("writing to the database counts only new messages, records edits as observations, and translates v:1 records", async () => {
   const db = tempDb();
   const id = project(db);
-  const said = "t1:self:0123456789abcdef";
   const base = {
-    v: 1 as const,
     host: "claude-code" as const,
     session: "s1",
     project: "git:github.com/o/r",
     branch: null,
     at: "2026-09-13T00:00:00.000Z",
   };
+  const said = "t1:owner:0123456789abcdef";
   const batch: Spooled[] = [
     {
       ...base,
+      v: 2,
       kind: "message",
       turn: "t1",
       id: said,
-      speaker: "self",
+      speaker: "owner",
       body: "直して",
       truncated: false,
+      redacted: false,
       originalBytes: 9,
     },
-    // A file touched in a turn started by a completion notice (t2).
-    { ...base, kind: "file", turn: "t2", message: said, path: "a.ts", action: "edit" },
+    { ...base, v: 2, kind: "edit", turn: "t2", event: "tool-1", path: "a.ts" },
   ];
   const projects = new Map([["git:github.com/o/r", { id, name: "r" }]]);
   try {
     assert.equal(await write(db.capture, batch, projects), 1, "number of newly inserted messages");
     // A resend is "already there". An insert into the view reports 0 changed rows, so count by the difference from existing ids.
     assert.equal(await write(db.capture, batch, projects), 0);
-    const anchor = uuidFrom(conversationId(id, "claude-code", "s1"), said);
     assert.deepEqual(
       db.owner
-        .prepare("select message_id, path from message_file")
+        .prepare(
+          "select s.external_id, e.path, e.turn_id, e.via from edit_observation e join session s on s.id = e.session_id",
+        )
         .all()
         .map((r) => ({ ...r })),
-      [{ message_id: anchor, path: "a.ts" }],
+      [{ external_id: "s1", path: "a.ts", turn_id: "t2", via: "tool" }],
+    );
+    // A queue left by 0.4 is kept: its messages become owner or assistant messages and its edits become observations; its read files are dropped
+    const v1 = { v: 1, ...base, turn: "t3" };
+    const old = [
+      current({
+        ...v1,
+        kind: "message",
+        id: "t3:self:x",
+        speaker: "self",
+        body: "古い",
+        truncated: false,
+        originalBytes: 6,
+      }),
+      current({ ...v1, kind: "file", message: "t3:self:x", path: "b.ts", action: "edit" }),
+      current({ ...v1, kind: "file", message: "t3:self:x", path: "c.md", action: "read" }),
+    ];
+    assert.deepEqual(
+      old.map((r) => (r ? [r.v, r.kind, r.kind === "message" ? r.speaker : r.path] : null)),
+      [[2, "message", "owner"], [2, "edit", "b.ts"], null],
+    );
+    assert.equal(
+      await write(
+        db.capture,
+        old.filter((r) => r !== null),
+        projects,
+      ),
+      1,
     );
   } finally {
     await db.done();
@@ -657,13 +691,13 @@ test("reads the edited file of a Codex apply_patch from its headers", () => {
   assert.deepEqual(
     spooled().flatMap((x) => (x.kind === "message" ? [[x.host, x.speaker, x.body]] : [])),
     [
-      ["codex", "self", "a.ts を直して"],
+      ["codex", "owner", "a.ts を直して"],
       ["codex", "assistant", "直した。"],
     ],
   );
-  const files = spooled().filter((x) => x.kind === "file");
-  assert.equal(files.length, 1);
-  assert.ok(files[0]?.kind === "file" && files[0].path === "server/src/a.ts" && files[0].host === "codex");
+  const edits = spooled().filter((x) => x.kind === "edit");
+  assert.equal(edits.length, 1);
+  assert.ok(edits[0]?.kind === "edit" && edits[0].path === "server/src/a.ts" && edits[0].host === "codex");
 });
 
 test("the Codex hook entry point sets the host and returns valid JSON for Stop", () => {

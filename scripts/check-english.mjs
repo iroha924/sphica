@@ -13,8 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Every file under dir whose name matches re, as a repository path. New files are checked without being listed. */
 const filesUnder = (dir, re) =>
-  fs
-    .readdirSync(path.join(root, dir), { recursive: true })
+  (fs.existsSync(path.join(root, dir)) ? fs.readdirSync(path.join(root, dir), { recursive: true }) : [])
     .map((f) => `${dir}/${f.split(path.sep).join("/")}`)
     .filter((f) => re.test(f))
     // Symlinked directories (.claude/skills -> .agents/skills) would list the same file twice; keep only the real path.
@@ -25,12 +24,8 @@ const filesUnder = (dir, re) =>
 const ENGLISH = [
   ...filesUnder("server/src", /\.tsx?$/),
   ...filesUnder("scripts", /\.(c?js|mjs|m?ts|tsx)$/),
-  "server/evals/cases.ts",
-  "server/evals/retrieval.ts",
   "server/test/assets.test.ts",
   "server/test/check-mcp-version.test.ts",
-  "server/test/evals-run.test.ts",
-  "server/test/migrate.test.ts",
   "server/test/plugin.test.ts",
   "server/test/project.test.ts",
   "server/test/release-gate.test.ts",
@@ -39,6 +34,10 @@ const ENGLISH = [
   "server/test/tarball.test.ts",
   "server/test/temp-db.ts",
   "server/test/temp-repo.ts",
+  "server/test/acceptance-cases.test.ts",
+  "server/evals/acceptance/load.ts",
+  "server/evals/acceptance/run.ts",
+  "server/evals/acceptance/driver.ts",
 ];
 
 /** Comments must be English. Tests keep Japanese fixtures, and evals keep their measured prompts. */

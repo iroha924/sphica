@@ -124,7 +124,7 @@ Search is ranked word search (FTS5's bm25). The calling AI makes up for semantic
 - `message.seq` is an explicit `integer primary key` (an implicit rowid can be renumbered by VACUUM)
 - Always wrap query words in `"…"` and double any `"` inside (`ftsQuery`). Unwrapped, `AND`, `NEAR`, `:`, and `-` become operators
 
-Measurements live in `server/evals/` (`evals:retrieval` for one-shot search, `evals:agentic` for accuracy when an agent uses it).
+The acceptance cases live in `server/evals/acceptance/` (`bun run acceptance`); the evaluation design is in the 0.5.0 rebuild plan.
 
 ## When changing the set of values
 

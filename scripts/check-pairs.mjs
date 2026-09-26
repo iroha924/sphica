@@ -32,21 +32,25 @@ const same = (a, b) => [...a].sort().join() === [...b].sort().join();
 
 // ---- Value domains match between the database CHECKs and the code ----
 //
-// The source of truth is the CHECKs in db/schema.sql. The copy in code (server/src/knowledge.ts) is used by MCP input, trace checks, labels,
-// and the capture and import types (the label table is forced by its type to cover every status). **Catches adding to one side and forgetting the other.**
-// Adding only to the database leaves search labels empty; adding only to the code makes import and capture fail the CHECK
+// The source of truth is the CHECKs in db/schema.sql. The copy in code (server/src/knowledge.ts) is used by capture, the save paths,
+// and search filters. **Catches adding to one side and forgetting the other.** Adding only to the code makes saves fail the CHECK;
+// adding only to the database leaves values the code never writes or filters on
 // (a real case: files that were Read were sent as action 'read', the CHECK allowed only edit / review, and capture stopped).
-const schema = read("db/schema.sql");
-// A table rebuilt by a migration is written with its name quoted (`create table "knowledge"`)
-const knowledgeTable = schema.slice(
-  schema.search(/create table "?knowledge"? \(/),
-  schema.indexOf("create index knowledge_listing"),
-);
 const PAIRS = [
-  ["knowledge.kind", /kind in \(([^)]*)\)\s*\),\s*status text/, "KINDS"],
-  ["message.speaker_kind", /speaker_kind text not null check \(speaker_kind in \(([^)]*)\)\)/, "SPEAKERS"],
-  ["conversation.origin", /origin text not null check \(origin in \(([^)]*)\)\)/, "ORIGINS"],
-  ["message_file.action", /action text not null check \(action in \(([^)]*)\)\)/, "FILE_ACTIONS"],
+  ["unit.kind", /kind text not null check \(kind in \(('decision'[^)]*)\)\)/, "UNIT_KINDS"],
+  ["unit.stance", /stance text check \(stance in \(([^)]*)\)\)/, "STANCES"],
+  [
+    "unit.lifecycle",
+    /lifecycle text not null default 'candidate' check \(lifecycle in \(([^)]*)\)\)/,
+    "LIFECYCLES",
+  ],
+  [
+    "unit_option.outcome",
+    /outcome text not null check \(outcome in \(('chosen'[^)]*)\)\)/,
+    "OPTION_OUTCOMES",
+  ],
+  ["session.host", /host text not null check \(host in \(([^)]*)\)\)/, "HOSTS"],
+  ["source.kind", /kind text not null check \(kind in \(('session_message'[^)]*)\)\)/, "SOURCE_KINDS"],
 ];
 for (const [column, re, constant] of PAIRS) {
   const db = words(grab("db/schema.sql", re, `the ${column} CHECK`), "'", `the ${column} CHECK`);
@@ -63,45 +67,6 @@ for (const [column, re, constant] of PAIRS) {
     fail.push(
       `${column} does not match: the database has ${db.join(" / ")}, and ${constant} in knowledge.ts has ${code.join(" / ")}`,
     );
-}
-const dbStatuses = Object.fromEntries(
-  [...knowledgeTable.matchAll(/when '([a-z_]+)' then status is not null and status in \(([^)]*)\)/g)].map(
-    (m) => [
-      m[1],
-      [...m[2].matchAll(/'([a-z_]+)'/g)]
-        .map((x) => x[1])
-        .sort()
-        .join(),
-    ],
-  ),
-);
-const codeStatuses = Object.fromEntries(
-  [
-    ...(
-      grab(
-        "server/src/knowledge.ts",
-        /export const STATUSES = \{(.*?)\} as const/s,
-        "STATUSES in knowledge.ts",
-      ) ?? ""
-    ).matchAll(/([a-z_]+): \[([^\]]*)\]/g),
-  ].map((m) => [
-    m[1],
-    [...m[2].matchAll(/"([a-z_]+)"/g)]
-      .map((x) => x[1])
-      .sort()
-      .join(),
-  ]),
-);
-if (Object.keys(dbStatuses).length === 0)
-  fail.push(
-    "cannot extract any status CHECK from db/schema.sql. The regex in check-pairs.mjs has drifted from the file",
-  );
-for (const kind of new Set([...Object.keys(dbStatuses), ...Object.keys(codeStatuses)])) {
-  if (dbStatuses[kind] !== codeStatuses[kind]) {
-    fail.push(
-      `${kind} statuses do not match: the database has ${dbStatuses[kind] ?? "none"}, and knowledge.ts has ${codeStatuses[kind] ?? "none"}`,
-    );
-  }
 }
 
 // ---- Status glyphs match between the CLI and the review ledger ----
@@ -475,32 +440,6 @@ if (TRAILER !== null) {
   for (const file of fs.readdirSync(AGENT_DIR).map((f) => `${AGENT_DIR}/${f}`)) {
     if (/^completion: /m.test(read(file)))
       fail.push(`${file}: the completion line belongs only in the launching Skill`);
-  }
-}
-
-// ---- MCP replies quoted in the review Skill match what the recall and read tools return ----
-//
-// The review Skill and the precedent reviewer tell "unregistered", "no project", and "no results" apart by quoting MCP replies.
-// If tools.ts changes a reply, the quote stops matching and every case reads as a failed search.
-{
-  const mcp = read("server/src/tools.ts");
-  for (const file of [REVIEW_SKILL, `${AGENT_DIR}/precedent.md`]) {
-    const rows = read(file)
-      .split("\n")
-      .filter((l) => l.startsWith("|") && /\bReturns\b/.test(l));
-    // Only the cell that says what MCP returns; other cells quote the ledger value, not MCP.
-    const quotes = rows.flatMap((l) =>
-      l
-        .split("|")
-        .filter((cell) => /\bReturns\b/.test(cell))
-        .flatMap((cell) => [...cell.matchAll(/"([\x20-\x7e]+?)"/g)].map((m) => m[1])),
-    );
-    if (quotes.length === 0) fail.push(`${file}: no quoted MCP replies found. Check the table format`);
-    // Match whole words, so a quote that is a prefix of the real reply ("message" in "messages") still fails.
-    const said = (q) =>
-      new RegExp(`(?<![A-Za-z])${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z])`).test(mcp);
-    for (const q of quotes)
-      if (!said(q)) fail.push(`${file} quotes "${q}", which server/src/tools.ts does not return`);
   }
 }
 

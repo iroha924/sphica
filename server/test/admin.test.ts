@@ -106,21 +106,34 @@ test("sphica init does not overwrite a file that is not a Sphica database", asyn
   );
 });
 
+test("sphica init leaves a database made by Sphica 0.4 or earlier unchanged and says to move it aside", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  const raw = new DatabaseSync(file);
+  raw.exec("create table project (id integer primary key); pragma user_version = 7");
+  raw.close();
+  const before = fs.readFileSync(file);
+  await assert.rejects(
+    quiet(() => dbInit(file)),
+    /Sphica 0.4 or earlier.*Move it aside/,
+  );
+  assert.deepEqual(fs.readFileSync(file), before);
+});
+
 test("db reindex rebuilds the full-text index and passes the doctor check", async () => {
   const file = path.join(tmp(), "sphica.db");
   await quiet(() => dbInit(file));
   const w = connectWriter("owner", file);
   w.exec("insert into project (key, name) values ('git:x/y', 'x/y')");
   w.prepare(
-    "insert into conversation (id, project_id, origin, external_id, started_at) values ('c', 1, 'codex', 's', ?)",
+    "insert into session (id, project_id, host, external_id, started_at) values ('s', 1, 'codex', 's', ?)",
   ).run(at("2026-09-01T00:00:00Z"));
   w.prepare(
-    "insert into knowledge (project_id, conversation_id, source_key, kind, body, occurred_at, content_hash) values (1, 'c', 'k', 'finding', '索引を作り直す', ?, ?)",
-  ).run(at("2026-09-01T00:00:00Z"), hash());
-  w.exec("insert into knowledge_fts (knowledge_fts) values ('delete-all')");
+    "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s', 'm', 1, 's', 'owner', ?, ?, '索引を作り直す', ?, ?, 1)",
+  ).run(at("2026-09-01T00:00:00Z"), at("2026-09-01T00:00:00Z"), Buffer.byteLength("索引を作り直す"), hash());
+  w.exec("insert into source_fts (source_fts) values ('delete-all')");
   const count = () =>
     (
-      w.prepare("select count(*) as n from knowledge_fts where knowledge_fts match '\"索引\"'").get() as {
+      w.prepare("select count(*) as n from source_fts where source_fts match '\"索引\"'").get() as {
         n: number;
       }
     ).n;
@@ -130,7 +143,7 @@ test("db reindex rebuilds the full-text index and passes the doctor check", asyn
   w.close();
   const x = inspect(file);
   assert.equal(x.revision, SCHEMA_REVISION);
-  assert.deepEqual(x.fts, { knowledge: null, message: null });
+  assert.deepEqual(x.fts, { unit: null, source: null });
   assert.ok(x.bytes > 0);
 });
 

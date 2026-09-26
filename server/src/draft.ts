@@ -18,7 +18,7 @@ const ID = /^[A-Za-z0-9_-]{12}$/;
 const draftRoot = (): string => path.join(os.homedir(), ".sphica", "drafts");
 
 /** The id as typed, if it has the shape draft issues. */
-export function draftId(input: string): string {
+function draftId(input: string): string {
   if (!ID.test(input))
     throw new Error(`Not a draft id: ${JSON.stringify(input.slice(0, 40))}. Use the id draft printed`);
   return input;

@@ -44,32 +44,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "mcp_tool",
-            "server": "plugin:sphica:sphica",
-            "tool": "check_path",
-            "input": { "path": "${tool_input.file_path}", "cwd": "${cwd}", "hook": true },
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "NotebookEdit",
-        "hooks": [
-          {
-            "type": "mcp_tool",
-            "server": "plugin:sphica:sphica",
-            "tool": "check_path",
-            "input": { "path": "${tool_input.notebook_path}", "cwd": "${cwd}", "hook": true },
-            "timeout": 5
-          }
-        ]
-      }
     ]
   }
 }

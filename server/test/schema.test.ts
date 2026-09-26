@@ -1,206 +1,407 @@
-// Whether the constraints in db/schema.sql reject what they should and accept what they should.
-// Writes use the owner connection (testing the schema itself, not the authorizer).
+// Whether the constraints and triggers in db/schema.sql refuse what they should and accept what they should.
+// Writes use the owner connection (testing the schema itself, not the authorizer); the capture views are tested through their triggers.
 
 import assert from "node:assert/strict";
-import { after, before, test } from "node:test";
-import { at, hash, insert, type TempDb, tempDb } from "./temp-db.ts";
+import { afterEach, beforeEach, test } from "node:test";
+import { sha256 } from "../src/text.ts";
+import { at, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 let db: TempDb;
 let p: number;
-let conversation: string;
-let pr: number;
-before(() => {
+let other: number;
+beforeEach(() => {
   db = tempDb();
-  p = insert(db, "project", { key: "git:github.com/o/r", name: "o/r" });
-  conversation = "c1";
-  insert(db, "conversation", {
-    id: conversation,
-    project_id: p,
-    origin: "codex",
-    external_id: "s",
-    started_at: at("2026-09-01T00:00:00Z"),
-  });
-  pr = insert(db, "pull_request", { project_id: p, number: 1, title: "題", state: "merged" });
+  p = project(db);
+  other = project(db, "git:github.com/o/other", "o/other");
 });
-after(() => db.done());
+afterEach(() => db.done());
 
-const rejects = (
-  table: string,
-  v: Record<string, string | number | Buffer | null>,
-  why: RegExp = /constraint failed/,
-) =>
-  assert.throws(
-    () => insert(db, table, v),
-    why,
-    `${table} ${JSON.stringify(v, (_k, x) => (Buffer.isBuffer(x) ? "<hash>" : x))}`,
+const now = at("2026-09-27T00:00:00Z");
+type Values = Record<string, string | number | Buffer | null>;
+const refuses = (fn: () => unknown, why: RegExp) => assert.throws(fn, why);
+const sql = (text: string, ...args: (string | number | Buffer | null)[]) =>
+  db.owner.prepare(text).run(...args);
+const one = (text: string, ...args: (string | number | null)[]) =>
+  db.owner.prepare(text).get(...args) as Record<string, unknown>;
+
+const unit = (v: Values & { key: string; kind: string }, projectId = p, runId?: number) =>
+  insert(db, "unit", {
+    project_id: projectId,
+    stance: ["decision", "constraint"].includes(v.kind) ? "do" : null,
+    text: v.key,
+    extraction: "supported",
+    run_id: runId ?? run(db, projectId),
+    created_at: now,
+    content_hash: sha256(v.key),
+    ...v,
+  });
+const state = (unitId: number, from: string | null, to: string) =>
+  sql(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', (select run_id from unit where id = ?))",
+    unitId,
+    from,
+    to,
+    now,
+    unitId,
   );
-
-const fact = (v: Record<string, string | number | Buffer | null>) => ({
-  project_id: p,
-  conversation_id: conversation,
-  source_key: `k${Math.random()}`,
-  kind: "finding",
-  body: "本文",
-  occurred_at: at("2026-09-01T00:00:00Z"),
-  content_hash: hash(),
-  ...v,
-});
-
-test("pull requests keep a positive number, one row per number, and a known state", () => {
-  rejects("pull_request", { project_id: p, number: 0, title: "題", state: "open" });
-  rejects("pull_request", { project_id: p, number: 2, title: "題", state: "draft" });
-  rejects("pull_request", { project_id: p, number: 2, title: "", state: "open" });
-  rejects("pull_request", { project_id: p, number: 1, title: "題", state: "open" }, /UNIQUE/);
-  rejects("pull_request", {
-    project_id: p,
-    number: 3,
-    title: "題",
-    state: "open",
-    harvested_at: "2026-09-01T00:00:00Z",
+const evidence = (unitId: number, sourceId: number, v: Values = {}) =>
+  insert(db, "unit_evidence", {
+    unit_id: unitId,
+    source_id: sourceId,
+    span_start: 0,
+    span_end: 3,
+    role: "states",
+    run_id: Number(one("select run_id from unit where id = ?", unitId).run_id),
+    added_at: now,
+    ...v,
   });
-});
-
-// A record comes from the session trace read or the pull request harvest read, never both and never neither.
-test("knowledge has exactly one provenance, and document sections are gone", () => {
-  insert(db, "knowledge", fact({ conversation_id: null, pull_request_id: pr }));
-  rejects("knowledge", fact({ pull_request_id: pr }));
-  rejects("knowledge", fact({ conversation_id: null }));
-  rejects("knowledge", fact({ kind: "document", heading: "h" }));
-});
-
-test("knowledge enforces kind and status pairs, option parents, and successors, and stance follows kind and status", () => {
-  const d = insert(db, "knowledge", fact({ kind: "decision", status: "accepted" }));
-  const stance = db.owner.prepare("select stance from knowledge where id = ?").get(d) as { stance: string };
-  assert.equal(stance.stance, "do");
-  rejects("knowledge", fact({ kind: "option", status: "rejected" }));
-  rejects("knowledge", fact({ kind: "finding", status: "active" }));
-  rejects("knowledge", fact({ kind: "decision", status: "accepted", confirmation: null, command: "x" }));
-  rejects("knowledge", fact({ kind: "finding", confirmation: "x" }));
-  rejects("knowledge", fact({ kind: "decision", status: "superseded" }));
-  rejects("knowledge", fact({ kind: "finding", downsides: '["x"]' }));
-  rejects("knowledge", fact({ kind: "finding", refs: "{}" }));
-  rejects("knowledge", fact({ kind: "finding", occurred_at: "2026-09-01T00:00:00Z" }));
-});
-
-// Times compare as strings. Mixing forms without milliseconds or with offsets breaks ordering within a second and at date boundaries.
-test("times accept only ISO 8601 UTC with milliseconds", () => {
-  for (const bad of [
-    "2026-09-01T00:00:00Z",
-    "2026-09-01T09:00:00.000+09:00",
-    "2026-02-30T00:00:00.000Z",
-    "garbage",
-  ])
-    rejects("conversation", {
-      id: `c-${bad}`,
-      project_id: p,
-      origin: "codex",
-      external_id: bad,
-      started_at: bad,
-    });
-});
-
-test("message size matches the body byte count, and primary keys and ids reject null", () => {
-  const ok = (id: string, body: string) => ({
-    id,
-    conversation_id: conversation,
-    external_id: id,
-    speaker_kind: "self",
-    body,
-    original_bytes: Buffer.byteLength(body),
-    sent_at: at("2026-09-01T00:00:00Z"),
-    content_hash: hash(),
+const adoption = (unitId: number, sourceId: number, v: Values = {}) =>
+  insert(db, "unit_adoption", {
+    unit_id: unitId,
+    route: "owner_statement",
+    source_id: sourceId,
+    span_start: 0,
+    span_end: 3,
+    run_id: Number(one("select run_id from unit where id = ?", unitId).run_id),
+    added_at: now,
+    ...v,
+  });
+const external = (v: Values) =>
+  insert(db, "source", {
+    project_id: p,
+    revision: 1,
+    author_kind: "person",
+    created_at: now,
+    captured_at: now,
+    text: "Consider X",
+    original_bytes: 10,
+    content_hash: sha256(String(v.external_id)),
     indexed: 1,
+    ...v,
   });
-  insert(db, "message", ok("m1", "日本語とasciiの混在"));
-  rejects("message", { ...ok("m2", "こんにちは"), original_bytes: 5 });
-  rejects("message", { ...ok("m3", "abc"), truncated: 1 });
-  rejects("message", ok(null as unknown as string, "x"));
-  rejects("conversation", {
-    id: null,
-    project_id: p,
-    origin: "codex",
-    external_id: "n",
-    started_at: at("2026-09-01T00:00:00Z"),
-  });
-  // STRICT: no silent type mismatches (accepts "1", which converts without loss, and rejects values that do not convert)
-  rejects("message", { ...ok("m4", "x"), original_bytes: "abc" as unknown as number }, /cannot store/);
+
+test("the database carries its generation and revision", () => {
+  assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
+  assert.equal(one("pragma user_version").user_version, 1);
 });
 
-// A key is only `git:<text without spaces>` or `local:<name starting with a lowercase letter or digit>`.
-test("project keys accept only the defined forms", () => {
-  const cases: [string, boolean][] = [
-    ["git:github.com/o/r2", true],
-    ["local:my-app.v2", true],
-    ["git:a b", false],
-    ["git:a\tb", false],
-    ["git:a\nb", false],
-    ["git:a\rb", false],
-    ["git:a\vb", false],
-    ["git:a\fb", false],
-    ["git:", false],
-    ["local:My", false],
-    ["local:a:b", false],
-    ["svn:x", false],
-  ];
-  for (const [key, ok] of cases) {
-    if (ok) insert(db, "project", { key, name: key });
-    else rejects("project", { key, name: key });
-  }
-});
-
-// VACUUM can renumber implicit rowids. The FTS rowid is tied to the explicit seq.
-test("the message index still works after VACUUM, and deleting a conversation removes its messages and index entries", () => {
-  const c = "c-fts";
-  insert(db, "conversation", {
-    id: c,
-    project_id: p,
-    origin: "codex",
-    external_id: "fts",
-    started_at: at("2026-09-01T00:00:00Z"),
-  });
-  const add = (id: string, body: string) =>
-    insert(db, "message", {
+test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
+  session(db, p, "s1");
+  const put = (id: string, speaker: string, text: string) =>
+    sql(
+      "insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted, original_bytes, content_hash) values (?, 's1', 't', ?, ?, ?, ?, 0, 0, ?, ?)",
       id,
-      conversation_id: c,
-      external_id: id,
-      speaker_kind: "self",
-      body,
-      original_bytes: Buffer.byteLength(body),
-      sent_at: at("2026-09-01T00:00:00Z"),
-      content_hash: hash(),
+      speaker,
+      now,
+      now,
+      text,
+      Buffer.byteLength(text),
+      sha256(text),
+    );
+  put("m1", "owner", "SQLite にしよう");
+  put("m1", "owner", "SQLite にしよう");
+  assert.deepEqual(
+    { ...one("select project_id, artifact, indexed from source where external_id = 'm1'") },
+    {
+      project_id: p,
+      artifact: "session:s1",
       indexed: 1,
-    });
-  add("u1", "再送の話");
-  add("u2", "消す発言");
-  add("u3", "残る発言");
-  db.owner.prepare("delete from message where id = 'u2'").run();
-  db.owner.exec("vacuum");
-  const hit = (q: string) =>
-    (
-      db.owner
-        .prepare("select m.id from message_fts f join message m on m.seq = f.rowid where message_fts match ?")
-        .all(q) as { id: string }[]
-    ).map((r) => r.id);
-  assert.deepEqual(hit('"再送"'), ["u1"]);
-  assert.deepEqual(hit('"消す"'), []);
-  assert.deepEqual(hit('"残る"'), ["u3"]);
-  db.owner.prepare("delete from conversation where id = ?").run(c);
-  assert.deepEqual(hit('"残る"'), [], "cascade removes the index entries too");
-  db.owner.exec("insert into message_fts (message_fts, rank) values ('integrity-check', 1)");
-  db.owner.exec("insert into knowledge_fts (knowledge_fts, rank) values ('integrity-check', 1)");
-  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
+    },
+  );
+  refuses(() => put("m2", "person", "hi"), /owner or assistant/);
+  refuses(() => put("m1", "owner", "Postgres にしよう"), /different content/);
+  refuses(
+    () =>
+      sql(
+        "insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted, original_bytes, content_hash) values ('m1', 's1', 't', 'assistant', ?, ?, 'forged', 0, 0, 6, ?)",
+        now,
+        now,
+        sha256("SQLite にしよう"),
+      ),
+    /different content/,
+  );
 });
 
-test("the knowledge index matches heading, body, or reason, and follows updates", () => {
-  const k = insert(db, "knowledge", fact({ heading: "見出しの語", body: "柑橘の語", reason: "理由の語" }));
-  const hit = (q: string) =>
-    (
-      db.owner.prepare("select rowid from knowledge_fts where knowledge_fts match ?").all(q) as {
-        rowid: number;
-      }[]
-    ).map((r) => r.rowid);
-  for (const q of ['"見出し"', '"柑橘"', '"理由"']) assert.deepEqual(hit(q), [k], q);
-  db.owner.prepare("update knowledge set body = '書き換えた' where id = ?").run(k);
-  assert.deepEqual(hit('"柑橘"'), []);
-  assert.deepEqual(hit('"書き換え"'), [k]);
+test("an external source claims the owner only through a bound identity, and sources are never rewritten", () => {
+  refuses(
+    () =>
+      external({
+        kind: "pr_comment",
+        artifact: "pr:1",
+        external_id: "c1",
+        author_kind: "owner",
+        author_external_id: "9",
+      }),
+    /bound owner identity/,
+  );
+  sql(
+    "insert into owner_identity (provider, external_id, login, bound_at) values ('github', '9', 'me', ?)",
+    now,
+  );
+  const id = external({
+    kind: "pr_comment",
+    artifact: "pr:1",
+    external_id: "c2",
+    author_kind: "owner",
+    author_external_id: "9",
+  });
+  refuses(() => sql("update source set text = 'x' where id = ?", id), /never rewritten/);
+});
+
+test("file excerpts need a normalized repository path, both line bounds, and hex object ids", () => {
+  const excerpt = (path: string, extra: Values = {}) =>
+    external({
+      kind: "file_excerpt",
+      artifact: `file:${path}`,
+      external_id: `${path}@x`,
+      path,
+      line_start: 1,
+      line_end: 1,
+      commit_sha: "a".repeat(40),
+      blob_sha: "b".repeat(40),
+      indexed: 0,
+      ...extra,
+    });
+  excerpt("docs/運用メモ.md");
+  for (const bad of ["C:\\Windows\\win.ini", "../x", "/etc/passwd", "a//b", "./a", "a/./b", "a\\b"])
+    refuses(() => excerpt(bad), /constraint failed/);
+  refuses(() => excerpt("src/a.ts", { line_end: null }), /constraint failed/);
+  refuses(() => excerpt("src/b.ts", { commit_sha: "G".repeat(40) }), /constraint failed/);
+});
+
+test("units start as candidates and change lifecycle only through state events that check the rules", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  refuses(() => unit({ key: "u0", kind: "decision", lifecycle: "active" }), /start as candidates/);
+  const u = unit({ key: "u1", kind: "decision" });
+  state(u, null, "candidate");
+  refuses(() => state(u, "candidate", "active"), /needs unretracted evidence and adoption/);
+  evidence(u, src);
+  adoption(u, src);
+  state(u, "candidate", "active");
+  assert.equal(one("select lifecycle from unit where id = ?", u).lifecycle, "active");
+  refuses(() => sql("update unit set lifecycle = 'withdrawn' where id = ?", u), /only through unit_state/);
+  refuses(() => sql("update unit set text = 'x' where id = ?", u), /never rewritten/);
+  refuses(() => sql("update unit_state set to_state = 'candidate' where unit_id = ?", u), /append-only/);
+  refuses(() => state(u, "candidate", "withdrawn"), /from_state must be the current lifecycle/);
+});
+
+test("an unsourced or quarantined unit never becomes active", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit({ key: "u2", kind: "constraint", unsourced: 1 });
+  evidence(u, src);
+  adoption(u, src);
+  state(u, null, "candidate");
+  refuses(() => state(u, "candidate", "active"), /unsourced unit cannot become active/);
+  refuses(() => unit({ key: "u3", kind: "finding", extraction: "quarantined" }), /constraint failed/);
+});
+
+test("evidence and adoption stay in their project, inside the text, once, and are retracted rather than deleted", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const foreign = message(db, other, { id: "m9", text: "other project", session: "s9" });
+  const u = unit({ key: "u1", kind: "decision" });
+  refuses(() => evidence(u, foreign), /different projects/);
+  refuses(() => evidence(u, src, { span_end: 999 }), /outside the source text/);
+  evidence(u, src);
+  refuses(() => evidence(u, src), /UNIQUE/);
+  refuses(() => sql("delete from unit_evidence where unit_id = ?", u), /never deleted/);
+  adoption(u, src);
+  state(u, null, "candidate");
+  state(u, "candidate", "active");
+  const retract = (table: string) =>
+    sql(
+      `update ${table} set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?`,
+      now,
+      src,
+      u,
+    );
+  refuses(() => retract("unit_adoption"), /back to candidate/);
+  state(u, "active", "candidate");
+  retract("unit_adoption");
+  refuses(() => retract("unit_adoption"), /retracted, once/);
+});
+
+test("only the owner or a maintainer adopts; a contributor's suggestion, a merge, or a thread resolution never does", () => {
+  const u = unit({ key: "u1", kind: "decision" });
+  const suggestion = external({
+    kind: "review_comment",
+    artifact: "pr:1",
+    external_id: "r1",
+    author_association: "CONTRIBUTOR",
+  });
+  refuses(() => adoption(u, suggestion, { route: "explicit" }), /owner or a maintainer/);
+  refuses(() => adoption(u, suggestion), /owner-authored source/);
+  const merged = external({
+    kind: "pr_event",
+    artifact: "pr:1",
+    external_id: "e1",
+    event_kind: "merged",
+    author_association: "OWNER",
+    text: "merged",
+    original_bytes: 6,
+    indexed: 0,
+  });
+  refuses(() => adoption(u, merged, { route: "explicit" }), /not adoption/);
+  const maintainer = external({
+    kind: "pr_comment",
+    artifact: "pr:1",
+    external_id: "c1",
+    author_association: "MEMBER",
+  });
+  adoption(u, maintainer, { route: "explicit" });
+});
+
+test("a reported speaker marks the owner's own report, so it must cite an owner session message", () => {
+  const owner = message(db, p, { id: "m1", text: "Kimura said it is agreed." });
+  const comment = external({ kind: "pr_comment", artifact: "pr:1", external_id: "c1" });
+  const u = unit({ key: "u1", kind: "constraint" });
+  refuses(() => evidence(u, comment, { reported_speaker: "Kimura" }), /owner session message/);
+  evidence(u, owner, { reported_speaker: "Kimura" });
+});
+
+test("an implementation becomes active from commit evidence, or from an observed edit of the same path in the same project", () => {
+  session(db, p, "s1");
+  const said = message(db, p, { id: "m2", text: "Changed src/db.ts to open SQLite.", speaker: "assistant" });
+  sql(
+    "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s1', 't', 'e1', 'src/db.ts', 'tool', ?)",
+    now,
+  );
+  session(db, other, "s9");
+  sql(
+    "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s9', 't', 'e9', 'src/other.ts', 'tool', ?)",
+    now,
+  );
+  const u = unit({ key: "i1", kind: "implementation" });
+  evidence(u, said, { role: "implements", span_end: 7 });
+  const anchor = (path: string, observed: string) =>
+    insert(db, "unit_anchor", {
+      unit_id: u,
+      path,
+      role: "evidence",
+      edit_observation_id: Number(one("select id from edit_observation where path = ?", observed).id),
+      run_id: Number(one("select run_id from unit where id = ?", u).run_id),
+      added_at: now,
+    });
+  refuses(() => anchor("src/db.ts", "src/other.ts"), /same project/);
+  state(u, null, "candidate");
+  refuses(() => state(u, "candidate", "active"), /code or commit evidence/);
+  anchor("src/db.ts", "src/db.ts");
+  state(u, "candidate", "active");
+});
+
+test("options are sealed with the unit, and aliases are append-only strings", () => {
+  const u = unit({ key: "u1", kind: "decision" });
+  sql("insert into unit_option (unit_id, position, text, outcome) values (?, 1, 'Postgres', 'rejected')", u);
+  refuses(() => sql("update unit_option set text = 'MySQL' where unit_id = ?", u), /never rewritten/);
+  const alias = (terms: string) =>
+    sql(
+      "insert into unit_alias (unit_id, terms, content_hash, run_id, added_at) values (?, ?, ?, (select run_id from unit where id = ?), ?)",
+      u,
+      terms,
+      sha256("u1"),
+      u,
+      now,
+    );
+  refuses(() => alias("[null]"), /non-empty string/);
+  alias('["database", "データベース"]');
+  refuses(
+    () =>
+      sql("insert into unit_option (unit_id, position, text, outcome) values (?, 2, 'MySQL', 'rejected')", u),
+    /before its first state/,
+  );
+  refuses(() => sql("delete from unit_alias where unit_id = ?", u), /append-only/);
+  alias("[]");
+});
+
+test("the unit index finds body, options, and the newest matching aliases, and stops finding cleared aliases", () => {
+  const u = unit({ key: "u1", kind: "decision" });
+  sql("insert into unit_option (unit_id, position, text, outcome) values (?, 1, 'Postgres', 'rejected')", u);
+  const hits = (q: string) =>
+    db.owner.prepare("select rowid from unit_fts where unit_fts match ?").all(`"${q}"`).length;
+  sql(
+    "insert into unit_alias (unit_id, terms, content_hash, run_id, added_at) values (?, '[\"データベース\"]', ?, (select run_id from unit where id = ?), ?)",
+    u,
+    sha256("u1"),
+    u,
+    now,
+  );
+  assert.deepEqual([hits("Postgres"), hits("データベース")], [1, 1]);
+  sql(
+    "insert into unit_alias (unit_id, terms, content_hash, run_id, added_at) values (?, '[]', ?, (select run_id from unit where id = ?), ?)",
+    u,
+    sha256("u1"),
+    u,
+    now,
+  );
+  assert.equal(hits("データベース"), 0);
+});
+
+test("links stay in one project, supersedes never cycles, and a conflict is resolved once", () => {
+  const a = unit({ key: "a", kind: "question" });
+  const b = unit({ key: "b", kind: "question" });
+  const r = Number(one("select run_id from unit where id = ?", a).run_id);
+  const foreign = unit({ key: "c", kind: "question" }, other);
+  const link = (from: number, to: number, kind: string) =>
+    sql(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, ?, ?, ?)",
+      from,
+      to,
+      kind,
+      r,
+      now,
+    );
+  refuses(() => link(a, foreign, "conflicts"), /different projects/);
+  link(a, b, "supersedes");
+  refuses(() => link(b, a, "supersedes"), /cycle/);
+  link(a, b, "conflicts");
+  refuses(
+    () => sql("update unit_link set to_unit = ? where from_unit = ? and kind = 'conflicts'", foreign, a),
+    /frozen/,
+  );
+  sql(
+    "update unit_link set resolved_at = ?, resolution = 'chose a' where from_unit = ? and kind = 'conflicts'",
+    now,
+    a,
+  );
+  refuses(
+    () =>
+      sql(
+        "update unit_link set resolved_at = ?, resolution = 'chose b' where from_unit = ? and kind = 'conflicts'",
+        now,
+        a,
+      ),
+    /frozen/,
+  );
+});
+
+test("a delivery can list only units of the delivered session's project", () => {
+  session(db, p, "s1");
+  const foreign = unit({ key: "c", kind: "question" }, other);
+  sql(
+    "insert into capture_delivery (session_id, event, outcome, at) values ('s1', 'pre_edit', 'emitted', ?)",
+    now,
+  );
+  refuses(
+    () =>
+      sql(
+        "insert into capture_delivery_unit (delivery_id, unit_id) values ((select max(id) from delivery), ?)",
+        foreign,
+      ),
+    /different projects/,
+  );
+});
+
+test("forgetting a project removes everything under it despite the no-delete rules", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit({ key: "u1", kind: "decision" });
+  evidence(u, src);
+  adoption(u, src);
+  state(u, null, "candidate");
+  state(u, "candidate", "active");
+  sql("delete from project where id = ?", p);
+  assert.deepEqual(
+    ["unit", "source", "unit_evidence", "unit_state", "extraction_run"].map((t) =>
+      Number(one(`select count(*) as n from ${t}`).n),
+    ),
+    [0, 0, 0, 0, 0],
+  );
 });
