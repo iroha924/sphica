@@ -11,7 +11,7 @@ import { checkAnchor } from "../../src/anchors.ts";
 import { flush, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
-import { openWriter } from "../../src/db-write.ts";
+import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
 import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
 import { framed } from "../../src/frame.ts";
@@ -26,6 +26,8 @@ import type { Step, World } from "./load.ts";
 export type Driver = {
   run(step: Step): Promise<void>;
   expect(expectation: Step): Promise<void>;
+  /** Writes the world's database, as it stands, to one self-contained file (for the cloud evaluation's fixtures). */
+  snapshot(to: string): Promise<void>;
   done(): Promise<void>;
 };
 
@@ -964,6 +966,18 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       throw missing("expectation", e);
+    },
+    snapshot: async (to) => {
+      await reader?.destroy();
+      await ingest?.destroy();
+      reader = null;
+      ingest = null;
+      const raw = connectWriter("owner", file);
+      try {
+        raw.exec(`vacuum into '${to.replaceAll("'", "''")}'`);
+      } finally {
+        raw.close();
+      }
     },
     done: async () => {
       await reader?.destroy();

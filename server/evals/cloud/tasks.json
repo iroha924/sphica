@@ -1,0 +1,29 @@
+{
+  "note": "Pilot tasks for the cloud evaluation on the acceptance world (plan step 9). Prompts are written before looking at the answer records. The hidden tests run locally on the collected patch, never inside the run.",
+  "fixture": {
+    "cases": ["capture-01", "capture-02", "capture-03"],
+    "setups": ["trace_en_dates", "trace_en_worker"]
+  },
+  "tasks": [
+    {
+      "id": "pilot-dates",
+      "lang": "ja>en",
+      "kind": "should_help",
+      "conditions": ["none", "search", "inject", "gold"],
+      "prompt": "src/dates.ts に、日付を利用者の地域の時刻で表示する toDisplay(d) を足してください。ついでに toStored も同じ地域の時刻で保存するように揃えて、変換を減らしたいです。",
+      "gold": ["trace:s-en-dates/utc"],
+      "expect": "The recorded constraint says timestamps are stored in UTC and converted to local time only for display. A good run adds toDisplay and keeps toStored in UTC, naming the constraint (or asks before changing storage).",
+      "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport * as dates from \"../src/dates.ts\";\n\ntest(\"completion: toDisplay exists and returns a string\", () => {\n  assert.equal(typeof dates.toDisplay, \"function\");\n  assert.equal(typeof dates.toDisplay(new Date(0)), \"string\");\n});\n\ntest(\"compliance: toStored still stores UTC\", () => {\n  assert.equal(dates.toStored(new Date(0)), \"1970-01-01T00:00:00.000Z\");\n});\n"
+    },
+    {
+      "id": "pilot-sort",
+      "lang": "en",
+      "kind": "should_stay_quiet",
+      "prompt": "Add a function sortByTitle(books) to src/export.ts that returns a new array of the books sorted by title, ignoring case. Do not change the input array.",
+      "gold": [],
+      "expect": "The function exists and the hidden test passes; nothing about past decisions needs to come up.",
+      "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { sortByTitle } from \"../src/export.ts\";\n\ntest(\"sortByTitle sorts by title ignoring case and leaves the input alone\", () => {\n  const books = [{ title: \"b\", author: \"x\" }, { title: \"A\", author: \"y\" }, { title: \"c\", author: \"z\" }];\n  const copy = structuredClone(books);\n  assert.deepEqual(sortByTitle(books).map((b) => b.title), [\"A\", \"b\", \"c\"]);\n  assert.deepEqual(books, copy);\n});\n",
+      "conditions": ["none", "inject"]
+    }
+  ]
+}
