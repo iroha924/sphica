@@ -2,6 +2,7 @@
 // Each operation is filled in when its feature is built; until then it fails and names the missing operation.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,7 +37,7 @@ const LEAKY = [
 
 export async function createDriver(world: World): Promise<Driver> {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-acceptance-")));
-  const saved = Object.fromEntries(["HOME", "USERPROFILE", ...LEAKY].map((k) => [k, process.env[k]]));
+  const saved = Object.fromEntries(["HOME", "USERPROFILE", "PATH", ...LEAKY].map((k) => [k, process.env[k]]));
   for (const k of LEAKY) delete process.env[k];
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
@@ -85,6 +86,14 @@ export async function createDriver(world: World): Promise<Driver> {
   cli("init", "--cwd", repo);
 
   const sessions = new Map(world.sessions.map((s) => [s.id, s]));
+  // A fake gh first on PATH answers from the world (no network). edited lists PRs whose body is served with its edits.
+  const edited = new Set<number>();
+  const ghState = path.join(dir, "gh-world.json");
+  const writeGh = () => fs.writeFileSync(ghState, JSON.stringify({ world, edited: [...edited] }));
+  writeGh();
+  fs.mkdirSync(path.join(dir, "bin"));
+  fs.writeFileSync(path.join(dir, "bin", "gh"), fakeGh(ghState), { mode: 0o755 });
+  process.env.PATH = `${path.join(dir, "bin")}${path.delimiter}${saved.PATH ?? ""}`;
   let reader: Kysely<DB> | null = null;
   const db = () => {
     reader ??= openReader(file);
@@ -160,10 +169,70 @@ export async function createDriver(world: World): Promise<Driver> {
   }
 
   /** The source id behind a case's reference, as the `s<id>` ref context prints. */
+  /** The current revision of the source a case names as `pr:<n>#...` or `issue:<n>#...`. */
+  async function githubSource(r: string) {
+    const m = /^(pr|issue):(\d+)#(body|merge|comment:\d+|review:\d+|commit:\w+)$/.exec(r);
+    if (!m) return undefined;
+    const [, what, n, part = ""] = m;
+    const [kind, external] =
+      part === "body"
+        ? [what === "pr" ? "pr_body" : "issue_body", `${what}:${n}`]
+        : part === "merge"
+          ? ["pr_event", `pr:${n}#merged`]
+          : part.startsWith("comment:")
+            ? [what === "pr" ? "pr_comment" : "issue_comment", part]
+            : part.startsWith("review:")
+              ? ["review_comment", `review_comment:${part.slice(7)}`]
+              : ["commit_message", `commit:${fakeSha(part.slice(7))}`];
+    return db()
+      .selectFrom("source")
+      .selectAll()
+      .where("kind", "=", kind as "pr_body")
+      .where("external_id", "=", external)
+      .orderBy("revision", "desc")
+      .executeTakeFirst();
+  }
+
   async function ref(r: string): Promise<string> {
-    const got = await sessionSource(r);
+    const got = (await sessionSource(r)) ?? (await githubSource(r));
     if (!got) throw new Error(`no source for ${r}`);
     return `s${got.id}`;
+  }
+
+  /** Issues a draft through the CLI, writes the translated record into it, checks it, and saves it. */
+  async function extract(
+    origin: "trace" | "harvest",
+    draftArgs: string[],
+    prefix: string,
+    record: Record<string, unknown>,
+  ) {
+    const drafted = cli(origin, "draft", ...draftArgs);
+    const id = /^ {2}id: (\S+)$/m.exec(drafted)?.[1];
+    const draftFile = /^ {2}file: (.+)$/m.exec(drafted)?.[1];
+    if (!id || !draftFile) throw new Error(`${origin} draft printed no id or file\n${drafted}`);
+    fs.writeFileSync(draftFile, JSON.stringify(await translate(record)));
+    checked = run(origin, "check", id).out;
+    cli(origin, "save", id);
+    for (const u of (record.units ?? []) as { key: string }[]) {
+      const cited = new Set<string>();
+      JSON.stringify(u, (k, x) => {
+        if (k === "quote" && typeof x === "string") cited.add(x);
+        return x;
+      });
+      quotes.set(`${prefix}${u.key}`, cited);
+    }
+  }
+
+  async function harvest(step: {
+    pr: number;
+    refetch_with_edits?: boolean;
+    record: Record<string, unknown>;
+  }) {
+    if (step.refetch_with_edits) {
+      edited.add(step.pr);
+      writeGh();
+    }
+    await extract("harvest", [String(step.pr)], `harvest:${step.pr}/`, step.record);
   }
 
   /** Replaces case references with source refs, deep inside a record. */
@@ -181,21 +250,7 @@ export async function createDriver(world: World): Promise<Driver> {
     if (!s) throw new Error(`unknown session ${step.session}`);
     const uuid = sessionId(await projectId(), s.host === "codex" ? "codex" : "claude-code", s.id);
     const { processed_without_units: empty, ...record } = step.record;
-    const drafted = cli("trace", "draft", "--session", uuid);
-    const id = /^ {2}id: (\S+)$/m.exec(drafted)?.[1];
-    const draftFile = /^ {2}file: (.+)$/m.exec(drafted)?.[1];
-    if (!id || !draftFile) throw new Error(`trace draft printed no id or file\n${drafted}`);
-    fs.writeFileSync(draftFile, JSON.stringify(await translate(record)));
-    checked = run("trace", "check", id).out;
-    cli("trace", "save", id);
-    for (const u of (record.units ?? []) as { key: string }[]) {
-      const cited = new Set<string>();
-      JSON.stringify(u, (k, x) => {
-        if (k === "quote" && typeof x === "string") cited.add(x);
-        return x;
-      });
-      quotes.set(`trace:${s.id}/${u.key}`, cited);
-    }
+    await extract("trace", ["--session", uuid], `trace:${s.id}/`, record);
     for (const other of (empty ?? []) as string[]) await trace({ session: other, record: { units: [] } });
   }
 
@@ -208,6 +263,20 @@ export async function createDriver(world: World): Promise<Driver> {
   return {
     run: async (step) => {
       if (typeof step.capture === "string") return capture(step.capture);
+      if (step.edit_file && typeof step.edit_file === "object") {
+        const edit = step.edit_file as { path: string; replace?: [string, string]; prepend?: string };
+        const abs = path.join(repo, edit.path);
+        let text = fs.readFileSync(abs, "utf8");
+        if (edit.replace) {
+          assert.ok(text.includes(edit.replace[0]), `${edit.path} has no ${edit.replace[0]}`);
+          text = text.replace(edit.replace[0], edit.replace[1]);
+        }
+        if (edit.prepend) text = edit.prepend + text;
+        fs.writeFileSync(abs, text);
+        return;
+      }
+      if (step.harvest && typeof step.harvest === "object")
+        return harvest(step.harvest as { pr: number; record: Record<string, unknown> });
       if (step.trace && typeof step.trace === "object")
         return trace(step.trace as { session: string; record: Record<string, unknown> });
       if (step.session && typeof step.session === "object") {
@@ -219,6 +288,22 @@ export async function createDriver(world: World): Promise<Driver> {
       throw missing("operation", step);
     },
     expect: async (e) => {
+      if (typeof e.source === "string" && /^(pr|issue):/.test(e.source)) {
+        const got = await githubSource(e.source);
+        assert.ok(got, `no source ${e.source}`);
+        if (e.author !== undefined) assert.equal(got.author_login, e.author);
+        if (e.association !== undefined) assert.equal(got.author_association, e.association);
+        if (typeof e.linked_to === "string") {
+          const link = await db()
+            .selectFrom("artifact_link")
+            .select("kind")
+            .where("from_artifact", "=", e.linked_to)
+            .where("to_artifact", "=", got.artifact)
+            .executeTakeFirst();
+          assert.ok(link, `${got.artifact} is not linked from ${e.linked_to}`);
+        }
+        return;
+      }
       if (typeof e.source === "string" && e.source.startsWith("session:")) {
         const got = await sessionSource(e.source);
         assert.ok(got, `no source ${e.source}`);
@@ -353,6 +438,34 @@ export async function createDriver(world: World): Promise<Driver> {
         }
         return;
       }
+      if (e.source_revisions && typeof e.source_revisions === "object") {
+        const want = e.source_revisions as { of: string; count: number };
+        const latest = await githubSource(want.of);
+        assert.ok(latest, `no source ${want.of}`);
+        assert.equal(latest.revision, want.count);
+        return;
+      }
+      if (typeof e.evidence_of === "string") {
+        const got = await db()
+          .selectFrom("unit_evidence as e")
+          .innerJoin("unit as u", "u.id", "e.unit_id")
+          .innerJoin("source as m", "m.id", "e.source_id")
+          .where("u.key", "=", e.evidence_of)
+          .where("m.kind", "in", ["pr_body", "issue_body"])
+          .select("m.revision")
+          .execute();
+        assert.ok(got.length, `${e.evidence_of} cites no body`);
+        for (const g of got) assert.equal(g.revision, e.cites_revision);
+        return;
+      }
+      if (typeof e.no_unit_text_contains === "string") {
+        const texts = await db().selectFrom("unit").select(["key", "text"]).execute();
+        assert.deepEqual(
+          texts.filter((u) => u.text.includes(String(e.no_unit_text_contains))).map((u) => u.key),
+          [],
+        );
+        return;
+      }
       if (typeof e.check_problem_contains === "string") {
         assert.ok(
           checked.includes(e.check_problem_contains),
@@ -375,3 +488,39 @@ export async function createDriver(world: World): Promise<Driver> {
 
 /** Turn ids the driver gives the hooks: the case's turn number, so `session:<id>#2.owner` finds the second turn. */
 const turnId = (n: number): string => `t${n}`;
+
+/** The 40-character sha the fake gh gives a commit the world names by a short label. */
+const fakeSha = (label: string): string => crypto.createHash("sha1").update(label).digest("hex");
+
+/** A gh that answers `gh api repos/<o>/<r>/<path>` from the world file. A shebang script, so it runs on POSIX only (verify does not run on Windows). */
+function fakeGh(state: string): string {
+  return `#!/usr/bin/env node
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+const { world, edited } = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, "utf8"));
+const argv = process.argv.slice(2);
+const where = (argv[1] ?? "").replace(/^repos\\/[^/]+\\/[^/]+\\//, "").split("?")[0];
+const sha = (s) => crypto.createHash("sha1").update(s).digest("hex");
+const id = (login) => parseInt(sha(login).slice(0, 8), 16);
+const user = (login) => ({ login, id: id(login), type: login.endsWith("-bot") ? "Bot" : "User" });
+const comment = (c, url) => ({ id: c.id, body: c.body, user: user(c.author), author_association: c.association, created_at: c.created_at, html_url: url + "#c" + c.id });
+const answers = {};
+for (const p of world.pulls) {
+  const url = "https://github.com/example/tsundoku/pull/" + p.number;
+  const edits = edited.includes(p.number) ? p.body_edits ?? [] : [];
+  answers["pulls/" + p.number] = { number: p.number, title: p.title, body: edits.length ? edits[edits.length - 1].body : p.body, html_url: url,
+    created_at: p.created_at, merged_at: p.merged_at, merged_by: p.merged_at ? user(p.author) : null, user: user(p.author), author_association: p.association };
+  answers["issues/" + p.number + "/comments"] = p.comments.map((c) => comment(c, url));
+  answers["pulls/" + p.number + "/reviews"] = [];
+  answers["pulls/" + p.number + "/comments"] = p.review_comments.map((c) => ({ ...comment(c, url), path: c.path, line: c.line, commit_id: sha(c.commit) }));
+  answers["pulls/" + p.number + "/commits"] = p.commits.map((c) => ({ sha: sha(c.sha), author: user(p.author), commit: { message: c.message, author: { date: c.date } } }));
+}
+for (const i of world.issues) {
+  const url = "https://github.com/example/tsundoku/issues/" + i.number;
+  answers["issues/" + i.number] = { number: i.number, body: i.body, html_url: url, created_at: i.created_at, user: user(i.author), author_association: i.association };
+  answers["issues/" + i.number + "/comments"] = i.comments.map((c) => comment(c, url));
+}
+if (!(where in answers)) { process.stderr.write("fake gh: no answer for " + argv[1] + "\\n"); process.exit(1); }
+process.stdout.write(JSON.stringify(argv.includes("--slurp") ? [answers[where]] : answers[where]));
+`;
+}

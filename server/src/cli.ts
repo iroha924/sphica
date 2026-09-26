@@ -25,6 +25,7 @@ import { sql } from "kysely";
 import { dbInit, inspect, migrate, reindex } from "./admin.ts";
 import { flush, readState, rejectedDir, unregisteredDir } from "./capture.ts";
 import { withDb } from "./cli/common.ts";
+import { harvestRoutes } from "./cli/harvest.ts";
 import { traceRoutes } from "./cli/trace.ts";
 import {
   type Block,
@@ -496,11 +497,12 @@ const root = buildRouteMap({
     brief: "Keep and search past decisions and conversations",
     fullDescription: "Database: ~/.sphica/sphica.db (created by sphica init). No credentials are needed",
     // Usage shows only what people type. The rest are run by the trace Skill, the capture hooks, maintenance, or on doctor's advice; -H lists them
-    hideRoute: { project: true, capture: true, db: true, trace: true },
+    hideRoute: { project: true, capture: true, db: true, trace: true, harvest: true },
   },
   routes: {
     project: projectRoutes,
     trace: traceRoutes,
+    harvest: harvestRoutes,
     capture: captureRoutes,
     db: dbRoutes,
     init: buildCommand({

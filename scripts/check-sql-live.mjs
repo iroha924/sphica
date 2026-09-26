@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { coveredSites } from "./lib/coverage.mjs";
-import { makeRepo, root, runCli, runHook, withTempDir } from "./lib/live-harness.mjs";
+import { fakeGh, makeRepo, root, runCli, runHook, withTempDir } from "./lib/live-harness.mjs";
 import { ALLOWED_UNREACHED, callSites, LIVE_FILES } from "./lib/sql-call-sites.mjs";
 
 const failures = [];
@@ -25,6 +25,7 @@ await withTempDir(async (dir) => {
   const covDir = path.join(dir, "coverage");
   fs.mkdirSync(covDir, { recursive: true });
   const repo = makeRepo(dir);
+  fakeGh(dir);
 
   {
     // Outside any repository, so init only creates the database (from the repository root it would register this checkout too)
@@ -157,6 +158,35 @@ await withTempDir(async (dir) => {
     if (!/trace:live-1\/live active/.test(traced.out))
       failures.push(`trace save did not activate the decision\n${traced.out.slice(0, 600)}`);
     if (fs.existsSync(path.dirname(file))) failures.push(`trace save left its draft behind: ${file}`);
+
+    // Harvest a pull request through the fake gh. Its comment carries control sequences, which context must drop
+    const harvested = note("harvest draft", runCli(["harvest", "draft", "1"], dir, covDir, { cwd: repo }));
+    const hid = /^ {2}id: (\S+)$/m.exec(harvested.out)?.[1];
+    const hfile = /^ {2}file: (.+)$/m.exec(harvested.out)?.[1];
+    if (!hid || !hfile) throw new Error(`harvest draft printed no id or file\n${harvested.out}`);
+    const hcontext = runCli(["harvest", "context", hid], dir, covDir, { cwd: repo });
+    clean("harvest context", hcontext, "Checked");
+    const body = /^ {2}## (s\d+) pr_body/m.exec(hcontext.out)?.[1];
+    if (!body) failures.push(`harvest context printed no body ref\n${hcontext.out.slice(0, 600)}`);
+    fs.writeFileSync(
+      hfile,
+      JSON.stringify({
+        units: [
+          {
+            key: "real-db",
+            kind: "decision",
+            stance: "do",
+            text: "Use the real database for checks",
+            evidence: [{ source: body, quote: "Use the real database for checks.", role: "states" }],
+            adoption: [{ source: body, quote: "Use the real database for checks." }],
+          },
+        ],
+      }),
+    );
+    note("harvest check", runCli(["harvest", "check", hid], dir, covDir, { cwd: repo }));
+    const hsaved = note("harvest save", runCli(["harvest", "save", hid], dir, covDir, { cwd: repo }));
+    if (!/harvest:1\/real-db active/.test(hsaved.out))
+      failures.push(`harvest save did not activate the decision\n${hsaved.out.slice(0, 600)}`);
     const evil = makeRepo(dir, `https://github.com/example/ev${esc}il.git`, "evil\u001b[2Jdir");
     clean("init (remote and directory name)", runCli(["init", "--cwd", evil], dir, covDir), "evil");
     clean("project list", runCli(["project", "list"], dir, covDir), "example/ev");
