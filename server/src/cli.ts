@@ -532,55 +532,6 @@ const root = buildRouteMap({
       parameters: {},
       func: () => doctor(process.cwd()),
     }),
-    advice: buildCommand({
-      docs: { brief: "How often the edit hook showed constraints" },
-      parameters: {},
-      func: () => {
-        // Measures whether the edit hook helps. After a month, if it rarely shows anything, remove the hook.
-        const log = path.join(os.homedir(), ".sphica", "advice.jsonl");
-        if (!fs.existsSync(log)) {
-          console.log(panel("sphica advice", [], "No records yet (the edit hook has never run)"));
-          return;
-        }
-        // Skip lines cut midway (a process stopped while writing). One line does not make the whole unreadable.
-        const rows = fs
-          .readFileSync(log, "utf8")
-          .split("\n")
-          .flatMap((l) => {
-            try {
-              const r = JSON.parse(l) as { at?: unknown; shown?: unknown };
-              return typeof r.at === "string" && typeof r.shown === "number"
-                ? [{ at: r.at, shown: r.shown }]
-                : [];
-            } catch {
-              return [];
-            }
-          });
-        const shown = rows.filter((r) => r.shown > 0);
-        const since = rows[0]?.at;
-        const ratio = shown.length / Math.max(rows.length, 1);
-        console.log(
-          document(
-            "sphica advice",
-            since ? `since ${new Date(since).toLocaleString("sv-SE").slice(0, 16)}` : undefined,
-            [
-              {
-                kind: "fields",
-                rows: [
-                  ["edits with the hook", `${rows.length}`],
-                  ["constraints shown", `${shown.length}`],
-                  ...(since
-                    ? ([["records since", new Date(since).toLocaleString("sv-SE")]] as [string, string][])
-                    : []),
-                ],
-              },
-              { kind: "meter", label: "share with constraints", ratio, text: `${(ratio * 100).toFixed(1)}%` },
-            ],
-            `${mark("ok")} constraints shown on ${shown.length} of ${plural(rows.length, "edit")}`,
-          ),
-        );
-      },
-    }),
   },
 });
 

@@ -36,7 +36,13 @@ async function scopeOf(
     const number = Number(run.target.slice("pr:".length));
     const sources = await pullSources(db, run.project_id, number);
     return {
-      target: { projectId: run.project_id, origin: "harvest", prefix: `harvest:${number}/`, sessionId: null },
+      target: {
+        projectId: run.project_id,
+        origin: "harvest",
+        prefix: `harvest:${number}/`,
+        sessionId: null,
+        root: placeOf(process.cwd()).root,
+      },
       looked: sources.map((s) => s.id),
       blocks: [
         indent(`pull request #${number}; keys are saved as harvest:${number}/<key>`),
@@ -68,6 +74,7 @@ async function scopeOf(
       origin: "trace",
       prefix: `trace:${s.external_id}/`,
       sessionId: s.id,
+      root: placeOf(process.cwd()).root,
     },
     looked: sources.map((m) => m.id),
     blocks: [

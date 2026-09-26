@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { sha256 } from "../src/text.ts";
+import { sha256, terms } from "../src/text.ts";
 import { at, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 let db: TempDb;
@@ -315,8 +315,9 @@ test("options are sealed with the unit, and aliases are append-only strings", ()
 test("the unit index finds body, options, and the newest matching aliases, and stops finding cleared aliases", () => {
   const u = unit({ key: "u1", kind: "decision" });
   sql("insert into unit_option (unit_id, position, text, outcome) values (?, 1, 'Postgres', 'rejected')", u);
+  // Queries go through the same splitting as the index (Postgres is indexed as its singular form)
   const hits = (q: string) =>
-    db.owner.prepare("select rowid from unit_fts where unit_fts match ?").all(`"${q}"`).length;
+    db.owner.prepare("select rowid from unit_fts where unit_fts match ?").all(`"${terms(q)[0]}"`).length;
   sql(
     "insert into unit_alias (unit_id, terms, content_hash, run_id, added_at) values (?, '[\"データベース\"]', ?, (select run_id from unit where id = ?), ?)",
     u,

@@ -13,7 +13,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Every file under dir whose name matches re, as a repository path. New files are checked without being listed. */
 const filesUnder = (dir, re) =>
-  (fs.existsSync(path.join(root, dir)) ? fs.readdirSync(path.join(root, dir), { recursive: true }) : [])
+  fs
+    .readdirSync(path.join(root, dir), { recursive: true })
     .map((f) => `${dir}/${f.split(path.sep).join("/")}`)
     .filter((f) => re.test(f))
     // Symlinked directories (.claude/skills -> .agents/skills) would list the same file twice; keep only the real path.
@@ -59,7 +60,6 @@ const TEXT = [
   "renovate.json",
   "server/bunfig.toml",
   "db/schema.sql",
-  ...filesUnder("db/migrations", /\.sql$/),
   "CLAUDE.md",
   "AGENTS.md",
   ...filesUnder(".claude/rules", /\.md$/),

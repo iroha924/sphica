@@ -14,7 +14,7 @@ export { dbFile, type Role, SCHEMA_REVISION } from "./sqlite.ts";
  * in `[` or `{` as JSON, turning messages whose body is `[]` or `[1] …` into arrays. Columns not listed stay strings.
  * The columns (`refs`, `downsides`, `next`) and nested columns built with `jsonArrayFrom`.
  */
-const JSON_COLUMNS = new Set(["refs", "downsides", "next", "files", "paths"]);
+const JSON_COLUMNS = new Set(["next"]);
 
 const TOP_LEVEL = /^\$\[\d+\]\."([^"]+)"$/;
 

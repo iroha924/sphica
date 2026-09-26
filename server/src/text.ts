@@ -16,6 +16,13 @@ const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "and", "or", "fo
 const IDENT = /#\d+|[a-z0-9][a-z0-9_./#-]*[a-z0-9]/g;
 // Overly long chunks are not terms (base64 or hashes).
 const MAX_TERM = 100;
+// A kanji word with trailing kana (a conjugated verb) is kept as its kanji, so its conjugated forms meet.
+// english-exempt: the long vowel mark is kana too
+const OKURIGANA = /^(\p{Script=Han}+)[\p{Script=Hiragana}ー]+$/u;
+
+/** An English plural as its singular (managers, timestamps), so both forms meet. Words ending in ss, us, is stay (class, status, analysis). */
+const singular = (w: string): string =>
+  /^[a-z]{4,}s$/.test(w) && !/(?:ss|us|is)$/.test(w) ? w.slice(0, -1) : w;
 
 /**
  * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.
@@ -26,11 +33,64 @@ export function terms(text: string): string[] {
   const out: string[] = [];
   const keep = (w: string) => {
     if (w.length > MAX_TERM || STOP.has(w) || HIRAGANA_ONLY.test(w)) return;
-    out.push(w);
+    out.push(OKURIGANA.exec(w)?.[1] ?? singular(w));
   };
   for (const s of segmenter.segment(norm)) if (s.isWordLike) keep(s.segment.trim());
   for (const m of norm.matchAll(IDENT)) if (m[0].length >= 3) keep(m[0]);
   return out.filter(Boolean);
+}
+
+/**
+ * Words that frame a question rather than name its subject ("why", "which", and their Japanese counterparts). Dropped from queries only, so a question
+ * such as "which CI provider do we use" is judged on "ci" and "provider". Light verbs (use, add, get) go here for the same reason.
+ */
+const QUESTION = new Set([
+  ...[
+    "why",
+    "what",
+    "which",
+    "when",
+    "where",
+    "who",
+    "how",
+    "do",
+    "does",
+    "did",
+    "we",
+    "our",
+    "us",
+    "you",
+    "i",
+    "are",
+    "was",
+    "were",
+  ],
+  ...[
+    "will",
+    "would",
+    "should",
+    "can",
+    "could",
+    "there",
+    "this",
+    "that",
+    "with",
+    "from",
+    "any",
+    "ever",
+    "long",
+    "use",
+    "used",
+    "using",
+  ],
+  ...["add", "get", "make", "have", "has", "not", "no", "yes", "reason"],
+  // english-exempt: Japanese question framing words, matched after splitting
+  ...["理由", "仕組", "何", "方", "場合", "今", "件"],
+]);
+
+/** A question's content terms: its terms without question framing, each once, in order. */
+export function queryTerms(question: string): string[] {
+  return [...new Set(terms(question).filter((w) => !QUESTION.has(w)))].slice(0, 24);
 }
 
 /**
@@ -39,7 +99,7 @@ export function terms(text: string): string[] {
  * operators and the user's text would change the query syntax (`sql:live` would become a column filter).
  */
 export function ftsQuery(question: string): string | null {
-  const ws = [...new Set(terms(question))].slice(0, 24);
+  const ws = queryTerms(question);
   return ws.length ? ws.map((w) => `"${w.replaceAll('"', '""')}"`).join(" OR ") : null;
 }
 

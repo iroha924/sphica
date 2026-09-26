@@ -7,10 +7,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Kysely } from "kysely";
+import { checkAnchor } from "../../src/anchors.ts";
 import { flush, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
+import { readUnit } from "../../src/read.ts";
+import { searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import type { Step, World } from "./load.ts";
 
@@ -107,6 +110,11 @@ export async function createDriver(world: World): Promise<Driver> {
         .where("key", "=", "git:github.com/example/tsundoku")
         .executeTakeFirstOrThrow()
     ).id;
+  /** The last search's hits and the last read's text, for expectations about them. */
+  let found: UnitHit[] = [];
+  let lastRead = "";
+  const search = async (query: string) =>
+    (await searchUnits(db(), await projectId(), { question: query, limit: 10 })).hits;
   /** The last check output, for expectations about what check reported. */
   let checked = "";
   /** Quotes each saved key cited, to confirm stored spans cut exactly those bytes. */
@@ -273,6 +281,17 @@ export async function createDriver(world: World): Promise<Driver> {
         }
         if (edit.prepend) text = edit.prepend + text;
         fs.writeFileSync(abs, text);
+        return;
+      }
+      if (step.search && typeof step.search === "object") {
+        found = await search(String((step.search as { query: string }).query));
+        return;
+      }
+      if (Array.isArray(step.read)) {
+        const parts: string[] = [];
+        for (const key of step.read as string[])
+          parts.push((await readUnit(db(), await projectId(), key, repo)) ?? `${key}: not found`);
+        lastRead = parts.join("\n\n");
         return;
       }
       if (step.harvest && typeof step.harvest === "object")
@@ -464,6 +483,64 @@ export async function createDriver(world: World): Promise<Driver> {
           texts.filter((u) => u.text.includes(String(e.no_unit_text_contains))).map((u) => u.key),
           [],
         );
+        return;
+      }
+      if (typeof e.hits_include === "string") {
+        const at = found.findIndex((h) => h.key === e.hits_include);
+        assert.ok(
+          at >= 0 && at < Number(e.within ?? 10),
+          `${e.hits_include} not within ${e.within}: ${found.map((h) => h.key).join(", ")}`,
+        );
+        return;
+      }
+      if (e.no_active_unit_hits === true) {
+        assert.deepEqual(
+          found.filter((h) => h.lifecycle === "active").map((h) => h.key),
+          [],
+        );
+        return;
+      }
+      if (e.hit_shows_option && typeof e.hit_shows_option === "object") {
+        const want = e.hit_shows_option as { unit: string; text: string; outcome: string };
+        const hit = found.find((h) => h.key === want.unit);
+        assert.ok(
+          hit?.options.some((o) => o.text === want.text && o.outcome === want.outcome),
+          `${want.unit} does not show ${want.text}`,
+        );
+        return;
+      }
+      if (Array.isArray(e.ranks_above)) {
+        const [a, b] = e.ranks_above as [string, string];
+        const ia = found.findIndex((h) => h.key === a);
+        const ib = found.findIndex((h) => h.key === b);
+        assert.ok(
+          ia >= 0 && (ib < 0 || ia < ib),
+          `${a} is not above ${b}: ${found.map((h) => h.key).join(", ")}`,
+        );
+        return;
+      }
+      if (e.search && typeof e.search === "object") {
+        const want = e.search as { query: string; top_active_is: string };
+        const hits = (await search(want.query)).filter((h) => h.lifecycle === "active");
+        assert.equal(hits[0]?.key, want.top_active_is, hits.map((h) => h.key).join(", "));
+        return;
+      }
+      if (e.anchor && typeof e.anchor === "object") {
+        const want = e.anchor as { of: string; symbol: string; state: string };
+        const u = await unitOf(want.of);
+        const anchors = await db()
+          .selectFrom("unit_anchor")
+          .selectAll()
+          .where("unit_id", "=", u.id)
+          .where("symbol", "=", want.symbol)
+          .where("retired_at", "is", null)
+          .execute();
+        assert.ok(anchors[0], `${want.of} has no live anchor on ${want.symbol}`);
+        assert.equal(checkAnchor(repo, anchors[0]).state, want.state);
+        return;
+      }
+      if (typeof e.read_contains === "string") {
+        assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
         return;
       }
       if (typeof e.check_problem_contains === "string") {

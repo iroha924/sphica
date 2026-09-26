@@ -1,15 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bytes, clean, ftsQuery, head, reason, tail, terms, uuidFrom } from "../src/text.ts";
+import { bytes, clean, ftsQuery, head, queryTerms, reason, tail, terms, uuidFrom } from "../src/text.ts";
 
 // Hiragana-only words (particles, auxiliaries, and the like) match every row and dilute lexical ranking.
 test("terms split Japanese into words and drop hiragana-only words", () => {
   const got = terms("私はなんて言ってた？埋め込みの再ランクを試した");
-  for (const w of ["私", "埋", "込み", "再", "ランク"])
+  for (const w of ["私", "埋", "込", "再", "ランク"])
     assert.ok(got.includes(w), `${w} is missing: ${got.join(",")}`);
   for (const w of ["は", "なんて", "の", "を", "た", "め"]) assert.ok(!got.includes(w), `${w} remains`);
   // Import and query produce the same terms (a different dictionary on one side would miss).
   assert.deepEqual(terms("埋め込み"), terms("埋め込みの"));
+});
+
+// Conjugated verbs and English plurals meet their other forms on both sides
+test("kanji words drop trailing kana and English plurals become singular", () => {
+  assert.deepEqual(terms("入れる"), terms("入れない"));
+  assert.deepEqual(terms("package managers"), terms("package manager"));
+  for (const w of ["status", "class", "analysis"]) assert.deepEqual([...new Set(terms(w))], [w]);
+});
+
+// A question's framing words never decide whether a record answers it
+test("query terms drop question framing and keep each subject word once", () => {
+  assert.deepEqual(queryTerms("which CI provider do we use"), ["ci", "provider"]);
+  assert.deepEqual(queryTerms("DB サーバーを使わない理由"), ["db", "サーバー", "使"]);
 });
 
 // Segmenter splits `docs.ts` and `OT-123`. Questions with ids only match on the whole token.

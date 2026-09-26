@@ -38,6 +38,7 @@ const target = (p: number, sessionId: string | null = "s1"): Target => ({
   origin: "trace",
   prefix: "trace:ext-s1/",
   sessionId,
+  root: null,
 });
 
 async function save(db: TempDb, t: Target, record: unknown, looked: number[] = []) {

@@ -68,9 +68,8 @@ export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "n
  * it is the owner's data, and the only way forward is to move it aside and create a new one.
  */
 export function generationOf(raw: DatabaseSync): number | null {
-  const has = raw
-    .prepare("select 1 from sqlite_schema where type = 'table' and name = 'sphica_generation'")
-    .get();
+  // biome-ignore format: one line keeps raw.prepare( where the SQL ledger (scripts/lib/sql-call-sites.mjs) finds it
+  const has = raw.prepare("select 1 from sqlite_schema where type = 'table' and name = 'sphica_generation'").get();
   if (!has) {
     const any = raw.prepare("select 1 from sqlite_schema where type = 'table' and name = 'project'").get();
     return any ? 1 : null;

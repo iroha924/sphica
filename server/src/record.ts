@@ -2,6 +2,7 @@
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";
 import { z } from "zod";
+import { locate as locateSymbol } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { EVIDENCE_ROLES, OPTION_OUTCOMES, STANCES, UNIT_KINDS, WORK_STATUSES } from "./knowledge.ts";
@@ -93,6 +94,8 @@ export type Target = {
   origin: "trace" | "harvest";
   prefix: string;
   sessionId: string | null;
+  /** The repository's working tree, where an anchor's symbol is looked up to record its lines; null when unknown */
+  root: string | null;
 };
 
 type Planned = {
@@ -450,7 +453,10 @@ export async function saveRecord(
         .onConflict((oc) => oc.doNothing())
         .execute();
     }
-    for (const a of p.anchors)
+    for (const a of p.anchors) {
+      // Lines are recorded where the symbol is now, so a later read can tell a moved symbol from a missing one
+      const at = a.lines ? null : a.symbol ? locateSymbol(target.root, a.path, a.symbol) : null;
+      const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx
         .insertInto("unit_anchor")
         .values({
@@ -458,14 +464,16 @@ export async function saveRecord(
           path: a.path,
           symbol: a.symbol ?? null,
           commit_sha: a.commit ?? null,
-          line_start: a.lines?.[0] ?? null,
-          line_end: a.lines ? Math.max(a.lines[0], a.lines[1]) : null,
+          line_start: lines?.[0] ?? null,
+          line_end: lines ? Math.max(lines[0], lines[1]) : null,
+          excerpt: at?.excerpt ?? null,
           role: a.role,
           edit_observation_id: a.observation,
           run_id: runId,
           added_at: now,
         })
         .execute();
+    }
     await trx
       .insertInto("unit_state")
       .values({

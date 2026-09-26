@@ -95,14 +95,14 @@ test("no arguments and --help print usage for that level and succeed", () => {
 });
 
 // Usage lists only what people type. Commands for agents, hooks, and maintenance still run, and -H lists them
-test("usage lists only init, doctor, and advice, and -H shows the rest", () => {
+test("usage lists only init and doctor, and -H shows the rest", () => {
   const commands = (out: string) =>
     [...(out.split("Commands:")[1] ?? "").matchAll(/^ {2}(\S+) {2}/gm)].map((m) => m[1]);
-  assert.deepEqual(commands(run("--help").out).sort(), ["advice", "doctor", "init"]);
+  assert.deepEqual(commands(run("--help").out).sort(), ["doctor", "init"]);
   const all = commands(run("-H").out);
-  for (const name of ["project", "db", "capture"]) assert.ok(all.includes(name), name);
-  // Removed without aliases: the people directory, and the 0.4 trace and harvest commands until the rebuild adds theirs
-  for (const name of ["who"]) assert.match(run(name).out, new RegExp(`Unknown command: ${name}`));
+  for (const name of ["project", "db", "capture", "trace", "harvest"]) assert.ok(all.includes(name), name);
+  // Removed without aliases: the people directory and the edit-hook statistics
+  for (const name of ["who", "advice"]) assert.match(run(name).out, new RegExp(`Unknown command: ${name}`));
   const db = run("db", "--help").out;
   for (const name of ["reindex", "terms"]) assert.doesNotMatch(db, new RegExp(`^ {2}${name} {2}`, "m"), name);
   assert.match(db, /^ {2}migrate {2}/m);

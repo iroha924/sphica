@@ -19,7 +19,6 @@
     "release:plan": "node scripts/release-plan.mjs",
     "release:status": "node scripts/release-status.mjs",
     "codegen": "node scripts/codegen.mjs",
-    "terms:draft": "node scripts/terms-draft.mjs",
     "codegen:check": "node scripts/codegen.mjs --check",
     "sql:reach": "node scripts/check-sql-reach.mjs",
     "sql:live": "node scripts/check-sql-live.mjs",
