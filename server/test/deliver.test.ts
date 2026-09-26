@@ -78,6 +78,9 @@ test("delivery brings anchored, named, and broad records, never candidates or co
         decided("sqlite", m, "Keep one SQLite file.", {
           anchors: [{ path: "src/db.ts", role: "applies_to" }],
         }),
+        decided("opener", m, "No telemetry.", {
+          anchors: [{ path: "src/open.ts", symbol: "open", role: "applies_to" }],
+        }),
         {
           key: "maybe",
           kind: "decision",
@@ -139,6 +142,14 @@ test("delivery brings anchored, named, and broad records, never candidates or co
     );
     assert.equal(await prompt("Do we collect usage analytics?"), "", "alias-only matches never deliver");
     assert.equal(await prompt("今日の天気は？"), "");
+    // A symbol that is also a plain word (open) counts only when the prompt writes it as code
+    assert.equal(
+      await prompt("Carry out the task. Do not open pull requests."),
+      "",
+      "a plain word is not a code mention",
+    );
+    assert.match(await prompt("open() が遅い"), /opener .*\[names open\]/);
+    assert.match(await prompt("`open` を直したい"), /opener .*\[names open\]/);
     assert.equal(
       await at({ hook_event_name: "UserPromptSubmit", prompt: "toStored", agent_id: "sub" }),
       "",

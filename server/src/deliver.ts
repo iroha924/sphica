@@ -107,6 +107,12 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
       `(?<![\\p{L}\\p{N}_$])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_$])`,
       "u",
     ).test(s);
+  // A symbol that is also a plain word (open, save) is named only when written as code: followed by ( or inside backticks
+  const named = (symbol: string) =>
+    symbol.length >= 3 &&
+    (/[^a-z]/.test(symbol)
+      ? word(symbol, text)
+      : text.includes(`${symbol}(`) || text.includes(`\`${symbol}\``));
   const units = await deliverable(db, projectId)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .execute();
@@ -129,14 +135,12 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
   const hits: { u: (typeof units)[number]; why: string }[] = [];
   for (const u of units) {
     const a = anchors.find(
-      (x) =>
-        x.unit_id === u.id &&
-        ((x.symbol && x.symbol.length >= 3 && word(x.symbol, text)) || text.includes(x.path)),
+      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || text.includes(x.path)),
     );
     const o = options.find(
       (x) => x.unit_id === u.id && x.text.length >= 3 && word(x.text.normalize("NFKC").toLowerCase(), lower),
     );
-    if (a) hits.push({ u, why: ` [names ${a.symbol && word(a.symbol, text) ? a.symbol : a.path}]` });
+    if (a) hits.push({ u, why: ` [names ${a.symbol && named(a.symbol) ? a.symbol : a.path}]` });
     else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
   }
   const shown = hits.slice(0, LIMITS.prompt.units);
