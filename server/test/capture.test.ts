@@ -351,6 +351,60 @@ test("owner messages, the last AI reply, and edited files go into the queue", ()
   );
 });
 
+test("a turn records the paths git status shows changing, including edits made outside the edit tools and files committed in the turn", () => {
+  const repo = path.join(home, "status-repo");
+  const git = (...args: string[]) =>
+    execFileSync(
+      "git",
+      [
+        "-C",
+        repo,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        ...args,
+      ],
+      {
+        stdio: "ignore",
+      },
+    );
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  git("remote", "add", "origin", "https://github.com/o/status.git");
+  for (const f of ["kept.ts", "later.ts", "dirty.ts"]) fs.writeFileSync(path.join(repo, f), "a\n");
+  git("add", "-A");
+  git("commit", "-qm", "first");
+  // Dirty before the turn and not touched in it: the owner's own work in progress, not this turn's
+  fs.writeFileSync(path.join(repo, "dirty.ts"), "owner\n");
+  reset();
+  const base = { session_id: "st", prompt_id: "t1", cwd: repo };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  fs.writeFileSync(path.join(repo, "kept.ts"), "b\n"); // edited by a shell command
+  fs.writeFileSync(path.join(repo, "新規 file.ts"), "c\n"); // untracked, with a space and non-ASCII
+  fs.writeFileSync(path.join(repo, "later.ts"), "d\n");
+  git("commit", "-qm", "turn", "--", "later.ts"); // committed within the turn, so clean again at the end
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  const seen = spooled().flatMap((x) => (x.kind === "edit" ? [[x.path, x.via, x.turn]] : []));
+  assert.deepEqual(seen.sort(), [
+    ["kept.ts", "status", "t1"],
+    ["later.ts", "status", "t1"],
+    ["新規 file.ts", "status", "t1"],
+  ]);
+  // A message typed while the turn runs keeps the turn's starting point, and the next turn starts from the end of this one
+  reset();
+  const next = { ...base, prompt_id: "t2" };
+  onHook("claude-code", { ...next, hook_event_name: "UserPromptSubmit", prompt: "次" });
+  fs.writeFileSync(path.join(repo, "kept.ts"), "e\n");
+  onHook("claude-code", { ...next, hook_event_name: "UserPromptSubmit", prompt: "追加で" });
+  onHook("claude-code", { ...next, hook_event_name: "Stop", last_assistant_message: "終えた。" });
+  assert.deepEqual(
+    spooled().flatMap((x) => (x.kind === "edit" ? [x.path] : [])),
+    ["kept.ts"],
+  );
+});
+
 test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {
   reset();
   const base = { session_id: "s1", cwd: repoDir };
@@ -465,7 +519,7 @@ test("writing to the database counts only new messages, records edits as observa
       redacted: false,
       originalBytes: 9,
     },
-    { ...base, v: 2, kind: "edit", turn: "t2", event: "tool-1", path: "a.ts" },
+    { ...base, v: 2, kind: "edit", turn: "t2", event: "tool-1", path: "a.ts", via: "tool" },
   ];
   const projects = new Map([["git:github.com/o/r", { id, name: "r" }]]);
   try {

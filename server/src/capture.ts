@@ -29,6 +29,7 @@ import { type Host, sessionId } from "./knowledge.ts";
 import { panel, plain } from "./panel.ts";
 import { identify, patchPaths, relativeTo } from "./project.ts";
 import { bytes, clean, head, mask, plural, reason, sha256, tail } from "./text.ts";
+import { changed, type Snapshot, snapshot } from "./worktree.ts";
 
 // Resolve the location on every call (so tests that replace HOME never touch the real queue).
 export const spoolDir = (): string => path.join(os.homedir(), ".sphica", "spool");
@@ -44,6 +45,8 @@ export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
 const HOLD_DAYS = 30;
 const HOLD_MAX = 1000;
+/** Where each session's working tree stood when its running turn began. Turn start and end run in separate hook processes. */
+const baselineDir = (): string => path.join(os.homedir(), ".sphica", "worktree");
 
 /** A queued record. v:2 is written now; v:1 records left in a queue from 0.4 are translated when sent (never silently dropped). */
 export type Spooled =
@@ -75,6 +78,8 @@ export type Spooled =
       /** The tool call that reported the edit */
       event: string | null;
       path: string;
+      /** Reported by an edit tool, or seen changing in git status over the turn */
+      via: "tool" | "status";
       at: string;
     };
 
@@ -94,7 +99,8 @@ export function current(raw: unknown): Spooled | null {
   const r = raw as { v?: number } & Record<string, unknown>;
   if (r.v === 2) return raw as Spooled;
   if (r.v !== 1) throw new Error(`unknown queue record version ${String(r.v)}`);
-  const old = raw as SpooledV1 & Omit<Extract<Spooled, { kind: "edit" }>, "v" | "kind" | "event" | "path">;
+  const old = raw as SpooledV1 &
+    Omit<Extract<Spooled, { kind: "edit" }>, "v" | "kind" | "event" | "path" | "via">;
   if (old.kind === "message")
     return {
       ...old,
@@ -104,7 +110,7 @@ export function current(raw: unknown): Spooled | null {
       redacted: false,
     } as Spooled;
   if (old.action !== "edit") return null;
-  return { ...old, v: 2, kind: "edit", event: null, path: old.path } as Spooled;
+  return { ...old, v: 2, kind: "edit", event: null, path: old.path, via: "tool" } as Spooled;
 }
 
 /** Limit for one message. Beyond it only the start and end are kept (a huge log pasted by mistake never fills the database and index). */
@@ -291,6 +297,42 @@ export function captureNotice(file: string = dbFile()): string | null {
   return null;
 }
 
+type Baseline = Snapshot & { running: boolean };
+
+const baselineFile = (host: Host, session: string): string =>
+  path.join(baselineDir(), `${digest(`${host}\0${session}`)}.json`);
+
+function readBaseline(file: string): Baseline | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as Baseline;
+  } catch {
+    return null; // none yet, or unreadable: the turn starts from here
+  }
+}
+
+function writeBaseline(file: string, b: Baseline): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(b), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
+/** Drops the starting points of sessions not seen for HOLD_DAYS (one file per session would otherwise pile up). */
+function pruneBaselines(): void {
+  const cutoff = Date.now() - HOLD_DAYS * 24 * 60 * 60 * 1000;
+  let files: string[];
+  try {
+    files = fs.readdirSync(baselineDir());
+  } catch {
+    return; // not there yet
+  }
+  for (const f of files) {
+    const file = path.join(baselineDir(), f);
+    if ((fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) < cutoff)
+      fs.rmSync(file, { force: true });
+  }
+}
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
 export function onHook(host: Host, input: HookInput): { flush: boolean; notice?: string | null } {
   const event = input.hook_event_name;
@@ -303,6 +345,10 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (file && input.session_id && /^[A-Za-z0-9_-]+$/.test(input.session_id)) {
       fs.appendFileSync(file, `export SPHICA_PARENT_SESSION=${input.session_id}\n`);
     }
+    const place = identify(input.cwd ?? process.cwd());
+    const now = place && snapshot(place.root);
+    if (now) writeBaseline(baselineFile(host, String(input.session_id)), { ...now, running: false });
+    pruneBaselines();
     return { flush: false, notice: captureNotice() };
   }
   if (!owner()) return { flush: false };
@@ -329,12 +375,28 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     spool({ ...base, kind: "message", id, speaker, ...kept });
   };
 
+  const baseline = baselineFile(host, base.session);
+  if (event === "UserPromptSubmit") {
+    // A message typed while a turn runs keeps that turn's starting point. Between turns, the owner's own edits are not the turn's.
+    if (!readBaseline(baseline)?.running) {
+      const now = snapshot(place.root);
+      if (now) writeBaseline(baseline, { ...now, running: true });
+    }
+  }
   if (event === "UserPromptSubmit" && input.prompt) {
     const prompt = input.prompt.trimStart();
     if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
   }
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
+    const now = snapshot(place.root);
+    if (now) {
+      const before = readBaseline(baseline);
+      if (before)
+        for (const p of changed(place.root, before, now))
+          spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
+      writeBaseline(baseline, { ...now, running: false });
+    }
     return { flush: true };
   }
   if (event === "PostToolUse") {
@@ -353,7 +415,8 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
         ? patchPaths(String(ti.command ?? ""))
         : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string")
     ).flatMap((p) => relativeTo(place.root, p, cwd) ?? []);
-    for (const p of files) spool({ ...base, kind: "edit", event: input.tool_use_id ?? null, path: p });
+    for (const p of files)
+      spool({ ...base, kind: "edit", event: input.tool_use_id ?? null, path: p, via: "tool" });
   }
   return { flush: false };
 }
@@ -549,7 +612,7 @@ export async function write(
           turn_id: r.turn,
           tool_event_id: r.event,
           path: r.path,
-          via: "tool",
+          via: r.via,
           observed_at: iso(r.at),
         },
       ];
