@@ -108,6 +108,8 @@ const HOOK_SH = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
 name="$1"; shift
 log="\${TMPDIR:-/tmp}/eval-receipts.jsonl"
+# A cloud container can be reused across runs: session start clears what an earlier run left in the temporary directory
+if [ "$name" = start ]; then rm -rf "\${TMPDIR:-/tmp}/eval-sphica" "$log" "\${TMPDIR:-/tmp}/eval-gold-given"; fi
 input=$(cat)
 if [ "$#" -gt 0 ]; then output=$(printf '%s' "$input" | "$@" 2>/dev/null); else output=""; fi
 LOG="$log" sh "$here/node.sh" -e 'const [name, input, output] = process.argv.slice(1); require("node:fs").appendFileSync(process.env.LOG, JSON.stringify({ name, at: new Date().toISOString(), node: process.version, input: JSON.parse(input || "{}").hook_event_name ?? null, output }) + "\\n")' "$name" "$input" "$output" 2>/dev/null || true

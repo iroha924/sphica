@@ -84,6 +84,11 @@ test("search keeps records holding most of the question's words, filters them, a
     ]);
     assert.deepEqual(await keys("pnpm installs", { path: "other.json" }), []);
     assert.deepEqual(await keys("のはを"), []);
+    // A term naming an anchored path or symbol exactly is a strong hit even among many other words
+    assert.deepEqual(await keys("package.json installs convention history rationale owner"), [
+      "trace:ext-s1/npm",
+      "trace:ext-s1/pnpm",
+    ]);
     const sources = await searchSources(db.reader, p, "package managers", 5);
     assert.deepEqual([sources.hits.map((h) => h.id), sources.weaker], [[a], 0]);
     assert.deepEqual((await searchSources(db.reader, p, "を", 5)).hits, []);
@@ -167,6 +172,11 @@ test("read shows cited words and who said them, links, history, and each anchor 
       /Revisit when: 来年[\s\S]*Adoption:\n {2}none/,
     );
     assert.equal(await readUnit(db.reader, p, "nope", null), null);
+    // A key without its origin prefix reads the record when it names exactly one
+    assert.match(
+      (await readUnit(db.reader, p, "ext-s1/storage", root)) ?? "",
+      /^trace:ext-s1\/storage \(u\d+/,
+    );
     assert.match((await readSource(db.reader, p, `s${m}`)) ?? "", /session_message session:s1, by the owner/);
     assert.equal(await readSource(db.reader, p, "s999"), null);
     assert.equal(await readSource(db.reader, p, "x"), null);

@@ -135,7 +135,11 @@ export async function searchUnits(
     );
     const extra = new Set(alias ? terms((JSON.parse(alias.terms) as string[]).join(" ")) : []);
     const matched = wanted.filter((w) => own.has(w) || extra.has(w));
-    if (!strong(matched.length, wanted.length)) {
+    // Naming an anchored path or symbol exactly is a strong signal on its own, however many other words the query has
+    const ident = new Set(
+      anch.flatMap((a) => [a.path, a.symbol].flatMap((x) => (x ? [x.normalize("NFKC").toLowerCase()] : []))),
+    );
+    if (!strong(matched.length, wanted.length) && !matched.some((w) => ident.has(w))) {
       weaker++;
       continue;
     }

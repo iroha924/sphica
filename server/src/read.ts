@@ -1,6 +1,6 @@
 // The full view of one record or source for MCP read: a record's text, options, the exact words cited as evidence and adoption with who
 // said them, its links and state history, and each anchor checked against the working tree now.
-import type { Kysely } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 import { checkAnchor } from "./anchors.ts";
 import type { DB } from "./db-types.ts";
 import { inline } from "./panel.ts";
@@ -37,7 +37,32 @@ export async function readUnit(
     .where("project_id", "=", projectId)
     .where(byId ? "id" : "key", "=", byId ? Number(byId[1]) : ref)
     .executeTakeFirst();
-  if (!u) return null;
+  // A key without its origin prefix (ext-s1/storage) reads the record when exactly one origin has it
+  const bare =
+    u ??
+    (byId
+      ? undefined
+      : await db
+          .selectFrom("unit")
+          .selectAll()
+          .where("project_id", "=", projectId)
+          .where(
+            "key",
+            "in",
+            ["trace:", "harvest:", "glean:"].map((o) => o + ref),
+          )
+          .execute()
+          .then((rows) => (rows.length === 1 ? rows[0] : undefined)));
+  if (!bare) return null;
+  return describe(db, bare, root, asOf);
+}
+
+async function describe(
+  db: Kysely<DB>,
+  u: Selectable<DB["unit"]>,
+  root: string | null,
+  asOf: string | undefined,
+): Promise<string> {
   const [options, evidence, adoption, anchors, links, states] = await Promise.all([
     db
       .selectFrom("unit_option")
