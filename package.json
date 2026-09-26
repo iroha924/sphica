@@ -34,6 +34,7 @@
     "notices": "node scripts/third-party-notices.mjs --check",
     "pairs": "node scripts/check-pairs.mjs",
     "rule-scopes": "node scripts/check-rule-scopes.mjs",
-    "sql": "node scripts/check-sql.mjs"
+    "sql": "node scripts/check-sql.mjs",
+    "acceptance": "bun run --cwd server acceptance"
   }
 }
