@@ -23,6 +23,12 @@ export const LIFECYCLES = ["candidate", "active", "superseded", "withdrawn"] as 
 export const OPTION_OUTCOMES = ["chosen", "rejected", "deferred", "proposed"] as const;
 
 /** @public Read as text by scripts/check-pairs.mjs. */
+export const EVIDENCE_ROLES = ["states", "proposes", "rejects", "explains", "implements"] as const;
+
+/** @public Read as text by scripts/check-pairs.mjs. */
+export const WORK_STATUSES = ["active", "blocked", "paused", "done", "abandoned"] as const;
+
+/** @public Read as text by scripts/check-pairs.mjs. */
 export const HOSTS = ["claude-code", "codex"] as const;
 export type Host = (typeof HOSTS)[number];
 

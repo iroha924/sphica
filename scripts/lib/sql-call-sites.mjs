@@ -39,7 +39,7 @@ export function callSites(root) {
  * Files covered by the child process lane (scripts/check-sql-live.mjs). Tests have no seam to inject a db, and
  * starting the shipped entry point in a child process also exercises connection roles and cleanup.
  */
-export const LIVE_FILES = ["server/src/cli.ts", "server/src/capture.ts"];
+export const LIVE_FILES = ["server/src/cli.ts", "server/src/cli/trace.ts", "server/src/capture.ts"];
 
 /** Call sites the child process lane cannot reach either, with the reason. One site per line. */
 export const ALLOWED_UNREACHED = [];

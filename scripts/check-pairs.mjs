@@ -50,6 +50,8 @@ const PAIRS = [
     "OPTION_OUTCOMES",
   ],
   ["session.host", /host text not null check \(host in \(([^)]*)\)\)/, "HOSTS"],
+  ["unit_evidence.role", /role text not null check \(role in \(('states'[^)]*)\)\)/, "EVIDENCE_ROLES"],
+  ["work.status", /status text not null check \(status in \(('active', 'blocked'[^)]*)\)\)/, "WORK_STATUSES"],
   ["source.kind", /kind text not null check \(kind in \(('session_message'[^)]*)\)\)/, "SOURCE_KINDS"],
 ];
 for (const [column, re, constant] of PAIRS) {

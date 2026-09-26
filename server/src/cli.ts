@@ -21,9 +21,11 @@ import {
   text_en,
   version,
 } from "@stricli/core";
-import { type Kysely, sql } from "kysely";
+import { sql } from "kysely";
 import { dbInit, inspect, migrate, reindex } from "./admin.ts";
 import { flush, readState, rejectedDir, unregisteredDir } from "./capture.ts";
+import { withDb } from "./cli/common.ts";
+import { traceRoutes } from "./cli/trace.ts";
 import {
   type Block,
   closing,
@@ -36,9 +38,7 @@ import {
   stopped,
   title,
 } from "./cli/view.ts";
-import { dbFile, openReader, type Role, SCHEMA_REVISION } from "./db.ts";
-import type { DB } from "./db-types.ts";
-import { openWriter } from "./db-write.ts";
+import { dbFile, SCHEMA_REVISION } from "./db.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
 import { checkLocalName, identify, localRoots, nameLocal, repositoryRoot } from "./project.ts";
@@ -98,15 +98,6 @@ const TEXT: ApplicationText = {
   exceptionWhileRunningCommand: (e) => failed(reason(e)),
   commandErrorResult: (e) => failed(e.message),
 };
-
-async function withDb<T>(role: Exclude<Role, "owner">, fn: (db: Kysely<DB>) => Promise<T>): Promise<T> {
-  const db = role === "reader" ? openReader() : openWriter(role);
-  try {
-    return await fn(db);
-  } finally {
-    await db.destroy().catch(() => {});
-  }
-}
 
 async function doctor(cwd: string): Promise<void> {
   const issues: string[] = [];
@@ -505,10 +496,11 @@ const root = buildRouteMap({
     brief: "Keep and search past decisions and conversations",
     fullDescription: "Database: ~/.sphica/sphica.db (created by sphica init). No credentials are needed",
     // Usage shows only what people type. The rest are run by the trace Skill, the capture hooks, maintenance, or on doctor's advice; -H lists them
-    hideRoute: { project: true, capture: true, db: true },
+    hideRoute: { project: true, capture: true, db: true, trace: true },
   },
   routes: {
     project: projectRoutes,
+    trace: traceRoutes,
     capture: captureRoutes,
     db: dbRoutes,
     init: buildCommand({

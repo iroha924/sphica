@@ -9,12 +9,6 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export interface AppliedDraft {
-  applied_at: string;
-  draft_id: string;
-  run_id: number;
-}
-
 export interface ArtifactLink {
   from_artifact: string;
   kind: string;
@@ -110,6 +104,7 @@ export interface ExternalReference {
 }
 
 export interface ExtractionRun {
+  draft_id: string | null;
   finished_at: string | null;
   id: Generated<number>;
   input_bytes: number | null;
@@ -321,7 +316,6 @@ export interface Work {
 }
 
 export interface DB {
-  applied_draft: AppliedDraft;
   artifact_link: ArtifactLink;
   capture_delivery: CaptureDelivery;
   capture_delivery_unit: CaptureDeliveryUnit;

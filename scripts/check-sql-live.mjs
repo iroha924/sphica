@@ -124,6 +124,39 @@ await withTempDir(async (dir) => {
     // english-exempt: Japanese record fixture sent through the real CLI and hook
     hook({ hook_event_name: "Stop", last_assistant_message: `応答${esc}` });
     note("capture flush (control sequences)", runCli(["capture", "flush"], dir, covDir, asSession("live-1")));
+
+    // Trace the captured session: the draft binds a run to it, context prints refs, and the record cites one of them.
+    // Context prints what the owner said, so it is also where control sequences from a conversation must not reach the terminal.
+    clean("trace pending", runCli(["trace", "pending"], dir, covDir, asSession("live-1")), "SQL");
+    const drafted = note("trace draft", runCli(["trace", "draft"], dir, covDir, asSession("live-1")));
+    const id = /^ {2}id: (\S+)$/m.exec(drafted.out)?.[1];
+    const file = /^ {2}file: (.+)$/m.exec(drafted.out)?.[1];
+    if (!id || !file) throw new Error(`trace draft printed no id or file\n${drafted.out}`);
+    const context = runCli(["trace", "context", id], dir, covDir, asSession("live-1"));
+    // english-exempt: Japanese record fixture sent through the real CLI and hook
+    clean("trace context", context, "を含む発言");
+    const ref = /^ {2}## (s\d+) owner/m.exec(context.out)?.[1];
+    if (!ref) failures.push(`trace context printed no owner source ref\n${context.out.slice(0, 600)}`);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        units: [
+          {
+            key: "live",
+            kind: "decision",
+            stance: "do",
+            text: "Run SQL against a real database",
+            evidence: [{ source: ref, quote: "SQL", role: "states" }],
+            adoption: [{ source: ref, quote: "SQL" }],
+          },
+        ],
+      }),
+    );
+    note("trace check", runCli(["trace", "check", id], dir, covDir, asSession("live-1")));
+    const traced = note("trace save", runCli(["trace", "save", id], dir, covDir, asSession("live-1")));
+    if (!/trace:live-1\/live active/.test(traced.out))
+      failures.push(`trace save did not activate the decision\n${traced.out.slice(0, 600)}`);
+    if (fs.existsSync(path.dirname(file))) failures.push(`trace save left its draft behind: ${file}`);
     const evil = makeRepo(dir, `https://github.com/example/ev${esc}il.git`, "evil\u001b[2Jdir");
     clean("init (remote and directory name)", runCli(["init", "--cwd", evil], dir, covDir), "evil");
     clean("project list", runCli(["project", "list"], dir, covDir), "example/ev");

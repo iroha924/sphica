@@ -5,7 +5,7 @@
 -- Four boundaries:
 --   captured sources   session, source, artifact_link, edit_observation, external_reference: what was said or written, never rewritten
 --   extracted units    unit and its option, evidence, adoption, link, state, anchor, alias tables: what was decided or implemented
---   processing         extraction_run, source_processing, applied_draft: what has been looked at and saved, so gaps are counted
+--   processing         extraction_run, source_processing: what has been looked at and saved, so gaps are counted
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
 -- Byte offsets are into the UTF-8 bytes of source.text. Project consistency across tables is enforced by triggers, not only by code.
@@ -167,6 +167,8 @@ create table extraction_run (
   status text not null check (status in ('running', 'saved', 'failed', 'capped')),
   reason text,
   input_bytes integer check (input_bytes >= 0),
+  -- The CLI-issued draft this run saves. A saved run's draft saves nothing again; the draft is bound to this run's project and target
+  draft_id text unique,
   started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
   finished_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', finished_at) is finished_at),
   check (status in ('running', 'saved') or reason is not null)
@@ -178,13 +180,6 @@ create table source_processing (
   run_id integer not null references extraction_run (id) on delete cascade,
   outcome text not null check (outcome in ('units', 'no_unit', 'failed', 'capped')),
   primary key (source_id, run_id)
-) strict;
-
--- A CLI-issued draft that was saved, so saving it again changes nothing
-create table applied_draft (
-  draft_id text primary key not null,
-  run_id integer not null references extraction_run (id) on delete cascade,
-  applied_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', applied_at) is applied_at)
 ) strict;
 
 -- An extracted unit. Its text is never rewritten: corrections are successors, withdrawals, retractions, and anchor replacements.
