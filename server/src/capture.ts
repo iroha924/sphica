@@ -177,7 +177,7 @@ function spool(record: Spooled): void {
 }
 
 /** The current branch. Reads HEAD without starting git (in a worktree .git is a file pointing to the real location). */
-const branchOf = (root: string): string | null => {
+export const branchOf = (root: string): string | null => {
   try {
     const dotgit = path.join(root, ".git");
     const gitdir = fs.statSync(dotgit).isFile()
@@ -196,7 +196,7 @@ const branchOf = (root: string): string | null => {
   }
 };
 
-type HookInput = {
+export type HookInput = {
   hook_event_name?: string;
   session_id?: string;
   prompt_id?: string;

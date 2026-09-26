@@ -8,15 +8,21 @@ const { world, cases, setups } = loadAcceptance();
 const byId = new Map(cases.map((c) => [c.id, c]));
 const only = process.env.SPHICA_ACCEPTANCE_LAYER;
 
-/** The steps that build a case's world: referenced cases first (their own setup and operation), then named setups, then inline steps. */
-function arrange(c: Case, seen = new Set<string>()): Step[] {
-  if (seen.has(c.id)) throw new Error(`${c.id} refers to itself through its setup`);
-  seen.add(c.id);
+/**
+ * The steps that build a case's world: referenced cases first (their own setup and operation), then named setups, then inline steps.
+ * A case reached twice (two setups sharing one) is arranged once; a case reached again along its own chain is a cycle.
+ */
+function arrange(c: Case, chain = new Set<string>(), done = new Set<string>()): Step[] {
+  if (chain.has(c.id)) throw new Error(`${c.id} refers to itself through its setup`);
+  const inner = new Set([...chain, c.id]);
   return c.given.flatMap((g): Step[] => {
     if (typeof g.case === "string") {
       const other = byId.get(g.case);
       if (!other) throw new Error(`${c.id} refers to unknown case ${g.case}`);
-      return [...arrange(other, seen), other.when];
+      if (done.has(other.id)) return [];
+      const steps = [...arrange(other, inner, done), other.when];
+      done.add(other.id);
+      return steps;
     }
     const named = Object.keys(g).filter((k) => g[k] === true && k in setups);
     if (named.length) return named.flatMap((k) => expand(setups[k] as Step));

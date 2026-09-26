@@ -26,11 +26,7 @@ export interface CaptureDelivery {
   path: string | null;
   reason: string | null;
   session_id: string | null;
-}
-
-export interface CaptureDeliveryUnit {
-  delivery_id: number | null;
-  unit_id: number | null;
+  units: string | null;
 }
 
 export interface CaptureEdit {
@@ -318,7 +314,6 @@ export interface Work {
 export interface DB {
   artifact_link: ArtifactLink;
   capture_delivery: CaptureDelivery;
-  capture_delivery_unit: CaptureDeliveryUnit;
   capture_edit: CaptureEdit;
   capture_message: CaptureMessage;
   capture_session: CaptureSession;

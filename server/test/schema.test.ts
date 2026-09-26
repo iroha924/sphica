@@ -377,14 +377,18 @@ test("links stay in one project, supersedes never cycles, and a conflict is reso
 test("a delivery can list only units of the delivered session's project", () => {
   session(db, p, "s1");
   const foreign = unit({ key: "c", kind: "question" }, other);
+  const own = unit({ key: "d", kind: "question" });
   sql(
-    "insert into capture_delivery (session_id, event, outcome, at) values ('s1', 'pre_edit', 'emitted', ?)",
+    "insert into capture_delivery (session_id, event, outcome, at, units) values ('s1', 'pre_edit', 'emitted', ?, json_array(?))",
     now,
+    own,
   );
+  assert.equal(db.owner.prepare("select count(*) as n from delivery_unit where unit_id = ?").get(own)?.n, 1);
   refuses(
     () =>
       sql(
-        "insert into capture_delivery_unit (delivery_id, unit_id) values ((select max(id) from delivery), ?)",
+        "insert into capture_delivery (session_id, event, outcome, at, units) values ('s1', 'pre_edit', 'emitted', ?, json_array(?))",
+        now,
         foreign,
       ),
     /different projects/,

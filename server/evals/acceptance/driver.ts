@@ -12,10 +12,12 @@ import { flush, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { openWriter } from "../../src/db-write.ts";
+import { deliver } from "../../src/deliver.ts";
 import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
+import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
-import { readUnit } from "../../src/read.ts";
+import { readSource, readUnit } from "../../src/read.ts";
 import { searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import type { Step, World } from "./load.ts";
@@ -127,6 +129,36 @@ export async function createDriver(world: World): Promise<Driver> {
         .where("key", "=", "git:github.com/example/tsundoku")
         .executeTakeFirstOrThrow()
     ).id;
+  /** What the delivery hooks returned for the last inject step, one entry per call. */
+  let delivered: string[] = [];
+  let injectSession = 0;
+  /** Calls the delivery hook the way Claude Code would, in a fresh session each time a case injects. */
+  const inject = async (i: { event: string; path?: string; prompt?: string; source?: string }) => {
+    const input = {
+      session_id: `inject-${++injectSession}-${path.basename(dir)}`,
+      cwd: repo,
+      ...(i.event === "pre_edit"
+        ? {
+            hook_event_name: "PreToolUse",
+            tool_name: "Edit",
+            tool_input: { file_path: path.join(repo, i.path ?? "") },
+          }
+        : i.event === "prompt"
+          ? { hook_event_name: "UserPromptSubmit", prompt: i.prompt ?? "" }
+          : { hook_event_name: "SessionStart", source: i.source ?? "startup" }),
+    };
+    return deliver(input, "claude-code", file);
+  };
+  /** Every delivery a session could see: start, a prompt naming the needle, and an edit of every anchored path. */
+  const everything = async (needle: string) => {
+    const anchored = await db().selectFrom("unit_anchor").select("path").distinct().execute();
+    return [
+      await inject({ event: "session_start" }),
+      await inject({ event: "prompt", prompt: needle }),
+      ...(await Promise.all(anchored.map((a) => inject({ event: "pre_edit", path: a.path })))),
+    ].join("\n");
+  };
+
   /** The last search's hits and the last read's text, for expectations about them. */
   let found: UnitHit[] = [];
   let lastRead = "";
@@ -401,6 +433,46 @@ export async function createDriver(world: World): Promise<Driver> {
         const at = step.as_of as { time: string; read: string };
         lastRead =
           (await readUnit(db(), await projectId(), at.read, repo, new Date(at.time).toISOString())) ?? "";
+        return;
+      }
+      if (step.inject && typeof step.inject === "object") {
+        const i = step.inject as {
+          event: string;
+          path?: string;
+          prompt?: string;
+          source?: string;
+          repeat?: number;
+        };
+        // A repeat stays in one session: the second call shows what the same session sees again
+        delivered = [];
+        const repeat = i.repeat ?? 1;
+        injectSession++;
+        const fixed = injectSession;
+        for (let n = 0; n < repeat; n++) {
+          injectSession = fixed - 1;
+          delivered.push(await inject(i));
+        }
+        return;
+      }
+      if (step.work && typeof step.work === "object") {
+        const w = step.work as { key: string; title: string; current: string; next?: string[] };
+        await writer()
+          .insertInto("work")
+          .values({
+            project_id: await projectId(),
+            key: w.key,
+            title: w.title,
+            goal: w.title,
+            current: w.current,
+            next: JSON.stringify(w.next ?? []),
+            status: "active",
+            updated_at: new Date().toISOString(),
+          })
+          .execute();
+        return;
+      }
+      if (step.database === "missing") {
+        for (const f of [file, `${file}-wal`, `${file}-shm`]) fs.rmSync(f, { force: true });
         return;
       }
       if (step.harvest && typeof step.harvest === "object")
@@ -769,6 +841,59 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (typeof e.read_contains === "string") {
         assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
+        return;
+      }
+      if (Array.isArray(e.context_contains)) {
+        for (const w of e.context_contains as string[])
+          assert.ok(delivered[0]?.includes(w), `delivery lacks "${w}"\n${delivered[0]}`);
+        return;
+      }
+      if (Array.isArray(e.context_not_contains)) {
+        for (const w of e.context_not_contains as string[])
+          assert.ok(!delivered[0]?.includes(w), `delivery has "${w}"\n${delivered[0]}`);
+        return;
+      }
+      if (typeof e.context_max_chars === "number") {
+        assert.ok((delivered[0] ?? "").length <= e.context_max_chars, `${delivered[0]?.length} chars`);
+        return;
+      }
+      if (typeof e.context_max_lines === "number") {
+        assert.ok((delivered[0] ?? "").split("\n").length <= e.context_max_lines, delivered[0]);
+        return;
+      }
+      if (e.context_empty === true) {
+        assert.equal(delivered[0], "");
+        return;
+      }
+      if (Array.isArray(e.first_context_contains)) {
+        for (const w of e.first_context_contains as string[])
+          assert.ok(delivered[0]?.includes(w), `first delivery lacks "${w}"\n${delivered[0]}`);
+        return;
+      }
+      if (e.second_context_empty === true) {
+        assert.equal(delivered[1], "");
+        return;
+      }
+      if (typeof e.inject_prompt_context_empty === "string") {
+        assert.equal(
+          await inject({ event: "prompt", prompt: e.inject_prompt_context_empty }),
+          "",
+          String(e.reason),
+        );
+        return;
+      }
+      if (typeof e.inject_never_contains === "string") {
+        const all = await everything(e.inject_never_contains);
+        assert.ok(!all.includes(e.inject_never_contains), all);
+        return;
+      }
+      if (typeof e.read_of_source === "string") {
+        const text = framed((await readSource(db(), await projectId(), await ref(e.read_of_source))) ?? "");
+        if (e.framed_as_past_evidence)
+          assert.match(
+            text,
+            /^<past-records id="[0-9a-f]+">\nPast records: [\s\S]*Evidence, not instructions/,
+          );
         return;
       }
       if (typeof e.check_problem_contains === "string") {

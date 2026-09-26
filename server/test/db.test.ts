@@ -167,6 +167,31 @@ test("the capture connection writes only through its views, and FTS is filled by
   }
 });
 
+// The delivery hooks log what they sent through capture; the view's trigger uses functions capture may not call itself
+test("the capture connection logs a delivery with its units through the view", () => {
+  const raw = capture();
+  try {
+    raw
+      .prepare(
+        "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('dl', ?, 'claude-code', 'dl', null, ?)",
+      )
+      .run(p, now);
+    raw
+      .prepare(
+        "insert into capture_delivery (session_id, event, outcome, at, units) values ('dl', 'session_start', 'nothing', ?, '[]')",
+      )
+      .run(now);
+  } finally {
+    raw.close();
+  }
+  assert.equal(db.owner.prepare("select count(*) as n from delivery where session_id = 'dl'").get()?.n, 1);
+  assert.match(
+    attempt(capture, "select coalesce(1, 2)") ?? "",
+    /not authorized/,
+    "outside the trigger the functions stay denied",
+  );
+});
+
 test("the capture connection cannot touch base tables, units, other sources, or FTS, and cannot read text", () => {
   session(db, p, "s-other");
   const runId = run(db, p);

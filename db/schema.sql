@@ -676,18 +676,18 @@ create trigger capture_edit_insert instead of insert on capture_edit begin
   select new.session_id, new.turn_id, new.tool_event_id, new.path, new.via, new.observed_at
   where exists (select 1 from session where id = new.session_id) on conflict do nothing;
 end;
-create view capture_delivery as select session_id, event, outcome, reason, path, eligible, omitted, chars, at from delivery;
+-- units is a JSON array of the unit ids delivered; each must belong to the delivered session's project
+create view capture_delivery as
+  select session_id, event, outcome, reason, path, eligible, omitted, chars, at, null as units from delivery;
 create trigger capture_delivery_insert instead of insert on capture_delivery begin
+  select raise(abort, 'the unit and the delivered session belong to different projects')
+  where exists (select 1 from json_each(coalesce(new.units, '[]')) j
+    where (select project_id from unit where id = j.value) is not (select project_id from session where id = new.session_id));
   insert into delivery (session_id, event, outcome, reason, path, eligible, omitted, chars, at)
   values (new.session_id, new.event, new.outcome, new.reason, new.path, coalesce(new.eligible, 0), coalesce(new.omitted, 0),
     coalesce(new.chars, 0), new.at);
-end;
-create view capture_delivery_unit as select delivery_id, unit_id from delivery_unit;
-create trigger capture_delivery_unit_insert instead of insert on capture_delivery_unit begin
-  select raise(abort, 'the unit and the delivered session belong to different projects')
-  where (select s.project_id from delivery d join session s on s.id = d.session_id where d.id = new.delivery_id)
-    is not (select project_id from unit where id = new.unit_id);
-  insert into delivery_unit (delivery_id, unit_id) values (new.delivery_id, new.unit_id) on conflict do nothing;
+  insert into delivery_unit (delivery_id, unit_id)
+  select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
 
 pragma user_version = 1;
