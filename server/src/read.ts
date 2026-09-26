@@ -27,6 +27,8 @@ export async function readUnit(
   projectId: number,
   ref: string,
   root: string | null,
+  /** Only evidence and adoption added by this time (an as-of snapshot for replaying a past task) */
+  asOf?: string,
 ): Promise<string | null> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
   const u = await db
@@ -47,6 +49,7 @@ export async function readUnit(
       .selectFrom("unit_evidence as e")
       .innerJoin("source as s", "s.id", "e.source_id")
       .where("e.unit_id", "=", u.id)
+      .where("e.added_at", "<=", asOf ?? "9999")
       .select([
         "e.option_id",
         "e.role",
@@ -71,6 +74,7 @@ export async function readUnit(
       .selectFrom("unit_adoption as a")
       .innerJoin("source as s", "s.id", "a.source_id")
       .where("a.unit_id", "=", u.id)
+      .where("a.added_at", "<=", asOf ?? "9999")
       .select([
         "a.route",
         "a.span_start",
@@ -108,7 +112,7 @@ export async function readUnit(
   ]);
 
   const out = [
-    `${u.key} (u${u.id}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
+    `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
     u.text,
   ];
   if (u.why) out.push(`Why: ${u.why}`);
@@ -116,7 +120,7 @@ export async function readUnit(
   if (u.revisit_when) out.push(`Revisit when: ${u.revisit_when}`);
   if (u.no_code_surface) out.push(`No code location: ${u.no_code_surface}`);
   const quote = (e: (typeof evidence)[number]) =>
-    `  - s${e.source} ${e.kind}${e.revision > 1 ? ` revision ${e.revision}` : ""}, ${speaker(e)}${e.reported_speaker ? ` reporting what ${e.reported_speaker} said` : ""}, ${e.created_at} (${e.role}): "${inline(cut(e.text, e.span_start, e.span_end))}"${e.retracted_at ? ` [retracted: ${e.retraction_reason}]` : ""}`;
+    `  - s${e.source} ${e.kind} ${e.artifact}${e.revision > 1 ? ` revision ${e.revision}` : ""}, ${speaker(e)}${e.reported_speaker ? ` reporting what ${e.reported_speaker} said` : ""}, ${e.created_at} (${e.role}): "${inline(cut(e.text, e.span_start, e.span_end))}"${e.retracted_at ? ` [retracted: ${e.retraction_reason}]` : ""}`;
   if (options.length) {
     out.push("Options:");
     for (const o of options) {

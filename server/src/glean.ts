@@ -1,0 +1,520 @@
+// glean: evidence and corrections added to existing records later, and records written from what the owner points to. Every change cites
+// retained text: an owner message, a pull request or issue source, or a file excerpt the CLI reads from git itself. Nothing is rewritten:
+// evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
+import { execFileSync } from "node:child_process";
+import type { Kysely } from "kysely";
+import { z } from "zod";
+import { locate as symbolAt } from "./anchors.ts";
+import { iso } from "./db.ts";
+import type { DB } from "./db-types.ts";
+import { EVIDENCE_ROLES } from "./knowledge.ts";
+import { type Checked, checkRecord, repoPath, saveRecord, type Target } from "./record.ts";
+import { head, sha256 } from "./text.ts";
+
+/** Files larger than this are not excerpted (a generated file or a data dump is not a statement). */
+const MAX_FILE = 1024 * 1024;
+const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+const SOURCE_REF = z.string().regex(/^s[1-9][0-9]{0,15}$/, "cite a source ref such as s12");
+const unit = z.string().min(1).max(200);
+/** The unit's revision as read printed it; a unit changed since is refused */
+const revision = z.number().int().positive();
+const quote = z.string().min(1).max(4000);
+const File = z
+  .object({
+    path: z.string().min(1).max(500),
+    commit: z.string().min(1).max(100).default("HEAD"),
+    lines: z.tuple([z.number().int().positive(), z.number().int().positive()]),
+  })
+  .strict();
+const Op = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("add_evidence"),
+      unit,
+      revision,
+      source: SOURCE_REF.optional(),
+      file: File.optional(),
+      quote,
+      role: z.enum(EVIDENCE_ROLES),
+      reported_speaker: z.string().trim().min(1).max(100).optional(),
+    })
+    .strict(),
+  z.object({ op: z.literal("adopt"), unit, revision, source: SOURCE_REF, quote }).strict(),
+  z
+    .object({
+      op: z.literal("anchor"),
+      unit,
+      revision,
+      path: z.string().min(1).max(500),
+      symbol: z.string().min(1).max(200).optional(),
+      role: z.enum(["applies_to", "evidence"]),
+      commit: z
+        .string()
+        .regex(/^[0-9a-f]{40}$/)
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("replace_anchor"),
+      unit,
+      revision,
+      from: z.object({ path: z.string().min(1), symbol: z.string().min(1).optional() }).strict(),
+      to: z
+        .object({
+          path: z.string().min(1).max(500),
+          symbol: z.string().min(1).max(200).optional(),
+          role: z.enum(["applies_to", "evidence"]),
+        })
+        .strict(),
+      source: SOURCE_REF,
+      quote,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("retract_evidence"),
+      unit,
+      revision,
+      source: SOURCE_REF,
+      reason_source: SOURCE_REF,
+      reason_quote: quote,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("retract_adoption"),
+      unit,
+      revision,
+      source: SOURCE_REF,
+      reason_source: SOURCE_REF,
+      reason_quote: quote,
+    })
+    .strict(),
+  z
+    .object({ op: z.literal("withdraw"), unit, revision, reason_source: SOURCE_REF, reason_quote: quote })
+    .strict(),
+]);
+const Glean = z
+  .object({ units: z.array(z.unknown()).max(20).default([]), ops: z.array(Op).max(50).default([]) })
+  .strict();
+type OpInput = z.infer<typeof Op>;
+
+/** A file excerpt read from a commit: the lines asked for, byte for byte (CRLF kept), and where they came from. */
+type Excerpt = {
+  path: string;
+  commit: string;
+  blob: string;
+  size: number;
+  lines: [number, number];
+  text: string;
+};
+
+/** git without the caller's GIT_* variables, which could point it at another repository or object store. */
+function git(root: string, args: string[], max = MAX_FILE * 2): Buffer {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+  return execFileSync("git", ["-C", root, ...args], {
+    env,
+    maxBuffer: max,
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 10_000,
+  });
+}
+
+/** Reads lines of a committed file. Throws with the reason for paths outside the repository, links, submodules, binary, and oversized files. */
+function readExcerpt(root: string, file: z.infer<typeof File>): Excerpt {
+  const p = repoPath(file.path);
+  if (!p) throw new Error(`${JSON.stringify(head(file.path, 80))} is not a path inside the repository`);
+  let commit: string;
+  try {
+    commit = git(root, ["rev-parse", "--verify", "-q", `${file.commit}^{commit}`])
+      .toString("utf8")
+      .trim();
+  } catch {
+    throw new Error(`${JSON.stringify(head(file.commit, 40))} is not a commit of this repository`);
+  }
+  const entry = git(root, ["ls-tree", "-z", commit, "--", p]).toString("utf8").split("\0")[0] ?? "";
+  const m = /^(\d{6}) (\w+) ([0-9a-f]{40})\t(.*)$/.exec(entry);
+  if (!m || m[4] !== p) throw new Error(`${p} is not in commit ${commit.slice(0, 12)}`);
+  const [, mode, type, blob = ""] = m;
+  if (mode === "120000") throw new Error(`${p} is a symbolic link; cite the file it points to`);
+  if (type !== "blob" || !["100644", "100755"].includes(mode ?? ""))
+    throw new Error(`${p} is not a regular file (${type})`);
+  const size = Number(git(root, ["cat-file", "-s", blob]).toString("utf8").trim());
+  if (size > MAX_FILE) throw new Error(`${p} is ${size} bytes, over the ${MAX_FILE}-byte limit`);
+  const buf = git(root, ["cat-file", "blob", blob]);
+  if (buf.includes(0)) throw new Error(`${p} is binary`);
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    throw new Error(`${p} is not UTF-8 text`);
+  }
+  // Line starts in bytes; a line ends after its \n, so CRLF stays in the excerpt
+  const starts = [0];
+  for (let i = 0; i < buf.length; i++) if (buf[i] === 0x0a && i + 1 < buf.length) starts.push(i + 1);
+  const [a, b] = file.lines;
+  if (a > b || b > starts.length)
+    throw new Error(`${p} has ${starts.length} lines; lines ${a}-${b} are not in it`);
+  const text = buf.subarray(starts[a - 1], b < starts.length ? starts[b] : buf.length).toString("utf8");
+  return { path: p, commit, blob, size, lines: [a, b], text };
+}
+
+const locate = (body: string, q: string): [number, number] | null => {
+  const at = Buffer.from(body, "utf8").indexOf(Buffer.from(q, "utf8"));
+  return at < 0 ? null : [at, at + Buffer.byteLength(q, "utf8")];
+};
+
+type Planned = { input: OpInput; unitId: number; lifecycle: string; excerpt: Excerpt | null };
+export type GleanChecked = { errors: string[]; problems: string[]; units: Checked; ops: Planned[] };
+
+/**
+ * Checks a glean record. target.sessionId is the owner's current session: units whose only evidence is that session's owner messages,
+ * with no adoption, are kept as unsourced (the owner remembering is not a source).
+ */
+export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): Promise<GleanChecked> {
+  const parsed = Glean.safeParse(raw);
+  if (!parsed.success)
+    return {
+      errors: parsed.error.issues.map((i) => `${i.path.join(".") || "record"}: ${i.message}`),
+      problems: [],
+      units: { errors: [], problems: [], units: [], work: null },
+      ops: [],
+    };
+  const units = await checkRecord(db, target, { units: parsed.data.units });
+  const errors = [...units.errors];
+  const problems = [...units.problems];
+  if (parsed.data.units.length || units.units.length) {
+    const sessionOwner = new Set(
+      target.sessionId
+        ? (
+            await db
+              .selectFrom("source")
+              .select("id")
+              .where("session_id", "=", target.sessionId)
+              .where("author_kind", "=", "owner")
+              .execute()
+          ).map((s) => s.id)
+        : [],
+    );
+    for (const u of units.units)
+      if (u.adoption.length === 0 && u.evidence.every((e) => sessionOwner.has(e.source))) {
+        u.unsourced = true;
+        problems.push(
+          `${u.key}: its only evidence is the owner's words in this session; ask the owner for a source (an issue or pull request URL, meeting notes, the file and line) before saving; saved without one it is marked unsourced and never used as fact`,
+        );
+      }
+  }
+  const ops: Planned[] = [];
+  const source = async (ref: string) =>
+    db
+      .selectFrom("source")
+      .select(["id", "kind", "author_kind", "author_association", "text"])
+      .where("project_id", "=", target.projectId)
+      .where("id", "=", Number(ref.slice(1)))
+      .executeTakeFirst();
+  const span = async (ref: string, q: string, what: string) => {
+    const s = await source(ref);
+    if (!s) {
+      errors.push(`${what}: ${ref} is not a source of this project`);
+      return null;
+    }
+    const at = locate(s.text, q);
+    if (!at) {
+      errors.push(`${what}: quote not found in ${ref}: "${head(q, 80)}"`);
+      return null;
+    }
+    return { s, at };
+  };
+  for (const [i, op] of parsed.data.ops.entries()) {
+    const what = `ops.${i} ${op.op} ${op.unit}`;
+    const u = await db
+      .selectFrom("unit")
+      .select(["id", "kind", "lifecycle", "revision"])
+      .where("project_id", "=", target.projectId)
+      .where("key", "=", op.unit)
+      .executeTakeFirst();
+    if (!u) {
+      errors.push(`${what}: not a record of this project`);
+      continue;
+    }
+    if (u.revision !== op.revision) {
+      errors.push(
+        `${what}: changed since you read it (revision ${op.revision}, now ${u.revision}); read it again`,
+      );
+      continue;
+    }
+    let excerpt: Excerpt | null = null;
+    if (op.op === "add_evidence") {
+      if (!op.source === !op.file) errors.push(`${what}: cite either a source or a file`);
+      else if (op.file) {
+        try {
+          if (!target.root) throw new Error("the repository is not known");
+          excerpt = readExcerpt(target.root, op.file);
+          if (!locate(excerpt.text, op.quote))
+            errors.push(`${what}: quote not found in ${excerpt.path} lines ${op.file.lines.join("-")}`);
+        } catch (e) {
+          errors.push(`${what}: ${(e as Error).message}`);
+        }
+      } else if (op.source) {
+        const got = await span(op.source, op.quote, what);
+        if (
+          got &&
+          op.reported_speaker &&
+          !(got.s.kind === "session_message" && got.s.author_kind === "owner")
+        )
+          errors.push(
+            `${what}: reported_speaker is for the owner reporting someone else, so it must cite an owner message`,
+          );
+      }
+    }
+    if (op.op === "adopt") {
+      if (!["decision", "constraint"].includes(u.kind))
+        errors.push(`${what}: adoption applies to decisions and constraints`);
+      const got = await span(op.source, op.quote, what);
+      if (got && got.s.kind === "pr_event") errors.push(`${what}: the merge does not adopt a proposal`);
+      else if (got && got.s.author_kind !== "owner" && !MAINTAINERS.has(got.s.author_association ?? ""))
+        errors.push(`${what}: only the owner or a maintainer can adopt`);
+    }
+    if (op.op === "anchor" && !repoPath(op.path))
+      errors.push(`${what}: the path is not inside the repository`);
+    if (op.op === "replace_anchor") {
+      if (!repoPath(op.to.path)) errors.push(`${what}: the path is not inside the repository`);
+      await span(op.source, op.quote, what);
+    }
+    if (op.op === "retract_evidence" || op.op === "retract_adoption" || op.op === "withdraw") {
+      const got = await span(op.reason_source, op.reason_quote, what);
+      if (got && got.s.author_kind !== "owner")
+        errors.push(`${what}: only the owner's words can retract or withdraw`);
+    }
+    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt });
+  }
+  return { errors, problems, units, ops };
+}
+
+/** Stores a file excerpt as a source (once per blob and lines) and returns its id. */
+async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Promise<number> {
+  const external = `file:${x.path}@${x.blob}#L${x.lines[0]}-${x.lines[1]}`;
+  const found = await trx
+    .selectFrom("source")
+    .select("id")
+    .where("project_id", "=", projectId)
+    .where("kind", "=", "file_excerpt")
+    .where("external_id", "=", external)
+    .executeTakeFirst();
+  if (found) return found.id;
+  const now = iso(Date.now());
+  const partial = Buffer.byteLength(x.text, "utf8") !== x.size;
+  const row = await trx
+    .insertInto("source")
+    .values({
+      project_id: projectId,
+      kind: "file_excerpt",
+      artifact: `file:${x.path}`,
+      external_id: external,
+      revision: 1,
+      author_kind: "person",
+      created_at: now,
+      captured_at: now,
+      text: x.text,
+      truncated: partial ? 1 : 0,
+      original_bytes: x.size,
+      content_hash: sha256(x.text),
+      path: x.path,
+      line_start: x.lines[0],
+      line_end: x.lines[1],
+      commit_sha: x.commit,
+      blob_sha: x.blob,
+      indexed: 1,
+    })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  return row.id;
+}
+
+/** Moves a unit to a state, or leaves it when the schema's rules refuse (returns the refusal). */
+async function move(
+  trx: Kysely<DB>,
+  unitId: number,
+  to: string,
+  reason: string,
+  sourceId: number | null,
+  runId: number,
+): Promise<string | null> {
+  const u = await trx
+    .selectFrom("unit")
+    .select("lifecycle")
+    .where("id", "=", unitId)
+    .executeTakeFirstOrThrow();
+  if (u.lifecycle === to) return null;
+  try {
+    await trx
+      .insertInto("unit_state")
+      .values({
+        unit_id: unitId,
+        from_state: u.lifecycle,
+        to_state: to as "active",
+        at: iso(Date.now()),
+        reason,
+        source_id: sourceId,
+        run_id: runId,
+      })
+      .execute();
+    return null;
+  } catch (e) {
+    if (!/needs|cannot become active/.test((e as Error).message)) throw e;
+    return (e as Error).message;
+  }
+}
+
+export type GleanSaved = { units: Awaited<ReturnType<typeof saveRecord>>; changed: string[] };
+
+export async function saveGlean(
+  trx: Kysely<DB>,
+  target: Target,
+  runId: number,
+  c: GleanChecked,
+): Promise<GleanSaved> {
+  if (c.errors.length)
+    throw new Error(`The record is not valid:\n${c.errors.map((e) => `  ${e}`).join("\n")}`);
+  const units = await saveRecord(trx, target, runId, c.units, []);
+  const now = iso(Date.now());
+  const changed: string[] = [];
+  const spanOf = async (ref: string, q: string) => {
+    const s = await trx
+      .selectFrom("source")
+      .select(["id", "text"])
+      .where("id", "=", Number(ref.slice(1)))
+      .executeTakeFirstOrThrow();
+    const at = locate(s.text, q) ?? [0, 0];
+    return { id: s.id, start: at[0], end: at[1] };
+  };
+  const touched = new Map<number, string>();
+  for (const p of c.ops) {
+    const op = p.input;
+    touched.set(p.unitId, op.unit);
+    if (op.op === "add_evidence") {
+      const s = p.excerpt
+        ? { id: await excerptSource(trx, target.projectId, p.excerpt), text: p.excerpt.text }
+        : await trx
+            .selectFrom("source")
+            .select(["id", "text"])
+            .where("id", "=", Number(op.source?.slice(1)))
+            .executeTakeFirstOrThrow();
+      const at = locate(s.text, op.quote) ?? [0, 0];
+      await trx
+        .insertInto("unit_evidence")
+        .values({
+          unit_id: p.unitId,
+          source_id: s.id,
+          span_start: at[0],
+          span_end: at[1],
+          role: op.role,
+          reported_speaker: op.reported_speaker ?? null,
+          run_id: runId,
+          added_at: now,
+        })
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+      changed.push(`${op.unit}: evidence added`);
+    } else if (op.op === "adopt") {
+      const s = await spanOf(op.source, op.quote);
+      const author = await trx
+        .selectFrom("source")
+        .select("author_kind")
+        .where("id", "=", s.id)
+        .executeTakeFirstOrThrow();
+      await trx
+        .insertInto("unit_adoption")
+        .values({
+          unit_id: p.unitId,
+          route: author.author_kind === "owner" ? "owner_statement" : "explicit",
+          source_id: s.id,
+          span_start: s.start,
+          span_end: s.end,
+          run_id: runId,
+          added_at: now,
+        })
+        .onConflict((oc) => oc.doNothing())
+        .execute();
+      changed.push(`${op.unit}: adopted`);
+    } else if (op.op === "anchor" || op.op === "replace_anchor") {
+      const to = op.op === "anchor" ? op : op.to;
+      const at = to.symbol ? symbolAt(target.root, repoPath(to.path) ?? to.path, to.symbol) : null;
+      const added = await trx
+        .insertInto("unit_anchor")
+        .values({
+          unit_id: p.unitId,
+          path: repoPath(to.path) ?? to.path,
+          symbol: to.symbol ?? null,
+          commit_sha: op.op === "anchor" ? (op.commit ?? null) : null,
+          line_start: at?.line ?? null,
+          line_end: at?.line ?? null,
+          excerpt: at?.excerpt ?? null,
+          role: to.role,
+          run_id: runId,
+          added_at: now,
+        })
+        .returning("id")
+        .executeTakeFirstOrThrow();
+      if (op.op === "replace_anchor") {
+        let q = trx
+          .updateTable("unit_anchor")
+          .set({ retired_at: now, replaced_by: added.id })
+          .where("unit_id", "=", p.unitId)
+          .where("path", "=", op.from.path)
+          .where("retired_at", "is", null)
+          .where("id", "<>", added.id);
+        q = op.from.symbol ? q.where("symbol", "=", op.from.symbol) : q;
+        await q.execute();
+      }
+      changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
+    } else {
+      const reason = await spanOf(op.reason_source, op.reason_quote);
+      const retraction = {
+        retracted_at: now,
+        retraction_reason: op.reason_quote,
+        retraction_source_id: reason.id,
+        retraction_span_start: reason.start,
+        retraction_span_end: reason.end,
+      };
+      if (op.op === "withdraw") {
+        await move(trx, p.unitId, "withdrawn", `withdrawn: ${head(op.reason_quote, 200)}`, reason.id, runId);
+        changed.push(`${op.unit}: withdrawn`);
+        touched.delete(p.unitId);
+        continue;
+      }
+      // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order)
+      await move(
+        trx,
+        p.unitId,
+        "candidate",
+        `support retracted: ${head(op.reason_quote, 200)}`,
+        reason.id,
+        runId,
+      );
+      const table = op.op === "retract_evidence" ? "unit_evidence" : "unit_adoption";
+      await trx
+        .updateTable(table)
+        .set(retraction)
+        .where("unit_id", "=", p.unitId)
+        .where("source_id", "=", Number(op.source.slice(1)))
+        .where("retracted_at", "is", null)
+        .execute();
+      changed.push(`${op.unit}: ${op.op === "retract_evidence" ? "evidence" : "adoption"} retracted`);
+    }
+  }
+  // Every touched unit is judged again: a candidate that now has what it needs becomes active
+  for (const [id, key] of touched) {
+    const u = await trx.selectFrom("unit").select("lifecycle").where("id", "=", id).executeTakeFirstOrThrow();
+    if (u.lifecycle !== "candidate") continue;
+    const refused = await move(trx, id, "active", "glean: support complete", null, runId);
+    changed.push(refused ? `${key}: candidate (${refused})` : `${key}: active`);
+  }
+  await trx
+    .updateTable("extraction_run")
+    .set({ status: "saved", finished_at: now })
+    .where("id", "=", runId)
+    .execute();
+  return { units, changed };
+}

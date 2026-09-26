@@ -34,35 +34,6 @@ export function makeRepo(dir, remote = "https://github.com/example/live.git", na
 }
 
 /**
- * Installs a fake `gh` answering the REST paths harvest reads (`gh api repos/<repo>/<path>`) with one merged pull request.
- * It never reaches GitHub. A comment carries terminal control sequences, to check that context output drops them.
- */
-export function fakeGh(dir) {
-  const bin = path.join(dir, "bin");
-  fs.mkdirSync(bin, { recursive: true });
-  fs.writeFileSync(
-    path.join(bin, "gh"),
-    `#!/usr/bin/env node
-const argv = process.argv.slice(2);
-const where = (argv[1] ?? "").replace(/^repos\\/[^/]+\\/[^/]+\\//, "").split("?")[0];
-const user = { login: "someone", id: 7, type: "User" };
-const at = (h) => \`2026-09-01T0\${h}:00:00Z\`;
-const answers = {
-  "pulls/1": { number: 1, title: "First", body: "Use the real database for checks.", html_url: "https://example.invalid/1",
-    created_at: at(0), merged_at: at(5), merged_by: user, user, author_association: "OWNER" },
-  "issues/1/comments": [{ id: 11, body: "Checked \\u001b[2J\\u001b]0;pwn\\u0007\\rhere", user, author_association: "CONTRIBUTOR", created_at: at(1), html_url: "u" }],
-  "pulls/1/reviews": [],
-  "pulls/1/comments": [],
-  "pulls/1/commits": [{ sha: "0123456789abcdef0123456789abcdef01234567", author: user, commit: { message: "fix: check on the real database", author: { date: at(2) } } }],
-};
-if (!(where in answers)) { process.stderr.write(\`fake gh: no answer for \${argv[1]}\\n\`); process.exit(1); }
-process.stdout.write(JSON.stringify(argv.includes("--slurp") ? [answers[where]] : answers[where]));
-`,
-    { mode: 0o755 },
-  );
-}
-
-/**
  * The child process environment. The database is ~/.sphica/sphica.db in the temp HOME (created by `sphica init`).
  * No GitHub key is passed.
  */
@@ -83,11 +54,7 @@ function childEnv(dir, covDir, extra = {}) {
   // session the check passes, and nothing would be queued (measured: the hook exited 0 with an empty spool).
   if (!("SPHICA_PARENT_SESSION" in extra)) delete env.SPHICA_PARENT_SESSION;
   delete env.CLAUDE_CODE_ENTRYPOINT;
-  return {
-    ...env,
-    NODE_V8_COVERAGE: covDir,
-    PATH: `${path.join(dir, "bin")}${path.delimiter}${process.env.PATH}`,
-  };
+  return { ...env, NODE_V8_COVERAGE: covDir };
 }
 
 /** Runs the CLI once. Failures do not stop it (the goal is reach, and callers judge success). */
@@ -106,6 +73,17 @@ export function runCli(args, dir, covDir, { cwd = root, ...extra } = {}) {
  * Runs the capture hook once. The spool lives under home, so this relies on childEnv
  * swapping home (so the owner's queue is never read).
  */
+/** Sends the recording queue the way the Stop hook's detached process does (`capture.js --flush`). */
+export function runFlush(dir, covDir, extra = {}) {
+  const r = spawnSync("node", [path.join(root, "server/src/capture.ts"), "--flush"], {
+    cwd: extra.cwd ?? root,
+    env: childEnv(dir, covDir, extra),
+    encoding: "utf8",
+    timeout: TIMEOUT_MS,
+  });
+  return { status: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
 export function runHook(input, dir, covDir, extra = {}) {
   const r = spawnSync("node", [path.join(root, "server/src/capture.ts")], {
     cwd: extra.cwd ?? root,

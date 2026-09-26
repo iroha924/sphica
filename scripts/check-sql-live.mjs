@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { coveredSites } from "./lib/coverage.mjs";
-import { fakeGh, makeRepo, root, runCli, runHook, withTempDir } from "./lib/live-harness.mjs";
+import { makeRepo, root, runCli, runFlush, runHook, withTempDir } from "./lib/live-harness.mjs";
 import { ALLOWED_UNREACHED, callSites, LIVE_FILES } from "./lib/sql-call-sites.mjs";
 
 const failures = [];
@@ -25,7 +25,6 @@ await withTempDir(async (dir) => {
   const covDir = path.join(dir, "coverage");
   fs.mkdirSync(covDir, { recursive: true });
   const repo = makeRepo(dir);
-  fakeGh(dir);
 
   {
     // Outside any repository, so init only creates the database (from the repository root it would register this checkout too)
@@ -34,7 +33,6 @@ await withTempDir(async (dir) => {
     // ---- CLI: register, capture, then delete, in that order ----
     // The repo has a remote, so no --name (the CLI would refuse it). The key becomes git:github.com/example/live.
     note("init (register)", runCli(["init", "--cwd", repo], dir, covDir));
-    note("project list", runCli(["project", "list"], dir, covDir));
     // The capture hook and flush take the host session from the environment, as in a real session.
     const asSession = (id) => ({ cwd: repo, CLAUDE_CODE_SESSION_ID: id });
     // Capture. Queue through the hook, then flush. Flushing an empty queue returns 0 and never runs the write SQL.
@@ -49,7 +47,7 @@ await withTempDir(async (dir) => {
     });
     // english-exempt: Japanese record fixture sent through the real CLI and hook
     hook({ hook_event_name: "Stop", last_assistant_message: "通した。" });
-    note("capture flush", runCli(["capture", "flush"], dir, covDir, asSession("live-1")));
+    note("capture flush", runFlush(dir, covDir, asSession("live-1")));
 
     // Records from an unregistered project are set aside, not dropped (#104). If the owner works on a new machine before
     // running init, those messages land here. Deleting them would lose them for good.
@@ -70,7 +68,7 @@ await withTempDir(async (dir) => {
       covDir,
       strangerAs,
     );
-    const strayed = runCli(["capture", "flush"], dir, covDir, strangerAs);
+    const strayed = runFlush(dir, covDir, strangerAs);
     const kept = path.join(dir, ".sphica", "spool", "unregistered");
     const left = fs.existsSync(kept) ? fs.readdirSync(kept).filter((f) => f.endsWith(".json")) : [];
     if (left.length === 0) {
@@ -85,10 +83,10 @@ await withTempDir(async (dir) => {
 
     // Registering the project brings the set-aside records in. Without this link, setting them aside would be pointless.
     note("init (set-aside project)", runCli(["init", "--cwd", stranger], dir, covDir));
-    const retried = runCli(["capture", "flush"], dir, covDir, strangerAs);
-    if (!/new messages\s+[1-9]/.test(retried.out)) {
-      failures.push(`set-aside records were not stored after registering\n${retried.out.slice(0, 400)}`);
-    }
+    const retried = runFlush(dir, covDir, strangerAs);
+    const rejected = path.join(dir, ".sphica", "spool", "rejected");
+    if (fs.existsSync(rejected) && fs.readdirSync(rejected).length)
+      failures.push(`set-aside records were rejected after registering\n${retried.out.slice(0, 400)}`);
     const after = fs.existsSync(kept) ? fs.readdirSync(kept).filter((f) => f.endsWith(".json")) : [];
     if (after.length) failures.push(`set-aside records remain after sending: ${after.join(" / ")}`);
     if (fs.existsSync(stale)) failures.push(`a set-aside record older than 30 days was not pruned: ${stale}`);
@@ -124,79 +122,16 @@ await withTempDir(async (dir) => {
     hook({ hook_event_name: "UserPromptSubmit", prompt: `制御列${esc}を含む発言` });
     // english-exempt: Japanese record fixture sent through the real CLI and hook
     hook({ hook_event_name: "Stop", last_assistant_message: `応答${esc}` });
-    note("capture flush (control sequences)", runCli(["capture", "flush"], dir, covDir, asSession("live-1")));
+    note("capture flush (control sequences)", runFlush(dir, covDir, asSession("live-1")));
 
-    // Trace the captured session: the draft binds a run to it, context prints refs, and the record cites one of them.
-    // Context prints what the owner said, so it is also where control sequences from a conversation must not reach the terminal.
-    clean("trace pending", runCli(["trace", "pending"], dir, covDir, asSession("live-1")), "SQL");
-    const drafted = note("trace draft", runCli(["trace", "draft"], dir, covDir, asSession("live-1")));
-    const id = /^ {2}id: (\S+)$/m.exec(drafted.out)?.[1];
-    const file = /^ {2}file: (.+)$/m.exec(drafted.out)?.[1];
-    if (!id || !file) throw new Error(`trace draft printed no id or file\n${drafted.out}`);
-    const context = runCli(["trace", "context", id], dir, covDir, asSession("live-1"));
-    // english-exempt: Japanese record fixture sent through the real CLI and hook
-    clean("trace context", context, "を含む発言");
-    const ref = /^ {2}## (s\d+) owner/m.exec(context.out)?.[1];
-    if (!ref) failures.push(`trace context printed no owner source ref\n${context.out.slice(0, 600)}`);
-    fs.writeFileSync(
-      file,
-      JSON.stringify({
-        units: [
-          {
-            key: "live",
-            kind: "decision",
-            stance: "do",
-            text: "Run SQL against a real database",
-            evidence: [{ source: ref, quote: "SQL", role: "states" }],
-            adoption: [{ source: ref, quote: "SQL" }],
-          },
-        ],
-      }),
-    );
-    note("trace check", runCli(["trace", "check", id], dir, covDir, asSession("live-1")));
-    const traced = note("trace save", runCli(["trace", "save", id], dir, covDir, asSession("live-1")));
-    if (!/trace:live-1\/live active/.test(traced.out))
-      failures.push(`trace save did not activate the decision\n${traced.out.slice(0, 600)}`);
-    if (fs.existsSync(path.dirname(file))) failures.push(`trace save left its draft behind: ${file}`);
-
-    // Harvest a pull request through the fake gh. Its comment carries control sequences, which context must drop
-    const harvested = note("harvest draft", runCli(["harvest", "draft", "1"], dir, covDir, { cwd: repo }));
-    const hid = /^ {2}id: (\S+)$/m.exec(harvested.out)?.[1];
-    const hfile = /^ {2}file: (.+)$/m.exec(harvested.out)?.[1];
-    if (!hid || !hfile) throw new Error(`harvest draft printed no id or file\n${harvested.out}`);
-    const hcontext = runCli(["harvest", "context", hid], dir, covDir, { cwd: repo });
-    clean("harvest context", hcontext, "Checked");
-    const body = /^ {2}## (s\d+) pr_body/m.exec(hcontext.out)?.[1];
-    if (!body) failures.push(`harvest context printed no body ref\n${hcontext.out.slice(0, 600)}`);
-    fs.writeFileSync(
-      hfile,
-      JSON.stringify({
-        units: [
-          {
-            key: "real-db",
-            kind: "decision",
-            stance: "do",
-            text: "Use the real database for checks",
-            evidence: [{ source: body, quote: "Use the real database for checks.", role: "states" }],
-            adoption: [{ source: body, quote: "Use the real database for checks." }],
-          },
-        ],
-      }),
-    );
-    note("harvest check", runCli(["harvest", "check", hid], dir, covDir, { cwd: repo }));
-    const hsaved = note("harvest save", runCli(["harvest", "save", hid], dir, covDir, { cwd: repo }));
-    if (!/harvest:1\/real-db active/.test(hsaved.out))
-      failures.push(`harvest save did not activate the decision\n${hsaved.out.slice(0, 600)}`);
     const evil = makeRepo(dir, `https://github.com/example/ev${esc}il.git`, "evil\u001b[2Jdir");
     clean("init (remote and directory name)", runCli(["init", "--cwd", evil], dir, covDir), "evil");
-    clean("project list", runCli(["project", "list"], dir, covDir), "example/ev");
     // The doctor exit code depends on the local plugin state, so it is not checked (same reason as above)
     clean("doctor", runCli(["doctor"], dir, covDir), "example/ev", { status: false });
 
-    note(
-      "project forget",
-      runCli(["project", "forget", "git:github.com/example/live", "--yes"], dir, covDir),
-    );
+    const removed = note("uninstall", runCli(["uninstall", "--yes"], dir, covDir));
+    if (fs.existsSync(path.join(dir, ".sphica")))
+      failures.push(`uninstall left ~/.sphica behind\n${removed.out.slice(0, 400)}`);
   }
 
   // ---- Count reach ----

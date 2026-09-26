@@ -226,38 +226,50 @@ export async function readPull(
   const closes = [...new Set([...(p.body ?? "").matchAll(CLOSES)].map((m) => Number(m[1])))].filter(
     (n) => n !== number,
   );
-  for (const n of closes.slice(0, MAX_ISSUES)) {
-    const issue = (await get(`issues/${n}`)) as Issue;
-    if (issue.pull_request) continue;
-    if (issue.body?.trim())
+  for (const n of closes.slice(0, MAX_ISSUES)) items.push(...(await readIssue(get, n)));
+  return { title: p.title, items, closes };
+}
+
+/** An issue's body and comments; empty for a number that is a pull request. */
+export async function readIssue(get: Get, n: number): Promise<Item[]> {
+  const items: Item[] = [];
+  const issue = (await get(`issues/${n}`)) as Issue;
+  if (issue.pull_request) return items;
+  if (issue.body?.trim())
+    items.push(
+      item({
+        kind: "issue_body",
+        artifact: `issue:${n}`,
+        externalId: `issue:${n}`,
+        author: issue.user ?? null,
+        association: issue.author_association ?? null,
+        url: issue.html_url,
+        createdAt: issue.created_at,
+        text: issue.body,
+      }),
+    );
+  for (const c of (await get(`issues/${n}/comments?per_page=100`, true)) as Comment[])
+    if (c.body?.trim())
       items.push(
         item({
-          kind: "issue_body",
+          kind: "issue_comment",
           artifact: `issue:${n}`,
-          externalId: `issue:${n}`,
-          author: issue.user ?? null,
-          association: issue.author_association ?? null,
-          url: issue.html_url,
-          createdAt: issue.created_at,
-          text: issue.body,
+          externalId: `comment:${c.id}`,
+          author: c.user ?? null,
+          association: c.author_association ?? null,
+          url: c.html_url,
+          createdAt: c.created_at,
+          text: c.body,
         }),
       );
-    for (const c of (await get(`issues/${n}/comments?per_page=100`, true)) as Comment[])
-      if (c.body?.trim())
-        items.push(
-          item({
-            kind: "issue_comment",
-            artifact: `issue:${n}`,
-            externalId: `comment:${c.id}`,
-            author: c.user ?? null,
-            association: c.author_association ?? null,
-            url: c.html_url,
-            createdAt: c.created_at,
-            text: c.body,
-          }),
-        );
-  }
-  return { title: p.title, items, closes };
+  return items;
+}
+
+/** The pull request or issue a GitHub URL of this repository names, or null for any other URL. */
+export function githubTarget(repo: string, url: string): { kind: "pull" | "issue"; number: number } | null {
+  const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(pull|issues)\/(\d{1,9})(?:[/?#].*)?$/.exec(url.trim());
+  if (!m || m[1]?.toLowerCase() !== repo.toLowerCase()) return null;
+  return { kind: m[2] === "pull" ? "pull" : "issue", number: Number(m[3]) };
 }
 
 /**

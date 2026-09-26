@@ -8,7 +8,7 @@ import type { DB } from "./db-types.ts";
 import { EVIDENCE_ROLES, OPTION_OUTCOMES, STANCES, UNIT_KINDS, WORK_STATUSES } from "./knowledge.ts";
 import { head, sha256 } from "./text.ts";
 
-const KEY = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
 /** Sources are cited by the refs context prints (`s<id>`), never by URL or position the agent made up. */
 const SOURCE_REF = /^s[1-9][0-9]{0,15}$/;
 const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
@@ -23,7 +23,7 @@ const Evidence = Quote.extend({
 }).strict();
 const Unit = z
   .object({
-    key: z.string().regex(KEY, "use lowercase letters, digits, and . _ - (at most 64)"),
+    key: z.string().regex(KEY, "use lowercase letters, digits, and . _ - / (at most 64)"),
     kind: z.enum(UNIT_KINDS),
     stance: z.enum(STANCES).optional(),
     text: text(2000),
@@ -91,7 +91,7 @@ type EvidenceSpan = Span & { role: (typeof EVIDENCE_ROLES)[number]; reported: st
 /** What the run is about: its project, the key namespace (`trace:<session>/`), and the session whose edits anchors may cite. */
 export type Target = {
   projectId: number;
-  origin: "trace" | "harvest";
+  origin: "trace" | "harvest" | "glean";
   prefix: string;
   sessionId: string | null;
   /** The repository's working tree, where an anchor's symbol is looked up to record its lines; null when unknown */
@@ -104,6 +104,8 @@ type Planned = {
   quarantine: string[];
   /** Every source the unit cites, found or not: the run looked at them and something came of it */
   cites: Set<number>;
+  /** Set by glean when nothing but the owner's present words backs the unit */
+  unsourced?: boolean;
   evidence: EvidenceSpan[];
   options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[] }[];
   adoption: (Span & { route: "owner_statement" | "explicit" })[];
@@ -129,7 +131,7 @@ function locate(body: string, quote: string): [number, number] | null {
 }
 
 /** A repository-relative path with forward slashes, or null when it could leave the repository. */
-function repoPath(p: string): string | null {
+export function repoPath(p: string): string | null {
   const s = p.trim().replace(/^\.\//, "");
   if (!s || s.startsWith("/") || s.includes("\\") || /^[A-Za-z]:/.test(s)) return null;
   const parts = s.split("/");
@@ -396,6 +398,7 @@ export async function saveRecord(
         no_code_surface: u.no_code_surface ?? null,
         extraction: p.quarantine.length ? "quarantined" : "supported",
         extraction_reason: p.quarantine.length ? p.quarantine.join("; ") : null,
+        unsourced: p.unsourced ? 1 : 0,
         run_id: runId,
         created_at: now,
         content_hash: hash,

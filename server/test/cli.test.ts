@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -30,32 +32,39 @@ function runIn(home: string, ...args: string[]): { code: number; out: string } {
 
 // A parser that skips unknown arguments would run the command as if the misspelled flag were not there.
 test("unknown flags and commands fail before connecting to the database", () => {
-  for (const bad of ["--avod", "--limitt", "--all-scopes"]) {
-    const r = run("project", "list", bad);
+  for (const bad of ["--avod", "--limitt"]) {
+    const r = run("doctor", bad);
     assert.notEqual(r.code, 0);
     assert.match(r.out, new RegExp(`Unknown flag: ${bad}`), `${bad}: ${r.out}`);
     assert.doesNotMatch(r.out, /No database at/, "tried to connect to the database");
   }
-  // Removed commands (the terminal screen, and search, which MCP recall covers) fail like any unknown one
-  for (const name of ["dashboard", "search"]) {
+  // The CLI is init, doctor, and uninstall; everything else runs inside Claude Code and Codex, so these fail like any unknown command
+  for (const name of [
+    "dashboard",
+    "search",
+    "trace",
+    "harvest",
+    "glean",
+    "capture",
+    "project",
+    "db",
+    "who",
+    "advice",
+    "frobnicate",
+  ]) {
     const gone = run(name);
     assert.notEqual(gone.code, 0);
     assert.match(gone.out, new RegExp(`Unknown command: ${name}`), gone.out);
+    assert.doesNotMatch(gone.out, /No database at/, "tried to connect to the database");
   }
-  const r = run("frobnicate");
-  assert.notEqual(r.code, 0);
-  assert.match(r.out, /Unknown command: frobnicate/);
-  assert.doesNotMatch(r.out, /No database at/, "tried to connect to the database");
 });
 
 // A flag table shared by all commands silently accepts flags a command ignores.
-// The results then come back without the intended filter, and the user cannot tell.
 test("flags the command does not take and extra positional arguments fail by name", () => {
   for (const [args, want] of [
     [["doctor", "--yes"], /Unknown flag: --yes/],
-    [["project", "list", "--reset-docs"], /Unknown flag: --reset-docs/],
-    [["capture", "flush", "--avoid"], /Unknown flag: --avoid/],
-    [["project", "list", "garbage"], /Extra argument: garbage/],
+    [["uninstall", "--reindex"], /Unknown flag: --reindex/],
+    [["doctor", "garbage"], /Extra argument: garbage/],
   ] as const) {
     const r = run(...args);
     assert.notEqual(r.code, 0, `sphica ${args.join(" ")}: ${r.out}`);
@@ -66,13 +75,12 @@ test("flags the command does not take and extra positional arguments fail by nam
 
 // If typed arguments went into the error title, a newline in an argument could forge a marked line.
 test("the error title uses only the command path the dispatcher chose", () => {
-  assert.match(run("project", "forget").out, /^sphica project forget$/m);
   assert.match(
-    run("project", "forget", "--limit", "0", "f").out,
-    /^sphica project forget$/m,
+    run("doctor", "--nope").out,
+    /^sphica doctor$/m,
     "shows the subcommand even when parsing fails",
   );
-  const flagValue = run("project", "--cwd", "/nonexistent", "list");
+  const flagValue = run("--cwd", "/nonexistent", "init");
   assert.match(flagValue.out, /^sphica$/m, flagValue.out);
   assert.doesNotMatch(flagValue.out, /^sphica.*nonexistent/m, "flag values never go into the title");
   // Closing and status lines start at the line start. Content is indented, so an injected newline cannot forge one
@@ -82,32 +90,37 @@ test("the error title uses only the command path the dispatcher chose", () => {
   }
 });
 
-test("no arguments and --help print usage for that level and succeed", () => {
-  for (const args of [[], ["--help"], ["project", "--help"], ["db", "--help"]]) {
+test("no arguments and --help print usage listing init, doctor, and uninstall", () => {
+  for (const args of [[], ["--help"], ["-H"]]) {
     const r = run(...args);
     assert.equal(r.code, 0, `${args.join(" ")}: ${r.out}`);
-    assert.match(r.out, /Usage:/, `${args.join(" ")}: ${r.out}`);
+    const commands = [...(r.out.split("Commands:")[1] ?? "").matchAll(/^ {2}(\S+) {2}/gm)].map((m) => m[1]);
+    assert.deepEqual(commands.sort(), ["doctor", "init", "uninstall"], r.out);
   }
-  // Usage is built from the declarations. Check that command names show up there so no hand-copied text drifts.
-  assert.match(run("--help").out, /^ {2}init {2}/m);
-  assert.match(run("db", "--help").out, /^ {2}migrate {2}/m);
-  assert.match(run("project", "--help").out, /^ {2}forget {2}/m);
 });
 
-// Usage lists only what people type. Commands for agents, hooks, and maintenance still run, and -H lists them
-test("usage lists only init and doctor, and -H shows the rest", () => {
-  const commands = (out: string) =>
-    [...(out.split("Commands:")[1] ?? "").matchAll(/^ {2}(\S+) {2}/gm)].map((m) => m[1]);
-  assert.deepEqual(commands(run("--help").out).sort(), ["doctor", "init"]);
-  const all = commands(run("-H").out);
-  for (const name of ["project", "db", "capture", "trace", "harvest"]) assert.ok(all.includes(name), name);
-  // Removed without aliases: the people directory and the edit-hook statistics
-  for (const name of ["who", "advice"]) assert.match(run(name).out, new RegExp(`Unknown command: ${name}`));
-  const db = run("db", "--help").out;
-  for (const name of ["reindex", "terms"]) assert.doesNotMatch(db, new RegExp(`^ {2}${name} {2}`, "m"), name);
-  assert.match(db, /^ {2}migrate {2}/m);
-  // init registers the project now, so the old command is gone without an alias
-  const add = run("project", "add");
-  assert.notEqual(add.code, 0);
-  assert.match(add.out, /Unknown command: add/, add.out);
+// uninstall deletes only ~/.sphica; the plugin, the marketplace, and the npm package are shown for the owner to remove
+test("uninstall refuses without --yes outside a terminal, then deletes ~/.sphica and shows the rest", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-uninstall-"));
+  try {
+    runIn(home, "init");
+    const data = path.join(home, ".sphica");
+    assert.ok(fs.existsSync(path.join(data, "sphica.db")));
+    const refused = runIn(home, "uninstall");
+    assert.notEqual(refused.code, 0, refused.out);
+    assert.match(refused.out, /--yes/);
+    assert.ok(fs.existsSync(data), "deleted without confirmation");
+    const done = runIn(home, "uninstall", "--yes");
+    assert.equal(done.code, 0, done.out);
+    assert.equal(fs.existsSync(data), false);
+    for (const want of [
+      /npm uninstall -g sphica/,
+      /claude plugin uninstall sphica@sphica/,
+      /codex plugin marketplace remove sphica/,
+    ])
+      assert.match(done.out, want, done.out);
+    assert.match(runIn(home, "uninstall", "--yes").out, /does not exist/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

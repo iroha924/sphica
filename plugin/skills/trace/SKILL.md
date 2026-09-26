@@ -3,7 +3,7 @@ name: trace
 description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use only when the user explicitly asks.
 argument-hint: "[pending]"
 disable-model-invocation: true
-allowed-tools: Read, Edit(~/.sphica/drafts/**), Write(~/.sphica/drafts/**), Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" trace *)
+allowed-tools: mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
 ---
 
 # trace — keep what a session decided and implemented
@@ -25,21 +25,20 @@ records a later session can rely on**: every record quotes the words it came fro
 
 ## Flow
 
-`$M` is the CLI: `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` in Claude Code. In Codex, it is `node "<absolute path of this Skill's directory>/../../dist/cli.js"`
-(Sphica is not on Codex's PATH, and shell scripts do not run on Windows). **Run every command from the repository root.**
+Everything goes through Sphica's `record` MCP server (its tools are `trace_pending`, `trace_begin`, `record_context`, `record_check`,
+`record_save`). Pass the repository root as `cwd` to every tool.
 
-1. **Pick the session.** Without a target, it is the current session. With `pending`, run `$M trace pending`, show the owner the list, and
-   ask which to trace (AskUserQuestion in Claude Code). Trace one session at a time
-2. **Draft**: `$M trace draft` (or `$M trace draft --session <id>` with an id from pending). It prints an `id` and a `file` under
-   `~/.sphica/drafts/`. The draft is bound to that session and this project; the record never names them. When both Claude Code and Codex
-   sessions are in the environment, add `--host claude-code` or `--host codex`
-3. **Read**: `$M trace context <id>`. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,
-   the edits observed, and the project's live records. `(traced before)` marks messages an earlier trace already looked at
-4. **Write** the record below to the file with your file-writing tool (never through the shell, never inside the repository)
-5. **Check**: `$M trace check <id>`. Errors refuse the save; fix the same file and check again. Warnings say what will be left out,
-   quarantined, or kept as a candidate, and why
-6. **Save**: `$M trace save <id>`. It removes the draft. If it says the draft could not be removed, the record is saved: do not save again
-7. **Report** to the owner what was saved, copying save's lines (active, candidate with the reason, quarantined, superseded)
+1. **Pick the session.** Without a target, it is this session: its id is `${CLAUDE_SESSION_ID}` in Claude Code; in Codex, read `CODEX_THREAD_ID`
+   from your shell environment. With `pending`, call `trace_pending`, show the owner the list, and ask which to trace (AskUserQuestion in
+   Claude Code). Trace one session at a time
+2. **Begin**: `trace_begin` with that `session`. It returns a `run` id bound to that session and this project; the record never names them
+3. **Read**: `record_context` with the run. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,
+   the edits observed, and the project's live records. `(traced before)` marks messages an earlier trace already looked at.
+   Use `search` and `read` to look at older records this session may replace
+4. **Check**: `record_check` with the run and the record below as `record`. Errors refuse the save; fix and check again. Warnings say what will be
+   left out, quarantined, or kept as a candidate, and why
+5. **Save**: `record_save` with the same run and record. A run saves once
+6. **Report** to the owner what was saved, copying save's lines (active, candidate with the reason, quarantined, superseded)
 
 A session with nothing worth keeping is saved with `"units": []`: it is marked as looked at, so pending stops listing it.
 

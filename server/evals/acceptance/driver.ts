@@ -11,6 +11,9 @@ import { checkAnchor } from "../../src/anchors.ts";
 import { flush, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
+import { openWriter } from "../../src/db-write.ts";
+import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
+import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
 import { readUnit } from "../../src/read.ts";
 import { searchUnits, type UnitHit } from "../../src/search.ts";
@@ -63,6 +66,7 @@ export async function createDriver(world: World): Promise<Driver> {
       { stdio: "ignore" },
     );
   /** Runs the CLI as a child process; out holds stdout and stderr together. */
+  /** Environment for the next CLI runs: glean runs inside the owner's session, so the host's session variable is set. */
   const run = (...args: string[]) => {
     const r = spawnSync(process.execPath, [CLI, ...args], {
       cwd: repo,
@@ -82,7 +86,14 @@ export async function createDriver(world: World): Promise<Driver> {
   git("remote", "add", "origin", "https://github.com/example/tsundoku.git");
   for (const [rel, text] of Object.entries(world.files)) {
     fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
-    fs.writeFileSync(path.join(repo, rel), text);
+    // The world marks the binary and the oversized file by name; the real content is made here
+    const body =
+      text === "BINARY"
+        ? Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 1])
+        : text === "OVERSIZED"
+          ? "x".repeat(2 * 1024 * 1024)
+          : text;
+    fs.writeFileSync(path.join(repo, rel), body);
   }
   git("add", "-A");
   git("commit", "-qm", "initial");
@@ -98,6 +109,12 @@ export async function createDriver(world: World): Promise<Driver> {
   fs.writeFileSync(path.join(dir, "bin", "gh"), fakeGh(ghState), { mode: 0o755 });
   process.env.PATH = `${path.join(dir, "bin")}${path.delimiter}${saved.PATH ?? ""}`;
   let reader: Kysely<DB> | null = null;
+  let ingest: Kysely<DB> | null = null;
+  /** The ingest connection, as the record MCP server opens it */
+  const writer = () => {
+    ingest ??= openWriter("ingest", file);
+    return ingest;
+  };
   const db = () => {
     reader ??= openReader(file);
     return reader;
@@ -207,20 +224,17 @@ export async function createDriver(world: World): Promise<Driver> {
     return `s${got.id}`;
   }
 
-  /** Issues a draft through the CLI, writes the translated record into it, checks it, and saves it. */
-  async function extract(
-    origin: "trace" | "harvest",
-    draftArgs: string[],
-    prefix: string,
-    record: Record<string, unknown>,
-  ) {
-    const drafted = cli(origin, "draft", ...draftArgs);
-    const id = /^ {2}id: (\S+)$/m.exec(drafted)?.[1];
-    const draftFile = /^ {2}file: (.+)$/m.exec(drafted)?.[1];
-    if (!id || !draftFile) throw new Error(`${origin} draft printed no id or file\n${drafted}`);
-    fs.writeFileSync(draftFile, JSON.stringify(await translate(record)));
-    checked = run(origin, "check", id).out;
-    cli(origin, "save", id);
+  /** The record server's flow, called as its tools call it: check (kept for expectations), then save. */
+  async function extract(run: string, prefix: string, record: Record<string, unknown>) {
+    const pid = await projectId();
+    const translated = await translate(record);
+    checked = (await checkText(writer(), run, pid, repo, translated)).text;
+    await saveText(writer(), run, pid, repo, translated);
+    remember(prefix, record);
+  }
+
+  /** Quotes each saved key cited, to confirm stored spans cut exactly those bytes. */
+  function remember(prefix: string, record: Record<string, unknown>) {
     for (const u of (record.units ?? []) as { key: string }[]) {
       const cited = new Set<string>();
       JSON.stringify(u, (k, x) => {
@@ -240,7 +254,8 @@ export async function createDriver(world: World): Promise<Driver> {
       edited.add(step.pr);
       writeGh();
     }
-    await extract("harvest", [String(step.pr)], `harvest:${step.pr}/`, step.record);
+    const begun = await beginHarvest(writer(), await projectId(), step.pr, gh("example/tsundoku"));
+    await extract(begun.run, `harvest:${step.pr}/`, step.record);
   }
 
   /** Replaces case references with source refs, deep inside a record. */
@@ -249,7 +264,10 @@ export async function createDriver(world: World): Promise<Driver> {
     if (!v || typeof v !== "object") return v;
     const out: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v))
-      out[k] = k === "source" && typeof x === "string" ? await ref(x) : await translate(x);
+      out[k] =
+        (k === "source" || k === "reason_source") && typeof x === "string"
+          ? await ref(x)
+          : await translate(x);
     return out;
   }
 
@@ -258,8 +276,45 @@ export async function createDriver(world: World): Promise<Driver> {
     if (!s) throw new Error(`unknown session ${step.session}`);
     const uuid = sessionId(await projectId(), s.host === "codex" ? "codex" : "claude-code", s.id);
     const { processed_without_units: empty, ...record } = step.record;
-    await extract("trace", ["--session", uuid], `trace:${s.id}/`, record);
+    await extract(await beginTrace(writer(), await projectId(), uuid), `trace:${s.id}/`, record);
     for (const other of (empty ?? []) as string[]) await trace({ session: other, record: { units: [] } });
+  }
+
+  /** The outcome of the last glean save (glean may refuse, and the refusal is what some cases check). */
+  let saves: { status: number | null; out: string }[] = [];
+  const commitAll = () => {
+    git("add", "-A");
+    if (spawnSync("git", ["-C", repo, "diff", "--cached", "--quiet"]).status !== 0)
+      git("commit", "-qm", "owner edits");
+  };
+
+  /** Begins a glean run in the owner's session, with each op carrying the revision read would show now. */
+  async function gleanDraft(
+    session: string,
+    record: Record<string, unknown>,
+  ): Promise<{ run: string; record: unknown }> {
+    const s = sessions.get(session);
+    if (!s) throw new Error(`unknown session ${session}`);
+    await capture(session);
+    commitAll();
+    const run = await beginGlean(writer(), await projectId(), s.id);
+    const translated = (await translate(record)) as { ops?: { unit: string; revision?: number }[] };
+    for (const op of translated.ops ?? []) op.revision = (await unitOf(op.unit)).revision;
+    remember("glean:", record);
+    return { run, record: translated };
+  }
+
+  /** Saves a glean run; a refusal is an outcome some cases check, so it is returned rather than thrown. */
+  const gleanSave = async (d: { run: string; record: unknown }) =>
+    saveText(writer(), d.run, await projectId(), repo, d.record).then(
+      (out) => ({ status: 0, out }),
+      (e: Error) => ({ status: 1, out: e.message }),
+    );
+
+  async function glean(step: { session: string; record: Record<string, unknown> }) {
+    const d = await gleanDraft(step.session, step.record);
+    checked = (await checkText(writer(), d.run, await projectId(), repo, d.record)).text;
+    saves = [await gleanSave(d)];
   }
 
   const unitOf = async (key: string) => {
@@ -272,7 +327,12 @@ export async function createDriver(world: World): Promise<Driver> {
     run: async (step) => {
       if (typeof step.capture === "string") return capture(step.capture);
       if (step.edit_file && typeof step.edit_file === "object") {
-        const edit = step.edit_file as { path: string; replace?: [string, string]; prepend?: string };
+        const edit = step.edit_file as {
+          path: string;
+          replace?: [string, string];
+          prepend?: string;
+          crlf?: boolean;
+        };
         const abs = path.join(repo, edit.path);
         let text = fs.readFileSync(abs, "utf8");
         if (edit.replace) {
@@ -280,6 +340,7 @@ export async function createDriver(world: World): Promise<Driver> {
           text = text.replace(edit.replace[0], edit.replace[1]);
         }
         if (edit.prepend) text = edit.prepend + text;
+        if (edit.crlf) text = text.replace(/\r?\n/g, "\r\n");
         fs.writeFileSync(abs, text);
         return;
       }
@@ -292,6 +353,54 @@ export async function createDriver(world: World): Promise<Driver> {
         for (const key of step.read as string[])
           parts.push((await readUnit(db(), await projectId(), key, repo)) ?? `${key}: not found`);
         lastRead = parts.join("\n\n");
+        return;
+      }
+      if (step.glean && typeof step.glean === "object")
+        return glean(step.glean as { session: string; record: Record<string, unknown> });
+      if (step.glean_each && typeof step.glean_each === "object") {
+        const each = step.glean_each as { session: string; files: string[] };
+        const target = await db().selectFrom("unit").select("key").orderBy("id").executeTakeFirstOrThrow();
+        saves = [];
+        for (const f of each.files) {
+          const id = await gleanDraft(each.session, {
+            ops: [
+              {
+                op: "add_evidence",
+                unit: target.key,
+                file: { path: f, commit: "HEAD", lines: [1, 1] },
+                quote: "x",
+                role: "explains",
+              },
+            ],
+          });
+          saves.push(await gleanSave(id));
+        }
+        return;
+      }
+      if (step.glean_twice && typeof step.glean_twice === "object") {
+        const twice = step.glean_twice as { session: string; record: Record<string, unknown> };
+        const id = await gleanDraft(twice.session, twice.record);
+        saves = [await gleanSave(id), await gleanSave(id)];
+        // A draft written before its target changed is refused: another glean changes the unit in between
+        const stale = await gleanDraft(twice.session, twice.record);
+        const unit = ((twice.record.ops ?? []) as { unit: string }[])[0]?.unit ?? "";
+        const other = await gleanDraft(twice.session, {
+          ops: [{ op: "anchor", unit, path: "README.md", role: "applies_to" }],
+        });
+        assert.equal((await gleanSave(other)).status, 0);
+        saves.push(await gleanSave(stale));
+        return;
+      }
+      if (step.symlink && typeof step.symlink === "object") {
+        const link = step.symlink as { path: string; to: string };
+        fs.symlinkSync(link.to, path.join(repo, link.path));
+        commitAll();
+        return;
+      }
+      if (step.as_of && typeof step.as_of === "object") {
+        const at = step.as_of as { time: string; read: string };
+        lastRead =
+          (await readUnit(db(), await projectId(), at.read, repo, new Date(at.time).toISOString())) ?? "";
         return;
       }
       if (step.harvest && typeof step.harvest === "object")
@@ -453,7 +562,7 @@ export async function createDriver(world: World): Promise<Driver> {
             s?.host === "codex" ? "codex" : "claude-code",
             want.pending_sessions_includes,
           );
-          assert.match(cli("trace", "pending"), new RegExp(uuid));
+          assert.match(await pendingText(writer(), await projectId()), new RegExp(uuid));
         }
         return;
       }
@@ -539,6 +648,125 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.equal(checkAnchor(repo, anchors[0]).state, want.state);
         return;
       }
+      if (e.evidence && typeof e.evidence === "object") {
+        const want = e.evidence as { of: string; reported_speaker?: string; author_is_owner?: boolean };
+        const got = await db()
+          .selectFrom("unit_evidence as e")
+          .innerJoin("unit as u", "u.id", "e.unit_id")
+          .innerJoin("source as m", "m.id", "e.source_id")
+          .where("u.key", "=", want.of)
+          .where("e.reported_speaker", "=", want.reported_speaker ?? "")
+          .select("m.author_kind")
+          .execute();
+        assert.ok(got.length, `${want.of} has no evidence reported as ${want.reported_speaker}`);
+        if (want.author_is_owner !== undefined)
+          assert.equal(got[0]?.author_kind === "owner", want.author_is_owner);
+        return;
+      }
+      if (e.adoption_count && typeof e.adoption_count === "object") {
+        const want = e.adoption_count as { of: string; count: number };
+        const got = await db()
+          .selectFrom("unit_adoption as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .where("u.key", "=", want.of)
+          .where("a.retracted_at", "is", null)
+          .select("a.id")
+          .execute();
+        assert.equal(got.length, want.count);
+        return;
+      }
+      if (e.retracted_adoption_kept && typeof e.retracted_adoption_kept === "object") {
+        const want = e.retracted_adoption_kept as { of: string; count: number };
+        const got = await db()
+          .selectFrom("unit_adoption as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .where("u.key", "=", want.of)
+          .where("a.retracted_at", "is not", null)
+          .select("a.id")
+          .execute();
+        assert.equal(got.length, want.count);
+        return;
+      }
+      if (e.retired_anchor_kept && typeof e.retired_anchor_kept === "object") {
+        const want = e.retired_anchor_kept as { of: string; symbol: string };
+        const got = await db()
+          .selectFrom("unit_anchor as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .where("u.key", "=", want.of)
+          .where("a.symbol", "=", want.symbol)
+          .where("a.retired_at", "is not", null)
+          .select("a.id")
+          .execute();
+        assert.equal(got.length, 1);
+        return;
+      }
+      if (e.evidence_count && typeof e.evidence_count === "object") {
+        const want = e.evidence_count as { of: string; source: string; count: number };
+        const src = Number((await ref(want.source)).slice(1));
+        const got = await db()
+          .selectFrom("unit_evidence as e")
+          .innerJoin("unit as u", "u.id", "e.unit_id")
+          .where("u.key", "=", want.of)
+          .where("e.source_id", "=", src)
+          .select("e.id")
+          .execute();
+        assert.equal(got.length, want.count);
+        return;
+      }
+      if (e.file_source && typeof e.file_source === "object") {
+        const want = e.file_source as {
+          path: string;
+          lines: [number, number];
+          text: string;
+          blob_recorded?: boolean;
+          partial?: boolean;
+        };
+        const got = await db()
+          .selectFrom("source")
+          .selectAll()
+          .where("kind", "=", "file_excerpt")
+          .where("path", "=", want.path)
+          .executeTakeFirst();
+        assert.ok(got, `no excerpt of ${want.path}`);
+        assert.deepEqual([got.line_start, got.line_end], want.lines);
+        assert.ok(got.text.includes(want.text), got.text);
+        if (want.blob_recorded) assert.match(got.blob_sha ?? "", /^[0-9a-f]{40}$/);
+        if (want.partial !== undefined) assert.equal(got.truncated === 1, want.partial);
+        return;
+      }
+      if (typeof e.save_refused_contains === "string") {
+        assert.ok(
+          saves[0] && saves[0].status !== 0 && saves[0].out.includes(e.save_refused_contains),
+          saves[0]?.out,
+        );
+        return;
+      }
+      if (e.every_save_refused === true) {
+        assert.ok(saves.length > 0);
+        for (const r of saves) assert.notEqual(r.status, 0, r.out);
+        return;
+      }
+      if (e.stale_draft_refused === true) {
+        assert.equal(saves[0]?.status, 0, saves[0]?.out);
+        assert.notEqual(saves[1]?.status, 0, "the same draft saved twice");
+        assert.ok(
+          saves[2] && saves[2].status !== 0 && /changed since you read it/.test(saves[2].out),
+          saves[2]?.out,
+        );
+        return;
+      }
+      if (typeof e.evidence_sources_not_include === "string") {
+        assert.ok(!lastRead.includes(e.evidence_sources_not_include), lastRead);
+        assert.ok(lastRead.length > 0, "nothing was read");
+        return;
+      }
+      if (typeof e.check_notes_contain === "string") {
+        assert.ok(
+          checked.includes(e.check_notes_contain),
+          `check did not say "${e.check_notes_contain}"\n${checked}`,
+        );
+        return;
+      }
       if (typeof e.read_contains === "string") {
         assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
         return;
@@ -554,6 +782,7 @@ export async function createDriver(world: World): Promise<Driver> {
     },
     done: async () => {
       await reader?.destroy();
+      await ingest?.destroy();
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;

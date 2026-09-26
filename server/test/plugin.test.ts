@@ -451,6 +451,40 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
   }
 });
 
+// The record server carries the Skills' write steps; its tools and text stay within the host limits too
+test("the record MCP server starts without a database and lists the trace, harvest, and glean tools", async () => {
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp-record.ts")],
+      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+      stderr: "ignore",
+    }),
+  );
+  try {
+    assert.ok([...(client.getInstructions() ?? "")].length <= 2048);
+    const { tools } = await client.listTools();
+    assert.deepEqual(tools.map((t) => t.name).sort(), [
+      "glean_begin",
+      "glean_fetch",
+      "harvest_begin",
+      "record_check",
+      "record_context",
+      "record_save",
+      "trace_begin",
+      "trace_pending",
+    ]);
+    for (const t of tools)
+      assert.ok([...(t.description ?? "")].length <= 2048, `${t.name} description is too long`);
+    const r = await client.callTool({ name: "trace_pending", arguments: { cwd: "/nonexistent" } });
+    assert.equal(r.isError, true);
+    assert.match(JSON.stringify(r.content), /Sphica: /);
+  } finally {
+    await client.close();
+  }
+});
+
 // An unregistered project name comes from the remote spelling. Copying it without a length cap goes over the limit.
 test("the response fits the limit even with a long unregistered project name", async () => {
   const db = tempDb();

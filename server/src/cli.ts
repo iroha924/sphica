@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { confirm, isCancel } from "@clack/prompts";
 import {
   type ApplicationText,
   ArgumentScannerError,
@@ -21,24 +22,10 @@ import {
   text_en,
   version,
 } from "@stricli/core";
-import { sql } from "kysely";
-import { dbInit, inspect, migrate, reindex } from "./admin.ts";
-import { flush, readState, rejectedDir, unregisteredDir } from "./capture.ts";
+import { dbInit, inspect, reindex } from "./admin.ts";
+import { readState, rejectedDir, unregisteredDir } from "./capture.ts";
 import { withDb } from "./cli/common.ts";
-import { harvestRoutes } from "./cli/harvest.ts";
-import { traceRoutes } from "./cli/trace.ts";
-import {
-  type Block,
-  closing,
-  document,
-  failure,
-  indent,
-  panel,
-  section,
-  steps,
-  stopped,
-  title,
-} from "./cli/view.ts";
+import { closing, failure, indent, section, steps, stopped, title } from "./cli/view.ts";
 import { dbFile, SCHEMA_REVISION } from "./db.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
@@ -140,14 +127,14 @@ async function doctor(cwd: string): Promise<void> {
         "Schema version",
         usable
           ? `revision ${x.revision}`
-          : `revision ${x.revision}, this Sphica expects ${SCHEMA_REVISION} (${x.revision < SCHEMA_REVISION ? "run sphica db migrate" : "update sphica"})`,
+          : `revision ${x.revision}, this Sphica expects ${SCHEMA_REVISION} (${x.revision < SCHEMA_REVISION ? "made by an older Sphica: move it aside, then run sphica init" : "update sphica"})`,
       );
       const broken = Object.entries(x.fts).filter(([, v]) => v !== null);
       say(
         broken.length ? "fail" : "ok",
         "Full-text index",
         broken.length
-          ? `broken: ${broken.map(([k, v]) => `${k} (${plain(v ?? "")})`).join(" / ")}. Rebuild it with sphica db reindex`
+          ? `broken: ${broken.map(([k, v]) => `${k} (${plain(v ?? "")})`).join(" / ")}. Rebuild it with sphica doctor --reindex`
           : "healthy",
       );
     } catch (e) {
@@ -159,7 +146,7 @@ async function doctor(cwd: string): Promise<void> {
     s.stuck ? "fail" : s.rejected ? "warn" : "ok",
     "Recording",
     `${s.pending} pending${s.flushedAt ? ` / last sent ${new Date(s.flushedAt).toLocaleString("sv-SE")}` : ""}${
-      s.stuck ? ` / failed: ${plain(s.stuck)} (send again with sphica capture flush)` : ""
+      s.stuck ? ` / failed: ${plain(s.stuck)} (sent again after the next turn)` : ""
     }${s.unregistered ? ` / ${s.unregistered} set aside for unregistered projects (${unregisteredDir()})` : ""}${
       s.rejected ? ` / ${s.rejected} rejected by the database (${rejectedDir()})` : ""
     }`,
@@ -230,173 +217,6 @@ const CWD = {
   optional: true,
 } as const;
 
-const projectRoutes = buildRouteMap({
-  docs: { brief: "List and remove recorded projects (sphica init registers one)" },
-  routes: {
-    list: buildCommand({
-      docs: { brief: "Registered projects and their last extraction" },
-      parameters: {},
-      func: async () => {
-        const { found, ambiguous } = localRoots();
-        await withDb("reader", async (db) => {
-          const listed = await db
-            .selectFrom("project as p")
-            .leftJoin("extraction_run as r", (j) =>
-              j.onRef("r.project_id", "=", "p.id").on("r.status", "=", "saved"),
-            )
-            .select(["p.key", "p.name", (eb) => eb.fn.max("r.finished_at").as("last")])
-            .groupBy("p.id")
-            .orderBy("p.name")
-            .execute();
-          const home = os.homedir();
-          const cards = listed.map((x) => {
-            const root = found.get(x.key);
-            const where = root
-              ? root.startsWith(`${home}${path.sep}`)
-                ? `~${root.slice(home.length)}`
-                : root
-              : ambiguous.has(x.key)
-                ? "multiple locations"
-                : "not on this machine";
-            return {
-              title: inline(x.name),
-              body: inline(where),
-              meta: [
-                inline(x.key),
-                x.last
-                  ? `last extraction ${new Date(x.last).toLocaleString("sv-SE").slice(0, 16)}`
-                  : "nothing extracted yet",
-              ],
-            };
-          });
-          console.log(
-            document(
-              "sphica project list",
-              undefined,
-              cards.length
-                ? [{ kind: "cards", items: cards }]
-                : [
-                    {
-                      kind: "note",
-                      tone: "info",
-                      text: "No registered projects. Register one with sphica init in the repository",
-                    },
-                  ],
-              cards.length ? plural(cards.length, "project") : "none registered",
-            ),
-          );
-        });
-      },
-    }),
-    forget: buildCommand({
-      docs: { brief: "Delete a project's data (without --yes it only counts)" },
-      parameters: {
-        flags: { yes: { kind: "boolean", brief: "Really delete (cannot be undone)", optional: true } },
-        positional: {
-          kind: "tuple",
-          parameters: [
-            { parse: String, brief: "Key or name of the project to delete", placeholder: "key|name" },
-          ],
-        },
-      },
-      func: async (flags: { yes?: boolean }, target: string) => {
-        await withDb("ingest", async (db) => {
-          const hit = await db
-            .selectFrom("project")
-            .select(["id", "key", "name"])
-            .where((eb) => eb.or([eb("key", "=", target), eb("name", "=", target)]))
-            .execute();
-          const p = hit[0];
-          if (hit.length !== 1 || !p)
-            throw new Error(`${plural(hit.length, "project")} match ${target}. Specify it by key`);
-          const x = await db
-            .selectFrom("project")
-            .select([
-              sql<number>`(select count(*) from session where project_id = ${p.id})`.as("sessions"),
-              sql<number>`(select count(*) from source where project_id = ${p.id})`.as("sources"),
-              sql<number>`(select count(*) from unit where project_id = ${p.id})`.as("units"),
-            ])
-            .where("id", "=", p.id)
-            .executeTakeFirst();
-          const counts: Block = {
-            kind: "fields",
-            rows: [
-              ["project", inline(p.name)],
-              ["key", inline(p.key)],
-              ["sessions", `${x?.sessions}`],
-              ["sources", `${x?.sources}`],
-              ["records", `${x?.units}`],
-            ],
-          };
-          if (flags.yes !== true) {
-            console.log(
-              document(
-                "sphica project forget",
-                undefined,
-                [
-                  counts,
-                  { kind: "note", tone: "warning", text: "Add --yes to delete. This cannot be undone" },
-                ],
-                `${mark("none")} nothing deleted`,
-              ),
-            );
-            return;
-          }
-          await db.deleteFrom("project").where("id", "=", p.id).execute();
-          console.log(document("sphica project forget", undefined, [counts], `${mark("ok")} deleted`));
-        });
-      },
-    }),
-  },
-});
-
-const captureRoutes = buildRouteMap({
-  docs: { brief: "Conversation recording" },
-  routes: {
-    flush: buildCommand({
-      docs: { brief: "Send the recording queue to the database" },
-      parameters: {},
-      func: async () => {
-        const r = await flush();
-        if (r.busy) {
-          console.log(
-            panel(
-              "sphica capture flush",
-              [],
-              "Another send is running, so nothing was done (the queue empties when it finishes)",
-            ),
-          );
-          return;
-        }
-        console.log(
-          document(
-            "sphica capture flush",
-            undefined,
-            [
-              {
-                kind: "fields",
-                rows: [
-                  ["new messages", `${r.sent}`],
-                  ...(r.deferred
-                    ? ([["set aside for unregistered projects", `${r.deferred}`]] as [string, string][])
-                    : []),
-                  ...(r.rejected
-                    ? ([["rejected by the database", `${r.rejected} (kept in ${rejectedDir()})`]] as [
-                        string,
-                        string,
-                      ][])
-                    : []),
-                ],
-              },
-            ],
-            `${mark(r.rejected ? "warn" : "ok")} sent`,
-          ),
-        );
-      },
-    }),
-  },
-});
-
 /**
  * First-time setup: the database, then the project dir belongs to (a repository without a remote needs --name). Safe to run again.
  * A bad --name and a name that differs from the one already given stop before anything is written.
@@ -445,6 +265,60 @@ async function init(flags: { cwd?: string; name?: string }): Promise<void> {
   });
 }
 
+/**
+ * Deletes ~/.sphica: the database, the recording queue, and the hooks' state. The plugin, the marketplace, and the npm package are the
+ * owner's to remove, so only their commands are shown.
+ */
+async function uninstall(yes: boolean): Promise<void> {
+  const home = path.join(os.homedir(), ".sphica");
+  const where = [
+    home,
+    ...(process.env.SPHICA_DB && !path.resolve(process.env.SPHICA_DB).startsWith(home)
+      ? [process.env.SPHICA_DB]
+      : []),
+  ];
+  await boxed("sphica uninstall", async () => {
+    if (!fs.existsSync(home)) console.log(indent(`${mark("none")} ${home} does not exist`));
+    else {
+      if (!yes) {
+        if (!process.stdin.isTTY)
+          throw new Error(
+            `This deletes ${home} and every record in it. Run sphica uninstall --yes to go ahead`,
+          );
+        const answer = await confirm({
+          message: `Delete ${home} and every record in it? This cannot be undone`,
+        });
+        if (isCancel(answer) || !answer) return "cancelled";
+      }
+      fs.rmSync(home, { recursive: true, force: true });
+      console.log(indent(`${mark("ok")} deleted ${home}`));
+    }
+    if (where.length > 1)
+      console.log(
+        indent(`${mark("warn")} SPHICA_DB points outside it (${where[1]}); delete that file yourself`),
+      );
+    console.log(
+      steps(
+        "To remove the rest",
+        [
+          {
+            who: "Claude Code",
+            command: "claude plugin uninstall sphica@sphica && claude plugin marketplace remove sphica",
+            after: null,
+          },
+          {
+            who: "Codex",
+            command: "codex plugin remove sphica@sphica && codex plugin marketplace remove sphica",
+            after: null,
+          },
+          { who: "CLI", command: "npm uninstall -g sphica", after: null },
+        ],
+        "Sphica does not run these for you",
+      ),
+    );
+  });
+}
+
 /** Adds a heading and closing to admin.ts output lines. A failure closes the heading already printed (not a second block from stricli) */
 async function boxed(head: string, fn: () => unknown): Promise<void> {
   console.log(title(head));
@@ -464,47 +338,12 @@ async function boxed(head: string, fn: () => unknown): Promise<void> {
   console.log(closing(`${mark("ok")} done`));
 }
 
-const dbRoutes = buildRouteMap({
-  docs: {
-    brief: "This machine's database (~/.sphica/sphica.db) and schema",
-    // A maintainer step (a release that changes how search splits words). -H lists it
-    hideRoute: { reindex: true },
-  },
-  routes: {
-    migrate: buildCommand({
-      docs: { brief: "Apply db/migrations newer than the database version" },
-      parameters: {
-        flags: {
-          yes: {
-            kind: "boolean",
-            brief: "Skip the confirmation before applying (required outside a terminal)",
-            optional: true,
-          },
-        },
-      },
-      func: (flags: { yes?: boolean }) => boxed("sphica db migrate", () => migrate(flags.yes === true)),
-    }),
-    reindex: buildCommand({
-      docs: { brief: "Rebuild the full-text index (run after changing how search splits words)" },
-      parameters: {},
-      func: () => boxed("sphica db reindex", () => reindex()),
-    }),
-  },
-});
-
 const root = buildRouteMap({
   docs: {
     brief: "Keep and search past decisions and conversations",
     fullDescription: "Database: ~/.sphica/sphica.db (created by sphica init). No credentials are needed",
-    // Usage shows only what people type. The rest are run by the trace Skill, the capture hooks, maintenance, or on doctor's advice; -H lists them
-    hideRoute: { project: true, capture: true, db: true, trace: true, harvest: true },
   },
   routes: {
-    project: projectRoutes,
-    trace: traceRoutes,
-    harvest: harvestRoutes,
-    capture: captureRoutes,
-    db: dbRoutes,
     init: buildCommand({
       docs: {
         brief:
@@ -529,8 +368,30 @@ const root = buildRouteMap({
         brief:
           "npm package and plugin versions, Node, the database and schema, and harvest and recording status",
       },
-      parameters: {},
-      func: () => doctor(process.cwd()),
+      parameters: {
+        flags: {
+          reindex: {
+            kind: "boolean",
+            brief: "Rebuild the full-text index when doctor reports it broken",
+            optional: true,
+          },
+        },
+      },
+      func: (flags: { reindex?: boolean }) =>
+        flags.reindex ? boxed("sphica doctor --reindex", () => reindex()) : doctor(process.cwd()),
+    }),
+    uninstall: buildCommand({
+      docs: { brief: "Delete this machine's Sphica data (~/.sphica) and show how to remove the rest" },
+      parameters: {
+        flags: {
+          yes: {
+            kind: "boolean",
+            brief: "Skip the confirmation (required outside a terminal)",
+            optional: true,
+          },
+        },
+      },
+      func: (flags: { yes?: boolean }) => uninstall(flags.yes === true),
     }),
   },
 });

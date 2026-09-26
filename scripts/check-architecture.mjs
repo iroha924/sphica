@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Checks that interfaces reading untrusted text (MCP) have no write connection (server/src/db-write.ts).
+// Checks that the read MCP server has no write connection (server/src/db-write.ts); writes go through the record server (mcp-record.ts).
 //
 // **Connection roles are separated by import direction.** If imports from a reader entry reach db-write.ts, text it reads
 // could steer it into writing (the execution boundary in CLAUDE.md and AGENTS.md). Neither types nor the authorizer stop this: once a write

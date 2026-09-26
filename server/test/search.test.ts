@@ -148,7 +148,7 @@ test("read shows cited words and who said them, links, history, and each anchor 
     for (const want of [
       /decision do, active/,
       /Why: サーバーは要らない/,
-      /- Postgres: rejected, because server\n {2}- s\d+ session_message, the owner, .* \(rejects\): "サーバーは要らない"/,
+      /- Postgres: rejected, because server\n {2}- s\d+ session_message session:s1, the owner, .* \(rejects\): "サーバーは要らない"/,
       /\(owner_statement\): "SQLite にしよう。"/,
       /src\/db\.ts open \(applies_to\): located at line 2/,
       /src\/gone\.ts \(applies_to\): missing — needs review/,

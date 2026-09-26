@@ -45,7 +45,7 @@ export async function openRun(
   db: Kysely<DB>,
   v: {
     projectId: number;
-    origin: "trace" | "harvest";
+    origin: "trace" | "harvest" | "glean";
     target: string;
     sessionId: string | null;
     draftId: string;

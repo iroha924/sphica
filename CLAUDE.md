@@ -21,9 +21,9 @@ Start troubleshooting with `sphica doctor`.
 ## Runtime boundaries
 
 - `db/schema.sql` is the only source of truth for the DB. Do not add an ORM schema as a second source <!-- invariant: schema-single-source -->
-- MCP and the CLI's reads (`project list`, `trace context`, `harvest read`, the projects in `doctor`) use the reader connection, `trace save`, `harvest save`, and project changes use ingest, capture uses capture, and `sphica db *` and the database check in `doctor` use owner. <!-- invariant: connection-roles -->
+- The read MCP server (`server/src/mcp.ts`: status, search, read) and `doctor`'s reads use the reader connection, the record MCP server (`server/src/mcp-record.ts`) and project registration in `init` use ingest, capture uses capture, and creating the database and `doctor --reindex` use owner. <!-- invariant: connection-roles -->
   Write connections live only in `server/src/db-write.ts` (`bun run architecture` checks it)
-- MCP uses only the reader connection, and commands that fetch PR or issue text or recorded conversations open no write connection (except that `trace context` first sends the capture queue through the capture role, which can only add recorded messages). The user-only harvest Skill passes a checked `harvest/1` record to `harvest save`, which derives the project and GitHub repository from cwd, confirms the PR there, and changes only knowledge owned by that PR (plus its provenance, search words, and file links). It takes no SQL and cannot change trace records or other projects <!-- invariant: untrusted-no-write -->
+- Records are written only through the record MCP server's run-bound tools: `trace_begin`, `harvest_begin`, and `glean_begin` bind a run to one project and one target, and `record_check` and `record_save` take that run id, never a project, session, pull request, or SQL from the record. The CLI carries only `init`, `doctor`, and `uninstall`; trace, harvest, glean, and review run as slash commands <!-- invariant: record-writes -->
 - No server that listens <!-- invariant: no-listen -->
 - No HTML or Markdown progress files. The DB is the source of truth for records <!-- invariant: no-progress-files -->
 
@@ -31,7 +31,7 @@ Start troubleshooting with `sphica doctor`.
 
 - Check the CLI separately from MCP. One working does not mean the other works <!-- invariant: exits-separate -->
 - When you change a value, category, or decision, find every reference with `rg` and fix the paired interface too. Add pairs you can list to a check <!-- invariant: rg-pairs -->
-- A new ingestion source writes through a checked record command (`trace save`, `harvest save`) or capture, never a bulk import <!-- invariant: harvest -->
+- A new ingestion source writes through the record server's run-bound tools or capture, never a bulk import <!-- invariant: harvest -->
 - A change that goes into the package bumps npm and the 3 plugin manifests to the same version, in the same branch (PR) <!-- invariant: version-sync -->
 - Validate external input at the system boundary. Do not write credentials to tracked files, command arguments, or logs <!-- invariant: boundary-validation -->
 - What we ship runs on Windows too. Do not depend on a POSIX shell, `0600`, a fixed `/tmp`, or execFile of `.cmd` <!-- invariant: windows -->

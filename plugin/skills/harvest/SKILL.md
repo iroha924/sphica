@@ -3,7 +3,7 @@ name: harvest
 description: Reads one GitHub pull request of the current repository (its body, comments, reviews, review comments, commits, the merge, and the issues it closes), keeps them as sources, and extracts what it decided and implemented into records that quote them, in the same form as trace. Pass the PR number. Use only when the user explicitly asks.
 argument-hint: "<PR number>"
 disable-model-invocation: true
-allowed-tools: Read, Edit(~/.sphica/drafts/**), Write(~/.sphica/drafts/**), Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" harvest *)
+allowed-tools: mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
 ---
 
 # harvest — keep what a pull request decided and implemented
@@ -25,17 +25,17 @@ each record quoting the words it came from.** No template is assumed; decide fro
 
 ## Flow
 
-`$M` is the CLI: `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js"` in Claude Code. In Codex, it is `node "<absolute path of this Skill's directory>/../../dist/cli.js"`
-(Sphica is not on Codex's PATH). **Run every command from the repository root** (the CLI finds the project and its GitHub repository from there).
+Everything goes through Sphica's `record` MCP server (`harvest_begin`, `record_context`, `record_check`, `record_save`). Pass the repository root
+as `cwd` to every tool.
 
 1. **Pick the pull request**: the number in the target. Without one, ask the owner for it and wait
-2. **Draft**: `$M harvest draft <number>`. It reads the pull request through `gh` (read only), keeps every part as a source (an edited body
-   becomes a new revision), and prints an `id` and a `file` under `~/.sphica/drafts/`. The draft is bound to that pull request
-3. **Read**: `$M harvest context <id>`. Each source is printed as `## s<N> <kind> <artifact> by <login> (<association>) <time>` followed by
+2. **Begin**: `harvest_begin` with `pr`. It reads the pull request and the issues it closes through `gh` (read only), keeps every part as a source
+   (an edited body becomes a new revision), and returns a `run` id bound to that pull request
+3. **Read**: `record_context` with the run. Each source is printed as `## s<N> <kind> <artifact> by <login> (<association>) <time>` followed by
    its text, then the project's live records. Read all of it before writing
-4. **Write** the record to the file with your file-writing tool. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
-   "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`
-5. **Check**: `$M harvest check <id>`, fix, and check again. **Save**: `$M harvest save <id>`
+4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
+   "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. Fix and check again until there are no errors
+5. **Save**: `record_save` with the same run and record
 6. **Report** to the owner what was saved, copying save's lines
 
 ## Who adopts
