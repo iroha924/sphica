@@ -1,7 +1,7 @@
 {
   "name": "sphica",
   "version": "0.5.0",
-  "description": "Records Claude Code and Codex sessions on your machine and recalls past decisions, rejected options, constraints, and what was said.",
+  "description": "Records Claude Code and Codex sessions on your machine and keeps past implementation and decisions, with their sources, for your agent to find.",
   "license": "MIT",
   "type": "module",
   "bin": {

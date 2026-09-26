@@ -13,7 +13,7 @@ bun run setup             # install dependencies and Lefthook from the pinned lo
 bun run verify            # lint, types, AI config, boundaries, bundle, tests, SQL reach, CLI child processes, acceptance cases. pre-push and CI run the same
 bun run verify:ai         # static checks of CLAUDE.md, AGENTS.md, Skills, and Agents
 bun run fix               # format and apply safe lint fixes with the pinned Biome (`bunx biome` runs an unrelated npm package)
-bun run bundle            # build the MCP, CLI, and capture artifacts
+bun run bundle            # build the MCP servers, CLI, and hook artifacts
 ```
 
 Start troubleshooting with `sphica doctor`.
@@ -43,7 +43,7 @@ Start troubleshooting with `sphica doctor`.
 Read to the end before implementing.
 
 - DB schema, connection roles, full-text search index, ingestion: `knowledge-schema`
-- MCP, CLI, capture hooks, plugin distribution: `plugin-release`
+- MCP servers, CLI, capture and delivery hooks, plugin distribution: `plugin-release`
 - Shipped review aspects: `plugin-agent-authoring`
 - Creating Skills, Agents, and rules: `docs-author`
 

@@ -33,7 +33,7 @@ export function kyselyOn(connect: () => DatabaseSync): Kysely<DB> {
   });
 }
 
-/** A read-only connection, used by MCP and the CLI's reads (`project list`, `trace context`, `harvest read`, the projects in `doctor`). */
+/** A read-only connection, used by the read MCP server, the delivery hooks, and the projects in `doctor`. */
 export function openReader(file: string = dbFile()): Kysely<DB> {
   return kyselyOn(() => connectReader(file));
 }

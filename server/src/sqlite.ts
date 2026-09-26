@@ -59,7 +59,9 @@ export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "n
   if (got === SCHEMA_REVISION) return;
   throw new Error(
     `The database schema is revision ${got}, but this Sphica expects revision ${SCHEMA_REVISION}. ` +
-      ((got ?? 0) < SCHEMA_REVISION ? "Run `sphica db migrate`." : "Update sphica."),
+      ((got ?? 0) < SCHEMA_REVISION
+        ? "Move it aside (it is left unchanged), then run `sphica init`."
+        : "Update sphica."),
   );
 }
 

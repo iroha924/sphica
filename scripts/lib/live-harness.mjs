@@ -40,7 +40,7 @@ export function makeRepo(dir, remote = "https://github.com/example/live.git", na
 function childEnv(dir, covDir, extra = {}) {
   const env = { ...process.env, ...extra };
   // **Swap home.** Otherwise the child uses the owner's ~/.sphica.
-  // `capture flush` reads the queue in ~/.sphica/spool and deletes what it sent (measured: it sent the owner's
+  // Flushing reads the queue in ~/.sphica/spool and deletes what it sent (measured: it sent the owner's
   // 4 unsent items to the throwaway database and removed them from the spool). Changing only the database path does not close this.
   env.HOME = dir;
   env.USERPROFILE = dir;

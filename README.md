@@ -9,20 +9,22 @@
 
 English | [日本語](https://github.com/iroha924/sphica/blob/main/README.ja.md)
 
-**Local memory of past decisions for Claude Code and Codex.**
-Sphica records your coding sessions and the decisions made in them.
-You or your agent can then look up what was decided, what was rejected, and why, before making the same call again.
+**Local memory of past implementation and decisions for Claude Code and Codex.**
+Sphica records your coding sessions, and keeps what was decided, rejected, deferred, and built, each record quoting the words it came from.
+Your agent finds those records when it searches, and sees the relevant ones on its own before it edits a file they apply to.
 The database is a single SQLite file on your machine.
 
 ## Features
 
-- **Look things up while you work.** The MCP tools `recall` and `read` let Claude Code and Codex search past decisions, rejected options, constraints, dead ends, and what you said in earlier sessions.
-- **Warnings before an edit (Claude Code).** Before the agent edits a file, a hook shows it the constraints recorded for that exact file and any technical debt that was deliberately left there.
-- **Automatic session recording.** Sphica keeps your prompts, the agent's final reply for each turn, and the paths of files changed by the agent's edit tools.
-- **Decision records on request.** `/sphica:trace` saves the decisions, rejected options, constraints, and dead ends of a session, with the pull requests and issues mentioned in it, plus where the work stands.
-- **Multi-perspective review.** `/sphica:review` runs a separate reviewer for each focus: correctness, security, and written conventions by default, plus redundancy and past decisions with `full`. When Codex is installed, it offers to repeat the review with Codex.
-- **Decisions from a pull request.** `/sphica:harvest <number>` reads one GitHub pull request, including its review comments and follow-up commits, and saves what it decided in the same form. The agent picks the decisions, so it works with any pull request template.
+- **Automatic recording.** Sphica keeps your prompts, the agent's final reply for each turn, and the paths of the files a turn changed (by the edit tools, or seen in `git status` at the turn's end).
+- **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from, and a decision counts as adopted only when you said so.
+- **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and the issues it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
+- **Evidence found later.** `/sphica:glean` adds evidence and corrections to existing records. It asks you for the source (an issue URL, the file and line, meeting notes) before saving; a claim without one is kept only as unsourced and never used as fact.
+- **Shown when it matters (Claude Code).** At session start, the current work; before an edit, the active decisions anchored to that file; when your prompt names a recorded option or code symbol, that record.
+- **Search in Japanese and English.** Records carry search words in both languages, so a question in one finds a record written in the other.
+- **Reviews check past decisions.** `/sphica:review` runs a reviewer per focus (correctness, security, written conventions, and past decisions by default; redundancy with `full`), and checks the diff against the records it touches.
 
+Records are never rewritten: a correction is a new record that supersedes the old one, and the history stays.
 The agent is told to treat records as history, not instructions, and to trust the code when a record and the current code disagree.
 
 ## Requirements
@@ -30,11 +32,11 @@ The agent is told to treat records as history, not instructions, and to trust th
 - Node.js 24.15 or later
 - Claude Code or Codex, or both
 - `git`, to identify the repositories you register
-- For `/sphica:harvest` only: the GitHub CLI (`gh`), signed in with `gh auth login`
+- For `/sphica:harvest` and fetching GitHub sources in `/sphica:glean`: the GitHub CLI (`gh`), signed in with `gh auth login`
 
 ## Install
 
-The plugin ships the MCP server, hooks, and skills. The `sphica` CLI comes from npm and is installed separately. You need both.
+The plugin ships the MCP servers, hooks, and skills. The `sphica` CLI comes from npm and is installed separately. You need both.
 
 **1. Install the CLI**
 
@@ -75,28 +77,30 @@ This creates `~/.sphica/sphica.db` and registers the repository. Running it agai
 sphica doctor
 ```
 
-`doctor` checks Node.js, the CLI and plugin versions, the database, and the recording queue. Start here whenever something looks wrong.
+`doctor` checks Node.js, the CLI and plugin versions, the database, the recording queue, and the registered projects. Start here whenever something looks wrong.
 
 ## Quick start
 
-Sphica writes sessions to the database only for repositories you register. A registered repository is called a project; run `sphica init` in each repository you want recorded.
+Sphica records sessions only in repositories you register (projects); run `sphica init` in each one.
 
-Then work as usual in Claude Code or Codex. To bring back earlier decisions, ask the agent:
+Work as usual. At the end of a session with something worth keeping, run `/sphica:trace` (`$sphica:trace` in Codex).
+`/sphica:trace pending` lists earlier sessions not traced yet. To keep what a pull request decided, run `/sphica:harvest 123`.
+When you find evidence later ("the ops notes say…", "Kimura said the team agreed"), run `/sphica:glean` with what you found.
+
+To bring back earlier decisions, ask the agent:
 
 - "Did we already decide how to handle retries here?"
-- "Why did we choose this approach?"
-- "What did I say about the migration last week?"
-- "Let's continue where we left off."
+- "Why did we choose this approach, and what did we reject?"
+- "Did we try generating thumbnails in a worker before?"
 
-The agent searches with `recall` and opens full records with `read`. At the end of a session with decisions worth keeping, run `/sphica:trace`.
-
-To keep what a pull request decided, run `/sphica:harvest 123` in Claude Code (`$sphica:harvest 123` in Codex). Without a number, it lists recent pull requests and asks which one.
+The agent searches with Sphica's `search` and opens full records with `read`. `status` tells it how much of the history has been traced, so an empty search is not mistaken for "never decided".
 
 ## What gets recorded and where it goes
 
-- **Where.** The database is `~/.sphica/sphica.db`. Records wait in a local queue, `~/.sphica/spool`, until they are written to it. Each machine has its own database, and records are not shared between machines.
-- **What.** Your prompts, the agent's final reply for each turn, and the paths of edited files. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format.
-- **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue. They are written to the database after you register the repository. Held records are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
+- **Where.** The database is `~/.sphica/sphica.db`. Records wait in a local queue, `~/.sphica/spool`, until they are written to it. Each machine has its own database; nothing is shared between machines.
+- **What.** Your prompts, the agent's final reply for each turn, and the paths of changed files. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format. Replies in the middle of a turn, and files created and deleted within one turn, are not seen.
+- **What was shown.** Each automatic delivery is logged by which records it showed, not their text.
+- **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue and are written after you register it. Held records are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
 - **Secrets.** Only secrets with a recognizable shape are masked:
   - keys with known prefixes
   - `KEY=…` and `"password": …` assignments
@@ -105,12 +109,19 @@ To keep what a pull request decided, run `/sphica:harvest 123` in Claude Code (`
   - `mysql -p`
 
   **Anything else is stored as typed, so do not paste secrets into a session.**
-- **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. Two things call other tools that may: `/sphica:harvest` runs `gh api` with your credentials to read the pull request, and `sphica doctor` runs `npm` and `claude` to check installed versions.
-- **Text written by others.** Pull request text read by `/sphica:harvest` may come from anyone. It is passed to the agent as data, and the MCP server cannot write to the database. The command that saves a harvest writes only records of that pull request in the current repository.
+- **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, and `sphica doctor` runs `npm` and `claude` to check installed versions.
+- **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only the owner's or a maintainer's words can adopt a decision.
 
-To delete a project's data, run `sphica project forget <name>`, where `<name>` is shown by `sphica project list`. Without `--yes`, it only shows how many records would be deleted. It deletes records in the database only. Records still waiting in `~/.sphica/spool` stay there and can be imported again if you register the repository again.
+## Limits in 0.5.0
 
-Before you stop using a machine, run `sphica capture flush` until `sphica doctor` shows no records waiting to be sent. Each run writes up to 500 records. Records from unregistered repositories are not written, so register those repositories first if you want to keep them.
+- Structured records exist only for what you traced, harvested, or gleaned. Everything else is searchable only as captured text (`search` with `sources: true`).
+- Automatic delivery is built for Claude Code. In Codex, the records are there to search, but nothing is shown on its own yet.
+- A code location in a record is checked against your working tree when it is read ("located", "moved", "missing"). A located symbol does not prove the decision still holds.
+
+## Upgrading from 0.4
+
+0.5.0 keeps records in a new format. A 0.4 database is refused and left unchanged; its records are not carried over.
+Move `~/.sphica/sphica.db` aside (keep it if you want the old data), then run `sphica init` again in each repository.
 
 ## Updating
 
@@ -134,46 +145,41 @@ codex plugin marketplace upgrade sphica
 codex plugin add sphica@sphica
 ```
 
-Restart open sessions afterwards. When a release changes the database schema, the CLI asks you to run `sphica db migrate`. Back up `~/.sphica/sphica.db` before you run it.
+Restart open sessions afterwards.
 
 ## Uninstalling
 
 ```bash
+sphica uninstall
+```
+
+This deletes `~/.sphica` (the database and the recording queue) after asking, and shows the commands that remove the rest:
+
+```bash
+claude plugin uninstall sphica@sphica && claude plugin marketplace remove sphica
+codex plugin remove sphica@sphica && codex plugin marketplace remove sphica
 npm uninstall -g sphica
 ```
-
-Claude Code:
-
-```bash
-claude plugin uninstall sphica@sphica
-```
-
-Codex:
-
-```bash
-codex plugin remove sphica@sphica
-```
-
-Your records stay in `~/.sphica/` until you delete that directory yourself.
 
 ## Troubleshooting
 
 Run `sphica doctor` first. It shows which part is out of date or not working. Common cases:
 
 - **`sphica: command not found`.** The plugin does not put the CLI on your PATH. Run `npm i -g sphica`.
-- **Nothing is recorded.** Check that the repository is registered with `sphica project list`. In Codex, also check that the hooks are trusted in `/hooks`.
-- **The MCP server reports an older version.** Restart the session, or run `/reload-plugins` in Claude Code.
-- **A search finds nothing.** Search matches words. Try other words, English and Japanese, or shorter terms. An empty result doesn't mean nothing was recorded.
+- **Nothing is recorded.** Check that `sphica doctor` lists the repository under Projects. In Codex, also check that the hooks are trusted in `/hooks`.
+- **The MCP servers report an older version.** Restart the session, or run `/reload-plugins` in Claude Code.
+- **A search finds nothing.** Search matches words. Try other words, the other language, an identifier, or fewer words. Ask the agent to check `status`: sessions not traced yet are searchable only as captured text.
+- **`doctor` says the full-text index is broken.** Run `sphica doctor --reindex`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `sphica init` | Create the database and register the current repository |
-| `sphica doctor` | Check versions, the database, recording, and each project's last harvest |
-| `sphica advice` | See how often the edit hook showed constraints |
+| `sphica doctor` | Check versions, the database, recording, and each registered project |
+| `sphica uninstall` | Delete `~/.sphica` and show how to remove the plugin and the CLI |
 
-Run `sphica --help` for these, `sphica -H` for every command (managing projects, and the ones agents and maintenance use), and `sphica <command> --help` for each command's options.
+Everything else runs inside Claude Code and Codex, through the `/sphica:*` commands and Sphica's MCP tools.
 
 ## Security
 

@@ -1,8 +1,7 @@
 // Looks after this machine's database (~/.sphica/sphica.db). The owner runs these locally, with the owner connection (no authorizer).
 //
 //   sphica init                 creates the database and applies db/schema.sql. Safe to run again (an existing one is left alone)
-//   sphica db migrate [--yes]   applies db/migrations newer than the database version (user_version)
-//   sphica db reindex           rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
+//   sphica doctor --reindex     rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
 
 import fs from "node:fs";
 import path from "node:path";
@@ -69,7 +68,7 @@ export function dbInit(file: string = dbFile()): void {
     if (got === SCHEMA_REVISION) say(`Already exists: ${file} (revision ${got})`);
     else
       say(
-        `Already exists: ${file} (revision ${got}; this Sphica expects ${SCHEMA_REVISION}. Run \`sphica db migrate\`.)`,
+        `Already exists: ${file} (revision ${got}; this Sphica expects ${SCHEMA_REVISION}. Move it aside, then run \`sphica init\`.)`,
       );
     return;
   }

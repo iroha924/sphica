@@ -26,7 +26,7 @@ const singular = (w: string): string =>
 
 /**
  * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.
- * **Changing the rules leaves existing indexes as they were.** A PR that changes them adds `sphica db reindex` to its release steps.
+ * **Changing the rules leaves existing indexes as they were.** A PR that changes them tells the owner to run `sphica doctor --reindex` in its release steps.
  */
 export function terms(text: string): string[] {
   const norm = text.normalize("NFKC").toLowerCase();

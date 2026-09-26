@@ -2,7 +2,7 @@
 // The sphica CLI. Imports, trace, and directory writes use the ingest connection; searches use the reader connection (sqlite.ts, db-write.ts).
 //
 // Argument parsing is left to @stricli/core. **Each command declares the flags and positional arguments it accepts**, so
-// another command's flag (`sphica doctor --yes`) or an extra positional argument (`sphica project list garbage`)
+// another command's flag (`sphica doctor --yes`) or an extra positional argument (`sphica doctor garbage`)
 // fails at parse time. Usage text is built from these declarations and never written separately.
 
 import fs from "node:fs";

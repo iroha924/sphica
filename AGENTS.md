@@ -17,10 +17,10 @@ Rules copied to both are tied by the invariant at the end of the line. When you 
 
 ```bash
 mise trust && mise install  # trust mise.toml and install Node, Bun, and actionlint at its versions
-bun run verify      # lint, types, AI config, boundaries, bundle, tests, SQL reach, CLI child processes
+bun run verify      # lint, types, AI config, boundaries, bundle, tests, SQL reach, CLI child processes, acceptance cases
 bun run verify:ai   # static checks of CLAUDE.md, AGENTS.md, Skills, and Agents
 bun run fix         # format and apply safe lint fixes with the pinned Biome (`bunx biome` runs an unrelated npm package)
-bun run bundle      # build the MCP, CLI, and capture artifacts
+bun run bundle      # build the MCP servers, CLI, and hook artifacts
 ```
 
 `verify` writes temporary files, so it cannot run in a read-only sandbox. If you could not run it, write that it is unverified.
@@ -73,7 +73,7 @@ bun run bundle      # build the MCP, CLI, and capture artifacts
 Read to the end before implementing or reviewing.
 
 - DB schema, connection roles, full-text search index, ingestion: `knowledge-schema`
-- MCP, CLI, capture hooks, plugin distribution: `plugin-release`
+- MCP servers, CLI, capture and delivery hooks, plugin distribution: `plugin-release`
 - Shipped review aspects: `plugin-agent-authoring`
 
 ## Reviews of this repository

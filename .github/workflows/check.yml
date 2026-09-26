@@ -133,4 +133,4 @@ jobs:
             '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | HOME="$home" USERPROFILE="$home" timeout 30 node "$out/package/dist/mcp.js" > mcp.out || true
           # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
-          grep -q '"recall"' mcp.out
+          grep -q '"search"' mcp.out

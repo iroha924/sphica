@@ -45,7 +45,7 @@ not overlapping is the caller's responsibility** (do not hand over this review w
 If you suspect an overlap, count the files in the packed contents and report them without drawing a conclusion.
 
 - Is everything present that step 1 of the `plugin-release` Skill's "Shipping" lists? **A tarball missing both manifests
-  does not load as a plugin at all**, yet counting only `dist/` passes green. `db/migrations` ships too
+  does not load as a plugin at all**, yet counting only `dist/` passes green. `dist/` holds 5 entries (cli, mcp, mcp-record, capture, deliver)
 - Is anything listed in `package.json`'s `files` missing from the tarball?
 - Does `node dist/cli.js --version` run in the unpacked directory?
 - Is every bundled dependency in `THIRD_PARTY_NOTICES.md`? **Is the listed version the one actually resolved?**
