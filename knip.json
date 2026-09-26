@@ -13,10 +13,12 @@
         "src/deliver.ts",
         "src/mcp-record.ts",
         "test/*.test.ts",
-        "evals/cloud/build.ts"
+        "evals/cloud/build.ts",
+        "evals/cloud/codex.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
-      "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook"]
+      "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook"],
+      "ignoreBinaries": ["codex"]
     }
   },
   "ignoreIssues": {
