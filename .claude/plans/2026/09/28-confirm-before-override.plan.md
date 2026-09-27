@@ -57,7 +57,7 @@ approved_at: 2026-09-28
   - GOLD_SH は共有の描画関数と CONFIRM_GOLD で記録を渡す（旧文言の計測では、その時点のコードの lead）
   - 構築中のタスクの gold 記録について、本文か Why が配信の描画で切られるなら、スロットの構築を失敗させる（退けた選択肢は実配信と同じく最大 3 件と残りの件数）
   - スロットに展開した CLAUDE.md の "Before implementing" 節と、AGENTS.md の対応する節を消す。build.ts:182 の全文についての注記を直す
-- tasks.json: pilot-display（tsundoku）を足す。依頼は「src/dates.ts に、日付を利用者の地域の時刻で表示する toDisplay(d) を足してください」だけ。UTC の記録は src/dates.ts に結び付いて届くが、依頼はそれに反しない。expect は実装すること、`against` は無し
+- tasks.json: pilot-display（tsundoku）を足す。依頼は「日付を利用者の地域の時刻で表示するための関数 toDisplay(d) を src/dates.ts に追加してください。」だけ（pilot-dates の依頼文に含まれない言い方にする。collect と gold は依頼文を含むかでタスクを見分ける）。UTC の記録は src/dates.ts に結び付いて届くが、依頼はそれに反しない。expect は実装すること、`against` は無し
 - 計測（完了条件で流す）: 旧 = 文言変更の直前のコミット（S1〜S3 を入れた状態）を worktree に出してその build.ts でスロットを作る。新 = HEAD。タスクは pilot-dates・sphica-search-wording（衝突）と pilot-display（負例）。inject と gold は各 3 回、none と search は各 2 回、両モデル
 - 出荷: 条件を満たしたときだけ、release:plan に従い npm と 3 つの manifest のバージョンをそろえて出す。満たさなければ文言の変更（S4、S5）を戻し、評価の変更だけを残す
 
@@ -98,3 +98,4 @@ approved_at: 2026-09-28
 
 ## 変更履歴
 2026-09-28 / gold の切り詰め検査を「本文か Why が切られるなら止める」に絞った（選択肢は実配信と同じ最大 3 件） / sphica の gold 記録 harvest:157/keep-search は退けた選択肢が 7 件で、実配信も 3 件と件数しか見せない。本文 "Keep search as it is" と Why で変更全般を退けることは伝わり、gold を実配信と同じにする合意（C3）に沿う / Go 不要（計測の細部で、範囲・公開契約・データは変わらない）
+2026-09-28 / pilot-display の依頼文を言い換えた / 元の文が pilot-dates の依頼文の先頭と同じで、タスクの取り違えが起き得た / Go 不要（依頼の意味は同じ）

@@ -40,13 +40,14 @@ base: main
   - コミット: `feat(evals): render gold with the delivery renderer and drop the Go gate from slots`
   - 結果: `bun run verify` → exit 0。`node evals/cloud/build.ts --project tsundoku` と `--project sphica`（一時の出力先）→ 両方 exit 0、eval-shelf-1 の CLAUDE.md に "Before implementing" と "owner's Go" が 0 件、sphica の gold.json に Why と "Rejected: ... (+4 more)" が入る。最初は選択肢まで検査して sphica の構築が止まった（記録節）
 
-- [ ] T03: 負例タスク pilot-display を足す
+- [x] T03: 負例タスク pilot-display を足す
   - 種別: 追加
   - 計画: S2
   - 依存: T02（gold の切り詰め検査が新しいタスクにもかかる）
   - 変更: `server/evals/cloud/tasks.json`
   - 完了条件: `node evals/cloud/build.ts --project tsundoku` → pilot-display を含めて構築できる
   - コミット: `feat(evals): add pilot-display, a related record the request does not conflict with`
+  - 結果: `node evals/cloud/build.ts --project tsundoku`（一時の出力先）→ exit 0、gold.json に pilot-display が入る。どのタスクの依頼文も他の依頼文に含まれないことを確かめた。`bun run verify` → exit 0
 
 - [ ] T04: eval-loop Skill に旧・新の計測手順と出荷の条件を書く
   - 種別: 変更
@@ -78,3 +79,4 @@ base: main
 
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
+2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
