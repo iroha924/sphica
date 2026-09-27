@@ -146,12 +146,23 @@ test("trace: pending lists the session, begin binds it, and check and save take 
       ],
     };
     assert.deepEqual(await checkText(db.ingest, run, p, null, { units: "x" }).then((c) => c.ok), false);
+    // Another session's words cannot back this run's record, even in the same project
+    const elsewhere = message(db, p, { id: "m9", text: "Postgres にしよう。", session: "s9" });
+    const borrowed = JSON.parse(
+      JSON.stringify(record)
+        .replaceAll(`s${m}`, `s${elsewhere}`)
+        .replaceAll("SQLite にしよう。", "Postgres にしよう。"),
+    );
+    assert.match(
+      (await checkText(db.ingest, run, p, null, borrowed)).text,
+      new RegExp(`s${elsewhere}: not a source of this run`),
+    );
     assert.match((await checkText(db.ingest, run, p, null, record)).text, /✓ 1 record can be saved/);
     assert.match(await saveText(db.ingest, run, p, null, record), /trace:ext-s1\/storage active/);
     await assert.rejects(saveText(db.ingest, run, p, null, record), /already saved/);
     await assert.rejects(contextText(db.ingest, run, p + 1, null), /another project/);
     await assert.rejects(contextText(db.ingest, "missing", p, null), /No run/);
-    assert.equal(await pendingText(db.ingest, p), "Every captured session has been traced.");
+    assert.match(await pendingText(db.ingest, p), /1 session to trace[\s\S]*- s9 claude-code/);
   } finally {
     await db.done();
   }
