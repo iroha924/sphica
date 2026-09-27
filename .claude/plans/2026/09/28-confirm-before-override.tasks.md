@@ -110,6 +110,16 @@ base: main
   - コミット: `fix(evals): leave dependencies and build output out of a run's result commit`
   - 結果: 直した行で notes.local だけが add された。`bun run verify` → exit 0
 
+- [x] T10: 無視ファイルの無いスロットでも依存を結果コミットから外す（T09 のレビュー）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象が T09 の後始末）
+  - 変更: `server/evals/cloud/build.ts`
+  - red: `git add -A` → .gitignore の無い一時リポジトリで、T09 の行の後も node_modules/x/a.js と src/node_modules/y/b.js が staged のまま
+  - 完了条件: 同じ一時リポジトリで直した行を足す → staged は src/app.ts だけ。`bun run verify` → exit 0
+  - コミット: `fix(evals): unstage dependencies in slots without an ignore file`
+  - 結果: 直した行で staged は src/app.ts だけになった。`bun run verify` → exit 0
+
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
 2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
@@ -121,3 +131,4 @@ base: main
 2026-09-28 / T06, T07, T08 / Codex のレビュー: T06（51f5521）と T08（daf70d6）は欠陥なし。T07（a929f46）で 2 件: 別の語順の承認要求を見逃す、本文に "Why: ..." を含むと Why の切り詰めをすり抜ける / どちらも評価スロットで起きない限られた入力として見送った（スロットの文面は既知で、言い換えは無数にある。後者はわざと作った入力）
 2026-09-28 / 計測 / スロットの push は main を作り直す上書きで、自動モードに止められた / 持ち主の判断で、.claude/settings.local.json に eval-shelf の force-with-lease push だけを許すルールを足した
 2026-09-28 / T09 / 旧文言 sphica の none と search で 1 回ずつ結果ブランチが無かった。run のログでは、エージェントが bun install した server/node_modules（約 13,000 ファイル）を finish.sh が強制で add していた / 依存と生成物を add から外した。旧文言の計測（a85a6ab）はこの直しを含まず、新文言の計測は含む。違いは無視対象の生成物をコミットするかだけで、エージェントが見るものは同じ
+2026-09-28 / T10 / T09 の Codex レビュー（6c86c22）で 1 件: tsundoku のスロットは .gitignore が無く、node_modules は git add -A で入る / T10 で直した。新文言 tsundoku の計測スロットは T10 の前に作ったが、tsundoku のタスクは依存を入れないので影響しない

@@ -158,6 +158,8 @@ git add -A >/dev/null 2>&1
 # Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer; installed dependencies and build
 # output are not (a run that installed node_modules could not push its result)
 git ls-files -z --others --ignored --exclude-standard | grep -zvE '^[.]tools/|^plugin/(dist|db)/|(^|/)node_modules/' | xargs -0 -r git add -f >/dev/null 2>&1
+# The same for dependencies a checkout without an ignore file staged above
+git ls-files -z --cached | grep -zE '(^|/)node_modules/' | xargs -0 -r git rm -q --cached >/dev/null 2>&1
 git -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
 git push -q --force origin "HEAD:refs/heads/claude/eval-$sid" >/dev/null 2>&1 || true
 `;
