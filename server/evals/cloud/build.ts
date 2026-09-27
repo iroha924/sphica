@@ -207,6 +207,16 @@ function files(dir: string): void {
   execFileSync("tar", ["-x", "-C", dir], { input: tar });
 }
 
+/** The shipped delivery hook's PreToolUse matcher, so the inject slot fires on the same tools the plugin does. */
+function deliverMatcher(): string {
+  const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, "plugin", "hooks", "hooks.json"), "utf8")) as {
+    hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
+  };
+  const entry = hooks.hooks.PreToolUse.find((e) => e.hooks.some((h) => h.command.includes("deliver.js")));
+  if (!entry) throw new Error("plugin/hooks/hooks.json has no PreToolUse delivery hook");
+  return entry.matcher;
+}
+
 /** Runs the slot's session start hook as the host would and requires a delivery row, so a hook that never runs fails the build. */
 async function smokeDelivery(dir: string): Promise<void> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-smoke-"));
@@ -300,7 +310,7 @@ async function main() {
       hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: deliver("prompt"), timeout: 30 }] }];
       hooks.PreToolUse = [
         {
-          matcher: "Edit|Write|MultiEdit|NotebookEdit",
+          matcher: deliverMatcher(),
           hooks: [{ type: "command", command: deliver("edit"), timeout: 30 }],
         },
       ];
