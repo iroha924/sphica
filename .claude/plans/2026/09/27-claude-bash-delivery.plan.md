@@ -21,6 +21,7 @@ approved_at: 2026-09-27
 
 - 0.5.0 の実機確認で Claude Code が Read ではなく Bash の `cat` で読み、配信が 3 回とも出なかった。0.5.1 で Codex と同じ「コマンドがファイルを名指ししたときに配信する」を Claude Code にも入れる（2026-09-27、「うん、進めてOK」）
 - `.claude/plans/` を .gitignore から外し、git で追跡する。過去の計画ファイルは削除する（plan の確認の後に持ち主が追加、2026-09-27）
+- 不変条件 no-progress-files は Sphica の記録についての規範で、`.claude/plans/` の開発の計画とタスクは対象外と CLAUDE.md と AGENTS.md に明記する（PR #177 のレビューで衝突が見つかった後に持ち主が追加、2026-09-27）
 - 一時 HOME では Claude のサインインが効かなかったので、Sphica の置き場所を切り替えるテスト用の環境変数 SPHICA_HOME を足して実測する（実装中に持ち主が追加、2026-09-27）
 
 ## 目的
@@ -106,3 +107,4 @@ Claude Code のセッションで、Bash のコマンドが decision / constrain
 
 ## 変更履歴
 - 2026-09-27 / SPHICA_HOME を足し（S6）、実測を HOME の切り替えから SPHICA_HOME に変えた / 一時 HOME で Claude のサインインが「OAuth session expired」で効かなかった / Go 済み（持ち主が「Sphica の置き場所を環境変数で切り替える」を選んだ）
+- 2026-09-27 / 不変条件 no-progress-files の範囲を明記した（T12） / PR #177 の Codex レビューが、追跡した tasks を Markdown の進捗ファイルと指摘した / Go 済み（持ち主が「不変条件の範囲を明確にして追跡を続ける」を選んだ）

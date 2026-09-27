@@ -34,7 +34,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
   Instead: take write connections from the factories in `server/src/db-write.ts`. The read MCP server never imports them (`bun run architecture`)
 - Records are written only through the record MCP server's run-bound tools: `trace_begin`, `harvest_begin`, and `glean_begin` bind a run to one project and one target, and `record_check` and `record_save` take that run id, never a project, session, pull request, or SQL from the record. The CLI carries only `init`, `doctor`, and `uninstall`; trace, harvest, glean, and review run as slash commands <!-- invariant: record-writes -->
 - No server that listens <!-- invariant: no-listen -->
-- No HTML or Markdown progress files. The DB is the source of truth for records <!-- invariant: no-progress-files -->
+- Sphica keeps no HTML or Markdown progress files of its own. The DB is the source of truth for records (development plans and task lists in `.claude/plans/` are not records) <!-- invariant: no-progress-files -->
 
 ### Paired changes
 

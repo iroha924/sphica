@@ -130,6 +130,15 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `fix(cli): refuse uninstall while SPHICA_HOME is set`
   - 結果: red: 同じテストが直す前に exit 0 の uninstall で失敗。直した後 `node --test test/cli.test.ts` → pass 7 / fail 0
 
+- [x] T12: 不変条件 no-progress-files が開発の計画とタスクを対象にしないことを明記する
+  - 種別: 変更
+  - 計画: S5
+  - 依存: T01（計画を追跡に変えたのが T01）
+  - 変更: `CLAUDE.md`, `AGENTS.md`
+  - 完了条件: `rg -n "no-progress-files" CLAUDE.md AGENTS.md` → 各 1 件で `.claude/plans/` を対象外と書いている、`bun run verify:ai` → exit 0
+  - コミット: `docs(claude): say development plans are not the progress files the no-progress-files rule forbids`
+  - 結果: `rg -n "no-progress-files" CLAUDE.md AGENTS.md` → 各 1 件、どちらも「development plans and task lists in `.claude/plans/` are not records」。`bun run verify:ai` → exit 0
+
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
@@ -142,3 +151,4 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
 2026-09-27 / T09 / 修正分の Codex レビュー（c41fce8..2da1d01）で 1 件: AGENTS.md の temp-home に SPHICA_HOME が無い / T09 を足して直した
 2026-09-27 / T10 / review-shipping（main..d12ea05）で 2 件 / 2（PowerShell ツール）は T10 で README に書いた。1（書き込みロックで配信の記録が 5 秒待ち、ホストの 5 秒で配信ごと失われる）は Read で以前からある挙動で、配信の順序を変える必要があり 0.5.1 の範囲外。PR の見送り欄に書き、issue にするかは持ち主に聞く
 2026-09-27 / T11 / PR #177 の GitHub Codex（a5c93f7）で P1: SPHICA_HOME を既存のディレクトリに向けて uninstall --yes を流すと、そのディレクトリを再帰で消す / T11 で SPHICA_HOME があるときは止めるようにした
+2026-09-27 / T12 / PR #177 の GitHub Codex（c6427a8）で P1: 追跡した tasks が no-progress-files に反する、P2: シェルでエスケープしたスペース入りのパスを名指しと見なさない / 持ち主の判断で P1 は規範の範囲を明記（T12）。P2 は Codex で 0.5.0 から同じ挙動で、スペース入りのパスに限られるので見送る
