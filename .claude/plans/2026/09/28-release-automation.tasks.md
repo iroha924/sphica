@@ -40,13 +40,14 @@ base: main
   - コミット: `feat(release): check that only the owner can approve npm-release`
   - 結果: `node --test test/release-env.test.ts` → 9 pass / 0 fail（別人、2 人目、Team、規則なし、prevent_self_review、admin bypass、ポリシー 4 通りと保護ブランチ、API の失敗）。`bun run --cwd server typecheck`、`bun run knip`、`actionlint release.yml` → exit 0
 
-- [ ] T03: merge 後の仕上げを行う release-finish
+- [x] T03: merge 後の仕上げを行う release-finish
   - 種別: 追加
   - 計画: S3
   - 依存: なし
-  - 変更: `scripts/lib/release-finish.mjs`, `scripts/release-finish.mjs`, `server/test/release-finish.test.ts`
-  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → release でないときに何もしない、Release を作る、既にあれば作らない、ノートが無ければ exit 1、ツリーが違えば exit 1、`--dry-run` で作成もコメントもしない
+  - 変更: `scripts/lib/release-finish.mjs`, `scripts/lib/release-finish.d.mts`, `scripts/release-finish.mjs`, `server/test/release-finish.test.ts`, `.github/workflows/release.yml`
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → tag を merge していない merge コミットで exit 1、Release を作る、既にあれば作らない、ノートが無ければ exit 1、ツリーが違えば exit 1、`--dry-run` で作成もコメントもしない
   - コミット: `feat(release): verify a merged release and create its GitHub Release from a script`
+  - 結果: `node --test test/release-finish.test.ts` → 7 pass / 0 fail（作成とコメント、再実行で作らない、merge 違い・ツリー違い・attestation なし・latest 違い・ノートなし・コメントだけのノートで exit 1 かつ作成もコメントもなし、dry run、引数の拒否、ノートの抽出、merge の特定）。実データ: `GITHUB_REPOSITORY=iroha924/sphica node scripts/release-finish.mjs --dry-run` → `v0.5.3: tree, attestation, npm latest, and Release notes check out (dry run)`。`gh attestation verify` は `--source-ref refs/tags/v0.5.2` にすると exit 1（空振りしない）。typecheck、knip、actionlint → exit 0
 
 ## P2: 1 つの run で承認から完了まで
 
@@ -82,3 +83,6 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
+- 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
+- 2026-09-28 / T03 / 仕上げは push:main で起動せず release.yml から引数付きで呼ぶ形になったので、「release でないときに何もしない」は当てはまらない。knip のため PR 用の `finish-dry-run` ジョブを T03 で release.yml に足し、型宣言も要った / 完了条件を前: 「release でないときに何もしない、…」から、後: 「tag を merge していない merge コミットで exit 1、…」へ。変更欄に `scripts/lib/release-finish.d.mts`, `.github/workflows/release.yml` を足した
+- 2026-09-28 / T02 / Codex のタスクレビュー（0a3bf53）: 指摘 0 件（sandbox でテストは流せず、手元で実測済み） / 採る指摘なし

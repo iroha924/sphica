@@ -20,6 +20,10 @@ on:
       - scripts/lib/tarball.mjs
       - scripts/check-sbom.mjs
       - scripts/lib/sbom.mjs
+      - scripts/release-env.mjs
+      - scripts/lib/release-env.mjs
+      - scripts/release-finish.mjs
+      - scripts/lib/release-finish.mjs
       # A PR that bumps the version is a release PR, so run the same steps before the tag is pushed
       - plugin/package.json
 
@@ -148,6 +152,32 @@ jobs:
           path: ${{ runner.temp }}/release/${{ steps.pack.outputs.tgz }}
           retention-days: 7
           if-no-files-found: error
+
+  # Runs release-finish's checks against the latest published release, so a change to them is exercised before a real release needs them
+  finish-dry-run:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      attestations: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Check the latest published release as release-finish would
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-finish.mjs --dry-run
 
   stage:
     needs: [sbom, prepare]
