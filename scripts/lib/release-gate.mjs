@@ -1,9 +1,10 @@
-// Decides whether a tag may be staged to npm. prepare and stage in release.yml go through the same decision.
+// Decides whether a tag may be published to npm. prepare and publish in release.yml go through the same decision.
 // The inputs are gathered from git and the GitHub API; this module only decides (tests cover every branch).
 
-const REQUIRED_WORKFLOWS = ["check", "pr-body"];
+// release is the PR's dry run of publish and finish; every release PR bumps plugin/package.json, which triggers it
+const REQUIRED_WORKFLOWS = ["check", "pr-body", "release"];
 
-/** The failed conditions and the number of the PR whose head is the tag commit. Empty problems means it may be staged. */
+/** The failed conditions and the number of the PR whose head is the tag commit. Empty problems means it may be published. */
 export function gateProblems({
   tag,
   commit,
@@ -22,7 +23,7 @@ export function gateProblems({
     for (const [key, version] of Object.entries(versions))
       if (version !== match[1]) problems.push(`tag ${tag} does not match ${key} version ${version}`);
 
-  // npm rejects staging an existing version, but only after the owner approves. Stop an already published version here
+  // npm rejects publishing an existing version, but only after the owner approves. Stop an already published version here
   if (published) problems.push(`the version of tag ${tag} is already on npm. Bump the version and tag again`);
 
   // If main is an ancestor of the tag commit, the tree of the trial merge commit PR CI checked equals the tag commit's tree

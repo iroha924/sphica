@@ -52,14 +52,6 @@ try {
 } catch {
   tags = null;
 }
-// Listing stages needs an npm login and npm 11.19.0 (the release job's; older npm has no stage). If it cannot be read, report unknown
-const stagedText = attempt("npx", ["-y", "npm@11.19.0", "stage", "list", "sphica", "--json"]);
-let staged = null;
-try {
-  staged = stagedText ? JSON.parse(stagedText) : null;
-} catch {
-  staged = null;
-}
 const remoteTags = attempt("git", ["ls-remote", "--tags", "origin"]);
 const globalRoot = attempt("npm", ["root", "-g"]);
 const globalPackage = globalRoot
@@ -100,16 +92,8 @@ for (const market of markets ?? []) {
 console.log("npm package");
 console.log(`  repository: ${packageVersion}`);
 console.log(`  registry latest: ${tags?.latest ?? "unknown"}`);
-console.log(`  registry next: ${tags?.next ?? "unknown"}`);
-console.log(
-  `  staged: ${
-    Array.isArray(staged)
-      ? staged.length
-        ? staged.map((item) => `${item.version} (${item.id})`).join(", ")
-        : "none"
-      : "unknown"
-  }`,
-);
+// Releases no longer move next; until the owner removes it, it still points to the last staged version
+if (tags?.next) console.log(`  registry next: ${tags.next}`);
 console.log(
   `  npm i -g: ${
     globalPackage.status === "ok"
@@ -148,7 +132,9 @@ console.log(
 const issues = [];
 const unknowns = [];
 if (tags && tags.latest !== packageVersion) issues.push("repository and npm latest differ");
-if (tags && tags.next !== tags.latest) issues.push("npm next and latest differ");
+if (tags?.next && tags.next !== tags.latest) {
+  issues.push("npm next is left behind latest; the owner removes it with npm dist-tag rm sphica next");
+}
 if (tags?.latest && globalPackage.status !== "unknown" && globalPackage.version !== tags.latest) {
   issues.push("the npm i -g CLI differs from npm latest");
 }
@@ -167,9 +153,7 @@ if (marketplace && codexObserved && (codexCaches.length !== 1 || codexCaches[0] 
 if (marketplace && tags?.latest && marketplace.localeCompare(tags.latest, undefined, { numeric: true }) > 0) {
   issues.push("plugin channel is ahead of npm latest");
 }
-if (Array.isArray(staged) && staged.length) issues.push("a stage is still waiting for approval or rejection");
 if (tags === null) unknowns.push("cannot observe npm dist-tags");
-if (!Array.isArray(staged)) unknowns.push("cannot observe npm stages (needs npm login)");
 if (remoteTags === null) unknowns.push("cannot observe remote tags");
 if (globalPackage.status === "unknown") unknowns.push("cannot observe the npm i -g CLI");
 if (!claudeObserved) unknowns.push("cannot observe the Claude cache");

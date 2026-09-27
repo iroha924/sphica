@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Checks whether a tag may be staged to npm. release.yml calls it twice, before and after staging.
+// Checks whether a tag may be published to npm. release.yml calls it twice, before and after the owner approves.
 // Usage: node scripts/release-gate.mjs --tag v1.2.3 --commit <sha> (needs GH_TOKEN and GITHUB_REPOSITORY)
 
 import { execFileSync } from "node:child_process";
@@ -66,4 +66,6 @@ if (problems.length) {
   console.error(problems.join("\n"));
   process.exit(1);
 }
-console.log(`${tag}: head ${commit} of PR #${pull} may be staged`);
+console.log(`${tag}: head ${commit} of PR #${pull} may be released`);
+// release.yml reads the PR number from here to comment on the PR
+if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `pull=${pull}\n`);

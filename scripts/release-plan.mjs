@@ -58,19 +58,12 @@ const actions =
   kind === "none"
     ? []
     : [
-        "pass PR CI (check, pr-body) and the Codex review, and merge main into the branch",
+        "fill in the PR's Release notes, pass PR CI (check, pr-body, and the release dry run) and the Codex review, and merge main into the branch",
         `git tag v${packageVersion} <PR head> && git push origin v${packageVersion}`,
-        "check prepare in release.yml, then hand the run URL to the owner",
-        "owner: approve the npm-release environment",
-        "compare the SHA-512 of npx -y npm@11.19.0 stage download <stage-id> with the job summary, then hand the stage ID to the owner",
-        "owner: approve the stage on npmjs.com (Staged Packages, check provenance, 2FA)",
-        "gh pr merge <PR> --merge --match-head-commit <PR head>",
-        "git diff --exit-code <PR head> <merge commit>",
-        `compare the SHA-512 of npm pack sphica@${packageVersion} --silent`,
-        `owner: in your own terminal, npm dist-tag add sphica@${packageVersion} latest (OTP fails in Claude's non-TTY shell)`,
-        "npm view sphica dist-tags --json",
+        "hand the run URL release.yml comments on the PR to the owner",
+        "owner: approve the npm-release environment on the run page (the run then publishes, merges, and creates the GitHub Release)",
+        "gh run watch <run-id> --exit-status",
         "bun run release:status",
-        `gh release create v${packageVersion} --verify-tag --title v${packageVersion} --notes-file <Release notes from the PR>`,
         "update the Claude and Codex plugin caches and restart sessions",
       ];
 const plan = {

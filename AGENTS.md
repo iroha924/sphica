@@ -46,7 +46,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
 
 - A change that goes into the package bumps npm and the 3 plugin manifests to the same version, in the same branch (PR) <!-- invariant: version-sync -->
 - Before editing the version, look at the kind `bun run release:plan -- --base <previous release commit>` reports <!-- invariant: release-plan -->
-- Before each release step, reopen the `plugin-release` Skill and run its commands exactly as written. The owner approves the `npm-release` environment, approves npm Staged Packages, and runs `npm dist-tag add` <!-- invariant: release-owner-steps -->
+- Before each release step, reopen the `plugin-release` Skill and run its commands exactly as written. The owner approves the `npm-release` environment, the only gate before npm; do not do it in the owner's place, on the page or through the API <!-- invariant: release-owner-steps -->
 - `plugin/dist` and `plugin/db` are untracked, so they do not show in `git diff`. Run `npm pack` and unpack it outside the repository to look <!-- invariant: pack-and-inspect -->
 - What we ship runs on Windows too. Do not depend on a POSIX shell, `0600`, a fixed `/tmp`, or execFile of `.cmd` <!-- invariant: windows -->
 - Validate external input at the system boundary. Do not write credentials to tracked files, command arguments, or logs <!-- invariant: boundary-validation -->
