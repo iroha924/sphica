@@ -325,6 +325,20 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
       db.owner.prepare("select count(*) as n from unit_anchor where retired_at is not null").get()?.n,
       1,
     );
+    // Two pieces of evidence cite the issue: a retraction without a quote cannot say which one it means
+    await assert.rejects(
+      ops([
+        {
+          op: "retract_evidence",
+          unit: "glean:csv/no-notes",
+          revision: rev(),
+          source: `s${issue}`,
+          reason_source: `s${said}`,
+          reason_quote: "取り消す。",
+        },
+      ]),
+      /2 pieces of evidence cite s\d+; add quote/,
+    );
     assert.match(
       await ops([
         {
@@ -340,11 +354,25 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
           unit: "glean:csv/no-notes",
           revision: rev(),
           source: `s${issue}`,
+          quote: "Notes must never",
           reason_source: `s${said}`,
           reason_quote: "取り消す。",
         },
       ]),
       /candidate/,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select e.role, e.retracted_at is not null as gone from unit_evidence e where e.unit_id = ? and e.source_id = ? order by e.role",
+        )
+        .all(u("glean:csv/no-notes").id, issue)
+        .map((r) => [r.role, r.gone]),
+      [
+        ["explains", 1],
+        ["states", 0],
+      ],
+      "only the quoted evidence is retracted",
     );
     await ops([
       {

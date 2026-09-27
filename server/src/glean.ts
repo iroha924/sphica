@@ -78,6 +78,8 @@ const Op = z.discriminatedUnion("op", [
       unit,
       revision,
       source: SOURCE_REF,
+      // Which piece of evidence from that source, when it holds more than one
+      quote: quote.optional(),
       reason_source: SOURCE_REF,
       reason_quote: quote,
     })
@@ -88,6 +90,7 @@ const Op = z.discriminatedUnion("op", [
       unit,
       revision,
       source: SOURCE_REF,
+      quote: quote.optional(),
       reason_source: SOURCE_REF,
       reason_quote: quote,
     })
@@ -165,7 +168,14 @@ const locate = (body: string, q: string): [number, number] | null => {
   return at < 0 ? null : [at, at + Buffer.byteLength(q, "utf8")];
 };
 
-type Planned = { input: OpInput; unitId: number; lifecycle: string; excerpt: Excerpt | null };
+type Planned = {
+  input: OpInput;
+  unitId: number;
+  lifecycle: string;
+  excerpt: Excerpt | null;
+  /** The span a retraction removes */
+  retracts: [number, number] | null;
+};
 export type GleanChecked = { errors: string[]; problems: string[]; units: Checked; ops: Planned[] };
 
 /**
@@ -287,7 +297,29 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
       if (got && got.s.author_kind !== "owner")
         errors.push(`${what}: only the owner's words can retract or withdraw`);
     }
-    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt });
+    // A retraction names one span: the only live one from that source, or the one its quote cuts
+    let retracts: [number, number] | null = null;
+    if (op.op === "retract_evidence" || op.op === "retract_adoption") {
+      const noun = op.op === "retract_evidence" ? "evidence" : "adoption";
+      const live = await db
+        .selectFrom(op.op === "retract_evidence" ? "unit_evidence" : "unit_adoption")
+        .select(["span_start", "span_end"])
+        .where("unit_id", "=", u.id)
+        .where("source_id", "=", Number(op.source.slice(1)))
+        .where("retracted_at", "is", null)
+        .execute();
+      const spans = [...new Map(live.map((l) => [`${l.span_start}:${l.span_end}`, l])).values()];
+      if (op.quote !== undefined) {
+        const got = await span(op.source, op.quote, what);
+        const hit = got && spans.find((l) => l.span_start === got.at[0] && l.span_end === got.at[1]);
+        if (hit) retracts = [hit.span_start, hit.span_end];
+        else if (got) errors.push(`${what}: no live ${noun} of ${op.source} quotes that`);
+      } else if (spans.length > 1)
+        errors.push(`${what}: ${spans.length} pieces of ${noun} cite ${op.source}; add quote to say which`);
+      else if (spans[0]) retracts = [spans[0].span_start, spans[0].span_end];
+      else errors.push(`${what}: no live ${noun} cites ${op.source}`);
+    }
+    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts });
   }
   return { errors, problems, units, ops };
 }
@@ -499,6 +531,8 @@ export async function saveGlean(
         .set(retraction)
         .where("unit_id", "=", p.unitId)
         .where("source_id", "=", Number(op.source.slice(1)))
+        .where("span_start", "=", p.retracts?.[0] ?? -1)
+        .where("span_end", "=", p.retracts?.[1] ?? -1)
         .where("retracted_at", "is", null)
         .execute();
       changed.push(`${op.unit}: ${op.op === "retract_evidence" ? "evidence" : "adoption"} retracted`);
