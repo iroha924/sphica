@@ -90,8 +90,6 @@ Once, before the first release, the owner sets these up in the web UI (without t
 - GitHub: a ruleset limiting creating, updating, and deleting tags `v*` to the owner
 - npm: trusted publisher (repository `iroha924/sphica`, workflow `release.yml`, environment `npm-release`, direct `npm publish` allowed),
   2FA required, publishing with tokens disallowed. A connection cannot be edited: to change one, delete it and create it again
-- npm: releases no longer move the `next` dist-tag. After the first release this way, the owner removes it once with `npm dist-tag rm sphica next`
-  in their own terminal (it asks for an OTP); `bun run release:status` reports it until then
 
 3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`, and `release`, the dry run) and the Codex review. Keep main merged into the PR branch
    (if main has moved ahead, the tree CI checked and the tag's tree do not match)
@@ -105,7 +103,7 @@ Once, before the first release, the owner sets these up in the web UI (without t
 6. The owner approves the `npm-release` environment on the run page. `publish` then runs both checks again, compares the SHA-512 of the same tarball,
    attests the SBOM, and runs `npm publish <tgz> --tag latest --provenance` (trusted publishing, no token). The version is the default install from here
 7. `merge` merges the PR with `gh pr merge <PR> --merge --match-head-commit <head>` using the run's token. A merge by that token starts no other workflow
-8. `finish` runs `scripts/release-finish.mjs`: the merge commit's tree equals the tag's (`git diff --exit-code <head> <merge commit>`), the tarball npm serves
+8. `finish` runs `scripts/release-finish.mjs`. npm serves a published version a few minutes later (2 min 15 s for 0.5.4), so it first waits up to 4 minutes for it. Then: the merge commit's tree equals the tag's (`git diff --exit-code <head> <merge commit>`), the tarball npm serves
    has the SBOM attestation from this tag (`gh attestation verify <tgz> --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom --signer-workflow iroha924/sphica/.github/workflows/release.yml --source-ref refs/tags/v<version>`),
    and npm `latest` is the version. It then creates the GitHub Release from the PR body's "Release notes" section as is, only if the notes still match the digest from step 5
    (`gh release create v<version> --verify-tag --title v<version> --notes-file <file>`; not git log, which OpenSSF Best Practices' `release_notes` does not accept) and comments the result on the PR
@@ -120,7 +118,7 @@ When a job fails, `report-failure` comments on the PR with the failed jobs and w
 - npm has it but `merge` failed: the version is already `latest` while main lacks it. The owner decides whether to put `latest` back by running
   `npm dist-tag add sphica@<previous good version> latest` in their own terminal (the `!` prefix is only for this session's input box; in a shell, `!` inverts the exit code).
   That command asks for an OTP, which fails in a shell without a TTY such as Claude's. Fix the PR and ship a new version; never reuse the published one
-- `finish` failed after the merge: nothing is published again. npm's registry can serve a cached answer for a few minutes after a publish, so wait that long,
+- `finish` failed after the merge: nothing is published again. If npm still did not serve the version after finish's wait, wait a few more minutes,
   then rerun the failed job with `gh run rerun <run-id> --failed` (creating the Release is skipped when it exists),
   or run the failed check by hand with the commands in step 8
 - Do not rerun `publish` after it succeeded

@@ -30,6 +30,14 @@ else if (a[0] === "log") console.log("${MERGE} ${"c".repeat(40)} ${COMMIT}");
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALLS, "npm " + a.join(" ") + "\\n");
 if (a[0] === "pack") { fs.writeFileSync(path.join(a[a.indexOf("--pack-destination") + 1], "sphica-1.2.3.tgz"), ""); console.log("sphica-1.2.3.tgz"); }
+else if (a[0] === "view" && a[1] === "sphica@1.2.3") {
+  // npm accepts a publish and serves it a few minutes later; FAKE_APPEAR_AFTER is how many of these calls see nothing yet
+  const seen = path.join(path.dirname(process.env.CALLS), "seen");
+  const count = fs.existsSync(seen) ? Number(fs.readFileSync(seen, "utf8")) : 0;
+  fs.writeFileSync(seen, String(count + 1));
+  if (count < Number(process.env.FAKE_APPEAR_AFTER || 0)) { process.stderr.write("npm error code E404\\n"); process.exit(1); }
+  console.log("1.2.3");
+}
 else if (a.includes("dist-tags")) console.log(JSON.stringify({ latest: process.env.FAKE_LATEST || "1.2.3" }));
 else if (a[0] === "view") console.log("1.2.3");
 `,
@@ -77,6 +85,7 @@ function finish(args: string[], env: Record<string, string> = {}) {
         USERPROFILE: dir,
         GITHUB_REPOSITORY: "o/r",
         CALLS: calls,
+        RELEASE_FINISH_WAIT_SECONDS: "0",
         ...env,
       },
     });
@@ -131,6 +140,20 @@ test("release-finish refuses notes changed after the owner approved", () => {
   assert.equal(status, 1);
   assert.match(stderr, /Release notes changed after the owner approved/);
   assert.doesNotMatch(calls, /release create|pr comment/);
+});
+
+test("release-finish waits until npm serves the version it just published", () => {
+  const { status, stderr, calls } = finish(RELEASE, { FAKE_APPEAR_AFTER: "2" });
+  assert.equal(status, 0, stderr);
+  assert.equal(calls.match(/npm view sphica@1\.2\.3 version/g)?.length, 3);
+  assert.match(calls, /gh release create/);
+});
+
+test("release-finish gives up when npm never serves the version", () => {
+  const { status, stderr, calls } = finish(RELEASE, { FAKE_APPEAR_AFTER: "99" });
+  assert.equal(status, 1);
+  assert.match(stderr, /npm does not serve sphica@1\.2\.3 yet/);
+  assert.doesNotMatch(calls, /npm pack|release create|pr comment/);
 });
 
 test("release-finish does not create the Release twice when it is rerun", () => {

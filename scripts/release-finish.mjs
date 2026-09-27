@@ -94,6 +94,8 @@ function finish({ tag, commit, merge, pull }) {
   if (run("git", ["rev-parse", `${merge}^2`]) !== commit) fail(`${merge} does not merge ${tag} (${commit})`);
   if (!succeeds("git", ["diff", "--quiet", commit, merge])) fail(`the tree of ${merge} differs from ${tag}`);
 
+  if (!dryRun) waitForNpm(version);
+
   // 2. npm serves the bytes the publish job attested, which it had compared with prepare's SHA-512 first
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-release-finish-"));
   try {
@@ -159,4 +161,14 @@ function finish({ tag, commit, merge, pull }) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// npm accepts a publish and serves it minutes later (2 min 15 s for 0.5.4). Wait up to 4 minutes, within finish's 10-minute timeout
+function waitForNpm(version) {
+  const seconds = Number(process.env.RELEASE_FINISH_WAIT_SECONDS ?? 20);
+  for (let attempt = 0; attempt < 12; attempt++) {
+    if (attempt > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+    if (succeeds("npm", ["view", `sphica@${version}`, "version"])) return;
+  }
+  fail(`npm does not serve sphica@${version} yet; wait a few minutes and rerun finish`);
 }
