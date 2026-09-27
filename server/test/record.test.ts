@@ -39,6 +39,7 @@ const target = (p: number, sessionId: string | null = "s1"): Target => ({
   prefix: "trace:ext-s1/",
   sessionId,
   root: null,
+  sources: null,
 });
 
 async function save(db: TempDb, t: Target, record: unknown, looked: number[] = []) {
@@ -380,6 +381,36 @@ test("trace reads pending sessions, a draft's run, a session's messages and edit
     );
     assert.deepEqual(await sessionEdits(db.reader, "s1"), [{ path: "a.ts", via: "status", turn_id: "t1" }]);
     assert.deepEqual(await liveUnits(db.reader, p), []);
+  } finally {
+    await db.done();
+  }
+});
+
+test("a trace or harvest run cites only the sources it was given; another session's words are refused", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const mine = message(db, p, { id: "m1", text: "Use SQLite." });
+    const theirs = message(db, p, { id: "m2", text: "Use Postgres.", session: "s2" });
+    const record = (source: number, quote: string) => ({
+      units: [
+        {
+          key: "db",
+          kind: "decision",
+          stance: "do",
+          text: quote,
+          evidence: [{ source: `s${source}`, quote, role: "states" }],
+          adoption: [{ source: `s${source}`, quote }],
+        },
+      ],
+    });
+    const scoped: Target = { ...target(p), sources: [mine] };
+    const refused = await checkRecord(db.reader, scoped, record(theirs, "Use Postgres."));
+    assert.ok(
+      refused.errors.some((e) => e.includes(`s${theirs}: not a source of this run`)),
+      refused.errors.join(" | "),
+    );
+    assert.deepEqual((await checkRecord(db.reader, scoped, record(mine, "Use SQLite."))).errors, []);
   } finally {
     await db.done();
   }

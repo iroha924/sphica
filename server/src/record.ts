@@ -96,6 +96,8 @@ export type Target = {
   sessionId: string | null;
   /** The repository's working tree, where an anchor's symbol is looked up to record its lines; null when unknown */
   root: string | null;
+  /** The sources the run may cite (a trace's session, a harvest's pull request); null for glean, which cites any source of the project */
+  sources: readonly number[] | null;
 };
 
 type Planned = {
@@ -187,7 +189,11 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       : []
     ).map((s) => [s.id, s]),
   );
-  for (const r of refs) if (!sources.has(r)) errors.push(`s${r}: not a source of this project`);
+  for (const r of refs) {
+    if (!sources.has(r)) errors.push(`s${r}: not a source of this project`);
+    else if (target.sources && !target.sources.includes(r))
+      errors.push(`s${r}: not a source of this run (cite the sources record_context lists)`);
+  }
 
   const linked = [
     ...new Set(record.units.flatMap((u) => [...(u.supersedes ? [u.supersedes] : []), ...u.conflicts])),

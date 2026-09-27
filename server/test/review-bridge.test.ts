@@ -54,7 +54,14 @@ function checkout(): string {
 }
 
 async function save(db: TempDb, p: number, record: unknown) {
-  const t: Target = { projectId: p, origin: "trace", prefix: "trace:ext-s1/", sessionId: "s1", root: null };
+  const t: Target = {
+    projectId: p,
+    origin: "trace",
+    prefix: "trace:ext-s1/",
+    sessionId: "s1",
+    root: null,
+    sources: null,
+  };
   return inTransaction(db.ingest, async (trx) => {
     const run = await openRun(trx, {
       projectId: p,

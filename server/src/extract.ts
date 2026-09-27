@@ -179,6 +179,7 @@ async function scopeOf(
         prefix: `harvest:${number}/`,
         sessionId: null,
         root,
+        sources: sources.map((s) => s.id),
       },
       looked: sources.map((s) => s.id),
       text: [
@@ -202,7 +203,14 @@ async function scopeOf(
   if (run.origin === "glean") {
     const owner = sources.filter((m) => m.author_kind === "owner").slice(-20);
     return {
-      target: { projectId: run.project_id, origin: "glean", prefix: "glean:", sessionId: s.id, root },
+      target: {
+        projectId: run.project_id,
+        origin: "glean",
+        prefix: "glean:",
+        sessionId: s.id,
+        root,
+        sources: null,
+      },
       looked: [],
       text: [
         "New records are saved as glean:<key>. Find the records to change with search and read (read prints each record's revision).",
@@ -219,6 +227,7 @@ async function scopeOf(
       prefix: `trace:${s.external_id}/`,
       sessionId: s.id,
       root,
+      sources: sources.map((m) => m.id),
     },
     looked: sources.map((m) => m.id),
     text: [
