@@ -173,6 +173,8 @@ export async function createDriver(world: World): Promise<Driver> {
   /** The last search's hits and the last read's text, for expectations about them. */
   let found: UnitHit[] = [];
   let lastRead = "";
+  /** A time after every write so far and before the latest glean's, for reading as of just before it (writes carry the real clock). */
+  let beforeGlean = "";
   const search = async (query: string) =>
     (await searchUnits(db(), await projectId(), { question: query, limit: 10 })).hits;
   /** The last check output, for expectations about what check reported. */
@@ -398,8 +400,13 @@ export async function createDriver(world: World): Promise<Driver> {
         lastRead = parts.join("\n\n");
         return;
       }
-      if (step.glean && typeof step.glean === "object")
+      if (step.glean && typeof step.glean === "object") {
+        const tick = () => new Promise((r) => setTimeout(r, 2));
+        await tick();
+        beforeGlean = new Date().toISOString();
+        await tick();
         return glean(step.glean as { session: string; record: Record<string, unknown> });
+      }
       if (step.glean_each && typeof step.glean_each === "object") {
         const each = step.glean_each as { session: string; files: string[] };
         const target = await db().selectFrom("unit").select("key").orderBy("id").executeTakeFirstOrThrow();
@@ -441,9 +448,9 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.as_of && typeof step.as_of === "object") {
-        const at = step.as_of as { time: string; read: string };
-        lastRead =
-          (await readUnit(db(), await projectId(), at.read, repo, new Date(at.time).toISOString())) ?? "";
+        const at = step.as_of as { before: "glean"; read: string };
+        assert.ok(at.before === "glean" && beforeGlean, "as_of reads as of just before a glean step");
+        lastRead = (await readUnit(db(), await projectId(), at.read, repo, beforeGlean)) ?? "";
         return;
       }
       if (step.review_select && typeof step.review_select === "object") {

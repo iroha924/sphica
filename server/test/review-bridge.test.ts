@@ -201,6 +201,12 @@ test("no applicable record, no change, no base, and a PR argument each say what 
       "",
       "the same change is not reported twice in a session",
     );
+    fs.writeFileSync(path.join(w.repo, "README.md"), "hello\n");
+    assert.match(
+      await w.typed("review", "", "same"),
+      /checked 1 changed path/,
+      "an edited change with the same answer is still checked again",
+    );
     fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 5;\n");
     assert.match(
       await w.typed("review", "", "same"),

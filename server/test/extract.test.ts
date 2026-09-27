@@ -159,7 +159,22 @@ test("trace: pending lists the session, begin binds it, and check and save take 
     );
     assert.match((await checkText(db.ingest, run, p, null, record)).text, /✓ 1 record can be saved/);
     // A message captured after the run began was never shown to it: saving must not mark it traced
-    message(db, p, { id: "m3", text: "やっぱり Postgres も考えたい。", sent: "2099-01-01T00:00:00Z" });
+    const late = message(db, p, {
+      id: "m3",
+      text: "やっぱり Postgres も考えたい。",
+      sent: "2099-01-01T00:00:00Z",
+    });
+    // Nor is it shown or citable now: it waits for the next trace, which will look at it
+    assert.doesNotMatch(await contextText(db.ingest, run, p, null), /やっぱり Postgres/);
+    const citesLate = JSON.parse(
+      JSON.stringify(record)
+        .replaceAll(`s${m}`, `s${late}`)
+        .replaceAll("SQLite にしよう。", "やっぱり Postgres も考えたい。"),
+    );
+    assert.match(
+      (await checkText(db.ingest, run, p, null, citesLate)).text,
+      new RegExp(`s${late}: not a source of this run`),
+    );
     assert.match(await saveText(db.ingest, run, p, null, record), /trace:ext-s1\/storage active/);
     await assert.rejects(saveText(db.ingest, run, p, null, record), /already saved/);
     await assert.rejects(contextText(db.ingest, run, p + 1, null), /another project/);
@@ -440,6 +455,16 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     });
     await refused(replace({ path: "src/missing.ts" }), /no live anchor on src\/missing\.ts/);
     await refused(replace({ path: "./src.ts", symbol: "nope" }), /no live anchor on src\.ts nope/);
+    // Two replacements of one anchor would leave both new anchors live
+    const twice = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      ...replace({ path: "src.ts", symbol: "openStore" }),
+    };
+    await assert.rejects(
+      ops([twice, twice]),
+      /ops\.1 .*another operation in this batch already replaces src\.ts openStore/,
+    );
     await refused(
       { op: "retract_evidence", source: `s${issue}`, reason_source: `s${reply}`, reason_quote: "了解。" },
       /only the owner's words/,

@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Kysely } from "kysely";
+import { leaves } from "./anchors.ts";
 import type { DB } from "./db-types.ts";
 
 export type Place = { key: string; root: string; name: string };
@@ -201,8 +202,7 @@ export function localRoots(roots = [path.join(os.homedir(), "Projects")]): {
 export function relativeTo(root: string, file: string, cwd = root): string | null {
   const abs = path.resolve(cwd, file);
   const rel = path.relative(root, abs);
-  // A name like `..config` is inside the root. Only `..` itself or paths starting with `../` leave it.
-  if (!rel || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null;
+  if (!rel || leaves(rel)) return null;
   return rel.split(path.sep).join("/");
 }
 

@@ -8,18 +8,22 @@ export type AnchorState = "located" | "moved" | "missing" | "unknown";
 /** Files larger than this are not scanned for a symbol. */
 const MAX_BYTES = 2 * 1024 * 1024;
 
+/** Whether a path.relative result leaves its base. A name like `..config` stays inside; only `..` itself or `../...` leave. */
+export const leaves = (rel: string): boolean =>
+  rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The text of a repository file, or null when it is absent; undefined when it cannot be read as text here. */
 function readText(root: string, rel: string): string | null | undefined {
   const abs = path.join(root, rel);
-  if (path.relative(root, abs).startsWith("..")) return undefined;
+  if (leaves(path.relative(root, abs))) return undefined;
   const st = fs.lstatSync(abs, { throwIfNoEntry: false });
   if (!st) return null;
   if (!st.isFile() || st.size > MAX_BYTES) return undefined;
   // A symlinked directory on the way can lead outside the repository: the real path must stay inside the real root
   const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
-  if (inside.startsWith("..") || path.isAbsolute(inside)) return undefined;
+  if (leaves(inside)) return undefined;
   const buf = fs.readFileSync(abs);
   return buf.includes(0) ? undefined : buf.toString("utf8");
 }

@@ -102,6 +102,38 @@ test("a rename without content changes lists both paths, the old one as gone", (
   ]);
 });
 
+// Git quotes a path holding a tab, quote, backslash, or (without core.quotePath=false) a non-ASCII byte, and escapes it C-style
+test("quoted Git paths are read unquoted in headers, renames, and deletions", () => {
+  const diff = [
+    'diff --git "a/q\\"x.sh" "b/q\\"x.sh"',
+    "old mode 100644",
+    "new mode 100755",
+    'diff --git "a/old\\\\name.ts" "b/new\\tname.ts"',
+    "similarity index 100%",
+    'rename from "old\\\\name.ts"',
+    'rename to "new\\tname.ts"',
+    'diff --git "a/\\346\\227\\245.ts" "b/\\346\\227\\245.ts"',
+    '--- "a/\\346\\227\\245.ts"',
+    '+++ "b/\\346\\227\\245.ts"',
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+    'diff --git "a/del\\tx.ts" "b/del\\tx.ts"',
+    "deleted file mode 100644",
+    '--- "a/del\\tx.ts"',
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-x",
+  ].join("\n");
+  assert.deepEqual(parseDiff(diff), [
+    { path: 'q"x.sh', added: [], lines: [] },
+    { path: "old\\name.ts", added: [], lines: [], gone: true },
+    { path: "new\tname.ts", added: [], lines: [] },
+    { path: "日.ts", added: ["y"], lines: [1] },
+    { path: "del\tx.ts", added: [], lines: [], gone: true },
+  ]);
+});
+
 test("inside a hunk, an added or removed line that looks like a file header stays a line of the same file", () => {
   const diff = [
     "diff --git a/src/a.ts b/src/a.ts",

@@ -240,6 +240,8 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     }
     return { s, at };
   };
+  // Anchors an earlier operation in this batch replaces: a second replacement would leave both new anchors live
+  const replaced = new Set<number>();
   for (const [i, op] of parsed.data.ops.entries()) {
     const what = `ops.${i} ${op.op} ${op.unit}`;
     const u = await db
@@ -314,8 +316,12 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
         if (op.from.symbol) q = q.where("symbol", "=", op.from.symbol);
         const live = await q.execute();
         const name = `${from}${op.from.symbol ? ` ${op.from.symbol}` : ""}`;
-        if (live.length === 1) replaces = live[0]?.id ?? null;
-        else if (!live.length) errors.push(`${what}: no live anchor on ${name}`);
+        if (live.length === 1) {
+          replaces = live[0]?.id ?? null;
+          if (replaces !== null && replaced.has(replaces))
+            errors.push(`${what}: another operation in this batch already replaces ${name}`);
+          if (replaces !== null) replaced.add(replaces);
+        } else if (!live.length) errors.push(`${what}: no live anchor on ${name}`);
         else errors.push(`${what}: ${live.length} live anchors on ${name}; give from.symbol`);
       }
     }

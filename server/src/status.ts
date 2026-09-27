@@ -1,7 +1,9 @@
 // What Sphica holds for one project: current work and coverage (captured, extracted, and still waiting), for MCP status and the CLI.
 import { type Kysely, sql } from "kysely";
 import type { DB } from "./db-types.ts";
-import { plural } from "./text.ts";
+import { framed } from "./frame.ts";
+import { inline } from "./panel.ts";
+import { head, plural } from "./text.ts";
 
 type Coverage = {
   sessions: number;
@@ -108,9 +110,10 @@ export async function status(db: Kysely<DB>, projectId: number, name: string): P
       ? `${plural(c.pendingSessions, "session")} not traced yet: their decisions exist only as captured text (run /sphica:trace pending).`
       : "Every captured session has been traced.",
     ...(c.emptySessions ? [`${plural(c.emptySessions, "session")} traced with nothing to record.`] : []),
-    ...(c.work.length
-      ? ["Work in progress:", ...c.work.map((w) => `- ${w.title} (${w.status}): ${w.current}`)]
-      : ["No work in progress."]),
+    // Work text was written from session text: one line per item, inside the past-records frame
+    c.work.length
+      ? `Work in progress:\n${framed(c.work.map((w) => `- ${head(inline(w.title), 200)} (${w.status}): ${head(inline(w.current), 500)}`).join("\n"))}`
+      : "No work in progress.",
   ];
   return lines.join("\n");
 }

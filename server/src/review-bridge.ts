@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { HookInput } from "./capture.ts";
 import { type FileDiff, parseDiff } from "./review.ts";
+import { sha256 } from "./text.ts";
 
 export type ReviewInput = HookInput & {
   expansion_type?: string;
@@ -40,7 +41,8 @@ export function reviewCall(input: ReviewInput): { name: string; args: string } |
   return { name, args: typeof args === "string" ? args.slice(0, 1000) : "" };
 }
 
-export type Change = { base: string; files: FileDiff[] } | { problem: string };
+/** A local change, with a digest of what was read so a review of the same change is told once */
+export type Change = { base: string; files: FileDiff[]; digest: string } | { problem: string };
 
 // Pinned against user settings that change what diff prints: path quoting, prefixes (diff.mnemonicPrefix, diff.dstPrefix), and textconv
 const git = (root: string, args: string[], maxBuffer = 1024 * 1024) =>
@@ -104,6 +106,7 @@ export function localChange(root: string, args: string): Change {
     if (!files.some((f) => f.path === name)) files.push({ path: name, added: [], lines: [] });
   if (files.length + untracked.length > MAX_FILES)
     return { problem: `the change has more than ${MAX_FILES} files` };
+  const read = [from, diff];
   for (const rel of untracked) {
     let text = "";
     try {
@@ -114,6 +117,7 @@ export function localChange(root: string, args: string): Change {
     }
     const added = text ? text.split(/\r?\n/) : [];
     files.push({ path: rel, added, lines: added.map((_, i) => i + 1) });
+    read.push(rel, text);
   }
-  return { base, files };
+  return { base, files, digest: sha256(read.join("\0")).toString("hex") };
 }

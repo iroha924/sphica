@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Kysely } from "kysely";
+import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, iso, openReader } from "./db.ts";
 import type { DB } from "./db-types.ts";
@@ -134,6 +135,8 @@ type Plan = {
   omitted: number;
   path: string | null;
   reason: string | null;
+  /** What a review delivery is told once per session for: the change it read, or its text when no change was read */
+  once?: string;
 };
 
 const anchoredTo = (db: Kysely<DB>, projectId: number, rels: string[]) =>
@@ -271,7 +274,7 @@ async function namedInCommand(
     const abs = path.join(root, p);
     const fromCwd = path.relative(cwd, abs);
     const out = new Set<string>();
-    for (const f of [p, abs, fromCwd.startsWith("..") ? "" : fromCwd])
+    for (const f of [p, abs, leaves(fromCwd) ? "" : fromCwd])
       if (f)
         for (const sep of ["/", "\\"]) {
           const t = f.split(/[\\/]/).join(sep);
@@ -429,11 +432,12 @@ async function beforeReview(
   const base = inline(change.base);
   if (!n)
     return said(`Sphica: no local change against ${base} to check against past decisions.`, "no change");
+  const once = `${change.base}\0${change.digest}`;
   // The same bar as other deliveries: a record in an unresolved conflict is held back
   const live = new Set((await deliverable(db, projectId).select("u.id").execute()).map((r) => r.id));
   const rows = (await selectForReview(db, projectId, change.files)).filter((a) => live.has(a.id));
   const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
-  if (!rows.length) return said(`Sphica ${checked}: no active recorded decision applies.`, null);
+  if (!rows.length) return { ...said(`Sphica ${checked}: no active recorded decision applies.`, null), once };
   const shown = rows.slice(0, LIMITS.review.units);
   const f = fit(
     shown.map((u) => line(u, ` [${inline(u.because)}]`)),
@@ -447,12 +451,13 @@ async function beforeReview(
     omitted: rows.length - shown.length + f.omitted,
     path: null,
     reason: null,
+    once,
   };
 }
 
-/** Whether this session was already told exactly this about a review (a review skill is often called more than once per change). */
-function toldBefore(session: string, text: string): boolean {
-  return !markOnce("review", `${session}\0${text}`);
+/** Whether this session was already told about this change (a review skill is often called more than once per change). */
+function toldBefore(session: string, key: string): boolean {
+  return !markOnce("review", `${session}\0${key}`);
 }
 
 /**
@@ -568,13 +573,9 @@ export async function deliver(
   const place = identify(input.cwd ?? process.cwd());
   if (!place) return "";
   let rels = targets
-    .map((t) =>
-      path
-        .relative(place.root, path.resolve(input.cwd ?? place.root, t))
-        .split(path.sep)
-        .join("/"),
-    )
-    .filter((r) => r && !r.startsWith("..") && !path.isAbsolute(r));
+    .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
+    .filter((r) => r && !leaves(r))
+    .map((r) => r.split(path.sep).join("/"));
   if (onPath && !shell && !rels.length) return "";
   let db: Kysely<DB> | null = null;
   try {
@@ -612,7 +613,7 @@ export async function deliver(
             : call
               ? await beforeReview(db, pid, place.root, call)
               : await atStart(db, pid, branchOf(place.root));
-    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.text)) return "";
+    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
     await log(file, pid, host, input.session_id, event, plan, plan.text ? "emitted" : "nothing").catch(
       () => {},
     );

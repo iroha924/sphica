@@ -27,7 +27,7 @@ export async function readUnit(
   projectId: number,
   ref: string,
   root: string | null,
-  /** Only evidence and adoption added by this time (an as-of snapshot for replaying a past task) */
+  /** Only what existed by this time: the record, its evidence, adoption, anchors, and links (an as-of snapshot for replaying a past task) */
   asOf?: string,
 ): Promise<string | null> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
@@ -53,7 +53,8 @@ export async function readUnit(
           )
           .execute()
           .then((rows) => (rows.length === 1 ? rows[0] : undefined)));
-  if (!bare) return null;
+  // As of a past time, a record created later does not exist yet
+  if (!bare || (asOf && bare.created_at > asOf)) return null;
   return describe(db, bare, root, asOf);
 }
 
@@ -119,6 +120,7 @@ async function describe(
       .selectFrom("unit_anchor")
       .select(["path", "symbol", "role", "commit_sha", "line_start", "retired_at"])
       .where("unit_id", "=", u.id)
+      .where("added_at", "<=", asOf ?? "9999")
       .orderBy("id")
       .execute(),
     db
@@ -126,6 +128,7 @@ async function describe(
       .innerJoin("unit as a", "a.id", "l.from_unit")
       .innerJoin("unit as b", "b.id", "l.to_unit")
       .where((eb) => eb.or([eb("l.from_unit", "=", u.id), eb("l.to_unit", "=", u.id)]))
+      .where("l.added_at", "<=", asOf ?? "9999")
       .select(["l.kind", "l.resolved_at", "a.id as from_id", "a.key as from_key", "b.key as to_key"])
       .execute(),
     db

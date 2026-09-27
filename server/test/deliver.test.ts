@@ -267,6 +267,38 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
+// Only `..` itself or `../...` leave the repository; a folder named `..config` is inside it
+test("an edit under a folder whose name starts with two dots is delivered", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep the config flat." });
+    await save(db, p, {
+      units: [
+        decided("flat", m, "Keep the config flat.", {
+          anchors: [{ path: "..config/app.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const out = await deliver(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "dots",
+        cwd: repo,
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "..config", "app.ts") },
+      },
+      "claude-code",
+      db.file,
+    );
+    assert.match(out, /Keep the config flat/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("a read shows at most 5 records, and reads over a session at most 8, even when the text would fit", async () => {
   const db = tempDb();
   const repo = checkout();

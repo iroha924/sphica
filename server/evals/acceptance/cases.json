@@ -2091,7 +2091,7 @@
       "id": "glean-11",
       "layer": "glean",
       "lang": "en",
-      "summary": "Evidence gleaned after a task's cutoff is excluded from that task's snapshot, even for an older file",
+      "summary": "Evidence gleaned after a task's cutoff is excluded from that task's snapshot, while the record and its earlier evidence stay",
       "given": [
         {
           "case": "glean-04"
@@ -2099,13 +2099,16 @@
       ],
       "when": {
         "as_of": {
-          "time": "2026-03-19T00:00:00Z",
+          "before": "glean",
           "read": "trace:s-ja-telemetry/no-telemetry"
         }
       },
       "then": [
         {
           "evidence_sources_not_include": "file:docs/運用メモ.md"
+        },
+        {
+          "read_contains": "(states)"
         }
       ]
     },

@@ -8,6 +8,35 @@ import type { DB } from "./db-types.ts";
 /** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */
 export type FileDiff = { path: string; added: string[]; lines: number[]; gone?: true };
 
+const ESCAPES: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+
+/** A path as Git prints it in a diff: C-quoted when it holds special bytes, then without its a/ or b/ prefix. */
+function gitPath(token: string, prefix: string): string {
+  let out = token;
+  if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
+    const bytes: number[] = [];
+    const body = token.slice(1, -1);
+    for (let i = 0; i < body.length; i++) {
+      const c = String.fromCodePoint(body.codePointAt(i) ?? 0);
+      if (c !== "\\") {
+        bytes.push(...Buffer.from(c, "utf8"));
+        i += c.length - 1;
+        continue;
+      }
+      const octal = /^[0-3][0-7]{2}/.exec(body.slice(i + 1));
+      if (octal) {
+        bytes.push(Number.parseInt(octal[0], 8));
+        i += 3;
+      } else {
+        const next = body[++i] ?? "";
+        bytes.push(ESCAPES[next] ?? next.charCodeAt(0));
+      }
+    }
+    out = Buffer.from(bytes).toString("utf8");
+  }
+  return prefix && out.startsWith(prefix) ? out.slice(prefix.length) : out;
+}
+
 /**
  * The changed files of a unified diff (`git diff` output), with each added line and its line number in the new file. A deleted file and
  * the old path of a rename are kept as gone.
@@ -47,27 +76,27 @@ export function parseDiff(text: string): FileDiff[] {
       }
       continue;
     }
-    const header = /^diff --git a\/.+ b\/(.+)$/.exec(raw);
+    const header = /^diff --git (?:"(?:[^"\\]|\\.)*"|a\/.+) ("(?:[^"\\]|\\.)*"|b\/.+)$/.exec(raw);
     if (header?.[1]) {
       closeBlock();
-      block = header[1];
+      block = gitPath(header[1], "b/");
       continue;
     }
     // A rename prints its paths as metadata, with no ---/+++ header or hunk when the content is unchanged
     const renamed = /^rename (from|to) (.+)$/.exec(raw);
     if (renamed?.[2]) {
       block = null;
-      const f = at(renamed[2]);
+      const f = at(gitPath(renamed[2], ""));
       if (renamed[1] === "from") f.gone = true;
       continue;
     }
-    const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(raw);
+    const to = /^\+\+\+ (.+?)\t?$/.exec(raw);
     if (to) {
       block = null;
       // The old path is the header line just before; it names a deleted file
-      const was = /^--- (?:a\/)?(.+?)\t?$/.exec(rows[i - 1] ?? "")?.[1];
-      cur = to[1] === "/dev/null" ? null : at(to[1] ?? "");
-      if (!cur && was && was !== "/dev/null") at(was).gone = true;
+      const was = /^--- (.+?)\t?$/.exec(rows[i - 1] ?? "")?.[1];
+      cur = to[1] === "/dev/null" ? null : at(gitPath(to[1] ?? "", "b/"));
+      if (!cur && was && was !== "/dev/null") at(gitPath(was, "a/")).gone = true;
       continue;
     }
     const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(raw);

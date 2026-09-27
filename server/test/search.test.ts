@@ -224,6 +224,10 @@ test("anchors are located, moved, missing, or unknown, and a symbol only matches
     assert.equal(check("none.ts", null, null), "missing");
     assert.equal(check("bin", "x", null), "unknown");
     assert.equal(check("../outside", null, null), "unknown");
+    // A name that only starts with two dots is inside the repository
+    fs.mkdirSync(path.join(root, "..config"));
+    fs.writeFileSync(path.join(root, "..config", "c.ts"), "const open = 1;\n");
+    assert.equal(check("..config/c.ts", "open", 1), "located");
     assert.equal(checkAnchor(null, { path: "a.ts", symbol: null, line_start: null }).state, "unknown");
     // A symlinked directory inside the repository must not let an anchor read a file outside it
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-outside-"));
@@ -324,9 +328,24 @@ test("reading as of a past time shows no retraction made after it", async () => 
             { source: `s${m}`, quote: "Use pnpm.", role: "states" },
             { source: `s${m}`, quote: "It installs faster.", role: "explains" },
           ],
+          anchors: [{ path: "package.json", role: "applies_to" }],
         }),
+        decision("npm", m, "It installs faster."),
       ],
     });
+    // A record, an anchor, and a link that came after the as-of time below
+    const run0 = Number(db.owner.prepare("select id from extraction_run limit 1").get()?.id);
+    db.owner.exec("update unit set created_at = '2099-01-01T00:00:00.000Z' where key = 'trace:ext-s1/npm'");
+    db.owner
+      .prepare(
+        "insert into unit_anchor (unit_id, path, role, run_id, added_at) select id, 'later.json', 'applies_to', ?, '2099-01-01T00:00:00.000Z' from unit where key = 'trace:ext-s1/pnpm'",
+      )
+      .run(run0);
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) select a.id, b.id, 'implements', ?, '2099-01-01T00:00:00.000Z' from unit a, unit b where a.key = 'trace:ext-s1/npm' and b.key = 'trace:ext-s1/pnpm'",
+      )
+      .run(run0);
     // One of two pieces of evidence is retracted, dated after the as-of time below
     db.owner.exec(
       "update unit_evidence set retracted_at = '2099-01-01T00:00:00.000Z', retraction_reason = 'later mistake', retraction_source_id = source_id, retraction_span_start = span_start, retraction_span_end = span_end where role = 'explains'",
@@ -345,6 +364,9 @@ test("reading as of a past time shows no retraction made after it", async () => 
     assert.match(before, /Use pnpm\./);
     assert.doesNotMatch(before, /retracted|later mistake|withdrawn|later withdrawal/);
     assert.match(before, /decision do, active/);
+    assert.match(before, /package\.json/);
+    assert.doesNotMatch(before, /later\.json|Implemented by/);
+    assert.equal(await readUnit(db.reader, p, "trace:ext-s1/npm", null, asOf), null);
     assert.match(
       (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null)) ?? "",
       /\[retracted: later mistake\]/,

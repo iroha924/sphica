@@ -23,6 +23,7 @@ import {
   version,
 } from "@stricli/core";
 import { dbInit, inspect, reindex } from "./admin.ts";
+import { leaves } from "./anchors.ts";
 import { readState, rejectedDir, unregisteredDir } from "./capture.ts";
 import { withDb } from "./cli/common.ts";
 import { closing, failure, indent, section, steps, stopped, title } from "./cli/view.ts";
@@ -274,7 +275,7 @@ async function uninstall(yes: boolean): Promise<void> {
   // Inside by path segments: ~/.sphica-old is a sibling, not a folder in ~/.sphica
   const inHome = (p: string) => {
     const rel = path.relative(home, path.resolve(p));
-    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+    return rel === "" || !leaves(rel);
   };
   const where = [
     home,
