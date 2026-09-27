@@ -64,26 +64,30 @@ function signals(log: string): Row["signals"] {
 }
 
 /**
- * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs
- * with Node's permission model (reads only the checkout, no writes or child processes) and, on macOS, sandbox-exec without network.
+ * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs only
+ * on macOS, in sandbox-exec without network, under Node's permission model (reads only the checkout, no writes or child processes), with no inherited environment.
  */
 function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
+  if (process.platform !== "darwin")
+    return "not run (hidden tests run only on macOS, where sandbox-exec denies network)";
   fs.mkdirSync(path.join(work, "test"), { recursive: true });
   fs.writeFileSync(path.join(work, "test", "hidden.test.ts"), task.test);
-  const node = [
-    process.execPath,
-    "--permission",
-    `--allow-fs-read=${fs.realpathSync(work)}`,
-    "--test",
-    "--test-isolation=none",
-    "test/hidden.test.ts",
-  ];
-  const [command, ...rest] =
-    process.platform === "darwin"
-      ? ["sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", ...node]
-      : node;
-  const r = spawnSync(command ?? "", rest, { cwd: work, encoding: "utf8", timeout: 300_000 });
+  const inside = fs.realpathSync(work);
+  const r = spawnSync(
+    "/usr/bin/sandbox-exec",
+    [
+      "-p",
+      "(version 1)(allow default)(deny network*)",
+      process.execPath,
+      "--permission",
+      `--allow-fs-read=${inside}`,
+      "--test",
+      "--test-isolation=none",
+      "test/hidden.test.ts",
+    ],
+    { cwd: work, encoding: "utf8", timeout: 300_000, env: { PATH: "/usr/bin:/bin", HOME: inside } },
+  );
   const pass = /^ℹ pass (\d+)/m.exec(r.stdout)?.[1] ?? "0";
   const fail = /^ℹ fail (\d+)/m.exec(r.stdout)?.[1] ?? "?";
   return `${pass} passed, ${fail} failed`;
