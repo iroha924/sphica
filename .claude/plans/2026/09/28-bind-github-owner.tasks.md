@@ -88,25 +88,36 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `fix(github): cap logins at 39 characters and test the signal and size cases`
   - 結果: red を実測（pass 5 / fail 1、40 文字が ok）。直した後 `bun run test` → 299 pass / 0 fail。`bun run typecheck` → 指摘なし
 
+- [x] T12: 39 文字のログイン名が通る境界をテストする
+  - 種別: 変更
+  - 計画: S2
+  - 依存: T11（39 文字の上限が要る）
+  - 変更: `server/test/github.test.ts`
+  - 完了条件: `bun run test` → 39 文字の login が ok で返る検査を含めて通る
+  - コミット: `feat(cli): bind the signed-in GitHub account in init and show it in doctor`
+  - 結果: `bun run verify` → rc 0（`bun run test` を含む）
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
 
-- [ ] T04: init で登録して表示し、doctor に登録済みのアカウントを出す
+- [x] T04: init で登録して表示し、doctor に登録済みのアカウントを出す
   - 種別: 追加
   - 計画: S4
   - 依存: T02（ghUser() が要る）, T03（bindOwner() が要る）
-  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`, `scripts/check-sql-live.mjs`
+  - 変更: `server/src/cli.ts`, `server/src/admin.ts`, `server/test/cli.test.ts`, `server/test/admin.test.ts`, `server/test/fake-gh.ts`, `scripts/lib/live-harness.mjs`, `scripts/check-sql-live.mjs`, `scripts/check-tarball.mjs`
   - 完了条件: `bun run sql:live` → 一時 HOME と偽の gh で init が登録し、gh の失敗でも 0 で終わり、doctor が `GitHub owner` を表示する検査が通る
   - コミット: `feat(cli): bind the signed-in GitHub account in init and show it in doctor`
+  - 結果: `bun run sql:live` → 8 / 8 SQL sites、未ログインの init が理由を出し、ログイン済みの init が hana (id 42) を登録し、doctor が `✓ GitHub owner hana (id 42)` を出す検査を含めて通る。`node scripts/check-tarball.mjs <npm pack の tgz>` → CLI 0.5.5 が起動し、DB を作り、アカウントを登録。`bun run verify` → rc 0
 
-- [ ] T05: 受け入れのドライバーで偽の gh を init の前に置き、CONTRIBUTOR の自分の PR が採用されるケースを足す
+- [x] T05: 受け入れのドライバーで偽の gh を init の前に置き、CONTRIBUTOR の自分の PR が採用されるケースを足す
   - 種別: 追加
   - 計画: S5
   - 依存: T04（init が登録しないとケースが通らない）
-  - 変更: `server/evals/acceptance/driver.ts`, `server/evals/acceptance/world.json`, `server/evals/acceptance/cases.json`
+  - 変更: `server/evals/acceptance/driver.ts`, `server/evals/acceptance/world.json`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run acceptance` → 新しいケースを含めて通り、既存ケースの結果が変わらない
   - コミット: `test(acceptance): harvest the bound owner's pull request as a contributor`
+  - 結果: `bun run acceptance` → 57 pass / 0 fail（capture-09: 登録後の CONTRIBUTOR の PR が active で author_is_owner、capture-10: 登録なしは candidate で author_is_owner でない。既存 55 件は変わらず）
 
 ## P3: 文書と出荷
 
@@ -137,3 +148,7 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T01 のレビュー / 指摘なし（Codex 側はテストを流せず、手元の `bun run test` で確認済み） / そのまま
 - 2026-09-28 / T03 のレビュー / F1（revision をロックの前に読む）と F2（複数行で最初の行だけ比べる）を採用 / 修正タスク T10 を足した
 - 2026-09-28 / T09 のレビュー / F1 のうち長さ（39 文字）は採用、EMU の接尾辞の形の検査は見送り（login は表示と保存だけで、owner の判定は数値 ID）。F2（シグナルと上限超えのテスト）は採用 / 修正タスク T11 を足した
+- 2026-09-28 / T04 / init を流すテスト（admin.test、cli.test、sql:live、check-tarball）が手元の本物の gh で api.github.com に繋がることに気づいた / 偽の gh を PATH の先頭に置く server/test/fake-gh.ts と live-harness の fakeGh を足し、変更欄を広げた
+- 2026-09-28 / T04, T05 / 受け入れのドライバーは init の後に偽の gh を置いていたため、T04 だけのコミットでは受け入れテストが本物の gh を呼ぶ / T04 と T05 を 1 コミットにした。既存ケースを変えないよう、最初の init は未ログインで流し、`gh_login` のステップで登録する形にした（plan の「world の任意の欄」から変更。world の owner 欄は前からあるので使わなかった）
+- 2026-09-28 / T05 / 受け入れの件数を固定する検査がある / capture の件数を 8 → 10 にした
+- 2026-09-28 / T10, T11 のレビュー / F2（39 文字の境界テスト）を採用し T12 を足した。F1（revision の競合の回帰テスト）は見送り（順序を決めて再現する手段が無く、起きるのは別の接続が user_version を書き換える場合だけ）

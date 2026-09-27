@@ -107,7 +107,8 @@ export function dbInit(file: string = dbFile()): void {
 }
 
 export type Binding =
-  | { kind: "bound" | "already" }
+  | { kind: "bound" }
+  | { kind: "already" }
   | { kind: "other"; id: string; login: string | null }
   | { kind: "skipped"; revision: number };
 

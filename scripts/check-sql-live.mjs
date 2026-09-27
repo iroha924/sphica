@@ -28,11 +28,23 @@ await withTempDir(async (dir) => {
 
   {
     // Outside any repository, so init only creates the database (from the repository root it would register this checkout too)
-    note("init", runCli(["init", "--cwd", dir], dir, covDir));
+    // gh is signed out here (the harness puts a fake gh first on PATH): init still sets up, and says why nothing was bound
+    const unbound = note("init", runCli(["init", "--cwd", dir], dir, covDir));
+    if (!/GitHub account not bound: gh api user failed/.test(unbound.out))
+      failures.push(
+        `init with a signed-out gh does not say the account was not bound\n${unbound.out.slice(0, 600)}`,
+      );
 
     // ---- CLI: register, capture, then delete, in that order ----
     // The repo has a remote, so no --name (the CLI would refuse it). The key becomes git:github.com/example/live.
-    note("init (register)", runCli(["init", "--cwd", repo], dir, covDir));
+    const registered = note(
+      "init (register)",
+      runCli(["init", "--cwd", repo], dir, covDir, {
+        SPHICA_TEST_GH_USER: JSON.stringify({ id: 42, login: "hana" }),
+      }),
+    );
+    if (!/GitHub account hana \(id 42\) bound as the owner/.test(registered.out))
+      failures.push(`init with a signed-in gh does not bind the account\n${registered.out.slice(0, 600)}`);
     // The capture hook and flush take the host session from the environment, as in a real session.
     const asSession = (id) => ({ cwd: repo, CLAUDE_CODE_SESSION_ID: id });
     // Capture. Queue through the hook, then flush. Flushing an empty queue returns 0 and never runs the write SQL.
@@ -96,6 +108,7 @@ await withTempDir(async (dir) => {
     for (const [label, want] of [
       ["Schema version", /✓ Schema version\s+revision \d+/],
       ["Full-text index", /✓ Full-text index\s+healthy/],
+      ["GitHub owner", /✓ GitHub owner\s+hana \(id 42\)/],
       ["Projects", /Projects/],
     ]) {
       if (!want.test(doctor.out))

@@ -9,7 +9,10 @@ import { fileURLToPath } from "node:url";
 import { bindOwner, dbInit, inspect, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
+import { fakeGhPath } from "./fake-gh.ts";
 import { at, hash } from "./temp-db.ts";
+
+const signedOut = fakeGhPath();
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "cli.ts");
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "sphica-admin-"));
@@ -163,7 +166,7 @@ test("reindex that fails rolls back and rethrows", async () => {
 test("sphica init creates the database in .sphica under HOME", () => {
   const home = tmp();
   execFileSync(process.execPath, [CLI, "init"], {
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+    env: { PATH: signedOut, HOME: home, USERPROFILE: home },
     stdio: "ignore",
     timeout: 30_000,
   });
@@ -181,7 +184,7 @@ test("old command forms are rejected and create no database", () => {
   ]) {
     const home = tmp();
     const r = spawnSync(process.execPath, [CLI, ...args], {
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+      env: { PATH: signedOut, HOME: home, USERPROFILE: home },
       encoding: "utf8",
       timeout: 30_000,
     });
@@ -194,7 +197,7 @@ test("old command forms are rejected and create no database", () => {
 test("a boxed command that fails prints its heading once and closes with Stopped", () => {
   const home = tmp();
   const r = spawnSync(process.execPath, [CLI, "doctor", "--reindex"], {
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+    env: { PATH: signedOut, HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 30_000,
   });
@@ -206,8 +209,11 @@ test("a boxed command that fails prints its heading once and closes with Stopped
 
 /** Runs the CLI with HOME set to home; the repo helpers below make the places init looks at. */
 function cli(home: string, ...args: string[]) {
+  return cliWith(signedOut, home, ...args);
+}
+function cliWith(PATH: string, home: string, ...args: string[]) {
   const r = spawnSync(process.execPath, [CLI, ...args], {
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+    env: { PATH, HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 60_000,
   });
@@ -247,6 +253,26 @@ test("sphica init in a repository with a remote creates the database and registe
   assert.equal(again.code, 0, again.out);
   assert.match(again.out, /already registered/, again.out);
   assert.deepEqual(projectKeys(home), ["git:github.com/example/proj"]);
+});
+
+// Without gh, or signed out, init still sets up; with gh it binds that account once and never adds a second one
+test("sphica init binds the account gh is signed in to, and says why when it cannot", () => {
+  const home = tmp();
+  const out = cli(home, "init", "--cwd", tmp());
+  assert.equal(out.code, 0, out.out);
+  assert.match(out.out, /GitHub account not bound: gh api user failed/, out.out);
+  const bound = cliWith(fakeGhPath({ id: 42, login: "hana" }), home, "init", "--cwd", tmp());
+  assert.equal(bound.code, 0, bound.out);
+  assert.match(bound.out, /GitHub account hana \(id 42\) bound as the owner/, bound.out);
+  const again = cliWith(fakeGhPath({ id: 42, login: "hana" }), home, "init", "--cwd", tmp());
+  assert.match(again.out, /hana \(id 42\) already bound/, again.out);
+  const other = cliWith(fakeGhPath({ id: 7, login: "someone" }), home, "init", "--cwd", tmp());
+  assert.equal(other.code, 0, other.out);
+  assert.match(
+    other.out,
+    /signed in as someone \(id 7\), but hana \(id 42\) is bound as the owner; not added/,
+    other.out,
+  );
 });
 
 test("sphica init outside a repository only creates the database", () => {

@@ -30,6 +30,15 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
 // Do not pass SPHICA_DB, which points to the owner's database, to the child (only the temp HOME database is created)
 const parentEnv = { ...process.env };
 delete parentEnv.SPHICA_DB;
+// init reads the signed-in account through gh: a fake gh first on PATH answers, so the runner's gh never reaches api.github.com
+const bin = path.join(home, "fake-gh");
+fs.mkdirSync(bin);
+fs.writeFileSync(
+  path.join(bin, "gh"),
+  `#!${process.execPath}\nconst a = process.argv.slice(2);\nif (a[0] === "api" && a[1] === "user") process.stdout.write('{"id":42,"login":"hana"}');\nelse process.exit(1);\n`,
+  { mode: 0o755 },
+);
+parentEnv.PATH = `${bin}${path.delimiter}${process.env.PATH ?? ""}`;
 try {
   execFileSync("tar", ["xzf", tgz, "-C", out]);
   const pkg = path.join(out, "package");
@@ -48,9 +57,11 @@ try {
     throw new Error(`the tarball CLI reported ${named}, but the package version is ${version}`);
   cli("--help");
   cli("doctor", "--help");
-  cli("init");
+  const init = cli("init");
   if (!fs.existsSync(path.join(home, ".sphica", "sphica.db")))
     throw new Error("init did not create a database");
+  if (!/GitHub account hana \(id 42\) bound as the owner/.test(init))
+    throw new Error(`init did not bind the GitHub account gh answered\n${init}`);
   const filesIn = (dir) =>
     fs
       .readdirSync(dir, { withFileTypes: true, recursive: true })
@@ -67,7 +78,7 @@ try {
   if (fs.existsSync(path.join(pkg, "dist", "dashboard")))
     throw new Error("tarball still contains dist/dashboard");
   console.log(
-    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started and created a database`,
+    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, and bound the GitHub account`,
   );
 } finally {
   fs.rmSync(out, { recursive: true, force: true });

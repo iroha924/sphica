@@ -6,6 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { fakeGhPath } from "./fake-gh.ts";
+
+const signedOut = fakeGhPath();
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "cli.ts");
 
 /** Runs without a database or credentials. Only argument parsing and checks before connecting matter here. */
@@ -17,7 +20,7 @@ function runIn(home: string, ...args: string[]): { code: number; out: string } {
     const out = execFileSync(process.execPath, [CLI, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+      env: { PATH: signedOut, HOME: home, USERPROFILE: home },
       // Keep a hanging regression from stalling the test run (--test-timeout does not apply to sync calls).
       timeout: 30_000,
     });

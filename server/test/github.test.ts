@@ -299,6 +299,10 @@ test("gh reads pull requests and the signed-in user from github.com only", async
   await withGh(JSON.stringify({ id: 43, login: "mona-cat_octo" }), 0, async () => {
     assert.deepEqual(await ghUser(), { ok: true, id: 43, login: "mona-cat_octo" });
   });
+  // 39 characters is GitHub's longest login; 40 is refused below
+  await withGh(JSON.stringify({ id: 44, login: "a".repeat(39) }), 0, async () => {
+    assert.deepEqual(await ghUser(), { ok: true, id: 44, login: "a".repeat(39) });
+  });
 });
 
 test("a signed-out gh, a missing gh, and an answer that is not a user are told apart", async () => {
