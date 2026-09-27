@@ -101,6 +101,19 @@ export function identify(dir: string): Place | null {
   }
 }
 
+/**
+ * The project a record write goes to: the host's workspace (Claude Code's CLAUDE_PROJECT_DIR, or the directory Codex starts the MCP
+ * server in), never another project a tool's cwd argument names. Null when the workspace is in no project.
+ */
+export function writePlace(workspace: string, cwd: string | undefined): Place | null {
+  const here = identify(workspace);
+  if (!here) return null;
+  const asked = cwd ? identify(cwd) : null;
+  if (asked && asked.key !== here.key)
+    throw new Error(`${asked.name} is not the workspace this session writes to (${here.name})`);
+  return here;
+}
+
 /** Rejects a name a project without a remote cannot take (before anything is written) */
 export function checkLocalName(name: string): void {
   if (!LOCAL_KEY.test(name))

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The record MCP server: the trace, harvest, and glean Skills write through it (the ingest connection). The read server (mcp.ts) stays
 // reader-only. Every write is bound to a run begin issued for one project and target; the record never names them.
-// The project is Claude Code's CLAUDE_PROJECT_DIR when set, otherwise the cwd argument (Codex gives the server no trusted workspace).
+// The project is the host's workspace: Claude Code's CLAUDE_PROJECT_DIR, or the directory Codex starts this server in (measured with
+// codex-cli 0.157.1). A cwd argument naming another project is refused, so text read in one project cannot steer a write into another.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -23,7 +24,7 @@ import { framed } from "./frame.ts";
 import { gh, repoOf } from "./github.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
-import { identify, type Place, projectId } from "./project.ts";
+import { type Place, projectId, writePlace } from "./project.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { head, reason } from "./text.ts";
 
@@ -41,7 +42,7 @@ const reply = (t: string, isError = false) => ({
 });
 
 async function projectOf(cwd: string | undefined): Promise<Place & { projectId: number }> {
-  const place = identify(process.env.CLAUDE_PROJECT_DIR ?? cwd ?? process.cwd());
+  const place = writePlace(process.env.CLAUDE_PROJECT_DIR ?? process.cwd(), cwd);
   if (!place) throw new Error("This directory is not in a registered project (run `sphica init` there)");
   const id = await projectId(conn(), place.key);
   if (id === null)
