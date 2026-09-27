@@ -13,14 +13,21 @@ import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
-async function save(db: TempDb, p: number, record: unknown, root: string | null = null) {
-  const t: Target = { projectId: p, origin: "trace", prefix: "trace:ext-s1/", sessionId: "s1", root };
+async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
+  const t: Target = {
+    projectId: p,
+    origin: "trace",
+    prefix: `trace:ext-${sessionId}/`,
+    sessionId,
+    root,
+    sources: null,
+  };
   return inTransaction(db.ingest, async (trx) => {
     const runId = await openRun(trx, {
       projectId: p,
       origin: "trace",
-      target: "session:s1",
-      sessionId: "s1",
+      target: `session:${sessionId}`,
+      sessionId,
       draftId: `d${Math.random()}`,
     });
     return saveRecord(trx, t, runId, await checkRecord(trx, t, record), []);
@@ -206,5 +213,43 @@ test("anchors are located, moved, missing, or unknown, and a symbol only matches
     assert.equal(checkAnchor(null, { path: "a.ts", symbol: null, line_start: null }).state, "unknown");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("another project's many matches never crowd out this project's hit", async () => {
+  const db = tempDb();
+  try {
+    const other = project(db, "git:github.com/o/other", "o/other");
+    const mine = project(db);
+    const said = message(db, other, { id: "x", text: "Retry budget stays fixed.", session: "o1" });
+    // A record holds at most 50 units, so the 210 go in five records
+    for (let b = 0; b < 5; b++)
+      await save(
+        db,
+        other,
+        {
+          units: Array.from({ length: 42 }, (_, n) =>
+            decision(`r${b}-${n}`, said, "Retry budget stays fixed."),
+          ),
+        },
+        null,
+        "o1",
+      );
+    for (let n = 0; n < 210; n++)
+      message(db, other, { id: `x${n}`, text: `Retry budget note ${n}.`, session: "o1" });
+    const m = message(db, mine, { id: "m", text: "Retry budget is three.", session: "m1" });
+    await save(db, mine, { units: [decision("mine", m, "Retry budget is three.")] }, null, "m1");
+    const units = await searchUnits(db.reader, mine, { question: "retry budget", limit: 5 });
+    assert.deepEqual(
+      units.hits.map((h) => h.key),
+      ["trace:ext-m1/mine"],
+    );
+    const sources = await searchSources(db.reader, mine, "retry budget", 5);
+    assert.deepEqual(
+      sources.hits.map((h) => h.id),
+      [m],
+    );
+  } finally {
+    await db.done();
   }
 });

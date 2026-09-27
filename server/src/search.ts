@@ -52,7 +52,7 @@ export async function searchUnits(
       sql<{
         rowid: number;
         rank: number;
-      }>`(select rowid, bm25(unit_fts, 3, 2, 1) as rank from unit_fts where unit_fts match ${match} limit ${POOL})`.as(
+      }>`(select unit_fts.rowid as rowid, bm25(unit_fts, 3, 2, 1) as rank from unit_fts join unit on unit.id = unit_fts.rowid where unit_fts match ${match} and unit.project_id = ${projectId} order by rank limit ${POOL})`.as(
         "f",
       ),
     )
@@ -218,7 +218,7 @@ export async function searchSources(
       sql<{
         rowid: number;
         rank: number;
-      }>`(select rowid, bm25(source_fts) as rank from source_fts where source_fts match ${match} limit ${POOL})`.as(
+      }>`(select source_fts.rowid as rowid, bm25(source_fts) as rank from source_fts join source on source.id = source_fts.rowid where source_fts match ${match} and source.project_id = ${projectId} order by rank limit ${POOL})`.as(
         "f",
       ),
     )
