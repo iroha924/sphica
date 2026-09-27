@@ -22,13 +22,14 @@ base: main
 
 採点と Codex の回答の形を決め、手書きの厳密な検査で崩れを見分けられるようにする。
 
-- [ ] T01: tasks.json の against、2 つの schema、schema-check とそのテスト
+- [x] T01: tasks.json の against、2 つの schema、schema-check とそのテスト
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/grade.schema.json`, `server/evals/cloud/answer.schema.json`, `server/evals/cloud/schema-check.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass（型違い、範囲外、enum 違反、余分なキー、欠けたキーで理由付きの不一致）
   - コミット: `feat(evals): add grade and answer schemas with a strict check`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 3 / fail 0（型違い、範囲外、enum 違反、余分なキー、欠けたキー、schema ファイルとの一致）。`tsc` → 通過
 
 ## P2: 実行・回収・採点
 
