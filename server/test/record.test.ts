@@ -430,6 +430,8 @@ test("an implementation's commit anchor counts only when that commit holds the p
       }).trim();
     git("init", "-q");
     fs.writeFileSync(path.join(root, "db.ts"), "export const open = () => 1;\n");
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(path.join(root, "src", "a.ts"), "export const a = 1;\n");
     git("add", "-A");
     git("commit", "-qm", "db");
     const real = git("rev-parse", "HEAD");
@@ -454,6 +456,11 @@ test("an implementation's commit anchor counts only when that commit holds the p
       forged.checked.problems.join(" | "),
     );
     assert.deepEqual((await save(db, t, built("elsewhere", real, "missing.ts"))).saved.active, []);
+    assert.deepEqual(
+      (await save(db, t, built("folder", real, "src"))).saved.active,
+      [],
+      "a folder is not a file",
+    );
     assert.deepEqual((await save(db, t, built("real", real))).saved.active, ["trace:ext-s1/real"]);
   } finally {
     await db.done();

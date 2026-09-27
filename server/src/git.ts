@@ -12,11 +12,13 @@ export function cleanGit(root: string, args: string[], max = 1024 * 1024): Buffe
   });
 }
 
-/** Whether the commit exists in the repository and holds the path. */
+/** Whether the commit exists in the repository and holds the path as a regular file (not a folder, a symlink, or a submodule). */
 export function commitHolds(root: string, commit: string, rel: string): boolean {
   try {
-    cleanGit(root, ["cat-file", "-e", `${commit}:${rel}`]);
-    return true;
+    const entry = cleanGit(root, ["ls-tree", "-z", commit, "--", rel]).toString("utf8").split("\0")[0] ?? "";
+    // "<mode> <type> <object>\t<path>"
+    const m = /^(\d{6}) (\w+) [0-9a-f]+\t(.*)$/.exec(entry);
+    return !!m && (m[1] === "100644" || m[1] === "100755") && m[2] === "blob" && m[3] === rel;
   } catch {
     return false;
   }
