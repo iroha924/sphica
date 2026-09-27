@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Kysely } from "kysely";
 import type { DB } from "./db-types.ts";
 
@@ -102,8 +103,23 @@ export function identify(dir: string): Place | null {
 }
 
 /**
- * The project a record write goes to: the host's workspace (Claude Code's CLAUDE_PROJECT_DIR, or the directory Codex starts the MCP
- * server in), never another project a tool's cwd argument names. Null when the workspace is in no project.
+ * The session's directory Codex puts in a tool call's _meta when the server declares the `codex/sandbox-state-meta` capability
+ * (codex-cli 0.157.1 starts plugin MCP servers in the plugin root, so this is its only workspace signal). Null when absent or not a file URL.
+ */
+export function hostWorkspace(meta: unknown): string | null {
+  const state = (meta as Record<string, unknown> | undefined)?.["codex/sandbox-state-meta"];
+  const cwd = (state as Record<string, unknown> | undefined)?.sandboxCwd;
+  if (typeof cwd !== "string" || !cwd.startsWith("file:")) return null;
+  try {
+    return fileURLToPath(cwd);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The project a record write goes to: the host's workspace (Claude Code's CLAUDE_PROJECT_DIR, or the directory Codex names in the
+ * call), never another project a tool's cwd argument names. Null when the workspace is in no project.
  */
 export function writePlace(workspace: string, cwd: string | undefined): Place | null {
   const here = identify(workspace);

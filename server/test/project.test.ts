@@ -4,7 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import {
+  hostWorkspace,
   identify,
   localRoots,
   nameLocal,
@@ -172,7 +174,7 @@ test("reads edited files of a Codex patch only from the 4 header forms", () => {
   assert.deepEqual(patchPaths(patch), ["server/src/db.ts", "docs/new.md", "old.ts", "a.ts", "b.ts"]);
 });
 
-// The record server writes only into the host's workspace: Claude Code names it, Codex starts the server in it
+// The record server writes only into the host's workspace: Claude Code names it in the environment, Codex in each call
 test("a write's project is the workspace; a cwd argument naming another project is refused", () => {
   const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bound-")));
   try {
@@ -192,4 +194,15 @@ test("a write's project is the workspace; a cwd argument naming another project 
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("the workspace Codex names in a call is read only from a file URL in its sandbox state", () => {
+  const dir = path.join(os.tmpdir(), "a b");
+  const named = (sandboxCwd: unknown) => hostWorkspace({ "codex/sandbox-state-meta": { sandboxCwd } });
+  assert.equal(named(pathToFileURL(dir).href), dir);
+  assert.equal(named(dir), null);
+  assert.equal(named("https://example.test/x"), null);
+  assert.equal(named(1), null);
+  assert.equal(hostWorkspace(undefined), null);
+  assert.equal(hostWorkspace({ sandboxCwd: pathToFileURL(dir).href }), null);
 });

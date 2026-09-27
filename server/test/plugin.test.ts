@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -19,7 +19,7 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
-import { tempDb } from "./temp-db.ts";
+import { project, tempDb } from "./temp-db.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const REPO_PLUGIN = path.join(SRC, "..", "..", "plugin");
@@ -488,6 +488,49 @@ test("the record MCP server starts without a database and lists the trace, harve
     assert.match(JSON.stringify(r.content), /Sphica: /);
   } finally {
     await client.close();
+  }
+});
+
+// Codex starts plugin MCP servers in the plugin root and names the session's directory only in each call's _meta (codex-cli 0.157.1)
+test("the record MCP server writes to the workspace the host names in the call, not where it was started", async () => {
+  const db = tempDb();
+  const repo = (name: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sphica-${name}-`));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: dir });
+    fs.mkdirSync(path.join(dir, "sub"));
+    return dir;
+  };
+  const started = repo("a");
+  const workspace = repo("b");
+  project(db, "git:github.com/o/b", "o/b");
+  const meta = (dir: string) => ({
+    "codex/sandbox-state-meta": { sandboxCwd: pathToFileURL(path.join(dir, "sub")).href },
+  });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp-record.ts")],
+      cwd: started,
+      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const call = async (args: { cwd?: string }, _meta?: Record<string, unknown>) => {
+    const r = await client.callTool({ name: "trace_pending", arguments: args, ...(_meta ? { _meta } : {}) });
+    return { error: r.isError === true, text: (r.content as { text: string }[])[0]?.text ?? "" };
+  };
+  try {
+    const ok = await call({ cwd: workspace }, meta(workspace));
+    assert.equal(ok.error, false, ok.text);
+    const other = await call({ cwd: started }, meta(workspace));
+    assert.match(other.text, /o\/a is not the workspace this session writes to \(o\/b\)/);
+    const unnamed = await call({ cwd: workspace });
+    assert.match(unnamed.text, /did not say which workspace/);
+  } finally {
+    await client.close();
+    await db.done();
   }
 });
 
