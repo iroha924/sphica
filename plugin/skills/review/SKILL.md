@@ -141,15 +141,14 @@ Layer 5 and "patterns the surrounding code already follows" remain, so the revie
 
 ### Past decisions (Sphica knowledge)
 
-**Do not read 0 results as "none".** "Searched and found nothing", "could not reach the database", and
-"the project is not registered" all look like 0 results if left alone. Tell them apart by the `recall` response.
+**Do not read 0 results as "none".** Pass the diff and the repository root (`cwd`) to Sphica's `review_select`: it says
+"Decision lane: checked" with the records the diff touches (possibly none), or "Decision lane: not checked" with why.
 
 | State | How to tell | Ledger value |
 |---|---|---|
-| MCP does not connect / the database is unreachable | The tool call fails | **`unable`** + reason |
-| Connected, but the project is not registered | Returns "is not registered with Sphica" | **`unable`** + "this repository is not registered with Sphica (`sphica init`)" |
-| The location given is not a project | Returns "cannot tell which project it is" | **`unable`** + "the repository root was not passed as `cwd`" |
-| Registered, and the search found 0 | Returns "No matches" or "No matching messages" | **`ran`**. Treat it as a grounded negative |
+| MCP does not connect, the database is unreachable, or the project is not registered | The tool call fails, or says "not checked" | **`unable`** + the reason it gave |
+| Checked, and no record applies | "No active record applies" | **`ran`**. A grounded negative |
+| Checked, and records apply | The list of records | Pass them to the `precedent` aspect |
 
 ## Step 3 — Start the reviewers
 
@@ -161,12 +160,12 @@ expand this table. Listing aspects separately lets a new aspect land in only one
 
 | mode | required aspects |
 |---|---|
-| `standard` | `adversarial` / `security` / `conventions` |
+| `standard` | `adversarial` / `security` / `conventions` / `precedent` |
 | `full` | `adversarial` / `security` / `conventions` / `cleanup` / `precedent` |
 
-**The default is `standard`.** It covers the 3 aspects that map directly to the fix criteria (the 4 in Step 7's continuation). What the 2 aspects added by `full` catch
-(unwritten reimplementations, one-off abstractions, premature sharing, fixes that are too shallow, past decisions kept only in Sphica)
-can be missed by `standard`. **The default is kept light knowing this.**
+**The default is `standard`.** It covers the aspects that map directly to the fix criteria (the 4 in Step 7's continuation) and checks the diff
+against the decisions kept in Sphica. What `cleanup`, added by `full`, catches (unwritten reimplementations, one-off abstractions, premature sharing,
+fixes that are too shallow) can be missed by `standard`. **The default is kept light knowing this.**
 
 | Aspect | Body | Tools given |
 |---|---|---|
@@ -174,7 +173,7 @@ can be missed by `standard`. **The default is kept light knowing this.**
 | Security | `reviewers/security.md` | `Read` `Grep` `Glob` `Bash` |
 | Written conventions | `reviewers/conventions.md` | `Read` `Grep` `Glob` |
 | Redundancy | `reviewers/cleanup.md` | `Read` `Grep` `Glob` |
-| Past decisions | `reviewers/precedent.md` | `Read` `Grep` `Glob` + the Sphica MCP |
+| Past decisions | `reviewers/precedent.md` | `Read` `Grep` `Glob` + Sphica's read MCP (`review_select`, `read`, `search`, `review_check`) |
 
 The validator is `reviewers/validator.md` (`Read` `Grep` `Glob` `Bash`). It is not an aspect, so it is not in the mode's launch plan; Step 6 starts it only when a candidate needs it.
 
@@ -440,7 +439,7 @@ and a final `╰─` line. Write tables in Markdown (Claude Code draws borders a
 State marks appear only in this legend and in the state cells of the ledger table in the example below. Write cells as "mark state (note)", and put no marks inside notes (marks written anywhere else leave old marks behind when the marks change).
 
 ```
-✦ **sphica review** · origin/main...HEAD · standard · aspects 3/5 × models 2 · round 1/2
+✦ **sphica review** · origin/main...HEAD · standard · aspects 4/5 × models 2 · round 1/2
 
 | Aspect (body given) | Claude | Codex |
 |---|---|---|
@@ -448,7 +447,7 @@ State marks appear only in this legend and in the state cells of the ledger tabl
 | Security (`security.md`) | △ cut short (UNKNOWN) | ✓ ran (0 findings, COMPLETE) |
 | Written conventions (`conventions.md`) | ✓ ran (1 finding, PARTIAL) | ✓ ran (0 findings, COMPLETE) |
 | Redundancy (`cleanup.md`) | ○ not run (outside standard) | ○ not run (outside standard) |
-| Past decisions (`precedent.md`) | ○ not run (outside standard) | ○ not run (outside standard) |
+| Past decisions (`precedent.md`) | ✓ ran (1 finding, COMPLETE) | ✓ ran (0 findings, COMPLETE) |
 
 Overall: INCOMPLETE — the Claude lane for security did not complete
 

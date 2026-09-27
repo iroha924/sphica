@@ -19,7 +19,7 @@ const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "inherit"
 // so mangled class names fall back to stricli's default text.
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
-for (const entry of ["mcp", "capture", "cli"]) {
+for (const entry of ["mcp", "mcp-record", "capture", "deliver", "cli"]) {
   run("bun", ["build", `server/src/${entry}.ts`, "--target=node", "--outfile", `plugin/dist/${entry}.js`]);
 }
 

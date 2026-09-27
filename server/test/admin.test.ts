@@ -4,10 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { applyMigrations, askToApply, dbInit, inspect, migrate, reindex } from "../src/admin.ts";
+import { dbInit, inspect, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { at, hash } from "./temp-db.ts";
@@ -106,21 +105,34 @@ test("sphica init does not overwrite a file that is not a Sphica database", asyn
   );
 });
 
-test("db reindex rebuilds the full-text index and passes the doctor check", async () => {
+test("sphica init leaves a database made by Sphica 0.4 or earlier unchanged and says to move it aside", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  const raw = new DatabaseSync(file);
+  raw.exec("create table project (id integer primary key); pragma user_version = 7");
+  raw.close();
+  const before = fs.readFileSync(file);
+  await assert.rejects(
+    quiet(() => dbInit(file)),
+    /Sphica 0.4 or earlier.*Move it aside/,
+  );
+  assert.deepEqual(fs.readFileSync(file), before);
+});
+
+test("reindex rebuilds the full-text index and passes the doctor check", async () => {
   const file = path.join(tmp(), "sphica.db");
   await quiet(() => dbInit(file));
   const w = connectWriter("owner", file);
   w.exec("insert into project (key, name) values ('git:x/y', 'x/y')");
   w.prepare(
-    "insert into conversation (id, project_id, origin, external_id, started_at) values ('c', 1, 'codex', 's', ?)",
+    "insert into session (id, project_id, host, external_id, started_at) values ('s', 1, 'codex', 's', ?)",
   ).run(at("2026-09-01T00:00:00Z"));
   w.prepare(
-    "insert into knowledge (project_id, conversation_id, source_key, kind, body, occurred_at, content_hash) values (1, 'c', 'k', 'finding', '索引を作り直す', ?, ?)",
-  ).run(at("2026-09-01T00:00:00Z"), hash());
-  w.exec("insert into knowledge_fts (knowledge_fts) values ('delete-all')");
+    "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s', 'm', 1, 's', 'owner', ?, ?, '索引を作り直す', ?, ?, 1)",
+  ).run(at("2026-09-01T00:00:00Z"), at("2026-09-01T00:00:00Z"), Buffer.byteLength("索引を作り直す"), hash());
+  w.exec("insert into source_fts (source_fts) values ('delete-all')");
   const count = () =>
     (
-      w.prepare("select count(*) as n from knowledge_fts where knowledge_fts match '\"索引\"'").get() as {
+      w.prepare("select count(*) as n from source_fts where source_fts match '\"索引\"'").get() as {
         n: number;
       }
     ).n;
@@ -130,37 +142,24 @@ test("db reindex rebuilds the full-text index and passes the doctor check", asyn
   w.close();
   const x = inspect(file);
   assert.equal(x.revision, SCHEMA_REVISION);
-  assert.deepEqual(x.fts, { knowledge: null, message: null });
+  assert.deepEqual(x.fts, { unit: null, source: null });
   assert.ok(x.bytes > 0);
 });
 
-test("db migrate does nothing when there are no migrations to apply", async () => {
-  const file = path.join(tmp(), "sphica.db");
-  await quiet(() => dbInit(file));
-  assert.equal(await quiet(() => migrate(true, file)), "up-to-date");
-  assert.equal(inspect(file).revision, SCHEMA_REVISION);
-});
-
-// Declining (No, Esc, or EOF all come back as false) applies nothing and says so, so the command cannot close with "done".
-test("db migrate applies nothing and reports cancelled when the confirmation is declined", async () => {
+// A reindex that fails midway leaves the index as it was instead of half rebuilt
+test("reindex that fails rolls back and rethrows", async () => {
   const dir = tmp();
   const file = path.join(dir, "sphica.db");
   await quiet(() => dbInit(file));
-  const migrations = path.join(dir, "migrations");
-  writeMigrations(migrations, ["create table note (a text) strict;\n"]);
-  let asked = 0;
-  const decline = async () => {
-    asked++;
-    return false;
-  };
-  assert.equal(await quiet(() => migrate(false, file, migrations, decline)), "cancelled");
-  assert.equal(asked, 1);
-  assert.equal(inspect(file).revision, SCHEMA_REVISION);
-  assert.equal(await quiet(() => migrate(false, file, migrations, async () => true)), "applied");
-  assert.equal(inspect(file).revision, SCHEMA_REVISION + 1);
+  const raw = new DatabaseSync(file);
+  raw.exec("drop table source_fts");
+  raw.close();
+  await assert.rejects(
+    quiet(() => reindex(file)),
+    /source_fts/,
+  );
 });
 
-// The path taken by the shipped CLI. HOME points to a temp directory so the owner's ~/.sphica is untouched.
 test("sphica init creates the database in .sphica under HOME", () => {
   const home = tmp();
   execFileSync(process.execPath, [CLI, "init"], {
@@ -173,7 +172,13 @@ test("sphica init creates the database in .sphica under HOME", () => {
 
 // No aliases for old names. The old `sphica db init` and `sphica check` fail. (`sphica init --cwd <dir>` is valid again: it registers dir.)
 test("old command forms are rejected and create no database", () => {
-  for (const args of [["db", "init"], ["check"]]) {
+  for (const args of [
+    ["db", "init"],
+    ["check"],
+    ["trace", "pending"],
+    ["capture", "flush"],
+    ["project", "list"],
+  ]) {
     const home = tmp();
     const r = spawnSync(process.execPath, [CLI, ...args], {
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
@@ -186,83 +191,16 @@ test("old command forms are rejected and create no database", () => {
 });
 
 // A failure midway must not leave the first half committed without a version bump (running again would apply it twice).
-test("db migrate applies new migrations in one transaction and bumps the version, leaving nothing on failure", async () => {
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const migrations = path.join(dir, "migrations");
-  fs.mkdirSync(migrations);
-  const next = SCHEMA_REVISION + 1;
-  const name = `${String(next).padStart(4, "0")}_add_note.sql`;
-  fs.writeFileSync(
-    path.join(migrations, name),
-    "create table note (a text) strict;\ncreate table broken (;\n",
-  );
-  await assert.rejects(
-    quiet(() => migrate(true, file, migrations)),
-    /syntax error/,
-  );
-  assert.equal(inspect(file).revision, SCHEMA_REVISION);
-  const tables = () =>
-    new DatabaseSync(file, { readOnly: true })
-      .prepare("select name from sqlite_schema where name = 'note'")
-      .all().length;
-  assert.equal(tables(), 0, "the first half of the DDL is rolled back too");
-  fs.writeFileSync(path.join(migrations, name), "create table note (a text) strict;\n");
-  await quiet(() => migrate(true, file, migrations));
-  assert.equal(inspect(file).revision, next);
-  assert.equal(tables(), 1);
-});
-
-// A terminal whose input closes mid-question (the other end hung up) must answer no, not wait forever.
-test("the migrate confirmation answers no when its input closes", async () => {
-  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => {} });
-  const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
-  output.resume();
-  const answer = askToApply(input, output);
-  setTimeout(() => input.end(), 50);
-  const timeout = new Promise<string>((done) => setTimeout(() => done("still waiting"), 2000).unref());
-  assert.equal(await Promise.race([answer, timeout]), false);
-});
-
-test("the migrate confirmation answers no when its input ended before it asked", async () => {
-  const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: () => {} });
-  const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
-  output.resume();
-  input.resume();
-  input.end();
-  await new Promise((done) => input.once("end", done));
-  const timeout = new Promise<string>((done) => setTimeout(() => done("still waiting"), 2000).unref());
-  assert.equal(await Promise.race([askToApply(input, output), timeout]), false);
-});
-
-// Without a terminal nobody can answer, so the default question refuses before asking (the test runner's stdin is not a terminal)
-test("db migrate without --yes outside a terminal stops before asking", async () => {
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const migrations = path.join(dir, "migrations");
-  writeMigrations(migrations, ["create table note (a text) strict;\n"]);
-  const timeout = new Promise<string>((done) => setTimeout(() => done("still waiting"), 2000).unref());
-  const outcome = quiet(() => migrate(false, file, migrations)).then(
-    () => "no error",
-    (e: Error) => e.message,
-  );
-  assert.match(await Promise.race([outcome, timeout]), /Add --yes/);
-  assert.equal(inspect(file).revision, SCHEMA_REVISION);
-});
-
-// A failure inside a boxed command closes the heading it already printed, instead of opening a second one
 test("a boxed command that fails prints its heading once and closes with Stopped", () => {
   const home = tmp();
-  const r = spawnSync(process.execPath, [CLI, "db", "reindex"], {
+  const r = spawnSync(process.execPath, [CLI, "doctor", "--reindex"], {
     env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 30_000,
   });
   const out = `${r.stdout}${r.stderr}`;
   assert.notEqual(r.status, 0, out);
-  assert.equal(out.split("\n").filter((l) => l === "sphica db reindex").length, 1, out);
+  assert.equal(out.split("\n").filter((l) => l === "sphica doctor --reindex").length, 1, out);
   assert.match(out, /^✗ Stopped$/m, out);
 });
 
@@ -372,7 +310,7 @@ test("sphica init refuses a --cwd that is not a directory before creating anythi
   }
 });
 
-test("doctor names the command that sends stuck recordings", () => {
+test("doctor says stuck recordings are sent again after the next turn", () => {
   const home = tmp();
   cli(home, "init");
   fs.mkdirSync(path.join(home, ".sphica", "spool"), { recursive: true });
@@ -382,200 +320,5 @@ test("doctor names the command that sends stuck recordings", () => {
     JSON.stringify({ error: "database is locked" }),
   );
   const r = cli(home, "doctor");
-  assert.match(r.out, /sphica capture flush/, r.out);
-});
-
-/** Writes migrations numbered from current + 1 into dir. */
-function writeMigrations(dir: string, bodies: string[]): string[] {
-  fs.mkdirSync(dir, { recursive: true });
-  return bodies.map((body, i) => {
-    const name = `${String(SCHEMA_REVISION + 1 + i).padStart(4, "0")}_m${i}.sql`;
-    fs.writeFileSync(path.join(dir, name), body);
-    return name;
-  });
-}
-
-// A migration that rebuilds a parent table deletes child rows by cascade through DROP's implicit delete while foreign keys are on.
-test("a migration declaring foreign_keys=off runs alone with foreign keys off and turns them back on after", async () => {
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const raw = connectWriter("owner", file);
-  const migrations = path.join(dir, "migrations");
-  const files = writeMigrations(migrations, [
-    `create table parent (id integer primary key autoincrement not null, v text not null) strict;
-create table child (id integer primary key not null, parent_id integer not null references parent (id) on delete cascade) strict;
-insert into parent (v) values ('a');
-insert into child (id, parent_id) values (1, 1);`,
-    // Leading spaces on line 1 still count as the declaration (missing it would rebuild with foreign keys on)
-    `  -- sphica: foreign_keys=off
-create table "parent_new" (id integer primary key autoincrement not null, v text not null check (v <> '')) strict;
-insert into "parent_new" (id, v) select id, v from parent;
-drop table parent;
-alter table "parent_new" rename to parent;`,
-  ]);
-  const applied = applyMigrations(raw, files, migrations);
-  assert.deepEqual(
-    applied.map((m) => m.revision),
-    [SCHEMA_REVISION + 1, SCHEMA_REVISION + 2],
-  );
-  assert.equal((raw.prepare("pragma foreign_keys").get() as { foreign_keys: number }).foreign_keys, 1);
-  assert.equal(
-    (raw.prepare("pragma user_version").get() as { user_version: number }).user_version,
-    SCHEMA_REVISION + 2,
-  );
-  assert.equal(
-    (raw.prepare("select count(*) as n from child").get() as { n: number }).n,
-    1,
-    "child rows remain",
-  );
-  raw.close();
-});
-
-test("when a foreign-keys-off migration fails, it rolls back on the same connection, turns foreign keys back on, and stops at the previous version", async () => {
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const raw = connectWriter("owner", file);
-  const migrations = path.join(dir, "migrations");
-  const files = writeMigrations(migrations, [
-    "create table note (a text) strict;",
-    "-- sphica: foreign_keys=off\ncreate table half (a text) strict;\ncreate table broken (;",
-  ]);
-  assert.throws(() => applyMigrations(raw, files, migrations), /syntax error/);
-  assert.equal((raw.prepare("pragma foreign_keys").get() as { foreign_keys: number }).foreign_keys, 1);
-  assert.equal(
-    (raw.prepare("pragma user_version").get() as { user_version: number }).user_version,
-    SCHEMA_REVISION + 1,
-  );
-  const has = (t: string) => raw.prepare("select 1 from sqlite_schema where name = ?").get(t) !== undefined;
-  assert.ok(has("note"), "the previous migration is committed");
-  assert.ok(!has("half"), "the first half of the failed migration is rolled back");
-  fs.writeFileSync(
-    path.join(migrations, files[1] as string),
-    "-- sphica: foreign_keys=off\ncreate table half (a text) strict;",
-  );
-  applyMigrations(raw, files, migrations);
-  assert.equal(
-    (raw.prepare("pragma user_version").get() as { user_version: number }).user_version,
-    SCHEMA_REVISION + 2,
-  );
-  raw.close();
-});
-
-// Misreading the declaration and applying with foreign keys on deletes child rows that should stay. Unreadable declarations stop before applying.
-test("stops without applying anything on an unknown declaration or one not on line 1", async () => {
-  for (const body of [
-    "-- sphica: foreign_keys=of\ncreate table x (a text) strict;",
-    "create table x (a text) strict;\n-- sphica: foreign_keys=off",
-    // Leading spaces still count as the declaration (reading it as absent would rebuild tables with foreign keys on)
-    "create table x (a text) strict;\n  -- sphica: foreign_keys=off",
-  ]) {
-    const dir = tmp();
-    const file = path.join(dir, "sphica.db");
-    await quiet(() => dbInit(file));
-    const raw = connectWriter("owner", file);
-    const files = writeMigrations(path.join(dir, "migrations"), [body]);
-    assert.throws(() => applyMigrations(raw, files, path.join(dir, "migrations")), /declaration/, body);
-    assert.equal(
-      (raw.prepare("pragma user_version").get() as { user_version: number }).user_version,
-      SCHEMA_REVISION,
-    );
-    raw.close();
-  }
-});
-
-// Dropping a table without the declaration deletes child rows by cascade with foreign keys on. Regardless of formatting
-// (comments, newlines), stop when SQLite actually tries to delete, leaving nothing behind. drop table inside a comment is fine.
-test("a migration without the declaration cannot drop or rebuild tables however it is written, and drop inside a comment passes", async () => {
-  for (const drop of [
-    "drop table parent;",
-    "DROP /* rebuild */ TABLE parent;",
-    "DROP -- rebuild\nTABLE parent;",
-    // Renaming the parent rewrites child foreign keys to point to the renamed table, and dropping that deletes the children
-    "alter table parent rename to parent_old;\ncreate table parent (id integer primary key not null) strict;\ninsert into parent select * from parent_old;\ndelete from parent_old;",
-  ]) {
-    const dir = tmp();
-    const file = path.join(dir, "sphica.db");
-    await quiet(() => dbInit(file));
-    const raw = connectWriter("owner", file);
-    raw.exec(`create table parent (id integer primary key not null) strict;
-create table child (id integer primary key not null, parent_id integer not null references parent (id) on delete cascade) strict;
-insert into parent (id) values (1);
-insert into child (id, parent_id) values (1, 1);`);
-    const migrations = path.join(dir, "migrations");
-    const files = writeMigrations(migrations, [drop]);
-    assert.throws(() => applyMigrations(raw, files, migrations), /not authorized/, drop);
-    assert.equal((raw.prepare("select count(*) as n from child").get() as { n: number }).n, 1, drop);
-    raw.close();
-  }
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const raw = connectWriter("owner", file);
-  const migrations = path.join(dir, "migrations");
-  const files = writeMigrations(migrations, [
-    "/* DROP TABLE parent */\ncreate table note (id integer) strict; -- DROP TABLE parent",
-  ]);
-  applyMigrations(raw, files, migrations);
-  assert.equal(
-    (raw.prepare("pragma user_version").get() as { user_version: number }).user_version,
-    SCHEMA_REVISION + 1,
-  );
-  raw.close();
-});
-
-// Before asking, db migrate shows what the migrations would remove (measured on a copy), and afterwards what they removed.
-test("db migrate shows the rows it would remove before asking, leaving the database untouched, and what it removed", async () => {
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const w = connectWriter("owner", file);
-  w.exec("insert into project (key, name) values ('git:a/b', 'a/b'), ('git:c/d', 'c/d'), ('git:e/f', 'e/f')");
-  w.close();
-  const migrations = path.join(dir, "migrations");
-  writeMigrations(migrations, ["delete from project where key <> 'git:a/b';\n"]);
-  const lines: string[] = [];
-  const log = console.log;
-  console.log = (s: string) => lines.push(String(s));
-  let seen = "";
-  try {
-    const outcome = await migrate(false, file, migrations, async () => {
-      seen = lines.join("\n");
-      assert.equal(inspect(file).revision, SCHEMA_REVISION, "the preview does not touch the database");
-      return true;
-    });
-    assert.equal(outcome, "applied");
-  } finally {
-    console.log = log;
-  }
-  assert.match(seen, /Would remove: project 2 rows \(3 → 1\)/);
-  assert.match(lines.join("\n"), /Removed: project 2 rows \(3 → 1\)/);
-  // Only the database and its journal remain: the preview copy is gone
-  assert.deepEqual(leftovers(dir), []);
-});
-
-/** Files beside the database other than itself, its journal, and the migrations */
-const leftovers = (dir: string) =>
-  fs.readdirSync(dir).filter((f) => !/^sphica\.db(-wal|-shm)?$/.test(f) && f !== "migrations");
-
-test("a migration that fails in the preview stops before asking and leaves no copy behind", async () => {
-  const dir = tmp();
-  const file = path.join(dir, "sphica.db");
-  await quiet(() => dbInit(file));
-  const migrations = path.join(dir, "migrations");
-  writeMigrations(migrations, ["insert into no_such_table values (1);\n"]);
-  let asked = false;
-  await assert.rejects(
-    quiet(() =>
-      migrate(false, file, migrations, async () => {
-        asked = true;
-        return true;
-      }),
-    ),
-    /no such table/,
-  );
-  assert.equal(asked, false);
-  assert.equal(inspect(file).revision, SCHEMA_REVISION);
-  assert.deepEqual(leftovers(dir), []);
+  assert.match(r.out, /sent again after the next turn/, r.out);
 });

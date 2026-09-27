@@ -2,7 +2,16 @@
   "mcpServers": {
     "sphica": {
       "command": "node",
-      "args": ["./dist/mcp.js"],
+      "args": [
+        "./dist/mcp.js"
+      ],
+      "cwd": "."
+    },
+    "record": {
+      "command": "node",
+      "args": [
+        "./dist/mcp-record.js"
+      ],
       "cwd": "."
     }
   }

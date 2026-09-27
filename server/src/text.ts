@@ -16,21 +16,90 @@ const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "and", "or", "fo
 const IDENT = /#\d+|[a-z0-9][a-z0-9_./#-]*[a-z0-9]/g;
 // Overly long chunks are not terms (base64 or hashes).
 const MAX_TERM = 100;
+// A kanji word with trailing kana (a conjugated verb) is kept as its kanji, so its conjugated forms meet.
+// english-exempt: the long vowel mark is kana too
+const OKURIGANA = /^(\p{Script=Han}+)[\p{Script=Hiragana}ー]+$/u;
+
+/**
+ * An English word and its plural brought to one form, so both meet: managers and manager, policies and policy, classes and class. Where a plural
+ * is ambiguous (caches and branches both end in -ches) the singular is folded the same way (cache and caches both become cach).
+ */
+function singular(w: string): string {
+  if (!/^[a-z]{4,}$/.test(w)) return w;
+  if (w.endsWith("ies")) return `${w.slice(0, -3)}y`;
+  if (w.endsWith("ie")) return `${w.slice(0, -2)}y`;
+  if (/(?:ss|us|x|z|ch|sh)es$/.test(w)) return w.slice(0, -2);
+  if (/(?:ch|sh|us)e$/.test(w)) return w.slice(0, -1);
+  return w.endsWith("s") && !/(?:ss|us|is)$/.test(w) ? w.slice(0, -1) : w;
+}
 
 /**
  * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.
- * **Changing the rules leaves existing indexes as they were.** A PR that changes them adds `sphica db reindex` to its release steps.
+ * **Changing the rules leaves existing indexes as they were.** A PR that changes them tells the owner to run `sphica doctor --reindex` in its release steps.
  */
 export function terms(text: string): string[] {
   const norm = text.normalize("NFKC").toLowerCase();
   const out: string[] = [];
   const keep = (w: string) => {
     if (w.length > MAX_TERM || STOP.has(w) || HIRAGANA_ONLY.test(w)) return;
-    out.push(w);
+    out.push(OKURIGANA.exec(w)?.[1] ?? singular(w));
   };
   for (const s of segmenter.segment(norm)) if (s.isWordLike) keep(s.segment.trim());
   for (const m of norm.matchAll(IDENT)) if (m[0].length >= 3) keep(m[0]);
   return out.filter(Boolean);
+}
+
+/**
+ * Words that frame a question rather than name its subject ("why", "which", and their Japanese counterparts). Dropped from queries only, so a question
+ * such as "which CI provider do we use" is judged on "ci" and "provider". Light verbs (use, add, get) go here for the same reason.
+ */
+const QUESTION = new Set([
+  ...[
+    "why",
+    "what",
+    "which",
+    "when",
+    "where",
+    "who",
+    "how",
+    "do",
+    "does",
+    "did",
+    "we",
+    "our",
+    "us",
+    "you",
+    "i",
+    "are",
+    "was",
+    "were",
+  ],
+  ...[
+    "will",
+    "would",
+    "should",
+    "can",
+    "could",
+    "there",
+    "this",
+    "that",
+    "with",
+    "from",
+    "any",
+    "ever",
+    "long",
+    "use",
+    "used",
+    "using",
+  ],
+  ...["add", "get", "make", "have", "has", "not", "no", "yes", "reason"],
+  // english-exempt: Japanese question framing words, matched after splitting
+  ...["理由", "仕組", "何", "方", "場合", "今", "件"],
+]);
+
+/** A question's content terms: its terms without question framing, each once, in order. */
+export function queryTerms(question: string): string[] {
+  return [...new Set(terms(question).filter((w) => !QUESTION.has(w)))].slice(0, 24);
 }
 
 /**
@@ -39,7 +108,7 @@ export function terms(text: string): string[] {
  * operators and the user's text would change the query syntax (`sql:live` would become a column filter).
  */
 export function ftsQuery(question: string): string | null {
-  const ws = [...new Set(terms(question))].slice(0, 24);
+  const ws = queryTerms(question);
   return ws.length ? ws.map((w) => `"${w.replaceAll('"', '""')}"`).join(" OR ") : null;
 }
 

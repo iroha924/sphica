@@ -8,15 +8,15 @@ import { sql } from "kysely";
 import { openReader, SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { connectReader } from "../src/sqlite.ts";
-import { at, hash, insert, knowledge, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { sha256 } from "../src/text.ts";
+import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 let db: TempDb;
 let p: number;
 before(() => {
   db = tempDb();
   p = project(db);
-  message(db, p, { id: "m-1", body: "持ち主の秘密の本文" });
-  knowledge(db, p, { source_key: "s#k", body: "知識の本文" });
+  message(db, p, { id: "m-1", text: "持ち主の秘密の本文" });
 });
 after(() => db.done());
 
@@ -40,21 +40,36 @@ function attempt(
 const reader = () => connectReader(db.file);
 const ingest = () => connectWriter("ingest", db.file);
 const capture = () => connectWriter("capture", db.file);
+const now = at("2026-09-12T00:00:00Z");
 
 // Writing with mismatched versions silently shifts column meanings. The code and schema versions must be equal.
-test("the schema version the code expects equals user_version in db/schema.sql", () => {
+test("the schema revision the code expects equals user_version in db/schema.sql", () => {
   const text = fs.readFileSync(new URL("../../db/schema.sql", import.meta.url), "utf8");
   assert.equal(Number(text.match(/pragma user_version = (\d+);/)?.[1]), SCHEMA_REVISION);
 });
 
-test("with a different database version, neither read nor write connections open, and the next step is shown", () => {
-  const old = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-old-")), "old.db");
+test("a database of an older generation, a newer revision, or no schema is refused and left unchanged", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-old-"));
+  const old = path.join(dir, "old.db");
   const raw = new DatabaseSync(old);
-  raw.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+  raw.exec("create table project (id integer primary key); pragma user_version = 7");
   raw.close();
-  assert.throws(() => connectReader(old), /Update sphica/);
-  assert.throws(() => connectWriter("ingest", old), /revision/);
-  const empty = path.join(path.dirname(old), "empty.db");
+  const before = fs.readFileSync(old);
+  for (const open of [
+    () => connectReader(old),
+    () => connectWriter("ingest", old),
+    () => connectWriter("capture", old),
+  ])
+    assert.throws(open, /Sphica 0.4 or earlier.*Move it aside/);
+  assert.deepEqual(fs.readFileSync(old), before, "the old database is not changed");
+  const newer = path.join(dir, "newer.db");
+  const n = new DatabaseSync(newer);
+  n.exec(
+    `create table sphica_generation (generation integer); insert into sphica_generation values (2); pragma user_version = ${SCHEMA_REVISION + 1}`,
+  );
+  n.close();
+  assert.throws(() => connectReader(newer), /Update sphica/);
+  const empty = path.join(dir, "empty.db");
   new DatabaseSync(empty).close();
   assert.throws(() => connectReader(empty), /sphica init/);
 });
@@ -70,11 +85,11 @@ test("a missing database is not created, and it stops", () => {
 test("the MCP and search connection can read but not write", async () => {
   const r = openReader(db.file);
   try {
-    assert.equal((await r.selectFrom("message").select("body").execute())[0]?.body, "持ち主の秘密の本文");
+    assert.equal((await r.selectFrom("source").select("text").execute())[0]?.text, "持ち主の秘密の本文");
   } finally {
     await r.destroy();
   }
-  assert.match(attempt(reader, "delete from message") ?? "", /readonly|not authorized/);
+  assert.match(attempt(reader, "delete from source") ?? "", /readonly|not authorized/);
   assert.match(attempt(reader, "create table x (a)") ?? "", /readonly|not authorized/);
   assert.match(attempt(reader, "attach database ':memory:' as x") ?? "", /not authorized/);
   assert.match(attempt(reader, "select load_extension('x')") ?? "", /not authorized/);
@@ -84,7 +99,7 @@ test("the ingest connection can write rows but cannot change the schema", () => 
   assert.equal(attempt(ingest, "update project set name = 'o/r2' where id = ?", p), null);
   for (const ddl of [
     "create table x (a)",
-    "drop table knowledge_file",
+    "drop table unit_anchor",
     "alter table project add column x text",
     "create index x on project (name)",
     "attach database ':memory:' as x",
@@ -96,44 +111,44 @@ test("the ingest connection can write rows but cannot change the schema", () => 
 });
 
 // The capture connection cannot read or modify existing rows, even if a recorded conversation tries to steer it.
-test("the capture connection writes only to the 3 views, and FTS is filled by the same statement", async () => {
-  const c = `c-${p}-cap`;
+test("the capture connection writes only through its views, and FTS is filled by the same statement", async () => {
   assert.equal(
     attempt(
       capture,
-      "insert into capture_conversation (id, project_id, origin, external_id, branch, started_at) values (?, ?, 'codex', 'cap', null, ?)",
-      c,
+      "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('cap', ?, 'codex', 'cap', null, ?)",
       p,
-      at("2026-09-12T00:00:00Z"),
+      now,
     ),
     null,
   );
-  const body = "自動記録で入れた発言";
+  const text = "自動記録で入れた発言";
   assert.equal(
     attempt(
       capture,
-      `insert into capture_message (id, conversation_id, external_id, turn_id, speaker_kind, body, truncated,
-         original_bytes, sent_at, content_hash, indexed) values ('m-cap', ?, 'e', null, 'self', ?, 0, ?, ?, ?, 1)`,
-      c,
-      body,
-      Buffer.byteLength(body),
-      at("2026-09-12T00:00:00Z"),
-      hash(),
+      `insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted,
+         original_bytes, content_hash) values ('e', 'cap', 't', 'owner', ?, ?, ?, 0, 0, ?, ?)`,
+      now,
+      now,
+      text,
+      Buffer.byteLength(text),
+      sha256(text),
     ),
     null,
   );
   assert.equal(
     attempt(
       capture,
-      "insert into capture_message_file (message_id, path, action) values ('m-cap', 'a.ts', 'edit')",
+      "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('cap', 't', 'x', 'a.ts', 'tool', ?)",
+      now,
     ),
     null,
   );
-  // Files with nothing to link to are silently dropped (a session that moved to another project midway)
+  // Edits of a session that is not in this database are dropped
   assert.equal(
     attempt(
       capture,
-      "insert into capture_message_file (message_id, path, action) values ('無い', 'a.ts', 'edit')",
+      "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('無い', 't', 'x', 'a.ts', 'tool', ?)",
+      now,
     ),
     null,
   );
@@ -141,10 +156,10 @@ test("the capture connection writes only to the 3 views, and FTS is filled by th
   try {
     const hit = await sql<{
       n: number;
-    }>`select count(*) as n from message_fts where message_fts match '"自動"'`.execute(r);
+    }>`select count(*) as n from source_fts where source_fts match '"自動"'`.execute(r);
     assert.equal(hit.rows[0]?.n, 1, "stored in FTS");
     assert.equal(
-      (await r.selectFrom("message_file").selectAll().where("message_id", "=", "無い").execute()).length,
+      (await r.selectFrom("edit_observation").selectAll().where("session_id", "=", "無い").execute()).length,
       0,
     );
   } finally {
@@ -152,49 +167,87 @@ test("the capture connection writes only to the 3 views, and FTS is filled by th
   }
 });
 
-test("the capture connection cannot touch base tables, knowledge, others' messages, identities, or FTS, and cannot read bodies", () => {
+// The delivery hooks log what they sent through capture; the view's trigger uses functions capture may not call itself
+test("the capture connection logs a delivery with its units through the view", () => {
+  const raw = capture();
+  try {
+    raw
+      .prepare(
+        "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('dl', ?, 'claude-code', 'dl', null, ?)",
+      )
+      .run(p, now);
+    raw
+      .prepare(
+        "insert into capture_delivery (session_id, event, outcome, at, units) values ('dl', 'session_start', 'nothing', ?, '[]')",
+      )
+      .run(now);
+  } finally {
+    raw.close();
+  }
+  assert.equal(db.owner.prepare("select count(*) as n from delivery where session_id = 'dl'").get()?.n, 1);
+  assert.match(
+    attempt(capture, "select coalesce(1, 2)") ?? "",
+    /not authorized/,
+    "outside the trigger the functions stay denied",
+  );
+});
+
+test("the capture connection cannot touch base tables, units, other sources, or FTS, and cannot read text", () => {
+  session(db, p, "s-other");
+  const runId = run(db, p);
   const denied: [string, ...(string | number | Buffer | null)[]][] = [
     [
-      "insert into message (id, conversation_id, external_id, speaker_kind, body, original_bytes, sent_at, content_hash, indexed) values ('x', 'c', 'e', 'self', 'b', 1, ?, ?, 1)",
-      at("2026-09-12T00:00:00Z"),
+      "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (?, 'session_message', 'x', 'x', 1, 's-other', 'owner', ?, ?, 'b', 1, ?, 1)",
+      p,
+      now,
+      now,
       hash(),
     ],
-    ["update message set body = 'x'"],
-    ["delete from message"],
+    ["update source set text = 'x'"],
+    ["delete from source"],
     [
-      "insert into knowledge (project_id, conversation_id, source_key, kind, body, occurred_at, content_hash) values (1, 'c', 'k', 'finding', 'b', ?, ?)",
-      at("2026-09-12T00:00:00Z"),
+      "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (?, 'k', 'finding', 'b', 'supported', ?, ?, ?)",
+      p,
+      runId,
+      now,
       hash(),
     ],
-    ["select body from message"],
-    ["select body from knowledge"],
-    ["select lexemes from message_fts"],
+    [
+      "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (1, 'owner_statement', 1, 0, 1, 1, '2026-09-12T00:00:00.000Z')",
+    ],
+    ["select text from source"],
+    ["select text from unit"],
+    ["select lexemes from source_fts"],
     // FTS internal tables hold index terms as is. Reads by FTS5 itself are allowed; reads from statements this connection builds are denied
-    // (_config holds no terms and is read in the prepare that opens the virtual table, so it is allowed)
-    ["select id, block from message_fts_data"],
-    ["select id, block from knowledge_fts_data"],
-    ["select * from message_fts_idx"],
-    ["select * from knowledge_fts_docsize"],
-    ["delete from message_fts"],
-    ["insert into message_fts (rowid, lexemes) values (999, 'x')"],
+    ["select id, block from source_fts_data"],
+    ["select id, block from unit_fts_data"],
+    ["select * from source_fts_idx"],
+    ["delete from source_fts"],
+    ["insert into source_fts (rowid, lexemes) values (999, 'x')"],
     ["attach database ':memory:' as x"],
     ["create virtual table x using fts5(a)"],
     ["pragma foreign_keys = off"],
   ];
   for (const [text, ...args] of denied)
     assert.match(attempt(capture, text, ...args) ?? "", /not authorized|prohibited/, text);
-  // The views have no columns that claim an identity
-  assert.match(
-    attempt(capture, "insert into capture_message (id, identity_id) values ('x', 1)") ?? "",
-    /has no column named identity_id/,
-  );
-  // Only Claude Code and Codex conversations can be created (the origin CHECK rejects anything else)
+  // The view derives the author from the speaker and refuses anyone else
   assert.match(
     attempt(
       capture,
-      "insert into capture_conversation (id, project_id, origin, external_id, started_at) values ('gh', ?, 'github', 'o/r#1', ?)",
+      "insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted, original_bytes, content_hash) values ('p', 's-other', 't', 'person', ?, ?, 'x', 0, 0, 1, ?)",
+      now,
+      now,
+      hash(),
+    ) ?? "",
+    /owner or assistant/,
+  );
+  // Only Claude Code and Codex sessions can be created (the host CHECK rejects anything else)
+  assert.match(
+    attempt(
+      capture,
+      "insert into capture_session (id, project_id, host, external_id, started_at) values ('gh', ?, 'github', 'o/r#1', ?)",
       p,
-      at("2026-09-12T00:00:00Z"),
+      now,
     ) ?? "",
     /CHECK constraint failed/,
   );
@@ -204,27 +257,39 @@ test("the capture connection cannot touch base tables, knowledge, others' messag
 test("no write connection can modify FTS internal tables directly", () => {
   for (const open of [ingest, capture, () => connectWriter("owner", db.file)])
     for (const text of [
-      "insert into message_fts_docsize (id, sz) values (999, x'00')",
-      "delete from message_fts_data",
-      "update message_fts_config set v = 0",
+      "insert into source_fts_docsize (id, sz) values (999, x'00')",
+      "delete from unit_fts_data",
+      "update source_fts_config set v = 0",
     ])
       assert.match(attempt(open, text) ?? "", /may not be modified|not authorized/, text);
 });
 
 // A connection without the registration (such as the sqlite3 CLI) would silently leave rows missing from the index.
-test("a connection without the tokenizer function cannot write knowledge or messages", () => {
+test("a connection without the tokenizer function cannot write sources or units", () => {
   const raw = new DatabaseSync(db.file);
   try {
     raw.exec("pragma foreign_keys = on");
     assert.throws(
+      () => message({ ...db, owner: raw }, p, { id: "nofn", text: "b" }),
+      /no such function: sphica_terms/,
+    );
+    const runId = insert({ ...db, owner: raw }, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "x",
+      status: "running",
+      started_at: now,
+    });
+    assert.throws(
       () =>
-        insert({ ...db, owner: raw }, "knowledge", {
+        insert({ ...db, owner: raw }, "unit", {
           project_id: p,
-          conversation_id: `00000000-0000-8000-8000-${String(p).padStart(12, "0")}`,
-          source_key: "s#nofn",
+          key: "nofn",
           kind: "finding",
-          body: "b",
-          occurred_at: at("2026-09-12T00:00:00Z"),
+          text: "b",
+          extraction: "supported",
+          run_id: runId,
+          created_at: now,
           content_hash: hash(),
         }),
       /no such function: sphica_terms/,

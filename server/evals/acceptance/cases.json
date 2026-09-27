@@ -1,0 +1,2352 @@
+{
+  "note": "Acceptance cases for the 0.5.0 rebuild (plan: .claude/plans/2026/09/27-decision-memory-rebuild.md). Each case sets up the synthetic world (world.json) through public entry points, performs one operation, and checks observable results. Agent-written records are given verbatim so the checks are deterministic; model judgement (review verdicts, extraction quality) is measured by the evaluation, not here. Aliases in the records are frozen search words the agent would write (plan: bilingual aliases); this set tests that search uses them, not that an agent writes good ones.",
+  "version": 1,
+  "refs": {
+    "session": "session:<id>#<turn>.<owner|assistant> (turns count from 1)",
+    "pr": "pr:<n>#body | pr:<n>#comment:<id> | pr:<n>#review:<id> | pr:<n>#commit:<sha> | pr:<n>#merge",
+    "issue": "issue:<n>#body | issue:<n>#comment:<id>",
+    "file": "file:<path>@<commit|HEAD>#L<a>-L<b>"
+  },
+  "steps": {
+    "capture": "send the session's hook events (prompt, edits, stop) through the capture hook for its host",
+    "trace": "issue a trace draft for the session, write the record, check, save",
+    "harvest": "issue a harvest draft for the pull request (fake gh serves world.json), write the record, check, save",
+    "glean": "issue a glean draft in the given session, write the record, check, save",
+    "edit_file": "change a world file in the temp repository and commit",
+    "search": "call the MCP search tool",
+    "read": "call the MCP read tool",
+    "status": "call the MCP status tool",
+    "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
+    "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
+    "as_of": "export the evaluation snapshot as of a time and query it"
+  },
+  "cases": [
+    {
+      "id": "capture-01",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "An owner directive in a session becomes an active decision with its rejected option and exact evidence spans",
+      "given": [
+        {
+          "capture": "s-ja-storage"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-storage",
+          "record": {
+            "units": [
+              {
+                "key": "storage",
+                "kind": "decision",
+                "stance": "do",
+                "text": "保存先は SQLite の 1 ファイルにする",
+                "why": "各ユーザーに DB サーバーを立てさせたくない",
+                "options": [
+                  {
+                    "text": "SQLite",
+                    "outcome": "chosen"
+                  },
+                  {
+                    "text": "Postgres",
+                    "outcome": "rejected",
+                    "why": "各ユーザーにサーバーの運用が要る",
+                    "evidence": [
+                      {
+                        "source": "session:s-ja-storage#1.owner",
+                        "quote": "各ユーザーに DB サーバーを立てさせたくない"
+                      }
+                    ]
+                  }
+                ],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-storage#1.owner",
+                    "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-storage#1.owner",
+                    "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/db.ts",
+                    "symbol": "open",
+                    "role": "applies_to"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "extraction": "supported",
+          "lifecycle": "active",
+          "stance": "do"
+        },
+        {
+          "option": "Postgres",
+          "of": "trace:s-ja-storage/storage",
+          "outcome": "rejected",
+          "has_evidence": true
+        },
+        {
+          "evidence_span_matches_source": "trace:s-ja-storage/storage"
+        }
+      ]
+    },
+    {
+      "id": "capture-02",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "A don't decision stays a don't",
+      "given": [
+        {
+          "capture": "s-ja-telemetry"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-telemetry",
+          "record": {
+            "units": [
+              {
+                "key": "no-telemetry",
+                "kind": "decision",
+                "stance": "dont",
+                "text": "利用状況の送信（テレメトリ）は入れない",
+                "why": "ローカルで完結させるのがこのアプリの売り",
+                "options": [
+                  {
+                    "text": "telemetry",
+                    "outcome": "rejected",
+                    "why": "ローカルで完結させる"
+                  }
+                ],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-telemetry#1.owner",
+                    "quote": "利用状況の送信（テレメトリ）は入れない。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-telemetry#1.owner",
+                    "quote": "利用状況の送信（テレメトリ）は入れない。"
+                  }
+                ],
+                "aliases": [
+                  "telemetry",
+                  "usage analytics",
+                  "usage stats",
+                  "tracking",
+                  "テレメトリ",
+                  "利用状況",
+                  "送信"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-telemetry/no-telemetry",
+          "lifecycle": "active",
+          "stance": "dont",
+          "code_surface": "none"
+        }
+      ]
+    },
+    {
+      "id": "capture-03",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "A deferral keeps its revisit condition",
+      "given": [
+        {
+          "capture": "s-ja-i18n"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-i18n",
+          "record": {
+            "units": [
+              {
+                "key": "i18n-later",
+                "kind": "decision",
+                "stance": "defer",
+                "text": "多言語対応は v2 まで保留",
+                "revisit_when": "海外のユーザーが最初に来たとき",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-i18n#1.owner",
+                    "quote": "多言語対応は v2 まで保留。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-i18n#1.owner",
+                    "quote": "多言語対応は v2 まで保留。"
+                  }
+                ],
+                "aliases": [
+                  "translations",
+                  "i18n",
+                  "localization",
+                  "multilingual",
+                  "多言語",
+                  "翻訳",
+                  "国際化"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-i18n/i18n-later",
+          "lifecycle": "active",
+          "stance": "defer",
+          "revisit_when": "海外のユーザーが最初に来たとき"
+        }
+      ]
+    },
+    {
+      "id": "capture-04",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "A claim whose quote is not in the captured text is quarantined and counted, not dropped or accepted; a session with nothing durable is processed with no unit",
+      "given": [
+        {
+          "capture": "s-ja-maybe"
+        },
+        {
+          "capture": "s-ja-chat"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-maybe",
+          "record": {
+            "units": [
+              {
+                "key": "zod",
+                "kind": "decision",
+                "stance": "do",
+                "text": "入力の検証に zod を使う",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-maybe#1.owner",
+                    "quote": "入力の検証には zod を使うことに決めた。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-maybe#1.owner",
+                    "quote": "入力の検証には zod を使うことに決めた。"
+                  }
+                ]
+              }
+            ],
+            "processed_without_units": ["s-ja-chat"]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-maybe/zod",
+          "extraction": "quarantined",
+          "reason_contains": "quote"
+        },
+        {
+          "status": {
+            "quarantined": 1,
+            "processed_without_units": 1
+          }
+        },
+        {
+          "inject_never_contains": "zod"
+        }
+      ]
+    },
+    {
+      "id": "capture-05",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "A harvested PR keeps the owner's rejection of a reviewer's suggestion as a rejected option with its reason",
+      "given": [],
+      "when": {
+        "harvest": {
+          "pr": 12,
+          "record": {
+            "units": [
+              {
+                "key": "pnpm",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Use pnpm for installs",
+                "why": "npm install took minutes on CI",
+                "options": [
+                  {
+                    "text": "pnpm",
+                    "outcome": "chosen"
+                  },
+                  {
+                    "text": "yarn",
+                    "outcome": "rejected",
+                    "why": "two package managers in the docs confused contributors",
+                    "evidence": [
+                      {
+                        "source": "pr:12#comment:1202",
+                        "quote": "We rejected yarn: two package managers in the docs already confused contributors"
+                      }
+                    ]
+                  }
+                ],
+                "evidence": [
+                  {
+                    "source": "pr:12#body",
+                    "quote": "Switch the lockfile to pnpm.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "pr:12#comment:1202",
+                    "quote": "We rejected yarn"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:12/pnpm",
+          "lifecycle": "active"
+        },
+        {
+          "option": "yarn",
+          "of": "harvest:12/pnpm",
+          "outcome": "rejected"
+        },
+        {
+          "source": "pr:12#comment:1201",
+          "author": "drive-by-dev",
+          "association": "CONTRIBUTOR"
+        }
+      ]
+    },
+    {
+      "id": "capture-06",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "A resolved review thread alone does not adopt the reviewer's suggestion",
+      "given": [],
+      "when": {
+        "harvest": {
+          "pr": 12,
+          "record": {
+            "units": [
+              {
+                "key": "sync-off",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Set synchronous = OFF",
+                "evidence": [
+                  {
+                    "source": "pr:12#review:1210",
+                    "quote": "Consider synchronous = OFF for speed.",
+                    "role": "proposes"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "pr:12#merge",
+                    "quote": ""
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:12/sync-off",
+          "lifecycle": "candidate"
+        },
+        {
+          "check_problem_contains": "merge does not adopt"
+        }
+      ]
+    },
+    {
+      "id": "capture-07",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "Harvest reads the linked issue's body as its own source, keeps its author association, and links it to the PR",
+      "given": [],
+      "when": {
+        "harvest": {
+          "pr": 15,
+          "record": {
+            "units": [
+              {
+                "key": "csv-no-notes",
+                "kind": "implementation",
+                "text": "toCsv writes title and author only",
+                "evidence": [
+                  {
+                    "source": "pr:15#body",
+                    "quote": "toCsv now writes title and author only.",
+                    "role": "implements"
+                  },
+                  {
+                    "source": "pr:15#commit:c15a",
+                    "quote": "fix: drop notes from CSV",
+                    "role": "implements"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/export.ts",
+                    "symbol": "toCsv",
+                    "role": "evidence"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "source": "issue:14#body",
+          "author": "maint-kai",
+          "association": "MEMBER",
+          "linked_to": "pr:15"
+        },
+        {
+          "unit": "harvest:15/csv-no-notes",
+          "kind": "implementation",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "capture-08",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "Capture from a Codex session stores the messages and an edit observation, which is not an implementation record by itself",
+      "given": [],
+      "when": {
+        "capture": "s-en-dates"
+      },
+      "then": [
+        {
+          "source": "session:s-en-dates#1.owner",
+          "kind": "session_message",
+          "host": "codex"
+        },
+        {
+          "edit_observation": {
+            "session": "s-en-dates",
+            "path": "src/dates.ts"
+          }
+        },
+        {
+          "units_for_session": "s-en-dates",
+          "count": 0
+        },
+        {
+          "status": {
+            "pending_sessions_includes": "s-en-dates"
+          }
+        }
+      ]
+    },
+    {
+      "id": "status-01",
+      "layer": "status",
+      "lang": "ja",
+      "summary": "An explicit supersession retires the old decision and points to the successor",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-postgres",
+            "at": "2026-05-01T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "やっぱり共有のために Postgres に移す。SQLite の決定は置き換える。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-postgres",
+          "record": {
+            "units": [
+              {
+                "key": "postgres",
+                "kind": "decision",
+                "stance": "do",
+                "text": "共有のために Postgres に移す",
+                "supersedes": "trace:s-ja-storage/storage",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-postgres#1.owner",
+                    "quote": "やっぱり共有のために Postgres に移す。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-postgres#1.owner",
+                    "quote": "SQLite の決定は置き換える。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "superseded",
+          "successor": "trace:s-ja-postgres/postgres"
+        },
+        {
+          "unit": "trace:s-ja-postgres/postgres",
+          "lifecycle": "active"
+        },
+        {
+          "state_history_of": "trace:s-ja-storage/storage",
+          "last": {
+            "to": "superseded",
+            "has_evidence": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "status-02",
+      "layer": "status",
+      "lang": "en",
+      "summary": "An English session supersedes a harvested PR decision",
+      "given": [
+        {
+          "case": "capture-05"
+        },
+        {
+          "session": {
+            "id": "s-en-npm",
+            "host": "codex",
+            "at": "2026-06-01T08:00:00Z",
+            "turns": [
+              {
+                "owner": "Go back to npm; pnpm broke our Windows contributors. This replaces the pnpm decision.",
+                "assistant": "Switched back to npm.",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-npm",
+          "record": {
+            "units": [
+              {
+                "key": "npm",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Use npm again",
+                "why": "pnpm broke Windows contributors",
+                "supersedes": "harvest:12/pnpm",
+                "evidence": [
+                  {
+                    "source": "session:s-en-npm#1.owner",
+                    "quote": "Go back to npm; pnpm broke our Windows contributors.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-npm#1.owner",
+                    "quote": "This replaces the pnpm decision."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:12/pnpm",
+          "lifecycle": "superseded",
+          "successor": "trace:s-en-npm/npm"
+        },
+        {
+          "search": {
+            "query": "package manager",
+            "top_active_is": "trace:s-en-npm/npm"
+          }
+        }
+      ]
+    },
+    {
+      "id": "status-03",
+      "layer": "status",
+      "lang": "ja",
+      "summary": "When an anchored symbol disappears, the decision stays active but reads as needing review",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "edit_file": {
+            "path": "src/db.ts",
+            "replace": ["export function open(", "export function openStore("]
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-ja-storage/storage"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
+        },
+        {
+          "anchor": {
+            "of": "trace:s-ja-storage/storage",
+            "symbol": "open",
+            "state": "missing"
+          }
+        },
+        {
+          "read_contains": "needs review"
+        }
+      ]
+    },
+    {
+      "id": "status-04",
+      "layer": "status",
+      "lang": "en",
+      "summary": "An anchor whose lines moved is still located",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "edit_file": {
+            "path": "src/export.ts",
+            "prepend": "// exports\n\n"
+          }
+        }
+      ],
+      "when": {
+        "read": ["harvest:15/csv-no-notes"]
+      },
+      "then": [
+        {
+          "anchor": {
+            "of": "harvest:15/csv-no-notes",
+            "symbol": "toCsv",
+            "state": "moved"
+          }
+        }
+      ]
+    },
+    {
+      "id": "status-05",
+      "layer": "status",
+      "lang": "ja",
+      "summary": "A later contradicting statement without a supersedes link does not retire the earlier decision",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-contra",
+            "at": "2026-05-02T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Postgres の方がいいかもしれない。",
+                "assistant": "検討事項として残します。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-contra",
+          "record": {
+            "units": [
+              {
+                "key": "maybe-postgres",
+                "kind": "question",
+                "text": "Postgres の方がいいか",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-contra#1.owner",
+                    "quote": "Postgres の方がいいかもしれない。",
+                    "role": "states"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-contra/maybe-postgres",
+          "kind": "question",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "status-06",
+      "layer": "status",
+      "lang": "en",
+      "summary": "An edited PR body becomes a new source revision; existing units keep citing the revision they were extracted from",
+      "given": [
+        {
+          "case": "capture-07"
+        }
+      ],
+      "when": {
+        "harvest": {
+          "pr": 15,
+          "refetch_with_edits": true,
+          "record": {
+            "units": []
+          }
+        }
+      },
+      "then": [
+        {
+          "source_revisions": {
+            "of": "pr:15#body",
+            "count": 2
+          }
+        },
+        {
+          "evidence_of": "harvest:15/csv-no-notes",
+          "cites_revision": 1
+        },
+        {
+          "no_unit_text_contains": "drop author"
+        }
+      ]
+    },
+    {
+      "id": "retrieval-01",
+      "layer": "retrieval",
+      "lang": "ja>ja",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "DB サーバーを使わない理由"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-ja-storage/storage",
+          "within": 3
+        }
+      ]
+    },
+    {
+      "id": "retrieval-02",
+      "layer": "retrieval",
+      "lang": "ja>ja",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "テレメトリは入れる？"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-ja-telemetry/no-telemetry",
+          "within": 3
+        }
+      ]
+    },
+    {
+      "id": "retrieval-03",
+      "layer": "retrieval",
+      "lang": "ja>ja",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "ログの保存期間は？"
+        }
+      },
+      "then": [
+        {
+          "no_active_unit_hits": true
+        }
+      ]
+    },
+    {
+      "id": "retrieval-04",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "given": [
+        {
+          "case": "capture-05"
+        },
+        {
+          "trace_en_dates": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "why pnpm and not yarn"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "harvest:12/pnpm",
+          "within": 3
+        },
+        {
+          "hit_shows_option": {
+            "unit": "harvest:12/pnpm",
+            "text": "yarn",
+            "outcome": "rejected"
+          }
+        }
+      ]
+    },
+    {
+      "id": "retrieval-05",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "given": [
+        {
+          "case": "capture-05"
+        },
+        {
+          "trace_en_dates": true
+        },
+        {
+          "trace_en_dates_competitor": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "which timezone do we store timestamps in"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-en-dates/utc",
+          "within": 3
+        }
+      ]
+    },
+    {
+      "id": "retrieval-06",
+      "layer": "retrieval",
+      "lang": "en>en",
+      "given": [
+        {
+          "case": "capture-05"
+        },
+        {
+          "trace_en_dates": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "which CI provider do we use"
+        }
+      },
+      "then": [
+        {
+          "no_active_unit_hits": true
+        }
+      ]
+    },
+    {
+      "id": "retrieval-07",
+      "layer": "retrieval",
+      "lang": "ja>en",
+      "given": [
+        {
+          "trace_en_dates": true
+        },
+        {
+          "trace_en_worker": true
+        },
+        {
+          "trace_en_dates_competitor": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "日付はどのタイムゾーンで保存する？"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-en-dates/utc",
+          "within": 3
+        },
+        {
+          "ranks_above": ["trace:s-en-dates/utc", "trace:s-en-dates/local-display"]
+        }
+      ]
+    },
+    {
+      "id": "retrieval-08",
+      "layer": "retrieval",
+      "lang": "ja>en",
+      "given": [
+        {
+          "trace_en_dates": true
+        },
+        {
+          "trace_en_worker": true
+        },
+        {
+          "trace_en_dates_competitor": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "サムネイルを別スレッドで作ろうとしたことはある？"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-en-worker/offscreen",
+          "within": 3
+        }
+      ]
+    },
+    {
+      "id": "retrieval-09",
+      "layer": "retrieval",
+      "lang": "ja>en",
+      "given": [
+        {
+          "trace_en_dates": true
+        },
+        {
+          "trace_en_worker": true
+        },
+        {
+          "trace_en_dates_competitor": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "課金の仕組みはどうなっている？"
+        }
+      },
+      "then": [
+        {
+          "no_active_unit_hits": true
+        }
+      ]
+    },
+    {
+      "id": "retrieval-10",
+      "layer": "retrieval",
+      "lang": "en>ja",
+      "given": [
+        {
+          "case": "capture-02"
+        },
+        {
+          "case": "capture-03"
+        },
+        {
+          "crash_reports": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "Do we collect usage analytics?"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-ja-telemetry/no-telemetry",
+          "within": 3
+        },
+        {
+          "ranks_above": ["trace:s-ja-telemetry/no-telemetry", "trace:s-ja-crash/crash-optin"]
+        }
+      ]
+    },
+    {
+      "id": "retrieval-11",
+      "layer": "retrieval",
+      "lang": "en>ja",
+      "given": [
+        {
+          "case": "capture-02"
+        },
+        {
+          "case": "capture-03"
+        },
+        {
+          "crash_reports": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "When will we add translations?"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-ja-i18n/i18n-later",
+          "within": 3
+        }
+      ]
+    },
+    {
+      "id": "retrieval-12",
+      "layer": "retrieval",
+      "lang": "en>ja",
+      "given": [
+        {
+          "case": "capture-02"
+        },
+        {
+          "case": "capture-03"
+        },
+        {
+          "crash_reports": true
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "How long do we keep backups?"
+        }
+      },
+      "then": [
+        {
+          "no_active_unit_hits": true
+        }
+      ]
+    },
+    {
+      "id": "injection-01",
+      "layer": "injection",
+      "lang": "ja>ja",
+      "summary": "Before editing an anchored file, the active decision is shown with the required wording",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/db.ts"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["trace:s-ja-storage/storage", "current code relevance unverified"]
+        },
+        {
+          "context_max_chars": 1500
+        }
+      ]
+    },
+    {
+      "id": "injection-02",
+      "layer": "injection",
+      "lang": "ja>ja",
+      "summary": "An unrelated prompt injects nothing",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "今日の天気は？"
+        }
+      },
+      "then": [
+        {
+          "context_empty": true
+        }
+      ]
+    },
+    {
+      "id": "injection-03",
+      "layer": "injection",
+      "lang": "en>en",
+      "summary": "Before editing the export code, the owner-adopted constraint from the issue is shown",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "case": "glean-02"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/export.ts"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["glean:csv/no-notes"]
+        }
+      ]
+    },
+    {
+      "id": "injection-04",
+      "layer": "injection",
+      "lang": "en>en",
+      "summary": "The session-start briefing carries the active work and stays small; candidates are not in it",
+      "given": [
+        {
+          "case": "capture-04"
+        },
+        {
+          "trace_en_dates": true
+        },
+        {
+          "work": {
+            "key": "export-v2",
+            "title": "Rework CSV export",
+            "current": "notes removed",
+            "next": ["add column order"]
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "session_start",
+          "source": "startup"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["Rework CSV export"]
+        },
+        {
+          "context_not_contains": ["zod"]
+        },
+        {
+          "context_max_chars": 1000
+        }
+      ]
+    },
+    {
+      "id": "injection-05",
+      "layer": "injection",
+      "lang": "ja>en",
+      "summary": "A Japanese prompt naming an exact identifier brings up the English constraint anchored to it",
+      "given": [
+        {
+          "trace_en_dates": true
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "toStored を直したい"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["trace:s-en-dates/utc"]
+        },
+        {
+          "context_max_lines": 3
+        }
+      ]
+    },
+    {
+      "id": "injection-06",
+      "layer": "injection",
+      "lang": "ja>en",
+      "summary": "With the database unavailable, the edit hook says so once and never pretends there is nothing",
+      "given": [
+        {
+          "database": "missing"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/db.ts",
+          "repeat": 2
+        }
+      },
+      "then": [
+        {
+          "first_context_contains": ["unavailable"]
+        },
+        {
+          "second_context_empty": true
+        }
+      ]
+    },
+    {
+      "id": "injection-07",
+      "layer": "injection",
+      "lang": "en>ja",
+      "summary": "An English prompt naming a rejected option brings up the Japanese don't decision",
+      "given": [
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "Add telemetry for usage stats"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["trace:s-ja-telemetry/no-telemetry"]
+        },
+        {
+          "inject_prompt_context_empty": "Do we collect usage analytics?",
+          "reason": "alias-only matches never inject"
+        }
+      ]
+    },
+    {
+      "id": "injection-08",
+      "layer": "injection",
+      "lang": "en>ja",
+      "summary": "Third-party text never reaches automatic delivery, and read frames every source as past evidence",
+      "given": [
+        {
+          "harvest_pr20": true
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "検索 前方一致"
+        }
+      },
+      "then": [
+        {
+          "context_not_contains": ["ignore all previous instructions"]
+        },
+        {
+          "read_of_source": "pr:20#comment:2001",
+          "framed_as_past_evidence": true
+        }
+      ]
+    },
+    {
+      "id": "injection-09",
+      "layer": "injection",
+      "lang": "ja>ja",
+      "summary": "Reading an anchored file brings its active decision once per session; a paraphrase names nothing, an unrelated read and a second read stay quiet, and the edit reminder is unchanged",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "prompt",
+              "prompt": "保存のやり方を見直したい"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/export.ts"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "pre_edit",
+              "path": "src/db.ts"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "empty": true
+            },
+            {
+              "empty": true
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage", "current code relevance unverified"]
+            },
+            {
+              "empty": true
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "review-01",
+      "layer": "review",
+      "lang": "ja",
+      "summary": "A diff to an anchored file selects the anchored decision",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "src/db.ts",
+            "add": "import pg from \"pg\";"
+          }
+        }
+      },
+      "then": [
+        {
+          "applicable_include": "trace:s-ja-storage/storage"
+        },
+        {
+          "lane": "checked"
+        }
+      ]
+    },
+    {
+      "id": "review-02",
+      "layer": "review",
+      "lang": "en",
+      "summary": "A diff to the export code selects the notes constraint",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "case": "glean-02"
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "src/export.ts",
+            "add": "b.note"
+          }
+        }
+      },
+      "then": [
+        {
+          "applicable_include": "glean:csv/no-notes"
+        }
+      ]
+    },
+    {
+      "id": "review-03",
+      "layer": "review",
+      "lang": "ja",
+      "summary": "A location-free don't decision is a review candidate for a diff that matches its option by name",
+      "given": [
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "src/telemetry.ts",
+            "add": "export function sendTelemetry() {}"
+          }
+        }
+      },
+      "then": [
+        {
+          "applicable_include": "trace:s-ja-telemetry/no-telemetry"
+        }
+      ]
+    },
+    {
+      "id": "review-04",
+      "layer": "review",
+      "lang": "en",
+      "summary": "A diff to the dates module selects the UTC constraint",
+      "given": [
+        {
+          "trace_en_dates": true
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "src/dates.ts",
+            "add": "export const toLocal = (d: Date) => d.toString();"
+          }
+        }
+      },
+      "then": [
+        {
+          "applicable_include": "trace:s-en-dates/utc"
+        }
+      ]
+    },
+    {
+      "id": "review-05",
+      "layer": "review",
+      "lang": "ja",
+      "summary": "A documentation-only diff selects no decision",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "docs/運用メモ.md",
+            "add": "月次でも確認する。"
+          }
+        }
+      },
+      "then": [
+        {
+          "applicable_empty": true
+        },
+        {
+          "lane": "checked"
+        }
+      ]
+    },
+    {
+      "id": "review-06",
+      "layer": "review",
+      "lang": "en",
+      "summary": "Superseded and candidate units are never applicable",
+      "given": [
+        {
+          "case": "status-02"
+        },
+        {
+          "case": "capture-06"
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "src/db.ts",
+            "add": "db.exec(\"pragma synchronous = off\");"
+          }
+        }
+      },
+      "then": [
+        {
+          "applicable_not_include": ["harvest:12/pnpm", "harvest:12/sync-off"]
+        }
+      ]
+    },
+    {
+      "id": "review-07",
+      "layer": "review",
+      "lang": "ja",
+      "summary": "Output validation rejects a verdict without a decision source or changed-code evidence",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "review_validate": {
+          "findings": [
+            {
+              "outcome": "violation",
+              "unit": "trace:s-ja-storage/storage"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "validation_problems_contain": ["evidence"]
+        }
+      ]
+    },
+    {
+      "id": "review-08",
+      "layer": "review",
+      "lang": "en",
+      "summary": "When the database cannot be reached the lane reports not checked",
+      "given": [
+        {
+          "database": "missing"
+        }
+      ],
+      "when": {
+        "review_select": {
+          "diff": {
+            "path": "src/dates.ts",
+            "add": "x"
+          }
+        }
+      },
+      "then": [
+        {
+          "lane": "not_checked"
+        }
+      ]
+    },
+    {
+      "id": "glean-01",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "A reported statement is stored as the owner's report with a reported speaker and never as adoption",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "session": {
+            "id": "s-ja-glean1",
+            "at": "2026-03-19T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "木村さんが、CSV にメモを入れない件はチームで合意済みと言ってた。issue は #14。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean1",
+          "record": {
+            "units": [
+              {
+                "key": "csv/no-notes",
+                "kind": "constraint",
+                "stance": "dont",
+                "text": "CSV の書き出しにメモを含めない",
+                "evidence": [
+                  {
+                    "source": "issue:14#body",
+                    "quote": "Exported CSV files must never include the private note field.",
+                    "role": "states"
+                  },
+                  {
+                    "source": "session:s-ja-glean1#1.owner",
+                    "quote": "木村さんが、CSV にメモを入れない件はチームで合意済みと言ってた。",
+                    "role": "states",
+                    "reported_speaker": "木村さん"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "glean:csv/no-notes",
+          "lifecycle": "candidate"
+        },
+        {
+          "evidence": {
+            "of": "glean:csv/no-notes",
+            "reported_speaker": "木村さん",
+            "author_is_owner": true
+          }
+        },
+        {
+          "adoption_count": {
+            "of": "glean:csv/no-notes",
+            "count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "glean-02",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "The owner's own separate adoption span makes it active",
+      "given": [
+        {
+          "case": "glean-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-glean2",
+            "at": "2026-03-19T11:00:00+09:00",
+            "turns": [
+              {
+                "owner": "CSV にメモを入れない、で決まりにしよう。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean2",
+          "record": {
+            "ops": [
+              {
+                "op": "adopt",
+                "unit": "glean:csv/no-notes",
+                "source": "session:s-ja-glean2#1.owner",
+                "quote": "CSV にメモを入れない、で決まりにしよう。"
+              },
+              {
+                "op": "anchor",
+                "unit": "glean:csv/no-notes",
+                "path": "src/export.ts",
+                "symbol": "toCsv",
+                "role": "applies_to"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "glean:csv/no-notes",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "glean-03",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "A quote that is not in any captured owner message is refused, not replaced by agent text",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "session": {
+            "id": "s-ja-glean3",
+            "at": "2026-03-19T12:00:00+09:00",
+            "turns": [
+              {
+                "owner": "メモの件を記録しておいて。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean3",
+          "record": {
+            "ops": [
+              {
+                "op": "adopt",
+                "unit": "harvest:15/csv-no-notes",
+                "source": "session:s-ja-glean3#1.owner",
+                "quote": "メモは絶対に入れないと決めた。"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "save_refused_contains": "not found"
+        },
+        {
+          "adoption_count": {
+            "of": "harvest:15/csv-no-notes",
+            "count": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "glean-04",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "A file excerpt is read by the CLI from git with exact UTF-8 and CRLF offsets",
+      "given": [
+        {
+          "case": "capture-02"
+        },
+        {
+          "edit_file": {
+            "path": "docs/運用メモ.md",
+            "crlf": true
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-glean4",
+            "at": "2026-03-20T09:00:00+09:00",
+            "turns": [
+              {
+                "owner": "運用メモにバックアップの決まりが書いてあるよ。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean4",
+          "record": {
+            "ops": [
+              {
+                "op": "add_evidence",
+                "unit": "trace:s-ja-telemetry/no-telemetry",
+                "file": {
+                  "path": "docs/運用メモ.md",
+                  "commit": "HEAD",
+                  "lines": [3, 3]
+                },
+                "quote": "リリース前にバックアップを取る。",
+                "role": "explains"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "file_source": {
+            "path": "docs/運用メモ.md",
+            "lines": [3, 3],
+            "text": "リリース前にバックアップを取る。",
+            "blob_recorded": true,
+            "partial": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "glean-05",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "Paths outside the repository are refused",
+      "given": [
+        {
+          "case": "capture-07"
+        }
+      ],
+      "when": {
+        "glean_each": {
+          "session": "s-en-dates",
+          "files": ["../secret.txt", "/etc/passwd", "C:\\Windows\\win.ini", "src/../../x"]
+        }
+      },
+      "then": [
+        {
+          "every_save_refused": true
+        }
+      ]
+    },
+    {
+      "id": "glean-06",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "Symlinks, binary files, and oversized files are refused",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "symlink": {
+            "path": "src/link.ts",
+            "to": "../../outside.txt"
+          }
+        }
+      ],
+      "when": {
+        "glean_each": {
+          "session": "s-en-dates",
+          "files": ["src/link.ts", "assets/logo.bin", "big/huge.txt"]
+        }
+      },
+      "then": [
+        {
+          "every_save_refused": true
+        }
+      ]
+    },
+    {
+      "id": "glean-07",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "Saving the same draft twice does not duplicate evidence; a draft whose target changed after read is refused",
+      "given": [
+        {
+          "case": "capture-05"
+        }
+      ],
+      "when": {
+        "glean_twice": {
+          "session": "s-en-dates",
+          "record": {
+            "ops": [
+              {
+                "op": "add_evidence",
+                "unit": "harvest:12/pnpm",
+                "source": "pr:12#commit:c12b",
+                "quote": "chore: switch to pnpm",
+                "role": "implements"
+              }
+            ]
+          },
+          "change_target_between": false
+        }
+      },
+      "then": [
+        {
+          "evidence_count": {
+            "of": "harvest:12/pnpm",
+            "source": "pr:12#commit:c12b",
+            "count": 1
+          }
+        },
+        {
+          "stale_draft_refused": true
+        }
+      ]
+    },
+    {
+      "id": "glean-08",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "A correction creates a successor and supersedes the old unit without editing its text",
+      "given": [
+        {
+          "case": "capture-05"
+        },
+        {
+          "session": {
+            "id": "s-en-glean8",
+            "host": "codex",
+            "at": "2026-03-21T09:00:00Z",
+            "turns": [
+              {
+                "owner": "Correction: we chose pnpm for disk use, not speed. Replace that decision.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-glean8",
+          "record": {
+            "units": [
+              {
+                "key": "pnpm-disk",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Use pnpm to save disk on CI",
+                "supersedes": "harvest:12/pnpm",
+                "evidence": [
+                  {
+                    "source": "session:s-en-glean8#1.owner",
+                    "quote": "we chose pnpm for disk use, not speed.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-glean8#1.owner",
+                    "quote": "Replace that decision."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:12/pnpm",
+          "lifecycle": "superseded",
+          "text": "Use pnpm for installs"
+        },
+        {
+          "unit": "glean:pnpm-disk",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "glean-09",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "Retracting a mistaken evidence or adoption link keeps it in history and recomputes eligibility",
+      "given": [
+        {
+          "case": "glean-02"
+        },
+        {
+          "session": {
+            "id": "s-ja-glean9",
+            "at": "2026-03-22T09:00:00+09:00",
+            "turns": [
+              {
+                "owner": "さっきの採用は間違い。まだ決めてない。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean9",
+          "record": {
+            "ops": [
+              {
+                "op": "retract_adoption",
+                "unit": "glean:csv/no-notes",
+                "source": "session:s-ja-glean2#1.owner",
+                "reason_source": "session:s-ja-glean9#1.owner",
+                "reason_quote": "さっきの採用は間違い。"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "glean:csv/no-notes",
+          "lifecycle": "candidate"
+        },
+        {
+          "retracted_adoption_kept": {
+            "of": "glean:csv/no-notes",
+            "count": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "glean-10",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "Replacing an anchor retires the old one and keeps its history",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "edit_file": {
+            "path": "src/db.ts",
+            "replace": ["export function open(", "export function openStore("]
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-glean10",
+            "at": "2026-04-01T09:00:00+09:00",
+            "turns": [
+              {
+                "owner": "open は openStore に名前が変わったよ。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean10",
+          "record": {
+            "ops": [
+              {
+                "op": "replace_anchor",
+                "unit": "trace:s-ja-storage/storage",
+                "from": {
+                  "path": "src/db.ts",
+                  "symbol": "open"
+                },
+                "to": {
+                  "path": "src/db.ts",
+                  "symbol": "openStore",
+                  "role": "applies_to"
+                },
+                "source": "session:s-ja-glean10#1.owner",
+                "quote": "open は openStore に名前が変わったよ。"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "anchor": {
+            "of": "trace:s-ja-storage/storage",
+            "symbol": "openStore",
+            "state": "located"
+          }
+        },
+        {
+          "retired_anchor_kept": {
+            "of": "trace:s-ja-storage/storage",
+            "symbol": "open"
+          }
+        }
+      ]
+    },
+    {
+      "id": "glean-11",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "Evidence gleaned after a task's cutoff is excluded from that task's snapshot, while the record and its earlier evidence stay",
+      "given": [
+        {
+          "case": "glean-04"
+        }
+      ],
+      "when": {
+        "as_of": {
+          "before": "glean",
+          "read": "trace:s-ja-telemetry/no-telemetry"
+        }
+      },
+      "then": [
+        {
+          "evidence_sources_not_include": "file:docs/運用メモ.md"
+        },
+        {
+          "read_contains": "(states)"
+        }
+      ]
+    },
+    {
+      "id": "glean-12",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "A claim with no source is kept, marked unsourced, never active and never injected; check tells the agent to ask the owner for a source",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-glean12",
+            "at": "2026-03-25T09:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙の画像は 1 MB までに縮めるって前に決めた気がする。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean12",
+          "record": {
+            "units": [
+              {
+                "key": "cover-size",
+                "kind": "constraint",
+                "stance": "do",
+                "text": "表紙の画像は 1 MB までに縮める",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-glean12#1.owner",
+                    "quote": "表紙の画像は 1 MB までに縮めるって前に決めた気がする。",
+                    "role": "states"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_notes_contain": "ask the owner for a source"
+        },
+        {
+          "unit": "glean:cover-size",
+          "lifecycle": "candidate",
+          "unsourced": true
+        },
+        {
+          "inject_never_contains": "1 MB"
+        }
+      ]
+    }
+  ],
+  "setups": {
+    "trace_en_dates": {
+      "capture": "s-en-dates",
+      "trace": {
+        "session": "s-en-dates",
+        "record": {
+          "units": [
+            {
+              "key": "utc",
+              "kind": "constraint",
+              "stance": "do",
+              "text": "Store every timestamp in UTC; convert to local time only for display",
+              "evidence": [
+                {
+                  "source": "session:s-en-dates#1.owner",
+                  "quote": "Store every timestamp in UTC.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-dates#1.owner",
+                  "quote": "Store every timestamp in UTC."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/dates.ts",
+                  "symbol": "toStored",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["日付", "タイムゾーン", "時刻の保存", "協定世界時", "UTC", "timezone", "timestamp"]
+            }
+          ]
+        }
+      }
+    },
+    "trace_en_worker": {
+      "capture": "s-en-worker",
+      "trace": {
+        "session": "s-en-worker",
+        "record": {
+          "units": [
+            {
+              "key": "offscreen",
+              "kind": "dead_end",
+              "text": "Generating thumbnails in a Web Worker with OffscreenCanvas failed: Safari 16 lacks OffscreenCanvas",
+              "evidence": [
+                {
+                  "source": "session:s-en-worker#1.assistant",
+                  "quote": "Safari 16 lacks it, so thumbnails failed there.",
+                  "role": "states"
+                }
+              ],
+              "aliases": ["サムネイル", "別スレッド", "ワーカー", "画像の縮小", "thumbnail", "worker"]
+            }
+          ]
+        }
+      }
+    },
+    "harvest_pr20": {
+      "harvest": {
+        "pr": 20,
+        "record": {
+          "units": [
+            {
+              "key": "prefix",
+              "kind": "decision",
+              "stance": "do",
+              "text": "書名の検索は前方一致にする",
+              "evidence": [
+                {
+                  "source": "pr:20#body",
+                  "quote": "書名の検索は前方一致にする。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "pr:20#body",
+                  "quote": "書名の検索は前方一致にする。"
+                }
+              ]
+            },
+            {
+              "key": "fts-later",
+              "kind": "decision",
+              "stance": "defer",
+              "text": "全文検索はデータが 1 万冊を超えるまで見送る",
+              "revisit_when": "データが 1 万冊を超えたとき",
+              "evidence": [
+                {
+                  "source": "pr:20#body",
+                  "quote": "全文検索はデータが 1 万冊を超えるまで見送る。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "pr:20#body",
+                  "quote": "全文検索はデータが 1 万冊を超えるまで見送る。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "trace_en_dates_competitor": {
+      "capture": "s-en-dates",
+      "trace": {
+        "session": "s-en-dates",
+        "record": {
+          "units": [
+            {
+              "key": "local-display",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Show dates in the reader's local time zone in the UI",
+              "evidence": [
+                {
+                  "source": "session:s-en-dates#1.owner",
+                  "quote": "Convert to local time only when showing it.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-dates#1.owner",
+                  "quote": "Convert to local time only when showing it."
+                }
+              ],
+              "aliases": ["表示", "ローカル時刻", "画面の日付", "display", "local time"]
+            }
+          ]
+        }
+      }
+    },
+    "crash_reports": {
+      "session": {
+        "id": "s-ja-crash",
+        "at": "2026-03-06T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "クラッシュレポートの送信は、ユーザーが明示的に許可したときだけにする。",
+            "assistant": "オプトインにします。",
+            "edits": []
+          }
+        ]
+      },
+      "trace": {
+        "session": "s-ja-crash",
+        "record": {
+          "units": [
+            {
+              "key": "crash-optin",
+              "kind": "decision",
+              "stance": "do",
+              "text": "クラッシュレポートの送信はオプトインにする",
+              "evidence": [
+                {
+                  "source": "session:s-ja-crash#1.owner",
+                  "quote": "クラッシュレポートの送信は、ユーザーが明示的に許可したときだけにする。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-ja-crash#1.owner",
+                  "quote": "クラッシュレポートの送信は、ユーザーが明示的に許可したときだけにする。"
+                }
+              ],
+              "aliases": ["crash report", "opt-in", "error reporting", "クラッシュ", "同意"]
+            }
+          ]
+        }
+      }
+    }
+  }
+}

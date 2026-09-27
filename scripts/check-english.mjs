@@ -25,12 +25,8 @@ const filesUnder = (dir, re) =>
 const ENGLISH = [
   ...filesUnder("server/src", /\.tsx?$/),
   ...filesUnder("scripts", /\.(c?js|mjs|m?ts|tsx)$/),
-  "server/evals/cases.ts",
-  "server/evals/retrieval.ts",
   "server/test/assets.test.ts",
   "server/test/check-mcp-version.test.ts",
-  "server/test/evals-run.test.ts",
-  "server/test/migrate.test.ts",
   "server/test/plugin.test.ts",
   "server/test/project.test.ts",
   "server/test/release-gate.test.ts",
@@ -39,6 +35,10 @@ const ENGLISH = [
   "server/test/tarball.test.ts",
   "server/test/temp-db.ts",
   "server/test/temp-repo.ts",
+  "server/test/acceptance-cases.test.ts",
+  "server/evals/acceptance/load.ts",
+  "server/evals/acceptance/run.ts",
+  "server/evals/acceptance/driver.ts",
 ];
 
 /** Comments must be English. Tests keep Japanese fixtures, and evals keep their measured prompts. */
@@ -60,7 +60,6 @@ const TEXT = [
   "renovate.json",
   "server/bunfig.toml",
   "db/schema.sql",
-  ...filesUnder("db/migrations", /\.sql$/),
   "CLAUDE.md",
   "AGENTS.md",
   ...filesUnder(".claude/rules", /\.md$/),

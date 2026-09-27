@@ -14,19 +14,11 @@
     "typecheck": "bun run --cwd server typecheck",
     "check": "bun run lint && bun run verify:ai && bun run naming && bun run pairs && bun run rule-scopes && bun run sql && bun run architecture && bun run english && bun run codegen:check && bun run typecheck && bun run knip",
     "test": "bun run --cwd server test",
-    "verify": "bun run check && bun run bundle && bun run sql:reach && bun run sql:live",
+    "verify": "bun run check && bun run bundle && bun run sql:reach && bun run sql:live && bun run acceptance",
     "bundle": "node scripts/bundle.mjs",
     "release:plan": "node scripts/release-plan.mjs",
     "release:status": "node scripts/release-status.mjs",
     "codegen": "node scripts/codegen.mjs",
-    "evals:retrieval": "node server/evals/retrieval.ts",
-    "evals:build": "node server/evals/build-cases.ts",
-    "evals:features": "node server/evals/features.ts",
-    "evals:agentic": "node server/evals/agentic/run.ts",
-    "evals:judge": "node server/evals/agentic/judge.ts",
-    "evals:experiment": "node server/evals/agentic/experiment.ts",
-    "evals:replay": "node server/evals/agentic/replay.ts",
-    "terms:draft": "node scripts/terms-draft.mjs",
     "codegen:check": "node scripts/codegen.mjs --check",
     "sql:reach": "node scripts/check-sql-reach.mjs",
     "sql:live": "node scripts/check-sql-live.mjs",
@@ -34,6 +26,7 @@
     "notices": "node scripts/third-party-notices.mjs --check",
     "pairs": "node scripts/check-pairs.mjs",
     "rule-scopes": "node scripts/check-rule-scopes.mjs",
-    "sql": "node scripts/check-sql.mjs"
+    "sql": "node scripts/check-sql.mjs",
+    "acceptance": "bun run --cwd server acceptance"
   }
 }

@@ -17,10 +17,10 @@ Rules copied to both are tied by the invariant at the end of the line. When you 
 
 ```bash
 mise trust && mise install  # trust mise.toml and install Node, Bun, and actionlint at its versions
-bun run verify      # lint, types, AI config, boundaries, bundle, tests, SQL reach, CLI child processes
+bun run verify      # lint, types, AI config, boundaries, bundle, tests, SQL reach, CLI child processes, acceptance cases
 bun run verify:ai   # static checks of CLAUDE.md, AGENTS.md, Skills, and Agents
 bun run fix         # format and apply safe lint fixes with the pinned Biome (`bunx biome` runs an unrelated npm package)
-bun run bundle      # build the MCP, CLI, and capture artifacts
+bun run bundle      # build the MCP servers, CLI, and hook artifacts
 ```
 
 `verify` writes temporary files, so it cannot run in a read-only sandbox. If you could not run it, write that it is unverified.
@@ -30,9 +30,9 @@ bun run bundle      # build the MCP, CLI, and capture artifacts
 ### DB and connections
 
 - `db/schema.sql` is the only source of truth for the DB. Do not add an ORM schema as a second source <!-- invariant: schema-single-source -->
-- MCP and the CLI's reads (`project list`, `trace context`, `harvest read`, the projects in `doctor`) use the reader connection, `trace save`, `harvest save`, and project changes use ingest, capture uses capture, and `sphica db *` and the database check in `doctor` use owner. <!-- invariant: connection-roles -->
-  Instead: take write connections from the factories in `server/src/db-write.ts`. Do not import them from reading interfaces (`bun run architecture`)
-- MCP uses only the reader connection, and commands that fetch PR or issue text or recorded conversations open no write connection (except that `trace context` first sends the capture queue through the capture role, which can only add recorded messages). The user-only harvest Skill passes a checked `harvest/1` record to `harvest save`, which derives the project and GitHub repository from cwd, confirms the PR there, and changes only knowledge owned by that PR (plus its provenance, search words, and file links). It takes no SQL and cannot change trace records or other projects <!-- invariant: untrusted-no-write -->
+- The read MCP server (`server/src/mcp.ts`: status, search, read) and `doctor`'s reads use the reader connection, the record MCP server (`server/src/mcp-record.ts`) and project registration in `init` use ingest, capture uses capture, and creating the database, `doctor`'s database check (the full-text index integrity check needs a writable connection), and `doctor --reindex` use owner. <!-- invariant: connection-roles -->
+  Instead: take write connections from the factories in `server/src/db-write.ts`. The read MCP server never imports them (`bun run architecture`)
+- Records are written only through the record MCP server's run-bound tools: `trace_begin`, `harvest_begin`, and `glean_begin` bind a run to one project and one target, and `record_check` and `record_save` take that run id, never a project, session, pull request, or SQL from the record. The CLI carries only `init`, `doctor`, and `uninstall`; trace, harvest, glean, and review run as slash commands <!-- invariant: record-writes -->
 - No server that listens <!-- invariant: no-listen -->
 - No HTML or Markdown progress files. The DB is the source of truth for records <!-- invariant: no-progress-files -->
 
@@ -40,7 +40,7 @@ bun run bundle      # build the MCP, CLI, and capture artifacts
 
 - Check the CLI separately from MCP. One working does not mean the other works <!-- invariant: exits-separate -->
 - When a value, category, or decision changes, is the paired interface fixed too? Add pairs you can list to a check <!-- invariant: rg-pairs -->
-- Does a new ingestion source write through a checked record command (`trace save`, `harvest save`) or capture, not a bulk import? <!-- invariant: harvest -->
+- Does a new ingestion source write through the record server's run-bound tools or capture, not a bulk import? <!-- invariant: harvest -->
 
 ### Package
 
@@ -73,7 +73,7 @@ bun run bundle      # build the MCP, CLI, and capture artifacts
 Read to the end before implementing or reviewing.
 
 - DB schema, connection roles, full-text search index, ingestion: `knowledge-schema`
-- MCP, CLI, capture hooks, plugin distribution: `plugin-release`
+- MCP servers, CLI, capture and delivery hooks, plugin distribution: `plugin-release`
 - Shipped review aspects: `plugin-agent-authoring`
 
 ## Reviews of this repository

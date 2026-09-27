@@ -280,6 +280,25 @@ try {
       fail(`plugin/hooks/codex.json: making ${event} async would break conversation order`);
     }
   }
+  const codexDeliver = ["$", '{PLUGIN_ROOT}/dist/deliver.js" codex'].join("");
+  const codexDeliverWindows =
+    "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex";
+  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse"]) {
+    const groups = (codexHooks?.[event] ?? []).filter((group) =>
+      (group.hooks ?? []).some((hook) => hook.command?.includes(codexDeliver)),
+    );
+    if (!groups.length) fail(`plugin/hooks/codex.json: ${event} is not wired to Codex delivery`);
+    if (!groups.some((group) => group.hooks.some((hook) => hook.commandWindows === codexDeliverWindows))) {
+      fail(`plugin/hooks/codex.json: ${event} has no Windows delivery command`);
+    }
+    // Codex edits arrive as apply_patch and reads only as shell commands (Bash)
+    if (
+      event === "PreToolUse" &&
+      !groups.some((group) => ["apply_patch", "Bash"].every((t) => new RegExp(group.matcher ?? "").test(t)))
+    ) {
+      fail("plugin/hooks/codex.json: the PreToolUse delivery matcher must cover apply_patch and Bash");
+    }
+  }
   const marketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
   const entry = marketplace.plugins?.[0];
   const src = entry?.source;

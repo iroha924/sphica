@@ -9,6 +9,15 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -18,6 +27,15 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/capture.js\"",
             "async": true
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "timeout": 5
           }
         ]
       }
@@ -47,25 +65,22 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Skill",
         "hooks": [
           {
-            "type": "mcp_tool",
-            "server": "plugin:sphica:sphica",
-            "tool": "check_path",
-            "input": { "path": "${tool_input.file_path}", "cwd": "${cwd}", "hook": true },
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
             "timeout": 5
           }
         ]
-      },
+      }
+    ],
+    "UserPromptExpansion": [
       {
-        "matcher": "NotebookEdit",
         "hooks": [
           {
-            "type": "mcp_tool",
-            "server": "plugin:sphica:sphica",
-            "tool": "check_path",
-            "input": { "path": "${tool_input.notebook_path}", "cwd": "${cwd}", "hook": true },
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
             "timeout": 5
           }
         ]

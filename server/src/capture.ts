@@ -25,10 +25,11 @@ import type { Kysely } from "kysely";
 import { dbFile, inTransaction, iso, sqliteCode } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
-import { conversationId, type FileAction, indexesMessage, type Origin } from "./knowledge.ts";
+import { type Host, sessionId } from "./knowledge.ts";
 import { panel, plain } from "./panel.ts";
 import { identify, patchPaths, relativeTo } from "./project.ts";
-import { bytes, clean, head, mask, plural, reason, sha256, tail, uuidFrom } from "./text.ts";
+import { bytes, clean, head, mask, plural, reason, sha256, tail } from "./text.ts";
+import { changed, type Snapshot, snapshot } from "./worktree.ts";
 
 // Resolve the location on every call (so tests that replace HOME never touch the real queue).
 export const spoolDir = (): string => path.join(os.homedir(), ".sphica", "spool");
@@ -44,40 +45,73 @@ export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
 const HOLD_DAYS = 30;
 const HOLD_MAX = 1000;
+/** Where each session's working tree stood when its running turn began. Turn start and end run in separate hook processes. */
+const baselineDir = (): string => path.join(os.homedir(), ".sphica", "worktree");
 
-type Host = Origin;
-
+/** A queued record. v:2 is written now; v:1 records left in a queue from 0.4 are translated when sent (never silently dropped). */
 export type Spooled =
   | {
-      v: 1;
+      v: 2;
       kind: "message";
       host: Host;
       session: string;
       project: string;
       branch: string | null;
       turn: string;
-      /** Unique within the conversation */
+      /** Unique within the session */
       id: string;
-      speaker: "self" | "assistant";
+      speaker: "owner" | "assistant";
       body: string;
       truncated: boolean;
+      redacted: boolean;
       originalBytes: number;
       at: string;
     }
   | {
-      v: 1;
-      kind: "file";
+      v: 2;
+      kind: "edit";
       host: Host;
       session: string;
       project: string;
       branch: string | null;
       turn: string;
-      /** The message of yours it links to (message id): your last message before the touch */
-      message: string;
+      /** The tool call that reported the edit */
+      event: string | null;
       path: string;
-      action: Exclude<FileAction, "review">;
+      /** Reported by an edit tool, or seen changing in git status over the turn */
+      via: "tool" | "status";
       at: string;
     };
+
+type SpooledV1 =
+  | {
+      v: 1;
+      kind: "message";
+      speaker: "self" | "assistant";
+      truncated: boolean;
+      originalBytes: number;
+      body: string;
+    }
+  | { v: 1; kind: "file"; action: string; path: string };
+
+/** A record read from the queue in the current shape, or null when it is a v:1 record with nothing to keep (a read file). */
+export function current(raw: unknown): Spooled | null {
+  const r = raw as { v?: number } & Record<string, unknown>;
+  if (r.v === 2) return raw as Spooled;
+  if (r.v !== 1) throw new Error(`unknown queue record version ${String(r.v)}`);
+  const old = raw as SpooledV1 &
+    Omit<Extract<Spooled, { kind: "edit" }>, "v" | "kind" | "event" | "path" | "via">;
+  if (old.kind === "message")
+    return {
+      ...old,
+      v: 2,
+      kind: "message",
+      speaker: old.speaker === "self" ? "owner" : "assistant",
+      redacted: false,
+    } as Spooled;
+  if (old.action !== "edit") return null;
+  return { ...old, v: 2, kind: "edit", event: null, path: old.path, via: "tool" } as Spooled;
+}
 
 /** Limit for one message. Beyond it only the start and end are kept (a huge log pasted by mistake never fills the database and index). */
 export const MAX_MESSAGE = 128 * 1024;
@@ -88,18 +122,26 @@ const KEEP = 8 * 1024;
  * To avoid leaving half a key across the cut, it masks a window twice the kept length, then cuts.
  * Without cutting, the kept size equals the masked body (the table CHECK).
  */
-export function fit(body: string): { body: string; truncated: boolean; originalBytes: number } {
+export function fit(body: string): {
+  body: string;
+  truncated: boolean;
+  redacted: boolean;
+  originalBytes: number;
+} {
   const all = bytes(body);
   if (all <= MAX_MESSAGE) {
     const kept = mask(body);
-    return { body: kept, truncated: false, originalBytes: bytes(kept) };
+    return { body: kept, truncated: false, redacted: kept !== body, originalBytes: all };
   }
-  const a = head(mask(head(body, KEEP * 2)), KEEP);
-  const z = tail(mask(tail(body, KEEP * 2)), KEEP);
+  const start = head(body, KEEP * 2);
+  const end = tail(body, KEEP * 2);
+  const a = head(mask(start), KEEP);
+  const z = tail(mask(end), KEEP);
   const cut = all - bytes(a) - bytes(z);
   return {
     body: `${a}\n\n[${cut.toLocaleString("en-US")} bytes in the middle not saved]\n\n${z}`,
     truncated: true,
+    redacted: mask(start) !== start || mask(end) !== end,
     originalBytes: all,
   };
 }
@@ -135,7 +177,7 @@ function spool(record: Spooled): void {
 }
 
 /** The current branch. Reads HEAD without starting git (in a worktree .git is a file pointing to the real location). */
-const branchOf = (root: string): string | null => {
+export const branchOf = (root: string): string | null => {
   try {
     const dotgit = path.join(root, ".git");
     const gitdir = fs.statSync(dotgit).isFile()
@@ -154,7 +196,7 @@ const branchOf = (root: string): string | null => {
   }
 };
 
-type HookInput = {
+export type HookInput = {
   hook_event_name?: string;
   session_id?: string;
   prompt_id?: string;
@@ -208,82 +250,29 @@ const INJECTED = [
  */
 const digest = (s: string): string => sha256(s).toString("hex").slice(0, 16);
 
-const saidDir = (): string => path.join(spoolDir(), "said");
-
 /**
- * Remembers your last message id per session. Files touched afterward link to it (turns started by completion notices or messages have
- * no message of yours, so the turn id cannot link them). Written under another name and then replaced so readers never see a half
- * value. Sessions untouched for 30 days are removed.
- */
-/**
- * How many times and how long to wait for the destination to free up (300ms total).
- * Antivirus holds files anywhere from a few to hundreds of milliseconds, so real time matters more than the count.
- */
-const RENAME_TRIES = 20;
-const RENAME_WAIT_MS = 15;
-
-/**
- * Waits synchronously. **This path is called synchronously from a hook, so it cannot await.**
- * `Atomics.wait` also waits on Node's main thread (measured: 125ms for 120ms requested on v24).
- */
-const sleepSync = (ms: number): void => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-};
-
-function remember(session: string, id: string): void {
-  const dir = saidDir();
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = path.join(dir, uuidFrom(session));
-  const tmp = `${file}.${process.pid}`;
-  fs.writeFileSync(tmp, id, { mode: 0o600 });
-  // On Windows, EPERM / EBUSY is returned while a process (an editor, antivirus) holds the destination.
-  // Giving up here would link later edits to the wrong message, or drop them unlinked.
-  // **Retry with real time in between.** Retrying without a gap uses up the count before the other side lets go, with the same result.
-  for (let i = 0; ; i++) {
-    try {
-      fs.renameSync(tmp, file);
-      break;
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (i >= RENAME_TRIES || (code !== "EPERM" && code !== "EBUSY")) {
-        fs.rmSync(tmp, { force: true });
-        throw e;
-      }
-      sleepSync(RENAME_WAIT_MS);
-    }
-  }
-  const old = Date.now() - 30 * 86_400_000;
-  for (const f of fs.readdirSync(dir)) {
-    const st = fs.statSync(path.join(dir, f), { throwIfNoEntry: false });
-    if (st && st.mtimeMs < old) fs.rmSync(path.join(dir, f), { force: true });
-  }
-}
-
-function lastSaid(session: string): string | null {
-  try {
-    return fs.readFileSync(path.join(saidDir(), uuidFrom(session)), "utf8");
-  } catch {
-    return null; // you have not said anything in this session yet
-  }
-}
-
-/**
- * The answers you chose in AskUserQuestion, and notes added to them. Question and answer pairs are recorded as your messages.
+ * The answers you chose in AskUserQuestion, and notes added to them. The questions are the model's words and are recorded as its message; only the answers are yours.
  * tool_response is `{ questions, answers: {question: answer}, annotations: {question: { notes }} }` (confirmed in real transcripts).
  * **Answers come only from tool_response.** tool_input is written by the model, so its values are never taken as your answers.
  */
-export function answersOf(input: HookInput): string | null {
+export function answersOf(input: HookInput): { questions: string; answers: string } | null {
   const response = input.tool_response as
     | { answers?: Record<string, unknown>; annotations?: Record<string, { notes?: unknown }> }
     | undefined;
   const answers = response?.answers;
   if (!answers || typeof answers !== "object") return null;
-  const lines = Object.entries(answers).map(([q, a]) => {
-    const notes = response?.annotations?.[q]?.notes;
-    const memo = typeof notes === "string" && notes.trim() ? `\nNotes: ${notes.trim()}` : "";
-    return `Q: ${q}\nA: ${Array.isArray(a) ? a.join(" / ") : String(a)}${memo}`;
-  });
-  return lines.length ? lines.join("\n\n") : null;
+  const pairs = Object.entries(answers);
+  if (!pairs.length) return null;
+  return {
+    questions: pairs.map(([q], i) => `Q${i + 1}: ${q}`).join("\n\n"),
+    answers: pairs
+      .map(([q, a], i) => {
+        const notes = response?.annotations?.[q]?.notes;
+        const memo = typeof notes === "string" && notes.trim() ? `\nNotes: ${notes.trim()}` : "";
+        return `A${i + 1}: ${Array.isArray(a) ? a.join(" / ") : String(a)}${memo}`;
+      })
+      .join("\n\n"),
+  };
 }
 
 /**
@@ -314,6 +303,42 @@ export function captureNotice(file: string = dbFile()): string | null {
   return null;
 }
 
+type Baseline = Snapshot & { running: boolean };
+
+const baselineFile = (host: Host, session: string): string =>
+  path.join(baselineDir(), `${digest(`${host}\0${session}`)}.json`);
+
+function readBaseline(file: string): Baseline | null {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8")) as Baseline;
+  } catch {
+    return null; // none yet, or unreadable: the turn starts from here
+  }
+}
+
+function writeBaseline(file: string, b: Baseline): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(b), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
+/** Drops the starting points of sessions not seen for HOLD_DAYS (one file per session would otherwise pile up). */
+function pruneBaselines(): void {
+  const cutoff = Date.now() - HOLD_DAYS * 24 * 60 * 60 * 1000;
+  let files: string[];
+  try {
+    files = fs.readdirSync(baselineDir());
+  } catch {
+    return; // not there yet
+  }
+  for (const f of files) {
+    const file = path.join(baselineDir(), f);
+    if ((fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) < cutoff)
+      fs.rmSync(file, { force: true });
+  }
+}
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
 export function onHook(host: Host, input: HookInput): { flush: boolean; notice?: string | null } {
   const event = input.hook_event_name;
@@ -326,6 +351,10 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (file && input.session_id && /^[A-Za-z0-9_-]+$/.test(input.session_id)) {
       fs.appendFileSync(file, `export SPHICA_PARENT_SESSION=${input.session_id}\n`);
     }
+    const place = identify(input.cwd ?? process.cwd());
+    const now = place && snapshot(place.root);
+    if (now) writeBaseline(baselineFile(host, String(input.session_id)), { ...now, running: false });
+    pruneBaselines();
     return { flush: false, notice: captureNotice() };
   }
   if (!owner()) return { flush: false };
@@ -337,7 +366,7 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   if (!turn) return { flush: false };
   const at = new Date().toISOString();
   const base = {
-    v: 1 as const,
+    v: 2 as const,
     host,
     session: String(input.session_id),
     project: place.key,
@@ -345,20 +374,35 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     turn,
     at,
   };
-  const say = (key: string, speaker: "self" | "assistant", raw: string) => {
+  const say = (key: string, speaker: "owner" | "assistant", raw: string, when = at) => {
     const kept = fit(clean(raw).trim());
     if (!kept.body.trim()) return;
     const id = `${key}:${digest(kept.body)}`;
-    spool({ ...base, kind: "message", id, speaker, ...kept });
-    if (speaker === "self") remember(base.session, id);
+    spool({ ...base, at: when, kind: "message", id, speaker, ...kept });
   };
 
+  const baseline = baselineFile(host, base.session);
+  if (event === "UserPromptSubmit") {
+    // A message typed while a turn runs keeps that turn's starting point. Between turns, the owner's own edits are not the turn's.
+    if (!readBaseline(baseline)?.running) {
+      const now = snapshot(place.root);
+      if (now) writeBaseline(baseline, { ...now, running: true });
+    }
+  }
   if (event === "UserPromptSubmit" && input.prompt) {
     const prompt = input.prompt.trimStart();
-    if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:self`, "self", prompt);
+    if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
   }
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
+    const now = snapshot(place.root);
+    if (now) {
+      const before = readBaseline(baseline);
+      if (before)
+        for (const p of changed(place.root, before, now))
+          spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
+      writeBaseline(baseline, { ...now, running: false });
+    }
     return { flush: true };
   }
   if (event === "PostToolUse") {
@@ -366,20 +410,24 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     const ti = input.tool_input ?? {};
     if (tool === "AskUserQuestion") {
       const said = answersOf(input);
-      if (said) say(`${turn}:ask:${input.tool_use_id ?? at}`, "self", said);
+      if (said) {
+        const id = `${turn}:ask:${input.tool_use_id ?? at}`;
+        // A millisecond before the answers, so the questions read first whatever order the spool files are sent in
+        say(`${id}:q`, "assistant", said.questions, new Date(Date.parse(at) - 1).toISOString());
+        say(id, "owner", said.answers);
+      }
       return { flush: false };
     }
     // Read files are not recorded (requirements and design reads used to be). They still arrive from old hook settings.
     if (tool === "Read") return { flush: false };
-    const message = lastSaid(base.session);
-    if (!message) return { flush: false }; // no message of yours to link to in this session yet
     const cwd = input.cwd ?? place.root;
     const files = (
       tool === "apply_patch"
         ? patchPaths(String(ti.command ?? ""))
         : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string")
     ).flatMap((p) => relativeTo(place.root, p, cwd) ?? []);
-    for (const p of files) spool({ ...base, kind: "file", message, path: p, action: "edit" });
+    for (const p of files)
+      spool({ ...base, kind: "edit", event: input.tool_use_id ?? null, path: p, via: "tool" });
   }
   return { flush: false };
 }
@@ -440,7 +488,7 @@ export function readState(): State & {
  * breaks and retakes it once when the holder is gone or it is older than 5 minutes (a send killed when `-p` ends would leave the lock
  * and the next send would silently do nothing; this happened). A lock just created without a pid yet is treated as alive.
  */
-export function lock(): (() => void) | null {
+function lock(): (() => void) | null {
   const file = path.join(spoolDir(), ".lock");
   fs.mkdirSync(spoolDir(), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -484,9 +532,9 @@ const chunks = <T>(xs: T[], n = ROWS): T[][] =>
 type Project = { id: number; name: string };
 
 /**
- * Writes a batch of records in one transaction. **The capture connection can write only to the 3 views** (db/schema.sql, db-write.ts).
- * The views' triggers insert with `on conflict do nothing`, so ids are fixed when queued and a resend means "already there".
- * **Counts do not use affected rows.** Inserting into a view affects 0 rows, so the ids present before sending are subtracted instead.
+ * Writes a batch of records in one transaction. **The capture connection can write only to the capture views** (db/schema.sql, db-write.ts).
+ * The views' triggers accept an identical resend and refuse a resend with different content, so ids are fixed when queued.
+ * **Counts do not use affected rows.** Inserting into a view affects 0 rows, so the messages present before sending are subtracted instead.
  */
 export async function write(
   db: Kysely<DB>,
@@ -494,32 +542,26 @@ export async function write(
   projects: Map<string, Project>,
 ): Promise<number> {
   return inTransaction(db, async (trx) => {
-    const conversations = new Map<
+    const sessions = new Map<
       string,
       { project: number; host: Host; session: string; branch: string | null; at: string }
     >();
     for (const r of batch) {
       const p = projects.get(r.project);
       if (!p) continue;
-      const id = conversationId(p.id, r.host, r.session);
-      const prev = conversations.get(id);
+      const id = sessionId(p.id, r.host, r.session);
+      const prev = sessions.get(id);
       if (!prev || Date.parse(r.at) < Date.parse(prev.at))
-        conversations.set(id, {
-          project: p.id,
-          host: r.host,
-          session: r.session,
-          branch: r.branch,
-          at: r.at,
-        });
+        sessions.set(id, { project: p.id, host: r.host, session: r.session, branch: r.branch, at: r.at });
     }
-    for (const part of chunks([...conversations]))
+    for (const part of chunks([...sessions]))
       await trx
-        .insertInto("capture_conversation")
+        .insertInto("capture_session")
         .values(
           part.map(([id, v]) => ({
             id,
             project_id: v.project,
-            origin: v.host,
+            host: v.host,
             external_id: v.session,
             branch: v.branch,
             started_at: iso(v.at),
@@ -529,59 +571,64 @@ export async function write(
     const messages = batch.flatMap((m) => {
       const p = m.kind === "message" ? projects.get(m.project) : undefined;
       if (m.kind !== "message" || !p) return [];
-      const conversation = conversationId(p.id, m.host, m.session);
-      return [{ m, conversation, id: uuidFrom(conversation, m.id) }];
+      return [{ m, session: sessionId(p.id, m.host, m.session) }];
     });
-    let before = 0;
-    for (const part of chunks(messages)) {
-      const ids = part.map((x) => x.id);
-      before += (await trx.selectFrom("message").select("id").where("id", "in", ids).execute()).length;
+    const present = async () => {
+      let n = 0;
+      for (const part of chunks(messages))
+        for (const [session, ids] of Map.groupBy(part, (x) => x.session))
+          n += (
+            await trx
+              .selectFrom("source")
+              .select("id")
+              .where("kind", "=", "session_message")
+              .where("session_id", "=", session)
+              .where(
+                "external_id",
+                "in",
+                ids.map((x) => x.m.id),
+              )
+              .execute()
+          ).length;
+      return n;
+    };
+    const before = await present();
+    const now = iso(Date.now());
+    for (const part of chunks(messages))
       await trx
         .insertInto("capture_message")
         .values(
           part.map((x) => ({
-            id: x.id,
-            conversation_id: x.conversation,
             external_id: x.m.id,
+            session_id: x.session,
             turn_id: x.m.turn,
-            speaker_kind: x.m.speaker,
-            body: x.m.body,
+            speaker: x.m.speaker,
+            created_at: iso(x.m.at),
+            captured_at: now,
+            text: x.m.body,
             truncated: x.m.truncated ? 1 : 0,
+            redacted: x.m.redacted ? 1 : 0,
             original_bytes: x.m.originalBytes,
-            sent_at: iso(x.m.at),
             content_hash: sha256(x.m.body),
-            indexed: indexesMessage(x.m.speaker) ? 1 : 0,
           })),
         )
         .execute();
-    }
-    let after = 0;
-    for (const part of chunks(messages))
-      after += (
-        await trx
-          .selectFrom("message")
-          .select("id")
-          .where(
-            "id",
-            "in",
-            part.map((x) => x.id),
-          )
-          .execute()
-      ).length;
-    // Link to your last message before the touch. If that message is not in this database (a session that moved to another project midway),
-    // the view's trigger drops it.
-    const files = batch.flatMap((r) => {
-      const p = r.kind === "file" ? projects.get(r.project) : undefined;
-      if (r.kind !== "file" || !p) return [];
+    const after = await present();
+    const edits = batch.flatMap((r) => {
+      const p = r.kind === "edit" ? projects.get(r.project) : undefined;
+      if (r.kind !== "edit" || !p) return [];
       return [
         {
-          message_id: uuidFrom(conversationId(p.id, r.host, r.session), r.message),
+          session_id: sessionId(p.id, r.host, r.session),
+          turn_id: r.turn,
+          tool_event_id: r.event,
           path: r.path,
-          action: r.action,
+          via: r.via,
+          observed_at: iso(r.at),
         },
       ];
     });
-    for (const part of chunks(files)) await trx.insertInto("capture_message_file").values(part).execute();
+    for (const part of chunks(edits)) await trx.insertInto("capture_edit").values(part).execute();
     return after - before;
   });
 }
@@ -627,17 +674,19 @@ export async function flush(
     if (names.length === 0) return { sent: 0, deferred: 0, rejected: 0 };
     const records: { name: string; from: string; r: Spooled }[] = [];
     for (const { name, from } of names) {
+      let r: Spooled | null;
       try {
-        records.push({
-          name,
-          from,
-          r: JSON.parse(fs.readFileSync(path.join(from, name), "utf8")) as Spooled,
-        });
+        r = current(JSON.parse(fs.readFileSync(path.join(from, name), "utf8")));
       } catch {
-        fs.rmSync(path.join(from, name), { force: true }); // unreadable leftovers
+        // Unreadable or of an unknown version: set it aside for the owner to see, never delete it
+        fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
+        fs.renameSync(path.join(from, name), path.join(rejectedDir(), name));
+        continue;
       }
+      if (r) records.push({ name, from, r });
+      else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are no longer kept
     }
-    // No version check (db-write.ts). Checking would stop all recording between upgrading the database and the plugin.
+    // Checks the generation only (db-write.ts): a revision change within a generation never stops recording.
     const db = openWriter("capture", file);
     client = db;
     const projects = new Map(
@@ -662,9 +711,8 @@ export async function flush(
       );
     } catch (e) {
       if (!rejected(e)) throw e;
-      // One at a time. Messages go first and files after (files link to your messages, so the reverse order has nothing to link to).
-      const ordered = [...known].sort((a, b) => Number(a.r.kind === "file") - Number(b.r.kind === "file"));
-      for (const x of ordered) {
+      // One at a time
+      for (const x of known) {
         try {
           sent += await write(db, [x.r], projects);
         } catch (e2) {
@@ -673,15 +721,6 @@ export async function flush(
         }
       }
     }
-    // Keep file records linking to your messages rejected in this batch too (sending them links nothing and writes 0 rows). File records
-    // arriving in later batches are dropped with nothing to link to.
-    const lost = new Set(
-      bad.flatMap((x) =>
-        x.r.kind === "message" && x.r.speaker === "self" ? [`${x.r.session}\0${x.r.id}`] : [],
-      ),
-    );
-    for (const x of known)
-      if (x.r.kind === "file" && lost.has(`${x.r.session}\0${x.r.message}`) && !bad.includes(x)) bad.push(x);
     if (bad.length) {
       fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
       for (const x of bad) {

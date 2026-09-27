@@ -10,8 +10,10 @@ import os from "node:os";
 import path from "node:path";
 import { constants as C, DatabaseSync } from "node:sqlite";
 
-/** Schema version the MCP server and CLI expect. Keep it equal to `pragma user_version` at the end of db/schema.sql. */
-export const SCHEMA_REVISION = 7;
+/** Schema generation (the `sphica_generation` table). A database of another generation is refused without being changed. */
+const SCHEMA_GENERATION = 2;
+/** Revision within the generation. Keep it equal to `pragma user_version` at the end of db/schema.sql. */
+export const SCHEMA_REVISION = 1;
 
 /** Connection roles: owner applies the schema, reader only reads, ingest imports, capture records conversations (append only). */
 export type Role = "owner" | "reader" | "ingest" | "capture";
@@ -43,20 +45,51 @@ export function requireFile(file: string): void {
  * PRAGMAs). `enableDefensive` stops direct writes to the FTS5 shadow tables. The owner has no reason to write them
  * either, so every connection enables it (node:sqlite enables it by default; this keeps it on if the default changes).
  */
-export function prepare(raw: DatabaseSync, checkVersion: boolean): void {
+export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "none"): void {
   raw.enableDefensive(true);
   raw.exec("pragma foreign_keys = on");
   // How long concurrent imports and recordings wait for each other. On timeout this fails with SQLITE_BUSY, and
   // recording retries on its next send.
   raw.exec("pragma busy_timeout = 5000");
-  if (!checkVersion) return;
+  if (check === "none") return;
+  checkGeneration(raw);
+  if (check === "generation") return;
   const got = (raw.prepare("pragma user_version").get() as { user_version: number } | undefined)
     ?.user_version;
   if (got === SCHEMA_REVISION) return;
-  if (!got) throw new Error("The database has no sphica schema. Create it with `sphica init`.");
   throw new Error(
     `The database schema is revision ${got}, but this Sphica expects revision ${SCHEMA_REVISION}. ` +
-      (got < SCHEMA_REVISION ? "Run `sphica db migrate`." : "Update sphica."),
+      ((got ?? 0) < SCHEMA_REVISION
+        ? "Move it aside (it is left unchanged), then run `sphica init`."
+        : "Update sphica."),
+  );
+}
+
+/**
+ * The schema generation of an open database. Older generations have no `sphica_generation` table. **Never change such a file**:
+ * it is the owner's data, and the only way forward is to move it aside and create a new one.
+ */
+export function generationOf(raw: DatabaseSync): number | null {
+  // biome-ignore format: one line keeps raw.prepare( where the SQL ledger (scripts/lib/sql-call-sites.mjs) finds it
+  const has = raw.prepare("select 1 from sqlite_schema where type = 'table' and name = 'sphica_generation'").get();
+  if (!has) {
+    const any = raw.prepare("select 1 from sqlite_schema where type = 'table' and name = 'project'").get();
+    return any ? 1 : null;
+  }
+  return (
+    (raw.prepare("select generation from sphica_generation").get() as { generation: number } | undefined)
+      ?.generation ?? null
+  );
+}
+
+function checkGeneration(raw: DatabaseSync): void {
+  const got = generationOf(raw);
+  if (got === SCHEMA_GENERATION) return;
+  if (got === null) throw new Error("The database has no sphica schema. Create it with `sphica init`.");
+  throw new Error(
+    got < SCHEMA_GENERATION
+      ? "The database was made by Sphica 0.4 or earlier, and this Sphica cannot read it. Move it aside (it is left unchanged), then run `sphica init`."
+      : "The database was made by a newer Sphica. Update sphica.",
   );
 }
 
@@ -79,7 +112,7 @@ const READER_FUNCTIONS = new Set([
 ]);
 
 /** Internal queries FTS5 makes to read its own index. They arrive outside any trigger (triggerOrView is null). */
-export const SHADOW = /^(knowledge|message)_fts_(data|idx|docsize|config)$/;
+export const SHADOW = /^(unit|source)_fts_(data|idx|docsize|config)$/;
 
 /**
  * A read-only connection. It opens with `readOnly`, so SQLite rejects writes, and the authorizer stops DDL, ATTACH,
@@ -91,7 +124,7 @@ export function connectReader(file: string = dbFile()): DatabaseSync {
   requireFile(file);
   const raw = new DatabaseSync(file, { readOnly: true });
   try {
-    prepare(raw, true);
+    prepare(raw, "revision");
   } catch (e) {
     raw.close();
     throw e;

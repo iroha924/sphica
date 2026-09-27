@@ -52,15 +52,21 @@ const DDL = (): Set<number> =>
 /** FTS5 checks data_version whenever it touches the index. Only the pragma with no value is allowed. */
 const readsDataVersion = (p1: string | null, p2: string | null) => p1 === "data_version" && p2 === null;
 
-/** Views capture may insert into. Identities and sources without columns cannot be claimed (db/schema.sql). */
-const CAPTURE_VIEWS = new Set(["capture_conversation", "capture_message", "capture_message_file"]);
+/** Views capture may insert into. Their triggers derive project, artifact, and indexing from the session (db/schema.sql). */
+const CAPTURE_VIEWS = new Set(["capture_session", "capture_message", "capture_edit", "capture_delivery"]);
 
 /** Tables that may be written inside triggers, keyed by trigger name (the authorizer's 5th argument). */
 const TRIGGER_WRITES: Record<string, Set<string>> = {
-  capture_conversation_insert: new Set(["conversation"]),
-  capture_message_insert: new Set(["message"]),
-  capture_message_file_insert: new Set(["message_file"]),
-  message_fts_ai: new Set(["message_fts"]),
+  capture_session_insert: new Set(["session"]),
+  capture_message_insert: new Set(["source"]),
+  capture_edit_insert: new Set(["edit_observation"]),
+  capture_delivery_insert: new Set(["delivery", "delivery_unit"]),
+  source_fts_ai: new Set(["source_fts"]),
+};
+
+/** Functions a capture view's trigger may call (the delivery log fills defaults and expands its unit list); capture's own statements may not. */
+const TRIGGER_FUNCTIONS: Record<string, Set<string>> = {
+  capture_delivery_insert: new Set(["coalesce", "json_each", "last_insert_rowid"]),
 };
 
 /**
@@ -69,7 +75,8 @@ const TRIGGER_WRITES: Record<string, Set<string>> = {
  */
 const CAPTURE_READS: Record<string, Set<string>> = {
   project: new Set(["id", "key", "name"]),
-  message: new Set(["id"]),
+  session: new Set(["id"]),
+  source: new Set(["id", "session_id", "external_id", "kind"]),
 };
 
 /**
@@ -96,7 +103,11 @@ function captureAuthorizer(
     if (triggerOrView !== null || fts) return C.SQLITE_OK;
     return CAPTURE_READS[table]?.has(p2 ?? "") ? C.SQLITE_OK : C.SQLITE_DENY;
   }
-  if (action === C.SQLITE_FUNCTION) return p2 === "sphica_terms" ? C.SQLITE_OK : C.SQLITE_DENY;
+  if (action === C.SQLITE_FUNCTION)
+    return p2 === "sphica_terms" ||
+      (triggerOrView !== null && TRIGGER_FUNCTIONS[triggerOrView]?.has(p2 ?? ""))
+      ? C.SQLITE_OK
+      : C.SQLITE_DENY;
   if (action === C.SQLITE_PRAGMA) return readsDataVersion(p1, p2) ? C.SQLITE_OK : C.SQLITE_DENY;
   if (action === C.SQLITE_SELECT || action === C.SQLITE_TRANSACTION || action === C.SQLITE_SAVEPOINT)
     return C.SQLITE_OK;
@@ -119,9 +130,9 @@ export function connectWriter(role: WriteRole, file: string = dbFile(), create =
   if (!create) requireFile(file);
   const raw = new DatabaseSync(file);
   try {
-    // Only ingest checks the version. owner is the one handling versions, and capture keeps writing from older plugins
-    // (checking would stop all recording between upgrading the database and the plugin; rejected rows go to rejected/).
-    prepare(raw, role === "ingest");
+    // Every role refuses another generation. Only ingest checks the revision: owner handles revisions, and capture keeps writing
+    // across a revision change within a generation (rejected rows go to rejected/).
+    prepare(raw, create ? "none" : role === "ingest" ? "revision" : "generation");
     raw.function("sphica_terms", { deterministic: true }, (text) => terms(String(text ?? "")).join(" "));
   } catch (e) {
     raw.close();

@@ -1,21 +1,16 @@
 // Looks after this machine's database (~/.sphica/sphica.db). The owner runs these locally, with the owner connection (no authorizer).
 //
 //   sphica init                 creates the database and applies db/schema.sql. Safe to run again (an existing one is left alone)
-//   sphica db migrate [--yes]   applies db/migrations newer than the database version (user_version)
-//   sphica db reindex           rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
+//   sphica doctor --reindex     rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { constants as C, type DatabaseSync } from "node:sqlite";
-import type { Readable, Writable } from "node:stream";
-import { confirm, isCancel } from "@clack/prompts";
+import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, SCHEMA_REVISION } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
-import { plain } from "./panel.ts";
-import { searchTerms } from "./terms.ts";
+import { generationOf } from "./sqlite.ts";
 import { plural } from "./text.ts";
 
 /** Indented like other CLI output (the db command in cli.ts adds the heading and closing) */
@@ -23,7 +18,6 @@ const say = (text: string) => console.log(indent(text));
 
 // assets.ts alone decides where bundled files live (the shipped package and the working tree differ).
 const SCHEMA = (): string => path.join(dbDir(), "schema.sql");
-const MIGRATIONS = (): string => path.join(dbDir(), "migrations");
 
 const versionOf = (raw: DatabaseSync): number =>
   (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
@@ -58,15 +52,23 @@ function withOwner<T>(file: string, fn: (raw: DatabaseSync) => T, create = false
  */
 export function dbInit(file: string = dbFile()): void {
   if (fs.existsSync(file)) {
-    const got = withOwner(file, versionOf);
-    if (got === SCHEMA_REVISION) say(`Already exists: ${file} (revision ${got})`);
-    else if (got === 0)
+    // Look without changing anything: another generation is refused, and a file that is not Sphica's is never touched
+    const look = new DatabaseSync(file, { readOnly: true });
+    let generation: number | null;
+    try {
+      generation = generationOf(look);
+    } finally {
+      look.close();
+    }
+    if (generation === null)
       throw new Error(
         `${file} is not a Sphica database (no schema). Move it to another name, then run this again.`,
       );
+    const got = withOwner(file, versionOf);
+    if (got === SCHEMA_REVISION) say(`Already exists: ${file} (revision ${got})`);
     else
       say(
-        `Already exists: ${file} (revision ${got}; this Sphica expects ${SCHEMA_REVISION}. Run \`sphica db migrate\`.)`,
+        `Already exists: ${file} (revision ${got}; this Sphica expects ${SCHEMA_REVISION}. Move it aside, then run \`sphica init\`.)`,
       );
     return;
   }
@@ -105,389 +107,37 @@ export function dbInit(file: string = dbFile()): void {
 }
 
 /**
- * NNNN in a name is the version after applying it. Name format and duplicates are checked even with nothing to apply (a skipped one never applies once the version moves on).
- */
-export function pendingMigrations(files: string[], current: number): { revision: number; file: string }[] {
-  const all = files
-    // Names starting with `.` are OS or editor hidden files (.DS_Store, vim swap files), not misnamed migrations.
-    .filter((file) => !file.startsWith("."))
-    .map((file) => {
-      const revision = file.match(/^(\d{4})_[a-z0-9_]+\.sql$/)?.[1];
-      if (!revision)
-        throw new Error(`db/migrations/${file} is not named NNNN_<lowercase letters, digits, _>.sql`);
-      return { revision: Number(revision), file };
-    })
-    .sort((a, b) => a.revision - b.revision);
-  const seen = new Map<number, string>();
-  for (const m of all) {
-    const other = seen.get(m.revision);
-    if (other)
-      throw new Error(`db/migrations has two migrations for revision ${m.revision}: ${other} and ${m.file}`);
-    seen.set(m.revision, m.file);
-  }
-  const pending = all.filter((m) => m.revision > current);
-  for (const [i, m] of pending.entries()) {
-    if (m.revision !== current + 1 + i)
-      throw new Error(`db/migrations has no migration for revision ${current + 1 + i}`);
-  }
-  return pending;
-}
-
-/**
- * The declaration on a migration's first line. Only `-- sphica: foreign_keys=off` is accepted; any other `-- sphica:` throws.
- * **Misreading it and applying with foreign keys on lets a table rebuild cascade-delete child rows.** Leading spaces also count as a declaration.
- * The authorizer in applyMigrations stops undeclared migrations from dropping tables (not judged from the SQL text).
- */
-function directiveOf(dir: string, m: { file: string }): "foreign_keys=off" | null {
-  const lines = fs.readFileSync(path.join(dir, m.file), "utf8").split(/\r?\n/);
-  let found: "foreign_keys=off" | null = null;
-  for (const [i, line] of lines.entries()) {
-    const d = /^\s*--\s*sphica:\s*(.*?)\s*$/.exec(line)?.[1];
-    if (d === undefined) continue;
-    if (i !== 0 || d !== "foreign_keys=off")
-      throw new Error(`Cannot read the declaration on line ${i + 1} of db/migrations/${m.file}: ${d}`);
-    found = d;
-  }
-  return found;
-}
-
-/**
- * Applies migrations newer than the database version and raises user_version per transaction (earlier ones stay if it fails midway, so it can be rerun).
- * Undeclared migrations in a row are applied in one transaction. A migration declaring `-- sphica: foreign_keys=off` runs alone,
- * turning foreign keys off outside the transaction, checks foreign_key_check is empty before commit, and turns them back on (they cannot switch inside a transaction).
- */
-export function applyMigrations(
-  raw: DatabaseSync,
-  files: string[],
-  dir: string,
-): { revision: number; file: string }[] {
-  // Read every declaration before applying. If one cannot be read, nothing is applied.
-  const pending = pendingMigrations(files, versionOf(raw));
-  const off = new Set(pending.filter((m) => directiveOf(dir, m) !== null).map((m) => m.file));
-  const applied: { revision: number; file: string }[] = [];
-  for (;;) {
-    const next = pendingMigrations(files, versionOf(raw))[0];
-    if (!next) return applied;
-    const single = off.has(next.file);
-    if (single) {
-      raw.exec("pragma foreign_keys = off");
-      if ((raw.prepare("pragma foreign_keys").get() as { foreign_keys: number }).foreign_keys !== 0)
-        throw new Error("Could not turn foreign keys off (inside a transaction)");
-    }
-    // Undeclared migrations may not drop or rebuild tables (ALTER, including adding columns, belongs in a declared migration).
-    // A drop with foreign keys on cascade-deletes child rows, and renaming a parent rewrites children's foreign keys to the backup.
-    // It stops on statements SQLite has parsed, so comments or line breaks in between do not slip through.
-    if (!single)
-      raw.setAuthorizer((action) =>
-        action === C.SQLITE_DROP_TABLE || action === C.SQLITE_ALTER_TABLE ? C.SQLITE_DENY : C.SQLITE_OK,
-      );
-    try {
-      const batch = immediate(raw, () => {
-        // Read again after taking the lock. If another db migrate advanced it meanwhile, apply the rest from there.
-        const now = pendingMigrations(files, versionOf(raw));
-        if (now[0]?.file !== next.file) return [];
-        const stop = now.findIndex((m) => off.has(m.file));
-        const take = single ? [next] : now.slice(0, stop === -1 ? now.length : stop);
-        for (const m of take) raw.exec(fs.readFileSync(path.join(dir, m.file), "utf8"));
-        if (single) {
-          const broken = raw.prepare("pragma foreign_key_check").all();
-          if (broken.length)
-            throw new Error(`${plural(broken.length, "foreign key reference")} broken after ${next.file}`);
-        }
-        raw.exec(`pragma user_version = ${(take.at(-1) as { revision: number }).revision}`);
-        return take;
-      });
-      applied.push(...batch);
-    } finally {
-      if (single) raw.exec("pragma foreign_keys = on");
-      else raw.setAuthorizer(null);
-    }
-  }
-}
-
-/** What migrate did. The CLI closes with Stopped only for cancelled (declining is not "done") */
-export type Migrated = "applied" | "up-to-date" | "cancelled";
-
-/** Asks in the terminal. No is the default, and Esc, Ctrl-C, and a closed stdin all count as no */
-export const askToApply = async (
-  input: NodeJS.ReadableStream = process.stdin,
-  output: NodeJS.WritableStream = process.stdout,
-): Promise<boolean> => {
-  // Clack does not settle when its input ends, so a closed input cancels the question (also one that ended before asking)
-  const stream = input as Readable;
-  if (stream.readableEnded || stream.destroyed) return false;
-  const closed = new AbortController();
-  const stop = () => closed.abort();
-  input.once("end", stop);
-  input.once("close", stop);
-  try {
-    const answer = await confirm({
-      message: "Apply these migrations?",
-      initialValue: false,
-      input: input as Readable,
-      output: output as Writable,
-      signal: closed.signal,
-    });
-    return !isCancel(answer) && answer;
-  } finally {
-    input.off("end", stop);
-    input.off("close", stop);
-  }
-};
-
-/** Row counts of the ordinary tables (not FTS5 or SQLite's own). */
-function rowCounts(raw: DatabaseSync): Map<string, number> {
-  const tables = raw
-    .prepare(
-      "select name from sqlite_schema where type = 'table' and name not like 'sqlite\\_%' escape '\\' and sql not like 'create virtual%' and name not like '%\\_fts\\_%' escape '\\'",
-    )
-    .all() as { name: string }[];
-  return new Map(
-    tables.map((t) => [
-      t.name,
-      (raw.prepare(`select count(*) as n from "${t.name}"`).get() as { n: number }).n,
-    ]),
-  );
-}
-
-/** Tables that lost rows, as "table N rows (before → after)". A dropped table counts as 0 after. */
-function removed(before: Map<string, number>, after: Map<string, number>): string[] {
-  return [...before].flatMap(([t, n]) => {
-    const now = after.get(t) ?? 0;
-    return now < n ? [`${t} ${plural(n - now, "row")} (${n} → ${now})`] : [];
-  });
-}
-
-/**
- * Applies the pending migrations to a copy beside the database and returns what they would remove. The copy is deleted afterwards,
- * whether or not it applied.
- */
-function preview(file: string, files: string[], dir: string): string[] {
-  const copy = `${file}.preview-${crypto.randomBytes(6).toString("hex")}`;
-  try {
-    withOwner(file, (raw) => raw.prepare("vacuum into ?").run(copy));
-    return withOwner(copy, (raw) => {
-      const before = rowCounts(raw);
-      applyMigrations(raw, files, dir);
-      return removed(before, rowCounts(raw));
-    });
-  } finally {
-    for (const f of [copy, `${copy}-wal`, `${copy}-shm`]) fs.rmSync(f, { force: true });
-  }
-}
-
-/**
- * Applies migrations newer than the database version. See applyMigrations for how.
- * **Lists them for confirmation before applying.** Without a terminal it cannot ask, so `--yes` is required.
- */
-const defaultAsk = () => askToApply();
-
-export async function migrate(
-  yes: boolean,
-  file: string = dbFile(),
-  dir: string = MIGRATIONS(),
-  ask: () => Promise<boolean> = defaultAsk,
-): Promise<Migrated> {
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
-  const current = withOwner(file, versionOf);
-  const todo = pendingMigrations(files, current);
-  if (todo.length === 0) {
-    say(`Nothing to apply: ${file} is at revision ${current}`);
-    return "up-to-date";
-  }
-  say(`DB: ${file}`);
-  say(`Current revision: ${current}`);
-  say(`To apply: ${todo.map((m) => m.file).join(" / ")}`);
-  const loses = preview(file, files, dir);
-  say(loses.length ? `Would remove: ${loses.join(" / ")}` : "Would remove: nothing");
-  if (!yes) {
-    if (ask === defaultAsk && !process.stdin.isTTY)
-      throw new Error("Add --yes when not running in a terminal");
-    if (!(await ask())) return "cancelled";
-  }
-  const { applied, lost } = withOwner(file, (raw) => {
-    const before = rowCounts(raw);
-    const applied = applyMigrations(raw, files, dir);
-    return { applied, lost: removed(before, rowCounts(raw)) };
-  });
-  say(`Applied: ${applied.map((m) => m.file).join(" / ") || "none"}`);
-  say(lost.length ? `Removed: ${lost.join(" / ")}` : "Removed: nothing");
-  say(`${file} is at revision ${withOwner(file, versionOf)}`);
-  return "applied";
-}
-
-/**
  * Rebuilds the full-text index. **A PR changing the rules of terms() adds this to its release steps.**
  * Changing the rules leaves existing rows indexed with the old rules, and they stop matching query terms.
  */
 export function reindex(file: string = dbFile()): void {
   const counts = withOwner(file, (raw) =>
     immediate(raw, () => {
-      raw.exec("insert into knowledge_fts (knowledge_fts) values ('delete-all')");
-      raw.exec("insert into knowledge_fts (rowid, h, b, e) select id, h, b, e from knowledge_search_text");
-      raw.exec("insert into message_fts (message_fts) values ('delete-all')");
+      raw.exec("insert into unit_fts (unit_fts) values ('delete-all')");
       raw.exec(
-        "insert into message_fts (rowid, lexemes) select seq, sphica_terms(body) from message where indexed = 1",
+        "insert into unit_fts (rowid, body, ident, alias) select id, body, ident, alias from unit_search_text",
+      );
+      raw.exec("insert into source_fts (source_fts) values ('delete-all')");
+      raw.exec(
+        "insert into source_fts (rowid, lexemes) select id, sphica_terms(text) from source where indexed = 1",
       );
       const n = (sql: string) => (raw.prepare(sql).get() as { n: number }).n;
       return {
-        knowledge: n("select count(*) as n from knowledge"),
-        message: n("select count(*) as n from message where indexed = 1"),
+        units: n("select count(*) as n from unit"),
+        sources: n("select count(*) as n from source where indexed = 1"),
       };
     }),
   );
-  say(
-    `Rebuilt the index: ${plural(counts.knowledge, "knowledge row")}, ${plural(counts.message, "message")}`,
-  );
+  say(`Rebuilt the index: ${plural(counts.units, "unit")}, ${plural(counts.sources, "source")}`);
 }
 
-const oneLine = (s: string) => plain(s).replace(/\n/g, " ");
-
-type Draft = Record<string, { terms?: unknown; content_hash?: unknown }>;
-/** The project a terms command works on: key to look it up, name to show */
-type Named = { key: string; name: string };
-
-/** The terms commands need the knowledge_terms table, which revision 4 added */
-function projectFor(raw: DatabaseSync, place: Named): number {
-  const got = versionOf(raw);
-  if (got < SCHEMA_REVISION)
-    throw new Error(
-      `The database is at revision ${got}, older than this Sphica (${SCHEMA_REVISION}). Run \`sphica db migrate\` first`,
-    );
-  const project = raw.prepare("select id from project where key = ?").get(place.key) as
-    | { id: number }
-    | undefined;
-  if (!project)
-    throw new Error(`${place.name} is not registered with Sphica. Register it with \`sphica init\``);
-  return project.id;
-}
-
-/**
- * Imports search words for existing records once, from a draft the owner reviewed: `{ "<source_key>": { "terms": "a, b", "content_hash": "<hex>" } }`.
- * Only records of this project whose text is unchanged since the draft (same hash) are written; the rest are listed with the reason.
- */
-export function importTerms(
-  draft: string,
-  place: Named,
-  file: string = dbFile(),
-): { written: number; unchanged: number; skipped: { key: string; why: string }[] } {
-  let entries: unknown;
-  try {
-    entries = JSON.parse(fs.readFileSync(draft, "utf8"));
-  } catch (e) {
-    throw new Error(`Could not read the draft ${draft}: ${e instanceof Error ? e.message : e}`);
-  }
-  if (typeof entries !== "object" || entries === null || Array.isArray(entries))
-    throw new Error(`Could not read the draft ${draft}: it is not a JSON object of source keys`);
-  const result = withOwner(file, (raw) =>
-    immediate(raw, () => {
-      const project = projectFor(raw, place);
-      const find = raw.prepare(
-        "select id, content_hash from knowledge where project_id = ? and source_key = ?",
-      );
-      const put = raw.prepare(
-        `insert into knowledge_terms (knowledge_id, terms, content_hash, source, written_at) values (?, ?, ?, 'import', ?)
-         on conflict (knowledge_id) do update set terms = excluded.terms, content_hash = excluded.content_hash,
-           source = excluded.source, written_at = excluded.written_at
-         where terms is not excluded.terms or content_hash is not excluded.content_hash or source is not excluded.source`,
-      );
-      const now = new Date().toISOString();
-      let written = 0;
-      // The same words already stored for the same text: kept as they are (a rewrite would also churn the index row)
-      let unchanged = 0;
-      const skipped: { key: string; why: string }[] = [];
-      for (const [key, e] of Object.entries(entries as Draft)) {
-        const row = find.get(project, key) as { id: number; content_hash: Uint8Array } | undefined;
-        if (!row) {
-          skipped.push({ key, why: "not a record of this project" });
-          continue;
-        }
-        if (typeof e?.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(e.content_hash)) {
-          skipped.push({ key, why: "the draft has no content_hash of 64 hex digits" });
-          continue;
-        }
-        if (Buffer.from(row.content_hash).toString("hex") !== e.content_hash) {
-          skipped.push({ key, why: "the record changed after the draft" });
-          continue;
-        }
-        let terms: string;
-        try {
-          terms = searchTerms(typeof e.terms === "string" ? e.terms : "");
-        } catch (x) {
-          skipped.push({ key, why: x instanceof Error ? x.message : String(x) });
-          continue;
-        }
-        if (!terms) {
-          skipped.push({ key, why: "no terms" });
-          continue;
-        }
-        if (Number(put.run(row.id, terms, row.content_hash, now).changes) > 0) written++;
-        else unchanged++;
-      }
-      return { written, unchanged, skipped };
-    }),
-  );
-  // Keys come from the draft file, which is external text
-  for (const s of result.skipped) say(`skipped ${oneLine(s.key)}: ${oneLine(s.why)}`);
-  // Nothing written is a failure, not an empty success: the draft is for another project or every record changed
-  if (result.written === 0 && result.unchanged === 0 && result.skipped.length > 0)
-    throw new Error(
-      `Imported no search words: every entry in the draft was skipped (${plural(result.skipped.length, "entry", "entries")})`,
-    );
-  say(
-    `Imported search words for ${plural(result.written, "record")}${result.unchanged ? ` (${result.unchanged} already had the same words)` : ""}`,
-  );
-  return result;
-}
-
-type Listed = {
-  id: number;
-  source_key: string;
-  source: string;
-  written_at: string;
-  terms: string;
-  fresh: number;
-};
-
-/** The search words of this project's records, for the owner to check (they are never shown in search results or read). */
-export function listTerms(place: Named, ref?: string, file: string = dbFile()): Listed[] {
-  const id = ref === undefined ? null : Number(/^k:(\d+)$/.exec(ref)?.[1] ?? Number.NaN);
-  if (id !== null && !Number.isSafeInteger(id))
-    throw new Error(`Could not read --ref ${JSON.stringify(ref)}: use k:<id>`);
-  const rows = withOwner(file, (raw) => {
-    const project = projectFor(raw, place);
-    if (
-      id !== null &&
-      !raw.prepare("select 1 from knowledge where id = ? and project_id = ?").get(id, project)
-    )
-      throw new Error(`k:${id} is not a record of ${place.name}`);
-    return raw
-      .prepare(
-        `select k.id, k.source_key, t.source, t.written_at, t.terms, t.content_hash = k.content_hash as fresh
-         from knowledge_terms t join knowledge k on k.id = t.knowledge_id
-         where k.project_id = ? and (? is null or k.id = ?) order by k.id`,
-      )
-      .all(project, id, id) as Listed[];
-  });
-  for (const r of rows)
-    say(
-      `k:${r.id} ${oneLine(r.source_key)} (${r.source}, written ${r.written_at.slice(0, 10)}${r.fresh ? "" : ", stale: the record changed"})\n  ${r.terms}`,
-    );
-  say(
-    id !== null && rows.length === 0
-      ? `k:${id} has no search words`
-      : `${plural(rows.length, "record")} with search words`,
-  );
-  return rows;
-}
-
-/** Database state for doctor. Everything is read only; no file is modified. */
+/** Database state for doctor. Nothing is modified, but the full-text integrity check is an FTS command that needs the owner connection. */
 export type Inspection = {
   revision: number;
   /** Sizes of the database and WAL files (bytes) */
   bytes: number;
   /** integrity-check of the full-text index. The reason text when broken */
-  fts: { knowledge: string | null; message: string | null };
+  fts: { unit: string | null; source: string | null };
 };
 
 export function inspect(file: string = dbFile()): Inspection {
@@ -504,7 +154,7 @@ export function inspect(file: string = dbFile()): Inspection {
     return {
       revision: versionOf(raw),
       bytes: size(file) + size(`${file}-wal`),
-      fts: { knowledge: check("knowledge_fts"), message: check("message_fts") },
+      fts: { unit: check("unit_fts"), source: check("source_fts") },
     };
   });
 }

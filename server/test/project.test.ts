@@ -4,7 +4,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { identify, localRoots, nameLocal, normalizeRemote, patchPaths, relativeTo } from "../src/project.ts";
+import { pathToFileURL } from "node:url";
+import {
+  hostWorkspace,
+  identify,
+  localRoots,
+  nameLocal,
+  normalizeRemote,
+  patchPaths,
+  relativeTo,
+  writePlace,
+} from "../src/project.ts";
 
 // These tests swap HOME to protect the real name map. Bun's os.homedir() ignores the swap and would rewrite the real map.
 if (process.versions.bun) throw new Error("run these tests with node --test (bun run test)");
@@ -162,4 +172,37 @@ test("reads edited files of a Codex patch only from the 4 header forms", () => {
     "*** End Patch",
   ].join("\n");
   assert.deepEqual(patchPaths(patch), ["server/src/db.ts", "docs/new.md", "old.ts", "a.ts", "b.ts"]);
+});
+
+// The record server writes only into the host's workspace: Claude Code names it in the environment, Codex in each call
+test("a write's project is the workspace; a cwd argument naming another project is refused", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bound-")));
+  try {
+    const repo = (name: string) => {
+      const dir = path.join(base, name);
+      fs.mkdirSync(path.join(dir, "sub"), { recursive: true });
+      execFileSync("git", ["init", "-q", dir]);
+      execFileSync("git", ["-C", dir, "remote", "add", "origin", `https://github.com/o/${name}.git`]);
+      return dir;
+    };
+    const a = repo("a");
+    const b = repo("b");
+    assert.equal(writePlace(a, undefined)?.key, "git:github.com/o/a");
+    assert.equal(writePlace(a, path.join(a, "sub"))?.key, "git:github.com/o/a");
+    assert.throws(() => writePlace(a, b), /o\/b is not the workspace this session writes to \(o\/a\)/);
+    assert.equal(writePlace(path.join(base, "none"), undefined), null);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("the workspace Codex names in a call is read only from a file URL in its sandbox state", () => {
+  const dir = path.join(os.tmpdir(), "a b");
+  const named = (sandboxCwd: unknown) => hostWorkspace({ "codex/sandbox-state-meta": { sandboxCwd } });
+  assert.equal(named(pathToFileURL(dir).href), dir);
+  assert.equal(named(dir), null);
+  assert.equal(named("https://example.test/x"), null);
+  assert.equal(named(1), null);
+  assert.equal(hostWorkspace(undefined), null);
+  assert.equal(hostWorkspace({ sandboxCwd: pathToFileURL(dir).href }), null);
 });

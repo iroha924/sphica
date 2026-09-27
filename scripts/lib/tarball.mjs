@@ -29,7 +29,9 @@ export function tarballProblems(paths, tracked) {
   for (const required of new Set([
     "dist/cli.js",
     "dist/mcp.js",
+    "dist/mcp-record.js",
     "dist/capture.js",
+    "dist/deliver.js",
     "db/schema.sql",
     ".claude-plugin/plugin.json",
     ".codex-plugin/plugin.json",

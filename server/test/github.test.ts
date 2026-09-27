@@ -1,193 +1,254 @@
+// Harvest's read of a pull request and how it is stored: what each source keeps, new revisions for edited text, and the closed issues.
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { type Get, isFiller, LIMITS, parts, readPull, repoOf } from "../src/github.ts";
+import { type Get, gh, linkIssues, pullSources, readPull, repoOf, storeItems } from "../src/github.ts";
+import { at, insert, project, tempDb } from "./temp-db.ts";
 
-const pull = {
-  id: 9001,
-  number: 12,
-  title: "Keep one SQLite file",
-  body: "We drop Postgres.",
-  html_url: "https://github.com/o/r/pull/12",
-  state: "closed",
-  merged_at: "2026-09-12T00:00:00Z",
-  created_at: "2026-09-10T00:00:00Z",
-  user: { login: "owner" },
-  commits: 2,
-  changed_files: 3,
-};
+const sha = (c: string) => c.repeat(40);
+const user = (login: string, id: number, type = "User") => ({ login, id, type });
 
-/** A fake GitHub: each path returns its fixture; list paths return arrays. */
-function fake(over: Record<string, unknown> = {}): { get: Get; paths: string[] } {
-  const paths: string[] = [];
-  const data: Record<string, unknown> = {
-    "pulls/12": pull,
-    "issues/12/comments": [
-      { id: 1, body: "LGTM", user: { login: "a" }, created_at: "2026-09-10T02:00:00Z", html_url: "u1" },
-      {
-        id: 2,
-        body: "Why not Postgres?",
-        user: { login: "a" },
-        created_at: "2026-09-10T01:00:00Z",
-        html_url: "u2",
+/** Answers from a table by path, as gh would (lists come back whole). */
+const fake =
+  (pullBody: string): Get =>
+  async (p) => {
+    const answers: Record<string, unknown> = {
+      "pulls/7": {
+        number: 7,
+        title: "Switch to pnpm",
+        body: pullBody,
+        html_url: "https://github.com/o/r/pull/7",
+        created_at: "2026-03-17T09:00:00Z",
+        merged_at: "2026-03-17T15:00:00+09:00",
+        merged_by: user("hana", 1),
+        user: user("hana", 1),
+        author_association: "OWNER",
       },
-    ],
-    "pulls/12/reviews": [
-      {
-        id: 3,
-        body: "",
-        user: { login: "b" },
-        state: "CHANGES_REQUESTED",
-        submitted_at: "2026-09-10T03:00:00Z",
-        html_url: "u3",
+      "issues/7/comments": [
+        {
+          id: 70,
+          body: "Why not yarn?",
+          user: user("dev", 2),
+          author_association: "CONTRIBUTOR",
+          created_at: "2026-03-17T10:00:00Z",
+          html_url: "u",
+        },
+        {
+          id: 71,
+          body: "  ",
+          user: user("dev", 2),
+          author_association: "CONTRIBUTOR",
+          created_at: "2026-03-17T10:00:00Z",
+          html_url: "u",
+        },
+      ],
+      "pulls/7/reviews": [
+        {
+          id: 72,
+          body: "Looks right",
+          state: "APPROVED",
+          submitted_at: null,
+          user: user("renovate", 3, "Bot"),
+          html_url: "u",
+        },
+        { id: 73, body: "", state: "APPROVED", submitted_at: null, user: user("dev", 2), html_url: "u" },
+      ],
+      "pulls/7/comments": [
+        {
+          id: 74,
+          body: "Consider OFF",
+          user: user("dev", 2),
+          author_association: "CONTRIBUTOR",
+          created_at: "2026-03-17T12:00:00Z",
+          html_url: "u",
+          path: "src/db.ts",
+          start_line: 4,
+          line: 6,
+          commit_id: sha("a"),
+          diff_hunk: "@@ -1 +1 @@",
+          in_reply_to_id: 70,
+        },
+        {
+          id: 75,
+          body: "outside",
+          user: user("dev", 2),
+          created_at: "2026-03-17T12:00:00Z",
+          html_url: "u",
+          path: "../x",
+          line: null,
+          commit_id: "short",
+        },
+      ],
+      "pulls/7/commits": [
+        {
+          sha: sha("b"),
+          author: user("hana", 1),
+          commit: { message: "chore: pnpm", author: { date: "2026-03-17T14:00:00Z" } },
+        },
+      ],
+      "issues/14": {
+        number: 14,
+        body: "Notes leak",
+        html_url: "u",
+        created_at: "2026-03-16T00:00:00Z",
+        user: user("kai", 4),
+        author_association: "MEMBER",
       },
-    ],
-    "pulls/12/comments": [
-      {
-        id: 4,
-        body: "This path breaks on Windows",
-        user: { login: "b" },
-        created_at: "2026-09-10T03:00:01Z",
-        html_url: "u4",
-        path: "src/db.ts",
-        line: 7,
+      "issues/14/comments": [
+        {
+          id: 76,
+          body: "Confirmed",
+          user: user("kai", 4),
+          author_association: "MEMBER",
+          created_at: "2026-03-16T01:00:00Z",
+          html_url: "u",
+        },
+      ],
+      "issues/15": {
+        number: 15,
+        body: "a PR",
+        html_url: "u",
+        created_at: "2026-03-16T00:00:00Z",
+        pull_request: {},
       },
-    ],
-    "pulls/12/commits": [
-      {
-        sha: "abcdef0123456789",
-        commit: { message: "fix: use path.join", author: { date: "2026-09-10T04:00:00Z" } },
-      },
-    ],
-    "issues/12/timeline": [
-      {
-        event: "cross-referenced",
-        created_at: "2026-09-10T05:00:00Z",
-        source: { issue: { number: 3, title: "Windows paths" } },
-      },
-      { event: "labeled", created_at: "2026-09-10T05:00:01Z" },
-    ],
-    ...over,
+    };
+    const key = p.split("?")[0] ?? "";
+    if (!(key in answers)) throw new Error(`no answer for ${p}`);
+    return answers[key];
   };
-  return {
-    paths,
-    get: async (path) => {
-      paths.push(path);
-      const key = path.split("?")[0] ?? path;
-      if (!(key in data)) throw new Error(`unexpected ${path}`);
-      return data[key];
-    },
-  };
-}
 
-test("reads the pull request whole, in time order, without filler", async () => {
-  const f = fake();
-  const { pr, text } = await readPull("o/r", 12, f.get);
-  assert.deepEqual(pr, {
-    number: 12,
-    githubId: 9001,
-    title: "Keep one SQLite file",
-    url: pull.html_url,
-    state: "merged",
-  });
-  assert.match(text, /^# #12: Keep one SQLite file/);
-  assert.match(text, /We drop Postgres\./);
-  assert.doesNotMatch(text, /LGTM/);
-  const order = [
-    "Why not Postgres?",
-    "CHANGES_REQUESTED",
-    "src/db.ts:7",
-    "fix: use path.join",
-    "issue #3 (Windows paths)",
-  ];
-  const at = order.map((s) => text.indexOf(s));
-  assert.ok(
-    at.every((x) => x > 0),
-    text,
+test("closing references in owner/repo#N and URL form count for this repository only", async () => {
+  const pull = await readPull(
+    fake("Fixes o/r#14, resolves https://github.com/O/R/issues/15, and fixes other/x#16. Switch to pnpm."),
+    7,
+    "o/r",
   );
+  assert.deepEqual(pull.closes, [14, 15]);
+});
+
+test("reads the body, comments, reviews with text, review comments with their position, commits, the merge, and closed issues", async () => {
+  const pull = await readPull(fake("Fixes #14, closes #15, and fixes #7. Switch to pnpm."), 7);
+  assert.equal(pull.title, "Switch to pnpm");
+  assert.deepEqual(pull.closes, [14, 15]);
   assert.deepEqual(
-    [...at].sort((a, b) => a - b),
-    at,
-    text,
+    pull.items.map((i) => [i.kind, i.externalId]),
+    [
+      ["pr_body", "pr:7"],
+      ["pr_comment", "comment:70"],
+      ["review", "review:72"],
+      ["review_comment", "review_comment:74"],
+      ["review_comment", "review_comment:75"],
+      ["commit_message", `commit:${sha("b")}`],
+      ["pr_event", "pr:7#merged"],
+      ["issue_body", "issue:14"],
+      ["issue_comment", "comment:76"],
+    ],
   );
-  assert.doesNotMatch(text, /labeled/);
-  // Every list is read in full (all pages)
-  assert.ok(f.paths.filter((p) => p !== "pulls/12").every((p) => p.includes("per_page=100")));
-});
-
-// GitHub lists stop at these sizes, so a larger pull request would be harvested from part of it
-test("refuses a pull request it cannot read whole", async () => {
-  const f = fake({ "pulls/12": { ...pull, commits: LIMITS.commits + 1 } });
-  await assert.rejects(readPull("o/r", 12, f.get), /cannot be read whole/);
-  assert.deepEqual(f.paths, ["pulls/12"], "stops before reading the lists");
-  // The file list is never read, so a pull request changing many files is read as usual
-  assert.match(
-    (await readPull("o/r", 12, fake({ "pulls/12": { ...pull, changed_files: 5000 } }).get)).text,
-    /We drop Postgres/,
+  const review = pull.items[3];
+  assert.deepEqual(
+    [review?.path, review?.lines, review?.commit, review?.parent],
+    ["src/db.ts", [4, 6], sha("a"), "review_comment:70"],
   );
-  const huge = fake({ "pulls/12": { ...pull, body: "x".repeat(LIMITS.bytes) } });
-  await assert.rejects(readPull("o/r", 12, huge.get), /cannot be read whole/);
-});
-
-test("reports an open pull request and one closed without merging", async () => {
-  const state = async (over: object) =>
-    (await readPull("o/r", 12, fake({ "pulls/12": { ...pull, ...over } }).get)).pr.state;
-  assert.equal(await state({ merged_at: null }), "closed");
-  assert.equal(await state({ merged_at: null, state: "open" }), "open");
-});
-
-test("harvest reads only GitHub repositories", () => {
+  const outside = pull.items[4];
+  assert.deepEqual([outside?.path, outside?.lines, outside?.commit], [null, null, null]);
   assert.equal(repoOf("git:github.com/o/r"), "o/r");
   assert.equal(repoOf("git:gitlab.com/o/r"), null);
-  assert.equal(repoOf("local:notes"), null);
+  assert.equal(repoOf("local:x"), null);
 });
 
-test("drops only filler replies", () => {
-  assert.equal(isFiller("LGTM!"), true);
-  assert.equal(isFiller("了解です。"), true);
-  assert.equal(isFiller("![img](https://x)"), true);
-  assert.equal(isFiller("これは DBT 側で"), false);
+test("stores sources with who wrote them, adds a revision only when text changed, and lists the current revisions with closed issues", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    insert(db, "owner_identity", {
+      provider: "github",
+      external_id: "1",
+      login: "hana",
+      bound_at: at("2026-01-01T00:00:00Z"),
+    });
+    const first = await readPull(fake("Fixes #14. Switch to pnpm."), 7);
+    const ids = await storeItems(db.ingest, p, first.items);
+    await linkIssues(db.ingest, p, 7, first.closes);
+    await linkIssues(db.ingest, p, 7, first.closes);
+    const kinds = db.owner
+      .prepare(
+        "select kind, author_kind, author_association, revision, available_at is not null as known, indexed from source order by id",
+      )
+      .all()
+      .map((r) => [r.kind, r.author_kind, r.author_association, r.revision, r.known, r.indexed]);
+    assert.deepEqual(kinds[0], ["pr_body", "owner", "OWNER", 1, 1, 1]);
+    assert.deepEqual(kinds[2], ["review", "bot", null, 1, 1, 1]);
+    assert.deepEqual(kinds[6], ["pr_event", "owner", null, 1, 1, 0]);
+    assert.deepEqual(await storeItems(db.ingest, p, first.items), ids, "unchanged text keeps its rows");
+    const second = await readPull(fake("Fixes #14. Switch to pnpm. Edited."), 7);
+    const again = await storeItems(db.ingest, p, second.items);
+    assert.notEqual(again[0], ids[0]);
+    assert.deepEqual(again.slice(1), ids.slice(1));
+    // A body that was always empty is not kept, but keeps its place: the ids line up with the items
+    const blank = [
+      { ...(first.items[0] as (typeof first.items)[number]), externalId: "blank", text: "" },
+      ...first.items.slice(1),
+    ];
+    const placed = await storeItems(db.ingest, p, blank);
+    assert.deepEqual(placed, [null, ...ids.slice(1)]);
+    // A review comment's diff hunk is masked like its body: a key in the changed code never lands in the database
+    const withHunk = first.items.find((it) => it.hunk !== null) ?? first.items[0];
+    const leaked = {
+      ...(withHunk as (typeof first.items)[number]),
+      externalId: "hunk-1",
+      artifact: "pr:99",
+      hunk: "+API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123",
+    };
+    await storeItems(db.ingest, p, [leaked]);
+    const hunk = String(
+      db.owner.prepare("select diff_hunk from source where external_id = 'hunk-1'").get()?.diff_hunk,
+    );
+    assert.ok(!hunk.includes("sk-proj-abc") && hunk.includes("[redacted"), hunk);
+    const current = await pullSources(db.reader, p, 7);
+    assert.equal(current.length, ids.length, "only the current revision of each source");
+    assert.deepEqual(
+      current.filter((s) => s.kind === "pr_body").map((s) => [s.revision, s.text]),
+      [[2, "Fixes #14. Switch to pnpm. Edited."]],
+    );
+    assert.ok(current.some((s) => s.artifact === "issue:14"));
+    // A cleared body becomes an empty current revision: the old text stays as history but is no longer what the pull request says
+    await storeItems(db.ingest, p, (await readPull(fake("   "), 7)).items);
+    assert.deepEqual(
+      (await pullSources(db.reader, p, 7))
+        .filter((s) => s.kind === "pr_body")
+        .map((s) => [s.revision, s.text]),
+      [[3, ""]],
+    );
+    // The body no longer closes #14: the next harvest drops the link, so the issue stops being part of the pull request
+    await linkIssues(db.ingest, p, 7, []);
+    assert.equal(
+      (await pullSources(db.reader, p, 7)).some((s) => s.artifact === "issue:14"),
+      false,
+    );
+  } finally {
+    await db.done();
+  }
 });
 
-test("splits long text into parts at line ends, each within the limit, losing nothing", () => {
-  const lines = Array.from({ length: 50 }, (_, i) => `${i}: ${"あ".repeat(30)}`);
-  const text = lines.join("\n");
-  const ps = parts(text, 400);
-  assert.ok(ps.length > 1);
-  assert.ok(ps.every((p) => Buffer.byteLength(p) <= 400));
-  assert.equal(ps.join("\n"), text);
-  // A single line longer than the limit is cut without breaking a character
-  const long = parts("い".repeat(300), 100);
-  assert.ok(long.every((p) => Buffer.byteLength(p) <= 100 && !p.includes("�")));
-  assert.equal(long.join(""), "い".repeat(300));
-  assert.deepEqual(parts("short", 400), ["short"]);
-});
-
-// A bare "fixed" reply or a link to the fix can be the only sign that a finding was handled
-test("keeps replies that say something was fixed, and links", () => {
-  assert.equal(isFiller("修正しました"), false);
-  assert.equal(isFiller("対応しました。"), false);
-  assert.equal(isFiller("[reason](https://example.com/review)"), false);
-});
-
-// A reference from another repository must not read as this repository's issue of the same number
-test("names the repository of a cross-reference from another repository", async () => {
-  const f = fake({
-    "issues/12/timeline": [
-      {
-        event: "cross-referenced",
-        created_at: "2026-09-10T05:00:00Z",
-        source: {
-          issue: { number: 3, title: "Elsewhere", repository_url: "https://api.github.com/repos/other/repo" },
-        },
-      },
-      {
-        event: "cross-referenced",
-        created_at: "2026-09-10T05:00:01Z",
-        source: { issue: { number: 4, title: "Here", repository_url: "https://api.github.com/repos/o/r" } },
-      },
-    ],
-  });
-  const { text } = await readPull("o/r", 12, f.get);
-  assert.match(text, /issue other\/repo#3 \(Elsewhere\) referred to this/);
-  assert.match(text, /issue #4 \(Here\) referred to this/);
+// Pull request data is written by anyone: a listing larger than the cap stops with a reason instead of filling memory
+test("a gh listing over the size cap is refused with a reason", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!/bin/sh\nexec "${process.execPath}" -e 'process.stdout.write("[[" + "\\"x\\",".repeat(6e6) + "\\"x\\"]]")'\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    await assert.rejects(
+      gh("o/r")("pulls/1/comments?per_page=100", true),
+      /too large to read \(over 16 MB\)/,
+    );
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
 });

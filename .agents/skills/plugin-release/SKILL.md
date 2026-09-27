@@ -1,6 +1,6 @@
 ---
 name: plugin-release
-description: Ships changes to Sphica's MCP, CLI, capture hooks, or plugin Skills and Agents to npm. Covers bundle entry points and the modules they depend on, matching versions, and confirming delivery to both Claude and Codex. For DB schema or role changes, use knowledge-schema first, then this Skill to ship.
+description: Ships changes to Sphica's MCP servers, CLI, capture and delivery hooks, or plugin Skills and Agents to npm. Covers bundle entry points and the modules they depend on, matching versions, and confirming delivery to both Claude and Codex. For DB schema or role changes, use knowledge-schema first, then this Skill to ship.
 ---
 
 # Ship the package
@@ -24,24 +24,22 @@ Claude Code resolves the package with the npm client and unpacks the tarball int
 
 - **No install scripts run, and no dependencies are installed.** The tarball must be self-contained
   (it ships one file each, bundled with `bun build`). The DB is `node:sqlite` (built into Node), so there are no native dependencies
-- `sphica init` / `sphica db migrate` read the bundled `db/schema.sql` (and `db/migrations`, if any). CI checks it by running `init`
-  in a temporary HOME with the CLI from the unpacked tarball
+- `sphica init` reads the bundled `db/schema.sql`. CI checks it by running `init` in a temporary HOME with the CLI from the unpacked tarball
+- `dist/` holds 5 entries: `cli.js` (init, doctor, uninstall), `mcp.js` (the read MCP server), `mcp-record.js` (the record MCP server the
+  trace, harvest, and glean Skills write through), `capture.js` (recording hooks), and `deliver.js` (delivery hooks)
 - The cache updates only when the version changes. `bun run bundle` or a commit alone does not deliver anything; nothing arrives until publish
 - The CLI reads `dist/cli.js` where it is run, so working in the CLI is no proof that it works in MCP
-- The capture hooks call `${CLAUDE_PLUGIN_ROOT}/dist/capture.js`, so they too run at the cache's version
+- The hooks call `${CLAUDE_PLUGIN_ROOT}/dist/capture.js` and `dist/deliver.js`, so they too run at the cache's version
+- The hook entries run only when their own path matches `capture.(ts|js)` / `deliver.(ts|js)`. Renaming a bundle (to `.mjs`, say) turns the hook into a silent no-op: it exits 0 and prints nothing
 - **`plugin/dist` is not tracked by git.** The build is made at publish time
 
-### How Skills start the CLI
+### How Skills do their work
 
-When a Skill calls the CLI, it **starts the JS inside the package directly**.
+Plugin Skills do not call the CLI. They use MCP tools: the read server (`sphica`) and the record server (`record`). In Claude Code a plugin's tool is
+named `mcp__plugin_sphica_<server>__<tool>`, and a Skill's `allowed-tools` lists the ones it uses. Codex uses the same servers from
+`plugin/mcp/codex.json`.
 
-```text
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <subcommand>
-```
-
-npm's `bin` is for the `sphica` command users get from `npm i -g`; **there is no contract that exposes it on the PATH
-inside the plugin**. Depending on a shell script like `${CLAUDE_PLUGIN_ROOT}/bin/sphica` does not work on Windows, and
-the npm source does not even guarantee it is placed.
+npm's `bin` is for the `sphica` command users get from `npm i -g`; **there is no contract that exposes it on the PATH inside the plugin**.
 
 ## Adding dependencies
 
@@ -137,23 +135,30 @@ So that the marketplace never points to an unpublished version between the merge
 
 ## Confirming it arrived
 
-**Claude runs every step here on the owner's machine**, including the backup and `sphica db migrate`. Do not hand the owner a list of
+**Claude runs every step here on the owner's machine**, including the backup and moving an old-generation DB aside. Do not hand the owner a list of
 commands (measured 2026-09-26: handed over, the owner answered that only `/reload-plugins` is theirs). The owner runs only `/reload-plugins`
 in open sessions. `sphica doctor` shows "npm package versions" and "Plugin channel versions" separately.
 
 1. **Run `npm i -g sphica@<version>`.** The CLI installed with `npm i -g` is a separate path from the plugin cache,
    and host updates do not upgrade it. **In a release that raised the DB revision, forgetting this leaves only the old CLI
    failing with "expects revision N"** (measured: after moving to revision 5, the global CLI stayed at 0.32.0)
-2. If the release raised the DB revision, back up and migrate as `knowledge-schema` "Applying to an existing DB" says, and put the
-   "Would remove" and "Removed" lines in the report
+2. If the release changed the DB generation, copy `~/.sphica/sphica.db` (with `-wal` and `-shm`) to a dated backup, move it aside, and run
+   `sphica init` in each registered repository (the old records are not carried over; say so in the report). A revision change within a
+   generation needs the migration `knowledge-schema` says to design first
 3. Claude Code: `claude plugin marketplace update sphica && claude plugin update sphica@sphica`. Codex:
    `codex plugin marketplace upgrade sphica && codex plugin add sphica@sphica`. Then ask the owner to run `/reload-plugins` in open sessions.
-   In sessions without an interactive terminal, MCP stays at the old version until the next session
+   In sessions without an interactive terminal, MCP stays at the old version until the next session.
+   In Codex, ask the owner to open `/hooks` and trust Sphica's hooks: Codex records trust per hook, so a hook added or changed by the update
+   stays skipped until trusted (capture keeps running, which hides it)
 4. In `sphica doctor`, check that the npm package matches between the repository and the global CLI, that the plugin channel matches between the repository
    and both hosts' caches, and that no reconnect instruction remains for the running MCP
-5. From a session after the update, call `recall` and check the contents of the changed MCP tools, Skills, and Agents. If capture changed,
-   also check that the session's messages are found by `recall` with `mode: said`, and that the "Recording" line in `sphica doctor` has nothing
-   waiting
+5. From a session after the update, call `status` and `search`, and check the contents of the changed MCP tools, Skills, and Agents. If capture
+   changed, also check that this session's messages are found by `search` with `sources: true`, and that the "Recording" line in `sphica doctor`
+   has nothing waiting. If delivery changed, read and then edit a file with an anchored record and check the hook's context arrived (a read shows each record once per session)
+6. Claude also runs the installed plugin headless, pointing `SPHICA_DB` at a temporary database so the owner's `~/.sphica` is untouched: in a scratch
+   repository with one anchored record, `claude -p` (a prompt that reads the file, and the user's own review command) and `codex exec` (the same, after
+   the owner trusted the hooks in `/hooks`; `--dangerously-bypass-hook-trust` shows only that the hooks work, not that they are trusted). Check the
+   delivery rows, the first Sphica tool call, and the final answer. Report how many runs showed the behavior, not one run as proof
 
 `plugin/skills/review/reviewers/` also goes through the cache, so saving or restarting a session does not give the new text.
 When changing aspects, read `plugin-agent-authoring` first too.
@@ -163,8 +168,8 @@ When changing aspects, read `plugin-agent-authoring` first too.
 - For a Skill that should start only when explicitly called, pair `disable-model-invocation: true` in SKILL.md (Claude Code) with
   `policy.allow_implicit_invocation: false` in the Skill directory's `agents/openai.yaml` (Codex). Codex does not read the former.
   `verify:ai` checks the pair
-- Pre-approval in `allowed-tools` written with `${CLAUDE_PLUGIN_ROOT}` works (on 2026-09-12, `claude -p "/sphica:<skill>" --plugin-dir <plugin>
-  --permission-mode default --output-format json` returned empty `permission_denials`; the user's settings had no Bash rule allowing Sphica)
+- Pre-approval of MCP tools in `allowed-tools` is unverified on a real host for the record server's tools. Check it after delivery with
+  `claude -p "/sphica:<skill>" --plugin-dir <plugin> --permission-mode default --output-format json` and an empty `permission_denials`
 - When checking after delivery, confirm in Codex that the body is read when explicitly started with `$sphica:<skill>` too
 
 Check the human-facing CLI output and the AI-facing MCP replies separately.

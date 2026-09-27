@@ -8,7 +8,16 @@
       "ignoreBinaries": ["lefthook"]
     },
     "server": {
-      "entry": ["src/capture.ts", "test/*.test.ts"],
+      "entry": [
+        "src/capture.ts",
+        "src/deliver.ts",
+        "src/mcp-record.ts",
+        "test/*.test.ts",
+        "evals/cloud/build.ts",
+        "evals/cloud/codex.ts",
+        "evals/cloud/collect.ts",
+        "evals/cloud/fixture.ts"
+      ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
       "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook"],
       "ignoreBinaries": ["codex"]

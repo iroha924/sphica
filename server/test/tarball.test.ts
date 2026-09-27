@@ -9,6 +9,8 @@ const tracked = trackedDistribution(root);
 const complete = new Set([
   "dist/cli.js",
   "dist/mcp.js",
+  "dist/mcp-record.js",
+  "dist/deliver.js",
   "dist/capture.js",
   "db/schema.sql",
   ".claude-plugin/plugin.json",

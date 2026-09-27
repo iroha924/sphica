@@ -1,186 +1,445 @@
-// Reads one pull request for the harvest Skill: its body, conversation, reviews, review comments, timeline, and commits, in time order.
-// **Read only, with no database connection.** The text is someone else's, so the CLI prints it inside the record frame.
-// Anything it cannot read in full stops the harvest: a partial read would be saved as if it were the whole pull request.
-
+// Reads one pull request through `gh api` (read only) and stores what people wrote as sources: the body (a new revision when edited),
+// comments, reviews, review comments with their code position, commits, the merge, and the issues the body closes.
+// Each source keeps its author's GitHub association, which decides who can adopt a proposal; the text is someone else's and is never trusted.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { bytes, head } from "./text.ts";
-import type { PullRequest } from "./trace.ts";
+import type { Kysely } from "kysely";
+import { fit } from "./capture.ts";
+import { iso } from "./db.ts";
+import type { DB } from "./db-types.ts";
+import type { SOURCE_KINDS } from "./knowledge.ts";
+import { sha256 } from "./text.ts";
 
-const run = promisify(execFile);
+const exec = promisify(execFile);
 
-/** Limits past which a pull request is refused rather than read in part (GitHub's REST lists stop at these, or the text is too large). */
-export const LIMITS = { commits: 250, bytes: 2 * 1024 * 1024, part: 64 * 1024 } as const;
+/** Linked issues read per pull request; a body naming more is cut, and the rest are only linked. */
+const MAX_ISSUES = 5;
+const CLOSES =
+  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:([\w.-]+\/[\w.-]+)#|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|#)(\d{1,9})\b/gi;
 
-/** `owner/repo` for a project key on github.com, or null (harvest reads only GitHub). */
+/** Issue numbers a body closes in this repository: #N, and owner/repo#N or an issue URL when they name this repository. */
+function closingRefs(body: string, repo: string | null): number[] {
+  const here = repo?.toLowerCase();
+  return [...body.matchAll(CLOSES)].flatMap((m) => {
+    const named = (m[1] ?? m[2])?.toLowerCase();
+    return !named || named === here ? [Number(m[3])] : [];
+  });
+}
+
+/** `owner/repo` of a project key on github.com, or null (harvest reads only GitHub). */
 export const repoOf = (key: string): string | null =>
   /^git:github\.com\/([^/]+\/[^/]+)$/.exec(key)?.[1] ?? null;
 
-/** Reads one GitHub REST path of the repository; all follows every page. Tests pass their own. */
+/** Reads one REST path of the repository; all follows every page. */
 export type Get = (path: string, all?: boolean) => Promise<unknown>;
 
-const gh =
+/** Pull request data is written by anyone: one listing stops at this size rather than filling memory (up to 4 run at once) */
+const MAX_RESPONSE = 16 * 1024 * 1024;
+
+export const gh =
   (repo: string): Get =>
   async (path, all = false) => {
-    const { stdout } = await run(
+    const { stdout } = await exec(
       "gh",
       ["api", `repos/${repo}/${path}`, ...(all ? ["--paginate", "--slurp"] : [])],
-      { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
-    );
+      { encoding: "utf8", maxBuffer: MAX_RESPONSE },
+    ).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
+        throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
+      throw e;
+    });
     const parsed = JSON.parse(stdout) as unknown;
     return all ? (parsed as unknown[][]).flat() : parsed;
   };
 
-type User = { login?: string } | null;
-type Pull = {
-  id: number;
+type User = { login?: string; id?: number; type?: string } | null;
+type Authored = { user?: User; author_association?: string };
+type Pull = Authored & {
   number: number;
   title: string;
   body: string | null;
   html_url: string;
-  state: "open" | "closed";
-  merged_at: string | null;
   created_at: string;
-  user: User;
-  commits: number;
+  merged_at: string | null;
+  merged_by?: User;
 };
-type Comment = { id: number; body: string | null; user: User; created_at: string; html_url: string };
-type Review = {
+type Comment = Authored & { id: number; body: string | null; created_at: string; html_url: string };
+type Review = Authored & {
   id: number;
   body: string | null;
-  user: User;
   state: string;
   submitted_at: string | null;
   html_url: string;
 };
-type ReviewComment = Comment & { path: string; line: number | null; in_reply_to_id?: number };
-type Commit = { sha: string; commit: { message: string; author: { date: string } | null } };
-type Event = {
-  event: string;
-  created_at?: string;
-  actor?: User;
-  source?: { issue?: { number: number; title: string; pull_request?: unknown; repository_url?: string } };
+type ReviewComment = Comment & {
+  path?: string;
+  line?: number | null;
+  start_line?: number | null;
+  commit_id?: string;
+  diff_hunk?: string;
+  in_reply_to_id?: number;
+};
+type Commit = {
+  sha: string;
+  html_url?: string;
+  author?: User;
+  commit: { message: string; author?: { date?: string } | null };
+};
+type Issue = Authored & {
+  number: number;
+  body: string | null;
+  html_url: string;
+  created_at: string;
+  pull_request?: unknown;
 };
 
-// Acknowledgments carry nothing to harvest. **Length alone does not drop a message**: "fixed" or a bare link can be the only sign a finding was handled.
-const FILLER =
-  // english-exempt: matches Japanese acknowledgments that people write
-  /^(lgtm|ok(です)?|了解(です)?|確認しました|ありがとうございます?|なるほど|承知(しました)?|わかりました|👍|:\+1:|:eyes:|:pray:)[!！。.\s]*$/i;
-export const isFiller = (body: string): boolean => {
-  const t = body.trim();
-  return t.length === 0 || FILLER.test(t) || /^!\[[^\]]*\]\([^)]*\)$/.test(t);
+/** One source as read, before it is stored. */
+export type Item = {
+  kind: (typeof SOURCE_KINDS)[number];
+  artifact: string;
+  externalId: string;
+  author: User;
+  association: string | null;
+  parent: string | null;
+  event: "merged" | null;
+  url: string | null;
+  createdAt: string;
+  text: string;
+  path: string | null;
+  lines: [number, number] | null;
+  hunk: string | null;
+  commit: string | null;
 };
 
-const who = (u: User) => `@${u?.login ?? "ghost"}`;
-const stateOf = (p: Pull): PullRequest["state"] =>
-  p.merged_at ? "merged" : p.state === "open" ? "open" : "closed";
+const item = (
+  v: Partial<Item> & Pick<Item, "kind" | "artifact" | "externalId" | "createdAt" | "text">,
+): Item => ({
+  author: null,
+  association: null,
+  parent: null,
+  event: null,
+  url: null,
+  path: null,
+  lines: null,
+  hunk: null,
+  commit: null,
+  ...v,
+});
 
-/** Recent pull requests, newest activity first, for choosing one to harvest. */
-export async function recentPulls(
-  repo: string,
-  count = 15,
-  get: Get = gh(repo),
-): Promise<{ number: number; title: string; state: string; updated: string }[]> {
-  const list = (await get(`pulls?state=all&sort=updated&direction=desc&per_page=${count}`)) as (Pull & {
-    updated_at: string;
-  })[];
-  return list.map((p) => ({ number: p.number, title: p.title, state: stateOf(p), updated: p.updated_at }));
-}
+const sha = (s: string | undefined): string | null => (s && /^[0-9a-f]{40}$/.test(s) ? s : null);
+const cleanPath = (p: string | undefined): string | null =>
+  p &&
+  !p.startsWith("/") &&
+  !p.includes("\\") &&
+  !p.split("/").some((x) => x === "" || x === "." || x === "..")
+    ? p
+    : null;
 
-/**
- * The whole pull request as text for an agent to read: the body, then every comment, review, review comment, commit, and
- * cross-reference in time order. Throws when it is too large to read whole.
- */
+/** Everything harvest stores for one pull request, and the issues its body closes. */
 export async function readPull(
-  repo: string,
+  get: Get,
   number: number,
-  get: Get = gh(repo),
-): Promise<{ pr: PullRequest; text: string }> {
+  repo: string | null = null,
+): Promise<{ title: string; items: Item[]; closes: number[] }> {
   const p = (await get(`pulls/${number}`)) as Pull;
-  if (p.commits > LIMITS.commits)
-    throw new Error(
-      `#${number} has ${p.commits} commits; GitHub lists only ${LIMITS.commits}, so it cannot be read whole`,
-    );
-  const [comments, reviews, reviewComments, commits, events] = await Promise.all([
+  const artifact = `pr:${number}`;
+  const [comments, reviews, reviewComments, commits] = await Promise.all([
     get(`issues/${number}/comments?per_page=100`, true) as Promise<Comment[]>,
     get(`pulls/${number}/reviews?per_page=100`, true) as Promise<Review[]>,
     get(`pulls/${number}/comments?per_page=100`, true) as Promise<ReviewComment[]>,
     get(`pulls/${number}/commits?per_page=100`, true) as Promise<Commit[]>,
-    get(`issues/${number}/timeline?per_page=100`, true) as Promise<Event[]>,
   ]);
-  const entries: { at: string; text: string }[] = [];
-  const add = (at: string | null | undefined, text: string) => entries.push({ at: at ?? p.created_at, text });
+  const items: Item[] = [];
+  // An empty body is passed on too, so a body cleared after an earlier harvest becomes an empty current revision (storeItems keeps
+  // no row for a body that was never there)
+  items.push(
+    item({
+      kind: "pr_body",
+      artifact,
+      externalId: artifact,
+      author: p.user ?? null,
+      association: p.author_association ?? null,
+      url: p.html_url,
+      createdAt: p.created_at,
+      text: p.body?.trim() ? p.body : "",
+    }),
+  );
   for (const c of comments)
-    if (c.body && !isFiller(c.body))
-      add(c.created_at, `${who(c.user)} commented (${c.html_url}):\n${c.body.trim()}`);
+    if (c.body?.trim())
+      items.push(
+        item({
+          kind: "pr_comment",
+          artifact,
+          externalId: `comment:${c.id}`,
+          author: c.user ?? null,
+          association: c.author_association ?? null,
+          url: c.html_url,
+          createdAt: c.created_at,
+          text: c.body,
+        }),
+      );
   for (const r of reviews)
-    if (r.body?.trim() || r.state !== "COMMENTED")
-      add(
-        r.submitted_at,
-        `${who(r.user)} reviewed: ${r.state} (${r.html_url})${r.body?.trim() ? `\n${r.body.trim()}` : ""}`,
+    if (r.body?.trim())
+      items.push(
+        item({
+          kind: "review",
+          artifact,
+          externalId: `review:${r.id}`,
+          author: r.user ?? null,
+          association: r.author_association ?? null,
+          url: r.html_url,
+          createdAt: r.submitted_at ?? p.created_at,
+          text: r.body,
+        }),
       );
   for (const c of reviewComments)
-    if (c.body && !isFiller(c.body))
-      add(
-        c.created_at,
-        `${who(c.user)} on ${c.path}${c.line ? `:${c.line}` : ""}${c.in_reply_to_id ? ` (reply to ${c.in_reply_to_id})` : ""} [${c.id}] (${c.html_url}):\n${c.body.trim()}`,
-      );
-  for (const c of commits)
-    add(c.commit.author?.date, `commit ${c.sha.slice(0, 12)}: ${c.commit.message.trim()}`);
-  for (const e of events)
-    if (e.event === "cross-referenced" && e.source?.issue) {
-      // A reference from another repository names it, so it never reads as this repository's issue of the same number
-      const from = e.source.issue.repository_url?.replace(/^.*\/repos\//, "");
-      const where = from && from !== repo ? from : "";
-      add(
-        e.created_at,
-        `${e.source.issue.pull_request ? "pull request" : "issue"} ${where}#${e.source.issue.number} (${e.source.issue.title}) referred to this`,
+    if (c.body?.trim()) {
+      const end = c.line ?? null;
+      items.push(
+        item({
+          kind: "review_comment",
+          artifact,
+          externalId: `review_comment:${c.id}`,
+          author: c.user ?? null,
+          association: c.author_association ?? null,
+          parent: c.in_reply_to_id ? `review_comment:${c.in_reply_to_id}` : null,
+          url: c.html_url,
+          createdAt: c.created_at,
+          text: c.body,
+          path: cleanPath(c.path),
+          lines: end ? [c.start_line ?? end, end] : null,
+          hunk: c.diff_hunk ?? null,
+          commit: sha(c.commit_id),
+        }),
       );
     }
-  entries.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  const text = [
-    `# #${p.number}: ${p.title}`,
-    `${stateOf(p)} · opened by ${who(p.user)} ${p.created_at}${p.merged_at ? ` · merged ${p.merged_at}` : ""} · ${p.html_url}`,
-    "",
-    "## Body",
-    "",
-    p.body?.trim() || "(empty)",
-    "",
-    "## In time order",
-    "",
-    ...entries.map((e) => `- ${e.at} ${e.text.replace(/\n/g, "\n  ")}`),
-  ].join("\n");
-  if (Buffer.byteLength(text) > LIMITS.bytes)
-    throw new Error(
-      `#${number} is ${Buffer.byteLength(text)} bytes as text, over the ${LIMITS.bytes}-byte limit, so it cannot be read whole`,
+  for (const c of commits)
+    items.push(
+      item({
+        kind: "commit_message",
+        artifact,
+        externalId: `commit:${c.sha}`,
+        author: c.author ?? null,
+        url: c.html_url ?? null,
+        createdAt: c.commit.author?.date ?? p.created_at,
+        text: c.commit.message,
+        commit: sha(c.sha),
+      }),
     );
-  return {
-    pr: { number: p.number, githubId: p.id, title: p.title, url: p.html_url, state: stateOf(p) },
-    text,
-  };
+  if (p.merged_at)
+    items.push(
+      item({
+        kind: "pr_event",
+        artifact,
+        externalId: `${artifact}#merged`,
+        author: p.merged_by ?? null,
+        event: "merged",
+        url: p.html_url,
+        createdAt: p.merged_at,
+        text: `Merged by @${p.merged_by?.login ?? "unknown"}`,
+      }),
+    );
+  const closes = [...new Set(closingRefs(p.body ?? "", repo))].filter((n) => n !== number);
+  for (const n of closes.slice(0, MAX_ISSUES)) items.push(...(await readIssue(get, n)));
+  return { title: p.title, items, closes };
 }
 
-/** Splits the text into parts of at most size bytes, at line ends where it can (an agent reads one part per call). */
-export function parts(text: string, size: number = LIMITS.part): string[] {
-  const out: string[] = [];
-  let cur = "";
-  const push = () => {
-    if (cur) out.push(cur);
-    cur = "";
-  };
-  for (let line of text.split("\n")) {
-    while (bytes(line) > size) {
-      push();
-      const cut = head(line, size);
-      out.push(cut);
-      line = line.slice(cut.length);
+/** An issue's body and comments; empty for a number that is a pull request. */
+export async function readIssue(get: Get, n: number): Promise<Item[]> {
+  const items: Item[] = [];
+  const issue = (await get(`issues/${n}`)) as Issue;
+  if (issue.pull_request) return items;
+  if (issue.body?.trim())
+    items.push(
+      item({
+        kind: "issue_body",
+        artifact: `issue:${n}`,
+        externalId: `issue:${n}`,
+        author: issue.user ?? null,
+        association: issue.author_association ?? null,
+        url: issue.html_url,
+        createdAt: issue.created_at,
+        text: issue.body,
+      }),
+    );
+  for (const c of (await get(`issues/${n}/comments?per_page=100`, true)) as Comment[])
+    if (c.body?.trim())
+      items.push(
+        item({
+          kind: "issue_comment",
+          artifact: `issue:${n}`,
+          externalId: `comment:${c.id}`,
+          author: c.user ?? null,
+          association: c.author_association ?? null,
+          url: c.html_url,
+          createdAt: c.created_at,
+          text: c.body,
+        }),
+      );
+  return items;
+}
+
+/** The pull request or issue a GitHub URL of this repository names, or null for any other URL. */
+export function githubTarget(repo: string, url: string): { kind: "pull" | "issue"; number: number } | null {
+  const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/(pull|issues)\/(\d{1,9})(?:[/?#].*)?$/.exec(url.trim());
+  if (!m || m[1]?.toLowerCase() !== repo.toLowerCase()) return null;
+  return { kind: m[2] === "pull" ? "pull" : "issue", number: Number(m[3]) };
+}
+
+/**
+ * Stores items as sources and returns the id of each one's current revision. Unchanged text keeps its row; changed text becomes
+ * a new revision, so units extracted earlier keep citing what they were extracted from.
+ */
+export async function storeItems(
+  db: Kysely<DB>,
+  projectId: number,
+  items: Item[],
+): Promise<(number | null)[]> {
+  const owners = new Set(
+    (
+      await db.selectFrom("owner_identity").select("external_id").where("provider", "=", "github").execute()
+    ).map((o) => o.external_id),
+  );
+  const now = iso(Date.now());
+  // One entry per item, null for an empty text never kept, so callers can pair items with their ids
+  const ids: (number | null)[] = [];
+  for (const it of items) {
+    const kept = fit(it.text);
+    const hash = sha256(kept.body);
+    const latest = await db
+      .selectFrom("source")
+      .select(["id", "revision", "content_hash"])
+      .where("project_id", "=", projectId)
+      .where("kind", "=", it.kind)
+      .where("external_id", "=", it.externalId)
+      .orderBy("revision", "desc")
+      .executeTakeFirst();
+    if (latest && Buffer.from(latest.content_hash).equals(hash)) {
+      ids.push(latest.id);
+      continue;
     }
-    const next = cur ? `${cur}\n${line}` : line;
-    if (bytes(next) > size) {
-      push();
-      cur = line;
-    } else cur = next;
+    if (!latest && !kept.body.trim()) {
+      ids.push(null);
+      continue;
+    }
+    const authorId = it.author?.id === undefined ? null : String(it.author.id);
+    const kind = authorId && owners.has(authorId) ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
+    const created = iso(it.createdAt);
+    const row = await db
+      .insertInto("source")
+      .values({
+        project_id: projectId,
+        kind: it.kind,
+        artifact: it.artifact,
+        external_id: it.externalId,
+        revision: (latest?.revision ?? 0) + 1,
+        author_kind: kind,
+        author_login: it.author?.login ?? null,
+        author_external_id: authorId,
+        author_association: it.association,
+        parent_external_id: it.parent,
+        event_kind: it.event,
+        url: it.url,
+        created_at: created,
+        // Only the first revision's time is known to be when it became visible; an edit's time is not in the REST response
+        available_at: latest ? null : created,
+        captured_at: now,
+        text: kept.body,
+        truncated: kept.truncated ? 1 : 0,
+        redacted: kept.redacted ? 1 : 0,
+        original_bytes: kept.originalBytes,
+        content_hash: hash,
+        path: it.path,
+        line_start: it.lines?.[0] ?? null,
+        line_end: it.lines?.[1] ?? null,
+        // Code under review can hold a key: the hunk is masked and bounded like the text
+        diff_hunk: it.hunk === null ? null : fit(it.hunk).body,
+        commit_sha: it.commit,
+        indexed: it.kind === "pr_event" ? 0 : 1,
+      })
+      .returning("id")
+      .executeTakeFirstOrThrow();
+    ids.push(row.id);
   }
-  push();
-  return out.length ? out : [""];
+  return ids;
+}
+
+/** Records that a pull request closes issues, by artifact. */
+export async function linkIssues(
+  db: Kysely<DB>,
+  projectId: number,
+  number: number,
+  closes: number[],
+): Promise<void> {
+  // The links follow the current body: an issue it no longer closes stops being part of the pull request
+  let stale = db
+    .deleteFrom("artifact_link")
+    .where("project_id", "=", projectId)
+    .where("from_artifact", "=", `pr:${number}`)
+    .where("kind", "=", "closes");
+  if (closes.length)
+    stale = stale.where(
+      "to_artifact",
+      "not in",
+      closes.map((n) => `issue:${n}`),
+    );
+  await stale.execute();
+  for (const n of closes)
+    await db
+      .insertInto("artifact_link")
+      .values({
+        project_id: projectId,
+        from_artifact: `pr:${number}`,
+        to_artifact: `issue:${n}`,
+        kind: "closes",
+      })
+      .onConflict((oc) => oc.doNothing())
+      .execute();
+}
+
+/** The current revision of every source of a pull request and the issues it closes, in time order. */
+export async function pullSources(db: Kysely<DB>, projectId: number, number: number) {
+  const artifacts = [
+    `pr:${number}`,
+    ...(
+      await db
+        .selectFrom("artifact_link")
+        .select("to_artifact")
+        .where("project_id", "=", projectId)
+        .where("from_artifact", "=", `pr:${number}`)
+        .execute()
+    ).map((l) => l.to_artifact),
+  ];
+  return db
+    .selectFrom("source as s")
+    .where("s.project_id", "=", projectId)
+    .where("s.artifact", "in", artifacts)
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("source as n")
+            .select("n.id")
+            .whereRef("n.project_id", "=", "s.project_id")
+            .whereRef("n.kind", "=", "s.kind")
+            .whereRef("n.external_id", "=", "s.external_id")
+            .whereRef("n.revision", ">", "s.revision"),
+        ),
+      ),
+    )
+    .select([
+      "s.id",
+      "s.kind",
+      "s.artifact",
+      "s.revision",
+      "s.author_login",
+      "s.author_association",
+      "s.created_at",
+      "s.captured_at",
+      "s.path",
+      "s.line_start",
+      "s.text",
+    ])
+    .orderBy("s.created_at")
+    .orderBy("s.id")
+    .execute();
 }

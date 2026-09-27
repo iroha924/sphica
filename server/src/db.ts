@@ -14,7 +14,7 @@ export { dbFile, type Role, SCHEMA_REVISION } from "./sqlite.ts";
  * in `[` or `{` as JSON, turning messages whose body is `[]` or `[1] …` into arrays. Columns not listed stay strings.
  * The columns (`refs`, `downsides`, `next`) and nested columns built with `jsonArrayFrom`.
  */
-const JSON_COLUMNS = new Set(["refs", "downsides", "next", "files", "paths"]);
+const JSON_COLUMNS = new Set(["next"]);
 
 const TOP_LEVEL = /^\$\[\d+\]\."([^"]+)"$/;
 
@@ -33,7 +33,7 @@ export function kyselyOn(connect: () => DatabaseSync): Kysely<DB> {
   });
 }
 
-/** A read-only connection, used by MCP and the CLI's reads (`project list`, `trace context`, `harvest read`, the projects in `doctor`). */
+/** A read-only connection, used by the read MCP server, the delivery hooks, and the projects in `doctor`. */
 export function openReader(file: string = dbFile()): Kysely<DB> {
   return kyselyOn(() => connectReader(file));
 }

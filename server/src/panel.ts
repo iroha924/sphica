@@ -1,6 +1,6 @@
 // The shape of what the capture hook shows people (✦ for the title, │ at the start of content lines, ╰─ for the closing line), plus marks and text cleanup shared with the CLI.
 // CLI output is drawn with Clack (server/src/cli/view.ts). The hook does not load Clack, so strings are built here.
-// MCP results and trace context, which only AIs read, use neither shape.
+// MCP results, which only AIs read, use neither shape.
 
 import { stripVTControlCharacters, styleText } from "node:util";
 import { visible } from "./text.ts";

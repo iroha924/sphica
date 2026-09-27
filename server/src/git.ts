@@ -1,0 +1,25 @@
+// git run against a repository the caller names, for reading committed objects.
+import { execFileSync } from "node:child_process";
+
+/** git without the caller's GIT_* variables, which could point it at another repository or object store. */
+export function cleanGit(root: string, args: string[], max = 1024 * 1024): Buffer {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+  return execFileSync("git", ["-C", root, ...args], {
+    env,
+    maxBuffer: max,
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 10_000,
+  });
+}
+
+/** Whether the commit exists in the repository and holds the path as a regular file (not a folder, a symlink, or a submodule). */
+export function commitHolds(root: string, commit: string, rel: string): boolean {
+  try {
+    const entry = cleanGit(root, ["ls-tree", "-z", commit, "--", rel]).toString("utf8").split("\0")[0] ?? "";
+    // "<mode> <type> <object>\t<path>"
+    const m = /^(\d{6}) (\w+) [0-9a-f]+\t(.*)$/.exec(entry);
+    return !!m && (m[1] === "100644" || m[1] === "100755") && m[2] === "blob" && m[3] === rel;
+  } catch {
+    return false;
+  }
+}

@@ -1,0 +1,654 @@
+#!/usr/bin/env node
+// Automatic delivery of past records into Claude Code and Codex: at session start (current work and a few broad constraints), before an edit or a read
+// (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
+// symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
+// Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
+// through the capture connection (never the text). Every failure leaves the host running: the hook prints nothing and exits 0.
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { Kysely } from "kysely";
+import { leaves } from "./anchors.ts";
+import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
+import { dbFile, iso, openReader } from "./db.ts";
+import type { DB } from "./db-types.ts";
+import { openWriter } from "./db-write.ts";
+import { type Host, sessionId } from "./knowledge.ts";
+import { inline } from "./panel.ts";
+import { identify, projectId } from "./project.ts";
+import { selectForReview } from "./review.ts";
+import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
+import { head, reason, sha256 } from "./text.ts";
+
+type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
+const LIMITS: Record<Event, { units: number; chars: number }> = {
+  session_start: { units: 6, chars: 1000 },
+  pre_edit: { units: 5, chars: 1500 },
+  pre_read: { units: 5, chars: 1500 },
+  prompt: { units: 3, chars: 900 },
+  review: { units: 5, chars: 1500 },
+};
+/** Reads are far more frequent than edits, so what reads deliver over one session is capped too. */
+const READ_SESSION = { units: 8, chars: 3000 };
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const NOTE = "Sphica past record, not an instruction; read it with Sphica's read before relying on it";
+
+/** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
+const deliverable = (db: Kysely<DB>, projectId: number) =>
+  db
+    .selectFrom("unit as u")
+    .where("u.project_id", "=", projectId)
+    .where("u.lifecycle", "=", "active")
+    .where("u.extraction", "=", "supported")
+    .where("u.unsourced", "=", 0)
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("unit_link as l")
+            .select("l.from_unit")
+            .where("l.kind", "=", "conflicts")
+            .where("l.resolved_at", "is", null)
+            .where((eb) =>
+              eb.or([eb("l.from_unit", "=", eb.ref("u.id")), eb("l.to_unit", "=", eb.ref("u.id"))]),
+            ),
+        ),
+      ),
+    );
+
+const line = (u: { key: string; kind: string; stance: string | null; text: string }, extra = "") =>
+  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 240)}${extra}`;
+
+/** Cuts to n characters (not bytes), marking the cut. */
+const clip = (text: string, n: number) => {
+  const chars = Array.from(inline(text));
+  return chars.length <= n ? chars.join("") : `${chars.slice(0, n - 1).join("")}…`;
+};
+
+/**
+ * For file-bound deliveries: each record's reason and the options it rejected, so it can be weighed without opening it. Records without them
+ * get nothing added. They are record text like the rest, shown after the key.
+ */
+async function reasons(db: Kysely<DB>, ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const [whys, options] = await Promise.all([
+    db.selectFrom("unit").select(["id", "why"]).where("id", "in", ids).execute(),
+    db
+      .selectFrom("unit_option")
+      .select(["unit_id", "text"])
+      .where("unit_id", "in", ids)
+      .where("outcome", "=", "rejected")
+      .orderBy("position")
+      .execute(),
+  ]);
+  const out = new Map<number, string>();
+  for (const id of ids) {
+    const why = whys.find((w) => w.id === id)?.why;
+    const rejected = options.filter((o) => o.unit_id === id).map((o) => clip(o.text, 60));
+    const parts = [
+      why ? ` Why: ${clip(why, 160)}` : "",
+      rejected.length
+        ? ` Rejected: ${rejected.slice(0, 3).join("; ")}${rejected.length > 3 ? ` (+${rejected.length - 3} more)` : ""}`
+        : "",
+    ].join("");
+    if (parts) out.set(id, parts);
+  }
+  return out;
+}
+
+/** Keeps whole lines within the budget; returns the kept lines and how many were left out. */
+/**
+ * Keeps whole lines within the budget. Each entry lists its forms, longest first. Entries go in first in their shortest form (one that does
+ * not fit is skipped, so a later, shorter one may still fit); leftover room then lengthens them in order. Returns the kept entries' indexes.
+ */
+function fit(
+  lines: (string | string[])[],
+  chars: number,
+  lead: string,
+): { text: string; kept: number[]; omitted: number } {
+  const forms = lines.map((entry) => (Array.isArray(entry) ? entry : [entry]));
+  const chosen = new Map<number, string>();
+  let used = lead.length;
+  forms.forEach((f, i) => {
+    const short = f[f.length - 1] ?? "";
+    if (used + short.length + 1 > chars) return;
+    chosen.set(i, short);
+    used += short.length + 1;
+  });
+  for (const [i, short] of chosen) {
+    const longer = forms[i]?.find((l) => used - short.length + l.length <= chars);
+    if (longer === undefined || longer === short) continue;
+    used += longer.length - short.length;
+    chosen.set(i, longer);
+  }
+  const kept = [...chosen.keys()];
+  return {
+    text: kept.length ? [lead, ...kept.map((i) => chosen.get(i))].join("\n") : "",
+    kept,
+    omitted: lines.length - kept.length,
+  };
+}
+
+type Plan = {
+  text: string;
+  units: number[];
+  eligible: number;
+  omitted: number;
+  path: string | null;
+  reason: string | null;
+  /** What a review delivery is told once per session for: the change it read, or its text when no change was read */
+  once?: string;
+};
+
+const anchoredTo = (db: Kysely<DB>, projectId: number, rels: string[]) =>
+  deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.path", "in", rels)
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .groupBy("u.id")
+    .orderBy("u.id", "desc");
+
+/** The paths a delivery names in its lead: all of them up to three, then a count. */
+const named = (rels: string[]) =>
+  rels.length <= 3
+    ? rels.map(inline).join(", ")
+    : `${rels.slice(0, 3).map(inline).join(", ")} and ${rels.length - 3} more`;
+
+/** Before an edit: the records anchored to any of the edited paths (a Codex patch can touch several), chosen together within one limit. */
+async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Promise<Plan> {
+  const rows = await anchoredTo(db, projectId, rels).execute();
+  const shown = rows.slice(0, LIMITS.pre_edit.units);
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
+  // Sphica's own request to check, not the record's: the hook runs after the edit is composed, so it asks for an account, not a pause
+  const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). Check this change against them: if it seems to go against one, confirm with the current code and the record's full text (Sphica's read), then say why the change stands or what you changed. ${NOTE}:`;
+  const f = fit(
+    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+    LIMITS.pre_edit.chars,
+    lead,
+  );
+  return {
+    text: f.text,
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
+    eligible: rows.length,
+    omitted: rows.length - shown.length + f.omitted,
+    path: head(rels.join(" "), 500),
+    reason: null,
+  };
+}
+
+/**
+ * Before a read: the decisions and constraints anchored to the path that this session has not been shown yet, within the read budget
+ * left for the session. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
+ */
+async function beforeRead(
+  db: Kysely<DB>,
+  projectId: number,
+  rels: string[],
+  session: string,
+  how: "reading" | "named",
+): Promise<Plan> {
+  const sent = await db
+    .selectFrom("delivery as d")
+    .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
+    .where("d.session_id", "=", session)
+    .where("d.outcome", "=", "emitted")
+    .select(["x.unit_id", "d.event"])
+    .execute();
+  const spent = await db
+    .selectFrom("delivery")
+    .where("session_id", "=", session)
+    .where("event", "=", "pre_read")
+    .where("outcome", "=", "emitted")
+    .select("chars")
+    .execute();
+  const seen = new Set(sent.map((r) => r.unit_id));
+  const readUnits = sent.filter((r) => r.event === "pre_read").length;
+  const rows = (
+    await anchoredTo(db, projectId, rels).where("u.kind", "in", ["decision", "constraint"]).execute()
+  ).filter((u) => !seen.has(u.id));
+  const room = Math.min(LIMITS.pre_read.units, READ_SESSION.units - readUnits);
+  const shown = rows.slice(0, Math.max(room, 0));
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
+  // A shell command that names a path is not proof it was read, so Codex's wording says only that it was named
+  const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${NOTE}:`;
+  const f = fit(
+    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+    Math.min(LIMITS.pre_read.chars, READ_SESSION.chars - spent.reduce((n, r) => n + r.chars, 0)),
+    lead,
+  );
+  return {
+    text: f.text,
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
+    eligible: rows.length,
+    omitted: rows.length - shown.length + f.omitted,
+    path: head(rels.join(" "), 500),
+    reason: null,
+  };
+}
+
+/** The paths a Codex patch touches, from its headers (both ends of a move), as written in the patch. */
+function patchPaths(patch: string): string[] {
+  const out = new Set<string>();
+  for (const l of patch.split(/\r?\n/)) {
+    const m = /^\s*\*\*\* (?:(?:Update|Add|Delete) File|Move to):\s*(.+?)\s*$/.exec(l);
+    if (m?.[1]) out.add(m[1]);
+  }
+  return [...out];
+}
+
+/** A patch the shell runs (`apply_patch <<'EOF'`), which Codex may report as Bash: it is an edit, not a read. */
+function shellPatch(input: HookInput): string | null {
+  const c = input.tool_name === "Bash" ? input.tool_input?.command : null;
+  return typeof c === "string" && /^\s*\*\*\* Begin Patch\s*$/m.test(c) ? c : null;
+}
+
+/**
+ * The anchored paths (of decisions and constraints) a shell command names as a whole word: relative to the root or to the command's cwd,
+ * with or without `./`, absolute, and with either separator (PowerShell on Windows).
+ */
+async function namedInCommand(
+  db: Kysely<DB>,
+  projectId: number,
+  root: string,
+  cwd: string,
+  command: string,
+): Promise<string[]> {
+  const paths = await deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .where("u.kind", "in", ["decision", "constraint"])
+    .select("a.path")
+    .distinct()
+    .execute();
+  const edge = `\\s'"=(){}<>|;&,`;
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const forms = (p: string) => {
+    const abs = path.join(root, p);
+    const fromCwd = path.relative(cwd, abs);
+    const out = new Set<string>();
+    for (const f of [p, abs, leaves(fromCwd) ? "" : fromCwd])
+      if (f)
+        for (const sep of ["/", "\\"]) {
+          const t = f.split(/[\\/]/).join(sep);
+          out.add(t);
+          if (!path.isAbsolute(f)) out.add(`.${sep}${t}`);
+        }
+    return [...out];
+  };
+  return paths
+    .map((r) => r.path)
+    .filter((p) =>
+      forms(p).some((t) => new RegExp(`(?:^|[${edge}])${esc(t)}(?:$|[${edge}:])`).test(command)),
+    );
+}
+
+/** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
+async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Promise<Plan> {
+  const text = prompt.normalize("NFKC");
+  const lower = text.toLowerCase();
+  const word = (w: string, s: string) =>
+    new RegExp(
+      `(?<![\\p{L}\\p{N}_$])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_$])`,
+      "u",
+    ).test(s);
+  // A symbol that is also a plain word (open, save) is named only when written as code: followed by ( or inside backticks
+  const named = (symbol: string) =>
+    symbol.length >= 3 &&
+    (/[^a-z]/.test(symbol)
+      ? word(symbol, text)
+      : text.includes(`${symbol}(`) || text.includes(`\`${symbol}\``));
+  const units = await deliverable(db, projectId)
+    .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .execute();
+  const ids = units.map((u) => u.id);
+  const [anchors, options] = ids.length
+    ? await Promise.all([
+        db
+          .selectFrom("unit_anchor")
+          .select(["unit_id", "path", "symbol"])
+          .where("unit_id", "in", ids)
+          .where("retired_at", "is", null)
+          .execute(),
+        db
+          .selectFrom("unit_option")
+          .select(["unit_id", "text", "outcome"])
+          .where("unit_id", "in", ids)
+          .execute(),
+      ])
+    : [[], []];
+  const hits: { u: (typeof units)[number]; why: string }[] = [];
+  for (const u of units) {
+    const a = anchors.find(
+      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || text.includes(x.path)),
+    );
+    const o = options.find(
+      (x) => x.unit_id === u.id && x.text.length >= 3 && word(x.text.normalize("NFKC").toLowerCase(), lower),
+    );
+    if (a) hits.push({ u, why: ` [names ${a.symbol && named(a.symbol) ? a.symbol : a.path}]` });
+    else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
+  }
+  const shown = hits.slice(0, LIMITS.prompt.units);
+  // One line per record, with the note on each, so the whole stays within 3 lines
+  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why).slice(2)}`);
+  const kept: string[] = [];
+  let used = 0;
+  for (const l of lines) {
+    if (used + l.length + 1 > LIMITS.prompt.chars) break;
+    kept.push(l);
+    used += l.length + 1;
+  }
+  return {
+    text: kept.join("\n"),
+    units: shown.slice(0, kept.length).map((h) => h.u.id),
+    eligible: hits.length,
+    omitted: hits.length - kept.length,
+    path: null,
+    reason: null,
+  };
+}
+
+async function atStart(db: Kysely<DB>, projectId: number, branch: string | null): Promise<Plan> {
+  const work = await db
+    .selectFrom("work")
+    .where("project_id", "=", projectId)
+    .where("status", "in", ["active", "blocked", "paused"])
+    .select(["title", "current", "next", "status", "branch"])
+    .orderBy("updated_at", "desc")
+    .limit(3)
+    .execute();
+  // Broad constraints: active constraints with no place they apply to (an evidence anchor only says where it was done), so no read
+  // or edit hook would ever show them
+  const broad = await deliverable(db, projectId)
+    .where("u.kind", "=", "constraint")
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("unit_anchor as a")
+            .select("a.id")
+            .whereRef("a.unit_id", "=", "u.id")
+            .where("a.role", "=", "applies_to")
+            .where("a.retired_at", "is", null),
+        ),
+      ),
+    )
+    .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .orderBy("u.id", "desc")
+    .limit(3)
+    .execute();
+  const lines = [
+    ...work.map((w) => {
+      // The reader connection already turns next back into an array (db.ts JSON_COLUMNS)
+      const next = (w.next as unknown as string[])[0];
+      return `- Work: ${head(inline(w.title), 120)} (${w.status}${w.branch && w.branch === branch ? ", this branch" : ""}): ${head(inline(w.current), 200)}${next ? `; next: ${head(inline(next), 120)}` : ""}`;
+    }),
+    ...broad.map((u) => line(u)),
+  ];
+  const f = fit(
+    lines,
+    LIMITS.session_start.chars,
+    `Sphica: this project's current work and standing constraints. ${NOTE}:`,
+  );
+  const shownUnits = broad.filter((u) => f.text.includes(inline(u.key))).map((u) => u.id);
+  return {
+    text: f.text,
+    units: shownUnits,
+    eligible: lines.length,
+    omitted: f.omitted,
+    path: null,
+    reason: null,
+  };
+}
+
+/** Before the user's own review command: the recorded decisions the local change touches, or why it could not be checked. */
+async function beforeReview(
+  db: Kysely<DB>,
+  projectId: number,
+  root: string,
+  call: { name: string; args: string },
+): Promise<Plan> {
+  const change = localChange(root, call.args);
+  const said = (text: string, why: string | null): Plan => ({
+    text,
+    units: [],
+    eligible: 0,
+    omitted: 0,
+    path: null,
+    reason: why,
+  });
+  if ("problem" in change)
+    return said(
+      `Sphica could not check this review against past decisions: ${change.problem}. To check, pass the diff to Sphica's review_select.`,
+      change.problem,
+    );
+  const n = change.files.length;
+  const base = inline(change.base);
+  if (!n)
+    return said(`Sphica: no local change against ${base} to check against past decisions.`, "no change");
+  const once = `${change.base}\0${change.digest}`;
+  // The same bar as other deliveries: a record in an unresolved conflict is held back
+  const live = new Set((await deliverable(db, projectId).select("u.id").execute()).map((r) => r.id));
+  const rows = (await selectForReview(db, projectId, change.files)).filter((a) => live.has(a.id));
+  const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
+  if (!rows.length) return { ...said(`Sphica ${checked}: no active recorded decision applies.`, null), once };
+  const shown = rows.slice(0, LIMITS.review.units);
+  const f = fit(
+    shown.map((u) => line(u, ` [${inline(u.because)}]`)),
+    LIMITS.review.chars,
+    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
+  );
+  return {
+    text: f.text,
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
+    eligible: rows.length,
+    omitted: rows.length - shown.length + f.omitted,
+    path: null,
+    reason: null,
+    once,
+  };
+}
+
+/** Whether this session was already told about this change (a review skill is often called more than once per change). */
+function toldBefore(session: string, key: string): boolean {
+  return !markOnce("review", `${session}\0${key}`);
+}
+
+/**
+ * Marks a key once, in a per-user directory (a shared /tmp holds other users' markers). True the first time; only an existing mark
+ * counts as seen, so a directory that cannot be written never silences a delivery.
+ */
+function markOnce(kind: string, key: string): boolean {
+  const user = (() => {
+    try {
+      return os.userInfo().username;
+    } catch {
+      return String(process.getuid?.() ?? "user");
+    }
+  })();
+  const dir = path.join(os.tmpdir(), `sphica-${sha256(user).toString("hex").slice(0, 12)}`, kind);
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(dir, sha256(key).toString("hex").slice(0, 24)), "", { flag: "wx" });
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "EEXIST";
+  }
+}
+
+/** Whether this session was already told Sphica is unavailable (said once per session, never as "nothing applies"). */
+function onceUnavailable(session: string): boolean {
+  return markOnce("unavailable", session);
+}
+
+async function log(
+  file: string,
+  projectId: number,
+  host: Host,
+  external: string,
+  event: Event,
+  plan: Plan,
+  outcome: string,
+  branch: string | null,
+): Promise<void> {
+  const cap = openWriter("capture", file);
+  try {
+    const id = sessionId(projectId, host, external);
+    const now = iso(Date.now());
+    await cap
+      .insertInto("capture_session")
+      .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
+      .execute();
+    await cap
+      .insertInto("capture_delivery")
+      .values({
+        session_id: id,
+        event,
+        outcome,
+        reason: plan.reason,
+        path: plan.path,
+        eligible: plan.eligible,
+        omitted: plan.omitted,
+        chars: plan.text.length,
+        at: now,
+        units: JSON.stringify(plan.units),
+      })
+      .execute();
+  } finally {
+    await cap.destroy().catch(() => {});
+  }
+}
+
+/** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
+export async function deliver(
+  input: ReviewInput & { source?: string },
+  host: Host = "claude-code",
+  file: string = dbFile(),
+): Promise<string> {
+  const name = input.hook_event_name;
+  const call = reviewCall(input);
+  const event: Event | null = call
+    ? "review"
+    : name === "SessionStart"
+      ? "session_start"
+      : name === "UserPromptSubmit"
+        ? "prompt"
+        : name === "PreToolUse"
+          ? input.tool_name === "Read" ||
+            (host === "codex" && input.tool_name === "Bash" && !shellPatch(input))
+            ? "pre_read"
+            : "pre_edit"
+          : null;
+  if (!event || !input.session_id) return "";
+  if (event === "prompt" && !isOwnerTurn(input)) return "";
+  // A headless review (claude -p "/review") still gets the check; only reviews inside subagents are left to the parent
+  if (event === "review" && input.agent_id) return "";
+  const ti = input.tool_input ?? {};
+  // Codex edits arrive as a patch in apply_patch, and its reads only as shell commands
+  const patch =
+    host === "codex" && input.tool_name === "apply_patch" && typeof ti.command === "string"
+      ? ti.command
+      : host === "codex"
+        ? shellPatch(input)
+        : null;
+  const shell =
+    host === "codex" && input.tool_name === "Bash" && !patch && typeof ti.command === "string"
+      ? ti.command
+      : null;
+  const targets = patch
+    ? patchPaths(patch)
+    : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);
+  const onPath = event === "pre_edit" || event === "pre_read";
+  if (
+    onPath &&
+    !shell &&
+    (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
+  )
+    return "";
+  const place = identify(input.cwd ?? process.cwd());
+  if (!place) return "";
+  let rels = targets
+    .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
+    .filter((r) => r && !leaves(r))
+    .map((r) => r.split(path.sep).join("/"));
+  if (onPath && !shell && !rels.length) return "";
+  let db: Kysely<DB> | null = null;
+  try {
+    if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
+    db = openReader(file);
+    const pid = await projectId(db, place.key);
+    if (pid === null) return "";
+    if (shell) {
+      rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
+      if (!rels.length) return "";
+    }
+    if (event === "session_start" && input.source === "resume") {
+      const said = await db
+        .selectFrom("delivery")
+        .select("id")
+        .where("session_id", "=", sessionId(pid, host, input.session_id))
+        .where("event", "=", "session_start")
+        .where("outcome", "=", "emitted")
+        .executeTakeFirst();
+      if (said) return "";
+    }
+    const plan =
+      event === "pre_edit"
+        ? await beforeEdit(db, pid, rels)
+        : event === "pre_read"
+          ? await beforeRead(
+              db,
+              pid,
+              rels,
+              sessionId(pid, host, input.session_id),
+              shell ? "named" : "reading",
+            )
+          : event === "prompt"
+            ? await onPrompt(db, pid, input.prompt ?? "")
+            : call
+              ? await beforeReview(db, pid, place.root, call)
+              : await atStart(db, pid, branchOf(place.root));
+    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
+    await log(
+      file,
+      pid,
+      host,
+      input.session_id,
+      event,
+      plan,
+      plan.text ? "emitted" : "nothing",
+      branchOf(place.root),
+    ).catch(() => {});
+    return plan.text;
+  } catch (e) {
+    // Unavailable is not "nothing applies": the edit and read hooks and session start say so, once per session (not every shell command)
+    if (event === "prompt" || shell || !onceUnavailable(`${host}\0${input.session_id}`)) return "";
+    return `Sphica unavailable: ${head(inline(reason(e)), 200)}. Past decisions for ${onPath ? named(rels) : "this project"} could not be checked.`;
+  } finally {
+    await db?.destroy().catch(() => {});
+  }
+}
+
+async function main(): Promise<void> {
+  const input = (await readInput(process.stdin)) as HookInput & { source?: string };
+  const host: Host = process.argv[2] === "codex" ? "codex" : "claude-code";
+  const context = await deliver(input, host).catch(() => "");
+  if (context)
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context },
+      }),
+    );
+}
+
+if (process.argv[1] && /deliver\.(ts|js)$/.test(process.argv[1])) {
+  main().catch(() => {
+    // Delivery never stops work
+  });
+}
