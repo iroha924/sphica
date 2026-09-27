@@ -22,7 +22,7 @@ description: Runs one turn of Sphica's evaluation loop on real agents. Builds th
 |---|---|
 | Tasks, prompts, gold keys, hidden tests | `server/evals/cloud/tasks.json` |
 | Slot builder, collector, Codex replay, fixture writer | `server/evals/cloud/build.ts`, `collect.ts`, `codex.ts`, `fixture.ts` |
-| Built slots, fixtures, Codex runs, old results | `~/.cache/sphica-eval/` (`build/`, `fixtures/`, `codex-runs/`, `archive/`) |
+| Built slots, fixtures, Codex runs, run logs, old results | `~/.cache/sphica-eval/` (`build/`, `fixtures/`, `codex-runs/`, `logs/`, `archive/`) |
 | Routine ids per slot | `~/.cache/sphica-eval/routines.json` |
 | Routine token | `~/.config/sphica-eval`. Never print it; fire with the RemoteTrigger tool instead |
 
@@ -31,12 +31,14 @@ the cloud credits beyond an approved loop, need the owner's approval first. One 
 
 ## One loop
 
+Run the `node evals/cloud/*.ts` commands from `server/`.
+
 ```text
 Loop progress:
 - [ ] 1. Fixture current with db/schema.sql (rebuild after any schema change)
-- [ ] 2. Build, delete old claude/eval-* branches, push the 4 slots
+- [ ] 2. Archive the last loop, build, delete old claude/eval-* branches, push the 4 slots
 - [ ] 3. Fire each routine at least twice with the task prompt; run codex.ts for none, search, gold
-- [ ] 4. Collect; fetch each run's log with RemoteTrigger get_run_log
+- [ ] 4. Save each run's log (RemoteTrigger get_run_log), then collect
 - [ ] 5. Grade final answers blind (Claude and Codex), compare
 - [ ] 6. For each failure: acceptance case first (red), fix, verify, rerun the same task
 ```
@@ -44,11 +46,13 @@ Loop progress:
 1. A fixture is built through the record server's own functions: `node evals/cloud/fixture.ts new|harvest|check|save`. Keep each PR's record JSON
    next to the database (`~/.cache/sphica-eval/fixtures/pr<N>.record.json`) so it can be rebuilt. Anchor records by the trace contract
    (`plugin/skills/trace/SKILL.md`), or delivery has nothing to show
-2. `node evals/cloud/build.ts --project <name>`, then for each slot delete its `claude/eval-*` branches and `git push -f origin main` from
-   `~/.cache/sphica-eval/build/eval-shelf-N`. The build fails if the inject slot's delivery hook logs nothing (the smoke test)
+2. Move the last `loop.json`, `build/manifest.json`, `codex-runs/`, and `logs/` into `archive/<loop>/` (deleted branches cannot be collected again).
+   Then `node evals/cloud/build.ts --project <name>`, and for each slot delete its `claude/eval-*` branches and, from
+   `~/.cache/sphica-eval/build/eval-shelf-N`, `git fetch -q origin main && git push --force-with-lease origin main` (the build starts a new history). The build fails if the inject slot's delivery hook logs nothing (the smoke test)
 3. Fire with RemoteTrigger `run` and body `{"text": "<task prompt>"}`. Codex: `node evals/cloud/codex.ts --repo eval-shelf-N --task <id>` (not the
-   inject slot; Codex has no delivery hooks yet). Move the previous `codex-runs/` into `archive/` first
-4. `node evals/cloud/collect.ts` writes `~/.cache/sphica-eval/loop.json`: hidden tests, delivered unit keys, final answers, and failure signals
+   inject slot; Codex has no delivery hooks yet)
+4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the failure signals). Then
+   `node evals/cloud/collect.ts` writes `~/.cache/sphica-eval/loop.json`: hidden tests, delivered unit keys, final answers, and failure signals
 5. Grade the final answer, not only the patch: a run in an old checkout often stops at a plan because that checkout's CLAUDE.md demands the owner's Go.
    Give graders the task's `expect` and the answers without their conditions
 
