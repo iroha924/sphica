@@ -120,7 +120,7 @@ base: main
   - コミット: `fix(evals): unstage dependencies in slots without an ignore file`
   - 結果: 直した行で staged は src/app.ts だけになった。`bun run verify` → exit 0
 
-- [ ] T11: 結果の後始末が Stop ごとに最終回答を上書きするのを直し、回答を追記する（新文言 tsundoku の採点で発見）
+- [x] T11: 結果の後始末が Stop ごとに最終回答を上書きするのを直し、回答を追記する（新文言 tsundoku の採点で発見）
   - 種別: 修正
   - 計画: S1
   - 依存: T10（同じ FINISH_SH を直す）
@@ -128,6 +128,7 @@ base: main
   - red: `node evals/cloud/build.ts --project tsundoku` → 作った finish.sh に Stop の入力を 2 回渡すと、.eval/answer.md が 2 回目の回答だけになる
   - 完了条件: 同じ手順で .eval/answer.md に 2 回分の回答が残る。`bun run verify` → exit 0
   - コミット: `fix(evals): keep every final answer of a run, not only the last`
+  - 結果: 直す前のスロットで Stop を 2 回渡すと .eval/answer.md は「working tree is clean」だけだった（red）。直した build.ts で作り直したスロットでは 2 回分の回答が残った。`bun run verify` → exit 0
 
 - [ ] T12: 結果の後始末のコミットをスロットのリポジトリのフックから外す（新文言 sphica の計測で発見）
   - 種別: 修正
