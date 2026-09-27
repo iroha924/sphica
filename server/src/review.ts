@@ -26,6 +26,12 @@ export function parseDiff(text: string): FileDiff[] {
   // Lines left in the current hunk, old and new side: inside it, "--- x" and "+++ x" are a removed or added line, not a file header
   let oldLeft = 0;
   let newLeft = 0;
+  // A mode-only or binary change prints only its "diff --git" line: its path counts when nothing else in the block named a file
+  let block: string | null = null;
+  const closeBlock = () => {
+    if (block) at(block);
+    block = null;
+  };
   const rows = text.split(/\r?\n/);
   for (const [i, raw] of rows.entries()) {
     if (cur && (oldLeft > 0 || newLeft > 0)) {
@@ -41,15 +47,23 @@ export function parseDiff(text: string): FileDiff[] {
       }
       continue;
     }
+    const header = /^diff --git a\/.+ b\/(.+)$/.exec(raw);
+    if (header?.[1]) {
+      closeBlock();
+      block = header[1];
+      continue;
+    }
     // A rename prints its paths as metadata, with no ---/+++ header or hunk when the content is unchanged
     const renamed = /^rename (from|to) (.+)$/.exec(raw);
     if (renamed?.[2]) {
+      block = null;
       const f = at(renamed[2]);
       if (renamed[1] === "from") f.gone = true;
       continue;
     }
     const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(raw);
     if (to) {
+      block = null;
       // The old path is the header line just before; it names a deleted file
       const was = /^--- (?:a\/)?(.+?)\t?$/.exec(rows[i - 1] ?? "")?.[1];
       cur = to[1] === "/dev/null" ? null : at(to[1] ?? "");
@@ -63,6 +77,7 @@ export function parseDiff(text: string): FileDiff[] {
       newLeft = Number(hunk[3] ?? 1);
     }
   }
+  closeBlock();
   return files;
 }
 

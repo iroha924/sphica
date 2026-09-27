@@ -56,6 +56,28 @@ test("a diff lists its changed files with added lines and their new line numbers
   ]);
 });
 
+test("a mode-only or binary change, which prints no ---/+++ header, still lists its path", () => {
+  const diff = [
+    "diff --git a/bin/run.sh b/bin/run.sh",
+    "old mode 100644",
+    "new mode 100755",
+    "diff --git a/logo.png b/logo.png",
+    "index 1111111..2222222 100644",
+    "Binary files a/logo.png and b/logo.png differ",
+    "diff --git a/src/a.ts b/src/a.ts",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+  assert.deepEqual(parseDiff(diff), [
+    { path: "bin/run.sh", added: [], lines: [] },
+    { path: "logo.png", added: [], lines: [] },
+    { path: "src/a.ts", added: ["y"], lines: [1] },
+  ]);
+});
+
 test("a rename without content changes lists both paths, the old one as gone", () => {
   const diff = [
     "diff --git a/src/a.ts b/src/b.ts",
