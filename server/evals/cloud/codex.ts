@@ -22,6 +22,7 @@ const { values: args } = parseArgs({
 type Task = { id: string; prompt: string; gold: string[] };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
 const manifest = JSON.parse(fs.readFileSync(path.join(args.build ?? "", "manifest.json"), "utf8")) as {
+  owner?: string;
   repositories: Record<string, { condition: string }>;
 };
 const repo = args.repo ?? "";
@@ -47,7 +48,14 @@ const tmp = path.join(dir, "tmp");
 for (const d of [home, codexHome, tmp]) fs.mkdirSync(d, { recursive: true });
 execFileSync("git", ["clone", "-q", path.join(args.build ?? "", repo), work]);
 // Sphica identifies the project by origin, so the clone points where the cloud checkout does
-execFileSync("git", ["-C", work, "remote", "set-url", "origin", `https://github.com/iroha924/${repo}.git`]);
+execFileSync("git", [
+  "-C",
+  work,
+  "remote",
+  "set-url",
+  "origin",
+  `https://github.com/${manifest.owner ?? "iroha924"}/${repo}.git`,
+]);
 fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
 const mcp =
   condition === "search" || condition === "inject"

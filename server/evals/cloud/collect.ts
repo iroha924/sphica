@@ -148,8 +148,14 @@ function main() {
         task: string;
         condition: string;
         seconds: number;
+        status: number | null;
         deliveries?: { outcome: string; units: string[] }[] | null;
       };
+      // A run whose Codex process failed (a timeout, a login error) says nothing about Sphica: it is not a result
+      if (result.status !== 0) {
+        console.log(`${name}: codex exited ${result.status}, left out`);
+        continue;
+      }
       // An inject run whose hooks logged nothing at all never had Sphica delivering: it is not a result
       if (result.condition === "inject" && !result.deliveries?.length) {
         console.log(`${name}: inject run with no delivery log, left out`);

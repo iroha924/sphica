@@ -176,6 +176,9 @@ async function goldText(file: string, keys: string[]): Promise<string> {
       .select(["key", "kind", "stance", "text", "why"])
       .where("key", "in", keys)
       .execute();
+    // A gold slot missing a record would be labelled gold while giving less: stop the build instead
+    const missing = keys.filter((k) => !rows.some((r) => r.key === k));
+    if (missing.length) throw new Error(`gold records missing from the fixture: ${missing.join(", ")}`);
     // The gold slot has no Sphica tools, so the record comes whole instead of pointing to read (a pointer it cannot follow reads as a forged claim)
     return rows
       .map(
@@ -267,6 +270,7 @@ async function main() {
     ),
     node: NODE,
     project: args.project,
+    owner,
     tasks: tasks.map((t) => t.id),
     repositories: {},
   };

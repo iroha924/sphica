@@ -37,7 +37,7 @@ Run the `node evals/cloud/*.ts` commands from `server/`.
 Loop progress:
 - [ ] 1. Fixture current with db/schema.sql (rebuild after any schema change)
 - [ ] 2. Archive the last loop, build, delete old claude/eval-* branches, push the 4 slots
-- [ ] 3. Fire each routine at least twice with the task prompt; run codex.ts for none, search, gold
+- [ ] 3. Fire each routine at least twice with the task prompt; run codex.ts for all four slots
 - [ ] 4. Save each run's log (RemoteTrigger get_run_log), then collect
 - [ ] 5. Grade final answers blind (Claude and Codex), compare
 - [ ] 6. For each failure: acceptance case first (red), fix, verify, rerun the same task
@@ -49,8 +49,9 @@ Loop progress:
 2. Move the last `loop.json`, `build/manifest.json`, `codex-runs/`, and `logs/` into `archive/<loop>/` (deleted branches cannot be collected again).
    Then `node evals/cloud/build.ts --project <name>`, and for each slot delete its `claude/eval-*` branches and, from
    `~/.cache/sphica-eval/build/eval-shelf-N`, `git fetch -q origin main && git push --force-with-lease origin main` (the build starts a new history). The build fails if the inject slot's delivery hook logs nothing (the smoke test)
-3. Fire with RemoteTrigger `run` and body `{"text": "<task prompt>"}`. Codex: `node evals/cloud/codex.ts --repo eval-shelf-N --task <id>` (not the
-   inject slot; Codex has no delivery hooks yet)
+3. Fire with RemoteTrigger `run` and body `{"text": "<task prompt>"}`. Codex: `node evals/cloud/codex.ts --repo eval-shelf-N --task <id>` for each slot.
+   In the inject and gold slots it writes the hooks into the run's own CODEX_HOME and passes `--dangerously-bypass-hook-trust`; collect leaves out
+   an inject run with no delivery log and any run whose Codex process failed
 4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the failure signals). Then
    `node evals/cloud/collect.ts` writes `~/.cache/sphica-eval/loop.json`: hidden tests, delivered unit keys, final answers, and failure signals
 5. Grade the final answer, not only the patch: a run in an old checkout often stops at a plan because that checkout's CLAUDE.md demands the owner's Go.
