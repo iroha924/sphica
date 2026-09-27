@@ -522,6 +522,8 @@ test("the record MCP server writes to the workspace the host names in the call, 
     return { error: r.isError === true, text: (r.content as { text: string }[])[0]?.text ?? "" };
   };
   try {
+    // Codex sends the session directory only to a server that declares this capability
+    assert.ok(client.getServerCapabilities()?.experimental?.["codex/sandbox-state-meta"]);
     const ok = await call({ cwd: workspace }, meta(workspace));
     assert.equal(ok.error, false, ok.text);
     const other = await call({ cwd: started }, meta(workspace));
