@@ -303,6 +303,64 @@ test("an edit under a folder whose name starts with two dots is delivered", asyn
   }
 });
 
+// Claude Code often reads with Bash (cat, sed) rather than Read: a command naming an anchored file gets its decisions, as in Codex
+test("a Claude Code Bash command naming an anchored file delivers once, shared with Read, and never counts as an edit", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep the store a Map." });
+    await save(db, p, {
+      units: [
+        decided("map", m, "Keep the store a Map.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ],
+    });
+    const call = (session: string, tool: string, input: Record<string, unknown>) =>
+      deliver(
+        { hook_event_name: "PreToolUse", session_id: session, cwd: repo, tool_name: tool, tool_input: input },
+        "claude-code",
+        db.file,
+      );
+    const rows = (session: string) =>
+      db.owner
+        .prepare(
+          "select d.event, d.outcome from delivery d join session s on s.id = d.session_id where s.external_id = ? order by d.id",
+        )
+        .all(session)
+        .map((r) => `${r.event}:${r.outcome}`);
+    assert.equal(await call("b1", "Bash", { command: "npm test" }), "");
+    assert.deepEqual(rows("b1"), [], "a command naming nothing leaves no trace");
+    const named = await call("b1", "Bash", { command: "cat src/db.ts" });
+    assert.match(named, /trace:ext-s1\/map /);
+    assert.match(named, /which this command names/);
+    assert.deepEqual(rows("b1"), ["pre_read:emitted"]);
+    assert.equal(
+      await call("b1", "Read", { file_path: path.join(repo, "src", "db.ts") }),
+      "",
+      "shown once per session",
+    );
+    // Read first, then Bash on the same file: the Bash call does not repeat it
+    assert.match(
+      await call("b2", "Read", { file_path: path.join(repo, "src", "db.ts") }),
+      /trace:ext-s1\/map /,
+    );
+    assert.equal(
+      await call("b2", "Bash", { command: `sed -n '1,40p' ${path.join(repo, "src", "db.ts")}` }),
+      "",
+    );
+    // A patch-looking heredoc in Claude's Bash is still a command that names the file, not an edit
+    const patchy = await call("b3", "Bash", {
+      command: "cat > /dev/null <<'EOF'\n*** Begin Patch\n*** Update File: src/db.ts\n*** End Patch\nEOF",
+    });
+    assert.match(patchy, /which this command names/);
+    assert.doesNotMatch(patchy, /Check this change/);
+    assert.deepEqual(rows("b3"), ["pre_read:emitted"]);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("a read shows at most 5 records, and reads over a session at most 8, even when the text would fit", async () => {
   const db = tempDb();
   const repo = checkout();

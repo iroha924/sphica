@@ -44,13 +44,14 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `chore(release): bump to 0.5.1`
   - 結果: 4 か所を 0.5.0 → 0.5.1。release:plan は T02 以降の変更を積んだ後に完了条件 A2 で流す（このコミット単体では配布物の中身は変わらない）
 
-- [ ] T02: deliver.ts で Claude の Bash を名指しの読み取りにし、テストを足す
+- [x] T02: deliver.ts で Claude の Bash を名指しの読み取りにし、テストを足す
   - 種別: 変更
   - 計画: S1
   - 依存: T05（pre-commit の版のゲートが、版を上げずに配布物を変えるコミットを止める）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts` → 全件 pass（Claude の Bash の名指し、何も名指ししない Bash、Read の後の Bash、patch 形式の Bash の 4 件を含む）
   - コミット: `feat(deliver): deliver when a Claude Code Bash command names an anchored file`
+  - 結果: 新しいテストは変更前のコードで「trace:ext-s1/map が出ない」で失敗。変更後 `node --test test/deliver.test.ts test/deliver-codex.test.ts test/review-bridge.test.ts` → pass 22 / fail 0。`tsc --noEmit` 通過
 
 - [ ] T03: hooks.json の matcher に Bash を足し、Claude 側の matcher を検査する
   - 種別: 変更
@@ -70,3 +71,4 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
 
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
+2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる

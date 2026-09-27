@@ -216,7 +216,7 @@ async function beforeRead(
     db,
     shown.map((u) => u.id),
   );
-  // A shell command that names a path is not proof it was read, so Codex's wording says only that it was named
+  // A shell command that names a path is not proof it was read, so the wording says only that it was named
   const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${NOTE}:`;
   const f = fit(
     shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
@@ -541,7 +541,7 @@ export async function deliver(
         ? "prompt"
         : name === "PreToolUse"
           ? input.tool_name === "Read" ||
-            (host === "codex" && input.tool_name === "Bash" && !shellPatch(input))
+            (input.tool_name === "Bash" && !(host === "codex" && shellPatch(input)))
             ? "pre_read"
             : "pre_edit"
           : null;
@@ -550,17 +550,14 @@ export async function deliver(
   // A headless review (claude -p "/review") still gets the check; only reviews inside subagents are left to the parent
   if (event === "review" && input.agent_id) return "";
   const ti = input.tool_input ?? {};
-  // Codex edits arrive as a patch in apply_patch, and its reads only as shell commands
+  // Codex edits arrive as a patch in apply_patch (or a patch run through the shell). Both hosts often read with shell commands
   const patch =
     host === "codex" && input.tool_name === "apply_patch" && typeof ti.command === "string"
       ? ti.command
       : host === "codex"
         ? shellPatch(input)
         : null;
-  const shell =
-    host === "codex" && input.tool_name === "Bash" && !patch && typeof ti.command === "string"
-      ? ti.command
-      : null;
+  const shell = input.tool_name === "Bash" && !patch && typeof ti.command === "string" ? ti.command : null;
   const targets = patch
     ? patchPaths(patch)
     : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);
