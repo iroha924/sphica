@@ -123,13 +123,14 @@ sphica init がアカウントを登録して結果を 1 行で出し、doctor �
 
 README と harvest Skill が登録を説明し、バージョンがそろう。
 
-- [ ] T06: README と harvest Skill に GitHub アカウントの登録を書く
+- [x] T06: README と harvest Skill に GitHub アカウントの登録を書く
   - 種別: 変更
   - 計画: S6
   - 依存: T04（書く表示の文言が決まる）
-  - 変更: `README.md`, `README.ja.md`, `plugin/skills/harvest/SKILL.md`
+  - 変更: `README.md`, `README.ja.md`, `plugin/skills/harvest/SKILL.md`, `server/src/extract.ts`, `server/src/github.ts`, `server/test/extract.test.ts`
   - 完了条件: `bun run verify:ai` → 0 で終わる。`rg -n "sphica init" README.md README.ja.md` → init の説明に GitHub アカウントの登録が入っている
   - コミット: `docs: explain how init binds the owner's GitHub account`
+  - 結果: `bun run verify` → rc 0（verify:ai を含む）。`rg -n "sphica init" README.md README.ja.md` → 72 行目の後に登録の段落、189 行目の表に登録。harvest の context が登録済みの本人に `(CONTRIBUTOR, the owner)` と出る検査が通る
 
 - [-] T07: release:plan に従い npm と 3 つの plugin manifest のバージョンをそろえる
   - 種別: 変更
@@ -152,3 +153,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T04, T05 / 受け入れのドライバーは init の後に偽の gh を置いていたため、T04 だけのコミットでは受け入れテストが本物の gh を呼ぶ / T04 と T05 を 1 コミットにした。既存ケースを変えないよう、最初の init は未ログインで流し、`gh_login` のステップで登録する形にした（plan の「world の任意の欄」から変更。world の owner 欄は前からあるので使わなかった）
 - 2026-09-28 / T05 / 受け入れの件数を固定する検査がある / capture の件数を 8 → 10 にした
 - 2026-09-28 / T10, T11 のレビュー / F2（39 文字の境界テスト）を採用し T12 を足した。F1（revision の競合の回帰テスト）は見送り（順序を決めて再現する手段が無く、起きるのは別の接続が user_version を書き換える場合だけ）
+- 2026-09-28 / T06 / harvest の record_context は `by <login> (CONTRIBUTOR)` としか出さず、Skill は CONTRIBUTOR を提案と教えるため、登録しても本人の発言を採用に引かせられない / context で owner の発言に `, the owner` を添え（pullSources に author_kind を足す）、Skill にその読み方を書いた。変更欄に extract.ts、github.ts、extract.test.ts を足した

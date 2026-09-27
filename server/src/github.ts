@@ -481,6 +481,7 @@ export async function pullSources(db: Kysely<DB>, projectId: number, number: num
       "s.kind",
       "s.artifact",
       "s.revision",
+      "s.author_kind",
       "s.author_login",
       "s.author_association",
       "s.created_at",

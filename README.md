@@ -71,6 +71,8 @@ sphica init
 
 This creates `~/.sphica/sphica.db` and registers the repository. Running it again leaves both untouched. If the repository has no `origin` remote, give it a name: `sphica init --name <name>`.
 
+If `gh` is signed in, init also binds that GitHub account as yours, so your words adopt a decision even in someone else's repository where you are only a contributor. Only the first account is bound: if `gh` is later signed in to another one, init says so and adds nothing, and there is no command to change it (move the database aside and run init again). Without `gh`, init still sets up and says why nothing was bound; `sphica doctor` shows the bound account.
+
 **4. Check the setup**
 
 ```bash
@@ -122,7 +124,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
   - `mysql -p`
 
   **Anything else is stored as typed, so do not paste secrets into a session.**
-- **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, and `sphica doctor` runs `npm` and `claude` to check installed versions.
+- **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, `sphica init` runs `gh api user` to read which GitHub account is yours, and `sphica doctor` runs `npm` and `claude` to check installed versions. `gh api` is always sent to github.com.
 - **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only your words, or those of the repository's owner or a maintainer, can adopt a decision.
 
 ## What Sphica can't do yet
@@ -186,7 +188,7 @@ Run `sphica doctor` first. It shows which part is out of date or not working. Co
 
 | Command | What it does |
 |---|---|
-| `sphica init` | Create the database and register the current repository |
+| `sphica init` | Create the database, bind the GitHub account `gh` is signed in to, and register the current repository |
 | `sphica doctor` | Check versions, the database, recording, and each registered project |
 | `sphica uninstall` | Delete `~/.sphica` and show how to remove the plugin and the CLI |
 

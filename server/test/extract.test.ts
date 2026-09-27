@@ -947,6 +947,7 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
         .get(`pr:${n}`) as { id: number; author_kind: string };
       return {
         kind: body.author_kind,
+        context: await contextText(db.ingest, run, p, null),
         saved: await saveText(db.ingest, run, p, null, record(`s${body.id}`)),
       };
     };
@@ -956,6 +957,9 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
     assert.deepEqual(bindOwner({ id: 42, login: "hana" }, db.file), { kind: "bound" });
     const after = await harvest(6);
     assert.equal(after.kind, "owner");
+    // context tells the agent these are the owner's words, or it would take a CONTRIBUTOR's text as a proposal
+    assert.match(after.context, /pr_body pr:6 by hana \(CONTRIBUTOR, the owner\)/);
+    assert.match(before.context, /pr_body pr:5 by hana \(CONTRIBUTOR\) /);
     assert.match(after.saved, /harvest:6\/notes active/);
   } finally {
     await db.done();
