@@ -120,6 +120,16 @@ test("capture writes only owner or assistant messages into a session's own proje
       ),
     /different content/,
   );
+  // A message id is unique within its session only: another session may carry the same id and text
+  session(db, p, "s2");
+  sql(
+    "insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted, original_bytes, content_hash) values ('m1', 's2', 't', 'owner', ?, ?, 'SQLite にしよう', 0, 0, ?, ?)",
+    now,
+    now,
+    Buffer.byteLength("SQLite にしよう"),
+    sha256("SQLite にしよう"),
+  );
+  assert.equal(one("select count(*) as n from source where external_id = 'm1'")?.n, 2);
 });
 
 test("an external source claims the owner only through a bound identity, and sources are never rewritten", () => {

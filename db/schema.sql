@@ -88,7 +88,6 @@ create table source (
   blob_sha text check (blob_sha is null or (length(blob_sha) = 40 and blob_sha not glob '*[^0-9a-f]*')),
   -- 1 when searched in the source index (owner words and third-party text; assistant replies are not)
   indexed integer not null check (indexed in (0, 1)),
-  unique (project_id, kind, external_id, revision),
   check ((kind = 'session_message') = (session_id is not null)),
   check ((kind = 'pr_event') = (event_kind is not null)),
   check (kind <> 'session_message' or author_kind in ('owner', 'assistant')),
@@ -99,6 +98,9 @@ create table source (
 ) strict;
 create index source_artifact on source (project_id, artifact, created_at);
 create index source_session on source (session_id, created_at) where session_id is not null;
+-- A captured message id is unique within its session; everything else within its project and kind
+create unique index source_message_once on source (session_id, external_id, revision) where session_id is not null;
+create unique index source_item_once on source (project_id, kind, external_id, revision) where session_id is null;
 
 -- An external source may claim the owner only through a bound identity; a retry with different bytes is refused, not silently dropped
 create trigger source_owner_bound before insert on source
