@@ -808,6 +808,51 @@ test("glean: replacing an implementation's only code proof puts it back to candi
   }
 });
 
+// A record is active on its own evidence: an option's citation does not keep a decision whose own words were retracted active
+test("glean: a decision whose own evidence is retracted stays a candidate even with option evidence", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "o1", text: "Use SQLite. SQLite is small." });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [
+        {
+          key: "db",
+          kind: "decision",
+          stance: "do",
+          text: "SQLite",
+          evidence: [{ source: `s${m}`, quote: "Use SQLite.", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "Use SQLite." }],
+          options: [
+            { text: "SQLite", outcome: "chosen", evidence: [{ source: `s${m}`, quote: "SQLite is small." }] },
+          ],
+        },
+      ],
+    });
+    const state = () =>
+      db.owner.prepare("select lifecycle, revision from unit where key = 'trace:ext-s1/db'").get();
+    assert.equal(state()?.lifecycle, "active");
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "I never decided that.", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      ops: [
+        {
+          op: "retract_evidence",
+          unit: "trace:ext-s1/db",
+          revision: state()?.revision,
+          source: `s${m}`,
+          quote: "Use SQLite.",
+          reason_source: `s${said}`,
+          reason_quote: "I never decided that.",
+        },
+      ],
+    });
+    assert.equal(state()?.lifecycle, "candidate");
+  } finally {
+    await db.done();
+  }
+});
+
 test("glean: retracting support from a superseded record leaves it superseded", async () => {
   const db = tempDb();
   try {

@@ -371,19 +371,20 @@ create trigger unit_state_rules before insert on unit_state begin
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
   select raise(abort, 'an active decision or constraint needs unretracted evidence and adoption')
   where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('decision', 'constraint') and (
-    not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.retracted_at is null)
+    not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
     or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null)));
   select raise(abort, 'an active implementation needs code or commit evidence')
   where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind = 'implementation' and not (
-    exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.retracted_at is null
-      and e.role = 'implements' and s.kind in ('commit_message', 'file_excerpt'))
+    exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
+      and e.retracted_at is null and e.role = 'implements' and s.kind in ('commit_message', 'file_excerpt'))
     or exists (select 1 from unit_anchor a where a.unit_id = u.id and a.retired_at is null and a.role = 'evidence'
       and (a.commit_sha is not null or (a.edit_observation_id is not null and exists (select 1 from unit_evidence e
         join source s on s.id = e.source_id join edit_observation o on o.id = a.edit_observation_id
-        where e.unit_id = u.id and e.retracted_at is null and e.role = 'implements' and s.session_id = o.session_id))))));
+        where e.unit_id = u.id and e.option_id is null and e.retracted_at is null and e.role = 'implements'
+          and s.session_id = o.session_id))))));
   select raise(abort, 'an active unit needs unretracted evidence')
   where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('finding', 'dead_end', 'question')
-    and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.retracted_at is null));
+    and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null));
   select raise(abort, 'superseded needs a supersedes link from its successor')
   where new.to_state = 'superseded' and not exists (select 1 from unit_link where to_unit = new.unit_id and kind = 'supersedes');
 end;
