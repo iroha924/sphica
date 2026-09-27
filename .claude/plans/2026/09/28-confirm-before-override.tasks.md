@@ -105,7 +105,7 @@ base: main
   - 計画: S1
   - 依存: T02（直す対象が build.ts の FINISH_SH）
   - 変更: `server/evals/cloud/build.ts`
-  - red: `git ls-files -z --others --ignored --exclude-standard | grep -zv '^.tools/' | xargs -0 -r git add -f`（node_modules/、plugin/dist/、notes.local が無視対象の一時リポジトリ）→ node_modules/x/a.js と plugin/dist/mcp.js が add される
+  - red: `git ls-files -z --others --ignored --exclude-standard | grep -zv '^.tools/' | xargs -0 -r git add -f` → node_modules/、plugin/dist/、notes.local を無視する一時リポジトリで node_modules/x/a.js と plugin/dist/mcp.js が add される
   - 完了条件: 同じ一時リポジトリで直した行 → notes.local だけが add される。`bun run verify` → exit 0
   - コミット: `fix(evals): leave dependencies and build output out of a run's result commit`
   - 結果: 直した行で notes.local だけが add された。`bun run verify` → exit 0
