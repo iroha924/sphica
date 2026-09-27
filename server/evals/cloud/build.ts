@@ -155,8 +155,9 @@ if [ -f "$here/fixture.id" ] && [ -f "$db" ]; then
   sh "$here/node.sh" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify(db.prepare("select d.event, d.outcome, d.path, d.chars, d.at, (select json_group_array(u.key) from delivery_unit x join unit u on u.id = x.unit_id where x.delivery_id = d.id) as units from delivery d order by d.id").all()))' "$db" > .eval/deliveries.json 2>/dev/null || true
 fi
 git add -A >/dev/null 2>&1
-# Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer
-git ls-files -z --others --ignored --exclude-standard | grep -zv '^.tools/' | xargs -0 -r git add -f >/dev/null 2>&1
+# Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer; installed dependencies and build
+# output are not (a run that installed node_modules could not push its result)
+git ls-files -z --others --ignored --exclude-standard | grep -zvE '^[.]tools/|^plugin/(dist|db)/|(^|/)node_modules/' | xargs -0 -r git add -f >/dev/null 2>&1
 git -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
 git push -q --force origin "HEAD:refs/heads/claude/eval-$sid" >/dev/null 2>&1 || true
 `;
