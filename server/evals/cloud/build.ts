@@ -287,6 +287,14 @@ async function main() {
           hooks: [{ type: "command", command: 'sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" start', timeout: 60 }],
         },
       ],
+      // Every slot logs the prompt, so collect can tell which task a run carried out
+      UserPromptSubmit: [
+        {
+          hooks: [
+            { type: "command", command: 'sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" prompt', timeout: 30 },
+          ],
+        },
+      ],
       Stop: [
         { hooks: [{ type: "command", command: 'sh "$CLAUDE_PROJECT_DIR/.tools/finish.sh"', timeout: 120 }] },
       ],

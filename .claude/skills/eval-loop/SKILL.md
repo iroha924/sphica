@@ -66,5 +66,9 @@ Loop progress:
 - Gold text must be whole. Pointing it at a Sphica tool the slot lacks made both models reject the record as an unverifiable claim
 - Unattended runs sent push notifications to the owner; the slot settings deny `PushNotification`. The routines also carry the Claude_Docs and
   Claude_Code_Remote connectors, which cannot be removed; they are the same in every condition
+- The gold slot's scaffolding is in the checkout (`.tools/gold.json`, `gold.sh`). A run that reads it can call the gold record forged; one
+  Claude run did. Count those runs separately rather than as a Sphica failure, until the gold slot delivers without readable scaffolding
+- A hook tested from a shell inside Claude Code inherits `CLAUDE_CODE_ENTRYPOINT` and `SPHICA_PARENT_SESSION`; unset both, or owner-turn checks
+  drop the call and the hook prints nothing
 - One run per condition is too weak to credit a difference to Sphica. Run at least two, and say how many in the report
 - Before leaving a wait loop in the background, run its exit condition once by hand; a wrong `until` condition kept one polling for 45 minutes

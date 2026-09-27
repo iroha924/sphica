@@ -20,10 +20,11 @@ const { values: args } = parseArgs({
   },
 });
 
-type Task = { id: string; prompt: string; test?: string };
+type Task = { id: string; prompt: string; test?: string; project?: string };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
 const manifest = JSON.parse(fs.readFileSync(path.join(args.build ?? "", "manifest.json"), "utf8")) as {
   commit: string;
+  project?: string;
   repositories: Record<string, { condition: string }>;
 };
 
@@ -73,7 +74,10 @@ function hiddenTest(work: string, task: Task): string {
   return `${pass} passed, ${fail} failed`;
 }
 
-const taskOf = (text: string) => plan.tasks.find((t) => text.includes(t.prompt));
+/** The task a run carried out: by the prompt its hooks received, else the build's only task (slots built before every slot logged prompts) */
+const built = plan.tasks.filter((t) => t.project === manifest.project);
+const taskOf = (text: string) =>
+  plan.tasks.find((t) => text.includes(t.prompt)) ?? (built.length === 1 ? built[0] : undefined);
 
 function main() {
   const rows: Row[] = [];
