@@ -22,10 +22,19 @@ base: main
 
 owner_identity を書けるのが owner 接続だけになり、gh からアカウントを検証して読み、DB に 1 件だけ登録できる。
 
+- [x] T08: npm と 3 つの manifest のバージョンを 0.5.5 に上げる
+  - 種別: 変更
+  - 計画: S7
+  - 依存: なし
+  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `bun run release:plan -- --base v0.5.4` → 4 か所が 0.5.5
+  - コミット: `chore(release): bump to 0.5.5`
+  - 結果: 4 つの manifest の "version" を grep して全部 0.5.5。release:plan は PR の差分がそろった時点で plan の完了条件として流す
+
 - [ ] T01: ingest 接続から owner_identity への書き込みを拒む
   - 種別: 変更
   - 計画: S1
-  - 依存: なし
+  - 依存: T08（配布物の変更はバージョンを上げた後でないとコミットできない）
   - 変更: `server/src/db-write.ts`, `server/test/db.test.ts`
   - 完了条件: `bun run test` → ingest からの owner_identity への insert / update / delete が拒まれる検査を含めて通る
   - コミット: `feat(db): refuse owner_identity writes from the ingest role`
@@ -33,7 +42,7 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
 - [ ] T02: gh api のホストを github.com に固定し、ghUser() で応答を検証して読む
   - 種別: 追加
   - 計画: S2
-  - 依存: なし
+  - 依存: T08（配布物の変更はバージョンを上げた後でないとコミットできない）
   - 変更: `server/src/github.ts`, `server/test/github.test.ts`
   - 完了条件: `bun run test` → gh(repo) と ghUser() が `--hostname github.com` を渡し、ghUser() が missing / failed / unexpected（id 無し・0・文字列、login が空）を分けて返す検査が通る
   - コミット: `feat(github): pin gh api to github.com and read the signed-in user`
@@ -78,7 +87,7 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
   - 完了条件: `bun run verify:ai` → 0 で終わる。`rg -n "sphica init" README.md README.ja.md` → init の説明に GitHub アカウントの登録が入っている
   - コミット: `docs: explain how init binds the owner's GitHub account`
 
-- [ ] T07: release:plan に従い npm と 3 つの plugin manifest のバージョンをそろえる
+- [-] T07: release:plan に従い npm と 3 つの plugin manifest のバージョンをそろえる
   - 種別: 変更
   - 計画: S7
   - 依存: T06（出荷に入る変更が全部そろってから種別を判定する）
@@ -87,3 +96,5 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
   - コミット: `chore(release): bump to the next version`
 
 ## 記録
+
+- 2026-09-28 / T01, T07, T08 / T01 のコミットが pre-commit の bundle 検査で止まった（配布物の変更はバージョンを同じ変更で上げる必要がある） / T07 を取りやめ、同じ S7 を担う T08 を先頭に足した。T01 と T02 の依存を なし → T08 に変えた
