@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
-import { checkRecord, saveRecord, type Target } from "../src/record.ts";
+import { checkRecord, repoPath, saveRecord, type Target } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -239,6 +239,21 @@ test("supersedes retires the old record with evidence, and conflicts link both",
       ...extra,
     });
     await save(db, target(p), { units: [unit("sqlite", a, "SQLite にする。")] });
+    // Two successors of one record in a batch would leave both active as its replacement
+    const twice = await inTransaction(db.ingest, (trx) =>
+      checkRecord(trx, target(p), {
+        units: [
+          unit("pg1", b, "やっぱり Postgres に移す。", { supersedes: "trace:ext-s1/sqlite" }),
+          unit("pg2", b, "やっぱり Postgres に移す。", { supersedes: "trace:ext-s1/sqlite" }),
+        ],
+      }),
+    );
+    assert.ok(
+      twice.errors.some((e) =>
+        /pg2: another record in this save already supersedes trace:ext-s1\/sqlite/.test(e),
+      ),
+      twice.errors.join("\n"),
+    );
     const { saved } = await save(db, target(p), {
       units: [unit("postgres", b, "やっぱり Postgres に移す。", { supersedes: "trace:ext-s1/sqlite" })],
     });
@@ -519,4 +534,11 @@ test("a traced work item carries its session's branch", async () => {
   } finally {
     await db.done();
   }
+});
+
+// A path the filesystem cannot open would make every later read of the record fail
+test("an anchor path holding a NUL or other control character is refused", () => {
+  assert.equal(repoPath("src/a.ts"), "src/a.ts");
+  assert.equal(repoPath("x\0y"), null);
+  assert.equal(repoPath("x\ny"), null);
 });

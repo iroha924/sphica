@@ -136,7 +136,8 @@ function locate(body: string, quote: string): [number, number] | null {
 /** A repository-relative path with forward slashes, or null when it could leave the repository. */
 export function repoPath(p: string): string | null {
   const s = p.trim().replace(/^\.\//, "");
-  if (!s || s.startsWith("/") || s.includes("\\") || /^[A-Za-z]:/.test(s)) return null;
+  // Control characters (NUL above all) make a path no filesystem call accepts
+  if (!s || s.startsWith("/") || s.includes("\\") || /^[A-Za-z]:/.test(s) || /\p{Cc}/u.test(s)) return null;
   const parts = s.split("/");
   if (parts.some((x) => x === ".." || x === "." || x === "")) return null;
   return s;
@@ -212,6 +213,8 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
   );
 
   const units: Planned[] = [];
+  // Records this save supersedes: one record has one successor
+  const claimed = new Set<number>();
   for (const [i, u] of record.units.entries()) {
     const key = keys[i] ?? "";
     const quarantine: string[] = [];
@@ -332,7 +335,10 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
+      else if (claimed.has(old.id))
+        errors.push(`${key}: another record in this save already supersedes ${u.supersedes}`);
       else supersedes = old.id;
+      if (supersedes !== null) claimed.add(supersedes);
     }
     const conflicts = u.conflicts.flatMap((k) => {
       const other = others.get(k);
