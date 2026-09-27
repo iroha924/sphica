@@ -116,6 +116,15 @@ const fake =
     return answers[key];
   };
 
+test("closing references in owner/repo#N and URL form count for this repository only", async () => {
+  const pull = await readPull(
+    fake("Fixes o/r#14, resolves https://github.com/O/R/issues/15, and fixes other/x#16. Switch to pnpm."),
+    7,
+    "o/r",
+  );
+  assert.deepEqual(pull.closes, [14, 15]);
+});
+
 test("reads the body, comments, reviews with text, review comments with their position, commits, the merge, and closed issues", async () => {
   const pull = await readPull(fake("Fixes #14, closes #15, and fixes #7. Switch to pnpm."), 7);
   assert.equal(pull.title, "Switch to pnpm");

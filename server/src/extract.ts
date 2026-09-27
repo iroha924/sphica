@@ -105,7 +105,8 @@ export async function beginHarvest(
   number: number,
   get: Get,
 ): Promise<{ run: string; sources: number }> {
-  const pull = await readPull(get, number);
+  const project = await db.selectFrom("project").select("key").where("id", "=", projectId).executeTakeFirst();
+  const pull = await readPull(get, number, repoOf(project?.key ?? ""));
   return inTransaction(db, async (trx) => {
     await storeItems(trx, projectId, pull.items);
     await linkIssues(trx, projectId, number, pull.closes);
@@ -147,7 +148,7 @@ export async function gleanFetch(
     throw new Error(
       "Only issues and pull requests of this repository on github.com can be fetched. For other sources, cite the owner's message that quotes them",
     );
-  const pull = at.kind === "pull" ? await readPull(get, at.number) : null;
+  const pull = at.kind === "pull" ? await readPull(get, at.number, repo) : null;
   const items = pull ? pull.items : await readIssue(get, at.number);
   const ids = await inTransaction(db, async (trx) => {
     const stored = await storeItems(trx, place.projectId, items);

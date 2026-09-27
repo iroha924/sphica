@@ -14,7 +14,17 @@ const exec = promisify(execFile);
 
 /** Linked issues read per pull request; a body naming more is cut, and the rest are only linked. */
 const MAX_ISSUES = 5;
-const CLOSES = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d{1,9})\b/gi;
+const CLOSES =
+  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:([\w.-]+\/[\w.-]+)#|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|#)(\d{1,9})\b/gi;
+
+/** Issue numbers a body closes in this repository: #N, and owner/repo#N or an issue URL when they name this repository. */
+function closingRefs(body: string, repo: string | null): number[] {
+  const here = repo?.toLowerCase();
+  return [...body.matchAll(CLOSES)].flatMap((m) => {
+    const named = (m[1] ?? m[2])?.toLowerCase();
+    return !named || named === here ? [Number(m[3])] : [];
+  });
+}
 
 /** `owner/repo` of a project key on github.com, or null (harvest reads only GitHub). */
 export const repoOf = (key: string): string | null =>
@@ -125,6 +135,7 @@ const cleanPath = (p: string | undefined): string | null =>
 export async function readPull(
   get: Get,
   number: number,
+  repo: string | null = null,
 ): Promise<{ title: string; items: Item[]; closes: number[] }> {
   const p = (await get(`pulls/${number}`)) as Pull;
   const artifact = `pr:${number}`;
@@ -223,9 +234,7 @@ export async function readPull(
         text: `Merged by @${p.merged_by?.login ?? "unknown"}`,
       }),
     );
-  const closes = [...new Set([...(p.body ?? "").matchAll(CLOSES)].map((m) => Number(m[1])))].filter(
-    (n) => n !== number,
-  );
+  const closes = [...new Set(closingRefs(p.body ?? "", repo))].filter((n) => n !== number);
   for (const n of closes.slice(0, MAX_ISSUES)) items.push(...(await readIssue(get, n)));
   return { title: p.title, items, closes };
 }
