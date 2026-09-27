@@ -110,6 +110,32 @@ test("the ingest connection can write rows but cannot change the schema", () => 
     assert.match(attempt(ingest, ddl) ?? "", /not authorized/, ddl);
 });
 
+// The record server holds an ingest connection; if it could bind an identity, text it reads could make itself the owner's words.
+test("the ingest connection cannot bind, change, or remove an owner identity", () => {
+  db.owner
+    .prepare(
+      "insert into owner_identity (provider, external_id, login, bound_at) values ('github', '5', 'me', ?)",
+    )
+    .run(now);
+  try {
+    for (const write of [
+      "insert into owner_identity (provider, external_id, login, bound_at) values ('github', '6', 'x', ?)",
+      "update owner_identity set external_id = '6' where external_id = '5' and bound_at <> ?",
+      "delete from owner_identity where bound_at <> ?",
+    ])
+      assert.match(attempt(ingest, write, now) ?? "", /not authorized/, write);
+    assert.deepEqual(
+      db.owner
+        .prepare("select external_id from owner_identity")
+        .all()
+        .map((r) => r.external_id),
+      ["5"],
+    );
+  } finally {
+    db.owner.exec("delete from owner_identity");
+  }
+});
+
 // The capture connection cannot read or modify existing rows, even if a recorded conversation tries to steer it.
 test("the capture connection writes only through its views, and FTS is filled by the same statement", async () => {
   assert.equal(

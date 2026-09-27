@@ -29,15 +29,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base v0.5.4` → 4 か所が 0.5.5
   - コミット: `chore(release): bump to 0.5.5`
-  - 結果: 4 つの manifest の "version" を grep して全部 0.5.5。release:plan は PR の差分がそろった時点で plan の完了条件として流す
+  - 結果: `bun run release:plan -- --base v0.5.4` → version: npm 0.5.5 / plugin 0.5.5 / marketplace 0.5.5 / Codex 0.5.5（07e5207 の時点。kind は差分がまだ無いので none）
 
-- [ ] T01: ingest 接続から owner_identity への書き込みを拒む
+- [x] T01: ingest 接続から owner_identity への書き込みを拒む
   - 種別: 変更
   - 計画: S1
   - 依存: T08（配布物の変更はバージョンを上げた後でないとコミットできない）
   - 変更: `server/src/db-write.ts`, `server/test/db.test.ts`
   - 完了条件: `bun run test` → ingest からの owner_identity への insert / update / delete が拒まれる検査を含めて通る
   - コミット: `feat(db): refuse owner_identity writes from the ingest role`
+  - 結果: 変更前のコードで `node --test --test-name-pattern="owner identity" test/db.test.ts` → insert の段で失敗（ingest が書けた）。変更後 `bun run test` → 293 pass / 0 fail
 
 - [ ] T02: gh api のホストを github.com に固定し、ghUser() で応答を検証して読む
   - 種別: 追加
@@ -98,3 +99,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 ## 記録
 
 - 2026-09-28 / T01, T07, T08 / T01 のコミットが pre-commit の bundle 検査で止まった（配布物の変更はバージョンを同じ変更で上げる必要がある） / T07 を取りやめ、同じ S7 を担う T08 を先頭に足した。T01 と T02 の依存を なし → T08 に変えた
+- 2026-09-28 / T08 / 結果欄を書式に合わない形のままコミットした（検査の終了コードをパイプで落とした） / T01 のコミットで結果欄を直した

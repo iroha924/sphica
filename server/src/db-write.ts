@@ -114,8 +114,13 @@ function captureAuthorizer(
   return C.SQLITE_DENY;
 }
 
+/** Only the owner's `sphica init` binds an identity: ingest runs the record server, which reads text anyone wrote. */
+const writes = (action: number) =>
+  action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE;
+
 function ingestAuthorizer(action: number, p1: string | null, p2: string | null): number {
   if (DDL().has(action)) return C.SQLITE_DENY;
+  if (writes(action) && p1 === "owner_identity") return C.SQLITE_DENY;
   if (action === C.SQLITE_PRAGMA) return readsDataVersion(p1, p2) ? C.SQLITE_OK : C.SQLITE_DENY;
   return C.SQLITE_OK;
 }
