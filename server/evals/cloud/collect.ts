@@ -71,8 +71,14 @@ function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
   if (process.platform !== "darwin")
     return "not run (hidden tests run only on macOS, where sandbox-exec denies network)";
-  fs.mkdirSync(path.join(work, "test"), { recursive: true });
-  fs.writeFileSync(path.join(work, "test", "hidden.test.ts"), task.test);
+  // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
+  const testDir = path.join(work, "test");
+  const dirStat = fs.lstatSync(testDir, { throwIfNoEntry: false });
+  if (dirStat && !dirStat.isDirectory()) return "not run (test/ in the branch is not a plain directory)";
+  fs.mkdirSync(testDir, { recursive: true });
+  const file = path.join(testDir, "hidden.test.ts");
+  fs.rmSync(file, { force: true });
+  fs.writeFileSync(file, task.test, { flag: "wx" });
   const inside = fs.realpathSync(work);
   const r = spawnSync(
     "/usr/bin/sandbox-exec",

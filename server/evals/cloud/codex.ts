@@ -57,9 +57,12 @@ execFileSync("git", [
   `https://github.com/${manifest.owner ?? "iroha924"}/${repo}.git`,
 ]);
 fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
+// Hooks run without a trust prompt, so they run from a copy outside the checkout the agent can write (it could rewrite .tools)
+const tools = path.join(dir, "tools");
+fs.cpSync(path.join(work, ".tools"), tools, { recursive: true });
 const mcp =
   condition === "search" || condition === "inject"
-    ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(work, ".tools", "sphica.sh"))}, ${JSON.stringify(path.join(work, ".tools", "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
+    ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
     : "";
 fs.writeFileSync(path.join(codexHome, "config.toml"), `${modelSettings()}\n${mcp}`);
 
@@ -68,7 +71,6 @@ fs.writeFileSync(path.join(codexHome, "config.toml"), `${modelSettings()}\n${mcp
 const hook = (args: string[], timeout: number) => ({
   hooks: [{ type: "command", command: args.map((a) => JSON.stringify(a)).join(" "), timeout }],
 });
-const tools = path.join(work, ".tools");
 const deliver = ["sh", path.join(tools, "sphica.sh"), path.join(tools, "dist", "deliver.js"), "codex"];
 const hooks =
   condition === "inject"
