@@ -63,12 +63,27 @@ function signals(log: string): Row["signals"] {
   };
 }
 
-/** Runs a task's hidden test against a checkout; "none" when the task has none. */
+/**
+ * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs
+ * with Node's permission model (reads only the checkout, no writes or child processes) and, on macOS, sandbox-exec without network.
+ */
 function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
   fs.mkdirSync(path.join(work, "test"), { recursive: true });
   fs.writeFileSync(path.join(work, "test", "hidden.test.ts"), task.test);
-  const r = spawnSync(process.execPath, ["--test", "test/hidden.test.ts"], { cwd: work, encoding: "utf8" });
+  const node = [
+    process.execPath,
+    "--permission",
+    `--allow-fs-read=${fs.realpathSync(work)}`,
+    "--test",
+    "--test-isolation=none",
+    "test/hidden.test.ts",
+  ];
+  const [command, ...rest] =
+    process.platform === "darwin"
+      ? ["sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", ...node]
+      : node;
+  const r = spawnSync(command ?? "", rest, { cwd: work, encoding: "utf8", timeout: 300_000 });
   const pass = /^ℹ pass (\d+)/m.exec(r.stdout)?.[1] ?? "0";
   const fail = /^ℹ fail (\d+)/m.exec(r.stdout)?.[1] ?? "?";
   return `${pass} passed, ${fail} failed`;
