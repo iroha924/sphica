@@ -460,3 +460,27 @@ test("an implementation's commit anchor counts only when that commit holds the p
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an older session traced after a newer one never overwrites the newer work state", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const older = message(db, p, { id: "m1", text: "まだ途中。" });
+    const newer = message(db, p, { id: "m2", text: "終わった。", session: "s2" });
+    db.owner.prepare("update session set started_at = ? where id = 's2'").run(at("2026-09-05T00:00:00Z"));
+    const work = (status: string, current: string) => ({
+      units: [],
+      work: { key: "w", title: "移行", goal: "終える", current, status },
+    });
+    const run = (sessionId: string) => ({ ...target(p, sessionId), prefix: `trace:ext-${sessionId}/` });
+    // trace_pending lists the newest session first, so it is traced first
+    await save(db, run("s2"), work("done", "終わった"), [newer]);
+    await save(db, run("s1"), work("active", "まだ途中"), [older]);
+    assert.deepEqual(
+      { ...db.owner.prepare("select status, current from work where key = 'w'").get() },
+      { status: "done", current: "終わった" },
+    );
+  } finally {
+    await db.done();
+  }
+});
