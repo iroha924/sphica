@@ -106,7 +106,7 @@ Once, before the first release, the owner sets these up in the web UI (without t
 8. `finish` runs `scripts/release-finish.mjs`. npm serves a published version a few minutes later (2 min 15 s for 0.5.4), so it first waits up to 4 minutes for it. Then: the merge commit's tree equals the tag's (`git diff --exit-code <head> <merge commit>`), the tarball npm serves
    has the SBOM attestation from this tag (`gh attestation verify <tgz> --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom --signer-workflow iroha924/sphica/.github/workflows/release.yml --source-ref refs/tags/v<version>`),
    and npm `latest` is the version. It then creates the GitHub Release from the PR body's "Release notes" section as is, only if the notes still match the digest from step 5
-   (`gh release create v<version> --verify-tag --title v<version> --notes-file <file>`; not git log, which OpenSSF Best Practices' `release_notes` does not accept) and comments the result on the PR
+   (`gh release create v<version> --verify-tag --title v<version> --notes-file <file>`; not git log, which OpenSSF Best Practices' `release_notes` does not accept) closes the issues the PR closes that are still open (a merge by the run's token does not close them), and comments the result on the PR
 9. Claude follows the run with `gh run watch <run-id> --exit-status`. When it succeeds, list npm's dist-tags, the remote tag, the global CLI, the marketplace,
    and the Claude/Codex caches with `bun run release:status`, and confirm no step remains. Items it failed to observe show as `unknown`, not `none` or `not found`
 

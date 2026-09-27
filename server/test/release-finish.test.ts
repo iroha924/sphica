@@ -48,6 +48,9 @@ const created = path.join(path.dirname(process.env.CALLS), "created");
 if (a[0] === "attestation") process.exit(process.env.FAKE_NO_ATTESTATION ? 1 : 0);
 else if (a[0] === "api" && a[1].includes("/commits/")) console.log(JSON.stringify([{ number: 6, head: { sha: "${"d".repeat(40)}" } }, { number: 7, head: { sha: "${COMMIT}" } }]));
 else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)}, head: { sha: process.env.FAKE_HEAD || "${COMMIT}" }, base: { ref: process.env.FAKE_BASE || "main" }, merged: !process.env.FAKE_NOT_MERGED, merge_commit_sha: process.env.FAKE_PR_MERGE || "${MERGE}" }));
+// Like the live API, closingIssuesReferences carries no state; issue view gives it
+else if (a[0] === "pr" && a[1] === "view") console.log(JSON.stringify({ closingIssuesReferences: [{ number: 3, state: null }, { number: 4, state: null }] }));
+else if (a[0] === "issue" && a[1] === "view") console.log(JSON.stringify({ state: a[2] === "3" ? "OPEN" : "CLOSED" }));
 else if (a[0] === "release" && a[1] === "create") fs.writeFileSync(created, "");
 else if (a[0] === "release" && a[1] === "view") {
   if (!process.env.FAKE_RELEASE_EXISTS && !fs.existsSync(created)) process.exit(1);
@@ -154,6 +157,18 @@ test("release-finish gives up when npm never serves the version", () => {
   assert.equal(status, 1);
   assert.match(stderr, /npm does not serve sphica@1\.2\.3 yet/);
   assert.doesNotMatch(calls, /npm pack|release create|pr comment/);
+});
+
+// A merge by GITHUB_TOKEN does not close the PR's linked issues, so finish closes the ones still open
+test("release-finish closes the open issues the release PR closes", () => {
+  const { status, stderr, calls } = finish(RELEASE);
+  assert.equal(status, 0, stderr);
+  assert.match(
+    calls,
+    /gh issue close 3 --repo o\/r --reason completed --comment Closed by #7, released in v1\.2\.3\./,
+  );
+  assert.doesNotMatch(calls, /gh issue close 4/);
+  assert.doesNotMatch(finish(["--dry-run"]).calls, /issue close/);
 });
 
 test("release-finish does not create the Release twice when it is rerun", () => {

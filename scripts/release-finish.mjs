@@ -150,6 +150,29 @@ function finish({ tag, commit, merge, pull }) {
         notesFile,
       ]);
     }
+    // A merge by GITHUB_TOKEN does not close the issues the PR closes (0.5.4), so close the ones still open
+    const linked = JSON.parse(
+      run("gh", ["pr", "view", pull, "--repo", repo, "--json", "closingIssuesReferences"]),
+    );
+    for (const { number } of linked.closingIssuesReferences ?? []) {
+      if (!Number.isInteger(number)) continue;
+      // closingIssuesReferences carries no state, so read it from the issue
+      const { state } = JSON.parse(
+        run("gh", ["issue", "view", String(number), "--repo", repo, "--json", "state"]),
+      );
+      if (state !== "OPEN") continue;
+      run("gh", [
+        "issue",
+        "close",
+        String(number),
+        "--repo",
+        repo,
+        "--reason",
+        "completed",
+        "--comment",
+        `Closed by #${pull}, released in ${tag}.`,
+      ]);
+    }
     const url = JSON.parse(run("gh", ["release", "view", tag, "--repo", repo, "--json", "url"])).url;
     const commentFile = path.join(dir, "comment.md");
     fs.writeFileSync(
