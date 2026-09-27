@@ -118,6 +118,11 @@ test("found is unknown without a log, yes only when a Sphica result names a gold
   );
   assert.equal(foundInCodexEvents("{bad json", gold), "unknown", "a log with no readable event cannot tell");
   assert.equal(foundInCodexEvents("", gold), "unknown");
+  assert.equal(
+    foundInCodexEvents('{"type":"thread.started"}\n{bad json', gold),
+    "unknown",
+    "a log broken partway cannot prove no",
+  );
 });
 
 test("inherited property names are extra keys, not allowed ones", () => {

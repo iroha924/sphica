@@ -91,9 +91,20 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `fix(evals): reject inherited keys, keep unreadable logs unknown, and keep signals of ungraded runs`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 12 / fail 0。`bun run --cwd server typecheck` → 通過
 
+- [x] T08: 途中で壊れた Codex のログを unknown にする（T07 の修正の再レビュー）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T07（直す対象が T07 の判定）
+  - 変更: `server/evals/cloud/judge.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test test/eval-grade.test.ts` → fail 1（1 行目が読めて 2 行目が壊れたログで found が no）
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass。`bun run verify` → exit 0
+  - コミット: `fix(evals): read a Codex log broken partway as unknown`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 12 / fail 0。保存済みの 16 回を数え直して判定の変わった行 0
+
 ## 記録
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
 2026-09-27 / T04 / grade.ts も読み込むと動くのでテストから呼べず、knip は新しい入口を未使用と見た / 採点の中身を grading.ts に分け、knip.json の entry に grade.ts を足した。変更欄を「grade.ts, eval-grade.test.ts」から「grade.ts, grading.ts, eval-grade.test.ts, knip.json」にした
 2026-09-27 / T06 / T02 の Codex レビュー（3316eb3）で 3 件: gold フックの失敗が成功に見える、2 回目の呼び出しで受領が消える、Codex の後の処理で落ちると status が null / 3 件とも T06 で直した
 2026-09-27 / T06 / red の欄が「コマンド → 期待」の形でなく done の検査で落ちた / 書式だけを直した（内容は同じ）
 2026-09-27 / T07 / 全体の差分の Codex レビューで 6 件（再現 4、読んで確定 2） / 6 件とも T07 で直した
+2026-09-27 / T08 / T07 の再レビューで 2 件: 途中で壊れたログが no、別ツールの出力に <past-records があると yes / 前者を T08 で直し、後者は評価中のエージェントが囲みごと表示した場合だけの入力として見送った

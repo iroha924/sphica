@@ -21,11 +21,13 @@ export function deliveredSignal(
   return "not_applicable";
 }
 
-/** Whether a Sphica search or read result in Codex's JSONL events named a gold record; unknown without a readable event. */
+/** Whether a Sphica search or read result in Codex's JSONL events named a gold record; unknown unless every line reads as an event. */
 export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
   if (events === null) return "unknown";
   let read = 0;
+  let broken = false;
   for (const line of events.split("\n")) {
+    if (!line.trim()) continue;
     let e: {
       type?: string;
       item?: { type?: string; server?: string; tool?: string; result?: { content?: { text?: string }[] } };
@@ -33,6 +35,7 @@ export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
     try {
       e = JSON.parse(line);
     } catch {
+      broken = true;
       continue;
     }
     read++;
@@ -41,7 +44,7 @@ export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
     if (it.tool !== "search" && it.tool !== "read") continue;
     if (names((it.result?.content ?? []).map((c) => c.text ?? "").join("\n"), gold)) return "yes";
   }
-  return read ? "no" : "unknown";
+  return read && !broken ? "no" : "unknown";
 }
 
 /**
