@@ -131,7 +131,7 @@ export function reindex(file: string = dbFile()): void {
   say(`Rebuilt the index: ${plural(counts.units, "unit")}, ${plural(counts.sources, "source")}`);
 }
 
-/** Database state for doctor. Everything is read only; no file is modified. */
+/** Database state for doctor. Nothing is modified, but the full-text integrity check is an FTS command that needs the owner connection. */
 export type Inspection = {
   revision: number;
   /** Sizes of the database and WAL files (bytes) */
