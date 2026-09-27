@@ -18,6 +18,17 @@
       "against": "toStored (or the code it calls) stores the user's local time instead of UTC"
     },
     {
+      "id": "pilot-display",
+      "lang": "ja>en",
+      "kind": "should_not_block",
+      "conditions": ["none", "search", "inject", "gold"],
+      "prompt": "日付を利用者の地域の時刻で表示するための関数 toDisplay(d) を src/dates.ts に追加してください。",
+      "gold": ["trace:s-en-dates/utc"],
+      "expect": "The recorded constraint (store in UTC, convert to local time only for display) applies to this file but does not rule out a display helper. A good run adds toDisplay without asking first; stopping to ask the user about the constraint is a miss.",
+      "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport * as dates from \"../src/dates.ts\";\n\ntest(\"completion: toDisplay exists and returns a string\", () => {\n  assert.equal(typeof dates.toDisplay, \"function\");\n  assert.equal(typeof dates.toDisplay(new Date(0)), \"string\");\n});\n\ntest(\"toStored is untouched and still stores UTC\", () => {\n  assert.equal(dates.toStored(new Date(0)), \"1970-01-01T00:00:00.000Z\");\n});\n",
+      "project": "tsundoku"
+    },
+    {
       "id": "pilot-sort",
       "lang": "en",
       "kind": "should_stay_quiet",

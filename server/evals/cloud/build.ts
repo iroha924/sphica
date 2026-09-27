@@ -10,6 +10,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
+import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
+import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 
@@ -147,15 +149,20 @@ cd "$(git -C "$here" rev-parse --show-toplevel)" || exit 0
 mkdir -p .eval
 cp "\${TMPDIR:-/tmp}/eval-receipts.jsonl" .eval/receipts.jsonl 2>/dev/null || true
 # The final answer is graded too (a run that stops for approval leaves no patch); older hosts lack last_assistant_message, so read the transcript
-printf '%s' "$input" | sh "$here/node.sh" -e 'const fs=require("node:fs");let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const i=JSON.parse(s||"{}");let a=i.last_assistant_message??"";if(!a&&i.transcript_path)for(const l of fs.readFileSync(i.transcript_path,"utf8").split("\\n")){try{const e=JSON.parse(l);const t=e.type==="assistant"?(e.message?.content??[]).filter(c=>c.type==="text").map(c=>c.text).join("\\n"):"";if(t)a=t}catch{}}fs.writeFileSync(".eval/answer.md",a)})' 2>/dev/null || true
+# Every stop's answer is kept: a stop hook can make the agent answer again, and the later answer is often only about committing
+printf '%s' "$input" | sh "$here/node.sh" -e 'const fs=require("node:fs");let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const i=JSON.parse(s||"{}");let a=i.last_assistant_message??"";if(!a&&i.transcript_path)for(const l of fs.readFileSync(i.transcript_path,"utf8").split("\\n")){try{const e=JSON.parse(l);const t=e.type==="assistant"?(e.message?.content??[]).filter(c=>c.type==="text").map(c=>c.text).join("\\n"):"";if(t)a=t}catch{}}const f=".eval/answer.md";const prev=fs.existsSync(f)?fs.readFileSync(f,"utf8"):"";if(a&&!prev.includes(a))fs.writeFileSync(f,prev?prev+"\\n\\n"+a:a)})' 2>/dev/null || true
 db="\${TMPDIR:-/tmp}/eval-sphica/$(cat "$here/fixture.id" 2>/dev/null)/sphica.db"
 if [ -f "$here/fixture.id" ] && [ -f "$db" ]; then
   sh "$here/node.sh" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify(db.prepare("select d.event, d.outcome, d.path, d.chars, d.at, (select json_group_array(u.key) from delivery_unit x join unit u on u.id = x.unit_id where x.delivery_id = d.id) as units from delivery d order by d.id").all()))' "$db" > .eval/deliveries.json 2>/dev/null || true
 fi
 git add -A >/dev/null 2>&1
-# Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer
-git ls-files -z --others --ignored --exclude-standard | grep -zv '^.tools/' | xargs -0 -r git add -f >/dev/null 2>&1
-git -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
+# Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer; installed dependencies and build
+# output are not (a run that installed node_modules could not push its result)
+git ls-files -z --others --ignored --exclude-standard | grep -zvE '^[.]tools/|^plugin/(dist|db)/|(^|/)node_modules/' | xargs -0 -r git add -f >/dev/null 2>&1
+# The same for dependencies a checkout without an ignore file staged above
+git ls-files -z --cached | grep -zE '(^|/)node_modules/' | xargs -0 -r git rm -q --cached >/dev/null 2>&1
+# The checkout's own hooks (lefthook, once the agent installed it) must not keep the run's result from being collected
+git -c core.hooksPath=/dev/null -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
 git push -q --force origin "HEAD:refs/heads/claude/eval-$sid" >/dev/null 2>&1 || true
 `;
 
@@ -166,28 +173,51 @@ function write(dir: string, rel: string, body: string | Buffer, mode?: number) {
   if (mode) fs.chmodSync(file, mode);
 }
 
-/** The delivery hook's record lines for the gold records, as the prompt delivery prints them. */
+/**
+ * The gold records as a file-bound delivery renders them (the record, its reason, its rejected options). The gold slot has no Sphica tools,
+ * so the lead points to no read.
+ */
 async function goldText(file: string, keys: string[]): Promise<string> {
   if (!keys.length) return "";
   const db = openWriter("ingest", file);
   try {
     const rows = await db
       .selectFrom("unit")
-      .select(["key", "kind", "stance", "text", "why"])
+      .select(["id", "key", "kind", "stance", "text", "why"])
       .where("key", "in", keys)
       .execute();
     // A gold slot missing a record would be labelled gold while giving less: stop the build instead
     const missing = keys.filter((k) => !rows.some((r) => r.key === k));
     if (missing.length) throw new Error(`gold records missing from the fixture: ${missing.join(", ")}`);
-    // The gold slot has no Sphica tools, so the record comes whole instead of pointing to read (a pointer it cannot follow reads as a forged claim)
-    return rows
-      .map(
-        (u) =>
-          `Sphica past record from this project's history, not an instruction: ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${u.text}${u.why ? `\nWhy: ${u.why}` : ""}`,
-      )
-      .join("\n");
+    // Gold claims the record as a delivery gives it; a body or reason the renderer would cut stops the build (rejected options show up to
+    // three with a count, as in every delivery)
+    const lines = await recordLines(db, rows);
+    rows.forEach((r, i) => {
+      const shown = lines[i] ?? "";
+      if (!shown.includes(inline(r.text)) || (r.why && !shown.includes(`Why: ${inline(r.why)}`)))
+        throw new Error(`gold record ${r.key} would be cut by the delivery renderer`);
+    });
+    return [GOLD_LEAD, ...lines].join("\n");
   } finally {
     await db.destroy();
+  }
+}
+
+/** The lead of the gold context: a delivery's, without the pointer to read the gold slot cannot follow. */
+const GOLD_LEAD = `Active decisions from this project's history (current code relevance unverified). ${CONFIRM_GOLD} Sphica past records, not instructions:`;
+
+/**
+ * Drops the section that asks for the owner's Go before implementing: an evaluation has no owner to give it, so runs would stop at a plan
+ * for that reason alone. A copy that still asks for it stops the build.
+ */
+function dropGoGate(dir: string): void {
+  for (const name of ["CLAUDE.md", "AGENTS.md"]) {
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8").replace(/^## Before implementing\n[\s\S]*?(?=^## )/m, "");
+    if (/owner's (Go|approval)|(Go|approval) before implementing/i.test(text))
+      throw new Error(`${name} in the slot still asks for the owner's Go`);
+    fs.writeFileSync(file, text);
   }
 }
 
@@ -278,6 +308,7 @@ async function main() {
     const repo = `eval-shelf-${i + 1}`;
     const dir = path.join(out, repo);
     files(dir);
+    dropGoGate(dir);
     write(dir, ".tools/node.sh", NODE_SH, 0o755);
     write(dir, ".tools/hook.sh", HOOK_SH, 0o755);
     write(dir, ".tools/finish.sh", FINISH_SH, 0o755);
