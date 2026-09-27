@@ -4,7 +4,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { type Get, gh, linkIssues, pullSources, readPull, repoOf, storeItems } from "../src/github.ts";
+import {
+  type Get,
+  gh,
+  ghUser,
+  linkIssues,
+  pullSources,
+  readPull,
+  repoOf,
+  storeItems,
+} from "../src/github.ts";
 import { at, insert, project, tempDb } from "./temp-db.ts";
 
 const sha = (c: string) => c.repeat(40);
@@ -250,5 +259,69 @@ test("a gh listing over the size cap is refused with a reason", async () => {
   } finally {
     process.env.PATH = saved;
     fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+/** Puts a gh first on PATH that saves its arguments and answers with `out` and `status`, runs `body`, then restores PATH. */
+async function withGh(
+  out: string,
+  status: number,
+  body: (args: () => string[]) => Promise<void>,
+): Promise<void> {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  const log = path.join(bin, "args.json");
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write(${JSON.stringify(out)});\nprocess.exit(${status});\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    await body(() => JSON.parse(fs.readFileSync(log, "utf8")) as string[]);
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+}
+
+// GH_HOST or an enterprise host must not answer for github.com: an id from another host would be taken as a github.com account
+test("gh reads pull requests and the signed-in user from github.com only", async () => {
+  await withGh("{}", 0, async (args) => {
+    await gh("o/r")("pulls/1");
+    assert.deepEqual(args(), ["api", "repos/o/r/pulls/1", "--hostname", "github.com"]);
+  });
+  await withGh(JSON.stringify({ id: 42, login: "hana-1", type: "User" }), 0, async (args) => {
+    assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana-1" });
+    assert.deepEqual(args(), ["api", "user", "--hostname", "github.com"]);
+  });
+});
+
+test("a signed-out gh, a missing gh, and an answer that is not a user are told apart", async () => {
+  await withGh("", 1, async () => {
+    assert.deepEqual(await ghUser(), { ok: false, reason: "failed" });
+  });
+  for (const answer of [
+    "not json",
+    "null",
+    JSON.stringify({ login: "hana" }),
+    JSON.stringify({ id: 0, login: "hana" }),
+    JSON.stringify({ id: "42", login: "hana" }),
+    JSON.stringify({ id: 2 ** 60, login: "hana" }),
+    JSON.stringify({ id: 42, login: "" }),
+    JSON.stringify({ id: 42, login: "-hana" }),
+    JSON.stringify({ id: 42, login: "hana\nok" }),
+  ])
+    await withGh(answer, 0, async () => {
+      assert.deepEqual(await ghUser(), { ok: false, reason: "unexpected" }, answer);
+    });
+  const saved = process.env.PATH;
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-no-gh-"));
+  try {
+    process.env.PATH = empty;
+    assert.deepEqual(await ghUser(), { ok: false, reason: "missing" });
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(empty, { recursive: true, force: true });
   }
 });

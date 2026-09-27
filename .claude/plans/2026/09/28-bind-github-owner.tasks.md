@@ -40,13 +40,14 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `feat(db): refuse owner_identity writes from the ingest role`
   - 結果: 変更前のコードで `node --test --test-name-pattern="owner identity" test/db.test.ts` → insert の段で失敗（ingest が書けた）。変更後 `bun run test` → 293 pass / 0 fail
 
-- [ ] T02: gh api のホストを github.com に固定し、ghUser() で応答を検証して読む
+- [x] T02: gh api のホストを github.com に固定し、ghUser() で応答を検証して読む
   - 種別: 追加
   - 計画: S2
   - 依存: T08（配布物の変更はバージョンを上げた後でないとコミットできない）
   - 変更: `server/src/github.ts`, `server/test/github.test.ts`
   - 完了条件: `bun run test` → gh(repo) と ghUser() が `--hostname github.com` を渡し、ghUser() が missing / failed / unexpected（id 無し・0・文字列、login が空）を分けて返す検査が通る
   - コミット: `feat(github): pin gh api to github.com and read the signed-in user`
+  - 結果: `bun run test` → 295 pass / 0 fail（偽の gh で `--hostname github.com` の引数、failed / missing / unexpected 9 通りを確認）。`bun run acceptance` → 55 pass。`bun run typecheck` と `bun run knip` → 指摘なし
 
 - [ ] T03: bindOwner() で最初の 1 件だけ登録し、登録した ID の CONTRIBUTOR の発言が採用される
   - 種別: 追加

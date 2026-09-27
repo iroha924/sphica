@@ -36,12 +36,15 @@ export type Get = (path: string, all?: boolean) => Promise<unknown>;
 /** Pull request data is written by anyone: one listing stops at this size rather than filling memory (up to 4 run at once) */
 const MAX_RESPONSE = 16 * 1024 * 1024;
 
+/** Project keys and owner_identity name github.com only, so GH_HOST or a configured enterprise host must not answer instead */
+const HOST = ["--hostname", "github.com"];
+
 export const gh =
   (repo: string): Get =>
   async (path, all = false) => {
     const { stdout } = await exec(
       "gh",
-      ["api", `repos/${repo}/${path}`, ...(all ? ["--paginate", "--slurp"] : [])],
+      ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
       { encoding: "utf8", maxBuffer: MAX_RESPONSE },
     ).catch((e: NodeJS.ErrnoException) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
@@ -51,6 +54,52 @@ export const gh =
     const parsed = JSON.parse(stdout) as unknown;
     return all ? (parsed as unknown[][]).flat() : parsed;
   };
+
+export type SignedIn =
+  | { ok: true; id: number; login: string }
+  | { ok: false; reason: "missing" | "failed" | "unexpected" };
+
+/** GitHub's login rule: letters, digits, and hyphens, starting with a letter or digit, at most 39 characters */
+const LOGIN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+
+/**
+ * The account gh is signed in to on github.com. A missing gh, a failed call (signed out, offline), and an answer that is not a
+ * user are told apart, so a broken answer is never reported as signed out.
+ */
+export async function ghUser(): Promise<SignedIn> {
+  let stdout: string;
+  try {
+    ({ stdout } = await exec("gh", ["api", "user", ...HOST], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return {
+      ok: false,
+      reason:
+        code === "ENOENT"
+          ? "missing"
+          : code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+            ? "unexpected"
+            : "failed",
+    };
+  }
+  let user: { id?: unknown; login?: unknown } | null;
+  try {
+    user = JSON.parse(stdout) as typeof user;
+  } catch {
+    return { ok: false, reason: "unexpected" };
+  }
+  const id = user?.id;
+  const login = user?.login;
+  if (
+    typeof id !== "number" ||
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    typeof login !== "string" ||
+    !LOGIN.test(login)
+  )
+    return { ok: false, reason: "unexpected" };
+  return { ok: true, id, login };
+}
 
 type User = { login?: string; id?: number; type?: string } | null;
 type Authored = { user?: User; author_association?: string };
