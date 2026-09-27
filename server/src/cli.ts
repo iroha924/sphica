@@ -281,6 +281,11 @@ async function uninstall(yes: boolean): Promise<void> {
     ...(process.env.SPHICA_DB && !inHome(process.env.SPHICA_DB) ? [process.env.SPHICA_DB] : []),
   ];
   await boxed("sphica uninstall", async () => {
+    // SPHICA_HOME may name any directory (tests and measurements set it); a recursive delete must never follow it
+    if (process.env.SPHICA_HOME)
+      throw new Error(
+        "SPHICA_HOME is set; uninstall deletes only ~/.sphica. Unset SPHICA_HOME and run it again",
+      );
     if (!fs.existsSync(home)) console.log(indent(`${mark("none")} ${home} does not exist`));
     else {
       if (!yes) {
