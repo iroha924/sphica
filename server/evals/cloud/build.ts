@@ -102,7 +102,8 @@ exec "$dir/bin/node" "$@"
 const SPHICA_SH = `#!/bin/sh
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-export SPHICA_DB="\${TMPDIR:-/tmp}/eval-sphica/sphica.db"
+# Keyed by the fixture, so a reused container never serves an earlier fixture's copy
+export SPHICA_DB="\${TMPDIR:-/tmp}/eval-sphica/$(cat "$here/fixture.id")/sphica.db"
 if [ ! -f "$SPHICA_DB" ]; then
   mkdir -p "$(dirname "$SPHICA_DB")"
   cp "$here/fixture.db" "$SPHICA_DB.$$" && mv "$SPHICA_DB.$$" "$SPHICA_DB"
@@ -147,8 +148,9 @@ mkdir -p .eval
 cp "\${TMPDIR:-/tmp}/eval-receipts.jsonl" .eval/receipts.jsonl 2>/dev/null || true
 # The final answer is graded too (a run that stops for approval leaves no patch); older hosts lack last_assistant_message, so read the transcript
 printf '%s' "$input" | sh "$here/node.sh" -e 'const fs=require("node:fs");let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const i=JSON.parse(s||"{}");let a=i.last_assistant_message??"";if(!a&&i.transcript_path)for(const l of fs.readFileSync(i.transcript_path,"utf8").split("\\n")){try{const e=JSON.parse(l);const t=e.type==="assistant"?(e.message?.content??[]).filter(c=>c.type==="text").map(c=>c.text).join("\\n"):"";if(t)a=t}catch{}}fs.writeFileSync(".eval/answer.md",a)})' 2>/dev/null || true
-if [ -f "\${TMPDIR:-/tmp}/eval-sphica/sphica.db" ]; then
-  sh "$here/node.sh" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify(db.prepare("select d.event, d.outcome, d.path, d.chars, d.at, (select json_group_array(u.key) from delivery_unit x join unit u on u.id = x.unit_id where x.delivery_id = d.id) as units from delivery d order by d.id").all()))' "\${TMPDIR:-/tmp}/eval-sphica/sphica.db" > .eval/deliveries.json 2>/dev/null || true
+db="\${TMPDIR:-/tmp}/eval-sphica/$(cat "$here/fixture.id" 2>/dev/null)/sphica.db"
+if [ -f "$here/fixture.id" ] && [ -f "$db" ]; then
+  sh "$here/node.sh" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify(db.prepare("select d.event, d.outcome, d.path, d.chars, d.at, (select json_group_array(u.key) from delivery_unit x join unit u on u.id = x.unit_id where x.delivery_id = d.id) as units from delivery d order by d.id").all()))' "$db" > .eval/deliveries.json 2>/dev/null || true
 fi
 git add -A >/dev/null 2>&1
 # Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer
@@ -221,6 +223,9 @@ function deliverMatcher(): string {
 async function smokeDelivery(dir: string): Promise<void> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-smoke-"));
   try {
+    // A reused container can hold another fixture's copy; the hook must not pick it up
+    fs.mkdirSync(path.join(tmp, "eval-sphica"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "eval-sphica", "sphica.db"), "an earlier fixture");
     execFileSync("sh", [".tools/sphica.sh", ".tools/dist/deliver.js"], {
       cwd: dir,
       input: JSON.stringify({
@@ -231,7 +236,8 @@ async function smokeDelivery(dir: string): Promise<void> {
       }),
       env: { PATH: process.env.PATH ?? "", HOME: tmp, TMPDIR: tmp },
     });
-    const db = openReader(path.join(tmp, "eval-sphica", "sphica.db"));
+    const id = fs.readFileSync(path.join(dir, ".tools", "fixture.id"), "utf8").trim();
+    const db = openReader(path.join(tmp, "eval-sphica", id, "sphica.db"));
     try {
       const rows = await db.selectFrom("delivery").select("id").execute();
       if (!rows.length) throw new Error(`${dir}: the delivery hook logged nothing at session start`);
@@ -293,6 +299,7 @@ async function main() {
       await rekey(db, repo);
       fixtureHash = sha256(fs.readFileSync(db));
       write(dir, ".tools/sphica.sh", SPHICA_SH, 0o755);
+      write(dir, ".tools/fixture.id", `${fixtureHash.slice(0, 16)}\n`);
       // The bundles are ESM; keeping the .js names keeps deliver's entry check (deliver.(ts|js)) true, which .mjs silently broke
       write(dir, ".tools/dist/package.json", `${JSON.stringify({ type: "module" })}\n`);
       write(dir, ".tools/dist/mcp.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "mcp.js")));
