@@ -22,13 +22,14 @@ base: main
 
 ワークフローが呼ぶ 3 つのスクリプト（PR 番号の受け渡し、環境の検査、merge 後の仕上げ）が、偽の外部コマンドを使ったテスト付きでそろう。
 
-- [ ] T01: release-gate が判定の通過時に `GITHUB_OUTPUT` へ PR 番号を書く
+- [x] T01: release-gate が判定の通過時に `GITHUB_OUTPUT` へ PR 番号を書く
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `scripts/release-gate.mjs`, `server/test/release-gate-cli.test.ts`
   - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-gate"` → 偽の git・gh・npm を PATH の先頭に置いた子プロセスで、通過時に `pull=7` が書かれ、落ちたときは `GITHUB_OUTPUT` が空のまま。スクリプトの変更を外すと前者が落ちる
   - コミット: `feat(release): write the PR number to GITHUB_OUTPUT when the gate passes`
+  - 結果: red: 変更前のスクリプトで通過のケースが `'' !== 'pull=7\n'` で落ちた（status 0、出力なし）。変更後 `bun run --cwd server test -- --test-name-pattern "release-gate"` → 270 pass / 0 fail（新しい 2 件を含む）
 
 - [ ] T02: `npm-release` 環境の設定を検査する release-env
   - 種別: 追加
