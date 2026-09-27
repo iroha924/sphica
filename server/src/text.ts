@@ -20,9 +20,18 @@ const MAX_TERM = 100;
 // english-exempt: the long vowel mark is kana too
 const OKURIGANA = /^(\p{Script=Han}+)[\p{Script=Hiragana}ー]+$/u;
 
-/** An English plural as its singular (managers, timestamps), so both forms meet. Words ending in ss, us, is stay (class, status, analysis). */
-const singular = (w: string): string =>
-  /^[a-z]{4,}s$/.test(w) && !/(?:ss|us|is)$/.test(w) ? w.slice(0, -1) : w;
+/**
+ * An English word and its plural brought to one form, so both meet: managers and manager, policies and policy, classes and class. Where a plural
+ * is ambiguous (caches and branches both end in -ches) the singular is folded the same way (cache and caches both become cach).
+ */
+function singular(w: string): string {
+  if (!/^[a-z]{4,}$/.test(w)) return w;
+  if (w.endsWith("ies")) return `${w.slice(0, -3)}y`;
+  if (w.endsWith("ie")) return `${w.slice(0, -2)}y`;
+  if (/(?:ss|us|x|z|ch|sh)es$/.test(w)) return w.slice(0, -2);
+  if (/(?:ch|sh|us)e$/.test(w)) return w.slice(0, -1);
+  return w.endsWith("s") && !/(?:ss|us|is)$/.test(w) ? w.slice(0, -1) : w;
+}
 
 /**
  * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.

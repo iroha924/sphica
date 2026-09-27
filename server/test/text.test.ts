@@ -17,6 +17,21 @@ test("kanji words drop trailing kana and English plurals become singular", () =>
   assert.deepEqual(terms("入れる"), terms("入れない"));
   assert.deepEqual(terms("package managers"), terms("package manager"));
   for (const w of ["status", "class", "analysis"]) assert.deepEqual([...new Set(terms(w))], [w]);
+  const pairs: [string, string][] = [
+    ["policies", "policy"],
+    ["classes", "class"],
+    ["statuses", "status"],
+    ["boxes", "box"],
+    ["branches", "branch"],
+    ["pushes", "push"],
+    ["notes", "note"],
+    ["cases", "case"],
+    ["caches", "cache"],
+    ["causes", "cause"],
+    ["houses", "house"],
+    ["cookies", "cookie"],
+  ];
+  for (const [plural, one] of pairs) assert.deepEqual(terms(plural), terms(one), `${plural} meets ${one}`);
 });
 
 // A question's framing words never decide whether a record answers it
