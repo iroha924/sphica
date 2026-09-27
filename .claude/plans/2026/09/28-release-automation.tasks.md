@@ -101,3 +101,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / T02 / Codex のタスクレビュー（0a3bf53）: 指摘 0 件（sandbox でテストは流せず、手元で実測済み） / 採る指摘なし
 - 2026-09-28 / T06 / release-gate の lib とテストに stage の言い回しが残っていた / 変更欄に `scripts/lib/release-gate.mjs`, `server/test/release-gate.test.ts` を足した
 - 2026-09-28 / T03 / Codex のタスクレビュー（19244ee）: 3 件。F1 `--tag` と `--commit` の一致を見ていない、F2 `--pull` の PR が tag のコミットを head に持つかを見ていない、F3 コードブロック内の見出しを節の区切りに読む（再現あり） / 3 件とも採る。修正タスク T07 を足した
+- 2026-09-28 / T04 / Codex のタスクレビュー（6ac17a4）: 2 件。F1 承認依頼のコメントが落ちても report-failure が走らない、F2 同じ tag の run が 3 件重なると待機中の run が取り消される / どちらも見送る。F1 はコメントが便利のためのもので、run の URL は Claude が Skill の手順 5 で必ず渡す。F2 は対策の `concurrency.queue: max` を固定の actionlint 1.7.12 が拒否し（実測）、同じ tag を打ち直さない規則と tag のルールセットのもとでは 3 件重なる入力が起きにくい
