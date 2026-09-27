@@ -104,6 +104,9 @@ function runScript(ghBody: string) {
         encoding: "utf8",
         env: {
           PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}`,
+          // A temporary HOME, so nothing a child runs can reach the owner's home (USERPROFILE on Windows)
+          HOME: dir,
+          USERPROFILE: dir,
           GITHUB_REPOSITORY: "iroha924/sphica",
           GITHUB_REPOSITORY_OWNER_ID: String(OWNER_ID),
         },

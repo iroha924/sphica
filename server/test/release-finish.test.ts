@@ -71,6 +71,9 @@ function finish(args: string[], env: Record<string, string> = {}) {
       encoding: "utf8",
       env: {
         PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+        // A temporary HOME, so nothing a child runs can reach the owner's home (USERPROFILE on Windows)
+        HOME: dir,
+        USERPROFILE: dir,
         GITHUB_REPOSITORY: "o/r",
         CALLS: calls,
         ...env,

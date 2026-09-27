@@ -144,7 +144,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): require the PR's release dry run before a tag may publish`
   - 結果: red: 変更前のコードで「release dry run failed or did not run」のテストが落ちた。変更後 `node --test test/release-gate.test.ts test/release-gate-cli.test.ts` → 11 pass / 0 fail。`node scripts/check-ai-config.mjs` → exit 0
 
-- [ ] T13: リリースのスクリプトのテストで、子プロセスに一時 HOME を渡す
+- [x] T13: リリースのスクリプトのテストで、子プロセスに一時 HOME を渡す
   - 種別: 修正
   - 計画: S1, S2, S3
   - 依存: T12（同じテストファイル）
@@ -152,6 +152,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - red: `rg -n "HOME" server/test/release-gate-cli.test.ts server/test/release-env.test.ts server/test/release-finish.test.ts` → 変更前は 0 件（子の HOME が無く、Node はアカウントのホームを使う）
   - 完了条件: 3 ファイルの子プロセスの env に `HOME` がテストの一時ディレクトリで入り、`bun run --cwd server test` → 全件 pass
   - コミット: `test(release): give release-script children a temporary HOME`
+  - 結果: red: 変更前は 3 ファイルとも `HOME` の指定が 0 件。変更後 `rg -n "HOME: dir" server/test/release-*.test.ts` → 3 件（USERPROFILE も同じ一時ディレクトリ）。`node --test test/release-gate-cli.test.ts test/release-env.test.ts test/release-finish.test.ts` → 18 pass / 0 fail
 
 - [ ] T14: merge の直前と finish で、PR の base が main であることを確かめる
   - 種別: 修正
