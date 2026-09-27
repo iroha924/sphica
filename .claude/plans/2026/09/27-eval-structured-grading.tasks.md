@@ -62,13 +62,14 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `feat(evals): grade answers blind through a checked schema and tabulate by model and condition`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 11 / fail 0（依頼文にモデルと条件が入らない、0 以外の終了・空・JSON でない・範囲外が ungraded、切り詰めた差分で no が unknown、表の分母と追う失敗）。`tsc`、`knip` → 通過。本物の Codex での採点は完了条件 A3 で流す
 
-- [ ] T05: eval-loop Skill の回収と採点の手順、報告の書き方を直す
+- [x] T05: eval-loop Skill の回収と採点の手順、報告の書き方を直す
   - 種別: 変更
   - 計画: S5
   - 依存: T04（書く手順が grade.ts を使う）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → exit 0。`rg -n "grade.ts|--fired|unknown" .claude/skills/eval-loop/SKILL.md` → 各 1 件以上
   - コミット: `docs(eval-loop): grade with grade.ts and report both models with unknown and excluded counts`
+  - 結果: `bun run verify:ai` → exit 0。`rg -n "grade.ts|--fired|unknown" .claude/skills/eval-loop/SKILL.md` → 6 件
 
 ## 記録
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
