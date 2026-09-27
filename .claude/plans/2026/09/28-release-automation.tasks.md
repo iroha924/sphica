@@ -199,7 +199,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - 計画: S4
   - 依存: T09（直す対象の判定）
   - 変更: `.github/workflows/release.yml`
-  - red: 判定のシェルを `PUBLISH=skipped GITHUB_REF_NAME=v0.5.3` で流す → 変更前は npm にあるバージョンでも `no`
+  - red: `PUBLISH=skipped GITHUB_REF_NAME=v0.5.3 bash -c '<report-failure の判定>'` → 変更前は npm にあるバージョンでも `no`
   - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。判定のシェル → success は yes、skipped と cancelled は npm にあれば yes・なければ no、failure は npm にあれば yes・なければ unknown
   - コミット: `fix(release): ask npm whenever publish did not succeed in this run`
   - 結果: actionlint → exit 0。判定のシェル → `success v9.9.9 -> yes`、`skipped v0.5.3 -> yes`、`skipped v9.9.9 -> no`、`cancelled v9.9.9 -> no`、`failure v0.5.3 -> yes`、`failure v9.9.9 -> unknown`
