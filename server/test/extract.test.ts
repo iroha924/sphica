@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import { bindOwner } from "../src/admin.ts";
 import {
   beginGlean,
   beginHarvest,
@@ -900,6 +901,62 @@ test("glean: retracting support from a superseded record leaves it superseded", 
     assert.ok(c.ok, c.text);
     await saveText(db.ingest, run, p, null, record);
     assert.deepEqual([state("trace:ext-s1/slow"), state("trace:ext-s1/fine")], ["superseded", "active"]);
+  } finally {
+    await db.done();
+  }
+});
+
+// A contributor to someone else's repository adopts nothing, unless the account is the owner's own, bound by sphica init
+test("harvest: the bound owner's words adopt in a pull request where they are only a contributor", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const contributor =
+      (n: number): Get =>
+      async (path) => {
+        const key = path.split("?")[0] ?? "";
+        if (key === `pulls/${n}`)
+          return {
+            number: n,
+            title: "t",
+            body: "Keep notes out of CSV.",
+            html_url: "u",
+            created_at: "2026-03-01T00:00:00Z",
+            merged_at: null,
+            user: { login: "hana", id: 42, type: "User" },
+            author_association: "CONTRIBUTOR",
+          };
+        return [];
+      };
+    const record = (source: string) => ({
+      units: [
+        {
+          key: "notes",
+          kind: "decision",
+          stance: "do",
+          text: "Keep notes out of CSV.",
+          evidence: [{ source, quote: "Keep notes out of CSV.", role: "states" }],
+          adoption: [{ source, quote: "Keep notes out of CSV." }],
+        },
+      ],
+    });
+    const harvest = async (n: number) => {
+      const run = (await beginHarvest(db.ingest, p, n, contributor(n))).run;
+      const body = db.owner
+        .prepare("select id, author_kind from source where artifact = ? and kind = 'pr_body'")
+        .get(`pr:${n}`) as { id: number; author_kind: string };
+      return {
+        kind: body.author_kind,
+        saved: await saveText(db.ingest, run, p, null, record(`s${body.id}`)),
+      };
+    };
+    const before = await harvest(5);
+    assert.equal(before.kind, "person");
+    assert.match(before.saved, /harvest:5\/notes candidate/);
+    assert.deepEqual(bindOwner({ id: 42, login: "hana" }, db.file), { kind: "bound" });
+    const after = await harvest(6);
+    assert.equal(after.kind, "owner");
+    assert.match(after.saved, /harvest:6\/notes active/);
   } finally {
     await db.done();
   }

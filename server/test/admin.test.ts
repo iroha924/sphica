@@ -6,7 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dbInit, inspect, reindex } from "../src/admin.ts";
+import { bindOwner, dbInit, inspect, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { at, hash } from "./temp-db.ts";
@@ -321,4 +321,39 @@ test("doctor says stuck recordings are sent again after the next turn", () => {
   );
   const r = cli(home, "doctor");
   assert.match(r.out, /sent again after the next turn/, r.out);
+});
+
+test("the owner's GitHub account is bound once; the same id again is kept, another is reported and not added", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  await quiet(() => dbInit(file));
+  const rows = () => {
+    const raw = new DatabaseSync(file, { readOnly: true });
+    try {
+      return raw.prepare("select provider, external_id, login from owner_identity").all();
+    } finally {
+      raw.close();
+    }
+  };
+  assert.deepEqual(bindOwner({ id: 42, login: "hana" }, file), { kind: "bound" });
+  assert.deepEqual(bindOwner({ id: 42, login: "hana-renamed" }, file), { kind: "already" });
+  assert.deepEqual(bindOwner({ id: 7, login: "someone" }, file), { kind: "other", id: "42", login: "hana" });
+  assert.deepEqual(
+    rows().map((r) => ({ ...r })),
+    [{ provider: "github", external_id: "42", login: "hana" }],
+  );
+});
+
+test("a database of another revision is not bound", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  await quiet(() => dbInit(file));
+  const raw = new DatabaseSync(file);
+  raw.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+  raw.close();
+  assert.deepEqual(bindOwner({ id: 42, login: "hana" }, file), {
+    kind: "skipped",
+    revision: SCHEMA_REVISION + 1,
+  });
+  const look = new DatabaseSync(file, { readOnly: true });
+  assert.equal((look.prepare("select count(*) as n from owner_identity").get() as { n: number }).n, 0);
+  look.close();
 });

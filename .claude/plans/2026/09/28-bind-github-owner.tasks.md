@@ -49,13 +49,14 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `feat(github): pin gh api to github.com and read the signed-in user`
   - 結果: `bun run test` → 295 pass / 0 fail（偽の gh で `--hostname github.com` の引数、failed / missing / unexpected 9 通りを確認）。`bun run acceptance` → 55 pass。`bun run typecheck` と `bun run knip` → 指摘なし
 
-- [ ] T03: bindOwner() で最初の 1 件だけ登録し、登録した ID の CONTRIBUTOR の発言が採用される
+- [x] T03: bindOwner() で最初の 1 件だけ登録し、登録した ID の CONTRIBUTOR の発言が採用される
   - 種別: 追加
   - 計画: S3
   - 依存: T01（owner 接続だけが書ける前提で登録の経路を 1 つにする）
-  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`, `server/test/github.test.ts`, `scripts/lib/sql-call-sites.mjs`
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`, `server/test/extract.test.ts`
   - 完了条件: `bun run test` → bound / already / other（行は 1 件のまま）/ skipped（revision 違い）と、bindOwner 後に CONTRIBUTOR の PR 本文が `owner` で保存されそれを引いた記録が active になる検査が通る。`bun run sql:reach` → 0 で終わる
   - コミット: `feat(admin): bind the owner's GitHub account once`
+  - 結果: `bun run test` → 298 pass / 0 fail（bound / already / other で行は 1 件 / skipped、登録前の CONTRIBUTOR の PR 本文は person で candidate、登録後の PR は owner で active）。`bun run sql:reach` → 128 / 128 sites
 
 ## P2: init と doctor
 
@@ -101,3 +102,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 
 - 2026-09-28 / T01, T07, T08 / T01 のコミットが pre-commit の bundle 検査で止まった（配布物の変更はバージョンを同じ変更で上げる必要がある） / T07 を取りやめ、同じ S7 を担う T08 を先頭に足した。T01 と T02 の依存を なし → T08 に変えた
 - 2026-09-28 / T08 / 結果欄を書式に合わない形のままコミットした（検査の終了コードをパイプで落とした） / T01 のコミットで結果欄を直した
+- 2026-09-28 / T03 / 採用まで通すテストは harvest の run と保存の道具がそろう extract.test.ts に置き、新しい SQL の呼び出しも既存のテストで届いて台帳の変更が要らなかった / 変更欄を `admin.ts, admin.test.ts, github.test.ts, sql-call-sites.mjs` → `admin.ts, admin.test.ts, extract.test.ts` に変えた
