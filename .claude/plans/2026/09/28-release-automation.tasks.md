@@ -53,13 +53,14 @@ base: main
 
 tag push の run が、承認待ちを PR に知らせ、承認の後に publish・merge・仕上げまで進み、落ちたら公開の有無を添えて PR に知らせる。PR の CI ではお試し実行と分かる名前で流れる。
 
-- [ ] T04: release.yml を新しいジョブの流れにする
+- [x] T04: release.yml を新しいジョブの流れにする
   - 種別: 変更
   - 計画: S4
   - 依存: T01（prepare の output の `pull`）, T02（prepare と publish が流す環境の検査）, T03（finish と finish-dry-run が流すスクリプト）
   - 変更: `.github/workflows/release.yml`
   - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。`rg -n "ubuntu-latest|npm stage" .github/workflows/release.yml` → 0 件。`rg -n 'run:' -A20 .github/workflows/release.yml | rg '\$\{\{'` → 0 件（値は `env:` 経由）。各ジョブの `permissions` が plan の方針どおり
   - コミット: `feat(release): publish, merge, and finish in one run after the owner's approval`
+  - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。`rg -n "ubuntu-latest|npm stage" .github/workflows/release.yml` → 0 件。`run:` ブロック内の `${{` を数えるスクリプト → 0 件。permissions: notify-approval は `pull-requests: write`、publish は `contents/pull-requests/actions: read` と `id-token/attestations: write`、merge は `contents/pull-requests: write`、finish は `contents/pull-requests: write` と `attestations: read`、report-failure は `pull-requests: write`、finish-dry-run は read だけ。zizmor はローカルに無いので PR の CI で確かめる（A7）
 
 ## P3: 手順・検査・公開の説明を揃えて 0.5.4 にする
 

@@ -1,8 +1,8 @@
-# Builds the npm release candidate in CI and stages it. Publishing happens only when the owner approves with 2FA on npm.
+# Builds the npm release in CI and publishes it once the owner approves the `npm-release` environment; the approval is the only gate before npm.
 #
-# Runs when a `v<version>` tag is pushed to the PR head with the owner's account (before the merge). prepare checks the tag, PR, and CI and builds the tarball,
-# and after the `npm-release` environment is approved, stage passes the same tarball to `npm stage publish --tag next`.
-# The owner approves the environment and the stage on npmjs.com and runs `npm dist-tag add` for latest; Claude runs the other local steps (.agents/skills/plugin-release/SKILL.md).
+# Runs when a `v<version>` tag is pushed to the PR head (before the merge). prepare checks the tag, PR, CI, and environment and builds the tarball,
+# then comments on the PR with this run's URL. After the owner's approval, publish sends the same tarball to `npm publish --tag latest`,
+# merge merges the PR, and finish checks what npm serves and creates the GitHub Release (.agents/skills/plugin-release/SKILL.md).
 #
 # No secrets. It reaches npm through trusted publishing (OIDC), with provenance.
 name: release
@@ -10,7 +10,7 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # For PRs that change the release steps and for release PRs, run everything up to stage
+  # For PRs that change the release steps and for release PRs, run everything up to publish, and finish's checks on the latest release
   pull_request:
     paths:
       - .github/workflows/release.yml
@@ -30,10 +30,16 @@ on:
 permissions:
   contents: read
 
+# A second run for the same tag waits instead of racing a publish that is waiting for approval
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   # The SBOM is built separately from the job that builds what ships (prepare). syft is fetched with a pinned checksum from its distributor (a single file with no dependencies)
   sbom:
-    runs-on: ubuntu-latest
+    name: "${{ github.event_name == 'push' && format('release {0}: sbom', github.ref_name) || 'dry run: sbom' }}"
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -63,8 +69,9 @@ jobs:
           if-no-files-found: error
 
   prepare:
+    name: "${{ github.event_name == 'push' && format('release {0}: prepare', github.ref_name) || 'dry run: prepare' }}"
     needs: sbom
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -73,6 +80,7 @@ jobs:
     outputs:
       sha512: ${{ steps.pack.outputs.sha512 }}
       tgz: ${{ steps.pack.outputs.tgz }}
+      pull: ${{ steps.gate.outputs.pull }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -92,7 +100,8 @@ jobs:
           package-manager-cache: false
 
       # The tag name matches every version, the commit is the head of an open PR into main, and that PR's check and pr-body succeeded
-      - name: May this tag be staged
+      - name: May this tag be released
+        id: gate
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -115,7 +124,7 @@ jobs:
       - name: Is the working tree still at the tag commit
         run: git diff --exit-code HEAD
 
-      # **Ship the checked tarball as is.** The stage job does not rebuild it.
+      # **Ship the checked tarball as is.** The publish job does not rebuild it.
       - name: Build and check the tarball
         id: pack
         run: |
@@ -134,6 +143,10 @@ jobs:
             echo "- file: \`$tgz\`"
             echo "- SHA-512: \`$sha512\`"
             echo "- integrity: \`$integrity\`"
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo
+              echo "$GITHUB_REF_NAME waits for the owner's approval of npm-release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Does the SBOM list every bundled dependency (the THIRD_PARTY_NOTICES.md table)?
@@ -155,8 +168,9 @@ jobs:
 
   # Runs release-finish's checks against the latest published release, so a change to them is exercised before a real release needs them
   finish-dry-run:
+    name: "dry run: finish"
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -179,10 +193,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-finish.mjs --dry-run
 
-  stage:
+  # Tells the owner on the PR where to approve. publish does not wait for it, so a failed comment does not stop the release
+  notify-approval:
+    name: "${{ github.event_name == 'push' && format('release {0}: ask for approval', github.ref_name) || 'dry run: ask for approval' }}"
+    needs: prepare
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Comment on the PR with this run's URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ needs.prepare.outputs.pull }}
+          SHA512: ${{ needs.prepare.outputs.sha512 }}
+        run: |
+          set -e
+          {
+            echo "$GITHUB_REF_NAME waits for the owner's approval of npm-release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "SHA-512 of the checked tarball: \`$SHA512\`"
+          } > "$RUNNER_TEMP/comment.md"
+          gh pr comment "$PULL" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
+
+  publish:
+    name: "${{ github.event_name == 'push' && format('release {0}: publish', github.ref_name) || 'dry run: publish' }}"
     needs: [sbom, prepare]
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Does not start until the owner approves. The trusted publisher is limited to this workflow and this environment
     environment: npm-release
@@ -193,7 +235,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      # The allowed endpoints are the stage destinations audit observed in the v0.37.7 release, plus nodejs.org for when setup-node cannot fetch from GitHub
+      # The allowed endpoints are the npm destinations audit observed in the v0.37.7 release, plus nodejs.org for when setup-node cannot fetch from GitHub
       # (harden-runner allows GitHub infrastructure such as OIDC and artifacts by default)
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -217,25 +259,19 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      # npm stage exists from npm 11.15.0. Node 24.21.0 bundles npm 11.19.0
+      # Trusted publishing needs npm 11.5.1 or later. Node 24.21.0 bundles npm 11.19.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.21.0"
           package-manager-cache: false
           registry-url: "https://registry.npmjs.org"
 
-      - name: Does this npm version have stage
-        run: |
-          set -e
-          version="$(npm --version)"
-          IFS=. read -r major minor _ <<< "$version"
-          if [ "$major" -lt 11 ] || { [ "$major" -eq 11 ] && [ "$minor" -lt 15 ]; }; then
-            echo "npm $version has no stage command" >&2
-            exit 1
-          fi
-
-      # Check again that the PR head and main did not move while waiting for approval
-      - name: May this tag be staged (after approval)
+      # Check again that the environment, the PR head, and main did not change while waiting for approval
+      - name: Can only the owner approve npm-release (after approval)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-env.mjs
+      - name: May this tag be released (after approval)
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-gate.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
@@ -264,17 +300,108 @@ jobs:
           subject-path: ${{ runner.temp }}/release/${{ needs.prepare.outputs.tgz }}
           sbom-path: ${{ runner.temp }}/sbom/sbom.cdx.json
 
-      # The same version cannot be staged twice. Do not rerun the run after this step succeeds (if it fails, bump the version and release again)
-      - name: Stage to npm
+      # A published version can never be published again. Do not rerun this job after this step succeeds (if it fails, bump the version and release again)
+      - name: Publish to npm
         env:
           TGZ: ${{ needs.prepare.outputs.tgz }}
+        run: npm publish "$RUNNER_TEMP/release/$TGZ" --tag latest --provenance
+
+  merge:
+    name: "${{ github.event_name == 'push' && format('release {0}: merge', github.ref_name) || 'dry run: merge' }}"
+    needs: [prepare, publish]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      commit: ${{ steps.merge.outputs.commit }}
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      # Merge only the head that was tagged and published. A merge by GITHUB_TOKEN starts no other workflow, so finish runs in this run
+      - name: Merge the PR at the tag commit
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ needs.prepare.outputs.pull }}
         run: |
-          set -eo pipefail
-          npm stage publish "$RUNNER_TEMP/release/$TGZ" --tag next --provenance 2>&1 | tee "$RUNNER_TEMP/stage.log"
+          set -e
+          gh pr merge "$PULL" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$GITHUB_SHA"
+          commit="$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  finish:
+    name: "${{ github.event_name == 'push' && format('release {0}: finish', github.ref_name) || 'dry run: finish (tag only)' }}"
+    needs: [prepare, merge]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      attestations: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Check what npm serves and create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ needs.prepare.outputs.pull }}
+          MERGE: ${{ needs.merge.outputs.commit }}
+        run: |
+          set -e
+          git fetch --quiet origin main
+          node scripts/release-finish.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --merge "$MERGE" --pull "$PULL"
+
+  # When any step of a release fails, say on the PR how far it got. Whether npm has the version decides the recovery
+  report-failure:
+    name: "${{ github.event_name == 'push' && format('release {0}: report failure', github.ref_name) || 'dry run: report failure' }}"
+    needs: [sbom, prepare, publish, merge, finish]
+    if: always() && github.event_name == 'push' && contains(needs.*.result, 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Comment on the PR with the failed jobs and whether npm has the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -e
+          failed="$(jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(", ")' <<< "$NEEDS")"
+          if out="$(npm view "sphica@${GITHUB_REF_NAME#v}" version 2>&1)"; then
+            published="$([ -n "$out" ] && echo yes || echo unknown)"
+          elif grep -q E404 <<< "$out"; then
+            published=no
+          else
+            published=unknown
+          fi
           {
-            echo "### stage"
+            echo "$GITHUB_REF_NAME release failed at: $failed. On npm: $published."
             echo
-            echo '```'
-            grep -E "staged with id|integrity|shasum" "$RUNNER_TEMP/stage.log" || true
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Recover by following the failure paths in .agents/skills/plugin-release/SKILL.md."
+          } > "$RUNNER_TEMP/comment.md"
+          cat "$RUNNER_TEMP/comment.md" >> "$GITHUB_STEP_SUMMARY"
+          pull="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.state == "open" or .merged_at != null)][0].number // empty')"
+          if [ -z "$pull" ]; then
+            echo "no PR has $GITHUB_SHA as its head; the summary holds the report" >&2
+            exit 1
+          fi
+          gh pr comment "$pull" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
