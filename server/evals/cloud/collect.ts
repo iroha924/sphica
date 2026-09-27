@@ -8,6 +8,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import {
+  answerFormat,
+  capPatch,
+  deliveredSignal,
+  foundInClaudeLog,
+  foundInCodexEvents,
+  type Tri,
+} from "./judge.ts";
 
 const HERE = import.meta.dirname;
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
@@ -17,10 +25,12 @@ const { values: args } = parseArgs({
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
     out: { type: "string", default: path.join(CACHE, "loop.json") },
+    // How many runs each Claude slot was fired for (repeatable, <slot>=<n>): a fired run with no result branch is kept as excluded
+    fired: { type: "string", multiple: true, default: [] },
   },
 });
 
-type Task = { id: string; prompt: string; test?: string; project?: string };
+type Task = { id: string; prompt: string; test?: string; project?: string; gold?: string[] };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
 const manifest = JSON.parse(fs.readFileSync(path.join(args.build ?? "", "manifest.json"), "utf8")) as {
   commit: string;
@@ -33,9 +43,19 @@ type Row = {
   task: string;
   condition: string;
   run: string;
+  /** Why the run is not a result (it still counts in the denominator); null for a result */
+  excluded: string | null;
   tests: string;
+  /** The final answer as the grader reads it (Codex's schema answer rendered to text) */
   answer: string;
-  delivered: string[];
+  answer_format: "valid" | "invalid" | "refused_or_empty" | "not_applicable";
+  answer_format_reason: string | null;
+  patch: string;
+  patch_truncated: boolean;
+  gold: string[];
+  delivered: "yes" | "no" | "not_applicable";
+  delivered_units: string[];
+  found: Tri;
   signals: {
     searches: number;
     empty_searches: number;
@@ -43,11 +63,37 @@ type Row = {
     tool_errors: number;
     turns: number | null;
     seconds: number | null;
-  };
+  } | null;
 };
 
+/** A run that is not a result, kept so the report's denominator holds every run that was started */
+const excludedRow = (
+  model: Row["model"],
+  task: string,
+  condition: string,
+  run: string,
+  reason: string,
+): Row => ({
+  model,
+  task,
+  condition,
+  run,
+  excluded: reason,
+  tests: "none",
+  answer: "",
+  answer_format: "not_applicable",
+  answer_format_reason: null,
+  patch: "",
+  patch_truncated: false,
+  gold: plan.tasks.find((t) => t.id === task)?.gold ?? [],
+  delivered: "not_applicable",
+  delivered_units: [],
+  found: "unknown",
+  signals: null,
+});
+
 /** Failure signals in a run's text: a routine run log, or Codex's JSONL events. */
-function signals(log: string): Row["signals"] {
+function signals(log: string): NonNullable<Row["signals"]> {
   const count = (re: RegExp) => (log.match(re) ?? []).length;
   const result = /result: \w+ is_error=\w+ turns=(\d+) duration=(\d+)s/.exec(log);
   return {
@@ -106,7 +152,22 @@ const taskOf = (text: string) =>
 
 function main() {
   const rows: Row[] = [];
+  const fired = new Map(
+    (args.fired ?? []).map((f) => {
+      const [slot, n] = f.split("=");
+      if (!slot || !/^\d+$/.test(n ?? "")) throw new Error(`--fired takes <slot>=<n>, got ${f}`);
+      if (!Object.hasOwn(manifest.repositories, slot)) throw new Error(`unknown slot ${slot} in --fired`);
+      return [slot, Number(n)] as const;
+    }),
+  );
+  // Without a count, a Claude run that pushed no branch would vanish from the denominator
+  for (const repo of Object.keys(manifest.repositories))
+    if (!fired.has(repo))
+      throw new Error(
+        `missing --fired ${repo}=<n> (how many runs each Claude slot was fired for, 0 when none)`,
+      );
   for (const [repo, { condition }] of Object.entries(manifest.repositories)) {
+    let collected = 0;
     const dir = path.join(args.build ?? "", repo);
     execFileSync("git", [
       "-C",
@@ -152,59 +213,151 @@ function main() {
         ).filter((d) => d.at >= started);
         const session = branch.replace("origin/claude/eval-", "");
         const logFile = path.join(args.logs ?? "", `${session}.log`);
+        const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : null;
+        const gold = task.gold ?? [];
+        const emitted = deliveries
+          .filter((d) => d.outcome === "emitted")
+          .flatMap((d) => JSON.parse(d.units) as string[]);
+        // The gold hook's receipt holds what it returned to the session
+        const goldOut = receipts
+          .split("\n")
+          .flatMap((l) => (l.trim() ? [JSON.parse(l) as { name: string; output?: string }] : []))
+          .filter((r) => r.name === "gold")
+          .map((r) => r.output ?? "")
+          .join("\n");
+        const diff = execFileSync(
+          "git",
+          ["-C", dir, "diff", "main", branch, "--", ".", ":!.tools", ":!.eval"],
+          {
+            encoding: "utf8",
+            maxBuffer: 64 * 1024 * 1024,
+          },
+        );
+        const cut = capPatch(diff);
         rows.push({
           model: "claude",
           task: task.id,
           condition,
           run: session,
+          excluded: null,
           tests: hiddenTest(work, task),
           answer: show(".eval/answer.md"),
-          delivered: deliveries
-            .filter((d) => d.outcome === "emitted")
-            .flatMap((d) => JSON.parse(d.units) as string[]),
-          signals: signals(fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : ""),
+          answer_format: "not_applicable",
+          answer_format_reason: null,
+          patch: cut.patch,
+          patch_truncated: cut.truncated,
+          gold,
+          delivered: deliveredSignal(condition, gold, emitted, goldOut || null),
+          delivered_units: emitted,
+          found: foundInClaudeLog(log, gold),
+          signals: log === null ? null : signals(log),
         });
+        collected++;
       } finally {
         execFileSync("git", ["-C", dir, "worktree", "remove", "--force", work]);
       }
     }
+    // A fired run that left no result branch is still one of the runs asked for
+    const task = built.length === 1 ? built[0] : undefined;
+    for (let i = collected; i < (fired.get(repo) ?? 0); i++)
+      rows.push(
+        excludedRow("claude", task?.id ?? "unknown", condition, `${repo}#${i + 1}`, "no result branch"),
+      );
   }
   if (fs.existsSync(args.codex ?? ""))
     for (const name of fs.readdirSync(args.codex ?? "")) {
       const dir = path.join(args.codex ?? "", name);
-      // A run still in progress has no result yet
-      if (!fs.existsSync(path.join(dir, "result.json"))) continue;
-      const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as {
+      const read = (file: string) =>
+        fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), "utf8") : null;
+      // started.json is the denominator: a run that started counts even when it left no result
+      const startedAt = read("started.json");
+      const resultText = read("result.json");
+      if (!startedAt && !resultText) continue;
+      const parse = <T>(text: string | null): T | null => {
+        try {
+          return text === null ? null : (JSON.parse(text) as T);
+        } catch {
+          return null;
+        }
+      };
+      const head = parse<{ task: string; condition: string }>(startedAt) ??
+        parse<{ task: string; condition: string }>(resultText) ?? { task: "unknown", condition: "unknown" };
+      if (!resultText) {
+        rows.push(
+          excludedRow(
+            "codex",
+            head.task,
+            head.condition,
+            name,
+            "no result.json (the run stopped before it finished)",
+          ),
+        );
+        continue;
+      }
+      const result = parse<{
         task: string;
         condition: string;
         seconds: number;
         status: number | null;
+        reason?: string | null;
         deliveries?: { outcome: string; units: string[] }[] | null;
-      };
-      // A run whose Codex process failed (a timeout, a login error) says nothing about Sphica: it is not a result
-      if (result.status !== 0) {
-        console.log(`${name}: codex exited ${result.status}, left out`);
+      }>(resultText);
+      // Cut off while it was written: the run started, so it stays in the denominator
+      if (!result) {
+        rows.push(excludedRow("codex", head.task, head.condition, name, "unreadable result.json"));
         continue;
       }
-      // An inject run whose hooks logged nothing at all never had Sphica delivering: it is not a result
+      // A run whose Codex process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
+      if (result.status !== 0 || result.reason) {
+        rows.push(
+          excludedRow(
+            "codex",
+            result.task,
+            result.condition,
+            name,
+            result.reason ?? `codex exited ${result.status}`,
+          ),
+        );
+        continue;
+      }
+      // An inject run whose hooks logged nothing at all never had Sphica delivering
       if (result.condition === "inject" && !result.deliveries?.length) {
-        console.log(`${name}: inject run with no delivery log, left out`);
+        rows.push(
+          excludedRow("codex", result.task, result.condition, name, "inject run with no delivery log"),
+        );
         continue;
       }
       const task = plan.tasks.find((t) => t.id === result.task);
-      if (!task) continue;
-      const events = fs.readFileSync(path.join(dir, "events.jsonl"), "utf8");
+      if (!task) {
+        rows.push(excludedRow("codex", result.task, result.condition, name, "unknown task"));
+        continue;
+      }
+      const gold = task.gold ?? [];
+      const events = read("events.jsonl");
+      const found = foundInCodexEvents(events, gold);
+      const emitted = (result.deliveries ?? [])
+        .filter((d) => d.outcome === "emitted")
+        .flatMap((d) => d.units);
+      const answer = answerFormat(read("answer.json"));
+      const cut = capPatch(read("patch.diff") ?? "");
       rows.push({
         model: "codex",
         task: task.id,
         condition: result.condition,
         run: name,
+        excluded: null,
         tests: hiddenTest(path.join(dir, "work"), task),
-        answer: fs.existsSync(path.join(dir, "last.md"))
-          ? fs.readFileSync(path.join(dir, "last.md"), "utf8")
-          : "",
-        delivered: (result.deliveries ?? []).filter((d) => d.outcome === "emitted").flatMap((d) => d.units),
-        signals: { ...signals(events), seconds: result.seconds },
+        answer: answer.text,
+        answer_format: answer.format,
+        answer_format_reason: answer.reason,
+        patch: cut.patch,
+        patch_truncated: cut.truncated,
+        gold,
+        delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
+        delivered_units: emitted,
+        found,
+        // A missing or broken event log cannot say how many searches or errors there were
+        signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },
       });
     }
   fs.writeFileSync(
@@ -213,18 +366,21 @@ function main() {
   );
   for (const r of rows)
     console.log(
-      [
-        r.model,
-        r.task,
-        r.condition,
-        r.tests,
-        `delivered=${r.delivered.length}`,
-        `search=${r.signals.searches}/${r.signals.empty_searches} empty`,
-        `read404=${r.signals.reads_not_found}`,
-        `errors=${r.signals.tool_errors}`,
-        `turns=${r.signals.turns ?? "?"}`,
-        `${r.signals.seconds ?? "?"}s`,
-      ].join("  "),
+      r.excluded
+        ? [r.model, r.task, r.condition, `excluded: ${r.excluded}`].join("  ")
+        : [
+            r.model,
+            r.task,
+            r.condition,
+            r.tests,
+            `delivered=${r.delivered}`,
+            `found=${r.found}`,
+            `answer=${r.answer_format}`,
+            `patch=${r.patch.length}${r.patch_truncated ? " (cut)" : ""}`,
+            `search=${r.signals?.searches ?? "?"}/${r.signals?.empty_searches ?? "?"} empty`,
+            `turns=${r.signals?.turns ?? "?"}`,
+            `${r.signals?.seconds ?? "?"}s`,
+          ].join("  "),
     );
 }
 

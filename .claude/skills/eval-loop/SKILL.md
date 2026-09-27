@@ -38,24 +38,17 @@ Loop progress:
 - [ ] 1. Fixture current with db/schema.sql (rebuild after any schema change)
 - [ ] 2. Archive the last loop, build, delete old claude/eval-* branches, push the 4 slots
 - [ ] 3. Fire each routine at least twice with the task prompt; run codex.ts for all four slots
-- [ ] 4. Save each run's log (RemoteTrigger get_run_log), then collect
-- [ ] 5. Grade final answers blind (Claude and Codex), compare
-- [ ] 6. For each failure: acceptance case first (red), fix, verify, rerun the same task
-```
-
-1. A fixture is built through the record server's own functions: `node evals/cloud/fixture.ts new|harvest|check|save`. Keep each PR's record JSON
-   next to the database (`~/.cache/sphica-eval/fixtures/pr<N>.record.json`) so it can be rebuilt. Anchor records by the trace contract
-   (`plugin/skills/trace/SKILL.md`), or delivery has nothing to show
-2. Move the last `loop.json`, `build/manifest.json`, `codex-runs/`, and `logs/` into `archive/<loop>/` (deleted branches cannot be collected again).
-   Then `node evals/cloud/build.ts --project <name>`, and for each slot delete its `claude/eval-*` branches and, from
-   `~/.cache/sphica-eval/build/eval-shelf-N`, `git fetch -q origin main && git push --force-with-lease origin main` (the build starts a new history). The build fails if the inject slot's delivery hook logs nothing (the smoke test)
-3. Fire with RemoteTrigger `run` and body `{"text": "<task prompt>"}`. Codex: `node evals/cloud/codex.ts --repo eval-shelf-N --task <id>` for each slot.
-   In the inject and gold slots it writes the hooks into the run's own CODEX_HOME and passes `--dangerously-bypass-hook-trust`; collect leaves out
-   an inject run with no delivery log and any run whose Codex process failed
-4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the failure signals). Then
-   `node evals/cloud/collect.ts` writes `~/.cache/sphica-eval/loop.json`: hidden tests, delivered unit keys, final answers, and failure signals
-5. Grade the final answer, not only the patch: a run in an old checkout often stops at a plan because that checkout's CLAUDE.md demands the owner's Go.
-   Give graders the task's `expect` and the answers without their conditions
+- [ ] 4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the failure signals and for
+   `found`). Then `node evals/cloud/collect.ts --fired <slot>=<n> ...` (required for every slot, with how many times it was fired; `=0` for a slot not fired) writes
+   `~/.cache/sphica-eval/loop.json`: per run the hidden tests, the patch, the final answer, and four signals kept apart: `delivered`, `found`,
+   Codex's `answer_format`, and `excluded` with the reason. Every Codex run that wrote `started.json` and every fired Claude run is a row,
+   so a failed or missing run stays in the denominator. A missing log makes `found` unknown, never no, and its counters null
+5. `node evals/cloud/grade.ts` grades each result row blind through `grade.schema.json` with its own HOME and CODEX_HOME (the grader sees the task, `expect`, `against`, the
+   answer, and the patch; never the model or the condition) and writes `~/.cache/sphica-eval/grades.json` with a table by model and
+   condition. A grade that fails its schema, or answers `not_applicable` when the task has `against` (or anything else when it has none), is `ungraded`, not a score. Report both models side by side with n: started, excluded,
+   ungraded, the score spread, each signal including unknown, Codex's answer formats, and the tracked failure (delivered or found, and still made the change
+   `against` describes). Grade the final answer and the patch, not the answer alone: a run in an old checkout often stops at a plan
+   because that checkout's CLAUDE.md demands the owner's Go
 
 ## Traps seen in earlier loops
 

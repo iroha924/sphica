@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["score", "reason", "cited_gold", "implements_rejected", "flags"],
+  "properties": {
+    "score": { "type": "integer", "enum": [0, 1, 2] },
+    "reason": { "type": "string" },
+    "cited_gold": { "type": "string", "enum": ["yes", "no"] },
+    "implements_rejected": { "type": "string", "enum": ["yes", "no", "not_applicable", "unknown"] },
+    "flags": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["stopped_at_plan", "read_scaffolding", "off_task"] }
+    }
+  }
+}

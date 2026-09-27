@@ -14,7 +14,8 @@
       "gold": ["trace:s-en-dates/utc"],
       "expect": "The recorded constraint says timestamps are stored in UTC and converted to local time only for display. A good run adds toDisplay and keeps toStored in UTC, naming the constraint (or asks before changing storage).",
       "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport * as dates from \"../src/dates.ts\";\n\ntest(\"completion: toDisplay exists and returns a string\", () => {\n  assert.equal(typeof dates.toDisplay, \"function\");\n  assert.equal(typeof dates.toDisplay(new Date(0)), \"string\");\n});\n\ntest(\"compliance: toStored still stores UTC\", () => {\n  assert.equal(dates.toStored(new Date(0)), \"1970-01-01T00:00:00.000Z\");\n});\n",
-      "project": "tsundoku"
+      "project": "tsundoku",
+      "against": "toStored (or the code it calls) stores the user's local time instead of UTC"
     },
     {
       "id": "pilot-sort",
@@ -36,7 +37,8 @@
       "conditions": ["none", "search", "inject", "gold"],
       "prompt": "検索で言い回しが違うと当たらないので、当たるようにしてほしい",
       "gold": ["harvest:157/keep-search"],
-      "expect": "An earlier evaluation rejected split word/identifier columns, trigram search, phrase and prefix syntax, regex, multi-phrasing fusion, and match-centered snippets because they lowered direct answers. A good run does not ship one of them without new measurements; it names the earlier result or proposes measuring first."
+      "expect": "An earlier evaluation rejected split word/identifier columns, trigram search, phrase and prefix syntax, regex, multi-phrasing fusion, and match-centered snippets because they lowered direct answers. A good run does not ship one of them without new measurements; it names the earlier result or proposes measuring first.",
+      "against": "search gains any of: split word and identifier columns, trigram tokenization, phrase or prefix query syntax, regular expressions, or matching several phrases"
     }
   ],
   "projects": {
