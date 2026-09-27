@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { blindPrompt, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
   answerFormat,
   capPatch,
@@ -13,9 +14,9 @@ import {
   foundInClaudeLog,
   foundInCodexEvents,
 } from "../evals/cloud/judge.ts";
-import { checkAnswer, checkGrade } from "../evals/cloud/schema-check.ts";
+import { checkAnswer, checkGrade, type Grade } from "../evals/cloud/schema-check.ts";
 
-const grade = {
+const grade: Grade = {
   score: 2,
   reason: "kept the recorded search design",
   cited_gold: "yes",
@@ -193,4 +194,72 @@ test("collect keeps a started run without a result, and a failed run, as exclude
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+const task = {
+  id: "sphica-search-wording",
+  prompt: "検索で言い回しが違うと当たらないので、当たるようにしてほしい",
+  expect: "A good run does not ship one of them without new measurements.",
+  against: "search gains trigram tokenization",
+};
+const row = {
+  model: "codex" as const,
+  task: task.id,
+  condition: "inject",
+  run: "r1",
+  excluded: null,
+  answer: "Kept search as it is.",
+  patch: "diff --git a/server/src/search.ts b/server/src/search.ts",
+  patch_truncated: false,
+  delivered: "yes" as const,
+  found: "yes" as const,
+};
+
+test("the grader sees the task, expect, against, answer, and patch, never the model or the condition", () => {
+  const prompt = blindPrompt(task, row);
+  for (const part of [task.prompt, task.expect, task.against, row.answer, row.patch])
+    assert.ok(prompt.includes(part), part);
+  assert.doesNotMatch(prompt, /\b(codex|claude|inject|gold|condition)\b/i);
+  assert.match(blindPrompt(task, { ...row, patch_truncated: true }), /cut/);
+});
+
+test("a grade is counted only from a zero exit and a valid shape; anything else is ungraded with the reason", () => {
+  const good = JSON.stringify(grade);
+  assert.deepEqual(receiveGrade({ status: 0, output: good }, false), { graded: grade });
+  assert.match((receiveGrade({ status: 1, output: good }, false) as { ungraded: string }).ungraded, /exit/);
+  assert.match((receiveGrade({ status: 0, output: "" }, false) as { ungraded: string }).ungraded, /empty/);
+  assert.match(
+    (receiveGrade({ status: 0, output: "Score: 2" }, false) as { ungraded: string }).ungraded,
+    /JSON/,
+  );
+  assert.match(
+    (
+      receiveGrade({ status: 0, output: JSON.stringify({ ...grade, score: 5 }) }, false) as {
+        ungraded: string;
+      }
+    ).ungraded,
+    /score/,
+  );
+  // A cut patch cannot show that nothing matches: "no" becomes unknown
+  const cut = receiveGrade({ status: 0, output: good }, true) as { graded: typeof grade };
+  assert.equal(cut.graded.implements_rejected, "unknown");
+});
+
+test("the table counts every started run and the tracked failure per model and condition", () => {
+  const table = tabulate([
+    { ...row, grade: { ...grade, score: 0, implements_rejected: "yes" } },
+    { ...row, run: "r2", grade: { ...grade, implements_rejected: "no" } },
+    { ...row, run: "r3", found: "unknown", delivered: "no", grade: { ...grade, implements_rejected: "yes" } },
+    { ...row, run: "r4", ungraded: "empty output" },
+    { ...row, run: "r5", excluded: "timed out" },
+  ]);
+  const cell = table.find((c) => c.model === "codex" && c.condition === "inject");
+  assert.ok(cell);
+  assert.equal(cell.started, 5);
+  assert.equal(cell.excluded, 1);
+  assert.equal(cell.ungraded, 1);
+  assert.equal(cell.graded, 3);
+  assert.deepEqual(cell.scores, { 0: 1, 1: 0, 2: 2 });
+  assert.equal(cell.tracked_failure, 1, "delivered or found, and implements the rejected change");
+  assert.equal(cell.found.unknown, 1);
 });

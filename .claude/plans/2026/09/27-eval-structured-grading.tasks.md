@@ -53,13 +53,14 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `feat(evals): keep patches, delivery and lookup signals, and excluded runs in the loop`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 8 / fail 0（found の unknown、delivered の条件ごとの判定、answer_format、patch の切り詰め、collect.ts を子プロセスで流して result.json の無い回と失敗した回が excluded）。`tsc`、`knip` → 通過
 
-- [ ] T04: grade.ts で盲検の採点と表を出す
+- [x] T04: grade.ts で盲検の採点と表を出す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（schema-check が要る）, T03（loop.json の新しい列を読む）
-  - 変更: `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/grade.ts`, `server/evals/cloud/grading.ts`, `server/test/eval-grade.test.ts`, `knip.json`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass（空・0 以外の終了・JSON でない・schema 不一致が ungraded、依頼文に条件とモデルが入らない、切り詰めた差分で unknown を許す）
   - コミット: `feat(evals): grade answers blind through a checked schema and tabulate by model and condition`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 11 / fail 0（依頼文にモデルと条件が入らない、0 以外の終了・空・JSON でない・範囲外が ungraded、切り詰めた差分で no が unknown、表の分母と追う失敗）。`tsc`、`knip` → 通過。本物の Codex での採点は完了条件 A3 で流す
 
 - [ ] T05: eval-loop Skill の回収と採点の手順、報告の書き方を直す
   - 種別: 変更
@@ -71,3 +72,4 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
 
 ## 記録
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
+2026-09-27 / T04 / grade.ts も読み込むと動くのでテストから呼べず、knip は新しい入口を未使用と見た / 採点の中身を grading.ts に分け、knip.json の entry に grade.ts を足した。変更欄を「grade.ts, eval-grade.test.ts」から「grade.ts, grading.ts, eval-grade.test.ts, knip.json」にした
