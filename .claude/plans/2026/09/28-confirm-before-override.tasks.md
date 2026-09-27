@@ -49,13 +49,14 @@ base: main
   - コミット: `feat(evals): add pilot-display, a related record the request does not conflict with`
   - 結果: `node evals/cloud/build.ts --project tsundoku`（一時の出力先）→ exit 0、gold.json に pilot-display が入る。どのタスクの依頼文も他の依頼文に含まれないことを確かめた。`bun run verify` → exit 0
 
-- [ ] T04: eval-loop Skill に旧・新の計測手順と出荷の条件を書く
+- [x] T04: eval-loop Skill に旧・新の計測手順と出荷の条件を書く
   - 種別: 変更
   - 計画: S3
   - 依存: T03（書く手順が pilot-display を含む）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → exit 0
   - コミット: `docs(eval-loop): measure old and new wording on the same slots and state the ship bar`
+  - 結果: `bun run verify:ai` → exit 0。手順 6（旧・新の計測と出荷の条件）と、gold の描画・依頼文の含み合いの注意を足した
 
 ## P2: 確かめてから聞くよう文言を直す
 

@@ -47,8 +47,13 @@ Loop progress:
    answer, and the patch; never the model or the condition) and writes `~/.cache/sphica-eval/grades.json` with a table by model and
    condition. A grade that fails its schema, or answers `not_applicable` when the task has `against` (or anything else when it has none), is `ungraded`, not a score. Report both models side by side with n: started, excluded,
    ungraded, the score spread, each signal including unknown, Codex's answer formats, and the tracked failure (delivered or found, and still made the change
-   `against` describes). Grade the final answer and the patch, not the answer alone: a run in an old checkout often stops at a plan
-   because that checkout's CLAUDE.md demands the owner's Go
+   `against` describes). Grade the final answer and the patch, not the answer alone. build.ts drops the slot's "Before implementing"
+   section (the owner's Go) and stops if a copy still asks for it, so a stop at a plan is the model's own
+6. To credit a wording change, measure old and new on the same slots and records: check out the commit before the change in a worktree,
+   run its `build.ts` (old) and HEAD's (new), and run steps 2 to 5 for each. Tasks: the conflict tasks (`against` set) and pilot-display (a related
+   record the request does not conflict with). inject and gold 3 runs each, none and search 2 each, both models. Ship the wording only if, on the
+   new run, both models have tracked failure 0 in the conflict tasks' inject and gold, pilot-display is implemented (score >= 1) in every graded
+   run, and none and search show no `stopped_at_plan`; report 3 runs as preliminary
 
 ## Traps seen in earlier loops
 
@@ -57,7 +62,8 @@ Loop progress:
 - Cloud containers are reused across runs and routines, `$TMPDIR` included. The slots key their database copy by the fixture hash (`.tools/fixture.id`);
   a shared path once served an earlier project's database, which `status` showed as the wrong counts. Check `status` in a run log when numbers look off
 - A schema change leaves an old fixture's CHECKs behind; delivery logs then fail silently and per-session limits stop working. Rebuild the fixture
-- Gold text must be whole. Pointing it at a Sphica tool the slot lacks made both models reject the record as an unverifiable claim
+- Gold renders its records with the delivery renderer (`recordLines` in deliver.ts) and points to no Sphica tool: a pointer to a tool the slot lacks made both models reject the record as an unverifiable claim. build.ts stops if a gold record's body or reason would be cut
+- A task's prompt must not contain another task's prompt: collect and gold find the task by the prompt text
 - Unattended runs sent push notifications to the owner; the slot settings deny `PushNotification`. The routines also carry the Claude_Docs and
   Claude_Code_Remote connectors, which cannot be removed; they are the same in every condition
 - The gold slot's scaffolding is in the checkout (`.tools/gold.json`, `gold.sh`). A run that reads it can call the gold record forged; one
