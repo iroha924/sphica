@@ -85,6 +85,12 @@ test("search keeps records holding most of the question's words, filters them, a
     assert.deepEqual(await keys("CI push", { kinds: ["finding"] }), ["trace:ext-s1/ci"]);
     assert.deepEqual(await keys("CI push", { kinds: ["decision"] }), []);
     assert.deepEqual(await keys("pnpm", { lifecycles: ["active"] }), []);
+    // Kind and lifecycle filters hold for successors too; a path filter still brings the successor of a record anchored there
+    assert.deepEqual(await keys("pnpm", { lifecycles: ["superseded"] }), ["trace:ext-s1/pnpm"]);
+    assert.deepEqual(
+      await keys("pnpm", { kinds: ["finding", "decision"], lifecycles: ["superseded", "active"] }),
+      ["trace:ext-s1/npm", "trace:ext-s1/pnpm"],
+    );
     assert.deepEqual(await keys("pnpm installs", { path: "package.json" }), [
       "trace:ext-s1/npm",
       "trace:ext-s1/pnpm",
@@ -219,6 +225,16 @@ test("anchors are located, moved, missing, or unknown, and a symbol only matches
     assert.equal(check("bin", "x", null), "unknown");
     assert.equal(check("../outside", null, null), "unknown");
     assert.equal(checkAnchor(null, { path: "a.ts", symbol: null, line_start: null }).state, "unknown");
+    // A symlinked directory inside the repository must not let an anchor read a file outside it
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-outside-"));
+    try {
+      fs.writeFileSync(path.join(outside, "private"), "SECRET_TOKEN = 1\n");
+      fs.symlinkSync(outside, path.join(root, "link"));
+      assert.equal(locate(root, "link/private", "SECRET_TOKEN"), null);
+      assert.equal(check("link/private", "SECRET_TOKEN", null), "unknown");
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -290,6 +306,38 @@ test("another project's many matches never crowd out this project's hit", async 
       sources.hits.map((h) => h.id).sort((a, b) => a - b),
       [m, many, found].sort((a, b) => a - b),
       "this project's three messages, none of the other project's 210",
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("reading as of a past time shows no retraction made after it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Use pnpm. It installs faster." });
+    await save(db, p, {
+      units: [
+        decision("pnpm", m, "Use pnpm.", {
+          evidence: [
+            { source: `s${m}`, quote: "Use pnpm.", role: "states" },
+            { source: `s${m}`, quote: "It installs faster.", role: "explains" },
+          ],
+        }),
+      ],
+    });
+    // One of two pieces of evidence is retracted, dated after the as-of time below
+    db.owner.exec(
+      "update unit_evidence set retracted_at = '2099-01-01T00:00:00.000Z', retraction_reason = 'later mistake', retraction_source_id = source_id, retraction_span_start = span_start, retraction_span_end = span_end where role = 'explains'",
+    );
+    const asOf = new Date(Date.now() + 60_000).toISOString();
+    const before = (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null, asOf)) ?? "";
+    assert.match(before, /Use pnpm\./);
+    assert.doesNotMatch(before, /retracted|later mistake/);
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null)) ?? "",
+      /\[retracted: later mistake\]/,
     );
   } finally {
     await db.done();

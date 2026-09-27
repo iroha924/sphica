@@ -160,15 +160,19 @@ export async function searchUnits(
       rank: r.rank,
     });
   }
-  // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question
+  // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question.
+  // The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
   const shown = new Set(hits.map((h) => h.id));
   for (const h of [...hits].filter((x) => x.lifecycle === "superseded")) {
-    const next = await db
+    let successors = db
       .selectFrom("unit_link as l")
       .innerJoin("unit as n", "n.id", "l.from_unit")
       .where("l.to_unit", "=", h.id)
       .where("l.kind", "=", "supersedes")
-      .where("n.extraction", "=", "supported")
+      .where("n.extraction", "=", "supported");
+    if (q.kinds?.length) successors = successors.where("n.kind", "in", q.kinds);
+    if (q.lifecycles?.length) successors = successors.where("n.lifecycle", "in", q.lifecycles);
+    const next = await successors
       .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
       .execute();
     for (const n of next)

@@ -17,6 +17,9 @@ function readText(root: string, rel: string): string | null | undefined {
   const st = fs.lstatSync(abs, { throwIfNoEntry: false });
   if (!st) return null;
   if (!st.isFile() || st.size > MAX_BYTES) return undefined;
+  // A symlinked directory on the way can lead outside the repository: the real path must stay inside the real root
+  const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
+  if (inside.startsWith("..") || path.isAbsolute(inside)) return undefined;
   const buf = fs.readFileSync(abs);
   return buf.includes(0) ? undefined : buf.toString("utf8");
 }

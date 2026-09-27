@@ -135,6 +135,16 @@ async function describe(
       .orderBy("id")
       .execute(),
   ]);
+  // As of a past time, what happened later has not happened: retractions, retired anchors, and resolved conflicts after it read as open
+  if (asOf) {
+    const later = (at: string | null) => (at && at > asOf ? null : at);
+    for (const e of evidence)
+      if (!later(e.retracted_at)) Object.assign(e, { retracted_at: null, retraction_reason: null });
+    for (const a of adoption)
+      if (!later(a.retracted_at)) Object.assign(a, { retracted_at: null, retraction_reason: null });
+    for (const a of anchors) a.retired_at = later(a.retired_at);
+    for (const l of links) l.resolved_at = later(l.resolved_at);
+  }
 
   const out = [
     `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
