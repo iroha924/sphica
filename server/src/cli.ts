@@ -271,11 +271,14 @@ async function init(flags: { cwd?: string; name?: string }): Promise<void> {
  */
 async function uninstall(yes: boolean): Promise<void> {
   const home = path.join(os.homedir(), ".sphica");
+  // Inside by path segments: ~/.sphica-old is a sibling, not a folder in ~/.sphica
+  const inHome = (p: string) => {
+    const rel = path.relative(home, path.resolve(p));
+    return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  };
   const where = [
     home,
-    ...(process.env.SPHICA_DB && !path.resolve(process.env.SPHICA_DB).startsWith(home)
-      ? [process.env.SPHICA_DB]
-      : []),
+    ...(process.env.SPHICA_DB && !inHome(process.env.SPHICA_DB) ? [process.env.SPHICA_DB] : []),
   ];
   await boxed("sphica uninstall", async () => {
     if (!fs.existsSync(home)) console.log(indent(`${mark("none")} ${home} does not exist`));

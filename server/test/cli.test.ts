@@ -124,3 +124,19 @@ test("uninstall refuses without --yes outside a terminal, then deletes ~/.sphica
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("uninstall names a SPHICA_DB in a sibling of ~/.sphica as outside it", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-uninstall-"));
+  try {
+    fs.mkdirSync(path.join(home, ".sphica"));
+    const sibling = path.join(home, ".sphica-old", "db.sqlite");
+    const out = execFileSync(process.execPath, [CLI, "uninstall", "--yes"], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: sibling },
+      timeout: 30_000,
+    });
+    assert.match(out, /SPHICA_DB points outside it/, out);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
