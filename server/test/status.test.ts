@@ -57,7 +57,10 @@ test("status counts captured and extracted records and names the sessions not tr
     });
     const out = await status(db.reader, p, "o/r");
     assert.match(out, /Captured: 3 sessions, 3 sources\./);
-    assert.match(out, /1 active record, 1 candidate waiting for adoption, 1 quarantined record/);
+    assert.match(
+      out,
+      /1 active record, 1 candidate not active yet \(waiting for adoption or evidence\), 1 quarantined record/,
+    );
     // s2 has an owner message nobody has looked at; s3 has only an assistant reply, so there is nothing to trace
     assert.match(out, /1 session not traced yet/);
     assert.match(out, /- CSV を作り直す \(active\): 途中/);

@@ -439,3 +439,28 @@ test("the delivery hook process answers with additionalContext, and prints nothi
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("a constraint anchored only as evidence is a standing constraint at session start", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Never log tokens." });
+    await save(db, p, {
+      units: [
+        decided("no-token-logs", m, "Never log tokens.", {
+          anchors: [{ path: "src/log.ts", role: "evidence" }],
+        }),
+      ],
+    });
+    const start = await deliver(
+      { hook_event_name: "SessionStart", session_id: crypto.randomUUID(), cwd: repo, source: "startup" },
+      "claude-code",
+      db.file,
+    );
+    assert.match(start, /no-token-logs/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

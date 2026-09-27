@@ -361,7 +361,8 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
     .orderBy("updated_at", "desc")
     .limit(3)
     .execute();
-  // Broad constraints: active constraints with no code location, so no edit hook would ever show them
+  // Broad constraints: active constraints with no place they apply to (an evidence anchor only says where it was done), so no read
+  // or edit hook would ever show them
   const broad = await deliverable(db, projectId)
     .where("u.kind", "=", "constraint")
     .where(({ not, exists, selectFrom }) =>
@@ -370,6 +371,7 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
           selectFrom("unit_anchor as a")
             .select("a.id")
             .whereRef("a.unit_id", "=", "u.id")
+            .where("a.role", "=", "applies_to")
             .where("a.retired_at", "is", null),
         ),
       ),

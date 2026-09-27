@@ -103,7 +103,7 @@ export async function status(db: Kysely<DB>, projectId: number, name: string): P
   const lines = [
     `${name}`,
     `Captured: ${plural(c.sessions, "session")}, ${plural(c.sources, "source")}.`,
-    `Extracted: ${plural(c.active, "active record")}, ${plural(c.candidates, "candidate")} waiting for adoption, ${plural(c.quarantined, "quarantined record")}.`,
+    `Extracted: ${plural(c.active, "active record")}, ${plural(c.candidates, "candidate")} not active yet (waiting for adoption or evidence), ${plural(c.quarantined, "quarantined record")}.`,
     c.pendingSessions
       ? `${plural(c.pendingSessions, "session")} not traced yet: their decisions exist only as captured text (run /sphica:trace pending).`
       : "Every captured session has been traced.",
