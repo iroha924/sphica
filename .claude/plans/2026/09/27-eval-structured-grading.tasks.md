@@ -44,13 +44,14 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `feat(evals): record every Codex run and take its answer through a schema`
   - 結果: `bun run --cwd server typecheck` → exit 0。読んで確かめた: started.json は clone の前に書き、以降は try で包み、result.json は finally で status と reason を書く。回答は `--output-schema answer.schema.json -o answer.json`、gold は gold-hook.sh が受領を gold-receipt.txt に残す
 
-- [ ] T03: collect.ts に patch、delivered と found、answer_format、excluded を足す
+- [x] T03: collect.ts に patch、delivered と found、answer_format、excluded を足す
   - 種別: 変更
   - 計画: S3
   - 依存: T01（schema-check が要る）, T02（started.json と answer.json と gold の受領を読む）
-  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/judge.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass（ログが無い回の found が unknown、result.json の無い回が excluded になるテストを含む）
   - コミット: `feat(evals): keep patches, delivery and lookup signals, and excluded runs in the loop`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 8 / fail 0（found の unknown、delivered の条件ごとの判定、answer_format、patch の切り詰め、collect.ts を子プロセスで流して result.json の無い回と失敗した回が excluded）。`tsc`、`knip` → 通過
 
 - [ ] T04: grade.ts で盲検の採点と表を出す
   - 種別: 追加
@@ -69,3 +70,4 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `docs(eval-loop): grade with grade.ts and report both models with unknown and excluded counts`
 
 ## 記録
+2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
