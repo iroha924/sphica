@@ -46,6 +46,7 @@ and only by saying so: "we rejected yarn", "let's keep SQLite". check refuses th
 - A contributor's suggestion (CONTRIBUTOR, NONE) is a proposal: `role: "proposes"`, and no adoption. It stays a candidate
 - The merge only shows the code went in. It is evidence for an `implementation` (with the commit message, `role: "implements"`), never adoption
 - A resolved review thread is not agreement either
+- `supersedes` and `conflicts` retire or dispute a saved record, so they need the owner's or a maintainer's words among the unit's evidence or adoption
 
 ## What to record
 

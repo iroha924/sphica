@@ -218,6 +218,59 @@ test("a merge or a contributor cannot adopt; the unit is kept as a candidate and
       planted.errors.some((e) => /work: only trace records work/.test(e)),
       planted.errors.join("\n"),
     );
+    // A contributor's words cannot retire or dispute a record: supersedes and conflicts outside trace need the owner's or a maintainer's words
+    await save(db, t, {
+      units: [
+        {
+          key: "kept",
+          kind: "finding",
+          text: "OFF is faster",
+          evidence: [{ source: `s${review}`, quote: "for speed", role: "states" }],
+        },
+      ],
+    });
+    const retire = await inTransaction(db.ingest, (trx) =>
+      checkRecord(trx, t, {
+        units: [
+          {
+            key: "over",
+            kind: "finding",
+            text: "x",
+            evidence: [{ source: `s${review}`, quote: "Consider", role: "states" }],
+            supersedes: "harvest:12/kept",
+            conflicts: ["harvest:12/kept"],
+          },
+        ],
+      }),
+    );
+    assert.ok(
+      retire.errors.some((e) =>
+        /over: supersedes and conflicts from harvest need the owner's or a maintainer's words/.test(e),
+      ),
+      retire.errors.join("\n"),
+    );
+    // A commit by someone who speaks as a maintainer elsewhere in the project (hana merged as OWNER) counts as their words
+    const commit = prSource(db, p, {
+      id: "c1",
+      kind: "commit_message",
+      text: "Replace the JSON cache with SQLite",
+      login: "hana",
+      assoc: "NONE",
+    });
+    const byOwner = await inTransaction(db.ingest, (trx) =>
+      checkRecord(trx, t, {
+        units: [
+          {
+            key: "cache",
+            kind: "finding",
+            text: "SQLite cache",
+            evidence: [{ source: `s${commit}`, quote: "Replace the JSON cache", role: "states" }],
+            supersedes: "harvest:12/kept",
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(byOwner.errors, []);
   } finally {
     await db.done();
   }
