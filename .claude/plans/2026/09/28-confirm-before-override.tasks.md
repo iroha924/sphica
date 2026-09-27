@@ -62,13 +62,14 @@ base: main
 
 配信と MCP の案内に固定文言を入れ、編集の前の「理由を言えば通してよい」を消す。
 
-- [ ] T05: 配信の固定文言 CONFIRM / CONFIRM_GOLD と各 lead への配置、境界と命令形のテスト
+- [x] T05: 配信の固定文言 CONFIRM / CONFIRM_GOLD と各 lead への配置、境界と命令形のテスト
   - 種別: 変更
   - 計画: S4
   - 依存: T02（gold が共有の描画関数を使っている）
   - 変更: `server/src/deliver.ts`, `server/evals/cloud/build.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`
   - 完了条件: `bun run verify` → exit 0（各配信面で長い lead でも記録が 1 件以上残る、命令形の本文でも lead がバイト単位で同じ、を含む）
   - コミット: `feat(deliver): ask the user before making a change a checked record rules out`
+  - 結果: `node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 15 / fail 0（読む前・編集の前・Bash の名指し・プロンプト・SessionStart の全部で固定文言と記録が残る、命令形の本文でも lead が同じ）。`bun run verify` → exit 0。tsundoku の gold.json の lead に gold 用の固定文言が入る
 
 - [ ] T06: MCP の案内で「コードとの食い違い」と「依頼が過去の決定を覆す」を分ける
   - 種別: 変更
@@ -81,3 +82,4 @@ base: main
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
 2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
+2026-09-28 / T05 / 固定文言が約 280 文字あり、読む前の配信のセッション上限（3000）を 1 回ごとに食って 8 件に届かなくなった / 各配信の上限に文言の長さを足し、セッション上限は使った量から 1 回ごとに文言の分を引いて数えるようにした（記録に使える量は変更前と同じ）

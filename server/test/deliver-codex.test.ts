@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { inTransaction } from "../src/db.ts";
-import { deliver } from "../src/deliver.ts";
+import { CONFIRM, deliver } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -249,7 +249,7 @@ test("a long lead or a rich record never empties an edit delivery: a line that d
       "codex",
       db.file,
     );
-    assert.ok(out.length > 0 && out.length <= 1500, `${out.length} chars`);
+    assert.ok(out.length > 0 && out.length <= 1500 + CONFIRM.length + 1, `${out.length} chars`);
     assert.match(out, /trace:ext-s1\/rich /);
     assert.match(out, /trace:ext-s1\/short /, "a shorter record after a long one still fits");
   } finally {
