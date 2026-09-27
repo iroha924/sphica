@@ -99,6 +99,11 @@ function main() {
       .map((b) => b.trim())
       .filter(Boolean);
     for (const branch of branches) {
+      // A branch left from an earlier build ran another bundle and fixture: it is not this loop's result
+      if (spawnSync("git", ["-C", dir, "merge-base", "--is-ancestor", "main", branch]).status !== 0) {
+        console.log(`${repo} ${branch}: not built on this loop's slot, left out`);
+        continue;
+      }
       const show = (file: string) =>
         spawnSync("git", ["-C", dir, "show", `${branch}:${file}`], { encoding: "utf8" }).stdout ?? "";
       const receipts = show(".eval/receipts.jsonl");
