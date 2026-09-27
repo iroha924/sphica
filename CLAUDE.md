@@ -64,7 +64,7 @@ Hand it over only after `bun run verify` passes.
 
 - `review-shipping`: before a commit that changes the package, versions, bundle inputs, or check scripts
 - Codex: before merging each PR. Ask by following the `codex-review` Skill
-- GitHub's Codex (ChatGPT connector) reviews a PR automatically when it is created. Claude owns watching it and deciding on re-reviews; the owner only looks at finished PRs.
+- GitHub's Codex (ChatGPT connector) reviews a PR when it is created and again only when someone comments `@codex review` (a push starts nothing); its Security Review runs with each Code Review. Claude owns watching it and deciding on re-reviews; the owner only looks at finished PRs.
   The summary comment's table (Codex Review Summary) is the source of truth: when the head commit's Code Review is Completed, it is done (👀 in the PR body means running,
   👍 means everything finished with no findings). Findings are unresolved review threads, Security Review ones included; read each, decide whether to fix or decline it, then resolve it.
   One round, one request: fix every finding of the round, push once, confirm it reached the remote, then comment `@codex review` once (it posts under the owner's name, and a request on a head you are about to replace is a wasted round).
