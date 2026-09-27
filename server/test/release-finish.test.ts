@@ -150,6 +150,12 @@ test("release-finish reads only the Release notes section, without comments", ()
   // Nested comment markers must not leave an opening `<!--` that would hide the rest of the notes
   assert.equal(releaseNotes("## Release notes\n\n<!<!---->--x\nHidden\n"), null);
   assert.equal(releaseNotes("## Release notes\n\nText <!-- open\n"), null);
+  // A fence closes only with the same character at least as long, so a shorter line inside does not end it
+  assert.equal(
+    releaseNotes("## What changed\n````md\n```\n## Release notes\nExample\n````\n## Verification\n"),
+    null,
+  );
+  assert.equal(releaseNotes("## What changed\n~~~\n```\n## Release notes\nExample\n~~~\n"), null);
   // Headings inside a code fence are text, not sections
   assert.equal(
     releaseNotes("## What changed\n```md\n## Release notes\nInjected\n```\n## Verification\nOK\n"),

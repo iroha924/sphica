@@ -9,11 +9,22 @@ export function releaseNotes(body) {
     text = text.replace(/<!--[\s\S]*?-->/g, "");
   }
   const lines = text.split("\n");
-  // A heading inside a code fence is text, not a section
-  let fenced = false;
+  // A heading inside a code fence is text, not a section. A fence opens with 3 or more backticks or tildes
+  // and closes only with the same character, at least as many, and nothing else on the line (CommonMark)
+  let fence = null;
   const heading = lines.map((line) => {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    return fenced || /^\s*(```|~~~)/.test(line) ? null : line;
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence === null) {
+      if (marker && !(marker[1][0] === "`" && marker[2].includes("`"))) {
+        fence = marker[1];
+        return null;
+      }
+      return line;
+    }
+    if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && marker[2].trim() === "") {
+      fence = null;
+    }
+    return null;
   });
   const start = heading.findIndex((line) => line !== null && /^## Release notes\s*$/.test(line));
   if (start === -1) return null;

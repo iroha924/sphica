@@ -164,7 +164,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): require main as the PR base when merging and finishing`
   - 結果: red: 変更前のコードで `FAKE_BASE: release` のケースが status 0 で落ちた。変更後 `node --test test/release-finish.test.ts` → 7 pass / 0 fail。actionlint → exit 0。実データの `--dry-run` → v0.5.3 で通る
 
-- [ ] T15: Release notes の抽出で、コードブロックの区切りを開始の記号の種類と長さで対応づける
+- [x] T15: Release notes の抽出で、コードブロックの区切りを開始の記号の種類と長さで対応づける
   - 種別: 修正
   - 計画: S3
   - 依存: T14（同じテストファイル）
@@ -172,6 +172,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - red: `node --test server/test/release-finish.test.ts` → 4 つのバッククォートの中に 3 つの行と見出しがある本文で、変更前のコードは見出しを節として読んで落ちる
   - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → 全件 pass
   - コミット: `fix(release): close a code fence only with a matching delimiter`
+  - 結果: red: 変更前のコードで、4 つのバッククォートの中の見出しを節として読み `Example` 以下を返して落ちた。変更後 `node --test test/release-finish.test.ts` → 7 pass / 0 fail。実データの `--dry-run` → v0.5.3 で通る
 
 - [ ] T16: 承認の前にノートを検査してハッシュを記録し、finish はそのノートと一致するときだけ Release を作る
   - 種別: 修正
