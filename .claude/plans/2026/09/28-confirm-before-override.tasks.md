@@ -120,6 +120,15 @@ base: main
   - コミット: `fix(evals): unstage dependencies in slots without an ignore file`
   - 結果: 直した行で staged は src/app.ts だけになった。`bun run verify` → exit 0
 
+- [ ] T11: 結果の後始末が Stop ごとに最終回答を上書きするのを直し、回答を追記する（新文言 tsundoku の採点で発見）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T10（同じ FINISH_SH を直す）
+  - 変更: `server/evals/cloud/build.ts`
+  - red: `node evals/cloud/build.ts --project tsundoku` → 作った finish.sh に Stop の入力を 2 回渡すと、.eval/answer.md が 2 回目の回答だけになる
+  - 完了条件: 同じ手順で .eval/answer.md に 2 回分の回答が残る。`bun run verify` → exit 0
+  - コミット: `fix(evals): keep every final answer of a run, not only the last`
+
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
 2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
@@ -134,3 +143,4 @@ base: main
 2026-09-28 / T10 / T09 の Codex レビュー（6c86c22）で 1 件: tsundoku のスロットは .gitignore が無く、node_modules は git add -A で入る / T10 で直した。新文言 tsundoku の計測スロットは T10 の前に作ったが、tsundoku のタスクは依存を入れないので影響しない
 2026-09-28 / T10 / Codex のレビュー（99cbc6a）で 1 件: 既に追跡されている node_modules も削除として staged になる / 見送った。スロットはどちらのプロジェクトも node_modules を追跡していない（git ls-files で 0 件）
 2026-09-28 / 計測 / 旧文言の結果（tracked failure = 届いたか見つけたうえで反する実装）: Claude は pilot-dates と sphica-search-wording の inject・gold で 0/12、Codex は 8/12（pilot-dates 6/6、sphica gold 2/3、inject 0/3）。none と search の stopped_at_plan は両モデル 0。旧文言 sphica の Claude none と search で 1 回ずつ結果ブランチ無し（T09 の不具合）
+2026-09-28 / T11 / 新文言 tsundoku の Claude の pilot-dates inject・gold で 1 点が 3 回。パッチは 6 回とも UTC を守り隠しテストも通過したが、採点役に渡った最終回答がクラウドの Stop フック（未コミットの催促）の後の「作業ツリーはクリーン」だった / 計測中のスロットを変えないよう、計測の後に T11 で直す。tracked failure はパッチで判定するので出荷の条件には響かない
