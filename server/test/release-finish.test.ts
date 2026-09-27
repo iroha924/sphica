@@ -38,7 +38,7 @@ fs.appendFileSync(process.env.CALLS, "gh " + a.join(" ") + "\\n");
 const created = path.join(path.dirname(process.env.CALLS), "created");
 if (a[0] === "attestation") process.exit(process.env.FAKE_NO_ATTESTATION ? 1 : 0);
 else if (a[0] === "api" && a[1].includes("/commits/")) console.log(JSON.stringify([{ number: 6, head: { sha: "${"d".repeat(40)}" } }, { number: 7, head: { sha: "${COMMIT}" } }]));
-else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)}, head: { sha: process.env.FAKE_HEAD || "${COMMIT}" }, merged: !process.env.FAKE_NOT_MERGED, merge_commit_sha: process.env.FAKE_PR_MERGE || "${MERGE}" }));
+else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)}, head: { sha: process.env.FAKE_HEAD || "${COMMIT}" }, base: { ref: process.env.FAKE_BASE || "main" }, merged: !process.env.FAKE_NOT_MERGED, merge_commit_sha: process.env.FAKE_PR_MERGE || "${MERGE}" }));
 else if (a[0] === "release" && a[1] === "create") fs.writeFileSync(created, "");
 else if (a[0] === "release" && a[1] === "view") {
   if (!process.env.FAKE_RELEASE_EXISTS && !fs.existsSync(created)) process.exit(1);
@@ -112,6 +112,7 @@ test("release-finish fails before creating anything when a check fails", () => {
     [{ FAKE_SECOND: "d".repeat(40) }, /does not merge v1\.2\.3/],
     [{ FAKE_REMOTE_TAG: "d".repeat(40) }, /remote tag v1\.2\.3 points to d{40}/],
     [{ FAKE_NOT_MERGED: "1" }, /PR #7 is not merged at b{40}/],
+    [{ FAKE_BASE: "release" }, /PR #7 targets release, not main/],
     [{ FAKE_PR_MERGE: "d".repeat(40) }, /PR #7 is not merged at b{40}/],
     [{ FAKE_DIFF: "1" }, /tree of .* differs/],
     [{ FAKE_NO_ATTESTATION: "1" }, /no SBOM attestation/],

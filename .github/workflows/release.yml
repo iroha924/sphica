@@ -330,6 +330,12 @@ jobs:
           PULL: ${{ needs.prepare.outputs.pull }}
         run: |
           set -e
+          # --match-head-commit pins only the head; the base could have been changed while waiting for approval
+          base="$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json baseRefName --jq .baseRefName)"
+          if [ "$base" != main ]; then
+            echo "PR #$PULL targets $base, not main" >&2
+            exit 1
+          fi
           gh pr merge "$PULL" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$GITHUB_SHA"
           commit="$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"

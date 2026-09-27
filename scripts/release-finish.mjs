@@ -70,6 +70,7 @@ function finish({ tag, commit, merge, pull }) {
   const pr = JSON.parse(run("gh", ["api", `repos/${repo}/pulls/${pull}`]));
   if (pr.head?.sha !== commit)
     fail(`PR #${pull} has head ${pr.head?.sha ?? "unknown"}, not the tag commit ${commit}`);
+  if (pr.base?.ref !== "main") fail(`PR #${pull} targets ${pr.base?.ref ?? "unknown"}, not main`);
   if (pr.merged !== true || pr.merge_commit_sha !== merge) fail(`PR #${pull} is not merged at ${merge}`);
   if (run("git", ["rev-parse", `${merge}^2`]) !== commit) fail(`${merge} does not merge ${tag} (${commit})`);
   if (!succeeds("git", ["diff", "--quiet", commit, merge])) fail(`the tree of ${merge} differs from ${tag}`);

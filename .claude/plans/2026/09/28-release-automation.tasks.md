@@ -154,7 +154,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `test(release): give release-script children a temporary HOME`
   - 結果: red: 変更前は 3 ファイルとも `HOME` の指定が 0 件。変更後 `rg -n "HOME: dir" server/test/release-*.test.ts` → 3 件（USERPROFILE も同じ一時ディレクトリ）。`node --test test/release-gate-cli.test.ts test/release-env.test.ts test/release-finish.test.ts` → 18 pass / 0 fail
 
-- [ ] T14: merge の直前と finish で、PR の base が main であることを確かめる
+- [x] T14: merge の直前と finish で、PR の base が main であることを確かめる
   - 種別: 修正
   - 計画: S3, S4
   - 依存: T10（同じスクリプト）
@@ -162,6 +162,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - red: `node --test server/test/release-finish.test.ts` → base が main でない PR でも、変更前のコードは通って落ちる
   - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → base 違いで exit 1 を含めて全件 pass。`mise exec -- actionlint .github/workflows/release.yml` → exit 0
   - コミット: `fix(release): require main as the PR base when merging and finishing`
+  - 結果: red: 変更前のコードで `FAKE_BASE: release` のケースが status 0 で落ちた。変更後 `node --test test/release-finish.test.ts` → 7 pass / 0 fail。actionlint → exit 0。実データの `--dry-run` → v0.5.3 で通る
 
 - [ ] T15: Release notes の抽出で、コードブロックの区切りを開始の記号の種類と長さで対応づける
   - 種別: 修正
