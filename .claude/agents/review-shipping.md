@@ -18,7 +18,7 @@ and the machines it runs on. Code quality, design taste, and checking against co
 
 `CLAUDE.md` and `.claude/rules/verification.md` are in your context at startup.
 `.claude/rules/comments.md` has `paths:`, so **it does not load until you Read a matching file**.
-Open it first when you look at comments. The `plugin-release` Skill is preloaded with the list of what ships and the steps,
+Open it first when you look at comments. The `plugin-release` Skill is preloaded with the distribution path and the release steps,
 and **it is the source of truth.** Do not copy it into this text.
 
 ## The 8 things to check
@@ -44,7 +44,7 @@ gitignored, so `git status` shows neither a running bundle nor its output. **Thi
 not overlapping is the caller's responsibility** (do not hand over this review while `bun run verify` is running).
 If you suspect an overlap, count the files in the packed contents and report them without drawing a conclusion.
 
-- Is everything present that step 1 of the `plugin-release` Skill's "Shipping" lists? **A tarball missing both manifests
+- Is everything present that `package.json`'s `files` and `scripts/lib/tarball.mjs` require (run `node scripts/check-tarball.mjs <tgz>`)? **A tarball missing both manifests
   does not load as a plugin at all**, yet counting only `dist/` passes green. `dist/` holds 5 entries (cli, mcp, mcp-record, capture, deliver)
 - Is anything listed in `package.json`'s `files` missing from the tarball?
 - Does `node dist/cli.js --version` run in the unpacked directory?
@@ -94,7 +94,8 @@ Run the packed entries the way the hosts do, and look at what the diff cannot sh
 - **Entry names.** `capture.js` and `deliver.js` run only when their own path matches `capture.(ts|js)` / `deliver.(ts|js)`; a renamed bundle
   exits 0 and prints nothing (real case: an evaluation slot renamed them to `.mjs` and delivered nothing for two loops)
 - **Hosts.** Events and matchers in `plugin/hooks/hooks.json` (Claude Code) and `plugin/hooks/codex.json` (Codex) exist in the host versions
-  users run, and the hook input fields the code reads are the ones those hosts send. Say which versions you checked
+  users run, and the hook input fields the code reads are the ones those hosts send. Check against the installed hosts (`claude --version`,
+  `codex --version`) and what you can read locally; say which versions you checked, and put the rest under Not checked
 - **The user's machine.** Hooks meet the user's git settings, large repositories, the hook timeout, headless runs (`claude -p`), and Windows
   (`commandWindows`, paths with spaces) (real cases: a user git setting changed diff paths, and a textconv ran past the 5 s timeout)
 - **The database.** A `db/schema.sql` change reaches existing databases: before 0.5.0 ships the schema is edited in place, after it a change needs

@@ -147,7 +147,9 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
    generation needs the migration `knowledge-schema` says to design first
 3. Claude Code: `claude plugin marketplace update sphica && claude plugin update sphica@sphica`. Codex:
    `codex plugin marketplace upgrade sphica && codex plugin add sphica@sphica`. Then ask the owner to run `/reload-plugins` in open sessions.
-   In sessions without an interactive terminal, MCP stays at the old version until the next session
+   In sessions without an interactive terminal, MCP stays at the old version until the next session.
+   In Codex, ask the owner to open `/hooks` and trust Sphica's hooks: Codex records trust per hook, so a hook added or changed by the update
+   stays skipped until trusted (capture keeps running, which hides it)
 4. In `sphica doctor`, check that the npm package matches between the repository and the global CLI, that the plugin channel matches between the repository
    and both hosts' caches, and that no reconnect instruction remains for the running MCP
 5. From a session after the update, call `status` and `search`, and check the contents of the changed MCP tools, Skills, and Agents. If capture
