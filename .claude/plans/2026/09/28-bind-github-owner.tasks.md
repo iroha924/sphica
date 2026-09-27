@@ -78,6 +78,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `fix(admin): check the revision under the lock and match any bound row`
   - 結果: red を実測（actual other / expected already）。直した後 `bun run test` → 299 pass / 0 fail。`bun run typecheck` → 指摘なし。`bun run sql:reach` → 128 / 128 sites。revision の競合は再現テストを作らず、読む位置をロックの中へ移しただけ
 
+- [x] T11: ghUser() が 40 文字以上のログイン名を拒み、シグナルでの終了と出力の上限超えの分類をテストする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T09（直す対象の分類が要る）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test test/github.test.ts` → 40 文字のログイン名が ok で返り失敗
+  - 完了条件: `bun run test` → 40 文字の拒否、SIGKILL で failed、2 MB の出力で unexpected を含めて通る
+  - コミット: `fix(github): cap logins at 39 characters and test the signal and size cases`
+  - 結果: red を実測（pass 5 / fail 1、40 文字が ok）。直した後 `bun run test` → 299 pass / 0 fail。`bun run typecheck` → 指摘なし
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -126,3 +136,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T02 のレビュー / F1（EMU のログイン名を拒む、再現済み）と F2（EACCES を failed にする）を採用 / 修正タスク T09 を足した
 - 2026-09-28 / T01 のレビュー / 指摘なし（Codex 側はテストを流せず、手元の `bun run test` で確認済み） / そのまま
 - 2026-09-28 / T03 のレビュー / F1（revision をロックの前に読む）と F2（複数行で最初の行だけ比べる）を採用 / 修正タスク T10 を足した
+- 2026-09-28 / T09 のレビュー / F1 のうち長さ（39 文字）は採用、EMU の接尾辞の形の検査は見送り（login は表示と保存だけで、owner の判定は数値 ID）。F2（シグナルと上限超えのテスト）は採用 / 修正タスク T11 を足した

@@ -59,8 +59,8 @@ export type SignedIn =
   | { ok: true; id: number; login: string }
   | { ok: false; reason: "missing" | "failed" | "unexpected" };
 
-/** A login is printed and stored: letters, digits, hyphens, and the underscore of an Enterprise Managed User (mona-cat_octo) */
-const LOGIN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
+/** A login is printed and stored: up to 39 letters, digits, hyphens, and the underscore of an Enterprise Managed User (mona-cat_octo) */
+const LOGIN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/;
 
 /**
  * The account gh is signed in to on github.com. A gh that cannot be started, a call that exited non-zero (signed out, offline),

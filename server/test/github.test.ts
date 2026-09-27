@@ -305,6 +305,22 @@ test("a signed-out gh, a missing gh, and an answer that is not a user are told a
   await withGh("", 1, async () => {
     assert.deepEqual(await ghUser(), { ok: false, reason: "failed" });
   });
+  // Ended by a signal, gh ran but gave no answer; an answer larger than a user can be is not one
+  for (const [script, reason] of [
+    ["process.kill(process.pid, 'SIGKILL');", "failed"],
+    ["process.stdout.write('x'.repeat(2 * 1024 * 1024));", "unexpected"],
+  ] as const) {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+    const saved = process.env.PATH;
+    try {
+      fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\n${script}\n`, { mode: 0o755 });
+      process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+      assert.deepEqual(await ghUser(), { ok: false, reason }, script);
+    } finally {
+      process.env.PATH = saved;
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  }
   for (const answer of [
     "not json",
     "null",
@@ -315,6 +331,7 @@ test("a signed-out gh, a missing gh, and an answer that is not a user are told a
     JSON.stringify({ id: 42, login: "" }),
     JSON.stringify({ id: 42, login: "-hana" }),
     JSON.stringify({ id: 42, login: "hana\nok" }),
+    JSON.stringify({ id: 42, login: "a".repeat(40) }),
   ])
     await withGh(answer, 0, async () => {
       assert.deepEqual(await ghUser(), { ok: false, reason: "unexpected" }, answer);
