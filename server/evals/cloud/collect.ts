@@ -33,6 +33,7 @@ type Row = {
   condition: string;
   run: string;
   tests: string;
+  answer: string;
   delivered: string[];
   signals: {
     searches: number;
@@ -123,6 +124,7 @@ function main() {
           condition,
           run: session,
           tests: hiddenTest(work, task),
+          answer: show(".eval/answer.md"),
           delivered: deliveries
             .filter((d) => d.outcome === "emitted")
             .flatMap((d) => JSON.parse(d.units) as string[]),
@@ -136,6 +138,8 @@ function main() {
   if (fs.existsSync(args.codex ?? ""))
     for (const name of fs.readdirSync(args.codex ?? "")) {
       const dir = path.join(args.codex ?? "", name);
+      // A run still in progress has no result yet
+      if (!fs.existsSync(path.join(dir, "result.json"))) continue;
       const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as {
         task: string;
         condition: string;
@@ -150,6 +154,9 @@ function main() {
         condition: result.condition,
         run: name,
         tests: hiddenTest(path.join(dir, "work"), task),
+        answer: fs.existsSync(path.join(dir, "last.md"))
+          ? fs.readFileSync(path.join(dir, "last.md"), "utf8")
+          : "",
         delivered: [],
         signals: { ...signals(events), seconds: result.seconds },
       });

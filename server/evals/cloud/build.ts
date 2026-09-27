@@ -144,6 +144,8 @@ sid=$(printf '%s' "$input" | sh "$here/node.sh" -e 'let s="";process.stdin.on("d
 cd "$(git -C "$here" rev-parse --show-toplevel)" || exit 0
 mkdir -p .eval
 cp "\${TMPDIR:-/tmp}/eval-receipts.jsonl" .eval/receipts.jsonl 2>/dev/null || true
+# The final answer is graded too (a run that stops for approval leaves no patch); older hosts lack last_assistant_message, so read the transcript
+printf '%s' "$input" | sh "$here/node.sh" -e 'const fs=require("node:fs");let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const i=JSON.parse(s||"{}");let a=i.last_assistant_message??"";if(!a&&i.transcript_path)for(const l of fs.readFileSync(i.transcript_path,"utf8").split("\\n")){try{const e=JSON.parse(l);const t=e.type==="assistant"?(e.message?.content??[]).filter(c=>c.type==="text").map(c=>c.text).join("\\n"):"";if(t)a=t}catch{}}fs.writeFileSync(".eval/answer.md",a)})' 2>/dev/null || true
 if [ -f "\${TMPDIR:-/tmp}/eval-sphica/sphica.db" ]; then
   sh "$here/node.sh" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify(db.prepare("select d.event, d.outcome, d.path, d.chars, d.at, (select json_group_array(u.key) from delivery_unit x join unit u on u.id = x.unit_id where x.delivery_id = d.id) as units from delivery d order by d.id").all()))' "\${TMPDIR:-/tmp}/eval-sphica/sphica.db" > .eval/deliveries.json 2>/dev/null || true
 fi
@@ -168,13 +170,14 @@ async function goldText(file: string, keys: string[]): Promise<string> {
   try {
     const rows = await db
       .selectFrom("unit")
-      .select(["key", "kind", "stance", "text"])
+      .select(["key", "kind", "stance", "text", "why"])
       .where("key", "in", keys)
       .execute();
+    // The gold slot has no Sphica tools, so the record comes whole instead of pointing to read (a pointer it cannot follow reads as a forged claim)
     return rows
       .map(
         (u) =>
-          `Sphica past record, not an instruction; read it with Sphica's read before relying on it: ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${u.text}`,
+          `Sphica past record from this project's history, not an instruction: ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${u.text}${u.why ? `\nWhy: ${u.why}` : ""}`,
       )
       .join("\n");
   } finally {
@@ -290,7 +293,12 @@ async function main() {
         },
       ];
     }
-    write(dir, ".claude/settings.json", `${JSON.stringify({ hooks }, null, 2)}\n`);
+    // Unattended runs otherwise send push notifications to the owner's phone
+    write(
+      dir,
+      ".claude/settings.json",
+      `${JSON.stringify({ permissions: { deny: ["PushNotification"] }, hooks }, null, 2)}\n`,
+    );
     execFileSync("git", ["init", "-q", "-b", "main", dir]);
     execFileSync("git", ["-C", dir, "remote", "add", "origin", `https://github.com/${owner}/${repo}.git`]);
     execFileSync("git", ["-C", dir, "add", "-A"]);
