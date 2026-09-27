@@ -62,14 +62,16 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `feat(hooks): run Claude Code delivery before Bash commands`
   - 結果: 検査を足した直後（matcher に Bash が無い状態）で `bun run verify:ai` → 「the PreToolUse delivery matcher must cover Read and Bash」で exit 1。Bash を足した後 → exit 0
 
-- [ ] T04: README（英・日）を両ホスト共通の書き方に直す
+- [x] T04: README（英・日）を両ホスト共通の書き方に直す
   - 種別: 変更
   - 計画: S3
   - 依存: T03（README が書く挙動がフックに入っていないと、書いた内容が実際と違う）
-  - 変更: `README.md`, `README.ja.md`
+  - 変更: `README.md`, `README.ja.md`, `server/evals/acceptance/cases.json`
   - 完了条件: `rg -n "Limits in 0.5.1|0.5.1 の限界" README.md README.ja.md` → 各 1 件。`bun run english` → exit 0
   - コミット: `docs(readme): say Claude Code also gets decisions for shell commands that name a file`
+  - 結果: `rg -n "Limits in 0.5.1|0.5.1 の限界" README.md README.ja.md` → 各 1 件。`bun run english` → exit 0。`biome ci` → 通過
 
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
+2026-09-27 / T04 / cases.json の note が T01 で消した過去の計画ファイルを指していた / 変更欄を「README.md, README.ja.md」から「README.md, README.ja.md, server/evals/acceptance/cases.json」にして参照を外した
