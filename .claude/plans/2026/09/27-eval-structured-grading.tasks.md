@@ -76,7 +76,7 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - 計画: S2
   - 依存: T02（直す包みと result.json を T02 が書いた）
   - 変更: `server/evals/cloud/codex.ts`
-  - red: 包みと同じ形の sh を、7 で終わる gold.sh で流す → exit 0 が返る。2 回目に空の出力で流す → 受領が空に上書きされる
+  - red: `sh <直す前の包みと同じ形の sh>` → 7 で終わる gold.sh でも exit 0、2 回目の空の出力で受領が空に上書きされる
   - 完了条件: 同じ形の sh で、7 で終わる gold.sh → exit 7、2 回目の空の出力 → 受領に 1 回目の本文が残る。`bun run --cwd server typecheck` → exit 0
   - コミット: `fix(evals): pass the gold hook's exit on, keep its receipt, and record Codex's exit first`
   - 結果: 直した形の sh で、7 で終わる gold.sh → 「record-text exit=7」、2 回目 → exit=0 で受領は「record-text」のまま。`tsc` → 通過。result.status は spawnSync の直後に入れる
@@ -85,3 +85,4 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
 2026-09-27 / T04 / grade.ts も読み込むと動くのでテストから呼べず、knip は新しい入口を未使用と見た / 採点の中身を grading.ts に分け、knip.json の entry に grade.ts を足した。変更欄を「grade.ts, eval-grade.test.ts」から「grade.ts, grading.ts, eval-grade.test.ts, knip.json」にした
 2026-09-27 / T06 / T02 の Codex レビュー（3316eb3）で 3 件: gold フックの失敗が成功に見える、2 回目の呼び出しで受領が消える、Codex の後の処理で落ちると status が null / 3 件とも T06 で直した
+2026-09-27 / T06 / red の欄が「コマンド → 期待」の形でなく done の検査で落ちた / 書式だけを直した（内容は同じ）
