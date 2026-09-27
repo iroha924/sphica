@@ -102,10 +102,19 @@ function main() {
       const work = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
       try {
         execFileSync("git", ["-C", dir, "worktree", "add", "-q", "--detach", work, branch]);
-        const deliveries = JSON.parse(show(".eval/deliveries.json") || "[]") as {
-          outcome: string;
-          units: string;
-        }[];
+        // A reused container keeps an earlier run's database copy: count only deliveries after this session's first receipt
+        const started =
+          receipts
+            .split("\n")
+            .flatMap((l) => (l.trim() ? [(JSON.parse(l) as { at: string }).at] : []))
+            .sort()[0] ?? "";
+        const deliveries = (
+          JSON.parse(show(".eval/deliveries.json") || "[]") as {
+            outcome: string;
+            units: string;
+            at: string;
+          }[]
+        ).filter((d) => d.at >= started);
         const session = branch.replace("origin/claude/eval-", "");
         const logFile = path.join(args.logs ?? "", `${session}.log`);
         rows.push({

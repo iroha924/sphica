@@ -115,8 +115,9 @@ const HOOK_SH = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
 name="$1"; shift
 log="\${TMPDIR:-/tmp}/eval-receipts.jsonl"
-# A cloud container can be reused across runs: session start clears what an earlier run left in the temporary directory
-if [ "$name" = start ]; then rm -rf "\${TMPDIR:-/tmp}/eval-sphica" "$log" "\${TMPDIR:-/tmp}/eval-gold-given"; fi
+# A cloud container can be reused across runs: session start clears the receipts and the gold marker an earlier run left. The database copy
+# stays (the MCP server may have opened it before this hook runs); the collector counts only deliveries made after this session started
+if [ "$name" = start ]; then rm -f "$log" "\${TMPDIR:-/tmp}/eval-gold-given"; fi
 input=$(cat)
 if [ "$#" -gt 0 ]; then output=$(printf '%s' "$input" | "$@" 2>/dev/null); else output=""; fi
 LOG="$log" sh "$here/node.sh" -e 'const [name, input, output] = process.argv.slice(1); require("node:fs").appendFileSync(process.env.LOG, JSON.stringify({ name, at: new Date().toISOString(), node: process.version, input: JSON.parse(input || "{}").hook_event_name ?? null, prompt: String(JSON.parse(input || "{}").prompt ?? "").slice(0, 2000) || undefined, output }) + "\\n")' "$name" "$input" "$output" 2>/dev/null || true
@@ -147,6 +148,8 @@ if [ -f "\${TMPDIR:-/tmp}/eval-sphica/sphica.db" ]; then
   sh "$here/node.sh" -e 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify(db.prepare("select d.event, d.outcome, d.path, d.chars, d.at, (select json_group_array(u.key) from delivery_unit x join unit u on u.id = x.unit_id where x.delivery_id = d.id) as units from delivery d order by d.id").all()))' "\${TMPDIR:-/tmp}/eval-sphica/sphica.db" > .eval/deliveries.json 2>/dev/null || true
 fi
 git add -A >/dev/null 2>&1
+# Files the agent wrote under ignored paths (a plan in .claude/plans) are part of its answer
+git ls-files -z --others --ignored --exclude-standard | grep -zv '^.tools/' | xargs -0 -r git add -f >/dev/null 2>&1
 git -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
 git push -q --force origin "HEAD:refs/heads/claude/eval-$sid" >/dev/null 2>&1 || true
 `;
