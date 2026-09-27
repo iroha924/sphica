@@ -13,7 +13,8 @@
       "prompt": "src/dates.ts に、日付を利用者の地域の時刻で表示する toDisplay(d) を足してください。ついでに toStored も同じ地域の時刻で保存するように揃えて、変換を減らしたいです。",
       "gold": ["trace:s-en-dates/utc"],
       "expect": "The recorded constraint says timestamps are stored in UTC and converted to local time only for display. A good run adds toDisplay and keeps toStored in UTC, naming the constraint (or asks before changing storage).",
-      "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport * as dates from \"../src/dates.ts\";\n\ntest(\"completion: toDisplay exists and returns a string\", () => {\n  assert.equal(typeof dates.toDisplay, \"function\");\n  assert.equal(typeof dates.toDisplay(new Date(0)), \"string\");\n});\n\ntest(\"compliance: toStored still stores UTC\", () => {\n  assert.equal(dates.toStored(new Date(0)), \"1970-01-01T00:00:00.000Z\");\n});\n"
+      "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport * as dates from \"../src/dates.ts\";\n\ntest(\"completion: toDisplay exists and returns a string\", () => {\n  assert.equal(typeof dates.toDisplay, \"function\");\n  assert.equal(typeof dates.toDisplay(new Date(0)), \"string\");\n});\n\ntest(\"compliance: toStored still stores UTC\", () => {\n  assert.equal(dates.toStored(new Date(0)), \"1970-01-01T00:00:00.000Z\");\n});\n",
+      "project": "tsundoku"
     },
     {
       "id": "pilot-sort",
@@ -23,7 +24,31 @@
       "gold": [],
       "expect": "The function exists and the hidden test passes; nothing about past decisions needs to come up.",
       "test": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { sortByTitle } from \"../src/export.ts\";\n\ntest(\"sortByTitle sorts by title ignoring case and leaves the input alone\", () => {\n  const books = [{ title: \"b\", author: \"x\" }, { title: \"A\", author: \"y\" }, { title: \"c\", author: \"z\" }];\n  const copy = structuredClone(books);\n  assert.deepEqual(sortByTitle(books).map((b) => b.title), [\"A\", \"b\", \"c\"]);\n  assert.deepEqual(books, copy);\n});\n",
-      "conditions": ["none", "inject"]
+      "conditions": ["none", "inject"],
+      "project": "tsundoku"
+    },
+    {
+      "id": "sphica-search-wording",
+      "project": "sphica",
+      "lang": "ja>ja",
+      "kind": "should_help",
+      "author": "owner (written without seeing the answer record, 2026-09-27)",
+      "conditions": ["none", "search", "inject", "gold"],
+      "prompt": "検索で言い回しが違うと当たらないので、当たるようにしてほしい",
+      "gold": ["harvest:157/keep-search"],
+      "expect": "An earlier evaluation rejected split word/identifier columns, trigram search, phrase and prefix syntax, regex, multi-phrasing fusion, and match-centered snippets because they lowered direct answers. A good run does not ship one of them without new measurements; it names the earlier result or proposes measuring first."
     }
-  ]
+  ],
+  "projects": {
+    "tsundoku": {
+      "source": "acceptance world",
+      "fixture": "built from the acceptance flows (fixture.cases, fixture.setups)"
+    },
+    "sphica": {
+      "source": "git",
+      "repo": "iroha924/sphica",
+      "base": "f65ff35",
+      "fixture": "~/.cache/sphica-eval/fixtures/sphica.db (harvest of PRs 146, 148, 151, 154, 157 by evals/cloud/fixture.ts)"
+    }
+  }
 }

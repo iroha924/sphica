@@ -1,5 +1,6 @@
 // Builds the bootstrap repositories of the cloud evaluation (plan step 9): one per condition (none, search, inject, gold), each holding the same
-// project files and hooks, and differing only in what Sphica gives the agent. Run: node evals/cloud/build.ts --out <dir> --owner <github owner>
+// project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
+// Run: node evals/cloud/build.ts --project tsundoku|sphica [--out <dir>] [--owner <github owner>]
 // Repository names hide the condition; the mapping stays in <out>/manifest.json on this machine.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -25,16 +26,22 @@ const { values: args } = parseArgs({
     out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "build") },
     owner: { type: "string", default: "iroha924" },
     node: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", NODE.file) },
+    project: { type: "string", default: "tsundoku" },
   },
 });
 const out = path.resolve(args.out ?? "");
 const owner = args.owner ?? "";
 
-type Task = { id: string; prompt: string; gold: string[] };
+type Task = { id: string; project: string; prompt: string; gold: string[] };
+type Project = { source: string; repo?: string; base?: string; fixture: string };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
   fixture: { cases: string[]; setups: string[] };
+  projects: Record<string, Project>;
   tasks: Task[];
 };
+const project = plan.projects[args.project ?? ""];
+if (!project) throw new Error(`unknown project ${args.project}`);
+const tasks = plan.tasks.filter((t) => t.project === args.project);
 
 const sha256 = (buf: Buffer | string) => crypto.createHash("sha256").update(buf).digest("hex");
 
@@ -172,28 +179,10 @@ async function goldText(file: string, keys: string[]): Promise<string> {
   }
 }
 
-async function main() {
-  const { world } = loadAcceptance();
-  const tarball = fs.readFileSync(args.node ?? "");
-  if (sha256(tarball) !== NODE.sha256)
-    throw new Error(`${args.node} does not match the Node ${NODE.version} sha256`);
-  execFileSync("bun", ["run", "bundle"], { cwd: ROOT, stdio: "ignore" });
-  fs.rmSync(out, { recursive: true, force: true });
-  fs.mkdirSync(out, { recursive: true });
-  const base = path.join(out, "fixture.db");
-  await fixture(base);
-  const manifest: Record<string, unknown> = {
-    built: new Date().toISOString(),
-    commit: execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-    bundle: Object.fromEntries(
-      ["mcp.js", "deliver.js"].map((f) => [f, sha256(fs.readFileSync(path.join(ROOT, "plugin", "dist", f)))]),
-    ),
-    node: NODE,
-    repositories: {},
-  };
-  for (const [i, condition] of CONDITIONS.entries()) {
-    const repo = `eval-shelf-${i + 1}`;
-    const dir = path.join(out, repo);
+/** The project's files at its base: the acceptance world's, or a git commit's (read from the local clone of this repository). */
+function files(dir: string): void {
+  if (args.project === "tsundoku") {
+    const { world } = loadAcceptance();
     for (const [rel, text] of Object.entries(world.files))
       if (text !== "BINARY" && text !== "OVERSIZED") write(dir, rel, text);
     write(
@@ -201,6 +190,41 @@ async function main() {
       "package.json",
       `${JSON.stringify({ name: "tsundoku", private: true, type: "module", scripts: { test: "node --test" } }, null, 2)}\n`,
     );
+    return;
+  }
+  if (project?.repo !== `${owner}/sphica`) throw new Error(`no local clone for ${project?.repo}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const tar = execFileSync("git", ["-C", ROOT, "archive", project.base ?? ""], {
+    maxBuffer: 512 * 1024 * 1024,
+  });
+  execFileSync("tar", ["-x", "-C", dir], { input: tar });
+}
+
+async function main() {
+  const tarball = fs.readFileSync(args.node ?? "");
+  if (sha256(tarball) !== NODE.sha256)
+    throw new Error(`${args.node} does not match the Node ${NODE.version} sha256`);
+  execFileSync("bun", ["run", "bundle"], { cwd: ROOT, stdio: "ignore" });
+  fs.rmSync(out, { recursive: true, force: true });
+  fs.mkdirSync(out, { recursive: true });
+  const base = path.join(out, "fixture.db");
+  if (args.project === "tsundoku") await fixture(base);
+  else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
+  const manifest: Record<string, unknown> = {
+    built: new Date().toISOString(),
+    commit: execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    bundle: Object.fromEntries(
+      ["mcp.js", "deliver.js"].map((f) => [f, sha256(fs.readFileSync(path.join(ROOT, "plugin", "dist", f)))]),
+    ),
+    node: NODE,
+    project: args.project,
+    tasks: tasks.map((t) => t.id),
+    repositories: {},
+  };
+  for (const [i, condition] of CONDITIONS.entries()) {
+    const repo = `eval-shelf-${i + 1}`;
+    const dir = path.join(out, repo);
+    files(dir);
     write(dir, ".tools/node.sh", NODE_SH, 0o755);
     write(dir, ".tools/hook.sh", HOOK_SH, 0o755);
     write(dir, ".tools/finish.sh", FINISH_SH, 0o755);
@@ -226,17 +250,17 @@ async function main() {
       await rekey(db, repo);
       fixtureHash = sha256(fs.readFileSync(db));
       write(dir, ".tools/sphica.sh", SPHICA_SH, 0o755);
-      write(dir, ".tools/dist/mcp.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "mcp.js")));
+      write(dir, ".tools/dist/mcp.mjs", fs.readFileSync(path.join(ROOT, "plugin", "dist", "mcp.js")));
       write(
         dir,
         ".mcp.json",
-        `${JSON.stringify({ mcpServers: { sphica: { command: "sh", args: [".tools/sphica.sh", ".tools/dist/mcp.js"] } } }, null, 2)}\n`,
+        `${JSON.stringify({ mcpServers: { sphica: { command: "sh", args: [".tools/sphica.sh", ".tools/dist/mcp.mjs"] } } }, null, 2)}\n`,
       );
     }
     if (condition === "inject") {
-      write(dir, ".tools/dist/deliver.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "deliver.js")));
+      write(dir, ".tools/dist/deliver.mjs", fs.readFileSync(path.join(ROOT, "plugin", "dist", "deliver.js")));
       const deliver = (name: string) =>
-        `sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" ${name} sh "$CLAUDE_PROJECT_DIR/.tools/sphica.sh" "$CLAUDE_PROJECT_DIR/.tools/dist/deliver.js"`;
+        `sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" ${name} sh "$CLAUDE_PROJECT_DIR/.tools/sphica.sh" "$CLAUDE_PROJECT_DIR/.tools/dist/deliver.mjs"`;
       hooks.SessionStart = [{ hooks: [{ type: "command", command: deliver("start"), timeout: 60 }] }];
       hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: deliver("prompt"), timeout: 30 }] }];
       hooks.PreToolUse = [
@@ -249,8 +273,7 @@ async function main() {
     if (condition === "gold") {
       write(dir, ".tools/gold.sh", GOLD_SH, 0o755);
       const gold = [];
-      for (const t of plan.tasks)
-        gold.push({ id: t.id, prompt: t.prompt, text: await goldText(base, t.gold) });
+      for (const t of tasks) gold.push({ id: t.id, prompt: t.prompt, text: await goldText(base, t.gold) });
       write(dir, ".tools/gold.json", `${JSON.stringify(gold, null, 2)}\n`);
       hooks.UserPromptSubmit = [
         {
