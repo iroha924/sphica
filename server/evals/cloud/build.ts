@@ -11,6 +11,7 @@ import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
 import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
+import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 
@@ -185,10 +186,13 @@ async function goldText(file: string, keys: string[]): Promise<string> {
     if (missing.length) throw new Error(`gold records missing from the fixture: ${missing.join(", ")}`);
     // Gold claims the record as a delivery gives it; a body or reason the renderer would cut stops the build (rejected options show up to
     // three with a count, as in every delivery)
-    for (const r of rows)
-      if (Array.from(r.text).length > 240 || Array.from(r.why ?? "").length > 160)
+    const lines = await recordLines(db, rows);
+    rows.forEach((r, i) => {
+      const shown = lines[i] ?? "";
+      if (!shown.includes(inline(r.text)) || (r.why && !shown.includes(`Why: ${inline(r.why)}`)))
         throw new Error(`gold record ${r.key} would be cut by the delivery renderer`);
-    return [GOLD_LEAD, ...(await recordLines(db, rows))].join("\n");
+    });
+    return [GOLD_LEAD, ...lines].join("\n");
   } finally {
     await db.destroy();
   }
@@ -206,7 +210,8 @@ function dropGoGate(dir: string): void {
     const file = path.join(dir, name);
     if (!fs.existsSync(file)) continue;
     const text = fs.readFileSync(file, "utf8").replace(/^## Before implementing\n[\s\S]*?(?=^## )/m, "");
-    if (/owner's Go/.test(text)) throw new Error(`${name} in the slot still asks for the owner's Go`);
+    if (/owner's (Go|approval)|(Go|approval) before implementing/i.test(text))
+      throw new Error(`${name} in the slot still asks for the owner's Go`);
     fs.writeFileSync(file, text);
   }
 }

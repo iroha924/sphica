@@ -80,8 +80,19 @@ base: main
   - コミット: `feat(mcp): tell agents to confirm with the user before overturning a past decision`
   - 結果: `node --test test/plugin.test.ts` → pass 25 / fail 0（案内が 2,048 文字以内で、「コードが正しい」と「過去の決定を覆すなら聞く」の両方を含む）。`bun run verify` → exit 0
 
+- [x] T07: gold の切り詰めをバイトで切る描画と同じ基準で見て、Go を求める別の言い方でも構築を止める（T02 のレビュー）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象が T02 の検査）
+  - 変更: `server/evals/cloud/build.ts`
+  - red: `node --input-type=module -e '<81 個の「あ」と、"Get the owner's approval before implementing changes." を旧検査に通す>'` → 「old check passes: true | renderer keeps whole: false」「old Go check stops: false」
+  - 完了条件: `node evals/cloud/build.ts --project tsundoku` と `--project sphica` → 両方 exit 0。`bun run verify` → exit 0
+  - コミット: `fix(evals): judge gold cuts by the rendered line and catch other ways of asking for Go`
+  - 結果: 描画した行に本文と Why が丸ごと入るかで判定するようにした。Go の検査は /owner's (Go|approval)|(Go|approval) before implementing/i（"Read to the end before implementing." には当たらない）。`node evals/cloud/build.ts --project tsundoku` と `--project sphica`（一時の出力先）→ 両方 exit 0。`bun run verify` → exit 0
+
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
 2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
 2026-09-28 / T05 / 固定文言が約 280 文字あり、読む前の配信のセッション上限（3000）を 1 回ごとに食って 8 件に届かなくなった / 各配信の上限に文言の長さを足し、セッション上限は使った量から 1 回ごとに文言の分を引いて数えるようにした（記録に使える量は変更前と同じ）
 2026-09-28 / T06 / 案内の文を確かめるテストを plugin.test.ts に足した / 変更欄を「server/src/mcp.ts」から「server/src/mcp.ts, server/test/plugin.test.ts」にした
+2026-09-28 / T07 / T02 の Codex レビュー（efc999c）で 2 件: 本文を文字数で見るが描画はバイトで切る、Go の検査が "owner's Go" だけ / 2 件とも T07 で直した。最初の直しの "before implementing" は Skill 節の "Read to the end before implementing." に当たって sphica の構築が止まったので絞った
