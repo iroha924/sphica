@@ -52,7 +52,31 @@ test("a diff lists its changed files with added lines and their new line numbers
   assert.deepEqual(parseDiff(DIFF), [
     { path: "src/db.ts", added: ["const b = 3;", 'import pg from "pg";'], lines: [4, 5] },
     { path: "src/telemetry.ts", added: ["export function sendTelemetry() {}"], lines: [1] },
-    { path: "gone.ts", added: [], lines: [] },
+    { path: "gone.ts", added: [], lines: [], gone: true },
+  ]);
+});
+
+test("a rename without content changes lists both paths, the old one as gone", () => {
+  const diff = [
+    "diff --git a/src/a.ts b/src/b.ts",
+    "similarity index 100%",
+    "rename from src/a.ts",
+    "rename to src/b.ts",
+    "diff --git a/src/c.ts b/src/d.ts",
+    "similarity index 90%",
+    "rename from src/c.ts",
+    "rename to src/d.ts",
+    "--- a/src/c.ts",
+    "+++ b/src/d.ts",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+  assert.deepEqual(parseDiff(diff), [
+    { path: "src/a.ts", added: [], lines: [], gone: true },
+    { path: "src/b.ts", added: [], lines: [] },
+    { path: "src/c.ts", added: [], lines: [], gone: true },
+    { path: "src/d.ts", added: ["y"], lines: [1] },
   ]);
 });
 
@@ -134,6 +158,14 @@ test("records anchored to a changed path, and location-free don't records naming
         evidence: { path: "other.ts", line: 1 },
       },
       { outcome: "unrelated", unit: "trace:ext-s1/no-telemetry" },
+      // A deleted file has no added lines: its path is the evidence
+      {
+        outcome: "violation",
+        unit: "trace:ext-s1/storage",
+        reason: "drops the file",
+        evidence: { path: "gone.ts" },
+      },
+      { outcome: "violation", unit: "trace:ext-s1/storage", reason: "x", evidence: { path: "src/db.ts" } },
     ]);
     assert.deepEqual(problems, [
       "findings.1 (complies trace:ext-s1/maybe): not a record this diff touches; cite one review_select returned",
@@ -141,6 +173,7 @@ test("records anchored to a changed path, and location-free don't records naming
       "findings.1 (complies trace:ext-s1/maybe): needs evidence in the changed code (a path and an added line)",
       "findings.2 (violation trace:ext-s1/storage): evidence line 3 is not an added line of src/db.ts",
       "findings.3 (violation trace:ext-s1/storage): evidence path other.ts is not in the diff",
+      "findings.6 (violation trace:ext-s1/storage): evidence in src/db.ts needs an added line",
     ]);
     assert.match((await checkFindings(db.reader, p, files, [{ outcome: "maybe" }])).join(), /findings\.0/);
   } finally {

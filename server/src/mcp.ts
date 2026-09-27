@@ -180,7 +180,11 @@ server.registerTool(
       "The full record: its text, options, the exact words cited as evidence and adoption with who said them, links (supersedes, conflicts), " +
       "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source.",
     inputSchema: {
-      refs: z.array(z.string().min(1).max(300)).min(1).max(10).describe("Record keys, u<id>, or s<id>"),
+      refs: z
+        .array(z.string().min(1).max(300))
+        .min(1)
+        .max(10)
+        .describe("Record keys, u<id>, or s<id> (s<id>@<byte> reads a long source on from that byte)"),
       cwd: CWD,
     },
     annotations: READ_ONLY,
@@ -255,7 +259,7 @@ server.registerTool(
     title: "Check decision verdicts",
     description:
       "Checks a reviewer's verdicts on the records review_select returned. Each finding: outcome (violation, complies, unrelated, undetermined), " +
-      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number. Returns the problems, or none.",
+      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). Returns the problems, or none.",
     inputSchema: {
       diff: DIFF,
       findings: z.array(z.record(z.string(), z.unknown())).max(50),

@@ -198,7 +198,8 @@ async function describe(
 
 /** A retained source by `s<id>`, with who wrote it and where it lives; null when there is none. */
 export async function readSource(db: Kysely<DB>, projectId: number, ref: string): Promise<string | null> {
-  const m = /^s([1-9][0-9]{0,15})$/.exec(ref);
+  // s<id>@<byte> reads on from that byte: a source can hold more than one reply carries
+  const m = /^s([1-9][0-9]{0,15})(?:@(\d{1,9}))?$/.exec(ref);
   if (!m) return null;
   const s = await db
     .selectFrom("source")
@@ -209,6 +210,20 @@ export async function readSource(db: Kysely<DB>, projectId: number, ref: string)
   if (!s) return null;
   return [
     `s${s.id}: ${s.kind} ${s.artifact}${s.revision > 1 ? ` revision ${s.revision}` : ""}, by ${speaker(s)}, ${s.created_at}${s.url ? `, ${s.url}` : ""}${s.path ? `, ${s.path}${s.line_start ? `:${s.line_start}` : ""}` : ""}${s.truncated ? " (middle not saved)" : ""}`,
-    head(s.text, 64 * 1024),
+    ...part(s.id, s.text, Number(m[2] ?? 0)),
   ].join("\n");
+}
+
+const PART = 64 * 1024;
+
+/** One reply's worth of the text from a byte offset (moved back to a character boundary), and where the rest starts. */
+function part(id: number, text: string, from: number): string[] {
+  const all = Buffer.from(text, "utf8");
+  let start = Math.min(from, all.length);
+  while (start > 0 && start < all.length && ((all[start] ?? 0) & 0xc0) === 0x80) start--;
+  const shown = head(all.subarray(start).toString("utf8"), PART);
+  const end = start + Buffer.byteLength(shown, "utf8");
+  return end < all.length
+    ? [shown, `(${all.length - end} more bytes; read s${id}@${end} for the rest)`]
+    : [shown];
 }

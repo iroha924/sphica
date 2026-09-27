@@ -5,14 +5,22 @@ import type { Kysely } from "kysely";
 import { z } from "zod";
 import type { DB } from "./db-types.ts";
 
-export type FileDiff = { path: string; added: string[]; lines: number[] };
+/** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */
+export type FileDiff = { path: string; added: string[]; lines: number[]; gone?: true };
 
 /**
- * The changed files of a unified diff (`git diff` output), with each added line and its line number in the new file. A deleted file is
- * kept under its old path with no added lines.
+ * The changed files of a unified diff (`git diff` output), with each added line and its line number in the new file. A deleted file and
+ * the old path of a rename are kept as gone.
  */
 export function parseDiff(text: string): FileDiff[] {
   const files: FileDiff[] = [];
+  const at = (path: string): FileDiff => {
+    const found = files.find((f) => f.path === path);
+    if (found) return found;
+    const f: FileDiff = { path, added: [], lines: [] };
+    files.push(f);
+    return f;
+  };
   let cur: FileDiff | null = null;
   let line = 0;
   // Lines left in the current hunk, old and new side: inside it, "--- x" and "+++ x" are a removed or added line, not a file header
@@ -33,13 +41,19 @@ export function parseDiff(text: string): FileDiff[] {
       }
       continue;
     }
+    // A rename prints its paths as metadata, with no ---/+++ header or hunk when the content is unchanged
+    const renamed = /^rename (from|to) (.+)$/.exec(raw);
+    if (renamed?.[2]) {
+      const f = at(renamed[2]);
+      if (renamed[1] === "from") f.gone = true;
+      continue;
+    }
     const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(raw);
     if (to) {
       // The old path is the header line just before; it names a deleted file
       const was = /^--- (?:a\/)?(.+?)\t?$/.exec(rows[i - 1] ?? "")?.[1];
-      cur = to[1] === "/dev/null" ? null : { path: to[1] ?? "", added: [], lines: [] };
-      if (cur) files.push(cur);
-      else if (was && was !== "/dev/null") files.push({ path: was, added: [], lines: [] });
+      cur = to[1] === "/dev/null" ? null : at(to[1] ?? "");
+      if (!cur && was && was !== "/dev/null") at(was).gone = true;
       continue;
     }
     const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(raw);
@@ -147,9 +161,9 @@ const Finding = z
     outcome: z.enum(["violation", "complies", "unrelated", "undetermined"]),
     unit: z.string().min(1),
     reason: z.string().optional(),
-    /** Changed code the verdict rests on: a path in the diff and a line added there */
+    /** Changed code the verdict rests on: a path in the diff and a line added there (the path alone for a file that is gone) */
     evidence: z
-      .object({ path: z.string().min(1), line: z.number().int().positive() })
+      .object({ path: z.string().min(1), line: z.number().int().positive().optional() })
       .strict()
       .optional(),
   })
@@ -177,6 +191,10 @@ export async function checkFindings(
     else {
       const file = files.find((x) => x.path === f.evidence?.path);
       if (!file) problems.push(`${at}: evidence path ${f.evidence.path} is not in the diff`);
+      else if (file.gone) {
+        // A deleted or renamed-away file has no added lines: its path is the evidence
+      } else if (f.evidence.line === undefined)
+        problems.push(`${at}: evidence in ${file.path} needs an added line`);
       else if (!file.lines.includes(f.evidence.line))
         problems.push(`${at}: evidence line ${f.evidence.line} is not an added line of ${file.path}`);
     }

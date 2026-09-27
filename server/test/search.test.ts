@@ -186,6 +186,14 @@ test("read shows cited words and who said them, links, history, and each anchor 
     );
     assert.match((await readSource(db.reader, p, `s${m}`)) ?? "", /session_message session:s1, by the owner/);
     assert.equal(await readSource(db.reader, p, "s999"), null);
+    // A long source reads in parts: the first says where the rest starts, and reading from there ends with the text's end
+    const long = message(db, p, { id: "long", text: `${"a".repeat(70 * 1024)}THE END` });
+    const first = (await readSource(db.reader, p, `s${long}`)) ?? "";
+    const next = /read s(\d+)@(\d+) for the rest/.exec(first);
+    assert.ok(next, first.slice(-200));
+    const rest = (await readSource(db.reader, p, `s${next?.[1]}@${next?.[2]}`)) ?? "";
+    assert.match(rest, /THE END$/);
+    assert.equal(first.includes("THE END"), false);
     assert.equal(await readSource(db.reader, p, "x"), null);
   } finally {
     await db.done();

@@ -93,7 +93,7 @@ Then always check the following.
 ## Check your verdicts
 
 Before answering, pass your verdicts to `review_check(diff, findings, cwd)`: each finding is `outcome` (`violation`, `complies`, `unrelated`,
-`undetermined`), `unit` (the record key), `reason`, and for a violation or compliance, `evidence` (the changed path and the added line number).
+`undetermined`), `unit` (the record key), `reason`, and for a violation or compliance, `evidence` (the changed path and the added line number; for a deleted or renamed-away file, the path alone).
 Fix what it reports. A verdict it rejects is not a finding.
 
 ## Output
