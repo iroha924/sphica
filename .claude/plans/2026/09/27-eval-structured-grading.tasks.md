@@ -35,13 +35,14 @@ base: main
 
 Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を残し、盲検で採点して表にする。
 
-- [ ] T02: codex.ts に起動の台帳、回答の schema、gold フックの受領を足す
+- [x] T02: codex.ts に起動の台帳、回答の schema、gold フックの受領を足す
   - 種別: 変更
   - 計画: S2
   - 依存: T01（answer.schema.json が要る）
   - 変更: `server/evals/cloud/codex.ts`
   - 完了条件: `bun run --cwd server typecheck` → exit 0。コードを読み、started.json が起動の前、result.json が finally で書かれることを確かめる（本物の Codex は完了条件 A3 で走らせる）
   - コミット: `feat(evals): record every Codex run and take its answer through a schema`
+  - 結果: `bun run --cwd server typecheck` → exit 0。読んで確かめた: started.json は clone の前に書き、以降は try で包み、result.json は finally で status と reason を書く。回答は `--output-schema answer.schema.json -o answer.json`、gold は gold-hook.sh が受領を gold-receipt.txt に残す
 
 - [ ] T03: collect.ts に patch、delivered と found、answer_format、excluded を足す
   - 種別: 変更
