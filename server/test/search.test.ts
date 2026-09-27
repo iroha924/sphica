@@ -279,8 +279,9 @@ test("another project's many matches never crowd out this project's hit", async 
     );
     const sources = await searchSources(db.reader, mine, "retry budget", 5);
     assert.deepEqual(
-      sources.hits.map((h) => h.id),
-      [m],
+      sources.hits.map((h) => h.id).sort((a, b) => a - b),
+      [m, many, found].sort((a, b) => a - b),
+      "this project's three messages, none of the other project's 210",
     );
   } finally {
     await db.done();
