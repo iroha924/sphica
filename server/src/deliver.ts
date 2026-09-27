@@ -245,7 +245,7 @@ async function beforeRead(
     shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
     Math.min(
       LIMITS.pre_read.chars,
-      READ_SESSION.chars - spent.reduce((n, r) => n + Math.max(r.chars - ASK, 0), 0),
+      READ_SESSION.chars + ASK - spent.reduce((n, r) => n + Math.max(r.chars - ASK, 0), 0),
     ),
     lead,
   );

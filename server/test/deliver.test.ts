@@ -633,3 +633,52 @@ test("every delivery surface keeps a full-length record beside the request, and 
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// The request on each read has its own room: a second read in a session keeps as many records as it would without it
+test("a later read in a session keeps its records: the request is not charged to the session's record budget", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rich = (n: number) => `Rich rule ${n} ${"r".repeat(220)}`;
+    const why = "w".repeat(150);
+    const small = (n: number) => `Small rule ${n} ${"s".repeat(180)}`;
+    const m = message(db, p, {
+      id: "m1",
+      text: [1, 2].map(rich).concat([1, 2, 3, 4, 5].map(small)).join(" "),
+    });
+    await save(db, p, {
+      units: [
+        ...[1, 2].map((n) =>
+          decided(`rich${n}`, m, rich(n), {
+            kind: "decision",
+            why,
+            options: [1, 2, 3].map((k) => ({ text: `${"o".repeat(50)} ${k}`, outcome: "rejected" })),
+            anchors: [{ path: "src/a.ts", role: "applies_to" }],
+          }),
+        ),
+        ...[1, 2, 3, 4, 5].map((n) =>
+          decided(`small${n}`, m, small(n), { anchors: [{ path: "src/b.ts", role: "applies_to" }] }),
+        ),
+      ],
+    });
+    const read = (file: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "later",
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const lines = (text: string) => text.split("\n").filter((l) => l.startsWith("- ")).length;
+    assert.equal(lines(await read("src/a.ts")), 2);
+    assert.equal(lines(await read("src/b.ts")), 5, "the second read keeps all five records");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
