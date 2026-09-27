@@ -54,7 +54,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
 ### Tests
 
 - Run SQL on a real SQLite database in a temporary directory (`server/test/temp-db.ts`) and look at the results. Do not match built SQL strings <!-- invariant: real-sqlite-tests -->
-- Set a child process's `HOME` to a temporary directory and do not pass the parent's `SPHICA_DB` (otherwise it reads and writes the owner's `~/.sphica`) <!-- invariant: temp-home -->
+- Set a child process's `HOME` to a temporary directory and do not pass the parent's `SPHICA_DB` or `SPHICA_HOME` (otherwise it reads and writes the owner's `~/.sphica`, or the directory `SPHICA_HOME` names) <!-- invariant: temp-home -->
 - Do not skip when a precondition is missing. Fail <!-- invariant: no-silent-skip -->
 - Do not connect to external APIs. Pass without credentials <!-- invariant: no-external-api -->
 - SQLite return values differ from their types. BLOBs are Uint8Array, rows are objects without a prototype, and `returning rowid` needs `as rowid` <!-- invariant: sqlite-values -->

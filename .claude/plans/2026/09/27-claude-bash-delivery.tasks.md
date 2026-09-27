@@ -100,6 +100,16 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `docs(readme): say a patch passed to apply_patch through the shell is still an edit in Codex`
   - 結果: red: `git diff --check main..HEAD` → .gitignore:27 の末尾の空行で落ちた。直した後 `rg -n "still counts as an edit" README.md` → 1 件、`git diff --check main..HEAD` → 下のコミットの後に exit 0
 
+- [x] T09: AGENTS.md の temp-home の規範にも SPHICA_HOME を足す
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（対の .claude/rules/verification.md を T07 が直した）
+  - 変更: `AGENTS.md`
+  - red: `rg -n "SPHICA_HOME" AGENTS.md` → 0 件（Codex 向けの規範だけ SPHICA_DB しか書いていない）
+  - 完了条件: `rg -n "SPHICA_HOME" AGENTS.md .claude/rules/verification.md` → 各 1 件、`bun run verify:ai` → exit 0
+  - コミット: `docs(agents): say a child process must not inherit SPHICA_HOME either`
+  - 結果: red: `rg -n "SPHICA_HOME" AGENTS.md` → 0 件。直した後、同じ rg で AGENTS.md と verification.md が各 1 件、`bun run verify:ai` → exit 0
+
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
@@ -109,3 +119,4 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
 2026-09-27 / A3 / 候補（--plugin-dir、sphica@sphica は無効）で claude -p を 3 回: 3 回とも Bash で src/db.ts を読み、pre_read emitted が 1 行ずつ、最初の Sphica のツールは read、回答は 3 回とも記録（起動が遅くなったので Map のまま）を理由に挙げた。本物の ~/.sphica に headless-demo のプロジェクトも spool も無し / 期待どおり
 2026-09-27 / A4 / 紐付く記録 200 件の DB で、何も名指ししない Bash の入力を deliver.js に 50 回: 中央値 89 ms、p95 91 ms / Codex の約 75 ms に近く、リスクの報告条件に当たらない
 2026-09-27 / T07, T08 / 全体の差分の Codex レビュー（main..c41fce8）で 3 件と git diff --check の 1 件 / F1（sql:live の子が SPHICA_HOME を引き継ぐ）は T07、F3（README の Codex の patch の説明）と末尾の空行は T08 で直す。F2（配信の印が os.tmpdir に作られる）は利用者ごとの一時ファイルで、セッション ID で分かれ、持ち主の ~/.sphica のデータではないので採らない
+2026-09-27 / T09 / 修正分の Codex レビュー（c41fce8..2da1d01）で 1 件: AGENTS.md の temp-home に SPHICA_HOME が無い / T09 を足して直した
