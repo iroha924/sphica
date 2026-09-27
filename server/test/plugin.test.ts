@@ -442,6 +442,9 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
       [...instructions].length <= 2048,
       `server instructions are ${[...instructions].length} characters`,
     );
+    // A disagreement with the code and a request that overturns a decision are told apart
+    assert.match(instructions, /the code is right/);
+    assert.match(instructions, /would overturn a past decision.*ask before making the change/);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
       "read",

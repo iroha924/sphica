@@ -71,15 +71,17 @@ base: main
   - コミット: `feat(deliver): ask the user before making a change a checked record rules out`
   - 結果: `node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 15 / fail 0（読む前・編集の前・Bash の名指し・プロンプト・SessionStart の全部で固定文言と記録が残る、命令形の本文でも lead が同じ）。`bun run verify` → exit 0。tsundoku の gold.json の lead に gold 用の固定文言が入る
 
-- [ ] T06: MCP の案内で「コードとの食い違い」と「依頼が過去の決定を覆す」を分ける
+- [x] T06: MCP の案内で「コードとの食い違い」と「依頼が過去の決定を覆す」を分ける
   - 種別: 変更
   - 計画: S5
   - 依存: T05（同じ文言の考え方を使う）
-  - 変更: `server/src/mcp.ts`
+  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`
   - 完了条件: `bun run verify` → exit 0
   - コミット: `feat(mcp): tell agents to confirm with the user before overturning a past decision`
+  - 結果: `node --test test/plugin.test.ts` → pass 25 / fail 0（案内が 2,048 文字以内で、「コードが正しい」と「過去の決定を覆すなら聞く」の両方を含む）。`bun run verify` → exit 0
 
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
 2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
 2026-09-28 / T05 / 固定文言が約 280 文字あり、読む前の配信のセッション上限（3000）を 1 回ごとに食って 8 件に届かなくなった / 各配信の上限に文言の長さを足し、セッション上限は使った量から 1 回ごとに文言の分を引いて数えるようにした（記録に使える量は変更前と同じ）
+2026-09-28 / T06 / 案内の文を確かめるテストを plugin.test.ts に足した / 変更欄を「server/src/mcp.ts」から「server/src/mcp.ts, server/test/plugin.test.ts」にした
