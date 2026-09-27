@@ -354,6 +354,8 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       conflicts,
     });
   }
+  // Work is the traced session's own state, shown at session start: a harvest or glean cannot set it from text it read
+  if (record.work && target.origin !== "trace") errors.push("work: only trace records work");
   return { errors, problems, units, work: record.work ?? null };
 }
 
