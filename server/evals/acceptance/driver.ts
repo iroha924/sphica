@@ -39,6 +39,7 @@ const CLI = path.join(import.meta.dirname, "..", "..", "src", "cli.ts");
 /** Variables from the shell running the cases that would point hooks and the CLI at the owner's sessions or database. */
 const LEAKY = [
   "SPHICA_DB",
+  "SPHICA_HOME",
   "SPHICA_PARENT_SESSION",
   "CLAUDE_CODE_ENTRYPOINT",
   "CLAUDE_CODE_SESSION_ID",

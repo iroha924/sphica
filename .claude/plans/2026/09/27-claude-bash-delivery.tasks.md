@@ -80,6 +80,25 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `feat(paths): let SPHICA_HOME move Sphica's files for tests and measurements`
   - 結果: 新しいテストは変更前で dbFile が ~/.sphica を返して失敗。変更後 `node --test test/capture.test.ts test/project.test.ts test/cli.test.ts` → pass 40 / fail 0。`tsc`、`architecture`、`knip` → 通過
 
+- [x] T07: 検証のハーネスとテストが SPHICA_HOME を引き継がないようにする
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（SPHICA_HOME が無いと漏れが起きない）
+  - 変更: `scripts/lib/live-harness.mjs`, `server/evals/acceptance/driver.ts`, `server/test/capture.test.ts`, `server/test/project.test.ts`, `server/test/extract.test.ts`, `.claude/rules/verification.md`
+  - red: `SPHICA_HOME=<空の一時ディレクトリ> bun run sql:live` → そのディレクトリに sphica.db、spool、capture.json、worktree ができる
+  - 完了条件: `SPHICA_HOME=<空の一時ディレクトリ> bun run verify` → exit 0 で、そのディレクトリは空のまま
+  - コミット: `fix(verify): keep SPHICA_HOME out of the checks' child processes and HOME-swapping tests`
+  - 結果: red: `SPHICA_HOME=<空> bun run sql:live` → sphica.db、spool、capture.json、worktree ができた。直した後 `SPHICA_HOME=<空> bun run verify` → exit 0、ディレクトリは空。SPHICA_HOME なしの `bun run verify` → exit 0
+
+- [ ] T08: README の限界の行を Codex の patch の扱いに合わせ、.gitignore の末尾の空行を消す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（直す README の行を T04 が書いた）
+  - 変更: `README.md`, `README.ja.md`, `.gitignore`
+  - red: `rg -n "not as an edit\\.$" README.md` → 1 件（Codex でシェルから apply_patch に渡したパッチは編集として扱うのに、編集として扱わないとだけ書いている）。`git diff --check main..HEAD` → .gitignore の末尾の空行で exit 2
+  - 完了条件: `rg -n "still counts as an edit" README.md` → 1 件、`git diff --check main..HEAD` → exit 0
+  - コミット: `docs(readme): say a patch passed to apply_patch through the shell is still an edit in Codex`
+
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
@@ -88,3 +107,4 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
 2026-09-27 / T02, T03, T06 / Codex のタスクごとのレビュー（d116709, 5e0a273, 6334c68）はどれも指摘 0 件 / 採る指摘なし。Codex 側でのテストは読み取り専用のため一時ディレクトリを作れず未実行で、手元では全件 pass
 2026-09-27 / A3 / 候補（--plugin-dir、sphica@sphica は無効）で claude -p を 3 回: 3 回とも Bash で src/db.ts を読み、pre_read emitted が 1 行ずつ、最初の Sphica のツールは read、回答は 3 回とも記録（起動が遅くなったので Map のまま）を理由に挙げた。本物の ~/.sphica に headless-demo のプロジェクトも spool も無し / 期待どおり
 2026-09-27 / A4 / 紐付く記録 200 件の DB で、何も名指ししない Bash の入力を deliver.js に 50 回: 中央値 89 ms、p95 91 ms / Codex の約 75 ms に近く、リスクの報告条件に当たらない
+2026-09-27 / T07, T08 / 全体の差分の Codex レビュー（main..c41fce8）で 3 件と git diff --check の 1 件 / F1（sql:live の子が SPHICA_HOME を引き継ぐ）は T07、F3（README の Codex の patch の説明）と末尾の空行は T08 で直す。F2（配信の印が os.tmpdir に作られる）は利用者ごとの一時ファイルで、セッション ID で分かれ、持ち主の ~/.sphica のデータではないので採らない

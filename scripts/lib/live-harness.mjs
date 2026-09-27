@@ -44,8 +44,8 @@ function childEnv(dir, covDir, extra = {}) {
   // 4 unsent items to the throwaway database and removed them from the spool). Changing only the database path does not close this.
   env.HOME = dir;
   env.USERPROFILE = dir;
-  // If the parent's SPHICA_DB remained, the child would open that database instead of the temp HOME one.
-  for (const k of ["SPHICA_DB", "GITHUB_TOKEN"]) delete env[k];
+  // If the parent's SPHICA_DB or SPHICA_HOME remained, the child would use that database or those files instead of the temp HOME
+  for (const k of ["SPHICA_DB", "SPHICA_HOME", "GITHUB_TOKEN"]) delete env[k];
   // Host sessions leak in from the parent. With both present the CLI stops because it cannot tell which host it is,
   // so keep only what the check passes.
   for (const k of ["CODEX_THREAD_ID", "CODEX_SESSION_ID"]) delete env[k];

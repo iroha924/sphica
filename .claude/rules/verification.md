@@ -13,7 +13,7 @@
 - Run SQL on a real SQLite database in a temporary directory (`server/test/temp-db.ts`) and look at the results. Do not match built SQL strings (SQL that never runs stays green) <!-- invariant: real-sqlite-tests -->
 - Do not touch `~/.sphica`. Pass the DB path as an argument or through `SPHICA_DB`
 - `sql:reach` counts whether tests ran each SQL call site in `server/src` (except `LIVE_FILES`, which `sql:live` covers). The ledger is `scripts/lib/sql-call-sites.mjs`
-- `sql:live` runs the CLI and the capture hooks as child processes. Set the child's `HOME` to a temporary directory and do not pass the parent's `SPHICA_DB` (otherwise it reads and writes the owner's `~/.sphica`) <!-- invariant: temp-home -->
+- `sql:live` runs the CLI and the capture hooks as child processes. Set the child's `HOME` to a temporary directory and do not pass the parent's `SPHICA_DB` or `SPHICA_HOME` (otherwise it reads and writes the owner's `~/.sphica`, or the directory `SPHICA_HOME` names) <!-- invariant: temp-home -->
 - Do not skip when a precondition is missing. Fail (otherwise it always skips in CI and stays green) <!-- invariant: no-silent-skip -->
 - Do not connect to external APIs. Pass without credentials. For GitHub, pass a fake `Get` to `server/src/github.ts`, or put a fake `gh` first on PATH (the acceptance driver does) <!-- invariant: no-external-api -->
 - Close connections with `TempDb.done()` (a held connection keeps `verify` from finishing). The source of truth for the time limit is `--test-timeout` in `server/package.json`

@@ -267,6 +267,8 @@ before(() => {
   delete process.env.SPHICA_PARENT_SESSION;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   process.env.HOME = home;
+  // SPHICA_HOME would win over the swapped HOME and point the queue at the shell's directory
+  delete process.env.SPHICA_HOME;
   execFileSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
   fs.mkdirSync(path.join(repoDir, "server"));
   execFileSync("git", ["-C", repoDir, "remote", "add", "origin", "https://github.com/o/r.git"], {

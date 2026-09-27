@@ -16,6 +16,9 @@ import {
   writePlace,
 } from "../src/project.ts";
 
+// These tests swap HOME to keep the name map apart; SPHICA_HOME would win over it and point at the shell's directory
+delete process.env.SPHICA_HOME;
+
 // These tests swap HOME to protect the real name map. Bun's os.homedir() ignores the swap and would rewrite the real map.
 if (process.versions.bun) throw new Error("run these tests with node --test (bun run test)");
 
