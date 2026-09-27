@@ -289,3 +289,21 @@ test("a non-ASCII anchored path is matched, and a record in an unresolved confli
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("an unwritable temporary directory never silences the review check", async () => {
+  const w = await world();
+  const saved = process.env.TMPDIR;
+  const locked = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-locked-"));
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 8;\n");
+    fs.chmodSync(locked, 0o500);
+    process.env.TMPDIR = locked;
+    assert.match(await w.typed("review", "", "locked"), /trace:ext-s1\/sqlite/);
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+    fs.chmodSync(locked, 0o700);
+    fs.rmSync(locked, { recursive: true, force: true });
+    await w.done();
+  }
+});

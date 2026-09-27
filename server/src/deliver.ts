@@ -450,29 +450,34 @@ async function beforeReview(
 
 /** Whether this session was already told exactly this about a review (a review skill is often called more than once per change). */
 function toldBefore(session: string, text: string): boolean {
-  const dir = path.join(os.tmpdir(), "sphica-review");
+  return !markOnce("review", `${session}\0${text}`);
+}
+
+/**
+ * Marks a key once, in a per-user directory (a shared /tmp holds other users' markers). True the first time; only an existing mark
+ * counts as seen, so a directory that cannot be written never silences a delivery.
+ */
+function markOnce(kind: string, key: string): boolean {
+  const user = (() => {
+    try {
+      return os.userInfo().username;
+    } catch {
+      return String(process.getuid?.() ?? "user");
+    }
+  })();
+  const dir = path.join(os.tmpdir(), `sphica-${sha256(user).toString("hex").slice(0, 12)}`, kind);
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, sha256(`${session}\0${text}`).toString("hex").slice(0, 24)), "", {
-      flag: "wx",
-    });
-    return false;
-  } catch {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(dir, sha256(key).toString("hex").slice(0, 24)), "", { flag: "wx" });
     return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "EEXIST";
   }
 }
 
 /** Whether this session was already told Sphica is unavailable (said once per session, never as "nothing applies"). */
 function onceUnavailable(session: string): boolean {
-  const dir = path.join(os.tmpdir(), "sphica-unavailable");
-  const mark = path.join(dir, sha256(session).toString("hex").slice(0, 24));
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(mark, "", { flag: "wx" });
-    return true;
-  } catch {
-    return false;
-  }
+  return markOnce("unavailable", session);
 }
 
 async function log(
