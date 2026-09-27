@@ -129,6 +129,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 
 - Structured records exist only for what you traced, harvested, or gleaned. Everything else is searchable only as captured text (`search` with `sources: true`).
 - In Codex, a shell command that names a file gets its decisions even when the command does not read it, and edits made through shell commands get none.
+- Showing a record does not make the agent follow it. In our evaluation Codex received and found an earlier decision against a request, and still carried out the request as asked.
 - A code location in a record is checked against your working tree when it is read ("located", "moved", "missing"). A located symbol does not prove the decision still holds.
 
 ## Upgrading from 0.4
