@@ -343,6 +343,21 @@ test("the owner's GitHub account is bound once; the same id again is kept, anoth
   );
 });
 
+// storeItems treats every bound row as the owner, so any of them is already bound, not another account
+test("an id bound in any row counts as already bound", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  await quiet(() => dbInit(file));
+  const raw = new DatabaseSync(file);
+  const bind = raw.prepare(
+    "insert into owner_identity (provider, external_id, login, bound_at) values ('github', ?, 'x', ?)",
+  );
+  bind.run("42", at("2026-01-01T00:00:00Z"));
+  bind.run("7", at("2026-02-01T00:00:00Z"));
+  raw.close();
+  assert.deepEqual(bindOwner({ id: 7, login: "x" }, file), { kind: "already" });
+  assert.deepEqual(bindOwner({ id: 9, login: "y" }, file), { kind: "other", id: "42", login: "x" });
+});
+
 test("a database of another revision is not bound", async () => {
   const file = path.join(tmp(), "sphica.db");
   await quiet(() => dbInit(file));

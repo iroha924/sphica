@@ -68,6 +68,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `fix(github): accept managed-user logins and tell an unstartable gh from a signed-out one`
   - 結果: red を実測（pass 4 / fail 2、上の 2 件）。直した後 `bun run test` → 298 pass / 0 fail。`bun run typecheck` → 指摘なし
 
+- [x] T10: bindOwner() が revision を書き込みロックの中で確かめ、どの行に登録済みの ID でも already と返す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す対象の bindOwner() が要る）
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`
+  - red: `cd server && node --test --test-name-pattern="any row" test/admin.test.ts` → ID 42 と 7 が登録された DB で 7 を渡すと other が返り失敗
+  - 完了条件: `bun run test` → 複数行のケースを含めて通る
+  - コミット: `fix(admin): check the revision under the lock and match any bound row`
+  - 結果: red を実測（actual other / expected already）。直した後 `bun run test` → 299 pass / 0 fail。`bun run typecheck` → 指摘なし。`bun run sql:reach` → 128 / 128 sites。revision の競合は再現テストを作らず、読む位置をロックの中へ移しただけ
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -114,3 +124,5 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T08 / 結果欄を書式に合わない形のままコミットした（検査の終了コードをパイプで落とした） / T01 のコミットで結果欄を直した
 - 2026-09-28 / T03 / 採用まで通すテストは harvest の run と保存の道具がそろう extract.test.ts に置き、新しい SQL の呼び出しも既存のテストで届いて台帳の変更が要らなかった / 変更欄を `admin.ts, admin.test.ts, github.test.ts, sql-call-sites.mjs` → `admin.ts, admin.test.ts, extract.test.ts` に変えた
 - 2026-09-28 / T02 のレビュー / F1（EMU のログイン名を拒む、再現済み）と F2（EACCES を failed にする）を採用 / 修正タスク T09 を足した
+- 2026-09-28 / T01 のレビュー / 指摘なし（Codex 側はテストを流せず、手元の `bun run test` で確認済み） / そのまま
+- 2026-09-28 / T03 のレビュー / F1（revision をロックの前に読む）と F2（複数行で最初の行だけ比べる）を採用 / 修正タスク T10 を足した

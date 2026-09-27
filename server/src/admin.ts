@@ -116,15 +116,16 @@ export type Binding =
  * switching gh to someone else's account must not give their words the owner's weight. A database of another revision is left alone.
  */
 export function bindOwner(user: { id: number; login: string }, file: string = dbFile()): Binding {
-  return withOwner(file, (raw) => {
-    const revision = versionOf(raw);
-    if (revision !== SCHEMA_REVISION) return { kind: "skipped", revision };
-    return immediate(raw, (): Binding => {
+  return withOwner(file, (raw) =>
+    // The revision is read under the write lock, so it cannot change between the check and the insert
+    immediate(raw, (): Binding => {
+      const revision = versionOf(raw);
+      if (revision !== SCHEMA_REVISION) return { kind: "skipped", revision };
       const bound = raw
         .prepare(
-          "select external_id, login from owner_identity where provider = 'github' order by bound_at, external_id limit 1",
+          "select external_id, login from owner_identity where provider = 'github' order by external_id = ? desc, bound_at, external_id limit 1",
         )
-        .get() as { external_id: string; login: string | null } | undefined;
+        .get(String(user.id)) as { external_id: string; login: string | null } | undefined;
       if (!bound) {
         raw
           .prepare(
@@ -136,8 +137,8 @@ export function bindOwner(user: { id: number; login: string }, file: string = db
       return bound.external_id === String(user.id)
         ? { kind: "already" }
         : { kind: "other", id: bound.external_id, login: bound.login };
-    });
-  });
+    }),
+  );
 }
 
 /**
