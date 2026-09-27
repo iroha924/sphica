@@ -87,6 +87,7 @@ Processes of the same OS user can rewrite the file directly, so this is not an O
 - Write connections live only in `server/src/db-write.ts`; `bun run architecture` checks the read MCP server cannot reach them
 - Enable `enableDefensive(true)` on every connection (it stops direct writes to FTS5 shadow tables)
 - Initialization order is fixed: open → defensive and pragmas → `sphica_terms` → authorizer
+- Before adding a function to `READER_FUNCTIONS` because a read fails with `not authorized`, see whether the code can compute it instead (the read-delivery budget sums `chars` in JS rather than widening the reader)
 - **Do not count rows by affected rows through a view** (an insert into a view reports 0). Count by what exists before and after
 - Judge permissions by running them: `server/test/db.test.ts` tries each role's allowed and forbidden operations on real connections.
   A trigger function the authorizer denies fails only at run time (the delivery log once failed this way unnoticed)
@@ -122,5 +123,5 @@ Both are contentless and filled by triggers calling `sphica_terms`, which is `te
 - Tests run SQL on a real SQLite database in a temporary directory (`server/test/temp-db.ts`). Do not touch `~/.sphica`
 - `bun run verify` includes `sql:reach` (tests ran every SQL call site in `server/src`, except `LIVE_FILES`), `sql:live` (the CLI and capture as child
   processes), and the acceptance cases
-- **The acceptance cases are the contract.** `server/evals/acceptance/cases.json` holds 54 bilingual cases over capture, status, retrieval, injection,
-  review, and glean; `run.ts` plays them through `driver.ts`. For a new behavior, add a case first and confirm it fails for the intended reason
+- **The acceptance cases are the contract.** `server/evals/acceptance/cases.json` holds the bilingual cases over capture, status, retrieval, injection,
+  review, and glean (`server/test/acceptance-cases.test.ts` fixes the count per layer); `run.ts` plays them through `driver.ts`. For a new behavior, add a case first and confirm it fails for the intended reason

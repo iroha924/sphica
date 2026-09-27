@@ -30,6 +30,7 @@ Claude Code resolves the package with the npm client and unpacks the tarball int
 - The cache updates only when the version changes. `bun run bundle` or a commit alone does not deliver anything; nothing arrives until publish
 - The CLI reads `dist/cli.js` where it is run, so working in the CLI is no proof that it works in MCP
 - The hooks call `${CLAUDE_PLUGIN_ROOT}/dist/capture.js` and `dist/deliver.js`, so they too run at the cache's version
+- The hook entries run only when their own path matches `capture.(ts|js)` / `deliver.(ts|js)`. Renaming a bundle (to `.mjs`, say) turns the hook into a silent no-op: it exits 0 and prints nothing
 - **`plugin/dist` is not tracked by git.** The build is made at publish time
 
 ### How Skills do their work
@@ -151,7 +152,7 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
    and both hosts' caches, and that no reconnect instruction remains for the running MCP
 5. From a session after the update, call `status` and `search`, and check the contents of the changed MCP tools, Skills, and Agents. If capture
    changed, also check that this session's messages are found by `search` with `sources: true`, and that the "Recording" line in `sphica doctor`
-   has nothing waiting. If delivery changed, edit a file with an anchored record and check the hook's context arrived
+   has nothing waiting. If delivery changed, read and then edit a file with an anchored record and check the hook's context arrived (a read shows each record once per session)
 
 `plugin/skills/review/reviewers/` also goes through the cache, so saving or restarting a session does not give the new text.
 When changing aspects, read `plugin-agent-authoring` first too.

@@ -45,6 +45,7 @@ Read to the end before implementing.
 - DB schema, connection roles, full-text search index, ingestion: `knowledge-schema`
 - MCP servers, CLI, capture and delivery hooks, plugin distribution: `plugin-release`
 - Shipped review aspects: `plugin-agent-authoring`
+- Running the evaluation loop on Claude and Codex (cloud routines, local Codex, fixtures, grading): `eval-loop`
 - Creating Skills, Agents, and rules: `docs-author`
 
 ## Branches and PRs
