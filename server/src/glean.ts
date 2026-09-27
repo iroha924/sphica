@@ -584,15 +584,23 @@ export async function saveGlean(
         touched.delete(p.unitId);
         continue;
       }
-      // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order)
-      await move(
-        trx,
-        p.unitId,
-        "candidate",
-        `support retracted: ${head(op.reason_quote, 200)}`,
-        reason.id,
-        runId,
-      );
+      // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order).
+      // A superseded or withdrawn unit keeps its state: it must not come back through a later activation
+      const current = await trx
+        .selectFrom("unit")
+        .select("lifecycle")
+        .where("id", "=", p.unitId)
+        .executeTakeFirstOrThrow();
+      if (current.lifecycle === "active")
+        await move(
+          trx,
+          p.unitId,
+          "candidate",
+          `support retracted: ${head(op.reason_quote, 200)}`,
+          reason.id,
+          runId,
+        );
+      else if (current.lifecycle !== "candidate") touched.delete(p.unitId);
       const table = op.op === "retract_evidence" ? "unit_evidence" : "unit_adoption";
       await trx
         .updateTable(table)

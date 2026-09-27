@@ -588,3 +588,53 @@ test("glean: the owner's words resolve a conflict, and only an unresolved one be
     await db.done();
   }
 });
+
+test("glean: retracting support from a superseded record leaves it superseded", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "o1",
+      text: "The cache is slow. It misses on cold start. The cache is fine now.",
+    });
+    const finding = (key: string, quotes: string[], extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "finding",
+      text: quotes[0],
+      evidence: quotes.map((quote) => ({ source: `s${m}`, quote, role: "states" })),
+      ...extra,
+    });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [finding("slow", ["The cache is slow.", "It misses on cold start."])],
+    });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [finding("fine", ["The cache is fine now."], { supersedes: "trace:ext-s1/slow" })],
+    });
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    assert.equal(state("trace:ext-s1/slow"), "superseded");
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "Cold start is not the cause.", session: "g1" });
+    const run = await beginGlean(db.ingest, p, "g1");
+    const record = {
+      ops: [
+        {
+          op: "retract_evidence",
+          unit: "trace:ext-s1/slow",
+          revision: db.owner.prepare("select revision from unit where key = 'trace:ext-s1/slow'").get()
+            ?.revision,
+          source: `s${m}`,
+          quote: "It misses on cold start.",
+          reason_source: `s${said}`,
+          reason_quote: "Cold start is not the cause.",
+        },
+      ],
+    };
+    const c = await checkText(db.ingest, run, p, null, record);
+    assert.ok(c.ok, c.text);
+    await saveText(db.ingest, run, p, null, record);
+    assert.deepEqual([state("trace:ext-s1/slow"), state("trace:ext-s1/fine")], ["superseded", "active"]);
+  } finally {
+    await db.done();
+  }
+});
