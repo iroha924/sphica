@@ -8,6 +8,8 @@ export function releaseNotes(body) {
     previous = text;
     text = text.replace(/<!--[\s\S]*?-->/g, "");
   }
+  // An opening marker left anywhere hides what follows it on GitHub, heading included, so the owner could not have read it
+  if (text.includes("<!--")) return null;
   const lines = text.split("\n");
   // A heading inside a code fence is text, not a section. A fence opens with 3 or more backticks or tildes
   // and closes only with the same character, at least as many, and nothing else on the line (CommonMark)
@@ -33,8 +35,7 @@ export function releaseNotes(body) {
     .slice(start + 1, end === -1 ? undefined : end)
     .join("\n")
     .trim();
-  // An unclosed comment would hide the rest of the notes in the Release, so such notes go back to the owner
-  return notes === "" || notes.includes("<!--") ? null : notes;
+  return notes === "" ? null : notes;
 }
 
 /** From `git log --merges --format='%H %P'` lines, the merge commit whose second parent is the tag commit, or null. */

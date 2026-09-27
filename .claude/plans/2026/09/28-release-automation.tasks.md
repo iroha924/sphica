@@ -204,6 +204,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): ask npm whenever publish did not succeed in this run`
   - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。判定のシェルを 6 通りで流す → `success v9.9.9 -> yes`、`skipped v0.5.3 -> yes`、`skipped v9.9.9 -> no`、`cancelled v9.9.9 -> no`、`failure v0.5.3 -> yes`、`failure v9.9.9 -> unknown`
 
+- [x] T19: Release notes の本文のどこかにコメントの開始記号が残っていたら受け付けない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T15（同じ抽出処理）
+  - 変更: `scripts/lib/release-finish.mjs`, `server/test/release-finish.test.ts`
+  - red: `node --test server/test/release-finish.test.ts` → 見出しより前に閉じないコメントがある本文で、変更前のコードは `Not reviewed` を返して落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → 全件 pass
+  - コミット: `fix(release): refuse notes with an unclosed comment anywhere in the PR body`
+  - 結果: red: 変更前のコードで `actual: 'Not reviewed'` で落ちた。変更後 `node --test test/release-finish.test.ts` → 9 pass / 0 fail。実データの `--dry-run` → v0.5.3 で通る、`--notes-digest --pull 182` → ハッシュが出る
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
