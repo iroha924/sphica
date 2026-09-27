@@ -95,7 +95,21 @@ async function reasons(db: Kysely<DB>, ids: number[]): Promise<Map<number, strin
   return out;
 }
 
-/** Keeps whole lines within the budget; returns the kept lines and how many were left out. */
+/**
+ * Records as file-bound deliveries show them at their longest: the line, then the reason and rejected options. The evaluation's gold slot
+ * renders its records with this too, so gold gives exactly what a delivery gives.
+ */
+export async function recordLines(
+  db: Kysely<DB>,
+  units: { id: number; key: string; kind: string; stance: string | null; text: string }[],
+): Promise<string[]> {
+  const why = await reasons(
+    db,
+    units.map((u) => u.id),
+  );
+  return units.map((u) => line(u, why.get(u.id)));
+}
+
 /**
  * Keeps whole lines within the budget. Each entry lists its forms, longest first. Entries go in first in their shortest form (one that does
  * not fit is skipped, so a later, shorter one may still fit); leftover room then lengthens them in order. Returns the kept entries' indexes.

@@ -31,13 +31,14 @@ base: main
   - コミット: `chore(release): bump to the next patch version`
   - 結果: `bun run release:plan -- --base v0.5.2` → npm 0.5.3 / plugin 0.5.3 / marketplace 0.5.3 / Codex 0.5.3
 
-- [ ] T02: 記録 1 件の描画を deliver.ts から export し、gold がそれを使う。スロットの Go の節を除き、切り詰めを検査する
+- [x] T02: 記録 1 件の描画を deliver.ts から export し、gold がそれを使う。スロットの Go の節を除き、切り詰めを検査する
   - 種別: 変更
   - 計画: S1
   - 依存: T01（配布物の変更はバージョンを上げた後でないとコミットできない）
   - 変更: `server/src/deliver.ts`, `server/evals/cloud/build.ts`, `server/test/deliver.test.ts`
   - 完了条件: `bun run verify` → exit 0。`node evals/cloud/build.ts --project tsundoku` → 構築でき、スロットの CLAUDE.md と AGENTS.md に "Before implementing" 節が無く、gold.sh の出力に退けた選択肢が入る
   - コミット: `feat(evals): render gold with the delivery renderer and drop the Go gate from slots`
+  - 結果: `bun run verify` → exit 0。`node evals/cloud/build.ts --project tsundoku` と `--project sphica`（一時の出力先）→ 両方 exit 0、eval-shelf-1 の CLAUDE.md に "Before implementing" と "owner's Go" が 0 件、sphica の gold.json に Why と "Rejected: ... (+4 more)" が入る。最初は選択肢まで検査して sphica の構築が止まった（記録節）
 
 - [ ] T03: 負例タスク pilot-display を足す
   - 種別: 追加
@@ -76,3 +77,4 @@ base: main
   - コミット: `feat(mcp): tell agents to confirm with the user before overturning a past decision`
 
 ## 記録
+2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した

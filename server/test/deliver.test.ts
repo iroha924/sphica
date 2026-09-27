@@ -8,7 +8,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction } from "../src/db.ts";
-import { deliver } from "../src/deliver.ts";
+import { deliver, recordLines } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -452,6 +452,14 @@ test("reads and edits carry each record's reason and rejected options, edits ask
     const prompt = await at("p", { hook_event_name: "UserPromptSubmit", prompt: "search() を直したい" });
     assert.match(prompt, /trace:ext-s1\/keep/);
     assert.doesNotMatch(prompt, /Why:|Rejected:/);
+    // The evaluation's gold slot renders records with the same function, so gold gives what a read gives
+    const units = await db.ingest
+      .selectFrom("unit")
+      .select(["id", "key", "kind", "stance", "text"])
+      .where("key", "=", "trace:ext-s1/keep")
+      .execute();
+    const [gold] = await recordLines(db.ingest, units);
+    assert.ok(gold && read.split("\n").includes(gold), gold);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

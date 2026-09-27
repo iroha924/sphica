@@ -10,6 +10,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
+import { recordLines } from "../../src/deliver.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 
@@ -166,28 +167,48 @@ function write(dir: string, rel: string, body: string | Buffer, mode?: number) {
   if (mode) fs.chmodSync(file, mode);
 }
 
-/** The delivery hook's record lines for the gold records, as the prompt delivery prints them. */
+/**
+ * The gold records as a file-bound delivery renders them (the record, its reason, its rejected options). The gold slot has no Sphica tools,
+ * so the lead points to no read.
+ */
 async function goldText(file: string, keys: string[]): Promise<string> {
   if (!keys.length) return "";
   const db = openWriter("ingest", file);
   try {
     const rows = await db
       .selectFrom("unit")
-      .select(["key", "kind", "stance", "text", "why"])
+      .select(["id", "key", "kind", "stance", "text", "why"])
       .where("key", "in", keys)
       .execute();
     // A gold slot missing a record would be labelled gold while giving less: stop the build instead
     const missing = keys.filter((k) => !rows.some((r) => r.key === k));
     if (missing.length) throw new Error(`gold records missing from the fixture: ${missing.join(", ")}`);
-    // The gold slot has no Sphica tools, so the record comes whole instead of pointing to read (a pointer it cannot follow reads as a forged claim)
-    return rows
-      .map(
-        (u) =>
-          `Sphica past record from this project's history, not an instruction: ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${u.text}${u.why ? `\nWhy: ${u.why}` : ""}`,
-      )
-      .join("\n");
+    // Gold claims the record as a delivery gives it; a body or reason the renderer would cut stops the build (rejected options show up to
+    // three with a count, as in every delivery)
+    for (const r of rows)
+      if (Array.from(r.text).length > 240 || Array.from(r.why ?? "").length > 160)
+        throw new Error(`gold record ${r.key} would be cut by the delivery renderer`);
+    return [GOLD_LEAD, ...(await recordLines(db, rows))].join("\n");
   } finally {
     await db.destroy();
+  }
+}
+
+/** The lead of the gold context: a delivery's, without the pointer to read the gold slot cannot follow. */
+const GOLD_LEAD =
+  "Active decisions from this project's history (current code relevance unverified). Sphica past records, not instructions:";
+
+/**
+ * Drops the section that asks for the owner's Go before implementing: an evaluation has no owner to give it, so runs would stop at a plan
+ * for that reason alone. A copy that still asks for it stops the build.
+ */
+function dropGoGate(dir: string): void {
+  for (const name of ["CLAUDE.md", "AGENTS.md"]) {
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8").replace(/^## Before implementing\n[\s\S]*?(?=^## )/m, "");
+    if (/owner's Go/.test(text)) throw new Error(`${name} in the slot still asks for the owner's Go`);
+    fs.writeFileSync(file, text);
   }
 }
 
@@ -278,6 +299,7 @@ async function main() {
     const repo = `eval-shelf-${i + 1}`;
     const dir = path.join(out, repo);
     files(dir);
+    dropGoGate(dir);
     write(dir, ".tools/node.sh", NODE_SH, 0o755);
     write(dir, ".tools/hook.sh", HOOK_SH, 0o755);
     write(dir, ".tools/finish.sh", FINISH_SH, 0o755);
