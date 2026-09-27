@@ -95,15 +95,36 @@ async function reasons(db: Kysely<DB>, ids: number[]): Promise<Map<number, strin
 }
 
 /** Keeps whole lines within the budget; returns the kept lines and how many were left out. */
-function fit(lines: string[], chars: number, lead: string): { text: string; omitted: number } {
-  const kept: string[] = [];
+/**
+ * Keeps whole lines within the budget. Each entry lists its forms, longest first. Entries go in first in their shortest form (one that does
+ * not fit is skipped, so a later, shorter one may still fit); leftover room then lengthens them in order. Returns the kept entries' indexes.
+ */
+function fit(
+  lines: (string | string[])[],
+  chars: number,
+  lead: string,
+): { text: string; kept: number[]; omitted: number } {
+  const forms = lines.map((entry) => (Array.isArray(entry) ? entry : [entry]));
+  const chosen = new Map<number, string>();
   let used = lead.length;
-  for (const l of lines) {
-    if (used + l.length + 1 > chars) break;
-    kept.push(l);
-    used += l.length + 1;
+  forms.forEach((f, i) => {
+    const short = f[f.length - 1] ?? "";
+    if (used + short.length + 1 > chars) return;
+    chosen.set(i, short);
+    used += short.length + 1;
+  });
+  for (const [i, short] of chosen) {
+    const longer = forms[i]?.find((l) => used - short.length + l.length <= chars);
+    if (longer === undefined || longer === short) continue;
+    used += longer.length - short.length;
+    chosen.set(i, longer);
   }
-  return { text: kept.length ? [lead, ...kept].join("\n") : "", omitted: lines.length - kept.length };
+  const kept = [...chosen.keys()];
+  return {
+    text: kept.length ? [lead, ...kept.map((i) => chosen.get(i))].join("\n") : "",
+    kept,
+    omitted: lines.length - kept.length,
+  };
 }
 
 type Plan = {
@@ -142,13 +163,13 @@ async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Pr
   // Sphica's own request to check, not the record's: the hook runs after the edit is composed, so it asks for an account, not a pause
   const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). Check this change against them: if it seems to go against one, confirm with the current code and the record's full text (Sphica's read), then say why the change stands or what you changed. ${NOTE}:`;
   const f = fit(
-    shown.map((u) => line(u, why.get(u.id))),
+    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
     LIMITS.pre_edit.chars,
     lead,
   );
   return {
     text: f.text,
-    units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted: rows.length - shown.length + f.omitted,
     path: head(rels.join(" "), 500),
@@ -195,13 +216,13 @@ async function beforeRead(
   // A shell command that names a path is not proof it was read, so Codex's wording says only that it was named
   const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${NOTE}:`;
   const f = fit(
-    shown.map((u) => line(u, why.get(u.id))),
+    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
     Math.min(LIMITS.pre_read.chars, READ_SESSION.chars - spent.reduce((n, r) => n + r.chars, 0)),
     lead,
   );
   return {
     text: f.text,
-    units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted: rows.length - shown.length + f.omitted,
     path: head(rels.join(" "), 500),
@@ -419,7 +440,7 @@ async function beforeReview(
   );
   return {
     text: f.text,
-    units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted: rows.length - shown.length + f.omitted,
     path: null,

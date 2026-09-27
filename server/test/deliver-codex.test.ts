@@ -209,3 +209,44 @@ test("a shell command names a path as ./path, relative to a subdirectory, or wit
     await w.done();
   }
 });
+
+test("a long lead or a rich record never empties an edit delivery: a line that does not fit is shortened or skipped", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const dirs = [1, 2, 3].map((n) => `src/${String(n).repeat(150)}/f.ts`);
+    const long = "Keep the long rule as written here. ".repeat(8).trim();
+    const why = "Because it was measured again and again. ".repeat(8).trim();
+    const m = message(db, p, { id: "m1", text: `${long} ${why} Short rule.` });
+    await save(db, p, {
+      units: [
+        decided("short", m, "Short rule.", dirs),
+        {
+          ...decided("rich", m, long, dirs),
+          why,
+          options: [1, 2, 3, 4].map((n) => ({ text: `${"option ".repeat(10)}${n}`, outcome: "rejected" })),
+        },
+      ],
+    });
+    const out = await deliver(
+      {
+        session_id: crypto.randomUUID(),
+        cwd: repo,
+        hook_event_name: "PreToolUse",
+        tool_name: "apply_patch",
+        tool_input: {
+          command: `*** Begin Patch\n${dirs.map((d) => `*** Update File: ${d}`).join("\n")}\n*** End Patch`,
+        },
+      } as never,
+      "codex",
+      db.file,
+    );
+    assert.ok(out.length > 0 && out.length <= 1500, `${out.length} chars`);
+    assert.match(out, /trace:ext-s1\/rich /);
+    assert.match(out, /trace:ext-s1\/short /, "a shorter record after a long one still fits");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
