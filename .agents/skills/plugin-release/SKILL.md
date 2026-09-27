@@ -91,12 +91,12 @@ Once, before the first release, the owner sets these up in the web UI (without t
 - npm: trusted publisher (repository `iroha924/sphica`, workflow `release.yml`, environment `npm-release`, direct `npm publish` allowed),
   2FA required, publishing with tokens disallowed. A connection cannot be edited: to change one, delete it and create it again
 
-3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`) and the Codex review. Keep main merged into the PR branch
+3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`, and `release`, the dry run) and the Codex review. Keep main merged into the PR branch
    (if main has moved ahead, the tree CI checked and the tag's tree do not match)
 4. Run `git tag v<version> <head>` on **the PR head** and push it. Tagging the head, not main, lets the candidate be checked before the merge.
    Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
-   and that `check` and `pr-body` succeeded on that head (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
+   and that `check`, `pr-body`, and `release` succeeded on that head (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
    after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner
 6. The owner approves the `npm-release` environment on the run page. `publish` then runs both checks again, compares the SHA-512 of the same tarball,

@@ -29,7 +29,7 @@ const ok = {
   tagCommit: COMMIT,
   published: false,
   pulls: [pull],
-  runs: [run("check"), run("pr-body")],
+  runs: [run("check"), run("pr-body"), run("release")],
 };
 
 test("passes and returns the PR number when the tag, all versions, the PR, and CI line up", () => {
@@ -77,8 +77,10 @@ test("rejects a commit whose latest check and pr-body runs did not succeed", () 
     /check/,
   );
   assert.deepEqual(
-    gateProblems({ ...ok, runs: [run("check", "failure", 1), run("check", "success", 2), run("pr-body")] })
-      .problems,
+    gateProblems({
+      ...ok,
+      runs: [run("check", "failure", 1), run("check", "success", 2), run("pr-body"), run("release")],
+    }).problems,
     [],
   );
   assert.match(
@@ -125,4 +127,18 @@ test("rejects when the remote tag no longer points to the commit", () => {
 
 test("rejects a tag version already on npm (stopping before publish fails after the owner approves)", () => {
   assert.match(gateProblems({ ...ok, published: true }).problems.join("\n"), /already on npm/);
+});
+
+// The PR's release run is the dry run of publish and finish; a defect it finds must stop the tag before anything is published
+test("rejects a commit whose release dry run failed or did not run", () => {
+  assert.match(
+    gateProblems({ ...ok, runs: [run("check"), run("pr-body"), run("release", "failure")] }).problems.join(
+      "\n",
+    ),
+    /release run did not succeed/,
+  );
+  assert.match(
+    gateProblems({ ...ok, runs: [run("check"), run("pr-body")] }).problems.join("\n"),
+    /release has not run/,
+  );
 });

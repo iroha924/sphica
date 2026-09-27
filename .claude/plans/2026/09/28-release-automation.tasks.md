@@ -134,6 +134,52 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): name tag-only jobs with plain text`
   - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。`gh pr checks` は push 後に確かめる
 
+- [x] T12: tag のゲートが PR の `release`（お試し実行）の成功も条件にする
+  - 種別: 修正
+  - 計画: S1, S5
+  - 依存: T01（同じゲート）
+  - 変更: `scripts/lib/release-gate.mjs`, `server/test/release-gate.test.ts`, `server/test/release-gate-cli.test.ts`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `node --test server/test/release-gate.test.ts` → release の run が失敗・未実行でも、変更前のコードは問題なしと返して落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-gate"` → 全件 pass
+  - コミット: `fix(release): require the PR's release dry run before a tag may publish`
+  - 結果: red: 変更前のコードで「release dry run failed or did not run」のテストが落ちた。変更後 `node --test test/release-gate.test.ts test/release-gate-cli.test.ts` → 11 pass / 0 fail。`node scripts/check-ai-config.mjs` → exit 0
+
+- [ ] T13: リリースのスクリプトのテストで、子プロセスに一時 HOME を渡す
+  - 種別: 修正
+  - 計画: S1, S2, S3
+  - 依存: T12（同じテストファイル）
+  - 変更: `server/test/release-gate-cli.test.ts`, `server/test/release-env.test.ts`, `server/test/release-finish.test.ts`
+  - red: `rg -n "HOME" server/test/release-gate-cli.test.ts server/test/release-env.test.ts server/test/release-finish.test.ts` → 変更前は 0 件（子の HOME が無く、Node はアカウントのホームを使う）
+  - 完了条件: 3 ファイルの子プロセスの env に `HOME` がテストの一時ディレクトリで入り、`bun run --cwd server test` → 全件 pass
+  - コミット: `test(release): give release-script children a temporary HOME`
+
+- [ ] T14: merge の直前と finish で、PR の base が main であることを確かめる
+  - 種別: 修正
+  - 計画: S3, S4
+  - 依存: T10（同じスクリプト）
+  - 変更: `.github/workflows/release.yml`, `scripts/release-finish.mjs`, `server/test/release-finish.test.ts`
+  - red: `node --test server/test/release-finish.test.ts` → base が main でない PR でも、変更前のコードは通って落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → base 違いで exit 1 を含めて全件 pass。`mise exec -- actionlint .github/workflows/release.yml` → exit 0
+  - コミット: `fix(release): require main as the PR base when merging and finishing`
+
+- [ ] T15: Release notes の抽出で、コードブロックの区切りを開始の記号の種類と長さで対応づける
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T14（同じテストファイル）
+  - 変更: `scripts/lib/release-finish.mjs`, `server/test/release-finish.test.ts`
+  - red: `node --test server/test/release-finish.test.ts` → 4 つのバッククォートの中に 3 つの行と見出しがある本文で、変更前のコードは見出しを節として読んで落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → 全件 pass
+  - コミット: `fix(release): close a code fence only with a matching delimiter`
+
+- [ ] T16: 承認の前にノートを検査してハッシュを記録し、finish はそのノートと一致するときだけ Release を作る
+  - 種別: 修正
+  - 計画: S3, S4
+  - 依存: T15（同じスクリプト）
+  - 変更: `scripts/release-finish.mjs`, `server/test/release-finish.test.ts`, `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `node --test server/test/release-finish.test.ts` → 承認の後に書き換えたノートでも、変更前のコードは Release を作って落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → ノートのハッシュ違いで exit 1、`--notes-digest` でノートが無ければ exit 1、を含めて全件 pass。`mise exec -- actionlint .github/workflows/release.yml` → exit 0
+  - コミット: `fix(release): create the Release only from the notes the owner saw before approving`
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
@@ -146,3 +192,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / 全体 / review-shipping: 出してよい。指摘 1 件: npm のレジストリは CDN のキャッシュ（max-age=300）を返すので、publish 直後の finish が落ちうる、merge の失敗時に report-failure が誤って「npm にない」と書きうる（推測、未観測） / report-failure の誤りは T09 で直す。finish は再実行で直るので、Skill に数分待ってから再実行と書くだけにする
 - 2026-09-28 / 全体 / Codex の修正分の再レビュー（99435b5..7fff62b）: 指摘 0 件 / 対応なし
 - 2026-09-28 / 全体 / PR #182 の CI: 必須チェックとお試し実行、zizmor、actionlint は pass。CodeQL が `scripts/lib/release-finish.mjs:5-7` の HTML コメントの除去を「不完全な複数文字のサニタイズ」（high）として落とした。スキップされたジョブの名前が式のまま出た / T10 と T11 を足した。CodeQL の件は、影響（Release のノートの一部が隠れうる。GitHub が HTML をサニタイズするので実行には至らない見込み）と修正案をオーナーに報告してから直した
+- 2026-09-28 / 全体 / GitHub Codex のレビュー（edc1a65）: 5 件（P1 2、P2 3）。ゲートがお試し実行の成功を見ない、テストの子に一時 HOME が無い、merge 前に base を見ない、コードブロックの区切りを種類と長さで対応づけない、承認後に書き換えたノートで Release を作りうる / 5 件とも採り、T12〜T16 を足した

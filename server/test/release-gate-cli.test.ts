@@ -29,7 +29,7 @@ const endpoint = process.argv[3] ?? "";
 const pull = { state: "open", number: 7, base: { ref: "main" }, head: { sha: "${COMMIT}", repo: { full_name: "${REPO}" } } };
 const run = (name) => ({ id: 1, name, event: "pull_request", head_sha: "${COMMIT}", status: "completed", conclusion: "success", pull_requests: [{ number: 7, base: { ref: "main" } }] });
 if (endpoint.includes("/pulls")) process.stdout.write(JSON.stringify(process.env.FAKE_NO_PR ? [] : [pull]));
-else if (endpoint.includes("actions/runs")) process.stdout.write(JSON.stringify({ workflow_runs: [run("check"), run("pr-body")] }));
+else if (endpoint.includes("actions/runs")) process.stdout.write(JSON.stringify({ workflow_runs: [run("check"), run("pr-body"), run("release")] }));
 else process.exit(1);
 `,
 };

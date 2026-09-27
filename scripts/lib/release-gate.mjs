@@ -1,7 +1,8 @@
 // Decides whether a tag may be published to npm. prepare and publish in release.yml go through the same decision.
 // The inputs are gathered from git and the GitHub API; this module only decides (tests cover every branch).
 
-const REQUIRED_WORKFLOWS = ["check", "pr-body"];
+// release is the PR's dry run of publish and finish; every release PR bumps plugin/package.json, which triggers it
+const REQUIRED_WORKFLOWS = ["check", "pr-body", "release"];
 
 /** The failed conditions and the number of the PR whose head is the tag commit. Empty problems means it may be published. */
 export function gateProblems({
