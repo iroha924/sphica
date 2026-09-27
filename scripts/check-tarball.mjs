@@ -47,7 +47,7 @@ try {
   if (named !== version)
     throw new Error(`the tarball CLI reported ${named}, but the package version is ${version}`);
   cli("--help");
-  cli("db", "--help");
+  cli("doctor", "--help");
   cli("init");
   if (!fs.existsSync(path.join(home, ".sphica", "sphica.db")))
     throw new Error("init did not create a database");
