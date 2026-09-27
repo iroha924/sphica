@@ -132,3 +132,5 @@ base: main
 2026-09-28 / 計測 / スロットの push は main を作り直す上書きで、自動モードに止められた / 持ち主の判断で、.claude/settings.local.json に eval-shelf の force-with-lease push だけを許すルールを足した
 2026-09-28 / T09 / 旧文言 sphica の none と search で 1 回ずつ結果ブランチが無かった。run のログでは、エージェントが bun install した server/node_modules（約 13,000 ファイル）を finish.sh が強制で add していた / 依存と生成物を add から外した。旧文言の計測（a85a6ab）はこの直しを含まず、新文言の計測は含む。違いは無視対象の生成物をコミットするかだけで、エージェントが見るものは同じ
 2026-09-28 / T10 / T09 の Codex レビュー（6c86c22）で 1 件: tsundoku のスロットは .gitignore が無く、node_modules は git add -A で入る / T10 で直した。新文言 tsundoku の計測スロットは T10 の前に作ったが、tsundoku のタスクは依存を入れないので影響しない
+2026-09-28 / T10 / Codex のレビュー（99cbc6a）で 1 件: 既に追跡されている node_modules も削除として staged になる / 見送った。スロットはどちらのプロジェクトも node_modules を追跡していない（git ls-files で 0 件）
+2026-09-28 / 計測 / 旧文言の結果（tracked failure = 届いたか見つけたうえで反する実装）: Claude は pilot-dates と sphica-search-wording の inject・gold で 0/12、Codex は 8/12（pilot-dates 6/6、sphica gold 2/3、inject 0/3）。none と search の stopped_at_plan は両モデル 0。旧文言 sphica の Claude none と search で 1 回ずつ結果ブランチ無し（T09 の不具合）
