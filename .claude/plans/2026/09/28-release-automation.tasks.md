@@ -94,6 +94,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): tie release-finish to the tag's commit and PR, and skip fenced headings`
   - 結果: red: 変更前のコードで `FAKE_TAG_COMMIT` のケースが status 0、お試し実行が別の PR（#6）を拾う、コードブロック内の見出しを節として読む、の 3 件が落ちた。変更後 `node --test server/test/release-finish.test.ts` → 7 pass / 0 fail。実データの `node scripts/release-finish.mjs --dry-run` → v0.5.3 で通る
 
+- [x] T08: release-finish が remote の tag と PR の実際の merge コミットを確かめる
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T07（同じスクリプトの検査の並びに足す）
+  - 変更: `scripts/release-finish.mjs`, `server/test/release-finish.test.ts`
+  - red: `node --test server/test/release-finish.test.ts` → remote の tag が別のコミットを指すケースが、変更前のコードでは status 0 で落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → remote の tag 違い、PR が未 merge、PR の merge コミット違いで exit 1 を含めて全件 pass
+  - コミット: `fix(release): check the remote tag and the PR's own merge commit before creating the Release`
+  - 結果: red: 変更前のコードで `FAKE_REMOTE_TAG` のケースが status 0 で落ちた。変更後 `node --test server/test/release-finish.test.ts` → 7 pass / 0 fail。実データの `node scripts/release-finish.mjs --dry-run` → v0.5.3（PR #181 の merge コミット）で通る
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
@@ -102,3 +112,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / T06 / release-gate の lib とテストに stage の言い回しが残っていた / 変更欄に `scripts/lib/release-gate.mjs`, `server/test/release-gate.test.ts` を足した
 - 2026-09-28 / T03 / Codex のタスクレビュー（19244ee）: 3 件。F1 `--tag` と `--commit` の一致を見ていない、F2 `--pull` の PR が tag のコミットを head に持つかを見ていない、F3 コードブロック内の見出しを節の区切りに読む（再現あり） / 3 件とも採る。修正タスク T07 を足した
 - 2026-09-28 / T04 / Codex のタスクレビュー（6ac17a4）: 2 件。F1 承認依頼のコメントが落ちても report-failure が走らない、F2 同じ tag の run が 3 件重なると待機中の run が取り消される / どちらも見送る。F1 はコメントが便利のためのもので、run の URL は Claude が Skill の手順 5 で必ず渡す。F2 は対策の `concurrency.queue: max` を固定の actionlint 1.7.12 が拒否し（実測）、同じ tag を打ち直さない規則と tag のルールセットのもとでは 3 件重なる入力が起きにくい
+- 2026-09-28 / 全体 / Codex の全差分レビュー: 3 件。1 publish 後に remote の tag が動いても気づかない、2 渡された merge コミットが PR の実際の merge か確かめない、3 既存の Release の本文が PR のノートと違っても成功扱い / 1 と 2 を採り、修正タスク T08 を足した。3 は Release を手で書き換えたときだけの入力で、オーナーの意図した修正で再実行を落とす副作用があるので見送る

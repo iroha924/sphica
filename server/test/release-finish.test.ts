@@ -22,6 +22,7 @@ fs.appendFileSync(process.env.CALLS, "git " + a.join(" ") + "\\n");
 if (a[0] === "rev-parse" && a[1].endsWith("^2")) console.log(process.env.FAKE_SECOND || "${COMMIT}");
 else if (a[0] === "rev-parse") console.log(process.env.FAKE_TAG_COMMIT || "${COMMIT}");
 else if (a[0] === "diff") process.exit(process.env.FAKE_DIFF ? 1 : 0);
+else if (a[0] === "ls-remote") console.log((process.env.FAKE_REMOTE_TAG || "${COMMIT}") + "\trefs/tags/v1.2.3");
 else if (a[0] === "log") console.log("${MERGE} ${"c".repeat(40)} ${COMMIT}");
 `,
   npm: `
@@ -37,7 +38,7 @@ fs.appendFileSync(process.env.CALLS, "gh " + a.join(" ") + "\\n");
 const created = path.join(path.dirname(process.env.CALLS), "created");
 if (a[0] === "attestation") process.exit(process.env.FAKE_NO_ATTESTATION ? 1 : 0);
 else if (a[0] === "api" && a[1].includes("/commits/")) console.log(JSON.stringify([{ number: 6, head: { sha: "${"d".repeat(40)}" } }, { number: 7, head: { sha: "${COMMIT}" } }]));
-else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)}, head: { sha: process.env.FAKE_HEAD || "${COMMIT}" } }));
+else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)}, head: { sha: process.env.FAKE_HEAD || "${COMMIT}" }, merged: !process.env.FAKE_NOT_MERGED, merge_commit_sha: process.env.FAKE_PR_MERGE || "${MERGE}" }));
 else if (a[0] === "release" && a[1] === "create") fs.writeFileSync(created, "");
 else if (a[0] === "release" && a[1] === "view") {
   if (!process.env.FAKE_RELEASE_EXISTS && !fs.existsSync(created)) process.exit(1);
@@ -106,6 +107,9 @@ test("release-finish fails before creating anything when a check fails", () => {
     [{ FAKE_TAG_COMMIT: "d".repeat(40) }, /v1\.2\.3 points to d{40}, not a{40}/],
     [{ FAKE_HEAD: "d".repeat(40) }, /PR #7 has head d{40}, not the tag commit/],
     [{ FAKE_SECOND: "d".repeat(40) }, /does not merge v1\.2\.3/],
+    [{ FAKE_REMOTE_TAG: "d".repeat(40) }, /remote tag v1\.2\.3 points to d{40}/],
+    [{ FAKE_NOT_MERGED: "1" }, /PR #7 is not merged at b{40}/],
+    [{ FAKE_PR_MERGE: "d".repeat(40) }, /PR #7 is not merged at b{40}/],
     [{ FAKE_DIFF: "1" }, /tree of .* differs/],
     [{ FAKE_NO_ATTESTATION: "1" }, /no SBOM attestation/],
     [{ FAKE_LATEST: "1.2.2" }, /npm latest is 1\.2\.2/],

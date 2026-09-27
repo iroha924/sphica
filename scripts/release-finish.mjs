@@ -59,9 +59,18 @@ function finish({ tag, commit, merge, pull }) {
   // 1. The tag, the PR, and the merge all name the same commit, and the merge brought in exactly its tree
   const tagged = run("git", ["rev-parse", `${tag}^{commit}`]);
   if (tagged !== commit) fail(`${tag} points to ${tagged}, not ${commit}`);
+  // The Release is created from the remote tag, which could have moved after publish. For an annotated tag, take the `^{}` line
+  const refs = run("git", ["ls-remote", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`])
+    .split("\n")
+    .map((line) => line.split("\t"));
+  const remote =
+    refs.find(([, ref]) => ref === `refs/tags/${tag}^{}`)?.[0] ??
+    refs.find(([, ref]) => ref === `refs/tags/${tag}`)?.[0];
+  if (remote !== commit) fail(`remote tag ${tag} points to ${remote ?? "nothing"}, not ${commit}`);
   const pr = JSON.parse(run("gh", ["api", `repos/${repo}/pulls/${pull}`]));
   if (pr.head?.sha !== commit)
     fail(`PR #${pull} has head ${pr.head?.sha ?? "unknown"}, not the tag commit ${commit}`);
+  if (pr.merged !== true || pr.merge_commit_sha !== merge) fail(`PR #${pull} is not merged at ${merge}`);
   if (run("git", ["rev-parse", `${merge}^2`]) !== commit) fail(`${merge} does not merge ${tag} (${commit})`);
   if (!succeeds("git", ["diff", "--quiet", commit, merge])) fail(`the tree of ${merge} differs from ${tag}`);
 
