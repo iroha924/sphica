@@ -66,13 +66,14 @@ tag push の run が、承認待ちを PR に知らせ、承認の後に publish
 
 Skill と検査と公開の説明が新しい流れだけを語り、この PR が 0.5.4 として新しい流れで出せる状態になる。
 
-- [ ] T05: npm と 3 つのマニフェストを 0.5.4 に揃える
+- [x] T05: npm と 3 つのマニフェストを 0.5.4 に揃える
   - 種別: 変更
   - 計画: S6
   - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base v0.5.3` → 4 つのバージョンが 0.5.4
   - コミット: `chore(release): bump to 0.5.4`
+  - 結果: `bun run release:plan -- --base v0.5.3` → `version: npm 0.5.4 / plugin 0.5.4 / marketplace 0.5.4 / Codex 0.5.4`（kind はパッケージの入力がまだ変わっていないので `none`。README を変える T06 で `plugin` になる）
 
 - [ ] T06: Skill、check-ai-config、release-plan、release-status、AGENTS.md、verification.md、PR テンプレート、README を新しい流れに揃える
   - 種別: 変更
