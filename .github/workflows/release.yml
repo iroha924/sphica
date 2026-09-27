@@ -219,7 +219,9 @@ jobs:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
+      # Claude also hands the run URL to the owner, so a failed comment does not fail the release run
       - name: Comment on the PR with this run's URL
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PULL: ${{ needs.prepare.outputs.pull }}
@@ -288,6 +290,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-gate.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+      # The notes the owner read must still be the PR's notes before anything irreversible happens
+      - name: Are the Release notes the ones recorded before approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ needs.prepare.outputs.pull }}
+          NOTES: ${{ needs.prepare.outputs.notes }}
+        run: |
+          digest="$(node scripts/release-finish.mjs --notes-digest --pull "$PULL")"
+          if [ "$digest" != "$NOTES" ]; then
+            echo "the PR's Release notes changed after prepare recorded them; ask the owner and release a new version" >&2
+            exit 1
+          fi
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

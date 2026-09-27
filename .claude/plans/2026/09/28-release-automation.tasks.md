@@ -214,6 +214,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): refuse notes with an unclosed comment anywhere in the PR body`
   - 結果: red: 変更前のコードで `actual: 'Not reviewed'` で落ちた。変更後 `node --test test/release-finish.test.ts` → 9 pass / 0 fail。実データの `--dry-run` → v0.5.3 で通る、`--notes-digest --pull 182` → ハッシュが出る
 
+- [x] T20: publish の直前にもノートのハッシュを比べ、承認依頼のコメントの失敗で run を落とさない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T16（比べる相手のハッシュ）
+  - 変更: `.github/workflows/release.yml`
+  - red: `rg -n "notes-digest" .github/workflows/release.yml` → 変更前は prepare の 1 か所だけで、publish の前に比べていない
+  - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。publish の比較のシェルを、PR #181 の実物のハッシュで流すと exit 0、違うハッシュで exit 1
+  - コミット: `fix(release): recheck the approved notes before publishing and keep a failed comment from failing the run`
+  - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。比較のシェルを流す → 実物のハッシュで `exit=0`、`0000` で「notes changed」を出して `exit=1`。承認依頼のコメントのステップは `continue-on-error: true`
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
