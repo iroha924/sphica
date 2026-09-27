@@ -573,20 +573,25 @@ export async function saveRecord(
   }
   if (checked.work) {
     const w = checked.work;
+    const traced = target.sessionId
+      ? await trx
+          .selectFrom("session")
+          .select(["started_at", "branch"])
+          .where("id", "=", target.sessionId)
+          .executeTakeFirst()
+      : undefined;
     const row = {
       title: w.title,
       goal: w.goal,
       current: w.current,
       next: JSON.stringify(w.next),
       status: w.status,
+      // Session start marks work on the branch it is on
+      branch: traced?.branch ?? null,
       run_id: runId,
       updated_at: now,
     };
     // trace_pending lists the newest session first, so an older session is often traced later: its state must not replace a newer one
-    const started = (session: string | null) =>
-      session
-        ? trx.selectFrom("session").select("started_at").where("id", "=", session).executeTakeFirst()
-        : Promise.resolve(undefined);
     const held = await trx
       .selectFrom("work as w")
       .leftJoin("extraction_run as r", "r.id", "w.run_id")
@@ -595,7 +600,7 @@ export async function saveRecord(
       .where("w.project_id", "=", target.projectId)
       .where("w.key", "=", w.key)
       .executeTakeFirst();
-    const mine = (await started(target.sessionId))?.started_at;
+    const mine = traced?.started_at;
     if (!(held?.started_at && mine && held.started_at > mine))
       await trx
         .insertInto("work")

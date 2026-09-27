@@ -484,3 +484,21 @@ test("an older session traced after a newer one never overwrites the newer work 
     await db.done();
   }
 });
+
+test("a traced work item carries its session's branch", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "途中。" });
+    db.owner.prepare("update session set branch = 'feature/x' where id = 's1'").run();
+    await save(
+      db,
+      target(p),
+      { units: [], work: { key: "w", title: "移行", goal: "終える", current: "途中", status: "active" } },
+      [m],
+    );
+    assert.equal(db.owner.prepare("select branch from work where key = 'w'").get()?.branch, "feature/x");
+  } finally {
+    await db.done();
+  }
+});
