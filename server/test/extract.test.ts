@@ -471,6 +471,34 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     });
     await refused(replace({ path: "src/missing.ts" }), /no live anchor on src\/missing\.ts/);
     await refused(replace({ path: "./src.ts", symbol: "nope" }), /no live anchor on src\.ts nope/);
+    // An anchor the record already has, or one added twice in a batch, would leave two that replace_anchor cannot tell apart
+    const pin = { op: "anchor", path: "src.ts", symbol: "openStore", role: "applies_to" };
+    await refused(pin, /already has a live anchor on src\.ts openStore/);
+    const fresh = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      op: "anchor",
+      path: "src.ts",
+      symbol: "close",
+      role: "applies_to",
+    };
+    await assert.rejects(
+      ops([fresh, fresh]),
+      /ops\.1 .*another operation in this batch already anchors src\.ts close/,
+    );
+    // Pinning a commit to an unpinned place is a different anchor, and an anchor a batch retires does not count as live
+    const checks = async (list: Record<string, unknown>[]) =>
+      (await checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: list })).ok;
+    const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    assert.equal(await checks([{ unit: "glean:csv/no-notes", revision: rev(), ...pin, commit: head }]), true);
+    const moveOff = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      ...replace({ path: "src.ts", symbol: "openStore" }),
+    };
+    const back = { unit: "glean:csv/no-notes", revision: rev(), ...pin };
+    assert.equal(await checks([moveOff, back]), true);
+    assert.equal(await checks([back, moveOff]), true);
     // Two replacements of one anchor would leave both new anchors live
     const twice = {
       unit: "glean:csv/no-notes",
@@ -545,6 +573,59 @@ test("glean: a successor that becomes active later supersedes the record it repl
     const state = (key: string) =>
       db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
     assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["candidate", "active"]);
+    await glean({
+      ops: [
+        {
+          op: "adopt",
+          unit: "glean:storage-2",
+          revision: db.owner.prepare("select revision from unit where key = 'glean:storage-2'").get()
+            ?.revision,
+          source: `s${said}`,
+          quote: "これで決まり。",
+        },
+      ],
+    });
+    assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["active", "superseded"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("glean: a successor that becomes active later supersedes a predecessor that was still a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const old = message(db, p, { id: "o1", text: "SQLite にしよう。" });
+    const traced = await beginTrace(db.ingest, p, "s1");
+    const decided = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...extra,
+    });
+    await saveText(db.ingest, traced, p, null, {
+      units: [decided("storage", old, "SQLite にしよう。")],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "Postgres に変える。これで決まり。", session: "g1" });
+    const assistant = message(db, p, {
+      id: "a",
+      text: "Postgres に変えましょう。",
+      speaker: "assistant",
+      session: "g1",
+    });
+    const glean = async (record: unknown) =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, record);
+    await glean({
+      units: [
+        decided("storage-2", assistant, "Postgres に変えましょう。", { supersedes: "trace:ext-s1/storage" }),
+      ],
+    });
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["candidate", "candidate"]);
     await glean({
       ops: [
         {

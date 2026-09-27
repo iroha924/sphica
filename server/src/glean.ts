@@ -242,6 +242,17 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
   };
   // Anchors an earlier operation in this batch replaces: a second replacement would leave both new anchors live
   const replaced = new Set<number>();
+  // Anchors added earlier in this batch, by unit, path, symbol, and role
+  const anchored = new Set<string>();
+  const places: {
+    what: string;
+    unit: number;
+    rel: string;
+    symbol: string | null;
+    role: "applies_to" | "evidence";
+    commit: string | null;
+    name: string;
+  }[] = [];
   for (const [i, op] of parsed.data.ops.entries()) {
     const what = `ops.${i} ${op.op} ${op.unit}`;
     const u = await db
@@ -325,6 +336,17 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
         else errors.push(`${what}: ${live.length} live anchors on ${name}; give from.symbol`);
       }
     }
+    // A second live anchor on the same place (and commit) could not be told apart from the first by replace_anchor
+    const dest = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
+    const rel = dest ? repoPath(dest.path) : null;
+    if (dest && rel) {
+      const commit = op.op === "anchor" ? (op.commit ?? null) : null;
+      const name = `${rel}${dest.symbol ? ` ${dest.symbol}` : ""}`;
+      const k = [u.id, rel, dest.symbol ?? "", dest.role, commit ?? ""].join("\0");
+      if (anchored.has(k)) errors.push(`${what}: another operation in this batch already anchors ${name}`);
+      anchored.add(k);
+      places.push({ what, unit: u.id, rel, symbol: dest.symbol ?? null, role: dest.role, commit, name });
+    }
     if (
       op.op === "retract_evidence" ||
       op.op === "retract_adoption" ||
@@ -376,6 +398,21 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
       else errors.push(`${what}: no live ${noun} cites ${op.source}`);
     }
     ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces });
+  }
+  // Checked after every op is read: an anchor any op of this batch retires no longer counts as live
+  for (const x of places) {
+    let q = db
+      .selectFrom("unit_anchor")
+      .select("id")
+      .where("unit_id", "=", x.unit)
+      .where("path", "=", x.rel)
+      .where("role", "=", x.role)
+      .where("retired_at", "is", null)
+      .where("id", "not in", [...replaced, -1]);
+    q = x.symbol ? q.where("symbol", "=", x.symbol) : q.where("symbol", "is", null);
+    q = x.commit ? q.where("commit_sha", "=", x.commit) : q.where("commit_sha", "is", null);
+    if (await q.executeTakeFirst())
+      errors.push(`${x.what}: the record already has a live anchor on ${x.name}`);
   }
   return { errors, problems, units, ops };
 }
@@ -634,7 +671,7 @@ export async function saveGlean(
       .select(["o.id", "o.key"])
       .where("l.from_unit", "=", id)
       .where("l.kind", "=", "supersedes")
-      .where("o.lifecycle", "=", "active")
+      .where("o.lifecycle", "in", ["active", "candidate"])
       .execute();
     for (const o of replaced) {
       await move(trx, o.id, "superseded", `superseded by ${key}`, null, runId);
