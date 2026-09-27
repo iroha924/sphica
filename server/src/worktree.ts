@@ -44,7 +44,13 @@ export function snapshot(root: string): Snapshot | null {
     const p = parts.slice(skip).join(" ");
     if (f[0] === "2") i++;
     if (!usable(p)) continue;
-    const st = fs.statSync(path.join(root, p), { throwIfNoEntry: false });
+    // The entry itself, not what a symlink points to (a looping or dangling link must not stop recording)
+    let st: fs.Stats | undefined;
+    try {
+      st = fs.lstatSync(path.join(root, p), { throwIfNoEntry: false });
+    } catch {
+      st = undefined;
+    }
     entries[p] = `${parts.slice(0, skip).join(" ")} ${st ? `${st.size}:${st.mtimeMs}` : "gone"}`;
   }
   const head = git(root, ["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;

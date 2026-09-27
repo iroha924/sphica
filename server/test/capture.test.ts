@@ -21,6 +21,7 @@ import {
   write,
 } from "../src/capture.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
+import { snapshot } from "../src/worktree.ts";
 import { project, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
@@ -372,6 +373,16 @@ test("an AskUserQuestion answer is the owner's, its questions the assistant's, a
       ["p2:ask:toolu_1", "owner", "A1: SQLite"],
     ],
   );
+});
+
+// One odd entry in git status must not stop recording: the hook swallows the error and the whole turn would go unrecorded
+test("a self-referential symlink in the tree does not stop the snapshot", () => {
+  const repo = fs.mkdtempSync(path.join(home, "loop-"));
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  fs.symlinkSync("loop", path.join(repo, "loop"));
+  fs.writeFileSync(path.join(repo, "a.txt"), "a");
+  const snap = snapshot(repo);
+  assert.deepEqual(Object.keys(snap?.entries ?? {}).sort(), ["a.txt", "loop"]);
 });
 
 test("a turn records the paths git status shows changing, including edits made outside the edit tools and files committed in the turn", () => {
