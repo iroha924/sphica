@@ -1,7 +1,10 @@
 // Harvest's read of a pull request and how it is stored: what each source keeps, new revisions for edited text, and the closed issues.
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { type Get, linkIssues, pullSources, readPull, repoOf, storeItems } from "../src/github.ts";
+import { type Get, gh, linkIssues, pullSources, readPull, repoOf, storeItems } from "../src/github.ts";
 import { at, insert, project, tempDb } from "./temp-db.ts";
 
 const sha = (c: string) => c.repeat(40);
@@ -190,6 +193,19 @@ test("stores sources with who wrote them, adds a revision only when text changed
     ];
     const placed = await storeItems(db.ingest, p, blank);
     assert.deepEqual(placed, [null, ...ids.slice(1)]);
+    // A review comment's diff hunk is masked like its body: a key in the changed code never lands in the database
+    const withHunk = first.items.find((it) => it.hunk !== null) ?? first.items[0];
+    const leaked = {
+      ...(withHunk as (typeof first.items)[number]),
+      externalId: "hunk-1",
+      artifact: "pr:99",
+      hunk: "+API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123",
+    };
+    await storeItems(db.ingest, p, [leaked]);
+    const hunk = String(
+      db.owner.prepare("select diff_hunk from source where external_id = 'hunk-1'").get()?.diff_hunk,
+    );
+    assert.ok(!hunk.includes("sk-proj-abc") && hunk.includes("[redacted"), hunk);
     const current = await pullSources(db.reader, p, 7);
     assert.equal(current.length, ids.length, "only the current revision of each source");
     assert.deepEqual(
@@ -213,5 +229,26 @@ test("stores sources with who wrote them, adds a revision only when text changed
     );
   } finally {
     await db.done();
+  }
+});
+
+// Pull request data is written by anyone: a listing larger than the cap stops with a reason instead of filling memory
+test("a gh listing over the size cap is refused with a reason", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!/bin/sh\nexec "${process.execPath}" -e 'process.stdout.write("[[" + "\\"x\\",".repeat(6e6) + "\\"x\\"]]")'\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    await assert.rejects(
+      gh("o/r")("pulls/1/comments?per_page=100", true),
+      /too large to read \(over 16 MB\)/,
+    );
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
   }
 });

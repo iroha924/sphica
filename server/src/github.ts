@@ -33,17 +33,21 @@ export const repoOf = (key: string): string | null =>
 /** Reads one REST path of the repository; all follows every page. */
 export type Get = (path: string, all?: boolean) => Promise<unknown>;
 
+/** Pull request data is written by anyone: one listing stops at this size rather than filling memory (up to 4 run at once) */
+const MAX_RESPONSE = 16 * 1024 * 1024;
+
 export const gh =
   (repo: string): Get =>
   async (path, all = false) => {
     const { stdout } = await exec(
       "gh",
       ["api", `repos/${repo}/${path}`, ...(all ? ["--paginate", "--slurp"] : [])],
-      {
-        encoding: "utf8",
-        maxBuffer: 256 * 1024 * 1024,
-      },
-    );
+      { encoding: "utf8", maxBuffer: MAX_RESPONSE },
+    ).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
+        throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
+      throw e;
+    });
     const parsed = JSON.parse(stdout) as unknown;
     return all ? (parsed as unknown[][]).flat() : parsed;
   };
@@ -348,7 +352,8 @@ export async function storeItems(
         path: it.path,
         line_start: it.lines?.[0] ?? null,
         line_end: it.lines?.[1] ?? null,
-        diff_hunk: it.hunk,
+        // Code under review can hold a key: the hunk is masked and bounded like the text
+        diff_hunk: it.hunk === null ? null : fit(it.hunk).body,
         commit_sha: it.commit,
         indexed: it.kind === "pr_event" ? 0 : 1,
       })
