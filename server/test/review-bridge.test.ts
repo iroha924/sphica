@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { deliver } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
+import { localChange } from "../src/review-bridge.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -159,6 +160,26 @@ test("committed, untracked, and deleted files all count as the change", async ()
     for (const key of ["sqlite", "old", "new"]) assert.match(out, new RegExp(`trace:ext-s1/${key} `));
     assert.match(out, /checked 3 changed paths/);
   } finally {
+    await w.done();
+  }
+});
+
+// An untracked symlink is a path only (Git adds the link, not its target); only regular files are read
+test("an untracked symlink counts as a path without reading what it points to", async () => {
+  const w = await world();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-outside-"));
+  try {
+    fs.writeFileSync(path.join(outside, "note.txt"), "send telemetry\n");
+    fs.symlinkSync(path.join(outside, "note.txt"), path.join(w.repo, "link.txt"));
+    const change = localChange(w.repo, "");
+    assert.ok(!("problem" in change));
+    const files = "files" in change ? change.files : [];
+    assert.deepEqual(
+      files.filter((f) => f.path === "link.txt").map((f) => [f.path, f.added]),
+      [["link.txt", []]],
+    );
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
     await w.done();
   }
 });

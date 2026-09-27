@@ -259,7 +259,7 @@ server.registerTool(
     title: "Check decision verdicts",
     description:
       "Checks a reviewer's verdicts on the records review_select returned. Each finding: outcome (violation, complies, unrelated, undetermined), " +
-      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). Returns the problems, or none.",
+      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). Every record review_select returned needs one outcome. Returns the problems, or none.",
     inputSchema: {
       diff: DIFF,
       findings: z.array(z.record(z.string(), z.unknown())).max(50),

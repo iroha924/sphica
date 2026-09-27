@@ -148,6 +148,34 @@ test("inside a hunk, an added or removed line that looks like a file header stay
   assert.deepEqual(parseDiff(diff), [{ path: "src/a.ts", added: ["++ b/decoy.ts", "real"], lines: [1, 2] }]);
 });
 
+// Findings hold at most 50 verdicts, so a verdict for every record is asked only while that many fit
+test("more records than findings can hold do not make every verdict set fail", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const words = Array.from({ length: 51 }, (_, n) => `Rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: words.join(" ") });
+    const unit = (w: string, n: number) => ({
+      key: `r${n}`,
+      kind: "decision",
+      stance: "do",
+      text: w,
+      evidence: [{ source: `s${m}`, quote: w, role: "states" }],
+      adoption: [{ source: `s${m}`, quote: w }],
+      anchors: [{ path: "src/db.ts", role: "applies_to" }],
+    });
+    // One save holds at most 50 records
+    await save(db, p, { units: words.slice(0, 50).map(unit) });
+    await save(db, p, { units: [unit(words[50] ?? "", 50)] });
+    const files = parseDiff(DIFF);
+    assert.equal((await selectForReview(db.reader, p, files)).length, 51);
+    const some = Array.from({ length: 50 }, (_, n) => ({ outcome: "unrelated", unit: `trace:ext-s1/r${n}` }));
+    assert.deepEqual(await checkFindings(db.reader, p, files, some), []);
+  } finally {
+    await db.done();
+  }
+});
+
 test("records anchored to a changed path, and location-free don't records naming an added option, apply; verdicts need evidence", async () => {
   const db = tempDb();
   try {
@@ -191,6 +219,14 @@ test("records anchored to a changed path, and location-free don't records naming
       ],
     );
     assert.deepEqual(await selectForReview(db.reader, p, []), []);
+    // A full-width spelling of the option on an added line matches too (both sides are normalized the same way)
+    const wide = await selectForReview(db.reader, p, [
+      { path: "src/x.ts", added: ["send(ＴＥＬＥＭＥＴＲＹ)"], lines: [1] },
+    ]);
+    assert.deepEqual(
+      wide.map((u) => u.key),
+      ["trace:ext-s1/no-telemetry"],
+    );
     const problems = await checkFindings(db.reader, p, files, [
       {
         outcome: "violation",
@@ -230,6 +266,29 @@ test("records anchored to a changed path, and location-free don't records naming
       "findings.6 (violation trace:ext-s1/storage): evidence in src/db.ts needs an added line",
     ]);
     assert.match((await checkFindings(db.reader, p, files, [{ outcome: "maybe" }])).join(), /findings\.0/);
+    // Every record review_select returned needs a verdict, and one record cannot both comply and be violated
+    assert.deepEqual(await checkFindings(db.reader, p, files, []), [
+      "trace:ext-s1/storage: no verdict; give one (unrelated or undetermined when it does not apply)",
+      "trace:ext-s1/no-telemetry: no verdict; give one (unrelated or undetermined when it does not apply)",
+    ]);
+    const mixed = await checkFindings(db.reader, p, files, [
+      {
+        outcome: "violation",
+        unit: "trace:ext-s1/storage",
+        reason: "adds pg",
+        evidence: { path: "src/db.ts", line: 5 },
+      },
+      {
+        outcome: "complies",
+        unit: "trace:ext-s1/storage",
+        reason: "keeps it",
+        evidence: { path: "src/db.ts", line: 5 },
+      },
+      { outcome: "unrelated", unit: "trace:ext-s1/no-telemetry" },
+    ]);
+    assert.deepEqual(mixed, [
+      "trace:ext-s1/storage: contradictory verdicts (violation, complies); give one outcome",
+    ]);
   } finally {
     await db.done();
   }

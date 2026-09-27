@@ -153,7 +153,9 @@ export async function selectForReview(
         because: `anchored to ${a.path}${a.symbol ? ` ${a.symbol}` : ""}`,
       });
   // Location-free don't and defer records: an added line naming one of their options (inside an identifier too: sendTelemetry)
-  const added = files.flatMap((f) => f.added.map((l) => ({ path: f.path, text: l.toLowerCase() })));
+  const added = files.flatMap((f) =>
+    f.added.map((l) => ({ path: f.path, text: l.normalize("NFKC").toLowerCase() })),
+  );
   const free = await live
     .where("u.stance", "in", ["dont", "defer"])
     .where(({ not, exists, selectFrom }) =>
@@ -212,9 +214,13 @@ const Finding = z
       .optional(),
   })
   .strict();
-const Findings = z.array(Finding).max(50);
+const MAX_FINDINGS = 50;
+const Findings = z.array(Finding).max(MAX_FINDINGS);
 
-/** Problems with a reviewer's verdicts: a violation or compliance must name an applicable record, give a reason, and point at changed code. */
+/**
+ * Problems with a reviewer's verdicts: a violation or compliance must name an applicable record, give a reason, and point at changed code;
+ * each applicable record gets one outcome (asked only while they fit in the findings limit), and never contradictory ones.
+ */
 export async function checkFindings(
   db: Kysely<DB>,
   projectId: number,
@@ -223,7 +229,8 @@ export async function checkFindings(
 ): Promise<string[]> {
   const parsed = Findings.safeParse(raw);
   if (!parsed.success) return parsed.error.issues.map((i) => `findings.${i.path.join(".")}: ${i.message}`);
-  const applicable = new Set((await selectForReview(db, projectId, files)).map((u) => u.key));
+  const selected = (await selectForReview(db, projectId, files)).map((u) => u.key);
+  const applicable = new Set(selected);
   const problems: string[] = [];
   for (const [i, f] of parsed.data.entries()) {
     const at = `findings.${i} (${f.outcome} ${f.unit})`;
@@ -242,6 +249,14 @@ export async function checkFindings(
       else if (!file.lines.includes(f.evidence.line))
         problems.push(`${at}: evidence line ${f.evidence.line} is not an added line of ${file.path}`);
     }
+  }
+  // Every selected record is judged, once: several violations are fine, but not a violation and a compliance
+  for (const key of selected) {
+    const outcomes = [...new Set(parsed.data.filter((f) => f.unit === key).map((f) => f.outcome))];
+    if (!outcomes.length && selected.length <= MAX_FINDINGS)
+      problems.push(`${key}: no verdict; give one (unrelated or undetermined when it does not apply)`);
+    else if (outcomes.length > 1)
+      problems.push(`${key}: contradictory verdicts (${outcomes.join(", ")}); give one outcome`);
   }
   return problems;
 }

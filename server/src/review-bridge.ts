@@ -110,8 +110,10 @@ export function localChange(root: string, args: string): Change {
   for (const rel of untracked) {
     let text = "";
     try {
+      // Only a regular file is read: a symlink is added as a link (not its target), and a FIFO would block the hook
       const file = path.join(root, rel);
-      if (fs.statSync(file).size <= MAX_UNTRACKED_BYTES) text = fs.readFileSync(file, "utf8");
+      const st = fs.lstatSync(file);
+      if (st.isFile() && st.size <= MAX_UNTRACKED_BYTES) text = fs.readFileSync(file, "utf8");
     } catch {
       // unreadable: the path still counts
     }
