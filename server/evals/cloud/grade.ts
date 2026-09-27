@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { isolatedCodexHome } from "./codex-home.ts";
 import { blindPrompt, type Cell, type GradeRow, type GradeTask, receiveGrade, tabulate } from "./grading.ts";
 import type { Grade } from "./schema-check.ts";
 
@@ -21,10 +22,15 @@ const { values: args } = parseArgs({
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: GradeTask[] };
 const loop = JSON.parse(fs.readFileSync(args.loop ?? "", "utf8")) as { bundle: string; rows: GradeRow[] };
 
-/** One grader run in a fresh empty directory: the prompt carries everything, so there is nothing of the loop for it to read nearby. */
+/**
+ * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
+ * loop for it to read nearby, and none of the owner's hooks or plugins can add context to a blind grade.
+ */
 function gradeOne(prompt: string): { status: number | null; output: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-home-"));
   try {
+    isolatedCodexHome(path.join(home, ".codex"));
     const out = path.join(dir, "grade.json");
     const r = spawnSync(
       "codex",
@@ -43,11 +49,22 @@ function gradeOne(prompt: string): { status: number | null; output: string } {
         out,
         "-",
       ],
-      { input: prompt, encoding: "utf8", timeout: 15 * 60_000 },
+      {
+        input: prompt,
+        encoding: "utf8",
+        timeout: 15 * 60_000,
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: home,
+          CODEX_HOME: path.join(home, ".codex"),
+          LANG: process.env.LANG ?? "",
+        },
+      },
     );
     return { status: r.status, output: fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "" };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 }
 
@@ -62,7 +79,7 @@ for (const row of loop.rows) {
     graded.push({ ...row, ungraded: `unknown task ${row.task}` });
     continue;
   }
-  const got = receiveGrade(gradeOne(blindPrompt(task, row)), row.patch_truncated);
+  const got = receiveGrade(gradeOne(blindPrompt(task, row)), row.patch_truncated, task.against !== undefined);
   graded.push("graded" in got ? { ...row, grade: got.graded } : { ...row, ungraded: got.ungraded });
   console.log(
     `${row.model} ${row.condition} ${row.run}: ${"graded" in got ? `score ${got.graded.score}` : `ungraded (${got.ungraded})`}`,
@@ -82,6 +99,7 @@ const fmt = (c: Cell) =>
     `scores 0/1/2: ${c.scores[0]}/${c.scores[1]}/${c.scores[2]}`,
     `delivered yes/no/na: ${c.delivered.yes}/${c.delivered.no}/${c.delivered.not_applicable}`,
     `found yes/no/unknown: ${c.found.yes}/${c.found.no}/${c.found.unknown}`,
+    `answer valid/invalid/refused/na: ${c.answer_format.valid}/${c.answer_format.invalid}/${c.answer_format.refused_or_empty}/${c.answer_format.not_applicable}`,
     `cited ${c.cited_gold}`,
     `implements rejected yes/no/unknown/na: ${c.implements_rejected.yes}/${c.implements_rejected.no}/${c.implements_rejected.unknown}/${c.implements_rejected.not_applicable}`,
     `tracked failure ${c.tracked_failure}`,

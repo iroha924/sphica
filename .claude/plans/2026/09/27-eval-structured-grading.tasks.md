@@ -101,6 +101,16 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `fix(evals): read a Codex log broken partway as unknown`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 12 / fail 0。保存済みの 16 回を数え直して判定の変わった行 0
 
+- [x] T09: GitHub Codex のレビュー 5 件を直す（採点役の HOME の分離、全スロットの --fired、表の answer_format、against と not_applicable の一致、ログの無い回の信号）
+  - 種別: 修正
+  - 計画: S3, S4, S5
+  - 依存: T08（直す対象が T01〜T08 の実装）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - red: `cd server && node --test test/eval-grade.test.ts` → fail 5（採点役に親の CODEX_HOME が渡る、--fired の無いスロットで git に進む、against のあるタスクの not_applicable が数えられる、表に answer_format が無い、events の無い回の信号が 0）
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass。`bun run verify` → exit 0
+  - コミット: `fix(evals): isolate the grader's Codex home, require fired counts, and keep unknowns out of counters`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 14 / fail 0。`bun run verify` → exit 0
+
 ## 記録
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
 2026-09-27 / T04 / grade.ts も読み込むと動くのでテストから呼べず、knip は新しい入口を未使用と見た / 採点の中身を grading.ts に分け、knip.json の entry に grade.ts を足した。変更欄を「grade.ts, eval-grade.test.ts」から「grade.ts, grading.ts, eval-grade.test.ts, knip.json」にした
@@ -108,3 +118,4 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
 2026-09-27 / T06 / red の欄が「コマンド → 期待」の形でなく done の検査で落ちた / 書式だけを直した（内容は同じ）
 2026-09-27 / T07 / 全体の差分の Codex レビューで 6 件（再現 4、読んで確定 2） / 6 件とも T07 で直した
 2026-09-27 / T08 / T07 の再レビューで 2 件: 途中で壊れたログが no、別ツールの出力に <past-records があると yes / 前者を T08 で直し、後者は評価中のエージェントが囲みごと表示した場合だけの入力として見送った
+2026-09-27 / T09 / PR #180 の GitHub Codex レビューで 5 件（P1 2、P2 3） / 5 件とも T09 で直した。codex.ts の CODEX_HOME の組み立てを codex-home.ts に分けて採点役と共有したので、変更欄に codex-home.ts と codex.ts を足した

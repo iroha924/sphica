@@ -12,6 +12,7 @@ export type GradeRow = {
   run: string;
   excluded: string | null;
   answer: string;
+  answer_format: "valid" | "invalid" | "refused_or_empty" | "not_applicable";
   patch: string;
   patch_truncated: boolean;
   delivered: "yes" | "no" | "not_applicable";
@@ -45,10 +46,14 @@ export function blindPrompt(task: GradeTask, row: GradeRow): string {
   ].join("\n");
 }
 
-/** Accepts a grader's output: a zero exit and an exact shape, else ungraded with the reason. A cut patch cannot prove "no". */
+/**
+ * Accepts a grader's output: a zero exit, an exact shape, and not_applicable exactly when the task has no "Against"; else ungraded with the
+ * reason. A cut patch cannot prove "no".
+ */
 export function receiveGrade(
   run: { status: number | null; output: string },
   patchTruncated: boolean,
+  hasAgainst: boolean,
 ): { graded: Grade } | { ungraded: string } {
   if (run.status !== 0) return { ungraded: `grader exit ${run.status}` };
   const parsed = parseOutput(run.output);
@@ -56,6 +61,12 @@ export function receiveGrade(
   const checked = checkGrade(parsed.value);
   if (!checked.ok) return { ungraded: checked.reason };
   const g = checked.value;
+  if ((g.implements_rejected === "not_applicable") === hasAgainst)
+    return {
+      ungraded: hasAgainst
+        ? "implements_rejected: not_applicable for a task with an Against"
+        : "implements_rejected: must be not_applicable for a task without an Against",
+    };
   return {
     graded: patchTruncated && g.implements_rejected === "no" ? { ...g, implements_rejected: "unknown" } : g,
   };
@@ -71,13 +82,14 @@ export type Cell = {
   scores: Record<0 | 1 | 2, number>;
   delivered: Record<"yes" | "no" | "not_applicable", number>;
   found: Record<Tri, number>;
+  answer_format: Record<GradeRow["answer_format"], number>;
   cited_gold: number;
   implements_rejected: Record<Grade["implements_rejected"], number>;
   /** Delivered or found the record, and still made the change it rules out */
   tracked_failure: number;
 };
 
-/** One cell per model and condition. delivered and found are counted over every run not excluded, the grade's fields over graded runs. */
+/** One cell per model and condition. delivered, found, and the answer's format are counted over every run not excluded, the grade's fields over graded runs. */
 export function tabulate(rows: (GradeRow & { grade?: Grade; ungraded?: string })[]): Cell[] {
   const cells = new Map<string, Cell>();
   for (const r of rows) {
@@ -94,6 +106,7 @@ export function tabulate(rows: (GradeRow & { grade?: Grade; ungraded?: string })
         scores: { 0: 0, 1: 0, 2: 0 },
         delivered: { yes: 0, no: 0, not_applicable: 0 },
         found: { yes: 0, no: 0, unknown: 0 },
+        answer_format: { valid: 0, invalid: 0, refused_or_empty: 0, not_applicable: 0 },
         cited_gold: 0,
         implements_rejected: { yes: 0, no: 0, not_applicable: 0, unknown: 0 },
         tracked_failure: 0,
@@ -106,6 +119,7 @@ export function tabulate(rows: (GradeRow & { grade?: Grade; ungraded?: string })
     }
     c.delivered[r.delivered]++;
     c.found[r.found]++;
+    c.answer_format[r.answer_format]++;
     if (!r.grade) {
       c.ungraded++;
       continue;

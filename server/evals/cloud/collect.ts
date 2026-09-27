@@ -156,9 +156,16 @@ function main() {
     (args.fired ?? []).map((f) => {
       const [slot, n] = f.split("=");
       if (!slot || !/^\d+$/.test(n ?? "")) throw new Error(`--fired takes <slot>=<n>, got ${f}`);
+      if (!Object.hasOwn(manifest.repositories, slot)) throw new Error(`unknown slot ${slot} in --fired`);
       return [slot, Number(n)] as const;
     }),
   );
+  // Without a count, a Claude run that pushed no branch would vanish from the denominator
+  for (const repo of Object.keys(manifest.repositories))
+    if (!fired.has(repo))
+      throw new Error(
+        `missing --fired ${repo}=<n> (how many runs each Claude slot was fired for, 0 when none)`,
+      );
   for (const [repo, { condition }] of Object.entries(manifest.repositories)) {
     let collected = 0;
     const dir = path.join(args.build ?? "", repo);
@@ -243,7 +250,7 @@ function main() {
           delivered: deliveredSignal(condition, gold, emitted, goldOut || null),
           delivered_units: emitted,
           found: foundInClaudeLog(log, gold),
-          signals: signals(log ?? ""),
+          signals: log === null ? null : signals(log),
         });
         collected++;
       } finally {
@@ -327,6 +334,7 @@ function main() {
       }
       const gold = task.gold ?? [];
       const events = read("events.jsonl");
+      const found = foundInCodexEvents(events, gold);
       const emitted = (result.deliveries ?? [])
         .filter((d) => d.outcome === "emitted")
         .flatMap((d) => d.units);
@@ -347,8 +355,9 @@ function main() {
         gold,
         delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
         delivered_units: emitted,
-        found: foundInCodexEvents(events, gold),
-        signals: { ...signals(events ?? ""), seconds: result.seconds },
+        found,
+        // A missing or broken event log cannot say how many searches or errors there were
+        signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },
       });
     }
   fs.writeFileSync(

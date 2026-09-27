@@ -1,7 +1,7 @@
 // The evaluation's structured grading: grades and Codex answers are counted only when they match their fixed shapes exactly,
 // and anything else is kept apart with the reason rather than read as a score or as "nothing found".
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -201,6 +201,10 @@ test("collect keeps a started run without a result, and a failed run, as exclude
       "started.json": head,
       "result.json": { ...head, status: 0, reason: "git add failed", seconds: 1, deliveries: [] },
     });
+    run("noevents", {
+      "started.json": { ...head, condition: "none" },
+      "result.json": { ...head, condition: "none", status: 0, reason: null, seconds: 1, deliveries: null },
+    });
     const out = path.join(base, "loop.json");
     execFileSync(
       process.execPath,
@@ -217,7 +221,17 @@ test("collect keeps a started run without a result, and a failed run, as exclude
       ],
       { stdio: "ignore" },
     );
-    const rows = JSON.parse(fs.readFileSync(out, "utf8")).rows as { run: string; excluded: string | null }[];
+    const all = JSON.parse(fs.readFileSync(out, "utf8")).rows as {
+      run: string;
+      excluded: string | null;
+      signals: unknown;
+    }[];
+    assert.equal(
+      all.find((r) => r.run === "noevents")?.signals,
+      null,
+      "no event log: counters unknown, not 0",
+    );
+    const rows = all.filter((r) => r.run !== "noevents");
     assert.deepEqual(rows.map((r) => [r.run, r.excluded]).sort(), [
       ["after", "git add failed"],
       ["failed", "timed out"],
@@ -237,6 +251,7 @@ const task = {
 };
 const row = {
   model: "codex" as const,
+  answer_format: "valid" as "valid" | "invalid" | "refused_or_empty" | "not_applicable",
   task: task.id,
   condition: "inject",
   run: "r1",
@@ -258,24 +273,43 @@ test("the grader sees the task, expect, against, answer, and patch, never the mo
 
 test("a grade is counted only from a zero exit and a valid shape; anything else is ungraded with the reason", () => {
   const good = JSON.stringify(grade);
-  assert.deepEqual(receiveGrade({ status: 0, output: good }, false), { graded: grade });
-  assert.match((receiveGrade({ status: 1, output: good }, false) as { ungraded: string }).ungraded, /exit/);
-  assert.match((receiveGrade({ status: 0, output: "" }, false) as { ungraded: string }).ungraded, /empty/);
+  assert.deepEqual(receiveGrade({ status: 0, output: good }, false, true), { graded: grade });
   assert.match(
-    (receiveGrade({ status: 0, output: "Score: 2" }, false) as { ungraded: string }).ungraded,
+    (receiveGrade({ status: 1, output: good }, false, true) as { ungraded: string }).ungraded,
+    /exit/,
+  );
+  assert.match(
+    (receiveGrade({ status: 0, output: "" }, false, true) as { ungraded: string }).ungraded,
+    /empty/,
+  );
+  assert.match(
+    (receiveGrade({ status: 0, output: "Score: 2" }, false, true) as { ungraded: string }).ungraded,
     /JSON/,
   );
   assert.match(
     (
-      receiveGrade({ status: 0, output: JSON.stringify({ ...grade, score: 5 }) }, false) as {
+      receiveGrade({ status: 0, output: JSON.stringify({ ...grade, score: 5 }) }, false, true) as {
         ungraded: string;
       }
     ).ungraded,
     /score/,
   );
   // A cut patch cannot show that nothing matches: "no" becomes unknown
-  const cut = receiveGrade({ status: 0, output: good }, true) as { graded: typeof grade };
+  const cut = receiveGrade({ status: 0, output: good }, true, true) as { graded: typeof grade };
   assert.equal(cut.graded.implements_rejected, "unknown");
+  // not_applicable only when the task has no "Against", and only then
+  const na = JSON.stringify({ ...grade, implements_rejected: "not_applicable" });
+  assert.match(
+    (receiveGrade({ status: 0, output: na }, false, true) as { ungraded: string }).ungraded,
+    /not_applicable/,
+  );
+  assert.match(
+    (receiveGrade({ status: 0, output: good }, false, false) as { ungraded: string }).ungraded,
+    /not_applicable/,
+  );
+  assert.deepEqual(receiveGrade({ status: 0, output: na }, false, false), {
+    graded: { ...grade, implements_rejected: "not_applicable" },
+  });
 });
 
 test("the table counts every started run and the tracked failure per model and condition", () => {
@@ -286,6 +320,16 @@ test("the table counts every started run and the tracked failure per model and c
     { ...row, run: "r4", ungraded: "empty output" },
     { ...row, run: "r5", excluded: "timed out" },
   ]);
+  const formats = tabulate([
+    { ...row, answer_format: "invalid", grade },
+    { ...row, run: "r2", answer_format: "refused_or_empty", ungraded: "empty output" },
+    { ...row, run: "r3", answer_format: "valid", excluded: "timed out" },
+  ]).find((c) => c.model === "codex");
+  assert.deepEqual(
+    formats?.answer_format,
+    { valid: 0, invalid: 1, refused_or_empty: 1, not_applicable: 0 },
+    "answer formats are counted over runs not excluded",
+  );
   const cell = table.find((c) => c.model === "codex" && c.condition === "inject");
   assert.ok(cell);
   assert.equal(cell.started, 5);
@@ -300,4 +344,97 @@ test("the table counts every started run and the tracked failure per model and c
     { yes: 3, no: 1, not_applicable: 0 },
     "an ungraded run keeps its observed signals",
   );
+});
+
+test("collect needs a fired count for every slot and refuses unknown slot names", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    fs.mkdirSync(build);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
+    );
+    const collect = (...extra: string[]) =>
+      spawnSync(
+        process.execPath,
+        [
+          path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+          "--build",
+          build,
+          "--codex",
+          path.join(base, "codex"),
+          "--logs",
+          base,
+          "--out",
+          path.join(base, "loop.json"),
+          ...extra,
+        ],
+        { encoding: "utf8" },
+      );
+    assert.match(collect().stderr, /--fired eval-shelf-1=<n>/);
+    assert.match(
+      collect("--fired", "eval-shelf-1=1", "--fired", "eval-shelf-9=1").stderr,
+      /unknown slot eval-shelf-9/,
+    );
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("the grader runs with its own HOME and CODEX_HOME holding only the login and the model settings", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
+  try {
+    // A fake owner home, and a fake codex first on PATH that records what it was started with
+    const owner = path.join(base, "owner");
+    fs.mkdirSync(path.join(owner, ".codex"), { recursive: true });
+    fs.writeFileSync(path.join(owner, ".codex", "auth.json"), "{}");
+    fs.writeFileSync(
+      path.join(owner, ".codex", "config.toml"),
+      'model = "m"\n[mcp_servers.x]\ncommand = "x"\n',
+    );
+    fs.writeFileSync(path.join(owner, ".codex", "hooks.json"), "{}");
+    const bin = path.join(base, "bin");
+    fs.mkdirSync(bin);
+    const seen = path.join(base, "seen");
+    fs.writeFileSync(
+      path.join(bin, "codex"),
+      `#!/bin/sh
+{ echo "HOME=$HOME"; echo "CODEX_HOME=$CODEX_HOME"; ls "$CODEX_HOME"; cat "$CODEX_HOME/config.toml"; } > ${JSON.stringify(seen)}
+while [ "$1" != "-o" ]; do shift; done
+printf '%s' ${JSON.stringify(JSON.stringify({ ...grade }))} > "$2"
+`,
+      { mode: 0o755 },
+    );
+    const loop = path.join(base, "loop.json");
+    fs.writeFileSync(loop, JSON.stringify({ bundle: "c", rows: [{ ...row, answer_format: "valid" }] }));
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"),
+        "--loop",
+        loop,
+        "--out",
+        path.join(base, "grades.json"),
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+          HOME: owner,
+          CODEX_HOME: path.join(base, "sentinel"),
+        },
+      },
+    );
+    assert.equal(r.status, 0, r.stderr);
+    const got = fs.readFileSync(seen, "utf8");
+    assert.doesNotMatch(got, /sentinel/);
+    assert.doesNotMatch(got, new RegExp(`HOME=${owner}\\n`));
+    assert.match(got, /^auth\.json$/m);
+    assert.match(got, /^config\.toml$/m);
+    assert.doesNotMatch(got, /hooks\.json|mcp_servers/);
+    assert.match(got, /model = "m"/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
 });

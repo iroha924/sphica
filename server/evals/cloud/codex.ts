@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
+import { isolatedCodexHome } from "./codex-home.ts";
 
 const HERE = import.meta.dirname;
 const { values: args } = parseArgs({
@@ -29,15 +30,6 @@ const repo = args.repo ?? "";
 const task = plan.tasks.find((t) => t.id === args.task);
 const condition = manifest.repositories[repo]?.condition;
 if (!task || !condition) throw new Error(`unknown task ${args.task} or repository ${repo}`);
-
-/** The owner's model and effort only; nothing else from ~/.codex/config.toml. */
-function modelSettings(): string {
-  const text = fs.readFileSync(path.join(os.homedir(), ".codex", "config.toml"), "utf8");
-  return text
-    .split("\n")
-    .filter((l) => /^(model|model_reasoning_effort)\s*=/.test(l))
-    .join("\n");
-}
 
 const run = `${task.id}-${condition}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const dir = path.join(path.resolve(args.out ?? ""), run);
@@ -72,7 +64,6 @@ try {
     "origin",
     `https://github.com/${manifest.owner ?? "iroha924"}/${repo}.git`,
   ]);
-  fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
   // Hooks run without a trust prompt, so they run from a copy outside the checkout the agent can write (it could rewrite .tools)
   const tools = path.join(dir, "tools");
   fs.cpSync(path.join(work, ".tools"), tools, { recursive: true });
@@ -80,7 +71,7 @@ try {
     condition === "search" || condition === "inject"
       ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
       : "";
-  fs.writeFileSync(path.join(codexHome, "config.toml"), `${modelSettings()}\n${mcp}`);
+  isolatedCodexHome(codexHome, mcp);
 
   // Inject runs the shipped delivery hooks against the slot's database copy; gold goes through a prompt hook too, so both arrive as the
   // developer context a plugin hook gives (plugin/hooks/codex.json), not as part of the prompt

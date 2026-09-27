@@ -39,14 +39,14 @@ Loop progress:
 - [ ] 2. Archive the last loop, build, delete old claude/eval-* branches, push the 4 slots
 - [ ] 3. Fire each routine at least twice with the task prompt; run codex.ts for all four slots
 - [ ] 4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the failure signals and for
-   `found`). Then `node evals/cloud/collect.ts --fired <slot>=<n> ...` (one per Claude slot, with how many times it was fired) writes
+   `found`). Then `node evals/cloud/collect.ts --fired <slot>=<n> ...` (required for every slot, with how many times it was fired; `=0` for a slot not fired) writes
    `~/.cache/sphica-eval/loop.json`: per run the hidden tests, the patch, the final answer, and four signals kept apart: `delivered`, `found`,
    Codex's `answer_format`, and `excluded` with the reason. Every Codex run that wrote `started.json` and every fired Claude run is a row,
-   so a failed or missing run stays in the denominator. A missing log makes `found` unknown, never no
-5. `node evals/cloud/grade.ts` grades each result row blind through `grade.schema.json` (the grader sees the task, `expect`, `against`, the
+   so a failed or missing run stays in the denominator. A missing log makes `found` unknown, never no, and its counters null
+5. `node evals/cloud/grade.ts` grades each result row blind through `grade.schema.json` with its own HOME and CODEX_HOME (the grader sees the task, `expect`, `against`, the
    answer, and the patch; never the model or the condition) and writes `~/.cache/sphica-eval/grades.json` with a table by model and
-   condition. A grade that fails its schema is `ungraded`, not a score. Report both models side by side with n: started, excluded,
-   ungraded, the score spread, each signal including unknown, and the tracked failure (delivered or found, and still made the change
+   condition. A grade that fails its schema, or answers `not_applicable` when the task has `against` (or anything else when it has none), is `ungraded`, not a score. Report both models side by side with n: started, excluded,
+   ungraded, the score spread, each signal including unknown, Codex's answer formats, and the tracked failure (delivered or found, and still made the change
    `against` describes). Grade the final answer and the patch, not the answer alone: a run in an old checkout often stops at a plan
    because that checkout's CLAUDE.md demands the owner's Go
 
