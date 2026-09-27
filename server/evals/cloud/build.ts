@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { openReader } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
@@ -206,6 +207,32 @@ function files(dir: string): void {
   execFileSync("tar", ["-x", "-C", dir], { input: tar });
 }
 
+/** Runs the slot's session start hook as the host would and requires a delivery row, so a hook that never runs fails the build. */
+async function smokeDelivery(dir: string): Promise<void> {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-smoke-"));
+  try {
+    execFileSync("sh", [".tools/sphica.sh", ".tools/dist/deliver.js"], {
+      cwd: dir,
+      input: JSON.stringify({
+        hook_event_name: "SessionStart",
+        session_id: "smoke",
+        cwd: dir,
+        source: "startup",
+      }),
+      env: { PATH: process.env.PATH ?? "", HOME: tmp, TMPDIR: tmp },
+    });
+    const db = openReader(path.join(tmp, "eval-sphica", "sphica.db"));
+    try {
+      const rows = await db.selectFrom("delivery").select("id").execute();
+      if (!rows.length) throw new Error(`${dir}: the delivery hook logged nothing at session start`);
+    } finally {
+      await db.destroy();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   const tarball = fs.readFileSync(args.node ?? "");
   if (sha256(tarball) !== NODE.sha256)
@@ -256,17 +283,19 @@ async function main() {
       await rekey(db, repo);
       fixtureHash = sha256(fs.readFileSync(db));
       write(dir, ".tools/sphica.sh", SPHICA_SH, 0o755);
-      write(dir, ".tools/dist/mcp.mjs", fs.readFileSync(path.join(ROOT, "plugin", "dist", "mcp.js")));
+      // The bundles are ESM; keeping the .js names keeps deliver's entry check (deliver.(ts|js)) true, which .mjs silently broke
+      write(dir, ".tools/dist/package.json", `${JSON.stringify({ type: "module" })}\n`);
+      write(dir, ".tools/dist/mcp.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "mcp.js")));
       write(
         dir,
         ".mcp.json",
-        `${JSON.stringify({ mcpServers: { sphica: { command: "sh", args: [".tools/sphica.sh", ".tools/dist/mcp.mjs"] } } }, null, 2)}\n`,
+        `${JSON.stringify({ mcpServers: { sphica: { command: "sh", args: [".tools/sphica.sh", ".tools/dist/mcp.js"] } } }, null, 2)}\n`,
       );
     }
     if (condition === "inject") {
-      write(dir, ".tools/dist/deliver.mjs", fs.readFileSync(path.join(ROOT, "plugin", "dist", "deliver.js")));
+      write(dir, ".tools/dist/deliver.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "deliver.js")));
       const deliver = (name: string) =>
-        `sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" ${name} sh "$CLAUDE_PROJECT_DIR/.tools/sphica.sh" "$CLAUDE_PROJECT_DIR/.tools/dist/deliver.mjs"`;
+        `sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" ${name} sh "$CLAUDE_PROJECT_DIR/.tools/sphica.sh" "$CLAUDE_PROJECT_DIR/.tools/dist/deliver.js"`;
       hooks.SessionStart = [{ hooks: [{ type: "command", command: deliver("start"), timeout: 60 }] }];
       hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: deliver("prompt"), timeout: 30 }] }];
       hooks.PreToolUse = [
@@ -315,6 +344,7 @@ async function main() {
       "-qm",
       "initial",
     ]);
+    if (condition === "inject") await smokeDelivery(dir);
     (manifest.repositories as Record<string, unknown>)[repo] = { condition, fixture: fixtureHash };
   }
   fs.writeFileSync(path.join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

@@ -52,7 +52,7 @@ execFileSync("git", ["-C", work, "remote", "set-url", "origin", `https://github.
 fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
 const mcp =
   condition === "search"
-    ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(work, ".tools", "sphica.sh"))}, ${JSON.stringify(path.join(work, ".tools", "dist", "mcp.mjs"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
+    ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(work, ".tools", "sphica.sh"))}, ${JSON.stringify(path.join(work, ".tools", "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
     : "";
 fs.writeFileSync(path.join(codexHome, "config.toml"), `${modelSettings()}\n${mcp}`);
 
