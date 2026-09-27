@@ -382,13 +382,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NEEDS: ${{ toJSON(needs) }}
+          PUBLISH: ${{ needs.publish.result }}
         run: |
           set -e
           failed="$(jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(", ")' <<< "$NEEDS")"
-          if out="$(npm view "sphica@${GITHUB_REF_NAME#v}" version 2>&1)"; then
-            published="$([ -n "$out" ] && echo yes || echo unknown)"
-          elif grep -q E404 <<< "$out"; then
+          # The publish job's result decides; the registry may serve a cached answer for minutes after a publish.
+          # Only a failed publish is uncertain (the command may have gone through), so that case alone asks npm
+          if [ "$PUBLISH" = success ]; then
+            published=yes
+          elif [ "$PUBLISH" != failure ]; then
             published=no
+          elif out="$(npm view "sphica@${GITHUB_REF_NAME#v}" version 2>&1)" && [ -n "$out" ]; then
+            published=yes
           else
             published=unknown
           fi

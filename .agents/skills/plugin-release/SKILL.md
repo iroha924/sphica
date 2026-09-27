@@ -117,7 +117,8 @@ When a job fails, `report-failure` comments on the PR with the failed jobs and w
 - npm has it but `merge` failed: the version is already `latest` while main lacks it. The owner decides whether to put `latest` back by running
   `npm dist-tag add sphica@<previous good version> latest` in their own terminal (the `!` prefix is only for this session's input box; in a shell, `!` inverts the exit code).
   That command asks for an OTP, which fails in a shell without a TTY such as Claude's. Fix the PR and ship a new version; never reuse the published one
-- `finish` failed after the merge: nothing is published again. Rerun the failed job with `gh run rerun <run-id> --failed` (creating the Release is skipped when it exists),
+- `finish` failed after the merge: nothing is published again. npm's registry can serve a cached answer for a few minutes after a publish, so wait that long,
+  then rerun the failed job with `gh run rerun <run-id> --failed` (creating the Release is skipped when it exists),
   or run the failed check by hand with the commands in step 8
 - Do not rerun `publish` after it succeeded
 

@@ -104,6 +104,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): check the remote tag and the PR's own merge commit before creating the Release`
   - 結果: red: 変更前のコードで `FAKE_REMOTE_TAG` のケースが status 0 で落ちた。変更後 `node --test server/test/release-finish.test.ts` → 7 pass / 0 fail。実データの `node scripts/release-finish.mjs --dry-run` → v0.5.3（PR #181 の merge コミット）で通る
 
+- [x] T09: report-failure が公開の有無を publish ジョブの結果で決め、Skill に npm のキャッシュ待ちを書く
+  - 種別: 修正
+  - 計画: S4, S5
+  - 依存: T04（直す対象のジョブ）
+  - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `rg -n 'npm view "sphica@' .github/workflows/release.yml` → 変更前は report-failure が npm の答えだけで公開の有無を決めていた（publish 直後のキャッシュで E404 なら no と書く）。ワークフローの外では流せないので、判定のシェルを取り出して確かめる
+  - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。判定のシェルを PUBLISH=success / skipped / cancelled / failure で流す → yes / no / no / npm にあれば yes、なければ unknown
+  - コミット: `fix(release): take whether npm has the version from the publish job`
+  - 結果: actionlint → exit 0。判定のシェル → `success -> yes`、`skipped -> no`、`cancelled -> no`、`failure -> yes`（v0.5.3、npm にある）、`failure(v9.9.9) -> unknown`。`node scripts/check-ai-config.mjs` → exit 0
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
@@ -113,3 +123,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / T03 / Codex のタスクレビュー（19244ee）: 3 件。F1 `--tag` と `--commit` の一致を見ていない、F2 `--pull` の PR が tag のコミットを head に持つかを見ていない、F3 コードブロック内の見出しを節の区切りに読む（再現あり） / 3 件とも採る。修正タスク T07 を足した
 - 2026-09-28 / T04 / Codex のタスクレビュー（6ac17a4）: 2 件。F1 承認依頼のコメントが落ちても report-failure が走らない、F2 同じ tag の run が 3 件重なると待機中の run が取り消される / どちらも見送る。F1 はコメントが便利のためのもので、run の URL は Claude が Skill の手順 5 で必ず渡す。F2 は対策の `concurrency.queue: max` を固定の actionlint 1.7.12 が拒否し（実測）、同じ tag を打ち直さない規則と tag のルールセットのもとでは 3 件重なる入力が起きにくい
 - 2026-09-28 / 全体 / Codex の全差分レビュー: 3 件。1 publish 後に remote の tag が動いても気づかない、2 渡された merge コミットが PR の実際の merge か確かめない、3 既存の Release の本文が PR のノートと違っても成功扱い / 1 と 2 を採り、修正タスク T08 を足した。3 は Release を手で書き換えたときだけの入力で、オーナーの意図した修正で再実行を落とす副作用があるので見送る
+- 2026-09-28 / 全体 / review-shipping: 出してよい。指摘 1 件: npm のレジストリは CDN のキャッシュ（max-age=300）を返すので、publish 直後の finish が落ちうる、merge の失敗時に report-failure が誤って「npm にない」と書きうる（推測、未観測） / report-failure の誤りは T09 で直す。finish は再実行で直るので、Skill に数分待ってから再実行と書くだけにする
