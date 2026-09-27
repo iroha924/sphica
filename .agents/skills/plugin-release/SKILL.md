@@ -90,6 +90,8 @@ Once, before the first release, the owner sets these up in the web UI (without t
 - GitHub: a ruleset limiting creating, updating, and deleting tags `v*` to the owner
 - npm: trusted publisher (repository `iroha924/sphica`, workflow `release.yml`, environment `npm-release`, direct `npm publish` allowed),
   2FA required, publishing with tokens disallowed. A connection cannot be edited: to change one, delete it and create it again
+- npm: releases no longer move the `next` dist-tag. After the first release this way, the owner removes it once with `npm dist-tag rm sphica next`
+  in their own terminal (it asks for an OTP); `bun run release:status` reports it until then
 
 3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`, and `release`, the dry run) and the Codex review. Keep main merged into the PR branch
    (if main has moved ahead, the tree CI checked and the tag's tree do not match)

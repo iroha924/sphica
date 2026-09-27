@@ -92,6 +92,8 @@ for (const market of markets ?? []) {
 console.log("npm package");
 console.log(`  repository: ${packageVersion}`);
 console.log(`  registry latest: ${tags?.latest ?? "unknown"}`);
+// Releases no longer move next; until the owner removes it, it still points to the last staged version
+if (tags?.next) console.log(`  registry next: ${tags.next}`);
 console.log(
   `  npm i -g: ${
     globalPackage.status === "ok"
@@ -130,6 +132,9 @@ console.log(
 const issues = [];
 const unknowns = [];
 if (tags && tags.latest !== packageVersion) issues.push("repository and npm latest differ");
+if (tags?.next && tags.next !== tags.latest) {
+  issues.push("npm next is left behind latest; the owner removes it with npm dist-tag rm sphica next");
+}
 if (tags?.latest && globalPackage.status !== "unknown" && globalPackage.version !== tags.latest) {
   issues.push("the npm i -g CLI differs from npm latest");
 }

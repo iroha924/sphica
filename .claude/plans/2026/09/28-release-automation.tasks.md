@@ -224,6 +224,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): recheck the approved notes before publishing and keep a failed comment from failing the run`
   - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。比較のシェルを流す → 実物のハッシュで `exit=0`、`0000` で「notes changed」を出して `exit=1`。承認依頼のコメントのステップは `continue-on-error: true`
 
+- [x] T21: `release:status` が取り残された `next` を報告し、`release:plan` の手順にお試し実行を入れる
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T12（ゲートに足したお試し実行）
+  - 変更: `scripts/release-status.mjs`, `scripts/release-plan.mjs`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `bun run release:plan -- --base v0.5.3` → 変更前は「pass PR CI (check, pr-body)」でお試し実行に触れない。`rg -n "next" scripts/release-status.mjs` → 変更前は 0 件で、`next` が取り残されても報告しない
+  - 完了条件: `bun run release:plan -- --base v0.5.3` → 手順にお試し実行が入る。`bun run release:status` → `registry next` を表示し、`latest` とずれていれば残りとして報告する。`node scripts/check-ai-config.mjs` → exit 0
+  - コミット: `fix(release): report a stale next and name the dry run in the release plan`
+  - 結果: `bun run release:plan -- --base v0.5.3` → 「pass PR CI (check, pr-body, and the release dry run)」。`bun run release:status` → `registry next: 0.5.3` を表示（今は latest と同じなので報告なし。latest 0.5.4・next 0.5.3 の判定は同じ条件式で stale になることを確かめた）。`node scripts/check-ai-config.mjs` → exit 0
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
@@ -238,3 +248,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / 全体 / PR #182 の CI: 必須チェックとお試し実行、zizmor、actionlint は pass。CodeQL が `scripts/lib/release-finish.mjs:5-7` の HTML コメントの除去を「不完全な複数文字のサニタイズ」（high）として落とした。スキップされたジョブの名前が式のまま出た / T10 と T11 を足した。CodeQL の件は、影響（Release のノートの一部が隠れうる。GitHub が HTML をサニタイズするので実行には至らない見込み）と修正案をオーナーに報告してから直した
 - 2026-09-28 / 全体 / GitHub Codex のレビュー（edc1a65）: 5 件（P1 2、P2 3）。ゲートがお試し実行の成功を見ない、テストの子に一時 HOME が無い、merge 前に base を見ない、コードブロックの区切りを種類と長さで対応づけない、承認後に書き換えたノートで Release を作りうる / 5 件とも採り、T12〜T16 を足した
 - 2026-09-28 / 全体 / GitHub Codex のレビュー（f462d16）: 4 件（P1 1、P2 3）。冒頭コメントが 6 行、既存の Release の本文を確かめない、公開済みで prepare が落ちると no と誤報、コードブロック内の HTML コメントの例も消す / 冒頭コメントと誤報を T17・T18 で直す。既存の Release（先に誰かが作ったときだけ）とコードブロック内のコメントの例（まれな入力）は見送る
+- 2026-09-28 / 全体 / GitHub Codex のレビュー（7bb1f2c）: P2 5 件、P1 なし。publish の前にノートを比べない、next の取り残しが見えない、見出しより前の閉じないコメント、承認依頼のコメントの失敗で run が落ちる、release:plan がお試し実行に触れない / 5 件とも直した（T19〜T21）。オーナーの指示で、このあとの `@codex review` は依頼しない
