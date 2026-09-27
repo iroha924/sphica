@@ -194,6 +194,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): keep release-finish's header within three lines`
   - 結果: 冒頭コメント 3 行（引数と検査は Skill の Shipping 手順 5 と 8 を指す）。`node --test test/release-finish.test.ts` → 9 pass / 0 fail
 
+- [x] T18: report-failure は publish が成功していないとき npm に聞き、公開済みのバージョンを「なし」と書かない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T09（直す対象の判定）
+  - 変更: `.github/workflows/release.yml`
+  - red: 判定のシェルを `PUBLISH=skipped GITHUB_REF_NAME=v0.5.3` で流す → 変更前は npm にあるバージョンでも `no`
+  - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。判定のシェル → success は yes、skipped と cancelled は npm にあれば yes・なければ no、failure は npm にあれば yes・なければ unknown
+  - コミット: `fix(release): ask npm whenever publish did not succeed in this run`
+  - 結果: actionlint → exit 0。判定のシェル → `success v9.9.9 -> yes`、`skipped v0.5.3 -> yes`、`skipped v9.9.9 -> no`、`cancelled v9.9.9 -> no`、`failure v0.5.3 -> yes`、`failure v9.9.9 -> unknown`
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
@@ -207,3 +217,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / 全体 / Codex の修正分の再レビュー（99435b5..7fff62b）: 指摘 0 件 / 対応なし
 - 2026-09-28 / 全体 / PR #182 の CI: 必須チェックとお試し実行、zizmor、actionlint は pass。CodeQL が `scripts/lib/release-finish.mjs:5-7` の HTML コメントの除去を「不完全な複数文字のサニタイズ」（high）として落とした。スキップされたジョブの名前が式のまま出た / T10 と T11 を足した。CodeQL の件は、影響（Release のノートの一部が隠れうる。GitHub が HTML をサニタイズするので実行には至らない見込み）と修正案をオーナーに報告してから直した
 - 2026-09-28 / 全体 / GitHub Codex のレビュー（edc1a65）: 5 件（P1 2、P2 3）。ゲートがお試し実行の成功を見ない、テストの子に一時 HOME が無い、merge 前に base を見ない、コードブロックの区切りを種類と長さで対応づけない、承認後に書き換えたノートで Release を作りうる / 5 件とも採り、T12〜T16 を足した
+- 2026-09-28 / 全体 / GitHub Codex のレビュー（f462d16）: 4 件（P1 1、P2 3）。冒頭コメントが 6 行、既存の Release の本文を確かめない、公開済みで prepare が落ちると no と誤報、コードブロック内の HTML コメントの例も消す / 冒頭コメントと誤報を T17・T18 で直す。既存の Release（先に誰かが作ったときだけ）とコードブロック内のコメントの例（まれな入力）は見送る
