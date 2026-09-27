@@ -42,7 +42,7 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base v0.5.0` → release kind plugin、4 か所が 0.5.1
   - コミット: `chore(release): bump to 0.5.1`
-  - 結果: `bun run release:plan -- --base v0.5.0`（4b13e5f の時点）→ release kind none、version は npm / plugin / marketplace / Codex とも 0.5.1。T02 を積んだ d116709 の時点で同じコマンド → release kind plugin
+  - 結果: `bun run release:plan -- --base v0.5.0` → 4b13e5f の時点で release kind none、version は npm / plugin / marketplace / Codex とも 0.5.1。T02 を積んだ d116709 の時点で同じコマンド → release kind plugin
 
 - [x] T02: deliver.ts で Claude の Bash を名指しの読み取りにし、テストを足す
   - 種別: 変更
