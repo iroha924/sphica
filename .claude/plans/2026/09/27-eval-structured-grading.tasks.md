@@ -69,8 +69,19 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → exit 0。`rg -n "grade.ts|--fired|unknown" .claude/skills/eval-loop/SKILL.md` → 各 1 件以上
   - コミット: `docs(eval-loop): grade with grade.ts and report both models with unknown and excluded counts`
-  - 結果: `bun run verify:ai` → exit 0。`rg -n "grade.ts|--fired|unknown" .claude/skills/eval-loop/SKILL.md` → 6 件
+  - 結果: `bun run verify:ai` → exit 0。`rg -n "grade.ts|--fired|unknown" .claude/skills/eval-loop/SKILL.md` → 4 件（grade.ts、--fired、unknown がそれぞれ含まれる）
+
+- [x] T06: gold フックの包みが終了コードを返し受領を追記するようにし、Codex の終了コードを先に記録する
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す包みと result.json を T02 が書いた）
+  - 変更: `server/evals/cloud/codex.ts`
+  - red: 包みと同じ形の sh を、7 で終わる gold.sh で流す → exit 0 が返る。2 回目に空の出力で流す → 受領が空に上書きされる
+  - 完了条件: 同じ形の sh で、7 で終わる gold.sh → exit 7、2 回目の空の出力 → 受領に 1 回目の本文が残る。`bun run --cwd server typecheck` → exit 0
+  - コミット: `fix(evals): pass the gold hook's exit on, keep its receipt, and record Codex's exit first`
+  - 結果: 直した形の sh で、7 で終わる gold.sh → 「record-text exit=7」、2 回目 → exit=0 で受領は「record-text」のまま。`tsc` → 通過。result.status は spawnSync の直後に入れる
 
 ## 記録
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
 2026-09-27 / T04 / grade.ts も読み込むと動くのでテストから呼べず、knip は新しい入口を未使用と見た / 採点の中身を grading.ts に分け、knip.json の entry に grade.ts を足した。変更欄を「grade.ts, eval-grade.test.ts」から「grade.ts, grading.ts, eval-grade.test.ts, knip.json」にした
+2026-09-27 / T06 / T02 の Codex レビュー（3316eb3）で 3 件: gold フックの失敗が成功に見える、2 回目の呼び出しで受領が消える、Codex の後の処理で落ちると status が null / 3 件とも T06 で直した

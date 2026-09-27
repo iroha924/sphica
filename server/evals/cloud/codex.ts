@@ -102,7 +102,7 @@ try {
   if (condition === "gold")
     fs.writeFileSync(
       path.join(dir, "gold-hook.sh"),
-      `out=$(sh ${JSON.stringify(path.join(tools, "gold.sh"))})\nprintf '%s' "$out" > ${JSON.stringify(path.join(dir, "gold-receipt.txt"))}\nprintf '%s' "$out"\n`,
+      `out=$(sh ${JSON.stringify(path.join(tools, "gold.sh"))})\ncode=$?\nprintf '%s' "$out" >> ${JSON.stringify(path.join(dir, "gold-receipt.txt"))}\nprintf '%s' "$out"\nexit $code\n`,
     );
   if (hooks) fs.writeFileSync(path.join(codexHome, "hooks.json"), `${JSON.stringify({ hooks }, null, 2)}\n`);
   const prompt = task.prompt;
@@ -140,6 +140,8 @@ try {
       maxBuffer: 256 * 1024 * 1024,
     },
   );
+  // Recorded now, so a failure in what follows still leaves Codex's own exit in result.json
+  result.status = r.status;
   fs.writeFileSync(path.join(dir, "events.jsonl"), r.stdout ?? "");
   fs.writeFileSync(path.join(dir, "stderr.log"), r.stderr ?? "");
   execFileSync("git", ["-C", work, "add", "-A"]);
