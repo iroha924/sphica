@@ -81,6 +81,7 @@ jobs:
       sha512: ${{ steps.pack.outputs.sha512 }}
       tgz: ${{ steps.pack.outputs.tgz }}
       pull: ${{ steps.gate.outputs.pull }}
+      notes: ${{ steps.notes.outputs.digest }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -106,6 +107,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-gate.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+
+      # The owner reads the Release notes before approving; finish creates the Release only from these same notes
+      - name: Are the Release notes there before approval
+        id: notes
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL: ${{ steps.gate.outputs.pull }}
+        run: |
+          digest="$(node scripts/release-finish.mjs --notes-digest --pull "$PULL")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       # The owner's approval of npm-release is the only gate before npm, so stop if anyone else could approve or bypass it
       - name: Can only the owner approve npm-release
@@ -367,10 +379,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PULL: ${{ needs.prepare.outputs.pull }}
           MERGE: ${{ needs.merge.outputs.commit }}
+          NOTES: ${{ needs.prepare.outputs.notes }}
         run: |
           set -e
           git fetch --quiet origin main
-          node scripts/release-finish.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --merge "$MERGE" --pull "$PULL"
+          node scripts/release-finish.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA" --merge "$MERGE" --pull "$PULL" --approved-notes "$NOTES"
 
   # When any step of a release fails, say on the PR how far it got. Whether npm has the version decides the recovery
   report-failure:

@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // Checks a published and merged release, creates its GitHub Release from the PR's Release notes, and reports on the PR.
 // release.yml runs it after the merge job; with --dry-run it checks the latest published release and creates or posts nothing.
-// Usage: node scripts/release-finish.mjs --tag v1.2.3 --commit <tag sha> --merge <merge sha> --pull <N> | --dry-run
+// Before the approval, prepare runs it with --notes-digest to record the notes the owner sees, and finish creates the Release only from those.
+// Usage: node scripts/release-finish.mjs --tag v1.2.3 --commit <tag sha> --merge <merge sha> --pull <N> --approved-notes <sha256>
+//        | --dry-run | --notes-digest --pull <N>
 // (needs GH_TOKEN and GITHUB_REPOSITORY)
 
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,7 +20,9 @@ const { values } = parseArgs({
     commit: { type: "string" },
     merge: { type: "string" },
     pull: { type: "string" },
+    "approved-notes": { type: "string" },
     "dry-run": { type: "boolean", default: false },
+    "notes-digest": { type: "boolean", default: false },
   },
 });
 const dryRun = values["dry-run"];
@@ -30,8 +35,22 @@ const fail = (message) => {
   throw new Stop(message);
 };
 
+const digest = (notes) => createHash("sha256").update(notes).digest("hex");
+// The PR's Release notes, which must exist before anything is published
+const prNotes = (pull) => {
+  const pr = JSON.parse(run("gh", ["api", `repos/${repo}/pulls/${pull}`]));
+  const notes = releaseNotes(pr.body);
+  if (notes === null) fail(`PR #${pull} has no Release notes section, or it is empty`);
+  return { pr, notes };
+};
+
 try {
-  finish(values);
+  if (values["notes-digest"]) {
+    if (!/^\d+$/.test(values.pull ?? "")) fail("pass --pull as a PR number");
+    console.log(digest(prNotes(values.pull).notes));
+  } else {
+    finish(values);
+  }
 } catch (error) {
   if (!(error instanceof Stop)) throw error;
   console.error(error.message);
@@ -54,6 +73,9 @@ function finish({ tag, commit, merge, pull }) {
     if (!/^[0-9a-f]{40}$/.test(sha ?? "")) fail(`pass --${name} as a 40-character sha`);
   }
   if (!/^\d+$/.test(pull ?? "")) fail("pass --pull as a PR number");
+  const approved = values["approved-notes"];
+  if (!dryRun && !/^[0-9a-f]{64}$/.test(approved ?? ""))
+    fail("pass --approved-notes as the sha256 prepare recorded");
   const version = tag.slice(1);
 
   // 1. The tag, the PR, and the merge all name the same commit, and the merge brought in exactly its tree
@@ -101,6 +123,11 @@ function finish({ tag, commit, merge, pull }) {
     // 4. The owner reviewed the notes in the PR body; a release without them goes back to the owner
     const notes = releaseNotes(pr.body);
     if (notes === null) fail(`PR #${pull} has no Release notes section, or it is empty`);
+    if (!dryRun && digest(notes) !== approved) {
+      fail(
+        "the Release notes changed after the owner approved; ask the owner and create the Release by hand",
+      );
+    }
 
     if (dryRun) {
       console.log(`${tag}: tree, attestation, npm latest, and Release notes check out (dry run)`);

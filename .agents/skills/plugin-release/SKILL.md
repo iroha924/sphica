@@ -98,13 +98,14 @@ Once, before the first release, the owner sets these up in the web UI (without t
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
    and that `check`, `pr-body`, and `release` succeeded on that head (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
    after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
+   It also stops when the PR has no Release notes, and records a digest of the notes the owner is about to read.
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner
 6. The owner approves the `npm-release` environment on the run page. `publish` then runs both checks again, compares the SHA-512 of the same tarball,
    attests the SBOM, and runs `npm publish <tgz> --tag latest --provenance` (trusted publishing, no token). The version is the default install from here
 7. `merge` merges the PR with `gh pr merge <PR> --merge --match-head-commit <head>` using the run's token. A merge by that token starts no other workflow
 8. `finish` runs `scripts/release-finish.mjs`: the merge commit's tree equals the tag's (`git diff --exit-code <head> <merge commit>`), the tarball npm serves
    has the SBOM attestation from this tag (`gh attestation verify <tgz> --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom --signer-workflow iroha924/sphica/.github/workflows/release.yml --source-ref refs/tags/v<version>`),
-   and npm `latest` is the version. It then creates the GitHub Release from the PR body's "Release notes" section as is
+   and npm `latest` is the version. It then creates the GitHub Release from the PR body's "Release notes" section as is, only if the notes still match the digest from step 5
    (`gh release create v<version> --verify-tag --title v<version> --notes-file <file>`; not git log, which OpenSSF Best Practices' `release_notes` does not accept) and comments the result on the PR
 9. Claude follows the run with `gh run watch <run-id> --exit-status`. When it succeeds, list npm's dist-tags, the remote tag, the global CLI, the marketplace,
    and the Claude/Codex caches with `bun run release:status`, and confirm no step remains. Items it failed to observe show as `unknown`, not `none` or `not found`

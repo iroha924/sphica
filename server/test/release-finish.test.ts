@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -79,13 +80,31 @@ function finish(args: string[], env: Record<string, string> = {}) {
         ...env,
       },
     });
-    return { status: result.status, stderr: result.stderr, calls: fs.readFileSync(calls, "utf8") };
+    return {
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      calls: fs.readFileSync(calls, "utf8"),
+    };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
-const RELEASE = ["--tag", "v1.2.3", "--commit", COMMIT, "--merge", MERGE, "--pull", "7"];
+// The digest prepare records before the owner approves, for the notes in BODY
+const APPROVED = createHash("sha256").update("Fixes delivery.").digest("hex");
+const RELEASE = [
+  "--tag",
+  "v1.2.3",
+  "--commit",
+  COMMIT,
+  "--merge",
+  MERGE,
+  "--pull",
+  "7",
+  "--approved-notes",
+  APPROVED,
+];
 
 test("release-finish creates the Release from the PR's notes and comments on the PR", () => {
   const { status, stderr, calls } = finish(RELEASE);
@@ -96,6 +115,22 @@ test("release-finish creates the Release from the PR's notes and comments on the
   );
   assert.match(calls, /gh release create v1\.2\.3 --repo o\/r --verify-tag --title v1\.2\.3 --notes-file /);
   assert.match(calls, /gh pr comment 7 --repo o\/r --body-file /);
+});
+
+test("release-finish prints the digest of the PR's notes before approval, and fails without notes", () => {
+  const ok = finish(["--notes-digest", "--pull", "7"]);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(ok.stdout.trim(), APPROVED);
+  const none = finish(["--notes-digest", "--pull", "7"], { FAKE_BODY: "## What changed\n\nx\n" });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /no Release notes/);
+});
+
+test("release-finish refuses notes changed after the owner approved", () => {
+  const { status, stderr, calls } = finish(RELEASE, { FAKE_BODY: "## Release notes\n\nSomething else.\n" });
+  assert.equal(status, 1);
+  assert.match(stderr, /Release notes changed after the owner approved/);
+  assert.doesNotMatch(calls, /release create|pr comment/);
 });
 
 test("release-finish does not create the Release twice when it is rerun", () => {

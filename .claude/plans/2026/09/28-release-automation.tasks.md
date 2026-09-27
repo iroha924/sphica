@@ -174,7 +174,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): close a code fence only with a matching delimiter`
   - 結果: red: 変更前のコードで、4 つのバッククォートの中の見出しを節として読み `Example` 以下を返して落ちた。変更後 `node --test test/release-finish.test.ts` → 7 pass / 0 fail。実データの `--dry-run` → v0.5.3 で通る
 
-- [ ] T16: 承認の前にノートを検査してハッシュを記録し、finish はそのノートと一致するときだけ Release を作る
+- [x] T16: 承認の前にノートを検査してハッシュを記録し、finish はそのノートと一致するときだけ Release を作る
   - 種別: 修正
   - 計画: S3, S4
   - 依存: T15（同じスクリプト）
@@ -182,6 +182,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - red: `node --test server/test/release-finish.test.ts` → 承認の後に書き換えたノートでも、変更前のコードは Release を作って落ちる
   - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → ノートのハッシュ違いで exit 1、`--notes-digest` でノートが無ければ exit 1、を含めて全件 pass。`mise exec -- actionlint .github/workflows/release.yml` → exit 0
   - コミット: `fix(release): create the Release only from the notes the owner saw before approving`
+  - 結果: red: 変更前のスクリプトは `--approved-notes` と `--notes-digest` を知らず 5 件落ちた。変更後 `node --test test/release-finish.test.ts` → 9 pass / 0 fail（ハッシュの出力、ノートなしで exit 1、承認後に変えたノートで exit 1 かつ作成もコメントもなし）。actionlint → exit 0。実データ: `--notes-digest --pull 181` → 64 桁のハッシュ、`--dry-run` → v0.5.3 で通る
 
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
