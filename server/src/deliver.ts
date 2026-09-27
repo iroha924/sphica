@@ -57,6 +57,43 @@ const deliverable = (db: Kysely<DB>, projectId: number) =>
 const line = (u: { key: string; kind: string; stance: string | null; text: string }, extra = "") =>
   `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 240)}${extra}`;
 
+/** Cuts to n characters (not bytes), marking the cut. */
+const clip = (text: string, n: number) => {
+  const chars = Array.from(inline(text));
+  return chars.length <= n ? chars.join("") : `${chars.slice(0, n - 1).join("")}…`;
+};
+
+/**
+ * For file-bound deliveries: each record's reason and the options it rejected, so it can be weighed without opening it. Records without them
+ * get nothing added. They are record text like the rest, shown after the key.
+ */
+async function reasons(db: Kysely<DB>, ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const [whys, options] = await Promise.all([
+    db.selectFrom("unit").select(["id", "why"]).where("id", "in", ids).execute(),
+    db
+      .selectFrom("unit_option")
+      .select(["unit_id", "text"])
+      .where("unit_id", "in", ids)
+      .where("outcome", "=", "rejected")
+      .orderBy("position")
+      .execute(),
+  ]);
+  const out = new Map<number, string>();
+  for (const id of ids) {
+    const why = whys.find((w) => w.id === id)?.why;
+    const rejected = options.filter((o) => o.unit_id === id).map((o) => clip(o.text, 60));
+    const parts = [
+      why ? ` Why: ${clip(why, 160)}` : "",
+      rejected.length
+        ? ` Rejected: ${rejected.slice(0, 3).join("; ")}${rejected.length > 3 ? ` (+${rejected.length - 3} more)` : ""}`
+        : "",
+    ].join("");
+    if (parts) out.set(id, parts);
+  }
+  return out;
+}
+
 /** Keeps whole lines within the budget; returns the kept lines and how many were left out. */
 function fit(lines: string[], chars: number, lead: string): { text: string; omitted: number } {
   const kept: string[] = [];
@@ -98,9 +135,14 @@ const named = (rels: string[]) =>
 async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Promise<Plan> {
   const rows = await anchoredTo(db, projectId, rels).execute();
   const shown = rows.slice(0, LIMITS.pre_edit.units);
-  const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). ${NOTE}:`;
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
+  // Sphica's own request to check, not the record's: the hook runs after the edit is composed, so it asks for an account, not a pause
+  const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). Check this change against them: if it seems to go against one, confirm with the current code and the record's full text (Sphica's read), then say why the change stands or what you changed. ${NOTE}:`;
   const f = fit(
-    shown.map((u) => line(u)),
+    shown.map((u) => line(u, why.get(u.id))),
     LIMITS.pre_edit.chars,
     lead,
   );
@@ -146,10 +188,14 @@ async function beforeRead(
   ).filter((u) => !seen.has(u.id));
   const room = Math.min(LIMITS.pre_read.units, READ_SESSION.units - readUnits);
   const shown = rows.slice(0, Math.max(room, 0));
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
   // A shell command that names a path is not proof it was read, so Codex's wording says only that it was named
   const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${NOTE}:`;
   const f = fit(
-    shown.map((u) => line(u)),
+    shown.map((u) => line(u, why.get(u.id))),
     Math.min(LIMITS.pre_read.chars, READ_SESSION.chars - spent.reduce((n, r) => n + r.chars, 0)),
     lead,
   );

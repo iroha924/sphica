@@ -297,6 +297,66 @@ test("a read shows at most 5 records, and reads over a session at most 8, even w
   }
 });
 
+test("reads and edits carry each record's reason and rejected options, edits ask for a check, prompts stay short", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Keep search as it is. Each candidate was measured over 3 runs. Fusion lowered direct answers. Trigram cost more. Regex was slow. Prefix too.",
+    });
+    const why = `Each candidate was measured over 3 runs. ${"x".repeat(300)}`;
+    await save(db, p, {
+      units: [
+        decided("keep", m, "Keep search as it is.", {
+          kind: "decision",
+          why,
+          options: [
+            { text: "multi-phrasing fusion", outcome: "rejected" },
+            { text: "trigram", outcome: "rejected" },
+            { text: "regex", outcome: "rejected" },
+            { text: "prefix syntax", outcome: "rejected" },
+            { text: "as it is", outcome: "chosen" },
+          ],
+          anchors: [{ path: "src/search.ts", symbol: "search", role: "applies_to" }],
+        }),
+        decided("bare", m, "Fusion lowered direct answers.", {
+          anchors: [{ path: "src/search.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const at = (session: string, input: Record<string, unknown>) =>
+      deliver({ session_id: session, cwd: repo, ...input }, "claude-code", db.file);
+    const tool = (session: string, name: string) =>
+      at(session, {
+        hook_event_name: "PreToolUse",
+        tool_name: name,
+        tool_input: { file_path: path.join(repo, "src/search.ts") },
+      });
+    const read = await tool("r", "Read");
+    assert.match(read, /trace:ext-s1\/keep .*Why: Each candidate was measured over 3 runs\. x+…/);
+    assert.match(read, /Rejected: multi-phrasing fusion; trigram; regex \(\+1 more\)/);
+    assert.doesNotMatch(read, /as it is;|Rejected: .*as it is/, "a chosen option is not listed as rejected");
+    assert.match(
+      read,
+      /trace:ext-s1\/bare \(constraint do\): Fusion lowered direct answers\.$/m,
+      "no reason, nothing added",
+    );
+    const edit = await tool("e", "Edit");
+    assert.match(edit, /Check this change against them: if it seems to go against one/);
+    assert.match(edit, /not an instruction/);
+    assert.match(edit, /Why: /);
+    assert.doesNotMatch(read, /Check this change/);
+    const prompt = await at("p", { hook_event_name: "UserPromptSubmit", prompt: "search() を直したい" });
+    assert.match(prompt, /trace:ext-s1\/keep/);
+    assert.doesNotMatch(prompt, /Why:|Rejected:/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("an unavailable database is said once per session before an edit, never passed off as nothing, and prompts stay quiet", async () => {
   const repo = checkout();
   try {
