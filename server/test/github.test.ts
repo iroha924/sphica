@@ -305,6 +305,24 @@ test("gh reads pull requests and the signed-in user from github.com only", async
   });
 });
 
+// A gh stuck on the network must not hold init: it gives up and init goes on to register the repository
+test("a gh that never answers is given up on as failed", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  try {
+    fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\nsetTimeout(() => {}, 60_000);\n`, {
+      mode: 0o755,
+    });
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    const started = Date.now();
+    assert.deepEqual(await ghUser(500), { ok: false, reason: "failed" });
+    assert.ok(Date.now() - started < 10_000);
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 test("a signed-out gh, a missing gh, and an answer that is not a user are told apart", async () => {
   await withGh("", 1, async () => {
     assert.deepEqual(await ghUser(), { ok: false, reason: "failed" });

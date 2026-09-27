@@ -66,10 +66,15 @@ const LOGIN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/;
  * The account gh is signed in to on github.com. A gh that cannot be started, a call that exited non-zero (signed out, offline),
  * and an answer that is not a user are told apart, so neither a broken gh nor a broken answer is reported as signed out.
  */
-export async function ghUser(): Promise<SignedIn> {
+export async function ghUser(timeout = 15_000): Promise<SignedIn> {
   let stdout: string;
   try {
-    ({ stdout } = await exec("gh", ["api", "user", ...HOST], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
+    // A gh stuck on the network would hold init before it registers the repository; past the limit it is killed (failed)
+    ({ stdout } = await exec("gh", ["api", "user", ...HOST], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout,
+    }));
   } catch (e) {
     // Once gh ran, execFile gives its exit status (null when a signal ended it); when it never started, an error name
     const code: unknown = (e as { code?: unknown }).code;

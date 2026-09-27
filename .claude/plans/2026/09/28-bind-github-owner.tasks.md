@@ -97,6 +97,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `feat(cli): bind the signed-in GitHub account in init and show it in doctor`
   - 結果: `bun run verify` → rc 0（`bun run test` を含む）
 
+- [x] T15: ghUser() に時間の上限を付け、固まった gh で init が止まらないようにする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T11（直す対象の ghUser() の分類が要る）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test test/github.test.ts` → 60 秒眠る偽の gh で ghUser() が返らず、テストが時間切れで失敗
+  - 完了条件: `bun run test` → 固まった gh が 500 ms で failed になる検査を含めて通る
+  - コミット: `fix(github): give up on a gh api user call that never answers`
+  - 結果: red を実測（42 秒で時間切れの失敗）。直した後 `node --test test/github.test.ts` → 7 pass / 0 fail（5.8 秒）
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -176,3 +186,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T06 / harvest の record_context は `by <login> (CONTRIBUTOR)` としか出さず、Skill は CONTRIBUTOR を提案と教えるため、登録しても本人の発言を採用に引かせられない / context で owner の発言に `, the owner` を添え（pullSources に author_kind を足す）、Skill にその読み方を書いた。変更欄に extract.ts、github.ts、extract.test.ts を足した
 - 2026-09-28 / T04 のレビュー / F1（Windows CI の init が本物の gh を使う）、F2（tarball の doctor を見ていない）、F3（未登録の doctor が中立であることの検査が無い）を採用 / 修正タスク T13 を足した
 - 2026-09-28 / T06, T13 のレビュー / F1（空のトークンと設定では鍵保管庫の資格情報を除けず、リクエストが出ないとは言えない）、F3（登録前の発言も採用できると読める）、F4（再実行で何も変えないという説明と矛盾）を採用し T14 を足した。F2（PR 本文に見出しの形を書けば context の owner の見出しを偽装できる）は見送り: 本文による見出しの偽装はこの変更の前からあり、record_check と record_save が DB の author_kind を確かめ直すので、偽装だけでは採用にならない
+- 2026-09-28 / 差分全体の Codex レビュー / 指摘 1 件（gh api user に時間の上限が無く、固まった gh で init が止まる）を採用し T15 を足した
