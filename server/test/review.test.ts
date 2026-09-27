@@ -41,10 +41,11 @@ const DIFF = [
   "-old",
 ].join("\n");
 
-test("a diff lists its changed files with added lines and their new line numbers", () => {
+test("a diff lists its changed files with added lines and their new line numbers, and a deleted file under its old path", () => {
   assert.deepEqual(parseDiff(DIFF), [
     { path: "src/db.ts", added: ["const b = 3;", 'import pg from "pg";'], lines: [4, 5] },
     { path: "src/telemetry.ts", added: ["export function sendTelemetry() {}"], lines: [1] },
+    { path: "gone.ts", added: [], lines: [] },
   ]);
 });
 

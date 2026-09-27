@@ -7,16 +7,23 @@ import type { DB } from "./db-types.ts";
 
 export type FileDiff = { path: string; added: string[]; lines: number[] };
 
-/** The changed files of a unified diff (`git diff` output), with each added line and its line number in the new file. */
+/**
+ * The changed files of a unified diff (`git diff` output), with each added line and its line number in the new file. A deleted file is
+ * kept under its old path with no added lines.
+ */
 export function parseDiff(text: string): FileDiff[] {
   const files: FileDiff[] = [];
   let cur: FileDiff | null = null;
   let line = 0;
-  for (const raw of text.split(/\r?\n/)) {
+  const rows = text.split(/\r?\n/);
+  for (const [i, raw] of rows.entries()) {
     const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(raw);
     if (to) {
+      // The old path is the header line just before; it names a deleted file
+      const was = /^--- (?:a\/)?(.+?)\t?$/.exec(rows[i - 1] ?? "")?.[1];
       cur = to[1] === "/dev/null" ? null : { path: to[1] ?? "", added: [], lines: [] };
       if (cur) files.push(cur);
+      else if (was && was !== "/dev/null") files.push({ path: was, added: [], lines: [] });
       continue;
     }
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);

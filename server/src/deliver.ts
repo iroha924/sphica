@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Automatic delivery of past records into Claude Code: at session start (current work and a few broad constraints), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
-// symbol, path, or option exactly).
+// symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
 // through the capture connection (never the text). Every failure leaves the host running: the hook prints nothing and exits 0.
 import fs from "node:fs";
@@ -15,14 +15,17 @@ import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
+import { selectForReview } from "./review.ts";
+import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
 import { head, reason, sha256 } from "./text.ts";
 
-type Event = "session_start" | "pre_edit" | "pre_read" | "prompt";
+type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
 const LIMITS: Record<Event, { units: number; chars: number }> = {
   session_start: { units: 6, chars: 1000 },
   pre_edit: { units: 5, chars: 1500 },
   pre_read: { units: 5, chars: 1500 },
   prompt: { units: 3, chars: 900 },
+  review: { units: 5, chars: 1500 },
 };
 /** Reads are far more frequent than edits, so what reads deliver over one session is capped too. */
 const READ_SESSION = { units: 8, chars: 3000 };
@@ -261,6 +264,66 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
   };
 }
 
+/** Before the user's own review command: the recorded decisions the local change touches, or why it could not be checked. */
+async function beforeReview(
+  db: Kysely<DB>,
+  projectId: number,
+  root: string,
+  call: { name: string; args: string },
+): Promise<Plan> {
+  const change = localChange(root, call.args);
+  const said = (text: string, why: string | null): Plan => ({
+    text,
+    units: [],
+    eligible: 0,
+    omitted: 0,
+    path: null,
+    reason: why,
+  });
+  if ("problem" in change)
+    return said(
+      `Sphica could not check this review against past decisions: ${change.problem}. To check, pass the diff to Sphica's review_select.`,
+      change.problem,
+    );
+  const n = change.files.length;
+  const base = inline(change.base);
+  if (!n)
+    return said(`Sphica: no local change against ${base} to check against past decisions.`, "no change");
+  // The same bar as other deliveries: a record in an unresolved conflict is held back
+  const live = new Set((await deliverable(db, projectId).select("u.id").execute()).map((r) => r.id));
+  const rows = (await selectForReview(db, projectId, change.files)).filter((a) => live.has(a.id));
+  const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
+  if (!rows.length) return said(`Sphica ${checked}: no active recorded decision applies.`, null);
+  const shown = rows.slice(0, LIMITS.review.units);
+  const f = fit(
+    shown.map((u) => line(u, ` [${inline(u.because)}]`)),
+    LIMITS.review.chars,
+    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
+  );
+  return {
+    text: f.text,
+    units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
+    eligible: rows.length,
+    omitted: rows.length - shown.length + f.omitted,
+    path: null,
+    reason: null,
+  };
+}
+
+/** Whether this session was already told exactly this about a review (a review skill is often called more than once per change). */
+function toldBefore(session: string, text: string): boolean {
+  const dir = path.join(os.tmpdir(), "sphica-review");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, sha256(`${session}\0${text}`).toString("hex").slice(0, 24)), "", {
+      flag: "wx",
+    });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /** Whether this session was already told Sphica is unavailable (said once per session, never as "nothing applies"). */
 function onceUnavailable(session: string): boolean {
   const dir = path.join(os.tmpdir(), "sphica-unavailable");
@@ -313,13 +376,15 @@ async function log(
 
 /** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
 export async function deliver(
-  input: HookInput & { source?: string },
+  input: ReviewInput & { source?: string },
   host: Host = "claude-code",
   file: string = dbFile(),
 ): Promise<string> {
   const name = input.hook_event_name;
-  const event: Event | null =
-    name === "SessionStart"
+  const call = reviewCall(input);
+  const event: Event | null = call
+    ? "review"
+    : name === "SessionStart"
       ? "session_start"
       : name === "UserPromptSubmit"
         ? "prompt"
@@ -330,6 +395,8 @@ export async function deliver(
           : null;
   if (!event || !input.session_id) return "";
   if (event === "prompt" && !isOwnerTurn(input)) return "";
+  // A headless review (claude -p "/review") still gets the check; only reviews inside subagents are left to the parent
+  if (event === "review" && input.agent_id) return "";
   const ti = input.tool_input ?? {};
   const target = [ti.file_path, ti.notebook_path].find((p): p is string => typeof p === "string");
   const onPath = event === "pre_edit" || event === "pre_read";
@@ -366,7 +433,10 @@ export async function deliver(
           ? await beforeRead(db, pid, rel ?? "", sessionId(pid, host, input.session_id))
           : event === "prompt"
             ? await onPrompt(db, pid, input.prompt ?? "")
-            : await atStart(db, pid, branchOf(place.root));
+            : call
+              ? await beforeReview(db, pid, place.root, call)
+              : await atStart(db, pid, branchOf(place.root));
+    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.text)) return "";
     await log(file, pid, host, input.session_id, event, plan, plan.text ? "emitted" : "nothing").catch(
       () => {},
     );
