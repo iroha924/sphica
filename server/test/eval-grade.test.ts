@@ -107,7 +107,27 @@ test("found is unknown without a log, yes only when a Sphica result names a gold
   );
   assert.equal(foundInClaudeLog(null, gold), "unknown");
   assert.equal(foundInClaudeLog("tool_use mcp__sphica__search\ntool_result ok ## other", gold), "no");
-  assert.equal(foundInClaudeLog("tool_result ok ## harvest:157/keep-search (u1)", gold), "yes");
+  assert.equal(
+    foundInClaudeLog('tool_result: <past-records id="a"> ## harvest:157/keep-search (u1)', gold),
+    "yes",
+  );
+  assert.equal(
+    foundInClaudeLog("tool_use Bash: cat note\ntool_result: harvest:157/keep-search", gold),
+    "no",
+    "a result that is not a Sphica record set does not count",
+  );
+  assert.equal(foundInCodexEvents("{bad json", gold), "unknown", "a log with no readable event cannot tell");
+  assert.equal(foundInCodexEvents("", gold), "unknown");
+});
+
+test("inherited property names are extra keys, not allowed ones", () => {
+  assert.equal(checkGrade({ ...grade, constructor: 1 }).ok, false);
+  assert.equal(
+    checkAnswer(
+      JSON.parse('{"implemented":true,"summary":"s","past_decisions":[],"unverified":[],"__proto__":1}'),
+    ).ok,
+    false,
+  );
 });
 
 test("delivered is judged per condition: inject by emitted units, gold by what the hook returned", () => {
@@ -170,6 +190,12 @@ test("collect keeps a started run without a result, and a failed run, as exclude
       "started.json": head,
       "result.json": { ...head, status: 1, reason: "timed out", seconds: 1 },
     });
+    run("partial", { "started.json": head });
+    fs.writeFileSync(path.join(codex, "partial", "result.json"), "{");
+    run("after", {
+      "started.json": head,
+      "result.json": { ...head, status: 0, reason: "git add failed", seconds: 1, deliveries: [] },
+    });
     const out = path.join(base, "loop.json");
     execFileSync(
       process.execPath,
@@ -188,7 +214,9 @@ test("collect keeps a started run without a result, and a failed run, as exclude
     );
     const rows = JSON.parse(fs.readFileSync(out, "utf8")).rows as { run: string; excluded: string | null }[];
     assert.deepEqual(rows.map((r) => [r.run, r.excluded]).sort(), [
+      ["after", "git add failed"],
       ["failed", "timed out"],
+      ["partial", "unreadable result.json"],
       ["stopped", "no result.json (the run stopped before it finished)"],
     ]);
   } finally {
@@ -262,4 +290,9 @@ test("the table counts every started run and the tracked failure per model and c
   assert.deepEqual(cell.scores, { 0: 1, 1: 0, 2: 2 });
   assert.equal(cell.tracked_failure, 1, "delivered or found, and implements the rejected change");
   assert.equal(cell.found.unknown, 1);
+  assert.deepEqual(
+    cell.delivered,
+    { yes: 3, no: 1, not_applicable: 0 },
+    "an ungraded run keeps its observed signals",
+  );
 });

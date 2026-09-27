@@ -40,9 +40,10 @@ const shape =
   (fields: Record<string, Rule>): Rule =>
   (v) => {
     if (typeof v !== "object" || v === null || Array.isArray(v)) return "must be an object";
-    for (const key of Object.keys(v)) if (!(key in fields)) return `${key}: not allowed`;
+    // Own keys only: `in` would take inherited names such as constructor as allowed
+    for (const key of Object.keys(v)) if (!Object.hasOwn(fields, key)) return `${key}: not allowed`;
     for (const [key, rule] of Object.entries(fields)) {
-      if (!(key in v)) return `${key}: missing`;
+      if (!Object.hasOwn(v, key)) return `${key}: missing`;
       const why = rule((v as Record<string, unknown>)[key]);
       if (why) return `${key}: ${why}`;
     }

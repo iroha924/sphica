@@ -21,9 +21,10 @@ export function deliveredSignal(
   return "not_applicable";
 }
 
-/** Whether a Sphica search or read result in Codex's JSONL events named a gold record; unknown without the events. */
+/** Whether a Sphica search or read result in Codex's JSONL events named a gold record; unknown without a readable event. */
 export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
   if (events === null) return "unknown";
+  let read = 0;
   for (const line of events.split("\n")) {
     let e: {
       type?: string;
@@ -34,18 +35,26 @@ export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
     } catch {
       continue;
     }
+    read++;
     const it = e.item;
     if (e.type !== "item.completed" || it?.type !== "mcp_tool_call" || it.server !== "sphica") continue;
     if (it.tool !== "search" && it.tool !== "read") continue;
     if (names((it.result?.content ?? []).map((c) => c.text ?? "").join("\n"), gold)) return "yes";
   }
-  return "no";
+  return read ? "no" : "unknown";
 }
 
-/** The same for a routine run log, whose tool results are lines starting with tool_result; unknown without the log. */
+/**
+ * The same for a routine run log, unknown without it. Results there are not tied to their calls, so only a result in Sphica's
+ * record fence (<past-records) counts; a file another tool printed does not.
+ */
 export function foundInClaudeLog(log: string | null, gold: string[]): Tri {
   if (log === null) return "unknown";
-  return log.split("\n").some((l) => /\btool_result\b/.test(l) && names(l, gold)) ? "yes" : "no";
+  return log
+    .split("\n")
+    .some((l) => /\btool_result\b/.test(l) && l.includes("<past-records") && names(l, gold))
+    ? "yes"
+    : "no";
 }
 
 /** Codex's final output checked against answer.schema.json; a valid answer is rendered to text so graders read the same kind of answer. */

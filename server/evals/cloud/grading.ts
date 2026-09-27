@@ -77,7 +77,7 @@ export type Cell = {
   tracked_failure: number;
 };
 
-/** One cell per model and condition. Signals are counted over graded runs; excluded and ungraded runs only add to their own counts. */
+/** One cell per model and condition. delivered and found are counted over every run not excluded, the grade's fields over graded runs. */
 export function tabulate(rows: (GradeRow & { grade?: Grade; ungraded?: string })[]): Cell[] {
   const cells = new Map<string, Cell>();
   for (const r of rows) {
@@ -104,14 +104,14 @@ export function tabulate(rows: (GradeRow & { grade?: Grade; ungraded?: string })
       c.excluded++;
       continue;
     }
+    c.delivered[r.delivered]++;
+    c.found[r.found]++;
     if (!r.grade) {
       c.ungraded++;
       continue;
     }
     c.graded++;
     c.scores[r.grade.score]++;
-    c.delivered[r.delivered]++;
-    c.found[r.found]++;
     if (r.grade.cited_gold === "yes") c.cited_gold++;
     c.implements_rejected[r.grade.implements_rejected]++;
     if ((r.delivered === "yes" || r.found === "yes") && r.grade.implements_rejected === "yes")

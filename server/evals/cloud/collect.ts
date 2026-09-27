@@ -266,7 +266,15 @@ function main() {
       const startedAt = read("started.json");
       const resultText = read("result.json");
       if (!startedAt && !resultText) continue;
-      const head = JSON.parse((startedAt ?? resultText) as string) as { task: string; condition: string };
+      const parse = <T>(text: string | null): T | null => {
+        try {
+          return text === null ? null : (JSON.parse(text) as T);
+        } catch {
+          return null;
+        }
+      };
+      const head = parse<{ task: string; condition: string }>(startedAt) ??
+        parse<{ task: string; condition: string }>(resultText) ?? { task: "unknown", condition: "unknown" };
       if (!resultText) {
         rows.push(
           excludedRow(
@@ -279,16 +287,21 @@ function main() {
         );
         continue;
       }
-      const result = JSON.parse(resultText) as {
+      const result = parse<{
         task: string;
         condition: string;
         seconds: number;
         status: number | null;
         reason?: string | null;
         deliveries?: { outcome: string; units: string[] }[] | null;
-      };
-      // A run whose Codex process failed (a timeout, a login error) says nothing about Sphica
-      if (result.status !== 0) {
+      }>(resultText);
+      // Cut off while it was written: the run started, so it stays in the denominator
+      if (!result) {
+        rows.push(excludedRow("codex", head.task, head.condition, name, "unreadable result.json"));
+        continue;
+      }
+      // A run whose Codex process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
+      if (result.status !== 0 || result.reason) {
         rows.push(
           excludedRow(
             "codex",

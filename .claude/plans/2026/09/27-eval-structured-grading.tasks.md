@@ -81,8 +81,19 @@ Codex の回を台帳と schema で受け、回収で 4 つの信号と除外を
   - コミット: `fix(evals): pass the gold hook's exit on, keep its receipt, and record Codex's exit first`
   - 結果: 直した形の sh で、7 で終わる gold.sh → 「record-text exit=7」、2 回目 → exit=0 で受領は「record-text」のまま。`tsc` → 通過。result.status は spawnSync の直後に入れる
 
+- [x] T07: 全体レビューの 6 件を直す（継承したキー名、読めない Codex ログ、Sphica 以外の結果、採点できなかった回の信号、途中で切れた result.json、Codex の後の失敗）
+  - 種別: 修正
+  - 計画: S1, S3, S4
+  - 依存: T06（直す対象が T01〜T06 の実装）
+  - 変更: `server/evals/cloud/schema-check.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test test/eval-grade.test.ts` → fail 4（constructor 付きの採点が ok、Bash の結果で found が yes、途中で切れた result.json で collect が落ちる、採点できなかった回の delivered が数えられない）。`foundInCodexEvents("{bad json")` と `("")` → no
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass。`bun run verify` → exit 0
+  - コミット: `fix(evals): reject inherited keys, keep unreadable logs unknown, and keep signals of ungraded runs`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → pass 12 / fail 0。`bun run --cwd server typecheck` → 通過
+
 ## 記録
 2026-09-27 / T03 / collect.ts は読み込むと main() を走らせるのでテストから関数を呼べない / 判定を judge.ts に分け、変更欄を「collect.ts, eval-grade.test.ts」から「collect.ts, judge.ts, eval-grade.test.ts」にした
 2026-09-27 / T04 / grade.ts も読み込むと動くのでテストから呼べず、knip は新しい入口を未使用と見た / 採点の中身を grading.ts に分け、knip.json の entry に grade.ts を足した。変更欄を「grade.ts, eval-grade.test.ts」から「grade.ts, grading.ts, eval-grade.test.ts, knip.json」にした
 2026-09-27 / T06 / T02 の Codex レビュー（3316eb3）で 3 件: gold フックの失敗が成功に見える、2 回目の呼び出しで受領が消える、Codex の後の処理で落ちると status が null / 3 件とも T06 で直した
 2026-09-27 / T06 / red の欄が「コマンド → 期待」の形でなく done の検査で落ちた / 書式だけを直した（内容は同じ）
+2026-09-27 / T07 / 全体の差分の Codex レビューで 6 件（再現 4、読んで確定 2） / 6 件とも T07 で直した
