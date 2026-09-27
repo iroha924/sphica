@@ -58,6 +58,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `feat(admin): bind the owner's GitHub account once`
   - 結果: `bun run test` → 298 pass / 0 fail（bound / already / other で行は 1 件 / skipped、登録前の CONTRIBUTOR の PR 本文は person で candidate、登録後の PR は owner で active）。`bun run sql:reach` → 128 / 128 sites
 
+- [x] T09: ghUser() が Enterprise Managed User のログイン名を受け付け、起動できない gh を未ログインと分ける
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す対象の ghUser() が要る）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test test/github.test.ts` → `mona-cat_octo` が unexpected、実行権限の無い gh が failed で 2 件失敗
+  - 完了条件: `bun run test` → 両方のケースを含めて通る
+  - コミット: `fix(github): accept managed-user logins and tell an unstartable gh from a signed-out one`
+  - 結果: red を実測（pass 4 / fail 2、上の 2 件）。直した後 `bun run test` → 298 pass / 0 fail。`bun run typecheck` → 指摘なし
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -103,3 +113,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T01, T07, T08 / T01 のコミットが pre-commit の bundle 検査で止まった（配布物の変更はバージョンを同じ変更で上げる必要がある） / T07 を取りやめ、同じ S7 を担う T08 を先頭に足した。T01 と T02 の依存を なし → T08 に変えた
 - 2026-09-28 / T08 / 結果欄を書式に合わない形のままコミットした（検査の終了コードをパイプで落とした） / T01 のコミットで結果欄を直した
 - 2026-09-28 / T03 / 採用まで通すテストは harvest の run と保存の道具がそろう extract.test.ts に置き、新しい SQL の呼び出しも既存のテストで届いて台帳の変更が要らなかった / 変更欄を `admin.ts, admin.test.ts, github.test.ts, sql-call-sites.mjs` → `admin.ts, admin.test.ts, extract.test.ts` に変えた
+- 2026-09-28 / T02 のレビュー / F1（EMU のログイン名を拒む、再現済み）と F2（EACCES を failed にする）を採用 / 修正タスク T09 を足した

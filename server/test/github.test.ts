@@ -295,6 +295,10 @@ test("gh reads pull requests and the signed-in user from github.com only", async
     assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana-1" });
     assert.deepEqual(args(), ["api", "user", "--hostname", "github.com"]);
   });
+  // An Enterprise Managed User on github.com carries an underscore and a short code in the login
+  await withGh(JSON.stringify({ id: 43, login: "mona-cat_octo" }), 0, async () => {
+    assert.deepEqual(await ghUser(), { ok: true, id: 43, login: "mona-cat_octo" });
+  });
 });
 
 test("a signed-out gh, a missing gh, and an answer that is not a user are told apart", async () => {
@@ -319,6 +323,9 @@ test("a signed-out gh, a missing gh, and an answer that is not a user are told a
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-no-gh-"));
   try {
     process.env.PATH = empty;
+    assert.deepEqual(await ghUser(), { ok: false, reason: "missing" });
+    // A gh that cannot be started never ran, so it is not reported as signed out
+    fs.writeFileSync(path.join(empty, "gh"), "", { mode: 0o644 });
     assert.deepEqual(await ghUser(), { ok: false, reason: "missing" });
   } finally {
     process.env.PATH = saved;

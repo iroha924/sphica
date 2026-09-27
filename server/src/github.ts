@@ -59,27 +59,28 @@ export type SignedIn =
   | { ok: true; id: number; login: string }
   | { ok: false; reason: "missing" | "failed" | "unexpected" };
 
-/** GitHub's login rule: letters, digits, and hyphens, starting with a letter or digit, at most 39 characters */
-const LOGIN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+/** A login is printed and stored: letters, digits, hyphens, and the underscore of an Enterprise Managed User (mona-cat_octo) */
+const LOGIN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
 
 /**
- * The account gh is signed in to on github.com. A missing gh, a failed call (signed out, offline), and an answer that is not a
- * user are told apart, so a broken answer is never reported as signed out.
+ * The account gh is signed in to on github.com. A gh that cannot be started, a call that exited non-zero (signed out, offline),
+ * and an answer that is not a user are told apart, so neither a broken gh nor a broken answer is reported as signed out.
  */
 export async function ghUser(): Promise<SignedIn> {
   let stdout: string;
   try {
     ({ stdout } = await exec("gh", ["api", "user", ...HOST], { encoding: "utf8", maxBuffer: 1024 * 1024 }));
   } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
+    // Once gh ran, execFile gives its exit status (null when a signal ended it); when it never started, an error name
+    const code: unknown = (e as { code?: unknown }).code;
     return {
       ok: false,
       reason:
-        code === "ENOENT"
-          ? "missing"
+        typeof code === "number" || code === null
+          ? "failed"
           : code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
             ? "unexpected"
-            : "failed",
+            : "missing",
     };
   }
   let user: { id?: unknown; login?: unknown } | null;
