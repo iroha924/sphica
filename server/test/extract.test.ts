@@ -428,6 +428,19 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     await refused({ op: "adopt", source: "s99999", quote: "x" }, /not a source of this project/);
     await refused({ op: "anchor", path: "/etc/passwd", role: "applies_to" }, /not inside the repository/);
     await refused(
+      { op: "anchor", path: "src.ts", role: "evidence", commit: "0".repeat(40) },
+      /commit 000000000000 does not hold src\.ts/,
+    );
+    const replace = (from: Record<string, unknown>) => ({
+      op: "replace_anchor",
+      from,
+      to: { path: "src.ts", symbol: "other", role: "applies_to" },
+      source: `s${said}`,
+      quote: "これで決まり。",
+    });
+    await refused(replace({ path: "src/missing.ts" }), /no live anchor on src\/missing\.ts/);
+    await refused(replace({ path: "./src.ts", symbol: "nope" }), /no live anchor on src\.ts nope/);
+    await refused(
       { op: "retract_evidence", source: `s${issue}`, reason_source: `s${reply}`, reason_quote: "了解。" },
       /only the owner's words/,
     );

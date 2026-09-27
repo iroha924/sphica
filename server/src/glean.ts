@@ -6,7 +6,7 @@ import { z } from "zod";
 import { locate as symbolAt } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
-import { cleanGit } from "./git.ts";
+import { cleanGit, commitHolds } from "./git.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { type Checked, checkRecord, repoPath, saveRecord, type Target } from "./record.ts";
 import { head, sha256 } from "./text.ts";
@@ -177,6 +177,8 @@ type Planned = {
   excerpt: Excerpt | null;
   /** The span a retraction removes */
   retracts: [number, number] | null;
+  /** The live anchor a replacement retires */
+  replaces: number | null;
 };
 export type GleanChecked = { errors: string[]; problems: string[]; units: Checked; ops: Planned[] };
 
@@ -290,9 +292,32 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     }
     if (op.op === "anchor" && !repoPath(op.path))
       errors.push(`${what}: the path is not inside the repository`);
+    if (op.op === "anchor" && op.commit) {
+      const rel = repoPath(op.path);
+      if (rel && !(target.root && commitHolds(target.root, op.commit, rel)))
+        errors.push(`${what}: commit ${op.commit.slice(0, 12)} does not hold ${rel} in the repository`);
+    }
+    // A replacement retires exactly the one live anchor its from names
+    let replaces: number | null = null;
     if (op.op === "replace_anchor") {
       if (!repoPath(op.to.path)) errors.push(`${what}: the path is not inside the repository`);
       await span(op.source, op.quote, what);
+      const from = repoPath(op.from.path);
+      if (!from) errors.push(`${what}: the from path is not inside the repository`);
+      else {
+        let q = db
+          .selectFrom("unit_anchor")
+          .select("id")
+          .where("unit_id", "=", u.id)
+          .where("path", "=", from)
+          .where("retired_at", "is", null);
+        if (op.from.symbol) q = q.where("symbol", "=", op.from.symbol);
+        const live = await q.execute();
+        const name = `${from}${op.from.symbol ? ` ${op.from.symbol}` : ""}`;
+        if (live.length === 1) replaces = live[0]?.id ?? null;
+        else if (!live.length) errors.push(`${what}: no live anchor on ${name}`);
+        else errors.push(`${what}: ${live.length} live anchors on ${name}; give from.symbol`);
+      }
     }
     if (
       op.op === "retract_evidence" ||
@@ -344,7 +369,7 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
       else if (spans[0]) retracts = [spans[0].span_start, spans[0].span_end];
       else errors.push(`${what}: no live ${noun} cites ${op.source}`);
     }
-    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts });
+    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces });
   }
   return { errors, problems, units, ops };
 }
@@ -514,17 +539,13 @@ export async function saveGlean(
         })
         .returning("id")
         .executeTakeFirstOrThrow();
-      if (op.op === "replace_anchor") {
-        let q = trx
+      if (op.op === "replace_anchor")
+        await trx
           .updateTable("unit_anchor")
           .set({ retired_at: now, replaced_by: added.id })
-          .where("unit_id", "=", p.unitId)
-          .where("path", "=", op.from.path)
+          .where("id", "=", p.replaces ?? -1)
           .where("retired_at", "is", null)
-          .where("id", "<>", added.id);
-        q = op.from.symbol ? q.where("symbol", "=", op.from.symbol) : q;
-        await q.execute();
-      }
+          .execute();
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
     } else {
       const reason = await spanOf(op.reason_source, op.reason_quote);
