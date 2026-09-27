@@ -356,6 +356,19 @@ export async function linkIssues(
   number: number,
   closes: number[],
 ): Promise<void> {
+  // The links follow the current body: an issue it no longer closes stops being part of the pull request
+  let stale = db
+    .deleteFrom("artifact_link")
+    .where("project_id", "=", projectId)
+    .where("from_artifact", "=", `pr:${number}`)
+    .where("kind", "=", "closes");
+  if (closes.length)
+    stale = stale.where(
+      "to_artifact",
+      "not in",
+      closes.map((n) => `issue:${n}`),
+    );
+  await stale.execute();
   for (const n of closes)
     await db
       .insertInto("artifact_link")
