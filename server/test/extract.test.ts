@@ -470,6 +470,11 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
       quote: "これで決まり。",
     });
     await refused(replace({ path: "src/missing.ts" }), /no live anchor on src\/missing\.ts/);
+    // Moving a record's location redirects its delivery: only the owner's words can do it
+    await refused(
+      { ...replace({ path: "src.ts", symbol: "openStore" }), source: `s${issue}`, quote: "Notes must never" },
+      /only the owner's words can move an anchor/,
+    );
     await refused(replace({ path: "./src.ts", symbol: "nope" }), /no live anchor on src\.ts nope/);
     // An anchor the record already has, or one added twice in a batch, would leave two that replace_anchor cannot tell apart
     const pin = { op: "anchor", path: "src.ts", symbol: "openStore", role: "applies_to" };
@@ -756,6 +761,50 @@ test("glean: a retraction of words cited by the record and an option says it ret
     );
   } finally {
     await db.done();
+  }
+});
+
+// An implementation is active only with code proof: replacing its commit-pinned anchor judges it again
+test("glean: replacing an implementation's only code proof puts it back to candidate", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "o1", text: "openStore を実装した。" });
+    const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, root, {
+      units: [
+        {
+          key: "open",
+          kind: "implementation",
+          text: "openStore",
+          evidence: [{ source: `s${m}`, quote: "openStore を実装した。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "evidence", commit: head }],
+        },
+      ],
+    });
+    const state = () =>
+      db.owner.prepare("select lifecycle, revision from unit where key = 'trace:ext-s1/open'").get();
+    assert.equal(state()?.lifecycle, "active");
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "場所が変わった。", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      ops: [
+        {
+          op: "replace_anchor",
+          unit: "trace:ext-s1/open",
+          revision: state()?.revision,
+          from: { path: "src.ts", symbol: "openStore" },
+          to: { path: "src.ts", symbol: "openStore", role: "applies_to" },
+          source: `s${said}`,
+          quote: "場所が変わった。",
+        },
+      ],
+    });
+    assert.equal(state()?.lifecycle, "candidate");
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

@@ -69,7 +69,7 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 |---|---|
 | `add_evidence` | Cites a `source` ref or a committed `file` (path, commit, lines). `role` as in trace. When the owner reports what someone else said, add `reported_speaker`: it stays the owner's report, never that person's statement or an adoption |
 | `adopt` | The owner's (or a maintainer's) words that settle a decision or constraint. "Kimura said it was agreed" is not adoption; the owner saying "let's make it final" is |
-| `anchor` / `replace_anchor` | Adds a code location, or replaces one whose code moved (`from` and `to`, citing the owner's words); the old one is kept as history |
+| `anchor` / `replace_anchor` | Adds a code location, or replaces one whose code moved (`from` and `to`, citing the owner's words); the old one is kept as history. A replacement carries no commit, so an implementation whose proof was the replaced anchor goes back to candidate: add an `anchor` op with `commit` in the same batch to keep it active |
 | `retract_evidence` / `retract_adoption` | Marks a link mistaken, citing the owner's words (`reason_source`, `reason_quote`). When the record cites the same source more than once, add `quote` to say which one. It is kept as history, and the record is judged again |
 | `resolve_conflict` | Ends an unresolved conflict between `unit` and `with`, citing the owner's words (`reason_source`, `reason_quote`). Until then neither record is shown on its own |
 | `withdraw` | Withdraws a record the owner says no longer holds, citing the owner's words |

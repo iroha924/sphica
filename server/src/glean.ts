@@ -314,7 +314,10 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     let replaces: number | null = null;
     if (op.op === "replace_anchor") {
       if (!repoPath(op.to.path)) errors.push(`${what}: the path is not inside the repository`);
-      await span(op.source, op.quote, what);
+      // Moving a location redirects where the record is delivered, so third-party text cannot do it
+      const said = await span(op.source, op.quote, what);
+      if (said && said.s.author_kind !== "owner")
+        errors.push(`${what}: only the owner's words can move an anchor`);
       const from = repoPath(op.from.path);
       if (!from) errors.push(`${what}: the from path is not inside the repository`);
       else {
@@ -589,6 +592,29 @@ export async function saveGlean(
           .where("id", "=", p.replaces ?? -1)
           .where("retired_at", "is", null)
           .execute();
+      // When the retired anchor was an active implementation's code proof, it goes back to candidate and is judged again below
+      if (op.op === "replace_anchor") {
+        const held = await trx
+          .selectFrom("unit_anchor as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .select(["u.kind", "u.lifecycle", "a.role", "a.commit_sha", "a.edit_observation_id"])
+          .where("a.id", "=", p.replaces ?? -1)
+          .executeTakeFirst();
+        if (
+          held?.kind === "implementation" &&
+          held.lifecycle === "active" &&
+          held.role === "evidence" &&
+          (held.commit_sha !== null || held.edit_observation_id !== null)
+        )
+          await move(
+            trx,
+            p.unitId,
+            "candidate",
+            "glean: code anchor replaced, support checked again",
+            null,
+            runId,
+          );
+      }
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
     } else {
       const reason = await spanOf(op.reason_source, op.reason_quote);
