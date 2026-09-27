@@ -94,16 +94,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/release-gate.mjs --tag "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
 
-      # Without the environment, GitHub creates one with no protection, and stage runs without waiting for approval
-      - name: Does npm-release have an approver
+      # The owner's approval of npm-release is the only gate before npm, so stop if anyone else could approve or bypass it
+      - name: Can only the owner approve npm-release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          reviewers="$(gh api "repos/$GITHUB_REPOSITORY/environments/npm-release" \
-            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]] | length')"
-          test "$reviewers" -gt 0
+        run: node scripts/release-env.mjs
 
       - name: Install dependencies
         run: bun run setup

@@ -31,13 +31,14 @@ base: main
   - コミット: `feat(release): write the PR number to GITHUB_OUTPUT when the gate passes`
   - 結果: red: 変更前のスクリプトで通過のケースが `'' !== 'pull=7\n'` で落ちた（status 0、出力なし）。変更後 `bun run --cwd server test -- --test-name-pattern "release-gate"` → 270 pass / 0 fail（新しい 2 件を含む）
 
-- [ ] T02: `npm-release` 環境の設定を検査する release-env
+- [x] T02: `npm-release` 環境の設定を検査する release-env
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts`
+  - 変更: `scripts/lib/release-env.mjs`, `scripts/lib/release-env.d.mts`, `scripts/release-env.mjs`, `server/test/release-env.test.ts`, `.github/workflows/release.yml`
   - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-env"` → オーナー 1 人・`prevent_self_review: false`・`can_admins_bypass: false`・`v*` の tag ポリシー 1 件で通り、レビュアーの追加、別人、`prevent_self_review: true`、`can_admins_bypass: true`、ポリシーの追加・変更、API の失敗でそれぞれ落ちる
   - コミット: `feat(release): check that only the owner can approve npm-release`
+  - 結果: `node --test test/release-env.test.ts` → 9 pass / 0 fail（別人、2 人目、Team、規則なし、prevent_self_review、admin bypass、ポリシー 4 通りと保護ブランチ、API の失敗）。`bun run --cwd server typecheck`、`bun run knip`、`actionlint release.yml` → exit 0
 
 - [ ] T03: merge 後の仕上げを行う release-finish
   - 種別: 追加
@@ -80,3 +81,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `docs(release): describe the single GitHub approval and direct publish`
 
 ## 記録
+- 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
