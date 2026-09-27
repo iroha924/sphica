@@ -33,7 +33,7 @@ Always include the Codex review result (how many findings and how each was handl
 <!--
 Only for PRs that ship (release:plan says plugin). Otherwise delete this section.
 Describe the change as users see it and the commands to update. Do not name internal implementation details.
-After promotion to latest, this section becomes the GitHub Release body as is (no further review).
+The owner reads it before approving the release; the release run then makes it the GitHub Release body as is (no further review).
 -->
 
 ## Declined findings

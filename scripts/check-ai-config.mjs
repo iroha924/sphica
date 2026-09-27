@@ -131,7 +131,7 @@ const claudeVerification = read(".claude/rules/verification.md");
 for (const required of [
   "bun run release:plan -- --base <previous release commit>",
   "`plugin`: a change that goes into the package",
-  "the tarball `.github/workflows/release.yml` stages",
+  "the tarball `.github/workflows/release.yml` publishes",
   "Before each release step, reopen the `plugin-release` Skill",
 ]) {
   if (!claudeVerification.includes(required)) {
@@ -188,12 +188,10 @@ const releaseSteps =
   releaseStart === -1 || releaseEnd === -1 ? "" : releaseGuide.slice(releaseStart, releaseEnd);
 const releaseOrder = [
   "git tag v<version> <head>",
-  "npm stage publish <tgz> --tag next --provenance",
-  "npx -y npm@11.19.0 stage download <stage-id>",
+  "npm publish <tgz> --tag latest --provenance",
   "--match-head-commit <head>",
   "git diff --exit-code <head> <merge commit>",
-  "npm pack sphica@<version> --silent",
-  "npm dist-tag add sphica@<version> latest",
+  "gh run watch <run-id> --exit-status",
 ];
 let releaseCursor = -1;
 for (const step of releaseOrder) {
@@ -206,17 +204,10 @@ for (const step of releaseOrder) {
     releaseCursor = position;
   }
 }
-// The owner approves and authenticates these; Claude's shell has no TTY, so npm masks the OTP URL and fails.
-// Each owner step is tied to the numbered step that holds its command, so a summary elsewhere cannot stand in for it.
+// The owner's approval of npm-release is the only gate before npm.
+// It is tied to the numbered step that holds the publish command, so a summary elsewhere cannot stand in for it.
 const numberedSteps = releaseSteps.split(/^(?=\d+\. )/m).filter((step) => /^\d+\. /.test(step));
-for (const [anchor, owner] of [
-  ["npm stage publish <tgz>", "The owner approves the `npm-release` environment"],
-  ["stage download <stage-id>", "The owner approves it in npmjs.com's Staged Packages"],
-  [
-    "npm dist-tag add sphica@<version> latest",
-    "The owner runs `npm dist-tag add sphica@<version> latest` in their own terminal",
-  ],
-]) {
+for (const [anchor, owner] of [["npm publish <tgz>", "The owner approves the `npm-release` environment"]]) {
   const step = numberedSteps.find((text) => text.includes(anchor));
   if (!step?.includes(owner)) {
     fail(`.agents/skills/plugin-release/SKILL.md: the step with \`${anchor}\` must say \`${owner}\``);
@@ -229,8 +220,10 @@ for (const sentence of releaseSentences) {
     fail(`.agents/skills/plugin-release/SKILL.md: Claude must not approve or promote: ${sentence.trim()}`);
   }
 }
-if (releaseSteps.includes("npm stage approve")) {
-  fail(".agents/skills/plugin-release/SKILL.md: approve stages on npmjs.com, not with `npm stage approve`");
+if (releaseSteps.includes("npm stage")) {
+  fail(
+    ".agents/skills/plugin-release/SKILL.md: release.yml publishes directly; there is no npm stage to follow",
+  );
 }
 if (/`!\s*npm /.test(releaseSteps)) {
   fail(
@@ -238,21 +231,16 @@ if (/`!\s*npm /.test(releaseSteps)) {
   );
 }
 const releasePlanScript = read("scripts/release-plan.mjs");
-for (const owner of [
-  "owner: approve the npm-release environment",
-  "owner: approve the stage on npmjs.com",
-  "owner: in your own terminal, npm dist-tag add",
-]) {
-  if (!releasePlanScript.includes(owner)) fail(`scripts/release-plan.mjs: actions must include \`${owner}\``);
+const owners = releasePlanScript.match(/"owner: [^"]*"/g) ?? [];
+if (owners.length !== 1 || !owners[0].startsWith('"owner: approve the npm-release environment')) {
+  fail(
+    "scripts/release-plan.mjs: the only owner action must be `owner: approve the npm-release environment`",
+  );
 }
-if (!read("scripts/release-status.mjs").includes('"npm@11.19.0", "stage"')) {
-  fail("scripts/release-status.mjs: list stages with npm@11.19.0, the version the Skill uses for npm stage");
-}
-for (const [publish] of releaseSteps.matchAll(/npm publish[^\n`]*/g)) {
-  if (!publish.includes("--tag next")) {
-    fail(
-      ".agents/skills/plugin-release/SKILL.md: npm publish before merge must use --tag next and leave latest alone",
-    );
+// release.yml is the only place that publishes; the steps may name its command, never a local one
+for (const [publish] of releaseSteps.matchAll(/npm publish [^\n`]*/g)) {
+  if (publish !== "npm publish <tgz> --tag latest --provenance") {
+    fail(`.agents/skills/plugin-release/SKILL.md: only release.yml publishes (found \`${publish}\`)`);
   }
 }
 

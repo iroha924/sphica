@@ -55,18 +55,13 @@ MIT requires the copyright notice and license text; Apache-2.0 section 4 require
 
 First, classify the change with `bun run release:plan -- --base <previous release commit>`.
 
-**The owner does only these 3, plus `/reload-plugins` in open sessions after arrival, and Claude does not click or run them in the owner's place.** Claude runs every other command exactly as written in the steps below.
-Before each of them, hand the owner what to approve (the run URL, the stage ID, the version) and wait.
+**The owner does only one thing per release: approve the `npm-release` environment on the run page, plus `/reload-plugins` in open sessions after arrival.**
+That approval is the only gate before npm. Claude does not do it in the owner's place, neither on the page nor through the API (`gh api .../pending_deployments`), even though this machine's `gh` could.
+Claude runs every other command exactly as written in the steps below.
 
 | Step | What the owner does | Why |
 |---|---|---|
-| 6 | Approve the `npm-release` environment on the GitHub Actions run page | The owner is the only reviewer |
-| 7 | Look at provenance in npmjs.com's Staged Packages and approve with 2FA (rejecting uses the same page) | 2FA is on the owner's device |
-| 10 | Run `npm dist-tag add` in their own terminal (the `!` prefix is only for this session's input box; in a shell, `!` inverts the exit code) | npm commands that ask for an OTP fail with EOTP in Claude's shell, which has no TTY, because the auth URL is masked as `***` |
-
-Local npm (11.12.1, bundled with mise's Node 24.15.0) has no `npm stage`, so use the same version as the release job's Node 24.21.0
-through `npx -y npm@11.19.0`. Run other npm commands with local `npm`. If `npm stage download` asks for auth,
-Claude runs `npm login --auth-type=web` and has the owner open the URL it prints (this command does not mask the URL).
+| 6 | Open the run from the link the run comments on the PR, read the PR (including its Release notes), and approve `npm-release` with Review deployments | The owner is the only reviewer, and the release publishes, merges, and creates the GitHub Release without asking again |
 
 Do not merge Renovate's dependency PRs (1 a month) or lockfile maintenance PRs directly. Dependencies are package inputs, so a PR
 that does not bump the version fails CI's version gate. Pull them into a release PR, bump the version, ship it, and close the original PR after pulling it in
@@ -90,48 +85,43 @@ the release command read the same file.
 2. Do not put `version` directly under the marketplace entry. `plugin.json` silently wins, and a stale value hides updates
 Once, before the first release, the owner sets these up in the web UI (without them, the release stops or goes ahead unprotected).
 
-- GitHub: the `npm-release` environment (reviewer is the owner, self-approval prevention off, deployments allowed from tags `v*`).
-  `prepare` in `release.yml` rejects an environment with no approver
+- GitHub: the `npm-release` environment: the owner as the only required reviewer, self-review prevention off (the owner's account pushes the tag),
+  admin bypass off, deployments allowed only from tags `v*`. `scripts/release-env.mjs` stops the release in `prepare` and again in `publish` if any of this drifts
 - GitHub: a ruleset limiting creating, updating, and deleting tags `v*` to the owner
-- npm: trusted publisher (repository `iroha924/sphica`, workflow `release.yml`, environment `npm-release`,
-  staging only, no direct publish), 2FA required, publishing with tokens disallowed
+- npm: trusted publisher (repository `iroha924/sphica`, workflow `release.yml`, environment `npm-release`, direct `npm publish` allowed),
+  2FA required, publishing with tokens disallowed. A connection cannot be edited: to change one, delete it and create it again
 
-3. Open a PR and pass CI (`check`, `pr-body`) and the Codex review. Keep main merged into the PR branch
+3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`) and the Codex review. Keep main merged into the PR branch
    (if main has moved ahead, the tree CI checked and the tag's tree do not match)
 4. Run `git tag v<version> <head>` on **the PR head** and push it. Tagging the head, not main, lets the candidate be checked before the merge.
    Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
-   and that `check` and `pr-body` succeeded on that head (`scripts/release-gate.mjs`); after `verify`, it runs
-   `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
-   The SHA-512 and integrity appear in the job summary
-6. The owner approves the `npm-release` environment. `stage` then runs the same checks again, compares the SHA-512 of the same tarball, and
-   runs `npm stage publish <tgz> --tag next --provenance`. The stage ID appears in the job summary
-7. Claude runs `npx -y npm@11.19.0 stage download <stage-id>`, confirms that the `shasum -a 512` value matches the SHA-512 from step 5,
-   and hands the stage ID and SHA-512 to the owner. The owner approves it in npmjs.com's Staged Packages (checking provenance and authenticating with 2FA).
-   If it does not match or has no provenance, do not ask for approval; have the owner reject it on the same page
-8. Right before merging, check that the PR's head and base have not moved, and merge with `gh pr merge <PR> --merge --match-head-commit <head>`.
-   Confirm with `git diff --exit-code <head> <merge commit>` that the tree did not change. If there is a difference,
-   do not promote to `latest`
-9. In a clean temporary directory, run `npm pack sphica@<version> --silent`, and confirm that the SHA-512 matches step 5 and that the repository's
-   `node <repository>/scripts/check-tarball.mjs <tgz>` passes. Also check the SBOM attestation with
-   `gh attestation verify <tgz> --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom --signer-workflow iroha924/sphica/.github/workflows/release.yml`
-10. The owner runs `npm dist-tag add sphica@<version> latest` in their own terminal. This promotes it (OIDC cannot be used for dist-tags).
-    Claude checks with `npm view sphica dist-tags --json` that `next` and `latest` both point to `<version>`
-11. List npm's dist-tags, the remote tag, the global CLI, the marketplace, and the Claude/Codex caches with `bun run release:status`,
-    and confirm no step remains. Items it failed to observe show as `unknown`, not `none` or `not found`
-12. Use the PR body's "Release notes" section as is, and
-    create the GitHub Release with `gh release create v<version> --verify-tag --title v<version> --notes-file <file>`.
-    The owner checked the section in the PR's final review, so do not ask again before creating it. If the section is missing or empty, do not create it; go back to the owner.
-    Do not paste git log (OpenSSF Best Practices' `release_notes` does not accept it)
+   and that `check` and `pr-body` succeeded on that head (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
+   after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
+   The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner
+6. The owner approves the `npm-release` environment on the run page. `publish` then runs both checks again, compares the SHA-512 of the same tarball,
+   attests the SBOM, and runs `npm publish <tgz> --tag latest --provenance` (trusted publishing, no token). The version is the default install from here
+7. `merge` merges the PR with `gh pr merge <PR> --merge --match-head-commit <head>` using the run's token. A merge by that token starts no other workflow
+8. `finish` runs `scripts/release-finish.mjs`: the merge commit's tree equals the tag's (`git diff --exit-code <head> <merge commit>`), the tarball npm serves
+   has the SBOM attestation from this tag (`gh attestation verify <tgz> --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom --signer-workflow iroha924/sphica/.github/workflows/release.yml --source-ref refs/tags/v<version>`),
+   and npm `latest` is the version. It then creates the GitHub Release from the PR body's "Release notes" section as is
+   (`gh release create v<version> --verify-tag --title v<version> --notes-file <file>`; not git log, which OpenSSF Best Practices' `release_notes` does not accept) and comments the result on the PR
+9. Claude follows the run with `gh run watch <run-id> --exit-status`. When it succeeds, list npm's dist-tags, the remote tag, the global CLI, the marketplace,
+   and the Claude/Codex caches with `bun run release:status`, and confirm no step remains. Items it failed to observe show as `unknown`, not `none` or `not found`
 
-**Do not re-tag the same `v<version>`.** The same version cannot be staged or published twice, and provenance's references could no longer be followed.
+**Do not re-tag the same `v<version>`.** A published version can never be published again, and provenance's references could no longer be followed.
 
-- Failed before or after staging: the owner rejects the stage in Staged Packages; fix it, bump the version, and ship again with a new tag
-- Could not merge after approval: do not promote to `latest`; the owner runs `npm dist-tag add sphica@<previous good version> next` in their own terminal to put `next` back,
-  and ship again with a new version
-- Do not rerun the run after `stage` succeeded (a stage of the same version would collide)
+When a job fails, `report-failure` comments on the PR with the failed jobs and whether npm has the version (`yes`, `no`, or `unknown`; for `unknown`, check `npm view sphica@<version> version` by hand).
 
-So that the marketplace never points to an unpublished version between the merge and npm approval, finish the approval before the merge (steps 7 then 8).
+- npm does not have it (failed in `prepare` or `publish`): nothing shipped. Fix it, bump the version, and ship again with a new tag
+- npm has it but `merge` failed: the version is already `latest` while main lacks it. The owner decides whether to put `latest` back by running
+  `npm dist-tag add sphica@<previous good version> latest` in their own terminal (the `!` prefix is only for this session's input box; in a shell, `!` inverts the exit code).
+  That command asks for an OTP, which fails in a shell without a TTY such as Claude's. Fix the PR and ship a new version; never reuse the published one
+- `finish` failed after the merge: nothing is published again. Rerun the failed job with `gh run rerun <run-id> --failed` (creating the Release is skipped when it exists),
+  or run the failed check by hand with the commands in step 8
+- Do not rerun `publish` after it succeeded
+
+So that the marketplace never points to an unpublished version, the run publishes before it merges (steps 6 then 7).
 
 ## Confirming it arrived
 

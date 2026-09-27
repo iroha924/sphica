@@ -196,8 +196,8 @@ Everything else runs inside Claude Code and Codex, through the `/sphica:*` comma
 
 Report vulnerabilities privately as described in [SECURITY.md](https://github.com/iroha924/sphica/blob/main/SECURITY.md).
 
-Each release is built by GitHub Actions from a tag on the head of a pull request whose CI has passed, and staged on npm.
-The maintainer checks its SHA-512 checksum and provenance, then approves publication with two-factor authentication.
+Each release is built by GitHub Actions from a tag on the head of a pull request whose CI has passed.
+It is published only after the maintainer approves the release environment on GitHub, and it reaches npm through trusted publishing, with no stored token.
 The [npm page](https://www.npmjs.com/package/sphica#provenance) links to the workflow and the commit each release was built from.
 
 Dependabot opens weekly pull requests to update the GitHub Actions used in CI, and Renovate opens monthly ones for the npm dependencies bundled into the package.

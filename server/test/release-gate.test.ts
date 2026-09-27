@@ -123,6 +123,6 @@ test("rejects when the remote tag no longer points to the commit", () => {
   assert.match(gateProblems({ ...ok, tagCommit: null }).problems.join("\n"), /tag/);
 });
 
-test("rejects a tag version already on npm (stopping before stage fails after the owner approves)", () => {
+test("rejects a tag version already on npm (stopping before publish fails after the owner approves)", () => {
   assert.match(gateProblems({ ...ok, published: true }).problems.join("\n"), /already on npm/);
 });

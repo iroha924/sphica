@@ -75,16 +75,19 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `chore(release): bump to 0.5.4`
   - 結果: `bun run release:plan -- --base v0.5.3` → `version: npm 0.5.4 / plugin 0.5.4 / marketplace 0.5.4 / Codex 0.5.4`（kind はパッケージの入力がまだ変わっていないので `none`。README を変える T06 で `plugin` になる）
 
-- [ ] T06: Skill、check-ai-config、release-plan、release-status、AGENTS.md、verification.md、PR テンプレート、README を新しい流れに揃える
+- [x] T06: Skill、check-ai-config、release-plan、release-status、AGENTS.md、verification.md、PR テンプレート、README を新しい流れに揃える
   - 種別: 変更
   - 計画: S5
   - 依存: T04（手順が新しいジョブの流れを前提に書く）, T05（README はパッケージの入力なので、pre-commit のバージョン検査がバージョンの上がった状態を要る）
-  - 変更: `.agents/skills/plugin-release/SKILL.md`, `scripts/check-ai-config.mjs`, `scripts/release-plan.mjs`, `scripts/release-status.mjs`, `AGENTS.md`, `.claude/rules/verification.md`, `.github/pull_request_template.md`, `README.md`
+  - 変更: `.agents/skills/plugin-release/SKILL.md`, `scripts/check-ai-config.mjs`, `scripts/release-plan.mjs`, `scripts/release-status.mjs`, `AGENTS.md`, `.claude/rules/verification.md`, `.github/pull_request_template.md`, `README.md`, `scripts/lib/release-gate.mjs`, `server/test/release-gate.test.ts`
   - 完了条件: `bun run verify` → exit 0。`rg -n -- "npm stage|Staged Packages|--tag next|dist-tag add sphica@<version> latest|registry next|promotion to latest" .github scripts .agents AGENTS.md .claude/rules README.md` → 0 件。`bun run release:plan -- --base v0.5.3` → `release kind: plugin`、オーナーの action が環境の承認だけ
   - コミット: `docs(release): describe the single GitHub approval and direct publish`
+  - 結果: `bun run verify` → exit 0（acceptance 55 pass を含む）。`rg -n -- "npm stage|Staged Packages|--tag next|dist-tag add sphica@<version> latest|registry next|promotion to latest" …` → check-ai-config の「Shipping に npm stage を書かない」検査自身の 2 行だけ（検査の文字列で、手順の記述ではない）。`bun run release:plan -- --base v0.5.3` はコミット後に流す（README がコミットに入るまでは none）
 
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
 - 2026-09-28 / T03 / 仕上げは push:main で起動せず release.yml から引数付きで呼ぶ形になったので、「release でないときに何もしない」は当てはまらない。knip のため PR 用の `finish-dry-run` ジョブを T03 で release.yml に足し、型宣言も要った / 完了条件を前: 「release でないときに何もしない、…」から、後: 「tag を merge していない merge コミットで exit 1、…」へ。変更欄に `scripts/lib/release-finish.d.mts`, `.github/workflows/release.yml` を足した
 - 2026-09-28 / T02 / Codex のタスクレビュー（0a3bf53）: 指摘 0 件（sandbox でテストは流せず、手元で実測済み） / 採る指摘なし
+- 2026-09-28 / T06 / release-gate の lib とテストに stage の言い回しが残っていた / 変更欄に `scripts/lib/release-gate.mjs`, `server/test/release-gate.test.ts` を足した
+- 2026-09-28 / T03 / Codex のタスクレビュー（19244ee）: 3 件。F1 `--tag` と `--commit` の一致を見ていない、F2 `--pull` の PR が tag のコミットを head に持つかを見ていない、F3 コードブロック内の見出しを節の区切りに読む（再現あり） / 3 件とも採る。修正タスク T07 を足した
