@@ -120,8 +120,8 @@ jobs:
           # On Windows, os.homedir() reads USERPROFILE.
           home="$(mktemp -d)"
           # --cwd outside the checkout, so init only creates the database and registers nothing.
-          # gh gets an empty config and no token, so the runner's gh starts but is signed out: no request leaves, and the
-          # line shows execFile started gh.exe (a gh that could not start says so instead)
+          # gh gets an empty config and no token, so the runner's gh (which has no stored login) reports signed out. The line
+          # also shows execFile started gh.exe: a gh that could not start says so instead
           ghconf="$(mktemp -d)"
           HOME="$home" USERPROFILE="$home" GH_CONFIG_DIR="$ghconf" GH_TOKEN='' GITHUB_TOKEN='' \
             node "$out/package/dist/cli.js" init --cwd "$home" > init.out

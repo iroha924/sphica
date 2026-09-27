@@ -69,9 +69,9 @@ cd ~/Projects/your-repo
 sphica init
 ```
 
-This creates `~/.sphica/sphica.db` and registers the repository. Running it again leaves both untouched. If the repository has no `origin` remote, give it a name: `sphica init --name <name>`.
+This creates `~/.sphica/sphica.db` and registers the repository. Running it again keeps the database and the registration as they are. If the repository has no `origin` remote, give it a name: `sphica init --name <name>`.
 
-If `gh` is signed in, init also binds that GitHub account as yours, so your words adopt a decision even in someone else's repository where you are only a contributor. Only the first account is bound: if `gh` is later signed in to another one, init says so and adds nothing, and there is no command to change it (move the database aside and run init again). Without `gh`, init still sets up and says why nothing was bound; `sphica doctor` shows the bound account.
+If `gh` is signed in, init also binds that GitHub account as yours, so your words adopt a decision even in someone else's repository where you are only a contributor. This applies to pull requests harvested after binding; ones harvested before keep your words as a contributor's. Only the first account is bound: if `gh` is later signed in to another one, init says so and adds nothing, and there is no command to change it (move the database aside and run init again). Without `gh`, init still sets up and says why nothing was bound; `sphica doctor` shows the bound account.
 
 **4. Check the setup**
 

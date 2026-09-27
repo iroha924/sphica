@@ -142,6 +142,16 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
   - コミット: `docs: explain how init binds the owner's GitHub account`
   - 結果: `bun run verify` → rc 0（verify:ai を含む）。`rg -n "sphica init" README.md README.ja.md` → 72 行目の後に登録の段落、189 行目の表に登録。harvest の context が登録済みの本人に `(CONTRIBUTOR, the owner)` と出る検査が通る
 
+- [x] T14: README と CI のコメントを、登録前の発言と gh の資格情報について事実どおりに直す
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（直す対象の README が要る）, T13（直す対象の CI の手順が要る）
+  - 変更: `README.md`, `README.ja.md`, `.github/workflows/check.yml`
+  - red: `rg -n "leaves both untouched|no request leaves" README.md .github/workflows/check.yml` → 2 件（再実行で何も変えないという説明と、リクエストが出ないという言い切り）
+  - 完了条件: `rg -n "leaves both untouched|no request leaves" README.md .github/workflows/check.yml` → 0 件。`actionlint .github/workflows/check.yml` と `bun run verify:ai` → 指摘なし
+  - コミット: `docs: say what init changes on a rerun and that earlier harvests keep contributor words`
+  - 結果: red を実測（2 件）。直した後 rg → 0 件、`actionlint` → 指摘なし、`bun run verify:ai` → 通る
+
 - [-] T07: release:plan に従い npm と 3 つの plugin manifest のバージョンをそろえる
   - 種別: 変更
   - 計画: S7
@@ -165,3 +175,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T10, T11 のレビュー / F2（39 文字の境界テスト）を採用し T12 を足した。F1（revision の競合の回帰テスト）は見送り（順序を決めて再現する手段が無く、起きるのは別の接続が user_version を書き換える場合だけ）
 - 2026-09-28 / T06 / harvest の record_context は `by <login> (CONTRIBUTOR)` としか出さず、Skill は CONTRIBUTOR を提案と教えるため、登録しても本人の発言を採用に引かせられない / context で owner の発言に `, the owner` を添え（pullSources に author_kind を足す）、Skill にその読み方を書いた。変更欄に extract.ts、github.ts、extract.test.ts を足した
 - 2026-09-28 / T04 のレビュー / F1（Windows CI の init が本物の gh を使う）、F2（tarball の doctor を見ていない）、F3（未登録の doctor が中立であることの検査が無い）を採用 / 修正タスク T13 を足した
+- 2026-09-28 / T06, T13 のレビュー / F1（空のトークンと設定では鍵保管庫の資格情報を除けず、リクエストが出ないとは言えない）、F3（登録前の発言も採用できると読める）、F4（再実行で何も変えないという説明と矛盾）を採用し T14 を足した。F2（PR 本文に見出しの形を書けば context の owner の見出しを偽装できる）は見送り: 本文による見出しの偽装はこの変更の前からあり、record_check と record_save が DB の author_kind を確かめ直すので、偽装だけでは採用にならない
