@@ -159,6 +159,9 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
    repository with one anchored record, `claude -p` (a prompt that reads the file, and the user's own review command) and `codex exec` (the same, after
    the owner trusted the hooks in `/hooks`; `--dangerously-bypass-hook-trust` shows only that the hooks work, not that they are trusted). Check the
    delivery rows, the first Sphica tool call, and the final answer. Report how many runs showed the behavior, not one run as proof
+   For `codex exec`, `SPHICA_DB` is not enough: Codex starts MCP servers without it, so `read` and `search` hit the owner's `~/.sphica` (measured 2026-09-27).
+   Put the database at `<tmp>/.sphica/sphica.db` and run with `HOME=<tmp>`, `CODEX_HOME=$HOME/.codex` (the installed plugin and its trust), and the real
+   Node directory first on `PATH` (mise shims look under `HOME`)
 
 `plugin/skills/review/reviewers/` also goes through the cache, so saving or restarting a session does not give the new text.
 When changing aspects, read `plugin-agent-authoring` first too.
