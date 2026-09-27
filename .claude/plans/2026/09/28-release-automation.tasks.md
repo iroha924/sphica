@@ -202,7 +202,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - red: `PUBLISH=skipped GITHUB_REF_NAME=v0.5.3 bash -c '<report-failure の判定>'` → 変更前は npm にあるバージョンでも `no`
   - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。判定のシェル → success は yes、skipped と cancelled は npm にあれば yes・なければ no、failure は npm にあれば yes・なければ unknown
   - コミット: `fix(release): ask npm whenever publish did not succeed in this run`
-  - 結果: actionlint → exit 0。判定のシェル → `success v9.9.9 -> yes`、`skipped v0.5.3 -> yes`、`skipped v9.9.9 -> no`、`cancelled v9.9.9 -> no`、`failure v0.5.3 -> yes`、`failure v9.9.9 -> unknown`
+  - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。判定のシェルを 6 通りで流す → `success v9.9.9 -> yes`、`skipped v0.5.3 -> yes`、`skipped v9.9.9 -> no`、`cancelled v9.9.9 -> no`、`failure v0.5.3 -> yes`、`failure v9.9.9 -> unknown`
 
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
