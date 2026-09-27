@@ -1,10 +1,7 @@
 #!/usr/bin/env node
-// Checks a published and merged release, creates its GitHub Release from the PR's Release notes, and reports on the PR.
-// release.yml runs it after the merge job; with --dry-run it checks the latest published release and creates or posts nothing.
-// Before the approval, prepare runs it with --notes-digest to record the notes the owner sees, and finish creates the Release only from those.
-// Usage: node scripts/release-finish.mjs --tag v1.2.3 --commit <tag sha> --merge <merge sha> --pull <N> --approved-notes <sha256>
-//        | --dry-run | --notes-digest --pull <N>
-// (needs GH_TOKEN and GITHUB_REPOSITORY)
+// Checks a merged release and creates its GitHub Release from the notes recorded before approval (release.yml's finish job).
+// --notes-digest --pull <N> prints that record in prepare; --dry-run checks the latest published release and writes nothing.
+// The arguments and checks are in .agents/skills/plugin-release/SKILL.md (Shipping steps 5 and 8). Needs GH_TOKEN and GITHUB_REPOSITORY.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

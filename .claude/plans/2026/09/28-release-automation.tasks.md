@@ -184,6 +184,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): create the Release only from the notes the owner saw before approving`
   - 結果: red: 変更前のスクリプトは `--approved-notes` と `--notes-digest` を知らず 5 件落ちた。変更後 `node --test test/release-finish.test.ts` → 9 pass / 0 fail（ハッシュの出力、ノートなしで exit 1、承認後に変えたノートで exit 1 かつ作成もコメントもなし）。actionlint → exit 0。実データ: `--notes-digest --pull 181` → 64 桁のハッシュ、`--dry-run` → v0.5.3 で通る
 
+- [x] T17: release-finish の冒頭コメントを 3 行に収める
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T16（直す対象の冒頭コメント）
+  - 変更: `scripts/release-finish.mjs`
+  - red: `sed -n 2,7p scripts/release-finish.mjs` → 変更前は 6 行のコメント（リポジトリの規範 comment-length は 1〜3 行）
+  - 完了条件: 冒頭のコメントが 3 行以下で、引数と検査の説明は Skill を指す。`bun run --cwd server test -- --test-name-pattern "release-finish"` → 全件 pass
+  - コミット: `fix(release): keep release-finish's header within three lines`
+  - 結果: 冒頭コメント 3 行（引数と検査は Skill の Shipping 手順 5 と 8 を指す）。`node --test test/release-finish.test.ts` → 9 pass / 0 fail
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
