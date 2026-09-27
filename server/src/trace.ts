@@ -38,6 +38,7 @@ export type Run = {
   target: string;
   session_id: string | null;
   status: string;
+  started_at: string;
 };
 
 /** Starts a run for a draft. The draft is bound to this run's project and target, so the record cannot name another. */
@@ -71,7 +72,7 @@ export async function runOf(db: Kysely<DB>, draftId: string): Promise<Run | null
   return (
     (await db
       .selectFrom("extraction_run")
-      .select(["id", "project_id", "origin", "target", "session_id", "status"])
+      .select(["id", "project_id", "origin", "target", "session_id", "status", "started_at"])
       .where("draft_id", "=", draftId)
       .executeTakeFirst()) ?? null
   );
@@ -87,6 +88,7 @@ export async function sessionSources(db: Kysely<DB>, sessionId: string) {
       "m.author_kind",
       "m.turn_id",
       "m.created_at",
+      "m.captured_at",
       "m.text",
       "m.truncated",
       eb

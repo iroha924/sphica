@@ -158,11 +158,16 @@ test("trace: pending lists the session, begin binds it, and check and save take 
       new RegExp(`s${elsewhere}: not a source of this run`),
     );
     assert.match((await checkText(db.ingest, run, p, null, record)).text, /✓ 1 record can be saved/);
+    // A message captured after the run began was never shown to it: saving must not mark it traced
+    message(db, p, { id: "m3", text: "やっぱり Postgres も考えたい。", sent: "2099-01-01T00:00:00Z" });
     assert.match(await saveText(db.ingest, run, p, null, record), /trace:ext-s1\/storage active/);
     await assert.rejects(saveText(db.ingest, run, p, null, record), /already saved/);
     await assert.rejects(contextText(db.ingest, run, p + 1, null), /another project/);
     await assert.rejects(contextText(db.ingest, "missing", p, null), /No run/);
-    assert.match(await pendingText(db.ingest, p), /1 session to trace[\s\S]*- s9 claude-code/);
+    assert.match(
+      await pendingText(db.ingest, p),
+      /2 sessions to trace[\s\S]*- s(1|9) claude-code[\s\S]*- s(1|9) claude-code/,
+    );
   } finally {
     await db.done();
   }
@@ -443,5 +448,63 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("glean: a successor that becomes active later supersedes the record it replaces", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const old = message(db, p, { id: "o1", text: "SQLite にしよう。" });
+    const traced = await beginTrace(db.ingest, p, "s1");
+    const decided = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...extra,
+    });
+    await saveText(db.ingest, traced, p, null, {
+      units: [
+        decided("storage", old, "SQLite にしよう。", {
+          adoption: [{ source: `s${old}`, quote: "SQLite にしよう。" }],
+        }),
+      ],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "Postgres に変える。これで決まり。", session: "g1" });
+    const assistant = message(db, p, {
+      id: "a",
+      text: "Postgres に変えましょう。",
+      speaker: "assistant",
+      session: "g1",
+    });
+    const glean = async (record: unknown) =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, record);
+    // Evidence without adoption keeps the successor a candidate, so the old record stays active for now
+    await glean({
+      units: [
+        decided("storage-2", assistant, "Postgres に変えましょう。", { supersedes: "trace:ext-s1/storage" }),
+      ],
+    });
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["candidate", "active"]);
+    await glean({
+      ops: [
+        {
+          op: "adopt",
+          unit: "glean:storage-2",
+          revision: db.owner.prepare("select revision from unit where key = 'glean:storage-2'").get()
+            ?.revision,
+          source: `s${said}`,
+          quote: "これで決まり。",
+        },
+      ],
+    });
+    assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["active", "superseded"]);
+  } finally {
+    await db.done();
   }
 });

@@ -544,6 +544,20 @@ export async function saveGlean(
     if (u.lifecycle !== "candidate") continue;
     const refused = await move(trx, id, "active", "glean: support complete", null, runId);
     changed.push(refused ? `${key}: candidate (${refused})` : `${key}: active`);
+    if (refused) continue;
+    // A successor that becomes active now replaces what it supersedes, as saveRecord does for one active at once
+    const replaced = await trx
+      .selectFrom("unit_link as l")
+      .innerJoin("unit as o", "o.id", "l.to_unit")
+      .select(["o.id", "o.key"])
+      .where("l.from_unit", "=", id)
+      .where("l.kind", "=", "supersedes")
+      .where("o.lifecycle", "=", "active")
+      .execute();
+    for (const o of replaced) {
+      await move(trx, o.id, "superseded", `superseded by ${key}`, null, runId);
+      changed.push(`${o.key}: superseded`);
+    }
   }
   await trx
     .updateTable("extraction_run")
