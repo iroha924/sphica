@@ -229,11 +229,27 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
       content_hash: Buffer.alloc(32),
       indexed: 0,
     });
+    // An AskUserQuestion question is shown beside the owner's answer, marked as not the owner's words
+    message(db, p, {
+      id: "t1:ask:toolu_1:q:0123456789abcdef",
+      text: "Q1: どの DB？",
+      speaker: "assistant",
+      session: "g1",
+    });
+    message(db, p, {
+      id: "t1:assistant:0123456789abcdef",
+      text: "ただの返事",
+      speaker: "assistant",
+      session: "g1",
+    });
     const run = await beginGlean(db.ingest, p, "g1");
+    const glCtx = await contextText(db.ingest, run, p, root);
+    assert.match(glCtx, /glean:<key>[\s\S]*## s\d+ owner[\s\S]*木村さん/);
     assert.match(
-      await contextText(db.ingest, run, p, root),
-      /glean:<key>[\s\S]*## s\d+ owner[\s\S]*木村さん/,
+      glCtx,
+      /## s\d+ assistant question \(not the owner's words; cannot adopt\)[^\n]*\nQ1: どの DB？/,
     );
+    assert.doesNotMatch(glCtx, /ただの返事/);
     const fetched = await gleanFetch(
       db.ingest,
       run,

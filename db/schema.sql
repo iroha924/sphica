@@ -652,7 +652,7 @@ create trigger capture_session_insert instead of insert on capture_session begin
   select new.id, new.project_id, new.host, new.external_id, new.branch, new.started_at
   where not exists (select 1 from session where id = new.id);
 end;
--- speaker: owner (the host's user typed it) or assistant (the host's final reply)
+-- speaker: owner (the host's user typed it or answered AskUserQuestion) or assistant (the host's final reply, or the questions it asked)
 create view capture_message as
   select external_id, session_id, turn_id, author_kind as speaker, created_at, captured_at, text, truncated, redacted, original_bytes,
     content_hash from source where kind = 'session_message';

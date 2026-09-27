@@ -205,7 +205,9 @@ async function scopeOf(
   if (!s) throw new Error("The run's session is gone. Begin again");
   const sources = await sessionSources(db, s.id);
   if (run.origin === "glean") {
-    const owner = sources.filter((m) => m.author_kind === "owner").slice(-20);
+    // The owner's messages, and the questions the model asked with AskUserQuestion that the owner's answers reply to
+    const asked = (m: (typeof sources)[number]) => /:ask:.*:q:/.test(m.external_id ?? "");
+    const owner = sources.filter((m) => m.author_kind === "owner" || asked(m)).slice(-20);
     return {
       target: {
         projectId: run.project_id,
@@ -219,7 +221,10 @@ async function scopeOf(
       text: [
         "New records are saved as glean:<key>. Find the records to change with search and read (read prints each record's revision).",
         "The owner's messages in this session (cite by ref; quote exactly):",
-        ...owner.map((m) => `## s${m.id} owner ${m.created_at}\n${m.text}`),
+        ...owner.map(
+          (m) =>
+            `## s${m.id} ${asked(m) ? "assistant question (not the owner's words; cannot adopt)" : "owner"} ${m.created_at}\n${m.text}`,
+        ),
       ],
     };
   }

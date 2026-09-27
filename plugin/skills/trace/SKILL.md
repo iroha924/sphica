@@ -10,7 +10,7 @@ allowed-tools: mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_reco
 
 Target: **$ARGUMENTS**
 
-Claude Code and Codex capture the owner's messages, the AI's last reply per turn, and the files edited. **trace turns that conversation into
+Claude Code and Codex capture the owner's messages (including AskUserQuestion answers), the AI's last reply per turn (and the questions it asked there), and the files edited. **trace turns that conversation into
 records a later session can rely on**: every record quotes the words it came from, and only the owner's words adopt a decision.
 
 ## Failures this skill prevents

@@ -85,6 +85,7 @@ export async function sessionSources(db: Kysely<DB>, sessionId: string) {
     .where("m.session_id", "=", sessionId)
     .select((eb) => [
       "m.id",
+      "m.external_id",
       "m.author_kind",
       "m.turn_id",
       "m.created_at",

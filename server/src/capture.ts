@@ -251,22 +251,28 @@ const INJECTED = [
 const digest = (s: string): string => sha256(s).toString("hex").slice(0, 16);
 
 /**
- * The answers you chose in AskUserQuestion, and notes added to them. Question and answer pairs are recorded as your messages.
+ * The answers you chose in AskUserQuestion, and notes added to them. The questions are the model's words and are recorded as its message; only the answers are yours.
  * tool_response is `{ questions, answers: {question: answer}, annotations: {question: { notes }} }` (confirmed in real transcripts).
  * **Answers come only from tool_response.** tool_input is written by the model, so its values are never taken as your answers.
  */
-export function answersOf(input: HookInput): string | null {
+export function answersOf(input: HookInput): { questions: string; answers: string } | null {
   const response = input.tool_response as
     | { answers?: Record<string, unknown>; annotations?: Record<string, { notes?: unknown }> }
     | undefined;
   const answers = response?.answers;
   if (!answers || typeof answers !== "object") return null;
-  const lines = Object.entries(answers).map(([q, a]) => {
-    const notes = response?.annotations?.[q]?.notes;
-    const memo = typeof notes === "string" && notes.trim() ? `\nNotes: ${notes.trim()}` : "";
-    return `Q: ${q}\nA: ${Array.isArray(a) ? a.join(" / ") : String(a)}${memo}`;
-  });
-  return lines.length ? lines.join("\n\n") : null;
+  const pairs = Object.entries(answers);
+  if (!pairs.length) return null;
+  return {
+    questions: pairs.map(([q], i) => `Q${i + 1}: ${q}`).join("\n\n"),
+    answers: pairs
+      .map(([q, a], i) => {
+        const notes = response?.annotations?.[q]?.notes;
+        const memo = typeof notes === "string" && notes.trim() ? `\nNotes: ${notes.trim()}` : "";
+        return `A${i + 1}: ${Array.isArray(a) ? a.join(" / ") : String(a)}${memo}`;
+      })
+      .join("\n\n"),
+  };
 }
 
 /**
@@ -368,11 +374,11 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     turn,
     at,
   };
-  const say = (key: string, speaker: "owner" | "assistant", raw: string) => {
+  const say = (key: string, speaker: "owner" | "assistant", raw: string, when = at) => {
     const kept = fit(clean(raw).trim());
     if (!kept.body.trim()) return;
     const id = `${key}:${digest(kept.body)}`;
-    spool({ ...base, kind: "message", id, speaker, ...kept });
+    spool({ ...base, at: when, kind: "message", id, speaker, ...kept });
   };
 
   const baseline = baselineFile(host, base.session);
@@ -404,7 +410,12 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     const ti = input.tool_input ?? {};
     if (tool === "AskUserQuestion") {
       const said = answersOf(input);
-      if (said) say(`${turn}:ask:${input.tool_use_id ?? at}`, "owner", said);
+      if (said) {
+        const id = `${turn}:ask:${input.tool_use_id ?? at}`;
+        // A millisecond before the answers, so the questions read first whatever order the spool files are sent in
+        say(`${id}:q`, "assistant", said.questions, new Date(Date.parse(at) - 1).toISOString());
+        say(id, "owner", said.answers);
+      }
       return { flush: false };
     }
     // Read files are not recorded (requirements and design reads used to be). They still arrive from old hook settings.

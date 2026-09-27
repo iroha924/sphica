@@ -234,16 +234,17 @@ test("masking finishes in linear time on input that repeats a trigger", () => {
   }
 });
 
-test("turns AskUserQuestion answers into question and answer pairs", () => {
-  assert.equal(
+// The questions are the model's words: only the answers and notes are the owner's, so a trace cannot adopt from a question
+test("splits AskUserQuestion into the model's questions and the owner's answers", () => {
+  assert.deepEqual(
     answersOf({ tool_response: { answers: { "全部推奨で？": "推奨", 選ぶもの: ["A", "B"] } } }),
-    "Q: 全部推奨で？\nA: 推奨\n\nQ: 選ぶもの\nA: A / B",
+    { questions: "Q1: 全部推奨で？\n\nQ2: 選ぶもの", answers: "A1: 推奨\n\nA2: A / B" },
   );
-  assert.equal(
+  assert.deepEqual(
     answersOf({
       tool_response: { answers: { 進め方: "推奨" }, annotations: { 進め方: { notes: "全部推奨で" } } },
     }),
-    "Q: 進め方\nA: 推奨\nNotes: 全部推奨で",
+    { questions: "Q1: 進め方", answers: "A1: 推奨\nNotes: 全部推奨で" },
   );
   assert.equal(answersOf({ tool_response: {} }), null);
   assert.equal(
@@ -348,6 +349,28 @@ test("owner messages, the last AI reply, and edited files go into the queue", ()
     edits.map((f) => (f.kind === "edit" ? f.path : "")),
     ["db/schema.sql"],
     "files only read (Read) and files outside the repository are not recorded",
+  );
+});
+
+test("an AskUserQuestion answer is the owner's, its questions the assistant's, and the questions come first", () => {
+  reset();
+  onHook("claude-code", {
+    session_id: "s1",
+    prompt_id: "p2",
+    cwd: repoDir,
+    hook_event_name: "PostToolUse",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_1",
+    tool_response: { answers: { "Which DB?": "SQLite" } },
+  });
+  const messages = spooled().flatMap((m) => (m.kind === "message" ? [m] : []));
+  const byTime = [...messages].sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
+  assert.deepEqual(
+    byTime.map((m) => [m.id.replace(/:[0-9a-f]{16}$/, ""), m.speaker, m.body]),
+    [
+      ["p2:ask:toolu_1:q", "assistant", "Q1: Which DB?"],
+      ["p2:ask:toolu_1", "owner", "A1: SQLite"],
+    ],
   );
 });
 
