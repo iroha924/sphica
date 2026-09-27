@@ -1,6 +1,10 @@
 // Checking and saving records against real SQLite: quotes become spans of retained text, adoption follows who spoke, and lifecycle
 // moves only when the schema's activation rules pass.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -413,5 +417,46 @@ test("a trace or harvest run cites only the sources it was given; another sessio
     assert.deepEqual((await checkRecord(db.reader, scoped, record(mine, "Use SQLite."))).errors, []);
   } finally {
     await db.done();
+  }
+});
+
+test("an implementation's commit anchor counts only when that commit holds the path in the repository", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-commit-")));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+        encoding: "utf8",
+      }).trim();
+    git("init", "-q");
+    fs.writeFileSync(path.join(root, "db.ts"), "export const open = () => 1;\n");
+    git("add", "-A");
+    git("commit", "-qm", "db");
+    const real = git("rev-parse", "HEAD");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "open を足した。" });
+    const built = (key: string, commit: string, file = "db.ts") => ({
+      units: [
+        {
+          key,
+          kind: "implementation",
+          text: "open を足した",
+          evidence: [{ source: `s${m}`, quote: "open を足した。", role: "states" }],
+          anchors: [{ path: file, role: "evidence", commit }],
+        },
+      ],
+    });
+    const t: Target = { ...target(p), root };
+    const forged = await save(db, t, built("forged", "0".repeat(40)));
+    assert.deepEqual(forged.saved.active, [], "an unknown commit is not code evidence");
+    assert.ok(
+      forged.checked.problems.some((x) => /commit .* does not hold db\.ts/.test(x)),
+      forged.checked.problems.join(" | "),
+    );
+    assert.deepEqual((await save(db, t, built("elsewhere", real, "missing.ts"))).saved.active, []);
+    assert.deepEqual((await save(db, t, built("real", real))).saved.active, ["trace:ext-s1/real"]);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

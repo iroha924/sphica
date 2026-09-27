@@ -1,12 +1,12 @@
 // glean: evidence and corrections added to existing records later, and records written from what the owner points to. Every change cites
 // retained text: an owner message, a pull request or issue source, or a file excerpt the CLI reads from git itself. Nothing is rewritten:
 // evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
-import { execFileSync } from "node:child_process";
 import type { Kysely } from "kysely";
 import { z } from "zod";
 import { locate as symbolAt } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { cleanGit } from "./git.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { type Checked, checkRecord, repoPath, saveRecord, type Target } from "./record.ts";
 import { head, sha256 } from "./text.ts";
@@ -98,6 +98,17 @@ const Op = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("withdraw"), unit, revision, reason_source: SOURCE_REF, reason_quote: quote })
     .strict(),
+  // Ends an unresolved conflict between two records; until then automatic delivery holds both back
+  z
+    .object({
+      op: z.literal("resolve_conflict"),
+      unit,
+      revision,
+      with: unit,
+      reason_source: SOURCE_REF,
+      reason_quote: quote,
+    })
+    .strict(),
 ]);
 const Glean = z
   .object({ units: z.array(z.unknown()).max(20).default([]), ops: z.array(Op).max(50).default([]) })
@@ -114,16 +125,7 @@ type Excerpt = {
   text: string;
 };
 
-/** git without the caller's GIT_* variables, which could point it at another repository or object store. */
-function git(root: string, args: string[], max = MAX_FILE * 2): Buffer {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
-  return execFileSync("git", ["-C", root, ...args], {
-    env,
-    maxBuffer: max,
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: 10_000,
-  });
-}
+const git = (root: string, args: string[], max = MAX_FILE * 2) => cleanGit(root, args, max);
 
 /** Reads lines of a committed file. Throws with the reason for paths outside the repository, links, submodules, binary, and oversized files. */
 function readExcerpt(root: string, file: z.infer<typeof File>): Excerpt {
@@ -292,10 +294,33 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
       if (!repoPath(op.to.path)) errors.push(`${what}: the path is not inside the repository`);
       await span(op.source, op.quote, what);
     }
-    if (op.op === "retract_evidence" || op.op === "retract_adoption" || op.op === "withdraw") {
+    if (
+      op.op === "retract_evidence" ||
+      op.op === "retract_adoption" ||
+      op.op === "withdraw" ||
+      op.op === "resolve_conflict"
+    ) {
       const got = await span(op.reason_source, op.reason_quote, what);
       if (got && got.s.author_kind !== "owner")
-        errors.push(`${what}: only the owner's words can retract or withdraw`);
+        errors.push(`${what}: only the owner's words can retract, withdraw, or resolve`);
+    }
+    if (op.op === "resolve_conflict") {
+      const open = await db
+        .selectFrom("unit_link as l")
+        .innerJoin("unit as a", "a.id", "l.from_unit")
+        .innerJoin("unit as b", "b.id", "l.to_unit")
+        .select("l.from_unit")
+        .where("l.kind", "=", "conflicts")
+        .where("l.resolved_at", "is", null)
+        .where((eb) =>
+          eb.or([
+            eb.and([eb("a.id", "=", u.id), eb("b.key", "=", op.with)]),
+            eb.and([eb("b.id", "=", u.id), eb("a.key", "=", op.with)]),
+          ]),
+        )
+        .where("a.project_id", "=", target.projectId)
+        .executeTakeFirst();
+      if (!open) errors.push(`${what}: no unresolved conflict between ${op.unit} and ${op.with}`);
     }
     // A retraction names one span: the only live one from that source, or the one its quote cuts
     let retracts: [number, number] | null = null;
@@ -510,6 +535,28 @@ export async function saveGlean(
         retraction_span_start: reason.start,
         retraction_span_end: reason.end,
       };
+      if (op.op === "resolve_conflict") {
+        const other = await trx
+          .selectFrom("unit")
+          .select("id")
+          .where("project_id", "=", target.projectId)
+          .where("key", "=", op.with)
+          .executeTakeFirstOrThrow();
+        await trx
+          .updateTable("unit_link")
+          .set({ resolved_at: now, resolution: `${head(op.reason_quote, 400)} (s${reason.id})` })
+          .where("kind", "=", "conflicts")
+          .where("resolved_at", "is", null)
+          .where((eb) =>
+            eb.or([
+              eb.and([eb("from_unit", "=", p.unitId), eb("to_unit", "=", other.id)]),
+              eb.and([eb("from_unit", "=", other.id), eb("to_unit", "=", p.unitId)]),
+            ]),
+          )
+          .execute();
+        changed.push(`${op.unit}: conflict with ${op.with} resolved`);
+        continue;
+      }
       if (op.op === "withdraw") {
         await move(trx, p.unitId, "withdrawn", `withdrawn: ${head(op.reason_quote, 200)}`, reason.id, runId);
         changed.push(`${op.unit}: withdrawn`);

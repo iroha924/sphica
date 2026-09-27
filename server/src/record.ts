@@ -5,6 +5,7 @@ import { z } from "zod";
 import { locate as locateSymbol } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { commitHolds } from "./git.ts";
 import { EVIDENCE_ROLES, OPTION_OUTCOMES, STANCES, UNIT_KINDS, WORK_STATUSES } from "./knowledge.ts";
 import { head, sha256 } from "./text.ts";
 
@@ -295,8 +296,16 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         );
         continue;
       }
+      // A commit counts as code evidence only when the repository has it and it holds the path; otherwise the anchor keeps no commit
+      let commit = a.commit;
+      if (commit && !(target.root && commitHolds(target.root, commit, p))) {
+        problems.push(
+          `${key}: commit ${commit.slice(0, 12)} does not hold ${p} in the repository${target.root ? "" : " (no working tree to check)"}; the anchor keeps no commit`,
+        );
+        commit = undefined;
+      }
       const observation =
-        a.role === "evidence" && !a.commit && target.sessionId
+        a.role === "evidence" && !commit && target.sessionId
           ? ((
               await db
                 .selectFrom("edit_observation")
@@ -307,7 +316,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
                 .executeTakeFirst()
             )?.id ?? null)
           : null;
-      anchors.push({ ...a, path: p, observation });
+      anchors.push({ ...a, commit, path: p, observation });
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];

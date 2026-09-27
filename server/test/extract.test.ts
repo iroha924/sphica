@@ -508,3 +508,70 @@ test("glean: a successor that becomes active later supersedes the record it repl
     await db.done();
   }
 });
+
+test("glean: the owner's words resolve a conflict, and only an unresolved one between the two records", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "o1", text: "SQLite にしよう。いや Postgres かも。" });
+    const traced = await beginTrace(db.ingest, p, "s1");
+    await saveText(db.ingest, traced, p, null, {
+      units: [
+        {
+          key: "sqlite",
+          kind: "decision",
+          stance: "do",
+          text: "SQLite",
+          evidence: [{ source: `s${m}`, quote: "SQLite にしよう。", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "SQLite にしよう。" }],
+        },
+      ],
+    });
+    // conflicts names an existing record, so the question goes in a second run
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [
+        {
+          key: "maybe",
+          kind: "question",
+          text: "Postgres かも",
+          evidence: [{ source: `s${m}`, quote: "いや Postgres かも。", role: "states" }],
+          conflicts: ["trace:ext-s1/sqlite"],
+        },
+      ],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "SQLite で確定。Postgres の話は終わり。", session: "g1" });
+    const glean = async (op: Record<string, unknown>) => {
+      const run = await beginGlean(db.ingest, p, "g1");
+      const record = { ops: [op] };
+      const c = await checkText(db.ingest, run, p, null, record);
+      return c.ok ? saveText(db.ingest, run, p, null, record) : Promise.reject(new Error(c.text));
+    };
+    const rev = (key: string) =>
+      db.owner.prepare("select revision from unit where key = ?").get(key)?.revision;
+    const resolve = {
+      op: "resolve_conflict",
+      unit: "trace:ext-s1/sqlite",
+      revision: rev("trace:ext-s1/sqlite"),
+      with: "trace:ext-s1/maybe",
+      reason_source: `s${said}`,
+      reason_quote: "Postgres の話は終わり。",
+    };
+    await assert.rejects(glean({ ...resolve, with: "trace:ext-s1/nope" }), /no unresolved conflict/);
+    assert.match(await glean(resolve), /conflict with trace:ext-s1\/maybe resolved/);
+    assert.deepEqual(
+      {
+        ...db.owner
+          .prepare("select resolution is not null as done from unit_link where kind = 'conflicts'")
+          .get(),
+      },
+      { done: 1 },
+    );
+    await assert.rejects(
+      glean({ ...resolve, revision: rev("trace:ext-s1/sqlite") }),
+      /no unresolved conflict/,
+    );
+  } finally {
+    await db.done();
+  }
+});
