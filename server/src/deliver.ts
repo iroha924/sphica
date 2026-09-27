@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Automatic delivery of past records into Claude Code: at session start (current work and a few broad constraints), before an edit or a read
+// Automatic delivery of past records into Claude Code and Codex: at session start (current work and a few broad constraints), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
@@ -78,20 +78,27 @@ type Plan = {
   reason: string | null;
 };
 
-const anchoredTo = (db: Kysely<DB>, projectId: number, rel: string) =>
+const anchoredTo = (db: Kysely<DB>, projectId: number, rels: string[]) =>
   deliverable(db, projectId)
     .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
-    .where("a.path", "=", rel)
+    .where("a.path", "in", rels)
     .where("a.role", "=", "applies_to")
     .where("a.retired_at", "is", null)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .groupBy("u.id")
     .orderBy("u.id", "desc");
 
-async function beforeEdit(db: Kysely<DB>, projectId: number, rel: string): Promise<Plan> {
-  const rows = await anchoredTo(db, projectId, rel).execute();
+/** The paths a delivery names in its lead: all of them up to three, then a count. */
+const named = (rels: string[]) =>
+  rels.length <= 3
+    ? rels.map(inline).join(", ")
+    : `${rels.slice(0, 3).map(inline).join(", ")} and ${rels.length - 3} more`;
+
+/** Before an edit: the records anchored to any of the edited paths (a Codex patch can touch several), chosen together within one limit. */
+async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Promise<Plan> {
+  const rows = await anchoredTo(db, projectId, rels).execute();
   const shown = rows.slice(0, LIMITS.pre_edit.units);
-  const lead = `Active decisions applying to ${inline(rel)} (current code relevance unverified). ${NOTE}:`;
+  const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). ${NOTE}:`;
   const f = fit(
     shown.map((u) => line(u)),
     LIMITS.pre_edit.chars,
@@ -102,7 +109,7 @@ async function beforeEdit(db: Kysely<DB>, projectId: number, rel: string): Promi
     units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
     eligible: rows.length,
     omitted: rows.length - shown.length + f.omitted,
-    path: rel,
+    path: head(rels.join(" "), 500),
     reason: null,
   };
 }
@@ -111,7 +118,13 @@ async function beforeEdit(db: Kysely<DB>, projectId: number, rel: string): Promi
  * Before a read: the decisions and constraints anchored to the path that this session has not been shown yet, within the read budget
  * left for the session. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
  */
-async function beforeRead(db: Kysely<DB>, projectId: number, rel: string, session: string): Promise<Plan> {
+async function beforeRead(
+  db: Kysely<DB>,
+  projectId: number,
+  rels: string[],
+  session: string,
+  how: "reading" | "named",
+): Promise<Plan> {
   const sent = await db
     .selectFrom("delivery as d")
     .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
@@ -129,11 +142,12 @@ async function beforeRead(db: Kysely<DB>, projectId: number, rel: string, sessio
   const seen = new Set(sent.map((r) => r.unit_id));
   const readUnits = sent.filter((r) => r.event === "pre_read").length;
   const rows = (
-    await anchoredTo(db, projectId, rel).where("u.kind", "in", ["decision", "constraint"]).execute()
+    await anchoredTo(db, projectId, rels).where("u.kind", "in", ["decision", "constraint"]).execute()
   ).filter((u) => !seen.has(u.id));
   const room = Math.min(LIMITS.pre_read.units, READ_SESSION.units - readUnits);
   const shown = rows.slice(0, Math.max(room, 0));
-  const lead = `Active decisions applying to ${inline(rel)}, which you are reading (current code relevance unverified). ${NOTE}:`;
+  // A shell command that names a path is not proof it was read, so Codex's wording says only that it was named
+  const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${NOTE}:`;
   const f = fit(
     shown.map((u) => line(u)),
     Math.min(LIMITS.pre_read.chars, READ_SESSION.chars - spent.reduce((n, r) => n + r.chars, 0)),
@@ -144,9 +158,66 @@ async function beforeRead(db: Kysely<DB>, projectId: number, rel: string, sessio
     units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
     eligible: rows.length,
     omitted: rows.length - shown.length + f.omitted,
-    path: rel,
+    path: head(rels.join(" "), 500),
     reason: null,
   };
+}
+
+/** The paths a Codex patch touches, from its headers (both ends of a move), as written in the patch. */
+function patchPaths(patch: string): string[] {
+  const out = new Set<string>();
+  for (const l of patch.split(/\r?\n/)) {
+    const m = /^\s*\*\*\* (?:(?:Update|Add|Delete) File|Move to):\s*(.+?)\s*$/.exec(l);
+    if (m?.[1]) out.add(m[1]);
+  }
+  return [...out];
+}
+
+/** A patch the shell runs (`apply_patch <<'EOF'`), which Codex may report as Bash: it is an edit, not a read. */
+function shellPatch(input: HookInput): string | null {
+  const c = input.tool_name === "Bash" ? input.tool_input?.command : null;
+  return typeof c === "string" && /^\s*\*\*\* Begin Patch\s*$/m.test(c) ? c : null;
+}
+
+/**
+ * The anchored paths (of decisions and constraints) a shell command names as a whole word: relative to the root or to the command's cwd,
+ * with or without `./`, absolute, and with either separator (PowerShell on Windows).
+ */
+async function namedInCommand(
+  db: Kysely<DB>,
+  projectId: number,
+  root: string,
+  cwd: string,
+  command: string,
+): Promise<string[]> {
+  const paths = await deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .where("u.kind", "in", ["decision", "constraint"])
+    .select("a.path")
+    .distinct()
+    .execute();
+  const edge = `\\s'"=(){}<>|;&,`;
+  const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const forms = (p: string) => {
+    const abs = path.join(root, p);
+    const fromCwd = path.relative(cwd, abs);
+    const out = new Set<string>();
+    for (const f of [p, abs, fromCwd.startsWith("..") ? "" : fromCwd])
+      if (f)
+        for (const sep of ["/", "\\"]) {
+          const t = f.split(/[\\/]/).join(sep);
+          out.add(t);
+          if (!path.isAbsolute(f)) out.add(`.${sep}${t}`);
+        }
+    return [...out];
+  };
+  return paths
+    .map((r) => r.path)
+    .filter((p) =>
+      forms(p).some((t) => new RegExp(`(?:^|[${edge}])${esc(t)}(?:$|[${edge}:])`).test(command)),
+    );
 }
 
 /** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
@@ -389,7 +460,8 @@ export async function deliver(
       : name === "UserPromptSubmit"
         ? "prompt"
         : name === "PreToolUse"
-          ? input.tool_name === "Read"
+          ? input.tool_name === "Read" ||
+            (host === "codex" && input.tool_name === "Bash" && !shellPatch(input))
             ? "pre_read"
             : "pre_edit"
           : null;
@@ -398,24 +470,48 @@ export async function deliver(
   // A headless review (claude -p "/review") still gets the check; only reviews inside subagents are left to the parent
   if (event === "review" && input.agent_id) return "";
   const ti = input.tool_input ?? {};
-  const target = [ti.file_path, ti.notebook_path].find((p): p is string => typeof p === "string");
+  // Codex edits arrive as a patch in apply_patch, and its reads only as shell commands
+  const patch =
+    host === "codex" && input.tool_name === "apply_patch" && typeof ti.command === "string"
+      ? ti.command
+      : host === "codex"
+        ? shellPatch(input)
+        : null;
+  const shell =
+    host === "codex" && input.tool_name === "Bash" && !patch && typeof ti.command === "string"
+      ? ti.command
+      : null;
+  const targets = patch
+    ? patchPaths(patch)
+    : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);
   const onPath = event === "pre_edit" || event === "pre_read";
-  if (onPath && (!(event === "pre_read" || EDIT_TOOLS.has(input.tool_name ?? "")) || !target)) return "";
+  if (
+    onPath &&
+    !shell &&
+    (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
+  )
+    return "";
   const place = identify(input.cwd ?? process.cwd());
   if (!place) return "";
-  const rel = target
-    ? path
-        .relative(place.root, path.resolve(input.cwd ?? place.root, target))
+  let rels = targets
+    .map((t) =>
+      path
+        .relative(place.root, path.resolve(input.cwd ?? place.root, t))
         .split(path.sep)
-        .join("/")
-    : null;
-  if (onPath && (!rel || rel.startsWith(".."))) return "";
+        .join("/"),
+    )
+    .filter((r) => r && !r.startsWith("..") && !path.isAbsolute(r));
+  if (onPath && !shell && !rels.length) return "";
   let db: Kysely<DB> | null = null;
   try {
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
+    if (shell) {
+      rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
+      if (!rels.length) return "";
+    }
     if (event === "session_start" && input.source === "resume") {
       const said = await db
         .selectFrom("delivery")
@@ -428,9 +524,15 @@ export async function deliver(
     }
     const plan =
       event === "pre_edit"
-        ? await beforeEdit(db, pid, rel ?? "")
+        ? await beforeEdit(db, pid, rels)
         : event === "pre_read"
-          ? await beforeRead(db, pid, rel ?? "", sessionId(pid, host, input.session_id))
+          ? await beforeRead(
+              db,
+              pid,
+              rels,
+              sessionId(pid, host, input.session_id),
+              shell ? "named" : "reading",
+            )
           : event === "prompt"
             ? await onPrompt(db, pid, input.prompt ?? "")
             : call
@@ -442,9 +544,9 @@ export async function deliver(
     );
     return plan.text;
   } catch (e) {
-    // Unavailable is not "nothing applies": the edit and read hooks and session start say so, once per session
-    if (event === "prompt" || !onceUnavailable(`${host}\0${input.session_id}`)) return "";
-    return `Sphica unavailable: ${head(inline(reason(e)), 200)}. Past decisions for ${onPath ? inline(rel ?? "") : "this project"} could not be checked.`;
+    // Unavailable is not "nothing applies": the edit and read hooks and session start say so, once per session (not every shell command)
+    if (event === "prompt" || shell || !onceUnavailable(`${host}\0${input.session_id}`)) return "";
+    return `Sphica unavailable: ${head(inline(reason(e)), 200)}. Past decisions for ${onPath ? named(rels) : "this project"} could not be checked.`;
   } finally {
     await db?.destroy().catch(() => {});
   }

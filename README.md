@@ -93,6 +93,19 @@ To bring back earlier decisions, ask the agent:
 - "Why did we choose this approach, and what did we reject?"
 - "Did we try generating thumbnails in a worker before?"
 
+### What the agent sees on its own
+
+Without being asked, Sphica adds a few past records to what the agent sees, each marked as a past record rather than an instruction:
+
+- At session start: the current work and project-wide constraints.
+- On a prompt that names a recorded code symbol, file path, or option.
+- Before the agent reads or edits a file a decision applies to. A read shows each record once per session.
+- Before a review. When you run your own review command (any name containing `review`, or a name listed in the `SPHICA_REVIEW_COMMANDS`
+  environment variable, comma-separated), it gets the decisions your local change touches. `/sphica:review` checks them itself. Claude Code only.
+
+In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, and before a shell command that names such a file.
+Edits made through shell commands are not covered, and there is no review hook: run `$sphica:review`.
+
 The agent searches with Sphica's `search` and opens full records with `read`. `status` tells it how much of the history has been traced, so an empty search is not mistaken for "never decided".
 
 ## What gets recorded and where it goes
@@ -115,7 +128,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 ## Limits in 0.5.0
 
 - Structured records exist only for what you traced, harvested, or gleaned. Everything else is searchable only as captured text (`search` with `sources: true`).
-- Automatic delivery is built for Claude Code. In Codex, the records are there to search, but nothing is shown on its own yet.
+- In Codex, a shell command that names a file gets its decisions even when the command does not read it, and edits made through shell commands get none.
 - A code location in a record is checked against your working tree when it is read ("located", "moved", "missing"). A located symbol does not prove the decision still holds.
 
 ## Upgrading from 0.4
