@@ -645,7 +645,8 @@ export async function saveGlean(
         );
       else if (current.lifecycle !== "candidate") touched.delete(p.unitId);
       const table = op.op === "retract_evidence" ? "unit_evidence" : "unit_adoption";
-      await trx
+      // Every citation of the retracted words goes, the record's and its options'; the reply says how many
+      const done = await trx
         .updateTable(table)
         .set(retraction)
         .where("unit_id", "=", p.unitId)
@@ -653,8 +654,11 @@ export async function saveGlean(
         .where("span_start", "=", p.retracts?.[0] ?? -1)
         .where("span_end", "=", p.retracts?.[1] ?? -1)
         .where("retracted_at", "is", null)
-        .execute();
-      changed.push(`${op.unit}: ${op.op === "retract_evidence" ? "evidence" : "adoption"} retracted`);
+        .executeTakeFirst();
+      const n = Number(done.numUpdatedRows);
+      changed.push(
+        `${op.unit}: ${op.op === "retract_evidence" ? "evidence" : "adoption"} retracted${n > 1 ? ` (${n} citations of those words: the record's and its options')` : ""}`,
+      );
     }
   }
   // Every touched unit is judged again: a candidate that now has what it needs becomes active

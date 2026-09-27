@@ -711,6 +711,54 @@ test("glean: the owner's words resolve a conflict, and only an unresolved one be
   }
 });
 
+// Retracting words withdraws every citation of them, the record's and its options', and says so
+test("glean: a retraction of words cited by the record and an option says it retracted both", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "o1", text: "Use SQLite. It is enough." });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [
+        {
+          key: "db",
+          kind: "finding",
+          text: "SQLite",
+          evidence: [
+            { source: `s${m}`, quote: "Use SQLite.", role: "states" },
+            { source: `s${m}`, quote: "It is enough.", role: "explains" },
+          ],
+          options: [
+            { text: "SQLite", outcome: "chosen", evidence: [{ source: `s${m}`, quote: "Use SQLite." }] },
+          ],
+        },
+      ],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "I never said SQLite.", session: "g1" });
+    const out = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      ops: [
+        {
+          op: "retract_evidence",
+          unit: "trace:ext-s1/db",
+          revision: db.owner.prepare("select revision from unit where key = 'trace:ext-s1/db'").get()
+            ?.revision,
+          source: `s${m}`,
+          quote: "Use SQLite.",
+          reason_source: `s${said}`,
+          reason_quote: "I never said SQLite.",
+        },
+      ],
+    });
+    assert.match(out, /evidence retracted \(2 citations of those words: the record's and its options'\)/);
+    assert.equal(
+      db.owner.prepare("select count(*) as n from unit_evidence where retracted_at is null").get()?.n,
+      1,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("glean: retracting support from a superseded record leaves it superseded", async () => {
   const db = tempDb();
   try {
