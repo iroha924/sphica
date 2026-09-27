@@ -15,8 +15,24 @@ export function parseDiff(text: string): FileDiff[] {
   const files: FileDiff[] = [];
   let cur: FileDiff | null = null;
   let line = 0;
+  // Lines left in the current hunk, old and new side: inside it, "--- x" and "+++ x" are a removed or added line, not a file header
+  let oldLeft = 0;
+  let newLeft = 0;
   const rows = text.split(/\r?\n/);
   for (const [i, raw] of rows.entries()) {
+    if (cur && (oldLeft > 0 || newLeft > 0)) {
+      if (raw.startsWith("+")) {
+        cur.added.push(raw.slice(1));
+        cur.lines.push(line++);
+        newLeft--;
+      } else if (raw.startsWith("-")) oldLeft--;
+      else if (!raw.startsWith("\\")) {
+        line++;
+        oldLeft--;
+        newLeft--;
+      }
+      continue;
+    }
     const to = /^\+\+\+ (?:b\/)?(.+?)\t?$/.exec(raw);
     if (to) {
       // The old path is the header line just before; it names a deleted file
@@ -26,16 +42,12 @@ export function parseDiff(text: string): FileDiff[] {
       else if (was && was !== "/dev/null") files.push({ path: was, added: [], lines: [] });
       continue;
     }
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(raw);
     if (hunk) {
-      line = Number(hunk[1]);
-      continue;
+      oldLeft = Number(hunk[1] ?? 1);
+      line = Number(hunk[2]);
+      newLeft = Number(hunk[3] ?? 1);
     }
-    if (!cur || raw.startsWith("---")) continue;
-    if (raw.startsWith("+")) {
-      cur.added.push(raw.slice(1));
-      cur.lines.push(line++);
-    } else if (!raw.startsWith("-") && !raw.startsWith("\\")) line++;
   }
   return files;
 }

@@ -8,7 +8,14 @@ import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown) {
-  const t: Target = { projectId: p, origin: "trace", prefix: "trace:ext-s1/", sessionId: "s1", root: null };
+  const t: Target = {
+    projectId: p,
+    origin: "trace",
+    prefix: "trace:ext-s1/",
+    sessionId: "s1",
+    root: null,
+    sources: null,
+  };
   return inTransaction(db.ingest, async (trx) => {
     const run = await openRun(trx, {
       projectId: p,
@@ -47,6 +54,20 @@ test("a diff lists its changed files with added lines and their new line numbers
     { path: "src/telemetry.ts", added: ["export function sendTelemetry() {}"], lines: [1] },
     { path: "gone.ts", added: [], lines: [] },
   ]);
+});
+
+test("inside a hunk, an added or removed line that looks like a file header stays a line of the same file", () => {
+  const diff = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1,2 +1,3 @@",
+    "--- removed text",
+    "+++ b/decoy.ts",
+    "+real",
+    " kept",
+  ].join("\n");
+  assert.deepEqual(parseDiff(diff), [{ path: "src/a.ts", added: ["++ b/decoy.ts", "real"], lines: [1, 2] }]);
 });
 
 test("records anchored to a changed path, and location-free don't records naming an added option, apply; verdicts need evidence", async () => {
