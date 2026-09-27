@@ -190,6 +190,14 @@ test("stores sources with who wrote them, adds a revision only when text changed
       [[2, "Fixes #14. Switch to pnpm. Edited."]],
     );
     assert.ok(current.some((s) => s.artifact === "issue:14"));
+    // A cleared body becomes an empty current revision: the old text stays as history but is no longer what the pull request says
+    await storeItems(db.ingest, p, (await readPull(fake("   "), 7)).items);
+    assert.deepEqual(
+      (await pullSources(db.reader, p, 7))
+        .filter((s) => s.kind === "pr_body")
+        .map((s) => [s.revision, s.text]),
+      [[3, ""]],
+    );
     // The body no longer closes #14: the next harvest drops the link, so the issue stops being part of the pull request
     await linkIssues(db.ingest, p, 7, []);
     assert.equal(

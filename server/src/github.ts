@@ -146,19 +146,20 @@ export async function readPull(
     get(`pulls/${number}/commits?per_page=100`, true) as Promise<Commit[]>,
   ]);
   const items: Item[] = [];
-  if (p.body?.trim())
-    items.push(
-      item({
-        kind: "pr_body",
-        artifact,
-        externalId: artifact,
-        author: p.user ?? null,
-        association: p.author_association ?? null,
-        url: p.html_url,
-        createdAt: p.created_at,
-        text: p.body,
-      }),
-    );
+  // An empty body is passed on too, so a body cleared after an earlier harvest becomes an empty current revision (storeItems keeps
+  // no row for a body that was never there)
+  items.push(
+    item({
+      kind: "pr_body",
+      artifact,
+      externalId: artifact,
+      author: p.user ?? null,
+      association: p.author_association ?? null,
+      url: p.html_url,
+      createdAt: p.created_at,
+      text: p.body?.trim() ? p.body : "",
+    }),
+  );
   for (const c of comments)
     if (c.body?.trim())
       items.push(
@@ -308,6 +309,7 @@ export async function storeItems(db: Kysely<DB>, projectId: number, items: Item[
       ids.push(latest.id);
       continue;
     }
+    if (!latest && !kept.body.trim()) continue;
     const authorId = it.author?.id === undefined ? null : String(it.author.id);
     const kind = authorId && owners.has(authorId) ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
     const created = iso(it.createdAt);
