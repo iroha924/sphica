@@ -6,9 +6,15 @@ export function releaseNotes(body) {
     .replace(/\r/g, "")
     .replace(/<!--[\s\S]*?-->/g, "")
     .split("\n");
-  const start = lines.findIndex((line) => /^## Release notes\s*$/.test(line));
+  // A heading inside a code fence is text, not a section
+  let fenced = false;
+  const heading = lines.map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    return fenced || /^\s*(```|~~~)/.test(line) ? null : line;
+  });
+  const start = heading.findIndex((line) => line !== null && /^## Release notes\s*$/.test(line));
   if (start === -1) return null;
-  const end = lines.findIndex((line, index) => index > start && /^## /.test(line));
+  const end = heading.findIndex((line, index) => index > start && line !== null && /^## /.test(line));
   const notes = lines
     .slice(start + 1, end === -1 ? undefined : end)
     .join("\n")

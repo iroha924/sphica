@@ -84,6 +84,16 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `docs(release): describe the single GitHub approval and direct publish`
   - 結果: `bun run verify` → exit 0（acceptance 55 pass を含む）。`rg -n -- "npm stage|Staged Packages|--tag next|dist-tag add sphica@<version> latest|registry next|promotion to latest" …` → check-ai-config の「Shipping に npm stage を書かない」検査自身の 2 行だけ（検査の文字列で、手順の記述ではない）。`bun run release:plan -- --base v0.5.3` はコミット後に流す（README がコミットに入るまでは none）
 
+- [x] T07: release-finish が tag とコミット、PR と tag のコミットの一致を確かめ、コードブロック内の見出しを読まないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す対象のスクリプト）
+  - 変更: `scripts/release-finish.mjs`, `scripts/lib/release-finish.mjs`, `server/test/release-finish.test.ts`
+  - red: `node --test server/test/release-finish.test.ts` → tag が別のコミットを指す、PR の head が tag のコミットでない、コードブロック内の `## Release notes` の 3 ケースが、変更前のコードでは通ってしまって落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → 3 ケースを含めて全件 pass
+  - コミット: `fix(release): tie release-finish to the tag's commit and PR, and skip fenced headings`
+  - 結果: red: 変更前のコードで `FAKE_TAG_COMMIT` のケースが status 0、お試し実行が別の PR（#6）を拾う、コードブロック内の見出しを節として読む、の 3 件が落ちた。変更後 `node --test server/test/release-finish.test.ts` → 7 pass / 0 fail。実データの `node scripts/release-finish.mjs --dry-run` → v0.5.3 で通る
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし

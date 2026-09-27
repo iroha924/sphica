@@ -20,7 +20,7 @@ const FAKES = {
 const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALLS, "git " + a.join(" ") + "\\n");
 if (a[0] === "rev-parse" && a[1].endsWith("^2")) console.log(process.env.FAKE_SECOND || "${COMMIT}");
-else if (a[0] === "rev-parse") console.log("${COMMIT}");
+else if (a[0] === "rev-parse") console.log(process.env.FAKE_TAG_COMMIT || "${COMMIT}");
 else if (a[0] === "diff") process.exit(process.env.FAKE_DIFF ? 1 : 0);
 else if (a[0] === "log") console.log("${MERGE} ${"c".repeat(40)} ${COMMIT}");
 `,
@@ -36,8 +36,8 @@ const a = process.argv.slice(2);
 fs.appendFileSync(process.env.CALLS, "gh " + a.join(" ") + "\\n");
 const created = path.join(path.dirname(process.env.CALLS), "created");
 if (a[0] === "attestation") process.exit(process.env.FAKE_NO_ATTESTATION ? 1 : 0);
-else if (a[0] === "api" && a[1].includes("/commits/")) console.log(JSON.stringify([{ number: 7 }]));
-else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)} }));
+else if (a[0] === "api" && a[1].includes("/commits/")) console.log(JSON.stringify([{ number: 6, head: { sha: "${"d".repeat(40)}" } }, { number: 7, head: { sha: "${COMMIT}" } }]));
+else if (a[0] === "api") console.log(JSON.stringify({ body: process.env.FAKE_BODY ?? ${JSON.stringify(BODY)}, head: { sha: process.env.FAKE_HEAD || "${COMMIT}" } }));
 else if (a[0] === "release" && a[1] === "create") fs.writeFileSync(created, "");
 else if (a[0] === "release" && a[1] === "view") {
   if (!process.env.FAKE_RELEASE_EXISTS && !fs.existsSync(created)) process.exit(1);
@@ -103,6 +103,8 @@ test("release-finish does not create the Release twice when it is rerun", () => 
 
 test("release-finish fails before creating anything when a check fails", () => {
   const cases: [Record<string, string>, RegExp][] = [
+    [{ FAKE_TAG_COMMIT: "d".repeat(40) }, /v1\.2\.3 points to d{40}, not a{40}/],
+    [{ FAKE_HEAD: "d".repeat(40) }, /PR #7 has head d{40}, not the tag commit/],
     [{ FAKE_SECOND: "d".repeat(40) }, /does not merge v1\.2\.3/],
     [{ FAKE_DIFF: "1" }, /tree of .* differs/],
     [{ FAKE_NO_ATTESTATION: "1" }, /no SBOM attestation/],
@@ -123,6 +125,8 @@ test("release-finish --dry-run checks the latest published release and creates o
   assert.equal(status, 0, stderr);
   assert.match(calls, /gh attestation verify .*--source-ref refs\/tags\/v1\.2\.3/);
   assert.doesNotMatch(calls, /release create|release view|pr comment/);
+  // Of the PRs that contain the tag commit, the release PR is the one whose head it is
+  assert.match(calls, /gh api repos\/o\/r\/pulls\/7\n/);
 });
 
 test("release-finish refuses malformed arguments", () => {
@@ -135,6 +139,17 @@ test("release-finish reads only the Release notes section, without comments", ()
   assert.equal(releaseNotes("## Release notes\r\n\r\nLast section.\r\n"), "Last section.");
   assert.equal(releaseNotes("## Release notes\n\n<!-- x -->\n"), null);
   assert.equal(releaseNotes(null), null);
+  // Headings inside a code fence are text, not sections
+  assert.equal(
+    releaseNotes("## What changed\n```md\n## Release notes\nInjected\n```\n## Verification\nOK\n"),
+    null,
+  );
+  assert.equal(
+    releaseNotes(
+      "## Release notes\n\nRun:\n```sh\n## Verification\nsphica doctor\n```\n\n## Declined findings\n",
+    ),
+    "Run:\n```sh\n## Verification\nsphica doctor\n```",
+  );
 });
 
 test("release-finish finds the merge whose second parent is the tag commit", () => {

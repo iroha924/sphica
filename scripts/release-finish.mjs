@@ -46,7 +46,8 @@ function finish({ tag, commit, merge, pull }) {
     run("git", ["fetch", "--quiet", "origin", "main"]);
     merge = releaseMerge(run("git", ["log", "FETCH_HEAD", "--merges", "--format=%H %P"]), commit);
     if (!merge) fail(`no merge commit on main has ${tag} (${commit}) as its second parent`);
-    pull = String(JSON.parse(run("gh", ["api", `repos/${repo}/commits/${commit}/pulls`]))[0]?.number ?? "");
+    const pulls = JSON.parse(run("gh", ["api", `repos/${repo}/commits/${commit}/pulls`]));
+    pull = String(pulls.find((candidate) => candidate.head?.sha === commit)?.number ?? "");
   }
   if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag ?? "")) fail("pass --tag v<version>");
   for (const [name, sha] of Object.entries({ commit, merge })) {
@@ -55,7 +56,12 @@ function finish({ tag, commit, merge, pull }) {
   if (!/^\d+$/.test(pull ?? "")) fail("pass --pull as a PR number");
   const version = tag.slice(1);
 
-  // 1. The merge brought in exactly the tag commit's tree
+  // 1. The tag, the PR, and the merge all name the same commit, and the merge brought in exactly its tree
+  const tagged = run("git", ["rev-parse", `${tag}^{commit}`]);
+  if (tagged !== commit) fail(`${tag} points to ${tagged}, not ${commit}`);
+  const pr = JSON.parse(run("gh", ["api", `repos/${repo}/pulls/${pull}`]));
+  if (pr.head?.sha !== commit)
+    fail(`PR #${pull} has head ${pr.head?.sha ?? "unknown"}, not the tag commit ${commit}`);
   if (run("git", ["rev-parse", `${merge}^2`]) !== commit) fail(`${merge} does not merge ${tag} (${commit})`);
   if (!succeeds("git", ["diff", "--quiet", commit, merge])) fail(`the tree of ${merge} differs from ${tag}`);
 
@@ -83,7 +89,7 @@ function finish({ tag, commit, merge, pull }) {
     if (latest !== version) fail(`npm latest is ${latest}, not ${version}`);
 
     // 4. The owner reviewed the notes in the PR body; a release without them goes back to the owner
-    const notes = releaseNotes(JSON.parse(run("gh", ["api", `repos/${repo}/pulls/${pull}`])).body);
+    const notes = releaseNotes(pr.body);
     if (notes === null) fail(`PR #${pull} has no Release notes section, or it is empty`);
 
     if (dryRun) {
