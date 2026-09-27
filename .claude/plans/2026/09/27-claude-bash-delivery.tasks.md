@@ -90,7 +90,7 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `fix(verify): keep SPHICA_HOME out of the checks' child processes and HOME-swapping tests`
   - 結果: red: `SPHICA_HOME=<空> bun run sql:live` → sphica.db、spool、capture.json、worktree ができた。直した後 `SPHICA_HOME=<空> bun run verify` → exit 0、ディレクトリは空。SPHICA_HOME なしの `bun run verify` → exit 0
 
-- [ ] T08: README の限界の行を Codex の patch の扱いに合わせ、.gitignore の末尾の空行を消す
+- [x] T08: README の限界の行を Codex の patch の扱いに合わせ、.gitignore の末尾の空行を消す
   - 種別: 修正
   - 計画: S3
   - 依存: T04（直す README の行を T04 が書いた）
@@ -98,6 +98,7 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - red: `rg -n "not as an edit\\.$" README.md` → 1 件（Codex でシェルから apply_patch に渡したパッチは編集として扱うのに、編集として扱わないとだけ書いている）。`git diff --check main..HEAD` → .gitignore の末尾の空行で exit 2
   - 完了条件: `rg -n "still counts as an edit" README.md` → 1 件、`git diff --check main..HEAD` → exit 0
   - コミット: `docs(readme): say a patch passed to apply_patch through the shell is still an edit in Codex`
+  - 結果: red: `git diff --check main..HEAD` → .gitignore:27 の末尾の空行で落ちた。直した後 `rg -n "still counts as an edit" README.md` → 1 件、`git diff --check main..HEAD` → 下のコミットの後に exit 0
 
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた

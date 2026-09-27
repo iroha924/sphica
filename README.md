@@ -128,7 +128,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 ## Limits in 0.5.1
 
 - Structured records exist only for what you traced, harvested, or gleaned. Everything else is searchable only as captured text (`search` with `sources: true`).
-- A shell command that names a file gets its decisions even when it does not read the file, and a shell command that edits a file gets them only as a command naming it, not as an edit.
+- A shell command that names a file gets its decisions even when it does not read the file. A shell command that edits a file gets them only as a command naming it, not as an edit (in Codex, a patch passed to `apply_patch` through the shell still counts as an edit).
 - In Codex, `$sphica:trace`, `$sphica:harvest`, and `$sphica:glean` write only when Codex tells Sphica which directory the session is in. Codex 0.157.1 does, through an experimental MCP capability; if a later Codex stops, they stop with a message and write nothing.
 - Showing a record does not make the agent follow it. In our evaluation Codex received and found an earlier decision against a request, and still carried out the request as asked.
 - A code location in a record is checked against your working tree when it is read ("located", "moved", "missing"). A located symbol does not prove the decision still holds.
