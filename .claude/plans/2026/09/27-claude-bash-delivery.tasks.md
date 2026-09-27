@@ -53,13 +53,14 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `feat(deliver): deliver when a Claude Code Bash command names an anchored file`
   - 結果: 新しいテストは変更前のコードで「trace:ext-s1/map が出ない」で失敗。変更後 `node --test test/deliver.test.ts test/deliver-codex.test.ts test/review-bridge.test.ts` → pass 22 / fail 0。`tsc --noEmit` 通過
 
-- [ ] T03: hooks.json の matcher に Bash を足し、Claude 側の matcher を検査する
+- [x] T03: hooks.json の matcher に Bash を足し、Claude 側の matcher を検査する
   - 種別: 変更
   - 計画: S2
   - 依存: T02（フックが Bash を渡しても deliver.ts が Claude の Bash を扱わないと何も起きない）
   - 変更: `plugin/hooks/hooks.json`, `scripts/check-ai-config.mjs`
   - 完了条件: `bun run verify:ai` → exit 0。matcher から Bash を外すと同じコマンドが Claude の matcher の違反で落ちる
   - コミット: `feat(hooks): run Claude Code delivery before Bash commands`
+  - 結果: 検査を足した直後（matcher に Bash が無い状態）で `bun run verify:ai` → 「the PreToolUse delivery matcher must cover Read and Bash」で exit 1。Bash を足した後 → exit 0
 
 - [ ] T04: README（英・日）を両ホスト共通の書き方に直す
   - 種別: 変更
