@@ -11,17 +11,17 @@ English | [日本語](https://github.com/iroha924/sphica/blob/main/README.ja.md)
 
 **Local memory of past implementation and decisions for Claude Code and Codex.**
 Sphica records your coding sessions, and keeps what was decided, rejected, deferred, and built, each record quoting the words it came from.
-Your agent finds those records when it searches, and sees the relevant ones on its own before it edits a file they apply to.
+Your agent finds those records when it searches, and sees the relevant ones on its own when it reads or edits a file they apply to (in Codex, before a shell command that names the file and before `apply_patch`).
 The database is a single SQLite file on your machine.
 
 ## Features
 
 - **Automatic recording.** Sphica keeps your prompts, the agent's final reply for each turn, and the paths of the files a turn changed (by the edit tools, or seen in `git status` at the turn's end).
 - **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from, and a decision counts as adopted only when you said so.
-- **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and the issues it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
+- **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and up to five issues the body says it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
 - **Evidence found later.** `/sphica:glean` adds evidence and corrections to existing records. It asks you for the source (an issue URL, the file and line, meeting notes) before saving; a claim without one is kept only as unsourced and never used as fact.
-- **Shown when it matters (Claude Code).** At session start, the current work; before an edit, the active decisions anchored to that file; when your prompt names a recorded option or code symbol, that record.
-- **Search in Japanese and English.** Records carry search words in both languages, so a question in one finds a record written in the other.
+- **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. Works in both Claude Code and Codex.
+- **Search in Japanese and English.** Records are made with search words in both languages, so a question in either language is more likely to find them.
 - **Reviews check past decisions.** `/sphica:review` runs a reviewer per focus (correctness, security, written conventions, and past decisions by default; redundancy with `full`), and checks the diff against the records it touches.
 
 Records are never rewritten: a correction is a new record that supersedes the old one, and the history stays.
@@ -60,7 +60,7 @@ codex plugin marketplace add iroha924/sphica --ref main
 codex plugin add sphica@sphica
 ```
 
-In Codex, open `/hooks` and mark Sphica's hooks as trusted. Nothing is recorded until you do. If a plugin update changes the hooks, trust them again.
+In Codex, open `/hooks` and mark Sphica's hooks as trusted. Automatic recording does not start until you do. If a plugin update changes the hooks, trust them again.
 
 **3. Set up in your repository**
 
@@ -81,7 +81,7 @@ sphica doctor
 
 ## Quick start
 
-Sphica records sessions only in repositories you register (projects); run `sphica init` in each one.
+Only sessions in repositories you register (projects) go into Sphica's database; run `sphica init` in each one.
 
 Work as usual. At the end of a session with something worth keeping, run `/sphica:trace` (`$sphica:trace` in Codex).
 `/sphica:trace pending` lists earlier sessions not traced yet. To keep what a pull request decided, run `/sphica:harvest 123`.
@@ -100,20 +100,20 @@ Without being asked, Sphica adds a few past records to what the agent sees, each
 - At session start: the current work and project-wide constraints.
 - On a prompt that names a recorded code symbol, file path, or option.
 - Before the agent reads or edits a file a decision applies to, and before a shell command that names such a file (naming it is not proof the command reads it). A read shows each record once per session.
-- Before a review. When you run your own review command (any name containing `review`, or a name listed in the `SPHICA_REVIEW_COMMANDS`
-  environment variable, comma-separated), it gets the decisions your local change touches. `/sphica:review` checks them itself. Claude Code only.
+- Before a review (Claude Code only). When you run your own review command (any name containing `review`, or a name listed in the `SPHICA_REVIEW_COMMANDS`
+  environment variable, comma-separated), it gets the decisions your local change touches. `/sphica:review` checks them itself.
 
-In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, and before a shell command that names such a file.
+In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, and before a shell command that names such a file (Codex reads files through shell commands, so this covers reads).
 There is no review hook in Codex: run `$sphica:review`.
 
-The agent searches with Sphica's `search` and opens full records with `read`. `status` tells it how much of the history has been traced, so an empty search is not mistaken for "never decided".
+The agent searches with Sphica's `search` and opens full records with `read`. `status` tells it how much of the history has been traced, so an empty search is less likely to be mistaken for "never decided".
 
 ## What gets recorded and where it goes
 
-- **Where.** The database is `~/.sphica/sphica.db`. Records wait in a local queue, `~/.sphica/spool`, until they are written to it. Each machine has its own database; nothing is shared between machines.
-- **What.** Your prompts, the agent's final reply for each turn, and the paths of changed files. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format. Replies in the middle of a turn, and files created and deleted within one turn, are not seen.
+- **Where.** The database is `~/.sphica/sphica.db`. Captured sessions wait in a local queue, `~/.sphica/spool`, until they are written to it. Each machine has its own database; nothing is shared between machines.
+- **What.** Your prompts, the agent's final reply for each turn, and the paths of changed files. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format. Replies in the middle of a turn are not kept, nor are files created and deleted within one turn without the edit tools.
 - **What was shown.** Each automatic delivery is logged by which records it showed, not their text.
-- **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue and are written after you register it. Held records are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
+- **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue and are written after you register it. Held sessions are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
 - **Secrets.** Only secrets with a recognizable shape are masked:
   - keys with known prefixes
   - `KEY=…` and `"password": …` assignments
@@ -123,20 +123,16 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 
   **Anything else is stored as typed, so do not paste secrets into a session.**
 - **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, and `sphica doctor` runs `npm` and `claude` to check installed versions.
-- **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only the owner's or a maintainer's words can adopt a decision.
+- **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only your words, or those of the repository's owner or a maintainer, can adopt a decision.
 
-## Limits in 0.5.1
+## What Sphica can't do yet
 
-- Structured records exist only for what you traced, harvested, or gleaned. Everything else is searchable only as captured text (`search` with `sources: true`).
-- A shell command that names a file gets its decisions even when it does not read the file. A shell command that edits a file gets them only as a command naming it, not as an edit (in Codex, a patch passed to `apply_patch` through the shell still counts as an edit). In Claude Code this covers the Bash tool; commands run through its PowerShell tool (Windows without Git Bash) get no delivery.
-- In Codex, `$sphica:trace`, `$sphica:harvest`, and `$sphica:glean` write only when Codex tells Sphica which directory the session is in. Codex 0.157.1 does, through an experimental MCP capability; if a later Codex stops, they stop with a message and write nothing.
-- Showing a record does not make the agent follow it. In our evaluation Codex received and found an earlier decision against a request, and still carried out the request as asked.
-- A code location in a record is checked against your working tree when it is read ("located", "moved", "missing"). A located symbol does not prove the decision still holds.
-
-## Upgrading from 0.4
-
-0.5.0 keeps records in a new format. A 0.4 database is refused and left unchanged; its records are not carried over.
-Move `~/.sphica/sphica.db` aside (keep it if you want the old data), then run `sphica init` again in each repository.
+- Only what you traced, harvested, or gleaned becomes a structured record. The rest of a conversation is searchable as captured text (`search` with `sources: true`).
+- For shell commands, Sphica only sees whether a command names a file. It may show decisions for a file the command never reads, and a shell command that edits a file is not treated as an edit (in Codex, a patch passed to `apply_patch` through the shell is treated as an edit).
+- Commands run through Claude Code's PowerShell tool (Windows without Git Bash) do not get decisions yet.
+- In Codex, `$sphica:trace`, `$sphica:harvest`, and `$sphica:glean` can write only when Codex tells Sphica which directory the session is in. Current Codex does. When it does not, they write nothing and tell you why.
+- Showing a record does not make the agent follow it.
+- A code location in a record is checked against your working tree when it is read. Finding the code name (a function name, say) the record points to does not mean the decision still holds.
 
 ## Updating
 
@@ -200,11 +196,11 @@ Everything else runs inside Claude Code and Codex, through the `/sphica:*` comma
 
 Report vulnerabilities privately as described in [SECURITY.md](https://github.com/iroha924/sphica/blob/main/SECURITY.md).
 
-Since 0.37.1, each release is built by GitHub Actions from a tag on the head of a pull request whose CI has passed, and staged on npm.
+Each release is built by GitHub Actions from a tag on the head of a pull request whose CI has passed, and staged on npm.
 The maintainer checks its SHA-512 checksum and provenance, then approves publication with two-factor authentication.
-For these versions, the [npm page](https://www.npmjs.com/package/sphica#provenance) links to the workflow and the commit each one was built from.
+The [npm page](https://www.npmjs.com/package/sphica#provenance) links to the workflow and the commit each release was built from.
 
-Dependabot opens pull requests to update the GitHub Actions used in CI. It does not cover the npm dependencies bundled into the package, because Dependabot cannot read the Bun lockfile format (v2) this repository uses.
+Dependabot opens weekly pull requests to update the GitHub Actions used in CI, and Renovate opens monthly ones for the npm dependencies bundled into the package.
 
 ## Contributing
 
