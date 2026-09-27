@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import { branchOf } from "../src/capture.ts";
 import { inTransaction } from "../src/db.ts";
 import { deliver } from "../src/deliver.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -261,6 +262,9 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
     assert.ok(shown.length >= 1 && shown.length < 12, `${shown.length} reads delivered`);
     assert.ok(shown.join("").length <= 3000, `${shown.join("").length} chars over the session`);
     assert.ok(shown.length <= 8);
+    // The session a delivery opens carries its branch (capture never fills it in later), so work can be matched to it
+    const branch = db.owner.prepare("select branch from session where external_id = 'budget'").get()?.branch;
+    assert.ok(branch && branch === branchOf(repo), String(branch));
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

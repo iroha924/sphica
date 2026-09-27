@@ -495,6 +495,7 @@ async function log(
   event: Event,
   plan: Plan,
   outcome: string,
+  branch: string | null,
 ): Promise<void> {
   const cap = openWriter("capture", file);
   try {
@@ -502,7 +503,7 @@ async function log(
     const now = iso(Date.now());
     await cap
       .insertInto("capture_session")
-      .values({ id, project_id: projectId, host, external_id: external, branch: null, started_at: now })
+      .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
       .execute();
     await cap
       .insertInto("capture_delivery")
@@ -614,9 +615,16 @@ export async function deliver(
               ? await beforeReview(db, pid, place.root, call)
               : await atStart(db, pid, branchOf(place.root));
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
-    await log(file, pid, host, input.session_id, event, plan, plan.text ? "emitted" : "nothing").catch(
-      () => {},
-    );
+    await log(
+      file,
+      pid,
+      host,
+      input.session_id,
+      event,
+      plan,
+      plan.text ? "emitted" : "nothing",
+      branchOf(place.root),
+    ).catch(() => {});
     return plan.text;
   } catch (e) {
     // Unavailable is not "nothing applies": the edit and read hooks and session start say so, once per session (not every shell command)
