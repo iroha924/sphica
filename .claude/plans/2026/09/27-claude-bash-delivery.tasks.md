@@ -110,6 +110,16 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `docs(agents): say a child process must not inherit SPHICA_HOME either`
   - 結果: red: `rg -n "SPHICA_HOME" AGENTS.md` → 0 件。直した後、同じ rg で AGENTS.md と verification.md が各 1 件、`bun run verify:ai` → exit 0
 
+- [x] T10: README の限界に、Claude Code の PowerShell ツールには配信しないことを書く
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T08（直す README の行を T08 が書いた）
+  - 変更: `README.md`, `README.ja.md`
+  - red: `rg -n "PowerShell" README.md README.ja.md` → 0 件（Git Bash の無い Windows では PowerShell ツールで読むのに、シェルのコマンドなら配信すると書いている）
+  - 完了条件: `rg -n "PowerShell" README.md README.ja.md` → 各 1 件、`bun run english` → exit 0
+  - コミット: `docs(readme): say Claude Code's PowerShell tool gets no delivery`
+  - 結果: red: `rg -n "PowerShell" README.md README.ja.md` → 0 件。直した後、同じ rg で各 1 件、`bun run english` → exit 0
+
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
@@ -120,3 +130,4 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
 2026-09-27 / A4 / 紐付く記録 200 件の DB で、何も名指ししない Bash の入力を deliver.js に 50 回: 中央値 89 ms、p95 91 ms / Codex の約 75 ms に近く、リスクの報告条件に当たらない
 2026-09-27 / T07, T08 / 全体の差分の Codex レビュー（main..c41fce8）で 3 件と git diff --check の 1 件 / F1（sql:live の子が SPHICA_HOME を引き継ぐ）は T07、F3（README の Codex の patch の説明）と末尾の空行は T08 で直す。F2（配信の印が os.tmpdir に作られる）は利用者ごとの一時ファイルで、セッション ID で分かれ、持ち主の ~/.sphica のデータではないので採らない
 2026-09-27 / T09 / 修正分の Codex レビュー（c41fce8..2da1d01）で 1 件: AGENTS.md の temp-home に SPHICA_HOME が無い / T09 を足して直した
+2026-09-27 / T10 / review-shipping（main..d12ea05）で 2 件 / 2（PowerShell ツール）は T10 で README に書いた。1（書き込みロックで配信の記録が 5 秒待ち、ホストの 5 秒で配信ごと失われる）は Read で以前からある挙動で、配信の順序を変える必要があり 0.5.1 の範囲外。PR の見送り欄に書き、issue にするかは持ち主に聞く
