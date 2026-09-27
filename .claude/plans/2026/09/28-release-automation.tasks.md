@@ -124,7 +124,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): remove Release note comments until none is left`
   - 結果: red: 変更前のコードで、開始記号が残った本文（`x` と `Hidden` の 2 行）が返って落ちた。変更後 `node --test server/test/release-finish.test.ts` → 7 pass / 0 fail。実データの `node scripts/release-finish.mjs --dry-run` → v0.5.3 で通る。CodeQL は push 後に確かめる
 
-- [ ] T11: tag push のときだけ動くジョブの名前を、式ではなく固定の文字列にする
+- [x] T11: tag push のときだけ動くジョブの名前を、式ではなく固定の文字列にする
   - 種別: 修正
   - 計画: S4
   - 依存: T04（直す対象のジョブ）
@@ -132,6 +132,7 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - red: `gh pr checks 182` → スキップされたジョブの名前が `github.event_name == 'push' && format('release {0}: publish', …` のように式のまま表示された（GitHub はスキップしたジョブの name を評価しない）
   - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。push 後の `gh pr checks 182` にスキップされたジョブの式が出ない
   - コミット: `fix(release): name tag-only jobs with plain text`
+  - 結果: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。`gh pr checks` は push 後に確かめる
 
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ

@@ -195,7 +195,8 @@ jobs:
 
   # Tells the owner on the PR where to approve. publish does not wait for it, so a failed comment does not stop the release
   notify-approval:
-    name: "${{ github.event_name == 'push' && format('release {0}: ask for approval', github.ref_name) || 'dry run: ask for approval' }}"
+    # Runs only on a tag push. GitHub does not evaluate the name of a skipped job, so the name is plain text
+    name: ask for approval
     needs: prepare
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -221,7 +222,7 @@ jobs:
           gh pr comment "$PULL" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
 
   publish:
-    name: "${{ github.event_name == 'push' && format('release {0}: publish', github.ref_name) || 'dry run: publish' }}"
+    name: publish
     needs: [sbom, prepare]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -307,7 +308,7 @@ jobs:
         run: npm publish "$RUNNER_TEMP/release/$TGZ" --tag latest --provenance
 
   merge:
-    name: "${{ github.event_name == 'push' && format('release {0}: merge', github.ref_name) || 'dry run: merge' }}"
+    name: merge
     needs: [prepare, publish]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -334,7 +335,7 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
   finish:
-    name: "${{ github.event_name == 'push' && format('release {0}: finish', github.ref_name) || 'dry run: finish (tag only)' }}"
+    name: finish
     needs: [prepare, merge]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
@@ -367,7 +368,7 @@ jobs:
 
   # When any step of a release fails, say on the PR how far it got. Whether npm has the version decides the recovery
   report-failure:
-    name: "${{ github.event_name == 'push' && format('release {0}: report failure', github.ref_name) || 'dry run: report failure' }}"
+    name: report failure
     needs: [sbom, prepare, publish, merge, finish]
     if: always() && github.event_name == 'push' && contains(needs.*.result, 'failure')
     runs-on: ubuntu-24.04
