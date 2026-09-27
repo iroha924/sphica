@@ -22,13 +22,14 @@ base: main
 
 旧文言のまま、スロットから Go の節を除き、gold を実配信と同じ表示にし、負例タスクを足す。ここまでのコミットが旧文言の計測の基準になる。
 
-- [ ] T01: npm と 3 つの manifest のバージョンを上げる
+- [x] T01: npm と 3 つの manifest のバージョンを上げる
   - 種別: 変更
   - 計画: S1
   - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base v0.5.2` → 4 か所が同じ新しいバージョン
   - コミット: `chore(release): bump to the next patch version`
+  - 結果: `bun run release:plan -- --base v0.5.2` → npm 0.5.3 / plugin 0.5.3 / marketplace 0.5.3 / Codex 0.5.3
 
 - [ ] T02: 記録 1 件の描画を deliver.ts から export し、gold がそれを使う。スロットの Go の節を除き、切り詰めを検査する
   - 種別: 変更
