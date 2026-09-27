@@ -155,6 +155,10 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
 5. From a session after the update, call `status` and `search`, and check the contents of the changed MCP tools, Skills, and Agents. If capture
    changed, also check that this session's messages are found by `search` with `sources: true`, and that the "Recording" line in `sphica doctor`
    has nothing waiting. If delivery changed, read and then edit a file with an anchored record and check the hook's context arrived (a read shows each record once per session)
+6. Claude also runs the installed plugin headless, pointing `SPHICA_DB` at a temporary database so the owner's `~/.sphica` is untouched: in a scratch
+   repository with one anchored record, `claude -p` (a prompt that reads the file, and the user's own review command) and `codex exec` (the same, after
+   the owner trusted the hooks in `/hooks`; `--dangerously-bypass-hook-trust` shows only that the hooks work, not that they are trusted). Check the
+   delivery rows, the first Sphica tool call, and the final answer. Report how many runs showed the behavior, not one run as proof
 
 `plugin/skills/review/reviewers/` also goes through the cache, so saving or restarting a session does not give the new text.
 When changing aspects, read `plugin-agent-authoring` first too.
