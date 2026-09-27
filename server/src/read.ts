@@ -135,8 +135,13 @@ async function describe(
       .orderBy("id")
       .execute(),
   ]);
-  // As of a past time, what happened later has not happened: retractions, retired anchors, and resolved conflicts after it read as open
+  // As of a past time, what happened later has not happened: retractions, retired anchors, and resolved conflicts after it read as open,
+  // and the lifecycle is the last state reached by then
+  let lifecycle = u.lifecycle;
+  let history = states;
   if (asOf) {
+    history = states.filter((s) => s.at <= asOf);
+    lifecycle = history.at(-1)?.to_state ?? "candidate";
     const later = (at: string | null) => (at && at > asOf ? null : at);
     for (const e of evidence)
       if (!later(e.retracted_at)) Object.assign(e, { retracted_at: null, retraction_reason: null });
@@ -147,7 +152,7 @@ async function describe(
   }
 
   const out = [
-    `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
+    `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${lifecycle}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
     u.text,
   ];
   if (u.why) out.push(`Why: ${u.why}`);
@@ -202,7 +207,7 @@ async function describe(
         `${l.from_id === u.id ? "Implements" : "Implemented by"} ${l.from_id === u.id ? l.to_key : l.from_key}`,
       );
   }
-  out.push(`History: ${states.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
+  out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
   return out.join("\n");
 }
 

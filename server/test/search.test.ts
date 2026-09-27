@@ -331,10 +331,20 @@ test("reading as of a past time shows no retraction made after it", async () => 
     db.owner.exec(
       "update unit_evidence set retracted_at = '2099-01-01T00:00:00.000Z', retraction_reason = 'later mistake', retraction_source_id = source_id, retraction_span_start = span_start, retraction_span_end = span_end where role = 'explains'",
     );
+    // A withdrawal dated after the as-of time too
+    const run = Number(
+      db.owner.prepare("select run_id from unit_state order by id desc limit 1").get()?.run_id,
+    );
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', '2099-01-02T00:00:00.000Z', 'later withdrawal', ? from unit where key = 'trace:ext-s1/pnpm'",
+      )
+      .run(run);
     const asOf = new Date(Date.now() + 60_000).toISOString();
     const before = (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null, asOf)) ?? "";
     assert.match(before, /Use pnpm\./);
-    assert.doesNotMatch(before, /retracted|later mistake/);
+    assert.doesNotMatch(before, /retracted|later mistake|withdrawn|later withdrawal/);
+    assert.match(before, /decision do, active/);
     assert.match(
       (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null)) ?? "",
       /\[retracted: later mistake\]/,
