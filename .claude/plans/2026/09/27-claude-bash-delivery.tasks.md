@@ -35,10 +35,19 @@ base: main
 
 Claude Code の Bash がファイルを名指ししたら配信し、フックと検査と README をそろえて 0.5.1 にする。
 
+- [x] T05: 版を 0.5.1 に揃える
+  - 種別: 変更
+  - 計画: S4
+  - 依存: なし
+  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `bun run release:plan -- --base v0.5.0` → release kind plugin、4 か所が 0.5.1
+  - コミット: `chore(release): bump to 0.5.1`
+  - 結果: 4 か所を 0.5.0 → 0.5.1。release:plan は T02 以降の変更を積んだ後に完了条件 A2 で流す（このコミット単体では配布物の中身は変わらない）
+
 - [ ] T02: deliver.ts で Claude の Bash を名指しの読み取りにし、テストを足す
   - 種別: 変更
   - 計画: S1
-  - 依存: なし
+  - 依存: T05（pre-commit の版のゲートが、版を上げずに配布物を変えるコミットを止める）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts` → 全件 pass（Claude の Bash の名指し、何も名指ししない Bash、Read の後の Bash、patch 形式の Bash の 4 件を含む）
   - コミット: `feat(deliver): deliver when a Claude Code Bash command names an anchored file`
@@ -59,12 +68,5 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - 完了条件: `rg -n "Limits in 0.5.1|0.5.1 の限界" README.md README.ja.md` → 各 1 件。`bun run english` → exit 0
   - コミット: `docs(readme): say Claude Code also gets decisions for shell commands that name a file`
 
-- [ ] T05: 版を 0.5.1 に揃える
-  - 種別: 変更
-  - 計画: S4
-  - 依存: T04（配布物に入る変更がそろってから版を上げる）
-  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base v0.5.0` → release kind plugin、4 か所が 0.5.1
-  - コミット: `chore(release): bump to 0.5.1`
-
 ## 記録
+2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
