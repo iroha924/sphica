@@ -140,6 +140,15 @@ base: main
   - コミット: `fix(evals): commit a run's result without the checkout's own git hooks`
   - 結果: 直す前は、必ず失敗する pre-commit フックを入れたスロットで結果コミットが作られず、初期コミットのまま push された（red）。直した後は "eval result" のコミットに src/new.ts と .eval/answer.md が入って push された。`bun run verify` → exit 0。--no-verify は使わず、後始末のコミットだけ core.hooksPath を空に向けた（エージェントの成果を集めるためのコミットで、規範の対象の自分のコミットではない）
 
+- [x] T13: 固定文言が記録の枠を取らないことを、編集の前・プロンプト・SessionStart でも検査する（review-shipping の指摘）
+  - 種別: 追加
+  - 計画: S4
+  - 依存: T05（検査する上限が T05 のもの）
+  - 変更: `server/test/deliver.test.ts`
+  - 完了条件: `node --test --test-name-pattern "takes no room" test/deliver.test.ts` → pass。各面の上限から + ASK を外すとそれぞれ fail。`bun run verify` → exit 0
+  - コミット: `test(deliver): check that the request takes no room from records on every surface`
+  - 結果: 直した状態で pass 1。編集の前・プロンプト・SessionStart の上限から + ASK をそれぞれ外すと、どれも fail 1（edit keeps all five records / prompt keeps both records / session start keeps all three constraints）。`bun run verify` → exit 0
+
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
 2026-09-28 / T03 / pilot-display の依頼文が pilot-dates の依頼文の先頭と同じで、collect と gold の「依頼文を含むか」の判定で取り違え得た / 依頼文を言い換え、含み合いが無いことを確かめた
@@ -156,3 +165,6 @@ base: main
 2026-09-28 / 計測 / 旧文言の結果（tracked failure = 届いたか見つけたうえで反する実装）: Claude は pilot-dates と sphica-search-wording の inject・gold で 0/12、Codex は 8/12（pilot-dates 6/6、sphica gold 2/3、inject 0/3）。none と search の stopped_at_plan は両モデル 0。旧文言 sphica の Claude none と search で 1 回ずつ結果ブランチ無し（T09 の不具合）
 2026-09-28 / T11 / 新文言 tsundoku の Claude の pilot-dates inject・gold で 1 点が 3 回。パッチは 6 回とも UTC を守り隠しテストも通過したが、採点役に渡った最終回答がクラウドの Stop フック（未コミットの催促）の後の「作業ツリーはクリーン」だった / 計測中のスロットを変えないよう、計測の後に T11 で直す。tracked failure はパッチで判定するので出荷の条件には響かない
 2026-09-28 / T12 / 新文言 sphica の Claude none で 1 回、結果ブランチが無かった。run のログでは、エージェントが bun install した後に lefthook の pre-commit が動いており、後始末の結果コミットが作られず .eval/ が staged のまま残っていた（フックが止めたと見ているが未確定）/ 計測の後に T12 で直す。旧文言 sphica の除外 2 回も同じ原因の可能性がある
+2026-09-28 / T13 / review-shipping で 2 件: 固定文言が枠を取らないことを守るのは読む前のセッション上限だけ（再現済み）、アップデートをまたぐ 1 セッションで読む前の上限を最大 273 文字ほど超えうる / 前者を T13 で検査に足した。後者は 1 度きりで上限も決まっているので見送った
+2026-09-28 / 全体レビュー / Codex の差分全体のレビューで 1 件: gold の本文が切れても、同じ文が Why にあると検査を通る / T07 で見送ったのと同じ、わざと作った入力なので見送った
+2026-09-28 / 計測 / 新文言の結果: 衝突タスクの inject・gold で Codex の tracked failure 0/12（除外 1: 30 分の上限）、Claude 0/12。pilot-display は両モデルとも 10/10 実装。none と search の stopped_at_plan は 0。出荷の条件を満たした。pilot-dates の search で Codex が検索で記録を見つけても反する実装をしたのは旧・新とも 1/2

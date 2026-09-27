@@ -682,3 +682,46 @@ test("a later read in a session keeps its records: the request is not charged to
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// Each surface's limit grows by the request, so a delivery that filled the limit before still shows every record it did
+test("the request takes no room from records on edit, prompt, and session start", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const body = (n: number, len: number) => `Rule ${n} ${"r".repeat(len)}`;
+    const edits = [1, 2, 3, 4, 5].map((n) => body(n, 190));
+    const named = [1, 2].map((n) => body(10 + n, 230));
+    const broad = [1, 2, 3].map((n) => body(20 + n, 230));
+    const m = message(db, p, { id: "m1", text: [...edits, ...named, ...broad].join(" ") });
+    await save(db, p, {
+      units: [
+        ...edits.map((t, n) =>
+          decided(`e${n}`, m, t, { anchors: [{ path: "src/e.ts", role: "applies_to" }] }),
+        ),
+        ...named.map((t, n) =>
+          decided(`p${n}`, m, t, {
+            anchors: [{ path: `src/p${n}.ts`, symbol: "openStore", role: "applies_to" }],
+          }),
+        ),
+        ...broad.map((t, n) => decided(`b${n}`, m, t)),
+      ],
+    });
+    const at = (session: string, input: Record<string, unknown>) =>
+      deliver({ session_id: session, cwd: repo, ...input }, "claude-code", db.file);
+    const lines = (text: string, prefix: RegExp) => text.split("\n").filter((l) => prefix.test(l)).length;
+    const edit = await at("e", {
+      hook_event_name: "PreToolUse",
+      tool_name: "Edit",
+      tool_input: { file_path: path.join(repo, "src/e.ts") },
+    });
+    assert.equal(lines(edit, /^- trace:ext-s1\/e/), 5, "edit keeps all five records");
+    const prompt = await at("p", { hook_event_name: "UserPromptSubmit", prompt: "openStore() を直したい" });
+    assert.equal(lines(prompt, /trace:ext-s1\/p/), 2, "prompt keeps both records");
+    const start = await at(crypto.randomUUID(), { hook_event_name: "SessionStart", source: "startup" });
+    assert.equal(lines(start, /^- trace:ext-s1\/b/), 3, "session start keeps all three constraints");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
