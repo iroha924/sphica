@@ -85,3 +85,6 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
 2026-09-27 / T04 / cases.json の note が T01 で消した過去の計画ファイルを指していた / 変更欄を「README.md, README.ja.md」から「README.md, README.ja.md, server/evals/acceptance/cases.json」にして参照を外した
 2026-09-27 / T06 / 一時 HOME で Claude のサインインが効かず、公開前の実測（A3）が止まった / 持ち主の判断で SPHICA_HOME を足す T06 を追加し、plan に S6 を足した
+2026-09-27 / T02, T03, T06 / Codex のタスクごとのレビュー（d116709, 5e0a273, 6334c68）はどれも指摘 0 件 / 採る指摘なし。Codex 側でのテストは読み取り専用のため一時ディレクトリを作れず未実行で、手元では全件 pass
+2026-09-27 / A3 / 候補（--plugin-dir、sphica@sphica は無効）で claude -p を 3 回: 3 回とも Bash で src/db.ts を読み、pre_read emitted が 1 行ずつ、最初の Sphica のツールは read、回答は 3 回とも記録（起動が遅くなったので Map のまま）を理由に挙げた。本物の ~/.sphica に headless-demo のプロジェクトも spool も無し / 期待どおり
+2026-09-27 / A4 / 紐付く記録 200 件の DB で、何も名指ししない Bash の入力を deliver.js に 50 回: 中央値 89 ms、p95 91 ms / Codex の約 75 ms に近く、リスクの報告条件に当たらない
