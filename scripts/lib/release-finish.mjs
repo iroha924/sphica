@@ -2,10 +2,13 @@
 
 /** The body of the PR's `## Release notes` section without HTML comments, or null when it is missing or empty. */
 export function releaseNotes(body) {
-  const lines = String(body ?? "")
-    .replace(/\r/g, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .split("\n");
+  // Remove comments until none is left, so nested markers cannot leave an opening `<!--` behind
+  let text = String(body ?? "").replace(/\r/g, "");
+  for (let previous = ""; previous !== text; ) {
+    previous = text;
+    text = text.replace(/<!--[\s\S]*?-->/g, "");
+  }
+  const lines = text.split("\n");
   // A heading inside a code fence is text, not a section
   let fenced = false;
   const heading = lines.map((line) => {
@@ -19,7 +22,8 @@ export function releaseNotes(body) {
     .slice(start + 1, end === -1 ? undefined : end)
     .join("\n")
     .trim();
-  return notes === "" ? null : notes;
+  // An unclosed comment would hide the rest of the notes in the Release, so such notes go back to the owner
+  return notes === "" || notes.includes("<!--") ? null : notes;
 }
 
 /** From `git log --merges --format='%H %P'` lines, the merge commit whose second parent is the tag commit, or null. */

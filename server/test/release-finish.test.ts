@@ -143,6 +143,9 @@ test("release-finish reads only the Release notes section, without comments", ()
   assert.equal(releaseNotes("## Release notes\r\n\r\nLast section.\r\n"), "Last section.");
   assert.equal(releaseNotes("## Release notes\n\n<!-- x -->\n"), null);
   assert.equal(releaseNotes(null), null);
+  // Nested comment markers must not leave an opening `<!--` that would hide the rest of the notes
+  assert.equal(releaseNotes("## Release notes\n\n<!<!---->--x\nHidden\n"), null);
+  assert.equal(releaseNotes("## Release notes\n\nText <!-- open\n"), null);
   // Headings inside a code fence are text, not sections
   assert.equal(
     releaseNotes("## What changed\n```md\n## Release notes\nInjected\n```\n## Verification\nOK\n"),

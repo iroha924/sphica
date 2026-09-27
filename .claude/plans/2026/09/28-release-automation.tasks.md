@@ -114,6 +114,25 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
   - コミット: `fix(release): take whether npm has the version from the publish job`
   - 結果: actionlint → exit 0。判定のシェル → `success -> yes`、`skipped -> no`、`cancelled -> no`、`failure -> yes`（v0.5.3、npm にある）、`failure(v9.9.9) -> unknown`。`node scripts/check-ai-config.mjs` → exit 0
 
+- [x] T10: Release notes から HTML コメントを取り除く処理が、入れ子の記号でコメントの開始記号を残さないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T07（直す対象の抽出処理）
+  - 変更: `scripts/lib/release-finish.mjs`, `server/test/release-finish.test.ts`
+  - red: `node --test server/test/release-finish.test.ts` → コメントの開始記号を入れ子にしたノートで、変更前のコードは開始記号が残った本文を返して落ちる
+  - 完了条件: `bun run --cwd server test -- --test-name-pattern "release-finish"` → 入れ子の記号と閉じないコメントで null を含めて全件 pass。PR の CodeQL に新しい指摘が無い
+  - コミット: `fix(release): remove Release note comments until none is left`
+  - 結果: red: 変更前のコードで、開始記号が残った本文（`x` と `Hidden` の 2 行）が返って落ちた。変更後 `node --test server/test/release-finish.test.ts` → 7 pass / 0 fail。実データの `node scripts/release-finish.mjs --dry-run` → v0.5.3 で通る。CodeQL は push 後に確かめる
+
+- [ ] T11: tag push のときだけ動くジョブの名前を、式ではなく固定の文字列にする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直す対象のジョブ）
+  - 変更: `.github/workflows/release.yml`
+  - red: `gh pr checks 182` → スキップされたジョブの名前が `github.event_name == 'push' && format('release {0}: publish', …` のように式のまま表示された（GitHub はスキップしたジョブの name を評価しない）
+  - 完了条件: `mise exec -- actionlint .github/workflows/release.yml` → exit 0。push 後の `gh pr checks 182` にスキップされたジョブの式が出ない
+  - コミット: `fix(release): name tag-only jobs with plain text`
+
 ## 記録
 - 2026-09-28 / T02 / knip がどこからも呼ばれないスクリプトを落とすので、release.yml の「承認者がいるか」のステップを release-env に置き換える変更を T02 に入れた。型宣言 `release-env.d.mts` も要った / 変更欄を前: `scripts/lib/release-env.mjs`, `scripts/release-env.mjs`, `server/test/release-env.test.ts` から、後: それに `scripts/lib/release-env.d.mts`, `.github/workflows/release.yml` を足した値へ
 - 2026-09-28 / T01 / Codex のタスクレビュー（333a550）: 指摘 0 件。Codex は sandbox で一時ディレクトリを作れずテストを流せなかったが、red と green は手元で実測済み / 採る指摘なし
@@ -125,3 +144,4 @@ Skill と検査と公開の説明が新しい流れだけを語り、この PR �
 - 2026-09-28 / 全体 / Codex の全差分レビュー: 3 件。1 publish 後に remote の tag が動いても気づかない、2 渡された merge コミットが PR の実際の merge か確かめない、3 既存の Release の本文が PR のノートと違っても成功扱い / 1 と 2 を採り、修正タスク T08 を足した。3 は Release を手で書き換えたときだけの入力で、オーナーの意図した修正で再実行を落とす副作用があるので見送る
 - 2026-09-28 / 全体 / review-shipping: 出してよい。指摘 1 件: npm のレジストリは CDN のキャッシュ（max-age=300）を返すので、publish 直後の finish が落ちうる、merge の失敗時に report-failure が誤って「npm にない」と書きうる（推測、未観測） / report-failure の誤りは T09 で直す。finish は再実行で直るので、Skill に数分待ってから再実行と書くだけにする
 - 2026-09-28 / 全体 / Codex の修正分の再レビュー（99435b5..7fff62b）: 指摘 0 件 / 対応なし
+- 2026-09-28 / 全体 / PR #182 の CI: 必須チェックとお試し実行、zizmor、actionlint は pass。CodeQL が `scripts/lib/release-finish.mjs:5-7` の HTML コメントの除去を「不完全な複数文字のサニタイズ」（high）として落とした。スキップされたジョブの名前が式のまま出た / T10 と T11 を足した。CodeQL の件は、影響（Release のノートの一部が隠れうる。GitHub が HTML をサニタイズするので実行には至らない見込み）と修正案をオーナーに報告してから直した
