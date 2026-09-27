@@ -19,10 +19,13 @@ export const SCHEMA_REVISION = 1;
 export type Role = "owner" | "reader" | "ingest" | "capture";
 
 /**
- * The database file. `SPHICA_DB` exists only for tests (the same purpose as pointing a child process's HOME at a
- * temporary directory). It is not documented in the README.
+ * Where Sphica keeps its files (~/.sphica). `SPHICA_HOME` moves all of them, for tests and for measuring a host without touching
+ * the owner's queue; `SPHICA_DB` moves only the database. Neither is documented in the README.
  */
-export const dbFile = (): string => process.env.SPHICA_DB || path.join(os.homedir(), ".sphica", "sphica.db");
+export const sphicaHome = (): string => process.env.SPHICA_HOME || path.join(os.homedir(), ".sphica");
+
+/** The database file. */
+export const dbFile = (): string => process.env.SPHICA_DB || path.join(sphicaHome(), "sphica.db");
 
 /**
  * Whether Node has the APIs the permission boundary needs. **Never continue in a weaker state.** npm may only warn

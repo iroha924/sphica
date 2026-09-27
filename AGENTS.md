@@ -34,7 +34,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
   Instead: take write connections from the factories in `server/src/db-write.ts`. The read MCP server never imports them (`bun run architecture`)
 - Records are written only through the record MCP server's run-bound tools: `trace_begin`, `harvest_begin`, and `glean_begin` bind a run to one project and one target, and `record_check` and `record_save` take that run id, never a project, session, pull request, or SQL from the record. The CLI carries only `init`, `doctor`, and `uninstall`; trace, harvest, glean, and review run as slash commands <!-- invariant: record-writes -->
 - No server that listens <!-- invariant: no-listen -->
-- No HTML or Markdown progress files. The DB is the source of truth for records <!-- invariant: no-progress-files -->
+- Sphica keeps no HTML or Markdown progress files of its own. The DB is the source of truth for records (development plans and task lists in `.claude/plans/` are not records) <!-- invariant: no-progress-files -->
 
 ### Paired changes
 
@@ -54,7 +54,7 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
 ### Tests
 
 - Run SQL on a real SQLite database in a temporary directory (`server/test/temp-db.ts`) and look at the results. Do not match built SQL strings <!-- invariant: real-sqlite-tests -->
-- Set a child process's `HOME` to a temporary directory and do not pass the parent's `SPHICA_DB` (otherwise it reads and writes the owner's `~/.sphica`) <!-- invariant: temp-home -->
+- Set a child process's `HOME` to a temporary directory and do not pass the parent's `SPHICA_DB` or `SPHICA_HOME` (otherwise it reads and writes the owner's `~/.sphica`, or the directory `SPHICA_HOME` names) <!-- invariant: temp-home -->
 - Do not skip when a precondition is missing. Fail <!-- invariant: no-silent-skip -->
 - Do not connect to external APIs. Pass without credentials <!-- invariant: no-external-api -->
 - SQLite return values differ from their types. BLOBs are Uint8Array, rows are objects without a prototype, and `returning rowid` needs `as rowid` <!-- invariant: sqlite-values -->

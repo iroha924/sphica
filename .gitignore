@@ -24,6 +24,3 @@ plugin/THIRD_PARTY_NOTICES.md
 
 # Left by npm pack. What gets published is rebuilt from bundle.
 *.tgz
-
-# Plans made with grill-codex stay on this machine.
-.claude/plans/

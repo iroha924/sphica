@@ -125,6 +125,35 @@ test("uninstall refuses without --yes outside a terminal, then deletes ~/.sphica
   }
 });
 
+// SPHICA_HOME is for tests and measurements: uninstall must not turn it into a recursive delete of any directory it names
+test("uninstall refuses while SPHICA_HOME is set and deletes nothing", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-uninstall-"));
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-project-"));
+  fs.writeFileSync(path.join(project, "keep.txt"), "mine");
+  try {
+    let out = "";
+    let code = 0;
+    try {
+      out = execFileSync(process.execPath, [CLI, "uninstall", "--yes"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_HOME: project },
+        timeout: 30_000,
+      });
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      code = err.status ?? -1;
+      out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    }
+    assert.notEqual(code, 0, out);
+    assert.match(out, /SPHICA_HOME is set/);
+    assert.ok(fs.existsSync(path.join(project, "keep.txt")), "the directory SPHICA_HOME names was deleted");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test("uninstall names a SPHICA_DB in a sibling of ~/.sphica as outside it", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-uninstall-"));
   try {

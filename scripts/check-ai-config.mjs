@@ -299,6 +299,17 @@ try {
       fail("plugin/hooks/codex.json: the PreToolUse delivery matcher must cover apply_patch and Bash");
     }
   }
+  // Claude Code reads with the Read tool and, often, with shell commands (Bash): the delivery hook must see both
+  const claudeDeliver = (JSON.parse(read("plugin/hooks/hooks.json")).hooks?.PreToolUse ?? []).filter(
+    (group) => (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
+  );
+  if (
+    !claudeDeliver.some((group) =>
+      ["Read", "Bash"].every((t) => new RegExp(`^(?:${group.matcher ?? ""})$`).test(t)),
+    )
+  ) {
+    fail("plugin/hooks/hooks.json: the PreToolUse delivery matcher must cover Read and Bash");
+  }
   const marketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
   const entry = marketplace.plugins?.[0];
   const src = entry?.source;

@@ -65,7 +65,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Skill",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash",
         "hooks": [
           {
             "type": "command",

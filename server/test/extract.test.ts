@@ -30,6 +30,8 @@ const saved = {
 before(() => {
   process.env.HOME = home;
   process.env.SPHICA_DB = path.join(home, "none.db");
+  // SPHICA_HOME would win over the swapped HOME, and flush would read that directory's queue
+  delete process.env.SPHICA_HOME;
   delete process.env.CLAUDE_CODE_SESSION_ID;
   delete process.env.CODEX_THREAD_ID;
 });

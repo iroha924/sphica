@@ -19,7 +19,6 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { Kysely } from "kysely";
 import { dbFile, inTransaction, iso, sqliteCode } from "./db.ts";
@@ -28,12 +27,13 @@ import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { panel, plain } from "./panel.ts";
 import { identify, patchPaths, relativeTo } from "./project.ts";
+import { sphicaHome } from "./sqlite.ts";
 import { bytes, clean, head, mask, plural, reason, sha256, tail } from "./text.ts";
 import { changed, type Snapshot, snapshot } from "./worktree.ts";
 
 // Resolve the location on every call (so tests that replace HOME never touch the real queue).
-export const spoolDir = (): string => path.join(os.homedir(), ".sphica", "spool");
-const stateFile = (): string => path.join(os.homedir(), ".sphica", "capture.json");
+export const spoolDir = (): string => path.join(sphicaHome(), "spool");
+const stateFile = (): string => path.join(sphicaHome(), "capture.json");
 /** Records the database rejected. Moved here instead of deleted, and counted by doctor (fix and move them back to resend). */
 export const rejectedDir = (): string => path.join(spoolDir(), "rejected");
 /**
@@ -46,7 +46,7 @@ export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered
 const HOLD_DAYS = 30;
 const HOLD_MAX = 1000;
 /** Where each session's working tree stood when its running turn began. Turn start and end run in separate hook processes. */
-const baselineDir = (): string => path.join(os.homedir(), ".sphica", "worktree");
+const baselineDir = (): string => path.join(sphicaHome(), "worktree");
 
 /** A queued record. v:2 is written now; v:1 records left in a queue from 0.4 are translated when sent (never silently dropped). */
 export type Spooled =

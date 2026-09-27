@@ -20,6 +20,8 @@ import {
   spoolDir,
   write,
 } from "../src/capture.ts";
+import { dbFile } from "../src/db.ts";
+import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
 import { snapshot } from "../src/worktree.ts";
 import { project, tempDb } from "./temp-db.ts";
@@ -265,6 +267,8 @@ before(() => {
   delete process.env.SPHICA_PARENT_SESSION;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   process.env.HOME = home;
+  // SPHICA_HOME would win over the swapped HOME and point the queue at the shell's directory
+  delete process.env.SPHICA_HOME;
   execFileSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
   fs.mkdirSync(path.join(repoDir, "server"));
   execFileSync("git", ["-C", repoDir, "remote", "add", "origin", "https://github.com/o/r.git"], {
@@ -287,6 +291,27 @@ const spooled = (): Spooled[] => {
 const reset = () => fs.rmSync(spoolDir(), { recursive: true, force: true });
 /** Hides the second half of ids built from the body so only the shape is compared. */
 const shape = (id: string) => id.replace(/:(owner|assistant):[0-9a-f]{16}$/, ":$1:<hash>");
+
+// A measurement or test run points SPHICA_HOME at a temporary directory, so nothing reaches the owner's ~/.sphica
+test("SPHICA_HOME moves the database, the queue, and the local project table", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
+  const saved = { home: process.env.SPHICA_HOME, db: process.env.SPHICA_DB };
+  try {
+    process.env.SPHICA_HOME = dir;
+    delete process.env.SPHICA_DB;
+    assert.equal(dbFile(), path.join(dir, "sphica.db"));
+    assert.equal(spoolDir(), path.join(dir, "spool"));
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-local-"));
+    nameLocal(repo, "demo");
+    assert.ok(fs.existsSync(path.join(dir, "projects.json")));
+    fs.rmSync(repo, { recursive: true, force: true });
+  } finally {
+    if (saved.home === undefined) delete process.env.SPHICA_HOME;
+    else process.env.SPHICA_HOME = saved.home;
+    if (saved.db !== undefined) process.env.SPHICA_DB = saved.db;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("owner messages, the last AI reply, and edited files go into the queue", () => {
   reset();
