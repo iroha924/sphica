@@ -119,6 +119,16 @@ sphica init がアカウントを登録して結果を 1 行で出し、doctor �
   - コミット: `test(acceptance): harvest the bound owner's pull request as a contributor`
   - 結果: `bun run acceptance` → 57 pass / 0 fail（capture-09: 登録後の CONTRIBUTOR の PR が active で author_is_owner、capture-10: 登録なしは candidate で author_is_owner でない。既存 55 件は変わらず）
 
+- [x] T13: Windows CI の init で本物の gh を未ログインにし、tarball と sql:live で doctor の表示を確かめる
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（init と doctor の表示が要る）
+  - 変更: `.github/workflows/check.yml`, `scripts/check-sql-live.mjs`, `scripts/check-tarball.mjs`
+  - red: `rg -n "GH_CONFIG_DIR|GitHub owner" .github/workflows/check.yml scripts/check-tarball.mjs` → 何も出ない（Windows CI の init は認証済みになり得る本物の gh を使い、tarball の doctor も見ていない）
+  - 完了条件: `bun run sql:live` → 未登録の doctor が `○ GitHub owner none` で、to fix に入らない検査を含めて通る。`node scripts/check-tarball.mjs <tgz>` → doctor の `✓ GitHub owner hana (id 42)` を含めて通る。`actionlint .github/workflows/check.yml` → 指摘なし
+  - コミット: `fix(ci): keep gh signed out in the Windows init and check doctor's GitHub owner line`
+  - 結果: red を実測（rg が 0 件）。`bun run sql:live` → 8 / 8 SQL sites で通る。`node scripts/check-tarball.mjs` → 通る。`actionlint` → 指摘なし。CI の手順を手元で再現（空の GH_CONFIG_DIR と空のトークンで本物の gh）→ gh は exit 4 で、init は `GitHub account not bound: gh api user failed` を出した。Windows での実走は PR の CI で見る
+
 ## P3: 文書と出荷
 
 README と harvest Skill が登録を説明し、バージョンがそろう。
@@ -154,3 +164,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T05 / 受け入れの件数を固定する検査がある / capture の件数を 8 → 10 にした
 - 2026-09-28 / T10, T11 のレビュー / F2（39 文字の境界テスト）を採用し T12 を足した。F1（revision の競合の回帰テスト）は見送り（順序を決めて再現する手段が無く、起きるのは別の接続が user_version を書き換える場合だけ）
 - 2026-09-28 / T06 / harvest の record_context は `by <login> (CONTRIBUTOR)` としか出さず、Skill は CONTRIBUTOR を提案と教えるため、登録しても本人の発言を採用に引かせられない / context で owner の発言に `, the owner` を添え（pullSources に author_kind を足す）、Skill にその読み方を書いた。変更欄に extract.ts、github.ts、extract.test.ts を足した
+- 2026-09-28 / T04 のレビュー / F1（Windows CI の init が本物の gh を使う）、F2（tarball の doctor を見ていない）、F3（未登録の doctor が中立であることの検査が無い）を採用 / 修正タスク T13 を足した

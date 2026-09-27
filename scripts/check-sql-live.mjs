@@ -34,6 +34,10 @@ await withTempDir(async (dir) => {
       failures.push(
         `init with a signed-out gh does not say the account was not bound\n${unbound.out.slice(0, 600)}`,
       );
+    // Unbound is neutral: only harvest and glean need it, so doctor never lists it among the things to fix
+    const early = runCli(["doctor"], dir, covDir);
+    if (!/○ GitHub owner\s+none/.test(early.out) || /to fix:[^\n]*GitHub owner/.test(early.out))
+      failures.push(`doctor does not show an unbound GitHub owner as neutral\n${early.out.slice(0, 800)}`);
 
     // ---- CLI: register, capture, then delete, in that order ----
     // The repo has a remote, so no --name (the CLI would refuse it). The key becomes git:github.com/example/live.

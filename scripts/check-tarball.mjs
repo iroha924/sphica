@@ -62,6 +62,15 @@ try {
     throw new Error("init did not create a database");
   if (!/GitHub account hana \(id 42\) bound as the owner/.test(init))
     throw new Error(`init did not bind the GitHub account gh answered\n${init}`);
+  // doctor can exit 1 on this machine's plugin install state; only its GitHub owner line is checked here
+  let doctor;
+  try {
+    doctor = cli("doctor");
+  } catch (e) {
+    doctor = `${e.stdout ?? ""}`;
+  }
+  if (!/✓ GitHub owner\s+hana \(id 42\)/.test(doctor))
+    throw new Error(`doctor did not show the bound GitHub account\n${doctor}`);
   const filesIn = (dir) =>
     fs
       .readdirSync(dir, { withFileTypes: true, recursive: true })
