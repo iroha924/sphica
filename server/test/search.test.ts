@@ -244,6 +244,39 @@ test("another project's many matches never crowd out this project's hit", async 
       units.hits.map((h) => h.key),
       ["trace:ext-m1/mine"],
     );
+    // Matches a filter drops (other kinds here) never crowd out the one it keeps
+    const many = message(db, mine, { id: "q", text: "Retry budget is ten.", session: "m1" });
+    for (let b = 0; b < 5; b++)
+      await save(
+        db,
+        mine,
+        { units: Array.from({ length: 42 }, (_, n) => decision(`q${b}-${n}`, many, "Retry budget is ten.")) },
+        null,
+        "m1",
+      );
+    const found = message(db, mine, { id: "f", text: "Retry budget ran out twice.", session: "m1" });
+    await save(
+      db,
+      mine,
+      {
+        units: [
+          {
+            key: "finding",
+            kind: "finding",
+            text: "Retry budget ran out twice.",
+            evidence: [{ source: `s${found}`, quote: "Retry budget ran out twice.", role: "states" }],
+          },
+        ],
+      },
+      null,
+      "m1",
+    );
+    assert.deepEqual(
+      (
+        await searchUnits(db.reader, mine, { question: "retry budget", kinds: ["finding"], limit: 5 })
+      ).hits.map((h) => h.key),
+      ["trace:ext-m1/finding"],
+    );
     const sources = await searchSources(db.reader, mine, "retry budget", 5);
     assert.deepEqual(
       sources.hits.map((h) => h.id),
