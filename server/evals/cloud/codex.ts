@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { openReader } from "../../src/db.ts";
 
 const HERE = import.meta.dirname;
 const { values: args } = parseArgs({
@@ -27,8 +28,6 @@ const repo = args.repo ?? "";
 const task = plan.tasks.find((t) => t.id === args.task);
 const condition = manifest.repositories[repo]?.condition;
 if (!task || !condition) throw new Error(`unknown task ${args.task} or repository ${repo}`);
-if (condition === "inject")
-  throw new Error("Codex has no delivery hooks yet (plan step 10); run none, search, or gold");
 
 /** The owner's model and effort only; nothing else from ~/.codex/config.toml. */
 function modelSettings(): string {
@@ -51,22 +50,30 @@ execFileSync("git", ["clone", "-q", path.join(args.build ?? "", repo), work]);
 execFileSync("git", ["-C", work, "remote", "set-url", "origin", `https://github.com/iroha924/${repo}.git`]);
 fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
 const mcp =
-  condition === "search"
+  condition === "search" || condition === "inject"
     ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(work, ".tools", "sphica.sh"))}, ${JSON.stringify(path.join(work, ".tools", "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
     : "";
 fs.writeFileSync(path.join(codexHome, "config.toml"), `${modelSettings()}\n${mcp}`);
 
-// Gold is given at the first prompt, in the delivery hook's shape (the same first-prompt delivery the Claude runs get)
-const goldText =
-  condition === "gold"
-    ? ((
-        JSON.parse(fs.readFileSync(path.join(work, ".tools", "gold.json"), "utf8")) as {
-          id: string;
-          text: string;
-        }[]
-      ).find((g) => g.id === task.id)?.text ?? "")
-    : "";
-const prompt = goldText ? `${goldText}\n\n${task.prompt}` : task.prompt;
+// Inject runs the shipped delivery hooks against the slot's database copy; gold goes through a prompt hook too, so both arrive as the
+// developer context a plugin hook gives (plugin/hooks/codex.json), not as part of the prompt
+const hook = (args: string[], timeout: number) => ({
+  hooks: [{ type: "command", command: args.map((a) => JSON.stringify(a)).join(" "), timeout }],
+});
+const tools = path.join(work, ".tools");
+const deliver = ["sh", path.join(tools, "sphica.sh"), path.join(tools, "dist", "deliver.js"), "codex"];
+const hooks =
+  condition === "inject"
+    ? {
+        SessionStart: [hook(deliver, 10)],
+        UserPromptSubmit: [hook(deliver, 10)],
+        PreToolUse: [{ matcher: "^apply_patch$|^Bash$", ...hook(deliver, 10) }],
+      }
+    : condition === "gold"
+      ? { UserPromptSubmit: [hook(["sh", path.join(tools, "gold.sh")], 10)] }
+      : null;
+if (hooks) fs.writeFileSync(path.join(codexHome, "hooks.json"), `${JSON.stringify({ hooks }, null, 2)}\n`);
+const prompt = task.prompt;
 
 const started = Date.now();
 const r = spawnSync(
@@ -74,6 +81,8 @@ const r = spawnSync(
   [
     "exec",
     "--json",
+    // Only the hooks written above, which this script vets, are in this CODEX_HOME
+    ...(hooks ? ["--dangerously-bypass-hook-trust"] : []),
     "--ignore-rules",
     "-s",
     "workspace-write",
@@ -106,7 +115,7 @@ const patch = execFileSync(
   { encoding: "utf8" },
 );
 fs.writeFileSync(path.join(dir, "patch.diff"), patch);
-const tools = (r.stdout ?? "").split("\n").flatMap((l) => {
+const calls = (r.stdout ?? "").split("\n").flatMap((l) => {
   try {
     // Each call appears as item.started and item.completed; count the start only
     const e = JSON.parse(l) as { type?: string; item?: { type?: string; server?: string; tool?: string } };
@@ -117,8 +126,33 @@ const tools = (r.stdout ?? "").split("\n").flatMap((l) => {
     return [];
   }
 });
+// What the delivery hooks logged, from the slot's database copy (keyed by its fixture, as sphica.sh keys it)
+let deliveries: { event: string; outcome: string; units: string[] }[] | null = null;
+if (condition === "inject") {
+  const id = fs.readFileSync(path.join(tools, "fixture.id"), "utf8").trim();
+  const db = openReader(path.join(tmp, "eval-sphica", id, "sphica.db"));
+  try {
+    const rows = await db
+      .selectFrom("delivery as d")
+      .select(["d.id", "d.event", "d.outcome"])
+      .orderBy("d.id")
+      .execute();
+    const units = await db
+      .selectFrom("delivery_unit as x")
+      .innerJoin("unit as u", "u.id", "x.unit_id")
+      .select(["x.delivery_id", "u.key"])
+      .execute();
+    deliveries = rows.map((d) => ({
+      event: d.event,
+      outcome: d.outcome,
+      units: units.filter((u) => u.delivery_id === d.id).map((u) => u.key),
+    }));
+  } finally {
+    await db.destroy();
+  }
+}
 fs.writeFileSync(
   path.join(dir, "result.json"),
-  `${JSON.stringify({ run, model: "codex", repo, condition, task: task.id, status: r.status, seconds: Math.round((Date.now() - started) / 1000), mcp_calls: tools }, null, 2)}\n`,
+  `${JSON.stringify({ run, model: "codex", repo, condition, task: task.id, status: r.status, seconds: Math.round((Date.now() - started) / 1000), mcp_calls: calls, deliveries }, null, 2)}\n`,
 );
-console.log(`${run}: exit ${r.status}, ${tools.length} MCP calls, patch ${patch.length} bytes → ${dir}`);
+console.log(`${run}: exit ${r.status}, ${calls.length} MCP calls, patch ${patch.length} bytes → ${dir}`);

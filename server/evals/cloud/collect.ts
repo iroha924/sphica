@@ -148,7 +148,13 @@ function main() {
         task: string;
         condition: string;
         seconds: number;
+        deliveries?: { outcome: string; units: string[] }[] | null;
       };
+      // An inject run whose hooks logged nothing at all never had Sphica delivering: it is not a result
+      if (result.condition === "inject" && !result.deliveries?.length) {
+        console.log(`${name}: inject run with no delivery log, left out`);
+        continue;
+      }
       const task = plan.tasks.find((t) => t.id === result.task);
       if (!task) continue;
       const events = fs.readFileSync(path.join(dir, "events.jsonl"), "utf8");
@@ -161,7 +167,7 @@ function main() {
         answer: fs.existsSync(path.join(dir, "last.md"))
           ? fs.readFileSync(path.join(dir, "last.md"), "utf8")
           : "",
-        delivered: [],
+        delivered: (result.deliveries ?? []).filter((d) => d.outcome === "emitted").flatMap((d) => d.units),
         signals: { ...signals(events), seconds: result.seconds },
       });
     }
