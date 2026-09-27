@@ -114,8 +114,9 @@ test("delivery brings anchored, named, and broad records, never candidates or co
     });
     const at = (input: Record<string, unknown>) =>
       deliver({ session_id: "sess", cwd: repo, ...input }, "claude-code", db.file);
-    const edit = (file: string, tool = "Edit") =>
+    const edit = (file: string, tool = "Edit", session = "sess") =>
       at({
+        session_id: session,
         hook_event_name: "PreToolUse",
         tool_name: tool,
         tool_input: { file_path: path.join(repo, file) },
@@ -127,7 +128,28 @@ test("delivery brings anchored, named, and broad records, never candidates or co
     assert.doesNotMatch(dates, /maybe/, "a candidate is never delivered");
     assert.equal(await edit("src/db.ts"), "", "a record in an unresolved conflict is held back");
     assert.equal(await edit("src/other.ts"), "");
-    assert.equal(await edit("src/dates.ts", "Read"), "");
+    const read = await edit("src/dates.ts", "Read", "reader");
+    assert.match(
+      read,
+      /Active decisions applying to src\/dates\.ts, which you are reading \(current code relevance unverified\)/,
+    );
+    assert.match(read, /trace:ext-s1\/utc/);
+    assert.equal(
+      await edit("src/dates.ts", "Read", "reader"),
+      "",
+      "a record already shown in this session is not shown again on a read",
+    );
+    assert.match(
+      await edit("src/dates.ts", "Edit", "reader"),
+      /trace:ext-s1\/utc/,
+      "the edit reminder still comes",
+    );
+    assert.equal(
+      await edit("src/dates.ts", "Read"),
+      "",
+      "a record an edit already showed is not shown again on a read",
+    );
+    assert.equal(await edit("src/open.ts", "Grep"), "", "only Read counts as reading");
     assert.equal(
       await at({ hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: { file_path: "/etc/hosts" } }),
       "",
@@ -175,12 +197,100 @@ test("delivery brings anchored, named, and broad records, never candidates or co
       )
       .all()
       .map((r) => [r.event, r.outcome, r.units]);
-    assert.deepEqual(logged.slice(0, 3), [
+    assert.deepEqual(logged.slice(0, 6), [
       ["pre_edit", "emitted", 1],
       ["pre_edit", "nothing", 0],
       ["pre_edit", "nothing", 0],
+      ["pre_read", "emitted", 1],
+      ["pre_read", "nothing", 0],
+      ["pre_edit", "emitted", 1],
     ]);
     assert.ok(logged.some(([e, o]) => e === "session_start" && o === "emitted"));
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("reads deliver within a session-wide budget, never a unit twice, and only decisions and constraints", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const text = Array.from({ length: 12 }, (_, n) => `Rule ${n} ${"x".repeat(300)}.`).join(" ");
+    const m = message(db, p, { id: "m1", text: `${text} Found a slow path.` });
+    await save(db, p, {
+      units: [
+        ...Array.from({ length: 12 }, (_, n) =>
+          decided(`r${n}`, m, `Rule ${n} ${"x".repeat(300)}.`, {
+            anchors: [{ path: `src/f${n}.ts`, role: "applies_to" }],
+          }),
+        ),
+        {
+          key: "slow",
+          kind: "finding",
+          text: "Found a slow path.",
+          evidence: [{ source: `s${m}`, quote: "Found a slow path.", role: "states" }],
+          anchors: [{ path: "src/f0.ts", role: "applies_to" }],
+        },
+      ],
+    });
+    const read = (file: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "budget",
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const out: string[] = [];
+    for (let n = 0; n < 12; n++) out.push(await read(`src/f${n}.ts`));
+    assert.doesNotMatch(out[0] ?? "", /slow/, "a finding is not delivered on a read");
+    const shown = out.filter(Boolean);
+    assert.ok(shown.length >= 1 && shown.length < 12, `${shown.length} reads delivered`);
+    assert.ok(shown.join("").length <= 3000, `${shown.join("").length} chars over the session`);
+    assert.ok(shown.length <= 8);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a read shows at most 5 records, and reads over a session at most 8, even when the text would fit", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rules = Array.from({ length: 17 }, (_, n) => `Short rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: rules.join(" ") });
+    await save(db, p, {
+      units: rules.map((r, n) =>
+        decided(`s${n}`, m, r, {
+          anchors: [{ path: n < 7 ? "src/many.ts" : `src/g${n}.ts`, role: "applies_to" }],
+        }),
+      ),
+    });
+    const read = (file: string, session: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: session,
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const lines = (text: string) => text.split("\n").filter((l) => l.startsWith("- ")).length;
+    assert.equal(lines(await read("src/many.ts", "one")), 5, "one read shows at most 5 records");
+    let total = 0;
+    for (let n = 7; n < 17; n++) total += lines(await read(`src/g${n}.ts`, "many"));
+    assert.equal(total, 8, "reads over one session show at most 8 records");
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

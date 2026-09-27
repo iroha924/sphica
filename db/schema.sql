@@ -624,7 +624,7 @@ create index work_open on work (project_id, updated_at desc) where status in ('a
 create table delivery (
   id integer primary key autoincrement not null,
   session_id text references session (id) on delete cascade,
-  event text not null check (event in ('session_start', 'pre_edit', 'prompt', 'review')),
+  event text not null check (event in ('session_start', 'pre_edit', 'pre_read', 'prompt', 'review')),
   outcome text not null check (outcome in ('emitted', 'nothing', 'unavailable', 'suppressed')),
   reason text,
   path text,

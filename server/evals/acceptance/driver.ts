@@ -140,10 +140,10 @@ export async function createDriver(world: World): Promise<Driver> {
     const input = {
       session_id: `inject-${++injectSession}-${path.basename(dir)}`,
       cwd: repo,
-      ...(i.event === "pre_edit"
+      ...(i.event === "pre_edit" || i.event === "pre_read"
         ? {
             hook_event_name: "PreToolUse",
-            tool_name: "Edit",
+            tool_name: i.event === "pre_read" ? "Read" : "Edit",
             tool_input: { file_path: path.join(repo, i.path ?? "") },
           }
         : i.event === "prompt"
@@ -473,15 +473,16 @@ export async function createDriver(world: World): Promise<Driver> {
           prompt?: string;
           source?: string;
           repeat?: number;
+          sequence?: { event: string; path?: string; prompt?: string }[];
         };
         // A repeat stays in one session: the second call shows what the same session sees again
         delivered = [];
         const repeat = i.repeat ?? 1;
         injectSession++;
         const fixed = injectSession;
-        for (let n = 0; n < repeat; n++) {
+        for (const call of i.sequence ?? Array.from({ length: repeat }, () => i)) {
           injectSession = fixed - 1;
-          delivered.push(await inject(i));
+          delivered.push(await inject(call));
         }
         return;
       }
@@ -930,6 +931,17 @@ export async function createDriver(world: World): Promise<Driver> {
       if (Array.isArray(e.first_context_contains)) {
         for (const w of e.first_context_contains as string[])
           assert.ok(delivered[0]?.includes(w), `first delivery lacks "${w}"\n${delivered[0]}`);
+        return;
+      }
+      // One expectation per call of a sequence, in order
+      if (Array.isArray(e.each_context)) {
+        const each = e.each_context as { contains?: string[]; empty?: true }[];
+        assert.equal(delivered.length, each.length, "one expectation per call");
+        each.forEach((want, n) => {
+          if (want.empty) assert.equal(delivered[n], "", `call ${n + 1} delivered\n${delivered[n]}`);
+          for (const w of want.contains ?? [])
+            assert.ok(delivered[n]?.includes(w), `call ${n + 1} lacks "${w}"\n${delivered[n]}`);
+        });
         return;
       }
       if (e.second_context_empty === true) {

@@ -16,7 +16,7 @@
     "search": "call the MCP search tool",
     "read": "call the MCP read tool",
     "status": "call the MCP status tool",
-    "inject": "run the delivery hook for an event (session_start | pre_edit | prompt) and capture its additional context",
+    "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
     "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
     "as_of": "export the evaluation snapshot as of a time and query it"
   },
@@ -1307,6 +1307,64 @@
         {
           "read_of_source": "pr:20#comment:2001",
           "framed_as_past_evidence": true
+        }
+      ]
+    },
+    {
+      "id": "injection-09",
+      "layer": "injection",
+      "lang": "ja>ja",
+      "summary": "Reading an anchored file brings its active decision once per session; a paraphrase names nothing, an unrelated read and a second read stay quiet, and the edit reminder is unchanged",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "prompt",
+              "prompt": "保存のやり方を見直したい"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/export.ts"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "pre_edit",
+              "path": "src/db.ts"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "empty": true
+            },
+            {
+              "empty": true
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage", "current code relevance unverified"]
+            },
+            {
+              "empty": true
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            }
+          ]
         }
       ]
     },

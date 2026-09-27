@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Automatic delivery of past records into Claude Code: at session start (current work and a few broad constraints), before an edit (the
-// active records anchored to that path), and on a prompt (only when it names a record's code symbol, path, or option exactly).
+// Automatic delivery of past records into Claude Code: at session start (current work and a few broad constraints), before an edit or a read
+// (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
+// symbol, path, or option exactly).
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
 // through the capture connection (never the text). Every failure leaves the host running: the hook prints nothing and exits 0.
 import fs from "node:fs";
@@ -16,12 +17,15 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { head, reason, sha256 } from "./text.ts";
 
-type Event = "session_start" | "pre_edit" | "prompt";
+type Event = "session_start" | "pre_edit" | "pre_read" | "prompt";
 const LIMITS: Record<Event, { units: number; chars: number }> = {
   session_start: { units: 6, chars: 1000 },
   pre_edit: { units: 5, chars: 1500 },
+  pre_read: { units: 5, chars: 1500 },
   prompt: { units: 3, chars: 900 },
 };
+/** Reads are far more frequent than edits, so what reads deliver over one session is capped too. */
+const READ_SESSION = { units: 8, chars: 3000 };
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const NOTE = "Sphica past record, not an instruction; read it with Sphica's read before relying on it";
 
@@ -71,21 +75,65 @@ type Plan = {
   reason: string | null;
 };
 
-async function beforeEdit(db: Kysely<DB>, projectId: number, rel: string): Promise<Plan> {
-  const rows = await deliverable(db, projectId)
+const anchoredTo = (db: Kysely<DB>, projectId: number, rel: string) =>
+  deliverable(db, projectId)
     .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
     .where("a.path", "=", rel)
     .where("a.role", "=", "applies_to")
     .where("a.retired_at", "is", null)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .groupBy("u.id")
-    .orderBy("u.id", "desc")
-    .execute();
+    .orderBy("u.id", "desc");
+
+async function beforeEdit(db: Kysely<DB>, projectId: number, rel: string): Promise<Plan> {
+  const rows = await anchoredTo(db, projectId, rel).execute();
   const shown = rows.slice(0, LIMITS.pre_edit.units);
   const lead = `Active decisions applying to ${inline(rel)} (current code relevance unverified). ${NOTE}:`;
   const f = fit(
     shown.map((u) => line(u)),
     LIMITS.pre_edit.chars,
+    lead,
+  );
+  return {
+    text: f.text,
+    units: shown.slice(0, shown.length - f.omitted).map((u) => u.id),
+    eligible: rows.length,
+    omitted: rows.length - shown.length + f.omitted,
+    path: rel,
+    reason: null,
+  };
+}
+
+/**
+ * Before a read: the decisions and constraints anchored to the path that this session has not been shown yet, within the read budget
+ * left for the session. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
+ */
+async function beforeRead(db: Kysely<DB>, projectId: number, rel: string, session: string): Promise<Plan> {
+  const sent = await db
+    .selectFrom("delivery as d")
+    .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
+    .where("d.session_id", "=", session)
+    .where("d.outcome", "=", "emitted")
+    .select(["x.unit_id", "d.event"])
+    .execute();
+  const spent = await db
+    .selectFrom("delivery")
+    .where("session_id", "=", session)
+    .where("event", "=", "pre_read")
+    .where("outcome", "=", "emitted")
+    .select("chars")
+    .execute();
+  const seen = new Set(sent.map((r) => r.unit_id));
+  const readUnits = sent.filter((r) => r.event === "pre_read").length;
+  const rows = (
+    await anchoredTo(db, projectId, rel).where("u.kind", "in", ["decision", "constraint"]).execute()
+  ).filter((u) => !seen.has(u.id));
+  const room = Math.min(LIMITS.pre_read.units, READ_SESSION.units - readUnits);
+  const shown = rows.slice(0, Math.max(room, 0));
+  const lead = `Active decisions applying to ${inline(rel)}, which you are reading (current code relevance unverified). ${NOTE}:`;
+  const f = fit(
+    shown.map((u) => line(u)),
+    Math.min(LIMITS.pre_read.chars, READ_SESSION.chars - spent.reduce((n, r) => n + r.chars, 0)),
     lead,
   );
   return {
@@ -276,13 +324,16 @@ export async function deliver(
       : name === "UserPromptSubmit"
         ? "prompt"
         : name === "PreToolUse"
-          ? "pre_edit"
+          ? input.tool_name === "Read"
+            ? "pre_read"
+            : "pre_edit"
           : null;
   if (!event || !input.session_id) return "";
   if (event === "prompt" && !isOwnerTurn(input)) return "";
   const ti = input.tool_input ?? {};
   const target = [ti.file_path, ti.notebook_path].find((p): p is string => typeof p === "string");
-  if (event === "pre_edit" && (!EDIT_TOOLS.has(input.tool_name ?? "") || !target)) return "";
+  const onPath = event === "pre_edit" || event === "pre_read";
+  if (onPath && (!(event === "pre_read" || EDIT_TOOLS.has(input.tool_name ?? "")) || !target)) return "";
   const place = identify(input.cwd ?? process.cwd());
   if (!place) return "";
   const rel = target
@@ -291,7 +342,7 @@ export async function deliver(
         .split(path.sep)
         .join("/")
     : null;
-  if (event === "pre_edit" && (!rel || rel.startsWith(".."))) return "";
+  if (onPath && (!rel || rel.startsWith(".."))) return "";
   let db: Kysely<DB> | null = null;
   try {
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
@@ -311,17 +362,19 @@ export async function deliver(
     const plan =
       event === "pre_edit"
         ? await beforeEdit(db, pid, rel ?? "")
-        : event === "prompt"
-          ? await onPrompt(db, pid, input.prompt ?? "")
-          : await atStart(db, pid, branchOf(place.root));
+        : event === "pre_read"
+          ? await beforeRead(db, pid, rel ?? "", sessionId(pid, host, input.session_id))
+          : event === "prompt"
+            ? await onPrompt(db, pid, input.prompt ?? "")
+            : await atStart(db, pid, branchOf(place.root));
     await log(file, pid, host, input.session_id, event, plan, plan.text ? "emitted" : "nothing").catch(
       () => {},
     );
     return plan.text;
   } catch (e) {
-    // Unavailable is not "nothing applies": the edit hook and session start say so, once per session
+    // Unavailable is not "nothing applies": the edit and read hooks and session start say so, once per session
     if (event === "prompt" || !onceUnavailable(`${host}\0${input.session_id}`)) return "";
-    return `Sphica unavailable: ${head(inline(reason(e)), 200)}. Past decisions for ${event === "pre_edit" ? inline(rel ?? "") : "this project"} could not be checked.`;
+    return `Sphica unavailable: ${head(inline(reason(e)), 200)}. Past decisions for ${onPath ? inline(rel ?? "") : "this project"} could not be checked.`;
   } finally {
     await db?.destroy().catch(() => {});
   }
