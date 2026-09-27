@@ -6,7 +6,6 @@
 // fails at parse time. Usage text is built from these declarations and never written separately.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { confirm, isCancel } from "@clack/prompts";
 import {
@@ -31,7 +30,7 @@ import { dbFile, SCHEMA_REVISION } from "./db.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
 import { checkLocalName, identify, localRoots, nameLocal, repositoryRoot } from "./project.ts";
-import { requireRuntime } from "./sqlite.ts";
+import { requireRuntime, sphicaHome } from "./sqlite.ts";
 import { plural, reason } from "./text.ts";
 
 /**
@@ -271,7 +270,7 @@ async function init(flags: { cwd?: string; name?: string }): Promise<void> {
  * owner's to remove, so only their commands are shown.
  */
 async function uninstall(yes: boolean): Promise<void> {
-  const home = path.join(os.homedir(), ".sphica");
+  const home = sphicaHome();
   // Inside by path segments: ~/.sphica-old is a sibling, not a folder in ~/.sphica
   const inHome = (p: string) => {
     const rel = path.relative(home, path.resolve(p));

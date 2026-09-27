@@ -12,11 +12,12 @@ import { fileURLToPath } from "node:url";
 import type { Kysely } from "kysely";
 import { leaves } from "./anchors.ts";
 import type { DB } from "./db-types.ts";
+import { sphicaHome } from "./sqlite.ts";
 
 export type Place = { key: string; root: string; name: string };
 
 // Resolve the location on every call (so tests that replace HOME never touch the real table).
-const localFile = (): string => path.join(os.homedir(), ".sphica", "projects.json");
+const localFile = (): string => path.join(sphicaHome(), "projects.json");
 const LOCAL_KEY = /^[a-z0-9][a-z0-9._-]*$/;
 
 /**

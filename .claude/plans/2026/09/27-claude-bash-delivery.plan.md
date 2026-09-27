@@ -21,6 +21,7 @@ approved_at: 2026-09-27
 
 - 0.5.0 の実機確認で Claude Code が Read ではなく Bash の `cat` で読み、配信が 3 回とも出なかった。0.5.1 で Codex と同じ「コマンドがファイルを名指ししたときに配信する」を Claude Code にも入れる（2026-09-27、「うん、進めてOK」）
 - `.claude/plans/` を .gitignore から外し、git で追跡する。過去の計画ファイルは削除する（plan の確認の後に持ち主が追加、2026-09-27）
+- 一時 HOME では Claude のサインインが効かなかったので、Sphica の置き場所を切り替えるテスト用の環境変数 SPHICA_HOME を足して実測する（実装中に持ち主が追加、2026-09-27）
 
 ## 目的
 
@@ -58,10 +59,11 @@ Claude Code のセッションで、Bash のコマンドが decision / constrain
   - Read の後に同じパスの Bash → 同じ記録を繰り返さない
   - `*** Begin Patch` / `*** Update File: src/f.ts` を含む Claude の Bash → pre_edit ではなく名指しの読み取り
 - `.gitignore` から `.claude/plans/` を外し、過去の計画ファイル（追跡されていない `.claude/plans/` の既存ファイル）を消し、この plan と tasks を作業ブランチの最初のコミットに入れる
+- SPHICA_HOME: 設定されていれば `~/.sphica` の代わりに使う（DB・spool・状態・ベースライン・ローカルのプロジェクト表・uninstall の対象）。SPHICA_DB は DB の場所だけを今までどおり上書きする。どちらもテストと実測のためのもので README には書かない。一か所の関数（`server/src/sqlite.ts` の `sphicaHome()`）から解決する
+- 実測は本物の HOME のまま、SPHICA_HOME を一時ディレクトリにして走らせる（Claude のサインインは本物の HOME で効く）
 - 版: plugin/package.json、plugin/.claude-plugin/plugin.json、plugin/.codex-plugin/plugin.json、.claude-plugin/marketplace.json の npm source を 0.5.1 に揃える
 - 実測（公開前と公開後、それぞれ 3 回）。コードを変えないので手順にせず、0.5.1 の公開とあわせて完了条件 A3〜A6 で流す
-  - 一時ディレクトリを HOME にし、`~/.claude` と `~/.claude.json` へのリンクだけを置く。その HOME で scratch リポジトリに `sphica init` し、記録を 1 件入れる（DB は `$HOME/.sphica/sphica.db`、SPHICA_DB は使わない）
-  - 3 回の前に、同じ HOME で簡単な `claude -p` を 1 回流してサインインが効くかを見る。効かなければ実測を止めて持ち主に戻す（本物の HOME に逃げない）
+  - SPHICA_HOME を一時ディレクトリにし、その下で scratch リポジトリに `sphica init` し、記録を 1 件入れる（DB は `$SPHICA_HOME/sphica.db`、SPHICA_DB は使わない）。走らせる前と後で、本物の `~/.sphica` の spool の件数と DB のセッション数が実測で増えていないことを確かめる
   - 公開前: `bun run bundle` の後、`--plugin-dir <plugin の絶対パス>` と `--settings`（enabledPlugins の sphica@sphica を false）で走らせ、stream-json の init で sphica の plugin が候補のパスの 1 件だけかを確かめる
   - 公開後: 導入した 0.5.1 で、init の plugin のパスと版を確かめてから走らせる
   - 1 回ごとに、delivery の行、最初に呼んだ Sphica のツール、最終回答が記録を使ったかを報告する
@@ -70,7 +72,7 @@ Claude Code のセッションで、Bash のコマンドが decision / constrain
 ## 採った案と棄却した案
 
 - 採用: Claude の Bash は patch 形式の文字列を含んでも読み取り扱い。棄却: host の条件を外すだけ（Claude の Bash が patch 形式で pre_edit になる。C1）
-- 採用: 実測は一時 HOME。棄却: SPHICA_DB だけの切り替え（spool と状態は HOME の下にあり、持ち主の溜まった記録が一時 DB へ流れうる。C2）
+- 採用: 実測は SPHICA_HOME で Sphica の置き場所ごと一時ディレクトリへ。棄却: SPHICA_DB だけの切り替え（spool と状態は HOME の下にあり、持ち主の溜まった記録が一時 DB へ流れうる。C2）、HOME ごとの切り替え（Claude のサインインが効かなかった、実測 2026-09-27）
 - 採用: 公開前に手元の候補で実測し、公開後にも実測。棄却: 公開後の配信の件数だけで判定（同じ版は出し直せず、回答への反映も分からない。C2）
 
 ## 手順
@@ -80,21 +82,22 @@ Claude Code のセッションで、Bash のコマンドが decision / constrain
 - S3: README（英・日）を直す
 - S4: 版を 0.5.1 に揃える
 - S5: `.claude/plans/` を git の追跡に変え、過去の計画ファイルを消し、この plan と tasks を入れる
+- S6: Sphica の置き場所を SPHICA_HOME で切り替えられるようにする
 
 ## 完了条件
 
 - A1: `bun run verify` → exit 0
 - A2: 版の変更をコミットした後に `bun run release:plan -- --base v0.5.0` → release kind が plugin
-- A3: 公開前の 3 回の後に `sqlite3 <一時 HOME>/.sphica/sphica.db "select s.external_id, d.event, d.outcome from delivery d join session s on s.id = d.session_id where s.host = 'claude-code' order by d.id"` → Bash が紐付くパスを名指しした回ごとに pre_read emitted が 1 行以上。各回の stream-json の init で sphica が候補のパス 1 件。回ごとの最初の Sphica のツールと、回答が記録を使ったかも報告する
+- A3: 公開前の 3 回の後に `sqlite3 <SPHICA_HOME>/sphica.db "select s.external_id, d.event, d.outcome from delivery d join session s on s.id = d.session_id where s.host = 'claude-code' order by d.id"` → Bash が紐付くパスを名指しした回ごとに pre_read emitted が 1 行以上。各回の stream-json の init で sphica が候補のパス 1 件。回ごとの最初の Sphica のツールと、回答が記録を使ったかも報告する
 - A4: `node <候補の plugin>/dist/deliver.js` → 紐付く記録 200 件の一時 DB で、何も名指ししない Bash の入力を 50 回渡し、中央値と p95 を報告する（判定の閾値は置かない）
-- A5: `sqlite3 <一時 HOME>/.sphica/sphica.db "select s.external_id, d.event, d.outcome from delivery d join session s on s.id = d.session_id where s.host = 'claude-code' order by d.id"` → 公開後の 3 回で A3 と同じ期待。init の sphica が導入した 0.5.1 のキャッシュのパスと版
+- A5: `sqlite3 <SPHICA_HOME>/sphica.db "select s.external_id, d.event, d.outcome from delivery d join session s on s.id = d.session_id where s.host = 'claude-code' order by d.id"` → 公開後の 3 回で A3 と同じ期待。init の sphica が導入した 0.5.1 のキャッシュのパスと版
 - A6: `npm view sphica dist-tags --json` → latest と next が 0.5.1
 
 ## リスク
 
 - Claude の Bash のたびに deliver.js が起動する → A4 の値が Codex（約 75 ms）より大きく離れていたら持ち主に報告し、先に DB を開かない判定（名指しの候補が無ければ終える）を検討する
 - 紐付くパスを何件も並べた Bash のコマンドが読み取りの予算を使う → 予算は今の値のまま。評価で誤配として測る
-- 一時 HOME でサインインが効かない → 実測を止めて持ち主に戻す
+- 実測が本物の `~/.sphica` に触れる（SPHICA_HOME が一部で効かない）→ 前後の件数の比較で見つけ、見つけたら実測を止めて持ち主に戻す
 - サブエージェント（Explore）が親と予算を共有するかは実機で未確認 → 実測で見えたら報告する
 
 ## 未解決
@@ -102,3 +105,4 @@ Claude Code のセッションで、Bash のコマンドが decision / constrain
 なし
 
 ## 変更履歴
+- 2026-09-27 / SPHICA_HOME を足し（S6）、実測を HOME の切り替えから SPHICA_HOME に変えた / 一時 HOME で Claude のサインインが「OAuth session expired」で効かなかった / Go 済み（持ち主が「Sphica の置き場所を環境変数で切り替える」を選んだ）

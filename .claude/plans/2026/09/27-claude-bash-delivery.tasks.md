@@ -71,7 +71,17 @@ Claude Code の Bash がファイルを名指ししたら配信し、フック�
   - コミット: `docs(readme): say Claude Code also gets decisions for shell commands that name a file`
   - 結果: `rg -n "Limits in 0.5.1|0.5.1 の限界" README.md README.ja.md` → 各 1 件。`bun run english` → exit 0。`biome ci` → 通過
 
+- [x] T06: Sphica の置き場所を SPHICA_HOME で切り替えられるようにする
+  - 種別: 追加
+  - 計画: S6
+  - 依存: なし
+  - 変更: `server/src/sqlite.ts`, `server/src/capture.ts`, `server/src/project.ts`, `server/src/cli.ts`, `server/test/capture.test.ts`
+  - 完了条件: `cd server && node --test test/capture.test.ts test/project.test.ts test/cli.test.ts` → 全件 pass（SPHICA_HOME で DB・spool・状態・プロジェクト表が一時ディレクトリに向くテストを含む）
+  - コミット: `feat(paths): let SPHICA_HOME move Sphica's files for tests and measurements`
+  - 結果: 新しいテストは変更前で dbFile が ~/.sphica を返して失敗。変更後 `node --test test/capture.test.ts test/project.test.ts test/cli.test.ts` → pass 40 / fail 0。`tsc`、`architecture`、`knip` → 通過
+
 ## 記録
 2026-09-27 / T05, T02 / pre-commit の版のゲートが、版を上げずに server/src/deliver.ts を変えるコミットを止めた / T05 を T02 の前へ移し、T05 の依存を「T04」から「なし」に、T02 の依存を「なし」から「T05」に変えた
 2026-09-27 / T05 / 完了条件の半分（release kind plugin）を満たす前に [x] にした。4b13e5f 単体では `release:plan` が none（配布物のコードが未変更）、版は 4 か所 0.5.1 / plugin の判定は T02 以降を積んだ後に完了条件 A2 で確かめる
 2026-09-27 / T04 / cases.json の note が T01 で消した過去の計画ファイルを指していた / 変更欄を「README.md, README.ja.md」から「README.md, README.ja.md, server/evals/acceptance/cases.json」にして参照を外した
+2026-09-27 / T06 / 一時 HOME で Claude のサインインが効かず、公開前の実測（A3）が止まった / 持ち主の判断で SPHICA_HOME を足す T06 を追加し、plan に S6 を足した
