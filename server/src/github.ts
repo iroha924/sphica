@@ -286,14 +286,19 @@ export function githubTarget(repo: string, url: string): { kind: "pull" | "issue
  * Stores items as sources and returns the id of each one's current revision. Unchanged text keeps its row; changed text becomes
  * a new revision, so units extracted earlier keep citing what they were extracted from.
  */
-export async function storeItems(db: Kysely<DB>, projectId: number, items: Item[]): Promise<number[]> {
+export async function storeItems(
+  db: Kysely<DB>,
+  projectId: number,
+  items: Item[],
+): Promise<(number | null)[]> {
   const owners = new Set(
     (
       await db.selectFrom("owner_identity").select("external_id").where("provider", "=", "github").execute()
     ).map((o) => o.external_id),
   );
   const now = iso(Date.now());
-  const ids: number[] = [];
+  // One entry per item, null for an empty text never kept, so callers can pair items with their ids
+  const ids: (number | null)[] = [];
   for (const it of items) {
     const kept = fit(it.text);
     const hash = sha256(kept.body);
@@ -309,7 +314,10 @@ export async function storeItems(db: Kysely<DB>, projectId: number, items: Item[
       ids.push(latest.id);
       continue;
     }
-    if (!latest && !kept.body.trim()) continue;
+    if (!latest && !kept.body.trim()) {
+      ids.push(null);
+      continue;
+    }
     const authorId = it.author?.id === undefined ? null : String(it.author.id);
     const kind = authorId && owners.has(authorId) ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
     const created = iso(it.createdAt);

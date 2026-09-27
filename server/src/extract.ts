@@ -155,11 +155,12 @@ export async function gleanFetch(
     if (pull) await linkIssues(trx, place.projectId, at.number, pull.closes);
     return stored;
   });
+  const kept = items.flatMap((it, i) => (ids[i] == null ? [] : [{ it, id: ids[i] }]));
   return [
-    `${plural(items.length, "source")} kept. Read them with read s<id>, then cite the refs:`,
-    ...items.map(
-      (it, i) =>
-        `- s${ids[i]} ${it.kind} by ${it.author?.login ?? "unknown"}: ${inline(it.text).slice(0, 120)}`,
+    `${plural(kept.length, "source")} kept. Read them with read s<id>, then cite the refs:`,
+    ...kept.map(
+      ({ it, id }) =>
+        `- s${id} ${it.kind} by ${it.author?.login ?? "unknown"}: ${inline(it.text).slice(0, 120)}`,
     ),
   ].join("\n");
 }

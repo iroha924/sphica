@@ -183,6 +183,13 @@ test("stores sources with who wrote them, adds a revision only when text changed
     const again = await storeItems(db.ingest, p, second.items);
     assert.notEqual(again[0], ids[0]);
     assert.deepEqual(again.slice(1), ids.slice(1));
+    // A body that was always empty is not kept, but keeps its place: the ids line up with the items
+    const blank = [
+      { ...(first.items[0] as (typeof first.items)[number]), externalId: "blank", text: "" },
+      ...first.items.slice(1),
+    ];
+    const placed = await storeItems(db.ingest, p, blank);
+    assert.deepEqual(placed, [null, ...ids.slice(1)]);
     const current = await pullSources(db.reader, p, 7);
     assert.equal(current.length, ids.length, "only the current revision of each source");
     assert.deepEqual(
