@@ -161,7 +161,8 @@ git add -A >/dev/null 2>&1
 git ls-files -z --others --ignored --exclude-standard | grep -zvE '^[.]tools/|^plugin/(dist|db)/|(^|/)node_modules/' | xargs -0 -r git add -f >/dev/null 2>&1
 # The same for dependencies a checkout without an ignore file staged above
 git ls-files -z --cached | grep -zE '(^|/)node_modules/' | xargs -0 -r git rm -q --cached >/dev/null 2>&1
-git -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
+# The checkout's own hooks (lefthook, once the agent installed it) must not keep the run's result from being collected
+git -c core.hooksPath=/dev/null -c user.name=eval -c user.email=eval@example.invalid commit -qm "eval result" --allow-empty >/dev/null 2>&1
 git push -q --force origin "HEAD:refs/heads/claude/eval-$sid" >/dev/null 2>&1 || true
 `;
 

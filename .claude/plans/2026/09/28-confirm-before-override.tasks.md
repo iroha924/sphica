@@ -130,7 +130,7 @@ base: main
   - コミット: `fix(evals): keep every final answer of a run, not only the last`
   - 結果: 直す前のスロットで Stop を 2 回渡すと .eval/answer.md は「working tree is clean」だけだった（red）。直した build.ts で作り直したスロットでは 2 回分の回答が残った。`bun run verify` → exit 0
 
-- [ ] T12: 結果の後始末のコミットをスロットのリポジトリのフックから外す（新文言 sphica の計測で発見）
+- [x] T12: 結果の後始末のコミットをスロットのリポジトリのフックから外す（新文言 sphica の計測で発見）
   - 種別: 修正
   - 計画: S1
   - 依存: T11（同じ FINISH_SH を直す）
@@ -138,6 +138,7 @@ base: main
   - red: `sh .tools/finish.sh` → 必ず失敗する pre-commit フックを入れた一時スロットで、結果コミットが作られず .eval/ が staged のまま残る
   - 完了条件: 同じ手順で結果コミットが作られる。`bun run verify` → exit 0
   - コミット: `fix(evals): commit a run's result without the checkout's own git hooks`
+  - 結果: 直す前は、必ず失敗する pre-commit フックを入れたスロットで結果コミットが作られず、初期コミットのまま push された（red）。直した後は "eval result" のコミットに src/new.ts と .eval/answer.md が入って push された。`bun run verify` → exit 0。--no-verify は使わず、後始末のコミットだけ core.hooksPath を空に向けた（エージェントの成果を集めるためのコミットで、規範の対象の自分のコミットではない）
 
 ## 記録
 2026-09-28 / T02 / gold の切り詰め検査を選択肢まで含めると、sphica の gold 記録（退けた選択肢 7 件）で構築が止まった / 検査を本文と Why に絞り、plan の方針と変更履歴を直した
