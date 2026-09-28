@@ -53,8 +53,20 @@ export function locate(
   const line = lines[i] ?? "";
   // A line inside a private key cannot be masked alone: its BEGIN and END are on other lines
   const from = bytes(lines.slice(0, i).join("\n")) + (i > 0 ? 1 : 0);
-  const inKey = privateKeyRanges(lines.join("\n")).some(([a, b]) => a < from + bytes(line) && b > from);
-  return { line: i + 1, excerpt: inKey ? "[redacted: private key]" : mask(line).trim().slice(0, 200) };
+  if (privateKeyRanges(lines.join("\n")).some(([a, b]) => a < from + bytes(line) && b > from))
+    return { line: i + 1, excerpt: "[redacted: private key]" };
+  // Nor can a value whose key name sits on another line: the text around must not change how the line masks
+  const before = lines
+    .slice(0, i)
+    .map((l) => `${l}\n`)
+    .join("");
+  const after = lines
+    .slice(i + 1)
+    .map((l) => `\n${l}`)
+    .join("");
+  const own = mask(line);
+  const cut = mask(before + line) !== mask(before) + own || mask(line + after) !== own + mask(after);
+  return { line: i + 1, excerpt: cut ? "[redacted]" : own.trim().slice(0, 200) };
 }
 
 /** The anchor's state in the working tree: the file and symbol are there (at the recorded line or another), gone, or cannot be checked. */

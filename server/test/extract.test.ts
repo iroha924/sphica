@@ -548,7 +548,7 @@ test("glean: a cited file excerpt is stored masked, and quotes touching masked t
     const raw = "# Config\nAPI_KEY=abc123def456\nRotate the key before a release.\n";
     fs.writeFileSync(
       path.join(root, "config.md"),
-      `${raw}-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----\nuse abc123def456 here\n`,
+      `${raw}-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----\nuse abc123def456 here\nAPI_KEY=\nzz99yy88xx77\n`,
     );
     const git = (...a: string[]) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" }).trim();
     git("add", "-A");
@@ -651,6 +651,12 @@ test("glean: a cited file excerpt is stored masked, and quotes touching masked t
     await assert.rejects(cite([2, 7], "abc123def456"), /the quote also appears in text Sphica masks/);
     await assert.rejects(cite([5, 5], "MIIEvQ"), /lines 5-5 are inside a private key/);
     await assert.rejects(cite([3, 5], "Rotate the key"), /lines 3-5 are inside a private key/);
+    // The key name is on the line before: the value alone does not look like a key, but the whole file masks it
+    await assert.rejects(cite([9, 9], "zz99yy88xx77"), /lines 9-9 cut through text Sphica masks/);
+    assert.equal(
+      db.owner.prepare("select count(*) as n from source where text like '%zz99yy88xx77%'").get()?.n,
+      0,
+    );
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

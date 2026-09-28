@@ -168,7 +168,13 @@ function readExcerpt(root: string, file: z.infer<typeof File>): Excerpt {
   if (privateKeyRanges(buf.toString("utf8")).some(([s, e]) => s < to && e > from && (s < from || e > to)))
     throw new Error(`${p} lines ${a}-${b} are inside a private key; cite lines outside it`);
   const raw = buf.subarray(from, to).toString("utf8");
-  return { path: p, commit, blob, size, lines: [a, b], raw, text: mask(raw) };
+  const text = mask(raw);
+  // A key name on a line outside the excerpt can mark a value inside it: the text around must not change how the excerpt masks
+  const before = buf.subarray(0, from).toString("utf8");
+  const after = buf.subarray(to).toString("utf8");
+  if (mask(before + raw) !== mask(before) + text || mask(raw + after) !== text + mask(after))
+    throw new Error(`${p} lines ${a}-${b} cut through text Sphica masks; cite more lines around it`);
+  return { path: p, commit, blob, size, lines: [a, b], raw, text };
 }
 
 const locate = (body: string, q: string): [number, number] | null => {

@@ -71,7 +71,7 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
     const key = "Zq9x".repeat(60);
     fs.writeFileSync(
       path.join(root, "config.ts"),
-      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n`,
+      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\nexport const API_KEY =\n  tokenValue123abc;\n`,
     );
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "設定の鍵はここにある。" });
@@ -88,6 +88,7 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
             anchors: [
               { path: "config.ts", symbol: "apiKey", role: "applies_to" },
               { path: "config.ts", symbol: "keyBody", role: "applies_to" },
+              { path: "config.ts", symbol: "tokenValue123abc", role: "applies_to" },
             ],
           },
         ],
@@ -100,11 +101,13 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
     }[];
     assert.deepEqual(
       got.map((a) => a.symbol),
-      ["apiKey", "keyBody"],
+      ["apiKey", "keyBody", "tokenValue123abc"],
     );
     assert.doesNotMatch(got[0]?.excerpt ?? "", /Zq9x/);
     assert.match(got[0]?.excerpt ?? "", /^export const apiKey = "\[redacted\]"/);
     assert.equal(got[1]?.excerpt, "[redacted: private key]");
+    // The key name is on the line before: the line alone does not look like a key, but the whole file masks it
+    assert.equal(got[2]?.excerpt, "[redacted]");
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
