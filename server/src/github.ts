@@ -77,6 +77,8 @@ export async function ghUser(timeout = 15_000): Promise<SignedIn> {
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
       timeout,
+      // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
+      killSignal: "SIGKILL",
       env: plainEnv(),
     }));
   } catch (e) {

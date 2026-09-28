@@ -330,14 +330,18 @@ test("gh is asked for plain JSON even when the owner forces color", async () => 
   }
 });
 
-// A gh stuck on the network must not hold init: it gives up and init goes on to register the repository
+// A gh stuck on the network must not hold init, even one that ignores SIGTERM: it gives up and init goes on to register the repository
 test("a gh that never answers is given up on as failed", async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
   const saved = process.env.PATH;
   try {
-    fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\nsetTimeout(() => {}, 20_000);\n`, {
-      mode: 0o755,
-    });
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nprocess.on('SIGTERM', () => {}); setTimeout(() => {}, 20_000);\n`,
+      {
+        mode: 0o755,
+      },
+    );
     process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
     const started = Date.now();
     assert.deepEqual(await ghUser(500), { ok: false, reason: "failed" });
