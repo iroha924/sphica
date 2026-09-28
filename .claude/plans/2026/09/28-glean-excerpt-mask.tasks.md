@@ -45,14 +45,15 @@ base: main
 
 glean が引いたファイルの抜粋が、伏せ字にされて保存・索引化され、秘密に触れる引用が断られるようになる。
 
-- [ ] T02: glean の抜粋を伏せ字にして保存し、引用と秘密鍵の行の指定を検査する
+- [x] T02: glean の抜粋を伏せ字にして保存し、引用と秘密鍵の行の指定を検査する
   - 種別: 修正
   - 計画: S1, S3
   - 依存: T01（引用の判定と秘密鍵の範囲の関数が要る）
-  - 変更: `server/src/glean.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
+  - 変更: `server/src/glean.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
   - red: 足したテストと受け入れケースを直す前のコードで `bun run --cwd server test` と `bun run acceptance` → 抜粋の本文に秘密の文字列が残る、`redacted` が 0、`source_fts` で秘密の文字列が当たる、秘密に触れる引用が保存される、の各 assert で fail
   - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass。古い伏せ字なしの行があるときは新しい revision が作られ、根拠の位置がその本文の上で正しい
   - コミット: `fix(glean): mask file excerpts before storing them (T02)`
+  - 結果: red は、直す前の glean.ts で extract.test.ts の新しいテストが fail（古い伏せ字なしの行を使い回し、行数 1 ≠ 2）、受け入れケース glean-13 が fail（保存本文に `API_KEY=abc123def456` が残る）。直した後 `bun run --cwd server test` → 313 件 pass、`bun run acceptance` → 58 件 pass
 
 ## P3: コード位置の抜粋を伏せ字にする
 
@@ -83,3 +84,5 @@ glean スキルの案内を足し、出荷前の検査を通す。
 
 - 2026-09-28 / T01, T04 / pre-commit の bundle フックが、パッケージに入るファイルの変更と同じコミットでのバージョンの引き上げを求めた / バージョンの引き上げ（0.5.7）を T04 から T01 に移した。T01 の変更欄: 前 `server/src/text.ts`, `server/test/text.test.ts` → 後 それに 4 つのバージョンのファイルを足す。T04 の変更欄: 前 SKILL.md と 4 つのバージョンのファイル → 後 SKILL.md のみ。T04 の名前とコミットの件名も合わせて直した
 - 2026-09-28 / T05 / T01 の Codex レビュー（F1）: 伏せ字が約 5 万箇所ある約 1 MiB の入力で quoteSpan が 7.3 秒、処理時間が二乗で増える / 採用。修正タスク T05 を T01 の後に足した。Codex 側の全件テストの失敗は読み取り専用の環境で一時ディレクトリが作れなかったためで、手元では 311 件 pass
+- 2026-09-28 / T02 / 受け入れケースの層ごとの件数の検査（server/test/acceptance-cases.test.ts の PER_LAYER）が glean 12 件を固定していた / glean-13 を足したので 13 にした。T02 の変更欄に同ファイルを足した（前: 4 ファイル → 後: 5 ファイル）
+- 2026-09-28 / T05 / 持ち主が Claude を再起動するため中断。T05 の Codex レビューは投げた直後で結果を受け取っていない / 再開時に T05（b5d996b）と T02 のレビューを新しい会話で投げ直す

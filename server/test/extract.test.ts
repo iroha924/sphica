@@ -541,6 +541,122 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
   }
 });
 
+test("glean: a cited file excerpt is stored masked, and quotes touching masked text or a cut key are refused", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const raw = "# Config\nAPI_KEY=abc123def456\nRotate the key before a release.\n";
+    fs.writeFileSync(
+      path.join(root, "config.md"),
+      `${raw}-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----\nuse abc123def456 here\n`,
+    );
+    const git = (...a: string[]) => execFileSync("git", ["-C", root, ...a], { encoding: "utf8" }).trim();
+    git("add", "-A");
+    git(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "config",
+    );
+    const p = project(db);
+    session(db, p, "g1");
+    const said = message(db, p, { id: "o1", text: "鍵は回す。", session: "g1" });
+    const units = {
+      units: [
+        {
+          key: "rotate",
+          kind: "finding",
+          text: "鍵を回す",
+          evidence: [{ source: `s${said}`, quote: "鍵は回す。", role: "states" }],
+        },
+      ],
+    };
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, units);
+    // An excerpt an older version stored unmasked is kept, and a masked revision is added beside it
+    const external = `file:config.md@${git("rev-parse", "HEAD:config.md")}#L1-3`;
+    const old = insert(db, "source", {
+      project_id: p,
+      kind: "file_excerpt",
+      artifact: "file:config.md",
+      external_id: external,
+      revision: 1,
+      author_kind: "person",
+      created_at: "2026-03-01T00:00:00.000Z",
+      captured_at: "2026-03-01T00:00:00.000Z",
+      text: raw,
+      truncated: 1,
+      original_bytes: 200,
+      content_hash: Buffer.alloc(32),
+      path: "config.md",
+      line_start: 1,
+      line_end: 3,
+      commit_sha: git("rev-parse", "HEAD"),
+      blob_sha: git("rev-parse", "HEAD:config.md"),
+      indexed: 1,
+    });
+    const rev = () =>
+      (db.owner.prepare("select revision from unit where key = 'glean:rotate'").get() as { revision: number })
+        .revision;
+    const cite = async (lines: [number, number], quote: string) => {
+      const record = {
+        ops: [
+          {
+            op: "add_evidence",
+            unit: "glean:rotate",
+            revision: rev(),
+            file: { path: "config.md", lines },
+            quote,
+            role: "explains",
+          },
+        ],
+      };
+      const r = await beginGlean(db.ingest, p, "g1");
+      const c = await checkText(db.ingest, r, p, root, record);
+      return c.ok ? saveText(db.ingest, r, p, root, record) : Promise.reject(new Error(c.text));
+    };
+    await cite([1, 3], "Rotate the key before a release.");
+    const rows = db.owner
+      .prepare(
+        "select id, revision, text, redacted, truncated from source where external_id = ? order by revision",
+      )
+      .all(external) as { id: number; revision: number; text: string; redacted: number; truncated: number }[];
+    assert.equal(rows.length, 2);
+    const masked = rows[1];
+    assert.ok(masked && masked.id !== old);
+    assert.doesNotMatch(masked.text, /abc123def456/);
+    assert.match(masked.text, /API_KEY=\[redacted\]/);
+    assert.deepEqual([masked.redacted, masked.truncated], [1, 1]);
+    const ev = db.owner
+      .prepare("select source_id, span_start, span_end from unit_evidence where source_id in (?, ?)")
+      .get(old, masked.id) as { source_id: number; span_start: number; span_end: number };
+    assert.equal(ev.source_id, masked.id);
+    assert.equal(
+      Buffer.from(masked.text).subarray(ev.span_start, ev.span_end).toString(),
+      "Rotate the key before a release.",
+    );
+    // Only the older unmasked row still holds the key in the index
+    const hits = db.owner
+      .prepare("select rowid from source_fts where source_fts match '\"abc123def456\"'")
+      .all() as { rowid: number }[];
+    assert.deepEqual(
+      hits.map((h) => h.rowid),
+      [old],
+    );
+    await assert.rejects(cite([1, 3], "abc123def456"), /the quote also appears in text Sphica masks/);
+    await assert.rejects(cite([2, 7], "abc123def456"), /the quote also appears in text Sphica masks/);
+    await assert.rejects(cite([5, 5], "MIIEvQ"), /lines 5-5 are inside a private key/);
+    await assert.rejects(cite([3, 5], "Rotate the key"), /lines 3-5 are inside a private key/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("glean: a successor that becomes active later supersedes the record it replaces", async () => {
   const db = tempDb();
   try {

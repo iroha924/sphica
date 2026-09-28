@@ -842,6 +842,8 @@ export async function createDriver(world: World): Promise<Driver> {
           text: string;
           blob_recorded?: boolean;
           partial?: boolean;
+          not_text?: string;
+          redacted?: boolean;
         };
         const got = await db()
           .selectFrom("source")
@@ -854,6 +856,8 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.ok(got.text.includes(want.text), got.text);
         if (want.blob_recorded) assert.match(got.blob_sha ?? "", /^[0-9a-f]{40}$/);
         if (want.partial !== undefined) assert.equal(got.truncated === 1, want.partial);
+        if (want.not_text !== undefined) assert.ok(!got.text.includes(want.not_text), got.text);
+        if (want.redacted !== undefined) assert.equal(got.redacted === 1, want.redacted);
         return;
       }
       if (typeof e.save_refused_contains === "string") {
