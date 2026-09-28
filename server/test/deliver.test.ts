@@ -258,8 +258,11 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
     const out: string[] = [];
     for (let n = 0; n < 12; n++) out.push(await read(`src/f${n}.ts`));
     assert.doesNotMatch(out[0] ?? "", /slow/, "a finding is not delivered on a read");
-    const shown = out.filter(Boolean);
-    assert.ok(shown.length >= 1 && shown.length < 12, `${shown.length} reads delivered`);
+    // Reads past the budget carry only the omission note; the budget counts the reads that delivered records, without their note
+    const shown = out
+      .filter((o) => /^- trace:/m.test(o))
+      .map((o) => o.replace(/\n- \d+ more records? appl.*$/, ""));
+    assert.ok(shown.length >= 1 && shown.length < 12, `${shown.length} reads delivered records`);
     const records = shown.join("").length - shown.length * (CONFIRM.length + 1);
     assert.ok(records <= 3000, `${records} chars over the session besides the request`);
     assert.ok(shown.length <= 8);
@@ -388,7 +391,7 @@ test("a read shows at most 5 records, and reads over a session at most 8, even w
         "claude-code",
         db.file,
       );
-    const lines = (text: string) => text.split("\n").filter((l) => l.startsWith("- ")).length;
+    const lines = (text: string) => text.split("\n").filter((l) => l.startsWith("- trace:")).length;
     assert.equal(lines(await read("src/many.ts", "one")), 5, "one read shows at most 5 records");
     let total = 0;
     for (let n = 7; n < 17; n++) total += lines(await read(`src/g${n}.ts`, "many"));
@@ -720,6 +723,118 @@ test("the request takes no room from records on edit, prompt, and session start"
     assert.equal(lines(prompt, /trace:ext-s1\/p/), 2, "prompt keeps both records");
     const start = await at(crypto.randomUUID(), { hook_event_name: "SessionStart", source: "startup" });
     assert.equal(lines(start, /^- trace:ext-s1\/b/), 3, "session start keeps all three constraints");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// A delivery that leaves records out says how many and where to find them, so it never reads as the full set
+test("every delivery says how many records or work items it left out, even when none fit", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rule = (n: number) => `Rule ${n} keeps the store small.`;
+    const m = message(db, p, { id: "m1", text: Array.from({ length: 30 }, (_, n) => rule(n)).join(" ") });
+    await save(db, p, {
+      units: [
+        // Seven on one edited file (the edit limit is 5), six decisions on a read file (the read limit is 5)
+        ...Array.from({ length: 7 }, (_, n) =>
+          decided(`e${n}`, m, rule(n), { anchors: [{ path: "src/e.ts", role: "applies_to" }] }),
+        ),
+        ...Array.from({ length: 6 }, (_, n) =>
+          decided(`r${n}`, m, rule(10 + n), { anchors: [{ path: "src/r.ts", role: "applies_to" }] }),
+        ),
+        // Four named by a prompt (the prompt limit is 3), four broad constraints (session start shows 3)
+        ...Array.from({ length: 4 }, (_, n) =>
+          decided(`p${n}`, m, rule(20 + n), {
+            anchors: [{ path: `src/p${n}.ts`, symbol: "openStore", role: "applies_to" }],
+          }),
+        ),
+        ...Array.from({ length: 4 }, (_, n) => decided(`b${n}`, m, rule(24 + n))),
+      ],
+    });
+    for (let n = 0; n < 4; n++)
+      insert(db, "work", {
+        project_id: p,
+        key: `w${n}`,
+        title: `Work ${n}`,
+        goal: "g",
+        current: "c",
+        next: "[]",
+        status: "active",
+        updated_at: `2026-09-2${n}T00:00:00.000Z`,
+      });
+    const at = (session: string, input: Record<string, unknown>) =>
+      deliver({ session_id: session, cwd: repo, ...input }, "claude-code", db.file);
+    const tool = (session: string, name: string, file: string) =>
+      at(session, {
+        hook_event_name: "PreToolUse",
+        tool_name: name,
+        tool_input: { file_path: path.join(repo, file) },
+      });
+    const note = (n: number) =>
+      `- ${n} more record${n === 1 ? " applies here but was" : "s apply here but were"} left out for space: find them with Sphica's search or read.`;
+    const edit = await tool("e", "Edit", "src/e.ts");
+    assert.equal(edit.split("\n").at(-1), note(2));
+    const read = await tool("r", "Read", "src/r.ts");
+    assert.equal(read.split("\n").at(-1), note(1));
+    const prompt = await at("p", { hook_event_name: "UserPromptSubmit", prompt: "openStore() を直したい" });
+    assert.equal(prompt.split("\n").at(-1), note(1));
+    const start = await at(crypto.randomUUID(), { hook_event_name: "SessionStart", source: "startup" });
+    assert.ok(start.includes(`\n${note(1)}`), start);
+    assert.ok(
+      start.includes("\n- 1 more work item not shown: Sphica's status lists the 5 most recently updated."),
+      start,
+    );
+    // Once a session's read budget is spent, a read still says records apply instead of saying nothing
+    const spent = crypto.randomUUID();
+    const reads: string[] = [];
+    for (const f of ["src/r.ts", "src/e.ts", "src/p0.ts", "src/p1.ts"])
+      reads.push(await tool(spent, "Read", f));
+    const last = reads.at(-1) ?? "";
+    assert.match(last, /^Active decisions applying to src\/p1\.ts/);
+    assert.equal(last.split("\n").at(-1), note(1));
+    assert.doesNotMatch(last, /^- trace:/m, "no record fits once the budget is spent");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The omission note is Sphica's own text: it never takes a later read's room in the session budget
+test("a read's omission note is left out of the logged length the session's read budget adds up", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rule = (n: number) => `Rule ${n} keeps reads short.`;
+    const m = message(db, p, { id: "m1", text: Array.from({ length: 6 }, (_, n) => rule(n)).join(" ") });
+    await save(db, p, {
+      units: Array.from({ length: 6 }, (_, n) =>
+        decided(`a${n}`, m, rule(n), { anchors: [{ path: "src/x.ts", role: "applies_to" }] }),
+      ),
+    });
+    const read = await deliver(
+      {
+        hook_event_name: "PreToolUse",
+        session_id: "noted",
+        cwd: repo,
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/x.ts") },
+      },
+      "claude-code",
+      db.file,
+    );
+    const note = read.slice(read.lastIndexOf("\n"));
+    assert.match(note, /^\n- 1 more record applies here/);
+    const logged = db.owner
+      .prepare(
+        "select d.chars from delivery d join session s on s.id = d.session_id where s.external_id = 'noted'",
+      )
+      .get()?.chars;
+    assert.equal(logged, read.length - note.length);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

@@ -46,23 +46,25 @@ base: main
 
 上限から漏れた記録や作業の件数と見方が、配信の文に出る。今届いている記録は押し出さない。
 
-- [ ] T03: 各配信に省略の注記を足し、その字数を枠の外に確保し、session_start の省略を数える
+- [x] T03: 各配信に省略の注記を足し、その字数を枠の外に確保し、session_start の省略を数える
   - 種別: 修正
   - 計画: S3
   - 依存: なし
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/review-bridge.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 上限を超える記録を置いた各イベントのテストが、注記が無いので落ちる。何も入らないときのテストが空の文で落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 全部 pass（既存の「記録が押し出されない」テストを含む）
   - コミット: `fix(deliver): say how many records and work items were left out and where to find them`
+  - 結果: red（直す前）→ 編集の配信の最後の行が注記でなく記録（`- trace:ext-s1/e2 …`）で失敗。直した後 `node --test test/deliver.test.ts test/review-bridge.test.ts test/deliver-codex.test.ts` → pass 28 / fail 0（編集・読み取り・プロンプト・セッション開始（記録と作業の 2 つの注記）・review の注記、予算を使い切った後の読み取りが lead と注記だけで出る）。既存の予算のテスト 2 件は注記を記録と数えて落ちたので、記録の行（`- trace:`）と記録を渡した配信だけを数えるように直した
 
-- [ ] T04: delivery.chars から注記を除き、読み取りの予算を記録を渡した配信だけで数える
+- [x] T04: delivery.chars から注記を除き、読み取りの予算を記録を渡した配信だけで数える
   - 種別: 修正
   - 計画: S4
   - 依存: T03（`Plan.note` と注記だけの配信が要る）
   - 変更: `server/src/deliver.ts`, `db/schema.sql`, `server/test/deliver.test.ts`
-  - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 予算を使い切った後の注記だけの読み取りが予算を使い、その後の記録が届かないテストで落ちる
+  - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 注記付きの読み取りのログの chars に注記の字数が入って落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 全部 pass
   - コミット: `fix(deliver): keep the omission note out of the read budget`
+  - 結果: red（直す前）`node --test test/deliver.test.ts` → 注記付きの読み取りのログの chars が 862（注記を除くと 764）で失敗。直した後 `node --test test/deliver.test.ts test/review-bridge.test.ts test/deliver-codex.test.ts` → pass 28 / fail 0。`bun run typecheck` → 0
 
 ## P3: trace 待ちを知らせる（W3 #191）
 
@@ -89,3 +91,5 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 ## 記録
 
 2026-09-29 / T02 / 文に読んだ件数を出すため、`searchUnits` と `searchSources` の返り値に `read` を足した / T02 の変更欄に `server/src/search.ts` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）
+2026-09-29 / T03, T04 / T03 の注記だけの読み取りで既存の予算のテストが崩れるので、T04 の red を確かめてから同じコミットで終えた。後の読み取りの記録が注記で削られることを比べるテストは、今の上限（1 回 1500 字・1 セッション 3000 字・8 件）では差が出る状況を作れなかった（字数の組を総当たりして確かめた）ので、ログの chars が注記を除くことを確かめる形にした / T03 の変更欄に `server/test/review-bridge.test.ts` を足した（前: `server/src/deliver.ts`, `server/test/deliver.test.ts`）。T04 の red を「予算を使い切った後の注記だけの読み取りが予算を使う」から「ログの chars に注記が入る」に変えた
+2026-09-29 / T01 / T01 の Codex レビュー 4 件: ページの間の書き込みで候補を飛ばす・二重に数える（F1）と、600 件のテストが強い一致を確かめていない（F4）は採用。件数に達して止まったときに stopped が false（F2）は見送り（stopped は上限で打ち切ったことを言い、件数がそろって止まるのは打ち切りではない。コメントで明記する）。1 ページの本文を先に読み込む（F3）は見送り（1 ページ最大約 51 MiB は plan で合意済み）。T02 のレビューは指摘なし / 修正タスク T07 を足す

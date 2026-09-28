@@ -334,3 +334,26 @@ test("an unwritable temporary directory never silences the review check", async 
     await w.done();
   }
 });
+
+test("a review that leaves decisions out says how many and where to find them", async () => {
+  const w = await world();
+  try {
+    const p = Number(w.db.owner.prepare("select id from project").get()?.id);
+    const rule = (n: number) => `Keep db rule ${n}.`;
+    const m = message(w.db, p, { id: "m2", text: Array.from({ length: 5 }, (_, n) => rule(n)).join(" ") });
+    await save(w.db, p, {
+      units: Array.from({ length: 5 }, (_, n) =>
+        decided(`db${n}`, m, rule(n), { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ),
+    });
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    const out = await w.typed("my-review");
+    assert.equal(out.split("\n").filter((l) => l.startsWith("- trace:")).length, 5);
+    assert.equal(
+      out.split("\n").at(-1),
+      "- 1 more record applies here but was left out for space: find them with Sphica's search or read.",
+    );
+  } finally {
+    await w.done();
+  }
+});

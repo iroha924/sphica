@@ -667,6 +667,7 @@ create table work (
 create index work_open on work (project_id, updated_at desc) where status in ('active', 'blocked', 'paused');
 
 -- What a delivery hook emitted or suppressed, and how many eligible units it left out. No source text is copied here.
+-- chars is the delivered length without the omission note (Sphica's own text), since the read budget adds it up.
 create table delivery (
   id integer primary key autoincrement not null,
   session_id text references session (id) on delete cascade,
