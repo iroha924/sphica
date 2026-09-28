@@ -18,6 +18,7 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
 import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
+import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
 
 type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
@@ -409,7 +410,24 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
   };
 }
 
-async function atStart(db: Kysely<DB>, projectId: number, branch: string | null): Promise<Plan> {
+/**
+ * Records grow only when the owner traces, so session start says when sessions wait: at most once a day per database and project
+ * (a mark that cannot be written shows it again rather than hiding it).
+ */
+async function waiting(db: Kysely<DB>, projectId: number, file: string, key: string): Promise<string> {
+  const n = await pendingCount(db, projectId);
+  if (!n) return "";
+  const day = new Date().toISOString().slice(0, 10);
+  if (!markOnce("pending", `${path.resolve(file)}\0${key}\0${day}`)) return "";
+  return `- ${n} session${n === 1 ? "" : "s"} waiting to be traced: run /sphica:trace pending.`;
+}
+
+async function atStart(
+  db: Kysely<DB>,
+  projectId: number,
+  branch: string | null,
+  place: { file: string; key: string },
+): Promise<Plan> {
   const current = db
     .selectFrom("work")
     .where("project_id", "=", projectId)
@@ -460,7 +478,11 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
   const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
   const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    ...noted(f.text, lead, [leftOut(broadLeft), workLeftOut(workLeft)]),
+    ...noted(f.text, lead, [
+      leftOut(broadLeft),
+      workLeftOut(workLeft),
+      await waiting(db, projectId, place.file, place.key),
+    ]),
     units: shownUnits,
     eligible: (workTotal ?? 0) + (broadTotal ?? 0),
     omitted: workLeft + broadLeft,
@@ -676,7 +698,7 @@ export async function deliver(
             ? await onPrompt(db, pid, input.prompt ?? "")
             : call
               ? await beforeReview(db, pid, place.root, call)
-              : await atStart(db, pid, branchOf(place.root));
+              : await atStart(db, pid, branchOf(place.root), { file, key: place.key });
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
     await log(
       file,

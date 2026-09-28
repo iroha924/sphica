@@ -18,6 +18,35 @@ type Coverage = {
   work: { title: string; current: string; status: string }[];
 };
 
+/** Sessions with owner messages that no extraction has looked at yet (status and session start share this count). */
+export async function pendingCount(db: Kysely<DB>, projectId: number): Promise<number> {
+  const r = await db
+    .selectFrom("session as s")
+    .where("s.project_id", "=", projectId)
+    .where((eb) =>
+      eb.exists(
+        eb
+          .selectFrom("source as m")
+          .whereRef("m.session_id", "=", "s.id")
+          .where("m.author_kind", "=", "owner")
+          .where((eb2) =>
+            eb2.not(
+              eb2.exists(
+                eb2
+                  .selectFrom("source_processing as p")
+                  .whereRef("p.source_id", "=", "m.id")
+                  .select(sql`1`.as("x")),
+              ),
+            ),
+          )
+          .select(sql`1`.as("x")),
+      ),
+    )
+    .select((eb) => eb.fn.countAll<number>().as("n"))
+    .executeTakeFirst();
+  return Number(r?.n ?? 0);
+}
+
 async function coverage(db: Kysely<DB>, projectId: number): Promise<Coverage> {
   const count = async (q: Promise<{ n: number | string | bigint } | undefined>) => Number((await q)?.n ?? 0);
   const units = (where: (q: ReturnType<typeof unitBase>) => ReturnType<typeof unitBase>) =>
@@ -44,32 +73,7 @@ async function coverage(db: Kysely<DB>, projectId: number): Promise<Coverage> {
           .select((eb) => eb.fn.countAll<number>().as("n"))
           .executeTakeFirst(),
       ),
-      count(
-        db
-          .selectFrom("session as s")
-          .where("s.project_id", "=", projectId)
-          .where((eb) =>
-            eb.exists(
-              eb
-                .selectFrom("source as m")
-                .whereRef("m.session_id", "=", "s.id")
-                .where("m.author_kind", "=", "owner")
-                .where((eb2) =>
-                  eb2.not(
-                    eb2.exists(
-                      eb2
-                        .selectFrom("source_processing as p")
-                        .whereRef("p.source_id", "=", "m.id")
-                        .select(sql`1`.as("x")),
-                    ),
-                  ),
-                )
-                .select(sql`1`.as("x")),
-            ),
-          )
-          .select((eb) => eb.fn.countAll<number>().as("n"))
-          .executeTakeFirst(),
-      ),
+      pendingCount(db, projectId),
       count(
         db
           .selectFrom("session")

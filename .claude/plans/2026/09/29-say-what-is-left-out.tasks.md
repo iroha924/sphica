@@ -90,13 +90,14 @@ base: main
 
 trace 待ちのセッションがあると、セッション開始時に 1 日 1 回、件数と `/sphica:trace pending` が出る。
 
-- [ ] T05: trace 待ちの数え方を共通にし、session_start で 1 日 1 回知らせる
+- [x] T05: trace 待ちの数え方を共通にし、session_start で 1 日 1 回知らせる
   - 種別: 追加
   - 計画: S5
   - 依存: T03（session_start の注記の枠と、lead だけでも出す経路が要る）
   - 変更: `server/src/deliver.ts`, `server/src/status.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts test/status.test.ts` → 全部 pass（あると出る、無いと出ない、それだけでも出る、25 件で 25、同じ日の 2 回目は出ない）
   - コミット: `feat(deliver): tell at session start when sessions wait to be traced, once a day`
+  - 結果: 実装前 `node --test --test-name-pattern="waiting to be traced" test/deliver.test.ts` → 失敗（行が無い）。実装後 `node --test test/deliver.test.ts test/status.test.ts` → pass 19 / fail 0（無いと出ない、trace 待ちだけでも lead と行が出る、25 件で 25、同じ日の 2 回目は出ない）。typecheck・lint → 0、`sql:reach` 157 / 157、architecture → 通過
 
 ## P4: acceptance
 

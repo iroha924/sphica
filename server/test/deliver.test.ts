@@ -875,3 +875,28 @@ test("session start counts a constraint as shown only when its line was kept", a
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// Records grow only when the owner traces, so session start says when sessions wait, once a day
+test("session start tells about sessions waiting to be traced, once a day, even with nothing else to show", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const start = () =>
+      deliver(
+        { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+        "claude-code",
+        db.file,
+      );
+    assert.equal(await start(), "", "nothing waits and nothing applies");
+    for (let n = 0; n < 25; n++) message(db, p, { id: `m${n}`, text: `untraced ${n}`, session: `s${n}` });
+    message(db, p, { id: "a", text: "assistant only", session: "sa", speaker: "assistant" });
+    const first = await start();
+    assert.match(first, /^Sphica: this project's current work and standing constraints\./);
+    assert.equal(first.split("\n").at(-1), "- 25 sessions waiting to be traced: run /sphica:trace pending.");
+    assert.doesNotMatch(await start(), /waiting to be traced/, "said once a day");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
