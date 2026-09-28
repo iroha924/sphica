@@ -65,15 +65,6 @@ glean が引いたファイルの抜粋が、伏せ字にされて保存・索�
   - コミット: `fix(glean): mask file excerpts before storing them (T02)`
   - 結果: red は、直す前の glean.ts で extract.test.ts の新しいテストが fail（古い伏せ字なしの行を使い回し、行数 1 ≠ 2）、受け入れケース glean-13 が fail（保存本文に `API_KEY=abc123def456` が残る）。直した後 `bun run --cwd server test` → 313 件 pass、`bun run acceptance` → 58 件 pass
 
-- [x] T07: 抜粋の外にあるキー名で伏せ字になる値を、抜粋だけで保存しない
-  - 種別: 修正
-  - 計画: S3, S4
-  - 依存: T02（直す対象の glean の抜粋）, T03（直す対象のコード位置の抜粋）
-  - 変更: `server/src/glean.ts`, `server/src/anchors.ts`, `server/test/extract.test.ts`, `server/test/record.test.ts`, `plugin/skills/glean/SKILL.md`
-  - red: `API_KEY=` の次の行の値だけを引くケースを足し、直す前のコードで `node --test test/extract.test.ts test/record.test.ts` → extract は `Missing expected rejection`、record は抜粋に `tokenValue123abc;` が残って fail
-  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
-  - コミット: `fix(glean): refuse excerpts whose masking depends on text outside them (T07)`
-  - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run acceptance` → 58 件 pass、tsc と biome は指摘なし
 
 ## P3: コード位置の抜粋を伏せ字にする
 
@@ -88,6 +79,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - 完了条件: `bun run --cwd server test` → 全件 pass
   - コミット: `fix(anchors): mask anchor excerpts before cutting them (T03)`
   - 結果: red は、直す前のコードで record.test.ts の新しいテストが fail（抜粋に `apiKey` の値が残る）。値は `sk-` の形だと切った後でも鍵の形で伏せ字になり、順序の誤りを見分けられないので、代入の形でしか見つからない値に変えて red を取り直した。直した後 `bun run --cwd server test` → 314 件 pass、`bun run acceptance` → 58 件 pass、`bun run architecture` → 通過。配信のたびに走る anchorState には秘密鍵の走査を入れず、保存時の locate だけで抜粋を作る形に分けた
+
+- [x] T07: 抜粋の外にあるキー名で伏せ字になる値を、抜粋だけで保存しない
+  - 種別: 修正
+  - 計画: S3, S4
+  - 依存: T02（直す対象の glean の抜粋）, T03（直す対象のコード位置の抜粋）
+  - 変更: `server/src/glean.ts`, `server/src/anchors.ts`, `server/test/extract.test.ts`, `server/test/record.test.ts`, `plugin/skills/glean/SKILL.md`
+  - red: `API_KEY=` の次の行の値だけを引くケースを足し、直す前のコードで `node --test test/extract.test.ts test/record.test.ts` → extract は `Missing expected rejection`、record は抜粋に `tokenValue123abc;` が残って fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(glean): refuse excerpts whose masking depends on text outside them (T07)`
+  - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run acceptance` → 58 件 pass、tsc と biome は指摘なし
 
 ## P4: 出荷の準備
 
@@ -112,3 +113,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T06 / T06（ec11ca7）の Codex レビュー: 範囲を絞った目印の正規表現は全種類の目印に一致し、閉じ括弧の無い入力でも線形と確認。新しい指摘 F1（再現済み）: 同じ文字の連続に同じ文字だけの長い引用を重なりも含めて探すと二乗時間で、1 MiB で約 2.2 秒 / 見送り。ファイルは 1 MiB（MAX_FILE）、引用は 4000 文字（zod）が上限で最悪でも約 2.2 秒、本人が実行する glean でしか起きない。線形にするには自前の KMP が要り、手間に見合わない。PR 本文の見送った指摘に書く
 - 2026-09-28 / T03 / T03（bf13675）の Codex レビュー: 指摘なし（target 一致）。Codex 側の全件テストの失敗は読み取り専用の環境の EPERM で、手元では 314 件 pass / 受け取り
 - 2026-09-28 / T07 / T02（ff28b14）の Codex レビュー F1（再現済み）: `API_KEY=` の次の行の値だけを引くと、抜粋だけを伏せ字にしても値が残り、source.text と source_fts に入る。コード位置の抜粋（T03）にも同じ穴 / 採用。修正タスク T07: 前後の文脈とつないで伏せ字にした結果が別々に伏せ字にした結果と一致しなければ、glean は断り、コード位置の抜粋は `[redacted]` にする
+- 2026-09-28 / T07 / T07 を依存先の T03 より前に置いていた（a3f2ba2 の時点で tasks の検査が違反を出していたのに、検査の結果を head に流していてコミットを止めなかった） / T07 を P3 の後ろへ移した
