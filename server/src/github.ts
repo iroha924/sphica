@@ -348,6 +348,19 @@ export function githubTarget(repo: string, url: string): { kind: "pull" | "issue
 }
 
 /**
+ * Text people write under their own GitHub login. A commit is attributed by its git author email, which anyone can write in a fork,
+ * and a merge event is Sphica's own sentence, so neither speaks as the owner even when the account is bound.
+ */
+const SPOKEN = new Set<string>([
+  "pr_body",
+  "issue_body",
+  "pr_comment",
+  "issue_comment",
+  "review",
+  "review_comment",
+]);
+
+/**
  * Stores items as sources and returns the id of each one's current revision. Unchanged text keeps its row; changed text becomes
  * a new revision, so units extracted earlier keep citing what they were extracted from.
  */
@@ -384,8 +397,7 @@ export async function storeItems(
       continue;
     }
     const authorId = it.author?.id === undefined ? null : String(it.author.id);
-    // GitHub attributes a commit by its git author email, which anyone can write in a fork, so a commit never speaks as the owner
-    const bound = authorId !== null && owners.has(authorId) && it.kind !== "commit_message";
+    const bound = authorId !== null && owners.has(authorId) && SPOKEN.has(it.kind);
     const kind = bound ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
     const created = iso(it.createdAt);
     const row = await db

@@ -137,6 +137,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `fix(github): never let a commit's git author speak as the owner`
   - 結果: red を実測（actual owner / expected person）。直した後 `node --test test/github.test.ts test/extract.test.ts test/record.test.ts` → 31 pass / 0 fail
 
+- [x] T21: マージのイベントも owner にせず、owner になれる種類を人が書く本文・コメント・レビューに絞る
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T19（直す対象の owner の判定が要る）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test --test-name-pattern="stores sources with who wrote them" test/github.test.ts` → 登録済みの hana がマージした pr_event が owner で保存され失敗
+  - 完了条件: `bun run test` → pr_event と commit_message が person で保存される検査を含めて通る
+  - コミット: `fix(github): let only text people write speak as the owner`
+  - 結果: red を実測（actual owner / expected person）。直した後 `bun run verify` → rc 0（test、acceptance 57 pass、sql:reach 128 / 128、sql:live 8 / 8）
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -240,3 +250,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / review-shipping / #1・#2（時間の上限）は T15 で対応済み。#3（CLICOLOR_FORCE で JSON に色が付く）を本物の gh で再現して採用し T16 を足した。#4（live-harness の childEnv の JSDoc が fakeGh の上に残った）を採用し T17 を足した。Windows の CI の手順は PR の CI で確かめる
 - 2026-09-28 / T15, T16 の Codex 再レビュー / 指摘 1 件（SIGTERM を無視する gh では時間の上限が効かない、Codex が再現）を採用し T18 を足した
 - 2026-09-28 / PR #183 の GitHub Codex レビュー（1 回目） / P1 commit の作者（git のメールから GitHub が割り当て、fork で偽装できる）を採用し T19。P1 check-tarball の SPHICA_HOME と P2 connection-roles の不変条件を採用し T20。P2 glean_fetch に owner を出す件は見送り: glean_fetch の出力は read s<id> で読むよう案内し、read は owner の発言を the owner と出す（server/src/read.ts:18）
+- 2026-09-28 / PR #183 の GitHub Codex レビュー（2 回目、80a48a6） / P1 マージのイベント（Sphica が作る文）が owner になり、supersedes や glean の取り下げの根拠に使える件を採用し T21。除外の列挙ではなく、owner になれる種類の許可リストにした

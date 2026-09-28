@@ -189,7 +189,7 @@ test("stores sources with who wrote them, adds a revision only when text changed
       .map((r) => [r.kind, r.author_kind, r.author_association, r.revision, r.known, r.indexed]);
     assert.deepEqual(kinds[0], ["pr_body", "owner", "OWNER", 1, 1, 1]);
     assert.deepEqual(kinds[2], ["review", "bot", null, 1, 1, 1]);
-    assert.deepEqual(kinds[6], ["pr_event", "owner", null, 1, 1, 0]);
+    assert.deepEqual(kinds[6], ["pr_event", "person", null, 1, 1, 0]);
     // A commit's author comes from the git email, which anyone can write: a bound id there never makes the owner's words
     assert.deepEqual(
       kinds.filter((k) => k[0] === "commit_message").map((k) => k[1]),
