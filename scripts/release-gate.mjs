@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { gateProblems } from "./lib/release-gate.mjs";
+import { gateProblems, reviewProblems } from "./lib/release-gate.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const { tag, commit } = parseArgs({
@@ -16,6 +16,10 @@ const repo = process.env.GITHUB_REPOSITORY;
 if (!tag || !commit || !/^[0-9a-f]{40}$/.test(commit) || !repo) {
   throw new Error("pass --tag, --commit (a 40-character sha), and GITHUB_REPOSITORY");
 }
+const THREADS = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    reviewThreads(first: 100, after: $after) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } }
+}`;
 const run = (command, args) => execFileSync(command, args, { cwd: root, encoding: "utf8" }).trim();
 const api = (endpoint) => JSON.parse(run("gh", ["api", endpoint]));
 const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -62,6 +66,35 @@ const { problems, pull } = gateProblems({
   pulls: api(`repos/${repo}/commits/${commit}/pulls`),
   runs: api(`repos/${repo}/actions/runs?head_sha=${commit}&event=pull_request&per_page=100`).workflow_runs,
 });
+// Codex reviews after CI, so its state is read here, at tag time, not by a pull_request check. Every page is read; an API failure throws
+if (pull !== null) {
+  const [owner, name] = repo.split("/");
+  const comments = JSON.parse(
+    run("gh", ["api", "--paginate", "--slurp", `repos/${repo}/issues/${pull}/comments?per_page=100`]),
+  ).flat();
+  const threads = [];
+  for (let after = null; ; ) {
+    const page = JSON.parse(
+      run("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=${THREADS}`,
+        "-f",
+        `owner=${owner}`,
+        "-f",
+        `name=${name}`,
+        "-F",
+        `number=${pull}`,
+        ...(after ? ["-f", `after=${after}`] : []),
+      ]),
+    ).data.repository.pullRequest.reviewThreads;
+    threads.push(...page.nodes);
+    if (!page.pageInfo.hasNextPage) break;
+    after = page.pageInfo.endCursor;
+  }
+  problems.push(...reviewProblems({ commit, comments, threads }));
+}
 if (problems.length) {
   console.error(problems.join("\n"));
   process.exit(1);

@@ -25,11 +25,14 @@ process.stderr.write("npm error code E404\\n");
 process.exit(1);
 `,
   gh: `
-const endpoint = process.argv[3] ?? "";
+const args = process.argv.slice(2);
+const endpoint = args.find((a) => a.startsWith("repos/") || a === "graphql") ?? "";
 const pull = { state: "open", number: 7, base: { ref: "main" }, head: { sha: "${COMMIT}", repo: { full_name: "${REPO}" } } };
 const run = (name) => ({ id: 1, name, event: "pull_request", head_sha: "${COMMIT}", status: "completed", conclusion: "success", pull_requests: [{ number: 7, base: { ref: "main" } }] });
 if (endpoint.includes("/pulls")) process.stdout.write(JSON.stringify(process.env.FAKE_NO_PR ? [] : [pull]));
 else if (endpoint.includes("actions/runs")) process.stdout.write(JSON.stringify({ workflow_runs: [run("check"), run("pr-body"), run("release")] }));
+else if (endpoint.endsWith("/comments?per_page=100")) process.stdout.write(JSON.stringify([[{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->' }]]));
+else if (endpoint === "graphql") process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: true }], pageInfo: { hasNextPage: false, endCursor: null } } } } } }));
 else process.exit(1);
 `,
 };
@@ -82,5 +85,12 @@ test("release-gate writes the PR number to GITHUB_OUTPUT when the tag may be rel
 test("release-gate writes nothing to GITHUB_OUTPUT when the gate fails", () => {
   const { status, output } = runGate({ FAKE_NO_PR: "1" });
   assert.equal(status, 1);
+  assert.equal(output, "");
+});
+
+test("release-gate stops a head whose Codex review is still running", () => {
+  const { status, stderr, output } = runGate({ FAKE_REVIEW_RUNNING: "1" });
+  assert.equal(status, 1);
+  assert.match(stderr, /running, not completed/);
   assert.equal(output, "");
 });

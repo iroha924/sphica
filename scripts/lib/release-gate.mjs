@@ -63,3 +63,39 @@ export function gateProblems({
   }
   return { problems, pull: number };
 }
+
+/**
+ * The GitHub Codex connector's bot account, which posts one review summary per PR. Matched by id and type, never by login text:
+ * anyone can comment on a public PR, and a comment carrying the same marker from any other author is ignored.
+ * Observed on PR #183 (2026-09-28): login chatgpt-codex-connector[bot], type Bot, app chatgpt-codex-connector.
+ */
+const CODEX_BOT_ID = 199175422;
+const MARKER = /<!-- codex-security-review:v1 (\{.*?\}) -->/;
+
+/**
+ * Whether Codex finished reviewing the tag commit with nothing left open: the connector's summary names that head as completed,
+ * and no review thread is unresolved. The PR body's own account of the review proves nothing, since the author writes it.
+ */
+export function reviewProblems({ commit, comments, threads }) {
+  const problems = [];
+  const summaries = comments.filter(
+    (c) => c?.user?.type === "Bot" && c.user.id === CODEX_BOT_ID && MARKER.test(c.body ?? ""),
+  );
+  if (summaries.length !== 1)
+    problems.push(`expected one Codex review summary on the PR, found ${summaries.length}`);
+  else {
+    let state = null;
+    try {
+      state = JSON.parse(MARKER.exec(summaries[0].body)?.[1] ?? "");
+    } catch {
+      problems.push("the Codex review summary's marker is not valid JSON");
+    }
+    if (state && state.headSha !== commit)
+      problems.push(`the Codex review summary is for ${state.headSha}, not the tag commit ${commit}`);
+    else if (state && state.status !== "completed")
+      problems.push(`the Codex review of ${commit} is ${state.status}, not completed`);
+  }
+  const open = threads.filter((t) => t?.isResolved !== true).length;
+  if (open) problems.push(`${open} review thread${open === 1 ? " is" : "s are"} unresolved`);
+  return problems;
+}

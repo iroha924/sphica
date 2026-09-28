@@ -54,13 +54,14 @@ base: main
 
 リリースは Codex のレビューが head で完了していないと止まり、GitHub 側の設定の穴を手元の検査が見つける。
 
-- [ ] T04: release-gate が Codex の要約の完了と未解決のスレッド 0 件を確かめる
+- [x] T04: release-gate が Codex の要約の完了と未解決のスレッド 0 件を確かめる
   - 種別: 追加
   - 計画: S3
   - 依存: なし
-  - 変更: `scripts/lib/release-gate.mjs`, `scripts/lib/release-gate.d.mts`, `scripts/release-gate.mjs`, `server/test/release-gate.test.ts`
+  - 変更: `scripts/lib/release-gate.mjs`, `scripts/lib/release-gate.d.mts`, `scripts/release-gate.mjs`, `server/test/release-gate.test.ts`, `server/test/release-gate-cli.test.ts`, `.github/workflows/release.yml`
   - 完了条件: `bun run test` → 要約の欠落・別の作者・headSha の不一致・running・マーカーの JSON の破損・未解決のスレッドのそれぞれで止め、すべてそろったときだけ通す検査を含めて通る
   - コミット: `feat(release): require a completed Codex review with no open threads on the head`
+  - 結果: `node --test test/release-gate.test.ts test/release-gate-cli.test.ts` → 13 pass / 0 fail（要約なし・別の作者・type User・2 件・別の head・running・JSON の破損・未解決 1 件・isResolved 欠落で止め、CLI も running で exit 1）。PR #183 の本物のコメントとスレッドで判定を流し、head 8f892dc は問題 0 件、古い head f772ff3 は「tag commit のものではない」で止まった
 
 - [ ] T05: immutable releases と SHA 固定の強制を有効にし、release:plan と release:status で確かめる
   - 種別: 追加
@@ -81,3 +82,4 @@ base: main
 ## 記録
 
 - 2026-09-28 / - / 持ち主の指示で、.claude/plans の他の plan と tasks（27-claude-bash-delivery、27-eval-structured-grading、28-bind-github-owner、28-confirm-before-override、28-release-automation）を最初のコミットで削除する。ほかのファイルからの参照は 0 件（rg で確認）
+- 2026-09-28 / T04 / release-gate の CLI テストの偽の gh も新しい API に答える必要があり、release.yml の関門の説明コメントも古くなった / 変更欄に release-gate-cli.test.ts と release.yml を足した

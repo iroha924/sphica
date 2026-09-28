@@ -100,7 +100,8 @@ jobs:
           node-version: "24.21.0"
           package-manager-cache: false
 
-      # The tag name matches every version, the commit is the head of an open PR into main, and that PR's check and pr-body succeeded
+      # The tag name matches every version, the commit is the head of an open PR into main, that PR's check and pr-body succeeded,
+      # and Codex finished reviewing that head with no thread left open
       - name: May this tag be released
         id: gate
         if: github.event_name == 'push'

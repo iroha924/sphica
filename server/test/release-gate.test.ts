@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { gateProblems } from "../../scripts/lib/release-gate.mjs";
+import { gateProblems, reviewProblems } from "../../scripts/lib/release-gate.mjs";
 
 const COMMIT = "a".repeat(40);
 const REPO = "iroha924/sphica";
@@ -141,4 +141,29 @@ test("rejects a commit whose release dry run failed or did not run", () => {
     gateProblems({ ...ok, runs: [run("check"), run("pr-body")] }).problems.join("\n"),
     /release has not run/,
   );
+});
+
+const summary = (headSha: string, status = "completed", user: object = { id: 199175422, type: "Bot" }) => ({
+  user,
+  body: `<!-- codex-pull-request-review-summary -->\n<!-- codex-security-review:v1 {"headSha":"${headSha}","status":"${status}"} -->\n## Codex Review Summary`,
+});
+const reviewed = { commit: COMMIT, comments: [summary(COMMIT)], threads: [{ isResolved: true }] };
+
+// The PR body is written by the agent whose work was reviewed; only the connector's own summary and the threads prove the review
+test("passes only when Codex's own summary marks the tag commit completed and no thread is open", () => {
+  assert.deepEqual(reviewProblems(reviewed), []);
+  const fails = (input: { comments?: unknown[]; threads?: unknown[] }, why: RegExp) =>
+    assert.match(reviewProblems({ ...reviewed, ...input }).join("\n"), why);
+  fails({ comments: [] }, /found 0/);
+  fails({ comments: [summary(COMMIT, "completed", { id: 42, type: "User" })] }, /found 0/);
+  fails({ comments: [summary(COMMIT, "completed", { id: 199175422, type: "User" })] }, /found 0/);
+  fails({ comments: [summary(COMMIT), summary(COMMIT)] }, /found 2/);
+  fails({ comments: [summary("b".repeat(40))] }, /not the tag commit/);
+  fails({ comments: [summary(COMMIT, "running")] }, /running, not completed/);
+  fails(
+    { comments: [{ ...summary(COMMIT), body: "<!-- codex-security-review:v1 {headSha} -->" }] },
+    /not valid JSON/,
+  );
+  fails({ threads: [{ isResolved: true }, { isResolved: false }] }, /1 review thread is unresolved/);
+  fails({ threads: [{}] }, /unresolved/);
 });
