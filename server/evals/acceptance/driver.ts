@@ -14,12 +14,13 @@ import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
 import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
+import { applyForget, previewForget } from "../../src/forget.ts";
 import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
 import { readSource, readUnit } from "../../src/read.ts";
 import { type Applicable, checkFindings, parseDiff, selectForReview } from "../../src/review.ts";
-import { searchUnits, type UnitHit } from "../../src/search.ts";
+import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import type { Step, World } from "./load.ts";
 
@@ -403,6 +404,15 @@ export async function createDriver(world: World): Promise<Driver> {
         lastRead = parts.join("\n\n");
         return;
       }
+      // The owner's confirmation is the record server's part (tested there); here the preview is applied as confirmed
+      if (step.forget && typeof step.forget === "object") {
+        const ids: number[] = [];
+        for (const r of (step.forget as { sources: string[] }).sources)
+          ids.push(Number((await ref(r)).slice(1)));
+        const pid = await projectId();
+        await applyForget(file, pid, ids, await previewForget(file, pid, ids));
+        return;
+      }
       if (step.glean && typeof step.glean === "object") {
         const tick = () => new Promise((r) => setTimeout(r, 2));
         await tick();
@@ -748,6 +758,16 @@ export async function createDriver(world: World): Promise<Driver> {
           ia >= 0 && (ib < 0 || ia < ib),
           `${a} is not above ${b}: ${found.map((h) => h.key).join(", ")}`,
         );
+        return;
+      }
+      if (typeof e.source_gone === "string") {
+        assert.equal((await sessionSource(e.source_gone)) ?? (await githubSource(e.source_gone)), undefined);
+        return;
+      }
+      if (e.source_search && typeof e.source_search === "object") {
+        const want = e.source_search as { query: string; hits: number };
+        const got = await searchSources(db(), await projectId(), want.query, 10);
+        assert.equal(got.hits.length, want.hits, got.hits.map((h) => h.text).join(" / "));
         return;
       }
       if (e.search && typeof e.search === "object") {

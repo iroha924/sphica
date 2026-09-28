@@ -113,13 +113,14 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
   - コミット: `feat(mcp): add forget_preview and forget_apply with a confirmation the owner types`
   - 結果: `node --test test/plugin.test.ts` → pass 26（ツール一覧、preview と確認文に本文が出ない、elicitation 非対応・件数の不一致・decline では消えない、件数が合えば消える、空の elicitation 宣言は SDK 1.30 がフォーム対応と読み件数が合えば消える）。`bun run verify` → exit 0。cancel と elicitInput の失敗は未テスト（decline と同じ分岐、失敗は catch で止まる）
 
-- [ ] T07: `/sphica:forget` Skill と受け入れケース
+- [x] T07: `/sphica:forget` Skill と受け入れケース
   - 種別: 追加
   - 計画: S7
   - 依存: T06（Skill が呼ぶツールが要る）
-  - 変更: `plugin/skills/forget/SKILL.md`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 変更: `plugin/skills/forget/SKILL.md`, `plugin/skills/forget/agents/openai.yaml`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `CLAUDE.md`, `AGENTS.md`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify:ai` と `bun run acceptance` → Skill の検査と forget の受け入れケースが通る
   - コミット: `feat(skills): add /sphica:forget`
+  - 結果: `bun run verify:ai` → 通る（plugin Skills 5）。forget-01 は driver の forget を外すと失敗（source_gone、source_search は actual 1 / expected 0）し、戻すと通ることを確かめた。`bun run verify` → exit 0（受け入れ 59 件）
 
 ## 記録
 2026-09-29 / T01 / `git show v0.5.7:db/schema.sql` は浅い clone で読めない / revision 1 の schema を `server/test/fixtures/schema-rev1.sql` に固定し、変更欄に足した（前: 6 ファイル、後: 7 ファイル）
@@ -132,3 +133,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T10 / Codex の T03 レビュー F1・F3・F4（再現済み）を採用し修正タスク T10 を足した。F2（ingest が forget_id 付きの unit_state を書ける）は見送り: authorizer には値が見えず、ingest は run_id 付きなら unit_state を元々書ける。authorizer はコードの書き間違いを止める粗い防御で、forget_id を書くのは forget.ts の固定の SQL だけ / T09 のレビューは指摘なし
 2026-09-29 / T05 / capture の墓標テストは T01 で schema.test.ts に入っていた。Codex の T04 レビュー F1（A3 の `--test-name-pattern=bytes` に一致するテストが無く空振りする、再現済み）を採用 / 変更欄を直した（前: capture.test.ts、後: schema.test.ts と forget.test.ts）。テスト名に bytes と tombstone を入れた
 2026-09-29 / T06 / preview と確認の文面を作る forgetText を forget.ts に置いた / 変更欄に forget.ts を足した
+2026-09-29 / T07 / Codex 向けの `agents/openai.yaml`（暗黙の起動を止める）が必要だった。record-writes の規範と README に forget を書き足した / 変更欄に 5 ファイルを足した

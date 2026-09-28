@@ -22,6 +22,7 @@ The database is a single SQLite file on your machine.
 - **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from, and a decision counts as adopted only when you said so.
 - **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and up to five issues the body says it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
 - **Evidence found later.** `/sphica:glean` adds evidence and corrections to existing records. It asks you for the source (an issue URL, the file and line, meeting notes) before saving; a claim without one is kept only as unsourced and never used as fact.
+- **Forget what should not have been kept.** `/sphica:forget` removes the messages, pull request items, or file excerpts you pick, with their search entries and the bytes left in the database file, after you confirm in a dialog. Records that cited them are judged again and leave active when nothing else supports them.
 - **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. Works in both Claude Code and Codex.
 - **Search in Japanese and English.** Records are made with search words in both languages, so a question in either language is more likely to find them.
 - **Reviews check past decisions.** `/sphica:review` runs a reviewer per focus (correctness, security, written conventions, and past decisions by default; redundancy with `full`), and checks the diff against the records it touches.
@@ -118,14 +119,14 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 - **What.** Your prompts, the agent's final reply for each turn, and the paths of changed files. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format. Replies in the middle of a turn are not kept, nor are files created and deleted within one turn without the edit tools.
 - **What was shown.** Each automatic delivery is logged by which records it showed, not their text.
 - **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue and are written after you register it. Held sessions are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
-- **Secrets.** In your prompts, pull request text, and the file lines `/sphica:glean` cites, only secrets with a recognizable shape are masked (excerpts saved before 0.5.7 stay as they were):
+- **Secrets.** In your prompts, pull request text, and the file lines `/sphica:glean` cites, only secrets with a recognizable shape are masked (excerpts saved before 0.5.7 stay as they were until you forget them):
   - keys with known prefixes
   - `KEY=…` and `"password": …` assignments
   - credentials in URLs
   - authorization headers
   - `mysql -p`
 
-  **Anything else is stored as typed, so do not paste secrets into a session.**
+  **Anything else is stored as typed, so do not paste secrets into a session.** If one got in, remove it with `/sphica:forget` (Claude Code; the confirmation dialog it needs may not appear in Codex).
 - **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, `sphica init` runs `gh api user` to read which GitHub account is yours, and `sphica doctor` runs `npm` and `claude` to check installed versions. `gh api` is always sent to github.com.
 - **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only your words, or those of the repository's owner or a maintainer, can adopt a decision.
 
