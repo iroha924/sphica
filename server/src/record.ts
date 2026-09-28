@@ -332,10 +332,10 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         );
         continue;
       }
-      if (a.symbol && masksSymbol(target.root, p, a.symbol)) {
-        problems.push(`${key}: anchor symbol in ${p} is text Sphica masks; left out`);
-        continue;
-      }
+      // The path still delivers the record; only the symbol, which would store the key, is dropped
+      const symbol = a.symbol && masksSymbol(target.root, p, a.symbol) ? undefined : a.symbol;
+      if (a.symbol && !symbol)
+        problems.push(`${key}: anchor symbol in ${p} is text Sphica masks; the anchor keeps only its path`);
       // A commit counts as code evidence only when the repository has it and it holds the path; otherwise the anchor keeps no commit
       let commit = a.commit;
       if (commit && !(target.root && commitHolds(target.root, commit, p))) {
@@ -356,7 +356,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
                 .executeTakeFirst()
             )?.id ?? null)
           : null;
-      anchors.push({ ...a, commit, path: p, observation });
+      anchors.push({ ...a, symbol, commit, path: p, observation });
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];

@@ -118,7 +118,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 - **What.** Your prompts, the agent's final reply for each turn, and the paths of changed files. Background-task notifications and messages from other agents are skipped when Sphica recognizes their format. Replies in the middle of a turn are not kept, nor are files created and deleted within one turn without the edit tools.
 - **What was shown.** Each automatic delivery is logged by which records it showed, not their text.
 - **Unregistered repositories.** Sessions in a repository you have not registered stay in the queue and are written after you register it. Held sessions are dropped after 30 days, and when more than 1,000 are waiting the oldest go first.
-- **Secrets.** Only secrets with a recognizable shape are masked:
+- **Secrets.** In your prompts, pull request text, and the file lines `/sphica:glean` cites, only secrets with a recognizable shape are masked (excerpts saved before 0.5.7 stay as they were):
   - keys with known prefixes
   - `KEY=…` and `"password": …` assignments
   - credentials in URLs

@@ -334,6 +334,11 @@ function byteRanges(text: string, ranges: [number, number][]): [number, number][
 // Labels are short names (the longest is "webhook signing secret"); a bound keeps unclosed openings in a file from rereading to its end
 const PLACEHOLDER = /\[redacted(?:: [^\]\n]{1,40})?\]/g;
 
+/** The string index ranges of the placeholders mask() left in masked text, in order. */
+export function placeholderRanges(masked: string): [number, number][] {
+  return [...masked.matchAll(PLACEHOLDER)].map((x) => [x.index, x.index + x[0].length]);
+}
+
 /** Every byte offset where needle starts in hay, overlapping occurrences included. */
 function starts(hay: Buffer, needle: Buffer): number[] {
   const out: number[] = [];
@@ -354,10 +359,7 @@ export function quoteSpan(raw: string, masked: string, quote: string): [number, 
     const at = m.indexOf(q);
     return at < 0 ? null : [at, at + q.length];
   }
-  const holes = byteRanges(
-    masked,
-    [...masked.matchAll(PLACEHOLDER)].map((x) => [x.index, x.index + x[0].length]),
-  );
+  const holes = byteRanges(masked, placeholderRanges(masked));
   // Matches and placeholders both run in order, so one pass pairs them
   let h = 0;
   const kept = starts(m, q).filter((at) => {

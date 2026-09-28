@@ -72,7 +72,7 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
     const key = "Zq9x".repeat(60);
     fs.writeFileSync(
       path.join(root, "config.ts"),
-      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n// keyBody is also named here, outside the key, yet its copy inside the key keeps it out\nexport const API_KEY =\n  tokenValue123abc; // configMarker\n// tokenValue123abc is also mentioned here\nSECRET_TOKEN=redacted\n`,
+      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n// keyBody is also named here, outside the key, yet its copy inside the key keeps it out\nexport const API_KEY =\n  tokenValue123abc; // configMarker\n// tokenValue123abc is also mentioned here\nSECRET_TOKEN=redacted\nconst url = "postgres://app:localdev@localhost/app"; const local = 1;\n`,
     );
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "設定の鍵はここにある。" });
@@ -90,25 +90,31 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
               { path: "config.ts", symbol: "apiKey", role: "applies_to" },
               { path: "config.ts", symbol: "keyBody", role: "applies_to" },
               { path: "config.ts", symbol: "configMarker", role: "applies_to" },
-              // A symbol that is itself a key, by shape or because the file shows it only inside masked text, is left out
+              // A symbol that is itself a key, by shape or because the file shows it only inside masked text, is dropped
               { path: "config.ts", symbol: "tokenValue123abc", role: "applies_to" },
               { path: "config.ts", symbol: `sk-${"b2".repeat(15)}`, role: "applies_to" },
               // Also when the value shows unmasked elsewhere, or when it reads like the placeholder itself
               { path: "config.ts", symbol: "redacted", role: "applies_to" },
+              // An ordinary name whose letters also sit inside masked text is kept: only whole names count
+              { path: "config.ts", symbol: "local", role: "applies_to" },
             ],
           },
         ],
       },
       [m],
     );
-    const got = db.owner.prepare("select symbol, excerpt from unit_anchor order by id").all() as {
-      symbol: string;
-      excerpt: string;
+    const all = db.owner.prepare("select path, symbol, excerpt from unit_anchor order by id").all() as {
+      path: string;
+      symbol: string | null;
+      excerpt: string | null;
     }[];
+    // Anchors whose symbol masking swallows keep their path, so the record is still delivered, without the symbol
     assert.deepEqual(
-      got.map((a) => a.symbol),
-      ["apiKey", "configMarker"],
+      all.map((a) => a.symbol),
+      ["apiKey", null, "configMarker", null, null, null, "local"],
     );
+    assert.ok(all.every((a) => a.path === "config.ts"));
+    const got = all.filter((a) => a.symbol);
     assert.doesNotMatch(got[0]?.excerpt ?? "", /Zq9x/);
     assert.match(got[0]?.excerpt ?? "", /^export const apiKey = "\[redacted\]"/);
     // The key name is on the line before: the line alone does not look like a key, but the whole file masks it

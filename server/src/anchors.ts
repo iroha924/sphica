@@ -2,7 +2,7 @@
 // A located symbol only says the code is still there; it never proves the decision still holds.
 import fs from "node:fs";
 import path from "node:path";
-import { bytes, mask, privateKeyRanges, quoteSpan } from "./text.ts";
+import { bytes, mask, placeholderRanges, privateKeyRanges } from "./text.ts";
 
 export type AnchorState = "located" | "moved" | "missing" | "unknown";
 
@@ -37,15 +37,22 @@ function findSymbol(text: string, symbol: string): { lines: string[]; i: number 
 }
 
 /**
- * Whether a symbol is text mask() hides: a key by its shape, or a name some occurrence of which masking swallows (quoteSpan's rule, so a
- * copy left elsewhere or a placeholder's own letters do not clear it). Such an anchor would store the key in its symbol.
+ * Whether a symbol is text mask() hides: a key by its shape, or a name masking swallows somewhere (a copy left elsewhere, or a placeholder's own
+ * letters, does not clear it). Names are counted whole, as findSymbol matches them. Such an anchor would store the key in its symbol.
  */
 export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
   if (mask(symbol) !== symbol) return true;
   const text = root ? readText(root, rel) : null;
-  if (typeof text !== "string" || !text.includes(symbol)) return false;
+  if (typeof text !== "string") return false;
+  const re = new RegExp(`(?<![\\w$])${literal(symbol)}(?![\\w$])`, "g");
+  const raw = [...text.matchAll(re)].length;
+  if (raw === 0) return false;
   const masked = mask(text);
-  return masked !== text && quoteSpan(text, masked, symbol) === null;
+  const holes = placeholderRanges(masked);
+  const kept = [...masked.matchAll(re)].filter(
+    (m) => !holes.some(([a, b]) => m.index < b && m.index + symbol.length > a),
+  );
+  return kept.length !== raw;
 }
 
 /**

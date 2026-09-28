@@ -120,6 +120,25 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): keep masking key lines in locate after the check (T10)`
   - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 315 件 pass、`bun run verify` → exit 0
 
+- [x] T12: symbol を識別子全体で数え、伏せ字に飲まれた symbol は anchor ごとではなく symbol だけを外す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T10（直す対象の anchors.ts の最新の形）
+  - 変更: `server/src/anchors.ts`, `server/src/record.ts`, `server/src/text.ts`, `server/test/record.test.ts`
+  - red: 伏せ字の中に文字列として含まれる普通の名前 `local`（`postgres://app:localdev@…`）を symbol にした anchor を足し、直す前のコードで `node --test test/record.test.ts` → `local` の anchor が外れて fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): count whole names and keep the path when a symbol is masked (T11, T12)`
+  - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 315 件 pass、`bun run verify` → exit 0。Sphica 自身の text.ts で `sql`・`word`・`mask` は通るようになった。`what` はまだ伏せ字に飲まれる（行をまたぐ伏せ字の中にある）が、anchor はパスで残るので配信は止まらない
+
+- [x] T11: README の秘密情報の項目に、glean が引いたファイルの行も伏せ字になることを書く
+  - 種別: 変更
+  - 計画: S5
+  - 依存: T12（出荷する振る舞いがそろっている必要がある）
+  - 変更: `README.md`, `README.ja.md`
+  - 完了条件: `bun run verify` → exit 0
+  - コミット: `fix(anchors): count whole names and keep the path when a symbol is masked (T11, T12)`
+  - 結果: 持ち主の確認（README や .claude 配下の文書の更新は要るか）を受けて足した。CLAUDE.md・AGENTS.md・.claude/skills・.claude/rules・.agents には伏せ字の記述が無く変更なし。plugin/README.md は bundle が README.md から写す。`bun run verify` → exit 0
+
 ## P4: 出荷の準備
 
 glean スキルの案内を足し、出荷前の検査を通す。
@@ -150,3 +169,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T09 / T08（448e24d）の Codex レビュー F1・F2（再現済み）: 秘密の値が別の行に伏せ字なしで残る場合と、値が `redacted` の場合に masksSymbol が false を返し、symbol に保存される / 採用。修正タスク T09: quoteSpan と同じ件数の規則にした
 - 2026-09-28 / T10 / T09（320a447）の Codex レビュー F1（再現済み）: 保存時の locate は検査の後にファイルを読み直すので、その間に symbol の行が秘密鍵の中に入ると、T09 で消した分岐が守っていた抜粋が残る / 採用。修正タスク T10 で分岐を戻した
 - 2026-09-28 / 全体 / 全差分（main..320a447）の Codex レビュー F1: 2 MiB を超えるファイルは読まないので、秘密の値の symbol が検査をすり抜ける。F2（再現済み）: commit を指定した anchor で、その commit では秘密で作業ツリーでは秘密でない値の symbol が通る / 見送り。レビューのたびに symbol の周りから珍しい入力が 1〜2 件ずつ出て収束しないため、持ち主に選択肢を示し「絞って終える」を受けた。どちらもエージェントが秘密そのものを symbol に選んだうえでの珍しい条件。PR 本文の見送った指摘に書く。Codex の追加ラウンドはせず、review-shipping だけ回す
+- 2026-09-28 / T12 / review-shipping（d4e5bc4）: masksSymbol が部分文字列で数えるため、`local` や `what` のような普通の識別子が、伏せ字の中の文字列に当たって秘密と判定され、trace・harvest で anchor ごと外れる。秘密は漏れないが配信が止まる / 採用（自分の修正が生んだもの）。修正タスク T12: 識別子全体で数え、trace・harvest では symbol だけを外してパスの anchor は残す
