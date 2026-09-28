@@ -22,7 +22,7 @@ base: main
 
 置き換えが 2 段以上でも、検索が今の記録を示す。
 
-- [ ] T01: 後継を今の記録までたどる関数を作って searchUnits で使い、バージョンを上げる
+- [x] T01: 後継を今の記録までたどる関数を作って searchUnits で使い、バージョンを上げる
   - 種別: 修正
   - 計画: S1, S8
   - 依存: なし
@@ -30,6 +30,7 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 test/search.test.ts` → A → B → C と置き換えた記録で、A の一致から C に届かずに落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 全部 pass。`bun run release:plan -- --base 0543025` → `plugin`、4 か所が同じバージョン
   - コミット: `fix(search): follow replacements to the live record, not one step`
+  - 結果: red（直す前）`node --test test/search.test.ts` → pnpm → npm → bun の置き換えで、pnpm の一致から npm（途中）が返り bun に届かずに失敗。直した後 `node --test test/search.test.ts test/plugin.test.ts` → pass 37 / fail 0。`releaseKind` に差分のファイルを渡して `plugin`。4 か所を 0.6.3 にそろえた。typecheck・lint → 0、`sql:reach` 157 / 157
 
 ## P2: 過去の発言と、それが何につながったか
 

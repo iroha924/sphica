@@ -119,23 +119,16 @@ export async function searchUnits(
     read += rows.length;
     weaker += await judgeUnits(db, rows, wanted, hits);
   }
-  // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question.
-  // The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
+  // A superseded hit points to what replaced it: the record at the end of the chain joins the hits even when it shares no word with
+  // the question. The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
   const shown = new Set(hits.map((h) => h.id));
-  for (const h of [...hits].filter((x) => x.lifecycle === "superseded")) {
-    let successors = db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as n", "n.id", "l.from_unit")
-      .where("l.to_unit", "=", h.id)
-      .where("l.kind", "=", "supersedes")
-      .where("n.extraction", "=", "supported");
-    if (q.kinds?.length) successors = successors.where("n.kind", "in", q.kinds);
-    if (q.lifecycles?.length) successors = successors.where("n.lifecycle", "in", q.lifecycles);
-    const next = await successors
-      .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
-      .execute();
-    for (const n of next)
-      if (!shown.has(n.id)) {
+  for (const h of [...hits].filter((x) => x.lifecycle === "superseded"))
+    for (const n of await liveSuccessors(db, h.id))
+      if (
+        !shown.has(n.id) &&
+        (!q.kinds?.length || (q.kinds as string[]).includes(n.kind)) &&
+        (!q.lifecycles?.length || (q.lifecycles as string[]).includes(n.lifecycle))
+      ) {
         shown.add(n.id);
         hits.push({
           ...n,
@@ -147,7 +140,6 @@ export async function searchUnits(
           rank: h.rank,
         });
       }
-  }
   hits.sort(
     (a, b) =>
       (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
@@ -161,6 +153,56 @@ export async function searchUnits(
     stopped,
     read,
   };
+}
+
+export type Successor = {
+  id: number;
+  key: string;
+  kind: string;
+  stance: string | null;
+  lifecycle: string;
+  text: string;
+  why: string | null;
+  revisit_when: string | null;
+};
+
+/**
+ * The records at the end of a record's supersedes chain: each replacement is followed until one that nothing replaced, so a record
+ * replaced twice leads to the one that holds now. A visited set keeps a cycle from looping.
+ */
+export async function liveSuccessors(db: Kysely<DB>, id: number): Promise<Successor[]> {
+  const seen = new Set([id]);
+  const found: Successor[] = [];
+  const replaced = new Set<number>();
+  for (let frontier = [id]; frontier.length; ) {
+    const next = await db
+      .selectFrom("unit_link as l")
+      .innerJoin("unit as n", "n.id", "l.from_unit")
+      .where("l.to_unit", "in", frontier)
+      .where("l.kind", "=", "supersedes")
+      .where("n.extraction", "=", "supported")
+      .select([
+        "l.to_unit",
+        "n.id",
+        "n.key",
+        "n.kind",
+        "n.stance",
+        "n.lifecycle",
+        "n.text",
+        "n.why",
+        "n.revisit_when",
+      ])
+      .execute();
+    frontier = [];
+    for (const { to_unit, ...n } of next) {
+      replaced.add(to_unit);
+      if (seen.has(n.id)) continue;
+      seen.add(n.id);
+      found.push(n);
+      frontier.push(n.id);
+    }
+  }
+  return found.filter((n) => !replaced.has(n.id));
 }
 
 type UnitRow = {

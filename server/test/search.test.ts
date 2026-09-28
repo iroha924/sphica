@@ -545,3 +545,29 @@ test("a record withdrawn after the order was taken is not an active hit, and a s
     await db.done();
   }
 });
+
+// A record replaced twice still leads to the one that holds now, not to the one in between
+test("a hit replaced twice brings the live record at the end of the chain", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Use pnpm for installs." });
+    const b = message(db, p, { id: "m2", text: "Go back to npm." });
+    const c = message(db, p, { id: "m3", text: "Move to bun." });
+    await save(db, p, { units: [decision("pnpm", a, "Use pnpm for installs.")] });
+    await save(db, p, {
+      units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
+    });
+    await save(db, p, { units: [decision("bun", c, "Move to bun.", { supersedes: "trace:ext-s1/npm" })] });
+    const r = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
+    assert.deepEqual(
+      r.hits.map((h) => [h.key, h.successorOf ?? null]),
+      [
+        ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
+        ["trace:ext-s1/pnpm", null],
+      ],
+    );
+  } finally {
+    await db.done();
+  }
+});
