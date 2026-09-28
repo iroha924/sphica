@@ -76,6 +76,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # release-gate reads the Codex review summary among the PR's issue comments
+      issues: read
       actions: read
     outputs:
       sha512: ${{ steps.pack.outputs.sha512 }}
@@ -247,6 +249,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
       actions: read
       id-token: write
       attestations: write

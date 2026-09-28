@@ -143,9 +143,19 @@ test("rejects a commit whose release dry run failed or did not run", () => {
   );
 });
 
-const summary = (headSha: string, status = "completed", user: object = { id: 199175422, type: "Bot" }) => ({
+const row = (
+  name: string,
+  state = "✅ **Completed** <relative-time>t</relative-time>",
+  sha = COMMIT.slice(0, 7),
+) => `| x **${name}** | ${state} | \`${sha}\` | PR opened |`;
+const summary = (
+  headSha: string,
+  status = "completed",
+  user: object = { id: 199175422, type: "Bot" },
+  rows = [row("Code Review"), row("Security Review")],
+) => ({
   user,
-  body: `<!-- codex-pull-request-review-summary -->\n<!-- codex-security-review:v1 {"headSha":"${headSha}","status":"${status}"} -->\n## Codex Review Summary`,
+  body: `<!-- codex-pull-request-review-summary -->\n<!-- codex-security-review:v1 {"headSha":"${headSha}","status":"${status}"} -->\n## Codex Review Summary\n\n| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n${rows.join("\n")}\n`,
 });
 const reviewed = { commit: COMMIT, comments: [summary(COMMIT)], threads: [{ isResolved: true }] };
 
@@ -166,4 +176,29 @@ test("passes only when Codex's own summary marks the tag commit completed and no
   );
   fails({ threads: [{ isResolved: true }, { isResolved: false }] }, /1 review thread is unresolved/);
   fails({ threads: [{}] }, /unresolved/);
+  // The marker may follow one review only: the table's Code Review and Security Review rows must both be done, on this commit
+  const bot = { id: 199175422, type: "Bot" };
+  fails(
+    {
+      comments: [
+        summary(COMMIT, "completed", bot, [
+          row("Code Review", "🔄 **Running** since t"),
+          row("Security Review"),
+        ]),
+      ],
+    },
+    /Code Review/,
+  );
+  fails(
+    {
+      comments: [
+        summary(COMMIT, "completed", bot, [
+          row("Code Review"),
+          row("Security Review", "✅ **Completed** t", "bbbbbbb"),
+        ]),
+      ],
+    },
+    /Security Review/,
+  );
+  fails({ comments: [summary(COMMIT, "completed", bot, [row("Security Review")])] }, /Code Review/);
 });

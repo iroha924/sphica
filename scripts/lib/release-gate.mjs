@@ -71,6 +71,7 @@ export function gateProblems({
  */
 const CODEX_BOT_ID = 199175422;
 const MARKER = /<!-- codex-security-review:v1 (\{.*?\}) -->/;
+const REVIEWS = ["Code Review", "Security Review"];
 
 /**
  * Whether Codex finished reviewing the tag commit with nothing left open: the connector's summary names that head as completed,
@@ -94,6 +95,19 @@ export function reviewProblems({ commit, comments, threads }) {
       problems.push(`the Codex review summary is for ${state.headSha}, not the tag commit ${commit}`);
     else if (state && state.status !== "completed")
       problems.push(`the Codex review of ${commit} is ${state.status}, not completed`);
+    // Which review the marker follows is not documented, and each finishes on its own: both table rows must be done on this commit
+    else if (state)
+      for (const name of REVIEWS) {
+        const found = new RegExp(
+          `^\\|[^|\\n]*\\*\\*${name}\\*\\*[^|\\n]*\\|([^|\\n]*)\\|\\s*\`([0-9a-f]{7,40})\`\\s*\\|`,
+          "m",
+        ).exec(summaries[0].body);
+        if (!found) problems.push(`the Codex review summary has no ${name} row`);
+        else if (!found[1].includes("**Completed**") || !commit.startsWith(found[2]))
+          problems.push(
+            `the Codex ${name} is not completed on ${commit} (${found[1].trim().split(" <")[0]} on ${found[2]})`,
+          );
+      }
   }
   const open = threads.filter((t) => t?.isResolved !== true).length;
   if (open) problems.push(`${open} review thread${open === 1 ? " is" : "s are"} unresolved`);

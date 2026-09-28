@@ -124,6 +124,16 @@ base: main
   - コミット: `fix(release): read PR comments past a megabyte in the release gate`
   - 結果: red を実測（`spawnSync gh ENOBUFS`）。直した後 `node --test test/release-gate-cli.test.ts test/release-gate.test.ts` → 15 pass / 0 fail
 
+- [x] T11: 関門が要約の表の Code Review と Security Review の両方の完了を確かめ、手順書に最後の head での再レビューと、レビュー待ちで止まったときの流し直しを書き、関門のジョブに issues: read を足す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T10（直す対象の関門の取得と判定が要る）
+  - 変更: `scripts/lib/release-gate.mjs`, `server/test/release-gate.test.ts`, `server/test/release-gate-cli.test.ts`, `scripts/release-plan.mjs`, `.agents/skills/plugin-release/SKILL.md`, `.github/workflows/release.yml`
+  - red: `cd server && node --test test/release-gate.test.ts` → Code Review の行が Running の要約でも問題 0 件で通り失敗
+  - 完了条件: `bun run test` → 表の行が Running・別の commit・欠落のそれぞれで止める検査を含めて通る。PR #183 の本物のコメントで判定 → 問題 0 件。`actionlint .github/workflows/release.yml` と `bun run verify:ai` → 通る
+  - コミット: `fix(release): require both Codex reviews done on the head and document re-review before tagging`
+  - 結果: red を実測（actual ''）。直した後 `bun run test` → 309 pass / 0 fail、PR #183 の本物のデータで `[]`、`actionlint` と `bun run verify:ai` と `bun run check` → 通る
+
 ## 記録
 
 - 2026-09-28 / - / 持ち主の指示で、.claude/plans の他の plan と tasks（27-claude-bash-delivery、27-eval-structured-grading、28-bind-github-owner、28-confirm-before-override、28-release-automation）を最初のコミットで削除する。ほかのファイルからの参照は 0 件（rg で確認）
@@ -135,3 +145,4 @@ base: main
 - 2026-09-28 / T06 のレビュー / F1（文言が検査の中身より強い）を採用し T08
 - 2026-09-28 / T05 のレビュー / F1（404 を off と判定する）を採用し T09。F2（release:plan --json の CLI 全体のテストが無い）は見送り: release:plan は手元で人が読む道具で、判定は単体テストで押さえている
 - 2026-09-28 / 差分全体の Codex レビュー / 指摘 1 件（gh の出力を execFileSync の既定 1 MiB で受け、長い PR で ENOBUFS。Codex が再現）を採用し T10
+- 2026-09-28 / review-shipping / #1（手順書の順序ではレビュー後の push や main のマージで head が変わり、関門で止まってバージョンを 1 つ失う。#182 の本物のデータで再現）と #2（マーカーがどちらのレビューを追うか不明）を採用し T11。関門のジョブの issues: read（読めるか未確認）も T11 で足した。必須チェックの付け替えはタグの前に行う

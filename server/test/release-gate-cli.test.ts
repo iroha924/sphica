@@ -35,7 +35,7 @@ else if (endpoint.endsWith("/comments?per_page=100")) {
   // Answers as --paginate --slurp does: one array per page. The summary is on the second page, so reading only the first misses it
   if (process.env.FAKE_API_FAIL || !args.includes("--paginate") || !args.includes("--slurp")) process.exit(1);
   const long = process.env.FAKE_LONG_COMMENTS ? [{ user: { id: 1, type: "User" }, body: "x".repeat(2 * 1024 * 1024) }] : [];
-  process.stdout.write(JSON.stringify([long, [{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->' }]]));
+  process.stdout.write(JSON.stringify([long, [{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->\\n| x **Code Review** | ✅ **Completed** t | \`${COMMIT.slice(0, 7)}\` | PR opened |\\n| x **Security Review** | ✅ **Completed** t | \`${COMMIT.slice(0, 7)}\` | PR opened |' }]]));
 }
 else if (endpoint === "graphql") {
   // Two pages; the second is asked for with after=p2 and holds the thread FAKE_OPEN_THREAD leaves unresolved
