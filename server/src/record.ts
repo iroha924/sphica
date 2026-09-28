@@ -324,6 +324,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
     }
 
     const anchors: Planned["anchors"] = [];
+    const fallbacks = new Set<(typeof anchors)[number]>();
     for (const a of u.anchors) {
       const p = repoPath(a.path);
       if (!p) {
@@ -356,18 +357,20 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
                 .executeTakeFirst()
             )?.id ?? null)
           : null;
-      // A masked symbol's fallback merges into a path-only anchor already there: identical rows could not be told apart by replace_anchor
-      const same = (x: (typeof anchors)[number]) =>
-        !x.symbol &&
-        x.path === p &&
-        x.role === a.role &&
-        x.commit === commit &&
-        `${x.lines}` === `${a.lines}`;
-      if (a.symbol && !symbol && anchors.some(same)) {
-        problems.push(`${key}: another path-only anchor on ${p} already covers it; left out`);
+      const planned = { ...a, symbol, commit, path: p, observation };
+      if (a.symbol && !symbol) fallbacks.add(planned);
+      anchors.push(planned);
+    }
+    // A masked symbol's fallback merges into a path-only anchor like it, in any order: identical rows could not be told apart by replace_anchor
+    const place = (x: (typeof anchors)[number]) => `${x.path}\0${x.role}\0${x.commit}\0${x.lines}`;
+    const covered = new Set(anchors.filter((x) => !x.symbol && !fallbacks.has(x)).map(place));
+    for (const x of [...fallbacks]) {
+      if (!covered.has(place(x))) {
+        covered.add(place(x));
         continue;
       }
-      anchors.push({ ...a, symbol, commit, path: p, observation });
+      problems.push(`${key}: another path-only anchor on ${x.path} already covers it; left out`);
+      anchors.splice(anchors.indexOf(x), 1);
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];

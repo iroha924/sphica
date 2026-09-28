@@ -144,6 +144,8 @@ test("path-only anchors with their own lines are all kept, and a merged fallback
             text: "ここを見る",
             evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
             anchors: [
+              // A fallback given before the path-only anchor it matches merges all the same
+              { path: "c.ts", lines: [4, 5], symbol: `sk-${"e5".repeat(15)}`, role: "applies_to" },
               { path: "c.ts", lines: [2, 2], role: "applies_to" },
               { path: "c.ts", lines: [4, 5], role: "applies_to" },
               { path: "c.ts", symbol: `sk-${"c3".repeat(15)}`, role: "applies_to" },
