@@ -1,4 +1,4 @@
-# Checks that the Verification section of the PR body records the Codex review result. The body is written by the author whose work
+# Checks that the Verification section of the PR body mentions the Codex review (only that the word is there). The body is written by the author whose work
 # was reviewed, so this checks the record, not the review: release-gate reads the Codex summary itself before a release.
 # The body is untrusted, so it is passed through an environment variable and only read (never expanded into shell expressions).
 name: pr-body
@@ -18,7 +18,7 @@ jobs:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
-      - name: The Verification section records the Codex review result
+      - name: The Verification section mentions the Codex review
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -27,6 +27,6 @@ jobs:
           # english-exempt: the Japanese Verification heading of PRs opened before the English template
           printf '%s\n' "$BODY" | tr -d '\r' | perl -0pe 's/<!--.*?-->//gs' | awk '/^## (Verification|検証)[ \t]*$/{f=1;next} /^## /{f=0} f' > verification.txt
           grep -q "Codex" verification.txt || {
-            echo "The Verification section of the PR body does not record the Codex review result (see review in CLAUDE.md and the codex-review Skill)"
+            echo "The Verification section of the PR body does not mention the Codex review (see review in CLAUDE.md and the codex-review Skill)"
             exit 1
           }

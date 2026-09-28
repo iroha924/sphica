@@ -14,8 +14,8 @@ test("each setting is on, off, or unknown from the status and body gh returned",
     states({ status: 200, body: { enabled: false } }, { status: 200, body: { sha_pinning_required: false } }),
     ["off", "off"],
   );
-  // The docs answer 404 when immutable releases are off
-  assert.deepEqual(states({ status: 404, body: null }, pinned), ["off", "on"]);
+  // A 404 may be a wrong repository name or no access, so it is not taken as off
+  assert.deepEqual(states({ status: 404, body: null }, pinned), ["unknown", "on"]);
   for (const unseen of [
     { status: null, body: null },
     { status: 403, body: null },

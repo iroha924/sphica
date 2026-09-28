@@ -31,8 +31,17 @@ const pull = { state: "open", number: 7, base: { ref: "main" }, head: { sha: "${
 const run = (name) => ({ id: 1, name, event: "pull_request", head_sha: "${COMMIT}", status: "completed", conclusion: "success", pull_requests: [{ number: 7, base: { ref: "main" } }] });
 if (endpoint.includes("/pulls")) process.stdout.write(JSON.stringify(process.env.FAKE_NO_PR ? [] : [pull]));
 else if (endpoint.includes("actions/runs")) process.stdout.write(JSON.stringify({ workflow_runs: [run("check"), run("pr-body"), run("release")] }));
-else if (endpoint.endsWith("/comments?per_page=100")) process.stdout.write(JSON.stringify([[{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->' }]]));
-else if (endpoint === "graphql") process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: true }], pageInfo: { hasNextPage: false, endCursor: null } } } } } }));
+else if (endpoint.endsWith("/comments?per_page=100")) {
+  // Answers as --paginate --slurp does: one array per page. The summary is on the second page, so reading only the first misses it
+  if (process.env.FAKE_API_FAIL || !args.includes("--paginate") || !args.includes("--slurp")) process.exit(1);
+  process.stdout.write(JSON.stringify([[], [{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->' }]]));
+}
+else if (endpoint === "graphql") {
+  // Two pages; the second is asked for with after=p2 and holds the thread FAKE_OPEN_THREAD leaves unresolved
+  const second = args.includes("after=p2");
+  const nodes = second ? [{ isResolved: !process.env.FAKE_OPEN_THREAD }] : [{ isResolved: true }];
+  process.stdout.write(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes, pageInfo: { hasNextPage: !second, endCursor: second ? null : "p2" } } } } } }));
+}
 else process.exit(1);
 `,
 };
@@ -86,6 +95,15 @@ test("release-gate writes nothing to GITHUB_OUTPUT when the gate fails", () => {
   const { status, output } = runGate({ FAKE_NO_PR: "1" });
   assert.equal(status, 1);
   assert.equal(output, "");
+});
+
+test("release-gate reads every page of threads and stops when the API fails", () => {
+  const open = runGate({ FAKE_OPEN_THREAD: "1" });
+  assert.equal(open.status, 1);
+  assert.match(open.stderr, /1 review thread is unresolved/);
+  const failed = runGate({ FAKE_API_FAIL: "1" });
+  assert.notEqual(failed.status, 0);
+  assert.equal(failed.output, "");
 });
 
 test("release-gate stops a head whose Codex review is still running", () => {

@@ -81,6 +81,39 @@ base: main
   - コミット: `ci: name the PR body check for what it checks and cap job times`
   - 結果: `actionlint .github/workflows/pr-body.yml .github/workflows/check.yml` → 指摘なし。`rg -n "codex-review" .github CLAUDE.md AGENTS.md .agents plugin` → Skill 名の参照 2 件だけ（CLAUDE.md:66、pr-body.yml のメッセージ内）。必須チェックの付け替えは PR の上で verification-section が走った後に行う
 
+## P3: レビューの直し
+
+タスクごとのレビューで出た指摘を直す。
+
+- [x] T07: release-gate の CLI テストで、全ページを読むことと API の失敗で止まることを守る
+  - 種別: 変更
+  - 計画: S3
+  - 依存: T04（守る対象の取得処理が要る）
+  - 変更: `server/test/release-gate-cli.test.ts`
+  - 完了条件: `cd server && node --test test/release-gate-cli.test.ts` → 2 ページ目の未解決スレッドで止まり、API の失敗で 0 以外で終わる検査を含めて通る
+  - コミット: `fix: address task reviews of the gate, settings, and PR body wording`
+  - 結果: `node --test test/repo-settings.test.ts test/release-gate-cli.test.ts` → 6 pass / 0 fail。`--paginate` を一時的に外すと release-gate-cli の 4 件中 3 件が落ちることを確かめてから戻した
+
+- [x] T08: pr-body の文言を「Codex のレビューに触れているか」に狭める
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T06（直す対象の文言が要る）
+  - 変更: `.github/workflows/pr-body.yml`
+  - red: `rg -n "records the Codex review result" .github/workflows/pr-body.yml` → 2 件（結果が無くても「Codex」の文字だけで通るのに、記録を確かめたと言い切っている）
+  - 完了条件: `rg -n "records the Codex review result" .github/workflows/pr-body.yml` → 0 件。`actionlint .github/workflows/pr-body.yml` → 指摘なし
+  - コミット: `fix: address task reviews of the gate, settings, and PR body wording`
+  - 結果: red を実測（`git show HEAD:.github/workflows/pr-body.yml | rg -c "records the Codex review result"` → 2）。直した後 `rg -n "records the Codex review result" .github/workflows/pr-body.yml` → 0 件、`actionlint` → 指摘なし
+
+- [x] T09: immutable releases の 404 を off ではなく unknown として扱う
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象の判定が要る）
+  - 変更: `scripts/lib/repo-settings.mjs`, `server/test/repo-settings.test.ts`
+  - red: 直す前の scripts/lib/repo-settings.mjs で `cd server && node --test test/repo-settings.test.ts` → 404 が `off` になり失敗
+  - 完了条件: `bun run test` → 404 が unknown になる検査を含めて通る。`bun run release:status` → 両設定とも on
+  - コミット: `fix: address task reviews of the gate, settings, and PR body wording`
+  - 結果: red を実測（actual `['off', 'on']`）。直した後 repo-settings と release-gate-cli のテスト → 6 pass / 0 fail、`bun run release:status` → 両方とも on
+
 ## 記録
 
 - 2026-09-28 / - / 持ち主の指示で、.claude/plans の他の plan と tasks（27-claude-bash-delivery、27-eval-structured-grading、28-bind-github-owner、28-confirm-before-override、28-release-automation）を最初のコミットで削除する。ほかのファイルからの参照は 0 件（rg で確認）
@@ -88,3 +121,6 @@ base: main
 - 2026-09-28 / T02 のレビュー / F1（`<!-->` や途中に `--` を含む並びは GFM ではコメントにならず表示されるのに、参照を落とす。Codex が再現）は見送り: plan の「結び付きを落とす方向は安全」の範囲で、起きるのは結び付きの欠落だけ
 - 2026-09-28 / T05 / immutable releases の GET は、無効でも 404 ではなく 200 で `enabled:false` を返した（docs の 404 と違う） / 両方を off として扱うようにした
 - 2026-09-28 / T06 / plugin-release Skill の関門の説明が新しい判定（Codex の要約と未解決のスレッド、release:plan の設定の確認）を含まない / 変更欄に .agents/skills/plugin-release/SKILL.md を足した
+- 2026-09-28 / T04 のレビュー / F1（CLI テストがページングと API の失敗を守っていない）を採用し T07
+- 2026-09-28 / T06 のレビュー / F1（文言が検査の中身より強い）を採用し T08
+- 2026-09-28 / T05 のレビュー / F1（404 を off と判定する）を採用し T09。F2（release:plan --json の CLI 全体のテストが無い）は見送り: release:plan は手元で人が読む道具で、判定は単体テストで押さえている

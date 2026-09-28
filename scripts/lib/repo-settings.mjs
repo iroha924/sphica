@@ -3,7 +3,8 @@
 
 /**
  * The state of each setting from what `gh api` returned: `{ status, body }` per endpoint, status null when gh could not run.
- * Immutable releases answers 200 with `enabled` (and 404 when off, per the docs); any other answer is unknown, never off.
+ * Immutable releases answers 200 with `enabled` (observed with it off, although the docs say 404). A 404 is unknown, never off:
+ * it also means a wrong repository name or no access.
  */
 export function settingsState({ immutable, actions }) {
   const state = (on, off) => (on ? "on" : off ? "off" : "unknown");
@@ -12,7 +13,7 @@ export function settingsState({ immutable, actions }) {
       name: "immutable releases",
       state: state(
         immutable.status === 200 && immutable.body?.enabled === true,
-        immutable.status === 404 || (immutable.status === 200 && immutable.body?.enabled === false),
+        immutable.status === 200 && immutable.body?.enabled === false,
       ),
     },
     {
