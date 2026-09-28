@@ -34,10 +34,6 @@ export function makeRepo(dir, remote = "https://github.com/example/live.git", na
 }
 
 /**
- * The child process environment. The database is ~/.sphica/sphica.db in the temp HOME (created by `sphica init`).
- * No GitHub key is passed.
- */
-/**
  * A gh first on PATH. init reads the signed-in account through `gh api user`; the owner's real gh would reach api.github.com
  * with their login. It answers from SPHICA_TEST_GH_USER (JSON), or exits 1 like a signed-out gh. POSIX only (a shebang script).
  */
@@ -54,6 +50,10 @@ function fakeGh(dir) {
   return bin;
 }
 
+/**
+ * The child process environment. The database is ~/.sphica/sphica.db in the temp HOME (created by `sphica init`).
+ * No GitHub key is passed.
+ */
 function childEnv(dir, covDir, extra = {}) {
   const env = { ...process.env, ...extra };
   env.PATH = `${fakeGh(dir)}${path.delimiter}${process.env.PATH ?? ""}`;

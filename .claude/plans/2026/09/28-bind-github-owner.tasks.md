@@ -130,6 +130,16 @@ sphica init がアカウントを登録して結果を 1 行で出し、doctor �
   - コミット: `feat(cli): bind the signed-in GitHub account in init and show it in doctor`
   - 結果: `bun run sql:live` → 8 / 8 SQL sites、未ログインの init が理由を出し、ログイン済みの init が hana (id 42) を登録し、doctor が `✓ GitHub owner hana (id 42)` を出す検査を含めて通る。`node scripts/check-tarball.mjs <npm pack の tgz>` → CLI 0.5.5 が起動し、DB を作り、アカウントを登録。`bun run verify` → rc 0
 
+- [x] T17: live-harness の childEnv の JSDoc を childEnv の上へ戻す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（fakeGh を足した live-harness が要る）
+  - 変更: `scripts/lib/live-harness.mjs`
+  - red: `rg -n -B1 "^function childEnv" scripts/lib/live-harness.mjs` → 直前の行が空行で、childEnv の JSDoc が fakeGh の JSDoc の上に残っている
+  - 完了条件: `rg -n -B1 "^function childEnv" scripts/lib/live-harness.mjs` → 直前の行が JSDoc の閉じ `*/`。`bun run sql:live` → 通る
+  - コミット: `docs(harness): put childEnv's comment back above childEnv`
+  - 結果: 直す前 `git show HEAD:scripts/lib/live-harness.mjs | rg -n -B1 "^function childEnv"` → 直前が空行（56 行目）。直した後 → 直前が ` */`。`bun run sql:live` → 8 / 8 SQL sites で通る
+
 - [x] T05: 受け入れのドライバーで偽の gh を init の前に置き、CONTRIBUTOR の自分の PR が採用されるケースを足す
   - 種別: 追加
   - 計画: S5
