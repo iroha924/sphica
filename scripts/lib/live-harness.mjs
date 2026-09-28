@@ -34,11 +34,30 @@ export function makeRepo(dir, remote = "https://github.com/example/live.git", na
 }
 
 /**
+ * A gh first on PATH. init reads the signed-in account through `gh api user`; the owner's real gh would reach api.github.com
+ * with their login. It answers from SPHICA_TEST_GH_USER (JSON), or exits 1 like a signed-out gh. POSIX only (a shebang script).
+ */
+function fakeGh(dir) {
+  const bin = path.join(dir, "fake-gh");
+  if (!fs.existsSync(path.join(bin, "gh"))) {
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nconst a = process.argv.slice(2);\nconst u = process.env.SPHICA_TEST_GH_USER;\nif (a[0] === "api" && a[1] === "user" && u) process.stdout.write(u);\nelse process.exit(1);\n`,
+      { mode: 0o755 },
+    );
+  }
+  return bin;
+}
+
+/**
  * The child process environment. The database is ~/.sphica/sphica.db in the temp HOME (created by `sphica init`).
  * No GitHub key is passed.
  */
 function childEnv(dir, covDir, extra = {}) {
   const env = { ...process.env, ...extra };
+  env.PATH = `${fakeGh(dir)}${path.delimiter}${process.env.PATH ?? ""}`;
+  if (!("SPHICA_TEST_GH_USER" in extra)) delete env.SPHICA_TEST_GH_USER;
   // **Swap home.** Otherwise the child uses the owner's ~/.sphica.
   // Flushing reads the queue in ~/.sphica/spool and deletes what it sent (measured: it sent the owner's
   // 4 unsent items to the throwaway database and removed them from the spool). Changing only the database path does not close this.

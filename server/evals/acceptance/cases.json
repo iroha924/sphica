@@ -2167,6 +2167,106 @@
           "inject_never_contains": "1 MB"
         }
       ]
+    },
+    {
+      "id": "capture-09",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "The owner's own words adopt in a pull request where they are only a contributor, once sphica init bound the account gh is signed in to",
+      "given": [
+        {
+          "gh_login": "hana-owner"
+        }
+      ],
+      "when": {
+        "harvest": {
+          "pr": 30,
+          "record": {
+            "units": [
+              {
+                "key": "csv-notes",
+                "kind": "decision",
+                "stance": "do",
+                "text": "CSV export leaves notes out",
+                "why": "notes are private",
+                "evidence": [
+                  {
+                    "source": "pr:30#body",
+                    "quote": "Exports leave notes out.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "pr:30#body",
+                    "quote": "Exports leave notes out."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:30/csv-notes",
+          "lifecycle": "active"
+        },
+        {
+          "source": "pr:30#body",
+          "author": "hana-owner",
+          "association": "CONTRIBUTOR",
+          "author_is_owner": true
+        }
+      ]
+    },
+    {
+      "id": "capture-10",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "Without a bound account, the same pull request by a contributor adopts nothing and the decision stays a candidate",
+      "given": [],
+      "when": {
+        "harvest": {
+          "pr": 30,
+          "record": {
+            "units": [
+              {
+                "key": "csv-notes",
+                "kind": "decision",
+                "stance": "do",
+                "text": "CSV export leaves notes out",
+                "why": "notes are private",
+                "evidence": [
+                  {
+                    "source": "pr:30#body",
+                    "quote": "Exports leave notes out.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "pr:30#body",
+                    "quote": "Exports leave notes out."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:30/csv-notes",
+          "lifecycle": "candidate"
+        },
+        {
+          "source": "pr:30#body",
+          "author": "hana-owner",
+          "association": "CONTRIBUTOR",
+          "author_is_owner": false
+        }
+      ]
     }
   ],
   "setups": {

@@ -4,7 +4,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { type Get, gh, linkIssues, pullSources, readPull, repoOf, storeItems } from "../src/github.ts";
+import {
+  type Get,
+  gh,
+  ghUser,
+  linkIssues,
+  pullSources,
+  readPull,
+  repoOf,
+  storeItems,
+} from "../src/github.ts";
 import { at, insert, project, tempDb } from "./temp-db.ts";
 
 const sha = (c: string) => c.repeat(40);
@@ -180,7 +189,12 @@ test("stores sources with who wrote them, adds a revision only when text changed
       .map((r) => [r.kind, r.author_kind, r.author_association, r.revision, r.known, r.indexed]);
     assert.deepEqual(kinds[0], ["pr_body", "owner", "OWNER", 1, 1, 1]);
     assert.deepEqual(kinds[2], ["review", "bot", null, 1, 1, 1]);
-    assert.deepEqual(kinds[6], ["pr_event", "owner", null, 1, 1, 0]);
+    assert.deepEqual(kinds[6], ["pr_event", "person", null, 1, 1, 0]);
+    // A commit's author comes from the git email, which anyone can write: a bound id there never makes the owner's words
+    assert.deepEqual(
+      kinds.filter((k) => k[0] === "commit_message").map((k) => k[1]),
+      ["person"],
+    );
     assert.deepEqual(await storeItems(db.ingest, p, first.items), ids, "unchanged text keeps its rows");
     const second = await readPull(fake("Fixes #14. Switch to pnpm. Edited."), 7);
     const again = await storeItems(db.ingest, p, second.items);
@@ -250,5 +264,144 @@ test("a gh listing over the size cap is refused with a reason", async () => {
   } finally {
     process.env.PATH = saved;
     fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+/** Puts a gh first on PATH that saves its arguments and answers with `out` and `status`, runs `body`, then restores PATH. */
+async function withGh(
+  out: string,
+  status: number,
+  body: (args: () => string[]) => Promise<void>,
+): Promise<void> {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  const log = path.join(bin, "args.json");
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write(${JSON.stringify(out)});\nprocess.exit(${status});\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    await body(() => JSON.parse(fs.readFileSync(log, "utf8")) as string[]);
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+}
+
+// GH_HOST or an enterprise host must not answer for github.com: an id from another host would be taken as a github.com account
+test("gh reads pull requests and the signed-in user from github.com only", async () => {
+  await withGh("{}", 0, async (args) => {
+    await gh("o/r")("pulls/1");
+    assert.deepEqual(args(), ["api", "repos/o/r/pulls/1", "--hostname", "github.com"]);
+  });
+  await withGh(JSON.stringify({ id: 42, login: "hana-1", type: "User" }), 0, async (args) => {
+    assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana-1" });
+    assert.deepEqual(args(), ["api", "user", "--hostname", "github.com"]);
+  });
+  // An Enterprise Managed User on github.com carries an underscore and a short code in the login
+  await withGh(JSON.stringify({ id: 43, login: "mona-cat_octo" }), 0, async () => {
+    assert.deepEqual(await ghUser(), { ok: true, id: 43, login: "mona-cat_octo" });
+  });
+  // 39 characters is GitHub's longest login; 40 is refused below
+  await withGh(JSON.stringify({ id: 44, login: "a".repeat(39) }), 0, async () => {
+    assert.deepEqual(await ghUser(), { ok: true, id: 44, login: "a".repeat(39) });
+  });
+});
+
+// CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97), which no longer parses
+test("gh is asked for plain JSON even when the owner forces color", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = { PATH: process.env.PATH, CLICOLOR_FORCE: process.env.CLICOLOR_FORCE };
+  try {
+    const colors = "const f = process.env.CLICOLOR_FORCE; const c = f && f !== '0';";
+    const out = (json: string) =>
+      `process.stdout.write(c ? "\\u001b[1;37m" + ${JSON.stringify(json)} + "\\u001b[m" : ${JSON.stringify(json)});`;
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\n${colors}\nif (process.argv[3] === "user") ${out('{"id":42,"login":"hana"}')} else ${out("{}")}\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
+    process.env.CLICOLOR_FORCE = "1";
+    assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana" });
+    assert.deepEqual(await gh("o/r")("pulls/1"), {});
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.CLICOLOR_FORCE === undefined) delete process.env.CLICOLOR_FORCE;
+    else process.env.CLICOLOR_FORCE = saved.CLICOLOR_FORCE;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+// A gh stuck on the network must not hold init, even one that ignores SIGTERM: it gives up and init goes on to register the repository
+test("a gh that never answers is given up on as failed", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nprocess.on('SIGTERM', () => {}); setTimeout(() => {}, 20_000);\n`,
+      {
+        mode: 0o755,
+      },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    const started = Date.now();
+    assert.deepEqual(await ghUser(500), { ok: false, reason: "failed" });
+    assert.ok(Date.now() - started < 10_000);
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test("a signed-out gh, a missing gh, and an answer that is not a user are told apart", async () => {
+  await withGh("", 1, async () => {
+    assert.deepEqual(await ghUser(), { ok: false, reason: "failed" });
+  });
+  // Ended by a signal, gh ran but gave no answer; an answer larger than a user can be is not one
+  for (const [script, reason] of [
+    ["process.kill(process.pid, 'SIGKILL');", "failed"],
+    ["process.stdout.write('x'.repeat(2 * 1024 * 1024));", "unexpected"],
+  ] as const) {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+    const saved = process.env.PATH;
+    try {
+      fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\n${script}\n`, { mode: 0o755 });
+      process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+      assert.deepEqual(await ghUser(), { ok: false, reason }, script);
+    } finally {
+      process.env.PATH = saved;
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  }
+  for (const answer of [
+    "not json",
+    "null",
+    JSON.stringify({ login: "hana" }),
+    JSON.stringify({ id: 0, login: "hana" }),
+    JSON.stringify({ id: "42", login: "hana" }),
+    JSON.stringify({ id: 2 ** 60, login: "hana" }),
+    JSON.stringify({ id: 42, login: "" }),
+    JSON.stringify({ id: 42, login: "-hana" }),
+    JSON.stringify({ id: 42, login: "hana\nok" }),
+    JSON.stringify({ id: 42, login: "a".repeat(40) }),
+  ])
+    await withGh(answer, 0, async () => {
+      assert.deepEqual(await ghUser(), { ok: false, reason: "unexpected" }, answer);
+    });
+  const saved = process.env.PATH;
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-no-gh-"));
+  try {
+    process.env.PATH = empty;
+    assert.deepEqual(await ghUser(), { ok: false, reason: "missing" });
+    // A gh that cannot be started never ran, so it is not reported as signed out
+    fs.writeFileSync(path.join(empty, "gh"), "", { mode: 0o644 });
+    assert.deepEqual(await ghUser(), { ok: false, reason: "missing" });
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(empty, { recursive: true, force: true });
   }
 });

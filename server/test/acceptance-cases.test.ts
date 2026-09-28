@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadAcceptance, quoteSources } from "../evals/acceptance/load.ts";
 
-const PER_LAYER = { capture: 8, status: 6, retrieval: 12, injection: 9, review: 8, glean: 12 };
+const PER_LAYER = { capture: 10, status: 6, retrieval: 12, injection: 9, review: 8, glean: 12 };
 const DELIBERATE_MISSING = new Set(["capture-04", "glean-03"]);
 
 test("the acceptance set has the agreed number of cases per layer and unique ids", () => {

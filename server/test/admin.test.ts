@@ -6,10 +6,13 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { dbInit, inspect, reindex } from "../src/admin.ts";
+import { bindOwner, dbInit, inspect, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
+import { fakeGhPath } from "./fake-gh.ts";
 import { at, hash } from "./temp-db.ts";
+
+const signedOut = fakeGhPath();
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "cli.ts");
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "sphica-admin-"));
@@ -163,7 +166,7 @@ test("reindex that fails rolls back and rethrows", async () => {
 test("sphica init creates the database in .sphica under HOME", () => {
   const home = tmp();
   execFileSync(process.execPath, [CLI, "init"], {
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+    env: { PATH: signedOut, HOME: home, USERPROFILE: home },
     stdio: "ignore",
     timeout: 30_000,
   });
@@ -181,7 +184,7 @@ test("old command forms are rejected and create no database", () => {
   ]) {
     const home = tmp();
     const r = spawnSync(process.execPath, [CLI, ...args], {
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+      env: { PATH: signedOut, HOME: home, USERPROFILE: home },
       encoding: "utf8",
       timeout: 30_000,
     });
@@ -194,7 +197,7 @@ test("old command forms are rejected and create no database", () => {
 test("a boxed command that fails prints its heading once and closes with Stopped", () => {
   const home = tmp();
   const r = spawnSync(process.execPath, [CLI, "doctor", "--reindex"], {
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+    env: { PATH: signedOut, HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 30_000,
   });
@@ -206,8 +209,11 @@ test("a boxed command that fails prints its heading once and closes with Stopped
 
 /** Runs the CLI with HOME set to home; the repo helpers below make the places init looks at. */
 function cli(home: string, ...args: string[]) {
+  return cliWith(signedOut, home, ...args);
+}
+function cliWith(PATH: string, home: string, ...args: string[]) {
   const r = spawnSync(process.execPath, [CLI, ...args], {
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home },
+    env: { PATH, HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 60_000,
   });
@@ -247,6 +253,26 @@ test("sphica init in a repository with a remote creates the database and registe
   assert.equal(again.code, 0, again.out);
   assert.match(again.out, /already registered/, again.out);
   assert.deepEqual(projectKeys(home), ["git:github.com/example/proj"]);
+});
+
+// Without gh, or signed out, init still sets up; with gh it binds that account once and never adds a second one
+test("sphica init binds the account gh is signed in to, and says why when it cannot", () => {
+  const home = tmp();
+  const out = cli(home, "init", "--cwd", tmp());
+  assert.equal(out.code, 0, out.out);
+  assert.match(out.out, /GitHub account not bound: gh api user failed/, out.out);
+  const bound = cliWith(fakeGhPath({ id: 42, login: "hana" }), home, "init", "--cwd", tmp());
+  assert.equal(bound.code, 0, bound.out);
+  assert.match(bound.out, /GitHub account hana \(id 42\) bound as the owner/, bound.out);
+  const again = cliWith(fakeGhPath({ id: 42, login: "hana" }), home, "init", "--cwd", tmp());
+  assert.match(again.out, /hana \(id 42\) already bound/, again.out);
+  const other = cliWith(fakeGhPath({ id: 7, login: "someone" }), home, "init", "--cwd", tmp());
+  assert.equal(other.code, 0, other.out);
+  assert.match(
+    other.out,
+    /signed in as someone \(id 7\), but hana \(id 42\) is bound as the owner; not added/,
+    other.out,
+  );
 });
 
 test("sphica init outside a repository only creates the database", () => {
@@ -321,4 +347,54 @@ test("doctor says stuck recordings are sent again after the next turn", () => {
   );
   const r = cli(home, "doctor");
   assert.match(r.out, /sent again after the next turn/, r.out);
+});
+
+test("the owner's GitHub account is bound once; the same id again is kept, another is reported and not added", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  await quiet(() => dbInit(file));
+  const rows = () => {
+    const raw = new DatabaseSync(file, { readOnly: true });
+    try {
+      return raw.prepare("select provider, external_id, login from owner_identity").all();
+    } finally {
+      raw.close();
+    }
+  };
+  assert.deepEqual(bindOwner({ id: 42, login: "hana" }, file), { kind: "bound" });
+  assert.deepEqual(bindOwner({ id: 42, login: "hana-renamed" }, file), { kind: "already" });
+  assert.deepEqual(bindOwner({ id: 7, login: "someone" }, file), { kind: "other", id: "42", login: "hana" });
+  assert.deepEqual(
+    rows().map((r) => ({ ...r })),
+    [{ provider: "github", external_id: "42", login: "hana" }],
+  );
+});
+
+// storeItems treats every bound row as the owner, so any of them is already bound, not another account
+test("an id bound in any row counts as already bound", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  await quiet(() => dbInit(file));
+  const raw = new DatabaseSync(file);
+  const bind = raw.prepare(
+    "insert into owner_identity (provider, external_id, login, bound_at) values ('github', ?, 'x', ?)",
+  );
+  bind.run("42", at("2026-01-01T00:00:00Z"));
+  bind.run("7", at("2026-02-01T00:00:00Z"));
+  raw.close();
+  assert.deepEqual(bindOwner({ id: 7, login: "x" }, file), { kind: "already" });
+  assert.deepEqual(bindOwner({ id: 9, login: "y" }, file), { kind: "other", id: "42", login: "x" });
+});
+
+test("a database of another revision is not bound", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  await quiet(() => dbInit(file));
+  const raw = new DatabaseSync(file);
+  raw.exec(`pragma user_version = ${SCHEMA_REVISION + 1}`);
+  raw.close();
+  assert.deepEqual(bindOwner({ id: 42, login: "hana" }, file), {
+    kind: "skipped",
+    revision: SCHEMA_REVISION + 1,
+  });
+  const look = new DatabaseSync(file, { readOnly: true });
+  assert.equal((look.prepare("select count(*) as n from owner_identity").get() as { n: number }).n, 0);
+  look.close();
 });

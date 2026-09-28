@@ -119,13 +119,20 @@ jobs:
           node "$out/package/dist/cli.js" --help > /dev/null
           # On Windows, os.homedir() reads USERPROFILE.
           home="$(mktemp -d)"
-          # --cwd outside the checkout, so init only creates the database and registers nothing
-          HOME="$home" USERPROFILE="$home" node "$out/package/dist/cli.js" init --cwd "$home"
+          # --cwd outside the checkout, so init only creates the database and registers nothing.
+          # gh gets an empty config and no token, so the runner's gh (which has no stored login) reports signed out. The line
+          # also shows execFile started gh.exe: a gh that could not start says so instead
+          ghconf="$(mktemp -d)"
+          HOME="$home" USERPROFILE="$home" GH_CONFIG_DIR="$ghconf" GH_TOKEN='' GITHUB_TOKEN='' \
+            node "$out/package/dist/cli.js" init --cwd "$home" > init.out
+          cat init.out
+          grep -F "GitHub account not bound: gh api user failed" init.out
           test -f "$home/.sphica/sphica.db"
           # doctor can return 1 depending on plugin install state (this runner has no plugin). Check only the DB rows.
           HOME="$home" USERPROFILE="$home" node "$out/package/dist/cli.js" doctor > doctor.out || true
           grep -E "✓ Schema version" doctor.out
           grep -E "✓ Full-text index" doctor.out
+          grep -E "○ GitHub owner +none" doctor.out
           # Does MCP start and return the tool list?
           printf '%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \

@@ -8,7 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
 import { indent } from "./cli/view.ts";
-import { dbFile, SCHEMA_REVISION } from "./db.ts";
+import { dbFile, iso, SCHEMA_REVISION } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
 import { generationOf } from "./sqlite.ts";
 import { plural } from "./text.ts";
@@ -104,6 +104,42 @@ export function dbInit(file: string = dbFile()): void {
     for (const f of [tmp, `${tmp}-wal`, `${tmp}-shm`]) fs.rmSync(f, { force: true });
   }
   say(`Created: ${file} (revision ${SCHEMA_REVISION})`);
+}
+
+export type Binding =
+  | { kind: "bound" }
+  | { kind: "already" }
+  | { kind: "other"; id: string; login: string | null }
+  | { kind: "skipped"; revision: number };
+
+/**
+ * Binds the GitHub account gh is signed in to as the owner, only when none is bound yet. Another account is reported, never added:
+ * switching gh to someone else's account must not give their words the owner's weight. A database of another revision is left alone.
+ */
+export function bindOwner(user: { id: number; login: string }, file: string = dbFile()): Binding {
+  return withOwner(file, (raw) =>
+    // The revision is read under the write lock, so it cannot change between the check and the insert
+    immediate(raw, (): Binding => {
+      const revision = versionOf(raw);
+      if (revision !== SCHEMA_REVISION) return { kind: "skipped", revision };
+      const bound = raw
+        .prepare(
+          "select external_id, login from owner_identity where provider = 'github' order by external_id = ? desc, bound_at, external_id limit 1",
+        )
+        .get(String(user.id)) as { external_id: string; login: string | null } | undefined;
+      if (!bound) {
+        raw
+          .prepare(
+            "insert into owner_identity (provider, external_id, login, bound_at) values ('github', ?, ?, ?)",
+          )
+          .run(String(user.id), user.login, iso(Date.now()));
+        return { kind: "bound" };
+      }
+      return bound.external_id === String(user.id)
+        ? { kind: "already" }
+        : { kind: "other", id: bound.external_id, login: bound.login };
+    }),
+  );
 }
 
 /**

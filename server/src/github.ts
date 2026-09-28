@@ -36,13 +36,19 @@ export type Get = (path: string, all?: boolean) => Promise<unknown>;
 /** Pull request data is written by anyone: one listing stops at this size rather than filling memory (up to 4 run at once) */
 const MAX_RESPONSE = 16 * 1024 * 1024;
 
+/** Project keys and owner_identity name github.com only, so GH_HOST or a configured enterprise host must not answer instead */
+const HOST = ["--hostname", "github.com"];
+
+/** CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97); "0" turns it back off */
+const plainEnv = () => ({ ...process.env, CLICOLOR_FORCE: "0" });
+
 export const gh =
   (repo: string): Get =>
   async (path, all = false) => {
     const { stdout } = await exec(
       "gh",
-      ["api", `repos/${repo}/${path}`, ...(all ? ["--paginate", "--slurp"] : [])],
-      { encoding: "utf8", maxBuffer: MAX_RESPONSE },
+      ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
+      { encoding: "utf8", maxBuffer: MAX_RESPONSE, env: plainEnv() },
     ).catch((e: NodeJS.ErrnoException) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
         throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
@@ -51,6 +57,61 @@ export const gh =
     const parsed = JSON.parse(stdout) as unknown;
     return all ? (parsed as unknown[][]).flat() : parsed;
   };
+
+export type SignedIn =
+  | { ok: true; id: number; login: string }
+  | { ok: false; reason: "missing" | "failed" | "unexpected" };
+
+/** A login is printed and stored: up to 39 letters, digits, hyphens, and the underscore of an Enterprise Managed User (mona-cat_octo) */
+const LOGIN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/;
+
+/**
+ * The account gh is signed in to on github.com. A gh that cannot be started, a call that exited non-zero (signed out, offline),
+ * and an answer that is not a user are told apart, so neither a broken gh nor a broken answer is reported as signed out.
+ */
+export async function ghUser(timeout = 15_000): Promise<SignedIn> {
+  let stdout: string;
+  try {
+    // A gh stuck on the network would hold init before it registers the repository; past the limit it is killed (failed)
+    ({ stdout } = await exec("gh", ["api", "user", ...HOST], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout,
+      // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
+      killSignal: "SIGKILL",
+      env: plainEnv(),
+    }));
+  } catch (e) {
+    // Once gh ran, execFile gives its exit status (null when a signal ended it); when it never started, an error name
+    const code: unknown = (e as { code?: unknown }).code;
+    return {
+      ok: false,
+      reason:
+        typeof code === "number" || code === null
+          ? "failed"
+          : code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+            ? "unexpected"
+            : "missing",
+    };
+  }
+  let user: { id?: unknown; login?: unknown } | null;
+  try {
+    user = JSON.parse(stdout) as typeof user;
+  } catch {
+    return { ok: false, reason: "unexpected" };
+  }
+  const id = user?.id;
+  const login = user?.login;
+  if (
+    typeof id !== "number" ||
+    !Number.isSafeInteger(id) ||
+    id <= 0 ||
+    typeof login !== "string" ||
+    !LOGIN.test(login)
+  )
+    return { ok: false, reason: "unexpected" };
+  return { ok: true, id, login };
+}
 
 type User = { login?: string; id?: number; type?: string } | null;
 type Authored = { user?: User; author_association?: string };
@@ -287,6 +348,19 @@ export function githubTarget(repo: string, url: string): { kind: "pull" | "issue
 }
 
 /**
+ * Text people write under their own GitHub login. A commit is attributed by its git author email, which anyone can write in a fork,
+ * and a merge event is Sphica's own sentence, so neither speaks as the owner even when the account is bound.
+ */
+const SPOKEN = new Set<string>([
+  "pr_body",
+  "issue_body",
+  "pr_comment",
+  "issue_comment",
+  "review",
+  "review_comment",
+]);
+
+/**
  * Stores items as sources and returns the id of each one's current revision. Unchanged text keeps its row; changed text becomes
  * a new revision, so units extracted earlier keep citing what they were extracted from.
  */
@@ -323,7 +397,8 @@ export async function storeItems(
       continue;
     }
     const authorId = it.author?.id === undefined ? null : String(it.author.id);
-    const kind = authorId && owners.has(authorId) ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
+    const bound = authorId !== null && owners.has(authorId) && SPOKEN.has(it.kind);
+    const kind = bound ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
     const created = iso(it.createdAt);
     const row = await db
       .insertInto("source")
@@ -431,6 +506,7 @@ export async function pullSources(db: Kysely<DB>, projectId: number, number: num
       "s.kind",
       "s.artifact",
       "s.revision",
+      "s.author_kind",
       "s.author_login",
       "s.author_association",
       "s.created_at",

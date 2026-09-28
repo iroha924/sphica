@@ -32,7 +32,7 @@ as `cwd` to every tool.
 2. **Begin**: `harvest_begin` with `pr`. It reads the pull request and the issues it closes through `gh` (read only), keeps every part as a source
    (an edited body becomes a new revision), and returns a `run` id bound to that pull request
 3. **Read**: `record_context` with the run. Each source is printed as `## s<N> <kind> <artifact> by <login> (<association>) <time>` followed by
-   its text, then the project's live records. Read all of it before writing
+   its text (`, the owner` follows the association for the owner's own account), then the project's live records. Read all of it before writing
 4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
    "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. Fix and check again until there are no errors
 5. **Save**: `record_save` with the same run and record
@@ -44,6 +44,8 @@ as `cwd` to every tool.
 and only by saying so: "we rejected yarn", "let's keep SQLite". check refuses the rest and says why:
 
 - A contributor's suggestion (CONTRIBUTOR, NONE) is a proposal: `role: "proposes"`, and no adoption. It stays a candidate
+- A source marked `the owner` in context (`by <login> (CONTRIBUTOR, the owner)`) is the owner's own words, from the GitHub account
+  `sphica init` bound. It adopts like the owner's words anywhere, even where their association is CONTRIBUTOR
 - The merge only shows the code went in. It is evidence for an `implementation` (with the commit message, `role: "implements"`), never adoption
 - A resolved review thread is not agreement either
 - `supersedes` and `conflicts` retire or dispute a saved record, so they need the owner's or a maintainer's words among the unit's evidence or adoption

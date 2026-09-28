@@ -103,17 +103,19 @@ export async function createDriver(world: World): Promise<Driver> {
   }
   git("add", "-A");
   git("commit", "-qm", "initial");
-  cli("init", "--cwd", repo);
 
   const sessions = new Map(world.sessions.map((s) => [s.id, s]));
-  // A fake gh first on PATH answers from the world (no network). edited lists PRs whose body is served with its edits.
+  // A fake gh first on PATH answers from the world (no network), before init, which reads the signed-in account through it.
+  // edited lists PRs whose body is served with its edits; signedIn is the login gh answers `api user` with (signed out when null).
   const edited = new Set<number>();
+  let signedIn: string | null = null;
   const ghState = path.join(dir, "gh-world.json");
-  const writeGh = () => fs.writeFileSync(ghState, JSON.stringify({ world, edited: [...edited] }));
+  const writeGh = () => fs.writeFileSync(ghState, JSON.stringify({ world, edited: [...edited], signedIn }));
   writeGh();
   fs.mkdirSync(path.join(dir, "bin"));
   fs.writeFileSync(path.join(dir, "bin", "gh"), fakeGh(ghState), { mode: 0o755 });
   process.env.PATH = `${path.join(dir, "bin")}${path.delimiter}${saved.PATH ?? ""}`;
+  cli("init", "--cwd", repo);
   let reader: Kysely<DB> | null = null;
   let ingest: Kysely<DB> | null = null;
   /** The ingest connection, as the record MCP server opens it */
@@ -442,6 +444,13 @@ export async function createDriver(world: World): Promise<Driver> {
         saves.push(await gleanSave(stale));
         return;
       }
+      // gh signs in as this login and init runs again, binding it as the owner
+      if (typeof step.gh_login === "string") {
+        signedIn = step.gh_login;
+        writeGh();
+        cli("init", "--cwd", repo);
+        return;
+      }
       if (step.symlink && typeof step.symlink === "object") {
         const link = step.symlink as { path: string; to: string };
         fs.symlinkSync(link.to, path.join(repo, link.path));
@@ -533,6 +542,7 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.ok(got, `no source ${e.source}`);
         if (e.author !== undefined) assert.equal(got.author_login, e.author);
         if (e.association !== undefined) assert.equal(got.author_association, e.association);
+        if (e.author_is_owner !== undefined) assert.equal(got.author_kind === "owner", e.author_is_owner);
         if (typeof e.linked_to === "string") {
           const link = await db()
             .selectFrom("artifact_link")
@@ -1017,12 +1027,12 @@ const turnId = (n: number): string => `t${n}`;
 /** The 40-character sha the fake gh gives a commit the world names by a short label. */
 const fakeSha = (label: string): string => crypto.createHash("sha1").update(label).digest("hex");
 
-/** A gh that answers `gh api repos/<o>/<r>/<path>` from the world file. A shebang script, so it runs on POSIX only (verify does not run on Windows). */
+/** A gh that answers `gh api repos/<o>/<r>/<path>` and `gh api user` from the world file. A shebang script, so it runs on POSIX only (verify does not run on Windows). */
 function fakeGh(state: string): string {
   return `#!/usr/bin/env node
 const fs = require("node:fs");
 const crypto = require("node:crypto");
-const { world, edited } = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, "utf8"));
+const { world, edited, signedIn } = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, "utf8"));
 const argv = process.argv.slice(2);
 const where = (argv[1] ?? "").replace(/^repos\\/[^/]+\\/[^/]+\\//, "").split("?")[0];
 const sha = (s) => crypto.createHash("sha1").update(s).digest("hex");
@@ -1044,6 +1054,11 @@ for (const i of world.issues) {
   const url = "https://github.com/example/tsundoku/issues/" + i.number;
   answers["issues/" + i.number] = { number: i.number, body: i.body, html_url: url, created_at: i.created_at, user: user(i.author), author_association: i.association };
   answers["issues/" + i.number + "/comments"] = i.comments.map((c) => comment(c, url));
+}
+if (argv[1] === "user") {
+  if (!signedIn) { process.stderr.write("fake gh: not signed in\\n"); process.exit(1); }
+  process.stdout.write(JSON.stringify(user(signedIn)));
+  process.exit(0);
 }
 if (!(where in answers)) { process.stderr.write("fake gh: no answer for " + argv[1] + "\\n"); process.exit(1); }
 process.stdout.write(JSON.stringify(argv.includes("--slurp") ? [answers[where]] : answers[where]));

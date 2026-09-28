@@ -21,12 +21,13 @@ import {
   text_en,
   version,
 } from "@stricli/core";
-import { dbInit, inspect, reindex } from "./admin.ts";
+import { bindOwner, dbInit, inspect, reindex } from "./admin.ts";
 import { leaves } from "./anchors.ts";
 import { readState, rejectedDir, unregisteredDir } from "./capture.ts";
 import { withDb } from "./cli/common.ts";
 import { closing, failure, indent, section, steps, stopped, title } from "./cli/view.ts";
 import { dbFile, SCHEMA_REVISION } from "./db.ts";
+import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
 import { checkLocalName, identify, localRoots, nameLocal, repositoryRoot } from "./project.ts";
@@ -154,6 +155,20 @@ async function doctor(cwd: string): Promise<void> {
   if (usable) {
     try {
       await withDb("reader", async (db) => {
+        // Unbound is not a fault: only harvest and glean need it, and only for pull requests where the owner is not a maintainer
+        const owners = await db
+          .selectFrom("owner_identity")
+          .select(["external_id", "login"])
+          .where("provider", "=", "github")
+          .orderBy("bound_at")
+          .execute();
+        say(
+          owners.length ? "ok" : "none",
+          "GitHub owner",
+          owners.length
+            ? owners.map((o) => `${inline(o.login ?? "?")} (id ${inline(o.external_id)})`).join(" / ")
+            : "none. Bind it with sphica init while gh is signed in",
+        );
         const { found } = localRoots();
         const rows = await db
           .selectFrom("project as p")
@@ -217,6 +232,35 @@ const CWD = {
   optional: true,
 } as const;
 
+const GH_WHY = {
+  missing: "gh could not be started. Install GitHub CLI, run gh auth login, then sphica init again",
+  failed: "gh api user failed (signed out or offline). Run gh auth login, then sphica init again",
+  unexpected: "unexpected response from gh api user",
+} as const;
+
+/**
+ * Binds the GitHub account gh is signed in to as the owner's, so their words adopt in repositories they do not maintain.
+ * Without gh the rest of Sphica works, so every outcome is one line and none fails init.
+ */
+async function bindGitHub(): Promise<void> {
+  const user = await ghUser();
+  const line = (m: Mark, text: string) => console.log(indent(`${mark(m)} ${text}`));
+  if (!user.ok) {
+    line("warn", `GitHub account not bound: ${GH_WHY[user.reason]}`);
+    return;
+  }
+  const who = `${inline(user.login)} (id ${user.id})`;
+  const b = bindOwner(user);
+  if (b.kind === "bound") line("ok", `GitHub account ${who} bound as the owner`);
+  else if (b.kind === "already") line("none", `GitHub account ${who} already bound`);
+  else if (b.kind === "other")
+    line(
+      "warn",
+      `gh is signed in as ${who}, but ${inline(b.login ?? "?")} (id ${inline(b.id)}) is bound as the owner; not added`,
+    );
+  else line("none", `GitHub account not bound: the database is revision ${b.revision}`);
+}
+
 /**
  * First-time setup: the database, then the project dir belongs to (a repository without a remote needs --name). Safe to run again.
  * A bad --name and a name that differs from the one already given stop before anything is written.
@@ -239,6 +283,7 @@ async function init(flags: { cwd?: string; name?: string }): Promise<void> {
   }
   await boxed("sphica init", async () => {
     dbInit();
+    await bindGitHub();
     // A place already under this name (the named directory or one below it) is used as is, so the name table never gains a second place
     const place = flags.name !== undefined && !found ? nameLocal(cwd, flags.name) : found;
     if (!place) {
@@ -349,13 +394,14 @@ async function boxed(head: string, fn: () => unknown): Promise<void> {
 const root = buildRouteMap({
   docs: {
     brief: "Keep and search past decisions and conversations",
-    fullDescription: "Database: ~/.sphica/sphica.db (created by sphica init). No credentials are needed",
+    fullDescription:
+      "Database: ~/.sphica/sphica.db (created by sphica init). No credentials of its own: init reads your GitHub account through gh",
   },
   routes: {
     init: buildCommand({
       docs: {
         brief:
-          "Set up: create this machine's database and register the current repository (safe to run again)",
+          "Set up: create this machine's database, bind the GitHub account gh is signed in to as the owner, and register the current repository (safe to run again)",
       },
       parameters: {
         flags: {
