@@ -280,25 +280,73 @@ const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
 const KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/g;
 
 /**
- * Masks from a private key's BEGIN to the next END. END positions are collected in one pass first — a lazy regex match would reread
- * to the end for every BEGIN when many BEGINs have no END, going quadratic.
+ * Private key blocks as string index ranges, from a BEGIN to the next END. END positions are collected in one pass first — a lazy regex
+ * match would reread to the end for every BEGIN when many BEGINs have no END, going quadratic.
  */
-function maskPrivateKeys(text: string): string {
+function keyBlocks(text: string): [number, number][] {
   const ends = [...text.matchAll(KEY_END)].map((m) => [m.index, m.index + m[0].length] as const);
-  if (ends.length === 0) return text;
-  let out = "";
+  const out: [number, number][] = [];
   let last = 0;
   let e = 0;
-  for (const m of text.matchAll(KEY_BEGIN)) {
-    const after = m.index + m[0].length;
-    if (m.index < last) continue;
-    while (e < ends.length && (ends[e]?.[0] ?? 0) < after) e++;
-    const end = ends[e];
-    if (!end) break;
-    out += `${text.slice(last, m.index)}[redacted: private key]`;
-    last = end[1];
+  if (ends.length > 0)
+    for (const m of text.matchAll(KEY_BEGIN)) {
+      const after = m.index + m[0].length;
+      if (m.index < last) continue;
+      while (e < ends.length && (ends[e]?.[0] ?? 0) < after) e++;
+      const end = ends[e];
+      if (!end) break;
+      out.push([m.index, end[1]]);
+      last = end[1];
+    }
+  return out;
+}
+
+function maskPrivateKeys(text: string): string {
+  let out = "";
+  let last = 0;
+  for (const [a, b] of keyBlocks(text)) {
+    out += `${text.slice(last, a)}[redacted: private key]`;
+    last = b;
   }
   return out + text.slice(last);
+}
+
+/** The UTF-8 byte ranges of the private key blocks mask() replaces, so a caller cutting by bytes can tell a cut inside a key. */
+export function privateKeyRanges(text: string): [number, number][] {
+  return keyBlocks(text).map(([a, b]) => [bytes(text.slice(0, a)), bytes(text.slice(0, b))]);
+}
+
+const PLACEHOLDER = /\[redacted(?:: [^\]]*)?\]/g;
+
+/** Every byte offset where needle starts in hay, overlapping occurrences included. */
+function starts(hay: Buffer, needle: Buffer): number[] {
+  const out: number[] = [];
+  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) out.push(at);
+  return out;
+}
+
+/**
+ * The byte span of quote in masked (the masked form of raw), or null when it is missing or masking may have moved it: some occurrence in raw
+ * was masked away, or the match touches a placeholder. Each occurrence outside placeholders maps to one in raw, in order, so equal counts
+ * mean the first one is the same occurrence.
+ */
+export function quoteSpan(raw: string, masked: string, quote: string): [number, number] | null {
+  const q = Buffer.from(quote, "utf8");
+  if (q.length === 0) return null;
+  const m = Buffer.from(masked, "utf8");
+  if (raw === masked) {
+    const at = m.indexOf(q);
+    return at < 0 ? null : [at, at + q.length];
+  }
+  const holes = [...masked.matchAll(PLACEHOLDER)].map((x) => {
+    const a = bytes(masked.slice(0, x.index));
+    return [a, a + bytes(x[0])] as const;
+  });
+  const kept = starts(m, q).filter((at) => !holes.some(([a, b]) => at < b && at + q.length > a));
+  const first = kept[0];
+  return first !== undefined && kept.length === starts(Buffer.from(raw, "utf8"), q).length
+    ? [first, first + q.length]
+    : null;
 }
 
 export function mask(text: string): string {

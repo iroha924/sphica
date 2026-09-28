@@ -22,13 +22,14 @@ base: main
 
 秘密鍵の範囲と、引用が伏せ字に触れていないかの判定を、単体で使える形で足す。
 
-- [ ] T01: 秘密鍵ブロックの範囲と、引用の対応の判定を text.ts に足す
+- [x] T01: 秘密鍵ブロックの範囲と、引用の対応の判定を text.ts に足す
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/src/text.ts`, `server/test/text.test.ts`
+  - 変更: `server/src/text.ts`, `server/test/text.test.ts`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `bun run --cwd server test` → 追加したテスト（`TOKEN=redacted123` と `redacted` は断る、`API_KEY=abc123def456` と単独の `abc123def456` は断る、`AIza` + `a`×75 と `a`×40 は断る、秘密を避けた引用は正しいバイト位置、ブロックの範囲がバイト位置で返る）を含めて全件 pass
   - コミット: `feat(text): find private key ranges and check quotes against masked text (T01)`
+  - 結果: `node --test test/text.test.ts` → 13 件 pass（追加の 2 件を含む）。`tsc --noEmit` → エラーなし。biome check → 指摘なし。`bun run --cwd server test` → 311 件 pass。バージョンを 0.5.6 → 0.5.7 に上げた（pre-commit の bundle が同じコミットでの引き上げを求めるため）
 
 ## P2: glean の抜粋を伏せ字にする
 
@@ -58,14 +59,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
 
 ## P4: 出荷の準備
 
-glean スキルの案内と、バージョンをそろえる。
+glean スキルの案内を足し、出荷前の検査を通す。
 
-- [ ] T04: glean スキルに引用の注意を 1 行足し、バージョンを上げる
+- [ ] T04: glean スキルに引用の注意を 1 行足す
   - 種別: 変更
   - 計画: S5
   - 依存: T02（断るときの文面が決まっている必要がある）, T03（出荷の範囲がそろっている必要がある）
-  - 変更: `plugin/skills/glean/SKILL.md`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
+  - 変更: `plugin/skills/glean/SKILL.md`
   - 完了条件: `bun run release:plan -- --base v0.5.6` → kind が `plugin`、`bun run verify` → 0 で終わる
-  - コミット: `chore(release): bump to the next patch version for masked excerpts (T04)`
+  - コミット: `docs(glean): tell the agent not to quote secrets (T04)`
 
 ## 記録
+
+- 2026-09-28 / T01, T04 / pre-commit の bundle フックが、パッケージに入るファイルの変更と同じコミットでのバージョンの引き上げを求めた / バージョンの引き上げ（0.5.7）を T04 から T01 に移した。T01 の変更欄: 前 `server/src/text.ts`, `server/test/text.test.ts` → 後 それに 4 つのバージョンのファイルを足す。T04 の変更欄: 前 SKILL.md と 4 つのバージョンのファイル → 後 SKILL.md のみ。T04 の名前とコミットの件名も合わせて直した
