@@ -290,7 +290,11 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
         try {
           if (!target.root) throw new Error("the repository is not known");
           excerpt = readExcerpt(target.root, op.file);
-          if (!locate(excerpt.raw, op.quote))
+          if (await forgottenExcerpt(db, target.projectId, excerpt))
+            errors.push(
+              `${what}: the owner forgot ${excerpt.path} lines ${op.file.lines.join("-")}; cite something else`,
+            );
+          else if (!locate(excerpt.raw, op.quote))
             errors.push(`${what}: quote not found in ${excerpt.path} lines ${op.file.lines.join("-")}`);
           else if (!quoteSpan(excerpt.raw, excerpt.text, op.quote))
             errors.push(
@@ -440,6 +444,20 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
   return { errors, problems, units, ops };
 }
 
+/** Whether the owner forgot this excerpt (same file, lines, blob, and masked text): it is never stored again. */
+async function forgottenExcerpt(db: Kysely<DB>, projectId: number, x: Excerpt): Promise<boolean> {
+  const hit = await db
+    .selectFrom("source_forgotten")
+    .select("source_id")
+    .where("project_id", "=", projectId)
+    .where("artifact", "=", `file:${x.path}`)
+    .where("kind", "=", "file_excerpt")
+    .where("external_id", "=", `file:${x.path}@${x.blob}#L${x.lines[0]}-${x.lines[1]}`)
+    .where("content_hash", "=", sha256(x.text))
+    .executeTakeFirst();
+  return hit !== undefined;
+}
+
 /**
  * Stores a file excerpt as a source (once per blob, lines, and masked text) and returns its id. An excerpt stored unmasked by an older
  * version is kept as it was and a masked revision is added, since evidence spans are offsets into the text they were taken from.
@@ -456,6 +474,8 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
     .orderBy("revision", "desc")
     .executeTakeFirst();
   if (found?.content_hash.equals(hash)) return found.id;
+  if (await forgottenExcerpt(trx, projectId, x))
+    throw new Error(`the owner forgot ${x.path} lines ${x.lines.join("-")}; cite something else`);
   const now = iso(Date.now());
   const row = await trx
     .insertInto("source")

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { applyForget, previewForget } from "../src/forget.ts";
 import {
   type Get,
   gh,
@@ -418,5 +419,27 @@ test("a signed-out gh, a missing gh, and an answer that is not a user are told a
   } finally {
     process.env.PATH = saved;
     fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("tombstone: harvest does not store an item the owner forgot, and stores it again only with changed text", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const first = await readPull(fake("Switch to pnpm."), 7);
+    const ids = await storeItems(db.ingest, p, first.items);
+    const body = ids[0] as number;
+    await applyForget(db.file, p, [body], await previewForget(db.file, p, [body]));
+    const again = await storeItems(db.ingest, p, first.items);
+    assert.deepEqual(again, [null, ...ids.slice(1)]);
+    assert.equal(db.owner.prepare("select count(*) as n from source where kind = 'pr_body'").get()?.n, 0);
+    const edited = await storeItems(db.ingest, p, (await readPull(fake("Switch to pnpm. Edited."), 7)).items);
+    assert.equal(typeof edited[0], "number");
+    assert.equal(
+      db.owner.prepare("select text from source where kind = 'pr_body'").get()?.text,
+      "Switch to pnpm. Edited.",
+    );
+  } finally {
+    await db.done();
   }
 });

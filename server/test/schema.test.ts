@@ -504,7 +504,7 @@ test("only a retracted row whose retraction reason was forgotten can be removed,
   assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 3);
 });
 
-test("capture skips a message the owner forgot, and stores it again only with other text", () => {
+test("tombstone: capture skips a message the owner forgot, and stores it again only with other text", () => {
   session(db, p, "s1");
   const put = (text: string) =>
     sql(

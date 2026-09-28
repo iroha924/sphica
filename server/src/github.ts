@@ -392,7 +392,7 @@ export async function storeItems(
     ).map((o) => o.external_id),
   );
   const now = iso(Date.now());
-  // One entry per item, null for an empty text never kept, so callers can pair items with their ids
+  // One entry per item, null for an empty text never kept or words the owner forgot, so callers can pair items with their ids
   const ids: (number | null)[] = [];
   for (const it of items) {
     const kept = fit(it.text);
@@ -409,7 +409,17 @@ export async function storeItems(
       ids.push(latest.id);
       continue;
     }
-    if (!latest && !kept.body.trim()) {
+    // The owner forgot these words: fetching them again must not bring them back. Changed text is new speech and is stored
+    const forgotten = await db
+      .selectFrom("source_forgotten")
+      .select("source_id")
+      .where("project_id", "=", projectId)
+      .where("artifact", "=", it.artifact)
+      .where("kind", "=", it.kind)
+      .where("external_id", "=", it.externalId)
+      .where("content_hash", "=", hash)
+      .executeTakeFirst();
+    if (forgotten || (!latest && !kept.body.trim())) {
       ids.push(null);
       continue;
     }

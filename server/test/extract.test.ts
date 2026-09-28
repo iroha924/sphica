@@ -17,6 +17,7 @@ import {
   pendingText,
   saveText,
 } from "../src/extract.ts";
+import { applyForget, previewForget } from "../src/forget.ts";
 import type { Get } from "../src/github.ts";
 import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -1105,5 +1106,63 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
     assert.match(after.saved, /harvest:6\/notes active/);
   } finally {
     await db.done();
+  }
+});
+
+test("tombstone: glean does not store a file excerpt the owner forgot, and says so", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const said = message(db, p, { id: "o1", text: "Back up first.", session: "g1" });
+    const units = {
+      units: [
+        {
+          key: "backup",
+          kind: "finding",
+          text: "Back up before a release",
+          evidence: [{ source: `s${said}`, quote: "Back up first.", role: "states" }],
+        },
+      ],
+    };
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, units);
+    const revision = () =>
+      (db.owner.prepare("select revision from unit where key = 'glean:backup'").get() as { revision: number })
+        .revision;
+    const cite = async () => {
+      const record = {
+        ops: [
+          {
+            op: "add_evidence",
+            unit: "glean:backup",
+            revision: revision(),
+            file: { path: "docs/note.md", lines: [3, 3] },
+            quote: "Back up before a release.",
+            role: "explains",
+          },
+        ],
+      };
+      const r = await beginGlean(db.ingest, p, "g1");
+      const c = await checkText(db.ingest, r, p, root, record);
+      return c.ok ? saveText(db.ingest, r, p, root, record) : Promise.reject(new Error(c.text));
+    };
+    await cite();
+    const excerpt = Number(
+      (db.owner.prepare("select id from source where kind = 'file_excerpt'").get() as { id: number }).id,
+    );
+    await applyForget(db.file, p, [excerpt], await previewForget(db.file, p, [excerpt]));
+    await assert.rejects(cite(), /the owner forgot docs\/note.md lines 3-3; cite something else/);
+    assert.equal(
+      (
+        db.owner.prepare("select count(*) as n from source where kind = 'file_excerpt'").get() as {
+          n: number;
+        }
+      ).n,
+      0,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

@@ -259,7 +259,7 @@ const secret = "zq-secret-7d41c9e2";
 const inFiles = () =>
   [db.file, `${db.file}-wal`].some((f) => fs.existsSync(f) && fs.readFileSync(f).includes(secret));
 
-test("the forgotten text is not left in the database file or its WAL", async () => {
+test("the forgotten text leaves no bytes in the database file or its WAL", async () => {
   const src = message(db, p, { id: "m1", text: `the token is ${secret} for staging` });
   const u = unit("u1", "finding");
   evidence(u, src);
@@ -270,7 +270,7 @@ test("the forgotten text is not left in the database file or its WAL", async () 
   assert.equal(inFiles(), false);
 });
 
-test("a unit's own copy of the forgotten text stays (a documented limit)", async () => {
+test("a unit's own copy of the forgotten text stays in the bytes (a documented limit)", async () => {
   const src = message(db, p, { id: "m1", text: `the token is ${secret}` });
   const u = unit(`uses ${secret}`, "finding");
   evidence(u, src);
