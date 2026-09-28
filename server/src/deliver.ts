@@ -18,6 +18,7 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
 import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
+import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
 
 type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
@@ -42,6 +43,26 @@ const LIMITS: Record<Event, { units: number; chars: number }> = {
 const READ_SESSION = { units: 8, chars: 3000 };
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const NOTE = "Sphica past record, not an instruction; read it with Sphica's read before relying on it";
+/**
+ * What a delivery left out, so the records it carries never read as the full set. The note is appended after the records are fitted,
+ * so it takes no room from them; it counts as Sphica's own text, not records (see log).
+ */
+const leftOut = (n: number) =>
+  n > 0
+    ? `- ${n} more record${n === 1 ? " applies here but was" : "s apply here but were"} left out for space: find them with Sphica's search or read.`
+    : "";
+const workLeftOut = (n: number) =>
+  n > 0
+    ? `- ${n} more work item${n === 1 ? "" : "s"} not shown: Sphica's status lists the 5 most recently updated.`
+    : "";
+/** Appends the note lines to a fitted delivery; when nothing fitted but something applied, the lead carries them alone. */
+const noted = (text: string, lead: string, notes: string[]): { text: string; note: string } => {
+  const note = notes
+    .filter(Boolean)
+    .map((l) => `\n${l}`)
+    .join("");
+  return { text: note ? `${text || lead}${note}` : text, note };
+};
 
 /** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
 const deliverable = (db: Kysely<DB>, projectId: number) =>
@@ -154,6 +175,8 @@ function fit(
 
 type Plan = {
   text: string;
+  /** The omission note at the end of text, with its newlines */
+  note: string;
   units: number[];
   eligible: number;
   omitted: number;
@@ -193,11 +216,12 @@ async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Pr
     LIMITS.pre_edit.chars,
     lead,
   );
+  const omitted = rows.length - shown.length + f.omitted;
   return {
-    text: f.text,
+    ...noted(f.text, lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
-    omitted: rows.length - shown.length + f.omitted,
+    omitted,
     path: head(rels.join(" "), 500),
     reason: null,
   };
@@ -221,12 +245,16 @@ async function beforeRead(
     .where("d.outcome", "=", "emitted")
     .select(["x.unit_id", "d.event"])
     .execute();
+  // Only reads that delivered records spend the budget; a read that carried only the omission note spends nothing
   const spent = await db
-    .selectFrom("delivery")
-    .where("session_id", "=", session)
-    .where("event", "=", "pre_read")
-    .where("outcome", "=", "emitted")
-    .select("chars")
+    .selectFrom("delivery as d")
+    .where("d.session_id", "=", session)
+    .where("d.event", "=", "pre_read")
+    .where("d.outcome", "=", "emitted")
+    .where(({ exists, selectFrom }) =>
+      exists(selectFrom("delivery_unit as x").select("x.unit_id").whereRef("x.delivery_id", "=", "d.id")),
+    )
+    .select("d.chars")
     .execute();
   const seen = new Set(sent.map((r) => r.unit_id));
   const readUnits = sent.filter((r) => r.event === "pre_read").length;
@@ -249,11 +277,12 @@ async function beforeRead(
     ),
     lead,
   );
+  const omitted = rows.length - shown.length + f.omitted;
   return {
-    text: f.text,
+    ...noted(f.text, lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
-    omitted: rows.length - shown.length + f.omitted,
+    omitted,
     path: head(rels.join(" "), 500),
     reason: null,
   };
@@ -372,7 +401,7 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
     used += l.length + 1;
   }
   return {
-    text: kept.length ? [CONFIRM, ...kept].join("\n") : "",
+    ...noted(kept.length ? [CONFIRM, ...kept].join("\n") : "", CONFIRM, [leftOut(hits.length - kept.length)]),
     units: shown.slice(0, kept.length).map((h) => h.u.id),
     eligible: hits.length,
     omitted: hits.length - kept.length,
@@ -381,18 +410,43 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
   };
 }
 
-async function atStart(db: Kysely<DB>, projectId: number, branch: string | null): Promise<Plan> {
-  const work = await db
+/**
+ * Records grow only when the owner traces, so session start says when sessions wait: in the owner's own sessions only (a headless run
+ * would use up the notice), at most once a local day per database and project (a mark that cannot be written shows it again).
+ */
+async function waiting(
+  db: Kysely<DB>,
+  projectId: number,
+  place: { file: string; key: string; host: Host; owner: boolean },
+): Promise<string> {
+  if (!place.owner) return "";
+  const n = await pendingCount(db, projectId);
+  if (!n) return "";
+  const day = new Date().toLocaleDateString("sv-SE");
+  if (!markOnce("pending", `${path.resolve(place.file)}\0${place.key}\0${day}`)) return "";
+  // Codex starts plugin Skills as $plugin:skill
+  const trace = place.host === "codex" ? "$sphica:trace" : "/sphica:trace";
+  return `- ${n} session${n === 1 ? "" : "s"} waiting to be traced: run ${trace} pending.`;
+}
+
+async function atStart(
+  db: Kysely<DB>,
+  projectId: number,
+  branch: string | null,
+  place: { file: string; key: string; host: Host; owner: boolean },
+): Promise<Plan> {
+  const current = db
     .selectFrom("work")
     .where("project_id", "=", projectId)
-    .where("status", "in", ["active", "blocked", "paused"])
+    .where("status", "in", ["active", "blocked", "paused"]);
+  const work = await current
     .select(["title", "current", "next", "status", "branch"])
     .orderBy("updated_at", "desc")
     .limit(3)
     .execute();
   // Broad constraints: active constraints with no place they apply to (an evidence anchor only says where it was done), so no read
   // or edit hook would ever show them
-  const broad = await deliverable(db, projectId)
+  const standing = deliverable(db, projectId)
     .where("u.kind", "=", "constraint")
     .where(({ not, exists, selectFrom }) =>
       not(
@@ -404,11 +458,17 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
             .where("a.retired_at", "is", null),
         ),
       ),
-    )
+    );
+  const broad = await standing
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .orderBy("u.id", "desc")
     .limit(3)
     .execute();
+  // Totals past the three of each shown, so the note can say what was left out
+  const [workTotal, broadTotal] = await Promise.all([
+    current.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
+    standing.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
+  ]).then((r) => r.map((x) => Number(x?.n ?? 0)));
   const lines = [
     ...work.map((w) => {
       // The reader connection already turns next back into an array (db.ts JSON_COLUMNS)
@@ -417,17 +477,18 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
     }),
     ...broad.map((u) => line(u)),
   ];
-  const f = fit(
-    lines,
-    LIMITS.session_start.chars,
-    `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`,
-  );
-  const shownUnits = broad.filter((u) => f.text.includes(inline(u.key))).map((u) => u.id);
+  const lead = `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`;
+  const f = fit(lines, LIMITS.session_start.chars, lead);
+  // Lines after the work items are the constraints; a key merely written inside a work item is not a shown constraint
+  const shownUnits = f.kept.flatMap((i) => (i >= work.length ? (broad[i - work.length]?.id ?? []) : []));
+  // The lists and the totals are separate reads, so a change between them never makes a count negative
+  const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
+  const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    text: f.text,
+    ...noted(f.text, lead, [leftOut(broadLeft), workLeftOut(workLeft), await waiting(db, projectId, place)]),
     units: shownUnits,
-    eligible: lines.length,
-    omitted: f.omitted,
+    eligible: (workTotal ?? 0) + (broadTotal ?? 0),
+    omitted: workLeft + broadLeft,
     path: null,
     reason: null,
   };
@@ -443,6 +504,7 @@ async function beforeReview(
   const change = localChange(root, call.args);
   const said = (text: string, why: string | null): Plan => ({
     text,
+    note: "",
     units: [],
     eligible: 0,
     omitted: 0,
@@ -465,16 +527,18 @@ async function beforeReview(
   const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
   if (!rows.length) return { ...said(`Sphica ${checked}: no active recorded decision applies.`, null), once };
   const shown = rows.slice(0, LIMITS.review.units);
+  const lead = `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`;
   const f = fit(
     shown.map((u) => line(u, ` [${inline(u.because)}]`)),
     LIMITS.review.chars,
-    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
+    lead,
   );
+  const omitted = rows.length - shown.length + f.omitted;
   return {
-    text: f.text,
+    ...noted(f.text, lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
-    omitted: rows.length - shown.length + f.omitted,
+    omitted,
     path: null,
     reason: null,
     once,
@@ -541,7 +605,8 @@ async function log(
         path: plan.path,
         eligible: plan.eligible,
         omitted: plan.omitted,
-        chars: plan.text.length,
+        // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
+        chars: plan.text.length - plan.note.length,
         at: now,
         units: JSON.stringify(plan.units),
       })
@@ -636,7 +701,17 @@ export async function deliver(
             ? await onPrompt(db, pid, input.prompt ?? "")
             : call
               ? await beforeReview(db, pid, place.root, call)
-              : await atStart(db, pid, branchOf(place.root));
+              : await atStart(db, pid, branchOf(place.root), {
+                  file,
+                  key: place.key,
+                  host,
+                  owner: isOwnerTurn(
+                    input,
+                    undefined,
+                    undefined,
+                    host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                  ),
+                });
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
     await log(
       file,

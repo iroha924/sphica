@@ -39,6 +39,12 @@ async function projectOf(cwd: string | undefined): Promise<{ id: number; root: s
   return { id, root: place.root };
 }
 
+/** A search that stopped at its cap looked only at the best-ranked candidates, so an empty result is not "nothing matches". */
+const among = (r: { stopped: boolean; read: number }) =>
+  r.stopped ? `among the first ${r.read} candidates by rank ` : "";
+const stoppedAfter = (r: { stopped: boolean; read: number }) =>
+  r.stopped ? `\n\nStopped after ${r.read} candidates by rank; more may match.` : "";
+
 const hitText = (h: UnitHit) =>
   [
     `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}`,
@@ -139,7 +145,7 @@ server.registerTool(
         const r = await searchSources(db, p.id, a.query, limit);
         if (!r.hits.length)
           return text(
-            `No source holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out.`,
+            `No source ${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out.${r.stopped ? " Search with more specific words." : ""}`,
           );
         return text(
           framed(
@@ -148,7 +154,8 @@ server.registerTool(
                 (h) =>
                   `## s${h.id}: ${h.kind} ${h.artifact}, ${h.author}, ${h.created_at}\n${head(h.text, 800)}\nMatched: ${h.matched.join(", ")}`,
               )
-              .join("\n\n"),
+              .join("\n\n")
+              .concat(stoppedAfter(r)),
           ),
         );
       }
@@ -161,11 +168,14 @@ server.registerTool(
       });
       if (!r.hits.length)
         return text(
-          `No record holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +
+          `No record ${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +
+            (r.stopped ? "Search with more specific words. " : "") +
             "Search again with other words or the other language, or search sources; status says whether sessions are still untraced.",
         );
       return text(
-        framed(`${r.hits.map(hitText).join("\n\n")}\n\nRead a record by its key before relying on it.`),
+        framed(
+          `${r.hits.map(hitText).join("\n\n")}${stoppedAfter(r)}\n\nRead a record by its key before relying on it.`,
+        ),
       );
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);

@@ -375,3 +375,173 @@ test("reading as of a past time shows no retraction made after it", async () => 
     await db.done();
   }
 });
+
+test("a strong match ranked past the first 200 candidates is found, and a search says where it stopped", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const filler = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
+    // Short texts holding two of four words rank ahead of a long one holding three
+    const weak = (n: number) => (n % 2 ? "retry budget retry budget." : "cache warm cache warm.");
+    for (let n = 0; n < 210; n++) message(db, p, { id: `w${n}`, text: weak(n), session: "s1" });
+    const strong = message(db, p, {
+      id: "strong",
+      text: `${filler} retry budget cache ${filler}`,
+      session: "s1",
+    });
+    const sources = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.deepEqual(
+      { hits: sources.hits.map((h) => h.id), stopped: sources.stopped },
+      { hits: [strong], stopped: false },
+    );
+    // Units: the same shape, five records of 42 weak units ahead of one strong unit
+    const both = message(db, p, {
+      id: "both",
+      text: "retry budget retry budget. cache warm cache warm.",
+      session: "s1",
+    });
+    for (let b = 0; b < 5; b++)
+      await save(db, p, {
+        units: Array.from({ length: 42 }, (_, n) =>
+          decision(`w${b}-${n}`, both, n % 2 ? "retry budget retry budget." : "cache warm cache warm."),
+        ),
+      });
+    // A long record holding three of the four words, quoted from the middle of the long message
+    const tail = Array.from({ length: 100 }, (_, i) => `word${i + 200}`).join(" ");
+    const lead = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
+    await save(db, p, { units: [decision("strong", strong, `${tail} retry budget cache ${lead}`)] });
+    const units = await searchUnits(db.reader, p, { question: "retry budget cache warm", limit: 5 });
+    assert.deepEqual(
+      { hits: units.hits.map((h) => h.key), stopped: units.stopped },
+      { hits: ["trace:ext-s1/strong"], stopped: false },
+    );
+    // Past the cap of 600 sources the search stops and says so
+    for (let n = 210; n < 700; n++) message(db, p, { id: `w${n}`, text: weak(n), session: "s1" });
+    const capped = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.deepEqual(
+      { read: capped.weaker + capped.hits.length, stopped: capped.stopped },
+      { read: 600, stopped: true },
+      "the message holding all four words is one of the 600 read",
+    );
+    assert.deepEqual(
+      capped.hits.map((h) => h.id),
+      [both],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a source search stops once the text it read reaches 64 MiB", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const mib = `retry budget ${"x".repeat(1024 * 1024 - 13)}`;
+    for (let n = 0; n < 70; n++) message(db, p, { id: `big${n}`, text: `${mib}${n}`, session: "s1" });
+    const r = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.equal(r.stopped, true);
+    assert.equal(r.weaker, 64);
+  } finally {
+    await db.done();
+  }
+});
+
+// Each page is a separate statement, so a write between two pages must not shift the next page past a candidate
+test("a source removed between two pages of a search makes it skip no other candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const filler = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(" ");
+    // 50 short weak candidates rank first and the long strong one last
+    const weak = (n: number) =>
+      n % 2 ? "retry budget retry budget retry budget." : "cache warm cache warm cache warm.";
+    const first = message(db, p, { id: "w0", text: weak(0) });
+    for (let n = 1; n < 50; n++) message(db, p, { id: `w${n}`, text: weak(n) });
+    const strong = message(db, p, {
+      id: "strong",
+      text: `${filler(1000)} retry budget cache ${filler(1000)}`,
+    });
+    const plain = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.deepEqual(
+      plain.hits.map((h) => h.id),
+      [strong],
+      "the strong one is found without a write",
+    );
+    let removed = false;
+    const reader = db.reader.withPlugin({
+      transformQuery: (a) => a.node,
+      transformResult: async (a) => {
+        // Right after the first statement, the best-ranked candidate goes away (forget does this)
+        if (!removed) {
+          removed = true;
+          db.owner.prepare("delete from source where id = ?").run(first);
+        }
+        return a.result;
+      },
+    });
+    const r = await searchSources(reader, p, "retry budget cache warm", 5);
+    assert.ok(removed);
+    assert.deepEqual(
+      r.hits.map((h) => h.id),
+      [strong],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+// The order is taken first and rows are read after, so what changed in between must not slip past the filters or the cap
+test("a record withdrawn after the order was taken is not an active hit, and a source removed near the cap still says the search stopped", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m", text: "Retry budget stays fixed." });
+    await save(db, p, { units: [decision("retry", m, "Retry budget stays fixed.")] });
+    const afterFirst = (write: () => void) => {
+      let done = false;
+      return db.reader.withPlugin({
+        transformQuery: (a) => a.node,
+        transformResult: async (a) => {
+          if (!done) {
+            done = true;
+            write();
+          }
+          return a.result;
+        },
+      });
+    };
+    const withdrawn = afterFirst(() =>
+      db.owner
+        .prepare(
+          "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', ?, 'withdrawn meanwhile', (select run_id from unit_state order by id desc limit 1) from unit where key = 'trace:ext-s1/retry'",
+        )
+        .run(new Date().toISOString()),
+    );
+    const active = await searchUnits(withdrawn, p, {
+      question: "retry budget",
+      lifecycles: ["active"],
+      limit: 5,
+    });
+    assert.deepEqual(
+      active.hits.map((h) => h.key),
+      [],
+    );
+    // 601 weak sources and a strong one ranked last; the best-ranked goes away right after the order is taken
+    const weak = (n: number) => (n % 2 ? "retry budget retry budget." : "cache warm cache warm.");
+    const firstWeak = message(db, p, { id: "w0", text: weak(0), session: "s2" });
+    for (let n = 1; n < 601; n++) message(db, p, { id: `w${n}`, text: weak(n), session: "s2" });
+    const filler = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
+    message(db, p, { id: "strong", text: `${filler} retry budget cache ${filler}`, session: "s2" });
+    const removed = afterFirst(() => db.owner.prepare("delete from source where id = ?").run(firstWeak));
+    const r = await searchSources(removed, p, "retry budget cache warm", 5);
+    assert.equal(
+      db.owner.prepare("select id from source where id = ?").get(firstWeak),
+      undefined,
+      "it was removed",
+    );
+    assert.equal(r.read, 600, "the 601st taken is read in place of the removed one");
+    assert.equal(r.stopped, true, "a candidate past the ones read remains");
+  } finally {
+    await db.done();
+  }
+});
