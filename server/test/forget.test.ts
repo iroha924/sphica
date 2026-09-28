@@ -1,0 +1,292 @@
+// Forgetting chosen sources on a real database: rows and index entries go, units that cited them are judged again, and the bytes
+// do not stay in the file. The plan is .claude/plans/2026/09/29-forget-sources.plan.md.
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { afterEach, beforeEach, test } from "node:test";
+import { applyForget, type ForgetOutcome, previewForget } from "../src/forget.ts";
+import { sha256 } from "../src/text.ts";
+import { at, insert, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
+
+let db: TempDb;
+let p: number;
+beforeEach(() => {
+  db = tempDb();
+  p = project(db);
+});
+afterEach(() => db.done());
+
+const now = at("2026-09-20T00:00:00Z");
+type Values = Record<string, string | number | Buffer | null>;
+const one = (text: string, ...args: (string | number)[]) =>
+  db.owner.prepare(text).get(...args) as Record<string, unknown>;
+const sql = (text: string, ...args: (string | number | null)[]) => db.owner.prepare(text).run(...args);
+
+const unit = (key: string, kind: string, v: Values = {}) =>
+  insert(db, "unit", {
+    project_id: p,
+    key,
+    kind,
+    stance: ["decision", "constraint"].includes(kind) ? "do" : null,
+    text: key,
+    extraction: "supported",
+    run_id: run(db, p),
+    created_at: now,
+    content_hash: sha256(key),
+    ...v,
+  });
+const runOf = (u: number) => Number(one("select run_id from unit where id = ?", u).run_id);
+const evidence = (u: number, source: number, v: Values = {}) =>
+  insert(db, "unit_evidence", {
+    unit_id: u,
+    source_id: source,
+    span_start: 0,
+    span_end: 3,
+    role: "states",
+    run_id: runOf(u),
+    added_at: now,
+    ...v,
+  });
+const adoption = (u: number, source: number) =>
+  insert(db, "unit_adoption", {
+    unit_id: u,
+    route: "owner_statement",
+    source_id: source,
+    span_start: 0,
+    span_end: 3,
+    run_id: runOf(u),
+    added_at: now,
+  });
+const move = (u: number, from: string | null, to: string, source: number | null = null) =>
+  sql(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, ?, ?, ?, 'r', ?, ?)",
+    u,
+    from,
+    to,
+    now,
+    source,
+    runOf(u),
+  );
+const activate = (u: number, source: number | null = null) => {
+  move(u, null, "candidate");
+  move(u, "candidate", "active", source);
+};
+const lifecycle = (u: number) => one("select lifecycle from unit where id = ?", u).lifecycle;
+const exists = (id: number) => Number(one("select count(*) as n from source where id = ?", id).n) === 1;
+const indexed = (word: string) =>
+  Number(one("select count(*) as n from source_fts where source_fts match ?", word).n);
+
+/** Preview, then apply what the preview showed (the owner's confirmation). */
+async function forget(...ids: number[]) {
+  const seen = await previewForget(db.file, p, ids);
+  return applyForget(db.file, p, ids, seen);
+}
+
+test("forgetting the only source of an active decision removes the row and its index entry, and the decision leaves active", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit("u1", "decision");
+  evidence(u, src);
+  adoption(u, src);
+  activate(u, src);
+  assert.equal(indexed("sqlite"), 1);
+  const { outcome, cleanup } = await forget(src);
+  assert.equal(exists(src), false);
+  assert.equal(indexed("sqlite"), 0);
+  assert.equal(lifecycle(u), "candidate");
+  assert.deepEqual(outcome.units, [{ key: "u1", before: "active", after: "candidate", removed: 2 }]);
+  assert.equal(cleanup, "done");
+  // The state history keeps its rows; the one that cited the source no longer points at it
+  assert.deepEqual(
+    db.owner
+      .prepare(
+        "select source_id, forget_id is not null as forgot from unit_state where unit_id = ? order by id",
+      )
+      .all(u)
+      .map((r) => ({ ...r })),
+    [
+      { source_id: null, forgot: 0 },
+      { source_id: null, forgot: 0 },
+      { source_id: null, forgot: 1 },
+    ],
+  );
+});
+
+test("a decision with another source for its evidence and adoption stays active", async () => {
+  const a = message(db, p, { id: "m1", text: "Use SQLite." });
+  const b = message(db, p, { id: "m2", text: "Yes, SQLite. Decided." });
+  const u = unit("u1", "decision");
+  evidence(u, a);
+  evidence(u, b);
+  adoption(u, b);
+  activate(u, b);
+  const { outcome } = await forget(a);
+  assert.equal(lifecycle(u), "active");
+  assert.deepEqual(outcome.units, [{ key: "u1", before: "active", after: "active", removed: 1 }]);
+});
+
+test("an implementation stays active on its commit anchor, and leaves active when the forgotten commit was its only support", async () => {
+  const said = message(db, p, { id: "m1", text: "Implemented the cache." });
+  const anchored = unit("impl-anchor", "implementation");
+  evidence(anchored, said, { role: "implements" });
+  insert(db, "unit_anchor", {
+    unit_id: anchored,
+    path: "server/src/cache.ts",
+    commit_sha: "a".repeat(40),
+    role: "evidence",
+    run_id: runOf(anchored),
+    added_at: now,
+  });
+  activate(anchored);
+  const commit = insert(db, "source", {
+    project_id: p,
+    kind: "commit_message",
+    artifact: `commit:${"b".repeat(40)}`,
+    external_id: "b".repeat(40),
+    revision: 1,
+    author_kind: "person",
+    created_at: now,
+    captured_at: now,
+    text: "feat: add the cache",
+    original_bytes: 19,
+    content_hash: sha256("feat: add the cache"),
+    indexed: 1,
+  });
+  const committed = unit("impl-commit", "implementation");
+  evidence(committed, commit, { role: "implements" });
+  activate(committed);
+  await forget(said, commit);
+  assert.equal(lifecycle(anchored), "active");
+  assert.equal(lifecycle(committed), "candidate");
+});
+
+test("superseded, withdrawn, and candidate units keep their state and lose only the forgotten rows", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite." });
+  const next = message(db, p, { id: "m2", text: "Use Postgres." });
+  const old = unit("old", "finding");
+  evidence(old, src);
+  activate(old);
+  const successor = unit("new", "finding");
+  evidence(successor, next);
+  activate(successor);
+  insert(db, "unit_link", {
+    from_unit: successor,
+    to_unit: old,
+    kind: "supersedes",
+    run_id: runOf(successor),
+    added_at: now,
+  });
+  move(old, "active", "superseded");
+  const gone = unit("gone", "finding");
+  evidence(gone, src);
+  move(gone, null, "withdrawn");
+  const waiting = unit("waiting", "finding");
+  evidence(waiting, src);
+  move(waiting, null, "candidate");
+  const { outcome } = await forget(src);
+  assert.deepEqual([old, gone, waiting].map(lifecycle), ["superseded", "withdrawn", "candidate"]);
+  assert.deepEqual(
+    outcome.units.map((u) => [u.key, u.before, u.after]),
+    [
+      ["old", "superseded", "superseded"],
+      ["gone", "withdrawn", "withdrawn"],
+      ["waiting", "candidate", "candidate"],
+    ],
+  );
+});
+
+test("forgetting a retraction's reason removes the retracted row it explained, and an owner's unfetched reference goes with its message", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite." });
+  const reason = message(db, p, { id: "m2", text: "No, that was wrong. See https://notes.example/x" });
+  const u = unit("u1", "finding");
+  evidence(u, src);
+  evidence(u, src, { role: "explains" });
+  sql(
+    "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ? and role = 'states'",
+    now,
+    reason,
+    u,
+  );
+  insert(db, "external_reference", {
+    project_id: p,
+    url: "https://notes.example/x",
+    owner_source_id: reason,
+    span_start: 0,
+    span_end: 3,
+    added_at: now,
+  });
+  const { outcome } = await forget(reason);
+  assert.equal(outcome.references, 1);
+  assert.deepEqual(outcome.units, [{ key: "u1", before: "candidate", after: "candidate", removed: 1 }]);
+  assert.deepEqual(
+    db.owner
+      .prepare("select role from unit_evidence where unit_id = ?")
+      .all(u)
+      .map((r) => r.role),
+    ["explains"],
+  );
+  assert.equal(Number(one("select count(*) as n from external_reference").n), 0);
+});
+
+test("nothing is forgotten when what the sources support changed after the preview", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite." });
+  const u = unit("u1", "finding");
+  evidence(u, src);
+  const seen: ForgetOutcome = await previewForget(db.file, p, [src]);
+  assert.equal(exists(src), true, "the preview rolls back");
+  const later = unit("u2", "finding");
+  evidence(later, src);
+  await assert.rejects(applyForget(db.file, p, [src], seen), /changed after you confirmed/);
+  assert.equal(exists(src), true);
+  assert.equal(Number(one("select count(*) as n from source_forgotten").n), 0);
+});
+
+test("an unknown id or another project's id is refused, and an id already forgotten runs only the cleanup", async () => {
+  const other = project(db, "git:github.com/o/other", "o/other");
+  const foreign = message(db, other, { id: "m9", text: "someone else's", session: "s9" });
+  const src = message(db, p, { id: "m1", text: "Use SQLite." });
+  await assert.rejects(previewForget(db.file, p, [999]), /s999 is not a source of this project/);
+  await assert.rejects(
+    previewForget(db.file, p, [foreign]),
+    new RegExp(`s${foreign} is not a source of this project`),
+  );
+  await forget(src);
+  const again = await forget(src);
+  assert.deepEqual(again.outcome, { sources: [], already: [src], units: [], references: 0 });
+  assert.equal(again.cleanup, "done");
+});
+
+const secret = "zq-secret-7d41c9e2";
+const inFiles = () =>
+  [db.file, `${db.file}-wal`].some((f) => fs.existsSync(f) && fs.readFileSync(f).includes(secret));
+
+test("the forgotten text is not left in the database file or its WAL", async () => {
+  const src = message(db, p, { id: "m1", text: `the token is ${secret} for staging` });
+  const u = unit("u1", "finding");
+  evidence(u, src);
+  db.owner.exec("pragma wal_checkpoint(TRUNCATE)");
+  assert.equal(inFiles(), true);
+  const { cleanup } = await forget(src);
+  assert.equal(cleanup, "done");
+  assert.equal(inFiles(), false);
+});
+
+test("a unit's own copy of the forgotten text stays (a documented limit)", async () => {
+  const src = message(db, p, { id: "m1", text: `the token is ${secret}` });
+  const u = unit(`uses ${secret}`, "finding");
+  evidence(u, src);
+  await forget(src);
+  assert.equal(inFiles(), true);
+  assert.equal(one("select text from unit where id = ?", u).text, `uses ${secret}`);
+});
+
+test("a reader holding the WAL leaves the cleanup incomplete, and running the same ids again finishes it", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite." });
+  db.owner.exec("begin");
+  db.owner.prepare("select count(*) from source").get();
+  const first = await forget(src);
+  db.owner.exec("commit");
+  assert.equal(first.cleanup, "incomplete");
+  assert.equal(exists(src), false);
+  const again = await forget(src);
+  assert.equal(again.cleanup, "done");
+});

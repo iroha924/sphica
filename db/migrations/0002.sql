@@ -18,9 +18,10 @@ create table source_forgotten (
   kind text not null,
   external_id text not null,
   content_hash blob not null check (length(content_hash) = 32),
-  batch_id integer not null references forget_batch (id) on delete cascade,
-  unique (project_id, artifact, kind, external_id, content_hash)
+  batch_id integer not null references forget_batch (id) on delete cascade
 ) strict;
+-- Not unique: an edited item that returns to earlier text has two revisions with the same hash, and both can be forgotten
+create index source_forgotten_item on source_forgotten (project_id, artifact, kind, external_id, content_hash);
 
 -- Rebuild unit_state (https://www.sqlite.org/lang_altertable.html#otheralter). The triggers on other tables that name it are dropped
 -- first, or the rename fails on them, and are created again after it.

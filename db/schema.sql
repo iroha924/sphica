@@ -162,9 +162,10 @@ create table source_forgotten (
   kind text not null,
   external_id text not null,
   content_hash blob not null check (length(content_hash) = 32),
-  batch_id integer not null references forget_batch (id) on delete cascade,
-  unique (project_id, artifact, kind, external_id, content_hash)
+  batch_id integer not null references forget_batch (id) on delete cascade
 ) strict;
+-- Not unique: an edited item that returns to earlier text has two revisions with the same hash, and both can be forgotten
+create index source_forgotten_item on source_forgotten (project_id, artifact, kind, external_id, content_hash);
 
 -- A file path an edit tool reported, or that a turn-boundary git status snapshot found. It is not an implementation record.
 create table edit_observation (

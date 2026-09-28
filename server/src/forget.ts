@@ -1,0 +1,246 @@
+// Forgets sources the owner chose (issue #187): the rows, their index entries, and the bytes left in the file, while the records
+// that cited them are judged again with the same activation rules as saving. Runs only on the forget connection, only after the
+// owner confirmed a preview; the plan is .claude/plans/2026/09/29-forget-sources.plan.md.
+
+import { type Kysely, sql } from "kysely";
+import { iso } from "./db.ts";
+import type { DB } from "./db-types.ts";
+import { openWriter } from "./db-write.ts";
+import { ACTIVATION } from "./record.ts";
+
+export type ForgetOutcome = {
+  /** Sources that will be (or were) removed. No text: the preview must not show the words being forgotten */
+  sources: { id: number; kind: string; artifact: string; bytes: number }[];
+  /** Ids forgotten earlier: only the cleanup runs again for them */
+  already: number[];
+  /** Units whose evidence, adoption, or retraction reasons are removed, and their lifecycle before and after */
+  units: { key: string; before: string; after: string; removed: number }[];
+  /** Unfetched references the owner gave in a forgotten message */
+  references: number;
+};
+
+export type Cleanup = "done" | "incomplete";
+
+/** Thrown inside the transaction to roll a preview back; never leaves this file. */
+class Preview extends Error {
+  readonly outcome: ForgetOutcome;
+  constructor(outcome: ForgetOutcome) {
+    super("preview");
+    this.outcome = outcome;
+  }
+}
+
+/** The error an unknown id or another project's id gives. The same words for both, so ids of other projects cannot be probed. */
+const unknown = (id: number) => new Error(`s${id} is not a source of this project`);
+
+/**
+ * Removes the sources inside the caller's transaction and returns what happened. Order matters: the tombstones exist before the
+ * deletes (the no-delete triggers let a retracted row go only once its reason is tombstoned), and units are judged after the cascade.
+ */
+async function forgetIn(
+  trx: Kysely<DB>,
+  projectId: number,
+  ids: number[],
+  at: string,
+): Promise<ForgetOutcome> {
+  const unique = [...new Set(ids)];
+  const rows = unique.length
+    ? await trx
+        .selectFrom("source")
+        .where("id", "in", unique)
+        .where("project_id", "=", projectId)
+        .select([
+          "id",
+          "kind",
+          "artifact",
+          "external_id",
+          "content_hash",
+          sql<number>`length(cast(text as blob))`.as("bytes"),
+        ])
+        .orderBy("id")
+        .execute()
+    : [];
+  const gone = unique.length
+    ? await trx
+        .selectFrom("source_forgotten")
+        .where("source_id", "in", unique)
+        .where("project_id", "=", projectId)
+        .select("source_id")
+        .execute()
+    : [];
+  const already = gone.map((g) => g.source_id).sort((a, b) => a - b);
+  for (const id of unique) if (!rows.some((r) => r.id === id) && !already.includes(id)) throw unknown(id);
+  const outcome: ForgetOutcome = {
+    sources: rows.map((r) => ({ id: r.id, kind: r.kind, artifact: r.artifact, bytes: r.bytes })),
+    already,
+    units: [],
+    references: 0,
+  };
+  if (!rows.length) return outcome;
+  const targets = rows.map((r) => r.id);
+
+  // Every unit that loses a row: evidence or adoption on a forgotten source, or a retracted row whose reason is one
+  const touched = await trx
+    .selectFrom("unit as u")
+    .where("u.project_id", "=", projectId)
+    .where((eb) =>
+      eb.or(
+        (["unit_evidence", "unit_adoption"] as const).flatMap((t) => [
+          eb.exists(
+            eb
+              .selectFrom(t)
+              .select(`${t}.id`)
+              .whereRef(`${t}.unit_id`, "=", "u.id")
+              .where(`${t}.source_id`, "in", targets),
+          ),
+          eb.exists(
+            eb
+              .selectFrom(t)
+              .select(`${t}.id`)
+              .whereRef(`${t}.unit_id`, "=", "u.id")
+              .where(`${t}.retraction_source_id`, "in", targets),
+          ),
+        ]),
+      ),
+    )
+    .select(["u.id", "u.key", "u.lifecycle"])
+    .orderBy("u.id")
+    .execute();
+  const count = async (t: "unit_evidence" | "unit_adoption", unitId: number) =>
+    Number(
+      (
+        await trx
+          .selectFrom(t)
+          .where("unit_id", "=", unitId)
+          .where((eb) => eb.or([eb("source_id", "in", targets), eb("retraction_source_id", "in", targets)]))
+          .select((eb) => eb.fn.countAll<number>().as("n"))
+          .executeTakeFirstOrThrow()
+      ).n,
+    );
+  const removed = new Map<number, number>();
+  for (const u of touched)
+    removed.set(u.id, (await count("unit_evidence", u.id)) + (await count("unit_adoption", u.id)));
+
+  const batch = (
+    await trx
+      .insertInto("forget_batch")
+      .values({ project_id: projectId, at })
+      .returning("id")
+      .executeTakeFirstOrThrow()
+  ).id;
+  await trx
+    .insertInto("source_forgotten")
+    .values(
+      rows.map((r) => ({
+        source_id: r.id,
+        project_id: projectId,
+        artifact: r.artifact,
+        kind: r.kind,
+        external_id: r.external_id,
+        content_hash: r.content_hash,
+        batch_id: batch,
+      })),
+    )
+    .execute();
+  for (const t of ["unit_evidence", "unit_adoption"] as const)
+    await trx
+      .deleteFrom(t)
+      .where("retraction_source_id", "in", targets)
+      .where("retracted_at", "is not", null)
+      .where("source_id", "not in", targets)
+      .execute();
+  outcome.references = Number(
+    (await trx.deleteFrom("external_reference").where("owner_source_id", "in", targets).executeTakeFirst())
+      .numDeletedRows,
+  );
+  await trx.deleteFrom("source").where("id", "in", targets).execute();
+
+  // Judge active units again with the rules saving uses: back to candidate, then try active. Other lifecycles keep their state
+  // (a superseded or withdrawn unit never comes back through a later activation).
+  const reason = `sources ${targets.map((id) => `s${id}`).join(", ")} forgotten by the owner`;
+  for (const u of touched) {
+    let after = u.lifecycle;
+    if (u.lifecycle === "active") {
+      await trx
+        .insertInto("unit_state")
+        .values({ unit_id: u.id, from_state: "active", to_state: "candidate", at, reason, forget_id: batch })
+        .execute();
+      after = "candidate";
+      try {
+        await trx
+          .insertInto("unit_state")
+          .values({
+            unit_id: u.id,
+            from_state: "candidate",
+            to_state: "active",
+            at,
+            reason: "support checked again after forgetting sources",
+            forget_id: batch,
+          })
+          .execute();
+        after = "active";
+      } catch (e) {
+        if (!ACTIVATION.test((e as Error).message)) throw e;
+      }
+    }
+    outcome.units.push({ key: u.key, before: u.lifecycle, after, removed: removed.get(u.id) ?? 0 });
+  }
+  return outcome;
+}
+
+/** What forgetting these sources would do, computed by doing it and rolling back. Unknown ids and other projects' ids are refused. */
+export async function previewForget(file: string, projectId: number, ids: number[]): Promise<ForgetOutcome> {
+  const db = openWriter("forget", file);
+  try {
+    return await db.connection().execute(async (c) => {
+      await sql`begin immediate`.execute(c);
+      try {
+        throw new Preview(await forgetIn(c, projectId, ids, iso(Date.now())));
+      } catch (e) {
+        await sql`rollback`.execute(c).catch(() => {});
+        if (e instanceof Preview) return e.outcome;
+        throw e;
+      }
+    });
+  } finally {
+    await db.destroy();
+  }
+}
+
+/**
+ * Forgets the sources, but only if the result matches the preview the owner confirmed (another writer may have changed what cites
+ * them meanwhile). Then clears the bytes the deletion left: the FTS segments (optimize) and the WAL (checkpoint). A reader holding
+ * the WAL makes the checkpoint busy; running the same ids again finishes it.
+ */
+export async function applyForget(
+  file: string,
+  projectId: number,
+  ids: number[],
+  confirmed: ForgetOutcome,
+): Promise<{ outcome: ForgetOutcome; cleanup: Cleanup }> {
+  const db = openWriter("forget", file);
+  try {
+    return await db.connection().execute(async (c) => {
+      // Overwrite freed pages with zeros, so the deleted text does not stay in the file
+      await sql`pragma secure_delete = on`.execute(c);
+      await sql`begin immediate`.execute(c);
+      let outcome: ForgetOutcome;
+      try {
+        outcome = await forgetIn(c, projectId, ids, iso(Date.now()));
+        if (JSON.stringify(outcome) !== JSON.stringify(confirmed))
+          throw new Error(
+            "What these sources support changed after you confirmed. Nothing was forgotten; look at the preview again",
+          );
+        await sql`commit`.execute(c);
+      } catch (e) {
+        await sql`rollback`.execute(c).catch(() => {});
+        throw e;
+      }
+      await sql`insert into source_fts (source_fts) values ('optimize')`.execute(c);
+      const checkpoint = await sql<{ busy: number }>`pragma wal_checkpoint(TRUNCATE)`.execute(c);
+      return { outcome, cleanup: checkpoint.rows[0]?.busy === 0 ? "done" : "incomplete" };
+    });
+  } finally {
+    await db.destroy();
+  }
+}

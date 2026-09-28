@@ -72,13 +72,14 @@ revision 1 の DB を記録を失わずに revision 2 へ上げられるよう�
   - コミット: `fix(schema): keep unit_state's id counter across the migration`
   - 結果: red を実測（actual 3, expected 4）。修正後 `node --test test/migrate.test.ts test/admin.test.ts` → pass 27（init の移行テストは source・unit・unit_state の件数と active を確かめる）。`bun run sql:live` → 8 / 8 で通る。`bun run verify` → exit 0
 
-- [ ] T04: `forget.ts` の plan と apply（判定し直し、確認とのずれの検出、掃除）
+- [x] T04: `forget.ts` の plan と apply（判定し直し、確認とのずれの検出、掃除）
   - 種別: 追加
   - 計画: S4
   - 依存: T03（forget 接続が要る）
-  - 変更: `server/src/forget.ts`, `server/test/forget.test.ts`, `scripts/lib/sql-call-sites.mjs`
+  - 変更: `server/src/forget.ts`, `server/test/forget.test.ts`, `server/src/record.ts`, `db/schema.sql`, `db/migrations/0002.sql`, `server/src/db-types.ts`
   - 完了条件: `cd server && node --test test/forget.test.ts` → #187 の完了条件、根拠が 2 つの記録、commit の anchor を持つ implementation、superseded と withdrawn、撤回の理由の source、external_reference、確認とのずれ、消し済みと存在しない id、バイトの掃除、busy のテストが通る。`bun run sql:reach` が通る
   - コミット: `feat(forget): delete chosen sources and judge the units that cited them again`
+  - 結果: `node --test test/forget.test.ts` → pass 10（#187 の完了条件、根拠 2 つ、commit の anchor、superseded・withdrawn・candidate、撤回の理由と external_reference、確認とのずれ、存在しない id と他プロジェクトの id と消し済み id、DB と WAL のバイト、記録の本文の写し、busy と再実行）。`bun run verify` → exit 0（sql:reach を含む）
 
 - [ ] T05: harvest と glean が墓標と同じ内容を保存しない
   - 種別: 追加
@@ -115,3 +116,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T03 / knowledge-schema Skill に「世代 2 に移行の仕組みは無い」と接続の役の表が残っていた / 同じタスクで直し、変更欄に `.agents/skills/knowledge-schema/SKILL.md` を足した
 2026-09-29 / T01 / review-shipping: 旧 0.5.7 の CLI は revision 2 の DB に「退避しろ」と出す。Windows CI は移行を通らない / Release notes で先に CLI を更新するよう書く。Windows の移行は仕上げで判断する
 2026-09-29 / T09 / Codex の T01 レビュー F1（unit_state の作り直しで sqlite_sequence が失われ id が再利用される、再現済み）を採用。T02 レビュー F1（init のテストが project しか見ない）と F2（sql:live が revision を見ない）も採用 / 修正タスク T09 を T04 の前に足した
+2026-09-29 / T04 / 変更欄を実際に合わせた（前: forget.ts, forget.test.ts, sql-call-sites.mjs。後: forget.ts, forget.test.ts, record.ts, schema.sql, 0002.sql, db-types.ts）。台帳は変更不要だった。ACTIVATION を record.ts から export して共有 / source_forgotten の unique は、A→B→A と編集された項目の同じハッシュの 2 revision を両方消すと衝突するので、通常の索引に変えた（未リリースの schema と移行 SQL を同じ形に直した）

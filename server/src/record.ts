@@ -438,7 +438,7 @@ const contentHash = (u: UnitInput): Buffer =>
   );
 
 /** Messages the schema's activation rules raise; anything else is a real failure. */
-const ACTIVATION = /needs|cannot become active/;
+export const ACTIVATION = /needs|cannot become active/;
 
 /**
  * Writes a checked record inside the caller's transaction. looked lists the sources the run read: each gets a processing outcome, so
