@@ -840,3 +840,38 @@ test("a read's omission note is left out of the logged length the session's read
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// A constraint's key written in a work item is not the constraint being shown
+test("session start counts a constraint as shown only when its line was kept", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rule = `Keep one SQLite file ${"s".repeat(200)}.`;
+    const m = message(db, p, { id: "m1", text: rule });
+    await save(db, p, { units: [decided("b0", m, rule)] });
+    for (let n = 0; n < 3; n++)
+      insert(db, "work", {
+        project_id: p,
+        key: `w${n}`,
+        title: `Work ${n} ${"t".repeat(60)}`,
+        goal: "g",
+        current: `Follows trace:ext-s1/b0 ${"c".repeat(150)}`,
+        next: "[]",
+        status: "active",
+        updated_at: `2026-09-2${n}T00:00:00.000Z`,
+      });
+    const start = await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.doesNotMatch(start, /^- trace:ext-s1\/b0/m, "the constraint's own line does not fit");
+    assert.match(start, /\n- 1 more record applies here but was left out for space/);
+    const units = db.owner.prepare("select count(*) as n from delivery_unit").get()?.n;
+    assert.equal(units, 0, "the constraint is not logged as delivered");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

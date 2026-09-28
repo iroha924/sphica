@@ -454,9 +454,11 @@ async function atStart(db: Kysely<DB>, projectId: number, branch: string | null)
   ];
   const lead = `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`;
   const f = fit(lines, LIMITS.session_start.chars, lead);
-  const shownUnits = broad.filter((u) => f.text.includes(inline(u.key))).map((u) => u.id);
-  const workLeft = (workTotal ?? 0) - f.kept.filter((i) => i < work.length).length;
-  const broadLeft = (broadTotal ?? 0) - shownUnits.length;
+  // Lines after the work items are the constraints; a key merely written inside a work item is not a shown constraint
+  const shownUnits = f.kept.flatMap((i) => (i >= work.length ? (broad[i - work.length]?.id ?? []) : []));
+  // The lists and the totals are separate reads, so a change between them never makes a count negative
+  const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
+  const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
     ...noted(f.text, lead, [leftOut(broadLeft), workLeftOut(workLeft)]),
     units: shownUnits,

@@ -76,6 +76,16 @@ base: main
   - コミット: `fix(deliver): keep the omission note out of the read budget`
   - 結果: red（直す前）`node --test test/deliver.test.ts` → 注記付きの読み取りのログの chars が 862（注記を除くと 764）で失敗。直した後 `node --test test/deliver.test.ts test/review-bridge.test.ts test/deliver-codex.test.ts` → pass 28 / fail 0。`bun run typecheck` → 0
 
+- [x] T08: session_start で渡した制約を fit の採った行で数え、省略の数を 0 未満にしない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: なし
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 作業の文に制約の key があり、制約の行が入らないとき、制約の省略の注記が出ずに落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 全部 pass
+  - コミット: `fix(deliver): count the constraints session start showed by the lines it kept`
+  - 結果: red（直す前）`node --test test/deliver.test.ts` → 作業 3 件の文に制約の key があり制約の行が入らないとき、「1 more record」の注記が出ずに失敗。直した後 `node --test test/deliver.test.ts test/review-bridge.test.ts test/deliver-codex.test.ts` → pass 29 / fail 0。typecheck → 0。省略の数を 0 未満にしない直しは、テストなし（記録を参照）
+
 ## P3: trace 待ちを知らせる（W3 #191）
 
 trace 待ちのセッションがあると、セッション開始時に 1 日 1 回、件数と `/sphica:trace pending` が出る。
@@ -104,3 +114,4 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 2026-09-29 / T03, T04 / T03 の注記だけの読み取りで既存の予算のテストが崩れるので、T04 の red を確かめてから同じコミットで終えた。後の読み取りの記録が注記で削られることを比べるテストは、今の上限（1 回 1500 字・1 セッション 3000 字・8 件）では差が出る状況を作れなかった（字数の組を総当たりして確かめた）ので、ログの chars が注記を除くことを確かめる形にした / T03 の変更欄に `server/test/review-bridge.test.ts` を足した（前: `server/src/deliver.ts`, `server/test/deliver.test.ts`）。T04 の red を「予算を使い切った後の注記だけの読み取りが予算を使う」から「ログの chars に注記が入る」に変えた
 2026-09-29 / T01 / T01 の Codex レビュー 4 件: ページの間の書き込みで候補を飛ばす・二重に数える（F1）と、600 件のテストが強い一致を確かめていない（F4）は採用。件数に達して止まったときに stopped が false（F2）は見送り（stopped は上限で打ち切ったことを言い、件数がそろって止まるのは打ち切りではない。コメントで明記する）。1 ページの本文を先に読み込む（F3）は見送り（1 ページ最大約 51 MiB は plan で合意済み）。T02 のレビューは指摘なし / 修正タスク T07 を足す
 2026-09-29 / T07 / reader の authorizer はトランザクションを許さないので、1 つのスナップショットで読む案は権限の境界を変えることになる / 候補の順番（id と rank）を 1 つの SQL で上限 + 1 件まで取り、中身をページごとに id で引く形にした。途中で消えた行は読まないだけになる
+2026-09-29 / T08 / ec4390f の Codex レビュー 2 件: 作業の文に制約の key があると渡していない制約を渡したと数える（F1）と、作業の一覧と件数の間に作業が完了すると省略の数が負になりログの CHECK で落ちる（F2）。2 件とも採用。F2 のテストは配信が自分で開く DB 接続に割り込む仕組みが要るので付けず、0 未満にしない形で直す / 修正タスク T08 を足した
