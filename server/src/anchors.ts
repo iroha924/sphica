@@ -2,7 +2,7 @@
 // A located symbol only says the code is still there; it never proves the decision still holds.
 import fs from "node:fs";
 import path from "node:path";
-import { bytes, mask, privateKeyRanges } from "./text.ts";
+import { mask, quoteSpan } from "./text.ts";
 
 export type AnchorState = "located" | "moved" | "missing" | "unknown";
 
@@ -36,11 +36,16 @@ function findSymbol(text: string, symbol: string): { lines: string[]; i: number 
   return { lines, i: lines.findIndex((l) => re.test(l)) };
 }
 
-/** Whether a symbol is text mask() hides: a key by its shape, or a name the file shows only inside masked text. Such an anchor would store it. */
+/**
+ * Whether a symbol is text mask() hides: a key by its shape, or a name some occurrence of which masking swallows (quoteSpan's rule, so a
+ * copy left elsewhere or a placeholder's own letters do not clear it). Such an anchor would store the key in its symbol.
+ */
 export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
   if (mask(symbol) !== symbol) return true;
   const text = root ? readText(root, rel) : null;
-  return typeof text === "string" && findSymbol(text, symbol).i >= 0 && findSymbol(mask(text), symbol).i < 0;
+  if (typeof text !== "string" || !text.includes(symbol)) return false;
+  const masked = mask(text);
+  return masked !== text && quoteSpan(text, masked, symbol) === null;
 }
 
 /**
@@ -58,11 +63,7 @@ export function locate(
   const { lines, i } = findSymbol(text, symbol);
   if (i < 0) return null;
   const line = lines[i] ?? "";
-  // A line inside a private key cannot be masked alone: its BEGIN and END are on other lines
-  const from = bytes(lines.slice(0, i).join("\n")) + (i > 0 ? 1 : 0);
-  if (privateKeyRanges(lines.join("\n")).some(([a, b]) => a < from + bytes(line) && b > from))
-    return { line: i + 1, excerpt: "[redacted: private key]" };
-  // Nor can a value whose key name sits on another line: the text around must not change how the line masks
+  // A value whose key name sits on another line cannot be masked alone: the text around must not change how the line masks
   const before = lines
     .slice(0, i)
     .map((l) => `${l}\n`)

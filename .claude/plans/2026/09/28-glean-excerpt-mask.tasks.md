@@ -100,6 +100,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): leave out anchors whose symbol is text Sphica masks (T08)`
   - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run verify` → exit 0（acceptance 58 件 pass）。鍵の中にしか現れない名前（keyBody）も外れるようになったので、テストでは鍵の外にも同じ名前を置いて `[redacted: private key]` の経路を残した
 
+- [x] T09: symbol の出現箇所がひとつでも伏せ字に飲まれていたら anchor を保存しない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T08（直す対象の masksSymbol）
+  - 変更: `server/src/anchors.ts`, `server/test/record.test.ts`
+  - red: 別の行にも伏せ字なしで出る秘密の値と、値が `redacted` の代入を symbol にした anchor を足し、直す前のコードで `node --test test/record.test.ts` → symbol に `tokenValue123abc` と `redacted` が保存されて fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): refuse a symbol any occurrence of which masking swallows (T09)`
+  - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run verify` → exit 0。locate の秘密鍵の分岐は、呼び出し元が先に masksSymbol で外すため届かなくなったので消した（鍵の中の名前は `[redacted: private key]` ではなく anchor ごと外れる）
+
 ## P4: 出荷の準備
 
 glean スキルの案内を足し、出荷前の検査を通す。
@@ -127,3 +137,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T07 / T07（a3f2ba2）の Codex レビュー F1（再現済み）: `export const API_KEY =` の次の行の `process.env.API_KEY;` のような普通のコードでも、その行だけを引くと断られ、コード位置の抜粋は `[redacted]` になる。既存の ENV_ASSIGN が改行をまたいで値を伏せ字にするため / 見送り。前後の行を含めて引けば通り、秘密を守る側の誤検知。PR 本文の見送った指摘に書く。行単位の抜粋に秘密が残ったまま両方の等式が成り立つ例は見つからなかった
 - 2026-09-28 / T08 / 全差分（main..a2a0678）の Codex レビュー F1: anchor の symbol に秘密の値を指定すると、抜粋は伏せ字でも symbol が伏せ字なしで unit_anchor・検索索引・read に残る / 採用。修正タスク T08 を足した
 - 2026-09-28 / 全体 / review-shipping（head a2a0678）: 指摘なし。修正を外すとテストが落ちることを変異で確認、pack 30 ファイル、4 つのバージョン 0.5.7
+- 2026-09-28 / T09 / T08（448e24d）の Codex レビュー F1・F2（再現済み）: 秘密の値が別の行に伏せ字なしで残る場合と、値が `redacted` の場合に masksSymbol が false を返し、symbol に保存される / 採用。修正タスク T09: quoteSpan と同じ件数の規則にした

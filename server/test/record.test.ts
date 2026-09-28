@@ -63,7 +63,7 @@ async function save(db: TempDb, t: Target, record: unknown, looked: number[] = [
 const state = (db: TempDb, key: string) =>
   db.owner.prepare("select lifecycle, extraction, extraction_reason from unit where key = ?").get(key);
 
-test("an anchor's excerpt is masked before it is cut, and a line inside a private key is not kept", async () => {
+test("an anchor's excerpt is masked before it is cut, and a symbol masking swallows is not kept", async () => {
   const db = tempDb();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-anchor-"));
   try {
@@ -71,7 +71,7 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
     const key = "Zq9x".repeat(60);
     fs.writeFileSync(
       path.join(root, "config.ts"),
-      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n// keyBody is also named here, outside the key\nexport const API_KEY =\n  tokenValue123abc; // configMarker\n`,
+      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n// keyBody is also named here, outside the key, yet its copy inside the key keeps it out\nexport const API_KEY =\n  tokenValue123abc; // configMarker\n// tokenValue123abc is also mentioned here\nSECRET_TOKEN=redacted\n`,
     );
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "設定の鍵はここにある。" });
@@ -92,6 +92,8 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
               // A symbol that is itself a key, by shape or because the file shows it only inside masked text, is left out
               { path: "config.ts", symbol: "tokenValue123abc", role: "applies_to" },
               { path: "config.ts", symbol: `sk-${"b2".repeat(15)}`, role: "applies_to" },
+              // Also when the value shows unmasked elsewhere, or when it reads like the placeholder itself
+              { path: "config.ts", symbol: "redacted", role: "applies_to" },
             ],
           },
         ],
@@ -104,13 +106,12 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
     }[];
     assert.deepEqual(
       got.map((a) => a.symbol),
-      ["apiKey", "keyBody", "configMarker"],
+      ["apiKey", "configMarker"],
     );
     assert.doesNotMatch(got[0]?.excerpt ?? "", /Zq9x/);
     assert.match(got[0]?.excerpt ?? "", /^export const apiKey = "\[redacted\]"/);
-    assert.equal(got[1]?.excerpt, "[redacted: private key]");
     // The key name is on the line before: the line alone does not look like a key, but the whole file masks it
-    assert.equal(got[2]?.excerpt, "[redacted]");
+    assert.equal(got[1]?.excerpt, "[redacted]");
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
