@@ -82,7 +82,7 @@ const external = (v: Values) =>
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 1);
+  assert.equal(one("pragma user_version").user_version, 2);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -419,4 +419,108 @@ test("forgetting a project removes everything under it despite the no-delete rul
     ),
     [0, 0, 0, 0, 0],
   );
+});
+
+const forgetBatch = (projectId = p) => insert(db, "forget_batch", { project_id: projectId, at: now });
+const tombstone = (sourceId: number, batch: number) =>
+  sql(
+    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, revision, content_hash, batch_id) select id, project_id, artifact, kind, external_id, revision, content_hash, ? from source where id = ?",
+    batch,
+    sourceId,
+  );
+
+test("a forgotten source clears the state that cited it, and state history stays append-only otherwise", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const kept = message(db, p, { id: "m2", text: "Keep this one." });
+  const u = unit({ key: "u1", kind: "decision" });
+  evidence(u, src);
+  adoption(u, src);
+  state(u, null, "candidate");
+  sql(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, 'candidate', 'active', ?, 'r', ?, (select run_id from unit where id = ?))",
+    u,
+    now,
+    src,
+    u,
+  );
+  sql(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, 'active', 'candidate', ?, 'r', ?, (select run_id from unit where id = ?))",
+    u,
+    now,
+    kept,
+    u,
+  );
+  sql("delete from source where id = ?", src);
+  assert.deepEqual(
+    db.owner
+      .prepare("select source_id from unit_state where unit_id = ? order by id")
+      .all(u)
+      .map((r) => r.source_id),
+    [null, null, kept],
+  );
+  refuses(() => sql("update unit_state set source_id = null where source_id = ?", kept), /append-only/);
+  refuses(() => sql("update unit_state set reason = 'edited' where unit_id = ?", u), /append-only/);
+});
+
+test("a state change comes from exactly one of a run or a forget batch of the unit's project", () => {
+  const u = unit({ key: "u1", kind: "finding" });
+  const put = (runId: number | null, forgetId: number | null) =>
+    sql(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id, forget_id) values (?, null, 'candidate', ?, 'r', ?, ?)",
+      u,
+      now,
+      runId,
+      forgetId,
+    );
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  refuses(() => put(null, null), /CHECK/);
+  refuses(() => put(runId, forgetBatch()), /CHECK/);
+  refuses(() => put(null, forgetBatch(other)), /different projects/);
+  put(null, forgetBatch());
+  assert.equal(one("select lifecycle from unit where id = ?", u).lifecycle, "candidate");
+});
+
+test("only a retracted row whose retraction reason was forgotten can be removed, and removing it raises the unit's revision", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const reason = message(db, p, { id: "m2", text: "That was wrong." });
+  const u = unit({ key: "u1", kind: "decision" });
+  evidence(u, src);
+  evidence(u, src, { role: "explains" });
+  adoption(u, src);
+  sql(
+    "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ? and role = 'states'",
+    now,
+    reason,
+    u,
+  );
+  const before = Number(one("select revision from unit where id = ?", u).revision);
+  refuses(() => sql("delete from unit_evidence where unit_id = ? and role = 'states'", u), /never deleted/);
+  tombstone(reason, forgetBatch());
+  refuses(() => sql("delete from unit_evidence where unit_id = ? and role = 'explains'", u), /never deleted/);
+  refuses(() => sql("delete from unit_adoption where unit_id = ?", u), /never deleted/);
+  sql("delete from unit_evidence where unit_id = ? and role = 'states'", u);
+  assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 1);
+  sql("delete from source where id = ?", src);
+  assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 3);
+});
+
+test("tombstone: capture skips a message the owner forgot, and stores it again only with other text", () => {
+  session(db, p, "s1");
+  const put = (text: string) =>
+    sql(
+      "insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted, original_bytes, content_hash) values ('m1', 's1', 't', 'owner', ?, ?, ?, 0, 0, ?, ?)",
+      now,
+      now,
+      text,
+      Buffer.byteLength(text),
+      sha256(text),
+    );
+  put("token is abc123");
+  const src = Number(one("select id from source where external_id = 'm1'").id);
+  tombstone(src, forgetBatch());
+  sql("delete from source where id = ?", src);
+  put("token is abc123");
+  assert.equal(one("select count(*) as n from source where external_id = 'm1'").n, 0);
+  put("token is [redacted]");
+  assert.equal(one("select count(*) as n from source where external_id = 'm1'").n, 1);
 });

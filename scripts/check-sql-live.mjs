@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { DatabaseSync } from "node:sqlite";
 import { coveredSites } from "./lib/coverage.mjs";
 import { makeRepo, root, runCli, runFlush, runHook, withTempDir } from "./lib/live-harness.mjs";
 import { ALLOWED_UNREACHED, callSites, LIVE_FILES } from "./lib/sql-call-sites.mjs";
@@ -149,6 +150,43 @@ await withTempDir(async (dir) => {
     const removed = note("uninstall", runCli(["uninstall", "--yes"], dir, covDir));
     if (fs.existsSync(path.join(dir, ".sphica")))
       failures.push(`uninstall left ~/.sphica behind\n${removed.out.slice(0, 400)}`);
+  }
+
+  {
+    // A revision 1 database (as 0.5.7 made it): init migrates it in place, then capture writes into it
+    const home = path.join(dir, "old-home");
+    fs.mkdirSync(path.join(home, ".sphica"), { recursive: true });
+    const file = path.join(home, ".sphica", "sphica.db");
+    const old = new DatabaseSync(file);
+    old.exec("pragma journal_mode = wal");
+    old.exec(fs.readFileSync(path.join(root, "server", "test", "fixtures", "schema-rev1.sql"), "utf8"));
+    old.close();
+    const oldRepo = makeRepo(home);
+    const migrated = note("init (revision 1)", runCli(["init", "--cwd", oldRepo], home, covDir));
+    if (!/Migrated: .*\(revision 1 → 2\)/.test(migrated.out))
+      failures.push(`init does not migrate a revision 1 database\n${migrated.out.slice(0, 600)}`);
+    runHook(
+      {
+        session_id: "old-1",
+        prompt_id: "p1",
+        cwd: oldRepo,
+        hook_event_name: "UserPromptSubmit",
+        prompt: "after the migration",
+      },
+      home,
+      covDir,
+      { cwd: oldRepo, CLAUDE_CODE_SESSION_ID: "old-1" },
+    );
+    note(
+      "capture flush (migrated)",
+      runFlush(home, covDir, { cwd: oldRepo, CLAUDE_CODE_SESSION_ID: "old-1" }),
+    );
+    const look = new DatabaseSync(file, { readOnly: true });
+    const n = look.prepare("select count(*) as n from source where text = 'after the migration'").get().n;
+    const revision = look.prepare("pragma user_version").get().user_version;
+    if (revision !== 2) failures.push(`init left the database at revision ${revision}`);
+    look.close();
+    if (n !== 1) failures.push(`capture did not write into the migrated database (${n} rows)`);
   }
 
   // ---- Count reach ----

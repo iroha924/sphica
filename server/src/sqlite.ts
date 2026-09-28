@@ -13,10 +13,10 @@ import { constants as C, DatabaseSync } from "node:sqlite";
 /** Schema generation (the `sphica_generation` table). A database of another generation is refused without being changed. */
 const SCHEMA_GENERATION = 2;
 /** Revision within the generation. Keep it equal to `pragma user_version` at the end of db/schema.sql. */
-export const SCHEMA_REVISION = 1;
+export const SCHEMA_REVISION = 2;
 
 /** Connection roles: owner applies the schema, reader only reads, ingest imports, capture records conversations (append only). */
-export type Role = "owner" | "reader" | "ingest" | "capture";
+export type Role = "owner" | "reader" | "ingest" | "capture" | "forget";
 
 /**
  * Where Sphica keeps its files (~/.sphica). `SPHICA_HOME` moves all of them, for tests and for measuring a host without touching
@@ -63,7 +63,7 @@ export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "n
   throw new Error(
     `The database schema is revision ${got}, but this Sphica expects revision ${SCHEMA_REVISION}. ` +
       ((got ?? 0) < SCHEMA_REVISION
-        ? "Move it aside (it is left unchanged), then run `sphica init`."
+        ? "Update the sphica CLI (`npm i -g sphica`), then run `sphica init` to migrate it (records are kept)."
         : "Update sphica."),
   );
 }

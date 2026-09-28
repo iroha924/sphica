@@ -392,7 +392,7 @@ export async function storeItems(
     ).map((o) => o.external_id),
   );
   const now = iso(Date.now());
-  // One entry per item, null for an empty text never kept, so callers can pair items with their ids
+  // One entry per item, null for an empty text never kept or words the owner forgot, so callers can pair items with their ids
   const ids: (number | null)[] = [];
   for (const it of items) {
     const kept = fit(it.text);
@@ -405,11 +405,20 @@ export async function storeItems(
       .where("external_id", "=", it.externalId)
       .orderBy("revision", "desc")
       .executeTakeFirst();
-    if (latest && Buffer.from(latest.content_hash).equals(hash)) {
+    // What the owner forgot of this item: the same words are never stored again, and a revision older than a forgotten one is not current
+    const forgotten = await db
+      .selectFrom("source_forgotten")
+      .select(["revision", "content_hash"])
+      .where("project_id", "=", projectId)
+      .where("kind", "=", it.kind)
+      .where("external_id", "=", it.externalId)
+      .execute();
+    const lastForgotten = Math.max(0, ...forgotten.map((f) => f.revision));
+    if (latest && latest.revision > lastForgotten && Buffer.from(latest.content_hash).equals(hash)) {
       ids.push(latest.id);
       continue;
     }
-    if (!latest && !kept.body.trim()) {
+    if (forgotten.some((f) => Buffer.from(f.content_hash).equals(hash)) || (!latest && !kept.body.trim())) {
       ids.push(null);
       continue;
     }
@@ -424,7 +433,7 @@ export async function storeItems(
         kind: it.kind,
         artifact: it.artifact,
         external_id: it.externalId,
-        revision: (latest?.revision ?? 0) + 1,
+        revision: Math.max(latest?.revision ?? 0, lastForgotten) + 1,
         author_kind: kind,
         author_login: it.author?.login ?? null,
         author_external_id: authorId,
@@ -434,7 +443,7 @@ export async function storeItems(
         url: it.url,
         created_at: created,
         // Only the first revision's time is known to be when it became visible; an edit's time is not in the REST response
-        available_at: latest ? null : created,
+        available_at: latest || lastForgotten ? null : created,
         captured_at: now,
         text: kept.body,
         truncated: kept.truncated ? 1 : 0,
@@ -502,37 +511,52 @@ export async function pullSources(db: Kysely<DB>, projectId: number, number: num
         .execute()
     ).map((l) => l.to_artifact),
   ];
-  return db
-    .selectFrom("source as s")
-    .where("s.project_id", "=", projectId)
-    .where("s.artifact", "in", artifacts)
-    .where(({ not, exists, selectFrom }) =>
-      not(
-        exists(
-          selectFrom("source as n")
-            .select("n.id")
-            .whereRef("n.project_id", "=", "s.project_id")
-            .whereRef("n.kind", "=", "s.kind")
-            .whereRef("n.external_id", "=", "s.external_id")
-            .whereRef("n.revision", ">", "s.revision"),
+  return (
+    db
+      .selectFrom("source as s")
+      .where("s.project_id", "=", projectId)
+      .where("s.artifact", "in", artifacts)
+      .where(({ not, exists, selectFrom }) =>
+        not(
+          exists(
+            selectFrom("source as n")
+              .select("n.id")
+              .whereRef("n.project_id", "=", "s.project_id")
+              .whereRef("n.kind", "=", "s.kind")
+              .whereRef("n.external_id", "=", "s.external_id")
+              .whereRef("n.revision", ">", "s.revision"),
+          ),
         ),
-      ),
-    )
-    .select([
-      "s.id",
-      "s.kind",
-      "s.artifact",
-      "s.revision",
-      "s.author_kind",
-      "s.author_login",
-      "s.author_association",
-      "s.created_at",
-      "s.captured_at",
-      "s.path",
-      "s.line_start",
-      "s.text",
-    ])
-    .orderBy("s.created_at")
-    .orderBy("s.id")
-    .execute();
+      )
+      // A revision older than one the owner forgot is not the item's current text
+      .where(({ not, exists, selectFrom }) =>
+        not(
+          exists(
+            selectFrom("source_forgotten as f")
+              .select("f.source_id")
+              .whereRef("f.project_id", "=", "s.project_id")
+              .whereRef("f.kind", "=", "s.kind")
+              .whereRef("f.external_id", "=", "s.external_id")
+              .whereRef("f.revision", ">", "s.revision"),
+          ),
+        ),
+      )
+      .select([
+        "s.id",
+        "s.kind",
+        "s.artifact",
+        "s.revision",
+        "s.author_kind",
+        "s.author_login",
+        "s.author_association",
+        "s.created_at",
+        "s.captured_at",
+        "s.path",
+        "s.line_start",
+        "s.text",
+      ])
+      .orderBy("s.created_at")
+      .orderBy("s.id")
+      .execute()
+  );
 }

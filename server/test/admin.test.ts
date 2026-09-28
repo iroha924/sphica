@@ -6,7 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { bindOwner, dbInit, inspect, reindex } from "../src/admin.ts";
+import { bindOwner, dbInit, inspect, migrate, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { fakeGhPath } from "./fake-gh.ts";
@@ -396,5 +396,113 @@ test("a database of another revision is not bound", async () => {
   });
   const look = new DatabaseSync(file, { readOnly: true });
   assert.equal((look.prepare("select count(*) as n from owner_identity").get() as { n: number }).n, 0);
+  look.close();
+});
+
+const REV1 = fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "schema-rev1.sql"),
+  "utf8",
+);
+
+/** A revision 1 database with one project, as 0.5.7 made it. */
+function revision1(file: string): void {
+  const raw = connectWriter("owner", file, true);
+  raw.exec("pragma journal_mode = wal");
+  raw.exec(REV1);
+  const t = at("2026-09-01T00:00:00Z");
+  raw.prepare("insert into project (key, name) values ('git:x/y', 'x/y')").run();
+  raw
+    .prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values ('s', 1, 'codex', 'e', ?)",
+    )
+    .run(t);
+  raw
+    .prepare(
+      "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s', 'm', 1, 's', 'owner', ?, ?, 'found it', 8, ?, 1)",
+    )
+    .run(t, t, hash());
+  raw
+    .prepare(
+      "insert into extraction_run (project_id, origin, target, status, started_at) values (1, 'trace', 'session:s', 'saved', ?)",
+    )
+    .run(t);
+  raw
+    .prepare(
+      "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, 'k', 'finding', 'found', 'supported', 1, ?, ?)",
+    )
+    .run(t, hash(1));
+  raw
+    .prepare(
+      "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (1, 1, 0, 5, 'states', 1, ?)",
+    )
+    .run(t);
+  raw
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (1, null, 'candidate', ?, 'r', 1)",
+    )
+    .run(t);
+  raw
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (1, 'candidate', 'active', ?, 'r', 1, 1)",
+    )
+    .run(t);
+  raw.close();
+}
+const RECORDS = ["project", "session", "source", "unit", "unit_evidence", "unit_state"];
+const revisionOf = (file: string) => {
+  const raw = new DatabaseSync(file, { readOnly: true });
+  try {
+    return (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
+  } finally {
+    raw.close();
+  }
+};
+
+test("sphica init migrates a revision 1 database in place and keeps its records", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  revision1(file);
+  assert.throws(
+    () => connectWriter("ingest", file),
+    /Update the sphica CLI .*then run `sphica init` to migrate it/,
+  );
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (t: string) => said.push(t);
+  try {
+    dbInit(file);
+  } finally {
+    console.log = log;
+  }
+  assert.match(said.join("\n"), /Migrated: .* \(revision 1 → 2\)/);
+  assert.equal(revisionOf(file), SCHEMA_REVISION);
+  const raw = new DatabaseSync(file, { readOnly: true });
+  assert.deepEqual(
+    RECORDS.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n)),
+    [1, 1, 1, 1, 1, 2],
+  );
+  assert.equal(
+    (raw.prepare("select lifecycle from unit").get() as { lifecycle: string }).lifecycle,
+    "active",
+  );
+  raw.close();
+  // Running it again changes nothing
+  assert.equal(migrate(file), SCHEMA_REVISION);
+});
+
+test("a migration that would leave a broken reference changes nothing", () => {
+  const file = path.join(tmp(), "sphica.db");
+  revision1(file);
+  const raw = connectWriter("owner", file);
+  raw.exec("pragma foreign_keys = off");
+  raw
+    .prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values ('orphan', 99, 'codex', 'orphan', ?)",
+    )
+    .run(at("2026-09-01T00:00:00Z"));
+  raw.close();
+  assert.throws(() => migrate(file), /left 1 broken reference; nothing was changed/);
+  assert.equal(revisionOf(file), 1);
+  const look = new DatabaseSync(file, { readOnly: true });
+  assert.equal(look.prepare("select 1 from sqlite_schema where name = 'forget_batch'").get(), undefined);
   look.close();
 });

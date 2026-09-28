@@ -2328,6 +2328,40 @@
           "author_is_owner": false
         }
       ]
+    },
+    {
+      "id": "forget-01",
+      "layer": "forget",
+      "lang": "ja",
+      "summary": "Forgetting the only message a decision rests on removes it from the index and the decision leaves active",
+      "given": [
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "forget": {
+          "sources": ["session:s-ja-telemetry#1.owner"]
+        }
+      },
+      "then": [
+        {
+          "source_gone": "session:s-ja-telemetry#1.owner"
+        },
+        {
+          "source_search": {
+            "query": "テレメトリ 送信",
+            "hits": 0
+          }
+        },
+        {
+          "source_index_misses": "テレメトリ"
+        },
+        {
+          "unit": "trace:s-ja-telemetry/no-telemetry",
+          "lifecycle": "candidate"
+        }
+      ]
     }
   ],
   "setups": {

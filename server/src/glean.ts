@@ -290,7 +290,11 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
         try {
           if (!target.root) throw new Error("the repository is not known");
           excerpt = readExcerpt(target.root, op.file);
-          if (!locate(excerpt.raw, op.quote))
+          if ((await forgottenExcerpt(db, target.projectId, excerpt)).same)
+            errors.push(
+              `${what}: the owner forgot ${excerpt.path} lines ${op.file.lines.join("-")}; cite something else`,
+            );
+          else if (!locate(excerpt.raw, op.quote))
             errors.push(`${what}: quote not found in ${excerpt.path} lines ${op.file.lines.join("-")}`);
           else if (!quoteSpan(excerpt.raw, excerpt.text, op.quote))
             errors.push(
@@ -441,6 +445,29 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
 }
 
 /**
+ * What the owner forgot of this excerpt (same file, blob, and lines): whether its masked text is among it, which is never stored again,
+ * and the last forgotten revision, which new text numbers after.
+ */
+async function forgottenExcerpt(
+  db: Kysely<DB>,
+  projectId: number,
+  x: Excerpt,
+): Promise<{ same: boolean; last: number }> {
+  const rows = await db
+    .selectFrom("source_forgotten")
+    .select(["revision", "content_hash"])
+    .where("project_id", "=", projectId)
+    .where("kind", "=", "file_excerpt")
+    .where("external_id", "=", `file:${x.path}@${x.blob}#L${x.lines[0]}-${x.lines[1]}`)
+    .execute();
+  const hash = sha256(x.text);
+  return {
+    same: rows.some((r) => Buffer.from(r.content_hash).equals(hash)),
+    last: Math.max(0, ...rows.map((r) => r.revision)),
+  };
+}
+
+/**
  * Stores a file excerpt as a source (once per blob, lines, and masked text) and returns its id. An excerpt stored unmasked by an older
  * version is kept as it was and a masked revision is added, since evidence spans are offsets into the text they were taken from.
  */
@@ -455,7 +482,11 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
     .where("external_id", "=", external)
     .orderBy("revision", "desc")
     .executeTakeFirst();
-  if (found?.content_hash.equals(hash)) return found.id;
+  const forgotten = await forgottenExcerpt(trx, projectId, x);
+  // A revision older than a forgotten one is not the current text, even when the same words come back
+  if (found && found.revision > forgotten.last && found.content_hash.equals(hash)) return found.id;
+  if (forgotten.same)
+    throw new Error(`the owner forgot ${x.path} lines ${x.lines.join("-")}; cite something else`);
   const now = iso(Date.now());
   const row = await trx
     .insertInto("source")
@@ -464,7 +495,7 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
       kind: "file_excerpt",
       artifact: `file:${x.path}`,
       external_id: external,
-      revision: (found?.revision ?? 0) + 1,
+      revision: Math.max(found?.revision ?? 0, forgotten.last) + 1,
       author_kind: "person",
       created_at: now,
       captured_at: now,

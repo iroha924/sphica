@@ -113,6 +113,12 @@ export interface ExtractionRun {
   target: string;
 }
 
+export interface ForgetBatch {
+  at: string;
+  id: Generated<number>;
+  project_id: number;
+}
+
 export interface OwnerIdentity {
   bound_at: string;
   external_id: string;
@@ -167,6 +173,17 @@ export interface Source {
   truncated: Generated<number>;
   turn_id: string | null;
   url: string | null;
+}
+
+export interface SourceForgotten {
+  artifact: string;
+  batch_id: number;
+  content_hash: Buffer;
+  external_id: string;
+  kind: string;
+  project_id: number;
+  revision: number;
+  source_id: Generated<number>;
 }
 
 export interface SourceProcessing {
@@ -288,10 +305,11 @@ export interface UnitSearchText {
 
 export interface UnitState {
   at: string;
+  forget_id: number | null;
   from_state: string | null;
   id: Generated<number>;
   reason: string;
-  run_id: number;
+  run_id: number | null;
   source_id: number | null;
   to_state: string;
   unit_id: number;
@@ -322,10 +340,12 @@ export interface DB {
   edit_observation: EditObservation;
   external_reference: ExternalReference;
   extraction_run: ExtractionRun;
+  forget_batch: ForgetBatch;
   owner_identity: OwnerIdentity;
   project: Project;
   session: Session;
   source: Source;
+  source_forgotten: SourceForgotten;
   source_processing: SourceProcessing;
   sphica_generation: SphicaGeneration;
   unit: Unit;
