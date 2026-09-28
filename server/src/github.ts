@@ -384,7 +384,9 @@ export async function storeItems(
       continue;
     }
     const authorId = it.author?.id === undefined ? null : String(it.author.id);
-    const kind = authorId && owners.has(authorId) ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
+    // GitHub attributes a commit by its git author email, which anyone can write in a fork, so a commit never speaks as the owner
+    const bound = authorId !== null && owners.has(authorId) && it.kind !== "commit_message";
+    const kind = bound ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
     const created = iso(it.createdAt);
     const row = await db
       .insertInto("source")

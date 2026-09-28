@@ -27,9 +27,11 @@ if (problems.length) {
 // **Extract outside the repository.** Inside it, a wrong bundle would still resolve by walking up and pass.
 const out = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-tarball-"));
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
-// Do not pass SPHICA_DB, which points to the owner's database, to the child (only the temp HOME database is created)
+// Do not pass SPHICA_DB or SPHICA_HOME, which point to the owner's database, to the child (only the temp HOME database is created,
+// and the fake gh's account must never be bound in the owner's)
 const parentEnv = { ...process.env };
 delete parentEnv.SPHICA_DB;
+delete parentEnv.SPHICA_HOME;
 // init reads the signed-in account through gh: a fake gh first on PATH answers, so the runner's gh never reaches api.github.com
 const bin = path.join(home, "fake-gh");
 fs.mkdirSync(bin);

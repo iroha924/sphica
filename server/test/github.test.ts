@@ -190,6 +190,11 @@ test("stores sources with who wrote them, adds a revision only when text changed
     assert.deepEqual(kinds[0], ["pr_body", "owner", "OWNER", 1, 1, 1]);
     assert.deepEqual(kinds[2], ["review", "bot", null, 1, 1, 1]);
     assert.deepEqual(kinds[6], ["pr_event", "owner", null, 1, 1, 0]);
+    // A commit's author comes from the git email, which anyone can write: a bound id there never makes the owner's words
+    assert.deepEqual(
+      kinds.filter((k) => k[0] === "commit_message").map((k) => k[1]),
+      ["person"],
+    );
     assert.deepEqual(await storeItems(db.ingest, p, first.items), ids, "unchanged text keeps its rows");
     const second = await readPull(fake("Fixes #14. Switch to pnpm. Edited."), 7);
     const again = await storeItems(db.ingest, p, second.items);

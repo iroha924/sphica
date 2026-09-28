@@ -127,6 +127,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `fix(github): kill a timed-out gh even when it ignores SIGTERM`
   - 結果: red を実測（20.3 秒で失敗）。直した後 `node --test test/github.test.ts` → 8 pass / 0 fail（7.3 秒）
 
+- [x] T19: commit の作者は登録済みの ID でも owner にしない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（登録済みの ID が要る）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test --test-name-pattern="stores sources with who wrote them" test/github.test.ts` → 登録済みの hana (id 1) の commit が owner で保存され失敗
+  - 完了条件: `bun run test` → 登録済みの ID の commit_message が person で保存される検査を含めて通る
+  - コミット: `fix(github): never let a commit's git author speak as the owner`
+  - 結果: red を実測（actual owner / expected person）。直した後 `node --test test/github.test.ts test/extract.test.ts test/record.test.ts` → 31 pass / 0 fail
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -168,6 +178,16 @@ sphica init がアカウントを登録して結果を 1 行で出し、doctor �
   - 完了条件: `bun run sql:live` → 未登録の doctor が `○ GitHub owner none` で、to fix に入らない検査を含めて通る。`node scripts/check-tarball.mjs <tgz>` → doctor の `✓ GitHub owner hana (id 42)` を含めて通る。`actionlint .github/workflows/check.yml` → 指摘なし
   - コミット: `fix(ci): keep gh signed out in the Windows init and check doctor's GitHub owner line`
   - 結果: red を実測（rg が 0 件）。`bun run sql:live` → 8 / 8 SQL sites で通る。`node scripts/check-tarball.mjs` → 通る。`actionlint` → 指摘なし。CI の手順を手元で再現（空の GH_CONFIG_DIR と空のトークンで本物の gh）→ gh は exit 4 で、init は `GitHub account not bound: gh api user failed` を出した。Windows での実走は PR の CI で見る
+
+- [x] T20: check-tarball の子に SPHICA_HOME を渡さず、connection-roles に owner での登録を書く
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T13（直す対象の check-tarball の doctor 検査が要る）
+  - 変更: `scripts/check-tarball.mjs`, `CLAUDE.md`, `AGENTS.md`
+  - red: `rg -n "delete parentEnv.SPHICA_HOME|binding the owner's GitHub account" scripts/check-tarball.mjs CLAUDE.md AGENTS.md` → 0 件（SPHICA_HOME が残ると偽の gh のアカウントが持ち主の DB に登録され、不変条件は owner の用途に登録を挙げていない）
+  - 完了条件: 同じ rg → 3 件。`node scripts/check-tarball.mjs <tgz>` と `bun run verify:ai` → 通る
+  - コミット: `fix(check): keep SPHICA_HOME from the tarball check and name binding among owner uses`
+  - 結果: red を実測（rg 0 件）。直した後 rg → 3 件、`node scripts/check-tarball.mjs` → 通る、`bun run verify:ai` → 通る
 
 ## P3: 文書と出荷
 
@@ -219,3 +239,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / 差分全体の Codex レビュー / 指摘 1 件（gh api user に時間の上限が無く、固まった gh で init が止まる）を採用し T15 を足した
 - 2026-09-28 / review-shipping / #1・#2（時間の上限）は T15 で対応済み。#3（CLICOLOR_FORCE で JSON に色が付く）を本物の gh で再現して採用し T16 を足した。#4（live-harness の childEnv の JSDoc が fakeGh の上に残った）を採用し T17 を足した。Windows の CI の手順は PR の CI で確かめる
 - 2026-09-28 / T15, T16 の Codex 再レビュー / 指摘 1 件（SIGTERM を無視する gh では時間の上限が効かない、Codex が再現）を採用し T18 を足した
+- 2026-09-28 / PR #183 の GitHub Codex レビュー（1 回目） / P1 commit の作者（git のメールから GitHub が割り当て、fork で偽装できる）を採用し T19。P1 check-tarball の SPHICA_HOME と P2 connection-roles の不変条件を採用し T20。P2 glean_fetch に owner を出す件は見送り: glean_fetch の出力は read s<id> で読むよう案内し、read は owner の発言を the owner と出す（server/src/read.ts:18）
