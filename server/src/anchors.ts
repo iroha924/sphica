@@ -36,6 +36,13 @@ function findSymbol(text: string, symbol: string): { lines: string[]; i: number 
   return { lines, i: lines.findIndex((l) => re.test(l)) };
 }
 
+/** Whether a symbol is text mask() hides: a key by its shape, or a name the file shows only inside masked text. Such an anchor would store it. */
+export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
+  if (mask(symbol) !== symbol) return true;
+  const text = root ? readText(root, rel) : null;
+  return typeof text === "string" && findSymbol(text, symbol).i >= 0 && findSymbol(mask(text), symbol).i < 0;
+}
+
 /**
  * Where a symbol is in a repository file now, for recording an anchor's lines when it is saved. The line is masked before it is cut to 200
  * characters: cutting first could drop the closing quote that marks a value as a key.

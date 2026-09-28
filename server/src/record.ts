@@ -2,7 +2,7 @@
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { locate as locateSymbol } from "./anchors.ts";
+import { locate as locateSymbol, masksSymbol } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { commitHolds } from "./git.ts";
@@ -330,6 +330,10 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         problems.push(
           `${key}: anchor path ${JSON.stringify(head(a.path, 80))} is not inside the repository; left out`,
         );
+        continue;
+      }
+      if (a.symbol && masksSymbol(target.root, p, a.symbol)) {
+        problems.push(`${key}: anchor symbol in ${p} is text Sphica masks; left out`);
         continue;
       }
       // A commit counts as code evidence only when the repository has it and it holds the path; otherwise the anchor keeps no commit

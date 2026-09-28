@@ -3,7 +3,7 @@
 // evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { locate as symbolAt } from "./anchors.ts";
+import { masksSymbol, locate as symbolAt } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { cleanGit, commitHolds } from "./git.ts";
@@ -321,6 +321,10 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     }
     if (op.op === "anchor" && !repoPath(op.path))
       errors.push(`${what}: the path is not inside the repository`);
+    const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
+    const pinnedPath = pinned && repoPath(pinned.path);
+    if (pinned?.symbol && pinnedPath && masksSymbol(target.root, pinnedPath, pinned.symbol))
+      errors.push(`${what}: the symbol is text Sphica masks; anchor a name, not a key`);
     if (op.op === "anchor" && op.commit) {
       const rel = repoPath(op.path);
       if (rel && !(target.root && commitHolds(target.root, op.commit, rel)))

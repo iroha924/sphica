@@ -71,7 +71,7 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
     const key = "Zq9x".repeat(60);
     fs.writeFileSync(
       path.join(root, "config.ts"),
-      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\nexport const API_KEY =\n  tokenValue123abc;\n`,
+      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n// keyBody is also named here, outside the key\nexport const API_KEY =\n  tokenValue123abc; // configMarker\n`,
     );
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "設定の鍵はここにある。" });
@@ -88,7 +88,10 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
             anchors: [
               { path: "config.ts", symbol: "apiKey", role: "applies_to" },
               { path: "config.ts", symbol: "keyBody", role: "applies_to" },
+              { path: "config.ts", symbol: "configMarker", role: "applies_to" },
+              // A symbol that is itself a key, by shape or because the file shows it only inside masked text, is left out
               { path: "config.ts", symbol: "tokenValue123abc", role: "applies_to" },
+              { path: "config.ts", symbol: `sk-${"b2".repeat(15)}`, role: "applies_to" },
             ],
           },
         ],
@@ -101,7 +104,7 @@ test("an anchor's excerpt is masked before it is cut, and a line inside a privat
     }[];
     assert.deepEqual(
       got.map((a) => a.symbol),
-      ["apiKey", "keyBody", "tokenValue123abc"],
+      ["apiKey", "keyBody", "configMarker"],
     );
     assert.doesNotMatch(got[0]?.excerpt ?? "", /Zq9x/);
     assert.match(got[0]?.excerpt ?? "", /^export const apiKey = "\[redacted\]"/);

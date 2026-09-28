@@ -90,6 +90,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(glean): refuse excerpts whose masking depends on text outside them (T07)`
   - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run acceptance` → 58 件 pass、tsc と biome は指摘なし
 
+- [x] T08: 秘密を symbol にした anchor を保存しない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T07（同じテストのファイルを広げる）
+  - 変更: `server/src/anchors.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
+  - red: 秘密の値と `sk-` の形の鍵を symbol にした anchor を足し、直す前のコードで `node --test test/record.test.ts test/extract.test.ts` → record は symbol が保存されて fail、extract は `Missing expected rejection` で fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): leave out anchors whose symbol is text Sphica masks (T08)`
+  - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run verify` → exit 0（acceptance 58 件 pass）。鍵の中にしか現れない名前（keyBody）も外れるようになったので、テストでは鍵の外にも同じ名前を置いて `[redacted: private key]` の経路を残した
+
 ## P4: 出荷の準備
 
 glean スキルの案内を足し、出荷前の検査を通す。
@@ -114,3 +124,6 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T03 / T03（bf13675）の Codex レビュー: 指摘なし（target 一致）。Codex 側の全件テストの失敗は読み取り専用の環境の EPERM で、手元では 314 件 pass / 受け取り
 - 2026-09-28 / T07 / T02（ff28b14）の Codex レビュー F1（再現済み）: `API_KEY=` の次の行の値だけを引くと、抜粋だけを伏せ字にしても値が残り、source.text と source_fts に入る。コード位置の抜粋（T03）にも同じ穴 / 採用。修正タスク T07: 前後の文脈とつないで伏せ字にした結果が別々に伏せ字にした結果と一致しなければ、glean は断り、コード位置の抜粋は `[redacted]` にする
 - 2026-09-28 / T07 / T07 を依存先の T03 より前に置いていた（a3f2ba2 の時点で tasks の検査が違反を出していたのに、検査の結果を head に流していてコミットを止めなかった） / T07 を P3 の後ろへ移した
+- 2026-09-28 / T07 / T07（a3f2ba2）の Codex レビュー F1（再現済み）: `export const API_KEY =` の次の行の `process.env.API_KEY;` のような普通のコードでも、その行だけを引くと断られ、コード位置の抜粋は `[redacted]` になる。既存の ENV_ASSIGN が改行をまたいで値を伏せ字にするため / 見送り。前後の行を含めて引けば通り、秘密を守る側の誤検知。PR 本文の見送った指摘に書く。行単位の抜粋に秘密が残ったまま両方の等式が成り立つ例は見つからなかった
+- 2026-09-28 / T08 / 全差分（main..a2a0678）の Codex レビュー F1: anchor の symbol に秘密の値を指定すると、抜粋は伏せ字でも symbol が伏せ字なしで unit_anchor・検索索引・read に残る / 採用。修正タスク T08 を足した
+- 2026-09-28 / 全体 / review-shipping（head a2a0678）: 指摘なし。修正を外すとテストが落ちることを変異で確認、pack 30 ファイル、4 つのバージョン 0.5.7

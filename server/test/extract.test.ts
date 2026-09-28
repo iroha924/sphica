@@ -653,6 +653,25 @@ test("glean: a cited file excerpt is stored masked, and quotes touching masked t
     await assert.rejects(cite([3, 5], "Rotate the key"), /lines 3-5 are inside a private key/);
     // The key name is on the line before: the value alone does not look like a key, but the whole file masks it
     await assert.rejects(cite([9, 9], "zz99yy88xx77"), /lines 9-9 cut through text Sphica masks/);
+    const pin = async (symbol: string) => {
+      const record = {
+        ops: [
+          {
+            op: "anchor",
+            unit: "glean:rotate",
+            revision: rev(),
+            path: "config.md",
+            symbol,
+            role: "applies_to",
+          },
+        ],
+      };
+      const r = await beginGlean(db.ingest, p, "g1");
+      const c = await checkText(db.ingest, r, p, root, record);
+      return c.ok ? saveText(db.ingest, r, p, root, record) : Promise.reject(new Error(c.text));
+    };
+    await assert.rejects(pin("zz99yy88xx77"), /the symbol is text Sphica masks/);
+    await assert.rejects(pin(`sk-${"b2".repeat(15)}`), /the symbol is text Sphica masks/);
     assert.equal(
       db.owner.prepare("select count(*) as n from source where text like '%zz99yy88xx77%'").get()?.n,
       0,
