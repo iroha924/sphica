@@ -3,7 +3,7 @@
 // The record never names its project, session, or pull request; the run does.
 import crypto from "node:crypto";
 import type { Kysely } from "kysely";
-import { flush } from "./capture.ts";
+import { flush, TOOL_FLUSH_BUDGET_MS } from "./capture.ts";
 import { inTransaction } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import {
@@ -36,7 +36,7 @@ const newRunId = () => crypto.randomBytes(9).toString("base64url");
 
 /** Sessions of the project with owner messages not traced yet, as text. */
 export async function pendingText(db: Kysely<DB>, projectId: number): Promise<string> {
-  await flush().catch(() => {});
+  await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const rows = await pendingSessions(db, projectId);
   if (!rows.length) return "Every captured session has been traced.";
   const firsts = new Map(
@@ -83,7 +83,7 @@ async function sessionOf(db: Kysely<DB>, projectId: number, given: string | unde
 }
 
 export async function beginTrace(db: Kysely<DB>, projectId: number, session?: string): Promise<string> {
-  await flush().catch(() => {});
+  await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const s = await sessionOf(db, projectId, session);
   const run = newRunId();
   await openRun(db, { projectId, origin: "trace", target: `session:${s}`, sessionId: s, draftId: run });
@@ -91,7 +91,7 @@ export async function beginTrace(db: Kysely<DB>, projectId: number, session?: st
 }
 
 export async function beginGlean(db: Kysely<DB>, projectId: number, session?: string): Promise<string> {
-  await flush().catch(() => {});
+  await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const s = await sessionOf(db, projectId, session);
   const run = newRunId();
   await openRun(db, { projectId, origin: "glean", target: "glean", sessionId: s, draftId: run });
