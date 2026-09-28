@@ -950,7 +950,7 @@ test("held records of a project registered later are sent, and expired ones are 
   }
 });
 
-test("a send stops between batches once its time budget is spent", async () => {
+test("a send stops between batches once its time budget is spent, after at least one batch of the queue", async () => {
   reset();
   const db = tempDb();
   project(db);
@@ -958,18 +958,24 @@ test("a send stops between batches once its time budget is spent", async () => {
     for (let i = 0; i < 700; i++) queue(spoolDir(), Date.now(), i, owned(registered, i));
     const r = await flush(db.file, 0);
     assert.deepEqual({ sent: r.sent, left: left(spoolDir()) }, { sent: 500, left: 200 });
+    // Held records spending the budget still leave one batch for the queue
+    reset();
+    for (let i = 0; i < 500; i++)
+      queue(unregisteredDir(), Date.now() - 60_000, i, owned("git:github.com/o/other", i));
+    queue(spoolDir(), Date.now(), 999, owned(registered, 999));
+    assert.equal((await flush(db.file, 0)).sent, 1);
   } finally {
     await db.done();
   }
 });
 
-test("a record queued by a send that found the lock taken is sent by the send holding it", async () => {
+test("a send that finds the lock taken waits for it and sends what the holder left", async () => {
   reset();
   const db = tempDb();
   project(db);
   const readdir = fs.readdirSync;
   let second: ReturnType<typeof flush> | undefined;
-  // Once the holder sees an empty queue, a hook queues a record and starts its own send before the holder unlocks
+  // While a send with no budget left holds the lock and sees an empty queue, a hook queues a record and starts its own send
   const spy = mock.method(fs, "readdirSync", ((dir: fs.PathLike, ...rest: unknown[]) => {
     const got = (readdir as (...a: unknown[]) => string[])(dir, ...rest);
     if (!second && dir === spoolDir() && !got.some((f) => f.endsWith(".json"))) {
@@ -979,8 +985,33 @@ test("a record queued by a send that found the lock taken is sent by the send ho
     return got;
   }) as typeof fs.readdirSync);
   try {
+    const first = await flush(db.file, 0);
+    assert.equal(first.sent, 0);
+    assert.deepEqual(await second, { sent: 1, deferred: 0, rejected: 0 });
+    assert.equal(left(spoolDir()), 0);
+  } finally {
+    spy.mock.restore();
+    await db.done();
+  }
+});
+
+test("a send whose lock is taken between unlocking and taking it again waits and sends what the other left", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const rm = fs.rmSync;
+  let second: ReturnType<typeof flush> | undefined;
+  // Right after the first send unlocks, 501 records arrive and a send with no budget takes the lock first
+  const spy = mock.method(fs, "rmSync", ((target: fs.PathLike, ...rest: unknown[]) => {
+    (rm as (...a: unknown[]) => void)(target, ...rest);
+    if (!second && String(target).endsWith(".lock")) {
+      for (let i = 0; i < 501; i++) queue(spoolDir(), Date.now(), i, owned(registered, i));
+      second = flush(db.file, 0);
+    }
+  }) as typeof fs.rmSync);
+  try {
     const first = await flush(db.file);
-    assert.deepEqual(await second, { sent: 0, deferred: 0, rejected: 0, busy: true });
+    assert.deepEqual((await second)?.sent, 500);
     assert.equal(first.sent, 1);
     assert.equal(left(spoolDir()), 0);
   } finally {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Conversation recording. Called from hooks, it keeps your messages, the AI's last response, and touched files.
 //
-// **Recording hooks only write to a local queue.** A process detached by Stop sends the batch over the network.
+// **Recording hooks only write to a local queue.** A process detached by Stop sends it to the database in batches.
 // While the database is unreachable the records stay queued and are resent idempotently next time (ids are derived from the input).
 //
 // **Prompts you did not type are never recorded as your messages.** In a prior case, prompts meant for another agent
@@ -741,10 +741,11 @@ async function sendBatch(
  * Sends the queue to the database. **The connection is capture (append only).** Sending the same thing twice adds no rows.
  * Records of unregistered projects are held (only projects registered with `sphica init` are recorded); the first lock hold looks at
  * the held records present when it starts once, so they never take the place of queued records. The queue is then sent in batches
- * until it is empty or `budgetMs` is spent. After unlocking it looks again, so records queued by a send that found the lock taken are not left.
+ * until it is empty or `budgetMs` is spent, at least one batch of it per call. A send that finds the lock taken waits for it within its budget,
+ * and after unlocking a send looks at the queue again, so a holder that runs out of time does not leave records behind.
  * Failures such as a lost connection keep the batch queued for the next send.
  *
- * sent is the number of new messages (resent ones are not counted), deferred the held records left. busy means another send was running.
+ * sent is the number of new messages (resent ones are not counted), deferred the held records left. busy means the lock never came free.
  */
 export async function flush(
   file: string = dbFile(),
@@ -755,8 +756,13 @@ export async function flush(
   const held = unregisteredDir();
   const total = { sent: 0, deferred: 0, rejected: 0 };
   let batches = 0;
+  let queueBatches = 0;
   for (let first = true; ; first = false) {
-    const unlock = lock();
+    let unlock = lock();
+    while (!unlock && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      unlock = lock();
+    }
     if (!unlock) return first ? { ...total, busy: true } : total;
     let client: Kysely<DB> | null = null;
     const send = async (names: { name: string; from: string }[]) => {
@@ -777,10 +783,11 @@ export async function flush(
           await send(part);
         }
       }
-      while (!late()) {
+      while (queueBatches === 0 || !late()) {
         const part = queued(dir).slice(0, BATCH);
         if (part.length === 0) break;
         await send(part);
+        queueBatches++;
       }
       prune(held);
       total.deferred = queued(held).length;

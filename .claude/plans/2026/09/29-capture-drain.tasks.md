@@ -41,6 +41,16 @@ base: main
   - コミット: `fix(extract): give sends inside MCP tools a short time budget`
   - 結果: `rg -n "flush\(" server/src/extract.ts` → 39・86・94 行の 3 か所とも `TOOL_FLUSH_BUDGET_MS` を渡す。`bun run verify`（typecheck と knip を含む）→ 0
 
+- [x] T04: ロックが取れないときに持ち時間まで待ち、送信待ちを最低 1 バッチ送る
+  - 種別: 修正
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/capture.test.ts` → 新しいテストのうち、保留分と送信待ちが両方ある締め切りのテストと取り残し 2 件が失敗する
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/capture.test.ts` → 全部 pass。`bun run verify` → 0
+  - コミット: `fix(capture): wait for the lock within the budget and always send a batch of the queue`
+  - 結果: red（直す前）`node --test test/capture.test.ts` → 3 件失敗（2 つ目が `busy: true` で即座に返る、保留分があると送信待ち 0 件、取り直しで負けた 1 つ目が 0 件）。直した後 → pass 30 / fail 0。`bun run verify` → 0（sql:reach 153 / 153、sql:live 8 / 8、acceptance pass 59）
+
 ## P2: 出荷
 
 パッケージのバージョンをそろえる。
@@ -58,3 +68,4 @@ base: main
 
 2026-09-29 / T03 / pre-commit の bundle フックが、パッケージに入るファイルの変更と同じコミットでのバージョン上げを求め、T01 のコミットが止まった / T03 を T01 と同じコミットで終える。依存を「T02（出荷する差分がそろってから判定する）」から「なし」に変えた。`bun run verify` は T02 の後に流す
 2026-09-29 / T01, T02 / knip が、T02 で使う前の `TOOL_FLUSH_BUDGET_MS` と外から使わない `FLUSH_BUDGET_MS` の export を未使用として落とした / T02 を T01 と同じコミットで終え、`FLUSH_BUDGET_MS` の export を外した
+2026-09-29 / T04 / 43e6cdb の Codex レビュー F1・F2 を採用（持ち主が「両方直す」を選択。plan の変更履歴を参照）。review-shipping は出荷可、古いコメント 1 件を T04 で直す / 修正タスク T04 を足した
