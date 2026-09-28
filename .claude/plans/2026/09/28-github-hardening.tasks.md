@@ -22,13 +22,14 @@ base: main
 
 0.5.6 として、closingRefs が HTML コメントの中の参照を読まなくなり、README のバッジから説明へ辿れる。
 
-- [ ] T01: npm と 3 つの manifest のバージョンを 0.5.6 に上げる
+- [x] T01: npm と 3 つの manifest のバージョンを 0.5.6 に上げる
   - 種別: 変更
   - 計画: S1
   - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `grep -h '"version"' plugin/package.json plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json .claude-plugin/marketplace.json` → 4 行とも 0.5.6
   - コミット: `chore(release): bump to 0.5.6`
+  - 結果: `grep -h '"version"' ...` → 4 行とも "version": "0.5.6"
 
 - [ ] T02: closingRefs が HTML コメントの中の参照を読まないようにする
   - 種別: 修正
