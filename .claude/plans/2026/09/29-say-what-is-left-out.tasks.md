@@ -101,13 +101,14 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 
 ## P4: acceptance
 
-- [ ] T06: 検索の上限と配信の省略の acceptance case を足す
+- [x] T06: 検索の上限と配信の省略の acceptance case を足す
   - 種別: 追加
   - 計画: S6
   - 依存: T01（検索の上限）, T03（配信の注記）
-  - 変更: `server/evals/acceptance/cases.json`
+  - 変更: `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run acceptance` → 追加した case を含めて全部 pass。`bun run verify` → 0
   - コミット: `test(acceptance): cover a search past the first candidates and a delivery that left records out`
+  - 結果: `bun run acceptance` → pass 60 / fail 0（injection-10: `src/db.ts` に 6 件、編集の配信に「1 more record applies here but was left out」）。`bun run verify` → 0（`sql:reach` 157 / 157、`sql:live` 8 / 8、acceptance 60 / 60）
 
 ## 記録
 
@@ -116,3 +117,4 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 2026-09-29 / T01 / T01 の Codex レビュー 4 件: ページの間の書き込みで候補を飛ばす・二重に数える（F1）と、600 件のテストが強い一致を確かめていない（F4）は採用。件数に達して止まったときに stopped が false（F2）は見送り（stopped は上限で打ち切ったことを言い、件数がそろって止まるのは打ち切りではない。コメントで明記する）。1 ページの本文を先に読み込む（F3）は見送り（1 ページ最大約 51 MiB は plan で合意済み）。T02 のレビューは指摘なし / 修正タスク T07 を足す
 2026-09-29 / T07 / reader の authorizer はトランザクションを許さないので、1 つのスナップショットで読む案は権限の境界を変えることになる / 候補の順番（id と rank）を 1 つの SQL で上限 + 1 件まで取り、中身をページごとに id で引く形にした。途中で消えた行は読まないだけになる
 2026-09-29 / T08 / ec4390f の Codex レビュー 2 件: 作業の文に制約の key があると渡していない制約を渡したと数える（F1）と、作業の一覧と件数の間に作業が完了すると省略の数が負になりログの CHECK で落ちる（F2）。2 件とも採用。F2 のテストは配信が自分で開く DB 接続に割り込む仕組みが要るので付けず、0 未満にしない形で直す / 修正タスク T08 を足した
+2026-09-29 / T06 / 検索の上限の acceptance case は、200 件を超える記録を cases.json に並べることになり量が見合わない。W4 は実 SQLite の単体テスト（search.test.ts）と MCP のテスト（plugin.test.ts）で押さえた / 配信の注記の case（injection-10）だけを足し、層ごとの件数のテスト（acceptance-cases.test.ts）の injection を 9 → 10 にした。変更欄に `server/test/acceptance-cases.test.ts` を足した（前: `server/evals/acceptance/cases.json`）

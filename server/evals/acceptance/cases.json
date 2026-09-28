@@ -2362,6 +2362,190 @@
           "lifecycle": "candidate"
         }
       ]
+    },
+    {
+      "id": "injection-10",
+      "layer": "injection",
+      "lang": "ja>ja",
+      "summary": "An edit delivery that leaves records out for space says how many and where to find them",
+      "given": [
+        {
+          "capture": "s-ja-storage"
+        },
+        {
+          "trace": {
+            "session": "s-ja-storage",
+            "record": {
+              "units": [
+                {
+                  "key": "db-rule-0",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "src/db.ts の規則 0: 保存先は SQLite の 1 ファイルにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "role": "applies_to"
+                    }
+                  ]
+                },
+                {
+                  "key": "db-rule-1",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "src/db.ts の規則 1: 保存先は SQLite の 1 ファイルにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "role": "applies_to"
+                    }
+                  ]
+                },
+                {
+                  "key": "db-rule-2",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "src/db.ts の規則 2: 保存先は SQLite の 1 ファイルにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "role": "applies_to"
+                    }
+                  ]
+                },
+                {
+                  "key": "db-rule-3",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "src/db.ts の規則 3: 保存先は SQLite の 1 ファイルにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "role": "applies_to"
+                    }
+                  ]
+                },
+                {
+                  "key": "db-rule-4",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "src/db.ts の規則 4: 保存先は SQLite の 1 ファイルにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "role": "applies_to"
+                    }
+                  ]
+                },
+                {
+                  "key": "db-rule-5",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "src/db.ts の規則 5: 保存先は SQLite の 1 ファイルにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-storage#1.owner",
+                      "quote": "保存先は Postgres じゃなくて SQLite にしよう。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "role": "applies_to"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/db.ts"
+        }
+      },
+      "then": [
+        {
+          "context_contains": [
+            "trace:s-ja-storage/db-rule-5",
+            "1 more record applies here but was left out for space: find them with Sphica's search or read."
+          ]
+        }
+      ]
     }
   ],
   "setups": {
