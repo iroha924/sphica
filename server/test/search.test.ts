@@ -534,6 +534,12 @@ test("a record withdrawn after the order was taken is not an active hit, and a s
     message(db, p, { id: "strong", text: `${filler} retry budget cache ${filler}`, session: "s2" });
     const removed = afterFirst(() => db.owner.prepare("delete from source where id = ?").run(firstWeak));
     const r = await searchSources(removed, p, "retry budget cache warm", 5);
+    assert.equal(
+      db.owner.prepare("select id from source where id = ?").get(firstWeak),
+      undefined,
+      "it was removed",
+    );
+    assert.equal(r.read, 600, "the 601st taken is read in place of the removed one");
     assert.equal(r.stopped, true, "a candidate past the ones read remains");
   } finally {
     await db.done();
