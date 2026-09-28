@@ -62,6 +62,16 @@ revision 1 の DB を記録を失わずに revision 2 へ上げられるよう�
   - コミット: `feat(db): add the forget connection role and keep ingest from deleting sources`
   - 結果: `node --test test/db.test.ts` → pass 14（forget の一連の書き込みと拒否 8 種、ingest の削除と墓標の拒否、forget が revision 1 を拒否）。`bun run verify` → exit 0
 
+- [x] T09: 移行で unit_state の採番を引き継ぎ、移行のテストを空振りしない形にする
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T01（移行 SQL）, T02（init の移行と sql:live の段）
+  - 変更: `db/migrations/0002.sql`, `server/test/migrate.test.ts`, `server/test/admin.test.ts`, `scripts/check-sql-live.mjs`
+  - red: `cd server && node --test test/migrate.test.ts` → 採番のテストが actual 3 / expected 4 で失敗（消えた id が再利用される）
+  - 完了条件: `cd server && node --test test/migrate.test.ts test/admin.test.ts` → pass。`bun run sql:live` が移行後の revision 2 を確かめて通る
+  - コミット: `fix(schema): keep unit_state's id counter across the migration`
+  - 結果: red を実測（actual 3, expected 4）。修正後 `node --test test/migrate.test.ts test/admin.test.ts` → pass 27（init の移行テストは source・unit・unit_state の件数と active を確かめる）。`bun run sql:live` → 8 / 8 で通る。`bun run verify` → exit 0
+
 - [ ] T04: `forget.ts` の plan と apply（判定し直し、確認とのずれの検出、掃除）
   - 種別: 追加
   - 計画: S4
@@ -104,3 +114,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T08 / pre-commit の bundle 検査が、パッケージに入る変更にバージョンの同時更新を求めた / T08 を T01 の前へ移し、同じコミットで済ませる（完了条件: 前 `release:plan` が plugin と出て verify が通る、後 plugin と出て 4 か所が同じバージョン）
 2026-09-29 / T03 / knowledge-schema Skill に「世代 2 に移行の仕組みは無い」と接続の役の表が残っていた / 同じタスクで直し、変更欄に `.agents/skills/knowledge-schema/SKILL.md` を足した
 2026-09-29 / T01 / review-shipping: 旧 0.5.7 の CLI は revision 2 の DB に「退避しろ」と出す。Windows CI は移行を通らない / Release notes で先に CLI を更新するよう書く。Windows の移行は仕上げで判断する
+2026-09-29 / T09 / Codex の T01 レビュー F1（unit_state の作り直しで sqlite_sequence が失われ id が再利用される、再現済み）を採用。T02 レビュー F1（init のテストが project しか見ない）と F2（sql:live が revision を見ない）も採用 / 修正タスク T09 を T04 の前に足した

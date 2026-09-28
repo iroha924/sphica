@@ -40,6 +40,9 @@ create table unit_state_new (
 ) strict;
 insert into unit_state_new (id, unit_id, from_state, to_state, at, reason, source_id, run_id)
   select id, unit_id, from_state, to_state, at, reason, source_id, run_id from unit_state;
+-- AUTOINCREMENT never reuses an id: carry the counter over (dropping unit_state drops its row, and the rename moves this one)
+delete from sqlite_sequence where name = 'unit_state_new';
+insert into sqlite_sequence (name, seq) select 'unit_state_new', seq from sqlite_sequence where name = 'unit_state';
 drop table unit_state;
 alter table unit_state_new rename to unit_state;
 create index unit_state_order on unit_state (unit_id, id);

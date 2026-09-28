@@ -183,6 +183,8 @@ await withTempDir(async (dir) => {
     );
     const look = new DatabaseSync(file, { readOnly: true });
     const n = look.prepare("select count(*) as n from source where text = 'after the migration'").get().n;
+    const revision = look.prepare("pragma user_version").get().user_version;
+    if (revision !== 2) failures.push(`init left the database at revision ${revision}`);
     look.close();
     if (n !== 1) failures.push(`capture did not write into the migrated database (${n} rows)`);
   }

@@ -204,3 +204,27 @@ test("capture writes the same columns at both revisions, and writes into a migra
     .run(now, now, text, Buffer.byteLength(text), sha256(text));
   assert.equal(Number((old.prepare("select count(*) as n from source").get() as { n: number }).n), 2);
 });
+
+test("migration keeps unit_state's id counter, so an id once used is never handed out again", () => {
+  const raw = create("old.db", REV1);
+  fill(raw);
+  // A unit removed with its states leaves the counter above the highest id left
+  raw
+    .prepare(
+      "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, 'gone', 'finding', 'gone', 'supported', 1, ?, ?)",
+    )
+    .run(now, sha256("gone"));
+  raw
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (2, null, 'candidate', ?, 'r', 1)",
+    )
+    .run(now);
+  raw.prepare("delete from unit where id = 2").run();
+  migrate(raw);
+  raw
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (1, 'active', 'candidate', ?, 'r', 1)",
+    )
+    .run(now);
+  assert.equal(Number((raw.prepare("select max(id) as n from unit_state").get() as { n: number }).n), 4);
+});
