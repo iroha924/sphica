@@ -482,8 +482,9 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
     .where("external_id", "=", external)
     .orderBy("revision", "desc")
     .executeTakeFirst();
-  if (found?.content_hash.equals(hash)) return found.id;
   const forgotten = await forgottenExcerpt(trx, projectId, x);
+  // A revision older than a forgotten one is not the current text, even when the same words come back
+  if (found && found.revision > forgotten.last && found.content_hash.equals(hash)) return found.id;
   if (forgotten.same)
     throw new Error(`the owner forgot ${x.path} lines ${x.lines.join("-")}; cite something else`);
   const now = iso(Date.now());

@@ -461,7 +461,10 @@ const revisionOf = (file: string) => {
 test("sphica init migrates a revision 1 database in place and keeps its records", async () => {
   const file = path.join(tmp(), "sphica.db");
   revision1(file);
-  assert.throws(() => connectWriter("ingest", file), /Run `sphica init` to migrate it/);
+  assert.throws(
+    () => connectWriter("ingest", file),
+    /Update the sphica CLI .*then run `sphica init` to migrate it/,
+  );
   const said: string[] = [];
   const log = console.log;
   console.log = (t: string) => said.push(t);

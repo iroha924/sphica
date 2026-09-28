@@ -288,7 +288,7 @@ server.registerTool(
         if (String(answer.content?.confirm ?? "").trim() !== String(n))
           throw refused(`The number typed does not match ${n}`);
       }
-      const done = await applyForget(dbFile(), p.projectId, ids, seen);
+      const done = await applyForget(dbFile(), p.projectId, ids, seen, extra.signal);
       return [
         n ? `Forgot ${plural(n, "source")}.` : "Nothing new to forget.",
         forgetText(done.outcome),

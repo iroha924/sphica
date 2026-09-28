@@ -2355,6 +2355,9 @@
           }
         },
         {
+          "source_index_misses": "テレメトリ"
+        },
+        {
           "unit": "trace:s-ja-telemetry/no-telemetry",
           "lifecycle": "candidate"
         }

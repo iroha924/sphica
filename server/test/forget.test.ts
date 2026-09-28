@@ -290,3 +290,15 @@ test("a reader holding the WAL leaves the cleanup incomplete, and running the sa
   const again = await forget(src);
   assert.equal(again.cleanup, "done");
 });
+
+test("a call cancelled before the commit forgets nothing", async () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite." });
+  const seen = await previewForget(db.file, p, [src]);
+  const stop = new AbortController();
+  stop.abort();
+  await assert.rejects(
+    applyForget(db.file, p, [src], seen, stop.signal),
+    /cancelled, so nothing was forgotten/,
+  );
+  assert.equal(exists(src), true);
+});

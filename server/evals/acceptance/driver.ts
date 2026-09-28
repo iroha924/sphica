@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import { checkAnchor } from "../../src/anchors.ts";
 import { flush, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
@@ -22,6 +22,7 @@ import { readSource, readUnit } from "../../src/read.ts";
 import { type Applicable, checkFindings, parseDiff, selectForReview } from "../../src/review.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
+import { ftsQuery } from "../../src/text.ts";
 import type { Step, World } from "./load.ts";
 
 export type Driver = {
@@ -762,6 +763,16 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (typeof e.source_gone === "string") {
         assert.equal((await sessionSource(e.source_gone)) ?? (await githubSource(e.source_gone)), undefined);
+        return;
+      }
+      // The index itself, not joined to source rows: an entry left behind by a removed row still counts here
+      if (typeof e.source_index_misses === "string") {
+        const left = await sql<{
+          n: number;
+        }>`select count(*) as n from source_fts where source_fts match ${ftsQuery(e.source_index_misses)}`.execute(
+          db(),
+        );
+        assert.equal(Number(left.rows[0]?.n), 0, `the index still holds ${e.source_index_misses}`);
         return;
       }
       if (e.source_search && typeof e.source_search === "object") {

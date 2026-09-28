@@ -422,7 +422,10 @@ test("the forget connection refuses a database of an older revision", () => {
     `create table sphica_generation (generation integer); insert into sphica_generation values (2); pragma user_version = ${SCHEMA_REVISION - 1}`,
   );
   raw.close();
-  assert.throws(() => connectWriter("forget", file), /Run `sphica init` to migrate it/);
+  assert.throws(
+    () => connectWriter("forget", file),
+    /Update the sphica CLI .*then run `sphica init` to migrate it/,
+  );
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

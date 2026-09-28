@@ -108,7 +108,8 @@ export async function beginHarvest(
   const project = await db.selectFrom("project").select("key").where("id", "=", projectId).executeTakeFirst();
   const pull = await readPull(get, number, repoOf(project?.key ?? ""));
   return inTransaction(db, async (trx) => {
-    await storeItems(trx, projectId, pull.items);
+    // Items the owner forgot are not stored again, so they are not counted as kept
+    const kept = (await storeItems(trx, projectId, pull.items)).filter((id) => id !== null).length;
     await linkIssues(trx, projectId, number, pull.closes);
     const run = newRunId();
     await openRun(trx, {
@@ -118,7 +119,7 @@ export async function beginHarvest(
       sessionId: null,
       draftId: run,
     });
-    return { run, sources: pull.items.length };
+    return { run, sources: kept };
   });
 }
 

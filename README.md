@@ -22,7 +22,7 @@ The database is a single SQLite file on your machine.
 - **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from, and a decision counts as adopted only when you said so.
 - **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and up to five issues the body says it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
 - **Evidence found later.** `/sphica:glean` adds evidence and corrections to existing records. It asks you for the source (an issue URL, the file and line, meeting notes) before saving; a claim without one is kept only as unsourced and never used as fact.
-- **Forget what should not have been kept.** `/sphica:forget` removes the messages, pull request items, or file excerpts you pick, with their search entries and the bytes left in the database file, after you confirm in a dialog. Records that cited them are judged again and leave active when nothing else supports them.
+- **Forget what should not have been kept.** `/sphica:forget` removes the messages, pull request items, or file excerpts you pick, with their search entries and the bytes left in the database file, after you confirm in a dialog (if another session is reading the database, it asks you to run it again to finish clearing the bytes). Records that cited them are judged again and leave active when nothing else supports them; a record's own text stays as it was.
 - **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. Works in both Claude Code and Codex.
 - **Search in Japanese and English.** Records are made with search words in both languages, so a question in either language is more likely to find them.
 - **Reviews check past decisions.** `/sphica:review` runs a reviewer per focus (correctness, security, written conventions, and past decisions by default; redundancy with `full`), and checks the diff against the records it touches.
@@ -126,7 +126,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
   - authorization headers
   - `mysql -p`
 
-  **Anything else is stored as typed, so do not paste secrets into a session.** If one got in, remove it with `/sphica:forget` (Claude Code; the confirmation dialog it needs may not appear in Codex).
+  **Anything else is stored as typed, so do not paste secrets into a session.** If one got in, remove the source holding it with `/sphica:forget` (Claude Code; the confirmation dialog it needs may not appear in Codex). A record that repeated it keeps its own text.
 - **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, `sphica init` runs `gh api user` to read which GitHub account is yours, and `sphica doctor` runs `npm` and `claude` to check installed versions. `gh api` is always sent to github.com.
 - **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only your words, or those of the repository's owner or a maintainer, can adopt a decision.
 
@@ -161,7 +161,7 @@ codex plugin marketplace upgrade sphica
 codex plugin add sphica@sphica
 ```
 
-Restart open sessions afterwards.
+Restart open sessions afterwards. When an update changes the database (0.6.0 does), update the CLI first, then run `sphica init` once: it migrates the database in place and keeps your records. Until then Sphica says it is unavailable and tells you so. An older CLI cannot read the migrated database: if one still says to move it aside, update that CLI instead.
 
 ## Uninstalling
 

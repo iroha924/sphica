@@ -201,6 +201,12 @@ test("harvest: begin keeps the pull request as sources and context lists them wi
     const ctx = await contextText(db.ingest, begun.run, p, null);
     assert.match(ctx, /## s\d+ pr_body pr:3 by kai \(MEMBER\)[\s\S]*Keep notes out of CSV\./);
     assert.match(await saveText(db.ingest, begun.run, p, null, { units: [] }), /✓ saved/);
+    // tombstone: an item the owner forgot is not stored again, so it is not counted as kept
+    const body = Number(
+      (db.owner.prepare("select id from source where kind = 'pr_body'").get() as { id: number }).id,
+    );
+    await applyForget(db.file, p, [body], await previewForget(db.file, p, [body]));
+    assert.equal((await beginHarvest(db.ingest, p, 3, fakeGet)).sources, 0);
   } finally {
     await db.done();
   }

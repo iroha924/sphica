@@ -26,9 +26,11 @@ used when it was saved: a record left without support leaves active.
 
 Pass the repository root as `cwd` to every tool.
 
-1. **Find the sources** with `search` (`sources: true`), using words the owner gives: an identifier, a file path, the topic, not the secret itself.
-   `read s<id>` shows one. **Never repeat a secret in your replies**: describe each source by its ref, kind, and where it is (`s12`, a
-   message of 2026-09-20 in this project, `file:config.md` lines 1-3)
+1. **Find the sources** with `search` (`sources: true`), using words the text itself holds: an identifier, the topic, words around the secret, not
+   the secret itself. The index holds only the text, so a file path or a pull request number finds nothing: for a file excerpt or a pull
+   request item, `search` the records about it and `read` one; its evidence lists the `s<id>` it cites. `read s<id>` shows one source.
+   **Never repeat a secret in your replies**: describe each source by its ref, kind, and where it is (`s12`, a message of 2026-09-20 in
+   this project, `file:config.md` lines 1-3)
 2. **Confirm the list** with the owner (AskUserQuestion in Claude Code; in Codex, ask in the conversation and wait). Forget only what the owner picks
 3. **Preview**: `forget_preview` with the refs. It lists what will be removed, which records lose citations, and which leave active. Show it to the owner
 4. **Apply**: `forget_apply` with the same refs. The host shows the owner a dialog asking to type the number of sources; nothing is removed

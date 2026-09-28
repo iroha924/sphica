@@ -435,6 +435,11 @@ test("tombstone: harvest does not store an item the owner forgot, and stores it 
     assert.equal(db.owner.prepare("select count(*) as n from source where kind = 'pr_body'").get()?.n, 0);
     const edited = await storeItems(db.ingest, p, (await readPull(fake("Switch to pnpm. Edited."), 7)).items);
     assert.equal(typeof edited[0], "number");
+    // An edit's time is not in the REST response, so a revision after a forgotten one has no known time it became visible
+    assert.equal(
+      db.owner.prepare("select available_at from source where kind = 'pr_body'").get()?.available_at,
+      null,
+    );
     assert.equal(
       db.owner.prepare("select text from source where kind = 'pr_body'").get()?.text,
       "Switch to pnpm. Edited.",

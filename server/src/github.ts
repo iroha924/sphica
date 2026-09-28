@@ -443,7 +443,7 @@ export async function storeItems(
         url: it.url,
         created_at: created,
         // Only the first revision's time is known to be when it became visible; an edit's time is not in the REST response
-        available_at: latest ? null : created,
+        available_at: latest || lastForgotten ? null : created,
         captured_at: now,
         text: kept.body,
         truncated: kept.truncated ? 1 : 0,

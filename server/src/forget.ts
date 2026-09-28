@@ -221,6 +221,7 @@ export async function applyForget(
   projectId: number,
   ids: number[],
   confirmed: ForgetOutcome,
+  signal?: AbortSignal,
 ): Promise<{ outcome: ForgetOutcome; cleanup: Cleanup }> {
   const db = openWriter("forget", file);
   try {
@@ -235,14 +236,21 @@ export async function applyForget(
           throw new Error(
             "What these sources support changed after you confirmed. Nothing was forgotten; look at the preview again",
           );
+        // The call may be cancelled while this waits for the write lock: nothing is committed for a call nobody waits on
+        if (signal?.aborted) throw new Error("The call was cancelled, so nothing was forgotten");
         await sql`commit`.execute(c);
       } catch (e) {
         await sql`rollback`.execute(c).catch(() => {});
         throw e;
       }
-      await sql`insert into source_fts (source_fts) values ('optimize')`.execute(c);
-      const checkpoint = await sql<{ busy: number }>`pragma wal_checkpoint(TRUNCATE)`.execute(c);
-      return { outcome, cleanup: checkpoint.rows[0]?.busy === 0 ? "done" : "incomplete" };
+      // The sources are gone once committed: a cleanup that fails (a busy database) is reported as unfinished, never as a failed forget
+      try {
+        await sql`insert into source_fts (source_fts) values ('optimize')`.execute(c);
+        const checkpoint = await sql<{ busy: number }>`pragma wal_checkpoint(TRUNCATE)`.execute(c);
+        return { outcome, cleanup: checkpoint.rows[0]?.busy === 0 ? "done" : "incomplete" };
+      } catch {
+        return { outcome, cleanup: "incomplete" };
+      }
     });
   } finally {
     await db.destroy();
