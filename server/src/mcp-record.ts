@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // The record MCP server: the trace, harvest, and glean Skills write through it (the ingest connection). The read server (mcp.ts) stays
-// reader-only. Every write is bound to a run begin issued for one project and target; the record never names them.
+// reader-only. Every record write is bound to a run begin issued for one project and target; the record never names them. The forget
+// Skill's forget_apply is the one exception: it removes sources on the forget connection, only after the owner confirms in the host.
 // The project is the host's workspace: Claude Code's CLAUDE_PROJECT_DIR, or the session directory Codex puts in each call's _meta (it
 // starts this server in the plugin root). A cwd argument naming another project is refused, so text read in one project cannot steer a write into another.
 
@@ -8,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { Kysely } from "kysely";
 import { z } from "zod";
+import { dbFile } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import {
@@ -20,13 +22,14 @@ import {
   pendingText,
   saveText,
 } from "./extract.ts";
+import { applyForget, forgetText, previewForget } from "./forget.ts";
 import { framed } from "./frame.ts";
 import { gh, repoOf } from "./github.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, type Place, projectId, writePlace } from "./project.ts";
 import { requireRuntime } from "./sqlite.ts";
-import { head, reason } from "./text.ts";
+import { head, plural, reason } from "./text.ts";
 
 requireRuntime();
 let db: Kysely<DB> | null = null;
@@ -70,7 +73,7 @@ const server = new McpServer(
     // Asks Codex to name the session's directory in each call's _meta (hostWorkspace)
     capabilities: { experimental: { "codex/sandbox-state-meta": {} } },
     instructions: [
-      "Writes Sphica records for the trace, harvest, and glean Skills. Use these tools only while running one of those Skills.",
+      "Writes Sphica records for the trace, harvest, glean, and forget Skills. Use these tools only while running one of those Skills.",
       "Flow: begin (trace_begin, harvest_begin, or glean_begin) returns a run id; context shows what the run may cite; check the record; save it.",
       "Always pass the repository root as cwd.",
     ].join("\n"),
@@ -206,6 +209,91 @@ server.registerTool(
     tool(async () => {
       const p = await projectOf(a.cwd, extra._meta);
       return saveText(conn(), a.run, p.projectId, p.root, a.record);
+    }),
+);
+
+const SOURCES = z
+  .array(z.string().regex(/^s[1-9][0-9]{0,15}$/))
+  .min(1)
+  .max(50)
+  .describe("Sources to forget, as search and read show them (s12)");
+const idsOf = (refs: string[]) => refs.map((r) => Number(r.slice(1)));
+/** How long the owner has to answer the confirmation. The SDK's default request timeout (60 s) is too short for a person */
+const ANSWER_MS = 10 * 60 * 1000;
+
+server.registerTool(
+  "forget_preview",
+  {
+    title: "What forgetting sources would do",
+    description:
+      "Shows which sources would be removed and which records would lose citations or leave active. Changes nothing. Never shows the text.",
+    inputSchema: { sources: SOURCES, cwd: CWD },
+    annotations: READ,
+  },
+  async (a, extra) =>
+    tool(async () => {
+      const p = await projectOf(a.cwd, extra._meta);
+      return forgetText(await previewForget(dbFile(), p.projectId, idsOf(a.sources)));
+    }),
+);
+
+server.registerTool(
+  "forget_apply",
+  {
+    title: "Forget sources",
+    description:
+      "Asks the owner in the host to confirm by typing the number of sources, then removes them, their index entries, and the bytes left in the file, and judges the records that cited them again. Nothing is removed without that answer.",
+    inputSchema: { sources: SOURCES, cwd: CWD },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  async (a, extra) =>
+    tool(async () => {
+      const p = await projectOf(a.cwd, extra._meta);
+      const ids = idsOf(a.sources);
+      const seen = await previewForget(dbFile(), p.projectId, ids);
+      const n = seen.sources.length;
+      // Only the cleanup runs for ids forgotten earlier: nothing left to confirm
+      if (n > 0) {
+        // The model cannot answer this: the host shows it to the person. Anything but a matching typed count stops here
+        const refused = (why: string) => new Error(`${why}, so nothing was forgotten`);
+        if (!server.server.getClientCapabilities()?.elicitation)
+          throw refused("This host cannot ask you directly (run /sphica:forget in Claude Code)");
+        let answer: Awaited<ReturnType<typeof server.server.elicitInput>>;
+        try {
+          answer = await server.server.elicitInput(
+            {
+              mode: "form",
+              message: `Forget ${plural(n, "source")} for good?\n${forgetText(seen)}`,
+              requestedSchema: {
+                type: "object",
+                properties: {
+                  confirm: {
+                    type: "string",
+                    title: "Number of sources",
+                    description: `Type ${n} to forget ${plural(n, "source")}`,
+                  },
+                },
+                required: ["confirm"],
+              },
+            },
+            { timeout: ANSWER_MS },
+          );
+        } catch (e) {
+          throw refused(`The confirmation did not come back (${head(reason(e), 200)})`);
+        }
+        if (answer.action !== "accept")
+          throw refused(`You ${answer.action === "decline" ? "declined" : "cancelled"}`);
+        if (String(answer.content?.confirm ?? "").trim() !== String(n))
+          throw refused(`The number typed does not match ${n}`);
+      }
+      const done = await applyForget(dbFile(), p.projectId, ids, seen);
+      return [
+        n ? `Forgot ${plural(n, "source")}.` : "Nothing new to forget.",
+        forgetText(done.outcome),
+        done.cleanup === "done"
+          ? "The deleted text was cleared from the database file."
+          : "Another session is reading the database, so the deleted text may stay in the file until you run forget_apply with the same sources again.",
+      ].join("\n");
     }),
 );
 

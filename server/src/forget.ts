@@ -6,7 +6,9 @@ import { type Kysely, sql } from "kysely";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
+import { inline } from "./panel.ts";
 import { ACTIVATION } from "./record.ts";
+import { plural } from "./text.ts";
 
 export type ForgetOutcome = {
   /** Sources that will be (or were) removed. No text: the preview must not show the words being forgotten */
@@ -243,4 +245,25 @@ export async function applyForget(
   } finally {
     await db.destroy();
   }
+}
+
+/** The preview and the result in words, without the forgotten text (it would be copied into the session the owner wants it gone from). */
+export function forgetText(o: ForgetOutcome): string {
+  const lines = o.sources.map(
+    (s) => `- s${s.id} ${s.kind} in ${inline(s.artifact).slice(0, 120)} (${plural(s.bytes, "byte")})`,
+  );
+  if (o.already.length)
+    lines.push(
+      `- already forgotten: ${o.already.map((id) => `s${id}`).join(", ")} (only the cleanup runs again)`,
+    );
+  for (const u of o.units) {
+    const change = u.before === u.after ? `stays ${u.after}` : `${u.before} → ${u.after}`;
+    lines.push(`- record ${inline(u.key).slice(0, 120)}: ${change}, loses ${plural(u.removed, "citation")}`);
+  }
+  if (o.references)
+    lines.push(`- ${plural(o.references, "unfetched reference")} the forgotten messages gave`);
+  if (o.units.length)
+    lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
+  lines.push("Copies outside the database (capture's waiting and set-aside files, backups) are not touched.");
+  return lines.join("\n");
 }

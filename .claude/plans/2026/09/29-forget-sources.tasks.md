@@ -104,13 +104,14 @@ revision 1 の DB を記録を失わずに revision 2 へ上げられるよう�
 
 Claude Code と Codex から、人の確認付きで削除を呼べるようにする。
 
-- [ ] T06: record サーバーの `forget_preview` と `forget_apply`、elicitation での確認
+- [x] T06: record サーバーの `forget_preview` と `forget_apply`、elicitation での確認
   - 種別: 追加
   - 計画: S6
   - 依存: T04（plan と apply が要る）
-  - 変更: `server/src/mcp-record.ts`, `server/test/plugin.test.ts`
+  - 変更: `server/src/mcp-record.ts`, `server/test/plugin.test.ts`, `server/src/forget.ts`
   - 完了条件: `cd server && node --test test/plugin.test.ts` → 件数の一致で消え、フォーム非対応・decline・cancel・不一致・エラーでは何も書かないテストと、ツール一覧のテストが通る
   - コミット: `feat(mcp): add forget_preview and forget_apply with a confirmation the owner types`
+  - 結果: `node --test test/plugin.test.ts` → pass 26（ツール一覧、preview と確認文に本文が出ない、elicitation 非対応・件数の不一致・decline では消えない、件数が合えば消える、空の elicitation 宣言は SDK 1.30 がフォーム対応と読み件数が合えば消える）。`bun run verify` → exit 0。cancel と elicitInput の失敗は未テスト（decline と同じ分岐、失敗は catch で止まる）
 
 - [ ] T07: `/sphica:forget` Skill と受け入れケース
   - 種別: 追加
@@ -130,3 +131,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T04 / 変更欄を実際に合わせた（前: forget.ts, forget.test.ts, sql-call-sites.mjs。後: forget.ts, forget.test.ts, record.ts, schema.sql, 0002.sql, db-types.ts）。台帳は変更不要だった。ACTIVATION を record.ts から export して共有 / source_forgotten の unique は、A→B→A と編集された項目の同じハッシュの 2 revision を両方消すと衝突するので、通常の索引に変えた（未リリースの schema と移行 SQL を同じ形に直した）
 2026-09-29 / T10 / Codex の T03 レビュー F1・F3・F4（再現済み）を採用し修正タスク T10 を足した。F2（ingest が forget_id 付きの unit_state を書ける）は見送り: authorizer には値が見えず、ingest は run_id 付きなら unit_state を元々書ける。authorizer はコードの書き間違いを止める粗い防御で、forget_id を書くのは forget.ts の固定の SQL だけ / T09 のレビューは指摘なし
 2026-09-29 / T05 / capture の墓標テストは T01 で schema.test.ts に入っていた。Codex の T04 レビュー F1（A3 の `--test-name-pattern=bytes` に一致するテストが無く空振りする、再現済み）を採用 / 変更欄を直した（前: capture.test.ts、後: schema.test.ts と forget.test.ts）。テスト名に bytes と tombstone を入れた
+2026-09-29 / T06 / preview と確認の文面を作る forgetText を forget.ts に置いた / 変更欄に forget.ts を足した

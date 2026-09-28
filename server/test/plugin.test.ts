@@ -6,8 +6,9 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   compareVersions,
   differingFiles,
@@ -19,7 +20,7 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
-import { project, tempDb } from "./temp-db.ts";
+import { message, project, tempDb } from "./temp-db.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const REPO_PLUGIN = path.join(SRC, "..", "..", "plugin");
@@ -461,7 +462,7 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
 });
 
 // The record server carries the Skills' write steps; its tools and text stay within the host limits too
-test("the record MCP server starts without a database and lists the trace, harvest, and glean tools", async () => {
+test("the record MCP server starts without a database and lists the trace, harvest, glean, and forget tools", async () => {
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StdioClientTransport({
@@ -475,6 +476,8 @@ test("the record MCP server starts without a database and lists the trace, harve
     assert.ok([...(client.getInstructions() ?? "")].length <= 2048);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
+      "forget_apply",
+      "forget_preview",
       "glean_begin",
       "glean_fetch",
       "harvest_begin",
@@ -564,5 +567,94 @@ test("the response fits the limit even with a long unregistered project name", a
   } finally {
     await client.close();
     await db.done();
+  }
+});
+
+// The model calls forget_apply, but only the person's answer in the host removes anything
+test("forget_apply removes sources only when the owner types the count in the host's confirmation", async () => {
+  const db = tempDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-forget-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/f.git"], { cwd: dir });
+  const p = project(db, "git:github.com/o/f", "o/f");
+  const secret = "zq-secret-token-91";
+  const ids = [1, 2, 3, 4, 5].map((i) =>
+    message(db, p, { id: `m${i}`, text: `token ${secret} number ${i}` }),
+  );
+  const left = () => Number(db.owner.prepare("select count(*) as n from source").get()?.n);
+  const connect = async (options: ClientOptions, answer?: (message: string) => unknown) => {
+    const client = new Client({ name: "test", version: "0" }, options);
+    if (answer)
+      client.setRequestHandler(ElicitRequestSchema, async (r) => answer(String(r.params.message)) as never);
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(SRC, "mcp-record.ts")],
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: "/nonexistent",
+          SPHICA_DB: db.file,
+          CLAUDE_PROJECT_DIR: dir,
+        },
+        stderr: "ignore",
+      }),
+    );
+    return client;
+  };
+  const call = async (client: Client, name: string, sources: number[]) => {
+    const r = await client.callTool({
+      name,
+      arguments: { sources: sources.map((id) => `s${id}`), cwd: dir },
+    });
+    return { error: r.isError === true, text: (r.content as { text: string }[])[0]?.text ?? "" };
+  };
+  const form = { capabilities: { elicitation: { form: {} } } };
+  let asked = "";
+  const typing =
+    (typed: string, action = "accept") =>
+    (m: string) => {
+      asked = m;
+      return { action, content: { confirm: typed } };
+    };
+  const clients: Client[] = [];
+  try {
+    const plain = await connect({});
+    clients.push(plain);
+    const preview = await call(plain, "forget_preview", [ids[0] as number]);
+    assert.equal(preview.error, false, preview.text);
+    assert.match(preview.text, /s\d+ session_message/);
+    assert.doesNotMatch(preview.text, new RegExp(secret));
+    const unasked = await call(plain, "forget_apply", [ids[0] as number]);
+    assert.match(unasked.text, /cannot ask you directly.*nothing was forgotten/);
+    const wrong = await connect(form, typing("2"));
+    clients.push(wrong);
+    assert.match(
+      (await call(wrong, "forget_apply", [ids[0] as number])).text,
+      /does not match 1, so nothing was forgotten/,
+    );
+    assert.doesNotMatch(asked, new RegExp(secret), "the confirmation does not show the text either");
+    const declined = await connect(form, typing("1", "decline"));
+    clients.push(declined);
+    assert.match(
+      (await call(declined, "forget_apply", [ids[0] as number])).text,
+      /declined, so nothing was forgotten/,
+    );
+    assert.equal(left(), 5);
+    const owner = await connect(form, typing("2"));
+    clients.push(owner);
+    const done = await call(owner, "forget_apply", [ids[0] as number, ids[1] as number]);
+    assert.equal(done.error, false, done.text);
+    assert.match(done.text, /Forgot 2 sources/);
+    assert.equal(left(), 3);
+    // An empty elicitation capability means form support (the MCP specification, and SDK 1.30 reads it so)
+    const bare = await connect({ capabilities: { elicitation: {} } }, typing("1"));
+    clients.push(bare);
+    const r = await call(bare, "forget_apply", [ids[2] as number]);
+    assert.equal(r.error, false, r.text);
+    assert.equal(left(), 2);
+  } finally {
+    for (const c of clients) await c.close();
+    await db.done();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
