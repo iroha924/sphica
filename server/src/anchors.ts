@@ -49,10 +49,14 @@ export function masksSymbol(root: string | null, rel: string, symbol: string): b
   if (raw === 0) return false;
   const masked = mask(text);
   const holes = placeholderRanges(masked);
-  const kept = [...masked.matchAll(re)].filter(
-    (m) => !holes.some(([a, b]) => m.index < b && m.index + symbol.length > a),
-  );
-  return kept.length !== raw;
+  // Matches and placeholders both run in order, so one pass pairs them
+  let h = 0;
+  let kept = 0;
+  for (const m of masked.matchAll(re)) {
+    while ((holes[h]?.[1] ?? Number.POSITIVE_INFINITY) <= m.index) h++;
+    if (!((holes[h]?.[0] ?? Number.POSITIVE_INFINITY) < m.index + symbol.length)) kept++;
+  }
+  return kept !== raw;
 }
 
 /**

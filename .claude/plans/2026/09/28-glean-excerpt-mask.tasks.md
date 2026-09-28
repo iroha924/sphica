@@ -130,6 +130,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): count whole names and keep the path when a symbol is masked (T11, T12)`
   - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 315 件 pass、`bun run verify` → exit 0。Sphica 自身の text.ts で `sql`・`word`・`mask` は通るようになった。`what` はまだ伏せ字に飲まれる（行をまたぐ伏せ字の中にある）が、anchor はパスで残るので配信は止まらない
 
+- [x] T13: symbol を外した anchor を重複させず、masksSymbol の突き合わせを線形にする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T12（直す対象の path だけの anchor と masksSymbol）
+  - 変更: `server/src/anchors.ts`, `server/src/record.ts`, `server/test/record.test.ts`
+  - red: テストの期待を重複のない形に直し、2 MB の毎行伏せ字のファイルで masksSymbol を 1 秒以内に求めるテストを足して、直す前のコードで `node --test test/record.test.ts` → path だけの行が 4 件保存されて fail、masksSymbol が 5.8 秒かかって fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): keep one path-only anchor and pair placeholders in one pass (T13)`
+  - 結果: red は上のとおり fail。直した後 `node --test test/record.test.ts` → 15 件 pass、`bun run --cwd server test` → 316 件 pass、`bun run verify` → exit 0
+
 - [x] T11: README の秘密情報の項目に、glean が引いたファイルの行も伏せ字になることを書く
   - 種別: 変更
   - 計画: S5
@@ -170,3 +180,5 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T10 / T09（320a447）の Codex レビュー F1（再現済み）: 保存時の locate は検査の後にファイルを読み直すので、その間に symbol の行が秘密鍵の中に入ると、T09 で消した分岐が守っていた抜粋が残る / 採用。修正タスク T10 で分岐を戻した
 - 2026-09-28 / 全体 / 全差分（main..320a447）の Codex レビュー F1: 2 MiB を超えるファイルは読まないので、秘密の値の symbol が検査をすり抜ける。F2（再現済み）: commit を指定した anchor で、その commit では秘密で作業ツリーでは秘密でない値の symbol が通る / 見送り。レビューのたびに symbol の周りから珍しい入力が 1〜2 件ずつ出て収束しないため、持ち主に選択肢を示し「絞って終える」を受けた。どちらもエージェントが秘密そのものを symbol に選んだうえでの珍しい条件。PR 本文の見送った指摘に書く。Codex の追加ラウンドはせず、review-shipping だけ回す
 - 2026-09-28 / T12 / review-shipping（d4e5bc4）: masksSymbol が部分文字列で数えるため、`local` や `what` のような普通の識別子が、伏せ字の中の文字列に当たって秘密と判定され、trace・harvest で anchor ごと外れる。秘密は漏れないが配信が止まる / 採用（自分の修正が生んだもの）。修正タスク T12: 識別子全体で数え、trace・harvest では symbol だけを外してパスの anchor は残す
+
+- 2026-09-28 / T13 / review-shipping（88817d0）: symbol を外した anchor が同じ path と role で重複して保存され、replace_anchor がどれも指せない（再現済み。T12 のテストがその重複を期待していた）。masksSymbol が一致と目印の全組を突き合わせて 2 MiB で約 1.9 秒 / 採用（自分の修正が生んだもの）。修正タスク T13

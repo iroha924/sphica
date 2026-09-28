@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { locate } from "../src/anchors.ts";
+import { locate, masksSymbol } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
 import { checkRecord, repoPath, saveRecord, type Target } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
@@ -108,10 +108,10 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
       symbol: string | null;
       excerpt: string | null;
     }[];
-    // Anchors whose symbol masking swallows keep their path, so the record is still delivered, without the symbol
+    // Anchors whose symbol masking swallows keep their path, so the record is still delivered, once: identical rows could not be told apart
     assert.deepEqual(
       all.map((a) => a.symbol),
-      ["apiKey", null, "configMarker", null, null, null, "local"],
+      ["apiKey", null, "configMarker", "local"],
     );
     assert.ok(all.every((a) => a.path === "config.ts"));
     const got = all.filter((a) => a.symbol);
@@ -121,6 +121,19 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
     assert.equal(got[1]?.excerpt, "[redacted]");
   } finally {
     await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A file masked on every line must not make the symbol check pair every match with every placeholder
+test("masksSymbol stays fast on a large file masked on every line", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-masks-"));
+  try {
+    fs.writeFileSync(path.join(root, "big.ts"), "API_KEY=abc123def456 // loadConfig\n".repeat(55_000));
+    const started = performance.now();
+    assert.equal(masksSymbol(root, "big.ts", "loadConfig"), false);
+    assert.ok(performance.now() - started < 1000, `took ${Math.round(performance.now() - started)} ms`);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

@@ -356,6 +356,12 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
                 .executeTakeFirst()
             )?.id ?? null)
           : null;
+      // Two identical path-only anchors could not be told apart by replace_anchor
+      if (
+        !symbol &&
+        anchors.some((x) => !x.symbol && x.path === p && x.role === a.role && x.commit === commit)
+      )
+        continue;
       anchors.push({ ...a, symbol, commit, path: p, observation });
     }
 
