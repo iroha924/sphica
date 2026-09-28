@@ -908,3 +908,32 @@ test("session start tells about sessions waiting to be traced, once a day, even 
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// The notice names trace the way the host starts Skills, and a headless run neither sees it nor uses up the day's notice
+test("the waiting-sessions notice follows the host and is kept for the owner's sessions", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m", text: "untraced", session: "s1" });
+    const start = (host: "claude-code" | "codex") =>
+      deliver(
+        { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+        host,
+        db.file,
+      );
+    process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+    try {
+      assert.doesNotMatch(await start("claude-code"), /waiting to be traced/, "a headless run is not told");
+    } finally {
+      delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    }
+    assert.equal(
+      (await start("codex")).split("\n").at(-1),
+      "- 1 session waiting to be traced: run $sphica:trace pending.",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

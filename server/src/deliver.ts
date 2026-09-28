@@ -411,22 +411,29 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
 }
 
 /**
- * Records grow only when the owner traces, so session start says when sessions wait: at most once a day per database and project
- * (a mark that cannot be written shows it again rather than hiding it).
+ * Records grow only when the owner traces, so session start says when sessions wait: in the owner's own sessions only (a headless run
+ * would use up the notice), at most once a local day per database and project (a mark that cannot be written shows it again).
  */
-async function waiting(db: Kysely<DB>, projectId: number, file: string, key: string): Promise<string> {
+async function waiting(
+  db: Kysely<DB>,
+  projectId: number,
+  place: { file: string; key: string; host: Host; owner: boolean },
+): Promise<string> {
+  if (!place.owner) return "";
   const n = await pendingCount(db, projectId);
   if (!n) return "";
-  const day = new Date().toISOString().slice(0, 10);
-  if (!markOnce("pending", `${path.resolve(file)}\0${key}\0${day}`)) return "";
-  return `- ${n} session${n === 1 ? "" : "s"} waiting to be traced: run /sphica:trace pending.`;
+  const day = new Date().toLocaleDateString("sv-SE");
+  if (!markOnce("pending", `${path.resolve(place.file)}\0${place.key}\0${day}`)) return "";
+  // Codex starts plugin Skills as $plugin:skill
+  const trace = place.host === "codex" ? "$sphica:trace" : "/sphica:trace";
+  return `- ${n} session${n === 1 ? "" : "s"} waiting to be traced: run ${trace} pending.`;
 }
 
 async function atStart(
   db: Kysely<DB>,
   projectId: number,
   branch: string | null,
-  place: { file: string; key: string },
+  place: { file: string; key: string; host: Host; owner: boolean },
 ): Promise<Plan> {
   const current = db
     .selectFrom("work")
@@ -478,11 +485,7 @@ async function atStart(
   const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
   const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    ...noted(f.text, lead, [
-      leftOut(broadLeft),
-      workLeftOut(workLeft),
-      await waiting(db, projectId, place.file, place.key),
-    ]),
+    ...noted(f.text, lead, [leftOut(broadLeft), workLeftOut(workLeft), await waiting(db, projectId, place)]),
     units: shownUnits,
     eligible: (workTotal ?? 0) + (broadTotal ?? 0),
     omitted: workLeft + broadLeft,
@@ -698,7 +701,17 @@ export async function deliver(
             ? await onPrompt(db, pid, input.prompt ?? "")
             : call
               ? await beforeReview(db, pid, place.root, call)
-              : await atStart(db, pid, branchOf(place.root), { file, key: place.key });
+              : await atStart(db, pid, branchOf(place.root), {
+                  file,
+                  key: place.key,
+                  host,
+                  owner: isOwnerTurn(
+                    input,
+                    undefined,
+                    undefined,
+                    host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                  ),
+                });
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
     await log(
       file,

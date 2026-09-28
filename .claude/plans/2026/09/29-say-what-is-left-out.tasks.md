@@ -118,6 +118,16 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
   - コミット: `feat(deliver): tell at session start when sessions wait to be traced, once a day`
   - 結果: 実装前 `node --test --test-name-pattern="waiting to be traced" test/deliver.test.ts` → 失敗（行が無い）。実装後 `node --test test/deliver.test.ts test/status.test.ts` → pass 19 / fail 0（無いと出ない、trace 待ちだけでも lead と行が出る、25 件で 25、同じ日の 2 回目は出ない）。typecheck・lint → 0、`sql:reach` 157 / 157、architecture → 通過
 
+- [x] T11: trace 待ちの行を host の書き方にし、本人のセッションでだけ出して地方時の日付で 1 日 1 回にする
+  - 種別: 修正
+  - 計画: S5
+  - 依存: なし
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → Codex のセッション開始で `/sphica:trace` と出て落ちる。人のいないセッションが先に印を使い、本人のセッションに出なくて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 全部 pass
+  - コミット: `fix(deliver): name trace the host's way and keep the daily notice for the owner's sessions`
+  - 結果: red（直す前）`node --test test/deliver.test.ts` → 人のいないセッション（`CLAUDE_CODE_ENTRYPOINT=sdk-cli`）に `/sphica:trace pending` の行が出て失敗。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts test/review-bridge.test.ts` → pass 31 / fail 0（人のいないセッションには出ず印も使わない、その後の Codex の本人のセッションに `$sphica:trace pending` と出る）。typecheck → 0
+
 ## P4: acceptance
 
 - [x] T06: 検索の上限と配信の省略の acceptance case を足す
@@ -139,3 +149,4 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 2026-09-29 / T06 / 検索の上限の acceptance case は、200 件を超える記録を cases.json に並べることになり量が見合わない。W4 は実 SQLite の単体テスト（search.test.ts）と MCP のテスト（plugin.test.ts）で押さえた / 配信の注記の case（injection-10）だけを足し、層ごとの件数のテスト（acceptance-cases.test.ts）の injection を 9 → 10 にした。変更欄に `server/test/acceptance-cases.test.ts` を足した（前: `server/evals/acceptance/cases.json`）
 2026-09-29 / T09 / 6e1108c（T07）の Codex レビュー 4 件: 上限付近で候補が消えると stopped が false（F1）、順番の後に記録の状態やアンカーが変わると絞り込みに合わない記録を返す（F2）、同じ rank の並びが中身を引いた順（F4）は採用。上限に達した後の残りが消えていても stopped が true（F3）は見送り（「まだあるかも」と言うだけで害が無い）。220309b（T08）の 1 件（ログが書かれなくても通る検査）は採用。34a0d92（T05）の 1 件（resume では trace 待ちの通知が出ない）は見送り（resume は開始の配信ごと出さない今の決まりで、通知は次の新しいセッションで出る） / 修正タスク T09 を足した。F4 は今の SQLite が id 順で返すので red は作れない
 2026-09-29 / T10 / f6bd4fe（T09）の Codex レビュー 3 件: 中身を引いてから判定までに状態が変わると絞り込みに合わない記録が混じる（F1）と、検索の途中で FTS が変わると最後の並びが変わる（F2）は見送り（1 つのスナップショットで読むには reader の権限を広げる必要があり、起きても一瞬の競合で並びや過去の記録が 1 件違うだけ）。削除のテストが削除なしでも通る（F3）は採用。main..f6bd4fe の全差分のレビューは指摘なし / T10 を足して終えた
+2026-09-29 / T11 / review-shipping（f6bd4fe）の 2 件: Codex のセッション開始にも `/sphica:trace pending` と出る（Codex は `$sphica:trace`）、`claude -p` や `codex exec` のような人のいないセッションが 1 日 1 回の印を先に使う（日付も UTC で、日本では朝 9 時に切り替わる）。2 件とも採用 / 修正タスク T11 を足した
