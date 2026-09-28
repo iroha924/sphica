@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { isPackageInput, releaseKind, withoutReleaseVersion } from "./lib/release-scope.mjs";
+import { observe, settingsState } from "./lib/repo-settings.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const { base, json } = parseArgs({
@@ -66,6 +67,26 @@ const actions =
         "bun run release:status",
         "update the Claude and Codex plugin caches and restart sessions",
       ];
+// A release relies on settings only an admin can read (release.yml's GITHUB_TOKEN cannot); read them with the owner's gh
+const gh = (args) =>
+  execFileSync("gh", args, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30_000,
+  });
+let repo = null;
+try {
+  repo = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).trim();
+} catch {}
+const unseen = { status: null, body: null };
+const settings =
+  kind === "none"
+    ? []
+    : settingsState({
+        immutable: repo ? observe(gh, `repos/${repo}/immutable-releases`) : unseen,
+        actions: repo ? observe(gh, `repos/${repo}/actions/permissions`) : unseen,
+      });
 const plan = {
   base: ref,
   commit: git("rev-parse", "HEAD"),
@@ -78,6 +99,7 @@ const plan = {
     marketplace: marketplaceVersion,
   },
   actions,
+  settings,
 };
 
 if (json) {
@@ -91,4 +113,7 @@ if (json) {
   );
   if (files.length) console.log(`inputs: ${files.join(", ")}`);
   for (const action of actions) console.log(`  ${action}`);
+  for (const { name, state } of settings)
+    console.log(`${state === "on" ? "" : "fix before releasing: "}${name}: ${state}`);
 }
+if (settings.some(({ state }) => state !== "on")) process.exitCode = 1;

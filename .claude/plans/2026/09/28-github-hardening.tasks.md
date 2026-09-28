@@ -63,13 +63,14 @@ base: main
   - コミット: `feat(release): require a completed Codex review with no open threads on the head`
   - 結果: `node --test test/release-gate.test.ts test/release-gate-cli.test.ts` → 13 pass / 0 fail（要約なし・別の作者・type User・2 件・別の head・running・JSON の破損・未解決 1 件・isResolved 欠落で止め、CLI も running で exit 1）。PR #183 の本物のコメントとスレッドで判定を流し、head 8f892dc は問題 0 件、古い head f772ff3 は「tag commit のものではない」で止まった
 
-- [ ] T05: immutable releases と SHA 固定の強制を有効にし、release:plan と release:status で確かめる
+- [x] T05: immutable releases と SHA 固定の強制を有効にし、release:plan と release:status で確かめる
   - 種別: 追加
   - 計画: S4, S7
   - 依存: なし
   - 変更: `scripts/lib/repo-settings.mjs`, `scripts/lib/repo-settings.d.mts`, `scripts/release-plan.mjs`, `scripts/release-status.mjs`, `server/test/repo-settings.test.ts`
   - 完了条件: `bun run test` → 200・404・それ以外、true・false の全分岐の検査を含めて通る。持ち主のトークンで両設定を有効にした後 `bun run release:status` → 両方とも有効と表示
   - コミット: `feat(release): check immutable releases and SHA pinning from release:plan and release:status`
+  - 結果: 有効にする前の `bun run release:plan -- --base v0.5.5` と `bun run release:status` → 両設定とも off と表示して exit 1。`rg` で全 44 件の `uses:` が完全な SHA と確認してから `gh api -X PUT` で両設定を有効にし（204）、読み直して `{"enabled":true}` と `sha_pinning_required:true`。`bun run release:status` → 両方とも on。`bun run test` → 307 pass / 0 fail
 
 - [ ] T06: pr-body のジョブ名を verification-section にし、各ジョブに上限の時間を付ける
   - 種別: 変更
@@ -83,3 +84,5 @@ base: main
 
 - 2026-09-28 / - / 持ち主の指示で、.claude/plans の他の plan と tasks（27-claude-bash-delivery、27-eval-structured-grading、28-bind-github-owner、28-confirm-before-override、28-release-automation）を最初のコミットで削除する。ほかのファイルからの参照は 0 件（rg で確認）
 - 2026-09-28 / T04 / release-gate の CLI テストの偽の gh も新しい API に答える必要があり、release.yml の関門の説明コメントも古くなった / 変更欄に release-gate-cli.test.ts と release.yml を足した
+- 2026-09-28 / T02 のレビュー / F1（`<!-->` や途中に `--` を含む並びは GFM ではコメントにならず表示されるのに、参照を落とす。Codex が再現）は見送り: plan の「結び付きを落とす方向は安全」の範囲で、起きるのは結び付きの欠落だけ
+- 2026-09-28 / T05 / immutable releases の GET は、無効でも 404 ではなく 200 で `enabled:false` を返した（docs の 404 と違う） / 両方を off として扱うようにした
