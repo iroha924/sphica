@@ -524,6 +524,9 @@ function lock(): (() => void) | null {
 }
 
 const BATCH = 500;
+/** How long one send keeps going. Checked only between batches, so a batch can run past it (SQLite's busy wait, the one-by-one resend). */
+const FLUSH_BUDGET_MS = 30_000; // the detached send; far under the 5-minute stale lock
+export const TOOL_FLUSH_BUDGET_MS = 2_000; // sends an MCP tool waits for
 // Keep the number of variables per statement well below SQLite's limit (32,766). Messages have 11 columns.
 const ROWS = 1000;
 const chunks = <T>(xs: T[], n = ROWS): T[][] =>
@@ -640,119 +643,157 @@ export async function write(
 const REJECTED = new Set([18, 19, 20, 25]);
 const rejected = (e: unknown): boolean => REJECTED.has(sqliteCode(e) ?? -1);
 
+/** Queued records in `from`, oldest first (names start with the time they were stored). */
+const queued = (from: string): { name: string; from: string }[] => {
+  try {
+    return fs
+      .readdirSync(from)
+      .filter((f) => f.endsWith(".json") && !f.startsWith("."))
+      .sort()
+      .map((name) => ({ name, from }));
+  } catch {
+    return []; // not there yet
+  }
+};
+
+/**
+ * Sends one batch. Records of unregistered projects are moved to unregistered/, records the database rejects to rejected/, the rest deleted.
+ * **One invalid record never stops later records.** When the batch fails on a bad value it resends one by one.
+ */
+async function sendBatch(
+  db: Kysely<DB>,
+  names: { name: string; from: string }[],
+): Promise<{ sent: number; rejected: number }> {
+  const held = unregisteredDir();
+  const records: { name: string; from: string; r: Spooled }[] = [];
+  for (const { name, from } of names) {
+    let r: Spooled | null;
+    try {
+      r = current(JSON.parse(fs.readFileSync(path.join(from, name), "utf8")));
+    } catch {
+      // Unreadable or of an unknown version: set it aside for the owner to see, never delete it
+      fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
+      fs.renameSync(path.join(from, name), path.join(rejectedDir(), name));
+      continue;
+    }
+    if (r) records.push({ name, from, r });
+    else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are no longer kept
+  }
+  const projects = new Map(
+    (
+      await db
+        .selectFrom("project")
+        .select(["id", "key", "name"])
+        .where("key", "in", [...new Set(records.map((x) => x.r.project))])
+        .execute()
+    ).map((p) => [p.key, { id: p.id, name: p.name }]),
+  );
+  const known = records.filter((x) => projects.has(x.r.project));
+  const strayed = records.filter((x) => !projects.has(x.r.project));
+
+  let sent = 0;
+  const bad: { name: string; from: string; r: Spooled }[] = [];
+  try {
+    sent = await write(
+      db,
+      known.map((x) => x.r),
+      projects,
+    );
+  } catch (e) {
+    if (!rejected(e)) throw e;
+    // One at a time
+    for (const x of known) {
+      try {
+        sent += await write(db, [x.r], projects);
+      } catch (e2) {
+        if (!rejected(e2)) throw e2;
+        bad.push(x);
+      }
+    }
+  }
+  if (bad.length) {
+    fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
+    for (const x of bad) {
+      try {
+        fs.renameSync(path.join(x.from, x.name), path.join(rejectedDir(), x.name));
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; // a concurrent send moved it first
+      }
+    }
+  }
+  if (strayed.length) {
+    fs.mkdirSync(held, { recursive: true, mode: 0o700 });
+    for (const x of strayed) {
+      if (x.from === held) continue; // already set aside
+      try {
+        fs.renameSync(path.join(x.from, x.name), path.join(held, x.name));
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; // a concurrent send moved it first
+      }
+    }
+  }
+  const moved = new Set([...bad, ...strayed].map((x) => x.name));
+  for (const x of records) if (!moved.has(x.name)) fs.rmSync(path.join(x.from, x.name), { force: true });
+  return { sent, rejected: bad.length };
+}
+
 /**
  * Sends the queue to the database. **The connection is capture (append only).** Sending the same thing twice adds no rows.
- * Records of unregistered projects are dropped (only projects registered with `sphica init` are recorded).
- * **One invalid record never stops later records.** When a batch fails on a bad value it resends one by one and moves only the failed records
- * to rejected/ (never deleting them). Failures such as a lost connection keep the whole batch queued for the next send.
+ * Records of unregistered projects are held (only projects registered with `sphica init` are recorded); the first lock hold looks at
+ * the held records present when it starts once, so they never take the place of queued records. The queue is then sent in batches
+ * until it is empty or `budgetMs` is spent. After unlocking it looks again, so records queued by a send that found the lock taken are not left.
+ * Failures such as a lost connection keep the batch queued for the next send.
  *
- * sent is the number of new messages (resent ones are not counted). busy means another send was running and nothing was done.
+ * sent is the number of new messages (resent ones are not counted), deferred the held records left. busy means another send was running.
  */
 export async function flush(
   file: string = dbFile(),
+  budgetMs: number = FLUSH_BUDGET_MS,
 ): Promise<{ sent: number; deferred: number; rejected: number; busy?: boolean }> {
-  const unlock = lock();
-  if (!unlock) return { sent: 0, deferred: 0, rejected: 0, busy: true };
+  const deadline = Date.now() + budgetMs;
   const dir = spoolDir();
-  let client: Kysely<DB> | null = null;
-  try {
-    // Read the set-aside records too. After the project is registered, the next send puts them in.
-    const held = unregisteredDir();
-    const list = (from: string) => {
-      try {
-        return fs
-          .readdirSync(from)
-          .filter((f) => f.endsWith(".json") && !f.startsWith("."))
-          .map((name) => ({ name, from }));
-      } catch {
-        return []; // not there yet
-      }
+  const held = unregisteredDir();
+  const total = { sent: 0, deferred: 0, rejected: 0 };
+  let batches = 0;
+  for (let first = true; ; first = false) {
+    const unlock = lock();
+    if (!unlock) return first ? { ...total, busy: true } : total;
+    let client: Kysely<DB> | null = null;
+    const send = async (names: { name: string; from: string }[]) => {
+      // Checks the generation only (db-write.ts): a revision change within a generation never stops recording.
+      client ??= openWriter("capture", file);
+      const r = await sendBatch(client, names);
+      total.sent += r.sent;
+      total.rejected += r.rejected;
+      batches++;
     };
-    const names = [...list(dir), ...list(held)]
-      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-      .slice(0, BATCH);
-    if (names.length === 0) return { sent: 0, deferred: 0, rejected: 0 };
-    const records: { name: string; from: string; r: Spooled }[] = [];
-    for (const { name, from } of names) {
-      let r: Spooled | null;
-      try {
-        r = current(JSON.parse(fs.readFileSync(path.join(from, name), "utf8")));
-      } catch {
-        // Unreadable or of an unknown version: set it aside for the owner to see, never delete it
-        fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
-        fs.renameSync(path.join(from, name), path.join(rejectedDir(), name));
-        continue;
-      }
-      if (r) records.push({ name, from, r });
-      else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are no longer kept
-    }
-    // Checks the generation only (db-write.ts): a revision change within a generation never stops recording.
-    const db = openWriter("capture", file);
-    client = db;
-    const projects = new Map(
-      (
-        await db
-          .selectFrom("project")
-          .select(["id", "key", "name"])
-          .where("key", "in", [...new Set(records.map((x) => x.r.project))])
-          .execute()
-      ).map((p) => [p.key, { id: p.id, name: p.name }]),
-    );
-    const known = records.filter((x) => projects.has(x.r.project));
-    const strayed = records.filter((x) => !projects.has(x.r.project));
-
-    let sent = 0;
-    const bad: { name: string; from: string; r: Spooled }[] = [];
+    const late = () => batches > 0 && Date.now() >= deadline;
     try {
-      sent = await write(
-        db,
-        known.map((x) => x.r),
-        projects,
-      );
+      if (first) {
+        // Expired held records are dropped before they could be sent. Records held during this send are not in the list.
+        prune(held);
+        for (const part of chunks(queued(held), BATCH)) {
+          if (late()) break;
+          await send(part);
+        }
+      }
+      while (!late()) {
+        const part = queued(dir).slice(0, BATCH);
+        if (part.length === 0) break;
+        await send(part);
+      }
+      prune(held);
+      total.deferred = queued(held).length;
+      // Written before unlocking, so it never overwrites the state of a send that ran after this one.
+      writeState({ flushedAt: new Date().toISOString(), error: null, deferred: total.deferred });
     } catch (e) {
-      if (!rejected(e)) throw e;
-      // One at a time
-      for (const x of known) {
-        try {
-          sent += await write(db, [x.r], projects);
-        } catch (e2) {
-          if (!rejected(e2)) throw e2;
-          bad.push(x);
-        }
-      }
+      writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300) });
+      throw e;
+    } finally {
+      await (client as Kysely<DB> | null)?.destroy().catch(() => {});
+      unlock();
     }
-    if (bad.length) {
-      fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
-      for (const x of bad) {
-        try {
-          fs.renameSync(path.join(x.from, x.name), path.join(rejectedDir(), x.name));
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; // a concurrent send moved it first
-        }
-      }
-    }
-    if (strayed.length) {
-      fs.mkdirSync(held, { recursive: true, mode: 0o700 });
-      for (const x of strayed) {
-        if (x.from === held) continue; // already set aside
-        try {
-          fs.renameSync(path.join(x.from, x.name), path.join(held, x.name));
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; // a concurrent send moved it first
-        }
-      }
-    }
-    const moved = new Set([...bad, ...strayed].map((x) => x.name));
-    for (const x of records) if (!moved.has(x.name)) fs.rmSync(path.join(x.from, x.name), { force: true });
-    prune(held);
-    writeState({ flushedAt: new Date().toISOString(), error: null, deferred: strayed.length });
-    return { sent, deferred: strayed.length, rejected: bad.length };
-  } catch (e) {
-    writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300) });
-    throw e;
-  } finally {
-    await client?.destroy().catch(() => {});
-    unlock();
+    if (Date.now() >= deadline || queued(dir).length === 0) return total;
   }
 }
 

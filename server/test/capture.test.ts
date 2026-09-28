@@ -4,12 +4,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 import {
   answersOf,
   captureNotice,
   current,
   fit,
+  flush,
   isOwnerTurn,
   MAX_MESSAGE,
   onHook,
@@ -18,6 +19,7 @@ import {
   rejectedDir,
   type Spooled,
   spoolDir,
+  unregisteredDir,
   write,
 } from "../src/capture.ts";
 import { dbFile } from "../src/db.ts";
@@ -869,5 +871,120 @@ test("the Codex hook entry point sets the host and returns valid JSON for Stop",
       timeout: 10_000,
     }).toString();
     assert.equal(failedOutput, "{}", entry);
+  }
+});
+
+// ---- Sending the queue ----
+
+const queue = (dir: string, t: number, i: number, r: Spooled) => {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(dir, `${t}-1-${String(i).padStart(8, "0")}.json`), JSON.stringify(r));
+};
+const owned = (projectKey: string, i: number): Spooled => ({
+  v: 2,
+  kind: "message",
+  host: "claude-code",
+  session: "s-drain",
+  project: projectKey,
+  branch: null,
+  at: "2026-09-13T00:00:00.000Z",
+  turn: `t${i}`,
+  id: `t${i}:owner:${i.toString(16).padStart(16, "0")}`,
+  speaker: "owner",
+  body: `message ${i}`,
+  truncated: false,
+  redacted: false,
+  originalBytes: `message ${i}`.length,
+});
+const left = (dir: string) =>
+  fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".json")).length : 0;
+const registered = "git:github.com/o/r";
+
+test("one send drains a queue of more than one batch", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    for (let i = 0; i < 700; i++) queue(spoolDir(), Date.now(), i, owned(registered, i));
+    const r = await flush(db.file);
+    assert.deepEqual({ ...r, left: left(spoolDir()) }, { sent: 700, deferred: 0, rejected: 0, left: 0 });
+  } finally {
+    await db.done();
+  }
+});
+
+test("a batch of older held records does not keep a newer registered record from being sent", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    for (let i = 0; i < 500; i++)
+      queue(unregisteredDir(), Date.now() - 60_000, i, owned("git:github.com/o/other", i));
+    queue(spoolDir(), Date.now(), 999, owned(registered, 999));
+    const r = await flush(db.file);
+    assert.deepEqual(r, { sent: 1, deferred: 500, rejected: 0 });
+    assert.equal(left(unregisteredDir()), 500);
+  } finally {
+    await db.done();
+  }
+});
+
+test("held records of a project registered later are sent, and expired ones are dropped instead", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    queue(unregisteredDir(), Date.now() - 60_000, 1, owned(registered, 1));
+    queue(unregisteredDir(), Date.now() - 31 * 24 * 60 * 60 * 1000, 2, owned(registered, 2));
+    const r = await flush(db.file);
+    assert.deepEqual({ ...r, held: left(unregisteredDir()) }, { sent: 1, deferred: 0, rejected: 0, held: 0 });
+    assert.deepEqual(
+      db.owner
+        .prepare("select text from source where kind = 'session_message'")
+        .all()
+        .map((x) => x.text),
+      ["message 1"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a send stops between batches once its time budget is spent", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    for (let i = 0; i < 700; i++) queue(spoolDir(), Date.now(), i, owned(registered, i));
+    const r = await flush(db.file, 0);
+    assert.deepEqual({ sent: r.sent, left: left(spoolDir()) }, { sent: 500, left: 200 });
+  } finally {
+    await db.done();
+  }
+});
+
+test("a record queued by a send that found the lock taken is sent by the send holding it", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const readdir = fs.readdirSync;
+  let second: ReturnType<typeof flush> | undefined;
+  // Once the holder sees an empty queue, a hook queues a record and starts its own send before the holder unlocks
+  const spy = mock.method(fs, "readdirSync", ((dir: fs.PathLike, ...rest: unknown[]) => {
+    const got = (readdir as (...a: unknown[]) => string[])(dir, ...rest);
+    if (!second && dir === spoolDir() && !got.some((f) => f.endsWith(".json"))) {
+      queue(spoolDir(), Date.now(), 7, owned(registered, 7));
+      second = flush(db.file);
+    }
+    return got;
+  }) as typeof fs.readdirSync);
+  try {
+    const first = await flush(db.file);
+    assert.deepEqual(await second, { sent: 0, deferred: 0, rejected: 0, busy: true });
+    assert.equal(first.sent, 1);
+    assert.equal(left(spoolDir()), 0);
+  } finally {
+    spy.mock.restore();
+    await db.done();
   }
 });
