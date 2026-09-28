@@ -41,6 +41,16 @@ base: main
   - コミット: `fix(text): count placeholder byte offsets in one pass (T05)`
   - 結果: red は `took 42657 ms` で fail。直した後 `node --test test/text.test.ts` → 14 件 pass（同じテストが 85 ms）、`tsc --noEmit` と biome は指摘なし。`bun run --cwd server test` → 312 件 pass
 
+- [x] T06: 伏せ字の目印の正規表現に長さの上限を付ける
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T05（直す対象の quoteSpan の線形化）
+  - 変更: `server/src/text.ts`, `server/test/text.test.ts`
+  - red: 「stay fast」のテストに閉じ括弧の無い `[redacted: ` を 10 万行足し、直す前のコードで `node --test test/text.test.ts` → 5 秒の上限を超えて fail
+  - 完了条件: `bun run --cwd server test` → 全件 pass
+  - コミット: `fix(text): bound placeholder labels so unclosed openings stay linear (T06)`
+  - 結果: red は `took 45183 ms` で fail（最初の実行は期待値の書き誤りで別の assert が fail したので直して流し直した）。直した後 `node --test test/text.test.ts` → 14 件 pass（94 ms）、tsc と biome は指摘なし、`bun run --cwd server test` → 313 件 pass
+
 ## P2: glean の抜粋を伏せ字にする
 
 glean が引いたファイルの抜粋が、伏せ字にされて保存・索引化され、秘密に触れる引用が断られるようになる。

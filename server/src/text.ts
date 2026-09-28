@@ -331,7 +331,8 @@ function byteRanges(text: string, ranges: [number, number][]): [number, number][
   return out;
 }
 
-const PLACEHOLDER = /\[redacted(?:: [^\]]*)?\]/g;
+// Labels are short names (the longest is "webhook signing secret"); a bound keeps unclosed openings in a file from rereading to its end
+const PLACEHOLDER = /\[redacted(?:: [^\]\n]{1,40})?\]/g;
 
 /** Every byte offset where needle starts in hay, overlapping occurrences included. */
 function starts(hay: Buffer, needle: Buffer): number[] {

@@ -45,6 +45,9 @@ test("quoteSpan and privateKeyRanges stay fast on a file masked on every line", 
   assert.equal(quoteSpan(raw, masked, "TOKEN=[redacted]\nTOKEN"), null);
   const keys = "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n".repeat(20_000);
   assert.equal(privateKeyRanges(keys).length, 20_000);
+  // Unclosed placeholder openings in the file itself must not make the placeholder scan reread to the end
+  const open = `API_KEY=abc123def456\n${"[redacted: \n".repeat(100_000)}`;
+  assert.deepEqual(quoteSpan(open, mask(open), "API_KEY"), [0, 7]);
   assert.ok(performance.now() - started < 5000, `took ${Math.round(performance.now() - started)} ms`);
 });
 
