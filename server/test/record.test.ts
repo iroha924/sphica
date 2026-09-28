@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { locate } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
 import { checkRecord, repoPath, saveRecord, type Target } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
@@ -114,6 +115,20 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
     assert.equal(got[1]?.excerpt, "[redacted]");
   } finally {
     await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Save looks the symbol up again after the check, so the file may have changed in between: a line inside a key is still not kept
+test("locate does not keep a line inside a private key as an anchor's excerpt", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-locate-"));
+  try {
+    fs.writeFileSync(
+      path.join(root, "key.pem"),
+      "-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n",
+    );
+    assert.deepEqual(locate(root, "key.pem", "keyBody"), { line: 2, excerpt: "[redacted: private key]" });
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

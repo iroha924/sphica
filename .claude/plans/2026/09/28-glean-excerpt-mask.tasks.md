@@ -110,6 +110,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): refuse a symbol any occurrence of which masking swallows (T09)`
   - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 314 件 pass、`bun run verify` → exit 0。locate の秘密鍵の分岐は、呼び出し元が先に masksSymbol で外すため届かなくなったので消した（鍵の中の名前は `[redacted: private key]` ではなく anchor ごと外れる）
 
+- [x] T10: locate の秘密鍵の分岐を戻す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T09（分岐を消したタスク）
+  - 変更: `server/src/anchors.ts`, `server/test/record.test.ts`
+  - red: 鍵の中にだけ名前がある file で locate を直接呼ぶテストを足し、直す前のコードで `node --test test/record.test.ts` → 抜粋が `keyBody` のまま fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): keep masking key lines in locate after the check (T10)`
+  - 結果: red は上のとおり fail。直した後 `bun run --cwd server test` → 315 件 pass、`bun run verify` → exit 0
+
 ## P4: 出荷の準備
 
 glean スキルの案内を足し、出荷前の検査を通す。
@@ -138,3 +148,5 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T08 / 全差分（main..a2a0678）の Codex レビュー F1: anchor の symbol に秘密の値を指定すると、抜粋は伏せ字でも symbol が伏せ字なしで unit_anchor・検索索引・read に残る / 採用。修正タスク T08 を足した
 - 2026-09-28 / 全体 / review-shipping（head a2a0678）: 指摘なし。修正を外すとテストが落ちることを変異で確認、pack 30 ファイル、4 つのバージョン 0.5.7
 - 2026-09-28 / T09 / T08（448e24d）の Codex レビュー F1・F2（再現済み）: 秘密の値が別の行に伏せ字なしで残る場合と、値が `redacted` の場合に masksSymbol が false を返し、symbol に保存される / 採用。修正タスク T09: quoteSpan と同じ件数の規則にした
+- 2026-09-28 / T10 / T09（320a447）の Codex レビュー F1（再現済み）: 保存時の locate は検査の後にファイルを読み直すので、その間に symbol の行が秘密鍵の中に入ると、T09 で消した分岐が守っていた抜粋が残る / 採用。修正タスク T10 で分岐を戻した
+- 2026-09-28 / 全体 / 全差分（main..320a447）の Codex レビュー F1: 2 MiB を超えるファイルは読まないので、秘密の値の symbol が検査をすり抜ける。F2（再現済み）: commit を指定した anchor で、その commit では秘密で作業ツリーでは秘密でない値の symbol が通る / 見送り。レビューのたびに symbol の周りから珍しい入力が 1〜2 件ずつ出て収束しないため、持ち主に選択肢を示し「絞って終える」を受けた。どちらもエージェントが秘密そのものを symbol に選んだうえでの珍しい条件。PR 本文の見送った指摘に書く。Codex の追加ラウンドはせず、review-shipping だけ回す

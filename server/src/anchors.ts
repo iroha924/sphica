@@ -2,7 +2,7 @@
 // A located symbol only says the code is still there; it never proves the decision still holds.
 import fs from "node:fs";
 import path from "node:path";
-import { mask, quoteSpan } from "./text.ts";
+import { bytes, mask, privateKeyRanges, quoteSpan } from "./text.ts";
 
 export type AnchorState = "located" | "moved" | "missing" | "unknown";
 
@@ -63,6 +63,10 @@ export function locate(
   const { lines, i } = findSymbol(text, symbol);
   if (i < 0) return null;
   const line = lines[i] ?? "";
+  // A line inside a private key cannot be masked alone (its BEGIN and END are on other lines); the file may have changed since the check
+  const from = bytes(lines.slice(0, i).join("\n")) + (i > 0 ? 1 : 0);
+  if (privateKeyRanges(lines.join("\n")).some(([a, b]) => a < from + bytes(line) && b > from))
+    return { line: i + 1, excerpt: "[redacted: private key]" };
   // A value whose key name sits on another line cannot be masked alone: the text around must not change how the line masks
   const before = lines
     .slice(0, i)
