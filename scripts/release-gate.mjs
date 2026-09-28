@@ -20,7 +20,9 @@ const THREADS = `query($owner: String!, $name: String!, $number: Int!, $after: S
   repository(owner: $owner, name: $name) { pullRequest(number: $number) {
     reviewThreads(first: 100, after: $after) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } }
 }`;
-const run = (command, args) => execFileSync(command, args, { cwd: root, encoding: "utf8" }).trim();
+// A PR's comments, Codex's long reviews among them, can pass the 1 MiB default; running out stops a release that is ready
+const run = (command, args) =>
+  execFileSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
 const api = (endpoint) => JSON.parse(run("gh", ["api", endpoint]));
 const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
 

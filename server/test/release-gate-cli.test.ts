@@ -34,7 +34,8 @@ else if (endpoint.includes("actions/runs")) process.stdout.write(JSON.stringify(
 else if (endpoint.endsWith("/comments?per_page=100")) {
   // Answers as --paginate --slurp does: one array per page. The summary is on the second page, so reading only the first misses it
   if (process.env.FAKE_API_FAIL || !args.includes("--paginate") || !args.includes("--slurp")) process.exit(1);
-  process.stdout.write(JSON.stringify([[], [{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->' }]]));
+  const long = process.env.FAKE_LONG_COMMENTS ? [{ user: { id: 1, type: "User" }, body: "x".repeat(2 * 1024 * 1024) }] : [];
+  process.stdout.write(JSON.stringify([long, [{ user: { id: 199175422, type: "Bot" }, body: '<!-- codex-security-review:v1 {"headSha":"${COMMIT}","status":"' + (process.env.FAKE_REVIEW_RUNNING ? "running" : "completed") + '"} -->' }]]));
 }
 else if (endpoint === "graphql") {
   // Two pages; the second is asked for with after=p2 and holds the thread FAKE_OPEN_THREAD leaves unresolved
@@ -104,6 +105,13 @@ test("release-gate reads every page of threads and stops when the API fails", ()
   const failed = runGate({ FAKE_API_FAIL: "1" });
   assert.notEqual(failed.status, 0);
   assert.equal(failed.output, "");
+});
+
+// Codex's review comments are long; a PR's comments past 1 MiB must not stop a release that is ready
+test("release-gate reads a PR whose comments exceed a megabyte", () => {
+  const { status, stderr, output } = runGate({ FAKE_LONG_COMMENTS: "1" });
+  assert.equal(status, 0, stderr);
+  assert.equal(output, "pull=7\n");
 });
 
 test("release-gate stops a head whose Codex review is still running", () => {

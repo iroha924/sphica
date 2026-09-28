@@ -114,6 +114,16 @@ base: main
   - コミット: `fix: address task reviews of the gate, settings, and PR body wording`
   - 結果: red を実測（actual `['off', 'on']`）。直した後 repo-settings と release-gate-cli のテスト → 6 pass / 0 fail、`bun run release:status` → 両方とも on
 
+- [x] T10: release-gate が 1 MiB を超える PR のコメントでも止まらないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T07（直す対象の取得と、その CLI テストが要る）
+  - 変更: `scripts/release-gate.mjs`, `server/test/release-gate-cli.test.ts`
+  - red: `cd server && node --test --test-name-pattern="megabyte" test/release-gate-cli.test.ts` → 2 MB のコメントを返す偽の gh で `spawnSync gh ENOBUFS` になり失敗
+  - 完了条件: `cd server && node --test test/release-gate-cli.test.ts test/release-gate.test.ts` → 1 MiB を超えるコメントでも通る検査を含めて通る
+  - コミット: `fix(release): read PR comments past a megabyte in the release gate`
+  - 結果: red を実測（`spawnSync gh ENOBUFS`）。直した後 `node --test test/release-gate-cli.test.ts test/release-gate.test.ts` → 15 pass / 0 fail
+
 ## 記録
 
 - 2026-09-28 / - / 持ち主の指示で、.claude/plans の他の plan と tasks（27-claude-bash-delivery、27-eval-structured-grading、28-bind-github-owner、28-confirm-before-override、28-release-automation）を最初のコミットで削除する。ほかのファイルからの参照は 0 件（rg で確認）
@@ -124,3 +134,4 @@ base: main
 - 2026-09-28 / T04 のレビュー / F1（CLI テストがページングと API の失敗を守っていない）を採用し T07
 - 2026-09-28 / T06 のレビュー / F1（文言が検査の中身より強い）を採用し T08
 - 2026-09-28 / T05 のレビュー / F1（404 を off と判定する）を採用し T09。F2（release:plan --json の CLI 全体のテストが無い）は見送り: release:plan は手元で人が読む道具で、判定は単体テストで押さえている
+- 2026-09-28 / 差分全体の Codex レビュー / 指摘 1 件（gh の出力を execFileSync の既定 1 MiB で受け、長い PR で ENOBUFS。Codex が再現）を採用し T10
