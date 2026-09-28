@@ -231,7 +231,24 @@ test("masksSymbol stays fast on a large file masked on every line", () => {
     fs.writeFileSync(path.join(root, "big.ts"), "API_KEY=abc123def456 // loadConfig\n".repeat(55_000));
     const started = performance.now();
     assert.equal(masksSymbol(root, "big.ts", "loadConfig"), false);
+    // A one-letter symbol in a near-limit file: matches are counted, not collected
+    fs.writeFileSync(path.join(root, "min.ts"), "a ".repeat(1_048_575));
+    assert.equal(masksSymbol(root, "min.ts", "a"), false);
     assert.ok(performance.now() - started < 1000, `took ${Math.round(performance.now() - started)} ms`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Masking a key can leave a new whole name right after its placeholder; that one must not stand in for the occurrence it swallowed
+test("masksSymbol does not count a name that only a placeholder's edge made whole", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-edge-"));
+  try {
+    fs.writeFileSync(
+      path.join(root, "c.ts"),
+      `API_KEY=tokenValue123abc\nAIza${"a".repeat(35)}tokenValue123abc\n`,
+    );
+    assert.equal(masksSymbol(root, "c.ts", "tokenValue123abc"), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

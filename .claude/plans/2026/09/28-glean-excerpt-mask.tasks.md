@@ -170,6 +170,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): recheck symbols when saving and trim and order before comparing (T16)`
   - 結果: red は上のとおり fail（記録の側の空白は入力の検査が落とすので元から通った）。直した後 `node --test test/record.test.ts test/extract.test.ts` → 29 件 pass、`bun run --cwd server test` → 318 件 pass、`bun run verify` → exit 0。計画を approved（2026-09-28）に直した
 
+- [x] T17: GitHub の Codex レビュー（70f91ed）の P1 と、メモリの P2 を直す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T16（直す対象の masksSymbol）
+  - 変更: `server/src/anchors.ts`, `server/test/record.test.ts`
+  - red: 鍵の直後にくっついた名前のケースを足し、直す前のコードで `node --test test/record.test.ts` → masksSymbol が false を返して fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): skip names touching a placeholder and count without collecting (T17)`
+  - 結果: red は上のとおり fail。メモリの指摘は、1 文字の symbol と約 2 MiB のファイルの速さのテストを足したが、直す前のこの Mac でも 1 秒以内に通ったので red は取れていない（配列を作らずに数える形に直した）。直した後 `node --test test/record.test.ts test/extract.test.ts` → 30 件 pass、`bun run --cwd server test` → 319 件 pass、`bun run verify` → exit 0
+
 - [x] T11: README の秘密情報の項目に、glean が引いたファイルの行も伏せ字になることを書く
   - 種別: 変更
   - 計画: S5
@@ -215,3 +225,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T14 / review-shipping（013591e）: 重複を除く処理が lines を見ず、record が与えた行の範囲の違う path だけの anchor まで知らせなしに消す（再現済み。T13 の前はどれも保存された） / 採用（自分の修正が生んだもの）。修正タスク T14。役割や commit だけが違う path だけの anchor を replace_anchor が見分けられない点は、この変更より前からの設計なので見送り
 - 2026-09-28 / T15 / review-shipping（36d13fd）: symbol を外した anchor が、同じ行の範囲の path だけの anchor より前に来ると統合されず、同じ行が 2 つ保存される（再現済み） / 採用（自分の修正が生んだもの）。修正タスク T15: 全部の anchor を見てから統合する
 - 2026-09-28 / T16 / GitHub の Codex レビュー（46c4a44）: P1 検査と保存の間の書き換えで秘密の symbol が保存される、P1 前後に空白のある symbol が glean の検査をすり抜ける、P2 計画が draft のまま、P2 逆順の行の範囲が統合をすり抜ける / 4 件とも採用。計画が draft だったのは、Go の後に承認済みへ書き換えるコマンドが Bash の判定の障害で流れず、手動モードで再開したときに流し直さなかったため
+- 2026-09-29 / T17 / GitHub の Codex レビュー（70f91ed）: P1 鍵が伏せ字になると目印の直後に新しい識別子全体の一致ができ、飲まれた分と件数が相殺する（再現済み）、P2 1 文字の symbol で一致を配列に作り約 150 MB 使う（再現済み）、P2 保存の中の再確認と抜粋の読み込みが別の読み込み、P2 保存時に symbol を外したあと重複を除かない / 2 回目も 4 件で収束しないため持ち主に選択肢を示し、「簡単な 2 件を直して終える」を受けた。P1 とメモリの P2 を T17 で直し、書き換えの間に起きる 2 件は見送り（実行中の短い間にファイルが書き換わる場合だけ）

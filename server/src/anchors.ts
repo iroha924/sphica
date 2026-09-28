@@ -45,16 +45,19 @@ function swallowed(root: string | null, rel: string, symbol: string): boolean {
   const text = root ? readText(root, rel) : null;
   if (typeof text !== "string") return false;
   const re = new RegExp(`(?<![\\w$])${literal(symbol)}(?![\\w$])`, "g");
-  const raw = [...text.matchAll(re)].length;
+  let raw = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) raw++;
   if (raw === 0) return false;
   const masked = mask(text);
   const holes = placeholderRanges(masked);
-  // Matches and placeholders both run in order, so one pass pairs them
+  // Matches and placeholders both run in order, so one pass pairs them. A match touching a placeholder is not counted either: masking
+  // can make a whole name there out of one that was part of a key, and it would stand in for an occurrence masking swallowed
   let h = 0;
   let kept = 0;
-  for (const m of masked.matchAll(re)) {
-    while ((holes[h]?.[1] ?? Number.POSITIVE_INFINITY) <= m.index) h++;
-    if (!((holes[h]?.[0] ?? Number.POSITIVE_INFINITY) < m.index + symbol.length)) kept++;
+  re.lastIndex = 0;
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    while ((holes[h]?.[1] ?? Number.POSITIVE_INFINITY) < m.index) h++;
+    if (!((holes[h]?.[0] ?? Number.POSITIVE_INFINITY) <= m.index + symbol.length)) kept++;
   }
   return kept !== raw;
 }
