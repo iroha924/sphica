@@ -443,3 +443,25 @@ test("tombstone: harvest does not store an item the owner forgot, and stores it 
     await db.done();
   }
 });
+
+test("tombstone: after the newest revision is forgotten, an older one is not shown as current, and the next text takes a new revision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    await storeItems(db.ingest, p, (await readPull(fake("Version A."), 7)).items);
+    const b = (await storeItems(db.ingest, p, (await readPull(fake("Version B."), 7)).items))[0] as number;
+    await applyForget(db.file, p, [b], await previewForget(db.file, p, [b]));
+    await storeItems(db.ingest, p, (await readPull(fake("Version B."), 7)).items);
+    const bodies = (await pullSources(db.reader, p, 7)).filter((s) => s.kind === "pr_body");
+    assert.deepEqual(bodies, [], "version A is not the pull request's current body");
+    await storeItems(db.ingest, p, (await readPull(fake("Version C."), 7)).items);
+    assert.deepEqual(
+      (await pullSources(db.reader, p, 7))
+        .filter((s) => s.kind === "pr_body")
+        .map((s) => [s.text, s.revision]),
+      [["Version C.", 3]],
+    );
+  } finally {
+    await db.done();
+  }
+});

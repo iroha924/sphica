@@ -182,6 +182,7 @@ export interface SourceForgotten {
   external_id: string;
   kind: string;
   project_id: number;
+  revision: number;
   source_id: Generated<number>;
 }
 

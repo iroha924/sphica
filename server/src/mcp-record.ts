@@ -276,11 +276,13 @@ server.registerTool(
                 required: ["confirm"],
               },
             },
-            { timeout: ANSWER_MS },
+            { timeout: ANSWER_MS, signal: extra.signal },
           );
         } catch (e) {
           throw refused(`The confirmation did not come back (${head(reason(e), 200)})`);
         }
+        // The host gave up on this call: an answer arriving after that must not act on its own
+        if (extra.signal.aborted) throw refused("The call was cancelled");
         if (answer.action !== "accept")
           throw refused(`You ${answer.action === "decline" ? "declined" : "cancelled"}`);
         if (String(answer.content?.confirm ?? "").trim() !== String(n))

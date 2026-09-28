@@ -424,7 +424,7 @@ test("forgetting a project removes everything under it despite the no-delete rul
 const forgetBatch = (projectId = p) => insert(db, "forget_batch", { project_id: projectId, at: now });
 const tombstone = (sourceId: number, batch: number) =>
   sql(
-    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, content_hash, batch_id) select id, project_id, artifact, kind, external_id, content_hash, ? from source where id = ?",
+    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, revision, content_hash, batch_id) select id, project_id, artifact, kind, external_id, revision, content_hash, ? from source where id = ?",
     batch,
     sourceId,
   );

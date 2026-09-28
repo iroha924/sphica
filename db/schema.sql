@@ -161,6 +161,8 @@ create table source_forgotten (
   artifact text not null,
   kind text not null,
   external_id text not null,
+  -- An older revision left behind is not the item's current text, and new text numbers after the forgotten one
+  revision integer not null check (revision > 0),
   content_hash blob not null check (length(content_hash) = 32),
   batch_id integer not null references forget_batch (id) on delete cascade
 ) strict;

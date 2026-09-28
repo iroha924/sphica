@@ -122,6 +122,16 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
   - コミット: `feat(skills): add /sphica:forget`
   - 結果: `bun run verify:ai` → 通る（plugin Skills 5）。forget-01 は driver の forget を外すと失敗（source_gone、source_search は actual 1 / expected 0）し、戻すと通ることを確かめた。`bun run verify` → exit 0（受け入れ 59 件）
 
+- [x] T11: 消した revision より古い版を今の版として出さず、次の番号を消した版より後にする。取り消された forget_apply では消さない
+  - 種別: 修正
+  - 計画: S5, S6
+  - 依存: T05（harvest と glean の墓標の照合）, T06（forget_apply）
+  - 変更: `db/schema.sql`, `db/migrations/0002.sql`, `server/src/db-types.ts`, `server/src/forget.ts`, `server/src/github.ts`, `server/src/glean.ts`, `server/src/mcp-record.ts`, `server/test/github.test.ts`, `server/test/extract.test.ts`, `server/test/plugin.test.ts`, `server/test/db.test.ts`, `server/test/schema.test.ts`
+  - red: `cd server && node --test --test-name-pattern=tombstone test/github.test.ts` → 最新の revision を消すと古い版 A が今の本文として出る（expected []）。`node --test --test-name-pattern=forget_apply test/plugin.test.ts` → 取り消した呼び出しでも後の回答で消える（残り 1、期待 2）
+  - 完了条件: `cd server && node --test test/github.test.ts test/extract.test.ts test/plugin.test.ts test/forget.test.ts` → pass
+  - コミット: `fix(forget): hide revisions older than a forgotten one and ignore cancelled calls`
+  - 結果: red を 2 件とも実測。修正後 `node --test test/github.test.ts test/extract.test.ts test/forget.test.ts test/schema.test.ts test/db.test.ts test/migrate.test.ts` → pass 73、`node --test test/plugin.test.ts` → pass 26。`bun run verify` → exit 0
+
 ## 記録
 2026-09-29 / T01 / `git show v0.5.7:db/schema.sql` は浅い clone で読めない / revision 1 の schema を `server/test/fixtures/schema-rev1.sql` に固定し、変更欄に足した（前: 6 ファイル、後: 7 ファイル）
 2026-09-29 / T01 / rename が `unit_lifecycle_via_state` の参照で失敗した（実測）/ 移行で `unit_lifecycle_via_state` と `unit_option_sealed` を先に drop し、作り直す
@@ -134,3 +144,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T05 / capture の墓標テストは T01 で schema.test.ts に入っていた。Codex の T04 レビュー F1（A3 の `--test-name-pattern=bytes` に一致するテストが無く空振りする、再現済み）を採用 / 変更欄を直した（前: capture.test.ts、後: schema.test.ts と forget.test.ts）。テスト名に bytes と tombstone を入れた
 2026-09-29 / T06 / preview と確認の文面を作る forgetText を forget.ts に置いた / 変更欄に forget.ts を足した
 2026-09-29 / T07 / Codex 向けの `agents/openai.yaml`（暗黙の起動を止める）が必要だった。record-writes の規範と README に forget を書き足した / 変更欄に 5 ファイルを足した
+2026-09-29 / T11 / Codex の T05 レビュー F1（最新の revision を消すと古い版が今の版になり番号も使い回す）・F3（glean の墓標テストが保存の段を通らない。保存の段は元から拒否していた）、T06 レビュー F2（取り消した呼び出しへの後からの回答で消える）を採用し T11 を足した。墓標に revision を足した（未リリースの schema と移行 SQL を同じ形に直した）。T05 F2（anchor の excerpt に同じ行が入り得る）は、anchor はいまの作業ツリーを読む別の経路で plan の「別の経路からの同じ言葉は保存する」に入るため見送り。T06 F1（artifact のパスや unit の key に秘密があれば preview に出る）は、識別子で search の結果にも元から出るため見送り。T06 のレビューは Codex が自分の誤報に気づいて途中で止めたので、残りは仕上げの全差分レビューで見る。T10 のレビューは指摘なし

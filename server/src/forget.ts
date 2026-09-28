@@ -56,6 +56,7 @@ async function forgetIn(
           "kind",
           "artifact",
           "external_id",
+          "revision",
           "content_hash",
           sql<number>`length(cast(text as blob))`.as("bytes"),
         ])
@@ -139,6 +140,7 @@ async function forgetIn(
         artifact: r.artifact,
         kind: r.kind,
         external_id: r.external_id,
+        revision: r.revision,
         content_hash: r.content_hash,
         batch_id: batch,
       })),

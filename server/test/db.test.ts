@@ -333,7 +333,7 @@ test("the ingest connection cannot remove a source or write a forget batch or to
   for (const write of [
     "delete from source where id = ?",
     "insert into forget_batch (project_id, at) values (?, '2026-09-12T00:00:00.000Z')",
-    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, content_hash, batch_id) values (?, 1, 'a', 'k', 'e', zeroblob(32), 1)",
+    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, revision, content_hash, batch_id) values (?, 1, 'a', 'k', 'e', 1, zeroblob(32), 1)",
   ])
     assert.match(
       attempt(ingest, write, write.startsWith("insert into forget") ? p : id) ?? "",
@@ -384,7 +384,7 @@ test("the forget connection removes a source with what cites it, and cannot writ
     );
     raw
       .prepare(
-        "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, content_hash, batch_id) select id, project_id, artifact, kind, external_id, content_hash, ? from source where id = ?",
+        "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, revision, content_hash, batch_id) select id, project_id, artifact, kind, external_id, revision, content_hash, ? from source where id = ?",
       )
       .run(batch, src);
     raw.prepare("delete from source where id = ?").run(src);

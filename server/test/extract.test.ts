@@ -1153,6 +1153,23 @@ test("tombstone: glean does not store a file excerpt the owner forgot, and says 
     );
     await applyForget(db.file, p, [excerpt], await previewForget(db.file, p, [excerpt]));
     await assert.rejects(cite(), /the owner forgot docs\/note.md lines 3-3; cite something else/);
+    // Saving without checking first is refused the same way
+    const direct = {
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:backup",
+          revision: revision(),
+          file: { path: "docs/note.md", lines: [3, 3] },
+          quote: "Back up before a release.",
+          role: "explains",
+        },
+      ],
+    };
+    await assert.rejects(
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, direct),
+      /the owner forgot docs\/note.md lines 3-3/,
+    );
     assert.equal(
       (
         db.owner.prepare("select count(*) as n from source where kind = 'file_excerpt'").get() as {

@@ -652,6 +652,22 @@ test("forget_apply removes sources only when the owner types the count in the ho
     const r = await call(bare, "forget_apply", [ids[2] as number]);
     assert.equal(r.error, false, r.text);
     assert.equal(left(), 2);
+    // A call the host gave up on removes nothing, even when the owner answers the dialog it left open
+    let answerLater: ((v: unknown) => void) | null = null;
+    const late = await connect(form, () => new Promise((resolve) => (answerLater = resolve)));
+    clients.push(late);
+    const stop = new AbortController();
+    const pending = late
+      .callTool({ name: "forget_apply", arguments: { sources: [`s${ids[3]}`], cwd: dir } }, undefined, {
+        signal: stop.signal,
+      })
+      .catch(() => null);
+    while (!answerLater) await new Promise((t) => setTimeout(t, 20));
+    stop.abort();
+    await pending;
+    (answerLater as (v: unknown) => void)({ action: "accept", content: { confirm: "1" } });
+    await new Promise((t) => setTimeout(t, 500));
+    assert.equal(left(), 2, "a cancelled call forgot nothing");
   } finally {
     for (const c of clients) await c.close();
     await db.done();
