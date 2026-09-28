@@ -22,7 +22,7 @@ base: main
 
 200 件より後ろの強い一致が見つかり、上限で止まったときは結果の文がそう言う。
 
-- [ ] T01: 検索の候補をページで読み進め、上限と stopped を足し、バージョンを 0.6.2 に上げる
+- [x] T01: 検索の候補をページで読み進め、上限と stopped を足し、バージョンを 0.6.2 に上げる
   - 種別: 修正
   - 計画: S1, S7
   - 依存: なし
@@ -30,6 +30,7 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 弱い候補 210 件の後ろの強い一致のテストが、本文と記録の両方で `hits` が空のまま落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 全部 pass（本文・記録の強い一致、`stopped` の true / false、本文のバイトの上限を含む）。`bun run release:plan -- --base 4567a93` → `plugin`、4 か所が 0.6.2
   - コミット: `fix(search): read candidates past the first 200 and say where the scan stopped`
+  - 結果: red（直す前）→ 2 件失敗（本文の強い一致が `hits: []`、`stopped` が無い）。直した後 `node --test test/search.test.ts` → pass 7 / fail 0（本文と記録の強い一致、600 件で stopped、64 MiB で stopped と弱い候補 64 件）。`scripts/lib/release-scope.mjs` の `releaseKind` に差分のファイルを渡して `plugin`（`release:plan` はコミット済みの差分だけを見るので、コミット前は `none` と出た）。4 か所を 0.6.2 にそろえた。typecheck・lint → 0、`sql:reach` 153 / 153
 
 - [ ] T02: MCP の検索の文で、上限で止まったことを言う
   - 種別: 修正

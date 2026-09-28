@@ -375,3 +375,69 @@ test("reading as of a past time shows no retraction made after it", async () => 
     await db.done();
   }
 });
+
+test("a strong match ranked past the first 200 candidates is found, and a search says where it stopped", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const filler = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
+    // Short texts holding two of four words rank ahead of a long one holding three
+    const weak = (n: number) => (n % 2 ? "retry budget retry budget." : "cache warm cache warm.");
+    for (let n = 0; n < 210; n++) message(db, p, { id: `w${n}`, text: weak(n), session: "s1" });
+    const strong = message(db, p, {
+      id: "strong",
+      text: `${filler} retry budget cache ${filler}`,
+      session: "s1",
+    });
+    const sources = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.deepEqual(
+      { hits: sources.hits.map((h) => h.id), stopped: sources.stopped },
+      { hits: [strong], stopped: false },
+    );
+    // Units: the same shape, five records of 42 weak units ahead of one strong unit
+    const both = message(db, p, {
+      id: "both",
+      text: "retry budget retry budget. cache warm cache warm.",
+      session: "s1",
+    });
+    for (let b = 0; b < 5; b++)
+      await save(db, p, {
+        units: Array.from({ length: 42 }, (_, n) =>
+          decision(`w${b}-${n}`, both, n % 2 ? "retry budget retry budget." : "cache warm cache warm."),
+        ),
+      });
+    // A long record holding three of the four words, quoted from the middle of the long message
+    const tail = Array.from({ length: 100 }, (_, i) => `word${i + 200}`).join(" ");
+    const lead = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
+    await save(db, p, { units: [decision("strong", strong, `${tail} retry budget cache ${lead}`)] });
+    const units = await searchUnits(db.reader, p, { question: "retry budget cache warm", limit: 5 });
+    assert.deepEqual(
+      { hits: units.hits.map((h) => h.key), stopped: units.stopped },
+      { hits: ["trace:ext-s1/strong"], stopped: false },
+    );
+    // Past the cap of 600 sources the search stops and says so
+    for (let n = 210; n < 700; n++) message(db, p, { id: `w${n}`, text: weak(n), session: "s1" });
+    const capped = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.deepEqual(
+      { read: capped.weaker + capped.hits.length, stopped: capped.stopped },
+      { read: 600, stopped: true },
+      "the message holding all four words is one of the 600 read",
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a source search stops once the text it read reaches 64 MiB", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const mib = `retry budget ${"x".repeat(1024 * 1024 - 13)}`;
+    for (let n = 0; n < 70; n++) message(db, p, { id: `big${n}`, text: `${mib}${n}`, session: "s1" });
+    const r = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.equal(r.stopped, true);
+    assert.equal(r.weaker, 64);
+  } finally {
+    await db.done();
+  }
+});

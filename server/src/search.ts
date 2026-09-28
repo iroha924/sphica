@@ -6,8 +6,13 @@ import type { DB } from "./db-types.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { ftsQuery, queryTerms, terms } from "./text.ts";
 
-/** Candidates taken from the index before the term check. */
-const POOL = 200;
+/** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
+const UNIT_PAGE = 200;
+const UNIT_SCAN_MAX = 2000;
+// Sources can be 1 MiB file excerpts (term extraction takes ~50 ms per MiB), so they are read in smaller pages and capped by bytes too
+const SOURCE_PAGE = 50;
+const SOURCE_SCAN_MAX = 600;
+const SOURCE_SCAN_BYTES = 64 * 1024 * 1024;
 const LIFE_ORDER: Record<string, number> = { active: 0, candidate: 1, superseded: 2, withdrawn: 3 };
 
 export type UnitHit = {
@@ -43,10 +48,10 @@ export async function searchUnits(
   db: Kysely<DB>,
   projectId: number,
   q: UnitQuery,
-): Promise<{ hits: UnitHit[]; weaker: number; terms: string[] }> {
+): Promise<{ hits: UnitHit[]; weaker: number; terms: string[]; stopped: boolean }> {
   const wanted = queryTerms(q.question);
   const match = ftsQuery(q.question);
-  if (!match) return { hits: [], weaker: 0, terms: wanted };
+  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false };
   let query = db
     .selectFrom(
       sql<{
@@ -84,8 +89,86 @@ export async function searchUnits(
           .where("a.retired_at", "is", null),
       ),
     );
-  // The pool is cut only after every filter, so matches a filter drops never crowd out the ones it keeps
-  const rows = await query.orderBy("f.rank").limit(POOL).execute();
+  // Pages are cut only after every filter, so matches a filter drops never crowd out the ones it keeps. Hits are sorted at the end,
+  // so every page up to the cap is read. One row past each page only tells whether more candidates remain.
+  let weaker = 0;
+  let stopped = false;
+  const hits: (UnitHit & { rank: number })[] = [];
+  for (let read = 0; ; ) {
+    const page = await query
+      .orderBy("f.rank")
+      .orderBy("u.id")
+      .limit(UNIT_PAGE + 1)
+      .offset(read)
+      .execute();
+    const rows = page.slice(0, UNIT_PAGE);
+    weaker += await judgeUnits(db, rows, wanted, hits);
+    read += rows.length;
+    if (page.length <= UNIT_PAGE) break;
+    if (read >= UNIT_SCAN_MAX) {
+      stopped = true;
+      break;
+    }
+  }
+  // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question.
+  // The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
+  const shown = new Set(hits.map((h) => h.id));
+  for (const h of [...hits].filter((x) => x.lifecycle === "superseded")) {
+    let successors = db
+      .selectFrom("unit_link as l")
+      .innerJoin("unit as n", "n.id", "l.from_unit")
+      .where("l.to_unit", "=", h.id)
+      .where("l.kind", "=", "supersedes")
+      .where("n.extraction", "=", "supported");
+    if (q.kinds?.length) successors = successors.where("n.kind", "in", q.kinds);
+    if (q.lifecycles?.length) successors = successors.where("n.lifecycle", "in", q.lifecycles);
+    const next = await successors
+      .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
+      .execute();
+    for (const n of next)
+      if (!shown.has(n.id)) {
+        shown.add(n.id);
+        hits.push({
+          ...n,
+          options: [],
+          anchors: [],
+          matched: [],
+          aliasOnly: false,
+          successorOf: h.key,
+          rank: h.rank,
+        });
+      }
+  }
+  hits.sort(
+    (a, b) =>
+      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
+      b.matched.length - a.matched.length ||
+      a.rank - b.rank,
+  );
+  return { hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h), weaker, terms: wanted, stopped };
+}
+
+type UnitRow = {
+  id: number;
+  key: string;
+  kind: string;
+  stance: string | null;
+  lifecycle: string;
+  text: string;
+  why: string | null;
+  scope_note: string | null;
+  revisit_when: string | null;
+  content_hash: Uint8Array | Buffer;
+  rank: number;
+};
+
+/** Runs the term check on one page of candidates, adding the hits; returns how many were weaker. */
+async function judgeUnits(
+  db: Kysely<DB>,
+  rows: UnitRow[],
+  wanted: string[],
+  hits: (UnitHit & { rank: number })[],
+): Promise<number> {
   const ids = rows.map((r) => r.id);
   const [options, anchors, aliases] = ids.length
     ? await Promise.all([
@@ -112,7 +195,6 @@ export async function searchUnits(
     : [[], [], []];
 
   let weaker = 0;
-  const hits: (UnitHit & { rank: number })[] = [];
   for (const r of rows) {
     const opts = options.filter((o) => o.unit_id === r.id);
     const anch = anchors.filter((a) => a.unit_id === r.id);
@@ -160,42 +242,7 @@ export async function searchUnits(
       rank: r.rank,
     });
   }
-  // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question.
-  // The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
-  const shown = new Set(hits.map((h) => h.id));
-  for (const h of [...hits].filter((x) => x.lifecycle === "superseded")) {
-    let successors = db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as n", "n.id", "l.from_unit")
-      .where("l.to_unit", "=", h.id)
-      .where("l.kind", "=", "supersedes")
-      .where("n.extraction", "=", "supported");
-    if (q.kinds?.length) successors = successors.where("n.kind", "in", q.kinds);
-    if (q.lifecycles?.length) successors = successors.where("n.lifecycle", "in", q.lifecycles);
-    const next = await successors
-      .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
-      .execute();
-    for (const n of next)
-      if (!shown.has(n.id)) {
-        shown.add(n.id);
-        hits.push({
-          ...n,
-          options: [],
-          anchors: [],
-          matched: [],
-          aliasOnly: false,
-          successorOf: h.key,
-          rank: h.rank,
-        });
-      }
-  }
-  hits.sort(
-    (a, b) =>
-      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
-      b.matched.length - a.matched.length ||
-      a.rank - b.rank,
-  );
-  return { hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h), weaker, terms: wanted };
+  return weaker;
 }
 
 export type SourceHit = {
@@ -214,11 +261,11 @@ export async function searchSources(
   projectId: number,
   question: string,
   limit: number,
-): Promise<{ hits: SourceHit[]; weaker: number; terms: string[] }> {
+): Promise<{ hits: SourceHit[]; weaker: number; terms: string[]; stopped: boolean }> {
   const wanted = queryTerms(question);
   const match = ftsQuery(question);
-  if (!match) return { hits: [], weaker: 0, terms: wanted };
-  const rows = await db
+  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false };
+  const query = db
     .selectFrom(
       sql<{
         rowid: number;
@@ -238,28 +285,50 @@ export async function searchSources(
       "s.created_at",
       "s.text",
       "f.rank",
-    ])
-    .orderBy("f.rank")
-    .limit(POOL)
-    .execute();
+    ]);
   let weaker = 0;
+  let stopped = false;
   const hits: SourceHit[] = [];
-  for (const r of rows) {
-    const own = new Set(terms(r.text));
-    const matched = wanted.filter((w) => own.has(w));
-    if (!strong(matched.length, wanted.length)) {
-      weaker++;
-      continue;
+  // Hits come in rank order, so reading stops once there are enough. The caps are checked before each candidate.
+  let read = 0;
+  let bytes = 0;
+  scan: for (;;) {
+    const page = await query
+      .orderBy("f.rank")
+      .orderBy("s.id")
+      .limit(SOURCE_PAGE + 1)
+      .offset(read)
+      .execute();
+    const rows = page.slice(0, SOURCE_PAGE);
+    for (const r of rows) {
+      if (read >= SOURCE_SCAN_MAX || bytes >= SOURCE_SCAN_BYTES) {
+        stopped = true;
+        break scan;
+      }
+      read++;
+      bytes += Buffer.byteLength(r.text);
+      const own = new Set(terms(r.text));
+      const matched = wanted.filter((w) => own.has(w));
+      if (!strong(matched.length, wanted.length)) {
+        weaker++;
+        continue;
+      }
+      hits.push({
+        id: r.id,
+        kind: r.kind,
+        artifact: r.artifact,
+        author: r.author_login ?? r.author_kind,
+        created_at: r.created_at,
+        text: r.text,
+        matched,
+      });
+      if (hits.length >= limit) break scan;
     }
-    hits.push({
-      id: r.id,
-      kind: r.kind,
-      artifact: r.artifact,
-      author: r.author_login ?? r.author_kind,
-      created_at: r.created_at,
-      text: r.text,
-      matched,
-    });
+    if (page.length <= SOURCE_PAGE) break;
+    if (read >= SOURCE_SCAN_MAX || bytes >= SOURCE_SCAN_BYTES) {
+      stopped = true;
+      break;
+    }
   }
-  return { hits: hits.slice(0, limit), weaker, terms: wanted };
+  return { hits, weaker, terms: wanted, stopped };
 }
