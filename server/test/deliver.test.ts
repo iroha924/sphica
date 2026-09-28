@@ -913,26 +913,37 @@ test("session start tells about sessions waiting to be traced, once a day, even 
 test("the waiting-sessions notice follows the host and is kept for the owner's sessions", async () => {
   const db = tempDb();
   const repo = checkout();
+  const thread = process.env.CODEX_THREAD_ID;
   try {
     const p = project(db);
     message(db, p, { id: "m", text: "untraced", session: "s1" });
-    const start = (host: "claude-code" | "codex") =>
+    // Codex's own session is the one whose thread id the hook process carries
+    const start = (host: "claude-code" | "codex", session: string = crypto.randomUUID()) =>
       deliver(
-        { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+        { hook_event_name: "SessionStart", source: "startup", session_id: session, cwd: repo },
         host,
         db.file,
       );
+    delete process.env.CODEX_THREAD_ID;
     process.env.CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
     try {
       assert.doesNotMatch(await start("claude-code"), /waiting to be traced/, "a headless run is not told");
     } finally {
       delete process.env.CLAUDE_CODE_ENTRYPOINT;
     }
+    process.env.CODEX_THREAD_ID = "codex-parent";
+    assert.doesNotMatch(
+      await start("codex"),
+      /waiting to be traced/,
+      "a session Codex started is not the owner's",
+    );
     assert.equal(
-      (await start("codex")).split("\n").at(-1),
+      (await start("codex", "codex-parent")).split("\n").at(-1),
       "- 1 session waiting to be traced: run $sphica:trace pending.",
     );
   } finally {
+    if (thread === undefined) delete process.env.CODEX_THREAD_ID;
+    else process.env.CODEX_THREAD_ID = thread;
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }
