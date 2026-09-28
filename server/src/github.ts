@@ -17,10 +17,27 @@ const MAX_ISSUES = 5;
 const CLOSES =
   /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:([\w.-]+\/[\w.-]+)#|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|#)(\d{1,9})\b/gi;
 
+/**
+ * The body without HTML comments, which GitHub does not show. An opener never closed hides the rest, as on GitHub.
+ * One pass with indexOf: a lazy regex rescans the rest of the body after every opener that never closes.
+ */
+function visible(body: string): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const open = body.indexOf("<!--", at);
+    if (open < 0) return out + body.slice(at);
+    out += body.slice(at, open);
+    const close = body.indexOf("-->", open + 4);
+    if (close < 0) return out;
+    at = close + 3;
+  }
+}
+
 /** Issue numbers a body closes in this repository: #N, and owner/repo#N or an issue URL when they name this repository. */
 function closingRefs(body: string, repo: string | null): number[] {
   const here = repo?.toLowerCase();
-  return [...body.matchAll(CLOSES)].flatMap((m) => {
+  return [...visible(body).matchAll(CLOSES)].flatMap((m) => {
     const named = (m[1] ?? m[2])?.toLowerCase();
     return !named || named === here ? [Number(m[3])] : [];
   });

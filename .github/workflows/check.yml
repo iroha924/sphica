@@ -24,6 +24,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Checks that it passes on both the engines floor (24.15) and the next line (26). If one fails, the other's result is kept.
     strategy:
       fail-fast: false
@@ -88,6 +89,7 @@ jobs:
   # shows only on a real machine (CI cannot check it).
   windows:
     runs-on: windows-latest
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash

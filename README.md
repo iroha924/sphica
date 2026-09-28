@@ -7,6 +7,8 @@
 [![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](https://www.npmjs.com/package/sphica#provenance)
 [![Dependabot: GitHub Actions](https://img.shields.io/badge/Dependabot-GitHub%20Actions-025E8C?logo=dependabot)](https://github.com/iroha924/sphica/blob/main/.github/dependabot.yml)
 
+What the badges cover: CI runs the checks in [Contributing](https://github.com/iroha924/sphica#contributing), and how each release is built and published is in [Security](https://github.com/iroha924/sphica#security). A passing badge does not mean the code is free of bugs or vulnerabilities.
+
 English | [日本語](https://github.com/iroha924/sphica/blob/main/README.ja.md)
 
 **Local memory of past implementation and decisions for Claude Code and Codex.**

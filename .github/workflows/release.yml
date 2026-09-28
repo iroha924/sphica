@@ -76,6 +76,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      # release-gate reads the Codex review summary among the PR's issue comments
+      issues: read
       actions: read
     outputs:
       sha512: ${{ steps.pack.outputs.sha512 }}
@@ -100,7 +102,8 @@ jobs:
           node-version: "24.21.0"
           package-manager-cache: false
 
-      # The tag name matches every version, the commit is the head of an open PR into main, and that PR's check and pr-body succeeded
+      # The tag name matches every version, the commit is the head of an open PR into main, that PR's check and pr-body succeeded,
+      # and Codex finished reviewing that head with no thread left open
       - name: May this tag be released
         id: gate
         if: github.event_name == 'push'
@@ -246,6 +249,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
       actions: read
       id-token: write
       attestations: write

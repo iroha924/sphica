@@ -53,7 +53,7 @@ MIT requires the copyright notice and license text; Apache-2.0 section 4 require
 
 ## Shipping
 
-First, classify the change with `bun run release:plan -- --base <previous release commit>`.
+First, classify the change with `bun run release:plan -- --base <previous release commit>`. For a `plugin` release it also reads, with the owner's gh, the settings only an admin can see (immutable releases, SHA pinning required for actions) and fails unless both are on.
 
 **The owner does only one thing per release: approve the `npm-release` environment on the run page, plus `/reload-plugins` in open sessions after arrival.**
 That approval is the only gate before npm. Claude does not do it in the owner's place, neither on the page nor through the API (`gh api .../pending_deployments`), even though this machine's `gh` could.
@@ -91,12 +91,13 @@ Once, before the first release, the owner sets these up in the web UI (without t
 - npm: trusted publisher (repository `iroha924/sphica`, workflow `release.yml`, environment `npm-release`, direct `npm publish` allowed),
   2FA required, publishing with tokens disallowed. A connection cannot be edited: to change one, delete it and create it again
 
-3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`, and `release`, the dry run) and the Codex review. Keep main merged into the PR branch
+3. Open a PR with the "Release notes" section filled in, and pass CI (`check`, `pr-body`, and `release`, the dry run) and the Codex review. Keep main merged into the PR branch.
+   A push starts no Codex review, and the gate needs the review of the exact head: after the last push (merging main included), comment `@codex review` once and wait until both reviews in the summary are Completed on that head with 0 unresolved threads
    (if main has moved ahead, the tree CI checked and the tag's tree do not match)
 4. Run `git tag v<version> <head>` on **the PR head** and push it. Tagging the head, not main, lets the candidate be checked before the merge.
    Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
-   and that `check`, `pr-body`, and `release` succeeded on that head (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
+   that `check`, `pr-body`, and `release` succeeded on that head, and that the Codex connector's summary marks that head completed with no review thread left open (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
    after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
    It also stops when the PR has no Release notes, and records a digest of the notes the owner is about to read.
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner
@@ -114,7 +115,8 @@ Once, before the first release, the owner sets these up in the web UI (without t
 
 When a job fails, `report-failure` comments on the PR with the failed jobs and whether npm has the version (`yes`, `no`, or `unknown`; for `unknown`, check `npm view sphica@<version> version` by hand).
 
-- npm does not have it (failed in `prepare` or `publish`): nothing shipped. Fix it, bump the version, and ship again with a new tag
+- `prepare` stopped only because the Codex review of the head is missing, running, or has open threads: nothing shipped and the tag still points at the head. Request `@codex review` once; when the summary is Completed with 0 unresolved threads, run `gh run rerun <run-id> --failed`, without bumping the version. If a finding needs a fix, the fix is a new head the tag does not point to: bump the version and tag again
+- npm does not have it (failed in `prepare` or `publish` for any other reason): nothing shipped. Fix it, bump the version, and ship again with a new tag
 - npm has it but `merge` failed: the version is already `latest` while main lacks it. The owner decides whether to put `latest` back by running
   `npm dist-tag add sphica@<previous good version> latest` in their own terminal (the `!` prefix is only for this session's input box; in a shell, `!` inverts the exit code).
   That command asks for an OTP, which fails in a shell without a TTY such as Claude's. Fix the PR and ship a new version; never reuse the published one

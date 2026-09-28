@@ -9,3 +9,4 @@ export function gateProblems(input: {
   pulls: unknown[];
   runs: unknown[];
 }): { problems: string[]; pull: number | null };
+export function reviewProblems(input: { commit: string; comments: unknown[]; threads: unknown[] }): string[];

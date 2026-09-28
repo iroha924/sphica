@@ -7,6 +7,8 @@
 [![SLSA Build L2](https://img.shields.io/badge/SLSA-Build%20L2-green)](https://www.npmjs.com/package/sphica#provenance)
 [![Dependabot: GitHub Actions](https://img.shields.io/badge/Dependabot-GitHub%20Actions-025E8C?logo=dependabot)](https://github.com/iroha924/sphica/blob/main/.github/dependabot.yml)
 
+バッジが示すもの: CI が流す検査は[貢献](https://github.com/iroha924/sphica/blob/main/README.ja.md#貢献)、リリースのビルドと公開の仕組みは[セキュリティ](https://github.com/iroha924/sphica/blob/main/README.ja.md#セキュリティ)にあります。バッジが通っていても、バグや脆弱性が無いという意味ではありません。
+
 [English](https://github.com/iroha924/sphica/blob/main/README.md) | 日本語
 
 **Claude Code と Codex のための、過去の実装と判断の記憶。**
@@ -198,8 +200,8 @@ npm uninstall -g sphica
 
 脆弱性は [SECURITY.md](https://github.com/iroha924/sphica/blob/main/SECURITY.md) の手順で、非公開で報告してください。
 
-リリースは、CI が通った PR の head に打った tag から GitHub Actions がビルドし、npm にステージします。
-メンテナーが SHA-512 のチェックサムと provenance を確かめ、2 要素認証で承認してから公開します。
+リリースは、CI が通った PR の head に打った tag から GitHub Actions がビルドします。
+メンテナーが GitHub でリリースの環境を承認してから公開し、npm へはトークンを置かない trusted publishing で届けます。
 [npm のページ](https://www.npmjs.com/package/sphica#provenance)から、ビルドしたワークフローとコミットを辿れます。
 
 依存の更新は、CI で使う GitHub Actions を Dependabot が毎週、パッケージにバンドルした npm の依存を Renovate が毎月、PR にします。

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { observe, settingsState } from "./lib/repo-settings.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const read = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -127,8 +128,30 @@ console.log(
   }`,
 );
 
+// Only an admin can read these, so they are checked here with the owner's gh rather than in release.yml
+const repo = attempt("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]);
+const gh = (args) =>
+  execFileSync("gh", args, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 30_000,
+  });
+const settings = repo
+  ? settingsState({
+      immutable: observe(gh, `repos/${repo}/immutable-releases`),
+      actions: observe(gh, `repos/${repo}/actions/permissions`),
+    })
+  : settingsState({ immutable: { status: null, body: null }, actions: { status: null, body: null } });
+console.log("repository settings");
+for (const { name, state } of settings) console.log(`  ${name}: ${state}`);
+
 const issues = [];
 const unknowns = [];
+for (const { name, state } of settings) {
+  if (state === "off") issues.push(`${name} is off`);
+  if (state === "unknown") unknowns.push(`cannot observe ${name}`);
+}
 if (tags && tags.latest !== packageVersion) issues.push("repository and npm latest differ");
 if (tags?.latest && globalPackage.status !== "unknown" && globalPackage.version !== tags.latest) {
   issues.push("the npm i -g CLI differs from npm latest");
