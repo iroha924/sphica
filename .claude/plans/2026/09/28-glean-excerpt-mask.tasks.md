@@ -31,6 +31,16 @@ base: main
   - コミット: `feat(text): find private key ranges and check quotes against masked text (T01)`
   - 結果: `node --test test/text.test.ts` → 13 件 pass（追加の 2 件を含む）。`tsc --noEmit` → エラーなし。biome check → 指摘なし。`bun run --cwd server test` → 311 件 pass。バージョンを 0.5.6 → 0.5.7 に上げた（pre-commit の bundle が同じコミットでの引き上げを求めるため）
 
+- [x] T05: quoteSpan と privateKeyRanges のバイト位置の計算を線形にする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T01（直す対象の関数）
+  - 変更: `server/src/text.ts`, `server/test/text.test.ts`
+  - red: 足した「stay fast」のテストを直す前のコードで `node --test test/text.test.ts` → 5 秒の上限を超えて fail
+  - 完了条件: `bun run --cwd server test` → 全件 pass
+  - コミット: `fix(text): count placeholder byte offsets in one pass (T05)`
+  - 結果: red は `took 42657 ms` で fail。直した後 `node --test test/text.test.ts` → 14 件 pass（同じテストが 85 ms）、`tsc --noEmit` と biome は指摘なし。`bun run --cwd server test` → 312 件 pass
+
 ## P2: glean の抜粋を伏せ字にする
 
 glean が引いたファイルの抜粋が、伏せ字にされて保存・索引化され、秘密に触れる引用が断られるようになる。
@@ -72,3 +82,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 ## 記録
 
 - 2026-09-28 / T01, T04 / pre-commit の bundle フックが、パッケージに入るファイルの変更と同じコミットでのバージョンの引き上げを求めた / バージョンの引き上げ（0.5.7）を T04 から T01 に移した。T01 の変更欄: 前 `server/src/text.ts`, `server/test/text.test.ts` → 後 それに 4 つのバージョンのファイルを足す。T04 の変更欄: 前 SKILL.md と 4 つのバージョンのファイル → 後 SKILL.md のみ。T04 の名前とコミットの件名も合わせて直した
+- 2026-09-28 / T05 / T01 の Codex レビュー（F1）: 伏せ字が約 5 万箇所ある約 1 MiB の入力で quoteSpan が 7.3 秒、処理時間が二乗で増える / 採用。修正タスク T05 を T01 の後に足した。Codex 側の全件テストの失敗は読み取り専用の環境で一時ディレクトリが作れなかったためで、手元では 311 件 pass

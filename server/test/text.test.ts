@@ -36,6 +36,18 @@ test("quoteSpan refuses quotes that masking touched and places the rest on the m
   assert.equal(quoteSpan("abc", "abc", ""), null);
 });
 
+// A whole cited file can hold a placeholder on every line; the check must stay linear in its length
+test("quoteSpan and privateKeyRanges stay fast on a file masked on every line", () => {
+  const raw = "TOKEN=abc123def456\n".repeat(100_000);
+  const masked = mask(raw);
+  const started = performance.now();
+  assert.deepEqual(quoteSpan(raw, masked, "TOKEN"), [0, 5]);
+  assert.equal(quoteSpan(raw, masked, "TOKEN=[redacted]\nTOKEN"), null);
+  const keys = "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n".repeat(20_000);
+  assert.equal(privateKeyRanges(keys).length, 20_000);
+  assert.ok(performance.now() - started < 5000, `took ${Math.round(performance.now() - started)} ms`);
+});
+
 test("privateKeyRanges gives the byte ranges mask() replaces", () => {
   const key = "-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----";
   const text = `日本語\n${key}\ntail`;

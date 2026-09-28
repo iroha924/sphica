@@ -313,7 +313,22 @@ function maskPrivateKeys(text: string): string {
 
 /** The UTF-8 byte ranges of the private key blocks mask() replaces, so a caller cutting by bytes can tell a cut inside a key. */
 export function privateKeyRanges(text: string): [number, number][] {
-  return keyBlocks(text).map(([a, b]) => [bytes(text.slice(0, a)), bytes(text.slice(0, b))]);
+  return byteRanges(text, keyBlocks(text));
+}
+
+/** String index ranges, in order and not overlapping, as UTF-8 byte ranges, counting each stretch once. */
+function byteRanges(text: string, ranges: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  let at = 0;
+  let pos = 0;
+  for (const [a, b] of ranges) {
+    pos += bytes(text.slice(at, a));
+    const end = pos + bytes(text.slice(a, b));
+    out.push([pos, end]);
+    at = b;
+    pos = end;
+  }
+  return out;
 }
 
 const PLACEHOLDER = /\[redacted(?:: [^\]]*)?\]/g;
@@ -338,11 +353,16 @@ export function quoteSpan(raw: string, masked: string, quote: string): [number, 
     const at = m.indexOf(q);
     return at < 0 ? null : [at, at + q.length];
   }
-  const holes = [...masked.matchAll(PLACEHOLDER)].map((x) => {
-    const a = bytes(masked.slice(0, x.index));
-    return [a, a + bytes(x[0])] as const;
+  const holes = byteRanges(
+    masked,
+    [...masked.matchAll(PLACEHOLDER)].map((x) => [x.index, x.index + x[0].length]),
+  );
+  // Matches and placeholders both run in order, so one pass pairs them
+  let h = 0;
+  const kept = starts(m, q).filter((at) => {
+    while ((holes[h]?.[1] ?? Number.POSITIVE_INFINITY) <= at) h++;
+    return !((holes[h]?.[0] ?? Number.POSITIVE_INFINITY) < at + q.length);
   });
-  const kept = starts(m, q).filter((at) => !holes.some(([a, b]) => at < b && at + q.length > a));
   const first = kept[0];
   return first !== undefined && kept.length === starts(Buffer.from(raw, "utf8"), q).length
     ? [first, first + q.length]
