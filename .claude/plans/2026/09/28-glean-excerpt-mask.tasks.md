@@ -140,6 +140,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): keep one path-only anchor and pair placeholders in one pass (T13)`
   - 結果: red は上のとおり fail。直した後 `node --test test/record.test.ts` → 15 件 pass、`bun run --cwd server test` → 316 件 pass、`bun run verify` → exit 0
 
+- [x] T14: 重複を除くのは symbol を外した anchor だけにし、行の範囲も比べて、除いたら知らせる
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T13（直す対象の重複の除き方）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`
+  - red: 行の範囲の違う path だけの anchor 2 つと、symbol を外される anchor 2 つを同じファイルに付けるテストを足し、直す前のコードで `node --test test/record.test.ts` → 2 つ目以降が知らせなしに消えて fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(record): merge only masked-symbol fallbacks and say so (T14)`
+  - 結果: red は上のとおり fail（行の範囲 4〜5 の anchor と symbol を外した anchor が消えた）。直した後 `node --test test/record.test.ts` → 16 件 pass、`bun run --cwd server test` → 317 件 pass、`bun run verify` → exit 0
+
 - [x] T11: README の秘密情報の項目に、glean が引いたファイルの行も伏せ字になることを書く
   - 種別: 変更
   - 計画: S5
@@ -182,3 +192,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T12 / review-shipping（d4e5bc4）: masksSymbol が部分文字列で数えるため、`local` や `what` のような普通の識別子が、伏せ字の中の文字列に当たって秘密と判定され、trace・harvest で anchor ごと外れる。秘密は漏れないが配信が止まる / 採用（自分の修正が生んだもの）。修正タスク T12: 識別子全体で数え、trace・harvest では symbol だけを外してパスの anchor は残す
 
 - 2026-09-28 / T13 / review-shipping（88817d0）: symbol を外した anchor が同じ path と role で重複して保存され、replace_anchor がどれも指せない（再現済み。T12 のテストがその重複を期待していた）。masksSymbol が一致と目印の全組を突き合わせて 2 MiB で約 1.9 秒 / 採用（自分の修正が生んだもの）。修正タスク T13
+- 2026-09-28 / T14 / review-shipping（013591e）: 重複を除く処理が lines を見ず、record が与えた行の範囲の違う path だけの anchor まで知らせなしに消す（再現済み。T13 の前はどれも保存された） / 採用（自分の修正が生んだもの）。修正タスク T14。役割や commit だけが違う path だけの anchor を replace_anchor が見分けられない点は、この変更より前からの設計なので見送り

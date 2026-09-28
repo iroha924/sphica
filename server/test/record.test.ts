@@ -125,6 +125,54 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
   }
 });
 
+// Only the path-only anchors left behind by a masked symbol are merged; ones the record gives with their own lines all stay
+test("path-only anchors with their own lines are all kept, and a merged fallback is reported", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-dedupe-"));
+  try {
+    fs.writeFileSync(path.join(root, "c.ts"), "API_KEY=abc123def456\na\nb\nc\nd\n");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    const { checked } = await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "lines",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [
+              { path: "c.ts", lines: [2, 2], role: "applies_to" },
+              { path: "c.ts", lines: [4, 5], role: "applies_to" },
+              { path: "c.ts", symbol: `sk-${"c3".repeat(15)}`, role: "applies_to" },
+              { path: "c.ts", symbol: `sk-${"d4".repeat(15)}`, role: "applies_to" },
+            ],
+          },
+        ],
+      },
+      [m],
+    );
+    const rows = db.owner.prepare("select symbol, line_start, line_end from unit_anchor order by id").all();
+    assert.deepEqual(
+      rows.map((r) => [r.symbol, r.line_start, r.line_end]),
+      [
+        [null, 2, 2],
+        [null, 4, 5],
+        [null, null, null],
+      ],
+    );
+    assert.ok(
+      checked.problems.some((x) => /another path-only anchor on c\.ts/.test(x)),
+      checked.problems.join("\n"),
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // A file masked on every line must not make the symbol check pair every match with every placeholder
 test("masksSymbol stays fast on a large file masked on every line", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-masks-"));

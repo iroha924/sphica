@@ -356,12 +356,17 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
                 .executeTakeFirst()
             )?.id ?? null)
           : null;
-      // Two identical path-only anchors could not be told apart by replace_anchor
-      if (
-        !symbol &&
-        anchors.some((x) => !x.symbol && x.path === p && x.role === a.role && x.commit === commit)
-      )
+      // A masked symbol's fallback merges into a path-only anchor already there: identical rows could not be told apart by replace_anchor
+      const same = (x: (typeof anchors)[number]) =>
+        !x.symbol &&
+        x.path === p &&
+        x.role === a.role &&
+        x.commit === commit &&
+        `${x.lines}` === `${a.lines}`;
+      if (a.symbol && !symbol && anchors.some(same)) {
+        problems.push(`${key}: another path-only anchor on ${p} already covers it; left out`);
         continue;
+      }
       anchors.push({ ...a, symbol, commit, path: p, observation });
     }
 
