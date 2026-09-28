@@ -91,30 +91,31 @@ export async function searchUnits(
   const hits: (UnitHit & { rank: number })[] = [];
   for (let at = 0; at < Math.min(ranked.length, UNIT_SCAN_MAX); at += UNIT_PAGE) {
     const part = ranked.slice(at, Math.min(at + UNIT_PAGE, UNIT_SCAN_MAX));
-    const rank = new Map(part.map((r) => [r.id, r.rank]));
-    // A unit gone since the order was taken is simply not read
+    // Rows are read through the same filters, so a unit gone or changed since the order was taken is simply not read,
+    // and they are judged in the order taken (ties by id)
+    const order = new Map(part.map((r, i) => [r.id, i]));
     const rows = (
-      await db
-        .selectFrom("unit")
+      await query
         .select([
-          "id",
-          "key",
-          "kind",
-          "stance",
-          "lifecycle",
-          "text",
-          "why",
-          "scope_note",
-          "revisit_when",
-          "content_hash",
+          "u.id",
+          "u.key",
+          "u.kind",
+          "u.stance",
+          "u.lifecycle",
+          "u.text",
+          "u.why",
+          "u.scope_note",
+          "u.revisit_when",
+          "u.content_hash",
+          "f.rank",
         ])
         .where(
-          "id",
+          "u.id",
           "in",
           part.map((r) => r.id),
         )
         .execute()
-    ).map((r) => ({ ...r, rank: rank.get(r.id) ?? 0 }));
+    ).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
     read += rows.length;
     weaker += await judgeUnits(db, rows, wanted, hits);
   }
@@ -342,5 +343,7 @@ export async function searchSources(
       if (hits.length >= limit) break scan;
     }
   }
+  // Every id taken was looked at, but the order was cut at the cap: candidates past it were never taken
+  if (!stopped && hits.length < limit && ranked.length > SOURCE_SCAN_MAX) stopped = true;
   return { hits, weaker, terms: wanted, stopped, read };
 }

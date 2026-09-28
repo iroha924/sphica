@@ -52,6 +52,16 @@ base: main
   - コミット: `fix(search): take the candidate order in one statement so writes between pages skip nothing`
   - 結果: red（直す前）`node --test test/search.test.ts` → 1 ページ目の後に先頭の候補を消すと、51 番目の強い一致を飛ばして `hits: []` で失敗。直した後 → pass 8 / fail 0（600 件のテストで強い一致が見つかることも確かめる）。`bun run sql:reach` → 157 / 157、typecheck・lint → 0
 
+- [x] T09: 順番を取った後の変化で絞り込みと stopped が崩れないようにし、同じ rank は取った順に並べる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/src/search.ts`, `server/test/search.test.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 順番を取った直後に記録を withdrawn にすると active だけの検索に出るテストと、上限 + 1 件の先頭が消えると stopped が false になるテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts test/deliver.test.ts` → 全部 pass
+  - コミット: `fix(search): keep the filters and the cap true when rows change after the order is taken`
+  - 結果: red（直す前）`node --test test/search.test.ts` → 順番を取った直後に withdrawn にした記録が active だけの検索に出て失敗（`[ 'trace:ext-s1/retry' ]`）。stopped の直しの 1 行を外すと「a candidate past the ones read remains」で失敗することも確かめた。直した後 `node --test test/search.test.ts test/deliver.test.ts test/plugin.test.ts` → pass 52 / fail 0。lint・typecheck → 0、`sql:reach` 全箇所
+
 ## P2: 配信が省いたものを言う（W7 #190）
 
 上限から漏れた記録や作業の件数と見方が、配信の文に出る。今届いている記録は押し出さない。
@@ -118,3 +128,4 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 2026-09-29 / T07 / reader の authorizer はトランザクションを許さないので、1 つのスナップショットで読む案は権限の境界を変えることになる / 候補の順番（id と rank）を 1 つの SQL で上限 + 1 件まで取り、中身をページごとに id で引く形にした。途中で消えた行は読まないだけになる
 2026-09-29 / T08 / ec4390f の Codex レビュー 2 件: 作業の文に制約の key があると渡していない制約を渡したと数える（F1）と、作業の一覧と件数の間に作業が完了すると省略の数が負になりログの CHECK で落ちる（F2）。2 件とも採用。F2 のテストは配信が自分で開く DB 接続に割り込む仕組みが要るので付けず、0 未満にしない形で直す / 修正タスク T08 を足した
 2026-09-29 / T06 / 検索の上限の acceptance case は、200 件を超える記録を cases.json に並べることになり量が見合わない。W4 は実 SQLite の単体テスト（search.test.ts）と MCP のテスト（plugin.test.ts）で押さえた / 配信の注記の case（injection-10）だけを足し、層ごとの件数のテスト（acceptance-cases.test.ts）の injection を 9 → 10 にした。変更欄に `server/test/acceptance-cases.test.ts` を足した（前: `server/evals/acceptance/cases.json`）
+2026-09-29 / T09 / 6e1108c（T07）の Codex レビュー 4 件: 上限付近で候補が消えると stopped が false（F1）、順番の後に記録の状態やアンカーが変わると絞り込みに合わない記録を返す（F2）、同じ rank の並びが中身を引いた順（F4）は採用。上限に達した後の残りが消えていても stopped が true（F3）は見送り（「まだあるかも」と言うだけで害が無い）。220309b（T08）の 1 件（ログが書かれなくても通る検査）は採用。34a0d92（T05）の 1 件（resume では trace 待ちの通知が出ない）は見送り（resume は開始の配信ごと出さない今の決まりで、通知は次の新しいセッションで出る） / 修正タスク T09 を足した。F4 は今の SQLite が id 順で返すので red は作れない

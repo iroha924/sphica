@@ -868,6 +868,14 @@ test("session start counts a constraint as shown only when its line was kept", a
     );
     assert.doesNotMatch(start, /^- trace:ext-s1\/b0/m, "the constraint's own line does not fit");
     assert.match(start, /\n- 1 more record applies here but was left out for space/);
+    const logged = db.owner
+      .prepare("select outcome, omitted from delivery where event = 'session_start'")
+      .all();
+    assert.deepEqual(
+      logged.map((r) => ({ ...r })),
+      [{ outcome: "emitted", omitted: 1 }],
+      "the delivery is logged",
+    );
     const units = db.owner.prepare("select count(*) as n from delivery_unit").get()?.n;
     assert.equal(units, 0, "the constraint is not logged as delivered");
   } finally {

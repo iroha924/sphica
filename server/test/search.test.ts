@@ -489,3 +489,53 @@ test("a source removed between two pages of a search makes it skip no other cand
     await db.done();
   }
 });
+
+// The order is taken first and rows are read after, so what changed in between must not slip past the filters or the cap
+test("a record withdrawn after the order was taken is not an active hit, and a source removed near the cap still says the search stopped", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m", text: "Retry budget stays fixed." });
+    await save(db, p, { units: [decision("retry", m, "Retry budget stays fixed.")] });
+    const afterFirst = (write: () => void) => {
+      let done = false;
+      return db.reader.withPlugin({
+        transformQuery: (a) => a.node,
+        transformResult: async (a) => {
+          if (!done) {
+            done = true;
+            write();
+          }
+          return a.result;
+        },
+      });
+    };
+    const withdrawn = afterFirst(() =>
+      db.owner
+        .prepare(
+          "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', ?, 'withdrawn meanwhile', (select run_id from unit_state order by id desc limit 1) from unit where key = 'trace:ext-s1/retry'",
+        )
+        .run(new Date().toISOString()),
+    );
+    const active = await searchUnits(withdrawn, p, {
+      question: "retry budget",
+      lifecycles: ["active"],
+      limit: 5,
+    });
+    assert.deepEqual(
+      active.hits.map((h) => h.key),
+      [],
+    );
+    // 601 weak sources and a strong one ranked last; the best-ranked goes away right after the order is taken
+    const weak = (n: number) => (n % 2 ? "retry budget retry budget." : "cache warm cache warm.");
+    const firstWeak = message(db, p, { id: "w0", text: weak(0), session: "s2" });
+    for (let n = 1; n < 601; n++) message(db, p, { id: `w${n}`, text: weak(n), session: "s2" });
+    const filler = Array.from({ length: 300 }, (_, i) => `word${i}`).join(" ");
+    message(db, p, { id: "strong", text: `${filler} retry budget cache ${filler}`, session: "s2" });
+    const removed = afterFirst(() => db.owner.prepare("delete from source where id = ?").run(firstWeak));
+    const r = await searchSources(removed, p, "retry budget cache warm", 5);
+    assert.equal(r.stopped, true, "a candidate past the ones read remains");
+  } finally {
+    await db.done();
+  }
+});
