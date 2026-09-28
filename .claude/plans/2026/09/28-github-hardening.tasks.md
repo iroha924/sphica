@@ -31,7 +31,7 @@ base: main
   - コミット: `chore(release): bump to 0.5.6`
   - 結果: `grep -h '"version"' ...` → 4 行とも "version": "0.5.6"
 
-- [ ] T02: closingRefs が HTML コメントの中の参照を読まないようにする
+- [x] T02: closingRefs が HTML コメントの中の参照を読まないようにする
   - 種別: 修正
   - 計画: S2
   - 依存: T01（配布物の変更はバージョンを上げた後でないとコミットできない）
@@ -39,6 +39,7 @@ base: main
   - red: `cd server && node --test test/github.test.ts` → .github/pull_request_template.md の本文を読んだ PR が issue 12 を閉じる参照として返し失敗
   - 完了条件: `bun run test` → テンプレートの本文から参照が返らず、コメントの外の `Closes #3` は返り、閉じない開始記号の後ろは返らず、閉じない開始記号が多い入力でも線形の時間で終わる検査を含めて通る
   - コミット: `fix(github): ignore closing references inside HTML comments`
+  - 結果: red を実測（`node --test test/github.test.ts` → `Error: no answer for issues/12`、テンプレートのコメントから issue 12 を読みに行った）。直した後 `bun run test` → 全件 pass（開始記号 20 万個の入力も 1 秒以内）
 
 - [ ] T03: 両方の README のバッジの下に説明への案内を足し、日本語版の Security 節を今の手順に直す（#184）
   - 種別: 変更

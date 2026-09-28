@@ -137,6 +137,21 @@ test("closing references in owner/repo#N and URL form count for this repository 
   assert.deepEqual(pull.closes, [14, 15]);
 });
 
+// GitHub hides HTML comments, and our own PR template's comments say "put `Closes #12`": a reference inside one closes nothing
+test("closing references inside HTML comments, or after one left open, are not read", async () => {
+  const template = fs.readFileSync(
+    path.join(import.meta.dirname, "..", "..", ".github", "pull_request_template.md"),
+    "utf8",
+  );
+  assert.deepEqual((await readPull(fake(`${template}\nFixes #14.`), 7)).closes, [14]);
+  assert.deepEqual((await readPull(fake("Fixes #14 <!-- Closes #15 --> and more."), 7)).closes, [14]);
+  assert.deepEqual((await readPull(fake("Fixes #14. <!-- left open\nCloses #15"), 7)).closes, [14]);
+  // Many openers that never close are read in one pass, not once per opener
+  const started = Date.now();
+  assert.deepEqual((await readPull(fake(`Fixes #14 ${"<!--".repeat(200_000)} Closes #15`), 7)).closes, [14]);
+  assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
+});
+
 test("reads the body, comments, reviews with text, review comments with their position, commits, the merge, and closed issues", async () => {
   const pull = await readPull(fake("Fixes #14, closes #15, and fixes #7. Switch to pnpm."), 7);
   assert.equal(pull.title, "Switch to pnpm");
