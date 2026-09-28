@@ -48,10 +48,10 @@ export async function searchUnits(
   db: Kysely<DB>,
   projectId: number,
   q: UnitQuery,
-): Promise<{ hits: UnitHit[]; weaker: number; terms: string[]; stopped: boolean }> {
+): Promise<{ hits: UnitHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
   const wanted = queryTerms(q.question);
   const match = ftsQuery(q.question);
-  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false };
+  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
   let query = db
     .selectFrom(
       sql<{
@@ -93,8 +93,9 @@ export async function searchUnits(
   // so every page up to the cap is read. One row past each page only tells whether more candidates remain.
   let weaker = 0;
   let stopped = false;
+  let read = 0;
   const hits: (UnitHit & { rank: number })[] = [];
-  for (let read = 0; ; ) {
+  for (;;) {
     const page = await query
       .orderBy("f.rank")
       .orderBy("u.id")
@@ -145,7 +146,13 @@ export async function searchUnits(
       b.matched.length - a.matched.length ||
       a.rank - b.rank,
   );
-  return { hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h), weaker, terms: wanted, stopped };
+  return {
+    hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h),
+    weaker,
+    terms: wanted,
+    stopped,
+    read,
+  };
 }
 
 type UnitRow = {
@@ -261,10 +268,10 @@ export async function searchSources(
   projectId: number,
   question: string,
   limit: number,
-): Promise<{ hits: SourceHit[]; weaker: number; terms: string[]; stopped: boolean }> {
+): Promise<{ hits: SourceHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
   const wanted = queryTerms(question);
   const match = ftsQuery(question);
-  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false };
+  if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
   const query = db
     .selectFrom(
       sql<{
@@ -330,5 +337,5 @@ export async function searchSources(
       break;
     }
   }
-  return { hits, weaker, terms: wanted, stopped };
+  return { hits, weaker, terms: wanted, stopped, read };
 }

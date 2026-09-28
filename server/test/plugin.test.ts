@@ -674,3 +674,42 @@ test("forget_apply removes sources only when the owner types the count in the ho
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A search that stopped at its cap must not read as "nothing matches"
+test("search says when it stopped before reading every candidate", async () => {
+  const db = tempDb();
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-scan-"));
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/scan.git"], { cwd: repo });
+  const p = project(db, "git:github.com/o/scan", "o/scan");
+  for (let n = 0; n < 700; n++)
+    message(db, p, { id: `w${n}`, text: n % 2 ? "retry budget retry budget." : "cache warm cache warm." });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const search = async () => {
+    const r = await client.callTool({
+      name: "search",
+      arguments: { cwd: repo, query: "retry budget cache warm", sources: true },
+    });
+    return (r.content as { text: string }[])[0]?.text ?? "";
+  };
+  try {
+    const none = await search();
+    assert.match(none, /No source among the first 600 candidates by rank holds most of/);
+    assert.doesNotMatch(none, /^No source holds most of/);
+    message(db, p, { id: "both", text: "retry budget and cache warm." });
+    const some = await search();
+    assert.match(some, /retry budget and cache warm\./);
+    assert.match(some, /Stopped after 600 candidates by rank; more may match\./);
+  } finally {
+    await client.close();
+    await db.done();
+  }
+});

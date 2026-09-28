@@ -32,14 +32,15 @@ base: main
   - コミット: `fix(search): read candidates past the first 200 and say where the scan stopped`
   - 結果: red（直す前）→ 2 件失敗（本文の強い一致が `hits: []`、`stopped` が無い）。直した後 `node --test test/search.test.ts` → pass 7 / fail 0（本文と記録の強い一致、600 件で stopped、64 MiB で stopped と弱い候補 64 件）。`scripts/lib/release-scope.mjs` の `releaseKind` に差分のファイルを渡して `plugin`（`release:plan` はコミット済みの差分だけを見るので、コミット前は `none` と出た）。4 か所を 0.6.2 にそろえた。typecheck・lint → 0、`sql:reach` 153 / 153
 
-- [ ] T02: MCP の検索の文で、上限で止まったことを言う
+- [x] T02: MCP の検索の文で、上限で止まったことを言う
   - 種別: 修正
   - 計画: S2
   - 依存: T01（`stopped` が要る）
-  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`
+  - 変更: `server/src/mcp.ts`, `server/src/search.ts`, `server/test/plugin.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/plugin.test.ts` → 上限で止まった検索の文が「No ... holds most of」と言い切り、候補の数を言わないので落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/plugin.test.ts` → 全部 pass
   - コミット: `fix(mcp): say when a search stopped before reading every candidate`
+  - 結果: red（直す前）→ 上限で止まった本文の検索が `No source holds most of: retry, budget, cach, warm. 600 weaker matches left out.` と言い切って失敗。直した後 `node --test test/plugin.test.ts test/search.test.ts` → pass 34 / fail 0。typecheck → 0
 
 ## P2: 配信が省いたものを言う（W7 #190）
 
@@ -86,3 +87,5 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
   - コミット: `test(acceptance): cover a search past the first candidates and a delivery that left records out`
 
 ## 記録
+
+2026-09-29 / T02 / 文に読んだ件数を出すため、`searchUnits` と `searchSources` の返り値に `read` を足した / T02 の変更欄に `server/src/search.ts` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）
