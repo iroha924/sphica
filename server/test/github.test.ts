@@ -305,12 +305,37 @@ test("gh reads pull requests and the signed-in user from github.com only", async
   });
 });
 
+// CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97), which no longer parses
+test("gh is asked for plain JSON even when the owner forces color", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = { PATH: process.env.PATH, CLICOLOR_FORCE: process.env.CLICOLOR_FORCE };
+  try {
+    const colors = "const f = process.env.CLICOLOR_FORCE; const c = f && f !== '0';";
+    const out = (json: string) =>
+      `process.stdout.write(c ? "\\u001b[1;37m" + ${JSON.stringify(json)} + "\\u001b[m" : ${JSON.stringify(json)});`;
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\n${colors}\nif (process.argv[3] === "user") ${out('{"id":42,"login":"hana"}')} else ${out("{}")}\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
+    process.env.CLICOLOR_FORCE = "1";
+    assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana" });
+    assert.deepEqual(await gh("o/r")("pulls/1"), {});
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.CLICOLOR_FORCE === undefined) delete process.env.CLICOLOR_FORCE;
+    else process.env.CLICOLOR_FORCE = saved.CLICOLOR_FORCE;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 // A gh stuck on the network must not hold init: it gives up and init goes on to register the repository
 test("a gh that never answers is given up on as failed", async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
   const saved = process.env.PATH;
   try {
-    fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\nsetTimeout(() => {}, 60_000);\n`, {
+    fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\nsetTimeout(() => {}, 20_000);\n`, {
       mode: 0o755,
     });
     process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;

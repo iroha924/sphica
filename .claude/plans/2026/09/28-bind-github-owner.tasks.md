@@ -107,6 +107,16 @@ owner_identity を書けるのが owner 接続だけになり、gh からアカ�
   - コミット: `fix(github): give up on a gh api user call that never answers`
   - 結果: red を実測（42 秒で時間切れの失敗）。直した後 `node --test test/github.test.ts` → 7 pass / 0 fail（5.8 秒）
 
+- [x] T16: gh に CLICOLOR_FORCE=0 を渡し、色を強制している環境でも JSON を読めるようにする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T15（直す対象の ghUser() の呼び出しが要る）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test test/github.test.ts` → CLICOLOR_FORCE=1 で色付きの JSON を返す偽の gh に対し、ghUser() が unexpected を返して失敗
+  - 完了条件: `bun run test` → CLICOLOR_FORCE=1 の下で ghUser() と gh(repo) が素の JSON を読む検査を含めて通る
+  - コミット: `fix(github): ask gh for plain JSON even when color is forced`
+  - 結果: 本物の gh 2.97 で実測: `CLICOLOR_FORCE=1 gh api user | od -c` は ESC 付き、`NO_COLOR=1` を足しても ESC 付き、`CLICOLOR_FORCE=0` で素の JSON。red を実測（unexpected）。直した後 `node --test test/github.test.ts` → 8 pass / 0 fail
+
 ## P2: init と doctor
 
 sphica init がアカウントを登録して結果を 1 行で出し、doctor が登録を表示する。受け入れケースで harvest から採用まで通る。
@@ -187,3 +197,4 @@ README と harvest Skill が登録を説明し、バージョンがそろう。
 - 2026-09-28 / T04 のレビュー / F1（Windows CI の init が本物の gh を使う）、F2（tarball の doctor を見ていない）、F3（未登録の doctor が中立であることの検査が無い）を採用 / 修正タスク T13 を足した
 - 2026-09-28 / T06, T13 のレビュー / F1（空のトークンと設定では鍵保管庫の資格情報を除けず、リクエストが出ないとは言えない）、F3（登録前の発言も採用できると読める）、F4（再実行で何も変えないという説明と矛盾）を採用し T14 を足した。F2（PR 本文に見出しの形を書けば context の owner の見出しを偽装できる）は見送り: 本文による見出しの偽装はこの変更の前からあり、record_check と record_save が DB の author_kind を確かめ直すので、偽装だけでは採用にならない
 - 2026-09-28 / 差分全体の Codex レビュー / 指摘 1 件（gh api user に時間の上限が無く、固まった gh で init が止まる）を採用し T15 を足した
+- 2026-09-28 / review-shipping / #1・#2（時間の上限）は T15 で対応済み。#3（CLICOLOR_FORCE で JSON に色が付く）を本物の gh で再現して採用し T16 を足した。#4（live-harness の childEnv の JSDoc が fakeGh の上に残った）を採用し T17 を足した。Windows の CI の手順は PR の CI で確かめる

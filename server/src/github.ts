@@ -39,13 +39,16 @@ const MAX_RESPONSE = 16 * 1024 * 1024;
 /** Project keys and owner_identity name github.com only, so GH_HOST or a configured enterprise host must not answer instead */
 const HOST = ["--hostname", "github.com"];
 
+/** CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97); "0" turns it back off */
+const plainEnv = () => ({ ...process.env, CLICOLOR_FORCE: "0" });
+
 export const gh =
   (repo: string): Get =>
   async (path, all = false) => {
     const { stdout } = await exec(
       "gh",
       ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
-      { encoding: "utf8", maxBuffer: MAX_RESPONSE },
+      { encoding: "utf8", maxBuffer: MAX_RESPONSE, env: plainEnv() },
     ).catch((e: NodeJS.ErrnoException) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
         throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
@@ -74,6 +77,7 @@ export async function ghUser(timeout = 15_000): Promise<SignedIn> {
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
       timeout,
+      env: plainEnv(),
     }));
   } catch (e) {
     // Once gh ran, execFile gives its exit status (null when a signal ended it); when it never started, an error name
