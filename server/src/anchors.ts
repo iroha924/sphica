@@ -40,7 +40,7 @@ function findSymbol(text: string, symbol: string): { lines: string[]; i: number 
  * Whether a symbol is text mask() hides: a key by its shape, or a name masking swallows somewhere (a copy left elsewhere, or a placeholder's own
  * letters, does not clear it). Names are counted whole, as findSymbol matches them. Such an anchor would store the key in its symbol.
  */
-export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
+function swallowed(root: string | null, rel: string, symbol: string): boolean {
   if (mask(symbol) !== symbol) return true;
   const text = root ? readText(root, rel) : null;
   if (typeof text !== "string") return false;
@@ -57,6 +57,14 @@ export function masksSymbol(root: string | null, rel: string, symbol: string): b
     if (!((holes[h]?.[0] ?? Number.POSITIVE_INFINITY) < m.index + symbol.length)) kept++;
   }
   return kept !== raw;
+}
+
+/** A symbol with spaces around it is checked as written and trimmed, since the name in the file is the trimmed one. */
+export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
+  const trimmed = symbol.trim();
+  return (
+    swallowed(root, rel, symbol) || (trimmed !== symbol && trimmed !== "" && swallowed(root, rel, trimmed))
+  );
 }
 
 /**

@@ -1,9 +1,9 @@
 ---
 kind: plan
-status: draft
+status: approved
 codex_session: 01a0e761-7a81-75a2-b101-bb017ad51922
 codex_rounds: 4
-approved_at:
+approved_at: 2026-09-28
 ---
 
 # glean が引いたファイルの抜粋と、記録のコード位置の抜粋を、保存の前に伏せ字にする（W1）

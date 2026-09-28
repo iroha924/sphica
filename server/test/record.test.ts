@@ -92,6 +92,7 @@ test("an anchor's excerpt is masked before it is cut, and a symbol masking swall
               { path: "config.ts", symbol: "configMarker", role: "applies_to" },
               // A symbol that is itself a key, by shape or because the file shows it only inside masked text, is dropped
               { path: "config.ts", symbol: "tokenValue123abc", role: "applies_to" },
+              { path: "config.ts", symbol: " tokenValue123abc ", role: "applies_to" },
               { path: "config.ts", symbol: `sk-${"b2".repeat(15)}`, role: "applies_to" },
               // Also when the value shows unmasked elsewhere, or when it reads like the placeholder itself
               { path: "config.ts", symbol: "redacted", role: "applies_to" },
@@ -148,6 +149,9 @@ test("path-only anchors with their own lines are all kept, and a merged fallback
               { path: "c.ts", lines: [4, 5], symbol: `sk-${"e5".repeat(15)}`, role: "applies_to" },
               { path: "c.ts", lines: [2, 2], role: "applies_to" },
               { path: "c.ts", lines: [4, 5], role: "applies_to" },
+              // A reversed range is the same place once saved
+              { path: "c.ts", lines: [5, 4], symbol: `sk-${"f6".repeat(15)}`, role: "applies_to" },
+              { path: "c.ts", lines: [5, 5], role: "applies_to" },
               { path: "c.ts", symbol: `sk-${"c3".repeat(15)}`, role: "applies_to" },
               { path: "c.ts", symbol: `sk-${"d4".repeat(15)}`, role: "applies_to" },
             ],
@@ -162,12 +166,57 @@ test("path-only anchors with their own lines are all kept, and a merged fallback
       [
         [null, 2, 2],
         [null, 4, 5],
+        [null, 5, 5],
         [null, null, null],
       ],
     );
     assert.ok(
       checked.problems.some((x) => /another path-only anchor on c\.ts/.test(x)),
       checked.problems.join("\n"),
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The file can change between the check and the save: the symbol is checked again as it is stored
+test("an anchor symbol that became a key after the check is stored without it", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-recheck-"));
+  try {
+    fs.writeFileSync(path.join(root, "c.ts"), "const tokenValue123abc = loadConfig();\n");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    const t = { ...target(p), root };
+    await inTransaction(db.ingest, async (trx) => {
+      const runId = await openRun(trx, {
+        projectId: p,
+        origin: t.origin,
+        target: "session:s1",
+        sessionId: t.sessionId,
+        draftId: "d-recheck",
+      });
+      const checked = await checkRecord(trx, t, {
+        units: [
+          {
+            key: "recheck",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [{ path: "c.ts", symbol: "tokenValue123abc", role: "applies_to" }],
+          },
+        ],
+      });
+      fs.writeFileSync(path.join(root, "c.ts"), "API_KEY=tokenValue123abc\n");
+      await saveRecord(trx, t, runId, checked, [m]);
+    });
+    assert.deepEqual(
+      db.owner
+        .prepare("select path, symbol from unit_anchor")
+        .all()
+        .map((r) => [r.path, r.symbol]),
+      [["c.ts", null]],
     );
   } finally {
     await db.done();

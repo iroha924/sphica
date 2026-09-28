@@ -672,6 +672,7 @@ test("glean: a cited file excerpt is stored masked, and quotes touching masked t
     };
     await assert.rejects(pin("zz99yy88xx77"), /the symbol is text Sphica masks/);
     await assert.rejects(pin(`sk-${"b2".repeat(15)}`), /the symbol is text Sphica masks/);
+    await assert.rejects(pin(" zz99yy88xx77 "), /the symbol is text Sphica masks/);
     assert.equal(
       db.owner.prepare("select count(*) as n from source where text like '%zz99yy88xx77%'").get()?.n,
       0,

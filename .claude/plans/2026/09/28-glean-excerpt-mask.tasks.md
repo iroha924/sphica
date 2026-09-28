@@ -160,6 +160,16 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(record): merge masked-symbol fallbacks after all anchors are read (T15)`
   - 結果: red は上のとおり fail。直した後 `node --test test/record.test.ts` → 16 件 pass、`bun run --cwd server test` → 317 件 pass、`bun run verify` → exit 0
 
+- [x] T16: GitHub の Codex レビュー（46c4a44）の 4 件を直す
+  - 種別: 修正
+  - 計画: S3, S4
+  - 依存: T15（直す対象の統合の処理）
+  - 変更: `server/src/anchors.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `.claude/plans/2026/09/28-glean-excerpt-mask.plan.md`
+  - red: 前後に空白のある symbol の glean、逆順の行の範囲の統合、検査と保存の間に秘密へ書き換わるファイルのテストを足し、直す前のコードで `node --test test/record.test.ts test/extract.test.ts` → 3 件 fail
+  - 完了条件: `bun run --cwd server test` と `bun run acceptance` → 全件 pass
+  - コミット: `fix(anchors): recheck symbols when saving and trim and order before comparing (T16)`
+  - 結果: red は上のとおり fail（記録の側の空白は入力の検査が落とすので元から通った）。直した後 `node --test test/record.test.ts test/extract.test.ts` → 29 件 pass、`bun run --cwd server test` → 318 件 pass、`bun run verify` → exit 0。計画を approved（2026-09-28）に直した
+
 - [x] T11: README の秘密情報の項目に、glean が引いたファイルの行も伏せ字になることを書く
   - 種別: 変更
   - 計画: S5
@@ -204,3 +214,4 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T13 / review-shipping（88817d0）: symbol を外した anchor が同じ path と role で重複して保存され、replace_anchor がどれも指せない（再現済み。T12 のテストがその重複を期待していた）。masksSymbol が一致と目印の全組を突き合わせて 2 MiB で約 1.9 秒 / 採用（自分の修正が生んだもの）。修正タスク T13
 - 2026-09-28 / T14 / review-shipping（013591e）: 重複を除く処理が lines を見ず、record が与えた行の範囲の違う path だけの anchor まで知らせなしに消す（再現済み。T13 の前はどれも保存された） / 採用（自分の修正が生んだもの）。修正タスク T14。役割や commit だけが違う path だけの anchor を replace_anchor が見分けられない点は、この変更より前からの設計なので見送り
 - 2026-09-28 / T15 / review-shipping（36d13fd）: symbol を外した anchor が、同じ行の範囲の path だけの anchor より前に来ると統合されず、同じ行が 2 つ保存される（再現済み） / 採用（自分の修正が生んだもの）。修正タスク T15: 全部の anchor を見てから統合する
+- 2026-09-28 / T16 / GitHub の Codex レビュー（46c4a44）: P1 検査と保存の間の書き換えで秘密の symbol が保存される、P1 前後に空白のある symbol が glean の検査をすり抜ける、P2 計画が draft のまま、P2 逆順の行の範囲が統合をすり抜ける / 4 件とも採用。計画が draft だったのは、Go の後に承認済みへ書き換えるコマンドが Bash の判定の障害で流れず、手動モードで再開したときに流し直さなかったため

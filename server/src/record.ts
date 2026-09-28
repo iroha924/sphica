@@ -362,7 +362,9 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       anchors.push(planned);
     }
     // A masked symbol's fallback merges into a path-only anchor like it, in any order: identical rows could not be told apart by replace_anchor
-    const place = (x: (typeof anchors)[number]) => `${x.path}\0${x.role}\0${x.commit}\0${x.lines}`;
+    // Lines as saved (the end never before the start), so a reversed range meets the same place
+    const place = (x: (typeof anchors)[number]) =>
+      `${x.path}\0${x.role}\0${x.commit}\0${x.lines ? [x.lines[0], Math.max(...x.lines)] : ""}`;
     const covered = new Set(anchors.filter((x) => !x.symbol && !fallbacks.has(x)).map(place));
     for (const x of [...fallbacks]) {
       if (!covered.has(place(x))) {
@@ -532,14 +534,16 @@ export async function saveRecord(
     }
     for (const a of p.anchors) {
       // Lines are recorded where the symbol is now, so a later read can tell a moved symbol from a missing one
-      const at = a.lines ? null : a.symbol ? locateSymbol(target.root, a.path, a.symbol) : null;
+      // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
+      const symbol = a.symbol && !masksSymbol(target.root, a.path, a.symbol) ? a.symbol : undefined;
+      const at = a.lines ? null : symbol ? locateSymbol(target.root, a.path, symbol) : null;
       const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx
         .insertInto("unit_anchor")
         .values({
           unit_id: id,
           path: a.path,
-          symbol: a.symbol ?? null,
+          symbol: symbol ?? null,
           commit_sha: a.commit ?? null,
           line_start: lines?.[0] ?? null,
           line_end: lines ? Math.max(lines[0], lines[1]) : null,

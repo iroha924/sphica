@@ -595,13 +595,16 @@ export async function saveGlean(
       changed.push(`${op.unit}: adopted`);
     } else if (op.op === "anchor" || op.op === "replace_anchor") {
       const to = op.op === "anchor" ? op : op.to;
-      const at = to.symbol ? symbolAt(target.root, repoPath(to.path) ?? to.path, to.symbol) : null;
+      const rel = repoPath(to.path) ?? to.path;
+      // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
+      const symbol = to.symbol && !masksSymbol(target.root, rel, to.symbol) ? to.symbol : null;
+      const at = symbol ? symbolAt(target.root, rel, symbol) : null;
       const added = await trx
         .insertInto("unit_anchor")
         .values({
           unit_id: p.unitId,
-          path: repoPath(to.path) ?? to.path,
-          symbol: to.symbol ?? null,
+          path: rel,
+          symbol,
           commit_sha: op.op === "anchor" ? (op.commit ?? null) : null,
           line_start: at?.line ?? null,
           line_end: at?.line ?? null,
