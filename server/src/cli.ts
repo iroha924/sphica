@@ -128,7 +128,7 @@ async function doctor(cwd: string): Promise<void> {
         "Schema version",
         usable
           ? `revision ${x.revision}`
-          : `revision ${x.revision}, this Sphica expects ${SCHEMA_REVISION} (${x.revision < SCHEMA_REVISION ? "made by an older Sphica: move it aside, then run sphica init" : "update sphica"})`,
+          : `revision ${x.revision}, this Sphica expects ${SCHEMA_REVISION} (${x.revision < SCHEMA_REVISION ? "made by an older Sphica: run sphica init to migrate it" : "update sphica"})`,
       );
       const broken = Object.entries(x.fts).filter(([, v]) => v !== null);
       say(

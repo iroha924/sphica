@@ -6,7 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { bindOwner, dbInit, inspect, reindex } from "../src/admin.ts";
+import { bindOwner, dbInit, inspect, migrate, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { fakeGhPath } from "./fake-gh.ts";
@@ -396,5 +396,66 @@ test("a database of another revision is not bound", async () => {
   });
   const look = new DatabaseSync(file, { readOnly: true });
   assert.equal((look.prepare("select count(*) as n from owner_identity").get() as { n: number }).n, 0);
+  look.close();
+});
+
+const REV1 = fs.readFileSync(
+  path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "schema-rev1.sql"),
+  "utf8",
+);
+
+/** A revision 1 database with one project, as 0.5.7 made it. */
+function revision1(file: string): void {
+  const raw = connectWriter("owner", file, true);
+  raw.exec("pragma journal_mode = wal");
+  raw.exec(REV1);
+  raw.prepare("insert into project (key, name) values ('git:x/y', 'x/y')").run();
+  raw.close();
+}
+const revisionOf = (file: string) => {
+  const raw = new DatabaseSync(file, { readOnly: true });
+  try {
+    return (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
+  } finally {
+    raw.close();
+  }
+};
+
+test("sphica init migrates a revision 1 database in place and keeps its records", async () => {
+  const file = path.join(tmp(), "sphica.db");
+  revision1(file);
+  assert.throws(() => connectWriter("ingest", file), /Run `sphica init` to migrate it/);
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (t: string) => said.push(t);
+  try {
+    dbInit(file);
+  } finally {
+    console.log = log;
+  }
+  assert.match(said.join("\n"), /Migrated: .* \(revision 1 → 2\)/);
+  assert.equal(revisionOf(file), SCHEMA_REVISION);
+  const raw = new DatabaseSync(file, { readOnly: true });
+  assert.equal((raw.prepare("select count(*) as n from project").get() as { n: number }).n, 1);
+  raw.close();
+  // Running it again changes nothing
+  assert.equal(migrate(file), SCHEMA_REVISION);
+});
+
+test("a migration that would leave a broken reference changes nothing", () => {
+  const file = path.join(tmp(), "sphica.db");
+  revision1(file);
+  const raw = connectWriter("owner", file);
+  raw.exec("pragma foreign_keys = off");
+  raw
+    .prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values ('s', 99, 'codex', 'e', ?)",
+    )
+    .run(at("2026-09-01T00:00:00Z"));
+  raw.close();
+  assert.throws(() => migrate(file), /left 1 broken reference; nothing was changed/);
+  assert.equal(revisionOf(file), 1);
+  const look = new DatabaseSync(file, { readOnly: true });
+  assert.equal(look.prepare("select 1 from sqlite_schema where name = 'forget_batch'").get(), undefined);
   look.close();
 });

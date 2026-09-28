@@ -40,13 +40,14 @@ revision 1 の DB を記録を失わずに revision 2 へ上げられるよう�
   - コミット: `feat(schema): add revision 2 with forget batches, tombstones, and a rebuilt unit_state`
   - 結果: `node --test test/migrate.test.ts test/schema.test.ts` → pass 3 / pass 19（定義の一致、foreign_key_check 空、行と id の保持、移行後の capture 書き込み、新しいトリガーの許可と拒否）。`bun run verify` → exit 0
 
-- [ ] T02: `sphica init` が revision 1 の DB を移行し、reader と ingest は init を案内する
+- [x] T02: `sphica init` が revision 1 の DB を移行し、reader と ingest は init を案内する
   - 種別: 変更
   - 計画: S2
   - 依存: T01（移行 SQL と revision 2 が要る）
   - 変更: `server/src/admin.ts`, `server/src/sqlite.ts`, `server/src/cli.ts`, `server/test/admin.test.ts`, `scripts/check-sql-live.mjs`
   - 完了条件: `cd server && node --test test/admin.test.ts` → revision 1 の DB に init すると revision 2 になり、記録の件数が変わらない。移行の失敗で rollback される。`bun run sql:live` が通る
   - コミット: `feat(init): migrate a revision 1 database in place`
+  - 結果: `node --test test/admin.test.ts` → pass 23（移行で revision 2・件数保持・再実行で変化なし、壊れた参照で rollback し revision 1 のまま）。`bun run sql:live` → 子プロセスの init が revision 1 を移行し、capture が書き込めた。`bun run verify` → exit 0
 
 ## P2: 削除の中身
 

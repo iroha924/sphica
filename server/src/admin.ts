@@ -1,6 +1,6 @@
 // Looks after this machine's database (~/.sphica/sphica.db). The owner runs these locally, with the owner connection (no authorizer).
 //
-//   sphica init                 creates the database and applies db/schema.sql. Safe to run again (an existing one is left alone)
+//   sphica init                 creates the database and applies db/schema.sql. Safe to run again (an older revision is migrated)
 //   sphica doctor --reindex     rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
 
 import fs from "node:fs";
@@ -18,6 +18,9 @@ const say = (text: string) => console.log(indent(text));
 
 // assets.ts alone decides where bundled files live (the shipped package and the working tree differ).
 const SCHEMA = (): string => path.join(dbDir(), "schema.sql");
+/** db/migrations/<revision>.sql moves a database from the revision before it (0002.sql: 1 → 2). */
+const MIGRATION = (revision: number): string =>
+  path.join(dbDir(), "migrations", `${String(revision).padStart(4, "0")}.sql`);
 
 const versionOf = (raw: DatabaseSync): number =>
   (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
@@ -46,7 +49,41 @@ function withOwner<T>(file: string, fn: (raw: DatabaseSync) => T, create = false
 }
 
 /**
- * Prepares this machine's database. **An existing one is left alone**, so it is safe to run again.
+ * Moves the database up to SCHEMA_REVISION, one migration per transaction. Foreign keys are off while tables are rebuilt (the pragma
+ * has no effect inside a transaction), and foreign_key_check must come back empty before each commit. The revision is read under
+ * the write lock, so a concurrent init that already moved it does nothing more. Returns the revision it started from.
+ */
+export function migrate(file: string = dbFile()): number {
+  return withOwner(file, (raw) => {
+    const from = versionOf(raw);
+    for (let r = from + 1; r <= SCHEMA_REVISION; r++) {
+      const script = MIGRATION(r);
+      if (!fs.existsSync(script))
+        throw new Error(
+          `No migration from revision ${r - 1}. Move the database aside, then run \`sphica init\`.`,
+        );
+      raw.exec("pragma foreign_keys = off");
+      try {
+        immediate(raw, () => {
+          if (versionOf(raw) !== r - 1) return;
+          raw.exec(fs.readFileSync(script, "utf8"));
+          const broken = raw.prepare("pragma foreign_key_check").all().length;
+          if (broken)
+            throw new Error(
+              `Migration to revision ${r} left ${plural(broken, "broken reference")}; nothing was changed`,
+            );
+          if (versionOf(raw) !== r) throw new Error(`${path.basename(script)} did not set revision ${r}`);
+        });
+      } finally {
+        raw.exec("pragma foreign_keys = on");
+      }
+    }
+    return from;
+  });
+}
+
+/**
+ * Prepares this machine's database. **An existing one is kept**: an older revision is migrated, so it is safe to run again.
  * The schema is applied to a temporary file before it is put in place (stopping midway never leaves a half-applied database).
  * If the destination is already taken, it stops without placing it.
  */
@@ -66,10 +103,14 @@ export function dbInit(file: string = dbFile()): void {
       );
     const got = withOwner(file, versionOf);
     if (got === SCHEMA_REVISION) say(`Already exists: ${file} (revision ${got})`);
-    else
+    else if (got > SCHEMA_REVISION)
       say(
-        `Already exists: ${file} (revision ${got}; this Sphica expects ${SCHEMA_REVISION}. Move it aside, then run \`sphica init\`.)`,
+        `Already exists: ${file} (revision ${got}, made by a newer Sphica; this one expects ${SCHEMA_REVISION}. Update sphica.)`,
       );
+    else {
+      migrate(file);
+      say(`Migrated: ${file} (revision ${got} → ${SCHEMA_REVISION})`);
+    }
     return;
   }
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
