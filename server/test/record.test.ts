@@ -254,6 +254,21 @@ test("masksSymbol does not count a name that only a placeholder's edge made whol
   }
 });
 
+// A file Sphica cannot scan (too large, binary) gives no context to clear a symbol, so the symbol is treated as masked
+test("masksSymbol treats a symbol in a file it cannot scan as masked", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-unscanned-"));
+  try {
+    fs.writeFileSync(path.join(root, "big.txt"), `API_KEY=abc123def456\n${"x".repeat(2 * 1024 * 1024)}`);
+    fs.writeFileSync(path.join(root, "bin.dat"), Buffer.from([0x61, 0, 0x62]));
+    assert.equal(masksSymbol(root, "big.txt", "abc123def456"), true);
+    assert.equal(masksSymbol(root, "bin.dat", "loadConfig"), true);
+    // A file not there yet has no context either way: only the symbol's own shape counts
+    assert.equal(masksSymbol(root, "later.ts", "loadConfig"), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // Save looks the symbol up again after the check, so the file may have changed in between: a line inside a key is still not kept
 test("locate does not keep a line inside a private key as an anchor's excerpt", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-locate-"));

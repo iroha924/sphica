@@ -43,7 +43,9 @@ function findSymbol(text: string, symbol: string): { lines: string[]; i: number 
 function swallowed(root: string | null, rel: string, symbol: string): boolean {
   if (mask(symbol) !== symbol) return true;
   const text = root ? readText(root, rel) : null;
-  if (typeof text !== "string") return false;
+  // A file that is there but cannot be scanned (too large, binary, a link) gives no context to clear the symbol
+  if (text === undefined) return true;
+  if (text === null) return false;
   const re = new RegExp(`(?<![\\w$])${literal(symbol)}(?![\\w$])`, "g");
   let raw = 0;
   for (let m = re.exec(text); m; m = re.exec(text)) raw++;
