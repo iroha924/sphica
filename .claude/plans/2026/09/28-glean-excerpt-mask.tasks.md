@@ -83,13 +83,14 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
 
 glean スキルの案内を足し、出荷前の検査を通す。
 
-- [ ] T04: glean スキルに引用の注意を 1 行足す
+- [x] T04: glean スキルに引用の注意を 1 行足す
   - 種別: 変更
   - 計画: S5
   - 依存: T02（断るときの文面が決まっている必要がある）, T03（出荷の範囲がそろっている必要がある）
   - 変更: `plugin/skills/glean/SKILL.md`
   - 完了条件: `bun run release:plan -- --base v0.5.6` → kind が `plugin`、`bun run verify` → 0 で終わる
   - コミット: `docs(glean): tell the agent not to quote secrets (T04)`
+  - 結果: `bun run release:plan -- --base v0.5.6` → release kind: plugin、4 つのバージョンがすべて 0.5.7。`bun run verify` → 最後の acceptance まで通過（58 件 pass）
 
 ## 記録
 
