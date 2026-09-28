@@ -186,10 +186,11 @@ function finish({ tag, commit, merge, pull }) {
   }
 }
 
-// npm accepts a publish and serves it minutes later (2 min 15 s for 0.5.4). Wait up to 4 minutes, within finish's 10-minute timeout
+// npm accepts a publish and serves it minutes later (2 min 15 s for 0.5.4, about 6 min for 0.5.5 and 0.5.6).
+// Wait up to 12 minutes, within finish's 20-minute timeout
 function waitForNpm(version) {
   const seconds = Number(process.env.RELEASE_FINISH_WAIT_SECONDS ?? 20);
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < 36; attempt++) {
     if (attempt > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
     if (succeeds("npm", ["view", `sphica@${version}`, "version"])) return;
   }

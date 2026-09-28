@@ -375,7 +375,8 @@ jobs:
     needs: [prepare, merge]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # release-finish waits up to 12 minutes for npm to serve the version
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: write
