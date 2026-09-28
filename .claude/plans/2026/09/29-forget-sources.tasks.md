@@ -22,13 +22,23 @@ base: main
 
 revision 1 の DB を記録を失わずに revision 2 へ上げられるようにする。
 
-- [ ] T01: schema revision 2 と移行 SQL、新しい DB と移行した DB の一致のテスト
+- [x] T08: バージョンを上げる（npm と 3 つの manifest）
+  - 種別: 変更
+  - 計画: S8
+  - 依存: なし
+  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `bun run release:plan -- --base v0.5.7` → plugin と出る。4 か所が同じバージョン
+  - コミット: `chore(release): bump to 0.6.0`
+  - 結果: `bun run release:plan -- --base v0.5.7` → release kind: plugin。4 か所を 0.6.0 にした。T01 と合わせて `bun run verify` → exit 0
+
+- [x] T01: schema revision 2 と移行 SQL、新しい DB と移行した DB の一致のテスト
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `db/schema.sql`, `db/migrations/0002.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0002.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`, `server/test/fixtures/schema-rev1.sql`
   - 完了条件: `cd server && node --test test/migrate.test.ts test/schema.test.ts` → 移行後の定義が新しい DB と一致し、`foreign_key_check` が空で、新しいトリガーの許可と拒否のテストが通る。`bun run verify` が通る
   - コミット: `feat(schema): add revision 2 with forget batches, tombstones, and a rebuilt unit_state`
+  - 結果: `node --test test/migrate.test.ts test/schema.test.ts` → pass 3 / pass 19（定義の一致、foreign_key_check 空、行と id の保持、移行後の capture 書き込み、新しいトリガーの許可と拒否）。`bun run verify` → exit 0
 
 - [ ] T02: `sphica init` が revision 1 の DB を移行し、reader と ingest は init を案内する
   - 種別: 変更
@@ -86,12 +96,7 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
   - 完了条件: `bun run verify:ai` と `bun run acceptance` → Skill の検査と forget の受け入れケースが通る
   - コミット: `feat(skills): add /sphica:forget`
 
-- [ ] T08: バージョンを上げる（npm と 3 つの manifest）
-  - 種別: 変更
-  - 計画: S8
-  - 依存: なし
-  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base v0.5.7` → plugin と出る。`bun run verify` が通る
-  - コミット: `chore(release): bump to 0.6.0`
-
 ## 記録
+2026-09-29 / T01 / `git show v0.5.7:db/schema.sql` は浅い clone で読めない / revision 1 の schema を `server/test/fixtures/schema-rev1.sql` に固定し、変更欄に足した（前: 6 ファイル、後: 7 ファイル）
+2026-09-29 / T01 / rename が `unit_lifecycle_via_state` の参照で失敗した（実測）/ 移行で `unit_lifecycle_via_state` と `unit_option_sealed` を先に drop し、作り直す
+2026-09-29 / T08 / pre-commit の bundle 検査が、パッケージに入る変更にバージョンの同時更新を求めた / T08 を T01 の前へ移し、同じコミットで済ませる（完了条件: 前 `release:plan` が plugin と出て verify が通る、後 plugin と出て 4 か所が同じバージョン）

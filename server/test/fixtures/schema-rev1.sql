@@ -4,7 +4,6 @@
 --
 -- Four boundaries:
 --   captured sources   session, source, artifact_link, edit_observation, external_reference: what was said or written, never rewritten
---                      (the owner can forget chosen sources: forget_batch and source_forgotten keep what was removed, without its text)
 --   extracted units    unit and its option, evidence, adoption, link, state, anchor, alias tables: what was decided or implemented
 --   processing         extraction_run, source_processing: what has been looked at and saved, so gaps are counted
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
@@ -144,26 +143,6 @@ create table external_reference (
   span_start integer not null check (span_start >= 0),
   span_end integer not null check (span_end > span_start),
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
-) strict;
-
--- One owner-confirmed deletion of chosen sources. It stands in for an extraction run on the state changes the deletion causes.
-create table forget_batch (
-  id integer primary key autoincrement not null,
-  project_id integer not null references project (id) on delete cascade,
-  at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', at) is at)
-) strict;
-
--- A source the owner forgot: its original id and identity, never its text. Capture, harvest, and glean skip an item matching one,
--- so the same words are not stored again; changed text is new speech and is stored. source_id has no foreign key: the row is gone.
-create table source_forgotten (
-  source_id integer primary key not null,
-  project_id integer not null references project (id) on delete cascade,
-  artifact text not null,
-  kind text not null,
-  external_id text not null,
-  content_hash blob not null check (length(content_hash) = 32),
-  batch_id integer not null references forget_batch (id) on delete cascade,
-  unique (project_id, artifact, kind, external_id, content_hash)
 ) strict;
 
 -- A file path an edit tool reported, or that a turn-boundary git status snapshot found. It is not an implementation record.
@@ -373,7 +352,6 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
 end;
 
 -- Lifecycle history and the only route for lifecycle changes. The trigger checks the rules and then sets unit.lifecycle.
--- A change comes from an extraction run, or from the owner forgetting sources (forget_id). source_id becomes null when its source is forgotten.
 create table unit_state (
   id integer primary key autoincrement not null,
   unit_id integer not null references unit (id) on delete cascade,
@@ -381,10 +359,8 @@ create table unit_state (
   to_state text not null check (to_state in ('candidate', 'active', 'superseded', 'withdrawn')),
   at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', at) is at),
   reason text not null check (reason <> ''),
-  source_id integer references source (id) on delete set null,
-  run_id integer references extraction_run (id),
-  forget_id integer references forget_batch (id),
-  check ((run_id is null) <> (forget_id is null))
+  source_id integer references source (id),
+  run_id integer not null references extraction_run (id)
 ) strict;
 create index unit_state_order on unit_state (unit_id, id);
 create trigger unit_state_rules before insert on unit_state begin
@@ -412,11 +388,7 @@ create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'superseded needs a supersedes link from its successor')
   where new.to_state = 'superseded' and not exists (select 1 from unit_link where to_unit = new.unit_id and kind = 'supersedes');
 end;
--- The one update allowed is the foreign key action clearing source_id after its source was forgotten
-create trigger unit_state_append_only before update on unit_state
-when not (new.source_id is null and old.source_id is not null and not exists (select 1 from source where id = old.source_id)
-  and new.id is old.id and new.unit_id is old.unit_id and new.from_state is old.from_state and new.to_state is old.to_state
-  and new.at is old.at and new.reason is old.reason and new.run_id is old.run_id and new.forget_id is old.forget_id) begin
+create trigger unit_state_append_only before update on unit_state begin
   select raise(abort, 'state history is append-only');
 end;
 create trigger unit_state_no_delete before delete on unit_state when exists (select 1 from unit where id = old.unit_id) begin
@@ -503,16 +475,13 @@ create trigger unit_evidence_retract before update on unit_evidence begin
     and s.project_id = (select project_id from unit where id = new.unit_id)
     and new.retraction_span_end <= length(cast(s.text as blob)));
 end;
--- Deleting a project (or its unit or source) cascades; only a direct delete of a live link is refused.
--- A retracted row whose retraction reason cites a forgotten source is removed with that source (the reason cannot outlive it).
+-- Deleting a project (or its unit or source) cascades; only a direct delete of a live link is refused
 create trigger unit_evidence_no_delete before delete on unit_evidence
-when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
+when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id) begin
   select raise(abort, 'evidence is retracted, never deleted');
 end;
 create trigger unit_adoption_no_delete before delete on unit_adoption
-when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
+when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id) begin
   select raise(abort, 'adoption is retracted, never deleted');
 end;
 -- A retraction that would leave an active unit without its required support must first move it back to candidate
@@ -550,10 +519,7 @@ create trigger unit_link_check before insert on unit_link begin
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'state and unit belong to different projects')
-  where (new.run_id is not null
-       and (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id))
-     or (new.forget_id is not null
-       and (select project_id from unit where id = new.unit_id) is not (select project_id from forget_batch where id = new.forget_id))
+  where (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id)
      or (new.source_id is not null
        and (select project_id from unit where id = new.unit_id) is not (select project_id from source where id = new.source_id));
 end;
@@ -583,12 +549,6 @@ create trigger unit_rev_evidence_i after insert on unit_evidence begin update un
 create trigger unit_rev_evidence_u after update on unit_evidence begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_adoption_i after insert on unit_adoption begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_adoption_u after update on unit_adoption begin update unit set revision = revision + 1 where id = new.unit_id; end;
-create trigger unit_rev_evidence_d after delete on unit_evidence when exists (select 1 from unit where id = old.unit_id) begin
-  update unit set revision = revision + 1 where id = old.unit_id;
-end;
-create trigger unit_rev_adoption_d after delete on unit_adoption when exists (select 1 from unit where id = old.unit_id) begin
-  update unit set revision = revision + 1 where id = old.unit_id;
-end;
 create trigger unit_rev_link_i after insert on unit_link begin
   update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
 end;
@@ -711,9 +671,7 @@ create trigger capture_message_insert instead of insert on capture_message begin
     new.created_at, new.captured_at, new.text, new.truncated, new.redacted, new.original_bytes, new.content_hash,
     new.speaker = 'owner'
   from session s where s.id = new.session_id
-    and not exists (select 1 from source where kind = 'session_message' and session_id = new.session_id and external_id = new.external_id)
-    and not exists (select 1 from source_forgotten f where f.project_id = s.project_id and f.artifact = 'session:' || s.id
-      and f.kind = 'session_message' and f.external_id = new.external_id and f.content_hash = new.content_hash);
+    and not exists (select 1 from source where kind = 'session_message' and session_id = new.session_id and external_id = new.external_id);
 end;
 create view capture_edit as select session_id, turn_id, tool_event_id, path, via, observed_at from edit_observation;
 create trigger capture_edit_insert instead of insert on capture_edit begin
@@ -735,4 +693,4 @@ create trigger capture_delivery_insert instead of insert on capture_delivery beg
   select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
 
-pragma user_version = 2;
+pragma user_version = 1;
