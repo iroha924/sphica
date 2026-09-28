@@ -1019,3 +1019,38 @@ test("a send whose lock is taken between unlocking and taking it again waits and
     await db.done();
   }
 });
+
+test("a send that waits for the lock gives up at its deadline even if the lock frees during the last wait", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+  const lockFile = path.join(spoolDir(), ".lock");
+  fs.writeFileSync(lockFile, String(process.pid)); // another send of this process holds it
+  const release = setTimeout(() => fs.rmSync(lockFile, { force: true }), 60);
+  try {
+    assert.deepEqual(await flush(db.file, 50), { sent: 0, deferred: 0, rejected: 0, busy: true });
+    assert.equal(left(spoolDir()), 1);
+  } finally {
+    clearTimeout(release);
+    fs.rmSync(lockFile, { force: true });
+    await db.done();
+  }
+});
+
+test("a send with nothing queued keeps the last send time", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    await flush(db.file);
+    const sentAt = readState().flushedAt;
+    assert.ok(sentAt);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await flush(db.file);
+    assert.equal(readState().flushedAt, sentAt);
+  } finally {
+    await db.done();
+  }
+});

@@ -760,8 +760,8 @@ export async function flush(
   for (let first = true; ; first = false) {
     let unlock = lock();
     while (!unlock && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      unlock = lock();
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+      if (Date.now() < deadline) unlock = lock();
     }
     if (!unlock) return first ? { ...total, busy: true } : total;
     let client: Kysely<DB> | null = null;
@@ -774,6 +774,7 @@ export async function flush(
       batches++;
     };
     const late = () => batches > 0 && Date.now() >= deadline;
+    const sentBefore = batches;
     try {
       if (first) {
         // Expired held records are dropped before they could be sent. Records held during this send are not in the list.
@@ -791,8 +792,9 @@ export async function flush(
       }
       prune(held);
       total.deferred = queued(held).length;
-      // Written before unlocking, so it never overwrites the state of a send that ran after this one.
-      writeState({ flushedAt: new Date().toISOString(), error: null, deferred: total.deferred });
+      // Written before unlocking, so it never overwrites the state of a send that ran after this one. With nothing sent, the last send time stays.
+      if (batches > sentBefore)
+        writeState({ flushedAt: new Date().toISOString(), error: null, deferred: total.deferred });
     } catch (e) {
       writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300) });
       throw e;
