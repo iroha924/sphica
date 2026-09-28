@@ -81,6 +81,16 @@ revision 1 の DB を記録を失わずに revision 2 へ上げられるよう�
   - コミット: `feat(forget): delete chosen sources and judge the units that cited them again`
   - 結果: `node --test test/forget.test.ts` → pass 10（#187 の完了条件、根拠 2 つ、commit の anchor、superseded・withdrawn・candidate、撤回の理由と external_reference、確認とのずれ、存在しない id と他プロジェクトの id と消し済み id、DB と WAL のバイト、記録の本文の写し、busy と再実行）。`bun run verify` → exit 0（sql:reach を含む）
 
+- [x] T10: ingest の evidence・adoption の削除と、forget の secure_delete の無効化・unit の任意の列の更新を拒否する
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（forget と ingest の authorizer）
+  - 変更: `server/src/db-write.ts`, `server/test/db.test.ts`
+  - red: `cd server && node --test test/db.test.ts` → 追加した 2 件が失敗（ingest の delete from unit_evidence と、forget の pragma secure_delete = off・update unit set no_code_surface が通る）
+  - 完了条件: `cd server && node --test test/db.test.ts test/forget.test.ts test/schema.test.ts` → pass
+  - コミット: `fix(db): narrow what ingest and forget may write`
+  - 結果: red を実測（2 件失敗、actual ''）。修正後 `node --test test/db.test.ts test/forget.test.ts test/schema.test.ts` → pass 45。`bun run verify` → exit 0
+
 - [ ] T05: harvest と glean が墓標と同じ内容を保存しない
   - 種別: 追加
   - 計画: S5
@@ -117,3 +127,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T01 / review-shipping: 旧 0.5.7 の CLI は revision 2 の DB に「退避しろ」と出す。Windows CI は移行を通らない / Release notes で先に CLI を更新するよう書く。Windows の移行は仕上げで判断する
 2026-09-29 / T09 / Codex の T01 レビュー F1（unit_state の作り直しで sqlite_sequence が失われ id が再利用される、再現済み）を採用。T02 レビュー F1（init のテストが project しか見ない）と F2（sql:live が revision を見ない）も採用 / 修正タスク T09 を T04 の前に足した
 2026-09-29 / T04 / 変更欄を実際に合わせた（前: forget.ts, forget.test.ts, sql-call-sites.mjs。後: forget.ts, forget.test.ts, record.ts, schema.sql, 0002.sql, db-types.ts）。台帳は変更不要だった。ACTIVATION を record.ts から export して共有 / source_forgotten の unique は、A→B→A と編集された項目の同じハッシュの 2 revision を両方消すと衝突するので、通常の索引に変えた（未リリースの schema と移行 SQL を同じ形に直した）
+2026-09-29 / T10 / Codex の T03 レビュー F1・F3・F4（再現済み）を採用し修正タスク T10 を足した。F2（ingest が forget_id 付きの unit_state を書ける）は見送り: authorizer には値が見えず、ingest は run_id 付きなら unit_state を元々書ける。authorizer はコードの書き間違いを止める粗い防御で、forget_id を書くのは forget.ts の固定の SQL だけ / T09 のレビューは指摘なし

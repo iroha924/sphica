@@ -425,3 +425,25 @@ test("the forget connection refuses a database of an older revision", () => {
   assert.throws(() => connectWriter("forget", file), /Run `sphica init` to migrate it/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// The record server's code never deletes evidence or adoption, so ingest cannot use the forget exception in the no-delete triggers
+test("the ingest connection cannot delete evidence or adoption, even a retracted row whose reason was forgotten", () => {
+  for (const write of ["delete from unit_evidence where id = -1", "delete from unit_adoption where id = -1"])
+    assert.match(attempt(ingest, write) ?? "", /not authorized/, write);
+});
+
+test("the forget connection keeps secure_delete on and changes only the unit and state columns the forget writes", () => {
+  for (const write of [
+    "pragma secure_delete = off",
+    "pragma secure_delete = 0",
+    "update unit set no_code_surface = 'changed' where id = -1",
+    "update unit set text = 'changed' where id = -1",
+    "update unit_state set reason = 'changed' where id = -1",
+  ])
+    assert.match(attempt(forget, write) ?? "", /not authorized/, write);
+  for (const allowed of [
+    "pragma secure_delete = on",
+    "update unit set revision = revision + 1 where id = -1",
+  ])
+    assert.equal(attempt(forget, allowed), null, allowed);
+});

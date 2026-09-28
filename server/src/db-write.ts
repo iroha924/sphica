@@ -118,13 +118,17 @@ function captureAuthorizer(
 const writes = (action: number) =>
   action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE;
 
-/** Only forget removes sources or writes what it removed: the no-delete triggers let a retracted row go once its reason is forgotten. */
+/**
+ * Only forget removes sources or writes what it removed. The no-delete triggers let a retracted row go once its reason is forgotten,
+ * and the record server's code never deletes evidence or adoption, so ingest may not either.
+ */
 const FORGET_ONLY = new Set(["forget_batch", "source_forgotten"]);
+const KEPT_BY_INGEST = new Set(["source", "unit_evidence", "unit_adoption"]);
 
 function ingestAuthorizer(action: number, p1: string | null, p2: string | null): number {
   if (DDL().has(action)) return C.SQLITE_DENY;
   if (writes(action) && (p1 === "owner_identity" || FORGET_ONLY.has(p1 ?? ""))) return C.SQLITE_DENY;
-  if (action === C.SQLITE_DELETE && p1 === "source") return C.SQLITE_DENY;
+  if (action === C.SQLITE_DELETE && KEPT_BY_INGEST.has(p1 ?? "")) return C.SQLITE_DENY;
   if (action === C.SQLITE_PRAGMA) return readsDataVersion(p1, p2) ? C.SQLITE_OK : C.SQLITE_DENY;
   return C.SQLITE_OK;
 }
@@ -143,14 +147,24 @@ const FORGET_WRITES: Record<number, Set<string>> = {
     "source_processing",
     "source_fts",
   ]),
-  [C.SQLITE_UPDATE]: new Set(["unit_state", "unit"]),
+};
+/** Columns forget changes: the state and revision triggers set on unit, and the foreign key action clearing unit_state.source_id. */
+const FORGET_UPDATES: Record<string, Set<string>> = {
+  unit: new Set(["lifecycle", "revision"]),
+  unit_state: new Set(["source_id"]),
 };
 
 function forgetAuthorizer(action: number, p1: string | null, p2: string | null): number {
-  if (action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE)
-    return FORGET_WRITES[action]?.has(p1 ?? "") || SHADOW.test(p1 ?? "") ? C.SQLITE_OK : C.SQLITE_DENY;
+  if (SHADOW.test(p1 ?? "") && writes(action)) return C.SQLITE_OK;
+  if (action === C.SQLITE_UPDATE)
+    return FORGET_UPDATES[p1 ?? ""]?.has(p2 ?? "") ? C.SQLITE_OK : C.SQLITE_DENY;
+  if (action === C.SQLITE_INSERT || action === C.SQLITE_DELETE)
+    return FORGET_WRITES[action]?.has(p1 ?? "") ? C.SQLITE_OK : C.SQLITE_DENY;
+  // secure_delete may only be turned on: the deleted text must not stay in freed pages
   if (action === C.SQLITE_PRAGMA)
-    return readsDataVersion(p1, p2) || p1 === "secure_delete" || p1 === "wal_checkpoint"
+    return readsDataVersion(p1, p2) ||
+      (p1 === "secure_delete" && ["on", "1", "true"].includes((p2 ?? "").toLowerCase())) ||
+      p1 === "wal_checkpoint"
       ? C.SQLITE_OK
       : C.SQLITE_DENY;
   if (
