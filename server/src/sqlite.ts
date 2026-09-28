@@ -16,7 +16,7 @@ const SCHEMA_GENERATION = 2;
 export const SCHEMA_REVISION = 2;
 
 /** Connection roles: owner applies the schema, reader only reads, ingest imports, capture records conversations (append only). */
-export type Role = "owner" | "reader" | "ingest" | "capture";
+export type Role = "owner" | "reader" | "ingest" | "capture" | "forget";
 
 /**
  * Where Sphica keeps its files (~/.sphica). `SPHICA_HOME` moves all of them, for tests and for measuring a host without touching

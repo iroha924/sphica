@@ -30,8 +30,11 @@ Two numbers version it:
 - **Revision** (`pragma user_version` at the end of schema.sql, `SCHEMA_REVISION`): changes within a generation. Keep the two equal; the reader and
   ingest connections stop on a mismatch. Capture checks only the generation, so recording keeps working between a DB change and a plugin update
 
-**There is no migration runner in generation 2.** Until 0.5.0 ships, edit schema.sql in place. The first change after it ships needs a migration
-design (how an existing DB moves to the new revision, and how capture at the old revision keeps writing) before the schema edit.
+**A revision change ships with a migration.** `db/migrations/<revision>.sql` (4 digits, `0002.sql` moves 1 → 2) holds the same statements as
+schema.sql's new state; `sphica init` runs each in one transaction with foreign keys off and checks `foreign_key_check` before committing
+(`migrate()` in `server/src/admin.ts`). Rebuilding a table that other triggers name needs those triggers dropped first, or the rename fails.
+`server/test/migrate.test.ts` compares a migrated DB with a fresh one; keep the previous revision's schema in `server/test/fixtures/`.
+Keep the capture views' columns unchanged across a revision, since capture writes across the change
 
 ## When changing the schema
 
@@ -70,6 +73,8 @@ Four boundaries (the header of schema.sql):
 | Record MCP server | ingest | `server/src/mcp-record.ts` → `extract.ts` → `record.ts` (units), `glean.ts` (changes), `github.ts` (sources) |
 | `sphica init` | owner, then ingest | `server/src/admin.ts` creates the DB; `cli.ts` registers the project |
 | `sphica doctor --reindex` | owner | `reindex()` in `admin.ts` |
+| `sphica init` on an older revision | owner | `migrate()` in `admin.ts` |
+| `/sphica:forget` | forget | the record server's `forget_apply` → `forget.ts`, only after the owner confirms |
 
 A new ingestion source writes through the record server's run-bound tools or capture, never a bulk import.
 
@@ -82,6 +87,7 @@ Processes of the same OS user can rewrite the file directly, so this is not an O
 | owner | none | creating the DB, reindex, the database check in `doctor` |
 | reader | reads and allowed functions (`READER_FUNCTIONS`) only | the read MCP server (`mcp.ts`), delivery reads, `doctor`'s project list |
 | ingest | rejects DDL, ATTACH, virtual tables, writing pragmas | the record MCP server, project registration |
+| forget | inserts into `forget_batch`, `source_forgotten`, `unit_state`; deletes sources and what cites them; `secure_delete` and `wal_checkpoint` pragmas. Ingest may do none of the forget-only writes | `forget_apply` in the record server |
 | capture | inserts into the capture views only; reads only `project`'s id, key, and name, `session`'s id, and `source`'s id, session, external id, and kind; functions only inside the views' triggers (`TRIGGER_FUNCTIONS`) | capture and delivery logging |
 
 - Write connections live only in `server/src/db-write.ts`; `bun run architecture` checks the read MCP server cannot reach them

@@ -1,4 +1,4 @@
-// Writing connections (owner, ingest, capture). **Never imported from MCP or search** (scripts/check-architecture.mjs).
+// Writing connections (owner, ingest, capture, forget). **Never imported from MCP or search** (scripts/check-architecture.mjs).
 // Connection setup order is fixed: open → defensive and pragmas → the tokenizer function → authorizer.
 
 import { constants as C, DatabaseSync } from "node:sqlite";
@@ -118,11 +118,50 @@ function captureAuthorizer(
 const writes = (action: number) =>
   action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE;
 
+/** Only forget removes sources or writes what it removed: the no-delete triggers let a retracted row go once its reason is forgotten. */
+const FORGET_ONLY = new Set(["forget_batch", "source_forgotten"]);
+
 function ingestAuthorizer(action: number, p1: string | null, p2: string | null): number {
   if (DDL().has(action)) return C.SQLITE_DENY;
-  if (writes(action) && p1 === "owner_identity") return C.SQLITE_DENY;
+  if (writes(action) && (p1 === "owner_identity" || FORGET_ONLY.has(p1 ?? ""))) return C.SQLITE_DENY;
+  if (action === C.SQLITE_DELETE && p1 === "source") return C.SQLITE_DENY;
   if (action === C.SQLITE_PRAGMA) return readsDataVersion(p1, p2) ? C.SQLITE_OK : C.SQLITE_DENY;
   return C.SQLITE_OK;
+}
+
+/**
+ * What the forget connection may change: forget.ts runs fixed SQL, and this is the coarse guard around it. Deletes cascade to evidence,
+ * adoption, and processing rows, clear unit_state.source_id, and raise unit revisions; the authorizer sees those as plain writes.
+ */
+const FORGET_WRITES: Record<number, Set<string>> = {
+  [C.SQLITE_INSERT]: new Set(["forget_batch", "source_forgotten", "unit_state", "source_fts"]),
+  [C.SQLITE_DELETE]: new Set([
+    "source",
+    "external_reference",
+    "unit_evidence",
+    "unit_adoption",
+    "source_processing",
+    "source_fts",
+  ]),
+  [C.SQLITE_UPDATE]: new Set(["unit_state", "unit"]),
+};
+
+function forgetAuthorizer(action: number, p1: string | null, p2: string | null): number {
+  if (action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE)
+    return FORGET_WRITES[action]?.has(p1 ?? "") || SHADOW.test(p1 ?? "") ? C.SQLITE_OK : C.SQLITE_DENY;
+  if (action === C.SQLITE_PRAGMA)
+    return readsDataVersion(p1, p2) || p1 === "secure_delete" || p1 === "wal_checkpoint"
+      ? C.SQLITE_OK
+      : C.SQLITE_DENY;
+  if (
+    action === C.SQLITE_READ ||
+    action === C.SQLITE_SELECT ||
+    action === C.SQLITE_FUNCTION ||
+    action === C.SQLITE_TRANSACTION ||
+    action === C.SQLITE_SAVEPOINT
+  )
+    return C.SQLITE_OK;
+  return C.SQLITE_DENY;
 }
 
 /**
@@ -135,15 +174,16 @@ export function connectWriter(role: WriteRole, file: string = dbFile(), create =
   if (!create) requireFile(file);
   const raw = new DatabaseSync(file);
   try {
-    // Every role refuses another generation. Only ingest checks the revision: owner handles revisions, and capture keeps writing
+    // Every role refuses another generation. Ingest and forget check the revision: owner handles revisions, and capture keeps writing
     // across a revision change within a generation (rejected rows go to rejected/).
-    prepare(raw, create ? "none" : role === "ingest" ? "revision" : "generation");
+    prepare(raw, create ? "none" : role === "ingest" || role === "forget" ? "revision" : "generation");
     raw.function("sphica_terms", { deterministic: true }, (text) => terms(String(text ?? "")).join(" "));
   } catch (e) {
     raw.close();
     throw e;
   }
   if (role === "ingest") raw.setAuthorizer(ingestAuthorizer);
+  else if (role === "forget") raw.setAuthorizer(forgetAuthorizer);
   else if (role === "capture") {
     let own = false;
     raw.setAuthorizer((action, p1, p2, _db, triggerOrView) =>

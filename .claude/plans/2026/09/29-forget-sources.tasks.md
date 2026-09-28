@@ -53,13 +53,14 @@ revision 1 の DB を記録を失わずに revision 2 へ上げられるよう�
 
 選んだ source を消し、記録を判定し直し、取り込み直しを止める処理を、MCP に出す前に作る。
 
-- [ ] T03: 接続の役 forget と、ingest による削除と墓標の書き込みの拒否
+- [x] T03: 接続の役 forget と、ingest による削除と墓標の書き込みの拒否
   - 種別: 追加
   - 計画: S3
   - 依存: T01（forget_batch と source_forgotten の表が要る）
-  - 変更: `server/src/db-write.ts`, `server/src/sqlite.ts`, `server/test/db.test.ts`, `CLAUDE.md`, `AGENTS.md`
+  - 変更: `server/src/db-write.ts`, `server/src/sqlite.ts`, `server/test/db.test.ts`, `CLAUDE.md`, `AGENTS.md`, `.agents/skills/knowledge-schema/SKILL.md`
   - 完了条件: `cd server && node --test test/db.test.ts` → forget の許可と拒否、ingest の新しい拒否、forget が revision 1 を開けないテストが通る。`bun run architecture` が通る
   - コミット: `feat(db): add the forget connection role and keep ingest from deleting sources`
+  - 結果: `node --test test/db.test.ts` → pass 14（forget の一連の書き込みと拒否 8 種、ingest の削除と墓標の拒否、forget が revision 1 を拒否）。`bun run verify` → exit 0
 
 - [ ] T04: `forget.ts` の plan と apply（判定し直し、確認とのずれの検出、掃除）
   - 種別: 追加
@@ -101,3 +102,5 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T01 / `git show v0.5.7:db/schema.sql` は浅い clone で読めない / revision 1 の schema を `server/test/fixtures/schema-rev1.sql` に固定し、変更欄に足した（前: 6 ファイル、後: 7 ファイル）
 2026-09-29 / T01 / rename が `unit_lifecycle_via_state` の参照で失敗した（実測）/ 移行で `unit_lifecycle_via_state` と `unit_option_sealed` を先に drop し、作り直す
 2026-09-29 / T08 / pre-commit の bundle 検査が、パッケージに入る変更にバージョンの同時更新を求めた / T08 を T01 の前へ移し、同じコミットで済ませる（完了条件: 前 `release:plan` が plugin と出て verify が通る、後 plugin と出て 4 か所が同じバージョン）
+2026-09-29 / T03 / knowledge-schema Skill に「世代 2 に移行の仕組みは無い」と接続の役の表が残っていた / 同じタスクで直し、変更欄に `.agents/skills/knowledge-schema/SKILL.md` を足した
+2026-09-29 / T01 / review-shipping: 旧 0.5.7 の CLI は revision 2 の DB に「退避しろ」と出す。Windows CI は移行を通らない / Release notes で先に CLI を更新するよう書く。Windows の移行は仕上げで判断する

@@ -324,3 +324,104 @@ test("a connection without the tokenizer function cannot write sources or units"
     raw.close();
   }
 });
+
+const forget = () => connectWriter("forget", db.file);
+
+// The record server's extraction tools hold ingest. Only forget may remove sources or write what was removed.
+test("the ingest connection cannot remove a source or write a forget batch or tombstone", () => {
+  const id = message(db, p, { id: "m-ingest", text: "kept by ingest" });
+  for (const write of [
+    "delete from source where id = ?",
+    "insert into forget_batch (project_id, at) values (?, '2026-09-12T00:00:00.000Z')",
+    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, content_hash, batch_id) values (?, 1, 'a', 'k', 'e', zeroblob(32), 1)",
+  ])
+    assert.match(
+      attempt(ingest, write, write.startsWith("insert into forget") ? p : id) ?? "",
+      /not authorized/,
+      write,
+    );
+  assert.equal(db.owner.prepare("select count(*) as n from source where id = ?").get(id)?.n, 1);
+});
+
+test("the forget connection removes a source with what cites it, and cannot write anything else", () => {
+  const src = message(db, p, { id: "m-forget", text: "a secret to forget" });
+  const r = run(db, p);
+  const u = insert(db, "unit", {
+    project_id: p,
+    key: "trace:session:s1/forget",
+    kind: "finding",
+    text: "found",
+    extraction: "supported",
+    run_id: r,
+    created_at: now,
+    content_hash: sha256("found"),
+  });
+  insert(db, "unit_evidence", {
+    unit_id: u,
+    source_id: src,
+    span_start: 0,
+    span_end: 1,
+    role: "states",
+    run_id: r,
+    added_at: now,
+  });
+  db.owner
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'r', ?)",
+    )
+    .run(u, now, r);
+  db.owner
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, 'candidate', 'active', ?, 'r', ?, ?)",
+    )
+    .run(u, now, src, r);
+  const raw = forget();
+  try {
+    raw.exec("pragma secure_delete = on");
+    raw.exec("begin immediate");
+    const batch = Number(
+      raw.prepare("insert into forget_batch (project_id, at) values (?, ?) returning id").get(p, now)?.id,
+    );
+    raw
+      .prepare(
+        "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, content_hash, batch_id) select id, project_id, artifact, kind, external_id, content_hash, ? from source where id = ?",
+      )
+      .run(batch, src);
+    raw.prepare("delete from source where id = ?").run(src);
+    raw
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, forget_id) values (?, 'active', 'candidate', ?, 'forgotten', ?)",
+      )
+      .run(u, now, batch);
+    raw.exec("commit");
+    raw.exec("insert into source_fts (source_fts) values ('optimize')");
+    raw.prepare("pragma wal_checkpoint(TRUNCATE)").get();
+  } finally {
+    raw.close();
+  }
+  assert.equal(db.owner.prepare("select lifecycle from unit where id = ?").get(u)?.lifecycle, "candidate");
+  assert.equal(db.owner.prepare("select count(*) as n from unit_evidence where unit_id = ?").get(u)?.n, 0);
+  for (const write of [
+    "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'pr_body', 'pr:1', 'x', 1, 'person', '2026-09-12T00:00:00.000Z', '2026-09-12T00:00:00.000Z', 'x', 1, zeroblob(32), 0)",
+    "delete from unit",
+    "update project set name = 'x'",
+    "insert into owner_identity (provider, external_id, bound_at) values ('github', '9', '2026-09-12T00:00:00.000Z')",
+    "delete from session",
+    "create table x (a)",
+    "pragma foreign_keys = off",
+    "pragma user_version = 9",
+  ])
+    assert.match(attempt(forget, write) ?? "", /not authorized/, write);
+});
+
+test("the forget connection refuses a database of an older revision", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-forget-"));
+  const file = path.join(dir, "old.db");
+  const raw = new DatabaseSync(file);
+  raw.exec(
+    `create table sphica_generation (generation integer); insert into sphica_generation values (2); pragma user_version = ${SCHEMA_REVISION - 1}`,
+  );
+  raw.close();
+  assert.throws(() => connectWriter("forget", file), /Run `sphica init` to migrate it/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
