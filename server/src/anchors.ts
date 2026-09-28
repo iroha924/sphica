@@ -2,6 +2,7 @@
 // A located symbol only says the code is still there; it never proves the decision still holds.
 import fs from "node:fs";
 import path from "node:path";
+import { bytes, mask, privateKeyRanges } from "./text.ts";
 
 export type AnchorState = "located" | "moved" | "missing" | "unknown";
 
@@ -28,15 +29,17 @@ function readText(root: string, rel: string): string | null | undefined {
   return buf.includes(0) ? undefined : buf.toString("utf8");
 }
 
-/** The 1-based line where symbol first appears as a whole identifier, and that line; null when it does not. */
-function findSymbol(text: string, symbol: string): { line: number; excerpt: string } | null {
+/** The file's lines and the 0-based index of the first one holding symbol as a whole identifier (-1 when none does). */
+function findSymbol(text: string, symbol: string): { lines: string[]; i: number } {
   const re = new RegExp(`(?<![\\w$])${literal(symbol)}(?![\\w$])`);
   const lines = text.split(/\r?\n/);
-  const i = lines.findIndex((l) => re.test(l));
-  return i < 0 ? null : { line: i + 1, excerpt: (lines[i] ?? "").trim().slice(0, 200) };
+  return { lines, i: lines.findIndex((l) => re.test(l)) };
 }
 
-/** Where a symbol is in a repository file now, for recording an anchor's lines when it is saved. */
+/**
+ * Where a symbol is in a repository file now, for recording an anchor's lines when it is saved. The line is masked before it is cut to 200
+ * characters: cutting first could drop the closing quote that marks a value as a key.
+ */
 export function locate(
   root: string | null,
   rel: string,
@@ -44,7 +47,14 @@ export function locate(
 ): { line: number; excerpt: string } | null {
   if (!root) return null;
   const text = readText(root, rel);
-  return typeof text === "string" ? findSymbol(text, symbol) : null;
+  if (typeof text !== "string") return null;
+  const { lines, i } = findSymbol(text, symbol);
+  if (i < 0) return null;
+  const line = lines[i] ?? "";
+  // A line inside a private key cannot be masked alone: its BEGIN and END are on other lines
+  const from = bytes(lines.slice(0, i).join("\n")) + (i > 0 ? 1 : 0);
+  const inKey = privateKeyRanges(lines.join("\n")).some(([a, b]) => a < from + bytes(line) && b > from);
+  return { line: i + 1, excerpt: inKey ? "[redacted: private key]" : mask(line).trim().slice(0, 200) };
 }
 
 /** The anchor's state in the working tree: the file and symbol are there (at the recorded line or another), gone, or cannot be checked. */
@@ -57,10 +67,10 @@ export function checkAnchor(
   if (text === null) return { state: "missing", line: null };
   if (text === undefined) return { state: "unknown", line: null };
   if (!a.symbol) return { state: "located", line: a.line_start };
-  const found = findSymbol(text, a.symbol);
-  if (!found) return { state: "missing", line: null };
+  const { i } = findSymbol(text, a.symbol);
+  if (i < 0) return { state: "missing", line: null };
   return {
-    state: a.line_start === null || a.line_start === found.line ? "located" : "moved",
-    line: found.line,
+    state: a.line_start === null || a.line_start === i + 1 ? "located" : "moved",
+    line: i + 1,
   };
 }

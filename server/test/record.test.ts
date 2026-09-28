@@ -63,6 +63,54 @@ async function save(db: TempDb, t: Target, record: unknown, looked: number[] = [
 const state = (db: TempDb, key: string) =>
   db.owner.prepare("select lifecycle, extraction, extraction_reason from unit where key = ?").get(key);
 
+test("an anchor's excerpt is masked before it is cut, and a line inside a private key is not kept", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-anchor-"));
+  try {
+    // Only the quoted assignment names it a key, and its closing quote lies past the 200-character cut
+    const key = "Zq9x".repeat(60);
+    fs.writeFileSync(
+      path.join(root, "config.ts"),
+      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n`,
+    );
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "設定の鍵はここにある。" });
+    await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "config",
+            kind: "finding",
+            text: "設定の鍵はここにある",
+            evidence: [{ source: `s${m}`, quote: "設定の鍵はここにある。", role: "states" }],
+            anchors: [
+              { path: "config.ts", symbol: "apiKey", role: "applies_to" },
+              { path: "config.ts", symbol: "keyBody", role: "applies_to" },
+            ],
+          },
+        ],
+      },
+      [m],
+    );
+    const got = db.owner.prepare("select symbol, excerpt from unit_anchor order by id").all() as {
+      symbol: string;
+      excerpt: string;
+    }[];
+    assert.deepEqual(
+      got.map((a) => a.symbol),
+      ["apiKey", "keyBody"],
+    );
+    assert.doesNotMatch(got[0]?.excerpt ?? "", /Zq9x/);
+    assert.match(got[0]?.excerpt ?? "", /^export const apiKey = "\[redacted\]"/);
+    assert.equal(got[1]?.excerpt, "[redacted: private key]");
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an owner's directive becomes an active decision whose spans cut the quoted bytes, with a rejected option", async () => {
   const db = tempDb();
   try {

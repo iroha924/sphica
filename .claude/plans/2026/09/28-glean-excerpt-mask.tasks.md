@@ -69,7 +69,7 @@ glean が引いたファイルの抜粋が、伏せ字にされて保存・索�
 
 trace、harvest、glean が記録に付けるコード位置の抜粋に、秘密が残らなくなる。
 
-- [ ] T03: コード位置の抜粋を、行全体を伏せ字にしてから 200 文字に切る
+- [x] T03: コード位置の抜粋を、行全体を伏せ字にしてから 200 文字に切る
   - 種別: 修正
   - 計画: S1, S4
   - 依存: T01（秘密鍵の範囲の関数が要る）
@@ -77,6 +77,7 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - red: 足したテストを直す前のコードで `bun run --cwd server test` → 長い `apiKey = "…"` の行と秘密鍵ブロックの中の行で、`unit_anchor.excerpt` に秘密の文字列が残り fail
   - 完了条件: `bun run --cwd server test` → 全件 pass
   - コミット: `fix(anchors): mask anchor excerpts before cutting them (T03)`
+  - 結果: red は、直す前のコードで record.test.ts の新しいテストが fail（抜粋に `apiKey` の値が残る）。値は `sk-` の形だと切った後でも鍵の形で伏せ字になり、順序の誤りを見分けられないので、代入の形でしか見つからない値に変えて red を取り直した。直した後 `bun run --cwd server test` → 314 件 pass、`bun run acceptance` → 58 件 pass、`bun run architecture` → 通過。配信のたびに走る anchorState には秘密鍵の走査を入れず、保存時の locate だけで抜粋を作る形に分けた
 
 ## P4: 出荷の準備
 
