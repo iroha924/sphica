@@ -53,7 +53,7 @@ MIT requires the copyright notice and license text; Apache-2.0 section 4 require
 
 ## Shipping
 
-First, classify the change with `bun run release:plan -- --base <previous release commit>`.
+First, classify the change with `bun run release:plan -- --base <previous release commit>`. For a `plugin` release it also reads, with the owner's gh, the settings only an admin can see (immutable releases, SHA pinning required for actions) and fails unless both are on.
 
 **The owner does only one thing per release: approve the `npm-release` environment on the run page, plus `/reload-plugins` in open sessions after arrival.**
 That approval is the only gate before npm. Claude does not do it in the owner's place, neither on the page nor through the API (`gh api .../pending_deployments`), even though this machine's `gh` could.
@@ -96,7 +96,7 @@ Once, before the first release, the owner sets these up in the web UI (without t
 4. Run `git tag v<version> <head>` on **the PR head** and push it. Tagging the head, not main, lets the candidate be checked before the merge.
    Only the owner's account can create tags (the ruleset limits it). Claude pushes with the owner's credentials on this machine
 5. `.github/workflows/release.yml` runs. `prepare` checks that the tag matches every version, that the tag's commit is the head of an open PR into main,
-   and that `check`, `pr-body`, and `release` succeeded on that head (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
+   that `check`, `pr-body`, and `release` succeeded on that head, and that the Codex connector's summary marks that head completed with no review thread left open (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
    after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
    It also stops when the PR has no Release notes, and records a digest of the notes the owner is about to read.
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner

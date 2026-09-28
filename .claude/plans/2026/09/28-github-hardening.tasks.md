@@ -72,13 +72,14 @@ base: main
   - コミット: `feat(release): check immutable releases and SHA pinning from release:plan and release:status`
   - 結果: 有効にする前の `bun run release:plan -- --base v0.5.5` と `bun run release:status` → 両設定とも off と表示して exit 1。`rg` で全 44 件の `uses:` が完全な SHA と確認してから `gh api -X PUT` で両設定を有効にし（204）、読み直して `{"enabled":true}` と `sha_pinning_required:true`。`bun run release:status` → 両方とも on。`bun run test` → 307 pass / 0 fail
 
-- [ ] T06: pr-body のジョブ名を verification-section にし、各ジョブに上限の時間を付ける
+- [x] T06: pr-body のジョブ名を verification-section にし、各ジョブに上限の時間を付ける
   - 種別: 変更
   - 計画: S5, S7
   - 依存: なし
-  - 変更: `.github/workflows/pr-body.yml`, `.github/workflows/check.yml`
+  - 変更: `.github/workflows/pr-body.yml`, `.github/workflows/check.yml`, `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `actionlint .github/workflows/pr-body.yml .github/workflows/check.yml` → 指摘なし。`rg -n "codex-review" .github CLAUDE.md AGENTS.md .agents plugin` → ジョブ名としての参照が 0 件。main の必須チェックの付け替えは PR を開いて新しいチェックが走った後に行い、plan の A5 で確かめる
   - コミット: `ci: name the PR body check for what it checks and cap job times`
+  - 結果: `actionlint .github/workflows/pr-body.yml .github/workflows/check.yml` → 指摘なし。`rg -n "codex-review" .github CLAUDE.md AGENTS.md .agents plugin` → Skill 名の参照 2 件だけ（CLAUDE.md:66、pr-body.yml のメッセージ内）。必須チェックの付け替えは PR の上で verification-section が走った後に行う
 
 ## 記録
 
@@ -86,3 +87,4 @@ base: main
 - 2026-09-28 / T04 / release-gate の CLI テストの偽の gh も新しい API に答える必要があり、release.yml の関門の説明コメントも古くなった / 変更欄に release-gate-cli.test.ts と release.yml を足した
 - 2026-09-28 / T02 のレビュー / F1（`<!-->` や途中に `--` を含む並びは GFM ではコメントにならず表示されるのに、参照を落とす。Codex が再現）は見送り: plan の「結び付きを落とす方向は安全」の範囲で、起きるのは結び付きの欠落だけ
 - 2026-09-28 / T05 / immutable releases の GET は、無効でも 404 ではなく 200 で `enabled:false` を返した（docs の 404 と違う） / 両方を off として扱うようにした
+- 2026-09-28 / T06 / plugin-release Skill の関門の説明が新しい判定（Codex の要約と未解決のスレッド、release:plan の設定の確認）を含まない / 変更欄に .agents/skills/plugin-release/SKILL.md を足した
