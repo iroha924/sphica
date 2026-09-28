@@ -3,13 +3,13 @@
 // evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { locate as symbolAt } from "./anchors.ts";
+import { masksSymbol, locate as symbolAt } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { cleanGit, commitHolds } from "./git.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { type Checked, checkRecord, repoPath, saveRecord, type Target } from "./record.ts";
-import { head, sha256 } from "./text.ts";
+import { bytes, head, mask, privateKeyRanges, quoteSpan, sha256 } from "./text.ts";
 
 /** Files larger than this are not excerpted (a generated file or a data dump is not a statement). */
 const MAX_FILE = 1024 * 1024;
@@ -115,13 +115,14 @@ const Glean = z
   .strict();
 type OpInput = z.infer<typeof Op>;
 
-/** A file excerpt read from a commit: the lines asked for, byte for byte (CRLF kept), and where they came from. */
+/** A file excerpt read from a commit: the lines asked for, byte for byte (CRLF kept) in raw and masked in text, and where they came from. */
 type Excerpt = {
   path: string;
   commit: string;
   blob: string;
   size: number;
   lines: [number, number];
+  raw: string;
   text: string;
 };
 
@@ -161,8 +162,19 @@ function readExcerpt(root: string, file: z.infer<typeof File>): Excerpt {
   const [a, b] = file.lines;
   if (a > b || b > starts.length)
     throw new Error(`${p} has ${starts.length} lines; lines ${a}-${b} are not in it`);
-  const text = buf.subarray(starts[a - 1], b < starts.length ? starts[b] : buf.length).toString("utf8");
-  return { path: p, commit, blob, size, lines: [a, b], text };
+  const from = starts[a - 1] ?? 0;
+  const to = b < starts.length ? (starts[b] ?? buf.length) : buf.length;
+  // A cut through a private key leaves BEGIN or END outside the excerpt, where mask() cannot see it
+  if (privateKeyRanges(buf.toString("utf8")).some(([s, e]) => s < to && e > from && (s < from || e > to)))
+    throw new Error(`${p} lines ${a}-${b} are inside a private key; cite lines outside it`);
+  const raw = buf.subarray(from, to).toString("utf8");
+  const text = mask(raw);
+  // A key name on a line outside the excerpt can mark a value inside it: the text around must not change how the excerpt masks
+  const before = buf.subarray(0, from).toString("utf8");
+  const after = buf.subarray(to).toString("utf8");
+  if (mask(before + raw) !== mask(before) + text || mask(raw + after) !== text + mask(after))
+    throw new Error(`${p} lines ${a}-${b} cut through text Sphica masks; cite more lines around it`);
+  return { path: p, commit, blob, size, lines: [a, b], raw, text };
 }
 
 const locate = (body: string, q: string): [number, number] | null => {
@@ -278,8 +290,12 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
         try {
           if (!target.root) throw new Error("the repository is not known");
           excerpt = readExcerpt(target.root, op.file);
-          if (!locate(excerpt.text, op.quote))
+          if (!locate(excerpt.raw, op.quote))
             errors.push(`${what}: quote not found in ${excerpt.path} lines ${op.file.lines.join("-")}`);
+          else if (!quoteSpan(excerpt.raw, excerpt.text, op.quote))
+            errors.push(
+              `${what}: the quote also appears in text Sphica masks; quote a longer or different part`,
+            );
         } catch (e) {
           errors.push(`${what}: ${(e as Error).message}`);
         }
@@ -305,6 +321,10 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     }
     if (op.op === "anchor" && !repoPath(op.path))
       errors.push(`${what}: the path is not inside the repository`);
+    const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
+    const pinnedPath = pinned && repoPath(pinned.path);
+    if (pinned?.symbol && pinnedPath && masksSymbol(target.root, pinnedPath, pinned.symbol))
+      errors.push(`${what}: the symbol is text Sphica masks; anchor a name, not a key`);
     if (op.op === "anchor" && op.commit) {
       const rel = repoPath(op.path);
       if (rel && !(target.root && commitHolds(target.root, op.commit, rel)))
@@ -420,19 +440,23 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
   return { errors, problems, units, ops };
 }
 
-/** Stores a file excerpt as a source (once per blob and lines) and returns its id. */
+/**
+ * Stores a file excerpt as a source (once per blob, lines, and masked text) and returns its id. An excerpt stored unmasked by an older
+ * version is kept as it was and a masked revision is added, since evidence spans are offsets into the text they were taken from.
+ */
 async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Promise<number> {
   const external = `file:${x.path}@${x.blob}#L${x.lines[0]}-${x.lines[1]}`;
+  const hash = sha256(x.text);
   const found = await trx
     .selectFrom("source")
-    .select("id")
+    .select(["id", "revision", "content_hash"])
     .where("project_id", "=", projectId)
     .where("kind", "=", "file_excerpt")
     .where("external_id", "=", external)
+    .orderBy("revision", "desc")
     .executeTakeFirst();
-  if (found) return found.id;
+  if (found?.content_hash.equals(hash)) return found.id;
   const now = iso(Date.now());
-  const partial = Buffer.byteLength(x.text, "utf8") !== x.size;
   const row = await trx
     .insertInto("source")
     .values({
@@ -440,14 +464,15 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
       kind: "file_excerpt",
       artifact: `file:${x.path}`,
       external_id: external,
-      revision: 1,
+      revision: (found?.revision ?? 0) + 1,
       author_kind: "person",
       created_at: now,
       captured_at: now,
       text: x.text,
-      truncated: partial ? 1 : 0,
+      truncated: bytes(x.raw) !== x.size ? 1 : 0,
+      redacted: x.text !== x.raw ? 1 : 0,
       original_bytes: x.size,
-      content_hash: sha256(x.text),
+      content_hash: hash,
       path: x.path,
       line_start: x.lines[0],
       line_end: x.lines[1],
@@ -529,7 +554,9 @@ export async function saveGlean(
             .select(["id", "text"])
             .where("id", "=", Number(op.source?.slice(1)))
             .executeTakeFirstOrThrow();
-      const at = locate(s.text, op.quote) ?? [0, 0];
+      const at = (p.excerpt ? quoteSpan(p.excerpt.raw, s.text, op.quote) : locate(s.text, op.quote)) ?? [
+        0, 0,
+      ];
       await trx
         .insertInto("unit_evidence")
         .values({
@@ -568,13 +595,16 @@ export async function saveGlean(
       changed.push(`${op.unit}: adopted`);
     } else if (op.op === "anchor" || op.op === "replace_anchor") {
       const to = op.op === "anchor" ? op : op.to;
-      const at = to.symbol ? symbolAt(target.root, repoPath(to.path) ?? to.path, to.symbol) : null;
+      const rel = repoPath(to.path) ?? to.path;
+      // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
+      const symbol = to.symbol && !masksSymbol(target.root, rel, to.symbol) ? to.symbol : null;
+      const at = symbol ? symbolAt(target.root, rel, symbol) : null;
       const added = await trx
         .insertInto("unit_anchor")
         .values({
           unit_id: p.unitId,
-          path: repoPath(to.path) ?? to.path,
-          symbol: to.symbol ?? null,
+          path: rel,
+          symbol,
           commit_sha: op.op === "anchor" ? (op.commit ?? null) : null,
           line_start: at?.line ?? null,
           line_end: at?.line ?? null,

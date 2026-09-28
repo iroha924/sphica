@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "sphica",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Records Claude Code and Codex sessions on your machine and keeps past implementation and decisions, with their sources, for your agent to find.",
   "author": {
     "name": "iroha924",

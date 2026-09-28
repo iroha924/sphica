@@ -1,6 +1,66 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { bytes, clean, ftsQuery, head, queryTerms, reason, tail, terms, uuidFrom } from "../src/text.ts";
+import {
+  bytes,
+  clean,
+  ftsQuery,
+  head,
+  mask,
+  privateKeyRanges,
+  queryTerms,
+  quoteSpan,
+  reason,
+  tail,
+  terms,
+  uuidFrom,
+} from "../src/text.ts";
+
+// A quote is placed on the masked text only when masking cannot have changed which occurrence it names
+test("quoteSpan refuses quotes that masking touched and places the rest on the masked text", () => {
+  const span = (raw: string, quote: string) => quoteSpan(raw, mask(raw), quote);
+  // The only match left is inside the placeholder
+  assert.equal(span("TOKEN=redacted123\n", "redacted"), null);
+  // One occurrence was masked away, another survives: the survivor is not the same one
+  assert.equal(span("API_KEY=abc123def456\nuse abc123def456 here\n", "abc123def456"), null);
+  // Overlapping occurrences count: the key eats the first ones, the tail keeps one
+  assert.equal(span(`AIza${"a".repeat(75)}\n`, "a".repeat(40)), null);
+  assert.equal(span("API_KEY=abc123def456\n", "abc123def456"), null);
+  const raw = "# ops\nAPI_KEY=abc123def456\nBack up before a release.\n";
+  const masked = mask(raw);
+  assert.notEqual(masked, raw);
+  const got = span(raw, "Back up before a release.");
+  assert.ok(got);
+  assert.equal(Buffer.from(masked).subarray(got[0], got[1]).toString(), "Back up before a release.");
+  // Unmasked text keeps the first match, as before
+  assert.deepEqual(quoteSpan("a b a", "a b a", "a"), [0, 1]);
+  assert.equal(quoteSpan("abc", "abc", ""), null);
+});
+
+// A whole cited file can hold a placeholder on every line; the check must stay linear in its length
+test("quoteSpan and privateKeyRanges stay fast on a file masked on every line", () => {
+  const raw = "TOKEN=abc123def456\n".repeat(100_000);
+  const masked = mask(raw);
+  const started = performance.now();
+  assert.deepEqual(quoteSpan(raw, masked, "TOKEN"), [0, 5]);
+  assert.equal(quoteSpan(raw, masked, "TOKEN=[redacted]\nTOKEN"), null);
+  const keys = "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n".repeat(20_000);
+  assert.equal(privateKeyRanges(keys).length, 20_000);
+  // Unclosed placeholder openings in the file itself must not make the placeholder scan reread to the end
+  const open = `API_KEY=abc123def456\n${"[redacted: \n".repeat(100_000)}`;
+  assert.deepEqual(quoteSpan(open, mask(open), "API_KEY"), [0, 7]);
+  assert.ok(performance.now() - started < 5000, `took ${Math.round(performance.now() - started)} ms`);
+});
+
+test("privateKeyRanges gives the byte ranges mask() replaces", () => {
+  const key = "-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----";
+  const text = `日本語\n${key}\ntail`;
+  const got = privateKeyRanges(text);
+  assert.equal(got.length, 1);
+  const [a, b] = got[0] ?? [0, 0];
+  assert.equal(Buffer.from(text).subarray(a, b).toString(), key);
+  assert.equal(mask(text), "日本語\n[redacted: private key]\ntail");
+  assert.deepEqual(privateKeyRanges("-----BEGIN PRIVATE KEY-----\nno end"), []);
+});
 
 // Hiragana-only words (particles, auxiliaries, and the like) match every row and dilute lexical ranking.
 test("terms split Japanese into words and drop hiragana-only words", () => {

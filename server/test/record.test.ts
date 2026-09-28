@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { locate, masksSymbol } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
 import { checkRecord, repoPath, saveRecord, type Target } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
@@ -62,6 +63,225 @@ async function save(db: TempDb, t: Target, record: unknown, looked: number[] = [
 
 const state = (db: TempDb, key: string) =>
   db.owner.prepare("select lifecycle, extraction, extraction_reason from unit where key = ?").get(key);
+
+test("an anchor's excerpt is masked before it is cut, and a symbol masking swallows is not kept", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-anchor-"));
+  try {
+    // Only the quoted assignment names it a key, and its closing quote lies past the 200-character cut
+    const key = "Zq9x".repeat(60);
+    fs.writeFileSync(
+      path.join(root, "config.ts"),
+      `export const apiKey = "${key}"; // ${"x".repeat(10)}\n-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n// keyBody is also named here, outside the key, yet its copy inside the key keeps it out\nexport const API_KEY =\n  tokenValue123abc; // configMarker\n// tokenValue123abc is also mentioned here\nSECRET_TOKEN=redacted\nconst url = "postgres://app:localdev@localhost/app"; const local = 1;\n`,
+    );
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "設定の鍵はここにある。" });
+    await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "config",
+            kind: "finding",
+            text: "設定の鍵はここにある",
+            evidence: [{ source: `s${m}`, quote: "設定の鍵はここにある。", role: "states" }],
+            anchors: [
+              { path: "config.ts", symbol: "apiKey", role: "applies_to" },
+              { path: "config.ts", symbol: "keyBody", role: "applies_to" },
+              { path: "config.ts", symbol: "configMarker", role: "applies_to" },
+              // A symbol that is itself a key, by shape or because the file shows it only inside masked text, is dropped
+              { path: "config.ts", symbol: "tokenValue123abc", role: "applies_to" },
+              { path: "config.ts", symbol: " tokenValue123abc ", role: "applies_to" },
+              { path: "config.ts", symbol: `sk-${"b2".repeat(15)}`, role: "applies_to" },
+              // Also when the value shows unmasked elsewhere, or when it reads like the placeholder itself
+              { path: "config.ts", symbol: "redacted", role: "applies_to" },
+              // An ordinary name whose letters also sit inside masked text is kept: only whole names count
+              { path: "config.ts", symbol: "local", role: "applies_to" },
+            ],
+          },
+        ],
+      },
+      [m],
+    );
+    const all = db.owner.prepare("select path, symbol, excerpt from unit_anchor order by id").all() as {
+      path: string;
+      symbol: string | null;
+      excerpt: string | null;
+    }[];
+    // Anchors whose symbol masking swallows keep their path, so the record is still delivered, once: identical rows could not be told apart
+    assert.deepEqual(
+      all.map((a) => a.symbol),
+      ["apiKey", null, "configMarker", "local"],
+    );
+    assert.ok(all.every((a) => a.path === "config.ts"));
+    const got = all.filter((a) => a.symbol);
+    assert.doesNotMatch(got[0]?.excerpt ?? "", /Zq9x/);
+    assert.match(got[0]?.excerpt ?? "", /^export const apiKey = "\[redacted\]"/);
+    // The key name is on the line before: the line alone does not look like a key, but the whole file masks it
+    assert.equal(got[1]?.excerpt, "[redacted]");
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Only the path-only anchors left behind by a masked symbol are merged; ones the record gives with their own lines all stay
+test("path-only anchors with their own lines are all kept, and a merged fallback is reported", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-dedupe-"));
+  try {
+    fs.writeFileSync(path.join(root, "c.ts"), "API_KEY=abc123def456\na\nb\nc\nd\n");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    const { checked } = await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "lines",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [
+              // A fallback given before the path-only anchor it matches merges all the same
+              { path: "c.ts", lines: [4, 5], symbol: `sk-${"e5".repeat(15)}`, role: "applies_to" },
+              { path: "c.ts", lines: [2, 2], role: "applies_to" },
+              { path: "c.ts", lines: [4, 5], role: "applies_to" },
+              // A reversed range is the same place once saved
+              { path: "c.ts", lines: [5, 4], symbol: `sk-${"f6".repeat(15)}`, role: "applies_to" },
+              { path: "c.ts", lines: [5, 5], role: "applies_to" },
+              { path: "c.ts", symbol: `sk-${"c3".repeat(15)}`, role: "applies_to" },
+              { path: "c.ts", symbol: `sk-${"d4".repeat(15)}`, role: "applies_to" },
+            ],
+          },
+        ],
+      },
+      [m],
+    );
+    const rows = db.owner.prepare("select symbol, line_start, line_end from unit_anchor order by id").all();
+    assert.deepEqual(
+      rows.map((r) => [r.symbol, r.line_start, r.line_end]),
+      [
+        [null, 2, 2],
+        [null, 4, 5],
+        [null, 5, 5],
+        [null, null, null],
+      ],
+    );
+    assert.ok(
+      checked.problems.some((x) => /another path-only anchor on c\.ts/.test(x)),
+      checked.problems.join("\n"),
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The file can change between the check and the save: the symbol is checked again as it is stored
+test("an anchor symbol that became a key after the check is stored without it", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-recheck-"));
+  try {
+    fs.writeFileSync(path.join(root, "c.ts"), "const tokenValue123abc = loadConfig();\n");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    const t = { ...target(p), root };
+    await inTransaction(db.ingest, async (trx) => {
+      const runId = await openRun(trx, {
+        projectId: p,
+        origin: t.origin,
+        target: "session:s1",
+        sessionId: t.sessionId,
+        draftId: "d-recheck",
+      });
+      const checked = await checkRecord(trx, t, {
+        units: [
+          {
+            key: "recheck",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [{ path: "c.ts", symbol: "tokenValue123abc", role: "applies_to" }],
+          },
+        ],
+      });
+      fs.writeFileSync(path.join(root, "c.ts"), "API_KEY=tokenValue123abc\n");
+      await saveRecord(trx, t, runId, checked, [m]);
+    });
+    assert.deepEqual(
+      db.owner
+        .prepare("select path, symbol from unit_anchor")
+        .all()
+        .map((r) => [r.path, r.symbol]),
+      [["c.ts", null]],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A file masked on every line must not make the symbol check pair every match with every placeholder
+test("masksSymbol stays fast on a large file masked on every line", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-masks-"));
+  try {
+    fs.writeFileSync(path.join(root, "big.ts"), "API_KEY=abc123def456 // loadConfig\n".repeat(55_000));
+    const started = performance.now();
+    assert.equal(masksSymbol(root, "big.ts", "loadConfig"), false);
+    // A one-letter symbol in a near-limit file: matches are counted, not collected
+    fs.writeFileSync(path.join(root, "min.ts"), "a ".repeat(1_048_575));
+    assert.equal(masksSymbol(root, "min.ts", "a"), false);
+    assert.ok(performance.now() - started < 1000, `took ${Math.round(performance.now() - started)} ms`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Masking a key can leave a new whole name right after its placeholder; that one must not stand in for the occurrence it swallowed
+test("masksSymbol does not count a name that only a placeholder's edge made whole", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-edge-"));
+  try {
+    fs.writeFileSync(
+      path.join(root, "c.ts"),
+      `API_KEY=tokenValue123abc\nAIza${"a".repeat(35)}tokenValue123abc\n`,
+    );
+    assert.equal(masksSymbol(root, "c.ts", "tokenValue123abc"), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A file Sphica cannot scan (too large, binary) gives no context to clear a symbol, so the symbol is treated as masked
+test("masksSymbol treats a symbol in a file it cannot scan as masked", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-unscanned-"));
+  try {
+    fs.writeFileSync(path.join(root, "big.txt"), `API_KEY=abc123def456\n${"x".repeat(2 * 1024 * 1024)}`);
+    fs.writeFileSync(path.join(root, "bin.dat"), Buffer.from([0x61, 0, 0x62]));
+    assert.equal(masksSymbol(root, "big.txt", "abc123def456"), true);
+    assert.equal(masksSymbol(root, "bin.dat", "loadConfig"), true);
+    // A file not there yet has no context either way: only the symbol's own shape counts
+    assert.equal(masksSymbol(root, "later.ts", "loadConfig"), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Save looks the symbol up again after the check, so the file may have changed in between: a line inside a key is still not kept
+test("locate does not keep a line inside a private key as an anchor's excerpt", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-locate-"));
+  try {
+    fs.writeFileSync(
+      path.join(root, "key.pem"),
+      "-----BEGIN PRIVATE KEY-----\nkeyBody\n-----END PRIVATE KEY-----\n",
+    );
+    assert.deepEqual(locate(root, "key.pem", "keyBody"), { line: 2, excerpt: "[redacted: private key]" });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("an owner's directive becomes an active decision whose spans cut the quoted bytes, with a rejected option", async () => {
   const db = tempDb();

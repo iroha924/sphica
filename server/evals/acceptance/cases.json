@@ -2169,6 +2169,67 @@
       ]
     },
     {
+      "id": "glean-13",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "A file excerpt holding a key is stored masked, like captured messages",
+      "given": [
+        {
+          "case": "capture-02"
+        },
+        {
+          "edit_file": {
+            "path": "docs/運用メモ.md",
+            "prepend": "API_KEY=abc123def456\n"
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-glean13",
+            "at": "2026-03-26T09:00:00+09:00",
+            "turns": [
+              {
+                "owner": "運用メモにバックアップの決まりが書いてあるよ。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean13",
+          "record": {
+            "ops": [
+              {
+                "op": "add_evidence",
+                "unit": "trace:s-ja-telemetry/no-telemetry",
+                "file": {
+                  "path": "docs/運用メモ.md",
+                  "commit": "HEAD",
+                  "lines": [1, 4]
+                },
+                "quote": "リリース前にバックアップを取る。",
+                "role": "explains"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "file_source": {
+            "path": "docs/運用メモ.md",
+            "lines": [1, 4],
+            "text": "リリース前にバックアップを取る。",
+            "not_text": "abc123def456",
+            "redacted": true
+          }
+        }
+      ]
+    },
+    {
       "id": "capture-09",
       "layer": "capture",
       "lang": "en",

@@ -2,6 +2,7 @@
 // A located symbol only says the code is still there; it never proves the decision still holds.
 import fs from "node:fs";
 import path from "node:path";
+import { bytes, mask, placeholderRanges, privateKeyRanges } from "./text.ts";
 
 export type AnchorState = "located" | "moved" | "missing" | "unknown";
 
@@ -28,15 +29,53 @@ function readText(root: string, rel: string): string | null | undefined {
   return buf.includes(0) ? undefined : buf.toString("utf8");
 }
 
-/** The 1-based line where symbol first appears as a whole identifier, and that line; null when it does not. */
-function findSymbol(text: string, symbol: string): { line: number; excerpt: string } | null {
+/** The file's lines and the 0-based index of the first one holding symbol as a whole identifier (-1 when none does). */
+function findSymbol(text: string, symbol: string): { lines: string[]; i: number } {
   const re = new RegExp(`(?<![\\w$])${literal(symbol)}(?![\\w$])`);
   const lines = text.split(/\r?\n/);
-  const i = lines.findIndex((l) => re.test(l));
-  return i < 0 ? null : { line: i + 1, excerpt: (lines[i] ?? "").trim().slice(0, 200) };
+  return { lines, i: lines.findIndex((l) => re.test(l)) };
 }
 
-/** Where a symbol is in a repository file now, for recording an anchor's lines when it is saved. */
+/**
+ * Whether a symbol is text mask() hides: a key by its shape, or a name masking swallows somewhere (a copy left elsewhere, or a placeholder's own
+ * letters, does not clear it). Names are counted whole, as findSymbol matches them. Such an anchor would store the key in its symbol.
+ */
+function swallowed(root: string | null, rel: string, symbol: string): boolean {
+  if (mask(symbol) !== symbol) return true;
+  const text = root ? readText(root, rel) : null;
+  // A file that is there but cannot be scanned (too large, binary, a link) gives no context to clear the symbol
+  if (text === undefined) return true;
+  if (text === null) return false;
+  const re = new RegExp(`(?<![\\w$])${literal(symbol)}(?![\\w$])`, "g");
+  let raw = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) raw++;
+  if (raw === 0) return false;
+  const masked = mask(text);
+  const holes = placeholderRanges(masked);
+  // Matches and placeholders both run in order, so one pass pairs them. A match touching a placeholder is not counted either: masking
+  // can make a whole name there out of one that was part of a key, and it would stand in for an occurrence masking swallowed
+  let h = 0;
+  let kept = 0;
+  re.lastIndex = 0;
+  for (let m = re.exec(masked); m; m = re.exec(masked)) {
+    while ((holes[h]?.[1] ?? Number.POSITIVE_INFINITY) < m.index) h++;
+    if (!((holes[h]?.[0] ?? Number.POSITIVE_INFINITY) <= m.index + symbol.length)) kept++;
+  }
+  return kept !== raw;
+}
+
+/** A symbol with spaces around it is checked as written and trimmed, since the name in the file is the trimmed one. */
+export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
+  const trimmed = symbol.trim();
+  return (
+    swallowed(root, rel, symbol) || (trimmed !== symbol && trimmed !== "" && swallowed(root, rel, trimmed))
+  );
+}
+
+/**
+ * Where a symbol is in a repository file now, for recording an anchor's lines when it is saved. The line is masked before it is cut to 200
+ * characters: cutting first could drop the closing quote that marks a value as a key.
+ */
 export function locate(
   root: string | null,
   rel: string,
@@ -44,7 +83,26 @@ export function locate(
 ): { line: number; excerpt: string } | null {
   if (!root) return null;
   const text = readText(root, rel);
-  return typeof text === "string" ? findSymbol(text, symbol) : null;
+  if (typeof text !== "string") return null;
+  const { lines, i } = findSymbol(text, symbol);
+  if (i < 0) return null;
+  const line = lines[i] ?? "";
+  // A line inside a private key cannot be masked alone (its BEGIN and END are on other lines); the file may have changed since the check
+  const from = bytes(lines.slice(0, i).join("\n")) + (i > 0 ? 1 : 0);
+  if (privateKeyRanges(lines.join("\n")).some(([a, b]) => a < from + bytes(line) && b > from))
+    return { line: i + 1, excerpt: "[redacted: private key]" };
+  // A value whose key name sits on another line cannot be masked alone: the text around must not change how the line masks
+  const before = lines
+    .slice(0, i)
+    .map((l) => `${l}\n`)
+    .join("");
+  const after = lines
+    .slice(i + 1)
+    .map((l) => `\n${l}`)
+    .join("");
+  const own = mask(line);
+  const cut = mask(before + line) !== mask(before) + own || mask(line + after) !== own + mask(after);
+  return { line: i + 1, excerpt: cut ? "[redacted]" : own.trim().slice(0, 200) };
 }
 
 /** The anchor's state in the working tree: the file and symbol are there (at the recorded line or another), gone, or cannot be checked. */
@@ -57,10 +115,10 @@ export function checkAnchor(
   if (text === null) return { state: "missing", line: null };
   if (text === undefined) return { state: "unknown", line: null };
   if (!a.symbol) return { state: "located", line: a.line_start };
-  const found = findSymbol(text, a.symbol);
-  if (!found) return { state: "missing", line: null };
+  const { i } = findSymbol(text, a.symbol);
+  if (i < 0) return { state: "missing", line: null };
   return {
-    state: a.line_start === null || a.line_start === found.line ? "located" : "moved",
-    line: found.line,
+    state: a.line_start === null || a.line_start === i + 1 ? "located" : "moved",
+    line: i + 1,
   };
 }

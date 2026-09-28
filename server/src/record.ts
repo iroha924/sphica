@@ -2,7 +2,7 @@
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { locate as locateSymbol } from "./anchors.ts";
+import { locate as locateSymbol, masksSymbol } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { commitHolds } from "./git.ts";
@@ -324,6 +324,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
     }
 
     const anchors: Planned["anchors"] = [];
+    const fallbacks = new Set<(typeof anchors)[number]>();
     for (const a of u.anchors) {
       const p = repoPath(a.path);
       if (!p) {
@@ -332,6 +333,10 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         );
         continue;
       }
+      // The path still delivers the record; only the symbol, which would store the key, is dropped
+      const symbol = a.symbol && masksSymbol(target.root, p, a.symbol) ? undefined : a.symbol;
+      if (a.symbol && !symbol)
+        problems.push(`${key}: anchor symbol in ${p} is text Sphica masks; the anchor keeps only its path`);
       // A commit counts as code evidence only when the repository has it and it holds the path; otherwise the anchor keeps no commit
       let commit = a.commit;
       if (commit && !(target.root && commitHolds(target.root, commit, p))) {
@@ -352,7 +357,22 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
                 .executeTakeFirst()
             )?.id ?? null)
           : null;
-      anchors.push({ ...a, commit, path: p, observation });
+      const planned = { ...a, symbol, commit, path: p, observation };
+      if (a.symbol && !symbol) fallbacks.add(planned);
+      anchors.push(planned);
+    }
+    // A masked symbol's fallback merges into a path-only anchor like it, in any order: identical rows could not be told apart by replace_anchor
+    // Lines as saved (the end never before the start), so a reversed range meets the same place
+    const place = (x: (typeof anchors)[number]) =>
+      `${x.path}\0${x.role}\0${x.commit}\0${x.lines ? [x.lines[0], Math.max(...x.lines)] : ""}`;
+    const covered = new Set(anchors.filter((x) => !x.symbol && !fallbacks.has(x)).map(place));
+    for (const x of [...fallbacks]) {
+      if (!covered.has(place(x))) {
+        covered.add(place(x));
+        continue;
+      }
+      problems.push(`${key}: another path-only anchor on ${x.path} already covers it; left out`);
+      anchors.splice(anchors.indexOf(x), 1);
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
@@ -514,14 +534,16 @@ export async function saveRecord(
     }
     for (const a of p.anchors) {
       // Lines are recorded where the symbol is now, so a later read can tell a moved symbol from a missing one
-      const at = a.lines ? null : a.symbol ? locateSymbol(target.root, a.path, a.symbol) : null;
+      // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
+      const symbol = a.symbol && !masksSymbol(target.root, a.path, a.symbol) ? a.symbol : undefined;
+      const at = a.lines ? null : symbol ? locateSymbol(target.root, a.path, symbol) : null;
       const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx
         .insertInto("unit_anchor")
         .values({
           unit_id: id,
           path: a.path,
-          symbol: a.symbol ?? null,
+          symbol: symbol ?? null,
           commit_sha: a.commit ?? null,
           line_start: lines?.[0] ?? null,
           line_end: lines ? Math.max(lines[0], lines[1]) : null,
