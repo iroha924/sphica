@@ -135,7 +135,9 @@ in open sessions. `sphica doctor` shows "npm package versions" and "Plugin chann
 
 1. **Run `npm i -g sphica@<version>`.** The CLI installed with `npm i -g` is a separate path from the plugin cache,
    and host updates do not upgrade it. **In a release that raised the DB revision, forgetting this leaves only the old CLI
-   failing with "expects revision N"** (measured: after moving to revision 5, the global CLI stayed at 0.32.0)
+   failing with "expects revision N"** (measured: after moving to revision 5, the global CLI stayed at 0.32.0).
+   Run it from the home directory too (`cd ~ && npm i -g sphica@<version>`): with a per-directory Node (mise), `npm i -g` inside
+   this repository installs only into the Node its `mise.toml` pins, and `sphica` is then "command not found" everywhere else (measured 2026-09-28)
 2. If the release changed the DB generation, copy `~/.sphica/sphica.db` (with `-wal` and `-shm`) to a dated backup, move it aside, and run
    `sphica init` in each registered repository (the old records are not carried over; say so in the report). A revision change within a
    generation needs the migration `knowledge-schema` says to design first
