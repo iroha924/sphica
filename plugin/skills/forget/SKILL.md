@@ -38,7 +38,7 @@ Pass the repository root as `cwd` to every tool.
 5. **Report** what `forget_apply` returned, as it says it
 
 When `forget_apply` says the host cannot ask directly, the host has no confirmation dialog (some Codex versions): tell the owner to run
-`/sphica:forget` in Claude Code. When it says the cleanup is incomplete, another session was reading the database: run `forget_apply` with
+`/sphica:forget` in Claude Code. When it says clearing did not finish (usually another session reading the database): run `forget_apply` with
 the same refs again later, and it only finishes the cleanup.
 
 ## What stays

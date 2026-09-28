@@ -142,6 +142,16 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
   - コミット: `fix(forget): address the branch review findings`
   - 結果: red を実測（3 件と取り消し 1 件）。forget-01 の `source_index_misses` は forget を外すと「the index still holds テレメトリ」で失敗し、戻すと通る。`bun run verify` → exit 0（受け入れ 59 件）。掃除そのものが例外を投げる経路と、glean で消した版より古い版が戻る経路は、テストで再現する継ぎ目が無く未テスト
 
+- [x] T13: 掃除が終わらなかったときの文面で、原因をほかのセッションの読み取りと決めつけない
+  - 種別: 修正
+  - 計画: S6, S7
+  - 依存: T12（掃除の失敗を incomplete にした）
+  - 変更: `server/src/mcp-record.ts`, `plugin/skills/forget/SKILL.md`
+  - red: 文面だけの修正で、失敗させるテストは無い（`rg "Another session is reading" server/src` → 1 件）
+  - 完了条件: `bun run verify` → exit 0
+  - コミット: `fix(forget): word an unfinished cleanup without assuming its cause`
+  - 結果: `bun run verify` → exit 0（受け入れ 59 件）
+
 ## 記録
 2026-09-29 / T01 / `git show v0.5.7:db/schema.sql` は浅い clone で読めない / revision 1 の schema を `server/test/fixtures/schema-rev1.sql` に固定し、変更欄に足した（前: 6 ファイル、後: 7 ファイル）
 2026-09-29 / T01 / rename が `unit_lifecycle_via_state` の参照で失敗した（実測）/ 移行で `unit_lifecycle_via_state` と `unit_option_sealed` を先に drop し、作り直す
@@ -156,3 +166,4 @@ Claude Code と Codex から、人の確認付きで削除を呼べるように�
 2026-09-29 / T07 / Codex 向けの `agents/openai.yaml`（暗黙の起動を止める）が必要だった。record-writes の規範と README に forget を書き足した / 変更欄に 5 ファイルを足した
 2026-09-29 / T11 / Codex の T05 レビュー F1（最新の revision を消すと古い版が今の版になり番号も使い回す）・F3（glean の墓標テストが保存の段を通らない。保存の段は元から拒否していた）、T06 レビュー F2（取り消した呼び出しへの後からの回答で消える）を採用し T11 を足した。墓標に revision を足した（未リリースの schema と移行 SQL を同じ形に直した）。T05 F2（anchor の excerpt に同じ行が入り得る）は、anchor はいまの作業ツリーを読む別の経路で plan の「別の経路からの同じ言葉は保存する」に入るため見送り。T06 F1（artifact のパスや unit の key に秘密があれば preview に出る）は、識別子で search の結果にも元から出るため見送り。T06 のレビューは Codex が自分の誤報に気づいて途中で止めたので、残りは仕上げの全差分レビューで見る。T10 のレビューは指摘なし
 2026-09-29 / T12 / 仕上げのレビューを採用し T12 を足した。review-shipping F1（旧 CLI では移行されないのに案内が CLI の更新を言わない、再現済み）、Codex 全差分 F1（commit 後の掃除の失敗がエラーになる）・F2（消した唯一の版の後の版に available_at が入る）・F3（harvest_begin が飛ばした項目も数える）、T07 レビュー F1（Skill のパスでの探し方は索引に効かない）・F2（source_search は行と結合して数えるので索引だけ残る退行を見逃す）・F3/F4（README が記録の本文に残る言葉と掃除の未完了を書いていない）、T11 レビュー F1（承認後の確定前の取り消し）・F2（glean で消した版より古い版を今の版として使い直す）。review-shipping F2（旧 0.5.7 の CLI が revision 2 の DB に退避を勧める）は出荷済みのコードで直せないので README と Release notes で知らせる。review-shipping は途中でターン上限に達したため、項目 3・5・6（検査の自己一致、一括置換、古いコメント）は見ていない。検証のため持ち主の実 DB の複製を scratchpad に作っていたので消した
+2026-09-29 / T13 / 全差分レビュー 2 回目は P1・P2 なし。T12 レビュー F3（掃除の未完了の原因を読み手と決めつける）を採用し T13 を足した。F1（ロックを同期で待つ間に届いた取り消しが確定前の確認に間に合わない）は数秒の競合に限られる極端な入力、F2（記録に引用されず本文に番号の無い PR 項目は番号では見つからない）は Skill が本文の言葉で探すよう案内し持ち主に尋ねられるため、どちらも見送り PR の Declined findings に書く。レビューの往復はここで止める（CLAUDE.md: 新しい P1 が無く P2 が極端な入力だけ）

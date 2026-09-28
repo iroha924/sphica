@@ -294,7 +294,7 @@ server.registerTool(
         forgetText(done.outcome),
         done.cleanup === "done"
           ? "The deleted text was cleared from the database file."
-          : "Another session is reading the database, so the deleted text may stay in the file until you run forget_apply with the same sources again.",
+          : "Clearing the deleted text from the database file did not finish (another session may be reading it), so it may stay there until you run forget_apply with the same sources again.",
       ].join("\n");
     }),
 );
