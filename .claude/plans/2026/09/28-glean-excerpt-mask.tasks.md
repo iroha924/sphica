@@ -180,6 +180,15 @@ trace、harvest、glean が記録に付けるコード位置の抜粋に、秘�
   - コミット: `fix(anchors): skip names touching a placeholder and count without collecting (T17)`
   - 結果: red は上のとおり fail。メモリの指摘は、1 文字の symbol と約 2 MiB のファイルの速さのテストを足したが、直す前のこの Mac でも 1 秒以内に通ったので red は取れていない（配列を作らずに数える形に直した）。直した後 `node --test test/record.test.ts test/extract.test.ts` → 30 件 pass、`bun run --cwd server test` → 319 件 pass、`bun run verify` → exit 0
 
+- [x] T18: 3 つのスキルに、秘密と判定された symbol の扱いを書く
+  - 種別: 変更
+  - 計画: S5
+  - 依存: T17（書く振る舞いがそろっている必要がある）
+  - 変更: `plugin/skills/trace/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `plugin/skills/glean/SKILL.md`
+  - 完了条件: `bun run verify` → exit 0
+  - コミット: `docs(skills): say how a masked anchor symbol is handled (T18)`
+  - 結果: `bun run verify` → exit 0
+
 - [x] T11: README の秘密情報の項目に、glean が引いたファイルの行も伏せ字になることを書く
   - 種別: 変更
   - 計画: S5
@@ -226,3 +235,5 @@ glean スキルの案内を足し、出荷前の検査を通す。
 - 2026-09-28 / T15 / review-shipping（36d13fd）: symbol を外した anchor が、同じ行の範囲の path だけの anchor より前に来ると統合されず、同じ行が 2 つ保存される（再現済み） / 採用（自分の修正が生んだもの）。修正タスク T15: 全部の anchor を見てから統合する
 - 2026-09-28 / T16 / GitHub の Codex レビュー（46c4a44）: P1 検査と保存の間の書き換えで秘密の symbol が保存される、P1 前後に空白のある symbol が glean の検査をすり抜ける、P2 計画が draft のまま、P2 逆順の行の範囲が統合をすり抜ける / 4 件とも採用。計画が draft だったのは、Go の後に承認済みへ書き換えるコマンドが Bash の判定の障害で流れず、手動モードで再開したときに流し直さなかったため
 - 2026-09-29 / T17 / GitHub の Codex レビュー（70f91ed）: P1 鍵が伏せ字になると目印の直後に新しい識別子全体の一致ができ、飲まれた分と件数が相殺する（再現済み）、P2 1 文字の symbol で一致を配列に作り約 150 MB 使う（再現済み）、P2 保存の中の再確認と抜粋の読み込みが別の読み込み、P2 保存時に symbol を外したあと重複を除かない / 2 回目も 4 件で収束しないため持ち主に選択肢を示し、「簡単な 2 件を直して終える」を受けた。P1 とメモリの P2 を T17 で直し、書き換えの間に起きる 2 件は見送り（実行中の短い間にファイルが書き換わる場合だけ）
+- 2026-09-29 / 全体 / review-shipping（4d7a3d6）: 文字どおり `[redacted]` と書かれたファイルでその直前の名前が秘密と判定される、glean の保存時の再確認にテストがない、保存時の再確認が書き込みのロック中に 1 anchor あたり約 20 ms / 3 件とも見送り（PR 本文の見送った指摘に書いた）
+- 2026-09-29 / T18 / GitHub の Codex レビュー（4d7a3d6）: P1 3 つのスキルが秘密と判定された symbol の扱いを説明していない、P2 anchor ごとにファイル全体を伏せ字にし直すので 2 MiB と 20 anchor で約 2.8 秒（再現済み） / 持ち主に選択肢を示し「P1 だけ直す」を受けた。P1 を T18 で直し、P2 は見送り

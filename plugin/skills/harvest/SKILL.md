@@ -53,7 +53,7 @@ and only by saying so: "we rejected yarn", "let's keep SQLite". check refuses th
 ## What to record
 
 - Options someone proposed and a maintainer declined, with the reason given: a `decision` whose rejected option carries its `why` and evidence
-- What the pull request implemented: an `implementation` citing the commit message or the body, with an `evidence` anchor when a path and symbol are named
+- What the pull request implemented: an `implementation` citing the commit message or the body, with an `evidence` anchor when a path and symbol are named (a `symbol` that is a key or a value Sphica masks is dropped, keeping the path)
 - The problem the closed issue describes, when it states a rule ("exports must never include private notes"): a `constraint` citing the issue body
 - Review findings that led to a change (`finding`), paths tried and abandoned (`dead_end`), questions left open (`question`)
 
