@@ -41,13 +41,14 @@ base: main
   - コミット: `fix(github): ignore closing references inside HTML comments`
   - 結果: red を実測（`node --test test/github.test.ts` → `Error: no answer for issues/12`、テンプレートのコメントから issue 12 を読みに行った）。直した後 `bun run test` → 全件 pass（開始記号 20 万個の入力も 1 秒以内）
 
-- [ ] T03: 両方の README のバッジの下に説明への案内を足し、日本語版の Security 節を今の手順に直す（#184）
+- [x] T03: 両方の README のバッジの下に説明への案内を足し、日本語版の Security 節を今の手順に直す（#184）
   - 種別: 変更
   - 計画: S6
   - 依存: T01（README は配布物に入るので、バージョンを上げた後でないとコミットできない）
   - 変更: `README.md`, `README.ja.md`
   - 完了条件: `sed -n 3,12p README.md README.ja.md` → バッジの行の直下に CI と来歴の節へのリンクがある。`rg -n "ステージ|2 要素認証" README.ja.md` → 0 件。`bun run verify:ai` → 通る
   - コミット: `docs(readme): point from the badges to what CI and releases check`
+  - 結果: `sed -n 3,12p README.md README.ja.md` → バッジの直下に Contributing / Security（貢献 / セキュリティ）へのリンクと「通っていてもバグや脆弱性が無い意味ではない」の 1 行。`rg -n "ステージ|2 要素認証" README.ja.md` → 0 件。`bun run verify:ai` と `bun run english` → 通る
 
 ## P2: リリースの関門と GitHub の設定
 
