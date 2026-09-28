@@ -42,6 +42,16 @@ base: main
   - コミット: `fix(mcp): say when a search stopped before reading every candidate`
   - 結果: red（直す前）→ 上限で止まった本文の検索が `No source holds most of: retry, budget, cach, warm. 600 weaker matches left out.` と言い切って失敗。直した後 `node --test test/plugin.test.ts test/search.test.ts` → pass 34 / fail 0。typecheck → 0
 
+- [x] T07: 候補の順番を 1 つの SQL で取ってからページごとに中身を引き、600 件のテストで強い一致を確かめる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/src/search.ts`, `server/test/search.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 1 ページ目を読んだ後に先頭の候補を消すと、次のページで候補を 1 件飛ばすテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 全部 pass。`bun run sql:reach` → 全箇所
+  - コミット: `fix(search): take the candidate order in one statement so writes between pages skip nothing`
+  - 結果: red（直す前）`node --test test/search.test.ts` → 1 ページ目の後に先頭の候補を消すと、51 番目の強い一致を飛ばして `hits: []` で失敗。直した後 → pass 8 / fail 0（600 件のテストで強い一致が見つかることも確かめる）。`bun run sql:reach` → 157 / 157、typecheck・lint → 0
+
 ## P2: 配信が省いたものを言う（W7 #190）
 
 上限から漏れた記録や作業の件数と見方が、配信の文に出る。今届いている記録は押し出さない。
@@ -93,3 +103,4 @@ trace 待ちのセッションがあると、セッション開始時に 1 日 1
 2026-09-29 / T02 / 文に読んだ件数を出すため、`searchUnits` と `searchSources` の返り値に `read` を足した / T02 の変更欄に `server/src/search.ts` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）
 2026-09-29 / T03, T04 / T03 の注記だけの読み取りで既存の予算のテストが崩れるので、T04 の red を確かめてから同じコミットで終えた。後の読み取りの記録が注記で削られることを比べるテストは、今の上限（1 回 1500 字・1 セッション 3000 字・8 件）では差が出る状況を作れなかった（字数の組を総当たりして確かめた）ので、ログの chars が注記を除くことを確かめる形にした / T03 の変更欄に `server/test/review-bridge.test.ts` を足した（前: `server/src/deliver.ts`, `server/test/deliver.test.ts`）。T04 の red を「予算を使い切った後の注記だけの読み取りが予算を使う」から「ログの chars に注記が入る」に変えた
 2026-09-29 / T01 / T01 の Codex レビュー 4 件: ページの間の書き込みで候補を飛ばす・二重に数える（F1）と、600 件のテストが強い一致を確かめていない（F4）は採用。件数に達して止まったときに stopped が false（F2）は見送り（stopped は上限で打ち切ったことを言い、件数がそろって止まるのは打ち切りではない。コメントで明記する）。1 ページの本文を先に読み込む（F3）は見送り（1 ページ最大約 51 MiB は plan で合意済み）。T02 のレビューは指摘なし / 修正タスク T07 を足す
+2026-09-29 / T07 / reader の authorizer はトランザクションを許さないので、1 つのスナップショットで読む案は権限の境界を変えることになる / 候補の順番（id と rank）を 1 つの SQL で上限 + 1 件まで取り、中身をページごとに id で引く形にした。途中で消えた行は読まないだけになる

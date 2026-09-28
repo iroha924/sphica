@@ -63,20 +63,7 @@ export async function searchUnits(
     )
     .innerJoin("unit as u", "u.id", "f.rowid")
     .where("u.project_id", "=", projectId)
-    .where("u.extraction", "=", "supported")
-    .select([
-      "u.id",
-      "u.key",
-      "u.kind",
-      "u.stance",
-      "u.lifecycle",
-      "u.text",
-      "u.why",
-      "u.scope_note",
-      "u.revisit_when",
-      "u.content_hash",
-      "f.rank",
-    ]);
+    .where("u.extraction", "=", "supported");
   if (q.kinds?.length) query = query.where("u.kind", "in", q.kinds);
   if (q.lifecycles?.length) query = query.where("u.lifecycle", "in", q.lifecycles);
   if (q.path)
@@ -89,27 +76,47 @@ export async function searchUnits(
           .where("a.retired_at", "is", null),
       ),
     );
-  // Pages are cut only after every filter, so matches a filter drops never crowd out the ones it keeps. Hits are sorted at the end,
-  // so every page up to the cap is read. One row past each page only tells whether more candidates remain.
+  // The order is taken in one statement, after every filter, so a write between pages shifts nothing and matches a filter drops
+  // never crowd out the ones it keeps. Hits are sorted at the end, so every candidate up to the cap is read; the row past the cap
+  // only tells whether more remain.
+  const ranked = await query
+    .select(["u.id", "f.rank"])
+    .orderBy("f.rank")
+    .orderBy("u.id")
+    .limit(UNIT_SCAN_MAX + 1)
+    .execute();
+  const stopped = ranked.length > UNIT_SCAN_MAX;
   let weaker = 0;
-  let stopped = false;
   let read = 0;
   const hits: (UnitHit & { rank: number })[] = [];
-  for (;;) {
-    const page = await query
-      .orderBy("f.rank")
-      .orderBy("u.id")
-      .limit(UNIT_PAGE + 1)
-      .offset(read)
-      .execute();
-    const rows = page.slice(0, UNIT_PAGE);
-    weaker += await judgeUnits(db, rows, wanted, hits);
+  for (let at = 0; at < Math.min(ranked.length, UNIT_SCAN_MAX); at += UNIT_PAGE) {
+    const part = ranked.slice(at, Math.min(at + UNIT_PAGE, UNIT_SCAN_MAX));
+    const rank = new Map(part.map((r) => [r.id, r.rank]));
+    // A unit gone since the order was taken is simply not read
+    const rows = (
+      await db
+        .selectFrom("unit")
+        .select([
+          "id",
+          "key",
+          "kind",
+          "stance",
+          "lifecycle",
+          "text",
+          "why",
+          "scope_note",
+          "revisit_when",
+          "content_hash",
+        ])
+        .where(
+          "id",
+          "in",
+          part.map((r) => r.id),
+        )
+        .execute()
+    ).map((r) => ({ ...r, rank: rank.get(r.id) ?? 0 }));
     read += rows.length;
-    if (page.length <= UNIT_PAGE) break;
-    if (read >= UNIT_SCAN_MAX) {
-      stopped = true;
-      break;
-    }
+    weaker += await judgeUnits(db, rows, wanted, hits);
   }
   // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question.
   // The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
@@ -282,36 +289,39 @@ export async function searchSources(
       ),
     )
     .innerJoin("source as s", "s.id", "f.rowid")
-    .where("s.project_id", "=", projectId)
-    .select([
-      "s.id",
-      "s.kind",
-      "s.artifact",
-      "s.author_kind",
-      "s.author_login",
-      "s.created_at",
-      "s.text",
-      "f.rank",
-    ]);
+    .where("s.project_id", "=", projectId);
+  // The order is taken in one statement, so a write between pages shifts nothing; texts are then read a page at a time.
+  // Hits come in rank order, so reading ends once there are enough (that is not a stop). The caps are checked before each candidate.
+  const ranked = await query
+    .select(["s.id", "f.rank"])
+    .orderBy("f.rank")
+    .orderBy("s.id")
+    .limit(SOURCE_SCAN_MAX + 1)
+    .execute();
   let weaker = 0;
   let stopped = false;
   const hits: SourceHit[] = [];
-  // Hits come in rank order, so reading stops once there are enough. The caps are checked before each candidate.
   let read = 0;
   let bytes = 0;
-  scan: for (;;) {
-    const page = await query
-      .orderBy("f.rank")
-      .orderBy("s.id")
-      .limit(SOURCE_PAGE + 1)
-      .offset(read)
-      .execute();
-    const rows = page.slice(0, SOURCE_PAGE);
-    for (const r of rows) {
+  scan: for (let at = 0; at < ranked.length; at += SOURCE_PAGE) {
+    const ids = ranked.slice(at, at + SOURCE_PAGE).map((r) => r.id);
+    const byId = new Map(
+      (
+        await db
+          .selectFrom("source")
+          .select(["id", "kind", "artifact", "author_kind", "author_login", "created_at", "text"])
+          .where("id", "in", ids)
+          .execute()
+      ).map((r) => [r.id, r]),
+    );
+    for (const id of ids) {
       if (read >= SOURCE_SCAN_MAX || bytes >= SOURCE_SCAN_BYTES) {
         stopped = true;
         break scan;
       }
+      // A source gone since the order was taken (forgotten) is simply not read
+      const r = byId.get(id);
+      if (!r) continue;
       read++;
       bytes += Buffer.byteLength(r.text);
       const own = new Set(terms(r.text));
@@ -330,11 +340,6 @@ export async function searchSources(
         matched,
       });
       if (hits.length >= limit) break scan;
-    }
-    if (page.length <= SOURCE_PAGE) break;
-    if (read >= SOURCE_SCAN_MAX || bytes >= SOURCE_SCAN_BYTES) {
-      stopped = true;
-      break;
     }
   }
   return { hits, weaker, terms: wanted, stopped, read };

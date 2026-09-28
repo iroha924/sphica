@@ -423,6 +423,10 @@ test("a strong match ranked past the first 200 candidates is found, and a search
       { read: 600, stopped: true },
       "the message holding all four words is one of the 600 read",
     );
+    assert.deepEqual(
+      capped.hits.map((h) => h.id),
+      [both],
+    );
   } finally {
     await db.done();
   }
@@ -437,6 +441,50 @@ test("a source search stops once the text it read reaches 64 MiB", async () => {
     const r = await searchSources(db.reader, p, "retry budget cache warm", 5);
     assert.equal(r.stopped, true);
     assert.equal(r.weaker, 64);
+  } finally {
+    await db.done();
+  }
+});
+
+// Each page is a separate statement, so a write between two pages must not shift the next page past a candidate
+test("a source removed between two pages of a search makes it skip no other candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const filler = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(" ");
+    // 50 short weak candidates rank first and the long strong one last
+    const weak = (n: number) =>
+      n % 2 ? "retry budget retry budget retry budget." : "cache warm cache warm cache warm.";
+    const first = message(db, p, { id: "w0", text: weak(0) });
+    for (let n = 1; n < 50; n++) message(db, p, { id: `w${n}`, text: weak(n) });
+    const strong = message(db, p, {
+      id: "strong",
+      text: `${filler(1000)} retry budget cache ${filler(1000)}`,
+    });
+    const plain = await searchSources(db.reader, p, "retry budget cache warm", 5);
+    assert.deepEqual(
+      plain.hits.map((h) => h.id),
+      [strong],
+      "the strong one is found without a write",
+    );
+    let removed = false;
+    const reader = db.reader.withPlugin({
+      transformQuery: (a) => a.node,
+      transformResult: async (a) => {
+        // Right after the first statement, the best-ranked candidate goes away (forget does this)
+        if (!removed) {
+          removed = true;
+          db.owner.prepare("delete from source where id = ?").run(first);
+        }
+        return a.result;
+      },
+    });
+    const r = await searchSources(reader, p, "retry budget cache warm", 5);
+    assert.ok(removed);
+    assert.deepEqual(
+      r.hits.map((h) => h.id),
+      [strong],
+    );
   } finally {
     await db.done();
   }
