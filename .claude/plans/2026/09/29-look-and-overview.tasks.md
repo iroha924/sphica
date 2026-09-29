@@ -133,6 +133,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(overview): clip each part of a live line and keep keys on one line`
   - 結果: red（直す前）→ `/^## forged/m` に一致して失敗。直した後 `node --test test/overview.test.ts` → pass 4 / fail 0（本文 2,000 字・440 字のディレクトリ 49 件と改行入りキーで 64 KiB 未満、49 件すべてに `/f.ts]` が残る）。`npm test` → 全件 pass。`bun run check` → 0
 
+- [x] T14: look の返事全体にバイトの上限を置き、読めないファイルと 2,000 件を超えたアンカーを数え、後継を最後までたどり、長いキーのマーカーも読む
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（look が要る）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 大きすぎて関数名を探せないファイルが Not checked に数えられずに落ちる（ほかに、300 字を超えるキーのマーカーを読まない、25 段の置き換えで途中の記録を後継と出す、を同じテストで見る）
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 全部 pass
+  - コミット: `fix(overview): bound the whole look reply and count every place it could not check`
+  - 結果: red（直す前）→ `/- 1 code locations whose file could not be scanned/` に一致せず失敗。直した後 `node --test test/overview.test.ts` → pass 5 / fail 0（64 KiB 未満、Files gone に「100 more not shown」、25 段の置き換えの先が v25、400 字のセッション id のキーの後継が出る）。`npm test` → 399 / 399 pass。`bun run check` → 0、`sql:reach` → 170 / 170
+
 ## P4: 規約の下書きと受け入れ
 
 持ち主が選んだ制約から規約の下書きが出て、両ホストの受け入れ case が揃う。
@@ -169,3 +179,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T12 / Codex レビュー: 指摘なし
 - 2026-09-29 / T13 / T05 の Codex レビュー F1〜F3（キーが inline を通らず改行で行を偽造できる、長い本文でパスが切り詰めで消える、見出しが切り詰められず 64 KiB を超え得る）/ 修正タスク T13 を足した。look のキーも同じく inline に通した
 - 2026-09-29 / T07 / Claude と Codex の呼び出し設定の対は `verify:ai`（check-ai-config.mjs）が全 plugin Skill に対して見ていて、plugin.test.ts に足すものが無かった。README の機能一覧に overview と rules を足した / 変更欄を `server/test/plugin.test.ts` から `README.md`, `README.ja.md` に変えた
+- 2026-09-29 / T14 / T06 の Codex レビュー F1〜F5（返事全体の上限が無い、読めないファイルを none と出す、置き換えを 20 段で打ち切る、300 字を超えるキーのマーカーを見落とす、2,000 件を超えた件数を出さない）/ 修正タスク T14 を足した。F6（有効な制約の却下案の条件も出る）は採らない: 制約にも却下案と条件を持てるので、出すほうが正しい

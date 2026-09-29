@@ -7,7 +7,7 @@ import type { DB } from "./db-types.ts";
 import { inline } from "./panel.ts";
 import { UNSUPPORTED } from "./read.ts";
 import { ruleFiles } from "./rule-files.ts";
-import { head } from "./text.ts";
+import { bytes, head } from "./text.ts";
 
 /** One page: 50 records whose key, text, paths, and heading are each clipped, so a page stays under 64 KiB. Past it the reply says where to go on. */
 export const OVERVIEW_LIMITS = { records: 50, key: 200, text: 300, paths: 520, heading: 120 } as const;
@@ -97,10 +97,10 @@ export async function liveOverview(db: Kysely<DB>, projectId: number, after: num
   ].join("\n");
 }
 
-/** Anchors, markers, and conditions shown per heading; past them the heading says how many more there are. */
-const LOOK_LIMITS = { anchors: 2000, lines: 50 } as const;
+/** Anchors checked, lines per heading, bytes per line, and bytes for all headings together; past them a heading says how many it left out. */
+const LOOK_LIMITS = { anchors: 2000, lines: 50, line: 2200, bytes: 56 * 1024 } as const;
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
-const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,300})\s*-->/g;
+const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
 
 /**
  * Records that need a look: live records whose anchored file is gone or whose symbol is not found, written conditions for reconsidering,
@@ -109,45 +109,67 @@ const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,300})\s*-->/g
 export async function lookOverview(db: Kysely<DB>, projectId: number, root: string | null): Promise<string> {
   const notChecked: string[] = [];
   const sections: string[] = [];
+  // One budget for the whole reply, so many long lines under one heading cannot push it past what a host passes on
+  let used = 0;
   const section = (title: string, lines: string[], empty: string) => {
-    const shown = lines.slice(0, LOOK_LIMITS.lines);
+    const shown: string[] = [];
+    for (const line of lines.slice(0, LOOK_LIMITS.lines).map((l) => head(l, LOOK_LIMITS.line))) {
+      if (used + bytes(line) + 1 > LOOK_LIMITS.bytes) break;
+      used += bytes(line) + 1;
+      shown.push(line);
+    }
     sections.push(
       [
         `## ${title}`,
-        ...(shown.length ? shown : [empty]),
-        ...(lines.length > shown.length ? [`(${lines.length - shown.length} more not shown)`] : []),
+        ...(shown.length || lines.length ? shown : [empty]),
+        ...(lines.length > shown.length
+          ? [`(${lines.length - shown.length} more not shown: deal with these first, then ask again)`]
+          : []),
       ].join("\n"),
     );
   };
 
   // Anchored code: a gone file and a symbol no longer found are different reasons to look
-  const anchors = await db
+  const live = db
     .selectFrom("unit_anchor as a")
     .innerJoin("unit as u", "u.id", "a.unit_id")
     .where("u.project_id", "=", projectId)
     .where("u.lifecycle", "=", "active")
-    .where("a.retired_at", "is", null)
-    .select(["u.key", "u.kind", "a.path", "a.symbol", "a.line_start", "a.role"])
-    .orderBy("a.id")
-    .limit(LOOK_LIMITS.anchors + 1)
-    .execute();
+    .where("a.retired_at", "is", null);
+  const [anchors, total] = await Promise.all([
+    live
+      .select(["u.key", "u.kind", "a.path", "a.symbol", "a.line_start", "a.role"])
+      .orderBy("a.id")
+      .limit(LOOK_LIMITS.anchors)
+      .execute(),
+    live.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
+  ]);
   const gone: string[] = [];
   const lost: string[] = [];
   if (!root) notChecked.push("code locations: no working tree for this project here");
   else {
     let unknown = 0;
-    for (const a of anchors.slice(0, LOOK_LIMITS.anchors)) {
+    let unscanned = 0;
+    for (const a of anchors) {
       const where = `- ${inline(a.key)} (${a.kind}): ${inline(a.path)} (${a.role})`;
       const file = fileState(root, a.path);
       if (file === "gone") gone.push(where);
       else if (file === "unknown") unknown++;
-      else if (a.symbol && checkAnchor(root, a).state === "missing")
-        lost.push(`- ${inline(a.key)} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`);
+      else if (a.symbol) {
+        const state = checkAnchor(root, a).state;
+        if (state === "missing")
+          lost.push(`- ${inline(a.key)} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`);
+        else if (state === "unknown") unscanned++;
+      }
     }
     if (unknown)
       notChecked.push(`${unknown} code locations that lead outside the repository or cannot be followed`);
-    if (anchors.length > LOOK_LIMITS.anchors)
-      notChecked.push(`code locations past the first ${LOOK_LIMITS.anchors} (by age)`);
+    if (unscanned)
+      notChecked.push(
+        `${unscanned} code locations whose file could not be scanned for the symbol (too large, binary, or unreadable)`,
+      );
+    const past = Number(total?.n ?? 0) - anchors.length;
+    if (past > 0) notChecked.push(`${past} code locations past the first ${LOOK_LIMITS.anchors} (by age)`);
   }
   section("Files gone", gone, root ? "none" : "not checked");
   section("Symbol not found (the file is still there)", lost, root ? "none" : "not checked");
@@ -231,7 +253,9 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
       else if (u.lifecycle === "withdrawn") marked.push(`${where} was withdrawn`);
       else if (u.lifecycle === "superseded") {
         const next = await successor(db, u.id);
-        marked.push(`${where} was superseded${next ? ` by ${inline(next)}` : ""}`);
+        marked.push(
+          `${where} was superseded${next ? ` by ${inline(next.key)}${next.lifecycle === "active" ? "" : `, which is ${next.lifecycle} too`}` : ""}`,
+        );
       }
     }
     if (scan.skipped)
@@ -249,11 +273,11 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
   ].join("\n\n");
 }
 
-/** The live end of a record's supersedes chain, or the last successor when the chain stops at one not live. */
-async function successor(db: Kysely<DB>, id: number): Promise<string | null> {
-  let key: string | null = null;
+/** The end of a record's supersedes chain: the schema refuses cycles, so it ends. The caller says when the end is not active. */
+async function successor(db: Kysely<DB>, id: number): Promise<{ key: string; lifecycle: string } | null> {
+  let end: { key: string; lifecycle: string } | null = null;
   let at = id;
-  for (let step = 0; step < 20; step++) {
+  for (;;) {
     const next = await db
       .selectFrom("unit_link as l")
       .innerJoin("unit as u", "u.id", "l.from_unit")
@@ -262,9 +286,9 @@ async function successor(db: Kysely<DB>, id: number): Promise<string | null> {
       .select(["u.id", "u.key", "u.lifecycle"])
       .executeTakeFirst();
     if (!next) break;
-    key = next.key;
+    end = { key: next.key, lifecycle: next.lifecycle };
     if (next.lifecycle !== "superseded") break;
     at = next.id;
   }
-  return key;
+  return end;
 }

@@ -297,3 +297,88 @@ test("live keeps every record on one line with its paths, and a page stays under
     await db.done();
   }
 });
+
+test("look counts what it could not check, follows a long chain to its live end, reads long keys, and stays under 64 KiB", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    // A file too large to scan for its symbol is there, but whether the symbol is cannot be said
+    fs.writeFileSync(path.join(root, "big.ts"), "export function open() {}\n");
+    await save(
+      db,
+      p,
+      [record(m, "big", "decision", { anchors: [{ path: "big.ts", symbol: "open", role: "applies_to" }] })],
+      root,
+    );
+    fs.writeFileSync(path.join(root, "big.ts"), "x".repeat(3 * 1024 * 1024));
+    // Many gone files with long paths: the reply stops within its budget and says how many it left out
+    await save(
+      db,
+      p,
+      Array.from({ length: 50 }, (_, i) =>
+        record(m, `g${i}`, "constraint", {
+          anchors: Array.from({ length: 3 }, (_, k) => ({
+            path: `${"p".repeat(200)}/${"q".repeat(200)}/${i}-${k}.ts`,
+            role: "applies_to",
+          })),
+        }),
+      ),
+    );
+    // A chain of 25 replacements
+    await save(db, p, [record(m, "v0", "constraint")]);
+    for (let i = 1; i <= 25; i++)
+      await save(db, p, [record(m, `v${i}`, "constraint", { supersedes: `trace:ext-s1/v${i - 1}` })]);
+    // A key longer than 300 characters, as a long session id makes it
+    const long: Target = {
+      projectId: p,
+      origin: "trace",
+      prefix: `trace:${"s".repeat(400)}/`,
+      sessionId: "s1",
+      root: null,
+      sources: null,
+    };
+    await inTransaction(db.ingest, async (trx) => {
+      const runId = await openRun(trx, {
+        projectId: p,
+        origin: "trace",
+        target: "session:s1",
+        sessionId: "s1",
+        draftId: "long",
+      });
+      await saveRecord(
+        trx,
+        long,
+        runId,
+        await checkRecord(trx, long, { units: [record(m, "k", "constraint")] }),
+        [],
+      );
+      await saveRecord(
+        trx,
+        long,
+        runId,
+        await checkRecord(trx, long, {
+          units: [record(m, "k2", "constraint", { supersedes: `trace:${"s".repeat(400)}/k` })],
+        }),
+        [],
+      );
+    });
+    fs.writeFileSync(
+      path.join(root, "AGENTS.md"),
+      `- first <!-- sphica: trace:ext-s1/v0 -->\n- long <!-- sphica: trace:${"s".repeat(400)}/k -->\n${Array.from(
+        { length: 60 },
+        (_, i) => `- made up <!-- sphica: trace:${"u".repeat(900)}/${i} -->`,
+      ).join("\n")}\n`,
+    );
+    const look = await lookOverview(db.reader, p, root);
+    assert.ok(Buffer.byteLength(look) < 64 * 1024, `${Buffer.byteLength(look)} bytes`);
+    assert.match(look, /- 1 code locations whose file could not be scanned/);
+    assert.match(look, /AGENTS\.md:1: trace:ext-s1\/v0 was superseded by trace:ext-s1\/v25\n/);
+    assert.match(look, /AGENTS\.md:2: trace:s{400}\/k was superseded by trace:s{400}\/k2/);
+    assert.match(look, /\(\d+ more not shown/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
