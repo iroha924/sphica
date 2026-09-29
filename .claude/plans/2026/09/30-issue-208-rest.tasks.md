@@ -56,13 +56,14 @@ base: main
 
 保存の重いファイル・git の検査がロックの前に済み、ロックの中は内容のハッシュ比較だけになる
 
-- [ ] T04: anchors.ts の伏せ字の判定と symbol 探しを、読んだ内容を受け取る関数に分け、時間を測る
+- [x] T04: anchors.ts の伏せ字の判定と symbol 探しを、読んだ内容を受け取る関数に分け、時間を測る
   - 種別: 変更
   - 計画: S4, S5
   - 依存: なし
   - 変更: `server/src/anchors.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 既存の masksSymbol / locate のケースを内容を受け取る関数にも流して同じ結果。2 MB のファイルで「読み取り＋sha256」と「判定＋symbol 探し」の時間を測り、結果行に残す（読み取りが判定と同程度なら止めて plan を見直す）。`bun run verify` → 0
   - コミット: `refactor(anchors): judge and locate a symbol in text already read`
+  - 結果: `node --test --test-timeout=60000 test/record.test.ts test/search.test.ts` → 38 pass / 0 fail（伏せ字の例・範囲外・読めない・無いファイルの 8 ケースで、1 回読んだ内容への判定と位置が読み取り付きの関数と一致、同じ長さの書き換えでハッシュが変わる）。計測（Node 24、2.00 MB、7 回の中央値）: 普通のコード 読み取り＋sha256 1.0 ms / 伏せ字の判定 7.1 ms / symbol 探し 16.7 ms、行ごとにキーのあるファイル 0.9 ms / 16.7 ms / 25.2 ms。読み取りは判定の 1/7 以下なので方針 4 のまま進める。`bun run verify` → 0
 
 - [ ] T05: trace・harvest の保存で、ファイル・git の検査をロックの前に済ませ、ロックの中は anchor ごとにハッシュを比べる
   - 種別: 修正
@@ -98,3 +99,6 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
 
 - 2026-09-30 / T03 / mcp-record.ts は gh() の既定値で足り、変える必要が無かった / 変更欄から `server/src/mcp-record.ts` を外した（前: github.ts, mcp-record.ts, github.test.ts, extract.test.ts）
 - 2026-09-30 / T01 / Codex のレビュー F1: 後から始まった別 run が先に保存すると、先の run の context にも印が付く / 棄却。印は「context を読んだ時点で、どこかの run がもう見た」を表し、trace の `(traced before)` と同じ扱い。同じ PR を並行で harvest する場合に限られる
+- 2026-09-30 / T02 / Codex のレビュー: 指摘なし（7 種類の応答の形を確かめた）/ そのまま
+- 2026-09-30 / T03 / Codex のレビュー: 指摘なし。60 秒は --paginate の全ページの合計で、実際の余裕は未検証 / そのまま
+- 2026-09-30 / 持ち主の指示で、終わった 29-custom-fields の plan と tasks を同じ PR で消した

@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { locate, masksSymbol } from "../src/anchors.ts";
+import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { readUnit } from "../src/read.ts";
@@ -267,6 +267,44 @@ test("masksSymbol treats a symbol in a file it cannot scan as masked", () => {
     assert.equal(masksSymbol(root, "bin.dat", "loadConfig"), true);
     // A file not there yet has no context either way: only the symbol's own shape counts
     assert.equal(masksSymbol(root, "later.ts", "loadConfig"), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Save judges a symbol on text it read once before taking the write lock; the answers must match reading the file each time
+test("masksSymbolIn and locateIn on text read once agree with the reading functions, and the hash tells a changed file", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-read-once-"));
+  try {
+    const files: Record<string, string | Buffer> = {
+      "c.ts": `API_KEY=tokenValue123abc\nAIza${"a".repeat(35)}tokenValue123abc\n`,
+      "a.ts": "import x;\nconst open = 1;\n",
+      "big.txt": `API_KEY=abc123def456\n${"x".repeat(2 * 1024 * 1024)}`,
+      "bin.dat": Buffer.from([0x61, 0, 0x62]),
+    };
+    for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(root, name), body);
+    const cases: [string, string][] = [
+      ["c.ts", "tokenValue123abc"],
+      ["a.ts", "open"],
+      ["a.ts", " open "],
+      ["a.ts", "missing"],
+      ["big.txt", "abc123def456"],
+      ["bin.dat", "loadConfig"],
+      ["later.ts", "loadConfig"],
+      ["../out.ts", "open"],
+    ];
+    for (const [rel, symbol] of cases) {
+      const read = readRepoText(root, rel);
+      assert.equal(masksSymbolIn(read.text, symbol), masksSymbol(root, rel, symbol), `${rel} ${symbol}`);
+      assert.deepEqual(locateIn(read.text, symbol), locate(root, rel, symbol), `${rel} ${symbol}`);
+    }
+    assert.deepEqual(readRepoText(null, "a.ts"), { text: null, hash: "absent" });
+    assert.equal(readRepoText(root, "later.ts").hash, "absent");
+    assert.equal(readRepoText(root, "bin.dat").hash, "unreadable");
+    const before = readRepoText(root, "a.ts").hash;
+    // Same length, so a size check alone would not see it
+    fs.writeFileSync(path.join(root, "a.ts"), "import y;\nconst open = 1;\n");
+    assert.notEqual(readRepoText(root, "a.ts").hash, before);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

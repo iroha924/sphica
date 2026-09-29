@@ -1,5 +1,6 @@
 // Where a record sits in the code, checked against the working tree each time it is served (never cached in the database).
 // A located symbol only says the code is still there; it never proves the decision still holds.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { bytes, mask, placeholderRanges, privateKeyRanges } from "./text.ts";
@@ -15,8 +16,8 @@ export const leaves = (rel: string): boolean =>
 
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The text of a repository file, or null when it is absent; undefined when it cannot be read as text here. */
-function readText(root: string, rel: string): string | null | undefined {
+/** The bytes of a repository file, or null when it is absent; undefined when it cannot be read as text here. */
+function readBytes(root: string, rel: string): Buffer | null | undefined {
   const abs = path.join(root, rel);
   if (leaves(path.relative(root, abs))) return undefined;
   const st = fs.lstatSync(abs, { throwIfNoEntry: false });
@@ -27,11 +28,25 @@ function readText(root: string, rel: string): string | null | undefined {
     const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
     if (leaves(inside)) return undefined;
     const buf = fs.readFileSync(abs);
-    return buf.includes(0) ? undefined : buf.toString("utf8");
+    return buf.includes(0) ? undefined : buf;
   } catch {
     // Not readable here (no permission, or gone since the stat): it cannot be checked, which is not the same as missing
     return undefined;
   }
+}
+
+function readText(root: string, rel: string): string | null | undefined {
+  const buf = readBytes(root, rel);
+  return buf ? buf.toString("utf8") : buf;
+}
+
+/** Text of a repository file (null when absent, undefined when it cannot be read as text) and a hash that tells a later read whether it changed. */
+export type RepoText = { text: string | null | undefined; hash: string };
+
+export function readRepoText(root: string | null, rel: string): RepoText {
+  const buf = root ? readBytes(root, rel) : null;
+  if (!buf) return { text: buf, hash: buf === null ? "absent" : "unreadable" };
+  return { text: buf.toString("utf8"), hash: crypto.createHash("sha256").update(buf).digest("hex") };
 }
 
 /** The file's lines and the 0-based index of the first one holding symbol as a whole identifier (-1 when none does). */
@@ -45,9 +60,8 @@ function findSymbol(text: string, symbol: string): { lines: string[]; i: number 
  * Whether a symbol is text mask() hides: a key by its shape, or a name masking swallows somewhere (a copy left elsewhere, or a placeholder's own
  * letters, does not clear it). Names are counted whole, as findSymbol matches them. Such an anchor would store the key in its symbol.
  */
-function swallowed(root: string | null, rel: string, symbol: string): boolean {
+function swallowed(text: string | null | undefined, symbol: string): boolean {
   if (mask(symbol) !== symbol) return true;
-  const text = root ? readText(root, rel) : null;
   // A file that is there but cannot be scanned (too large, binary, a link) gives no context to clear the symbol
   if (text === undefined) return true;
   if (text === null) return false;
@@ -70,24 +84,22 @@ function swallowed(root: string | null, rel: string, symbol: string): boolean {
 }
 
 /** A symbol with spaces around it is checked as written and trimmed, since the name in the file is the trimmed one. */
-export function masksSymbol(root: string | null, rel: string, symbol: string): boolean {
+export function masksSymbolIn(text: string | null | undefined, symbol: string): boolean {
   const trimmed = symbol.trim();
-  return (
-    swallowed(root, rel, symbol) || (trimmed !== symbol && trimmed !== "" && swallowed(root, rel, trimmed))
-  );
+  return swallowed(text, symbol) || (trimmed !== symbol && trimmed !== "" && swallowed(text, trimmed));
 }
+
+export const masksSymbol = (root: string | null, rel: string, symbol: string): boolean =>
+  masksSymbolIn(root ? readText(root, rel) : null, symbol);
 
 /**
  * Where a symbol is in a repository file now, for recording an anchor's lines when it is saved. The line is masked before it is cut to 200
  * characters: cutting first could drop the closing quote that marks a value as a key.
  */
-export function locate(
-  root: string | null,
-  rel: string,
+export function locateIn(
+  text: string | null | undefined,
   symbol: string,
 ): { line: number; excerpt: string } | null {
-  if (!root) return null;
-  const text = readText(root, rel);
   if (typeof text !== "string") return null;
   const { lines, i } = findSymbol(text, symbol);
   if (i < 0) return null;
@@ -109,6 +121,12 @@ export function locate(
   const cut = mask(before + line) !== mask(before) + own || mask(line + after) !== own + mask(after);
   return { line: i + 1, excerpt: cut ? "[redacted]" : own.trim().slice(0, 200) };
 }
+
+export const locate = (
+  root: string | null,
+  rel: string,
+  symbol: string,
+): { line: number; excerpt: string } | null => (root ? locateIn(readText(root, rel), symbol) : null);
 
 /**
  * Whether a repository file is there now, apart from any symbol in it: gone when some part of its path does not exist, unknown when there
