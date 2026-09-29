@@ -473,7 +473,7 @@ test("sphica init migrates a revision 1 database in place and keeps its records"
   } finally {
     console.log = log;
   }
-  assert.match(said.join("\n"), /Migrated: .* \(revision 1 → 2\)/);
+  assert.match(said.join("\n"), new RegExp(`Migrated: .* \\(revision 1 → ${SCHEMA_REVISION}\\)`));
   assert.equal(revisionOf(file), SCHEMA_REVISION);
   const raw = new DatabaseSync(file, { readOnly: true });
   assert.deepEqual(

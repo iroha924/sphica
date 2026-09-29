@@ -22,13 +22,14 @@ base: main
 
 却下案に見直し条件と持ち主の引用を持てる DB になり、revision 2 から移行できる。
 
-- [ ] T01: `reconsider_when` と role `reconsiders`、有効化の検査、migration 0003、revision 2 の fixture と移行テストを足し、バージョンを 0.6.4 に上げる
+- [x] T01: `reconsider_when` と role `reconsiders`、有効化の検査、migration 0003、revision 2 の fixture と移行テストを足し、バージョンを 0.6.4 に上げる
   - 種別: 追加
   - 計画: S1, S9
   - 依存: なし
-  - 変更: `db/schema.sql`, `db/migrations/0003.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/knowledge.ts`, `server/test/fixtures/schema-rev2.sql`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
+  - 変更: `db/schema.sql`, `db/migrations/0003.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/knowledge.ts`, `server/test/fixtures/schema-rev2.sql`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`, `server/test/admin.test.ts`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts test/schema.test.ts` → 全部 pass（移行した DB が新規と一致し、案と evidence の行と id が残る。rejected 以外の案への条件、案の無い `reconsiders`、owner 以外の引用で有効化、引用の無い条件で有効化が拒否される。`forget_id` 付きの有効化は通る）。`bun run codegen:check` → 0。`bun run release:plan -- --base ecf7717` → `plugin`、4 か所が 0.6.4
   - コミット: `feat(schema): let a rejected option carry a reconsider condition with the owner's quote`
+  - 結果: `node --test test/migrate.test.ts test/schema.test.ts` → pass（revision 1 と 2 からの移行が新規の DB と定義一致、revision 2 の案と evidence の行と id が残り、移行後に条件付きの却下案と `reconsiders` が入る。chosen への条件・空の条件・案の無い `reconsiders`・条件の無い案への `reconsiders`・AI の発言の引用・引用の無い有効化が拒否され、条件の引用だけの取り消しでは active のまま、`forget_id` 付きの有効化は通る）。`npm test` → 381 / 381 pass。`bun run check`（lint・pairs・codegen:check・typecheck・knip ほか）→ 0。差分のファイルを `releaseKind` に渡して `plugin`、4 か所が 0.6.4
 
 ## P2: 見直し条件の保存と表示
 
@@ -99,3 +100,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `test(acceptance): cover the overview views and reconsider conditions`
 
 ## 記録
+- 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）

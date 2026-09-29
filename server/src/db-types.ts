@@ -291,6 +291,7 @@ export interface UnitOption {
   id: Generated<number>;
   outcome: string;
   position: number;
+  reconsider_when: string | null;
   text: string;
   unit_id: number;
   why: string | null;
