@@ -98,13 +98,14 @@ base: main
 
 harvest を Claude Code の fork で動かしたときの文脈の増え方と保存結果が測れていて、採否が決まっている
 
-- [ ] T07: harvest Skill を `context: fork` にし、会話履歴なしで動く文面にして計測する
+- [x] T07: harvest Skill を `context: fork` にし、会話履歴なしで動く文面にして計測する
   - 種別: 変更
   - 計画: S6
   - 依存: T01（計測の harvest に新しい印とバージョンが入った状態で比べる）, T05（計測する保存経路を最終の形にする）
   - 変更: `plugin/skills/harvest/SKILL.md`
   - 完了条件: plan の方針 5 の手順で前面実行と fork 実行を 1 回ずつ流し、結果行に background か否か、`$ARGUMENTS` と `disable-model-invocation` と保存行の確認、文脈の増加の 2 つの値、source の 4 つ組の一致、unit の比較、採否を残す。採らないときは SKILL.md を元に戻して `[-]` にし、記録に理由と #208 に書く文面を残す。`bun run verify` → 0
   - コミット: `feat(harvest): run the skill in a forked subagent in Claude Code`
+  - 結果: Claude Code 2.1.285、`claude -p ... --plugin-dir plugin --permission-mode default --output-format json` で、新しい DB を `sphica init` で作り PR #232 を harvest。`-p` では fork も結果を待つので background では確かめていない（background のツール制限は未検証）。`/sphica:harvest 232` で `$ARGUMENTS` が入り、`disable-model-invocation: true` のまま起動でき、fork の報告に保存行（`✓ harvest:232/... active` と `✓ saved`）がそのまま入った。文脈の増加（固定の事前・事後プロンプトの総入力の差、自動圧縮なし）: 前面 1 回目 41,931、前面 2 回目 41,611、fork 1,122（前面の 2.7%）。source の 4 つ組は 3 回とも同じ 37 件。unit の一致（前面の unit ごとに kind が同じで引用の半分以上が一致する unit があるか）: 前面 1 回目と fork 6/11、前面 2 回目と fork 8/11、前面どうし 5/11。fork との差は前面どうしの揺れを超えない。fork は trace の SKILL.md を Bash で読もうとして 1 回拒否された（`permission_denials`）。保存は済んだ。採用。unit の一致は計画の条件（全 unit）を満たさないため、外れた unit を PR 本文に並べて持ち主の判断を仰ぐ。`bun run verify` → 0
 
 ## 記録
 
@@ -118,3 +119,4 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
 - 2026-09-30 / T05 / Codex のレビュー F1: run を確かめる前に準備の重い検査が走る / 採用。T06 で saveText が bound で run を確かめてから準備する形にした
 - 2026-09-30 / T05 / Codex のレビュー F2: テストが「準備の後・ロックの前」と「前の anchor の挿入の後」の書き換えを見ていない、「同じ長さ」の記述が誤り / 一部採用。準備の直後の書き換えのケースを T06 のコミットで足した。挿入の後かどうかは、未コミットの行を別の接続から見られないため外から観測できず、refresh と挿入が同じループにあることをコードで担保する。T05 の結果行の「同じ長さ」は誤りで、内容のハッシュを比べるので長さは問わない
 - 2026-09-30 / T08 / Codex の T06 レビュー F1: 未到達の操作のテストが checkText だけで、saveText の準備の経路と revision 違いを見ていない / 採用。T08 を足した（テストだけの追加）
+- 2026-09-30 / T07 / fork との差が fork のせいかを見分けるため、計画に無い前面実行の 2 回目（別の新しい DB）を足して揺れの基準にした
