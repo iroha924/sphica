@@ -11,10 +11,10 @@ export const UNSUPPORTED =
   "unsupported: its owner quote was retracted or forgotten, so it is not the owner's condition";
 
 /** The bytes of a source a span points at. */
-const cut = (text: string, start: number, end: number) =>
+export const cut = (text: string, start: number, end: number) =>
   Buffer.from(text, "utf8").subarray(start, end).toString("utf8");
 
-const speaker = (s: {
+export const speaker = (s: {
   author_kind: string;
   author_login: string | null;
   author_association: string | null;

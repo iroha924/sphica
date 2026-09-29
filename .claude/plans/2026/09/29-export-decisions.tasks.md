@@ -22,13 +22,14 @@ base: main
 
 選んだ決定を引用と連なり付きの Markdown にし、不適格な入力と危ない保存先を拒む
 
-- [ ] T01: `export.ts` で文書の組み立てと保存先の検査を作り、0.6.6 に上げる
+- [x] T01: `export.ts` で文書の組み立てと保存先の検査を作り、0.6.6 に上げる
   - 種別: 追加
   - 計画: S1, S4
   - 依存: なし
-  - 変更: `server/src/export.ts`, `server/test/export.test.ts`, `scripts/lib/sql-call-sites.mjs`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/src/export.ts`, `server/src/read.ts`, `server/test/export.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `node --test test/export.test.ts` → 引用と 2 段の連なり、不適格なキー・深さ・大きさ・保存先の各失敗、Markdown の注入の各テストが通る。`bun run release:plan -- --base v0.6.5` → `plugin`、4 つのファイルが 0.6.6。`bun run verify` → 0
   - コミット: `feat(export): build a Markdown export of chosen live decisions`
+  - 結果: `node --test test/export.test.ts` → 7 pass / 0 fail（引用と 2 段の連なり、取り消した引用を出さない、不適格なキーの全体失敗、深さ 20 ちょうどは全部出て 21 で失敗、60 KiB 超で失敗、注入で見出しが増えずフェンスが閉じない、保存先の各場合）。`bun run release:plan -- --base v0.6.5` → `plugin`、4 つのファイルを 0.6.6 に。`bun run verify` → 0（`SQL: tests ran 176 / 176 sites`）
 
 ## P2: 入口
 
@@ -51,3 +52,4 @@ base: main
   - コミット: `feat(skills): add /sphica:export to write chosen decisions to a file`
 
 ## 記録
+2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
