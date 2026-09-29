@@ -138,7 +138,7 @@ test("closing references in owner/repo#N and URL form count for this repository 
   assert.deepEqual(pull.closes, [14, 15]);
 });
 
-// GitHub hides HTML comments, and our own PR template's comments say "put `Closes #12`": a reference inside one closes nothing
+// GitHub hides HTML comments, and our own PR template's comments tell the author to put a closing reference: one inside closes nothing
 test("closing references inside HTML comments, or after one left open, are not read", async () => {
   const template = fs.readFileSync(
     path.join(import.meta.dirname, "..", "..", ".github", "pull_request_template.md"),
@@ -251,7 +251,7 @@ test("stores sources with who wrote them, adds a revision only when text changed
         .map((s) => [s.revision, s.text]),
       [[3, ""]],
     );
-    // The body no longer closes #14: the next harvest drops the link, so the issue stops being part of the pull request
+    // The cleared body closes no issue: the next harvest drops the link, so the issue stops being part of the pull request
     await linkIssues(db.ingest, p, 7, []);
     assert.equal(
       (await pullSources(db.reader, p, 7)).some((s) => s.artifact === "issue:14"),

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { withoutComments } from "./lib/english.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -127,6 +128,19 @@ for (const id of claudeSide)
 for (const id of codexSide)
   if (!claudeSide.has(id))
     fail(`CLAUDE.md, .claude/rules: invariant ${id} exists only on the AGENTS.md side`);
+// The comment rules are the same words on both sides, not only the same markers.
+const commentRules = ["comment-length", "comment-refs", "comment-history"];
+const markedLines = (source, id) =>
+  source.split("\n").filter((line) => line.endsWith(`<!-- invariant: ${id} -->`));
+const commentsRule = read(".claude/rules/comments.md");
+for (const id of commentRules) {
+  const claude = markedLines(commentsRule, id);
+  const codex = markedLines(agents, id);
+  if (claude.length !== 1 || codex.length !== 1)
+    fail(`.claude/rules/comments.md, AGENTS.md: keep exactly one line for invariant ${id} in each`);
+  else if (claude[0] !== codex[0])
+    fail(`AGENTS.md: the ${id} line differs from .claude/rules/comments.md. Keep the words the same`);
+}
 const claudeVerification = read(".claude/rules/verification.md");
 for (const required of [
   "bun run release:plan -- --base <previous release commit>",
@@ -315,6 +329,22 @@ try {
   fail(`plugin manifest: ${error instanceof Error ? error.message : String(error)}`);
 }
 
+// Sphica's MCP tools by server, read from where they are registered, so a Skill can be held against the tools that exist.
+const registeredTools = (file) =>
+  [...withoutComments(read(file)).matchAll(/registerTool\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+const sphicaTools = new Map([
+  ["sphica", registeredTools("server/src/mcp.ts")],
+  ["record", registeredTools("server/src/mcp-record.ts")],
+]);
+for (const [server, tools] of sphicaTools)
+  if (!tools.length)
+    fail(`server/src: no registerTool calls found for the ${server} server. Check how tools are registered`);
+const toolId = new Map(
+  [...sphicaTools].flatMap(([server, tools]) => tools.map((t) => [t, `mcp__plugin_sphica_${server}__${t}`])),
+);
+// The read tools any Skill's turn may reach for: the read server's instructions send an agent to status after an empty search
+const alwaysAllowed = ["status", "search", "read"].map((t) => toolId.get(t));
+
 const skillDirectory = path.join(root, "plugin/skills");
 const pluginSkills = fs
   .readdirSync(skillDirectory, { withFileTypes: true })
@@ -336,6 +366,34 @@ for (const name of pluginSkills) {
     );
   }
   checkLocalLinks(relative, source);
+
+  // allowed-tools pre-approves tools for the Skill's own turn; a tool the body names but the list lacks is denied in a headless run.
+  // Reviewers under reviewers/ get their tools from the launch table in SKILL.md, so their names are checked through SKILL.md.
+  const referenceDir = path.join(skillDirectory, name, "references");
+  const body = [
+    source,
+    ...(fs.existsSync(referenceDir)
+      ? fs
+          .readdirSync(referenceDir)
+          .filter((f) => f.endsWith(".md"))
+          .map((f) => read(`plugin/skills/${name}/references/${f}`))
+      : []),
+  ].join("\n");
+  // Hosts take a comma-separated line; a YAML list parses here as an array
+  const listed = fields["allowed-tools"] ?? [];
+  const allowed = new Set(
+    (Array.isArray(listed) ? listed : listed.split(",")).map((t) => t.trim()).filter(Boolean),
+  );
+  const named = [
+    ...[...body.matchAll(/`([a-z_]+)`/g)].map((m) => toolId.get(m[1])).filter(Boolean),
+    ...[...body.matchAll(/\bmcp__plugin_sphica_[a-z]+__[a-z_]+/g)].map((m) => m[0]),
+    ...(/\bAskUserQuestion\b/.test(body) ? ["AskUserQuestion"] : []),
+  ];
+  for (const id of new Set([...alwaysAllowed, ...named]))
+    if (!allowed.has(id)) fail(`${relative}: allowed-tools lacks ${id}`);
+  for (const id of allowed)
+    if (id.startsWith("mcp__plugin_sphica_") && ![...toolId.values()].includes(id))
+      fail(`${relative}: allowed-tools names ${id}, which no Sphica server registers`);
 
   // Codex ignores disable-model-invocation, so explicit-only invocation also needs openai.yaml.
   const policy = path.join(skillDirectory, name, "agents/openai.yaml");
@@ -366,7 +424,7 @@ for (const name of pluginSkills) {
 // The choices from claude --help. An invalid value only warns and falls back to the session default.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
-// Checks the repository-only reviewers (.claude/agents). Shipped reviewers are no longer Agent definitions but
+// Checks the repository-only reviewers (.claude/agents). Shipped reviewers are not Agent definitions but
 // the bodies in plugin/skills/review/reviewers/, which have no frontmatter
 // (check-pairs.mjs checks those).
 const agentDirectories = [".claude/agents"];

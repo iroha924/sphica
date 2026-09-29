@@ -65,7 +65,9 @@ bun run bundle      # build the MCP servers, CLI, and hook artifacts
 
 ### Comments
 
-- 1 to 3 lines. Put longer explanations in a Skill or design doc and point to its path <!-- invariant: comment-length -->
+- 1 to 3 lines, only what the code cannot say: why it is this way, a constraint, a trap. Put anything longer in a Skill, not in the comment <!-- invariant: comment-length -->
+- Write the reason itself. Do not point to issues, pull requests, plans, or commits by number, URL, or path <!-- invariant: comment-refs -->
+- Describe the code as it is. Do not tell its history (what it used to be, what changed, when): git and Sphica's records keep that <!-- invariant: comment-history -->
 - Write strings and comments in new or changed code, and commit messages, in English. Translate existing Japanese text into English stage by stage, and do not translate records users saved (`bun run english` checks the English-only files) <!-- invariant: english-code -->
 
 ## Skills by task (`.agents/skills/`)

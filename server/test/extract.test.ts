@@ -129,7 +129,10 @@ test("trace: pending lists the session, begin binds it, and check and save take 
   try {
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "SQLite にしよう。" });
-    assert.match(await pendingText(db.ingest, p), /1 session to trace[\s\S]*- s1 claude-code/);
+    assert.match(
+      await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")),
+      /1 session to trace[\s\S]*- s1 claude-code/,
+    );
     await assert.rejects(beginTrace(db.ingest, p), /Pass the session/);
     await assert.rejects(beginTrace(db.ingest, p, "nope"), /No captured session/);
     const run = await beginTrace(db.ingest, p, "s1");
@@ -184,7 +187,7 @@ test("trace: pending lists the session, begin binds it, and check and save take 
     await assert.rejects(contextText(db.ingest, run, p + 1, null), /another project/);
     await assert.rejects(contextText(db.ingest, "missing", p, null), /No run/);
     assert.match(
-      await pendingText(db.ingest, p),
+      await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")),
       /2 sessions to trace[\s\S]*- s(1|9) claude-code[\s\S]*- s(1|9) claude-code/,
     );
   } finally {

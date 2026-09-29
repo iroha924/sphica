@@ -150,7 +150,7 @@ function finish({ tag, commit, merge, pull }) {
         notesFile,
       ]);
     }
-    // A merge by GITHUB_TOKEN does not close the issues the PR closes (0.5.4), so close the ones still open
+    // A merge by GITHUB_TOKEN does not close the issues the PR closes, so close the ones still open
     const linked = JSON.parse(
       run("gh", ["pr", "view", pull, "--repo", repo, "--json", "closingIssuesReferences"]),
     );

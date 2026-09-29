@@ -897,7 +897,11 @@ test("session start tells about sessions waiting to be traced, once a day, even 
         db.file,
       );
     assert.equal(await start(), "", "nothing waits and nothing applies");
-    for (let n = 0; n < 25; n++) message(db, p, { id: `m${n}`, text: `untraced ${n}`, session: `s${n}` });
+    // Session start reads the real clock, so the messages are dated today
+    const today = new Date().toISOString();
+    for (let n = 0; n < 25; n++)
+      message(db, p, { id: `m${n}`, text: `untraced ${n}`, session: `s${n}`, sent: today });
+    message(db, p, { id: "old", text: "untraced long ago", session: "sold", sent: "2026-01-01T00:00:00Z" });
     message(db, p, { id: "a", text: "assistant only", session: "sa", speaker: "assistant" });
     const first = await start();
     assert.match(first, /^Sphica: this project's current work and standing constraints\./);
@@ -916,7 +920,7 @@ test("the waiting-sessions notice follows the host and is kept for the owner's s
   const thread = process.env.CODEX_THREAD_ID;
   try {
     const p = project(db);
-    message(db, p, { id: "m", text: "untraced", session: "s1" });
+    message(db, p, { id: "m", text: "untraced", session: "s1", sent: new Date().toISOString() });
     // Codex's own session is the one whose thread id the hook process carries
     const start = (host: "claude-code" | "codex", session: string = crypto.randomUUID()) =>
       deliver(

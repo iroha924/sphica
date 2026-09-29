@@ -1,6 +1,7 @@
 ---
 name: review
 description: Reviews changes. Use it to review your own committed and uncommitted diff, to review someone else's PR, and to sweep for misses before a merge or release. It starts independent reviewers per aspect, and when Codex is available it runs the same aspects on the other model too, to catch defects only one model can see. Findings are ruled on by reproduction before they are returned. It does not handle formatting or naming inconsistencies, design preferences, or future extensibility.
+allowed-tools: mcp__plugin_sphica_sphica__status, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__review_select, mcp__plugin_sphica_sphica__review_check
 ---
 
 # review — sweep changes with independent reviewers

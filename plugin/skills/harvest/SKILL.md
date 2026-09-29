@@ -3,7 +3,7 @@ name: harvest
 description: Reads one GitHub pull request of the current repository (its body, comments, reviews, review comments, commits, the merge, and the issues it closes), keeps them as sources, and extracts what it decided and implemented into records that quote them, in the same form as trace. Pass the PR number. Use only when the user explicitly asks.
 argument-hint: "<PR number>"
 disable-model-invocation: true
-allowed-tools: mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
+allowed-tools: mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # harvest — keep what a pull request decided and implemented

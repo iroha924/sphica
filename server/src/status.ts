@@ -4,11 +4,12 @@ import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
 import { head, plural } from "./text.ts";
+import { PENDING_DAYS, pendingCutoff, untracedSessions } from "./trace.ts";
 
 type Coverage = {
   sessions: number;
-  /** Sessions with owner messages that no extraction has looked at yet */
-  pendingSessions: number;
+  /** Untraced sessions whose last owner message is recent, and those past PENDING_DAYS */
+  pending: { recent: number; older: number };
   /** Sessions a run looked at that gave no record */
   emptySessions: number;
   sources: number;
@@ -18,36 +19,24 @@ type Coverage = {
   work: { title: string; current: string; status: string }[];
 };
 
-/** Sessions with owner messages that no extraction has looked at yet (status and session start share this count). */
-export async function pendingCount(db: Kysely<DB>, projectId: number): Promise<number> {
+/** Untraced sessions, split by whether their last owner message is within PENDING_DAYS of now (status and session start share this). */
+export async function pendingCount(
+  db: Kysely<DB>,
+  projectId: number,
+  now: Date = new Date(),
+): Promise<{ recent: number; older: number }> {
+  const cutoff = pendingCutoff(now);
   const r = await db
-    .selectFrom("session as s")
-    .where("s.project_id", "=", projectId)
-    .where((eb) =>
-      eb.exists(
-        eb
-          .selectFrom("source as m")
-          .whereRef("m.session_id", "=", "s.id")
-          .where("m.author_kind", "=", "owner")
-          .where((eb2) =>
-            eb2.not(
-              eb2.exists(
-                eb2
-                  .selectFrom("source_processing as p")
-                  .whereRef("p.source_id", "=", "m.id")
-                  .select(sql`1`.as("x")),
-              ),
-            ),
-          )
-          .select(sql`1`.as("x")),
-      ),
-    )
-    .select((eb) => eb.fn.countAll<number>().as("n"))
+    .selectFrom(untracedSessions(db, projectId).as("w"))
+    .select([
+      sql<number>`count(case when w.last >= ${cutoff} then 1 end)`.as("recent"),
+      sql<number>`count(case when w.last < ${cutoff} then 1 end)`.as("older"),
+    ])
     .executeTakeFirst();
-  return Number(r?.n ?? 0);
+  return { recent: Number(r?.recent ?? 0), older: Number(r?.older ?? 0) };
 }
 
-async function coverage(db: Kysely<DB>, projectId: number): Promise<Coverage> {
+async function coverage(db: Kysely<DB>, projectId: number, now: Date): Promise<Coverage> {
   const count = async (q: Promise<{ n: number | string | bigint } | undefined>) => Number((await q)?.n ?? 0);
   const units = (where: (q: ReturnType<typeof unitBase>) => ReturnType<typeof unitBase>) =>
     count(
@@ -64,7 +53,7 @@ async function coverage(db: Kysely<DB>, projectId: number): Promise<Coverage> {
       .where("p.outcome", "=", outcome)
       .where("m.session_id", "is not", null)
       .select("m.session_id");
-  const [sessions, pendingSessions, emptySessions, sources, active, candidates, quarantined, work] =
+  const [sessions, pending, emptySessions, sources, active, candidates, quarantined, work] =
     await Promise.all([
       count(
         db
@@ -73,7 +62,7 @@ async function coverage(db: Kysely<DB>, projectId: number): Promise<Coverage> {
           .select((eb) => eb.fn.countAll<number>().as("n"))
           .executeTakeFirst(),
       ),
-      pendingCount(db, projectId),
+      pendingCount(db, projectId, now),
       count(
         db
           .selectFrom("session")
@@ -101,18 +90,31 @@ async function coverage(db: Kysely<DB>, projectId: number): Promise<Coverage> {
         .limit(5)
         .execute(),
     ]);
-  return { sessions, pendingSessions, emptySessions, sources, active, candidates, quarantined, work };
+  return { sessions, pending, emptySessions, sources, active, candidates, quarantined, work };
 }
 
-export async function status(db: Kysely<DB>, projectId: number, name: string): Promise<string> {
-  const c = await coverage(db, projectId);
+export async function status(
+  db: Kysely<DB>,
+  projectId: number,
+  name: string,
+  now = new Date(),
+): Promise<string> {
+  const c = await coverage(db, projectId, now);
   const lines = [
     `${name}`,
     `Captured: ${plural(c.sessions, "session")}, ${plural(c.sources, "source")}.`,
     `Extracted: ${plural(c.active, "active record")}, ${plural(c.candidates, "candidate")} not active yet (waiting for adoption or evidence), ${plural(c.quarantined, "quarantined record")}.`,
-    c.pendingSessions
-      ? `${plural(c.pendingSessions, "session")} not traced yet: their decisions exist only as captured text (run /sphica:trace pending).`
-      : "Every captured session has been traced.",
+    ...(c.pending.recent
+      ? [
+          `${plural(c.pending.recent, "session")} not traced yet: their decisions exist only as captured text (run /sphica:trace pending).`,
+        ]
+      : []),
+    ...(c.pending.older
+      ? [
+          `${c.pending.older} older ${c.pending.older === 1 ? "session" : "sessions"} (last owner message over ${PENDING_DAYS} days ago) not traced; /sphica:trace pending lists them.`,
+        ]
+      : []),
+    ...(c.pending.recent || c.pending.older ? [] : ["Every captured session has been traced."]),
     ...(c.emptySessions ? [`${plural(c.emptySessions, "session")} traced with nothing to record.`] : []),
     // Work text was written from session text: one line per item, inside the past-records frame
     c.work.length

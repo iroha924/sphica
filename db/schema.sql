@@ -1,5 +1,5 @@
 -- The source of truth for Sphica's database (SQLite, `node:sqlite`): the memory of past implementation and decisions for one owner on one machine.
--- Generation 2 (the 0.5.0 rebuild). `sphica_generation` holds the generation; `pragma user_version` is the revision within it.
+-- Generation 2. `sphica_generation` holds the generation; `pragma user_version` is the revision within it.
 -- A database of another generation is refused without being changed.
 --
 -- Four boundaries:

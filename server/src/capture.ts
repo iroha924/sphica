@@ -48,7 +48,7 @@ const HOLD_MAX = 1000;
 /** Where each session's working tree stood when its running turn began. Turn start and end run in separate hook processes. */
 const baselineDir = (): string => path.join(sphicaHome(), "worktree");
 
-/** A queued record. v:2 is written now; v:1 records left in a queue from 0.4 are translated when sent (never silently dropped). */
+/** A queued record. Capture writes v:2; a v:1 record still in a queue from an older install is translated when sent (never silently dropped). */
 export type Spooled =
   | {
       v: 2;
@@ -418,7 +418,7 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
       }
       return { flush: false };
     }
-    // Read files are not recorded (requirements and design reads used to be). They still arrive from old hook settings.
+    // Read files are not recorded. They still arrive from hook settings written by older installs.
     if (tool === "Read") return { flush: false };
     const cwd = input.cwd ?? place.root;
     const files = (
@@ -677,7 +677,7 @@ async function sendBatch(
       continue;
     }
     if (r) records.push({ name, from, r });
-    else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are no longer kept
+    else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are not kept
   }
   const projects = new Map(
     (

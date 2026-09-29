@@ -85,7 +85,7 @@ try {
     throw new Error(
       `the tarball has the banned name in ${banned.map((f) => path.relative(pkg, f)).join(", ")}`,
     );
-  // Web UI assets no longer ship (the UI moved to the terminal). If they remain, bundle forgot to remove them
+  // The package ships no web UI (the UI is the terminal). Assets left here mean bundle forgot to remove them
   if (fs.existsSync(path.join(pkg, "dist", "dashboard")))
     throw new Error("tarball still contains dist/dashboard");
   console.log(

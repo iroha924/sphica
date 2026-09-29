@@ -1,4 +1,4 @@
--- Revision 1 → 2 of generation 2: the owner can forget chosen sources (issue #187).
+-- Revision 1 → 2 of generation 2: the owner can forget chosen sources.
 -- `sphica init` runs this in one transaction with foreign keys off (set outside the transaction), then checks foreign_key_check before
 -- committing. Every statement matches db/schema.sql at revision 2; server/test/migrate.test.ts compares a migrated database with a fresh one.
 

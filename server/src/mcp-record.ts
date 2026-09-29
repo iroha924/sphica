@@ -93,7 +93,8 @@ server.registerTool(
   "trace_pending",
   {
     title: "Sessions not traced yet",
-    description: "Lists this project's captured sessions with owner messages no trace has looked at.",
+    description:
+      "Lists this project's captured sessions with owner messages no trace has looked at, then apart those whose last owner message is over 30 days old.",
     inputSchema: { cwd: CWD },
     annotations: READ,
   },

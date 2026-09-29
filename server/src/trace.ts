@@ -1,34 +1,80 @@
 // What trace reads: sessions not traced yet, the run a draft is bound to, and a session's sources, edits, and the project's live records.
-import { type Kysely, sql } from "kysely";
+import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import { iso } from "./db.ts";
-import type { DB } from "./db-types.ts";
+import type { DB, Session } from "./db-types.ts";
 
-/** Sessions with owner messages no extraction has looked at, newest first. */
-export async function pendingSessions(db: Kysely<DB>, projectId: number, limit = 20) {
-  return db
-    .selectFrom("session as s")
-    .innerJoin("source as m", "m.session_id", "s.id")
-    .where("s.project_id", "=", projectId)
+/** Days after its last owner message that an untraced session stops counting as waiting. Its messages stay and are still found. */
+export const PENDING_DAYS = 30;
+
+/** The oldest last-owner-message time that still counts as recent, as stored (ISO 8601 UTC). */
+export const pendingCutoff = (now: Date): string =>
+  new Date(now.getTime() - PENDING_DAYS * 86_400_000).toISOString();
+
+type InSession = ExpressionBuilder<DB & { s: Session }, "s">;
+
+/** Owner messages of session `s` that no extraction has looked at. */
+const untracedOwner = (eb: InSession) =>
+  eb
+    .selectFrom("source as m")
+    .whereRef("m.session_id", "=", "s.id")
     .where("m.author_kind", "=", "owner")
-    .where((eb) =>
-      eb.not(
-        eb.exists(
-          eb.selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
         ),
       ),
-    )
-    .groupBy("s.id")
+    );
+
+/**
+ * Sessions of the project with an owner message no extraction has looked at, with the time of their last owner message, traced
+ * or not: a session the owner came back to stays recent even when its untraced messages are old. Session start runs this, so each
+ * session is read through its own messages (the source_session index), never by grouping the whole project.
+ */
+export const untracedSessions = (db: Kysely<DB>, projectId: number) =>
+  db
+    .selectFrom("session as s")
+    .where("s.project_id", "=", projectId)
+    .where((eb) => eb.exists(untracedOwner(eb).select(sql`1`.as("x"))))
     .select((eb) => [
       "s.id",
       "s.host",
       "s.started_at",
       "s.branch",
-      eb.fn.countAll<number>().as("waiting"),
-      eb.fn.min("m.id").as("first"),
-    ])
-    .orderBy("s.started_at", "desc")
-    .limit(limit)
-    .execute();
+      eb
+        .selectFrom("source as o")
+        .whereRef("o.session_id", "=", "s.id")
+        .where("o.author_kind", "=", "owner")
+        .select((o) => o.fn.max("o.created_at").as("last"))
+        .as("last"),
+      untracedOwner(eb)
+        .select((m) => m.fn.countAll<number>().as("waiting"))
+        .as("waiting"),
+      untracedOwner(eb)
+        .select((m) => m.fn.min("m.id").as("first"))
+        .as("first"),
+    ]);
+
+/**
+ * Untraced sessions of one group, the one whose owner came back most recently first, with how many owner messages wait and the
+ * first of them. `total` counts the whole group, beyond the limit.
+ */
+export async function pendingSessions(
+  db: Kysely<DB>,
+  projectId: number,
+  group: "recent" | "older",
+  now: Date = new Date(),
+  limit = 20,
+) {
+  const cutoff = pendingCutoff(now);
+  const base = db
+    .selectFrom(untracedSessions(db, projectId).as("w"))
+    .where("w.last", group === "recent" ? ">=" : "<", cutoff);
+  const [rows, total] = await Promise.all([
+    base.selectAll("w").orderBy("w.last", "desc").limit(limit).execute(),
+    base.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
+  ]);
+  return { rows, total: Number(total?.n ?? 0) };
 }
 
 export type Run = {

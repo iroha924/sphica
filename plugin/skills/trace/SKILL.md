@@ -3,7 +3,7 @@ name: trace
 description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use only when the user explicitly asks.
 argument-hint: "[pending]"
 disable-model-invocation: true
-allowed-tools: mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # trace — keep what a session decided and implemented
@@ -30,7 +30,8 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
 
 1. **Pick the session.** Without a target, it is this session: its id is `${CLAUDE_SESSION_ID}` in Claude Code; in Codex, read `CODEX_THREAD_ID`
    from your shell environment. With `pending`, call `trace_pending`, show the owner the list, and ask which to trace (AskUserQuestion in
-   Claude Code). Trace one session at a time
+   Claude Code). Sessions whose last owner message is over 30 days old come last under their own heading: session start does not count
+   them, but they can still be traced. Trace one session at a time
 2. **Begin**: `trace_begin` with that `session`. It returns a `run` id bound to that session and this project; the record never names them
 3. **Read**: `record_context` with the run. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,
    the edits observed, and the project's live records. `(traced before)` marks messages an earlier trace already looked at.

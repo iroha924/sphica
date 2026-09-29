@@ -777,6 +777,39 @@
       ]
     },
     {
+      "id": "status-07",
+      "layer": "status",
+      "lang": "en",
+      "summary": "A session whose last owner message is over 30 days old stops counting as waiting, is listed apart as older, and its message is still found",
+      "given": [],
+      "when": {
+        "capture": "s-en-dates"
+      },
+      "then": [
+        {
+          "status": {
+            "after_days": 31,
+            "pending_recent": 0,
+            "pending_older": 1,
+            "pending_older_includes": "s-en-dates"
+          }
+        },
+        {
+          "status": {
+            "after_days": 29,
+            "pending_recent": 1,
+            "pending_older": 0
+          }
+        },
+        {
+          "source_search": {
+            "query": "timestamp UTC",
+            "hits": 1
+          }
+        }
+      ]
+    },
+    {
       "id": "retrieval-01",
       "layer": "retrieval",
       "lang": "ja>ja",
