@@ -20,6 +20,8 @@ type Earlier = {
   /** Direct ties the kind or lifecycle filters left out */
   hidden: number;
   context: Context[];
+  /** Every record quoting the message itself, shown or not: none of them is context */
+  direct: Set<number>;
   decided: boolean;
   traced: boolean;
   /** The assistant's reply in the same turn, by source id */
@@ -75,26 +77,27 @@ export async function askedBefore(
     );
     all.push({
       message: m,
-      led: await Promise.all(
-        shown.map(async (u) => ({
-          ...u,
-          now: u.lifecycle === "superseded" ? await liveSuccessors(db, u.id) : [],
-        })),
-      ),
+      led: shown.map((u) => ({ ...u, now: [] })),
       hidden: direct.length - shown.length,
       context: [],
+      direct: new Set(direct.map((u) => u.id)),
       decided: decided.has(m.id),
       traced: traced.has(m.id),
       reply: null,
     });
   }
+  // Successors and the same turn only for the messages shown; the rest count toward repeats alone
   const messages = all.slice(0, q.limit);
-  for (const e of messages) await sameTurn(db, e);
+  for (const e of messages) {
+    for (const u of e.led) if (u.lifecycle === "superseded") u.now = await liveSuccessors(db, u.id);
+    await sameTurn(db, e);
+  }
+  // A session is traced only when a trace looked at every matching message in it
   const sessions = new Map<string, { decided: boolean; traced: boolean }>();
   for (const e of all) {
     const s = e.message.session ?? "";
-    const was = sessions.get(s) ?? { decided: false, traced: false };
-    sessions.set(s, { decided: was.decided || e.decided, traced: was.traced || e.traced });
+    const was = sessions.get(s) ?? { decided: false, traced: true };
+    sessions.set(s, { decided: was.decided || e.decided, traced: was.traced && e.traced });
   }
   const none = [...sessions.values()].every((s) => !s.decided);
   const repeats =
@@ -158,14 +161,13 @@ async function sameTurn(db: Kysely<DB>, e: Earlier): Promise<void> {
   e.reply = others.find((o) => o.author_kind === "assistant")?.id ?? null;
   if (!others.length) return;
   const speaker = new Map(others.map((o) => [o.id, o.author_kind]));
-  const direct = new Set(e.led.map((u) => u.id));
   const seen = new Set<string>();
   for (const c of await citing(
     db,
     others.map((o) => o.id),
   )) {
     const k = `${c.id}\0${c.source_id}\0${c.role}`;
-    if (direct.has(c.id) || seen.has(k)) continue;
+    if (e.direct.has(c.id) || seen.has(k)) continue;
     seen.add(k);
     e.context.push({
       key: c.key,
@@ -181,7 +183,8 @@ async function sameTurn(db: Kysely<DB>, e: Earlier): Promise<void> {
 export function askedText(r: Asked): string {
   const parts = r.messages.map((e) => {
     const m = e.message;
-    const lines = [`## s${m.id}: ${inline(m.artifact)}, ${m.created_at}`, head(m.text, 600)];
+    // The message is kept on one line, so its own words cannot pass for a heading or a verdict
+    const lines = [`## s${m.id}: ${inline(m.artifact)}, ${m.created_at}`, inline(head(m.text, 600))];
     if (e.led.length) {
       lines.push("Led to:");
       for (const u of e.led)

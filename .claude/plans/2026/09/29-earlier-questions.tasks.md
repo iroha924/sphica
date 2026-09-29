@@ -63,6 +63,16 @@ base: main
   - コミット: `feat(mcp): search earlier owner messages with asked`
   - 結果: `node --test test/plugin.test.ts` → pass 28 / fail 0（本物の MCP クライアントで、別のセッションの本人の発言に「No recorded decision. Not traced yet: run /sphica:trace old.」が付き、`CLAUDE_CODE_SESSION_ID` のセッションの発言は返らない。`sources` と一緒なら断る）。typecheck → 0、architecture → 通過。README の機能の一覧に 1 行足した
 
+- [x] T07: レビューの指摘を直す（本文での偽装、隠した記録の再表示、一部だけ trace 済みのセッション、表示しない分の後継、Codex のセッションの除外、空の path、テストの空振り）
+  - 種別: 修正
+  - 計画: S3, S4, S5
+  - 依存: なし
+  - 変更: `server/src/asked.ts`, `server/src/mcp.ts`, `server/test/asked.test.ts`, `server/test/plugin.test.ts`, `server/test/search.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/asked.test.ts test/plugin.test.ts` → 改行を含む本文が偽の見出しを作る、隠した decision が文脈に出る、一部だけ trace 済みのセッションが traced に入る、Codex の今のセッションが返る、`path: ""` が断られない、で落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/asked.test.ts test/plugin.test.ts test/search.test.ts` → 全部 pass。`bun run verify` → 0
+  - コミット: `fix(search): keep asked output one message per heading, hidden records hidden, and every session tellable`
+  - 結果: red（直す前）`node --test test/asked.test.ts test/plugin.test.ts` → 「a message's text cannot start a heading」「this session's own words are left out」で失敗。1 つずつ直し、その都度次の確かめ（「a record the filters hid does not come back as context」「H still has a message no trace looked at」）が意図どおり落ちることを確かめた。直した後 `node --test test/asked.test.ts test/plugin.test.ts test/search.test.ts` → pass 42 / fail 0。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 62 / 62）。評価を流し直して 0 / 8、13 / 21 で変わらず
+
 ## P3: 測定と acceptance
 
 - [x] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
@@ -87,3 +97,4 @@ base: main
 
 2026-09-29 / T04 / plan の「Skill で search の使い方を書いている箇所があれば合わせる」に当たる箇所は Skill に無く、README の機能の一覧だった（plugin/README.md は bundle が写す追跡外のファイル） / T04 の変更欄に `README.md` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）
 2026-09-29 / T05 / knip が入口に無いファイルを未使用とみなすので、`evals/asked/run.ts` を knip.json の入口に足した。測定では、関係ない発言は返さない一方で見落としが多い（語の半分を超える規則の厳しさ）。ひらがなの問いの見落としは u29 の見直しの条件に当たる / T05 の変更欄に `knip.json` を足した（前: `server/evals/asked/run.ts`, `server/evals/asked/corpus.json`）。一致の規則の見直しは plan の対象外なので、数字を PR に書いて持ち主の判断に回す
+2026-09-29 / T07 / Codex レビュー: T01（120d791）は指摘なし。T02（3fdd478）2 件のうち、AI の返事を除く確認が空振り（F1）は採用、当たりのターンが未テスト（F2）は見送り（asked.test.ts の同じターンの文脈と返事がターンを使って通る）。T03（46c35f5）4 件（本文で見出しを偽装できる、隠した記録が文脈に出る、一部だけ trace 済みのセッションを traced と数える、表示しない発言の後継をたどる）は全部採用。T04（5c2e6c7）3 件（両方の環境変数があると Codex のセッションを除き損ねる、`path: ""` を断らない、framed をテストしていない）は全部採用 / 修正タスク T07 を足した。表示しない分の後継（F4）は性能の直しで、red のテストは作らない

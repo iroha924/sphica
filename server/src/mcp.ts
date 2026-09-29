@@ -150,13 +150,15 @@ server.registerTool(
       if (typeof p === "string") return text(p);
       const limit = a.limit ?? 8;
       if (a.asked) {
-        if (a.sources || a.path) return text("asked cannot be combined with sources or path.");
-        // The session this call comes from is left out, so its own words never come back as earlier ones
-        const external = process.env.CLAUDE_CODE_SESSION_ID ?? process.env.CODEX_THREAD_ID;
+        if (a.sources || a.path !== undefined) return text("asked cannot be combined with sources or path.");
+        // The calling session's own words never come back as earlier ones. Both ids are set when one host runs inside the other
+        const external = [process.env.CLAUDE_CODE_SESSION_ID, process.env.CODEX_THREAD_ID].filter(
+          (x): x is string => !!x,
+        );
         const r = await askedBefore(db, p.id, {
           question: a.query,
           limit,
-          notSessions: external ? [external, ...HOSTS.map((h) => sessionId(p.id, h, external))] : [],
+          notSessions: external.flatMap((x) => [x, ...HOSTS.map((h) => sessionId(p.id, h, x))]),
           kinds: a.kinds,
           lifecycles: a.lifecycles,
         });

@@ -730,7 +730,7 @@ test("search with asked shows earlier owner messages from other sessions and say
   message(db, p, {
     id: "now",
     text: "Pick the package manager for installs now.",
-    session: sessionId(p, "claude-code", "this-session"),
+    session: sessionId(p, "codex", "this-session"),
   });
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
@@ -741,7 +741,9 @@ test("search with asked shows earlier owner messages from other sessions and say
         PATH: process.env.PATH ?? "",
         HOME: "/nonexistent",
         SPHICA_DB: db.file,
-        CLAUDE_CODE_SESSION_ID: "this-session",
+        // Codex started from inside Claude Code carries both; this call is Codex's
+        CLAUDE_CODE_SESSION_ID: "outer-claude",
+        CODEX_THREAD_ID: "this-session",
       },
       stderr: "ignore",
     }),
@@ -756,6 +758,7 @@ test("search with asked shows earlier owner messages from other sessions and say
   try {
     const found = await search({ asked: true });
     assert.match(found, /Earlier owner messages matching: /);
+    assert.match(found, /^<past-records id="[0-9a-f]+">/, "the result is framed as past records");
     assert.match(found, new RegExp(`## s${earlier}: `));
     assert.match(found, /No recorded decision\. Not traced yet: run \/sphica:trace old\./);
     assert.doesNotMatch(
@@ -765,6 +768,10 @@ test("search with asked shows earlier owner messages from other sessions and say
     );
     assert.match(
       await search({ asked: true, sources: true }),
+      /^asked cannot be combined with sources or path\.$/,
+    );
+    assert.match(
+      await search({ asked: true, path: "" }),
       /^asked cannot be combined with sources or path\.$/,
     );
   } finally {
