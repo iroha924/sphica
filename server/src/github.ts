@@ -3,7 +3,7 @@
 // Each source keeps its author's GitHub association, which decides who can adopt a proposal; the text is someone else's and is never trusted.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
@@ -498,7 +498,7 @@ export async function linkIssues(
       .execute();
 }
 
-/** The current revision of every source of a pull request and the issues it closes, in time order. */
+/** The current revision of every source of a pull request and the issues it closes, in time order, with whether a run looked at each. */
 export async function pullSources(db: Kysely<DB>, projectId: number, number: number) {
   const artifacts = [
     `pr:${number}`,
@@ -555,6 +555,17 @@ export async function pullSources(db: Kysely<DB>, projectId: number, number: num
         "s.line_start",
         "s.text",
       ])
+      // Whether an earlier run already looked at the source, as trace's sessionSources tells it
+      .select((eb) =>
+        eb
+          .exists(
+            eb
+              .selectFrom("source_processing as p")
+              .whereRef("p.source_id", "=", "s.id")
+              .select(sql`1`.as("x")),
+          )
+          .as("looked"),
+      )
       .orderBy("s.created_at")
       .orderBy("s.id")
       .execute()

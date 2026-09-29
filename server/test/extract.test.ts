@@ -216,6 +216,72 @@ test("harvest: begin keeps the pull request as sources and context lists them wi
   }
 });
 
+test("harvest: context marks the sources an earlier run looked at, not a new comment or an edited body", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const user = { login: "kai", id: 4, type: "User" };
+    const comment = (id: number, body: string) => ({
+      id,
+      body,
+      html_url: "u",
+      created_at: "2026-03-02T00:00:00Z",
+      user,
+      author_association: "MEMBER",
+    });
+    const pull =
+      (body: string, comments: unknown[]): Get =>
+      async (q) =>
+        (
+          ({
+            "pulls/3": {
+              number: 3,
+              title: "t",
+              body,
+              html_url: "u",
+              created_at: "2026-03-01T00:00:00Z",
+              merged_at: null,
+              user,
+              author_association: "MEMBER",
+            },
+            "issues/3/comments": comments,
+            "pulls/3/reviews": [],
+            "pulls/3/comments": [],
+            "pulls/3/commits": [],
+          }) as Record<string, unknown>
+        )[q.split("?")[0] ?? ""];
+    const first = await beginHarvest(
+      db.ingest,
+      p,
+      3,
+      pull("Keep notes out of CSV.", [comment(1, "Old comment.")]),
+    );
+    const firstCtx = await contextText(db.ingest, first.run, p, null);
+    assert.doesNotMatch(firstCtx, /harvested before/);
+    assert.match(await saveText(db.ingest, first.run, p, null, { units: [] }), /✓ saved/);
+
+    const second = await beginHarvest(
+      db.ingest,
+      p,
+      3,
+      pull("Keep notes and drafts out of CSV.", [comment(1, "Old comment."), comment(2, "New comment.")]),
+    );
+    // Each source is its heading line and its text on the next line
+    const heading = (text: string) => {
+      const lines = ctx.split("\n");
+      return lines[lines.indexOf(text) - 1] ?? "";
+    };
+    const ctx = await contextText(db.ingest, second.run, p, null);
+    assert.match(heading("Old comment."), /^## s\d+ pr_comment .* \(harvested before\)$/);
+    assert.match(heading("New comment."), /^## s\d+ pr_comment /);
+    assert.doesNotMatch(heading("New comment."), /harvested before/);
+    assert.match(heading("Keep notes and drafts out of CSV."), /^## s\d+ pr_body pr:3 revision 2 /);
+    assert.doesNotMatch(heading("Keep notes and drafts out of CSV."), /harvested before/);
+  } finally {
+    await db.done();
+  }
+});
+
 test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, with stale and unsafe inputs refused", async () => {
   const db = tempDb();
   const root = repo();

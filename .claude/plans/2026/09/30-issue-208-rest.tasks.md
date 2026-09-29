@@ -22,7 +22,7 @@ base: main
 
 2 度目の harvest で前に見た source が分かり、逆向きの範囲と応答しない gh で harvest が止まらない
 
-- [ ] T01: harvest の行に `(harvested before)` を付け、バージョンを上げる
+- [x] T01: harvest の行に `(harvested before)` を付け、バージョンを上げる
   - 種別: 修正
   - 計画: S1, S7
   - 依存: なし
@@ -30,6 +30,7 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 test/extract.test.ts` → 保存済みの harvest の後に同じ PR へ新しいコメントを足して context を取るテストで、前の source の行に `(harvested before)` が無く落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/extract.test.ts` → 前の source にだけ印が付き、新しいコメントと本文の新しい revision には付かない。`bun run release:plan -- --base v0.6.10` → `plugin`、npm と 3 つの manifest が同じ新しいバージョン。`bun run verify` → 0
   - コミット: `fix(harvest): mark sources an earlier run looked at`
+  - 結果: 直す前の `node --test --test-name-pattern='marks the sources' test/extract.test.ts` → `## s2 pr_comment pr:3 by kai (MEMBER) 2026-03-02T00:00:00.000Z` が `(harvested before)` に一致せず落ちた。直した後 `node --test --test-timeout=60000 test/extract.test.ts test/github.test.ts` → 30 pass / 0 fail（前のコメントにだけ印、新しいコメントと本文の revision 2 には無し）。npm と 3 つの manifest を 0.6.11。`bun run verify` → 0
 
 - [ ] T02: 逆向き・側違いの行範囲を終わりの行だけにする
   - 種別: 修正
