@@ -1,22 +1,26 @@
 // The overview views against real SQLite: live lists every active decision and constraint once, grouped by directory, page by page
-// without skipping any; nothing superseded, withdrawn, or still a candidate shows.
+// without skipping any; nothing superseded, withdrawn, or still a candidate shows. look names gone files, lost symbols, conditions to
+// reconsider, and marked instruction lines whose record changed, and says what it could not check.
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
-import { liveOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
+import { liveOverview, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { at, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 const now = at("2026-09-29T00:00:00Z");
 
-async function save(db: TempDb, p: number, units: unknown[]) {
+async function save(db: TempDb, p: number, units: unknown[], root: string | null = null) {
   const t: Target = {
     projectId: p,
     origin: "trace",
     prefix: "trace:ext-s1/",
     sessionId: "s1",
-    root: null,
+    root,
     sources: null,
   };
   return inTransaction(db.ingest, async (trx) => {
@@ -132,6 +136,114 @@ test("live pages by id: a record superseded between pages skips nothing after it
       /No active decision or constraint after id 1000000/,
     );
   } finally {
+    await db.done();
+  }
+});
+
+test("look names gone files apart from lost symbols, conditions to reconsider, and marked lines whose record changed", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: `${said} If replicas are ever needed, look at Postgres again.`,
+    });
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(
+      path.join(root, "src", "keep.ts"),
+      "export function open() {}\nexport function close() {}\n",
+    );
+    fs.writeFileSync(path.join(root, "src", "gone.ts"), "export const x = 1;\n");
+    await save(
+      db,
+      p,
+      [
+        record(m, "gone-file", "decision", { anchors: [{ path: "src/gone.ts", role: "applies_to" }] }),
+        record(m, "lost-symbol", "constraint", {
+          anchors: [{ path: "src/keep.ts", symbol: "close", role: "applies_to" }],
+        }),
+        record(m, "fine", "decision", {
+          anchors: [{ path: "src/keep.ts", symbol: "open", role: "applies_to" }],
+        }),
+        record(m, "storage", "decision", {
+          options: [
+            {
+              text: "Postgres",
+              outcome: "rejected",
+              reconsider_when: "if replicas are ever needed",
+              reconsider_quote: {
+                source: `s${m}`,
+                quote: "If replicas are ever needed, look at Postgres again.",
+              },
+            },
+          ],
+        }),
+        { ...record(m, "later", "decision"), stance: "defer", revisit_when: "after the 1.0 release" },
+        record(m, "old-rule", "constraint"),
+        record(m, "dropped-rule", "constraint"),
+        record(m, "kept-rule", "constraint"),
+      ],
+      root,
+    );
+    fs.rmSync(path.join(root, "src", "gone.ts"));
+    fs.writeFileSync(path.join(root, "src", "keep.ts"), "export function open() {}\n");
+    fs.writeFileSync(
+      path.join(root, "CLAUDE.md"),
+      [
+        "- Keep one rule <!-- sphica: trace:ext-s1/kept-rule -->",
+        "- An old rule <!-- sphica: trace:ext-s1/old-rule -->",
+        "- A dropped rule <!--sphica:trace:ext-s1/dropped-rule-->",
+        "- A made-up one <!-- sphica: trace:ext-s1/nothing -->",
+        "- Not a Sphica marker <!-- invariant: x -->",
+      ].join("\n"),
+    );
+    await save(db, p, [record(m, "new-rule", "constraint", { supersedes: "trace:ext-s1/old-rule" })]);
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', ?, 'r', run_id from unit where key = 'trace:ext-s1/dropped-rule'",
+      )
+      .run(now);
+
+    const look = await lookOverview(db.reader, p, root);
+    const under = (title: string) => look.split("\n\n").find((x) => x.startsWith(`## ${title}`)) ?? "";
+    assert.equal(
+      under("Files gone"),
+      "## Files gone\n- trace:ext-s1/gone-file (decision): src/gone.ts (applies_to)",
+    );
+    assert.equal(
+      under("Symbol not found"),
+      "## Symbol not found (the file is still there)\n- trace:ext-s1/lost-symbol (constraint): close in src/keep.ts (applies_to)",
+    );
+    assert.match(
+      under("Conditions to reconsider"),
+      /- trace:ext-s1\/storage: rejected option Postgres, reconsider when: if replicas are ever needed\n- trace:ext-s1\/later: deferred later text, revisit when: after the 1\.0 release$/,
+    );
+    assert.equal(
+      under("Rule markers"),
+      [
+        "## Rule markers whose record changed",
+        "- CLAUDE.md:2: trace:ext-s1/old-rule was superseded by trace:ext-s1/new-rule",
+        "- CLAUDE.md:3: trace:ext-s1/dropped-rule was withdrawn",
+        "- CLAUDE.md:4: trace:ext-s1/nothing is not a record of this project",
+      ].join("\n"),
+    );
+    assert.match(under("Not checked"), /nothing: every place above was checked/);
+    // A symlink leading outside and no working tree at all are said, never read as "none"
+    fs.symlinkSync(os.tmpdir(), path.join(root, "out"));
+    await save(db, p, [
+      record(m, "outside", "decision", { anchors: [{ path: "out/x.ts", role: "applies_to" }] }),
+    ]);
+    assert.match(
+      await lookOverview(db.reader, p, root),
+      /- 1 code locations that lead outside the repository/,
+    );
+    const blind = await lookOverview(db.reader, p, null);
+    assert.match(blind, /## Files gone\nnot checked/);
+    assert.match(blind, /## Rule markers whose record changed\nnot checked/);
+    assert.match(blind, /- instruction files: no working tree/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
     await db.done();
   }
 });

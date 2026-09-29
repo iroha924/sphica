@@ -7,7 +7,7 @@ import { inline } from "./panel.ts";
 import { head } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
-const UNSUPPORTED =
+export const UNSUPPORTED =
   "unsupported: its owner quote was retracted or forgotten, so it is not the owner's condition";
 
 /** The bytes of a source a span points at. */

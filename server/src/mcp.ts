@@ -11,7 +11,7 @@ import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
-import { liveOverview } from "./overview.ts";
+import { liveOverview, lookOverview } from "./overview.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { identify, projectId } from "./project.ts";
@@ -270,12 +270,16 @@ const notChecked = (e: unknown) =>
 server.registerTool(
   "overview",
   {
-    title: "Every live decision and constraint",
+    title: "Live decisions, and records that need a look",
     description:
-      "On request, not before every change: view live lists every active decision and constraint of the project, grouped by the directory it " +
-      "applies to, a page at a time (pass after from the previous page). Read a record by its key before relying on it.",
+      "On request, not before every change. view live lists every active decision and constraint of the project, grouped by the directory it " +
+      "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
+      "is not found, written conditions for reconsidering an option (for you to judge, never applied), and lines in CLAUDE.md, AGENTS.md, or " +
+      ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn. Read a record by its key before relying on it.",
     inputSchema: {
-      view: z.enum(["live"]).describe("live: every active decision and constraint"),
+      view: z
+        .enum(["live", "look"])
+        .describe("live: every active decision and constraint; look: records that need a look"),
       after: z
         .number()
         .int()
@@ -290,7 +294,13 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd);
       if (typeof p === "string") return text(p);
-      return text(framed(await liveOverview(db, p.id, a.after ?? null)));
+      return text(
+        framed(
+          a.view === "live"
+            ? await liveOverview(db, p.id, a.after ?? null)
+            : await lookOverview(db, p.id, p.root),
+        ),
+      );
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }

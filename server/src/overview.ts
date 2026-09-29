@@ -2,8 +2,11 @@
 // Both read the database and the working tree only, and name records by key so the agent reads each before relying on it.
 import path from "node:path";
 import type { Kysely } from "kysely";
+import { checkAnchor, fileState } from "./anchors.ts";
 import type { DB } from "./db-types.ts";
 import { inline } from "./panel.ts";
+import { UNSUPPORTED } from "./read.ts";
+import { ruleFiles } from "./rule-files.ts";
 import { head } from "./text.ts";
 
 /** One reply's bounds: 50 lines of at most 600 bytes keep a page under 64 KiB. Past them the reply says where to go on. */
@@ -81,4 +84,176 @@ export async function liveOverview(db: Kysely<DB>, projectId: number, after: num
       : "That is the end of the list.",
     "Read a record by its key before relying on it.",
   ].join("\n");
+}
+
+/** Anchors, markers, and conditions shown per heading; past them the heading says how many more there are. */
+const LOOK_LIMITS = { anchors: 2000, lines: 50 } as const;
+/** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
+const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,300})\s*-->/g;
+
+/**
+ * Records that need a look: live records whose anchored file is gone or whose symbol is not found, written conditions for reconsidering,
+ * and marked lines in instruction files whose record was replaced or withdrawn. It says what each is and never decides or changes anything.
+ */
+export async function lookOverview(db: Kysely<DB>, projectId: number, root: string | null): Promise<string> {
+  const notChecked: string[] = [];
+  const sections: string[] = [];
+  const section = (title: string, lines: string[], empty: string) => {
+    const shown = lines.slice(0, LOOK_LIMITS.lines);
+    sections.push(
+      [
+        `## ${title}`,
+        ...(shown.length ? shown : [empty]),
+        ...(lines.length > shown.length ? [`(${lines.length - shown.length} more not shown)`] : []),
+      ].join("\n"),
+    );
+  };
+
+  // Anchored code: a gone file and a symbol no longer found are different reasons to look
+  const anchors = await db
+    .selectFrom("unit_anchor as a")
+    .innerJoin("unit as u", "u.id", "a.unit_id")
+    .where("u.project_id", "=", projectId)
+    .where("u.lifecycle", "=", "active")
+    .where("a.retired_at", "is", null)
+    .select(["u.key", "u.kind", "a.path", "a.symbol", "a.line_start", "a.role"])
+    .orderBy("a.id")
+    .limit(LOOK_LIMITS.anchors + 1)
+    .execute();
+  const gone: string[] = [];
+  const lost: string[] = [];
+  if (!root) notChecked.push("code locations: no working tree for this project here");
+  else {
+    let unknown = 0;
+    for (const a of anchors.slice(0, LOOK_LIMITS.anchors)) {
+      const where = `- ${a.key} (${a.kind}): ${inline(a.path)} (${a.role})`;
+      const file = fileState(root, a.path);
+      if (file === "gone") gone.push(where);
+      else if (file === "unknown") unknown++;
+      else if (a.symbol && checkAnchor(root, a).state === "missing")
+        lost.push(`- ${a.key} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`);
+    }
+    if (unknown)
+      notChecked.push(`${unknown} code locations that lead outside the repository or cannot be followed`);
+    if (anchors.length > LOOK_LIMITS.anchors)
+      notChecked.push(`code locations past the first ${LOOK_LIMITS.anchors} (by age)`);
+  }
+  section("Files gone", gone, root ? "none" : "not checked");
+  section("Symbol not found (the file is still there)", lost, root ? "none" : "not checked");
+
+  // Conditions are shown for a person or agent to judge; whether one has come about is never decided here
+  const [options, deferred] = await Promise.all([
+    db
+      .selectFrom("unit_option as o")
+      .innerJoin("unit as u", "u.id", "o.unit_id")
+      .where("u.project_id", "=", projectId)
+      .where("u.lifecycle", "=", "active")
+      .where("o.reconsider_when", "is not", null)
+      .select((eb) => [
+        "u.key",
+        "o.text",
+        "o.reconsider_when",
+        eb
+          .exists(
+            eb
+              .selectFrom("unit_evidence as e")
+              .innerJoin("source as s", "s.id", "e.source_id")
+              .whereRef("e.option_id", "=", "o.id")
+              .where("e.role", "=", "reconsiders")
+              .where("e.retracted_at", "is", null)
+              .where("s.author_kind", "=", "owner")
+              .select("e.id"),
+          )
+          .as("stands"),
+      ])
+      .orderBy("o.id")
+      .execute(),
+    db
+      .selectFrom("unit")
+      .where("project_id", "=", projectId)
+      .where("lifecycle", "=", "active")
+      .where("revisit_when", "is not", null)
+      .select(["key", "text", "revisit_when"])
+      .orderBy("id")
+      .execute(),
+  ]);
+  section(
+    "Conditions to reconsider (judge whether one has come about; nothing here is decided)",
+    [
+      ...options.map(
+        (o) =>
+          `- ${o.key}: rejected option ${inline(head(o.text, 120))}, reconsider when: ${inline(head(o.reconsider_when ?? "", 300))}${o.stands ? "" : ` [${UNSUPPORTED}]`}`,
+      ),
+      ...deferred.map(
+        (d) =>
+          `- ${d.key}: deferred ${inline(head(d.text, 120))}, revisit when: ${inline(head(d.revisit_when ?? "", 300))}`,
+      ),
+    ],
+    "none",
+  );
+
+  // Marked lines in instruction files: only the place and the key are shown, never the line, so the file's text cannot forge lines here
+  const marked: string[] = [];
+  if (!root) notChecked.push("instruction files: no working tree for this project here");
+  else {
+    const scan = ruleFiles(root);
+    const found: { file: string; line: number; key: string }[] = [];
+    for (const f of scan.files)
+      for (const [i, text] of f.text.split(/\r?\n/).entries())
+        for (const m of text.matchAll(MARKER)) found.push({ file: f.path, line: i + 1, key: m[1] ?? "" });
+    const keys = [...new Set(found.map((f) => f.key))];
+    const units = new Map(
+      (keys.length
+        ? await db
+            .selectFrom("unit")
+            .select(["id", "key", "lifecycle"])
+            .where("project_id", "=", projectId)
+            .where("key", "in", keys)
+            .execute()
+        : []
+      ).map((u) => [u.key, u]),
+    );
+    for (const f of found) {
+      const u = units.get(f.key);
+      const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
+      if (!u) marked.push(`${where} is not a record of this project`);
+      else if (u.lifecycle === "withdrawn") marked.push(`${where} was withdrawn`);
+      else if (u.lifecycle === "superseded") {
+        const next = await successor(db, u.id);
+        marked.push(`${where} was superseded${next ? ` by ${next}` : ""}`);
+      }
+    }
+    if (scan.skipped)
+      notChecked.push(
+        `${scan.skipped} instruction files not read (over the caps, not regular files, or outside the repository)`,
+      );
+    if (scan.incomplete) notChecked.push(`instruction files: the listing ${scan.incomplete}`);
+  }
+  section("Rule markers whose record changed", marked, root ? "none" : "not checked");
+
+  return [
+    ...sections,
+    `## Not checked\n${notChecked.length ? notChecked.map((n) => `- ${n}`).join("\n") : "nothing: every place above was checked"}`,
+    "Read a record by its key before acting on it. Change a record only through /sphica:trace, with the owner's words.",
+  ].join("\n\n");
+}
+
+/** The live end of a record's supersedes chain, or the last successor when the chain stops at one not live. */
+async function successor(db: Kysely<DB>, id: number): Promise<string | null> {
+  let key: string | null = null;
+  let at = id;
+  for (let step = 0; step < 20; step++) {
+    const next = await db
+      .selectFrom("unit_link as l")
+      .innerJoin("unit as u", "u.id", "l.from_unit")
+      .where("l.to_unit", "=", at)
+      .where("l.kind", "=", "supersedes")
+      .select(["u.id", "u.key", "u.lifecycle"])
+      .executeTakeFirst();
+    if (!next) break;
+    key = next.key;
+    if (next.lifecycle !== "superseded") break;
+    at = next.id;
+  }
+  return key;
 }

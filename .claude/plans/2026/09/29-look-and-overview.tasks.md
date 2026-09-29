@@ -114,13 +114,14 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(overview): bound rule-file reads by files looked at and count what the walk could not read`
   - 結果: red（直す前）→ 3 件が上の理由で失敗（ENOTDIR、actual [0, 201, 201] / expected [0, 201, 200]、actual skipped 0 / expected 1）。直した後 `node --test test/rule-files.test.ts` → pass 10 / fail 0。`npm test` → 全件 pass。`bun run check` → 0
 
-- [ ] T06: `overview` の `look` を足し、forget と取り消しの回帰テストを足す
+- [x] T06: `overview` の `look` を足し、forget と取り消しの回帰テストを足す
   - 種別: 追加
   - 計画: S6
   - 依存: T03（unsupported の判定が要る）, T04（ファイルの検査と規約ファイルの列挙が要る）, T05（ツールと返事の組み立てが要る）
-  - 変更: `server/src/overview.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`, `server/test/forget.test.ts`
+  - 変更: `server/src/overview.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`, `server/test/forget.test.ts`, `server/src/read.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/overview.test.ts test/forget.test.ts` → 全部 pass（Files gone、Symbol not found、Reconsider conditions、Rule markers の superseded・withdrawn・無いキー、確かめられなかった件数。引用だけの source を forget しても決定が active で unsupported と出る）
   - コミット: `feat(overview): list records that need a look: gone files, conditions, stale rule markers`
+  - 結果: `node --test test/overview.test.ts test/forget.test.ts` → pass 15 / fail 0（Files gone に消したファイル、Symbol not found に関数名だけ消えたもの、Conditions に引用付きの却下案の条件と defer の revisit_when、Rule markers に superseded（後継のキー付き）・withdrawn・無いキーの行番号とキーだけ。外へ出る symlink は Not checked に件数、作業ツリーが無いと各見出しが not checked。引用だけの source を forget しても決定は active で、read と look に unsupported）。`npm test` → 397 / 397 pass。`bun run check` → 0、`sql:reach` → 169 / 169
 
 ## P4: 規約の下書きと受け入れ
 
@@ -151,6 +152,7 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T03, T09 / Codex レビュー: 指摘なし
 - 2026-09-29 / T11 / T10 の Codex レビュー F1: trace Skill の「引用が無いと quarantine」の説明が、見直し条件の引用だけは拒否になった挙動と食い違う / T11 を足して Skill に書いた
 - 2026-09-29 / T05 / 1 行を 600 バイトで切るので 50 行で 64 KiB に届かず、バイトの上限の分岐は通らない / 分岐を置かず、定数のコメントで 64 KiB 未満に収まる理由を書いた。ツール一覧のテスト（plugin.test.ts）に overview を足し、変更欄にも足した（前: 無し）
-
 - 2026-09-29 / T12 / T04 の Codex レビュー F1・F3・F6・F7（上限が読めた数だけ、ENOTDIR で例外、読めないディレクトリを黙って飛ばす、規約ファイル名の symlink を数えない）/ 修正タスク T12 を足した
 - 2026-09-29 / T04 / Codex レビュー F2（検査と読み込みの間の差し替え）・F4（外へ出る親 symlink の下で消えた追跡ファイル）・F5（入れ子の git リポジトリと submodule）は採らない。どれも端の入力で、anchors.ts の readText も同じ前提で読む
+- 2026-09-29 / T06 / 引用を失った条件の表示を read と揃えるため、read.ts の UNSUPPORTED を export した / 変更欄に `server/src/read.ts` を足した（前: 無し）
+- 2026-09-29 / T12 / Codex レビュー: 指摘なし
