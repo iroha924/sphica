@@ -104,6 +104,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `feat(overview): list every live decision and constraint, grouped by directory`
   - 結果: `node --test test/overview.test.ts` → pass 2 / fail 0（有効な決定と制約 5 件を全部出し、finding・superseded・withdrawn・candidate を出さない。最初の applies_to のディレクトリでまとめ、ルートのファイルは (repository root)、場所の無いものは最後。55 件で 1 ページ目 50 件、ページの間に supersede しても 2 ページ目に残り 5 件と後継が出る）。`npm test` → 392 / 392 pass。`bun run check` → 0、`sql:reach` → 164 / 164
 
+- [x] T12: 規約ファイルの上限を見たファイルの数で数え、途中がファイルのパス・読めないディレクトリ・規約ファイル名の symlink を取りこぼさない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（検査と列挙が要る）
+  - 変更: `server/src/anchors.ts`, `server/src/rule-files.ts`, `server/test/rule-files.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 途中がファイルのパスで ENOTDIR が投げられる、読めないファイル 201 件を全部読む（readFileSync 201 回）、git の外で規約ファイル名の symlink が skipped に入らない、で 3 件落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 全部 pass
+  - コミット: `fix(overview): bound rule-file reads by files looked at and count what the walk could not read`
+  - 結果: red（直す前）→ 3 件が上の理由で失敗（ENOTDIR、actual [0, 201, 201] / expected [0, 201, 200]、actual skipped 0 / expected 1）。直した後 `node --test test/rule-files.test.ts` → pass 10 / fail 0。`npm test` → 全件 pass。`bun run check` → 0
+
 - [ ] T06: `overview` の `look` を足し、forget と取り消しの回帰テストを足す
   - 種別: 追加
   - 計画: S6
@@ -141,3 +151,6 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T03, T09 / Codex レビュー: 指摘なし
 - 2026-09-29 / T11 / T10 の Codex レビュー F1: trace Skill の「引用が無いと quarantine」の説明が、見直し条件の引用だけは拒否になった挙動と食い違う / T11 を足して Skill に書いた
 - 2026-09-29 / T05 / 1 行を 600 バイトで切るので 50 行で 64 KiB に届かず、バイトの上限の分岐は通らない / 分岐を置かず、定数のコメントで 64 KiB 未満に収まる理由を書いた。ツール一覧のテスト（plugin.test.ts）に overview を足し、変更欄にも足した（前: 無し）
+
+- 2026-09-29 / T12 / T04 の Codex レビュー F1・F3・F6・F7（上限が読めた数だけ、ENOTDIR で例外、読めないディレクトリを黙って飛ばす、規約ファイル名の symlink を数えない）/ 修正タスク T12 を足した
+- 2026-09-29 / T04 / Codex レビュー F2（検査と読み込みの間の差し替え）・F4（外へ出る親 symlink の下で消えた追跡ファイル）・F5（入れ子の git リポジトリと submodule）は採らない。どれも端の入力で、anchors.ts の readText も同じ前提で読む

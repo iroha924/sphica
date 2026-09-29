@@ -121,7 +121,14 @@ export function fileState(root: string | null, rel: string): "present" | "gone" 
   let at = root;
   for (const part of rel.split("/")) {
     at = path.join(at, part);
-    const st = fs.lstatSync(at, { throwIfNoEntry: false });
+    let st: fs.Stats | undefined;
+    try {
+      st = fs.lstatSync(at, { throwIfNoEntry: false });
+    } catch (e) {
+      // A path through what is now a regular file is gone too
+      if ((e as NodeJS.ErrnoException).code === "ENOTDIR") return "gone";
+      return "unknown";
+    }
     if (!st) return "gone";
     if (st.isSymbolicLink()) {
       try {

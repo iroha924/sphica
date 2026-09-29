@@ -33,8 +33,9 @@ export function ruleFiles(root: string): RuleFiles {
   const listed = gitList(root) ?? walk(root);
   const out: RuleFiles = { files: [], skipped: 0, incomplete: listed.incomplete };
   const realRoot = fs.realpathSync(root);
-  for (const rel of [...new Set(listed.paths)].sort()) {
-    if (out.files.length >= RULE_LIMITS.files) {
+  // The cap counts every file looked at, read or not, so it bounds the work
+  for (const [i, rel] of [...new Set(listed.paths)].sort().entries()) {
+    if (i >= RULE_LIMITS.files) {
       out.skipped++;
       continue;
     }
@@ -50,10 +51,10 @@ export function ruleFiles(root: string): RuleFiles {
 function readBounded(root: string, realRoot: string, rel: string): string | null | undefined {
   const abs = path.join(root, rel);
   if (leaves(path.relative(root, abs))) return undefined;
-  const st = fs.lstatSync(abs, { throwIfNoEntry: false });
-  if (!st) return null;
-  if (!st.isFile() || st.size > RULE_LIMITS.bytes) return undefined;
   try {
+    const st = fs.lstatSync(abs, { throwIfNoEntry: false });
+    if (!st) return null;
+    if (!st.isFile() || st.size > RULE_LIMITS.bytes) return undefined;
     // A symlinked directory on the way can lead outside the repository
     if (leaves(path.relative(realRoot, fs.realpathSync(abs)))) return undefined;
     const buf = fs.readFileSync(abs);
@@ -86,6 +87,7 @@ function gitList(root: string): { paths: string[]; incomplete: string | null } |
 function walk(root: string): { paths: string[]; incomplete: string | null } {
   const paths: string[] = [];
   let entries = 0;
+  let unread = 0;
   let incomplete: string | null = null;
   const visit = (rel: string, depth: number) => {
     if (incomplete) return;
@@ -93,6 +95,7 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
     try {
       list = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
     } catch {
+      unread++;
       return;
     }
     for (const d of list) {
@@ -101,7 +104,8 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
         return;
       }
       const child = rel ? `${rel}/${d.name}` : d.name;
-      if (d.isFile() && isRuleFile(child)) paths.push(child);
+      // A symlink with a rule file's name is listed so the read counts it as skipped rather than dropping it unseen
+      if ((d.isFile() || d.isSymbolicLink()) && isRuleFile(child)) paths.push(child);
       else if (
         d.isDirectory() &&
         d.name !== "node_modules" &&
@@ -114,5 +118,6 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
     }
   };
   visit("", 1);
+  if (!incomplete && unread) incomplete = `could not read ${unread} director${unread === 1 ? "y" : "ies"}`;
   return { paths, incomplete };
 }

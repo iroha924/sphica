@@ -149,3 +149,33 @@ test("outside git, a walk stops after its entry budget and says so", () => {
   for (let i = 0; i <= RULE_LIMITS.entries; i++) fs.writeFileSync(path.join(many, `f${i}`), "");
   assert.match(String(ruleFiles(root).incomplete), /stopped after 5000 directory entries/);
 });
+
+test("a path through a regular file is gone, not an error", () => {
+  put("src/db.ts");
+  assert.equal(fileState(root, "src/db.ts/child.ts"), "gone");
+});
+
+test("the file cap counts every file looked at, so many unreadable files do not all get read", (t) => {
+  for (let i = 0; i <= RULE_LIMITS.files; i++) put(`d${String(i).padStart(3, "0")}/AGENTS.md`, "a\0b");
+  const read = t.mock.method(fs, "readFileSync");
+  const r = ruleFiles(root);
+  assert.deepEqual(
+    [r.files.length, r.skipped, read.mock.callCount()],
+    [0, RULE_LIMITS.files + 1, RULE_LIMITS.files],
+  );
+});
+
+test("outside git, an unreadable directory makes the listing incomplete, and a symlink with a rule file's name is counted", () => {
+  put("CLAUDE.md");
+  fs.writeFileSync(path.join(outside, "AGENTS.md"), "outside\n");
+  fs.symlinkSync(path.join(outside, "AGENTS.md"), path.join(root, "AGENTS.md"));
+  const r = ruleFiles(root);
+  assert.deepEqual([r.files.map((f) => f.path), r.skipped], [["CLAUDE.md"], 1]);
+  put("locked/CLAUDE.md");
+  fs.chmodSync(path.join(root, "locked"), 0);
+  try {
+    assert.match(String(ruleFiles(root).incomplete), /could not read 1 directory/);
+  } finally {
+    fs.chmodSync(path.join(root, "locked"), 0o755);
+  }
+});
