@@ -123,6 +123,16 @@ base: main
   - コミット: `fix(export): refuse Cursor and Copilot instruction files too`
   - 結果: red は上のとおり再現。直した後: `node --test test/export.test.ts` → 11 pass / 0 fail、`bun run verify` → 0
 
+- [x] T11: 既存の保存先をその名前自体で解決し、Windows の短い別名で指示ファイルを指せないようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T08（同じ判定を直す）
+  - 変更: `server/src/export.ts`
+  - red: `node --test test/export.test.ts` → この macOS では再現できない（8.3 の短い名前は Windows のボリュームでしか作れず、Windows の CI ジョブは単体テストを流さない）
+  - 完了条件: `node --test test/export.test.ts` → 通る。`bun run verify` → 0
+  - コミット: `fix(export): resolve an existing target by its own real name`
+  - 結果: `node --test test/export.test.ts` → 11 pass / 0 fail、`bun run verify` → 0。red は未確認（上の理由）
+
 ## 記録
 2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
 2026-09-29 / T02 / acceptance の driver は MCP を起動せず、各ツールと同じ関数を直接呼ぶ作りだった / export の step も `exportPath` と `exportDecisions` を直接呼び、本物の入口は plugin のテストで export を呼んで確かめた。書き出しが成功する経路を本物の入口で通すのは A5 の headless 実行で見る
@@ -134,3 +144,4 @@ base: main
 2026-09-29 / T08 / GitHub の Codex レビュー（45ccca1、P1 なし、P2 3 件）: 指示ファイルへ書き出せる（Security Review）、検査のあとに作られたファイルの上書き、1 件の決定の巨大な根拠で上限の前にメモリを使う / 1 件目を T08 で直した。大文字と小文字を区別せず、`.claude`・`.agents`・`.codex` の中全体と、解決した実際の書き込み先も見る。2 件目は見送り: 同じリポジトリで競合して書く別プロセスという端の入力で、Claude Code の Write は読んでいない既存ファイルの上書きを拒む。3 件目は見送り: glean を重ねた極端な記録という端の入力
 2026-09-29 / T09 / GitHub の Codex レビュー（43c2c0c、P1 なし、P2 2 件）: `.git/config` や Markdown でないファイルに書ける、Windows で `AGENTS.md.` が AGENTS.md になる（Security Review） / 2 件とも T09 で直した
 2026-09-29 / T10 / GitHub の Codex レビュー（2ba9b02、P1 なし、P2 1 件）: `.github/copilot-instructions.md` と `.cursor/rules/` に書ける。指示ファイルの範囲を広げる指摘が毎ラウンド出るため持ち主に聞き、review Skill が拘束力のある規則とする置き場所（第 1 層）に合わせると決まった（2026-09-29） / T10 で直した。次に同じ種類の指摘が出ても、端の入力として見送って PR を終える
+2026-09-29 / T11 / GitHub の Codex レビュー（a67f565、P1 なし、P2 3 件）: 決定の本文などの複数行が 1 行につぶれる、長すぎる名前（ENAMETOOLONG）を通す、Windows の 8.3 の短い名前で既存の指示ファイルを指せる（Security Review） / ラウンドが収束しないので、持ち主の方針（出荷する P1 とセキュリティに絞って終える）に従い、3 件目だけ T11 で直した。1 件目は見送り: セキュリティでも P1 でもなく、記録の本文はふつう 1 文。2 件目は見送り: 書き込みが失敗するだけの端の入力

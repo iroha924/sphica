@@ -309,11 +309,12 @@ export function exportPath(
   if (!folder) return { error: "A part of the path is a file, not a folder." };
   let real: string;
   try {
-    real = path.join(fs.realpathSync(existing), ...rest);
+    // The native call returns the name Windows stores, so a short 8.3 alias of an existing file is checked under its real name
+    real = self ? fs.realpathSync.native(target) : path.join(fs.realpathSync.native(existing), ...rest);
   } catch {
     return { error: "A folder on the path cannot be resolved." };
   }
-  const rootReal = fs.realpathSync(root);
+  const rootReal = fs.realpathSync.native(root);
   if (!inside(rootReal, real)) return { error: "The path leads outside the repository." };
   // Quoted words written there would be loaded as the agent's standing instructions
   const inGit = (relative: string) => relative.toLowerCase().split(/[\\/]/).includes(".git");
