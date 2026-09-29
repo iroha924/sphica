@@ -9,7 +9,7 @@ import { inTransaction } from "../src/db.ts";
 import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "../src/export.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], session = "s1") {
   const t: Target = {
@@ -108,6 +108,43 @@ test("a chosen decision comes with its quotes and every decision it replaced, ne
       "no export time",
     );
     assert.equal(await exported(db, p, ["trace:ext-s1/sync"]), doc, "the same choice writes the same bytes");
+  } finally {
+    await db.done();
+  }
+});
+
+test("a deferred decision keeps when to revisit it, and a quote keeps the URL it came from", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const text = "Wait with sharding. Decided.";
+    const m = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: `session:${session(db, p)}`,
+      external_id: "m1",
+      revision: 1,
+      session_id: "s1",
+      author_kind: "owner",
+      url: "https://example.com/thread/1",
+      created_at: at("2026-09-10T00:00:00Z"),
+      available_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(),
+      indexed: 1,
+    });
+    await save(db, p, [
+      { ...decision(m, text, "later"), stance: "defer", revisit_when: "after the 1.0 release" },
+    ]);
+    const doc = await exported(db, p, ["trace:ext-s1/later"]);
+    assert.match(doc, /\nrevisit when: after the 1\.0 release\n/);
+    assert.match(doc, /\(states\): "Wait with sharding\. Decided\." <https:\/\/example\.com\/thread\/1>/);
+    assert.match(
+      doc,
+      /adopted by:\n {2}- the owner, [^,]+, session_message session:s1: "Wait with sharding\. Decided\." <https:\/\/example\.com\/thread\/1>/,
+    );
   } finally {
     await db.done();
   }
@@ -288,6 +325,7 @@ test("the save path must land inside the repository, through any symbolic link",
         JSON.stringify(bad),
       );
     assert.match(String(Object.values(exportPath(root, "."))), /leaves the repository/);
+    assert.deepEqual(exportPath(root, "..notes.md"), { relative: "..notes.md", exists: false });
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

@@ -73,9 +73,20 @@ base: main
   - コミット: `fix(export): name the checked path exactly, mark every failure, keep one instruction line`
   - 結果: red は上のとおり再現（export のテストは path の検査で、plugin のテストは `isError` で落ちた）。直した後: `node --test test/export.test.ts test/plugin.test.ts` → 36 pass / 0 fail、`bun run verify` → 0
 
+- [x] T06: 延期の見直し条件と引用元の URL を書き出し、`..` で始まる名前を通す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す関数が要る）
+  - 変更: `server/src/export.ts`, `server/test/export.test.ts`
+  - red: `node --test test/export.test.ts` → 直す前のコードで、`revisit_when` のある延期の決定に `revisit when:` が出ない、URL のある引用に URL が出ない、`..notes.md` が「The path leaves the repository.」で拒否される、で落ちる
+  - 完了条件: `node --test test/export.test.ts` → 9 pass。`bun run verify` → 0
+  - コミット: `fix(export): keep revisit conditions and quote URLs, accept names starting with two dots`
+  - 結果: red は上のとおり再現。直した後: `node --test test/export.test.ts` → 9 pass / 0 fail、`bun run verify` → 0
+
 ## 記録
 2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
 2026-09-29 / T02 / acceptance の driver は MCP を起動せず、各ツールと同じ関数を直接呼ぶ作りだった / export の step も `exportPath` と `exportDecisions` を直接呼び、本物の入口は plugin のテストで export を呼んで確かめた。書き出しが成功する経路を本物の入口で通すのは A5 の headless 実行で見る
 2026-09-29 / T03 / README と README.ja に各 Skill の説明行があった / 同じ形で export の行を足し、変更欄に `README.md`・`README.ja.md` を足した
 2026-09-29 / T04 / T01 の Codex レビュー: 検査と書き込みの間のシンボリックリンクのすり替え（高）、制約を置き換えた決定の連なりに制約が出る（中）、別プロジェクトの同じキー（中）、大きな引用でスタックがあふれる（中）、ファイルを通るパス（低） / 後の 3 件は T04 で直した。1 件目は見送り: すり替えられるのはそのリポジトリにすでに書ける人だけで、検査は持ち主の入力の誤りを止めるためのもの。2 件目は見送り: 置き換えられたものは種類を問わず経緯で、`kind: constraint` と明記して出る
 2026-09-29 / T05 / T02・T03 の Codex レビュー: 返答の保存先が見えない文字を除いて表示され検査したパスと違い得る（高、両方）、Skill の「1 行目のあと全部が文書」と実際の返答の 2 行の案内が合わない（中）、プロジェクトが無いときだけ isError が無い（中）、acceptance が本物の MCP の入口を通らない（中） / 前の 3 件は T05 で直した。4 件目は見送り: 成功の経路は A5 の headless 実行で、パッケージした 0.6.6 の入口から返った文書が 2 回ともそのままファイルになったことを確かめた
+2026-09-29 / T06 / 全差分の Codex レビュー: 延期の決定の見直し条件が出ない（中）、PR コメントなどの引用元 URL が落ちる（中）、`..` で始まる名前を拒否する（低） / 3 件とも T06 で直した。採用の引用にも出どころ（種類と artifact）を足した

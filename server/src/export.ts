@@ -48,6 +48,7 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
         "e.reported_speaker",
         "s.kind",
         "s.artifact",
+        "s.url",
         "s.author_kind",
         "s.author_login",
         "s.author_association",
@@ -64,6 +65,9 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
       .select([
         "a.span_start",
         "a.span_end",
+        "s.kind",
+        "s.artifact",
+        "s.url",
         "s.author_kind",
         "s.author_login",
         "s.author_association",
@@ -73,8 +77,10 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
       .orderBy("a.id")
       .execute(),
   ]);
+  // Where a quote lives, so a reader without Sphica can find it
+  const from = (s: { url: string | null }) => (s.url ? ` <${inline(s.url)}>` : "");
   const said = (e: (typeof evidence)[number]) =>
-    `  - ${inline(speaker(e))}${e.reported_speaker ? ` reporting what ${inline(e.reported_speaker)} said` : ""}, ${e.created_at}, ${e.kind} ${inline(e.artifact)} (${e.role}): "${inline(cut(e.text, e.span_start, e.span_end))}"`;
+    `  - ${inline(speaker(e))}${e.reported_speaker ? ` reporting what ${inline(e.reported_speaker)} said` : ""}, ${e.created_at}, ${e.kind} ${inline(e.artifact)} (${e.role}): "${inline(cut(e.text, e.span_start, e.span_end))}"${from(e)}`;
   const out = [
     `key: ${inline(u.key)} (u${u.id})`,
     `kind: ${u.kind}${u.stance ? ` ${u.stance}` : ""}`,
@@ -82,6 +88,7 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
   ];
   if (u.why) out.push(`why: ${inline(u.why)}`);
   if (u.scope_note) out.push(`scope: ${inline(u.scope_note)}`);
+  if (u.revisit_when) out.push(`revisit when: ${inline(u.revisit_when)}`);
   if (options.length) {
     out.push("options:");
     for (const o of options) {
@@ -99,7 +106,7 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
       "adopted by:",
       ...adoption.map(
         (a) =>
-          `  - ${inline(speaker(a))}, ${a.created_at}: "${inline(cut(a.text, a.span_start, a.span_end))}"`,
+          `  - ${inline(speaker(a))}, ${a.created_at}, ${a.kind} ${inline(a.artifact)}: "${inline(cut(a.text, a.span_start, a.span_end))}"${from(a)}`,
       ),
     );
   return out;
@@ -215,7 +222,7 @@ export function exportPath(
   const target = path.resolve(root, given);
   const inside = (base: string, p: string) => {
     const r = path.relative(base, p);
-    return r !== "" && !r.startsWith("..") && !path.isAbsolute(r);
+    return r !== "" && r !== ".." && !r.startsWith(`..${path.sep}`) && !path.isAbsolute(r);
   };
   if (!inside(root, target)) return { error: "The path leaves the repository." };
   const at = (p: string) => {
