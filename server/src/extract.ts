@@ -41,10 +41,11 @@ const newRunId = () => crypto.randomBytes(9).toString("base64url");
  */
 const PAGE_CHARS = 20_000;
 /**
- * The sources each run was shown, by run id. Saving marks only these (and what the record cites) as looked at. It lives in the record
+ * The sources each run was shown and the page cursors it was given, by run id. Saving marks only these sources (and what the record
+ * cites) as looked at, and a page starts only after a cursor this run was given, so no source is skipped. It lives in the record
  * server's process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
  */
-const shownTo = new Map<string, Set<number>>();
+const shownTo = new Map<string, { sources: Set<number>; cursors: Set<string> }>();
 /** Lines the last page lists at most, so the edits and live records alone stay within a page. */
 const TAIL_EDITS = 100;
 const TAIL_LIVE = 150;
@@ -310,6 +311,10 @@ export async function contextText(
   const run = await bound(db, id, projectId);
   const scope = await scopeOf(db, run, root);
   let start = 0;
+  if (after !== undefined && !shownTo.get(id)?.cursors.has(after))
+    throw new Error(
+      `${after.slice(0, 40)} is not a page this run was given; call record_context without after to start again from the first page`,
+    );
   if (after !== undefined) {
     const at = scope.items.findIndex((it) => `s${it.id}` === after);
     if (at < 0)
@@ -396,8 +401,9 @@ export async function contextText(
   const last = page.at(-1);
   const more = left > 0 || (last !== undefined && used + tailSize > PAGE_CHARS);
   // Recorded only now, after every await: a save running meanwhile never counts a source this reply has not returned yet
-  const shown = shownTo.get(id) ?? new Set<number>();
-  for (const it of page) shown.add(it.id);
+  const shown = shownTo.get(id) ?? { sources: new Set<number>(), cursors: new Set<string>() };
+  for (const it of page) shown.sources.add(it.id);
+  if (more && last) shown.cursors.add(`s${last.id}`);
   shownTo.delete(id);
   shownTo.set(id, shown);
   for (const old of shownTo.keys()) {
@@ -461,7 +467,7 @@ export async function saveText(
           )
         : await checkRecord(trx, scope.target, record).then((checked) => {
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
-            const shown = shownTo.get(id) ?? new Set<number>();
+            const shown = shownTo.get(id)?.sources ?? new Set<number>();
             // Only a quote found in the source counts: citing a message with words it does not hold proves nothing was read
             const cited = new Set(
               [

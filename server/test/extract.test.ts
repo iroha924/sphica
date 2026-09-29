@@ -1227,8 +1227,12 @@ test("trace: context comes in pages, and saving marks as looked at only the mess
     assert.ok(shown > 0 && shown < 40);
     assert.equal(untraced(), 40 - shown);
     assert.match(await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")), /1 session to trace/);
-    // Reading every page to the end marks them all
+    // Reading every page to the end marks them all; a page starts only after a cursor the run was given
     const second = await beginTrace(db.ingest, p, "s1");
+    await assert.rejects(
+      contextText(db.ingest, second, p, null, `s${ids[30]}`),
+      /not a page this run was given; call record_context without after/,
+    );
     let text = await contextText(db.ingest, second, p, null);
     const pages = [text];
     for (let m = /after: "(s\d+)"/.exec(text); m; m = /after: "(s\d+)"/.exec(text)) {
