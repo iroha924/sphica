@@ -10,6 +10,8 @@ import { head } from "./text.ts";
 /** Kinds that record a decision the owner made. A candidate is not adopted yet, so it never counts. */
 const DECIDED_KINDS = new Set(["decision", "constraint"]);
 const DECIDED_LIFECYCLES = new Set(["active", "superseded", "withdrawn"]);
+/** Records listed per message, tied and in the same turn each; the rest are counted, so one message cannot fill the result. */
+const PER_MESSAGE = 10;
 
 type Tied = { id: number; key: string; kind: string; lifecycle: string; now: Successor[] };
 type Context = { key: string; kind: string; lifecycle: string; speaker: string; role: string };
@@ -161,7 +163,8 @@ async function sameTurn(
     .where("id", "<>", id)
     .orderBy("id")
     .execute();
-  e.reply = others.find((o) => o.author_kind === "assistant")?.id ?? null;
+  // The turn's last assistant message is its answer; earlier ones can be questions it asked the owner
+  e.reply = others.findLast((o) => o.author_kind === "assistant")?.id ?? null;
   if (!others.length) return;
   const speaker = new Map(others.map((o) => [o.id, o.author_kind]));
   const seen = new Set<string>();
@@ -197,11 +200,12 @@ export function askedText(r: Asked, known = true): string {
     const lines = [`## s${m.id}: ${inline(m.artifact)}, ${m.created_at}`, inline(head(m.text, 600))];
     if (e.led.length) {
       lines.push("Led to:");
-      for (const u of e.led)
+      for (const u of e.led.slice(0, PER_MESSAGE))
         lines.push(
           `- ${inline(u.key)} (${u.kind}, ${u.lifecycle}${u.now.length ? `; now ${u.now.map((n) => `${inline(n.key)} (${n.lifecycle})`).join(", ")}` : ""})`,
         );
     }
+    if (e.led.length > PER_MESSAGE) lines.push(`and ${e.led.length - PER_MESSAGE} more tied records`);
     if (e.hidden) lines.push(`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters.`);
     if (!e.decided)
       lines.push(
@@ -209,8 +213,10 @@ export function askedText(r: Asked, known = true): string {
       );
     if (e.context.length) {
       lines.push("Same turn (context, not necessarily the answer):");
-      for (const c of e.context)
+      for (const c of e.context.slice(0, PER_MESSAGE))
         lines.push(`- ${inline(c.key)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`);
+      if (e.context.length > PER_MESSAGE)
+        lines.push(`and ${e.context.length - PER_MESSAGE} more in the same turn`);
     }
     if (e.reply !== null) lines.push(`Reply: s${e.reply} (read it with read)`);
     return lines.join("\n");

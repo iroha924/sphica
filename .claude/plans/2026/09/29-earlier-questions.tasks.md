@@ -102,6 +102,16 @@ base: main
   - コミット: `test(search): check the lifecycle filter on same-turn context`
   - 結果: `node --test test/asked.test.ts` → pass 4 / fail 0。asked.ts の lifecycle の条件を一時的に外すと「the active finding quoting the reply is left out by the lifecycle filter」で落ちることを確かめ、戻した
 
+- [x] T11: GitHub の Codex レビューの 4 件を直す（Reply はターンの最後の返事、candidate への置き換えはたどらない、つながった記録と文脈は 10 件まで、MCP のテストの HOME は一時ディレクトリ）
+  - 種別: 修正
+  - 計画: S1, S3
+  - 依存: なし
+  - 変更: `server/src/asked.ts`, `server/src/search.ts`, `server/test/asked.test.ts`, `server/test/search.test.ts`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/asked.test.ts test/search.test.ts` → AskUserQuestion のあるターンで Reply が質問を指す、candidate の置き換えが後継に出る、12 件の記録が全部出る、で落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/asked.test.ts test/search.test.ts test/plugin.test.ts` → 全部 pass。`bun run verify` → 0
+  - コミット: `fix(search): reply with the turn's last answer, skip unadopted replacements, bound tied records`
+  - 結果: red（直す前）`node --test test/asked.test.ts test/search.test.ts` → Reply が AI の質問（actual 2、expected 4）、candidate の yarn が後継に出る、で失敗。直した後 → pass 17 / fail 0（12 件の記録は 10 件と「and 2 more tied records」）。`node --test test/plugin.test.ts` → pass 28 / fail 0（MCP の子プロセスの HOME を一時ディレクトリにした）。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 62 / 62）
+
 ## P3: 測定と acceptance
 
 - [x] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
@@ -130,3 +140,4 @@ base: main
 2026-09-29 / T08 / c2a6be3（T07）と main..c2a6be3 の Codex レビュー: 同じターンの文脈に絞り込みがかからない（両方で指摘）は採用。両方のセッション id の除外を Codex 側しか確かめていない、偽の見出しのテストが偽の発言が結果にあることを確かめていない、の 2 件も採用。review-shipping は、Codex が起動した読み取りの MCP には CODEX_THREAD_ID が無く、Codex では今のセッションの発言が返ることを再現した（テストはその環境変数を与えて空振りしていた） / 修正タスク T08 を足した。Codex の件は公開インターフェースに響くので、持ち主に直し方を聞いてから plan を直す
 2026-09-29 / T09 / 持ち主が Codex の件で「session 引数を足す」を選び、plan を直した（変更履歴を参照） / 修正タスク T09 を足した
 2026-09-29 / T10 / a993a6c..2f72815 と main..2f72815 の Codex レビュー: lifecycle の絞り込みのテストが無い（両方で指摘）は採用。誤った id や別プロジェクトの id を session に渡すと除けていないのに「Earlier」と言う（T09 F1）は見送り（呼ぶ側が誤った値を渡したときだけ）。「now」の後継に lifecycle の絞り込みがかからない（全差分 F1）は見送り（後継は結果ではなく、見せた記録が今何に置き換わったかの注記で、隠すと置き換え済みの決定が今も有効に見える）。review-shipping はパックしたもので Codex の条件（id の無い MCP）を再現し、session を渡せば除かれ、渡さなければ注記が付くことを確かめた / T10 を足して終えた
+2026-09-29 / T11 / PR #224 の GitHub Codex レビュー（1a64304）: P2 が 4 件、P1 は無し。Reply が AskUserQuestion の質問を指す、MCP のテストの HOME が固定の存在しないパス、candidate の置き換えを後継としてたどる、つながった記録が上限なく出る。4 件とも直すのが安いので採用 / 修正タスク T11 を足した

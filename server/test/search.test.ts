@@ -639,3 +639,44 @@ test("an owner-message search keeps only the owner's words outside the named ses
     await db.done();
   }
 });
+
+// A replacement that was never adopted is not what holds now
+test("the chain skips a replacement that stayed a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Use pnpm for installs." });
+    const b = message(db, p, { id: "m2", text: "Go back to npm." });
+    const c = message(db, p, { id: "m3", text: "Maybe yarn." });
+    const d = message(db, p, { id: "m4", text: "Move to bun." });
+    await save(db, p, { units: [decision("pnpm", a, "Use pnpm for installs.")] });
+    await save(db, p, {
+      units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
+    });
+    // No adoption: it stays a candidate
+    await save(db, p, {
+      units: [
+        {
+          key: "yarn",
+          kind: "decision",
+          stance: "do",
+          text: "Maybe yarn.",
+          evidence: [{ source: `s${c}`, quote: "Maybe yarn.", role: "proposes" }],
+          supersedes: "trace:ext-s1/npm",
+        },
+      ],
+    });
+    await save(db, p, { units: [decision("bun", d, "Move to bun.", { supersedes: "trace:ext-s1/npm" })] });
+    const lifecycle = db.owner
+      .prepare("select lifecycle from unit where key = 'trace:ext-s1/yarn'")
+      .get()?.lifecycle;
+    assert.equal(lifecycle, "candidate");
+    const r = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
+    assert.deepEqual(
+      r.hits.map((h) => h.key),
+      ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
+    );
+  } finally {
+    await db.done();
+  }
+});

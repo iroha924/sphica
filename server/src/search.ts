@@ -167,8 +167,8 @@ export type Successor = {
 };
 
 /**
- * The records at the end of a record's supersedes chain: each replacement is followed until one that nothing replaced, so a record
- * replaced twice leads to the one that holds now. A visited set keeps a cycle from looping.
+ * The records at the end of a record's supersedes chain: each adopted replacement is followed until one that nothing replaced, so a
+ * record replaced twice leads to the one that holds now. A visited set keeps a cycle from looping.
  */
 export async function liveSuccessors(db: Kysely<DB>, id: number): Promise<Successor[]> {
   const seen = new Set([id]);
@@ -181,6 +181,8 @@ export async function liveSuccessors(db: Kysely<DB>, id: number): Promise<Succes
       .where("l.to_unit", "in", frontier)
       .where("l.kind", "=", "supersedes")
       .where("n.extraction", "=", "supported")
+      // A replacement never adopted (still a candidate) is not what holds now
+      .where("n.lifecycle", "<>", "candidate")
       .select([
         "l.to_unit",
         "n.id",

@@ -369,3 +369,57 @@ test("the kind and lifecycle filters narrow the same-turn context too", async ()
     await w.db.done();
   }
 });
+
+test("the reply is the turn's last assistant message, and tied records are bounded per message", async () => {
+  const db = tempDb();
+  const p = project(db);
+  try {
+    // An AskUserQuestion turn: the assistant asks, the owner answers, the assistant replies last
+    const asked = said(db, p, {
+      id: "k1",
+      text: "Set up the package manager for installs.",
+      session: "K",
+      turn: "t1",
+    });
+    said(db, p, { id: "k2", text: "npm or pnpm?", session: "K", turn: "t1", speaker: "assistant" });
+    said(db, p, { id: "k3", text: "pnpm", session: "K", turn: "t1" });
+    const last = said(db, p, {
+      id: "k4",
+      text: "Done, pnpm is set up.",
+      session: "K",
+      turn: "t1",
+      speaker: "assistant",
+    });
+    // Twelve records quote one message
+    await save(
+      db,
+      p,
+      "K",
+      {
+        units: Array.from({ length: 12 }, (_, n) => ({
+          key: `f${n}`,
+          kind: "finding",
+          text: `Finding ${n}`,
+          evidence: [
+            { source: `s${asked}`, quote: "Set up the package manager for installs.", role: "states" },
+          ],
+        })),
+      },
+      [asked],
+    );
+    const r = await askedBefore(db.reader, p, {
+      question: "package manager installs",
+      limit: 10,
+      notSessions: [],
+    });
+    const k = r.messages.find((e) => e.message.id === asked);
+    assert.equal(k?.reply, last);
+    const block = askedText(r)
+      .split("\n\n")
+      .find((b) => b.startsWith(`## s${asked}:`));
+    assert.equal(block?.split("\n").filter((l) => l.startsWith("- trace:K/f")).length, 10);
+    assert.match(block ?? "", /\nand 2 more tied records\n/);
+  } finally {
+    await db.done();
+  }
+});

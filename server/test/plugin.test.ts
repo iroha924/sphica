@@ -720,6 +720,7 @@ test("search says when it stopped before reading every candidate", async () => {
 test("search with asked leaves out the session it is given and says when it cannot tell the current session", async () => {
   const db = tempDb();
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-home-"));
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/o/asked.git"], { cwd: repo });
   const p = project(db, "git:github.com/o/asked", "o/asked");
@@ -738,7 +739,7 @@ test("search with asked leaves out the session it is given and says when it cann
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );
@@ -780,5 +781,6 @@ test("search with asked leaves out the session it is given and says when it cann
   } finally {
     await client.close();
     await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
