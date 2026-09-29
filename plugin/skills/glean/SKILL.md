@@ -47,7 +47,8 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 4. **Bring in the source**: for a GitHub issue or pull request URL of this repository, `glean_fetch` with the run and URL; it keeps the text as sources
    and lists their refs. For a file, cite it in the record (`file`); Sphica reads it from git itself. For anything else (meeting notes, chat), cite
    the owner's message that quotes it
-5. **Read**: `record_context` with the run: the owner's messages in this session with their refs
+5. **Read**: `record_context` with the run: the owner's messages in this session with their refs. When a page ends with
+   `call record_context with after: "s<N>"`, call it again with that `after`
 6. **Check**: `record_check` with the run and the record below. Fix errors and check again. A note to ask the owner for a source means
    step 2 is not done
 7. **Save**: `record_save`. **Report** what changed, copying save's lines

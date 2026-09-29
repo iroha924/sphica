@@ -16,6 +16,7 @@ const PER_LAYER = {
   overview: 5,
   export: 1,
   fields: 3,
+  paging: 2,
 };
 const DELIBERATE_MISSING = new Set(["capture-04", "glean-03"]);
 

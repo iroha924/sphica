@@ -15,7 +15,15 @@ import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
 import { exportDecisions, exportPath } from "../../src/export.ts";
-import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
+import {
+  beginGlean,
+  beginHarvest,
+  beginTrace,
+  checkText,
+  contextText,
+  pendingText,
+  saveText,
+} from "../../src/extract.ts";
 import { applyForget, previewForget } from "../../src/forget.ts";
 import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
@@ -289,8 +297,15 @@ export async function createDriver(world: World): Promise<Driver> {
   }
 
   /** The record server's flow, called as its tools call it: check (kept for expectations), then save. */
-  async function extract(run: string, prefix: string, record: Record<string, unknown>) {
+  async function extract(run: string, prefix: string, record: Record<string, unknown>, pages?: number) {
     const pid = await projectId();
+    // Read the context pages first, as the Skills do: saving marks only the sources shown (and quoted) as looked at.
+    // The cursor is taken from the page's last line only: source text above it may hold the same words
+    for (let page = await contextText(writer(), run, pid, repo), read = 1; ; read++) {
+      const next = /call record_context with after: "(s\d+)"[^\n]*$/.exec(page)?.[1];
+      if (!next || (pages !== undefined && read >= pages)) break;
+      page = await contextText(writer(), run, pid, repo, next);
+    }
     const translated = await translate(record);
     checked = (await checkText(writer(), run, pid, repo, translated)).text;
     await saveText(writer(), run, pid, repo, translated);
@@ -339,12 +354,15 @@ export async function createDriver(world: World): Promise<Driver> {
     session: string;
     record: Record<string, unknown>;
     refused?: boolean;
+    /** How many context pages the agent reads before saving; every page when absent */
+    pages?: number;
   }): Promise<void> {
     const s = sessions.get(step.session);
     if (!s) throw new Error(`unknown session ${step.session}`);
     const uuid = sessionId(await projectId(), s.host === "codex" ? "codex" : "claude-code", s.id);
     const { processed_without_units: empty, ...record } = step.record;
     const run = await beginTrace(writer(), await projectId(), uuid);
+    const pages = step.pages;
     // Only a case that expects the refusal keeps it as an outcome; any other failed save still fails the case
     if (step.refused) {
       saves = [
@@ -355,7 +373,7 @@ export async function createDriver(world: World): Promise<Driver> {
       ];
       return;
     }
-    await extract(run, `trace:${s.id}/`, record);
+    await extract(run, `trace:${s.id}/`, record, pages);
     for (const other of (empty ?? []) as string[]) await trace({ session: other, record: { units: [] } });
   }
 
@@ -1029,6 +1047,16 @@ export async function createDriver(world: World): Promise<Driver> {
           got.some((r) => r.outcome === want.outcome),
           `${want.source}: ${got.map((r) => r.outcome).join(", ")}`,
         );
+        return;
+      }
+      if (typeof e.source_pending === "string") {
+        const id = Number((await ref(e.source_pending)).slice(1));
+        const got = await db()
+          .selectFrom("source_processing")
+          .select("outcome")
+          .where("source_id", "=", id)
+          .execute();
+        assert.deepEqual(got, [], `${e.source_pending} was marked looked at`);
         return;
       }
       if (typeof e.no_unit === "string") {

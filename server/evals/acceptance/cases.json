@@ -3017,6 +3017,70 @@
           "no_unit": "trace:s-ja-fields/cache"
         }
       ]
+    },
+    {
+      "id": "paging-01",
+      "layer": "paging",
+      "lang": "ja",
+      "summary": "Saving after reading only the first context page leaves the unread messages waiting for the next trace",
+      "given": [
+        {
+          "capture": "s-ja-long"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-long",
+          "pages": 1,
+          "record": {
+            "units": []
+          }
+        }
+      },
+      "then": [
+        {
+          "source_outcome": {
+            "source": "session:s-ja-long#1.owner",
+            "outcome": "no_unit"
+          }
+        },
+        {
+          "source_pending": "session:s-ja-long#3.owner"
+        }
+      ]
+    },
+    {
+      "id": "paging-02",
+      "layer": "paging",
+      "lang": "ja",
+      "summary": "Reading every context page before saving marks every message looked at",
+      "given": [
+        {
+          "capture": "s-ja-long"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-long",
+          "record": {
+            "units": []
+          }
+        }
+      },
+      "then": [
+        {
+          "source_outcome": {
+            "source": "session:s-ja-long#1.owner",
+            "outcome": "no_unit"
+          }
+        },
+        {
+          "source_outcome": {
+            "source": "session:s-ja-long#3.owner",
+            "outcome": "no_unit"
+          }
+        }
+      ]
     }
   ],
   "setups": {

@@ -19,6 +19,7 @@ import {
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import type { Get } from "../src/github.ts";
+import { readSource } from "../src/read.ts";
 import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
@@ -1192,5 +1193,183 @@ test("tombstone: glean does not store a file excerpt the owner forgot, and says 
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("trace: context comes in pages, and saving marks as looked at only the messages the run was shown", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const ids = Array.from({ length: 40 }, (_, i) =>
+      message(db, p, {
+        id: `m${i}`,
+        text: `発言 ${i}: ${"あ".repeat(1500)}`,
+        sent: `2026-09-10T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+    const untraced = () =>
+      Number(
+        db.owner
+          .prepare(
+            "select count(*) as n from source s where s.session_id = 's1' and not exists (select 1 from source_processing p where p.source_id = s.id)",
+          )
+          .get()?.n,
+      );
+    // Reading only the first page and saving leaves the unread messages waiting for the next trace
+    const first = await beginTrace(db.ingest, p, "s1");
+    const page = await contextText(db.ingest, first, p, null);
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    assert.match(page, /\d+ more sources follow: call record_context with after: "s\d+"/);
+    assert.doesNotMatch(page, /Live records of this project/);
+    assert.doesNotMatch(page, /発言 39:/);
+    await saveText(db.ingest, first, p, null, { units: [] });
+    const shown = [...page.matchAll(/^## s(\d+) /gm)].length;
+    assert.ok(shown > 0 && shown < 40);
+    assert.equal(untraced(), 40 - shown);
+    assert.match(await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")), /1 session to trace/);
+    // Reading every page to the end marks them all; a page starts only after a cursor the run was given
+    const second = await beginTrace(db.ingest, p, "s1");
+    await assert.rejects(
+      contextText(db.ingest, second, p, null, `s${ids[30]}`),
+      /not a page this run was given; call record_context without after/,
+    );
+    let text = await contextText(db.ingest, second, p, null);
+    const pages = [text];
+    for (let m = /after: "(s\d+)"/.exec(text); m; m = /after: "(s\d+)"/.exec(text)) {
+      text = await contextText(db.ingest, second, p, null, m[1]);
+      pages.push(text);
+    }
+    assert.ok(pages.length > 1);
+    assert.match(pages.at(-1) ?? "", /発言 39:[\s\S]*Live records of this project/);
+    assert.equal(pages.join("\n").match(/^## s\d+ /gm)?.length, 40);
+    await saveText(db.ingest, second, p, null, { units: [] });
+    assert.equal(untraced(), 0);
+    assert.ok(ids.length === 40);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: one message longer than a page is cut with a pointer to read the rest, and a quote not found marks nothing looked at", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const long = message(db, p, { id: "m1", text: `始まり ${"い".repeat(30_000)} 終わり` });
+    const other = message(db, p, { id: "m2", text: "Postgres は使わない。", sent: "2026-09-10T00:01:00Z" });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const page = await contextText(db.ingest, run, p, null);
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    const rest = new RegExp(`read (s${long}@\\d+) for the rest`).exec(page)?.[1] ?? "";
+    assert.ok(rest, page.slice(-200));
+    assert.doesNotMatch(page, /終わり/);
+    // The pointer reads on from where the page cut off
+    const tail = (await readSource(db.reader, p, rest)) ?? "";
+    assert.match(tail, /終わり/);
+    assert.doesNotMatch(tail, /始まり/);
+    // The record cites the unread message with words it does not hold: that proves no reading, so it is not marked
+    await saveText(db.ingest, run, p, null, {
+      units: [
+        {
+          key: "no-postgres",
+          kind: "finding",
+          text: "Postgres",
+          evidence: [{ source: `s${other}`, quote: "MySQL も使わない。", role: "states" }],
+        },
+      ],
+    });
+    const looked = (id: number) =>
+      Number(db.owner.prepare("select count(*) as n from source_processing where source_id = ?").get(id)?.n);
+    assert.equal(looked(long), 1);
+    assert.equal(looked(other), 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: the live records go on a page of their own when they do not fit beside the last messages", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "う".repeat(19_900) });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const first = await contextText(db.ingest, run, p, null);
+    const next = /The live records follow: call record_context with after: "(s\d+)"/.exec(first)?.[1];
+    assert.ok(next, first.slice(-300));
+    assert.doesNotMatch(first, /Live records of this project/);
+    const last = await contextText(db.ingest, run, p, null, next);
+    assert.match(last, /Live records of this project/);
+    assert.doesNotMatch(last, /^## s/m);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: a page stays within its size for emoji text, and every edit of a long session is listed", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const emoji = message(db, p, { id: "m1", text: "😀".repeat(30_000) });
+    for (let i = 0; i < 150; i++)
+      insert(db, "edit_observation", {
+        session_id: "s1",
+        turn_id: "t1",
+        tool_event_id: `e${i}`,
+        path: `src/file-${i}.ts`,
+        via: "tool",
+        observed_at: "2026-09-10T00:00:00.000Z",
+      });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const first = await contextText(db.ingest, run, p, null);
+    assert.ok(first.length < 21_000, `a page of ${first.length} characters`);
+    assert.match(first, new RegExp(`read s${emoji}@\\d+ for the rest`));
+    let page = first;
+    for (let m = /after: "(s\d+)"/.exec(page); m; m = /after: "(s\d+)"/.exec(page))
+      page = await contextText(db.ingest, run, p, null, m[1]);
+    // Every edit is listed: a long session edits more than a hundred times, and the anchors come from these paths
+    assert.match(page, /- src\/file-0\.ts[\s\S]*- src\/file-149\.ts/);
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: a tail too long for a page is cut, with the number of lines left out", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const said = message(db, p, { id: "m1", text: "Track these fields." });
+    const r = Number(
+      db.owner
+        .prepare(
+          "insert into extraction_run (project_id, origin, target, status, started_at) values (?, 'trace', 'session:s1', 'saved', '2026-09-10T00:00:00.000Z') returning id",
+        )
+        .get(p)?.id,
+    );
+    for (let i = 0; i < 60; i++)
+      insert(db, "field_def", {
+        project_id: p,
+        name: `field_${i}`,
+        type: "text",
+        label: `Field ${i}`,
+        description: "d".repeat(500),
+        source_id: said,
+        span_start: 0,
+        span_end: 5,
+        run_id: r,
+        added_at: "2026-09-10T00:00:00.000Z",
+      });
+    const run = await beginTrace(db.ingest, p, "s1");
+    let page = await contextText(db.ingest, run, p, null);
+    for (let m = /after: "(s\d+)"[^\n]*$/.exec(page); m; m = /after: "(s\d+)"[^\n]*$/.exec(page)) {
+      assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+      page = await contextText(db.ingest, run, p, null, m[1]);
+    }
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    assert.match(
+      page,
+      /- and \d+ more lines left out: find records with search, and every field definition with the fields tool/,
+    );
+  } finally {
+    await db.done();
   }
 });
