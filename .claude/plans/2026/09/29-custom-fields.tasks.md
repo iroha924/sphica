@@ -53,13 +53,14 @@ trace の保存で定義と値を検査して書き、値で検索できる
   - コミット: `feat(record): take field definitions and quoted field values in trace`
   - 結果: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 23 pass / 0 fail（harvest の拒否、owner でない定義・同じ record での二重定義・enum の不整合・未定義の項目・引用に無い値・見つからない引用・kinds 外の拒否、`p95=320ms` から 320 は通り 95・`-5` から 5・`1.5` と `1e3` から 1 は拒否、「レイテンシは3件」から 3 は通る、保存した定義と値、次の run の record_context に定義が出て再定義は拒否、定義だけの save で source が `units`）。HEAD の record.ts では `valueInQuote` が無いため読み込みの段階で落ちる（挙動の違いによる失敗は確かめていない）。`bun run verify` → 0（`SQL: tests ran 185 / 185 sites`）
 
-- [ ] T04: 検索の判定語に値を入れ、acceptance を足す
+- [x] T04: 検索の判定語に値を入れ、acceptance を足す
   - 種別: 追加
   - 計画: S1, S3
   - 依存: T03（record_save で値を書けることが要る）
-  - 変更: `server/src/search.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/src/search.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/world.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run acceptance` → 定義 → 値 → 値だけで search に残る、引用に表記の無い値が拒否、定義だけの save、の 3 件が通る（判定語を足す前に 1 件目が弱い一致で落ちることを結果に残す）。`bun run verify` → 0
   - コミット: `feat(search): match records by their field values`
+  - 結果: 判定語を足す前の `bun run acceptance` → 71 pass / 1 fail（fields-02 が `trace:s-ja-fields/cache not within 3:` で落ち、値の語は索引に当たっても判定で弱い一致として落ちていた）。足した後 → 72 pass / 0 fail（fields-01: 定義だけの save で定義が入り、その発言が `units`。fields-02: 値 globex が保存され、`globex` だけの検索で 3 位以内。fields-03: 引用に無い値 initech は `is not written in the quote` で拒否され、記録は残らない）。`bun run verify` → 0（`SQL: tests ran 186 / 186 sites`）
 
 ## P3: 見せる
 
@@ -112,6 +113,15 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - 完了条件: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 値の語が DB と WAL のバイトに残らず、再実行でも消え、値だけが消える確認文に本文が残る注意が出る。`bun run verify` → 0
   - コミット: `fix(forget): always merge the unit index after forgetting, and warn when only field values go`
 
+- [ ] T10: integer の数値の開始を、ラテン・ギリシャ・キリル文字、数字、`_`、`.`、符号の直後では認めないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す関数が要る）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `.claude/plans/2026/09/29-custom-fields.plan.md`
+  - red: `cd server && node --test --test-timeout=60000 test/record.test.ts` → `x-5` から 5、`β95=320ms` と `ｐ95=320ms` から 95 を拒否するテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 上の 3 例が拒否され、`レイテンシは3件` から 3、`p95=-5` から -5、`320ms` から 320 は通る。`bun run verify` → 0
+  - コミット: `fix(record): read an integer only where no identifier or sign runs into it`
+
 ## 記録
 2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
 2026-09-29 / T01, T08 / パッケージに入る変更はバージョンを揃えないと pre-commit の bundle が止める / 0.6.8 への引き上げを T08 から T01 に移した。T01 の変更欄と完了条件に 4 つの manifest と release:plan を足し、T08 の変更欄（前: trace Skill と 4 つの manifest、新: trace Skill のみ）と完了条件（前: release:plan・verify:ai・verify、新: verify:ai・verify）と名前を直した
@@ -119,3 +129,5 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T03 / mcp-record.ts は record を unknown で受けて渡すだけなので変えずに済み、glean.ts は Checked の形が増えたので変えた / T03 の変更欄を直した（前: record.ts・extract.ts・mcp-record.ts・record.test.ts、新: record.ts・extract.ts・glean.ts・record.test.ts）
 2026-09-29 / T03 / integer の数値の開始の条件で、Unicode の文字を除くと「レイテンシは3件」の 3 が取れなかった / ASCII の英字と `_` だけを除くようにし、plan の方針と変更履歴を直した
 2026-09-29 / T01, T02 / Codex のレビュー: T01 の F1（値の語が unit 索引のブロックに残る）は T02 の optimize で直っていたが、バイトを見るテストが無い。T02 の F1（後処理が失敗した後の再実行で unit 索引の optimize が飛ぶ）と F2（値だけを失う記録で、本文が残る注意が出ない）は採用 / 修正タスク T09 を足した
+2026-09-29 / T04 / acceptance のドライバーは trace の保存の拒否を期待できず、架空プロジェクトに項目を定義するセッションも無かった / ドライバーに `refused` の trace と `field_defined`・`field_value`・`source_outcome`・`no_unit` の確認を足し、world.json に s-ja-fields を足した。変更欄に world.json を足した（前: search.ts・cases.json・driver.ts・acceptance-cases.test.ts）
+2026-09-29 / T03 / Codex のレビュー: F1（`x-5` から 5 が通る）と F2（`β95`・全角の `ｐ95` の 95 が通る）はどちらも再現されていて採用 / 修正タスク T10 を足した

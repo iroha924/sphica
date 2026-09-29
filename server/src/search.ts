@@ -229,7 +229,7 @@ async function judgeUnits(
   hits: (UnitHit & { rank: number })[],
 ): Promise<number> {
   const ids = rows.map((r) => r.id);
-  const [options, anchors, aliases] = ids.length
+  const [options, anchors, aliases, fields] = ids.length
     ? await Promise.all([
         db
           .selectFrom("unit_option")
@@ -250,8 +250,14 @@ async function judgeUnits(
           .where("unit_id", "in", ids)
           .orderBy("id", "desc")
           .execute(),
+        db
+          .selectFrom("unit_field as f")
+          .innerJoin("field_def as d", "d.id", "f.field_def_id")
+          .select(["f.unit_id", "d.name", "f.value"])
+          .where("f.unit_id", "in", ids)
+          .execute(),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
 
   let weaker = 0;
   for (const r of rows) {
@@ -270,6 +276,7 @@ async function judgeUnits(
           r.revisit_when,
           ...opts.flatMap((o) => [o.text, o.why, o.reconsider_when]),
           ...anch.flatMap((a) => [a.path, a.symbol]),
+          ...fields.filter((f) => f.unit_id === r.id).flatMap((f) => [f.name, f.value]),
         ]
           .filter(Boolean)
           .join("\n"),

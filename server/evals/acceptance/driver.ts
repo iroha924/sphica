@@ -335,12 +335,27 @@ export async function createDriver(world: World): Promise<Driver> {
     return out;
   }
 
-  async function trace(step: { session: string; record: Record<string, unknown> }): Promise<void> {
+  async function trace(step: {
+    session: string;
+    record: Record<string, unknown>;
+    refused?: boolean;
+  }): Promise<void> {
     const s = sessions.get(step.session);
     if (!s) throw new Error(`unknown session ${step.session}`);
     const uuid = sessionId(await projectId(), s.host === "codex" ? "codex" : "claude-code", s.id);
     const { processed_without_units: empty, ...record } = step.record;
-    await extract(await beginTrace(writer(), await projectId(), uuid), `trace:${s.id}/`, record);
+    const run = await beginTrace(writer(), await projectId(), uuid);
+    // Only a case that expects the refusal keeps it as an outcome; any other failed save still fails the case
+    if (step.refused) {
+      saves = [
+        await extract(run, `trace:${s.id}/`, record).then(
+          () => ({ status: 0, out: "saved" }),
+          (e: Error) => ({ status: 1, out: e.message }),
+        ),
+      ];
+      return;
+    }
+    await extract(run, `trace:${s.id}/`, record);
     for (const other of (empty ?? []) as string[]) await trace({ session: other, record: { units: [] } });
   }
 
@@ -978,6 +993,47 @@ export async function createDriver(world: World): Promise<Driver> {
         if (want.partial !== undefined) assert.equal(got.truncated === 1, want.partial);
         if (want.not_text !== undefined) assert.ok(!got.text.includes(want.not_text), got.text);
         if (want.redacted !== undefined) assert.equal(got.redacted === 1, want.redacted);
+        return;
+      }
+      if (typeof e.field_defined === "string") {
+        const d = await db()
+          .selectFrom("field_def")
+          .select("name")
+          .where("project_id", "=", await projectId())
+          .where("name", "=", e.field_defined)
+          .executeTakeFirst();
+        assert.ok(d, `no field ${e.field_defined}`);
+        return;
+      }
+      if (e.field_value && typeof e.field_value === "object") {
+        const want = e.field_value as { of: string; name: string; value: string };
+        const got = await db()
+          .selectFrom("unit_field as f")
+          .innerJoin("field_def as d", "d.id", "f.field_def_id")
+          .where("f.unit_id", "=", (await unitOf(want.of)).id)
+          .where("d.name", "=", want.name)
+          .select("f.value")
+          .executeTakeFirst();
+        assert.equal(got?.value, want.value, `${want.of} ${want.name}`);
+        return;
+      }
+      if (e.source_outcome && typeof e.source_outcome === "object") {
+        const want = e.source_outcome as { source: string; outcome: string };
+        const id = Number((await ref(want.source)).slice(1));
+        const got = await db()
+          .selectFrom("source_processing")
+          .select("outcome")
+          .where("source_id", "=", id)
+          .execute();
+        assert.ok(
+          got.some((r) => r.outcome === want.outcome),
+          `${want.source}: ${got.map((r) => r.outcome).join(", ")}`,
+        );
+        return;
+      }
+      if (typeof e.no_unit === "string") {
+        const u = await db().selectFrom("unit").select("id").where("key", "=", e.no_unit).executeTakeFirst();
+        assert.equal(u, undefined, `${e.no_unit} was saved`);
         return;
       }
       if (typeof e.save_refused_contains === "string") {

@@ -107,6 +107,23 @@
           "edits": []
         }
       ]
+    },
+    {
+      "id": "s-ja-fields",
+      "host": "claude-code",
+      "at": "2026-03-18T10:00:00+09:00",
+      "turns": [
+        {
+          "owner": "これから決定には、影響するテナントを tenant という項目で記録して。",
+          "assistant": "決定ごとに影響するテナントを tenant として記録します。",
+          "edits": []
+        },
+        {
+          "owner": "globex の一覧が遅いので、検索結果のキャッシュは Redis に置く。",
+          "assistant": "検索結果のキャッシュを Redis に置きます。",
+          "edits": []
+        }
+      ]
     }
   ],
   "issues": [
