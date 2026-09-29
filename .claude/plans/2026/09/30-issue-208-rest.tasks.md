@@ -85,6 +85,15 @@ base: main
   - コミット: `fix(glean): read excerpts and anchors before taking the write lock`
   - 結果: 直す前（glean.ts・extract.ts を T05 の状態に戻した）の red コマンド → 偽 git の記録が `[ 'locked' ]`（期待 `[ 'free' ]`）で落ちた。直した後 `node --test --test-timeout=60000 --test-name-pattern='^save:' test/extract.test.ts` → 3 pass（glean の git 呼び出しはすべてロックの外、無い unit への操作は読めない excerpt ではなく「not a record of this project」で拒否、ロックの中で書き換えた src.ts の symbol は保存しない。T05 のテストに「準備の読み取りの直後・ロックの前に書き換える」ケースを足し、ロックの中で判定し直すのはその 1 ファイルだけ）。`bun run verify` → 0
 
+- [x] T08: 未到達の glean 操作のエラーを record_save の経路でも確かめる
+  - 種別: 追加
+  - 計画: S5
+  - 依存: T06（準備の経路が要る）
+  - 変更: `server/test/extract.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 --test-name-pattern='^save: glean' test/extract.test.ts` → 無い unit と古い revision の操作で、checkText と saveText のどちらも読めない excerpt ではなくその理由で拒否する。`bun run verify` → 0
+  - コミット: `test(glean): check unreached operations through save too`
+  - 結果: 同じコマンド → 1 pass（無い unit は「not a record of this project」、revision+1 は「changed since you read it」、どちらも「is not a commit」を含まない）。`bun run verify` → 0
+
 ## P3: harvest の fork 実験
 
 harvest を Claude Code の fork で動かしたときの文脈の増え方と保存結果が測れていて、採否が決まっている
@@ -108,3 +117,4 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
 - 2026-09-30 / T06 / 変更欄 前: glean.ts, extract.ts, record.test.ts → 後: glean.ts, extract.ts, extract.test.ts。red 前: record.test.ts → 後: extract.test.ts の偽 git。T05 と同じ理由
 - 2026-09-30 / T05 / Codex のレビュー F1: run を確かめる前に準備の重い検査が走る / 採用。T06 で saveText が bound で run を確かめてから準備する形にした
 - 2026-09-30 / T05 / Codex のレビュー F2: テストが「準備の後・ロックの前」と「前の anchor の挿入の後」の書き換えを見ていない、「同じ長さ」の記述が誤り / 一部採用。準備の直後の書き換えのケースを T06 のコミットで足した。挿入の後かどうかは、未コミットの行を別の接続から見られないため外から観測できず、refresh と挿入が同じループにあることをコードで担保する。T05 の結果行の「同じ長さ」は誤りで、内容のハッシュを比べるので長さは問わない
+- 2026-09-30 / T08 / Codex の T06 レビュー F1: 未到達の操作のテストが checkText だけで、saveText の準備の経路と revision 違いを見ていない / 採用。T08 を足した（テストだけの追加）

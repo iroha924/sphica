@@ -497,22 +497,29 @@ test("save: glean reads excerpts and commits before the write lock, and judges a
     });
     const rev = () =>
       Number(db.owner.prepare("select revision from unit where key = 'glean:look'").get()?.revision);
-    // A missing unit is refused for that, not for its excerpt that cannot be read
-    const stray = await beginGlean(db.ingest, p, "g1");
-    const refused = await checkText(db.ingest, stray, p, root, {
-      ops: [
-        {
-          op: "add_evidence",
-          unit: "glean:nope",
-          revision: 1,
-          file: { path: "docs/note.md", commit: "f".repeat(40), lines: [3, 3] },
-          quote: "Back up before a release.",
-          role: "explains",
-        },
-      ],
+    // A missing unit or a stale revision is refused for that, not for its excerpt that cannot be read, by check and by save alike
+    const unreadable = (unit: string, revision: number) => ({
+      op: "add_evidence",
+      unit,
+      revision,
+      file: { path: "docs/note.md", commit: "f".repeat(40), lines: [3, 3] },
+      quote: "Back up before a release.",
+      role: "explains",
     });
-    assert.match(refused.text, /glean:nope: not a record of this project/);
-    assert.doesNotMatch(refused.text, /is not a commit/);
+    for (const [op, want] of [
+      [unreadable("glean:nope", 1), /glean:nope: not a record of this project/],
+      [unreadable("glean:look", rev() + 1), /glean:look: changed since you read it/],
+    ] as const) {
+      const stray = await beginGlean(db.ingest, p, "g1");
+      const checked = (await checkText(db.ingest, stray, p, root, { ops: [op] })).text;
+      assert.match(checked, want);
+      assert.doesNotMatch(checked, /is not a commit/);
+      await assert.rejects(saveText(db.ingest, stray, p, root, { ops: [op] }), (e: Error) => {
+        assert.match(e.message, want);
+        assert.doesNotMatch(e.message, /is not a commit/);
+        return true;
+      });
+    }
 
     writeLockGit(bin, db.file, log);
     const run = await beginGlean(db.ingest, p, "g1");
