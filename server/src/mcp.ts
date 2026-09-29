@@ -10,6 +10,7 @@ import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
 import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "./export.ts";
+import { fieldsTable } from "./fields.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
 import { liveOverview, lookOverview } from "./overview.ts";
@@ -290,6 +291,27 @@ server.registerTool(
       const built = await exportDecisions(db, p.id, p.name, a.records);
       if ("error" in built) return text(built.error, true);
       return text(exportReply(where, built.document));
+    } catch (e) {
+      return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
+    }
+  },
+);
+
+server.registerTool(
+  "fields",
+  {
+    title: "Fields this project tracks",
+    description:
+      "Only for the fields Skill. The fields the owner defined for this project's records, as a Markdown table: type, allowed values, " +
+      "the record kinds each applies to, how many records carry a value, and the owner's words that defined it.",
+    inputSchema: { cwd: CWD },
+    annotations: READ_ONLY,
+  },
+  async (a) => {
+    try {
+      const p = await projectOf(a.cwd);
+      if (typeof p === "string") return text(p, true);
+      return text(framed(await fieldsTable(db, p.id)));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }

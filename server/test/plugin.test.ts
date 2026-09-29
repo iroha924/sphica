@@ -450,6 +450,7 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
       "export",
+      "fields",
       "overview",
       "read",
       "review_check",
@@ -466,6 +467,9 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
     });
     assert.match(JSON.stringify(r.content), /not in a registered project/);
     assert.equal(r.isError, true);
+    const f = await client.callTool({ name: "fields", arguments: { cwd: "/nonexistent" } });
+    assert.match(JSON.stringify(f.content), /not in a registered project/);
+    assert.equal(f.isError, true);
   } finally {
     await client.close();
   }

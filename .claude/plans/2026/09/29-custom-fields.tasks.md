@@ -75,13 +75,14 @@ read と `/sphica:fields` で定義と値が見える
   - コミット: `feat(read): show field values with their quotes`
   - 結果: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 14 pass / 0 fail（`Fields:` の下に `tenant: acme (s<id> session_message session:s1, the owner, <日時>): "acme is slow"`）。HEAD の read.ts では新しい 1 件が落ちる。`bun run verify` → 0（`SQL: tests ran 187 / 187 sites`）
 
-- [ ] T06: 読み取りの MCP に `fields` ツールを足す
+- [x] T06: 読み取りの MCP に `fields` ツールを足す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（新しい表が要る）
   - 変更: `server/src/fields.ts`, `server/src/mcp.ts`, `server/test/fields.test.ts`, `server/test/plugin.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/fields.test.ts test/plugin.test.ts` → 定義ごとの件数の表、`|` と改行の入ったセル、200 文字の切り詰め、framed の囲み、ツール一覧に `fields`。`bun run verify` → 0
   - コミット: `feat(mcp): add the fields tool to the read server`
+  - 結果: `cd server && node --test --test-timeout=60000 test/fields.test.ts test/plugin.test.ts` → 29 pass / 0 fail（定義ごとの行と値の付いた記録の件数 2 / 0、ラベルと引用の `|` が `\|` になって列の数が見出しと同じ、改行が空白になり説明は 200 バイトで切れる、別プロジェクトには定義が出ない、本物の読み取りサーバーのツール一覧に `fields`、登録の無いディレクトリでは isError）。`bun run verify` → 0（`SQL: tests ran 188 / 188 sites`）
 
 - [ ] T07: `/sphica:fields` Skill を足す
   - 種別: 追加
@@ -132,3 +133,4 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T01, T02 / Codex のレビュー: T01 の F1（値の語が unit 索引のブロックに残る）は T02 の optimize で直っていたが、バイトを見るテストが無い。T02 の F1（後処理が失敗した後の再実行で unit 索引の optimize が飛ぶ）と F2（値だけを失う記録で、本文が残る注意が出ない）は採用 / 修正タスク T09 を足した
 2026-09-29 / T04 / acceptance のドライバーは trace の保存の拒否を期待できず、架空プロジェクトに項目を定義するセッションも無かった / ドライバーに `refused` の trace と `field_defined`・`field_value`・`source_outcome`・`no_unit` の確認を足し、world.json に s-ja-fields を足した。変更欄に world.json を足した（前: search.ts・cases.json・driver.ts・acceptance-cases.test.ts）
 2026-09-29 / T03 / Codex のレビュー: F1（`x-5` から 5 が通る）と F2（`β95`・全角の `ｐ95` の 95 が通る）はどちらも再現されていて採用 / 修正タスク T10 を足した
+2026-09-29 / T04, T05 / Codex のレビュー: どちらも指摘なし（読み取り専用の環境のためテストの実行はしていない、と明記あり） / 何もしない
