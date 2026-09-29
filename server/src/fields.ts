@@ -3,11 +3,15 @@
 
 import type { Kysely } from "kysely";
 import type { DB } from "./db-types.ts";
+import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
-import { head } from "./text.ts";
 
-/** One table cell: a single line cut to 200 bytes, with its pipes escaped so it cannot open another cell. */
-const cell = (s: string) => head(inline(s), 200).replaceAll("|", "\\|");
+/**
+ * One table cell: a single line cut to 200 characters, then backslashes doubled and pipes escaped. GFM splits a row at a pipe after an
+ * even run of backslashes, so escaping only the pipes would let a written `\\|` open another cell.
+ */
+const cell = (s: string) =>
+  [...inline(s)].slice(0, 200).join("").replaceAll("\\", "\\\\").replaceAll("|", "\\|");
 
 export async function fieldsTable(db: Kysely<DB>, projectId: number): Promise<string> {
   const defs = await db
@@ -54,4 +58,9 @@ export async function fieldsTable(db: Kysely<DB>, projectId: number): Promise<st
     "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ...rows.map((r) => `| ${r.join(" | ")} |`),
   ].join("\n");
+}
+
+/** The table as the read server returns it: wrapped as past records, since every cell is text someone wrote. */
+export async function fieldsText(db: Kysely<DB>, projectId: number): Promise<string> {
+  return framed(await fieldsTable(db, projectId));
 }

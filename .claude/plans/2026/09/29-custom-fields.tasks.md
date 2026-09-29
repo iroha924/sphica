@@ -128,14 +128,15 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - コミット: `fix(record): read an integer only where no identifier or sign runs into it`
   - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/record.test.ts` → 22 pass / 1 fail（`x-5` から 5 が true）。直した後 → 23 pass / 0 fail（`x-5` から 5 と -5、`β95=320ms` と `ｐ95=320ms` から 95 は拒否。`ｐ95=320ms` から 320、`レイテンシは3件` から 3、`p95=-5` から -5 は通る）。`bun run verify` → 0
 
-- [ ] T11: fields の表のセルでバックスラッシュも逃がし、200 文字で切り、framed の囲みをテストする
+- [x] T11: fields の表のセルでバックスラッシュも逃がし、200 文字で切り、framed の囲みをテストする
   - 種別: 修正
   - 計画: S4
   - 依存: T06（直す関数が要る）
-  - 変更: `server/src/fields.ts`, `server/src/mcp.ts`, `server/test/fields.test.ts`
+  - 変更: `server/src/fields.ts`, `server/src/mcp.ts`, `server/test/fields.test.ts`, `plugin/skills/trace/SKILL.md`
   - red: `cd server && node --test --test-timeout=60000 test/fields.test.ts` → `a\|b` のラベルで列が増えるテストと、日本語 200 文字の説明が切れないテストが落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/fields.test.ts` → バックスラッシュと `|` の入ったセルでも列の数が見出しと同じ、日本語の説明が 200 文字で切れる、返答が past-records の囲みに入る。`bun run verify` → 0
   - コミット: `fix(fields): escape backslashes in table cells, cut them by characters, and test the frame`
+  - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/fields.test.ts` → 0 pass / 1 fail（ラベル `Tenant \| who\` の行が GFM の読み方で 9 列になる）。直した後 → 1 pass / 0 fail（全行 8 列、日本語の説明が 200 文字で切れる、返答が `<past-records id=...>` で始まり表を含む）。`bun run verify` → 0
 
 ## 記録
 2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
@@ -150,3 +151,4 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T06 / Codex のレビュー: F1（既存の `\|` で列が崩れる、再現あり）、F2（200 文字のはずが 200 バイトで切っている）、F3（framed の囲みをテストしていない）はどれも採用 / 修正タスク T11 を足した
 2026-09-29 / T08 / trace Skill の本文の `fields` がツール名として数えられた / trace の allowed-tools に読み取りの fields を足した（定義の一覧を trace から見られても害はない）
 2026-09-29 / T09 / red の欄を直した（前: 後処理が失敗した後の再実行で値の語が残るテストと注意のテストが落ちる、新: 注意のテストが落ちる）。再実行の件は optimize を失敗させる手段がテストに無く、再現できなかった / 毎回 optimize する形に直し、結果欄に再現していないことを書いた
+2026-09-29 / T11 / Codex の T07・T08 のレビュー: F1（trace Skill に名前の 40 文字と enum の 1〜30 個・重複不可が無い）は採用 / 未着手だった T11 に含め、変更欄に `plugin/skills/trace/SKILL.md` を足した（前: fields.ts・mcp.ts・fields.test.ts）
