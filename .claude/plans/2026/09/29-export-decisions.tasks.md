@@ -35,13 +35,14 @@ base: main
 
 読み取りの MCP と明示起動の Skill から書き出せる
 
-- [ ] T02: 読み取りの MCP に `export` ツールを登録する
+- [x] T02: 読み取りの MCP に `export` ツールを登録する
   - 種別: 追加
   - 計画: S2
   - 依存: T01（組み立てと検査の関数が要る）
   - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run --cwd server test` → ツール一覧のテストが通る。`bun run acceptance` → export の case が通る。`bun run verify` → 0
   - コミット: `feat(mcp): add the export tool to the read server`
+  - 結果: `node --test test/plugin.test.ts` → 28 pass / 0 fail（ツール一覧に export、本物の読み取りサーバーで export を呼ぶと登録の無いディレクトリを拒む）。`bun run acceptance` → 69 pass（export-01: 引用、`trace:s-ja-postgres/postgres supersedes trace:s-ja-storage/storage`、置き換え済みの記録は拒否）。`bun run verify` → 0
 
 - [ ] T03: `/sphica:export` Skill を足す
   - 種別: 追加
@@ -53,3 +54,4 @@ base: main
 
 ## 記録
 2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
+2026-09-29 / T02 / acceptance の driver は MCP を起動せず、各ツールと同じ関数を直接呼ぶ作りだった / export の step も `exportPath` と `exportDecisions` を直接呼び、本物の入口は plugin のテストで export を呼んで確かめた。書き出しが成功する経路を本物の入口で通すのは A5 の headless 実行で見る

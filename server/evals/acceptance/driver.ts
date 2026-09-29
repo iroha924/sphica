@@ -14,6 +14,7 @@ import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
+import { exportDecisions, exportPath } from "../../src/export.ts";
 import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
 import { applyForget, previewForget } from "../../src/forget.ts";
 import { framed } from "../../src/frame.ts";
@@ -183,6 +184,13 @@ export async function createDriver(world: World): Promise<Driver> {
   let asked = "";
   /** What the last overview returned, as the read server words it. */
   let overview = "";
+  /** The document the last export built. */
+  let exported = "";
+  const exportOf = async (records: string[], at: string) => {
+    const where = exportPath(repo, at);
+    if ("error" in where) return where;
+    return exportDecisions(db(), await projectId(), "example/tsundoku", records);
+  };
   let lastRead = "";
   /** A time after every write so far and before the latest glean's, for reading as of just before it (writes carry the real clock). */
   let beforeGlean = "";
@@ -428,6 +436,13 @@ export async function createDriver(world: World): Promise<Driver> {
           o.view === "live"
             ? await liveOverview(db(), await projectId(), o.after ?? null)
             : await lookOverview(db(), await projectId(), repo);
+        return;
+      }
+      if (step.export && typeof step.export === "object") {
+        const x = step.export as { records: string[]; path: string };
+        const r = await exportOf(x.records, x.path);
+        if (!("document" in r)) assert.fail(r.error);
+        exported = r.document;
         return;
       }
       if (Array.isArray(step.read)) {
@@ -783,6 +798,17 @@ export async function createDriver(world: World): Promise<Driver> {
           assert.ok(overview.includes(w), `overview lacks "${w}"\n${overview}`);
         for (const w of (e.overview_lacks ?? []) as string[])
           assert.ok(!overview.includes(w), `overview shows "${w}"\n${overview}`);
+        return;
+      }
+      if (Array.isArray(e.export_contains)) {
+        for (const w of e.export_contains as string[])
+          assert.ok(exported.includes(w), `export lacks "${w}"\n${exported}`);
+        return;
+      }
+      if (e.export_refuses && typeof e.export_refuses === "object") {
+        const want = e.export_refuses as { records: string[]; contains: string };
+        const r = await exportOf(want.records, "docs/decisions.md");
+        assert.ok("error" in r && r.error.includes(want.contains), JSON.stringify(r));
         return;
       }
       if (Array.isArray(e.asked_contains)) {

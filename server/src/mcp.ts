@@ -9,6 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
+import { EXPORT_LIMITS, exportDecisions, exportPath } from "./export.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
 import { liveOverview, lookOverview } from "./overview.ts";
@@ -32,13 +33,15 @@ const text = (t: string, isError = false) => ({
 });
 
 /** The project of cwd, or the reply that says why there is none. */
-async function projectOf(cwd: string | undefined): Promise<{ id: number; root: string } | string> {
+async function projectOf(
+  cwd: string | undefined,
+): Promise<{ id: number; root: string; name: string } | string> {
   const place = identify(cwd ?? process.cwd());
   if (!place) return "This directory is not in a registered project (run `sphica init` there).";
   const id = await projectId(db, place.key);
   if (id === null)
     return `${head(inline(place.name), 200)} is not registered with Sphica (run \`sphica init\` there).`;
-  return { id, root: place.root };
+  return { id, root: place.root, name: place.name };
 }
 
 /** A search that stopped at its cap looked only at the best-ranked candidates, so an empty result is not "nothing matches". */
@@ -249,6 +252,48 @@ server.registerTool(
         parts.push(got ?? `${head(inline(ref), 200)}: not found in this project`);
       }
       return text(framed(parts.join("\n\n")));
+    } catch (e) {
+      return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
+    }
+  },
+);
+
+server.registerTool(
+  "export",
+  {
+    title: "Export chosen decisions to a file",
+    description:
+      "Only for the export Skill, after the owner chose the decisions and the path. Builds one Markdown document of the chosen active decisions, " +
+      "with their quotes and the older decisions each replaced, and checks that the path stays inside the repository. Returns the document to write, " +
+      "or why nothing can be written; it never writes a file itself.",
+    inputSchema: {
+      records: z
+        .array(z.string().min(1).max(300))
+        .min(1)
+        .max(EXPORT_LIMITS.records)
+        .describe("Keys or u<id> of the active decisions the owner chose"),
+      path: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe("Where the owner wants the file, relative to the repository root"),
+      cwd: CWD,
+    },
+    annotations: READ_ONLY,
+  },
+  async (a) => {
+    try {
+      const p = await projectOf(a.cwd);
+      if (typeof p === "string") return text(p);
+      const where = exportPath(p.root, a.path);
+      if ("error" in where) return text(`Nothing was exported: ${where.error}`, true);
+      const built = await exportDecisions(db, p.id, p.name, a.records);
+      if ("error" in built) return text(built.error, true);
+      return text(
+        `Write to ${head(inline(where.relative), 500)}: ${where.exists ? "this replaces an existing file; show the owner its content first" : "a new file"}. ` +
+          "Write the document below as the whole file, unchanged, from the line after this one to the end of this reply.\n" +
+          built.document,
+      );
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }
