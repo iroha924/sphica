@@ -81,13 +81,14 @@ base: main
   - コミット: `fix(check): require one line per comment rule and count CR line breaks in SQL`
   - 結果: red は上のとおり再現（重複でも verify:ai が 0、行番号 1）。直した後: 重複で「keep exactly one line for invariant comment-refs in each」で落ち、戻して 0。`node --test test/comments-check.test.ts` → 4 pass / 0 fail
 
-- [ ] T06: trace の Skill に古い群の説明を足す
+- [x] T06: trace の Skill に古い群の説明を足す
   - 種別: 変更
   - 計画: S3
   - 依存: T05（説明する出力の形が要る）
   - 変更: `plugin/skills/trace/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる
   - コミット: `docs(trace): say pending lists older sessions apart`
+  - 結果: 手順 1 に古い群の説明を 2 行足した。`bun run verify:ai` → 0、`bun run english` → 0
 
 ## P3: Skill の allowed-tools をそろえる
 
