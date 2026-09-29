@@ -11,6 +11,7 @@ const REFERENCES = [
   { re: /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #\d+/i, reason: "a closing reference" },
   { re: /[\w.-]+\/[\w.-]+#\d+/, reason: "an issue or pull request reference" },
   { re: /github\.com\/[^/\s]+\/[^/\s]+\/(?:issues|pull)\/\d+/, reason: "an issue or pull request URL" },
+  { re: /github\.com\/[^/\s]+\/[^/\s]+\/commit\/[0-9a-f]{7,}/, reason: "a commit URL" },
 ];
 
 /**

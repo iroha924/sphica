@@ -126,6 +126,16 @@ base: main
   - コミット: `fix(check): skip commented registrations, read full tool ids and YAML lists`
   - 結果: red は上のとおり再現。直した後: 1 は「which no Sphica server registers」、2 は「allowed-tools lacks mcp__plugin_sphica_record__forget_apply」で落ち、3 は 0。`bun run check` → 0
 
+- [x] T12: コメント中のコミット URL も落とす
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T04（直す検査が要る）
+  - 変更: `scripts/lib/comment-refs.mjs`, `server/test/comments-check.test.ts`
+  - red: `node -e` で `referenceProblems("// See https://github.com/iroha924/sphica/commit/81d898d for the reason.", "js")` → `[]`（規則が禁じるコミットの参照を通す）
+  - 完了条件: 同じ呼び出し → `a commit URL` を返す。`node --test test/comments-check.test.ts` → 通る。`bun run comments` → 0
+  - コミット: `fix(check): fail on commit URLs in comments`
+  - 結果: red は上のとおり `[]`。直した後は `a commit URL` を返し、`node --test test/comments-check.test.ts` → 4 pass / 0 fail、`bun run comments` → 0
+
 - [-] T08: リリースの種別を確かめ、バージョンをそろえる
   - 種別: 変更
   - 計画: S9
@@ -147,3 +157,4 @@ base: main
 2026-09-29 / T08 / 取りやめ。S9 のバージョン上げは pre-commit の求めで T03（d091e11）に入った。`bun run release:plan -- --base v0.6.4` → `plugin`、npm・plugin・marketplace・Codex がすべて 0.6.5 を確かめた
 2026-09-29 / T03 / 計画欄 前: S7、後: S7, S9 / T03 のコミットがバージョン上げ（S9）を実際に担ったので、欄を事実に合わせた
 2026-09-29 / T11 / T07・T10 の Codex レビュー: T10 は差なし。T07 の検査に、コメント中の登録を数える（中）、本文の完全なツール名を見落とす（中）、YAML の配列で例外（低）、「使わない」と書いた AskUserQuestion も許可を求める（低）、reviewer 本文と起動時のツール表のずれを見ない（中） / 前の 3 件は T11 で直した。4 件目は見送り（誤検出は落ちるだけで黙って通らない）。5 件目は見送り（計画で対象外とした別の検査）
+2026-09-29 / T12 / 全差分の Codex レビュー: コメントのコミット URL を通す（低）、`server/src/mcp.ts` の文字列リテラル中の registerTool を登録と数える（中） / 前者は T12 で直した。後者は見送り: 登録を定義するファイルにその文字列を置く場面が無く、閉じるには TypeScript の解析が要る

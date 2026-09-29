@@ -14,6 +14,7 @@ test("finds issue and pull request references and plan paths in comments", () =>
     "// Closes #12 once merged",
     "// tracked in iroha924/sphica#50",
     "// https://github.com/iroha924/sphica/pull/225 has the numbers",
+    "// https://github.com/iroha924/sphica/commit/81d898d explains it",
   ].join("\n");
   assert.deepEqual(reasons(src), [
     [1, "a plan path"],
@@ -23,6 +24,7 @@ test("finds issue and pull request references and plan paths in comments", () =>
     [5, "a closing reference"],
     [6, "an issue or pull request reference"],
     [7, "an issue or pull request URL"],
+    [8, "a commit URL"],
   ]);
 });
 
