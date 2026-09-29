@@ -49,13 +49,14 @@ base: main
   - コミット: `refactor: drop issue numbers, plan paths, and history from comments`
   - 結果: 14 ファイルのコメントを直し、4 つのファイルを 0.6.5 にした（`bun run release:plan -- --base v0.6.4` → `plugin`）。`bun run check` → 0。`node --test test/migrate.test.ts test/forget.test.ts test/github.test.ts` → 29 pass / 0 fail
 
-- [ ] T04: コメントの参照を落とす `bun run comments` を足す
+- [x] T04: コメントの参照を落とす `bun run comments` を足す
   - 種別: 追加
   - 計画: S6
   - 依存: T03（既存の違反が残ると検査が落ちる）
-  - 変更: `scripts/check-comments.mjs`, `scripts/lib/english.mjs`, `server/test/comments-check.test.ts`, `scripts/check-english.mjs`, `package.json`
+  - 変更: `scripts/check-comments.mjs`, `scripts/lib/comment-refs.mjs`, `scripts/lib/comment-refs.d.mts`, `scripts/lib/english.mjs`, `scripts/lib/english.d.mts`, `server/test/comments-check.test.ts`, `server/test/github.test.ts`, `scripts/check-english.mjs`, `package.json`
   - 完了条件: `bun run comments` → 0 で終わる。`bun run --cwd server test -- test/comments-check.test.ts` → 落ちる例と通る例がすべて期待どおり
   - コミット: `feat(check): fail on issue numbers and plan paths in comments`
+  - 結果: `bun run check` → 0（`comments: 129 JavaScript and TypeScript files, 3 SQL files`）。`node --test test/comments-check.test.ts test/english.test.ts` → 12 pass / 0 fail。`server/src/text.ts` に `// see issue #1`・`// see .claude/plans/x`・`// Closes #2` を 1 つずつ足すと exit 1、戻して 0
 
 ## P2: 30 日より古い未 trace のセッションを分ける（#226）
 
@@ -103,3 +104,4 @@ base: main
 ## 記録
 2026-09-29 / T03 / `server/test/migrate.test.ts:2` の「fixture は v0.5.7 の schema」は経緯ではなく fixture の出どころの説明だった / 直さず、変更欄から `server/test/migrate.test.ts` を外した（前: 含む、後: 含まない）
 2026-09-29 / T03, T08 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの上げを求めた / バージョンの上げを T03 に移し、T03 の変更欄に 4 つのバージョンファイルを足した。T08 は最後に release:plan で種別とバージョンの一致を確かめるだけにする
+2026-09-29 / T04 / 検査を流すと `server/test/github.test.ts:254` の「closes #14」が当たった。テスト用の関数を置く `scripts/lib/comment-refs.mjs` と型宣言も要った / コメントを直し、T04 の変更欄に `scripts/lib/comment-refs.mjs`・`scripts/lib/comment-refs.d.mts`・`scripts/lib/english.d.mts`・`server/test/github.test.ts` を足した

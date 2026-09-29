@@ -251,7 +251,7 @@ test("stores sources with who wrote them, adds a revision only when text changed
         .map((s) => [s.revision, s.text]),
       [[3, ""]],
     );
-    // The body no longer closes #14: the next harvest drops the link, so the issue stops being part of the pull request
+    // The cleared body closes no issue: the next harvest drops the link, so the issue stops being part of the pull request
     await linkIssues(db.ingest, p, 7, []);
     assert.equal(
       (await pullSources(db.reader, p, 7)).some((s) => s.artifact === "issue:14"),

@@ -20,6 +20,22 @@ const EXEMPT = /^\/\/\s*english-exempt:\s*(\S.*)$/;
 const isComment = (t) => t.type === "SingleLineComment" || t.type === "MultiLineComment";
 
 /**
+ * Each line of every comment in a JavaScript or TypeScript source, with its line number.
+ * @param {string} source
+ * @returns {{ line: number, text: string }[]}
+ */
+export function commentLines(source) {
+  const out = [];
+  let line = 1;
+  for (const t of jsTokens(source)) {
+    if (isComment(t))
+      out.push(...t.value.split(/\r\n|[\n\r\u2028\u2029]/).map((text, i) => ({ line: line + i, text })));
+    line += (t.value.match(/\r\n|[\n\r\u2028\u2029]/g) ?? []).length;
+  }
+  return out;
+}
+
+/**
  * @param {string} source
  * @param {"all" | "comments"} mode "all" checks strings, templates, and comments. "comments" checks comments only.
  * @returns {{ line: number, text: string, reason: string }[]}

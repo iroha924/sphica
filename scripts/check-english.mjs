@@ -27,6 +27,7 @@ const ENGLISH = [
   ...filesUnder("scripts", /\.(c?js|mjs|m?ts|tsx)$/),
   "server/test/assets.test.ts",
   "server/test/check-mcp-version.test.ts",
+  "server/test/comments-check.test.ts",
   "server/test/plugin.test.ts",
   "server/test/project.test.ts",
   "server/test/release-gate.test.ts",
