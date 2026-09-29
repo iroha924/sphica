@@ -16,7 +16,7 @@ import {
   repoOf,
   storeItems,
 } from "./github.ts";
-import { checkGlean, saveGlean } from "./glean.ts";
+import { checkGlean, prepareGlean, saveGlean } from "./glean.ts";
 import { HOSTS, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import type { Place } from "./project.ts";
@@ -445,19 +445,24 @@ export async function saveText(
   probe?: Probe,
 ): Promise<string> {
   // Read before the lock: capture and delivery wait on it, and reading the working tree and git is the slow part of a save
-  const facts = prepareRecord(root, record, probe);
+  const glean = (await bound(db, id, projectId)).origin === "glean";
+  const gleanFacts = glean ? prepareGlean(root, record, probe) : undefined;
+  const facts = gleanFacts ?? prepareRecord(root, record, probe);
   const text = await inTransaction(db, async (trx) => {
     const run = await bound(trx, id, projectId);
     const scope = await scopeOf(trx, run, root);
     const lines: string[] = [];
     const saved =
       run.origin === "glean"
-        ? await saveGlean(trx, scope.target, run.id, await checkGlean(trx, scope.target, record)).then(
-            (g) => {
-              lines.push(...g.changed.map((c) => `✓ ${c}`));
-              return g.units;
-            },
-          )
+        ? await saveGlean(
+            trx,
+            scope.target,
+            run.id,
+            await checkGlean(trx, scope.target, record, gleanFacts),
+          ).then((g) => {
+            lines.push(...g.changed.map((c) => `✓ ${c}`));
+            return g.units;
+          })
         : await checkRecord(trx, scope.target, record, facts).then((checked) => {
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
             const shown = shownTo.get(id)?.sources ?? new Set<number>();
