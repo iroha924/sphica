@@ -384,6 +384,19 @@ test("the save path must land inside the repository, through any symbolic link",
       );
     assert.match(String(Object.values(exportPath(root, "."))), /leaves the repository/);
     assert.deepEqual(exportPath(root, "..notes.md"), { relative: "..notes.md", exists: false });
+    // Files hosts load as instructions are never an export target: quoted words would become standing instructions
+    for (const rule of [
+      "CLAUDE.md",
+      "claude.md",
+      "AGENTS.md",
+      "sub/AGENTS.override.md",
+      ".claude/rules/x.md",
+      ".claude/skills/a/SKILL.md",
+      ".agents/skills/a/SKILL.md",
+      ".codex/x.md",
+      ".Claude/rules/x.md",
+    ])
+      assert.match(String(Object.values(exportPath(root, rule))), /instructions/, rule);
     fs.linkSync(path.join(outside, "..", "repo", "docs", "decisions.md"), path.join(root, "hard.md"));
     assert.match(String(Object.values(exportPath(root, "hard.md"))), /more than one name/);
     fs.symlinkSync(path.join(root, "docs", "decisions.md"), path.join(root, "filelink"));

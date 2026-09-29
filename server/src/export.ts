@@ -6,6 +6,7 @@ import type { Kysely, Selectable } from "kysely";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
 import { cut, speaker } from "./read.ts";
+import { RULE_NAMES } from "./rule-files.ts";
 
 export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as const;
 
@@ -238,6 +239,14 @@ export async function exportDecisions(
   return { document };
 }
 
+/** Folders hosts load agent instructions, Skills, and settings from, and the instruction file names, compared without case. */
+const INSTRUCTION_DIRS = new Set([".claude", ".agents", ".codex"]);
+const instructionFile = (relative: string) => {
+  const parts = relative.toLowerCase().split(/[\\/]/);
+  const names = [...RULE_NAMES].map((n) => n.toLowerCase());
+  return parts.some((p) => INSTRUCTION_DIRS.has(p)) || names.includes(parts.at(-1) ?? "");
+};
+
 /**
  * Where the owner asked the export to be written, checked against where the write really lands: a path relative to the repository
  * root whose real location (through any symbolic link on the way) stays inside it. The file is never read.
@@ -293,7 +302,14 @@ export function exportPath(
   } catch {
     return { error: "A folder on the path cannot be resolved." };
   }
-  if (!inside(fs.realpathSync(root), real)) return { error: "The path leads outside the repository." };
+  const rootReal = fs.realpathSync(root);
+  if (!inside(rootReal, real)) return { error: "The path leads outside the repository." };
+  // Quoted words written there would be loaded as the agent's standing instructions
+  if (instructionFile(path.relative(root, target)) || instructionFile(path.relative(rootReal, real)))
+    return {
+      error:
+        "The path is a file agents load as instructions (CLAUDE.md, AGENTS.md, or under .claude, .agents, .codex).",
+    };
   return { relative: path.relative(root, target).split(path.sep).join("/"), exists: Boolean(self) };
 }
 
