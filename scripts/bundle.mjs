@@ -2,8 +2,7 @@
 // Assembles the shipped files under plugin/. **plugin/ itself is the npm package root**:
 // Claude Code installs it from the marketplace npm source, and Codex from the same tarball.
 //
-// **Generated files are not tracked by git.** They are built at publish time, so they are not compared with commits
-// (plugin/dist used to be committed and checked with `git diff --exit-code`).
+// **Generated files are not tracked by git.** They are built at publish time, so they are not compared with commits.
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

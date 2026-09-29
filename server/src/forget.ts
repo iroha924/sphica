@@ -1,6 +1,6 @@
-// Forgets sources the owner chose (issue #187): the rows, their index entries, and the bytes left in the file, while the records
-// that cited them are judged again with the same activation rules as saving. Runs only on the forget connection, only after the
-// owner confirmed a preview; the plan is .claude/plans/2026/09/29-forget-sources.plan.md.
+// Forgets sources the owner chose: the rows, their index entries, and the bytes left in the file, while the records that cited
+// them are judged again with the same activation rules as saving. Runs only on the forget connection, only after the owner
+// confirmed a preview.
 
 import { type Kysely, sql } from "kysely";
 import { iso } from "./db.ts";

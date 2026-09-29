@@ -1,5 +1,5 @@
 // Forgetting chosen sources on a real database: rows and index entries go, units that cited them are judged again, and the bytes
-// do not stay in the file. The plan is .claude/plans/2026/09/29-forget-sources.plan.md.
+// do not stay in the file.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";

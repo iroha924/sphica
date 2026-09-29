@@ -1,4 +1,4 @@
-// Reads the acceptance world and cases (plan: .claude/plans/2026/09/27-decision-memory-rebuild.md) and resolves source references to text.
+// Reads the acceptance world and cases and resolves source references to text.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

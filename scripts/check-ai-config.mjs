@@ -377,7 +377,7 @@ for (const name of pluginSkills) {
 // The choices from claude --help. An invalid value only warns and falls back to the session default.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
-// Checks the repository-only reviewers (.claude/agents). Shipped reviewers are no longer Agent definitions but
+// Checks the repository-only reviewers (.claude/agents). Shipped reviewers are not Agent definitions but
 // the bodies in plugin/skills/review/reviewers/, which have no frontmatter
 // (check-pairs.mjs checks those).
 const agentDirectories = [".claude/agents"];

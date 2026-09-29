@@ -138,7 +138,7 @@ test("closing references in owner/repo#N and URL form count for this repository 
   assert.deepEqual(pull.closes, [14, 15]);
 });
 
-// GitHub hides HTML comments, and our own PR template's comments say "put `Closes #12`": a reference inside one closes nothing
+// GitHub hides HTML comments, and our own PR template's comments tell the author to put a closing reference: one inside closes nothing
 test("closing references inside HTML comments, or after one left open, are not read", async () => {
   const template = fs.readFileSync(
     path.join(import.meta.dirname, "..", "..", ".github", "pull_request_template.md"),

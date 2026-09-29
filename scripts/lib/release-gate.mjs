@@ -67,7 +67,7 @@ export function gateProblems({
 /**
  * The GitHub Codex connector's bot account, which posts one review summary per PR. Matched by id and type, never by login text:
  * anyone can comment on a public PR, and a comment carrying the same marker from any other author is ignored.
- * Observed on PR #183 (2026-09-28): login chatgpt-codex-connector[bot], type Bot, app chatgpt-codex-connector.
+ * Its login is chatgpt-codex-connector[bot], type Bot, app chatgpt-codex-connector.
  */
 const CODEX_BOT_ID = 199175422;
 const MARKER = /<!-- codex-security-review:v1 (\{.*?\}) -->/;

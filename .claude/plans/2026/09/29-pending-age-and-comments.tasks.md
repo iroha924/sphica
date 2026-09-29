@@ -40,13 +40,14 @@ base: main
   - コミット: `docs(rules): keep references and history out of code comments`
   - 結果: `bun run verify:ai` → 0。`comments.md` の comment-length の行に空白を 1 つ足すと「AGENTS.md: the comment-length line differs」で落ち、戻して 0。新しい 2 行に invariant `comment-refs`・`comment-history` を付け、印の集合の検査にも載せた
 
-- [ ] T03: 既存の違反コメントを直す
+- [x] T03: 既存の違反コメントを直す
   - 種別: 変更
   - 計画: S7
   - 依存: T02（直す基準の文面が要る）
-  - 変更: `server/src/forget.ts`, `server/test/forget.test.ts`, `server/evals/acceptance/load.ts`, `db/migrations/0002.sql`, `db/migrations/0003.sql`, `scripts/check-sql-live.mjs`, `scripts/lib/release-gate.mjs`, `server/test/github.test.ts`, `scripts/bundle.mjs`, `server/src/capture.ts`, `scripts/check-ai-config.mjs`, `scripts/check-tarball.mjs`, `db/schema.sql`, `server/test/migrate.test.ts`, `scripts/release-finish.mjs`
+  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `server/src/forget.ts`, `server/test/forget.test.ts`, `server/evals/acceptance/load.ts`, `db/migrations/0002.sql`, `db/migrations/0003.sql`, `scripts/check-sql-live.mjs`, `scripts/lib/release-gate.mjs`, `server/test/github.test.ts`, `scripts/bundle.mjs`, `server/src/capture.ts`, `scripts/check-ai-config.mjs`, `scripts/check-tarball.mjs`, `db/schema.sql`, `scripts/release-finish.mjs`
   - 完了条件: `bun run check` → 0 で終わる。`bun run --cwd server test -- test/migrate.test.ts` → 通る（migration の SQL は変わらない）
   - コミット: `refactor: drop issue numbers, plan paths, and history from comments`
+  - 結果: 14 ファイルのコメントを直し、4 つのファイルを 0.6.5 にした（`bun run release:plan -- --base v0.6.4` → `plugin`）。`bun run check` → 0。`node --test test/migrate.test.ts test/forget.test.ts test/github.test.ts` → 29 pass / 0 fail
 
 - [ ] T04: コメントの参照を落とす `bun run comments` を足す
   - 種別: 追加
@@ -100,3 +101,5 @@ base: main
   - コミット: `chore(release): 0.6.5`
 
 ## 記録
+2026-09-29 / T03 / `server/test/migrate.test.ts:2` の「fixture は v0.5.7 の schema」は経緯ではなく fixture の出どころの説明だった / 直さず、変更欄から `server/test/migrate.test.ts` を外した（前: 含む、後: 含まない）
+2026-09-29 / T03, T08 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの上げを求めた / バージョンの上げを T03 に移し、T03 の変更欄に 4 つのバージョンファイルを足した。T08 は最後に release:plan で種別とバージョンの一致を確かめるだけにする

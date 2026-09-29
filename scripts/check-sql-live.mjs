@@ -66,7 +66,7 @@ await withTempDir(async (dir) => {
     hook({ hook_event_name: "Stop", last_assistant_message: "通した。" });
     note("capture flush", runFlush(dir, covDir, asSession("live-1")));
 
-    // Records from an unregistered project are set aside, not dropped (#104). If the owner works on a new machine before
+    // Records from an unregistered project are set aside, not dropped. If the owner works on a new machine before
     // running init, those messages land here. Deleting them would lose them for good.
     const stranger = makeRepo(dir, "https://github.com/example/stranger.git", "stranger");
     const strangerTurn = { session_id: "live-3", prompt_id: "p9", cwd: stranger };
