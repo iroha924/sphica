@@ -27,11 +27,7 @@ export async function pendingCount(
 ): Promise<{ recent: number; older: number }> {
   const cutoff = pendingCutoff(now);
   const r = await db
-    .selectFrom(
-      untracedSessions(db, projectId)
-        .select((eb) => eb.fn.max("m.created_at").as("last"))
-        .as("w"),
-    )
+    .selectFrom(untracedSessions(db, projectId).as("w"))
     .select([
       sql<number>`count(case when w.last >= ${cutoff} then 1 end)`.as("recent"),
       sql<number>`count(case when w.last < ${cutoff} then 1 end)`.as("older"),

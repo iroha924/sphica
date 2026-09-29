@@ -1,7 +1,7 @@
 // What trace reads: sessions not traced yet, the run a draft is bound to, and a session's sources, edits, and the project's live records.
-import { type Kysely, sql } from "kysely";
+import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import { iso } from "./db.ts";
-import type { DB } from "./db-types.ts";
+import type { DB, Session } from "./db-types.ts";
 
 /** Days after its last owner message that an untraced session stops counting as waiting. Its messages stay and are still found. */
 export const PENDING_DAYS = 30;
@@ -10,21 +10,50 @@ export const PENDING_DAYS = 30;
 export const pendingCutoff = (now: Date): string =>
   new Date(now.getTime() - PENDING_DAYS * 86_400_000).toISOString();
 
-/** An owner message `m` that no extraction has looked at. */
-const untraced = sql<number>`not exists (select 1 from source_processing as p where p.source_id = m.id)`;
+type InSession = ExpressionBuilder<DB & { s: Session }, "s">;
+
+/** Owner messages of session `s` that no extraction has looked at. */
+const untracedOwner = (eb: InSession) =>
+  eb
+    .selectFrom("source as m")
+    .whereRef("m.session_id", "=", "s.id")
+    .where("m.author_kind", "=", "owner")
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
+        ),
+      ),
+    );
 
 /**
  * Sessions of the project with an owner message no extraction has looked at, with the time of their last owner message, traced
- * or not: a session the owner came back to stays recent even when its untraced messages are old.
+ * or not: a session the owner came back to stays recent even when its untraced messages are old. Session start runs this, so each
+ * session is read through its own messages (the source_session index), never by grouping the whole project.
  */
 export const untracedSessions = (db: Kysely<DB>, projectId: number) =>
   db
     .selectFrom("session as s")
-    .innerJoin("source as m", "m.session_id", "s.id")
     .where("s.project_id", "=", projectId)
-    .where("m.author_kind", "=", "owner")
-    .groupBy("s.id")
-    .having(sql<number>`count(case when ${untraced} then 1 end)`, ">", 0);
+    .where((eb) => eb.exists(untracedOwner(eb).select(sql`1`.as("x"))))
+    .select((eb) => [
+      "s.id",
+      "s.host",
+      "s.started_at",
+      "s.branch",
+      eb
+        .selectFrom("source as o")
+        .whereRef("o.session_id", "=", "s.id")
+        .where("o.author_kind", "=", "owner")
+        .select((o) => o.fn.max("o.created_at").as("last"))
+        .as("last"),
+      untracedOwner(eb)
+        .select((m) => m.fn.countAll<number>().as("waiting"))
+        .as("waiting"),
+      untracedOwner(eb)
+        .select((m) => m.fn.min("m.id").as("first"))
+        .as("first"),
+    ]);
 
 /**
  * Untraced sessions of one group, the one whose owner came back most recently first, with how many owner messages wait and the
@@ -38,29 +67,12 @@ export async function pendingSessions(
   limit = 20,
 ) {
   const cutoff = pendingCutoff(now);
-  const inGroup =
-    group === "recent"
-      ? sql<boolean>`max(m.created_at) >= ${cutoff}`
-      : sql<boolean>`max(m.created_at) < ${cutoff}`;
-  const base = untracedSessions(db, projectId).having(inGroup);
+  const base = db
+    .selectFrom(untracedSessions(db, projectId).as("w"))
+    .where("w.last", group === "recent" ? ">=" : "<", cutoff);
   const [rows, total] = await Promise.all([
-    base
-      .select((eb) => [
-        "s.id",
-        "s.host",
-        "s.started_at",
-        "s.branch",
-        sql<number>`count(case when ${untraced} then 1 end)`.as("waiting"),
-        sql<number>`min(case when ${untraced} then m.id end)`.as("first"),
-        eb.fn.max("m.created_at").as("last"),
-      ])
-      .orderBy("last", "desc")
-      .limit(limit)
-      .execute(),
-    db
-      .selectFrom(base.select("s.id").as("g"))
-      .select((eb) => eb.fn.countAll<number>().as("n"))
-      .executeTakeFirst(),
+    base.selectAll("w").orderBy("w.last", "desc").limit(limit).execute(),
+    base.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
   ]);
   return { rows, total: Number(total?.n ?? 0) };
 }

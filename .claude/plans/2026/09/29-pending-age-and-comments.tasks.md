@@ -81,6 +81,16 @@ base: main
   - コミット: `fix(check): require one line per comment rule and count CR line breaks in SQL`
   - 結果: red は上のとおり再現（重複でも verify:ai が 0、行番号 1）。直した後: 重複で「keep exactly one line for invariant comment-refs in each」で落ち、戻して 0。`node --test test/comments-check.test.ts` → 4 pass / 0 fail
 
+- [x] T10: 待ちの件数と一覧を、セッションごとの索引で引く形にする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T05（直す問い合わせが要る）
+  - 変更: `server/src/trace.ts`, `server/src/status.ts`
+  - red: 500 セッション × 200 オーナー発言の一時 DB で、直す前の `pendingCount` → 1 回 36.6 ms、`pendingSessions` → 101.5 ms（プロジェクトの全オーナー発言を GROUP BY で集計する）
+  - 完了条件: 同じ DB で `pendingCount` が数 ms に下がり、件数が直す前と同じ。`bun run verify` → 0
+  - コミット: `fix(trace): read each untraced session through its own messages`
+  - 結果: 同じ DB で `pendingCount` → 1.84 ms、`pendingSessions` → 15.9 ms。件数は直す前と同じ最近 268・古い 232。測定用のテストファイルは消した。`bun run verify` → 0
+
 - [x] T06: trace の Skill に古い群の説明を足す
   - 種別: 変更
   - 計画: S3
@@ -123,3 +133,4 @@ base: main
 
 2026-09-29 / T09 / T02・T04 の Codex レビュー: 同じ印の行が重複すると後ろの違いを見逃す（低）、SQL の複数行の文字列の中の `--` 行を誤検出（中）、CR だけの改行で行番号がずれる（低） / 1 件目と 3 件目は T09 を足して直した。2 件目は見送り: 誤検出は検査が落ちるだけで黙って通らず、今の SQL にそういう文字列は無く、直すには SQL の文字列の解釈が要る
 2026-09-29 / T07 / trace の本文は AskUserQuestion をバッククォートなしで書いていて、インラインコードだけを拾う形では当たらなかった / AskUserQuestion は普通の単語と紛れないので、本文のどこにあっても拾うようにした
+2026-09-29 / T10 / T05 の Codex レビュー: セッション開始のたびにプロジェクトの全オーナー発言を集計する（中、Codex の簡易測定で旧クエリの約 50 倍） / T10 を足し、未 trace のセッションを EXISTS で絞ってから、そのセッションの発言だけを索引で引く形に直した
