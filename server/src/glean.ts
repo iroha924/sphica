@@ -9,6 +9,7 @@ import type { DB } from "./db-types.ts";
 import { cleanGit, commitHolds } from "./git.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { type Checked, checkRecord, repoPath, saveRecord, type Target } from "./record.ts";
+import { repoFacts } from "./repo-facts.ts";
 import { bytes, head, mask, privateKeyRanges, quoteSpan, sha256 } from "./text.ts";
 
 /** Files larger than this are not excerpted (a generated file or a data dump is not a statement). */
@@ -205,7 +206,14 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     return {
       errors: parsed.error.issues.map((i) => `${i.path.join(".") || "record"}: ${i.message}`),
       problems: [],
-      units: { errors: [], problems: [], units: [], work: null, fieldDefs: [] },
+      units: {
+        errors: [],
+        problems: [],
+        units: [],
+        work: null,
+        fieldDefs: [],
+        facts: repoFacts(target.root),
+      },
       ops: [],
     };
   const units = await checkRecord(db, target, { units: parsed.data.units });

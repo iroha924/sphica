@@ -65,14 +65,15 @@ base: main
   - コミット: `refactor(anchors): judge and locate a symbol in text already read`
   - 結果: `node --test --test-timeout=60000 test/record.test.ts test/search.test.ts` → 38 pass / 0 fail（伏せ字の例・範囲外・読めない・無いファイルの 8 ケースで、1 回読んだ内容への判定と位置が読み取り付きの関数と一致、同じ長さの書き換えでハッシュが変わる）。計測（Node 24、2.00 MB、7 回の中央値）: 普通のコード 読み取り＋sha256 1.0 ms / 伏せ字の判定 7.1 ms / symbol 探し 16.7 ms、行ごとにキーのあるファイル 0.9 ms / 16.7 ms / 25.2 ms。読み取りは判定の 1/7 以下なので方針 4 のまま進める。`bun run verify` → 0
 
-- [ ] T05: trace・harvest の保存で、ファイル・git の検査をロックの前に済ませ、ロックの中は anchor ごとにハッシュを比べる
+- [x] T05: trace・harvest の保存で、ファイル・git の検査をロックの前に済ませ、ロックの中は anchor ごとにハッシュを比べる
   - 種別: 修正
   - 計画: S5
   - 依存: T04（内容を受け取る判定と位置の関数が要る）
-  - 変更: `server/src/extract.ts`, `server/src/record.ts`, `server/test/record.test.ts`
-  - red: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 書き換えていないファイルの anchor を保存するテストで、`begin immediate` から commit までに判定関数と commitHolds が呼ばれて落ちる
+  - 変更: `server/src/extract.ts`, `server/src/record.ts`, `server/src/repo-facts.ts`, `server/src/glean.ts`, `server/test/extract.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern='^save:' test/extract.test.ts` → anchor の commit を git に問うとき書き込みロックが取られていて落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts test/extract.test.ts` → ロックの中で判定関数と commitHolds が呼ばれない。準備の後・ロックの前の同じ長さの書き換えと、前の anchor の挿入の後の書き換えで、伏せ字の対象になった symbol が保存されない。record_check の結果が変わらない。`bun run verify` → 0
   - コミット: `fix(record): check files and commits before taking the write lock`
+  - 結果: 直す前（record.ts・extract.ts・glean.ts を HEAD に戻し repo-facts.ts だけ置いた状態）の `node --test --test-timeout=60000 --test-name-pattern='^save:' test/extract.test.ts` → 偽 git の記録が `[ 'locked' ]`（期待 `[ 'free' ]`）で落ちた。probe のテストは HEAD の saveText が probe を受け取らないため「judged before the lock」で落ちた（意図した理由ではない。緑の側だけの確認）。直した後 同じコマンド → 2 pass（ロックの中の呼び出しは `read a.ts`・`read b.ts` だけ、書き換えた a.ts と b.ts はロックの中で判定し直して symbol を保存しない）、`test/record.test.ts test/extract.test.ts` → 43 pass（既存の「check の後に鍵になった symbol」も通る）。`bun run verify` → 0
 
 - [ ] T06: glean の保存で、readExcerpt と anchor の検査をロックの前に済ませる
   - 種別: 修正
@@ -102,3 +103,4 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
 - 2026-09-30 / T02 / Codex のレビュー: 指摘なし（7 種類の応答の形を確かめた）/ そのまま
 - 2026-09-30 / T03 / Codex のレビュー: 指摘なし。60 秒は --paginate の全ページの合計で、実際の余裕は未検証 / そのまま
 - 2026-09-30 / 持ち主の指示で、終わった 29-custom-fields の plan と tasks を同じ PR で消した
+- 2026-09-30 / T05 / 変更欄 前: extract.ts, record.ts, record.test.ts → 後: extract.ts, record.ts, repo-facts.ts, glean.ts, extract.test.ts。red 前: record.test.ts で判定関数の呼び出し → 後: extract.test.ts で偽 git がロックを見る。ロックの有無は saveText を通さないと観測できず、判定関数は ES module の export を差し替えられないので、読み取りと判定を新しい module（repo-facts.ts）の Probe に集めて注入できるようにした。glean.ts は Checked に facts が増えた分だけ直した

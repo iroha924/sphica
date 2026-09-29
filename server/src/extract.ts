@@ -20,7 +20,8 @@ import { checkGlean, saveGlean } from "./glean.ts";
 import { HOSTS, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import type { Place } from "./project.ts";
-import { checkRecord, saveRecord, type Target } from "./record.ts";
+import { checkRecord, prepareRecord, saveRecord, type Target } from "./record.ts";
+import type { Probe } from "./repo-facts.ts";
 import { plural } from "./text.ts";
 import {
   liveUnits,
@@ -441,7 +442,10 @@ export async function saveText(
   projectId: number,
   root: string | null,
   record: unknown,
+  probe?: Probe,
 ): Promise<string> {
+  // Read before the lock: capture and delivery wait on it, and reading the working tree and git is the slow part of a save
+  const facts = prepareRecord(root, record, probe);
   const text = await inTransaction(db, async (trx) => {
     const run = await bound(trx, id, projectId);
     const scope = await scopeOf(trx, run, root);
@@ -454,7 +458,7 @@ export async function saveText(
               return g.units;
             },
           )
-        : await checkRecord(trx, scope.target, record).then((checked) => {
+        : await checkRecord(trx, scope.target, record, facts).then((checked) => {
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
             const shown = shownTo.get(id)?.sources ?? new Set<number>();
             // Only a quote found in the source counts: citing a message with words it does not hold proves nothing was read

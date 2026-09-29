@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { bindOwner } from "../src/admin.ts";
 import {
@@ -20,6 +21,7 @@ import {
 import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
 import { readSource } from "../src/read.ts";
+import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
@@ -279,6 +281,173 @@ test("harvest: context marks the sources an earlier run looked at, not a new com
     assert.doesNotMatch(heading("Keep notes and drafts out of CSV."), /harvested before/);
   } finally {
     await db.done();
+  }
+});
+
+/** Whether another connection could take the write lock on the database file right now (it does not wait). */
+function lockFree(file: string): boolean {
+  const c = new DatabaseSync(file);
+  try {
+    c.exec("pragma busy_timeout = 0");
+    c.exec("begin immediate");
+    c.exec("rollback");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    c.close();
+  }
+}
+
+// Capture and delivery wait on the write lock: git runs before a save takes it
+test("save: git is asked about an anchor's commit before the write lock is taken", async () => {
+  const db = tempDb();
+  const root = repo();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-git-"));
+  const log = path.join(bin, "locks.txt");
+  const savedPath = process.env.PATH;
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "openStore を使う。" });
+    const commit = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+    // A git first on PATH that notes whether the lock was free when it ran, then does the real work
+    fs.writeFileSync(
+      path.join(bin, "git"),
+      [
+        `#!${process.execPath}`,
+        `const { DatabaseSync } = require("node:sqlite");`,
+        `const c = new DatabaseSync(${JSON.stringify(db.file)});`,
+        `let free = true;`,
+        `try { c.exec("pragma busy_timeout = 0"); c.exec("begin immediate"); c.exec("rollback"); } catch { free = false; }`,
+        `c.close();`,
+        `require("node:fs").appendFileSync(${JSON.stringify(log)}, free ? "free\\n" : "locked\\n");`,
+        `const r = require("node:child_process").spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: "inherit" });`,
+        `process.exit(r.status ?? 1);`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, root);
+    const record = {
+      units: [
+        {
+          key: "store",
+          kind: "implementation",
+          text: "openStore を使う",
+          evidence: [{ source: `s${m}`, quote: "openStore を使う。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "evidence", commit }],
+        },
+      ],
+    };
+    process.env.PATH = `${bin}${path.delimiter}${savedPath ?? ""}`;
+    assert.match(await saveText(db.ingest, run, p, root, record), /✓ saved/);
+    process.env.PATH = savedPath;
+    assert.equal(
+      db.owner.prepare("select commit_sha from unit_anchor").get()?.commit_sha,
+      commit,
+      "the fake git answered for the real one",
+    );
+    assert.deepEqual(fs.readFileSync(log, "utf8").trim().split("\n"), ["free"]);
+  } finally {
+    process.env.PATH = savedPath;
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+// Inside the lock a file is only read again; it is judged anew only when its content changed, before each anchor is written
+test("save: under the write lock files are only read again, and a file changed meanwhile is judged anew", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-lock-"));
+  try {
+    const p = project(db);
+    const calls: { fn: string; rel?: string; locked: boolean }[] = [];
+    let rewrite = new Set<string>();
+    const probe: Probe = {
+      read: (r, rel) => {
+        const locked = !lockFree(db.file);
+        calls.push({ fn: "read", rel, locked });
+        if (locked && rewrite.delete(rel))
+          fs.writeFileSync(
+            path.join(root, rel),
+            `API_KEY=${rel === "a.ts" ? "tokenValue123abc" : "tokenValue456def"}\n`,
+          );
+        return PROBE.read(r, rel);
+      },
+      masks: (t, sym) => {
+        calls.push({ fn: "masks", locked: !lockFree(db.file) });
+        return PROBE.masks(t, sym);
+      },
+      locate: (t, sym) => {
+        calls.push({ fn: "locate", locked: !lockFree(db.file) });
+        return PROBE.locate(t, sym);
+      },
+      holds: (r, c, rel) => {
+        calls.push({ fn: "holds", locked: !lockFree(db.file) });
+        return PROBE.holds(r, c, rel);
+      },
+    };
+    const saveWith = async (sessionId: string) => {
+      fs.writeFileSync(path.join(root, "a.ts"), "const tokenValue123abc = loadConfig();\n");
+      fs.writeFileSync(path.join(root, "b.ts"), "const tokenValue456def = loadConfig();\n");
+      const m = message(db, p, { id: `m-${sessionId}`, text: "ここを見る。", session: sessionId });
+      const run = await beginTrace(db.ingest, p, sessionId);
+      await contextText(db.ingest, run, p, root);
+      calls.length = 0;
+      await saveText(
+        db.ingest,
+        run,
+        p,
+        root,
+        {
+          units: [
+            {
+              key: "look",
+              kind: "finding",
+              text: "ここを見る",
+              evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+              anchors: [
+                { path: "a.ts", symbol: "tokenValue123abc", role: "applies_to" },
+                { path: "b.ts", symbol: "tokenValue456def", role: "applies_to" },
+              ],
+            },
+          ],
+        },
+        probe,
+      );
+      return db.owner
+        .prepare(
+          "select a.path, a.symbol from unit_anchor a join unit u on u.id = a.unit_id where u.key like ? order by a.id",
+        )
+        .all(`trace:%${sessionId}/look`)
+        .map((r) => [r.path, r.symbol]);
+    };
+
+    assert.deepEqual(await saveWith("s1"), [
+      ["a.ts", "tokenValue123abc"],
+      ["b.ts", "tokenValue456def"],
+    ]);
+    assert.ok(
+      calls.some((c) => !c.locked && c.fn === "masks"),
+      "judged before the lock",
+    );
+    assert.deepEqual(
+      calls.filter((c) => c.locked).map((c) => `${c.fn} ${c.rel}`),
+      ["read a.ts", "read b.ts"],
+    );
+
+    // a.ts changes before its anchor is written, b.ts after a.ts's anchor is: each turns its symbol into a key
+    rewrite = new Set(["a.ts", "b.ts"]);
+    assert.deepEqual(await saveWith("s2"), [
+      ["a.ts", null],
+      ["b.ts", null],
+    ]);
+    assert.equal(calls.filter((c) => c.locked && c.fn === "masks").length, 2);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
