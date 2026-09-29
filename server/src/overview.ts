@@ -238,17 +238,16 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
       for (const [i, text] of f.text.split(/\r?\n/).entries())
         for (const m of text.matchAll(MARKER)) found.push({ file: f.path, line: i + 1, key: m[1] ?? "" });
     const keys = [...new Set(found.map((f) => f.key))];
-    const units = new Map(
-      (keys.length
-        ? await db
-            .selectFrom("unit")
-            .select(["id", "key", "lifecycle"])
-            .where("project_id", "=", projectId)
-            .where("key", "in", keys)
-            .execute()
-        : []
-      ).map((u) => [u.key, u]),
-    );
+    // In slices: SQLite takes at most 32,766 parameters in one statement, and instruction files can hold more markers
+    const units = new Map<string, { id: number; key: string; lifecycle: string }>();
+    for (let i = 0; i < keys.length; i += 500)
+      for (const u of await db
+        .selectFrom("unit")
+        .select(["id", "key", "lifecycle"])
+        .where("project_id", "=", projectId)
+        .where("key", "in", keys.slice(i, i + 500))
+        .execute())
+        units.set(u.key, u);
     for (const f of found) {
       const u = units.get(f.key);
       const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;

@@ -400,3 +400,22 @@ test("live names each record by id too, so a clipped key can still be read, and 
     await db.done();
   }
 });
+
+test("look reads more distinct markers than SQLite takes in one query", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    fs.mkdirSync(path.join(root, ".claude", "rules"), { recursive: true });
+    for (let f = 0; f < 6; f++)
+      fs.writeFileSync(
+        path.join(root, ".claude", "rules", `r${f}.md`),
+        Array.from({ length: 6000 }, (_, i) => `<!-- sphica: trace:x/${f}-${i} -->`).join("\n"),
+      );
+    const look = await lookOverview(db.reader, p, root);
+    assert.match(look, /- \.claude\/rules\/r0\.md:1: trace:x\/0-0 is not a record of this project/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
