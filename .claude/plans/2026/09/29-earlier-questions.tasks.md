@@ -45,13 +45,14 @@ base: main
   - コミット: `feat(search): match earlier owner messages across the whole scan`
   - 結果: `node --test test/search.test.ts` → pass 11 / fail 0（今のセッションの一致 601 件が上限を食わずに、別のセッションの本人の発言 3 件を全部返す。AI の返事と PR の本文は返らない。当たりにセッションとターンが付く）。typecheck・lint → 0
 
-- [ ] T03: 一致した発言ごとのつながった記録・同じターンの文脈・決定の有無と、繰り返しの行を組み立てる
+- [x] T03: 一致した発言ごとのつながった記録・同じターンの文脈・決定の有無と、繰り返しの行を組み立てる
   - 種別: 追加
   - 計画: S3, S4
   - 依存: T01（後継をたどる関数が要る）, T02（一致した発言の一覧が要る）
   - 変更: `server/src/asked.ts`, `server/test/asked.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/asked.test.ts` → 全部 pass（plan のテストの節の asked の項目）
   - コミット: `feat(search): show what earlier owner messages led to and repeats with no recorded decision`
+  - 結果: `node --test test/asked.test.ts` → pass 2 / fail 0（2 回置き換えた決定は後継 bun まで示す、trace 済みで記録なし・未 trace・finding だけを「No recorded decision」、同じターンの AI の返事を引用した記録は文脈に分けて返事を id で示す、絞り込みで隠しても「No recorded decision」と言わず件数を言う、表示 1 件でも 2 セッションの繰り返しを trace 済み・未 trace に分けて示す、決定のあるセッションが入ると繰り返しの行は出ない、今のセッションを除く）。typecheck・lint・knip → 0、`sql:reach` 161 / 161、architecture・english → 通過
 
 - [ ] T04: MCP の search に asked を足す
   - 種別: 追加
