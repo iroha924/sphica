@@ -205,6 +205,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(overview): keep walking siblings after a branch past the depth cap`
   - 結果: red（直す前）→ files が [] で失敗。直した後 `node --test test/rule-files.test.ts` → pass 12 / fail 0。`bun run check` → 0
 
+- [x] T19: 見直し条件の引用だけを glean が取り消しても、判定し直しで決定が candidate に落ちない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（有効化の検査が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0003.sql`, `server/test/schema.test.ts`, `.claude/plans/2026/09/29-look-and-overview.plan.md`
+  - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 条件の引用を取り消した決定を candidate から active に戻すと、有効化の検査に拒否されて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 全部 pass
+  - コミット: `fix(schema): let a decision come back after only its reconsider quote was retracted`
+  - 結果: red（直す前）→ `a reconsider condition needs an unretracted quote of the owner` で拒否されて失敗。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/record.test.ts test/forget.test.ts` → pass 58 / fail 0（移行した DB と新規の DB の定義も一致）
+
 ## 記録
 - 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）
 - 2026-09-29 / T02 / glean の add_evidence も同じ role 一覧を使っていて、`reconsiders` を渡すと DB のトリガーで分かりにくく落ちる / 入力で除き、変更欄に `server/src/glean.ts`, `server/test/extract.test.ts` を足した（前: 無し）
@@ -229,3 +239,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T17 / 全差分（main..eabb78b）の Codex レビュー: 指摘 1 件（異なるキーのマーカーが 32,766 を超えると look が SQL の変数の上限で落ちる）/ 修正タスク T17 を足した
 - 2026-09-29 / T17 / T17 だけの Codex 再レビュー: 1 件（数万件のマーカーで look は見出しごとに 50 行と件数しか出さず、続きを取る手段が無い）。look は上限付きで超えた分を件数で言う形が計画で合意した設計（C14）で、入力も端のもの / 採らない。レビューの依頼文に「件数によらず全部出す」と書いたのが強すぎた
 - 2026-09-29 / T18 / PR #225 の GitHub Codex review（e4e49ac）P2: 深さの上限に当たると以降のたどりを全部止める / 修正タスク T18 を足した
+- 2026-09-29 / T19 / PR #225 の GitHub Codex review P2: glean の retract_evidence は active を candidate に戻してから判定し直すので、条件の引用だけを取り消すと決定が戻れない / 修正タスク T19 を足し、plan の方針を直した（変更履歴）

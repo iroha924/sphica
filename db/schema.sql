@@ -415,12 +415,12 @@ create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'an active unit needs unretracted evidence')
   where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('finding', 'dead_end', 'question')
     and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null));
-  -- A reconsider condition is the owner's: each needs the owner's words when the unit is saved. Forget's recheck is exempt, so forgetting
-  -- the source of such words leaves the unit as it was and readers show the condition as unsupported
-  select raise(abort, 'a reconsider condition needs an unretracted quote of the owner')
+  -- A reconsider condition is the owner's: each needs a quote of the owner, written when the unit is saved. A quote retracted later, or
+  -- forgotten (forget's recheck is exempt, since the row is gone), leaves the unit as it was, and readers show the condition as unsupported
+  select raise(abort, 'a reconsider condition needs a quote of the owner')
   where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
     and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
-      where e.option_id = o.id and e.role = 'reconsiders' and e.retracted_at is null and s.author_kind = 'owner'));
+      where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
   select raise(abort, 'superseded needs a supersedes link from its successor')
   where new.to_state = 'superseded' and not exists (select 1 from unit_link where to_unit = new.unit_id and kind = 'supersedes');
 end;

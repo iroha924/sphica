@@ -352,10 +352,7 @@ test("a reconsider condition sits only on a rejected option, and its quote is th
   evidence(u, said);
   adoption(u, said);
   state(u, null, "candidate");
-  refuses(
-    () => state(u, "candidate", "active"),
-    /reconsider condition needs an unretracted quote of the owner/,
-  );
+  refuses(() => state(u, "candidate", "active"), /reconsider condition needs a quote of the owner/);
   // A quote on the option alone is written before the first state in real saves; here the unit is back to a fresh one
   const v = unit({ key: "u2", kind: "decision" });
   const cond = insert(db, "unit_option", {
@@ -378,12 +375,11 @@ test("a reconsider condition sits only on a rejected option, and its quote is th
     quote,
   );
   assert.equal(one("select lifecycle from unit where id = ?", v).lifecycle, "active");
-  // Saving again needs a live quote; forget's recheck does not
+  // Judged again after that retraction (as glean does), the decision comes back: the condition had the owner's words when saved,
+  // and readers now show it as unsupported. Forget's recheck, whose quote row is gone, comes back too
   state(v, "active", "candidate");
-  refuses(
-    () => state(v, "candidate", "active"),
-    /reconsider condition needs an unretracted quote of the owner/,
-  );
+  state(v, "candidate", "active");
+  state(v, "active", "candidate");
   sql(
     "insert into unit_state (unit_id, from_state, to_state, at, reason, forget_id) values (?, 'candidate', 'active', ?, 'r', ?)",
     v,

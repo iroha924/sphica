@@ -58,7 +58,7 @@ approved_at: 2026-09-29
 
 - `unit_option.reconsider_when text`、`check (reconsider_when is null or outcome = 'rejected')`
 - `unit_evidence.role` に `reconsiders` を足す。挿入時のトリガーで、`reconsiders` は `option_id` があり、その案が `rejected` で `reconsider_when` を持つときだけ許す
-- `unit_state_rules` に足す検査: `new.to_state = 'active' and new.forget_id is null` のとき、`reconsider_when` を持つ案それぞれに、取り消されていない `reconsiders` evidence があり、その source の `author_kind = 'owner'` であること。forget のやり直し（`forget_id` あり）では検査しない
+- `unit_state_rules` に足す検査: `new.to_state = 'active' and new.forget_id is null` のとき、`reconsider_when` を持つ案それぞれに、`reconsiders` evidence があり（取り消し済みでもよい）、その source の `author_kind = 'owner'` であること。forget のやり直し（`forget_id` あり）では検査しない
 - `content_hash` と unit の検索本文（FTS）に `reconsider_when` を入れる
 - `db/migrations/0003.sql` で `unit_option` と `unit_evidence` を作り直し、それらを参照するトリガー・インデックス・ビューも作り直す。`SCHEMA_REVISION` を 3 に上げ、db-types を生成し直す。revision 2 の schema を `server/test/fixtures/` に置き、移行で案と evidence の行と id が残ることを確かめる
 
@@ -155,3 +155,4 @@ approved_at: 2026-09-29
 なし
 
 ## 変更履歴
+2026-09-29 / 有効化の検査は取り消し済みの引用でも通す / glean が引用だけを取り消して判定し直すと、決定が candidate に落ちていた（PR #225 の Codex review）。「引用を失っても決定は active のまま、条件は unsupported と出す」という合意に合わせた / Go 不要（合意した方針の中の直し）
