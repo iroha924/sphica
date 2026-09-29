@@ -17,7 +17,8 @@
         "evals/cloud/codex.ts",
         "evals/cloud/collect.ts",
         "evals/cloud/grade.ts",
-        "evals/cloud/fixture.ts"
+        "evals/cloud/fixture.ts",
+        "evals/asked/run.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
       "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook"],

@@ -65,13 +65,14 @@ base: main
 
 ## P3: 測定と acceptance
 
-- [ ] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
+- [x] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
   - 種別: 追加
   - 計画: S6
   - 依存: T03（一致と組み立てが要る）
-  - 変更: `server/evals/asked/run.ts`, `server/evals/asked/corpus.json`
+  - 変更: `server/evals/asked/run.ts`, `server/evals/asked/corpus.json`, `knip.json`
   - 完了条件: `node server/evals/asked/run.ts` → 関係ない / 返した数、見落とし、空、上限で止まった問いを出力する。`bun run verify` → 0
   - コミット: `test(evals): measure unrelated earlier-message matches on a fixed corpus`
+  - 結果: `node evals/asked/run.ts`（server/ から）→ unrelated / returned 0 / 8（0.0%）、missed / related 13 / 21（61.9%）。空の問い 4 件（q-tel、q-token、q-log、q-hira）、上限で止まった問いは無し。ひらがなの問い q-hira は db-1・db-3 を見落とした。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 60 / 60）
 
 - [ ] T06: asked の acceptance case を足す
   - 種別: 追加
@@ -84,3 +85,4 @@ base: main
 ## 記録
 
 2026-09-29 / T04 / plan の「Skill で search の使い方を書いている箇所があれば合わせる」に当たる箇所は Skill に無く、README の機能の一覧だった（plugin/README.md は bundle が写す追跡外のファイル） / T04 の変更欄に `README.md` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）
+2026-09-29 / T05 / knip が入口に無いファイルを未使用とみなすので、`evals/asked/run.ts` を knip.json の入口に足した。測定では、関係ない発言は返さない一方で見落としが多い（語の半分を超える規則の厳しさ）。ひらがなの問いの見落としは u29 の見直しの条件に当たる / T05 の変更欄に `knip.json` を足した（前: `server/evals/asked/run.ts`, `server/evals/asked/corpus.json`）。一致の規則の見直しは plan の対象外なので、数字を PR に書いて持ち主の判断に回す
