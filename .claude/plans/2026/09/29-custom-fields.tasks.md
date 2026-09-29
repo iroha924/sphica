@@ -97,13 +97,14 @@ read と `/sphica:fields` で定義と値が見える
 
 trace Skill が項目の書き方を案内し、0.6.8 にそろう
 
-- [ ] T08: trace Skill に項目の書き方を足す
+- [x] T08: trace Skill に項目の書き方を足す
   - 種別: 変更
   - 計画: S5
   - 依存: T03（Skill が説明する入力の形が要る）
   - 変更: `plugin/skills/trace/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0。`bun run verify` → 0
   - コミット: `feat(trace): explain field definitions and values`
+  - 結果: `bun run verify` → 0。最初は本文の `` `fields` `` が読み取りツールの名前と重なって `allowed-tools lacks mcp__plugin_sphica_sphica__fields` で落ち、trace の allowed-tools に fields を足して通った
 
 ## P5: レビューの直し
 
@@ -125,6 +126,15 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 上の 3 例が拒否され、`レイテンシは3件` から 3、`p95=-5` から -5、`320ms` から 320 は通る。`bun run verify` → 0
   - コミット: `fix(record): read an integer only where no identifier or sign runs into it`
 
+- [ ] T11: fields の表のセルでバックスラッシュも逃がし、200 文字で切り、framed の囲みをテストする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T06（直す関数が要る）
+  - 変更: `server/src/fields.ts`, `server/src/mcp.ts`, `server/test/fields.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/fields.test.ts` → `a\|b` のラベルで列が増えるテストと、日本語 200 文字の説明が切れないテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/fields.test.ts` → バックスラッシュと `|` の入ったセルでも列の数が見出しと同じ、日本語の説明が 200 文字で切れる、返答が past-records の囲みに入る。`bun run verify` → 0
+  - コミット: `fix(fields): escape backslashes in table cells, cut them by characters, and test the frame`
+
 ## 記録
 2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
 2026-09-29 / T01, T08 / パッケージに入る変更はバージョンを揃えないと pre-commit の bundle が止める / 0.6.8 への引き上げを T08 から T01 に移した。T01 の変更欄と完了条件に 4 つの manifest と release:plan を足し、T08 の変更欄（前: trace Skill と 4 つの manifest、新: trace Skill のみ）と完了条件（前: release:plan・verify:ai・verify、新: verify:ai・verify）と名前を直した
@@ -135,3 +145,5 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T04 / acceptance のドライバーは trace の保存の拒否を期待できず、架空プロジェクトに項目を定義するセッションも無かった / ドライバーに `refused` の trace と `field_defined`・`field_value`・`source_outcome`・`no_unit` の確認を足し、world.json に s-ja-fields を足した。変更欄に world.json を足した（前: search.ts・cases.json・driver.ts・acceptance-cases.test.ts）
 2026-09-29 / T03 / Codex のレビュー: F1（`x-5` から 5 が通る）と F2（`β95`・全角の `ｐ95` の 95 が通る）はどちらも再現されていて採用 / 修正タスク T10 を足した
 2026-09-29 / T04, T05 / Codex のレビュー: どちらも指摘なし（読み取り専用の環境のためテストの実行はしていない、と明記あり） / 何もしない
+2026-09-29 / T06 / Codex のレビュー: F1（既存の `\|` で列が崩れる、再現あり）、F2（200 文字のはずが 200 バイトで切っている）、F3（framed の囲みをテストしていない）はどれも採用 / 修正タスク T11 を足した
+2026-09-29 / T08 / trace Skill の本文の `fields` がツール名として数えられた / trace の allowed-tools に読み取りの fields を足した（定義の一覧を trace から見られても害はない）
