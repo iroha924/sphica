@@ -420,7 +420,7 @@ async function waiting(
   place: { file: string; key: string; host: Host; owner: boolean },
 ): Promise<string> {
   if (!place.owner) return "";
-  const n = await pendingCount(db, projectId);
+  const n = (await pendingCount(db, projectId)).recent;
   if (!n) return "";
   const day = new Date().toLocaleDateString("sv-SE");
   if (!markOnce("pending", `${path.resolve(place.file)}\0${place.key}\0${day}`)) return "";

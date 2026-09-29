@@ -25,6 +25,7 @@ import { plural } from "./text.ts";
 import {
   liveUnits,
   openRun,
+  PENDING_DAYS,
   pendingSessions,
   type Run,
   runOf,
@@ -34,30 +35,45 @@ import {
 
 const newRunId = () => crypto.randomBytes(9).toString("base64url");
 
-/** Sessions of the project with owner messages not traced yet, as text. */
-export async function pendingText(db: Kysely<DB>, projectId: number): Promise<string> {
+/** Sessions of the project with owner messages not traced yet, as text: recent ones first, then the older ones apart. */
+export async function pendingText(
+  db: Kysely<DB>,
+  projectId: number,
+  now: Date = new Date(),
+): Promise<string> {
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
-  const rows = await pendingSessions(db, projectId);
-  if (!rows.length) return "Every captured session has been traced.";
+  const [recent, older] = await Promise.all([
+    pendingSessions(db, projectId, "recent", now),
+    pendingSessions(db, projectId, "older", now),
+  ]);
+  if (!recent.total && !older.total) return "Every captured session has been traced.";
+  const ids = [...recent.rows, ...older.rows].map((r) => Number(r.first));
   const firsts = new Map(
-    (
-      await db
-        .selectFrom("source")
-        .select(["id", "text"])
-        .where(
-          "id",
-          "in",
-          rows.map((r) => Number(r.first)),
-        )
-        .execute()
-    ).map((m) => [m.id, m.text]),
+    ids.length
+      ? (await db.selectFrom("source").select(["id", "text"]).where("id", "in", ids).execute()).map((m) => [
+          m.id,
+          m.text,
+        ])
+      : [],
   );
-  return [
-    `${plural(rows.length, "session")} to trace (pass the id to trace_begin):`,
-    ...rows.map(
+  const group = (g: typeof recent) => [
+    ...g.rows.map(
       (r) =>
         `- ${r.id} ${r.host} ${r.started_at}: ${plural(Number(r.waiting), "message")} waiting, starting "${inline(firsts.get(Number(r.first)) ?? "").slice(0, 100)}"`,
     ),
+    ...(g.total > g.rows.length ? [`- and ${g.total - g.rows.length} more`] : []),
+  ];
+  return [
+    recent.total
+      ? `${plural(recent.total, "session")} to trace (pass the id to trace_begin):`
+      : "No recent session waits to be traced.",
+    ...group(recent),
+    ...(older.total
+      ? [
+          `Older than ${PENDING_DAYS} days (not counted at session start), ${plural(older.total, "session")}; trace_begin takes these ids too:`,
+          ...group(older),
+        ]
+      : []),
   ].join("\n");
 }
 

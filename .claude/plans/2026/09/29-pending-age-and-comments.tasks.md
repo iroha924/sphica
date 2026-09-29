@@ -62,13 +62,14 @@ base: main
 
 セッション開始の件数から古いものが外れ、pending と status が古いものを別に示す
 
-- [ ] T05: 最後のオーナー発言で最近と古いを分け、件数・pending・status を変える
+- [x] T05: 最後のオーナー発言で最近と古いを分け、件数・pending・status を変える
   - 種別: 変更
   - 計画: S1, S2
   - 依存: なし
-  - 変更: `server/evals/acceptance/`, `server/src/status.ts`, `server/src/trace.ts`, `server/src/extract.ts`, `server/src/deliver.ts`, `server/src/mcp-record.ts`, `server/test/`, `scripts/lib/sql-call-sites.mjs`
+  - 変更: `server/evals/acceptance/`, `server/src/status.ts`, `server/src/trace.ts`, `server/src/extract.ts`, `server/src/deliver.ts`, `server/src/mcp-record.ts`, `server/test/`
   - 完了条件: `bun run --cwd server test` → 31 日・29 日・30 日ちょうど・古い未 trace と新しい trace 済みの 4 件と、`sources: true`・`asked: true` での検索が通る。`bun run acceptance` と `bun run sql:reach` → 0 で終わる。先に足した 31 日前の acceptance case は、実装前のコードで待ちの件数に入って落ちることを確かめてから実装する
   - コミット: `feat(trace): stop counting sessions idle for over 30 days as waiting`
+  - 結果: red: status-07 を足して実装前に `bun run acceptance` → status-07 だけが `actual: 1, expected: 0`（31 日後でも最近の待ちに数えた）で落ちた。実装後: `bun run verify` → 0（テスト 410 pass、acceptance 68 pass、`SQL: tests ran 171 / 171 sites`）
 
 - [ ] T06: trace の Skill に古い群の説明を足す
   - 種別: 変更
@@ -105,3 +106,5 @@ base: main
 2026-09-29 / T03 / `server/test/migrate.test.ts:2` の「fixture は v0.5.7 の schema」は経緯ではなく fixture の出どころの説明だった / 直さず、変更欄から `server/test/migrate.test.ts` を外した（前: 含む、後: 含まない）
 2026-09-29 / T03, T08 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの上げを求めた / バージョンの上げを T03 に移し、T03 の変更欄に 4 つのバージョンファイルを足した。T08 は最後に release:plan で種別とバージョンの一致を確かめるだけにする
 2026-09-29 / T04 / 検査を流すと `server/test/github.test.ts:254` の「closes #14」が当たった。テスト用の関数を置く `scripts/lib/comment-refs.mjs` と型宣言も要った / コメントを直し、T04 の変更欄に `scripts/lib/comment-refs.mjs`・`scripts/lib/comment-refs.d.mts`・`scripts/lib/english.d.mts`・`server/test/github.test.ts` を足した
+2026-09-29 / T05 / reader の authorizer が `sum` を許可していなかった / 許可リストは広げず `count(case when ... then 1 end)` で書いた
+2026-09-29 / T05 / テストの発言の既定日時（2026-09-10）が実際の時計では 10 月 10 日以降に古くなる / 件数・一覧・status を呼ぶテストに固定の now を渡し、時刻を差し込めないセッション開始のテストは発言を今日の日時にした。SQL の呼び出し箇所はすべてテストが流したので `scripts/lib/sql-call-sites.mjs` は変えず、変更欄から外した

@@ -710,7 +710,12 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (e.status && typeof e.status === "object") {
         const want = e.status as Record<string, unknown>;
-        const text = await status(db(), await projectId(), "example/tsundoku");
+        // Seen this many days after the capture, which stamps messages with the real clock
+        const now =
+          typeof want.after_days === "number"
+            ? new Date(Date.now() + want.after_days * 86_400_000)
+            : new Date();
+        const text = await status(db(), await projectId(), "example/tsundoku", now);
         const n = (re: RegExp) => Number(re.exec(text)?.[1] ?? 0);
         if (want.quarantined !== undefined)
           assert.equal(n(/(\d+) quarantined record/), want.quarantined, text);
@@ -727,7 +732,21 @@ export async function createDriver(world: World): Promise<Driver> {
             s?.host === "codex" ? "codex" : "claude-code",
             want.pending_sessions_includes,
           );
-          assert.match(await pendingText(writer(), await projectId()), new RegExp(uuid));
+          assert.match(await pendingText(writer(), await projectId(), now), new RegExp(uuid));
+        }
+        if (want.pending_recent !== undefined)
+          assert.equal(n(/(\d+) sessions? not traced yet/), want.pending_recent, text);
+        if (want.pending_older !== undefined)
+          assert.equal(n(/(\d+) older sessions? /), want.pending_older, text);
+        if (typeof want.pending_older_includes === "string") {
+          const s = sessions.get(want.pending_older_includes);
+          const uuid = sessionId(
+            await projectId(),
+            s?.host === "codex" ? "codex" : "claude-code",
+            want.pending_older_includes,
+          );
+          const listed = await pendingText(writer(), await projectId(), now);
+          assert.match(listed.slice(listed.indexOf("Older than 30 days")), new RegExp(uuid), listed);
         }
         return;
       }
