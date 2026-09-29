@@ -19,6 +19,8 @@ export type ForgetOutcome = {
   units: { key: string; before: string; after: string; removed: number }[];
   /** Unfetched references the owner gave in a forgotten message */
   references: number;
+  /** Field definitions quoting a forgotten source, and field values removed with them or quoting one themselves */
+  fields: { definitions: number; values: number };
 };
 
 export type Cleanup = "done" | "incomplete";
@@ -78,6 +80,7 @@ async function forgetIn(
     already,
     units: [],
     references: 0,
+    fields: { definitions: 0, values: 0 },
   };
   if (!rows.length) return outcome;
   const targets = rows.map((r) => r.id);
@@ -120,6 +123,30 @@ async function forgetIn(
           .executeTakeFirstOrThrow()
       ).n,
     );
+  const definitions = await trx
+    .selectFrom("field_def")
+    .where("project_id", "=", projectId)
+    .where("source_id", "in", targets)
+    .select("id")
+    .execute();
+  const defIds = definitions.map((d) => d.id);
+  outcome.fields = {
+    definitions: defIds.length,
+    values: Number(
+      (
+        await trx
+          .selectFrom("unit_field")
+          .where((eb) =>
+            eb.or([
+              eb("source_id", "in", targets),
+              ...(defIds.length ? [eb("field_def_id", "in", defIds)] : []),
+            ]),
+          )
+          .select((eb) => eb.fn.countAll<number>().as("n"))
+          .executeTakeFirstOrThrow()
+      ).n,
+    ),
+  };
   const removed = new Map<number, number>();
   for (const u of touched)
     removed.set(u.id, (await count("unit_evidence", u.id)) + (await count("unit_adoption", u.id)));
@@ -246,6 +273,8 @@ export async function applyForget(
       // The sources are gone once committed: a cleanup that fails (a busy database) is reported as unfinished, never as a failed forget
       try {
         await sql`insert into source_fts (source_fts) values ('optimize')`.execute(c);
+        // A removed field value leaves its words in the unit index segments until they are merged
+        if (outcome.fields.values) await sql`insert into unit_fts (unit_fts) values ('optimize')`.execute(c);
         const checkpoint = await sql<{ busy: number }>`pragma wal_checkpoint(TRUNCATE)`.execute(c);
         return { outcome, cleanup: checkpoint.rows[0]?.busy === 0 ? "done" : "incomplete" };
       } catch {
@@ -272,6 +301,10 @@ export function forgetText(o: ForgetOutcome): string {
   }
   if (o.references)
     lines.push(`- ${plural(o.references, "unfetched reference")} the forgotten messages gave`);
+  if (o.fields.definitions || o.fields.values)
+    lines.push(
+      `- ${plural(o.fields.definitions, "field definition")} and ${plural(o.fields.values, "field value")} go with them`,
+    );
   if (o.units.length)
     lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
   lines.push("Copies outside the database (capture's waiting and set-aside files, backups) are not touched.");

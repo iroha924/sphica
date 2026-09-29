@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
-import { applyForget, type ForgetOutcome, previewForget } from "../src/forget.ts";
+import { beginGlean, checkText } from "../src/extract.ts";
+import { applyForget, type ForgetOutcome, forgetText, previewForget } from "../src/forget.ts";
 import { lookOverview } from "../src/overview.ts";
 import { readUnit } from "../src/read.ts";
 import { sha256 } from "../src/text.ts";
@@ -253,7 +254,13 @@ test("an unknown id or another project's id is refused, and an id already forgot
   );
   await forget(src);
   const again = await forget(src);
-  assert.deepEqual(again.outcome, { sources: [], already: [src], units: [], references: 0 });
+  assert.deepEqual(again.outcome, {
+    sources: [],
+    already: [src],
+    units: [],
+    references: 0,
+    fields: { definitions: 0, values: 0 },
+  });
   assert.equal(again.cleanup, "done");
 });
 
@@ -331,4 +338,83 @@ test("forgetting only a reconsider condition's quote leaves the decision active,
     await lookOverview(db.reader, p, null),
     /- u1: rejected option Postgres, reconsider when: if replicas are needed \[unsupported/,
   );
+});
+
+/** A tenant field defined from `defined`, and a value on each unit quoting `quoted` (or the definition's source when not given). */
+const fields = (defined: number, values: { unit: number; quoted?: number }[]) => {
+  const d = insert(db, "field_def", {
+    project_id: p,
+    name: "tenant",
+    type: "text",
+    label: "Tenant",
+    description: "The tenant affected",
+    source_id: defined,
+    span_start: 0,
+    span_end: 5,
+    run_id: run(db, p),
+    added_at: now,
+  });
+  for (const v of values)
+    insert(db, "unit_field", {
+      unit_id: v.unit,
+      field_def_id: d,
+      value: "acme",
+      source_id: v.quoted ?? defined,
+      span_start: 0,
+      span_end: 4,
+      run_id: runOf(v.unit),
+      added_at: now,
+    });
+};
+const values = () => Number(one("select count(*) as n from unit_field").n);
+const definitions = () => Number(one("select count(*) as n from field_def").n);
+const units = (word: string) =>
+  Number(one("select count(*) as n from unit_fts where unit_fts match ?", `"${word}"`).n);
+const revision = (u: number) => Number(one("select revision from unit where id = ?", u).revision);
+
+test("forgetting a field definition's source removes the definition and every value of it, as the preview counted", async () => {
+  const defined = message(db, p, { id: "m1", text: "Track the tenant." });
+  const said = message(db, p, { id: "m2", text: "acme hit it." });
+  const u1 = unit("u1", "finding");
+  const u2 = unit("u2", "finding");
+  evidence(u1, said);
+  evidence(u2, said);
+  fields(defined, [{ unit: u1 }, { unit: u2, quoted: said }]);
+  assert.equal(units("acme"), 2);
+  const seen = await previewForget(db.file, p, [defined]);
+  assert.deepEqual(seen.fields, { definitions: 1, values: 2 });
+  assert.match(forgetText(seen), /1 field definition and 2 field values go with them/);
+  assert.equal(values(), 2, "the preview rolls back");
+  const [r1, r2] = [revision(u1), revision(u2)];
+  const { outcome, cleanup } = await applyForget(db.file, p, [defined], seen);
+  assert.deepEqual(outcome.fields, { definitions: 1, values: 2 });
+  assert.equal(cleanup, "done");
+  assert.equal(definitions(), 0);
+  assert.equal(values(), 0);
+  assert.equal(units("acme"), 0);
+  assert.ok(revision(u1) > r1 && revision(u2) > r2);
+});
+
+test("forgetting only a value's quoted source removes that value, keeps the definition, and a glean made before is refused", async () => {
+  const defined = message(db, p, { id: "m1", text: "Track the tenant." });
+  const said = message(db, p, { id: "m2", text: "acme hit it." });
+  const reason = message(db, p, { id: "m3", text: "Drop that finding." });
+  const u = unit("u1", "finding");
+  evidence(u, reason);
+  fields(defined, [{ unit: u, quoted: said }]);
+  const read = revision(u);
+  const seen = await previewForget(db.file, p, [said]);
+  assert.deepEqual(seen.fields, { definitions: 0, values: 1 });
+  await applyForget(db.file, p, [said], seen);
+  assert.equal(definitions(), 1);
+  assert.equal(values(), 0);
+  assert.equal(units("acme"), 0);
+  const withdraw = {
+    ops: [
+      { op: "withdraw", unit: "u1", revision: read, reason_source: `s${reason}`, reason_quote: "Drop that" },
+    ],
+  };
+  const checked = await checkText(db.ingest, await beginGlean(db.ingest, p, "s1"), p, null, withdraw);
+  assert.equal(checked.ok, false);
+  assert.match(checked.text, /changed since you read it/);
 });
