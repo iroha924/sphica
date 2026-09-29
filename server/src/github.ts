@@ -153,6 +153,8 @@ type ReviewComment = Comment & {
   path?: string;
   line?: number | null;
   start_line?: number | null;
+  side?: string | null;
+  start_side?: string | null;
   commit_id?: string;
   diff_hunk?: string;
   in_reply_to_id?: number;
@@ -273,6 +275,11 @@ export async function readPull(
   for (const c of reviewComments)
     if (c.body?.trim()) {
       const end = c.line ?? null;
+      // A range that starts on the old side counts its first line in another file than its end, so only the end line is kept
+      const start =
+        c.start_line && c.start_line <= (end ?? 0) && (c.start_side ?? c.side) === c.side
+          ? c.start_line
+          : end;
       items.push(
         item({
           kind: "review_comment",
@@ -285,7 +292,7 @@ export async function readPull(
           createdAt: c.created_at,
           text: c.body,
           path: cleanPath(c.path),
-          lines: end ? [c.start_line ?? end, end] : null,
+          lines: end && start ? [start, end] : null,
           hunk: c.diff_hunk ?? null,
           commit: sha(c.commit_id),
         }),

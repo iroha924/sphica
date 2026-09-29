@@ -32,7 +32,7 @@ base: main
   - コミット: `fix(harvest): mark sources an earlier run looked at`
   - 結果: 直す前の `node --test --test-name-pattern='marks the sources' test/extract.test.ts` → `## s2 pr_comment pr:3 by kai (MEMBER) 2026-03-02T00:00:00.000Z` が `(harvested before)` に一致せず落ちた。直した後 `node --test --test-timeout=60000 test/extract.test.ts test/github.test.ts` → 30 pass / 0 fail（前のコメントにだけ印、新しいコメントと本文の revision 2 には無し）。npm と 3 つの manifest を 0.6.11。`bun run verify` → 0
 
-- [ ] T02: 逆向き・側違いの行範囲を終わりの行だけにする
+- [x] T02: 逆向き・側違いの行範囲を終わりの行だけにする
   - 種別: 修正
   - 計画: S2
   - 依存: なし
@@ -40,6 +40,7 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 test/github.test.ts` → `start_line > line` の偽の応答で storeItems が CHECK で落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/github.test.ts` → 逆向きと `start_side !== side` は `[line, line]`、同じ側の順向きは `[start_line, line]` で保存され、harvest がほかの source も保存する。`bun run verify` → 0
   - コミット: `fix(harvest): keep only the end line of a reversed or two-sided comment range`
+  - 結果: 直す前の `node --test --test-name-pattern='runs backwards' test/github.test.ts` → `CHECK constraint failed: line_end >= line_start` で落ちた。直した後 `node --test --test-timeout=60000 test/github.test.ts` → 12 pass / 0 fail（逆向き 9→3 と LEFT→RIGHT 2→5 は終わりの行だけ、RIGHT の 4→6 はそのまま、start_line が null は 7→7、本文も保存）。`bun run verify` → 0
 
 - [ ] T03: `gh api` の呼び出しに 60 秒のタイムアウトを付ける
   - 種別: 修正
