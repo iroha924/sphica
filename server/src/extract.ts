@@ -45,6 +45,8 @@ const PAGE_CHARS = 40_000;
  * server's process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
  */
 const shownTo = new Map<string, Set<number>>();
+/** Runs remembered at once: a run read but never saved is forgotten after this many newer ones, and its sources then stay pending. */
+const SHOWN_RUNS = 100;
 
 /** Sessions of the project with owner messages not traced yet, as text: recent ones first, then the older ones apart. */
 export async function pendingText(
@@ -312,24 +314,6 @@ export async function contextText(
       );
     start = at + 1;
   }
-  let end = start;
-  for (let used = 0; end < scope.items.length; end++) {
-    const size = scope.items[end]?.text.length ?? 0;
-    if (end > start && used + size > PAGE_CHARS) break;
-    used += size;
-  }
-  const page = scope.items.slice(start, end);
-  const shown = shownTo.get(id) ?? new Set<number>();
-  for (const it of page) shown.add(it.id);
-  shownTo.set(id, shown);
-  const lines = [scope.head, ...page.map((it) => it.text)];
-  const last = page.at(-1);
-  const left = scope.items.length - end;
-  if (left > 0 && last)
-    return [
-      ...lines,
-      `${left} more ${left === 1 ? "source follows" : "sources follow"}: call record_context with after: "s${last.id}" and read every page before saving. Only the sources you were shown count as looked at.`,
-    ].join("\n");
   const live = await liveUnits(db, projectId);
   const fields =
     scope.target.origin === "trace"
@@ -340,8 +324,7 @@ export async function contextText(
           .orderBy("id")
           .execute()
       : [];
-  return [
-    ...lines,
+  const tail = [
     ...scope.tail,
     ...(fields.length
       ? [
@@ -363,7 +346,46 @@ export async function contextText(
             `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}) ${inline(u.text).slice(0, 160)}`,
         )
       : ["None."]),
-  ].join("\n");
+  ];
+  const tailSize = tail.join("\n").length;
+  // A source longer than a page is cut: its heading line stays, and the rest is read with read s<id>@<byte>
+  const entry = (it: { id: number; text: string }) => {
+    if (it.text.length <= PAGE_CHARS) return it.text;
+    const body = it.text.indexOf("\n") + 1;
+    const kept = [...it.text.slice(body)].slice(0, PAGE_CHARS - body).join("");
+    return `${it.text.slice(0, body)}${kept}\n(cut here; read s${it.id}@${Buffer.byteLength(kept, "utf8")} for the rest)`;
+  };
+  const page: { id: number; text: string }[] = [];
+  let used = 0;
+  let end = start;
+  for (; end < scope.items.length; end++) {
+    const it = scope.items[end];
+    if (!it) break;
+    const text = entry(it);
+    if (page.length && used + text.length > PAGE_CHARS) break;
+    page.push({ id: it.id, text });
+    used += text.length;
+  }
+  const left = scope.items.length - end;
+  // The tail goes on a page of its own when it does not fit beside the last sources
+  const last = page.at(-1);
+  const more = left > 0 || (last !== undefined && used + tailSize > PAGE_CHARS);
+  // Recorded only now, after every await: a save running meanwhile never counts a source this reply has not returned yet
+  const shown = shownTo.get(id) ?? new Set<number>();
+  for (const it of page) shown.add(it.id);
+  shownTo.delete(id);
+  shownTo.set(id, shown);
+  for (const old of shownTo.keys()) {
+    if (shownTo.size <= SHOWN_RUNS) break;
+    shownTo.delete(old);
+  }
+  const lines = [scope.head, ...page.map((it) => it.text)];
+  if (more && last)
+    return [
+      ...lines,
+      `${left > 0 ? `${left} more ${left === 1 ? "source follows" : "sources follow"}` : "The live records follow"}: call record_context with after: "s${last.id}" and read every page before saving. Only the sources you were shown count as looked at.`,
+    ].join("\n");
+  return [...lines, ...tail].join("\n");
 }
 
 /** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
@@ -415,10 +437,18 @@ export async function saveText(
         : await checkRecord(trx, scope.target, record).then((checked) => {
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
             const shown = shownTo.get(id) ?? new Set<number>();
-            const cited = new Set([
-              ...checked.units.flatMap((u) => [...u.cites]),
-              ...checked.fieldDefs.map((d) => d.source),
-            ]);
+            // Only a quote found in the source counts: citing a message with words it does not hold proves nothing was read
+            const cited = new Set(
+              [
+                ...checked.units.flatMap((u) => [
+                  ...u.evidence,
+                  ...u.adoption,
+                  ...u.options.flatMap((o) => [...o.evidence, ...(o.reconsider ? [o.reconsider] : [])]),
+                  ...u.fields,
+                ]),
+                ...checked.fieldDefs,
+              ].map((q) => q.source),
+            );
             return saveRecord(
               trx,
               scope.target,

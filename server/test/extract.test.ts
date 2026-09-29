@@ -19,6 +19,7 @@ import {
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import type { Get } from "../src/github.ts";
+import { readSource } from "../src/read.ts";
 import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
@@ -1240,6 +1241,60 @@ test("trace: context comes in pages, and saving marks as looked at only the mess
     await saveText(db.ingest, second, p, null, { units: [] });
     assert.equal(untraced(), 0);
     assert.ok(ids.length === 40);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: one message longer than a page is cut with a pointer to read the rest, and a quote not found marks nothing looked at", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const long = message(db, p, { id: "m1", text: `始まり ${"い".repeat(60_000)} 終わり` });
+    const other = message(db, p, { id: "m2", text: "Postgres は使わない。", sent: "2026-09-10T00:01:00Z" });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const page = await contextText(db.ingest, run, p, null);
+    assert.ok(page.length < 50_000, `a page of ${page.length} characters`);
+    const rest = new RegExp(`read (s${long}@\\d+) for the rest`).exec(page)?.[1] ?? "";
+    assert.ok(rest, page.slice(-200));
+    assert.doesNotMatch(page, /終わり/);
+    // The pointer reads on from where the page cut off
+    const tail = (await readSource(db.reader, p, rest)) ?? "";
+    assert.match(tail, /終わり/);
+    assert.doesNotMatch(tail, /始まり/);
+    // The record cites the unread message with words it does not hold: that proves no reading, so it is not marked
+    await saveText(db.ingest, run, p, null, {
+      units: [
+        {
+          key: "no-postgres",
+          kind: "finding",
+          text: "Postgres",
+          evidence: [{ source: `s${other}`, quote: "MySQL も使わない。", role: "states" }],
+        },
+      ],
+    });
+    const looked = (id: number) =>
+      Number(db.owner.prepare("select count(*) as n from source_processing where source_id = ?").get(id)?.n);
+    assert.equal(looked(long), 1);
+    assert.equal(looked(other), 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: the live records go on a page of their own when they do not fit beside the last messages", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "う".repeat(39_900) });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const first = await contextText(db.ingest, run, p, null);
+    const next = /The live records follow: call record_context with after: "(s\d+)"/.exec(first)?.[1];
+    assert.ok(next, first.slice(-300));
+    assert.doesNotMatch(first, /Live records of this project/);
+    const last = await contextText(db.ingest, run, p, null, next);
+    assert.match(last, /Live records of this project/);
+    assert.doesNotMatch(last, /^## s/m);
   } finally {
     await db.done();
   }
