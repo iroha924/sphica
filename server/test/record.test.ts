@@ -932,6 +932,9 @@ test("an integer value must be a whole number written in the quote; other types 
   assert.equal(valueInQuote("integer", "95", "β95=320ms"), false);
   assert.equal(valueInQuote("integer", "95", "ｐ95=320ms"), false);
   assert.equal(valueInQuote("integer", "320", "ｐ95=320ms"), true);
+  for (const quote of ["x−5", "x＋5", "x－5"])
+    assert.equal(valueInQuote("integer", "5", quote), false, quote);
+  assert.equal(valueInQuote("integer", "95", "β\u030195"), false);
   assert.equal(valueInQuote("enum", "high", "severity High"), false);
   assert.equal(valueInQuote("date", "2026-10-01", "due 2026-10-01"), true);
   assert.equal(valueInQuote("date", "2026-10-01", "due Oct 1"), false);

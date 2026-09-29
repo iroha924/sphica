@@ -613,11 +613,11 @@ const isoDate = (v: string) => {
 
 /**
  * A number written in a quote, whole: a sign, a decimal point, and an exponent belong to it. Nothing starts right after a Latin, Greek,
- * or Cyrillic letter (full width too), a digit, `_`, `.`, or a sign, so `p95`, `β95`, and the `5` of `x-5` are not numbers. Kana and
- * kanji do not stop one, since Japanese puts a particle right before a number.
+ * or Cyrillic letter (full width too), a combining mark, a digit, `_`, `.`, a dash, or a plus or minus sign of any width, so `p95`,
+ * `β95`, and the `5` of `x-5` or `x−5` are not numbers. Kana and kanji do not stop one, since Japanese puts a particle right before a number.
  */
 const NUMBER =
-  /(?<![\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{N}_.+-])[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/gu;
+  /(?<![\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{M}\p{N}\p{Pd}_.+\uFF0B\u2212])[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/gu;
 
 /** Whether the quote writes the value as it is, so a value can only be one that was said. An integer must be a whole number in the quote. */
 export function valueInQuote(type: FieldType, value: string, quote: string): boolean {

@@ -138,6 +138,16 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - コミット: `fix(fields): escape backslashes in table cells, cut them by characters, and test the frame`
   - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/fields.test.ts` → 0 pass / 1 fail（ラベル `Tenant \| who\` の行が GFM の読み方で 9 列になる）。直した後 → 1 pass / 0 fail（全行 8 列、日本語の説明が 200 文字で切れる、返答が `<past-records id=...>` で始まり表を含む）。`bun run verify` → 0
 
+- [x] T12: integer の数値の開始を、結合記号・ダッシュ類・全角と数式の符号の直後でも認めないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T10（直す正規表現が要る）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/record.test.ts` → `x−5`・`x＋5`・`x－5` から 5、`β\u030195` から 95 を拒否するテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 上の 4 例が拒否され、既存の通る例（`レイテンシは3件` の 3、`p95=-5` の -5、`320ms` の 320）は通る。`bun run verify` → 0
+  - コミット: `fix(record): stop an integer after combining marks, dashes, and full-width or math signs`
+  - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/record.test.ts` → 22 pass / 1 fail（`x−5` から 5 が true）。直した後 → 23 pass / 0 fail（4 例とも拒否、既存の通る例は通る）。`bun run verify` → 0
+
 ## 記録
 2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
 2026-09-29 / T01, T08 / パッケージに入る変更はバージョンを揃えないと pre-commit の bundle が止める / 0.6.8 への引き上げを T08 から T01 に移した。T01 の変更欄と完了条件に 4 つの manifest と release:plan を足し、T08 の変更欄（前: trace Skill と 4 つの manifest、新: trace Skill のみ）と完了条件（前: release:plan・verify:ai・verify、新: verify:ai・verify）と名前を直した
@@ -152,3 +162,4 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T08 / trace Skill の本文の `fields` がツール名として数えられた / trace の allowed-tools に読み取りの fields を足した（定義の一覧を trace から見られても害はない）
 2026-09-29 / T09 / red の欄を直した（前: 後処理が失敗した後の再実行で値の語が残るテストと注意のテストが落ちる、新: 注意のテストが落ちる）。再実行の件は optimize を失敗させる手段がテストに無く、再現できなかった / 毎回 optimize する形に直し、結果欄に再現していないことを書いた
 2026-09-29 / T11 / Codex の T07・T08 のレビュー: F1（trace Skill に名前の 40 文字と enum の 1〜30 個・重複不可が無い）は採用 / 未着手だった T11 に含め、変更欄に `plugin/skills/trace/SKILL.md` を足した（前: fields.ts・mcp.ts・fields.test.ts）
+2026-09-29 / T09, T10, T11 / Codex のレビュー: T09 と T11 は指摘なし。T10 に F1（Unicode のマイナス・全角の符号の後の 5 が通る）と F2（結合アクセントを挟んだ β の後の 95 が通る）、どちらも再現あり / 端の入力だが直しが小さく確実なので採用し、修正タスク T12 を足した
