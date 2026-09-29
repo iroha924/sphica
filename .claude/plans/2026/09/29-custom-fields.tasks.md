@@ -44,13 +44,14 @@ base: main
 
 trace の保存で定義と値を検査して書き、値で検索できる
 
-- [ ] T03: record の入力に `field_defs` と unit の `fields` を足し、検査と保存、record_context の定義を作る
+- [x] T03: record の入力に `field_defs` と unit の `fields` を足し、検査と保存、record_context の定義を作る
   - 種別: 追加
   - 計画: S1, S3
   - 依存: T01（新しい表が要る）
-  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/src/mcp-record.ts`, `server/test/record.test.ts`
+  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/src/glean.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → trace 以外の run の拒否、再定義の拒否、各型の表記の規則（`p95=320ms` から 320 は通り 95 は拒否、`-5` から 5・`1.5` から 1・`1e3` から 1 は拒否）、定義だけの save で source が `units` になる、が通る。`bun run verify` → 0
   - コミット: `feat(record): take field definitions and quoted field values in trace`
+  - 結果: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 23 pass / 0 fail（harvest の拒否、owner でない定義・同じ record での二重定義・enum の不整合・未定義の項目・引用に無い値・見つからない引用・kinds 外の拒否、`p95=320ms` から 320 は通り 95・`-5` から 5・`1.5` と `1e3` から 1 は拒否、「レイテンシは3件」から 3 は通る、保存した定義と値、次の run の record_context に定義が出て再定義は拒否、定義だけの save で source が `units`）。HEAD の record.ts では `valueInQuote` が無いため読み込みの段階で落ちる（挙動の違いによる失敗は確かめていない）。`bun run verify` → 0（`SQL: tests ran 185 / 185 sites`）
 
 - [ ] T04: 検索の判定語に値を入れ、acceptance を足す
   - 種別: 追加
@@ -100,7 +101,21 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - 完了条件: `bun run verify:ai` → 0。`bun run verify` → 0
   - コミット: `feat(trace): explain field definitions and values`
 
+## P5: レビューの直し
+
+- [ ] T09: forget の後処理で unit 索引を毎回 optimize し、値だけが消えるときも本文が残る注意を出し、値の語がファイルに残らないことを確かめる
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す処理が要る）
+  - 変更: `server/src/forget.ts`, `server/test/forget.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 後処理が失敗した後の再実行で値の語がファイルに残るテストと、値だけが消えるときの注意のテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 値の語が DB と WAL のバイトに残らず、再実行でも消え、値だけが消える確認文に本文が残る注意が出る。`bun run verify` → 0
+  - コミット: `fix(forget): always merge the unit index after forgetting, and warn when only field values go`
+
 ## 記録
 2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
 2026-09-29 / T01, T08 / パッケージに入る変更はバージョンを揃えないと pre-commit の bundle が止める / 0.6.8 への引き上げを T08 から T01 に移した。T01 の変更欄と完了条件に 4 つの manifest と release:plan を足し、T08 の変更欄（前: trace Skill と 4 つの manifest、新: trace Skill のみ）と完了条件（前: release:plan・verify:ai・verify、新: verify:ai・verify）と名前を直した
 2026-09-29 / T02 / 認可は T01 に移したので、T02 で変えたのは forget.ts とそのテストだけになった / T02 の変更欄を直した（前: db-write.ts・forget.ts・forget.test.ts・db.test.ts、新: forget.ts・forget.test.ts）。値を消したときは unit の索引の optimize も走らせ、値の語が索引の断片に残らないようにした
+2026-09-29 / T03 / mcp-record.ts は record を unknown で受けて渡すだけなので変えずに済み、glean.ts は Checked の形が増えたので変えた / T03 の変更欄を直した（前: record.ts・extract.ts・mcp-record.ts・record.test.ts、新: record.ts・extract.ts・glean.ts・record.test.ts）
+2026-09-29 / T03 / integer の数値の開始の条件で、Unicode の文字を除くと「レイテンシは3件」の 3 が取れなかった / ASCII の英字と `_` だけを除くようにし、plan の方針と変更履歴を直した
+2026-09-29 / T01, T02 / Codex のレビュー: T01 の F1（値の語が unit 索引のブロックに残る）は T02 の optimize で直っていたが、バイトを見るテストが無い。T02 の F1（後処理が失敗した後の再実行で unit 索引の optimize が飛ぶ）と F2（値だけを失う記録で、本文が残る注意が出ない）は採用 / 修正タスク T09 を足した

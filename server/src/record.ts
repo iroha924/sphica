@@ -6,10 +6,18 @@ import { locate as locateSymbol, masksSymbol } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { commitHolds } from "./git.ts";
-import { EVIDENCE_ROLES, OPTION_OUTCOMES, STANCES, UNIT_KINDS, WORK_STATUSES } from "./knowledge.ts";
+import {
+  EVIDENCE_ROLES,
+  FIELD_TYPES,
+  OPTION_OUTCOMES,
+  STANCES,
+  UNIT_KINDS,
+  WORK_STATUSES,
+} from "./knowledge.ts";
 import { head, sha256 } from "./text.ts";
 
 const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
+const FIELD_NAME = /^[a-z][a-z0-9_]{0,39}$/;
 /** Sources are cited by the refs context prints (`s<id>`), never by URL or position the agent made up. */
 const SOURCE_REF = /^s[1-9][0-9]{0,15}$/;
 const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
@@ -75,6 +83,31 @@ const Unit = z
     aliases: z.array(z.string()).max(12).default([]),
     supersedes: z.string().min(1).optional(),
     conflicts: z.array(z.string().min(1)).max(5).default([]),
+    fields: z
+      .array(
+        z
+          .object({
+            name: z.string().regex(FIELD_NAME, "a defined field name"),
+            value: text(200),
+            quote: Quote,
+          })
+          .strict(),
+      )
+      .max(12)
+      .default([]),
+  })
+  .strict();
+const FieldDef = z
+  .object({
+    name: z
+      .string()
+      .regex(FIELD_NAME, "a lowercase letter, then lowercase letters, digits, and _ (at most 40)"),
+    type: z.enum(FIELD_TYPES),
+    label: text(100),
+    description: text(500),
+    enum: z.array(text(100)).min(1).max(30).optional(),
+    kinds: z.array(z.enum(UNIT_KINDS)).max(UNIT_KINDS.length).default([]),
+    quote: Quote,
   })
   .strict();
 const Work = z
@@ -87,7 +120,13 @@ const Work = z
     status: z.enum(WORK_STATUSES),
   })
   .strict();
-const Record = z.object({ units: z.array(Unit).max(50), work: Work.optional() }).strict();
+const Record = z
+  .object({
+    field_defs: z.array(FieldDef).max(10).default([]),
+    units: z.array(Unit).max(50),
+    work: Work.optional(),
+  })
+  .strict();
 
 type UnitInput = z.infer<typeof Unit>;
 type Span = { source: number; start: number; end: number };
@@ -120,7 +159,11 @@ type Planned = {
   aliases: string[];
   supersedes: number | null;
   conflicts: number[];
+  fields: (Span & { name: string; value: string })[];
 };
+
+type FieldType = (typeof FIELD_TYPES)[number];
+type PlannedDef = Span & Omit<z.infer<typeof FieldDef>, "quote">;
 
 /** errors refuse the save; problems name parts left out or units that stay candidates or quarantined, and the save goes ahead. */
 export type Checked = {
@@ -128,6 +171,8 @@ export type Checked = {
   problems: string[];
   units: Planned[];
   work: z.infer<typeof Work> | null;
+  /** Field definitions this record adds; they are written before its units */
+  fieldDefs: PlannedDef[];
 };
 
 /** The byte span of quote in text, or null. The first occurrence is taken. */
@@ -157,6 +202,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       problems,
       units: [],
       work: null,
+      fieldDefs: [],
     };
   const record = parsed.data;
 
@@ -194,8 +240,10 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       ...u.evidence,
       ...u.adoption,
       ...u.options.flatMap((o) => [...o.evidence, ...(o.reconsider_quote ? [o.reconsider_quote] : [])]),
+      ...u.fields.map((f) => f.quote),
     ])
       refs.add(Number(q.source.slice(1)));
+  for (const d of record.field_defs) refs.add(Number(d.quote.source.slice(1)));
   const sources = new Map(
     (refs.size
       ? await db
@@ -212,6 +260,60 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
     else if (target.sources && !target.sources.includes(r))
       errors.push(`s${r}: not a source of this run (cite the sources record_context lists)`);
   }
+
+  const withFields = record.field_defs.length > 0 || record.units.some((u) => u.fields.length > 0);
+  // Fields are a trial kept to the owner's own sessions: a harvest or glean reads text others wrote
+  if (withFields && target.origin !== "trace")
+    errors.push("field_defs and fields: only trace records fields");
+  const defined = new Map<string, { type: FieldType; enum: string[] | null; kinds: string[] }>(
+    (withFields
+      ? await db
+          .selectFrom("field_def")
+          .select(["name", "type", "enum_values", "kinds"])
+          .where("project_id", "=", target.projectId)
+          .execute()
+      : []
+    ).map((d) => [
+      d.name,
+      {
+        type: d.type as FieldType,
+        enum: d.enum_values === null ? null : (JSON.parse(d.enum_values) as string[]),
+        kinds: JSON.parse(d.kinds) as string[],
+      },
+    ]),
+  );
+  const fieldDefs: PlannedDef[] = [];
+  for (const d of record.field_defs) {
+    const at = `field_defs ${d.name}`;
+    if (defined.has(d.name)) {
+      errors.push(`${at}: already defined in this project; a field cannot be defined again`);
+      continue;
+    }
+    if ((d.type === "enum") !== (d.enum !== undefined))
+      errors.push(`${at}: enum goes with type enum, and only with it`);
+    if (d.enum && new Set(d.enum).size !== d.enum.length) errors.push(`${at}: enum values appear twice`);
+    if (new Set(d.kinds).size !== d.kinds.length) errors.push(`${at}: kinds appear twice`);
+    const s = sources.get(Number(d.quote.source.slice(1)));
+    if (!s) continue;
+    // A field is the owner's choice of what to track: the AI proposing one is not a definition
+    if (s.author_kind !== "owner") {
+      errors.push(
+        `${at}: the quote must be the owner's; ${d.quote.source} is by ${s.author_login ?? s.author_kind}`,
+      );
+      continue;
+    }
+    const span = locate(s.text, d.quote.quote);
+    if (!span) {
+      errors.push(`${at}: quote not found in ${d.quote.source}: "${head(d.quote.quote, 80)}"`);
+      continue;
+    }
+    defined.set(d.name, { type: d.type, enum: d.enum ?? null, kinds: d.kinds });
+    const { quote: _, ...rest } = d;
+    fieldDefs.push({ ...rest, source: s.id, start: span[0], end: span[1] });
+  }
+  const names = record.field_defs.map((d) => d.name);
+  for (const n of new Set(names.filter((n, i) => names.indexOf(n) !== i)))
+    errors.push(`field_defs ${n}: defined twice in this record`);
 
   const linked = [
     ...new Set(record.units.flatMap((u) => [...(u.supersedes ? [u.supersedes] : []), ...u.conflicts])),
@@ -438,6 +540,43 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       return other ? [other.id] : [];
     });
 
+    const fields: Planned["fields"] = [];
+    for (const f of u.fields) {
+      const at = `${key}: field ${f.name}`;
+      const d = defined.get(f.name);
+      if (!d) {
+        errors.push(`${at}: not a field of this project (define it in field_defs first)`);
+        continue;
+      }
+      if (fields.some((x) => x.name === f.name)) {
+        errors.push(`${at}: given twice`);
+        continue;
+      }
+      if (d.kinds.length && !d.kinds.includes(u.kind)) {
+        errors.push(`${at}: applies to ${d.kinds.join(", ")}, not ${u.kind}`);
+        continue;
+      }
+      const wrong = fieldTypeError(d.type, d.enum, f.value);
+      if (wrong) {
+        errors.push(`${at}: ${wrong}`);
+        continue;
+      }
+      const s = sources.get(Number(f.quote.source.slice(1)));
+      if (!s) continue;
+      cites.add(s.id);
+      const span = locate(s.text, f.quote.quote);
+      // Refused rather than quarantined: a value nobody said should not be kept, and should not hold back the record either
+      if (!span) {
+        errors.push(`${at}: quote not found in ${f.quote.source}: "${head(f.quote.quote, 80)}"`);
+        continue;
+      }
+      if (!valueInQuote(d.type, f.value, f.quote.quote)) {
+        errors.push(`${at}: the value ${JSON.stringify(f.value)} is not written in the quote as it is`);
+        continue;
+      }
+      fields.push({ name: f.name, value: f.value, source: s.id, start: span[0], end: span[1] });
+    }
+
     units.push({
       input: u,
       key,
@@ -450,11 +589,38 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       aliases: aliases.filter((a) => a && a.length <= 40),
       supersedes,
       conflicts,
+      fields,
     });
   }
   // Work is the traced session's own state, shown at session start: a harvest or glean cannot set it from text it read
   if (record.work && target.origin !== "trace") errors.push("work: only trace records work");
-  return { errors, problems, units, work: record.work ?? null };
+  return { errors, problems, units, work: record.work ?? null, fieldDefs };
+}
+
+/** Why a value does not fit its field's type, or null. The schema's triggers check the same. */
+function fieldTypeError(type: FieldType, values: string[] | null, v: string): string | null {
+  if (type === "integer" && !/^-?[0-9]+$/.test(v)) return "an integer is an optional minus sign and digits";
+  if (type === "date" && !(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v) && isoDate(v)))
+    return "a date is a valid YYYY-MM-DD";
+  if (type === "enum" && !values?.includes(v)) return `one of ${values?.join(", ")}`;
+  return null;
+}
+
+const isoDate = (v: string) => {
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+};
+
+/**
+ * A number written in a quote, whole: a sign, a decimal point, and an exponent belong to it, and digits right after an ASCII letter or
+ * `_` (`p95`) are a name, not a number. Other scripts' letters do not count, since Japanese puts a particle right before a number.
+ */
+const NUMBER = /(?<![A-Za-z0-9_.])[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/g;
+
+/** Whether the quote writes the value as it is, so a value can only be one that was said. An integer must be a whole number in the quote. */
+export function valueInQuote(type: FieldType, value: string, quote: string): boolean {
+  if (type !== "integer") return quote.includes(value);
+  return [...quote.matchAll(NUMBER)].some((m) => m[0].replace(/^\+/, "") === value);
 }
 
 export type Saved = {
@@ -500,6 +666,36 @@ export async function saveRecord(
   const now = iso(Date.now());
   const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [] };
   const cited = new Set<number>();
+  for (const d of checked.fieldDefs) {
+    cited.add(d.source);
+    await trx
+      .insertInto("field_def")
+      .values({
+        project_id: target.projectId,
+        name: d.name,
+        type: d.type,
+        label: d.label,
+        description: d.description,
+        enum_values: d.enum ? JSON.stringify(d.enum) : null,
+        kinds: JSON.stringify(d.kinds),
+        source_id: d.source,
+        span_start: d.start,
+        span_end: d.end,
+        run_id: runId,
+        added_at: now,
+      })
+      .execute();
+  }
+  const fieldIds = new Map(
+    (checked.units.some((p) => p.fields.length)
+      ? await trx
+          .selectFrom("field_def")
+          .select(["id", "name"])
+          .where("project_id", "=", target.projectId)
+          .execute()
+      : []
+    ).map((d) => [d.name, d.id]),
+  );
   for (const p of checked.units) {
     for (const c of p.cites) cited.add(c);
     const u = p.input;
@@ -596,6 +792,24 @@ export async function saveRecord(
           excerpt: at?.excerpt ?? null,
           role: a.role,
           edit_observation_id: a.observation,
+          run_id: runId,
+          added_at: now,
+        })
+        .execute();
+    }
+    // Values are sealed with the unit, before its first state
+    for (const f of p.fields) {
+      const field = fieldIds.get(f.name);
+      if (field === undefined) throw new Error(`${p.key}: field ${f.name} is not defined`);
+      await trx
+        .insertInto("unit_field")
+        .values({
+          unit_id: id,
+          field_def_id: field,
+          value: f.value,
+          source_id: f.source,
+          span_start: f.start,
+          span_end: f.end,
           run_id: runId,
           added_at: now,
         })

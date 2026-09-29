@@ -9,8 +9,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { locate, masksSymbol } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
+import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { readUnit } from "../src/read.ts";
-import { checkRecord, repoPath, saveRecord, type Target } from "../src/record.ts";
+import { checkRecord, repoPath, saveRecord, type Target, valueInQuote } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -914,4 +915,177 @@ test("an anchor path holding a NUL or other control character is refused", () =>
   assert.equal(repoPath("src/a.ts"), "src/a.ts");
   assert.equal(repoPath("x\0y"), null);
   assert.equal(repoPath("x\ny"), null);
+});
+
+test("an integer value must be a whole number written in the quote; other types must be written as they are", () => {
+  assert.equal(valueInQuote("integer", "320", "p95=320ms after the fix"), true);
+  assert.equal(valueInQuote("integer", "95", "p95=320ms after the fix"), false);
+  assert.equal(valueInQuote("integer", "-5", "p95=-5 now"), true);
+  assert.equal(valueInQuote("integer", "5", "p95=-5 now"), false);
+  assert.equal(valueInQuote("integer", "1", "it took 1.5 s"), false);
+  assert.equal(valueInQuote("integer", "1", "about 1e3 rows"), false);
+  assert.equal(valueInQuote("integer", "5", "+5 retries"), true);
+  assert.equal(valueInQuote("integer", "3", "レイテンシは3件だけ"), true);
+  assert.equal(valueInQuote("enum", "high", "severity High"), false);
+  assert.equal(valueInQuote("date", "2026-10-01", "due 2026-10-01"), true);
+  assert.equal(valueInQuote("date", "2026-10-01", "due Oct 1"), false);
+  assert.equal(valueInQuote("text", "テナント A", "影響はテナント A だけ"), true);
+});
+
+test("trace defines a field from the owner's words and fills values only with quotes that write them", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const owner = message(db, p, {
+      id: "m1",
+      text: "これから決定には tenant を記録して。acme の p95 が 320ms だったので Redis にする。",
+    });
+    const ai = message(db, p, { id: "m2", text: "Shall I also track severity?", speaker: "assistant" });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const tenant = {
+      name: "tenant",
+      type: "text",
+      label: "Tenant",
+      description: "The tenant affected",
+      kinds: ["decision"],
+      quote: { source: `s${owner}`, quote: "tenant を記録して" },
+    };
+    const decision = (fields: unknown[], key = "redis") => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: "Redis にする",
+      evidence: [{ source: `s${owner}`, quote: "Redis にする", role: "states" }],
+      adoption: [{ source: `s${owner}`, quote: "Redis にする" }],
+      fields,
+    });
+    const refused = async (record: unknown, why: RegExp) => {
+      const c = await checkText(db.ingest, run, p, null, record);
+      assert.equal(c.ok, false, c.text);
+      assert.match(c.text, why);
+    };
+    await refused(
+      { field_defs: [{ ...tenant, quote: { source: `s${ai}`, quote: "track severity" } }], units: [] },
+      /quote must be the owner's/,
+    );
+    await refused({ field_defs: [tenant, tenant], units: [] }, /defined twice/);
+    await refused({ field_defs: [{ ...tenant, type: "enum" }], units: [] }, /enum goes with type enum/);
+    await refused(
+      {
+        field_defs: [],
+        units: [decision([{ name: "tenant", value: "acme", quote: { source: `s${owner}`, quote: "acme" } }])],
+      },
+      /not a field of this project/,
+    );
+    await refused(
+      {
+        field_defs: [tenant],
+        units: [
+          decision([
+            { name: "tenant", value: "globex", quote: { source: `s${owner}`, quote: "acme の p95" } },
+          ]),
+        ],
+      },
+      /not written in the quote/,
+    );
+    await refused(
+      {
+        field_defs: [tenant],
+        units: [
+          decision([{ name: "tenant", value: "acme", quote: { source: `s${owner}`, quote: "acme の p96" } }]),
+        ],
+      },
+      /quote not found/,
+    );
+    await refused(
+      {
+        field_defs: [tenant],
+        units: [
+          {
+            ...decision([]),
+            kind: "finding",
+            stance: undefined,
+            adoption: [],
+            fields: [{ name: "tenant", value: "acme", quote: { source: `s${owner}`, quote: "acme" } }],
+          },
+        ],
+      },
+      /applies to decision, not finding/,
+    );
+
+    const saved = await saveText(db.ingest, run, p, null, {
+      field_defs: [
+        tenant,
+        {
+          ...tenant,
+          name: "p95",
+          type: "integer",
+          label: "p95",
+          kinds: [],
+          quote: { source: `s${owner}`, quote: "p95" },
+        },
+      ],
+      units: [
+        decision([
+          { name: "tenant", value: "acme", quote: { source: `s${owner}`, quote: "acme の p95" } },
+          { name: "p95", value: "320", quote: { source: `s${owner}`, quote: "p95 が 320ms" } },
+        ]),
+      ],
+    });
+    assert.match(saved, /trace:ext-s1\/redis active/);
+    const rows = db.owner
+      .prepare(
+        "select d.name, f.value from unit_field f join field_def d on d.id = f.field_def_id order by f.id",
+      )
+      .all()
+      .map((r) => ({ ...r }));
+    assert.deepEqual(rows, [
+      { name: "tenant", value: "acme" },
+      { name: "p95", value: "320" },
+    ]);
+    // A later run sees the definitions and cannot define them again
+    const next = await beginTrace(db.ingest, p, "s1");
+    const context = await contextText(db.ingest, next, p, null);
+    assert.match(context, /- tenant \(text; decision\) Tenant: The tenant affected/);
+    assert.match(context, /- p95 \(integer; every kind\) p95: The tenant affected/);
+    const again = await checkText(db.ingest, next, p, null, { field_defs: [tenant], units: [] });
+    assert.match(again.text, /already defined in this project/);
+    const typed = await checkText(db.ingest, next, p, null, {
+      units: [
+        decision([{ name: "p95", value: "3.2", quote: { source: `s${owner}`, quote: "320ms" } }], "second"),
+      ],
+    });
+    assert.match(typed.text, /an integer is an optional minus sign and digits/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("a record that only defines a field marks its source as used, and harvest cannot write fields", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const owner = message(db, p, { id: "m1", text: "Track the tenant on decisions." });
+    const def = {
+      name: "tenant",
+      type: "text",
+      label: "Tenant",
+      description: "The tenant affected",
+      quote: { source: `s${owner}`, quote: "Track the tenant" },
+    };
+    const harvest = await checkRecord(
+      db.ingest,
+      { ...target(p), origin: "harvest" },
+      { field_defs: [def], units: [] },
+    );
+    assert.deepEqual(harvest.errors, ["field_defs and fields: only trace records fields"]);
+    await save(db, target(p), { field_defs: [def], units: [] }, [owner]);
+    assert.deepEqual(
+      { ...db.owner.prepare("select outcome from source_processing where source_id = ?").get(owner) },
+      { outcome: "units" },
+    );
+    assert.equal(Number(db.owner.prepare("select count(*) as n from field_def").get()?.n), 1);
+  } finally {
+    await db.done();
+  }
 });
