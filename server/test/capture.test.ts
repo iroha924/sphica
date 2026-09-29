@@ -82,6 +82,22 @@ const LEAKS: [string, string][] = [
   ["OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123", "sk-proj-abc"],
   ["VOYAGE=pa-abcdefghijklmnopqrstuvwxyz0123", "pa-abcdef"],
   ["gh: ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_abc"],
+  // Markdown emphasis puts an underscore right before the token
+  [
+    "_ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.c2lnbmF0dXJlLXZhbHVl_",
+    "eyJpc3MiOiJhcHAiLCJp",
+  ],
+  ["_ghp_abcdefghijklmnopqrstuvwxyz0123456789_", "ghp_abc"],
+  [`_github_pat_${"A1".repeat(41)}_`, "github_pat_A1A1"],
+  // Stateless installation tokens are a ghs_-prefixed JWT with two dots, up to about 520 characters
+  [
+    "ログに出ていた ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.Zm9vYmFyLWJhei1xdXV4X3NpZ25hdHVyZS12YWx1ZS0xMjM0NTY3ODkw",
+    "eyJpc3MiOiJhcHAiLCJp",
+  ],
+  [
+    "ログに出ていた ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.Zm9vYmFyLWJhei1xdXV4X3NpZ25hdHVyZS12YWx1ZS0xMjM0NTY3ODkw",
+    "Zm9vYmFyLWJhei1xdXV4",
+  ],
   ["url: postgres://sphica_reader:s3cr3t@ep-x.example.com/db", "s3cr3t"],
   ["PGPASSWORD=npg_AbCdEf123456", "npg_AbCdEf"],
   ["npg_AbCdEf123456XY を貼った", "npg_AbCdEf"],
@@ -149,6 +165,9 @@ const LEAKS: [string, string][] = [
 
 // Masked text cannot be restored. Treating type annotations, variable references, UI text, or paths as keys would lose the conversation.
 const KEEPS = [
+  // A ghs_ name that is not a JWT (no two dot-separated parts) is a file or an identifier, not a token
+  "see ghs_release-notes-and-installation-guide-version-draft.md",
+  "see docs/ghs_release-notes.installation-guide.version-draft.md before release",
   "ふつうの文: sk は短いので伏せない、pa-ge も伏せない",
   "max_tokens: 5000 と keyboard の key の話。const token = await getToken();",
   "password: string;",
@@ -219,6 +238,8 @@ test("masking finishes in linear time on input that repeats a trigger", () => {
     'token: "',
     "Authorization: Bearer ",
     "eyJ-",
+    "ghs_aaaaaaaa_",
+    "ghs_eyJaaaaaaaa_",
   ]) {
     const text = unit.repeat(Math.ceil(N / unit.length)).slice(0, N);
     const t = performance.now();
