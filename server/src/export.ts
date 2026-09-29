@@ -17,9 +17,10 @@ async function chosen(db: Kysely<DB>, projectId: number, ref: string): Promise<U
   const u = await db
     .selectFrom("unit")
     .selectAll()
+    .where("project_id", "=", projectId)
     .where(byId ? "id" : "key", "=", byId ? Number(byId[1]) : ref)
     .executeTakeFirst();
-  if (!u || u.project_id !== projectId) return "no such record in this project";
+  if (!u) return "no such record in this project";
   if (u.kind !== "decision") return `a ${u.kind}, not a decision`;
   if (u.lifecycle !== "active") return `${u.lifecycle}, not active`;
   return u;
@@ -107,7 +108,8 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
 /** A fence longer than any run of backticks inside, so nothing in the block can close it. */
 function fenced(body: string[]): string {
   const text = body.join("\n");
-  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  let longest = 0;
+  for (const m of text.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
   const fence = "`".repeat(Math.max(3, longest + 1));
   return `${fence}text\n${text}\n${fence}`;
 }
@@ -226,10 +228,14 @@ export function exportPath(
   // The deepest part that exists decides where the rest lands
   let existing = path.dirname(target);
   const rest = [path.basename(target)];
-  while (!at(existing)) {
+  let found = at(existing);
+  while (!found) {
     rest.unshift(path.basename(existing));
     existing = path.dirname(existing);
+    found = at(existing);
   }
+  if (!found.isDirectory() && !found.isSymbolicLink())
+    return { error: "A part of the path is a file, not a folder." };
   let real: string;
   try {
     real = path.join(fs.realpathSync(existing), ...rest);

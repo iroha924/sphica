@@ -11,12 +11,12 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
-async function save(db: TempDb, p: number, units: unknown[]) {
+async function save(db: TempDb, p: number, units: unknown[], session = "s1") {
   const t: Target = {
     projectId: p,
     origin: "trace",
     prefix: "trace:ext-s1/",
-    sessionId: "s1",
+    sessionId: session,
     root: null,
     sources: null,
   };
@@ -24,8 +24,8 @@ async function save(db: TempDb, p: number, units: unknown[]) {
     const runId = await openRun(trx, {
       projectId: p,
       origin: "trace",
-      target: "session:s1",
-      sessionId: "s1",
+      target: `session:${session}`,
+      sessionId: session,
       draftId: `d${Math.random()}`,
     });
     return saveRecord(trx, t, runId, await checkRecord(trx, t, { units }), []);
@@ -167,6 +167,19 @@ test("any record that is not an active decision of this project refuses the whol
     assert.match(error, /- nope: no such record in this project/);
     assert.doesNotMatch(error, /ok:/);
     assert.match(await refused(db, other, ["trace:ext-s1/ok"]), /no such record in this project/);
+    // The same key saved first in another project does not hide this project's decision
+    const first = tempDb();
+    try {
+      const a1 = project(first, "git:github.com/o/a", "o/a");
+      const b1 = project(first, "git:github.com/o/b", "o/b");
+      const ma = message(first, a1, { id: "ma", text: q, session: "sa" });
+      await save(first, a1, [decision(ma, q, "ok")], "sa");
+      const mb = message(first, b1, { id: "mb", text: q, session: "sb" });
+      await save(first, b1, [decision(mb, q, "ok")], "sb");
+      assert.match(await exported(first, b1, ["trace:ext-s1/ok"]), /"Keep it simple\. Decided\."/);
+    } finally {
+      await first.done();
+    }
   } finally {
     await db.done();
   }
@@ -206,6 +219,11 @@ test("a document over the byte cap is refused, not cut", async () => {
       keys.push(`trace:ext-s1/big${i}`);
     }
     assert.match(await refused(db, p, keys), /over 61440\. Choose fewer decisions\./);
+    // A quote full of backticks is refused for its size too, not by a crash on the way
+    const ticks = `${"`a".repeat(200_000)} Decided.`;
+    const mt = message(db, p, { id: "mt", text: ticks });
+    await save(db, p, [decision(mt, ticks, "ticks")]);
+    assert.match(await refused(db, p, ["trace:ext-s1/ticks"]), /Choose fewer decisions\./);
   } finally {
     await db.done();
   }
@@ -261,6 +279,7 @@ test("the save path must land inside the repository, through any symbolic link",
     assert.match(String(Object.values(exportPath(root, "away/deeper/x.md"))), /leads outside the repository/);
     assert.match(String(Object.values(exportPath(root, "link.md"))), /symbolic link/);
     assert.match(String(Object.values(exportPath(root, "docs"))), /not a regular file/);
+    assert.match(String(Object.values(exportPath(root, "docs/decisions.md/x.md"))), /not a folder/);
     assert.match(String(Object.values(exportPath(root, "."))), /leaves the repository/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });

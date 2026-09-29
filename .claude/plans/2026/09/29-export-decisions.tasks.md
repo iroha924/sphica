@@ -53,7 +53,18 @@ base: main
   - コミット: `feat(skills): add /sphica:export to write chosen decisions to a file`
   - 結果: `bun run verify:ai` → 0（plugin Skills 7、export の allowed-tools と openai.yaml がそろう）。`bun run english` → 0。`bun run verify` → 0
 
+- [x] T04: 別プロジェクトの同じキー、大きな引用、ファイルを通る保存先を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す関数が要る）
+  - 変更: `server/src/export.ts`, `server/test/export.test.ts`
+  - red: `node --test test/export.test.ts` → 直す前のコードで、別プロジェクトに先に同じキーがあると「trace:ext-s1/ok: no such record in this project」、「`a」を 20 万回くり返した引用で `RangeError: Maximum call stack size exceeded`、`docs/decisions.md/x.md` で「not a folder」が出ない、の 3 件が落ちる
+  - 完了条件: `node --test test/export.test.ts` → 7 pass。`bun run verify` → 0
+  - コミット: `fix(export): scope keys to the project, count backticks without spreading, refuse file ancestors`
+  - 結果: red は上のとおり 3 件とも再現。直した後: `node --test test/export.test.ts` → 7 pass / 0 fail、`bun run verify` → 0
+
 ## 記録
 2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
 2026-09-29 / T02 / acceptance の driver は MCP を起動せず、各ツールと同じ関数を直接呼ぶ作りだった / export の step も `exportPath` と `exportDecisions` を直接呼び、本物の入口は plugin のテストで export を呼んで確かめた。書き出しが成功する経路を本物の入口で通すのは A5 の headless 実行で見る
 2026-09-29 / T03 / README と README.ja に各 Skill の説明行があった / 同じ形で export の行を足し、変更欄に `README.md`・`README.ja.md` を足した
+2026-09-29 / T04 / T01 の Codex レビュー: 検査と書き込みの間のシンボリックリンクのすり替え（高）、制約を置き換えた決定の連なりに制約が出る（中）、別プロジェクトの同じキー（中）、大きな引用でスタックがあふれる（中）、ファイルを通るパス（低） / 後の 3 件は T04 で直した。1 件目は見送り: すり替えられるのはそのリポジトリにすでに書ける人だけで、検査は持ち主の入力の誤りを止めるためのもの。2 件目は見送り: 置き換えられたものは種類を問わず経緯で、`kind: constraint` と明記して出る
