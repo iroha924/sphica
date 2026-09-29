@@ -287,8 +287,11 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         return null;
       }
       const span = locate(s.text, q.quote);
+      // Refused rather than quarantined: an optional condition whose words are not there should not hold back the record it sits on
       if (!span) {
-        quarantine.push(`reconsider quote not found in ${q.source}: "${head(q.quote, 80)}"`);
+        errors.push(
+          `${key}: option "${head(o.text, 60)}": reconsider_quote not found in ${q.source}: "${head(q.quote, 80)}"`,
+        );
         return null;
       }
       return { source: s.id, start: span[0], end: span[1] };

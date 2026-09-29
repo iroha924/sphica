@@ -440,22 +440,11 @@ test("a rejected option keeps the reconsider condition the owner stated, quoted 
       /Invalid option/,
     );
 
-    // A condition whose words are not in the message quarantines the record, as any quote not found does
-    const lost = await save(
-      db,
-      target(p),
-      {
-        units: [
-          decision("lost", {
-            ...condition,
-            reconsider_quote: { source: `s${m}`, quote: "言っていない条件" },
-          }),
-        ],
-      },
-      [m],
+    // A condition whose words are not in the message is refused: the agent fixes the quote or leaves the condition out
+    await refused(
+      { ...condition, reconsider_quote: { source: `s${m}`, quote: "言っていない条件" } },
+      /reconsider_quote not found in s\d+/,
     );
-    assert.equal(lost.saved.quarantined.length, 1);
-    assert.match(String(state(db, "trace:ext-s1/lost")?.extraction_reason), /reconsider quote not found/);
   } finally {
     await db.done();
   }
