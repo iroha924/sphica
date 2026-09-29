@@ -40,4 +40,5 @@ test("reads only whole-line -- comments in SQL", () => {
     [1, "an issue number"],
   ]);
   assert.deepEqual(reasons("select 1; -- fine\ninsert into t values ('(#5)');", "sql"), []);
+  assert.deepEqual(reasons("-- a\r-- issue #2", "sql"), [[2, "an issue number"]]);
 });

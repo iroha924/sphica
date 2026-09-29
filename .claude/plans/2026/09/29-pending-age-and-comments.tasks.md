@@ -71,6 +71,16 @@ base: main
   - コミット: `feat(trace): stop counting sessions idle for over 30 days as waiting`
   - 結果: red: status-07 を足して実装前に `bun run acceptance` → status-07 だけが `actual: 1, expected: 0`（31 日後でも最近の待ちに数えた）で落ちた。実装後: `bun run verify` → 0（テスト 410 pass、acceptance 68 pass、`SQL: tests ran 171 / 171 sites`）
 
+- [x] T09: コメント規則の一致の検査と SQL コメントの行番号を直す
+  - 種別: 修正
+  - 計画: S5, S6
+  - 依存: T02（直す検査が要る）, T04（直す検査が要る）
+  - 変更: `scripts/check-ai-config.mjs`, `scripts/lib/comment-refs.mjs`, `server/test/comments-check.test.ts`
+  - red: 直す前のコードで、`comments.md` の comment-refs の行の後ろに 1 字違いの同じ印の行を足して `bun run verify:ai` → 通ってしまう。`referenceProblems("-- a\r-- issue #2", "sql")` → 行番号 1
+  - 完了条件: `bun run verify:ai` → 0。同じ印の行を重複させると「keep exactly one line」で落ちる。`node --test test/comments-check.test.ts` → CR だけの改行で行番号 2
+  - コミット: `fix(check): require one line per comment rule and count CR line breaks in SQL`
+  - 結果: red は上のとおり再現（重複でも verify:ai が 0、行番号 1）。直した後: 重複で「keep exactly one line for invariant comment-refs in each」で落ち、戻して 0。`node --test test/comments-check.test.ts` → 4 pass / 0 fail
+
 - [ ] T06: trace の Skill に古い群の説明を足す
   - 種別: 変更
   - 計画: S3
@@ -108,3 +118,5 @@ base: main
 2026-09-29 / T04 / 検査を流すと `server/test/github.test.ts:254` の「closes #14」が当たった。テスト用の関数を置く `scripts/lib/comment-refs.mjs` と型宣言も要った / コメントを直し、T04 の変更欄に `scripts/lib/comment-refs.mjs`・`scripts/lib/comment-refs.d.mts`・`scripts/lib/english.d.mts`・`server/test/github.test.ts` を足した
 2026-09-29 / T05 / reader の authorizer が `sum` を許可していなかった / 許可リストは広げず `count(case when ... then 1 end)` で書いた
 2026-09-29 / T05 / テストの発言の既定日時（2026-09-10）が実際の時計では 10 月 10 日以降に古くなる / 件数・一覧・status を呼ぶテストに固定の now を渡し、時刻を差し込めないセッション開始のテストは発言を今日の日時にした。SQL の呼び出し箇所はすべてテストが流したので `scripts/lib/sql-call-sites.mjs` は変えず、変更欄から外した
+
+2026-09-29 / T09 / T02・T04 の Codex レビュー: 同じ印の行が重複すると後ろの違いを見逃す（低）、SQL の複数行の文字列の中の `--` 行を誤検出（中）、CR だけの改行で行番号がずれる（低） / 1 件目と 3 件目は T09 を足して直した。2 件目は見送り: 誤検出は検査が落ちるだけで黙って通らず、今の SQL にそういう文字列は無く、直すには SQL の文字列の解釈が要る

@@ -23,7 +23,7 @@ export function referenceProblems(source, kind) {
     kind === "js"
       ? commentLines(source)
       : source
-          .split(/\r?\n/)
+          .split(/\r\n|\r|\n/)
           .map((text, i) => ({ line: i + 1, text }))
           .filter((l) => l.text.trimStart().startsWith("--"));
   const problems = [];
