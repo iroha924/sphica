@@ -284,8 +284,30 @@ export async function contextText(
   const run = await bound(db, id, projectId);
   const scope = await scopeOf(db, run, root);
   const live = await liveUnits(db, projectId);
+  const fields =
+    scope.target.origin === "trace"
+      ? await db
+          .selectFrom("field_def")
+          .select(["name", "type", "label", "description", "enum_values", "kinds"])
+          .where("project_id", "=", projectId)
+          .orderBy("id")
+          .execute()
+      : [];
   return [
     ...scope.text,
+    ...(fields.length
+      ? [
+          "Fields this project tracks (fill a unit's field only when a quote writes the value as it is; never define one again):",
+          ...fields.map((f) => {
+            const kinds = JSON.parse(f.kinds) as string[];
+            const values =
+              f.enum_values === null
+                ? ""
+                : `: ${(JSON.parse(f.enum_values) as string[]).map(inline).join(" | ")}`;
+            return `- ${f.name} (${f.type}${values}; ${kinds.length ? kinds.join(", ") : "every kind"}) ${inline(f.label)}: ${inline(f.description)}`;
+          }),
+        ]
+      : []),
     "Live records of this project (supersedes and conflicts take these keys):",
     ...(live.length
       ? live.map(

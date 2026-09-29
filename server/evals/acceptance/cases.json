@@ -2849,6 +2849,174 @@
           }
         }
       ]
+    },
+    {
+      "id": "fields-01",
+      "layer": "fields",
+      "lang": "ja",
+      "summary": "The owner defines a field in a session, and a trace that only saves the definition counts that message as used",
+      "given": [
+        {
+          "capture": "s-ja-fields"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-fields",
+          "record": {
+            "field_defs": [
+              {
+                "name": "tenant",
+                "type": "text",
+                "label": "テナント",
+                "description": "決定が影響するテナント",
+                "kinds": ["decision"],
+                "quote": {
+                  "source": "session:s-ja-fields#1.owner",
+                  "quote": "影響するテナントを tenant という項目で記録して"
+                }
+              }
+            ],
+            "units": []
+          }
+        }
+      },
+      "then": [
+        {
+          "field_defined": "tenant"
+        },
+        {
+          "source_outcome": {
+            "source": "session:s-ja-fields#1.owner",
+            "outcome": "units"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fields-02",
+      "layer": "fields",
+      "lang": "ja",
+      "summary": "A field value quoted from the owner is saved with the decision, and searching for the value alone finds it",
+      "given": [
+        {
+          "case": "fields-01"
+        },
+        {
+          "trace": {
+            "session": "s-ja-fields",
+            "record": {
+              "units": [
+                {
+                  "key": "cache",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "検索結果のキャッシュは Redis に置く",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-fields#2.owner",
+                      "quote": "検索結果のキャッシュは Redis に置く。",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-fields#2.owner",
+                      "quote": "検索結果のキャッシュは Redis に置く。"
+                    }
+                  ],
+                  "fields": [
+                    {
+                      "name": "tenant",
+                      "value": "globex",
+                      "quote": {
+                        "source": "session:s-ja-fields#2.owner",
+                        "quote": "globex の一覧が遅い"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "globex"
+        }
+      },
+      "then": [
+        {
+          "field_value": {
+            "of": "trace:s-ja-fields/cache",
+            "name": "tenant",
+            "value": "globex"
+          }
+        },
+        {
+          "hits_include": "trace:s-ja-fields/cache",
+          "within": 3
+        }
+      ]
+    },
+    {
+      "id": "fields-03",
+      "layer": "fields",
+      "lang": "ja",
+      "summary": "A field value the quote does not write is refused, and nothing of the record is saved",
+      "given": [
+        {
+          "case": "fields-01"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-fields",
+          "refused": true,
+          "record": {
+            "units": [
+              {
+                "key": "cache",
+                "kind": "decision",
+                "stance": "do",
+                "text": "検索結果のキャッシュは Redis に置く",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-fields#2.owner",
+                    "quote": "検索結果のキャッシュは Redis に置く。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-fields#2.owner",
+                    "quote": "検索結果のキャッシュは Redis に置く。"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "tenant",
+                    "value": "initech",
+                    "quote": {
+                      "source": "session:s-ja-fields#2.owner",
+                      "quote": "globex の一覧が遅い"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "save_refused_contains": "is not written in the quote"
+        },
+        {
+          "no_unit": "trace:s-ja-fields/cache"
+        }
+      ]
     }
   ],
   "setups": {

@@ -205,7 +205,7 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
     return {
       errors: parsed.error.issues.map((i) => `${i.path.join(".") || "record"}: ${i.message}`),
       problems: [],
-      units: { errors: [], problems: [], units: [], work: null },
+      units: { errors: [], problems: [], units: [], work: null, fieldDefs: [] },
       ops: [],
     };
   const units = await checkRecord(db, target, { units: parsed.data.units });

@@ -3,7 +3,7 @@ name: trace
 description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use only when the user explicitly asks.
 argument-hint: "[pending]"
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status, mcp__plugin_sphica_sphica__fields
 ---
 
 # trace — keep what a session decided and implemented
@@ -88,6 +88,10 @@ The `"..."` stands for the other language's words: in this example, `"データ�
 | `supersedes` | The key of a live record this one replaces (context lists them). The old one is marked superseded, never deleted |
 | `conflicts` | Keys of live records this one contradicts without replacing them. Both are held back from automatic injection until resolved |
 | `work` | The current work status, optional. The same `key` updates it |
+| `field_defs` | Top level, beside `units`. Only when the owner said in this session to keep a field on records: `name` (a lowercase letter, then lowercase letters, digits, `_`; at most 40), `type` (`text`, `enum`, `integer`, `date`), `label`, `description`, `enum` (1 to 30 distinct allowed values, only for `enum`), `kinds` (the unit kinds it applies to; empty means every kind), and `quote` of **the owner's** words defining it. A field context already lists cannot be defined again |
+| `fields` | On a unit, only for fields context lists or this record's `field_defs` defines: `name`, `value`, and `quote` of the words that say it. The value must be written in the quote as it is: an `integer` whole (not the `95` of `p95`, not the `1` of `1.5` or `1,000`; `1,000` is `1000`), a `date` as `YYYY-MM-DD`, an `enum` value exactly, and a date or enum value on its own (not the `no` of `not`). When no message says the value, leave the field out; never infer one |
+
+A field value that breaks these rules refuses the whole save, like a `reconsider_quote` not found: fix it or leave the field out.
 
 What becomes active: a decision or constraint with evidence and the owner's adoption; an implementation with code or commit evidence
 (an `evidence` anchor on a path this session edited counts); a finding, dead end, or question with evidence. Everything else stays a candidate,

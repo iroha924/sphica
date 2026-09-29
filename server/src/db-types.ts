@@ -113,6 +113,22 @@ export interface ExtractionRun {
   target: string;
 }
 
+export interface FieldDef {
+  added_at: string;
+  description: string;
+  enum_values: string | null;
+  id: Generated<number>;
+  kinds: Generated<string>;
+  label: string;
+  name: string;
+  project_id: number;
+  run_id: number;
+  source_id: number;
+  span_end: number;
+  span_start: number;
+  type: string;
+}
+
 export interface ForgetBatch {
   at: string;
   id: Generated<number>;
@@ -277,6 +293,18 @@ export interface UnitEvidence {
   unit_id: number;
 }
 
+export interface UnitField {
+  added_at: string;
+  field_def_id: number;
+  id: Generated<number>;
+  run_id: number;
+  source_id: number;
+  span_end: number;
+  span_start: number;
+  unit_id: number;
+  value: string;
+}
+
 export interface UnitLink {
   added_at: string;
   from_unit: number;
@@ -341,6 +369,7 @@ export interface DB {
   edit_observation: EditObservation;
   external_reference: ExternalReference;
   extraction_run: ExtractionRun;
+  field_def: FieldDef;
   forget_batch: ForgetBatch;
   owner_identity: OwnerIdentity;
   project: Project;
@@ -354,6 +383,7 @@ export interface DB {
   unit_alias: UnitAlias;
   unit_anchor: UnitAnchor;
   unit_evidence: UnitEvidence;
+  unit_field: UnitField;
   unit_link: UnitLink;
   unit_option: UnitOption;
   unit_search_text: UnitSearchText;
