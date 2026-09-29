@@ -1299,3 +1299,31 @@ test("trace: the live records go on a page of their own when they do not fit bes
     await db.done();
   }
 });
+
+test("trace: a page stays within its size for emoji text, and a long edit list is cut to its first lines", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const emoji = message(db, p, { id: "m1", text: "😀".repeat(30_000) });
+    for (let i = 0; i < 150; i++)
+      insert(db, "edit_observation", {
+        session_id: "s1",
+        turn_id: "t1",
+        tool_event_id: `e${i}`,
+        path: `src/file-${i}.ts`,
+        via: "tool",
+        observed_at: "2026-09-10T00:00:00.000Z",
+      });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const first = await contextText(db.ingest, run, p, null);
+    assert.ok(first.length < 41_000, `a page of ${first.length} characters`);
+    assert.match(first, new RegExp(`read s${emoji}@\\d+ for the rest`));
+    let page = first;
+    for (let m = /after: "(s\d+)"/.exec(page); m; m = /after: "(s\d+)"/.exec(page))
+      page = await contextText(db.ingest, run, p, null, m[1]);
+    assert.match(page, /- src\/file-99\.ts[\s\S]*- and 50 more edits/);
+    assert.doesNotMatch(page, /src\/file-100\.ts/);
+  } finally {
+    await db.done();
+  }
+});

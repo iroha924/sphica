@@ -33,7 +33,7 @@ as `cwd` to every tool.
    (an edited body becomes a new revision), and returns a `run` id bound to that pull request
 3. **Read**: `record_context` with the run. Each source is printed as `## s<N> <kind> <artifact> by <login> (<association>) <time>` followed by
    its text (`, the owner` follows the association for the owner's own account), then the project's live records. Read all of it before writing:
-   when a page ends with `more sources follow`, call `record_context` again with the `after` it names, until the last page
+   when a page ends with `call record_context with after: "s<N>"`, call it again with that `after`, until the last page
 4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
    "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. Fix and check again until there are no errors
 5. **Save**: `record_save` with the same run and record

@@ -45,6 +45,9 @@ const PAGE_CHARS = 40_000;
  * server's process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
  */
 const shownTo = new Map<string, Set<number>>();
+/** Lines the last page lists at most, so the edits and live records alone stay within a page. */
+const TAIL_EDITS = 100;
+const TAIL_LIVE = 150;
 /** Runs remembered at once: a run read but never saved is forgotten after this many newer ones, and its sources then stay pending. */
 const SHOWN_RUNS = 100;
 
@@ -286,7 +289,8 @@ async function scopeOf(
     tail: edits.length
       ? [
           "Edits observed (paths only; not proof of an implementation):",
-          ...edits.map((e) => `- ${e.path} (${e.via}, ${e.turn_id ?? "no turn"})`),
+          ...edits.slice(0, TAIL_EDITS).map((e) => `- ${e.path} (${e.via}, ${e.turn_id ?? "no turn"})`),
+          ...(edits.length > TAIL_EDITS ? [`- and ${edits.length - TAIL_EDITS} more edits`] : []),
         ]
       : [],
   };
@@ -341,18 +345,27 @@ export async function contextText(
       : []),
     "Live records of this project (supersedes and conflicts take these keys):",
     ...(live.length
-      ? live.map(
-          (u) =>
-            `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}) ${inline(u.text).slice(0, 160)}`,
-        )
+      ? live
+          .slice(0, TAIL_LIVE)
+          .map(
+            (u) =>
+              `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}) ${inline(u.text).slice(0, 160)}`,
+          )
       : ["None."]),
+    ...(live.length > TAIL_LIVE
+      ? [
+          `- and ${live.length - TAIL_LIVE} more live records: find the ones this session may replace with search`,
+        ]
+      : []),
   ];
   const tailSize = tail.join("\n").length;
   // A source longer than a page is cut: its heading line stays, and the rest is read with read s<id>@<byte>
   const entry = (it: { id: number; text: string }) => {
     if (it.text.length <= PAGE_CHARS) return it.text;
     const body = it.text.indexOf("\n") + 1;
-    const kept = [...it.text.slice(body)].slice(0, PAGE_CHARS - body).join("");
+    // Cut by UTF-16 units, as the page is measured, without splitting a surrogate pair
+    let kept = it.text.slice(body, PAGE_CHARS);
+    if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
     return `${it.text.slice(0, body)}${kept}\n(cut here; read s${it.id}@${Buffer.byteLength(kept, "utf8")} for the rest)`;
   };
   const page: { id: number; text: string }[] = [];
