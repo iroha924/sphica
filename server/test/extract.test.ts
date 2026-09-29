@@ -460,6 +460,8 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     await refused(file("docs/note.md", { lines: [9, 9] }), /lines 9-9 are not in it/);
     await refused({ ...file("docs/note.md"), quote: "absent" }, /quote not found in docs\/note.md/);
     await refused({ op: "add_evidence", quote: "x", role: "explains" }, /either a source or a file/);
+    // A reconsider quote belongs to an option's condition, which glean never writes
+    await refused({ ...file("docs/note.md"), role: "reconsiders" }, /role/);
     await refused(
       { op: "add_evidence", source: `s${reply}`, quote: "了解。", role: "states", reported_speaker: "x" },
       /must cite an owner message/,

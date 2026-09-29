@@ -19,7 +19,8 @@ const Quote = z
   .object({ source: z.string().regex(SOURCE_REF, "cite a source ref such as s12"), quote: z.string() })
   .strict();
 const Evidence = Quote.extend({
-  role: z.enum(EVIDENCE_ROLES),
+  // A reconsider quote comes only as an option's reconsider_quote, tied to the condition it backs
+  role: z.enum(EVIDENCE_ROLES).exclude(["reconsiders"]),
   reported_speaker: text(100).optional(),
 }).strict();
 const Unit = z
@@ -39,6 +40,9 @@ const Unit = z
             text: text(500),
             outcome: z.enum(OPTION_OUTCOMES),
             why: text(2000).optional(),
+            // What the owner said would bring a rejected option back, with the owner's words
+            reconsider_when: text(1000).optional(),
+            reconsider_quote: Quote.optional(),
             // The role defaults from the outcome: a rejected option's evidence rejects it, a chosen one's states it
             evidence: z
               .array(Evidence.partial({ role: true }))
@@ -110,7 +114,7 @@ type Planned = {
   /** Set by glean when nothing but the owner's present words backs the unit */
   unsourced?: boolean;
   evidence: EvidenceSpan[];
-  options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[] }[];
+  options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[]; reconsider: Span | null }[];
   adoption: (Span & { route: "owner_statement" | "explicit" })[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
   aliases: string[];
@@ -174,11 +178,23 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       errors.push(`${at}: stance is required for decisions and constraints, and only for them`);
     if (u.revisit_when !== undefined && u.stance !== "defer")
       errors.push(`${at}: revisit_when goes only with stance defer`);
+    for (const o of u.options) {
+      if ((o.reconsider_when === undefined) !== (o.reconsider_quote === undefined))
+        errors.push(`${at}: option "${head(o.text, 60)}": reconsider_when and reconsider_quote go together`);
+      else if (o.reconsider_when !== undefined && o.outcome !== "rejected")
+        errors.push(
+          `${at}: option "${head(o.text, 60)}": a reconsider condition goes only on a rejected option`,
+        );
+    }
   }
 
   const refs = new Set<number>();
   for (const u of record.units)
-    for (const q of [...u.evidence, ...u.adoption, ...u.options.flatMap((o) => o.evidence)])
+    for (const q of [
+      ...u.evidence,
+      ...u.adoption,
+      ...u.options.flatMap((o) => [...o.evidence, ...(o.reconsider_quote ? [o.reconsider_quote] : [])]),
+    ])
       refs.add(Number(q.source.slice(1)));
   const sources = new Map(
     (refs.size
@@ -258,6 +274,25 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         ];
       });
     const evidence = spans(u.evidence);
+    // Only the owner states a condition for reconsidering: the AI suggesting one, or someone else's words, is not the owner's condition
+    const reconsider = (o: UnitInput["options"][number]): Span | null => {
+      const q = o.reconsider_quote;
+      const s = q && sources.get(Number(q.source.slice(1)));
+      if (!q || !s || o.reconsider_when === undefined) return null;
+      cites.add(s.id);
+      if (s.author_kind !== "owner") {
+        errors.push(
+          `${key}: option "${head(o.text, 60)}": reconsider_quote must quote the owner; ${q.source} is by ${s.author_login ?? s.author_kind}`,
+        );
+        return null;
+      }
+      const span = locate(s.text, q.quote);
+      if (!span) {
+        quarantine.push(`reconsider quote not found in ${q.source}: "${head(q.quote, 80)}"`);
+        return null;
+      }
+      return { source: s.id, start: span[0], end: span[1] };
+    };
     const options = u.options.map((o) => ({
       input: o,
       evidence: spans(
@@ -267,6 +302,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
             e.role ?? (o.outcome === "rejected" ? "rejects" : o.outcome === "chosen" ? "states" : "explains"),
         })),
       ),
+      reconsider: reconsider(o),
     }));
     if (u.evidence.length === 0) quarantine.push("no evidence cited");
     // Retiring or disputing a record changes what is delivered: outside trace, third-party text alone cannot do it
@@ -433,7 +469,12 @@ const contentHash = (u: UnitInput): Buffer =>
       u.why ?? null,
       u.scope_note ?? null,
       u.revisit_when ?? null,
-      u.options.map((o) => [o.text, o.outcome, o.why ?? null]),
+      // A condition joins the hash only when there is one, so records without one keep the hash they always had
+      u.options.map((o) =>
+        o.reconsider_when === undefined
+          ? [o.text, o.outcome, o.why ?? null]
+          : [o.text, o.outcome, o.why ?? null, o.reconsider_when],
+      ),
     ]),
   );
 
@@ -510,10 +551,12 @@ export async function saveRecord(
           text: o.input.text,
           outcome: o.input.outcome,
           why: o.input.why ?? null,
+          reconsider_when: o.input.reconsider_when ?? null,
         })
         .returning("id")
         .executeTakeFirstOrThrow();
       await evidence(o.evidence, option.id);
+      if (o.reconsider) await evidence([{ ...o.reconsider, role: "reconsiders", reported: null }], option.id);
     }
     await evidence(p.evidence, null);
     for (const a of p.adoption) {

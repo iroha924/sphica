@@ -2,6 +2,7 @@
 // moves only when the schema's activation rules pass.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -345,6 +346,98 @@ test("an owner's directive becomes an active decision whose spans cut the quoted
       ],
     );
     assert.equal(db.owner.prepare("select status from extraction_run").get()?.status, "saved");
+  } finally {
+    await db.done();
+  }
+});
+
+test("a rejected option keeps the reconsider condition the owner stated, quoted from the owner, and check refuses any other", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Postgres はやめて SQLite にしよう。レプリカが要るようになったら Postgres をもう一度考える。",
+    });
+    const ai = message(db, p, {
+      id: "m2",
+      text: "複数台で書くなら Postgres を再検討できます。",
+      speaker: "assistant",
+    });
+    const decision = (key: string, option: Record<string, unknown>) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: "保存先は SQLite",
+      options: [{ text: "Postgres", outcome: "rejected", ...option }],
+      evidence: [{ source: `s${m}`, quote: "SQLite にしよう。", role: "states" }],
+      adoption: [{ source: `s${m}`, quote: "SQLite にしよう。" }],
+    });
+    const condition = {
+      reconsider_when: "レプリカが要るようになったら",
+      reconsider_quote: { source: `s${m}`, quote: "レプリカが要るようになったら Postgres をもう一度考える" },
+    };
+    const { saved } = await save(db, target(p), { units: [decision("storage", condition)] }, [m]);
+    assert.deepEqual(saved.active, ["trace:ext-s1/storage"]);
+    assert.deepEqual(
+      { ...db.owner.prepare("select outcome, reconsider_when from unit_option").get() },
+      { outcome: "rejected", reconsider_when: "レプリカが要るようになったら" },
+    );
+    const quoted = db.owner
+      .prepare(
+        "select e.role, e.option_id is not null as opt, substr(cast(s.text as blob), e.span_start + 1, e.span_end - e.span_start) as cut from unit_evidence e join source s on s.id = e.source_id where e.role = 'reconsiders'",
+      )
+      .all()
+      .map((r) => [r.role, r.opt, Buffer.from(r.cut as Uint8Array).toString("utf8")]);
+    assert.deepEqual(quoted, [["reconsiders", 1, "レプリカが要るようになったら Postgres をもう一度考える"]]);
+
+    // The condition is part of what the record says; a record without one keeps the hash it had before conditions existed
+    const plain = await save(db, target(p), { units: [decision("plain", {})] }, [m]);
+    assert.deepEqual(plain.saved.active, ["trace:ext-s1/plain"]);
+    const hashes = db.owner
+      .prepare("select content_hash from unit order by id")
+      .all()
+      .map((r) => Buffer.from(r.content_hash as Uint8Array).toString("hex"));
+    assert.notEqual(hashes[0], hashes[1]);
+    assert.equal(
+      hashes[1],
+      createHash("sha256")
+        .update(JSON.stringify(["保存先は SQLite", null, null, null, [["Postgres", "rejected", null]]]))
+        .digest("hex"),
+    );
+
+    const refused = async (option: Record<string, unknown>, why: RegExp) => {
+      const checked = await checkRecord(db.ingest, target(p), { units: [decision("x", option)] });
+      assert.match(checked.errors.join("\n"), why);
+    };
+    await refused({ reconsider_when: "レプリカが要るようになったら" }, /go together/);
+    await refused({ reconsider_quote: condition.reconsider_quote }, /go together/);
+    await refused({ ...condition, outcome: "chosen" }, /only on a rejected option/);
+    await refused(
+      { ...condition, reconsider_quote: { source: `s${ai}`, quote: "Postgres を再検討できます" } },
+      /must quote the owner/,
+    );
+    await refused(
+      { evidence: [{ source: `s${m}`, quote: "レプリカが要る", role: "reconsiders" }] },
+      /Invalid option/,
+    );
+
+    // A condition whose words are not in the message quarantines the record, as any quote not found does
+    const lost = await save(
+      db,
+      target(p),
+      {
+        units: [
+          decision("lost", {
+            ...condition,
+            reconsider_quote: { source: `s${m}`, quote: "言っていない条件" },
+          }),
+        ],
+      },
+      [m],
+    );
+    assert.equal(lost.saved.quarantined.length, 1);
+    assert.match(String(state(db, "trace:ext-s1/lost")?.extraction_reason), /reconsider quote not found/);
   } finally {
     await db.done();
   }

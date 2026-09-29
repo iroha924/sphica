@@ -35,13 +35,14 @@ base: main
 
 trace が持ち主の言った見直し条件を引用付きで保存でき、`read` で見える。
 
-- [ ] T02: record_check / record_save に `reconsider_when` と `reconsider_quote` を足し、trace Skill に書き方を足す
+- [x] T02: record_check / record_save に `reconsider_when` と `reconsider_quote` を足し、trace Skill に書き方を足す
   - 種別: 追加
   - 計画: S2
   - 依存: T01（新しい列と role が要る）
-  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `plugin/skills/trace/SKILL.md`
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `plugin/skills/trace/SKILL.md`, `server/src/glean.ts`, `server/test/extract.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 全部 pass（引用付きの条件が保存され active になる。片方だけ、owner 以外の引用、引用が source に無い、rejected 以外の案は拒否される。content_hash が条件で変わる）
   - コミット: `feat(record): save a reconsider condition the owner stated, with its quote`
+  - 結果: `node --test test/record.test.ts test/extract.test.ts` → pass 33 / fail 0（引用付きの条件が保存されて active、`reconsiders` の span が持ち主の言葉を切り出す。条件の無い記録の content_hash は以前と同じ式、条件ありとは違う。片方だけ・chosen への条件・AI の引用・evidence に直接 `reconsiders` は拒否、引用が見つからないと quarantined。glean の add_evidence も `reconsiders` を拒否）。`npm test` → 382 / 382 pass。`bun run check` → 0、`bun run verify:ai` → 0
 
 - [ ] T03: `read` の却下案の下に見直し条件と引用を出し、引用を失った条件に unsupported と付ける
   - 種別: 追加
@@ -101,3 +102,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 
 ## 記録
 - 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）
+- 2026-09-29 / T02 / glean の add_evidence も同じ role 一覧を使っていて、`reconsiders` を渡すと DB のトリガーで分かりにくく落ちる / 入力で除き、変更欄に `server/src/glean.ts`, `server/test/extract.test.ts` を足した（前: 無し）
