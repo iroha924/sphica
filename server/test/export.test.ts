@@ -373,7 +373,8 @@ test("the save path must land inside the repository, through any symbolic link",
     assert.match(String(Object.values(exportPath(root, "away/x.md"))), /leads outside the repository/);
     assert.match(String(Object.values(exportPath(root, "away/deeper/x.md"))), /leads outside the repository/);
     assert.match(String(Object.values(exportPath(root, "link.md"))), /symbolic link/);
-    assert.match(String(Object.values(exportPath(root, "docs"))), /not a regular file/);
+    fs.mkdirSync(path.join(root, "docs", "folder.md"));
+    assert.match(String(Object.values(exportPath(root, "docs/folder.md"))), /not a regular file/);
     assert.match(String(Object.values(exportPath(root, "docs/decisions.md/x.md"))), /not a folder/);
     // What the agent is told to write to is exactly what was checked: no character the reply would hide or change
     for (const bad of ["docs/safe\u200b.md", "docs/a\nb.md", "docs/\u001b[31mx.md", "docs/a\tb.md"])
@@ -382,7 +383,7 @@ test("the save path must land inside the repository, through any symbolic link",
         /cannot be shown as typed/,
         JSON.stringify(bad),
       );
-    assert.match(String(Object.values(exportPath(root, "."))), /leaves the repository/);
+    assert.ok("error" in exportPath(root, "."));
     assert.deepEqual(exportPath(root, "..notes.md"), { relative: "..notes.md", exists: false });
     // Files hosts load as instructions are never an export target: quoted words would become standing instructions
     for (const rule of [
@@ -397,6 +398,18 @@ test("the save path must land inside the repository, through any symbolic link",
       ".Claude/rules/x.md",
     ])
       assert.match(String(Object.values(exportPath(root, rule))), /instructions/, rule);
+    // Only a Markdown file of the working tree, and no name Windows would silently shorten
+    for (const odd of [
+      ".git/config",
+      ".git/x.md",
+      "src/index.ts",
+      "notes",
+      "AGENTS.md.",
+      "CLAUDE.md ",
+      "docs./x.md",
+      "docs /x.md",
+    ])
+      assert.ok("error" in exportPath(root, odd), odd);
     fs.linkSync(path.join(outside, "..", "repo", "docs", "decisions.md"), path.join(root, "hard.md"));
     assert.match(String(Object.values(exportPath(root, "hard.md"))), /more than one name/);
     fs.symlinkSync(path.join(root, "docs", "decisions.md"), path.join(root, "filelink"));

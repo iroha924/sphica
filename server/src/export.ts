@@ -260,6 +260,10 @@ export function exportPath(
     return { error: "The path has characters that cannot be shown as typed; use plain characters." };
   if (path.isAbsolute(given) || path.win32.isAbsolute(given))
     return { error: "Give a path relative to the repository root." };
+  // Windows drops a trailing dot or space, so `AGENTS.md.` would land on AGENTS.md
+  if (given.split(/[\\/]/).some((p) => p !== "." && p !== ".." && /[. ]$/.test(p)))
+    return { error: "A name on the path ends with a dot or a space; drop it." };
+  if (!/\.md$/i.test(given)) return { error: "Give a Markdown file, ending in .md." };
   const target = path.resolve(root, given);
   const inside = (base: string, p: string) => {
     const r = path.relative(base, p);
@@ -305,6 +309,9 @@ export function exportPath(
   const rootReal = fs.realpathSync(root);
   if (!inside(rootReal, real)) return { error: "The path leads outside the repository." };
   // Quoted words written there would be loaded as the agent's standing instructions
+  const inGit = (relative: string) => relative.toLowerCase().split(/[\\/]/).includes(".git");
+  if (inGit(path.relative(root, target)) || inGit(path.relative(rootReal, real)))
+    return { error: "The path is inside Git's own folder." };
   if (instructionFile(path.relative(root, target)) || instructionFile(path.relative(rootReal, real)))
     return {
       error:
