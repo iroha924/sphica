@@ -36,6 +36,9 @@ export const EVIDENCE_ROLES = [
 export const WORK_STATUSES = ["active", "blocked", "paused", "done", "abandoned"] as const;
 
 /** @public Read as text by scripts/check-pairs.mjs. */
+export const FIELD_TYPES = ["text", "enum", "integer", "date"] as const;
+
+/** @public Read as text by scripts/check-pairs.mjs. */
 export const HOSTS = ["claude-code", "codex"] as const;
 export type Host = (typeof HOSTS)[number];
 

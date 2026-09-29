@@ -82,7 +82,7 @@ const external = (v: Values) =>
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 3);
+  assert.equal(one("pragma user_version").user_version, 4);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -590,4 +590,112 @@ test("tombstone: capture skips a message the owner forgot, and stores it again o
   assert.equal(one("select count(*) as n from source where external_id = 'm1'").n, 0);
   put("token is [redacted]");
   assert.equal(one("select count(*) as n from source where external_id = 'm1'").n, 1);
+});
+
+test("a field definition quotes the owner inside its source, in trace, once per name, and is never rewritten", () => {
+  const said = message(db, p, { id: "m1", text: "Track the tenant on every decision." });
+  const ai = message(db, p, { id: "m2", text: "Shall I track the tenant?", speaker: "assistant" });
+  const elsewhere = message(db, other, { id: "m3", text: "Track the tenant.", session: "s2" });
+  const r = run(db, p);
+  const define = (v: Values) =>
+    insert(db, "field_def", {
+      project_id: p,
+      name: "tenant",
+      type: "text",
+      label: "Tenant",
+      description: "The tenant affected",
+      source_id: said,
+      span_start: 0,
+      span_end: 5,
+      run_id: r,
+      added_at: now,
+      ...v,
+    });
+  refuses(() => define({ source_id: ai }), /quotes the owner/);
+  refuses(() => define({ source_id: elsewhere }), /one project/);
+  refuses(() => define({ run_id: run(db, p, "harvest", "pr:1") }), /defined by trace/);
+  refuses(() => define({ span_end: 400 }), /outside the source text/);
+  refuses(() => define({ name: "Tenant" }), /CHECK constraint failed/);
+  refuses(() => define({ type: "enum" }), /CHECK constraint failed/);
+  refuses(() => define({ type: "enum", enum_values: '["a", "a"]' }), /distinct/);
+  refuses(() => define({ kinds: '["decision", "idea"]' }), /distinct unit kinds/);
+  const d = define({ kinds: '["decision"]' });
+  refuses(() => define({ label: "Another" }), /UNIQUE constraint failed/);
+  refuses(() => sql("update field_def set label = 'T' where id = ?", d), /never rewritten/);
+  refuses(() => sql("delete from field_def where id = ?", d), /only with their quoted source/);
+});
+
+test("a field value is sealed with its unit, fits its field's kinds and type, and goes with its quoted source", () => {
+  const said = message(db, p, {
+    id: "m1",
+    text: "Track tenant, p95, severity, and due. acme had p95 320 at high, due 2026-10-01.",
+  });
+  const r = run(db, p);
+  const define = (name: string, type: string, extra: Values = {}) =>
+    insert(db, "field_def", {
+      project_id: p,
+      name,
+      type,
+      label: name,
+      description: name,
+      source_id: said,
+      span_start: 0,
+      span_end: 5,
+      run_id: r,
+      added_at: now,
+      ...extra,
+    });
+  const tenant = define("tenant", "text", { kinds: '["decision"]' });
+  const p95 = define("p95", "integer");
+  const severity = define("severity", "enum", { enum_values: '["low", "high"]' });
+  const due = define("due", "date");
+  const u = unit({ key: "u1", kind: "decision" }, p, r);
+  const finding = unit({ key: "u2", kind: "finding" }, p, r);
+  const value = (fieldId: number, v: string, unitId = u, extra: Values = {}) =>
+    insert(db, "unit_field", {
+      unit_id: unitId,
+      field_def_id: fieldId,
+      value: v,
+      source_id: said,
+      span_start: 38,
+      span_end: 42,
+      run_id: r,
+      added_at: now,
+      ...extra,
+    });
+  refuses(() => value(tenant, "acme", finding), /does not apply/);
+  refuses(() => value(p95, "3.2"), /optional minus sign and digits/);
+  refuses(() => value(p95, "-"), /optional minus sign and digits/);
+  refuses(() => value(p95, "1e3"), /optional minus sign and digits/);
+  refuses(() => value(due, "2026-02-30"), /valid YYYY-MM-DD/);
+  refuses(() => value(due, "2026-10-1"), /valid YYYY-MM-DD/);
+  refuses(() => value(severity, "High"), /one of its values/);
+  refuses(() => value(tenant, "acme", u, { span_end: 900 }), /outside the source text/);
+  refuses(() => value(tenant, "acme", u, { run_id: run(db, p, "harvest", "pr:1") }), /written by trace/);
+  const revision = () => Number(one("select revision from unit where id = ?", u).revision);
+  const before = revision();
+  const v = value(tenant, "acme");
+  value(p95, "-320");
+  value(severity, "high");
+  value(due, "2026-10-01");
+  assert.equal(revision(), before + 4);
+  refuses(() => value(tenant, "globex"), /UNIQUE constraint failed/);
+  refuses(() => sql("update unit_field set value = 'globex' where id = ?", v), /never rewritten/);
+  refuses(() => sql("delete from unit_field where id = ?", v), /only with their unit or a quoted source/);
+  const hits = (word: string) =>
+    db.owner
+      .prepare("select rowid from unit_fts where unit_fts match ?")
+      .all(`"${word}"`)
+      .map((row) => Number(row.rowid));
+  assert.deepEqual(hits("acme"), [u]);
+  state(u, null, "candidate");
+  refuses(() => value(tenant, "acme", finding), /does not apply/);
+  refuses(() => value(p95, "7", u), /before its first state/);
+  // Removing the quoted source takes the values with it, raises the unit's revision, and drops the words from search
+  const after = revision();
+  sql("delete from source where id = ?", said);
+  assert.equal(Number(one("select count(*) as n from unit_field").n), 0);
+  assert.equal(Number(one("select count(*) as n from field_def").n), 0);
+  assert.ok(revision() > after);
+  assert.deepEqual(hits("acme"), []);
 });

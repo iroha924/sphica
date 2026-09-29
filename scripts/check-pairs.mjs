@@ -53,6 +53,8 @@ const PAIRS = [
   ["unit_evidence.role", /role text not null check \(role in \(('states'[^)]*)\)\)/, "EVIDENCE_ROLES"],
   ["work.status", /status text not null check \(status in \(('active', 'blocked'[^)]*)\)\)/, "WORK_STATUSES"],
   ["source.kind", /kind text not null check \(kind in \(('session_message'[^)]*)\)\)/, "SOURCE_KINDS"],
+  ["field_def.type", /type text not null check \(type in \(('text'[^)]*)\)\)/, "FIELD_TYPES"],
+  ["field_def.kinds", /or value not in \(('decision'[^)]*)\)\)/, "UNIT_KINDS"],
 ];
 for (const [column, re, constant] of PAIRS) {
   const db = words(grab("db/schema.sql", re, `the ${column} CHECK`), "'", `the ${column} CHECK`);

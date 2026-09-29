@@ -22,13 +22,14 @@ base: main
 
 定義と値の表が DB の規則ごとに入り、forget で一緒に消える
 
-- [ ] T01: schema を revision 4 にし、`field_def` と `unit_field`、トリガー、検索のビューと移行 `0004.sql` を足す
+- [x] T01: schema を revision 4 にし、`field_def` と `unit_field`、トリガー、検索のビューと移行 `0004.sql` を足す
   - 種別: 追加
   - 計画: S1, S2
   - 依存: なし
-  - 変更: `db/schema.sql`, `db/migrations/0004.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/test/fixtures/schema-rev3.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`
-  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 各トリガーの拒否（owner でない定義、別プロジェクト、範囲外、kinds 外、state の後の値、型の違反、update）と、rev3 から移行した DB と新しい DB の一致が通る。`bun run verify` → 0
+  - 変更: `db/schema.sql`, `db/migrations/0004.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/knowledge.ts`, `server/src/db-write.ts`, `scripts/check-pairs.mjs`, `server/test/fixtures/schema-rev3.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 各トリガーの拒否（owner でない定義、別プロジェクト、範囲外、kinds 外、state の後の値、型の違反、update）と、rev3 から移行した DB と新しい DB の一致が通る。`bun run release:plan -- --base v0.6.7` → `plugin`、4 つのファイルが 0.6.8。`bun run verify` → 0
   - コミット: `feat(schema): add project-defined fields and quoted field values (revision 4)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 30 pass / 0 fail（定義と値の各拒否、source を消すと定義・値が消え revision が上がり検索から消える、rev1〜3 から移行した DB と新しい DB の定義が一致、rev3 から移行した後に値で検索できる）。HEAD の schema.sql に戻すと新しい 2 件と revision の 1 件が落ちる。`bun run release:plan -- --base v0.6.7` → `plugin`、npm と 3 つの manifest が 0.6.8。`node scripts/check-pairs.mjs` は FIELD_TYPES と kinds の一覧をずらすとそれぞれ落ちる。`bun run verify` → 0
 
 - [ ] T02: forget の認可とプレビューに定義と値を入れる
   - 種別: 追加
@@ -90,12 +91,14 @@ read と `/sphica:fields` で定義と値が見える
 
 trace Skill が項目の書き方を案内し、0.6.8 にそろう
 
-- [ ] T08: trace Skill に項目の書き方を足し、0.6.8 に上げる
+- [ ] T08: trace Skill に項目の書き方を足す
   - 種別: 変更
   - 計画: S5
   - 依存: T03（Skill が説明する入力の形が要る）
-  - 変更: `plugin/skills/trace/SKILL.md`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base v0.6.7` → `plugin`、4 つのファイルが 0.6.8。`bun run verify:ai` → 0。`bun run verify` → 0
-  - コミット: `feat(trace): explain field definitions and values, and bump to 0.6.8`
+  - 変更: `plugin/skills/trace/SKILL.md`
+  - 完了条件: `bun run verify:ai` → 0。`bun run verify` → 0
+  - コミット: `feat(trace): explain field definitions and values`
 
 ## 記録
+2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
+2026-09-29 / T01, T08 / パッケージに入る変更はバージョンを揃えないと pre-commit の bundle が止める / 0.6.8 への引き上げを T08 から T01 に移した。T01 の変更欄と完了条件に 4 つの manifest と release:plan を足し、T08 の変更欄（前: trace Skill と 4 つの manifest、新: trace Skill のみ）と完了条件（前: release:plan・verify:ai・verify、新: verify:ai・verify）と名前を直した

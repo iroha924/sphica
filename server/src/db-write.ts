@@ -135,10 +135,11 @@ function ingestAuthorizer(action: number, p1: string | null, p2: string | null):
 
 /**
  * What the forget connection may change: forget.ts runs fixed SQL, and this is the coarse guard around it. Deletes cascade to evidence,
- * adoption, and processing rows, clear unit_state.source_id, and raise unit revisions; the authorizer sees those as plain writes.
+ * adoption, processing, field definition, and field value rows, clear unit_state.source_id, raise unit revisions, and reindex units that
+ * lose a field value; the authorizer sees those as plain writes.
  */
 const FORGET_WRITES: Record<number, Set<string>> = {
-  [C.SQLITE_INSERT]: new Set(["forget_batch", "source_forgotten", "unit_state", "source_fts"]),
+  [C.SQLITE_INSERT]: new Set(["forget_batch", "source_forgotten", "unit_state", "source_fts", "unit_fts"]),
   [C.SQLITE_DELETE]: new Set([
     "source",
     "external_reference",
@@ -146,6 +147,9 @@ const FORGET_WRITES: Record<number, Set<string>> = {
     "unit_adoption",
     "source_processing",
     "source_fts",
+    "field_def",
+    "unit_field",
+    "unit_fts",
   ]),
 };
 /** Columns forget changes: the state and revision triggers set on unit, and the foreign key action clearing unit_state.source_id. */

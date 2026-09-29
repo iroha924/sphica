@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3.
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -13,8 +13,9 @@ import { sha256 } from "../src/text.ts";
 const root = path.join(import.meta.dirname, "..", "..");
 const REV1 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev1.sql"), "utf8");
 const REV2 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev2.sql"), "utf8");
+const REV3 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev3.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
-const MIGRATIONS = [2, 3].map((r) =>
+const MIGRATIONS = [2, 3, 4].map((r) =>
   fs.readFileSync(path.join(root, "db", "migrations", `${String(r).padStart(4, "0")}.sql`), "utf8"),
 );
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
@@ -133,13 +134,14 @@ const counts = (raw: DatabaseSync) =>
 for (const [from, schema] of [
   [1, REV1],
   [2, REV2],
+  [3, REV3],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
     migrate(old);
     const fresh = create("fresh.db", CURRENT);
     assert.deepEqual(definitions(old), definitions(fresh));
-    assert.equal((old.prepare("pragma user_version").get() as { user_version: number }).user_version, 3);
+    assert.equal((old.prepare("pragma user_version").get() as { user_version: number }).user_version, 4);
     assert.deepEqual(
       old
         .prepare("pragma integrity_check")
@@ -284,4 +286,31 @@ test("migrating revision 2 keeps options and evidence with their ids, and a reje
     now,
   );
   assert.equal(Number((raw.prepare("select max(id) as n from unit_evidence").get() as { n: number }).n), 3);
+});
+
+test("migrating revision 3 keeps the saved unit searchable, and a new unit then takes a field value found by search", () => {
+  const raw = create("old.db", REV3);
+  fill(raw);
+  migrate(raw);
+  const hits = (word: string) =>
+    raw
+      .prepare("select rowid from unit_fts where unit_fts match ? order by rowid")
+      .all(`"${word}"`)
+      .map((r) => Number(r.rowid));
+  assert.deepEqual(hits("sqlite"), [1]);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  run(
+    "insert into field_def (project_id, name, type, label, description, source_id, span_start, span_end, run_id, added_at) values (1, 'tenant', 'text', 'Tenant', 'The tenant affected', 1, 0, 10, 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (1, 'trace:session:s1/k2', 'decision', 'do', 'Use WAL', 'supported', 1, ?, ?)",
+    now,
+    sha256("Use WAL"),
+  );
+  run(
+    "insert into unit_field (unit_id, field_def_id, value, source_id, span_start, span_end, run_id, added_at) values (2, 1, 'acme', 1, 0, 10, 1, ?)",
+    now,
+  );
+  assert.deepEqual(hits("acme"), [2]);
 });
