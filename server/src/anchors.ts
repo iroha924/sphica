@@ -105,6 +105,35 @@ export function locate(
   return { line: i + 1, excerpt: cut ? "[redacted]" : own.trim().slice(0, 200) };
 }
 
+/**
+ * Whether a repository file is there now, apart from any symbol in it: gone when some part of its path does not exist, unknown when there
+ * is no working tree or a symlink on the way leads outside the repository (or cannot be followed).
+ */
+export function fileState(root: string | null, rel: string): "present" | "gone" | "unknown" {
+  if (!root) return "unknown";
+  if (leaves(path.relative(root, path.join(root, rel)))) return "unknown";
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    return "unknown";
+  }
+  let at = root;
+  for (const part of rel.split("/")) {
+    at = path.join(at, part);
+    const st = fs.lstatSync(at, { throwIfNoEntry: false });
+    if (!st) return "gone";
+    if (st.isSymbolicLink()) {
+      try {
+        if (leaves(path.relative(realRoot, fs.realpathSync(at)))) return "unknown";
+      } catch {
+        return "unknown";
+      }
+    }
+  }
+  return "present";
+}
+
 /** The anchor's state in the working tree: the file and symbol are there (at the recorded line or another), gone, or cannot be checked. */
 export function checkAnchor(
   root: string | null,

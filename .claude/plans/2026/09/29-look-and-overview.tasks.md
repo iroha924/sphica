@@ -77,13 +77,14 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 
 頼まれたとき、有効な決定と制約の一覧と、確認が要る記録の一覧が出る。
 
-- [ ] T04: ファイルの有無の検査（親の symlink を含む）と、規約ファイルの列挙（git と git の外、上限付き）を足す
+- [x] T04: ファイルの有無の検査（親の symlink を含む）と、規約ファイルの列挙（git と git の外、上限付き）を足す
   - 種別: 追加
   - 計画: S4
   - 依存: なし
   - 変更: `server/src/anchors.ts`, `server/src/rule-files.ts`, `server/test/rule-files.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 全部 pass（消えたファイル、root の外へ出る symlink の親、未追跡の規約ファイル、ignore されたファイルを除く、git の外のたどり、200 ファイルと 256 KiB と深さの上限で件数が出る）
   - コミット: `feat(overview): check whether anchored files exist and list rule files to scan`
+  - 結果: `node --test test/rule-files.test.ts` → pass 7 / fail 0（ファイルが消えたものと関数名だけ消えたものの区別、root の外へ出る symlink と壊れた symlink の親は unknown、git の未追跡を含み ignore を除く、作業ツリーで消した追跡ファイルは出ない、大きすぎ・バイナリ・symlink を件数で出す、200 件の上限、git の外のたどりで node_modules・ドットディレクトリ・symlink を飛ばす、深さ 8 と 5,000 エントリで不完全と出す）。`npm test` → 全件 pass。`bun run check` → 0
 
 - [ ] T05: `overview` の `live` を足す（unit id のページ送り、ディレクトリごとのまとめ、50 件と 64 KiB の上限）
   - 種別: 追加
