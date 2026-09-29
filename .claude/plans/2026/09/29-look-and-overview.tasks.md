@@ -73,6 +73,15 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(record): refuse a reconsider condition whose quote is not in the source`
   - 結果: red（直す前）`node --test test/record.test.ts` → actual '' / expected /reconsider_quote not found in s\d+/ で失敗。直した後 → pass 20 / fail 0。`npm test` → 383 / 383 pass。`bun run check` → 0、`bun run verify:ai` → 0
 
+- [x] T11: trace Skill に、見つからない見直し条件の引用は保存を拒否すると書く
+  - 種別: 変更
+  - 計画: S2
+  - 依存: T10（拒否の挙動が要る）
+  - 変更: `plugin/skills/trace/SKILL.md`
+  - 完了条件: `bun run verify:ai` → 0
+  - コミット: `docs(trace): say a missing reconsider quote refuses the save`
+  - 結果: `bun run verify:ai` → 0
+
 ## P3: overview ツール
 
 頼まれたとき、有効な決定と制約の一覧と、確認が要る記録の一覧が出る。
@@ -129,3 +138,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T10 / T02 の Codex レビュー F2: 見つからない条件の引用で記録ごと quarantine になり、T02 の完了条件（拒否）と食い違う / 修正タスク T10 で拒否にした
 - 2026-09-29 / T10 / T02 の Codex レビュー F1: 持ち主が他人の発言を紹介した一文も条件の引用として通る。採用の引用と同じく author_kind でしか見られず、機械では見分けられない / trace Skill に書き足すだけにした
 - 2026-09-29 / T03, T09 / Codex レビュー: 指摘なし
+- 2026-09-29 / T11 / T10 の Codex レビュー F1: trace Skill の「引用が無いと quarantine」の説明が、見直し条件の引用だけは拒否になった挙動と食い違う / T11 を足して Skill に書いた
