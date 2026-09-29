@@ -88,6 +88,7 @@ const LEAKS: [string, string][] = [
     "eyJpc3MiOiJhcHAiLCJp",
   ],
   ["_ghp_abcdefghijklmnopqrstuvwxyz0123456789_", "ghp_abc"],
+  [`_github_pat_${"A1".repeat(41)}_`, "github_pat_A1A1"],
   // Stateless installation tokens are a ghs_-prefixed JWT with two dots, up to about 520 characters
   [
     "ログに出ていた ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.Zm9vYmFyLWJhei1xdXV4X3NpZ25hdHVyZS12YWx1ZS0xMjM0NTY3ODkw",
@@ -164,6 +165,8 @@ const LEAKS: [string, string][] = [
 
 // Masked text cannot be restored. Treating type annotations, variable references, UI text, or paths as keys would lose the conversation.
 const KEEPS = [
+  // A ghs_ name that is not a JWT (no two dot-separated parts) is a file or an identifier, not a token
+  "see ghs_release-notes-and-installation-guide-version-draft.md",
   "ふつうの文: sk は短いので伏せない、pa-ge も伏せない",
   "max_tokens: 5000 と keyboard の key の話。const token = await getToken();",
   "password: string;",
