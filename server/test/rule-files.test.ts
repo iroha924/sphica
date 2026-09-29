@@ -179,3 +179,14 @@ test("outside git, an unreadable directory makes the listing incomplete, and a s
     fs.chmodSync(path.join(root, "locked"), 0o755);
   }
 });
+
+test("a file that cannot be read is unknown to the anchor check, not an error", () => {
+  put("secret.ts", "export function open() {}\n");
+  fs.chmodSync(path.join(root, "secret.ts"), 0);
+  try {
+    assert.equal(fileState(root, "secret.ts"), "present");
+    assert.equal(checkAnchor(root, { path: "secret.ts", symbol: "open", line_start: null }).state, "unknown");
+  } finally {
+    fs.chmodSync(path.join(root, "secret.ts"), 0o644);
+  }
+});

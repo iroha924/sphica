@@ -175,6 +175,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `test(acceptance): cover the overview views and reconsider conditions`
   - 結果: `bun run acceptance` → pass 67 / fail 0（overview-01〜05: live に置き換え後の決定だけが出る、消したファイルが Files gone に出て Symbol not found は none、持ち主の言った見直し条件が引用付きで保存され active、look に条件が unsupported なしで出る、置き換えられた記録の印を付けた CLAUDE.md の行が後継付きで出る）。`bun run verify` → 0（`sql:reach` 170 / 170、`sql:live` 8 / 8）。`npm test` → 全件 pass
 
+- [x] T16: 読めないファイルを指すアンカーで、read と look が例外で落ちず「確かめられない」と数える
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T14（look の数え方が要る）
+  - 変更: `server/src/anchors.ts`, `server/test/rule-files.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 権限 0 のファイルの checkAnchor が EACCES を投げて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 全部 pass
+  - コミット: `fix(anchors): treat a file that cannot be read as unknown, not an error`
+  - 結果: red（直す前）→ `EACCES: permission denied, open …/secret.ts` で失敗。直した後 `node --test test/rule-files.test.ts` → pass 11 / fail 0。`npm test` → 全件 pass。`bun run check` → 0
+
 ## 記録
 - 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）
 - 2026-09-29 / T02 / glean の add_evidence も同じ role 一覧を使っていて、`reconsiders` を渡すと DB のトリガーで分かりにくく落ちる / 入力で除き、変更欄に `server/src/glean.ts`, `server/test/extract.test.ts` を足した（前: 無し）
@@ -195,3 +205,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T15 / T07 に依存するのに P3 に置いていた（検査の失敗をパイプで見逃してコミットした）/ T07 の後ろへ移した
 - 2026-09-29 / T08 / `sql:live` が init の移行先を revision 2 と固定で見ていて、revision 3 で落ちた / db/schema.sql の user_version を読むように直し、変更欄に `scripts/check-sql-live.mjs` を足した（前: 無し）
 - 2026-09-29 / T08 / knowledge-schema Skill は新しい挙動の acceptance の case を先に足して落ちるのを確かめると言うが、この計画では case を実装の後の T08 に置いたので、実装前に落ちることは確かめていない / 記録だけ残す
+- 2026-09-29 / T16 / T14 の Codex レビュー F1: 読めない通常ファイルで readText が EACCES を投げ、look 全体（と既存の read）が落ちる / 修正タスク T16 を足した。T15 の Codex レビュー F1（全角 180 字まで同じ 2 つのディレクトリが、切り詰めた見出しとパスで区別できない）は端の入力なので採らない

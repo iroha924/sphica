@@ -22,11 +22,16 @@ function readText(root: string, rel: string): string | null | undefined {
   const st = fs.lstatSync(abs, { throwIfNoEntry: false });
   if (!st) return null;
   if (!st.isFile() || st.size > MAX_BYTES) return undefined;
-  // A symlinked directory on the way can lead outside the repository: the real path must stay inside the real root
-  const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
-  if (leaves(inside)) return undefined;
-  const buf = fs.readFileSync(abs);
-  return buf.includes(0) ? undefined : buf.toString("utf8");
+  try {
+    // A symlinked directory on the way can lead outside the repository: the real path must stay inside the real root
+    const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
+    if (leaves(inside)) return undefined;
+    const buf = fs.readFileSync(abs);
+    return buf.includes(0) ? undefined : buf.toString("utf8");
+  } catch {
+    // Not readable here (no permission, or gone since the stat): it cannot be checked, which is not the same as missing
+    return undefined;
+  }
 }
 
 /** The file's lines and the 0-based index of the first one holding symbol as a whole identifier (-1 when none does). */
