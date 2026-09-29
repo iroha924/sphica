@@ -15,7 +15,15 @@ import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
 import { exportDecisions, exportPath } from "../../src/export.ts";
-import { beginGlean, beginHarvest, beginTrace, checkText, pendingText, saveText } from "../../src/extract.ts";
+import {
+  beginGlean,
+  beginHarvest,
+  beginTrace,
+  checkText,
+  contextText,
+  pendingText,
+  saveText,
+} from "../../src/extract.ts";
 import { applyForget, previewForget } from "../../src/forget.ts";
 import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
@@ -291,6 +299,12 @@ export async function createDriver(world: World): Promise<Driver> {
   /** The record server's flow, called as its tools call it: check (kept for expectations), then save. */
   async function extract(run: string, prefix: string, record: Record<string, unknown>) {
     const pid = await projectId();
+    // Read every context page first, as the Skills do: saving marks only the sources shown as looked at
+    for (let page = await contextText(writer(), run, pid, repo); ; ) {
+      const next = /with after: "(s\d+)"/.exec(page)?.[1];
+      if (!next) break;
+      page = await contextText(writer(), run, pid, repo, next);
+    }
     const translated = await translate(record);
     checked = (await checkText(writer(), run, pid, repo, translated)).text;
     await saveText(writer(), run, pid, repo, translated);

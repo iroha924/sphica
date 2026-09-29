@@ -1194,3 +1194,53 @@ test("tombstone: glean does not store a file excerpt the owner forgot, and says 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("trace: context comes in pages, and saving marks as looked at only the messages the run was shown", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const ids = Array.from({ length: 40 }, (_, i) =>
+      message(db, p, {
+        id: `m${i}`,
+        text: `発言 ${i}: ${"あ".repeat(1500)}`,
+        sent: `2026-09-10T00:${String(i).padStart(2, "0")}:00Z`,
+      }),
+    );
+    const untraced = () =>
+      Number(
+        db.owner
+          .prepare(
+            "select count(*) as n from source s where s.session_id = 's1' and not exists (select 1 from source_processing p where p.source_id = s.id)",
+          )
+          .get()?.n,
+      );
+    // Reading only the first page and saving leaves the unread messages waiting for the next trace
+    const first = await beginTrace(db.ingest, p, "s1");
+    const page = await contextText(db.ingest, first, p, null);
+    assert.ok(page.length < 50_000, `a page of ${page.length} characters`);
+    assert.match(page, /\d+ more sources follow: call record_context with after: "s\d+"/);
+    assert.doesNotMatch(page, /Live records of this project/);
+    assert.doesNotMatch(page, /発言 39:/);
+    await saveText(db.ingest, first, p, null, { units: [] });
+    const shown = [...page.matchAll(/^## s(\d+) /gm)].length;
+    assert.ok(shown > 0 && shown < 40);
+    assert.equal(untraced(), 40 - shown);
+    assert.match(await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")), /1 session to trace/);
+    // Reading every page to the end marks them all
+    const second = await beginTrace(db.ingest, p, "s1");
+    let text = await contextText(db.ingest, second, p, null);
+    const pages = [text];
+    for (let m = /after: "(s\d+)"/.exec(text); m; m = /after: "(s\d+)"/.exec(text)) {
+      text = await contextText(db.ingest, second, p, null, m[1]);
+      pages.push(text);
+    }
+    assert.ok(pages.length > 1);
+    assert.match(pages.at(-1) ?? "", /発言 39:[\s\S]*Live records of this project/);
+    assert.equal(pages.join("\n").match(/^## s\d+ /gm)?.length, 40);
+    await saveText(db.ingest, second, p, null, { units: [] });
+    assert.equal(untraced(), 0);
+    assert.ok(ids.length === 40);
+  } finally {
+    await db.done();
+  }
+});

@@ -172,14 +172,24 @@ server.registerTool(
   "record_context",
   {
     title: "What a run may cite",
-    description: "Prints the run's sources with their refs (s<id>) and this project's live records.",
-    inputSchema: { run: RUN, cwd: CWD },
+    description:
+      "Prints the run's sources with their refs (s<id>) and this project's live records, a page at a time. A page that ends with " +
+      "'more sources follow' names the after to pass for the next one; only sources shown count as looked at when saving.",
+    inputSchema: {
+      run: RUN,
+      after: z
+        .string()
+        .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
+        .optional()
+        .describe("The ref the previous page named, to read the next page"),
+      cwd: CWD,
+    },
     annotations: READ,
   },
   async (a, extra) =>
     tool(async () => {
       const p = await projectOf(a.cwd, extra._meta);
-      return framed(await contextText(conn(), a.run, p.projectId, p.root));
+      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after));
     }),
 );
 
