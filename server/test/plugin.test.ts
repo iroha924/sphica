@@ -449,6 +449,7 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
     assert.match(instructions, /would overturn a past decision.*ask before making the change/);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
+      "export",
       "overview",
       "read",
       "review_check",
@@ -458,6 +459,13 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
     ]);
     for (const t of tools)
       assert.ok([...(t.description ?? "")].length <= 2048, `${t.name} description is too long`);
+    // export answers through the real entry, and refuses rather than writing anything
+    const r = await client.callTool({
+      name: "export",
+      arguments: { records: ["u1"], path: "docs/decisions.md", cwd: "/nonexistent" },
+    });
+    assert.match(JSON.stringify(r.content), /not in a registered project/);
+    assert.equal(r.isError, true);
   } finally {
     await client.close();
   }

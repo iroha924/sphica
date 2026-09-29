@@ -7,15 +7,15 @@ import { cleanGit } from "./git.ts";
 
 export const RULE_LIMITS = { files: 200, bytes: 256 * 1024, depth: 8, entries: 5000 } as const;
 
-const NAMES = new Set(["CLAUDE.md", "AGENTS.md", "AGENTS.override.md"]);
+export const RULE_NAMES = new Set(["CLAUDE.md", "AGENTS.md", "AGENTS.override.md"]);
 /** git pathspecs for the same set; `**` also matches the top directory. */
-const PATHSPECS = [...NAMES, ".claude/rules/**/*.md"].map((p) => `:(glob)**/${p}`);
+const PATHSPECS = [...RULE_NAMES, ".claude/rules/**/*.md"].map((p) => `:(glob)**/${p}`);
 
 /** Whether a repository-relative path (forward slashes) is one of the instruction files. */
 export function isRuleFile(rel: string): boolean {
   const parts = rel.split("/");
   const name = parts.at(-1) ?? "";
-  if (NAMES.has(name)) return true;
+  if (RULE_NAMES.has(name)) return true;
   const i = parts.findIndex((p, k) => p === ".claude" && parts[k + 1] === "rules");
   return i >= 0 && parts.length > i + 2 && name.endsWith(".md");
 }
