@@ -167,6 +167,7 @@ const LEAKS: [string, string][] = [
 const KEEPS = [
   // A ghs_ name that is not a JWT (no two dot-separated parts) is a file or an identifier, not a token
   "see ghs_release-notes-and-installation-guide-version-draft.md",
+  "see docs/ghs_release-notes.installation-guide.version-draft.md before release",
   "ふつうの文: sk は短いので伏せない、pa-ge も伏せない",
   "max_tokens: 5000 と keyboard の key の話。const token = await getToken();",
   "password: string;",
@@ -237,6 +238,8 @@ test("masking finishes in linear time on input that repeats a trigger", () => {
     'token: "',
     "Authorization: Bearer ",
     "eyJ-",
+    "ghs_aaaaaaaa_",
+    "ghs_eyJaaaaaaaa_",
   ]) {
     const text = unit.repeat(Math.ceil(N / unit.length)).slice(0, N);
     const t = performance.now();

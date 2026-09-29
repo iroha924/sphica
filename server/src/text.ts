@@ -184,10 +184,13 @@ const SECRETS: [RegExp, string][] = [
   [/\bnapi_[A-Za-z0-9]{30,}/g, "API key"],
   [/\bnpm_[A-Za-z0-9]{36}\b/g, "npm token"],
   [/\bglpat-[A-Za-z0-9_-]{20,}/g, "GitLab token"],
-  // Installation tokens may be stateless: a ghs_-prefixed JWT (three dot-separated parts), up to about 520 characters; the older
-  // all-alphanumeric ghs_ tokens fall to the next rule.
-  // GitHub tokens start after any non-alphanumeric, including the underscore of Markdown emphasis, which \b would miss
-  [/(?<![A-Za-z0-9])ghs_[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "GitHub token"],
+  // GitHub tokens start after any non-alphanumeric, so the _ of Markdown emphasis does not hide them. A stateless installation token is
+  // ghs_ and a JWT (header eyJ, about 520 characters; older ghs_ tokens fall to the next rule), with capped parts: a start after _ would
+  // otherwise rescan the rest of the text.
+  [
+    /(?<![A-Za-z0-9])ghs_eyJ[A-Za-z0-9_-]{5,200}\.[A-Za-z0-9_-]{8,2000}\.[A-Za-z0-9_-]{8,1000}/g,
+    "GitHub token",
+  ],
   [/(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{30,}/g, "GitHub token"],
   [/(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{40,}/g, "GitHub token"],
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "Slack token"],
