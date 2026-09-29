@@ -9,6 +9,7 @@ import { stripVTControlCharacters } from "node:util";
 import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { sessionId } from "../src/knowledge.ts";
 import {
   compareVersions,
   differingFiles,
@@ -711,5 +712,75 @@ test("search says when it stopped before reading every candidate", async () => {
   } finally {
     await client.close();
     await db.done();
+  }
+});
+
+// asked: the owner's earlier messages in other sessions, never this session's own words. Codex gives its MCP servers no session id
+// (codex-cli 0.157.1), so the agent passes it; without one, the result says this session may be included
+test("search with asked leaves out the session it is given and says when it cannot tell the current session", async () => {
+  const db = tempDb();
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-home-"));
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/asked.git"], { cwd: repo });
+  const p = project(db, "git:github.com/o/asked", "o/asked");
+  const earlier = message(db, p, {
+    id: "old",
+    text: "Which package manager do installs use?",
+    session: "old",
+  });
+  message(db, p, {
+    id: "now",
+    text: "Pick the package manager for installs now.",
+    session: sessionId(p, "codex", "this-thread"),
+  });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const search = async (args: Record<string, unknown>) => {
+    const r = await client.callTool({
+      name: "search",
+      arguments: { cwd: repo, query: "package manager installs", ...args },
+    });
+    return (r.content as { text: string }[])[0]?.text ?? "";
+  };
+  try {
+    const given = await search({ asked: true, session: "this-thread" });
+    assert.match(given, /^<past-records id="[0-9a-f]+">/, "the result is framed as past records");
+    assert.match(given, /Earlier owner messages matching: /);
+    assert.match(given, new RegExp(`## s${earlier}: `));
+    assert.match(given, /No recorded decision\. Not traced yet: run \/sphica:trace old\./);
+    assert.doesNotMatch(
+      given,
+      /Pick the package manager for installs now/,
+      "the given session's own words are left out",
+    );
+    assert.doesNotMatch(given, /Current session unknown/);
+    const unknown = await search({ asked: true });
+    assert.match(unknown, /Owner messages matching: /);
+    assert.doesNotMatch(unknown, /Earlier owner messages/);
+    assert.match(unknown, /Pick the package manager for installs now/);
+    assert.match(
+      unknown,
+      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\./,
+    );
+    assert.match(
+      await search({ asked: true, sources: true }),
+      /^asked cannot be combined with sources or path\.$/,
+    );
+    assert.match(
+      await search({ asked: true, path: "" }),
+      /^asked cannot be combined with sources or path\.$/,
+    );
+  } finally {
+    await client.close();
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

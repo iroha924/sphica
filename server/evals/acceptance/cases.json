@@ -2546,6 +2546,55 @@
           ]
         }
       ]
+    },
+    {
+      "id": "asked-01",
+      "layer": "asked",
+      "lang": "ja>ja",
+      "summary": "Asked about the storage again, the earlier owner message shows the decision that quotes it",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "asked": {
+          "query": "保存先は SQLite と Postgres のどちら"
+        }
+      },
+      "then": [
+        {
+          "asked_contains": [
+            "Earlier owner messages matching:",
+            "保存先は Postgres じゃなくて SQLite にしよう。",
+            "- trace:s-ja-storage/storage (decision, active)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "asked-02",
+      "layer": "asked",
+      "lang": "ja>ja",
+      "summary": "An earlier owner message no trace has looked at says no recorded decision and suggests tracing it, never a guessed answer",
+      "given": [
+        {
+          "capture": "s-ja-telemetry"
+        }
+      ],
+      "when": {
+        "asked": {
+          "query": "テレメトリの送信"
+        }
+      },
+      "then": [
+        {
+          "asked_contains": [
+            "利用状況の送信（テレメトリ）は入れない。",
+            "No recorded decision. Not traced yet: run /sphica:trace "
+          ]
+        }
+      ]
     }
   ],
   "setups": {

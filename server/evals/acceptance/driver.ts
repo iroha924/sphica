@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { type Kysely, sql } from "kysely";
 import { checkAnchor } from "../../src/anchors.ts";
+import { askedBefore, askedText } from "../../src/asked.ts";
 import { flush, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
@@ -177,6 +178,8 @@ export async function createDriver(world: World): Promise<Driver> {
 
   /** The last search's hits and the last read's text, for expectations about them. */
   let found: UnitHit[] = [];
+  /** What the last search with asked returned, as the read server words it. */
+  let asked = "";
   let lastRead = "";
   /** A time after every write so far and before the latest glean's, for reading as of just before it (writes carry the real clock). */
   let beforeGlean = "";
@@ -396,6 +399,13 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (step.search && typeof step.search === "object") {
         found = await search(String((step.search as { query: string }).query));
+        return;
+      }
+      if (step.asked && typeof step.asked === "object") {
+        const question = String((step.asked as { query: string }).query);
+        asked = askedText(
+          await askedBefore(db(), await projectId(), { question, limit: 10, notSessions: [] }),
+        );
         return;
       }
       if (Array.isArray(step.read)) {
@@ -725,6 +735,11 @@ export async function createDriver(world: World): Promise<Driver> {
           texts.filter((u) => u.text.includes(String(e.no_unit_text_contains))).map((u) => u.key),
           [],
         );
+        return;
+      }
+      if (Array.isArray(e.asked_contains)) {
+        for (const w of e.asked_contains as string[])
+          assert.ok(asked.includes(w), `asked lacks "${w}"\n${asked}`);
         return;
       }
       if (typeof e.hits_include === "string") {

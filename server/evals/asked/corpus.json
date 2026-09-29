@@ -1,0 +1,149 @@
+{
+  "note": "Owner messages across sessions and the questions asked later, each with the ids of the messages a person would call related. run.ts measures how many returned messages are unrelated and how many related ones are missed.",
+  "sessions": [
+    {
+      "id": "pkg",
+      "messages": [
+        { "id": "pkg-1", "text": "Which package manager should we use for installs, npm or pnpm?" },
+        { "id": "pkg-2", "text": "Use pnpm. Its lockfile keeps installs reproducible." },
+        { "id": "pkg-3", "text": "Add the lockfile check to CI." },
+        { "id": "pkg-4", "text": "Remove the old yarn.lock file." }
+      ]
+    },
+    {
+      "id": "db",
+      "messages": [
+        { "id": "db-1", "text": "保存先は Postgres じゃなくて SQLite にしよう。" },
+        { "id": "db-2", "text": "各ユーザーに DB サーバーを立てさせたくない。" },
+        { "id": "db-3", "text": "SQLite のファイルはホームディレクトリの下に置く。" },
+        { "id": "db-4", "text": "バックアップは毎日一回コピーを取る。" }
+      ]
+    },
+    {
+      "id": "telemetry",
+      "messages": [
+        { "id": "tel-1", "text": "利用状況の送信（テレメトリ）は入れない。" },
+        { "id": "tel-2", "text": "エラーレポートも外部サービスには送らない。" },
+        { "id": "tel-3", "text": "ログはローカルのファイルにだけ残す。" },
+        { "id": "tel-4", "text": "Crash reports stay on the machine." }
+      ]
+    },
+    {
+      "id": "dates",
+      "messages": [
+        { "id": "date-1", "text": "Show dates as YYYY-MM-DD everywhere, not the locale format." },
+        { "id": "date-2", "text": "Store timestamps in UTC with milliseconds." },
+        { "id": "date-3", "text": "The date picker should start the week on Monday." },
+        { "id": "date-4", "text": "日付の表示は YYYY-MM-DD にそろえて。" }
+      ]
+    },
+    {
+      "id": "ci",
+      "messages": [
+        { "id": "ci-1", "text": "Run the tests on Windows in CI too." },
+        { "id": "ci-2", "text": "CI の実行時間が長すぎる。キャッシュを効かせたい。" },
+        { "id": "ci-3", "text": "Pin every GitHub Action to a commit SHA." },
+        { "id": "ci-4", "text": "Cache the node_modules folder between CI runs." }
+      ]
+    },
+    {
+      "id": "auth",
+      "messages": [
+        { "id": "auth-1", "text": "Log in with GitHub only; no passwords of our own." },
+        { "id": "auth-2", "text": "トークンはコマンドの引数やログに書かない。" },
+        { "id": "auth-3", "text": "Keep the GitHub token in the OS keychain." },
+        { "id": "auth-4", "text": "Sessions expire after 30 days." }
+      ]
+    },
+    {
+      "id": "thumbs",
+      "messages": [
+        { "id": "th-1", "text": "Try generating thumbnails in a Web Worker." },
+        { "id": "th-2", "text": "Safari 16 lacks OffscreenCanvas, so thumbnails failed there." },
+        { "id": "th-3", "text": "サムネイルはメインスレッドで作る形に戻す。" },
+        { "id": "th-4", "text": "Thumbnails are 256 pixels wide." }
+      ]
+    },
+    {
+      "id": "logs",
+      "messages": [
+        { "id": "log-1", "text": "Rotate the log file once it passes 10 MB." },
+        { "id": "log-2", "text": "ログの出力は英語にする。" },
+        { "id": "log-3", "text": "Do not log request bodies; they may hold secrets." },
+        { "id": "log-4", "text": "Keep seven days of logs." }
+      ]
+    },
+    {
+      "id": "cache",
+      "messages": [
+        { "id": "cache-1", "text": "Cache search results for five minutes." },
+        { "id": "cache-2", "text": "検索結果のキャッシュは書き込みがあったら捨てる。" },
+        { "id": "cache-3", "text": "Do not cache anything that holds a token." },
+        { "id": "cache-4", "text": "The image cache lives in the temp folder." }
+      ]
+    },
+    {
+      "id": "i18n",
+      "messages": [
+        { "id": "i18n-1", "text": "翻訳ファイルは JSON で持つ。" },
+        { "id": "i18n-2", "text": "Fall back to English when a translation is missing." },
+        { "id": "i18n-3", "text": "UI の文言は日本語と英語の二つだけ。" },
+        { "id": "i18n-4", "text": "Translators edit the JSON files through pull requests." }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "id": "q-pkg",
+      "lang": "en",
+      "text": "Which package manager do we use for installs?",
+      "related": ["pkg-1", "pkg-2"]
+    },
+    {
+      "id": "q-db",
+      "lang": "ja",
+      "text": "保存先は SQLite だったっけ Postgres だったっけ",
+      "related": ["db-1", "db-3"]
+    },
+    { "id": "q-tel", "lang": "ja", "text": "テレメトリは送ってもいい？", "related": ["tel-1"] },
+    {
+      "id": "q-date",
+      "lang": "en",
+      "text": "What format should dates be shown in?",
+      "related": ["date-1", "date-4"]
+    },
+    { "id": "q-ci-win", "lang": "en", "text": "Do the tests run on Windows in CI?", "related": ["ci-1"] },
+    { "id": "q-ci-cache", "lang": "ja", "text": "CI のキャッシュどうする", "related": ["ci-2", "ci-4"] },
+    {
+      "id": "q-token",
+      "lang": "en",
+      "text": "Where does the GitHub token live?",
+      "related": ["auth-3", "auth-2"]
+    },
+    {
+      "id": "q-thumb",
+      "lang": "en",
+      "text": "Can thumbnails be generated in a Web Worker?",
+      "related": ["th-1", "th-2", "th-3"]
+    },
+    {
+      "id": "q-log",
+      "lang": "en",
+      "text": "How big can the log file get before rotation?",
+      "related": ["log-1"]
+    },
+    {
+      "id": "q-cache",
+      "lang": "ja",
+      "text": "検索結果のキャッシュはいつ捨てる？",
+      "related": ["cache-1", "cache-2"]
+    },
+    {
+      "id": "q-i18n",
+      "lang": "en",
+      "text": "What happens when a translation is missing?",
+      "related": ["i18n-2"]
+    },
+    { "id": "q-hira", "lang": "ja", "text": "どこにほぞんするんだっけ", "related": ["db-1", "db-3"] }
+  ]
+}

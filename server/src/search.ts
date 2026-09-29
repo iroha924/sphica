@@ -119,23 +119,16 @@ export async function searchUnits(
     read += rows.length;
     weaker += await judgeUnits(db, rows, wanted, hits);
   }
-  // A superseded hit points to what replaced it: the live successor joins the hits even when it shares no word with the question.
-  // The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
+  // A superseded hit points to what replaced it: the record at the end of the chain joins the hits even when it shares no word with
+  // the question. The caller's kind and lifecycle filters hold for it too; a path filter does not, since it replaces a record anchored there
   const shown = new Set(hits.map((h) => h.id));
-  for (const h of [...hits].filter((x) => x.lifecycle === "superseded")) {
-    let successors = db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as n", "n.id", "l.from_unit")
-      .where("l.to_unit", "=", h.id)
-      .where("l.kind", "=", "supersedes")
-      .where("n.extraction", "=", "supported");
-    if (q.kinds?.length) successors = successors.where("n.kind", "in", q.kinds);
-    if (q.lifecycles?.length) successors = successors.where("n.lifecycle", "in", q.lifecycles);
-    const next = await successors
-      .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
-      .execute();
-    for (const n of next)
-      if (!shown.has(n.id)) {
+  for (const h of [...hits].filter((x) => x.lifecycle === "superseded"))
+    for (const n of await liveSuccessors(db, h.id))
+      if (
+        !shown.has(n.id) &&
+        (!q.kinds?.length || (q.kinds as string[]).includes(n.kind)) &&
+        (!q.lifecycles?.length || (q.lifecycles as string[]).includes(n.lifecycle))
+      ) {
         shown.add(n.id);
         hits.push({
           ...n,
@@ -147,7 +140,6 @@ export async function searchUnits(
           rank: h.rank,
         });
       }
-  }
   hits.sort(
     (a, b) =>
       (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
@@ -161,6 +153,58 @@ export async function searchUnits(
     stopped,
     read,
   };
+}
+
+export type Successor = {
+  id: number;
+  key: string;
+  kind: string;
+  stance: string | null;
+  lifecycle: string;
+  text: string;
+  why: string | null;
+  revisit_when: string | null;
+};
+
+/**
+ * The records at the end of a record's supersedes chain: each adopted replacement is followed until one that nothing replaced, so a
+ * record replaced twice leads to the one that holds now. A visited set keeps a cycle from looping.
+ */
+export async function liveSuccessors(db: Kysely<DB>, id: number): Promise<Successor[]> {
+  const seen = new Set([id]);
+  const found: Successor[] = [];
+  const replaced = new Set<number>();
+  for (let frontier = [id]; frontier.length; ) {
+    const next = await db
+      .selectFrom("unit_link as l")
+      .innerJoin("unit as n", "n.id", "l.from_unit")
+      .where("l.to_unit", "in", frontier)
+      .where("l.kind", "=", "supersedes")
+      .where("n.extraction", "=", "supported")
+      // A replacement never adopted (still a candidate) is not what holds now
+      .where("n.lifecycle", "<>", "candidate")
+      .select([
+        "l.to_unit",
+        "n.id",
+        "n.key",
+        "n.kind",
+        "n.stance",
+        "n.lifecycle",
+        "n.text",
+        "n.why",
+        "n.revisit_when",
+      ])
+      .execute();
+    frontier = [];
+    for (const { to_unit, ...n } of next) {
+      replaced.add(to_unit);
+      if (seen.has(n.id)) continue;
+      seen.add(n.id);
+      found.push(n);
+      frontier.push(n.id);
+    }
+  }
+  return found.filter((n) => !replaced.has(n.id));
 }
 
 type UnitRow = {
@@ -268,14 +312,20 @@ export type SourceHit = {
   created_at: string;
   text: string;
   matched: string[];
+  session: string | null;
+  turn: string | null;
 };
 
-/** Retained sources (conversation and pull request text) holding more than half of the question's content terms, best first. */
+/**
+ * Retained sources (conversation and pull request text) holding more than half of the question's content terms, best first.
+ * `owner` narrows them to the owner's own messages outside the given sessions, before the caps, so other text never uses them up.
+ */
 export async function searchSources(
   db: Kysely<DB>,
   projectId: number,
   question: string,
   limit: number,
+  owner?: { notSessions: string[] },
 ): Promise<{ hits: SourceHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
   const wanted = queryTerms(question);
   const match = ftsQuery(question);
@@ -290,7 +340,15 @@ export async function searchSources(
       ),
     )
     .innerJoin("source as s", "s.id", "f.rowid")
-    .where("s.project_id", "=", projectId);
+    .where("s.project_id", "=", projectId)
+    .$if(owner !== undefined, (q) =>
+      q
+        .where("s.kind", "=", "session_message")
+        .where("s.author_kind", "=", "owner")
+        .$if((owner?.notSessions.length ?? 0) > 0, (q2) =>
+          q2.where("s.session_id", "not in", owner?.notSessions ?? []),
+        ),
+    );
   // The order is taken in one statement, so a write between pages shifts nothing; texts are then read a page at a time.
   // Hits come in rank order, so reading ends once there are enough (that is not a stop). The caps are checked before each candidate.
   const ranked = await query
@@ -310,7 +368,17 @@ export async function searchSources(
       (
         await db
           .selectFrom("source")
-          .select(["id", "kind", "artifact", "author_kind", "author_login", "created_at", "text"])
+          .select([
+            "id",
+            "kind",
+            "artifact",
+            "author_kind",
+            "author_login",
+            "created_at",
+            "text",
+            "session_id",
+            "turn_id",
+          ])
           .where("id", "in", ids)
           .execute()
       ).map((r) => [r.id, r]),
@@ -339,6 +407,8 @@ export async function searchSources(
         created_at: r.created_at,
         text: r.text,
         matched,
+        session: r.session_id,
+        turn: r.turn_id,
       });
       if (hits.length >= limit) break scan;
     }

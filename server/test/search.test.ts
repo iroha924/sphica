@@ -11,7 +11,7 @@ import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
   const t: Target = {
@@ -541,6 +541,141 @@ test("a record withdrawn after the order was taken is not an active hit, and a s
     );
     assert.equal(r.read, 600, "the 601st taken is read in place of the removed one");
     assert.equal(r.stopped, true, "a candidate past the ones read remains");
+  } finally {
+    await db.done();
+  }
+});
+
+// A record replaced twice still leads to the one that holds now, not to the one in between
+test("a hit replaced twice brings the live record at the end of the chain", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Use pnpm for installs." });
+    const b = message(db, p, { id: "m2", text: "Go back to npm." });
+    const c = message(db, p, { id: "m3", text: "Move to bun." });
+    await save(db, p, { units: [decision("pnpm", a, "Use pnpm for installs.")] });
+    await save(db, p, {
+      units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
+    });
+    await save(db, p, { units: [decision("bun", c, "Move to bun.", { supersedes: "trace:ext-s1/npm" })] });
+    const r = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
+    assert.deepEqual(
+      r.hits.map((h) => [h.key, h.successorOf ?? null]),
+      [
+        ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
+        ["trace:ext-s1/pnpm", null],
+      ],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+// Earlier owner messages: only the owner's own words, outside the sessions the caller names, narrowed before the caps, all of them
+test("an owner-message search keeps only the owner's words outside the named sessions, before the caps, and returns every match", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const sessionOf = (id: number) =>
+      String(db.owner.prepare("select session_id from source where id = ?").get(id)?.session_id);
+    // 601 matches in the current session rank first and must not use up the cap
+    const here = message(db, p, { id: "h0", text: "retry budget retry budget.", session: "now" });
+    for (let n = 1; n < 601; n++)
+      message(db, p, { id: `h${n}`, text: "retry budget retry budget.", session: "now" });
+    const filler = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
+    const earlier = [0, 1, 2].map((n) =>
+      message(db, p, {
+        id: `e${n}`,
+        text: `${filler} what is the retry budget ${filler}`,
+        session: `old${n}`,
+      }),
+    );
+    // An assistant reply is never indexed in practice; this one is, so only the author filter keeps it out
+    insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:old0",
+      external_id: "a",
+      revision: 1,
+      session_id: "old0",
+      author_kind: "assistant",
+      created_at: at("2026-09-10T00:00:00Z"),
+      available_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text: "What is the retry budget? It is three.",
+      original_bytes: 38,
+      content_hash: hash(2),
+      indexed: 1,
+    });
+    insert(db, "source", {
+      project_id: p,
+      kind: "pr_body",
+      artifact: "pr:1",
+      external_id: "pr-1",
+      revision: 1,
+      author_kind: "person",
+      created_at: at("2026-09-10T00:00:00Z"),
+      available_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text: "retry budget in the pull request",
+      original_bytes: 32,
+      content_hash: hash(1),
+      indexed: 1,
+    });
+    const r = await searchSources(db.reader, p, "retry budget", Number.POSITIVE_INFINITY, {
+      notSessions: [sessionOf(here)],
+    });
+    assert.deepEqual(
+      r.hits.map((h) => h.id).sort((x, y) => x - y),
+      earlier,
+    );
+    assert.deepEqual(
+      r.hits.map((h) => h.session),
+      r.hits.map((h) => sessionOf(h.id)),
+    );
+    assert.equal(r.stopped, false);
+  } finally {
+    await db.done();
+  }
+});
+
+// A replacement that was never adopted is not what holds now
+test("the chain skips a replacement that stayed a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Use pnpm for installs." });
+    const b = message(db, p, { id: "m2", text: "Go back to npm." });
+    const c = message(db, p, { id: "m3", text: "Maybe yarn." });
+    const d = message(db, p, { id: "m4", text: "Move to bun." });
+    await save(db, p, { units: [decision("pnpm", a, "Use pnpm for installs.")] });
+    await save(db, p, {
+      units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
+    });
+    // No adoption: it stays a candidate
+    await save(db, p, {
+      units: [
+        {
+          key: "yarn",
+          kind: "decision",
+          stance: "do",
+          text: "Maybe yarn.",
+          evidence: [{ source: `s${c}`, quote: "Maybe yarn.", role: "proposes" }],
+          supersedes: "trace:ext-s1/npm",
+        },
+      ],
+    });
+    await save(db, p, { units: [decision("bun", d, "Move to bun.", { supersedes: "trace:ext-s1/npm" })] });
+    const lifecycle = db.owner
+      .prepare("select lifecycle from unit where key = 'trace:ext-s1/yarn'")
+      .get()?.lifecycle;
+    assert.equal(lifecycle, "candidate");
+    const r = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
+    assert.deepEqual(
+      r.hits.map((h) => h.key),
+      ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
+    );
   } finally {
     await db.done();
   }
