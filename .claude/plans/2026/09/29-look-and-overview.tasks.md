@@ -53,6 +53,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `feat(read): show a rejected option's reconsider condition and whether its quote still stands`
   - 結果: `node --test test/record.test.ts` → pass 20 / fail 0（却下案の下に `Reconsider when:` と `(reconsiders)` の引用が出る。引用を取り消すと `[unsupported: its owner quote was retracted or forgotten …]` と出て、決定は active のまま）。`npm test` → 382 / 382 pass。`bun run check` → 0
 
+- [x] T09: 検索の照合に却下案の見直し条件の語を入れる
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（条件付きの記録を保存する経路が要る）
+  - 変更: `server/src/search.ts`, `server/test/search.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 条件の語（read replicas）だけの質問で、全文検索が拾った記録を照合が弱い候補として捨て、hits が空で落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 全部 pass
+  - コミット: `fix(search): match a rejected option's reconsider condition, which the index already holds`
+  - 結果: red（直す前）`node --test test/search.test.ts` → 新しいテストが actual [] / expected ["trace:ext-s1/storage"] で失敗。直した後 → pass 13 / fail 0。`npm test` → 383 / 383 pass。`bun run check` → 0
+
 ## P3: overview ツール
 
 頼まれたとき、有効な決定と制約の一覧と、確認が要る記録の一覧が出る。
@@ -104,3 +114,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 ## 記録
 - 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）
 - 2026-09-29 / T02 / glean の add_evidence も同じ role 一覧を使っていて、`reconsiders` を渡すと DB のトリガーで分かりにくく落ちる / 入力で除き、変更欄に `server/src/glean.ts`, `server/test/extract.test.ts` を足した（前: 無し）
+- 2026-09-29 / T09 / T01 の Codex レビュー F1: 見直し条件は全文検索の索引に入るが、search の照合（judgeUnits）が案の text と why しか見ず、条件の語だけの質問を捨てる / 修正タスク T09 を足した。F2（`reconsiders` を入力で受け付ける）と F3（content_hash に条件が無い）は T02 で直してあり、採らない
