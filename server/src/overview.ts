@@ -9,10 +9,24 @@ import { UNSUPPORTED } from "./read.ts";
 import { ruleFiles } from "./rule-files.ts";
 import { head } from "./text.ts";
 
-/** One reply's bounds: 50 lines of at most 600 bytes keep a page under 64 KiB. Past them the reply says where to go on. */
-export const OVERVIEW_LIMITS = { records: 50, line: 600 } as const;
+/** One page: 50 records whose key, text, paths, and heading are each clipped, so a page stays under 64 KiB. Past it the reply says where to go on. */
+export const OVERVIEW_LIMITS = { records: 50, key: 200, text: 300, paths: 520, heading: 120 } as const;
 
 const PROJECT_WIDE = "Project-wide (no code location)";
+
+/** Whole paths while they fit the budget, then how many more; a single path longer than the budget is cut. */
+function pathList(paths: string[]): string {
+  const all = paths.map(inline);
+  const out: string[] = [];
+  let used = 0;
+  for (const p of all) {
+    if (used + Buffer.byteLength(p) + 2 > OVERVIEW_LIMITS.paths) break;
+    out.push(p);
+    used += Buffer.byteLength(p) + 2;
+  }
+  if (!out.length) out.push(head(all[0] ?? "", OVERVIEW_LIMITS.paths));
+  return `${out.join(", ")}${all.length > out.length ? ` (+${all.length - out.length} more)` : ""}`;
+}
 
 /** A page of the project's active decisions and constraints in id order after `after`, grouped by the directory each first applies to. */
 export async function liveOverview(db: Kysely<DB>, projectId: number, after: number | null): Promise<string> {
@@ -51,13 +65,14 @@ export async function liveOverview(db: Kysely<DB>, projectId: number, after: num
     const paths = [...new Set(anchors.filter((a) => a.unit_id === r.id).map((a) => a.path))];
     const first = paths[0];
     const dir = first === undefined ? null : path.posix.dirname(first);
-    const line = head(
-      `- ${r.key} (${r.kind}${r.stance ? ` ${r.stance}` : ""}): ${inline(r.text)}${paths.length ? ` [${paths.map(inline).join(", ")}]` : ""}`,
-      OVERVIEW_LIMITS.line,
-    );
+    // Each part is clipped on its own, so a long text never pushes the paths off the line
+    const line = `- ${head(inline(r.key), OVERVIEW_LIMITS.key)} (${r.kind}${r.stance ? ` ${r.stance}` : ""}): ${head(inline(r.text), OVERVIEW_LIMITS.text)}${paths.length ? ` [${pathList(paths)}]` : ""}`;
     shown.push({
       id: r.id,
-      group: dir === null ? PROJECT_WIDE : dir === "." ? "(repository root)" : `${dir}/`,
+      group: head(
+        inline(dir === null ? PROJECT_WIDE : dir === "." ? "(repository root)" : `${dir}/`),
+        OVERVIEW_LIMITS.heading,
+      ),
       line,
     });
   }
@@ -73,11 +88,7 @@ export async function liveOverview(db: Kysely<DB>, projectId: number, after: num
   const last = shown.at(-1)?.id ?? 0;
   const more = rows.length > shown.length;
   return [
-    ...groups.flatMap((g) => [
-      `## ${inline(g)}`,
-      ...shown.filter((s) => s.group === g).map((s) => s.line),
-      "",
-    ]),
+    ...groups.flatMap((g) => [`## ${g}`, ...shown.filter((s) => s.group === g).map((s) => s.line), ""]),
     `${shown.length} shown of ${n} active decisions and constraints${after === null ? "" : ` (ids after ${after})`}.`,
     more
       ? `More follow: call overview again with after: ${last}. Pages are read at different times: a record that became active in between, with a lower id, is not on a later page.`
@@ -126,12 +137,12 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
   else {
     let unknown = 0;
     for (const a of anchors.slice(0, LOOK_LIMITS.anchors)) {
-      const where = `- ${a.key} (${a.kind}): ${inline(a.path)} (${a.role})`;
+      const where = `- ${inline(a.key)} (${a.kind}): ${inline(a.path)} (${a.role})`;
       const file = fileState(root, a.path);
       if (file === "gone") gone.push(where);
       else if (file === "unknown") unknown++;
       else if (a.symbol && checkAnchor(root, a).state === "missing")
-        lost.push(`- ${a.key} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`);
+        lost.push(`- ${inline(a.key)} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`);
     }
     if (unknown)
       notChecked.push(`${unknown} code locations that lead outside the repository or cannot be followed`);
@@ -182,11 +193,11 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
     [
       ...options.map(
         (o) =>
-          `- ${o.key}: rejected option ${inline(head(o.text, 120))}, reconsider when: ${inline(head(o.reconsider_when ?? "", 300))}${o.stands ? "" : ` [${UNSUPPORTED}]`}`,
+          `- ${inline(o.key)}: rejected option ${inline(head(o.text, 120))}, reconsider when: ${inline(head(o.reconsider_when ?? "", 300))}${o.stands ? "" : ` [${UNSUPPORTED}]`}`,
       ),
       ...deferred.map(
         (d) =>
-          `- ${d.key}: deferred ${inline(head(d.text, 120))}, revisit when: ${inline(head(d.revisit_when ?? "", 300))}`,
+          `- ${inline(d.key)}: deferred ${inline(head(d.text, 120))}, revisit when: ${inline(head(d.revisit_when ?? "", 300))}`,
       ),
     ],
     "none",
@@ -220,7 +231,7 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
       else if (u.lifecycle === "withdrawn") marked.push(`${where} was withdrawn`);
       else if (u.lifecycle === "superseded") {
         const next = await successor(db, u.id);
-        marked.push(`${where} was superseded${next ? ` by ${next}` : ""}`);
+        marked.push(`${where} was superseded${next ? ` by ${inline(next)}` : ""}`);
       }
     }
     if (scan.skipped)

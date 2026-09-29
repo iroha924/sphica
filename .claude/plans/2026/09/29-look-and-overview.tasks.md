@@ -123,6 +123,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `feat(overview): list records that need a look: gone files, conditions, stale rule markers`
   - 結果: `node --test test/overview.test.ts test/forget.test.ts` → pass 15 / fail 0（Files gone に消したファイル、Symbol not found に関数名だけ消えたもの、Conditions に引用付きの却下案の条件と defer の revisit_when、Rule markers に superseded（後継のキー付き）・withdrawn・無いキーの行番号とキーだけ。外へ出る symlink は Not checked に件数、作業ツリーが無いと各見出しが not checked。引用だけの source を forget しても決定は active で、read と look に unsupported）。`npm test` → 397 / 397 pass。`bun run check` → 0、`sql:reach` → 169 / 169
 
+- [x] T13: live の行を部分ごとに切り詰めてパスを残し、見出しも切り詰め、live と look のキーを inline に通す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T06（look の行が要る）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 改行を含むキー（session の部分から入る）で独立した `## forged` 行が出て落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 全部 pass（64 KiB 未満、偽の行が出ない、長い本文でも全件にパスが残る）
+  - コミット: `fix(overview): clip each part of a live line and keep keys on one line`
+  - 結果: red（直す前）→ `/^## forged/m` に一致して失敗。直した後 `node --test test/overview.test.ts` → pass 4 / fail 0（本文 2,000 字・440 字のディレクトリ 49 件と改行入りキーで 64 KiB 未満、49 件すべてに `/f.ts]` が残る）。`npm test` → 全件 pass。`bun run check` → 0
+
 ## P4: 規約の下書きと受け入れ
 
 持ち主が選んだ制約から規約の下書きが出て、両ホストの受け入れ case が揃う。
@@ -156,3 +166,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T04 / Codex レビュー F2（検査と読み込みの間の差し替え）・F4（外へ出る親 symlink の下で消えた追跡ファイル）・F5（入れ子の git リポジトリと submodule）は採らない。どれも端の入力で、anchors.ts の readText も同じ前提で読む
 - 2026-09-29 / T06 / 引用を失った条件の表示を read と揃えるため、read.ts の UNSUPPORTED を export した / 変更欄に `server/src/read.ts` を足した（前: 無し）
 - 2026-09-29 / T12 / Codex レビュー: 指摘なし
+- 2026-09-29 / T13 / T05 の Codex レビュー F1〜F3（キーが inline を通らず改行で行を偽造できる、長い本文でパスが切り詰めで消える、見出しが切り詰められず 64 KiB を超え得る）/ 修正タスク T13 を足した。look のキーも同じく inline に通した

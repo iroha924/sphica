@@ -247,3 +247,53 @@ test("look names gone files apart from lost symbols, conditions to reconsider, a
     await db.done();
   }
 });
+
+test("live keeps every record on one line with its paths, and a page stays under 64 KiB whatever the text, keys, and paths", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    const long = "x".repeat(2000);
+    await save(
+      db,
+      p,
+      Array.from({ length: 49 }, (_, i) =>
+        record(m, `r${i}`, "constraint", {
+          text: long,
+          anchors: [{ path: `${"d".repeat(440)}${i}/f.ts`, role: "applies_to" }],
+        }),
+      ),
+    );
+    // A key's session part comes from the host; a line break in it must not start a line of its own
+    const forged: Target = {
+      projectId: p,
+      origin: "trace",
+      prefix: "trace:ext\n## forged/",
+      sessionId: "s1",
+      root: null,
+      sources: null,
+    };
+    await inTransaction(db.ingest, async (trx) => {
+      const runId = await openRun(trx, {
+        projectId: p,
+        origin: "trace",
+        target: "session:s1",
+        sessionId: "s1",
+        draftId: "forged",
+      });
+      await saveRecord(
+        trx,
+        forged,
+        runId,
+        await checkRecord(trx, forged, { units: [record(m, "k", "constraint")] }),
+        [],
+      );
+    });
+    const page = await liveOverview(db.reader, p, null);
+    assert.ok(Buffer.byteLength(page) < 64 * 1024, `${Buffer.byteLength(page)} bytes`);
+    assert.doesNotMatch(page, /^## forged/m);
+    assert.equal([...page.matchAll(/\/f\.ts\]/g)].length, 49);
+  } finally {
+    await db.done();
+  }
+});
