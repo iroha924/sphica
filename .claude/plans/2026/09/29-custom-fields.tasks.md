@@ -118,7 +118,7 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - コミット: `fix(forget): always merge the unit index after forgetting, and warn when only field values go`
   - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 14 pass / 1 fail（確認文が `- 0 field definitions and 1 field value go with them` だけで、`Records keep their own text` が無い）。直した後 → 15 pass / 0 fail（値の語が DB と WAL のバイトから消え、注意が出る）。`bun run verify` → 0。後処理が失敗した後の再実行で unit 索引の optimize が飛ぶ件は、optimize を失敗させる手段がテストに無く red を作れなかった。コードを読んだうえで、毎回 optimize するように直した
 
-- [ ] T10: integer の数値の開始を、ラテン・ギリシャ・キリル文字、数字、`_`、`.`、符号の直後では認めないようにする
+- [x] T10: integer の数値の開始を、ラテン・ギリシャ・キリル文字、数字、`_`、`.`、符号の直後では認めないようにする
   - 種別: 修正
   - 計画: S3
   - 依存: T03（直す関数が要る）
@@ -126,6 +126,7 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - red: `cd server && node --test --test-timeout=60000 test/record.test.ts` → `x-5` から 5、`β95=320ms` と `ｐ95=320ms` から 95 を拒否するテストが落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 上の 3 例が拒否され、`レイテンシは3件` から 3、`p95=-5` から -5、`320ms` から 320 は通る。`bun run verify` → 0
   - コミット: `fix(record): read an integer only where no identifier or sign runs into it`
+  - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/record.test.ts` → 22 pass / 1 fail（`x-5` から 5 が true）。直した後 → 23 pass / 0 fail（`x-5` から 5 と -5、`β95=320ms` と `ｐ95=320ms` から 95 は拒否。`ｐ95=320ms` から 320、`レイテンシは3件` から 3、`p95=-5` から -5 は通る）。`bun run verify` → 0
 
 - [ ] T11: fields の表のセルでバックスラッシュも逃がし、200 文字で切り、framed の囲みをテストする
   - 種別: 修正

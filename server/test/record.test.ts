@@ -926,6 +926,12 @@ test("an integer value must be a whole number written in the quote; other types 
   assert.equal(valueInQuote("integer", "1", "about 1e3 rows"), false);
   assert.equal(valueInQuote("integer", "5", "+5 retries"), true);
   assert.equal(valueInQuote("integer", "3", "レイテンシは3件だけ"), true);
+  // A sign that an identifier runs into is not the number's own, and the digits after it are not a number either
+  assert.equal(valueInQuote("integer", "5", "x-5"), false);
+  assert.equal(valueInQuote("integer", "-5", "x-5"), false);
+  assert.equal(valueInQuote("integer", "95", "β95=320ms"), false);
+  assert.equal(valueInQuote("integer", "95", "ｐ95=320ms"), false);
+  assert.equal(valueInQuote("integer", "320", "ｐ95=320ms"), true);
   assert.equal(valueInQuote("enum", "high", "severity High"), false);
   assert.equal(valueInQuote("date", "2026-10-01", "due 2026-10-01"), true);
   assert.equal(valueInQuote("date", "2026-10-01", "due Oct 1"), false);
