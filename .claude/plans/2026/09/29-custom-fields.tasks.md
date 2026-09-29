@@ -108,14 +108,15 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 
 ## P5: レビューの直し
 
-- [ ] T09: forget の後処理で unit 索引を毎回 optimize し、値だけが消えるときも本文が残る注意を出し、値の語がファイルに残らないことを確かめる
+- [x] T09: forget の後処理で unit 索引を毎回 optimize し、値だけが消えるときも本文が残る注意を出し、値の語がファイルに残らないことを確かめる
   - 種別: 修正
   - 計画: S2
   - 依存: T02（直す処理が要る）
   - 変更: `server/src/forget.ts`, `server/test/forget.test.ts`
-  - red: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 後処理が失敗した後の再実行で値の語がファイルに残るテストと、値だけが消えるときの注意のテストが落ちる
-  - 完了条件: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 値の語が DB と WAL のバイトに残らず、再実行でも消え、値だけが消える確認文に本文が残る注意が出る。`bun run verify` → 0
+  - red: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 値だけが消えるときの確認文に本文が残る注意が無く、テストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 値の語が DB と WAL のバイトに残らず、値だけが消える確認文に本文が残る注意が出る。`bun run verify` → 0
   - コミット: `fix(forget): always merge the unit index after forgetting, and warn when only field values go`
+  - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 14 pass / 1 fail（確認文が `- 0 field definitions and 1 field value go with them` だけで、`Records keep their own text` が無い）。直した後 → 15 pass / 0 fail（値の語が DB と WAL のバイトから消え、注意が出る）。`bun run verify` → 0。後処理が失敗した後の再実行で unit 索引の optimize が飛ぶ件は、optimize を失敗させる手段がテストに無く red を作れなかった。コードを読んだうえで、毎回 optimize するように直した
 
 - [ ] T10: integer の数値の開始を、ラテン・ギリシャ・キリル文字、数字、`_`、`.`、符号の直後では認めないようにする
   - 種別: 修正
@@ -147,3 +148,4 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T04, T05 / Codex のレビュー: どちらも指摘なし（読み取り専用の環境のためテストの実行はしていない、と明記あり） / 何もしない
 2026-09-29 / T06 / Codex のレビュー: F1（既存の `\|` で列が崩れる、再現あり）、F2（200 文字のはずが 200 バイトで切っている）、F3（framed の囲みをテストしていない）はどれも採用 / 修正タスク T11 を足した
 2026-09-29 / T08 / trace Skill の本文の `fields` がツール名として数えられた / trace の allowed-tools に読み取りの fields を足した（定義の一覧を trace から見られても害はない）
+2026-09-29 / T09 / red の欄を直した（前: 後処理が失敗した後の再実行で値の語が残るテストと注意のテストが落ちる、新: 注意のテストが落ちる）。再実行の件は optimize を失敗させる手段がテストに無く、再現できなかった / 毎回 optimize する形に直し、結果欄に再現していないことを書いた

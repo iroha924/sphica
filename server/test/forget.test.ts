@@ -418,3 +418,41 @@ test("forgetting only a value's quoted source removes that value, keeps the defi
   assert.equal(checked.ok, false);
   assert.match(checked.text, /changed since you read it/);
 });
+
+test("a value's words leave no bytes once its quoted source is forgotten, and the owner is told records keep their own text", async () => {
+  const defined = message(db, p, { id: "m1", text: "Track the tenant." });
+  const said = message(db, p, { id: "m2", text: `${secret} hit it.` });
+  const reason = message(db, p, { id: "m3", text: "It is slow." });
+  const u = unit("u1", "finding");
+  evidence(u, reason);
+  const d = insert(db, "field_def", {
+    project_id: p,
+    name: "tenant",
+    type: "text",
+    label: "Tenant",
+    description: "The tenant affected",
+    source_id: defined,
+    span_start: 0,
+    span_end: 5,
+    run_id: run(db, p),
+    added_at: now,
+  });
+  insert(db, "unit_field", {
+    unit_id: u,
+    field_def_id: d,
+    value: secret,
+    source_id: said,
+    span_start: 0,
+    span_end: secret.length,
+    run_id: runOf(u),
+    added_at: now,
+  });
+  db.owner.exec("pragma wal_checkpoint(TRUNCATE)");
+  assert.equal(inFiles(), true);
+  const seen = await previewForget(db.file, p, [said]);
+  assert.deepEqual(seen.units, []);
+  assert.match(forgetText(seen), /Records keep their own text/);
+  const { cleanup } = await applyForget(db.file, p, [said], seen);
+  assert.equal(cleanup, "done");
+  assert.equal(inFiles(), false);
+});

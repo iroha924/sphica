@@ -273,8 +273,9 @@ export async function applyForget(
       // The sources are gone once committed: a cleanup that fails (a busy database) is reported as unfinished, never as a failed forget
       try {
         await sql`insert into source_fts (source_fts) values ('optimize')`.execute(c);
-        // A removed field value leaves its words in the unit index segments until they are merged
-        if (outcome.fields.values) await sql`insert into unit_fts (unit_fts) values ('optimize')`.execute(c);
+        // A removed field value leaves its words in the unit index segments until they are merged. Every run merges, since a run
+        // after a failed cleanup no longer sees the values it removed
+        await sql`insert into unit_fts (unit_fts) values ('optimize')`.execute(c);
         const checkpoint = await sql<{ busy: number }>`pragma wal_checkpoint(TRUNCATE)`.execute(c);
         return { outcome, cleanup: checkpoint.rows[0]?.busy === 0 ? "done" : "incomplete" };
       } catch {
@@ -305,7 +306,7 @@ export function forgetText(o: ForgetOutcome): string {
     lines.push(
       `- ${plural(o.fields.definitions, "field definition")} and ${plural(o.fields.values, "field value")} go with them`,
     );
-  if (o.units.length)
+  if (o.units.length || o.fields.values)
     lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
   lines.push("Copies outside the database (capture's waiting and set-aside files, backups) are not touched.");
   return lines.join("\n");
