@@ -87,21 +87,23 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
   const from = (s: { url: string | null }) => (s.url ? ` <${inline(s.url)}>` : "");
   const said = (e: (typeof evidence)[number]) =>
     `  - ${inline(speaker(e))}${e.reported_speaker ? ` reporting what ${inline(e.reported_speaker)} said` : ""}, ${e.created_at}, ${e.kind} ${inline(e.artifact)} (${e.role}): ${words(e.text, e.span_start, e.span_end)}${from(e)}`;
+  // A field keeps its own line breaks; each later line is indented under its label, still inside the fence
+  const kept = (t: string, indent: string) => plain(t).split("\n").join(`\n${indent}`);
   const out = [
     `key: ${inline(u.key)} (u${u.id})`,
     `kind: ${u.kind}${u.stance ? ` ${u.stance}` : ""}`,
-    `text: ${inline(u.text)}`,
+    `text: ${kept(u.text, "  ")}`,
   ];
-  if (u.why) out.push(`why: ${inline(u.why)}`);
-  if (u.scope_note) out.push(`scope: ${inline(u.scope_note)}`);
-  if (u.revisit_when) out.push(`revisit when: ${inline(u.revisit_when)}`);
+  if (u.why) out.push(`why: ${kept(u.why, "  ")}`);
+  if (u.scope_note) out.push(`scope: ${kept(u.scope_note, "  ")}`);
+  if (u.revisit_when) out.push(`revisit when: ${kept(u.revisit_when, "  ")}`);
   if (options.length) {
     out.push("options:");
     for (const o of options) {
-      out.push(`- ${inline(o.text)}: ${o.outcome}${o.why ? `, because ${inline(o.why)}` : ""}`);
+      out.push(`- ${kept(o.text, "  ")}: ${o.outcome}${o.why ? `, because ${kept(o.why, "  ")}` : ""}`);
       // A condition stands only while the owner's words behind it do
       if (o.reconsider_when && evidence.some((e) => e.option_id === o.id && e.role === "reconsiders"))
-        out.push(`  reconsider when: ${inline(o.reconsider_when)}`);
+        out.push(`  reconsider when: ${kept(o.reconsider_when, "    ")}`);
       for (const e of evidence.filter((x) => x.option_id === o.id)) out.push(said(e));
     }
   }

@@ -208,6 +208,53 @@ test("a record that changes while the export reads it refuses the export", async
   }
 });
 
+test("fields spanning lines keep their line breaks, indented under their label, inside one fence", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const said = "Use this YAML. If replicas are ever needed, look at Postgres again. Decided.";
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [
+      {
+        ...decision(m, said, "yaml"),
+        stance: "defer",
+        text: "Use this YAML:\na:\n  b: c",
+        why: "one line\nsecond line",
+        scope_note: "server\nand CLI",
+        revisit_when: "after 1.0\nor on request",
+        options: [
+          {
+            text: "YAML\nfile",
+            outcome: "rejected",
+            why: "hard\nto diff",
+            reconsider_when: "if tools\nimprove",
+            reconsider_quote: {
+              source: `s${m}`,
+              quote: "If replicas are ever needed, look at Postgres again.",
+            },
+          },
+        ],
+      },
+    ]);
+    const doc = await exported(db, p, ["trace:ext-s1/yaml"]);
+    const block = /^(`{3,})text\n([\s\S]*?)\n\1$/gm;
+    const blocks = [...doc.matchAll(block)];
+    assert.equal(blocks.length, 2, "the header fence and the record fence, nothing closed early");
+    const body = blocks[1]?.[2] ?? "";
+    for (const lines of [
+      "text: Use this YAML:\n  a:\n    b: c",
+      "why: one line\n  second line",
+      "scope: server\n  and CLI",
+      "revisit when: after 1.0\n  or on request",
+      "- YAML\n  file: rejected, because hard\n  to diff",
+      "  reconsider when: if tools\n    improve",
+    ])
+      assert.ok(body.includes(lines), `${JSON.stringify(lines)} missing from\n${body}`);
+  } finally {
+    await db.done();
+  }
+});
+
 test("a retracted quote is left out", async () => {
   const db = tempDb();
   try {
