@@ -419,3 +419,32 @@ test("look reads more distinct markers than SQLite takes in one query", async ()
     await db.done();
   }
 });
+
+test("look follows a replaced record's chain once, however many lines mark it", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [record(m, "old", "constraint")]);
+    await save(db, p, [record(m, "new", "constraint", { supersedes: "trace:ext-s1/old" })]);
+    fs.writeFileSync(
+      path.join(root, "AGENTS.md"),
+      Array.from({ length: 1000 }, () => "- rule <!-- sphica: trace:ext-s1/old -->").join("\n"),
+    );
+    let queries = 0;
+    const counted = db.reader.withPlugin({
+      transformQuery: (a) => {
+        queries++;
+        return a.node;
+      },
+      transformResult: async (a) => a.result,
+    });
+    const look = await lookOverview(counted, p, root);
+    assert.match(look, /AGENTS\.md:1: trace:ext-s1\/old was superseded by trace:ext-s1\/new/);
+    assert.ok(queries < 20, `${queries} queries`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});

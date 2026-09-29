@@ -248,13 +248,19 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
         .where("key", "in", keys.slice(i, i + 500))
         .execute())
         units.set(u.key, u);
+    const chains = new Map<number, { key: string; lifecycle: string } | null>();
     for (const f of found) {
       const u = units.get(f.key);
       const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
       if (!u) marked.push(`${where} is not a record of this project`);
       else if (u.lifecycle === "withdrawn") marked.push(`${where} was withdrawn`);
       else if (u.lifecycle === "superseded") {
-        const next = await successor(db, u.id);
+        // A file can mark the same record thousands of times: its chain is followed once
+        let next = chains.get(u.id);
+        if (next === undefined) {
+          next = await successor(db, u.id);
+          chains.set(u.id, next);
+        }
         marked.push(
           `${where} was superseded${next ? ` by ${inline(next.key)}${next.lifecycle === "active" ? "" : `, which is ${next.lifecycle} too`}` : ""}`,
         );
