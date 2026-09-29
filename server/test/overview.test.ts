@@ -85,11 +85,11 @@ test("live lists every active decision and constraint once by directory, and not
     // Grouped by the first applies_to anchor's directory, root files together, records with no place last; all paths on the line
     assert.match(
       page,
-      /^## \(repository root\)\n- trace:ext-s1\/top \(constraint do\): top text \[README\.md\]$/m,
+      /^## \(repository root\)\n- trace:ext-s1\/top \(u\d+, constraint do\): top text \[README\.md\]$/m,
     );
     assert.match(
       page,
-      /^## server\/src\/\n- trace:ext-s1\/db \(decision do\): db text \[server\/src\/db\.ts, cli\/main\.ts\]$/m,
+      /^## server\/src\/\n- trace:ext-s1\/db \(u\d+, decision do\): db text \[server\/src\/db\.ts, cli\/main\.ts\]$/m,
     );
     assert.ok(page.indexOf("## Project-wide") > page.indexOf("## server/src/"));
     assert.match(page, /^5 shown of 5 active decisions and constraints\.\nThat is the end of the list\.$/m);
@@ -379,6 +379,24 @@ test("look counts what it could not check, follows a long chain to its live end,
     assert.match(look, /\(\d+ more not shown/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("live names each record by id too, so a clipped key can still be read, and never merges directories a clipped heading makes look alike", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    const common = "c".repeat(130);
+    await save(db, p, [
+      record(m, "x", "constraint", { anchors: [{ path: `${common}/x/a.ts`, role: "applies_to" }] }),
+      record(m, "y", "constraint", { anchors: [{ path: `${common}/y/b.ts`, role: "applies_to" }] }),
+    ]);
+    const page = await liveOverview(db.reader, p, null);
+    assert.equal([...page.matchAll(/^## /gm)].length, 2);
+    assert.match(page, /^- trace:ext-s1\/x \(u\d+, constraint do\): x text/m);
+  } finally {
     await db.done();
   }
 });

@@ -27,8 +27,9 @@ too, but text copied by hand stays after the decision behind it is overturned. *
 
 Pass the repository root as `cwd` to every tool.
 
-1. **Find the records.** When the owner named some, `search` for them. Otherwise call `overview` with `view: "live"` (and `after` for the next
-   page) and let the owner choose. Only active decisions and constraints qualify; a candidate, superseded, or withdrawn record does not
+1. **Find the records.** A key or `u<id>` the owner gave goes straight to `read` (search matches a record's words, not its key). When the
+   owner described some, `search` for them. Otherwise call `overview` with `view: "live"` (and `after` for the next page) and let the owner
+   choose. Only active decisions and constraints qualify; a candidate, superseded, or withdrawn record does not
 2. **Confirm the choice** with the owner. Draft only the records the owner picks
 3. **Read each** with `read` and draft from its text, reason, and scope, never from the conversation or a guess. When the record does not say
    enough for a rule (who it applies to, what to do instead), say so and leave it out rather than fill the gap

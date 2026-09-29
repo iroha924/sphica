@@ -66,13 +66,11 @@ export async function liveOverview(db: Kysely<DB>, projectId: number, after: num
     const first = paths[0];
     const dir = first === undefined ? null : path.posix.dirname(first);
     // Each part is clipped on its own, so a long text never pushes the paths off the line
-    const line = `- ${head(inline(r.key), OVERVIEW_LIMITS.key)} (${r.kind}${r.stance ? ` ${r.stance}` : ""}): ${head(inline(r.text), OVERVIEW_LIMITS.text)}${paths.length ? ` [${pathList(paths)}]` : ""}`;
+    // The id reads the record even when a long key is cut
+    const line = `- ${head(inline(r.key), OVERVIEW_LIMITS.key)} (u${r.id}, ${r.kind}${r.stance ? ` ${r.stance}` : ""}): ${head(inline(r.text), OVERVIEW_LIMITS.text)}${paths.length ? ` [${pathList(paths)}]` : ""}`;
     shown.push({
       id: r.id,
-      group: head(
-        inline(dir === null ? PROJECT_WIDE : dir === "." ? "(repository root)" : `${dir}/`),
-        OVERVIEW_LIMITS.heading,
-      ),
+      group: dir === null ? PROJECT_WIDE : dir === "." ? "(repository root)" : `${dir}/`,
       line,
     });
   }
@@ -88,12 +86,17 @@ export async function liveOverview(db: Kysely<DB>, projectId: number, after: num
   const last = shown.at(-1)?.id ?? 0;
   const more = rows.length > shown.length;
   return [
-    ...groups.flatMap((g) => [`## ${g}`, ...shown.filter((s) => s.group === g).map((s) => s.line), ""]),
+    // Grouped by the whole directory; only the heading shown is clipped, so two directories never merge
+    ...groups.flatMap((g) => [
+      `## ${head(inline(g), OVERVIEW_LIMITS.heading)}`,
+      ...shown.filter((s) => s.group === g).map((s) => s.line),
+      "",
+    ]),
     `${shown.length} shown of ${n} active decisions and constraints${after === null ? "" : ` (ids after ${after})`}.`,
     more
       ? `More follow: call overview again with after: ${last}. Pages are read at different times: a record that became active in between, with a lower id, is not on a later page.`
       : "That is the end of the list.",
-    "Read a record by its key before relying on it.",
+    "Read a record by its key or u<id> before relying on it.",
   ].join("\n");
 }
 
