@@ -310,14 +310,20 @@ export type SourceHit = {
   created_at: string;
   text: string;
   matched: string[];
+  session: string | null;
+  turn: string | null;
 };
 
-/** Retained sources (conversation and pull request text) holding more than half of the question's content terms, best first. */
+/**
+ * Retained sources (conversation and pull request text) holding more than half of the question's content terms, best first.
+ * `owner` narrows them to the owner's own messages outside the given sessions, before the caps, so other text never uses them up.
+ */
 export async function searchSources(
   db: Kysely<DB>,
   projectId: number,
   question: string,
   limit: number,
+  owner?: { notSessions: string[] },
 ): Promise<{ hits: SourceHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
   const wanted = queryTerms(question);
   const match = ftsQuery(question);
@@ -332,7 +338,15 @@ export async function searchSources(
       ),
     )
     .innerJoin("source as s", "s.id", "f.rowid")
-    .where("s.project_id", "=", projectId);
+    .where("s.project_id", "=", projectId)
+    .$if(owner !== undefined, (q) =>
+      q
+        .where("s.kind", "=", "session_message")
+        .where("s.author_kind", "=", "owner")
+        .$if((owner?.notSessions.length ?? 0) > 0, (q2) =>
+          q2.where("s.session_id", "not in", owner?.notSessions ?? []),
+        ),
+    );
   // The order is taken in one statement, so a write between pages shifts nothing; texts are then read a page at a time.
   // Hits come in rank order, so reading ends once there are enough (that is not a stop). The caps are checked before each candidate.
   const ranked = await query
@@ -352,7 +366,17 @@ export async function searchSources(
       (
         await db
           .selectFrom("source")
-          .select(["id", "kind", "artifact", "author_kind", "author_login", "created_at", "text"])
+          .select([
+            "id",
+            "kind",
+            "artifact",
+            "author_kind",
+            "author_login",
+            "created_at",
+            "text",
+            "session_id",
+            "turn_id",
+          ])
           .where("id", "in", ids)
           .execute()
       ).map((r) => [r.id, r]),
@@ -381,6 +405,8 @@ export async function searchSources(
         created_at: r.created_at,
         text: r.text,
         matched,
+        session: r.session_id,
+        turn: r.turn_id,
       });
       if (hits.length >= limit) break scan;
     }

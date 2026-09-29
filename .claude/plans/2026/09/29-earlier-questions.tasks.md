@@ -36,13 +36,14 @@ base: main
 
 `search` の `asked: true` で、本人の過去の発言とつながった記録、決定の有無、繰り返しが分かる。
 
-- [ ] T02: 本人の発言だけを上限まで読んで一致させる形を足す
+- [x] T02: 本人の発言だけを上限まで読んで一致させる形を足す
   - 種別: 追加
   - 計画: S2
   - 依存: なし
   - 変更: `server/src/search.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 全部 pass（本人の発言だけ、今のセッションを除く、条件が上限の前、`limit` で止めない）
   - コミット: `feat(search): match earlier owner messages across the whole scan`
+  - 結果: `node --test test/search.test.ts` → pass 11 / fail 0（今のセッションの一致 601 件が上限を食わずに、別のセッションの本人の発言 3 件を全部返す。AI の返事と PR の本文は返らない。当たりにセッションとターンが付く）。typecheck・lint → 0
 
 - [ ] T03: 一致した発言ごとのつながった記録・同じターンの文脈・決定の有無と、繰り返しの行を組み立てる
   - 種別: 追加

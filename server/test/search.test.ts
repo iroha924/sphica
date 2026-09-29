@@ -11,7 +11,7 @@ import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
   const t: Target = {
@@ -567,6 +567,58 @@ test("a hit replaced twice brings the live record at the end of the chain", asyn
         ["trace:ext-s1/pnpm", null],
       ],
     );
+  } finally {
+    await db.done();
+  }
+});
+
+// Earlier owner messages: only the owner's own words, outside the sessions the caller names, narrowed before the caps, all of them
+test("an owner-message search keeps only the owner's words outside the named sessions, before the caps, and returns every match", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const sessionOf = (id: number) =>
+      String(db.owner.prepare("select session_id from source where id = ?").get(id)?.session_id);
+    // 601 matches in the current session rank first and must not use up the cap
+    const here = message(db, p, { id: "h0", text: "retry budget retry budget.", session: "now" });
+    for (let n = 1; n < 601; n++)
+      message(db, p, { id: `h${n}`, text: "retry budget retry budget.", session: "now" });
+    const filler = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
+    const earlier = [0, 1, 2].map((n) =>
+      message(db, p, {
+        id: `e${n}`,
+        text: `${filler} what is the retry budget ${filler}`,
+        session: `old${n}`,
+      }),
+    );
+    message(db, p, { id: "a", text: "The retry budget is three.", session: "old0", speaker: "assistant" });
+    insert(db, "source", {
+      project_id: p,
+      kind: "pr_body",
+      artifact: "pr:1",
+      external_id: "pr-1",
+      revision: 1,
+      author_kind: "person",
+      created_at: at("2026-09-10T00:00:00Z"),
+      available_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text: "retry budget in the pull request",
+      original_bytes: 32,
+      content_hash: hash(1),
+      indexed: 1,
+    });
+    const r = await searchSources(db.reader, p, "retry budget", Number.POSITIVE_INFINITY, {
+      notSessions: [sessionOf(here)],
+    });
+    assert.deepEqual(
+      r.hits.map((h) => h.id).sort((x, y) => x - y),
+      earlier,
+    );
+    assert.deepEqual(
+      r.hits.map((h) => h.session),
+      r.hits.map((h) => sessionOf(h.id)),
+    );
+    assert.equal(r.stopped, false);
   } finally {
     await db.done();
   }
