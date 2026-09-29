@@ -44,14 +44,16 @@ base: main
   - コミット: `feat(mcp): add the export tool to the read server`
   - 結果: `node --test test/plugin.test.ts` → 28 pass / 0 fail（ツール一覧に export、本物の読み取りサーバーで export を呼ぶと登録の無いディレクトリを拒む）。`bun run acceptance` → 69 pass（export-01: 引用、`trace:s-ja-postgres/postgres supersedes trace:s-ja-storage/storage`、置き換え済みの記録は拒否）。`bun run verify` → 0
 
-- [ ] T03: `/sphica:export` Skill を足す
+- [x] T03: `/sphica:export` Skill を足す
   - 種別: 追加
   - 計画: S3
   - 依存: T02（`allowed-tools` の検査が登録済みのツール名を求める）
-  - 変更: `plugin/skills/export/SKILL.md`, `plugin/skills/export/agents/openai.yaml`
+  - 変更: `plugin/skills/export/SKILL.md`, `plugin/skills/export/agents/openai.yaml`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify:ai` → 0。`bun run english` → 0
   - コミット: `feat(skills): add /sphica:export to write chosen decisions to a file`
+  - 結果: `bun run verify:ai` → 0（plugin Skills 7、export の allowed-tools と openai.yaml がそろう）。`bun run english` → 0。`bun run verify` → 0
 
 ## 記録
 2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
 2026-09-29 / T02 / acceptance の driver は MCP を起動せず、各ツールと同じ関数を直接呼ぶ作りだった / export の step も `exportPath` と `exportDecisions` を直接呼び、本物の入口は plugin のテストで export を呼んで確かめた。書き出しが成功する経路を本物の入口で通すのは A5 の headless 実行で見る
+2026-09-29 / T03 / README と README.ja に各 Skill の説明行があった / 同じ形で export の行を足し、変更欄に `README.md`・`README.ja.md` を足した
