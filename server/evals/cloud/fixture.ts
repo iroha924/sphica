@@ -18,6 +18,15 @@ async function project(db: Kysely<DB>): Promise<{ id: number; repo: string }> {
   return { id: p.id, repo: p.key.replace(/^git:github\.com\//, "") };
 }
 
+/** Every page of a run's context, read in order. */
+async function everyPage(db: Kysely<DB>, run: string, projectId: number): Promise<string[]> {
+  const pages = [await contextText(db, run, projectId, null)];
+  for (let next = cursor(pages.at(-1)); next; next = cursor(pages.at(-1)))
+    pages.push(await contextText(db, run, projectId, null, next));
+  return pages;
+}
+const cursor = (page = "") => /call record_context with after: "(s\d+)"[^\n]*$/.exec(page)?.[1];
+
 async function main() {
   if (command === "new") {
     const repo = rest[0] ?? "";
@@ -36,19 +45,12 @@ async function main() {
     const p = await project(db);
     if (command === "harvest") {
       const begun = await beginHarvest(db, p.id, Number(rest[0]), gh(p.repo));
-      // Every page, in this one process: the pages shown are remembered only inside the process that printed them
-      const pages = [await contextText(db, begun.run, p.id, null)];
-      for (
-        let next = /call record_context with after: "(s\d+)"[^\n]*$/.exec(pages.at(-1) ?? "")?.[1];
-        next;
-      ) {
-        pages.push(await contextText(db, begun.run, p.id, null, next));
-        next = /call record_context with after: "(s\d+)"[^\n]*$/.exec(pages.at(-1) ?? "")?.[1];
-      }
-      console.log(`run: ${begun.run}\n${pages.join("\n")}`);
+      console.log(`run: ${begun.run}\n${(await everyPage(db, begun.run, p.id)).join("\n")}`);
     } else if (command === "check" || command === "save") {
       const [run = "", recordFile = ""] = rest;
       const record = JSON.parse(fs.readFileSync(recordFile, "utf8")) as unknown;
+      // The pages shown are remembered only inside one process: show them again here, as harvest printed them, before saving
+      await everyPage(db, run, p.id);
       console.log(
         command === "check"
           ? (await checkText(db, run, p.id, null, record)).text
