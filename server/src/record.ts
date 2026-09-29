@@ -611,18 +611,36 @@ const isoDate = (v: string) => {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
 };
 
+/** Characters a value runs into when it sits inside a longer word or number. Kana and kanji are not among them: Japanese has no spaces. */
+const WORD = /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{M}\p{N}_]/u;
+
 /**
- * A number written in a quote, whole: a sign, a decimal point, and an exponent belong to it. Nothing starts right after a Latin, Greek,
- * or Cyrillic letter (full width too), a combining mark, a digit, `_`, `.`, a dash, or a plus or minus sign of any width, so `p95`,
- * `β95`, and the `5` of `x-5` or `x−5` are not numbers. Kana and kanji do not stop one, since Japanese puts a particle right before a number.
+ * A number written in a quote, whole: a sign, digit grouping (`1,000`), a decimal point, and an exponent belong to it. Nothing starts
+ * right after a Latin, Greek, or Cyrillic letter (full width too), a combining mark, a digit, `_`, `.`, a dash, or a plus or minus sign
+ * of any width, so `p95`, `β95`, and the `5` of `x-5` or `x−5` are not numbers. Kana and kanji do not stop one, since Japanese puts a
+ * particle right before a number.
  */
 const NUMBER =
-  /(?<![\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{M}\p{N}\p{Pd}_.+\uFF0B\u2212])[+-]?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/gu;
+  /(?<![\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}\p{M}\p{N}\p{Pd}_.+\uFF0B\u2212])[+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+(?![0-9])|[0-9]+)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/gu;
 
-/** Whether the quote writes the value as it is, so a value can only be one that was said. An integer must be a whole number in the quote. */
+/** Whether value occurs in quote with no letter, digit, mark, or `_` right before or after it. */
+function standsAlone(quote: string, value: string): boolean {
+  for (let at = quote.indexOf(value); at >= 0; at = quote.indexOf(value, at + 1)) {
+    const before = [...quote.slice(Math.max(0, at - 2), at)].at(-1) ?? "";
+    const after = String.fromCodePoint(quote.codePointAt(at + value.length) ?? 32);
+    if (!WORD.test(before) && !WORD.test(after)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the quote writes the value as it is, so a value can only be one that was said. An integer must be a whole number in the quote,
+ * an enum value or a date must stand alone, and text may be any part of the quote.
+ */
 export function valueInQuote(type: FieldType, value: string, quote: string): boolean {
-  if (type !== "integer") return quote.includes(value);
-  return [...quote.matchAll(NUMBER)].some((m) => m[0].replace(/^\+/, "") === value);
+  if (type === "text") return quote.includes(value);
+  if (type !== "integer") return standsAlone(quote, value);
+  return [...quote.matchAll(NUMBER)].some((m) => m[0].replace(/^\+/, "").replaceAll(",", "") === value);
 }
 
 export type Saved = {

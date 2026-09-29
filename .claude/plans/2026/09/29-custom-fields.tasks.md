@@ -148,6 +148,16 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
   - コミット: `fix(record): stop an integer after combining marks, dashes, and full-width or math signs`
   - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/record.test.ts` → 22 pass / 1 fail（`x−5` から 5 が true）。直した後 → 23 pass / 0 fail（4 例とも拒否、既存の通る例は通る）。`bun run verify` → 0
 
+- [x] T13: enum と date の値は語の中に埋もれた位置を認めず、整数は桁区切りの数を 1 つの数として読む
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T12（直す関数が要る）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `plugin/skills/trace/SKILL.md`, `.claude/plans/2026/09/29-custom-fields.plan.md`
+  - red: `cd server && node --test --test-timeout=60000 test/record.test.ts` → `1,000 records` から 1、`not ready` から enum の no、`undo this change` から do、`2026-10-012` から日付を拒否するテストが落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 上の例が拒否され、`1,000` から 1000、`重要度はhighで` から high、`the answer is no.` から no は通る。`bun run verify` → 0
+  - コミット: `fix(record): read grouped numbers whole, and take enum and date values only on their own`
+  - 結果: 直す前の `cd server && node --test --test-timeout=60000 test/record.test.ts` → 22 pass / 1 fail（`1,000 records` から 1 が true）。直した後 → 23 pass / 0 fail（`1,000` から 1・`not ready` から no・`undo this change` から do・`2026-10-012` から日付は拒否、`1,000` から 1000・`重要度はhighで` から high・`the answer is no.` から no・`steps 1,2` から 2 は通る）。`bun run verify` → 0
+
 ## 記録
 2026-09-29 / T01 / source の削除が新しい表へ連鎖すると forget の接続が `not authorized` で止まり、forget のテストが落ちた / forget の認可（`FORGET_WRITES` に field_def・unit_field・unit_fts）を T02 から T01 に移した。T01 の変更欄に `server/src/db-write.ts` を足し、値の型の一覧を knowledge.ts の `FIELD_TYPES` と check-pairs の組にしたので `server/src/knowledge.ts` と `scripts/check-pairs.mjs` も足した（前: schema・移行・sqlite・db-types・fixture・テストのみ）
 2026-09-29 / T01, T08 / パッケージに入る変更はバージョンを揃えないと pre-commit の bundle が止める / 0.6.8 への引き上げを T08 から T01 に移した。T01 の変更欄と完了条件に 4 つの manifest と release:plan を足し、T08 の変更欄（前: trace Skill と 4 つの manifest、新: trace Skill のみ）と完了条件（前: release:plan・verify:ai・verify、新: verify:ai・verify）と名前を直した
@@ -163,3 +173,4 @@ trace Skill が項目の書き方を案内し、0.6.8 にそろう
 2026-09-29 / T09 / red の欄を直した（前: 後処理が失敗した後の再実行で値の語が残るテストと注意のテストが落ちる、新: 注意のテストが落ちる）。再実行の件は optimize を失敗させる手段がテストに無く、再現できなかった / 毎回 optimize する形に直し、結果欄に再現していないことを書いた
 2026-09-29 / T11 / Codex の T07・T08 のレビュー: F1（trace Skill に名前の 40 文字と enum の 1〜30 個・重複不可が無い）は採用 / 未着手だった T11 に含め、変更欄に `plugin/skills/trace/SKILL.md` を足した（前: fields.ts・mcp.ts・fields.test.ts）
 2026-09-29 / T09, T10, T11 / Codex のレビュー: T09 と T11 は指摘なし。T10 に F1（Unicode のマイナス・全角の符号の後の 5 が通る）と F2（結合アクセントを挟んだ β の後の 95 が通る）、どちらも再現あり / 端の入力だが直しが小さく確実なので採用し、修正タスク T12 を足した
+2026-09-29 / 全差分 / Codex の全差分のレビュー（main..ba7b4db）: F1（enum が部分文字列で `not ready` から no が通る）と F2（`1,000` から 1 が通る）、どちらも再現あり。移行後と新規の schema 定義 131 件の一致は Codex もメモリ内で確認 / どちらも普通の書き方で起きるので採用し、修正タスク T13 を足した

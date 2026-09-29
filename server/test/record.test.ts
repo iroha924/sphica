@@ -935,6 +935,17 @@ test("an integer value must be a whole number written in the quote; other types 
   for (const quote of ["x−5", "x＋5", "x－5"])
     assert.equal(valueInQuote("integer", "5", quote), false, quote);
   assert.equal(valueInQuote("integer", "95", "β\u030195"), false);
+  // A grouped number is one number: 1,000 is 1000, never 1
+  assert.equal(valueInQuote("integer", "1", "1,000 records"), false);
+  assert.equal(valueInQuote("integer", "1000", "1,000 records"), true);
+  assert.equal(valueInQuote("integer", "2", "steps 1,2 failed"), true);
+  // An enum value or a date stands on its own: not inside a longer word or number, while kana and kanji need no space around it
+  assert.equal(valueInQuote("enum", "no", "not ready"), false);
+  assert.equal(valueInQuote("enum", "do", "undo this change"), false);
+  assert.equal(valueInQuote("enum", "no", "the answer is no."), true);
+  assert.equal(valueInQuote("enum", "high", "重要度はhighで"), true);
+  assert.equal(valueInQuote("date", "2026-10-01", "due 2026-10-012"), false);
+  assert.equal(valueInQuote("text", "acme", "acmecorp"), true);
   assert.equal(valueInQuote("enum", "high", "severity High"), false);
   assert.equal(valueInQuote("date", "2026-10-01", "due 2026-10-01"), true);
   assert.equal(valueInQuote("date", "2026-10-01", "due Oct 1"), false);
