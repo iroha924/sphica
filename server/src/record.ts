@@ -2,10 +2,8 @@
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { locate as locateSymbol, masksSymbol } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
-import { commitHolds } from "./git.ts";
 import {
   EVIDENCE_ROLES,
   FIELD_TYPES,
@@ -14,6 +12,15 @@ import {
   UNIT_KINDS,
   WORK_STATUSES,
 } from "./knowledge.ts";
+import {
+  commitHeld,
+  type Probe,
+  type RepoFacts,
+  refresh,
+  repoFacts,
+  symbolAt,
+  symbolMasked,
+} from "./repo-facts.ts";
 import { head, sha256 } from "./text.ts";
 
 const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
@@ -173,6 +180,8 @@ export type Checked = {
   work: z.infer<typeof Work> | null;
   /** Field definitions this record adds; they are written before its units */
   fieldDefs: PlannedDef[];
+  /** What the check read from the working tree and git; save reads each file again and judges it anew only when it changed */
+  facts: RepoFacts;
 };
 
 /** The byte span of quote in text, or null. The first occurrence is taken. */
@@ -192,7 +201,29 @@ export function repoPath(p: string): string | null {
   return s;
 }
 
-export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown): Promise<Checked> {
+/**
+ * Reads what the record's anchors need from the working tree and git, before the caller takes the write lock. A record that does not
+ * parse reads nothing; checkRecord reports it.
+ */
+export function prepareRecord(root: string | null, raw: unknown, probe?: Probe): RepoFacts {
+  const facts = repoFacts(root, probe);
+  const parsed = Record.safeParse(raw);
+  if (!parsed.success) return facts;
+  for (const a of parsed.data.units.flatMap((u) => u.anchors)) {
+    const p = repoPath(a.path);
+    if (!p) continue;
+    if (a.symbol && !symbolMasked(facts, p, a.symbol) && !a.lines) symbolAt(facts, p, a.symbol);
+    if (a.commit) commitHeld(facts, a.commit, p);
+  }
+  return facts;
+}
+
+export async function checkRecord(
+  db: Kysely<DB>,
+  target: Target,
+  raw: unknown,
+  facts: RepoFacts = prepareRecord(target.root, raw),
+): Promise<Checked> {
   const errors: string[] = [];
   const problems: string[] = [];
   const parsed = Record.safeParse(raw);
@@ -203,6 +234,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
       units: [],
       work: null,
       fieldDefs: [],
+      facts,
     };
   const record = parsed.data;
 
@@ -475,12 +507,12 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
         continue;
       }
       // The path still delivers the record; only the symbol, which would store the key, is dropped
-      const symbol = a.symbol && masksSymbol(target.root, p, a.symbol) ? undefined : a.symbol;
+      const symbol = a.symbol && symbolMasked(facts, p, a.symbol) ? undefined : a.symbol;
       if (a.symbol && !symbol)
         problems.push(`${key}: anchor symbol in ${p} is text Sphica masks; the anchor keeps only its path`);
       // A commit counts as code evidence only when the repository has it and it holds the path; otherwise the anchor keeps no commit
       let commit = a.commit;
-      if (commit && !(target.root && commitHolds(target.root, commit, p))) {
+      if (commit && !commitHeld(facts, commit, p)) {
         problems.push(
           `${key}: commit ${commit.slice(0, 12)} does not hold ${p} in the repository${target.root ? "" : " (no working tree to check)"}; the anchor keeps no commit`,
         );
@@ -594,7 +626,7 @@ export async function checkRecord(db: Kysely<DB>, target: Target, raw: unknown):
   }
   // Work is the traced session's own state, shown at session start: a harvest or glean cannot set it from text it read
   if (record.work && target.origin !== "trace") errors.push("work: only trace records work");
-  return { errors, problems, units, work: record.work ?? null, fieldDefs };
+  return { errors, problems, units, work: record.work ?? null, fieldDefs, facts };
 }
 
 /** Why a value does not fit its field's type, or null. The schema's triggers check the same. */
@@ -797,8 +829,9 @@ export async function saveRecord(
     for (const a of p.anchors) {
       // Lines are recorded where the symbol is now, so a later read can tell a moved symbol from a missing one
       // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
-      const symbol = a.symbol && !masksSymbol(target.root, a.path, a.symbol) ? a.symbol : undefined;
-      const at = a.lines ? null : symbol ? locateSymbol(target.root, a.path, symbol) : null;
+      refresh(checked.facts, a.path);
+      const symbol = a.symbol && !symbolMasked(checked.facts, a.path, a.symbol) ? a.symbol : undefined;
+      const at = a.lines ? null : symbol ? symbolAt(checked.facts, a.path, symbol) : null;
       const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx
         .insertInto("unit_anchor")

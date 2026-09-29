@@ -262,6 +262,54 @@ test("stores sources with who wrote them, adds a revision only when text changed
   }
 });
 
+// A range can start on the old side and end on the new one, where the two line numbers count different files
+test("a review comment range that runs backwards or across sides keeps only its end line, and the harvest still stores", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const comment = (id: number, range: Record<string, unknown>) => ({
+      id,
+      body: `comment ${id}`,
+      user: user("dev", 2),
+      author_association: "CONTRIBUTOR",
+      created_at: "2026-03-17T12:00:00Z",
+      html_url: "u",
+      path: "src/db.ts",
+      commit_id: sha("a"),
+      ...range,
+    });
+    const base = fake("Switch to pnpm.");
+    const get: Get = async (q, all) =>
+      q.startsWith("pulls/7/comments")
+        ? [
+            comment(80, { start_line: 9, line: 3, start_side: "RIGHT", side: "RIGHT" }),
+            comment(81, { start_line: 2, line: 5, start_side: "LEFT", side: "RIGHT" }),
+            comment(82, { start_line: 4, line: 6, start_side: "RIGHT", side: "RIGHT" }),
+            comment(83, { start_line: null, line: 7, start_side: null, side: "RIGHT" }),
+          ]
+        : base(q, all);
+    const read = await readPull(get, 7);
+    await storeItems(db.ingest, p, read.items);
+    const rows = db.owner
+      .prepare(
+        "select external_id, line_start, line_end from source where kind = 'review_comment' order by external_id",
+      )
+      .all();
+    assert.deepEqual(
+      rows.map((r) => ({ ...r })),
+      [
+        { external_id: "review_comment:80", line_start: 3, line_end: 3 },
+        { external_id: "review_comment:81", line_start: 5, line_end: 5 },
+        { external_id: "review_comment:82", line_start: 4, line_end: 6 },
+        { external_id: "review_comment:83", line_start: 7, line_end: 7 },
+      ],
+    );
+    assert.ok(db.owner.prepare("select 1 from source where kind = 'pr_body'").get());
+  } finally {
+    await db.done();
+  }
+});
+
 // Pull request data is written by anyone: a listing larger than the cap stops with a reason instead of filling memory
 test("a gh listing over the size cap is refused with a reason", async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
@@ -347,6 +395,29 @@ test("gh is asked for plain JSON even when the owner forces color", async () => 
     process.env.PATH = saved.PATH;
     if (saved.CLICOLOR_FORCE === undefined) delete process.env.CLICOLOR_FORCE;
     else process.env.CLICOLOR_FORCE = saved.CLICOLOR_FORCE;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+// A gh stuck on the network must not hold harvest_begin or glean_fetch, even one that ignores SIGTERM
+test("a gh api call that never answers fails with the path it read", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nprocess.on('SIGTERM', () => {}); setTimeout(() => {}, 20_000);\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    const started = Date.now();
+    await assert.rejects(
+      gh("o/r", 500)("pulls/1/comments?per_page=100", true),
+      /^Error: pulls\/1\/comments did not answer within 0\.5 seconds$/,
+    );
+    assert.ok(Date.now() - started < 10_000);
+  } finally {
+    process.env.PATH = saved;
     fs.rmSync(bin, { recursive: true, force: true });
   }
 });

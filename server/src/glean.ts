@@ -3,12 +3,20 @@
 // evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { masksSymbol, locate as symbolAt } from "./anchors.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
-import { cleanGit, commitHolds } from "./git.ts";
+import { cleanGit } from "./git.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
-import { type Checked, checkRecord, repoPath, saveRecord, type Target } from "./record.ts";
+import { type Checked, checkRecord, prepareRecord, repoPath, saveRecord, type Target } from "./record.ts";
+import {
+  commitHeld,
+  type Probe,
+  type RepoFacts,
+  refresh,
+  repoFacts,
+  symbolAt,
+  symbolMasked,
+} from "./repo-facts.ts";
 import { bytes, head, mask, privateKeyRanges, quoteSpan, sha256 } from "./text.ts";
 
 /** Files larger than this are not excerpted (a generated file or a data dump is not a statement). */
@@ -195,20 +203,73 @@ type Planned = {
 };
 export type GleanChecked = { errors: string[]; problems: string[]; units: Checked; ops: Planned[] };
 
+/** What glean reads from the working tree and git: the units' anchors, and each cited file excerpt or why it cannot be read. */
+export type GleanFacts = RepoFacts & { excerpts: Map<string, Excerpt | Error> };
+
+const excerptKey = (file: z.infer<typeof File>) => JSON.stringify([file.path, file.commit, file.lines]);
+
+function excerptOf(facts: GleanFacts, file: z.infer<typeof File>): Excerpt | Error {
+  const key = excerptKey(file);
+  let got = facts.excerpts.get(key);
+  if (!got) {
+    try {
+      if (!facts.root) throw new Error("the repository is not known");
+      got = readExcerpt(facts.root, file);
+    } catch (e) {
+      got = e as Error;
+    }
+    facts.excerpts.set(key, got);
+  }
+  return got;
+}
+
+/**
+ * Reads what a glean record needs from the working tree and git, before the caller takes the write lock. A failed read is kept, not
+ * thrown: checkGlean reports it only for an operation its database checks reach.
+ */
+export function prepareGlean(root: string | null, raw: unknown, probe?: Probe): GleanFacts {
+  const parsed = Glean.safeParse(raw);
+  const facts: GleanFacts = {
+    ...(parsed.success ? prepareRecord(root, { units: parsed.data.units }, probe) : repoFacts(root, probe)),
+    excerpts: new Map(),
+  };
+  for (const op of parsed.success ? parsed.data.ops : []) {
+    if (op.op === "add_evidence" && op.file && !op.source) excerptOf(facts, op.file);
+    const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
+    const rel = pinned && repoPath(pinned.path);
+    if (pinned?.symbol && rel && !symbolMasked(facts, rel, pinned.symbol))
+      symbolAt(facts, rel, pinned.symbol);
+    if (op.op === "anchor" && op.commit && rel) commitHeld(facts, op.commit, rel);
+  }
+  return facts;
+}
+
 /**
  * Checks a glean record. target.sessionId is the owner's current session: units whose only evidence is that session's owner messages,
  * with no adoption, are kept as unsourced (the owner remembering is not a source).
  */
-export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): Promise<GleanChecked> {
+export async function checkGlean(
+  db: Kysely<DB>,
+  target: Target,
+  raw: unknown,
+  facts: GleanFacts = prepareGlean(target.root, raw),
+): Promise<GleanChecked> {
   const parsed = Glean.safeParse(raw);
   if (!parsed.success)
     return {
       errors: parsed.error.issues.map((i) => `${i.path.join(".") || "record"}: ${i.message}`),
       problems: [],
-      units: { errors: [], problems: [], units: [], work: null, fieldDefs: [] },
+      units: {
+        errors: [],
+        problems: [],
+        units: [],
+        work: null,
+        fieldDefs: [],
+        facts,
+      },
       ops: [],
     };
-  const units = await checkRecord(db, target, { units: parsed.data.units });
+  const units = await checkRecord(db, target, { units: parsed.data.units }, facts);
   const errors = [...units.errors];
   const problems = [...units.problems];
   if (parsed.data.units.length || units.units.length) {
@@ -289,8 +350,9 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
       if (!op.source === !op.file) errors.push(`${what}: cite either a source or a file`);
       else if (op.file) {
         try {
-          if (!target.root) throw new Error("the repository is not known");
-          excerpt = readExcerpt(target.root, op.file);
+          const read = excerptOf(facts, op.file);
+          if (read instanceof Error) throw read;
+          excerpt = read;
           if ((await forgottenExcerpt(db, target.projectId, excerpt)).same)
             errors.push(
               `${what}: the owner forgot ${excerpt.path} lines ${op.file.lines.join("-")}; cite something else`,
@@ -328,11 +390,11 @@ export async function checkGlean(db: Kysely<DB>, target: Target, raw: unknown): 
       errors.push(`${what}: the path is not inside the repository`);
     const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
     const pinnedPath = pinned && repoPath(pinned.path);
-    if (pinned?.symbol && pinnedPath && masksSymbol(target.root, pinnedPath, pinned.symbol))
+    if (pinned?.symbol && pinnedPath && symbolMasked(facts, pinnedPath, pinned.symbol))
       errors.push(`${what}: the symbol is text Sphica masks; anchor a name, not a key`);
     if (op.op === "anchor" && op.commit) {
       const rel = repoPath(op.path);
-      if (rel && !(target.root && commitHolds(target.root, op.commit, rel)))
+      if (rel && !commitHeld(facts, op.commit, rel))
         errors.push(`${what}: commit ${op.commit.slice(0, 12)} does not hold ${rel} in the repository`);
     }
     // A replacement retires exactly the one live anchor its from names
@@ -629,8 +691,9 @@ export async function saveGlean(
       const to = op.op === "anchor" ? op : op.to;
       const rel = repoPath(to.path) ?? to.path;
       // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
-      const symbol = to.symbol && !masksSymbol(target.root, rel, to.symbol) ? to.symbol : null;
-      const at = symbol ? symbolAt(target.root, rel, symbol) : null;
+      refresh(c.units.facts, rel);
+      const symbol = to.symbol && !symbolMasked(c.units.facts, rel, to.symbol) ? to.symbol : null;
+      const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
       const added = await trx
         .insertInto("unit_anchor")
         .values({

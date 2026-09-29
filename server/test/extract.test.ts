@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { bindOwner } from "../src/admin.ts";
 import {
@@ -18,8 +19,9 @@ import {
   saveText,
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
-import type { Get } from "../src/github.ts";
+import { type Get, gh } from "../src/github.ts";
 import { readSource } from "../src/read.ts";
+import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
@@ -216,6 +218,377 @@ test("harvest: begin keeps the pull request as sources and context lists them wi
   }
 });
 
+test("harvest: context marks the sources an earlier run looked at, not a new comment or an edited body", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const user = { login: "kai", id: 4, type: "User" };
+    const comment = (id: number, body: string) => ({
+      id,
+      body,
+      html_url: "u",
+      created_at: "2026-03-02T00:00:00Z",
+      user,
+      author_association: "MEMBER",
+    });
+    const pull =
+      (body: string, comments: unknown[]): Get =>
+      async (q) =>
+        (
+          ({
+            "pulls/3": {
+              number: 3,
+              title: "t",
+              body,
+              html_url: "u",
+              created_at: "2026-03-01T00:00:00Z",
+              merged_at: null,
+              user,
+              author_association: "MEMBER",
+            },
+            "issues/3/comments": comments,
+            "pulls/3/reviews": [],
+            "pulls/3/comments": [],
+            "pulls/3/commits": [],
+          }) as Record<string, unknown>
+        )[q.split("?")[0] ?? ""];
+    const first = await beginHarvest(
+      db.ingest,
+      p,
+      3,
+      pull("Keep notes out of CSV.", [comment(1, "Old comment.")]),
+    );
+    const firstCtx = await contextText(db.ingest, first.run, p, null);
+    assert.doesNotMatch(firstCtx, /harvested before/);
+    assert.match(await saveText(db.ingest, first.run, p, null, { units: [] }), /✓ saved/);
+
+    const second = await beginHarvest(
+      db.ingest,
+      p,
+      3,
+      pull("Keep notes and drafts out of CSV.", [comment(1, "Old comment."), comment(2, "New comment.")]),
+    );
+    // Each source is its heading line and its text on the next line
+    const heading = (text: string) => {
+      const lines = ctx.split("\n");
+      return lines[lines.indexOf(text) - 1] ?? "";
+    };
+    const ctx = await contextText(db.ingest, second.run, p, null);
+    assert.match(heading("Old comment."), /^## s\d+ pr_comment .* \(harvested before\)$/);
+    assert.match(heading("New comment."), /^## s\d+ pr_comment /);
+    assert.doesNotMatch(heading("New comment."), /harvested before/);
+    assert.match(heading("Keep notes and drafts out of CSV."), /^## s\d+ pr_body pr:3 revision 2 /);
+    assert.doesNotMatch(heading("Keep notes and drafts out of CSV."), /harvested before/);
+  } finally {
+    await db.done();
+  }
+});
+
+/** Whether another connection could take the write lock on the database file right now (it does not wait). */
+function lockFree(file: string): boolean {
+  const c = new DatabaseSync(file);
+  try {
+    c.exec("pragma busy_timeout = 0");
+    c.exec("begin immediate");
+    c.exec("rollback");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    c.close();
+  }
+}
+
+/** Puts a git in bin that notes in log whether the database's write lock was free when it ran, then runs the real git. */
+function writeLockGit(bin: string, file: string, log: string): void {
+  const realGit = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  fs.writeFileSync(
+    path.join(bin, "git"),
+    [
+      `#!${process.execPath}`,
+      `const { DatabaseSync } = require("node:sqlite");`,
+      `const c = new DatabaseSync(${JSON.stringify(file)});`,
+      `let free = true;`,
+      `try { c.exec("pragma busy_timeout = 0"); c.exec("begin immediate"); c.exec("rollback"); } catch { free = false; }`,
+      `c.close();`,
+      `require("node:fs").appendFileSync(${JSON.stringify(log)}, free ? "free\\n" : "locked\\n");`,
+      `const r = require("node:child_process").spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: "inherit" });`,
+      `process.exit(r.status ?? 1);`,
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+}
+
+// Capture and delivery wait on the write lock: git runs before a save takes it
+test("save: git is asked about an anchor's commit before the write lock is taken", async () => {
+  const db = tempDb();
+  const root = repo();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-git-"));
+  const log = path.join(bin, "locks.txt");
+  const savedPath = process.env.PATH;
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "openStore を使う。" });
+    const commit = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    writeLockGit(bin, db.file, log);
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, root);
+    const record = {
+      units: [
+        {
+          key: "store",
+          kind: "implementation",
+          text: "openStore を使う",
+          evidence: [{ source: `s${m}`, quote: "openStore を使う。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "evidence", commit }],
+        },
+      ],
+    };
+    process.env.PATH = `${bin}${path.delimiter}${savedPath ?? ""}`;
+    assert.match(await saveText(db.ingest, run, p, root, record), /✓ saved/);
+    process.env.PATH = savedPath;
+    assert.equal(
+      db.owner.prepare("select commit_sha from unit_anchor").get()?.commit_sha,
+      commit,
+      "the fake git answered for the real one",
+    );
+    assert.deepEqual(fs.readFileSync(log, "utf8").trim().split("\n"), ["free"]);
+  } finally {
+    process.env.PATH = savedPath;
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+// Inside the lock a file is only read again; it is judged anew only when its content changed, before each anchor is written
+test("save: under the write lock files are only read again, and a file changed meanwhile is judged anew", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-lock-"));
+  try {
+    const p = project(db);
+    const calls: { fn: string; rel?: string; locked: boolean }[] = [];
+    // Files turned into keys while the lock is held (just before their anchor is written), or right after the read before the lock
+    let rewrite = new Set<string>();
+    let rewriteAfterRead = new Set<string>();
+    const toKey = (rel: string) =>
+      fs.writeFileSync(
+        path.join(root, rel),
+        `API_KEY=${rel === "a.ts" ? "tokenValue123abc" : "tokenValue456def"}\n`,
+      );
+    const probe: Probe = {
+      read: (r, rel) => {
+        const locked = !lockFree(db.file);
+        calls.push({ fn: "read", rel, locked });
+        if (locked && rewrite.delete(rel)) toKey(rel);
+        const got = PROBE.read(r, rel);
+        if (!locked && rewriteAfterRead.delete(rel)) toKey(rel);
+        return got;
+      },
+      masks: (t, sym) => {
+        calls.push({ fn: "masks", locked: !lockFree(db.file) });
+        return PROBE.masks(t, sym);
+      },
+      locate: (t, sym) => {
+        calls.push({ fn: "locate", locked: !lockFree(db.file) });
+        return PROBE.locate(t, sym);
+      },
+      holds: (r, c, rel) => {
+        calls.push({ fn: "holds", locked: !lockFree(db.file) });
+        return PROBE.holds(r, c, rel);
+      },
+    };
+    const saveWith = async (sessionId: string) => {
+      fs.writeFileSync(path.join(root, "a.ts"), "const tokenValue123abc = loadConfig();\n");
+      fs.writeFileSync(path.join(root, "b.ts"), "const tokenValue456def = loadConfig();\n");
+      const m = message(db, p, { id: `m-${sessionId}`, text: "ここを見る。", session: sessionId });
+      const run = await beginTrace(db.ingest, p, sessionId);
+      await contextText(db.ingest, run, p, root);
+      calls.length = 0;
+      await saveText(
+        db.ingest,
+        run,
+        p,
+        root,
+        {
+          units: [
+            {
+              key: "look",
+              kind: "finding",
+              text: "ここを見る",
+              evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+              anchors: [
+                { path: "a.ts", symbol: "tokenValue123abc", role: "applies_to" },
+                { path: "b.ts", symbol: "tokenValue456def", role: "applies_to" },
+              ],
+            },
+          ],
+        },
+        probe,
+      );
+      return db.owner
+        .prepare(
+          "select a.path, a.symbol from unit_anchor a join unit u on u.id = a.unit_id where u.key like ? order by a.id",
+        )
+        .all(`trace:%${sessionId}/look`)
+        .map((r) => [r.path, r.symbol]);
+    };
+
+    assert.deepEqual(await saveWith("s1"), [
+      ["a.ts", "tokenValue123abc"],
+      ["b.ts", "tokenValue456def"],
+    ]);
+    assert.ok(
+      calls.some((c) => !c.locked && c.fn === "masks"),
+      "judged before the lock",
+    );
+    assert.deepEqual(
+      calls.filter((c) => c.locked).map((c) => `${c.fn} ${c.rel}`),
+      ["read a.ts", "read b.ts"],
+    );
+
+    // Each file turns its symbol into a key when the save reads it under the lock, just before writing that file's anchor
+    rewrite = new Set(["a.ts", "b.ts"]);
+    assert.deepEqual(await saveWith("s2"), [
+      ["a.ts", null],
+      ["b.ts", null],
+    ]);
+    assert.equal(calls.filter((c) => c.locked && c.fn === "masks").length, 2);
+
+    // Changed after the read before the lock: the read under the lock sees it
+    rewrite = new Set();
+    rewriteAfterRead = new Set(["b.ts"]);
+    assert.deepEqual(await saveWith("s3"), [
+      ["a.ts", "tokenValue123abc"],
+      ["b.ts", null],
+    ]);
+    assert.deepEqual(
+      calls.filter((c) => c.locked && c.fn !== "read").map((c) => c.fn),
+      ["masks"],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// glean reads its file excerpts and anchors before the lock too; a read that fails counts only for an operation the checks reach
+test("save: glean reads excerpts and commits before the write lock, and judges a changed anchor file again", async () => {
+  const db = tempDb();
+  const root = repo();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-git-"));
+  const log = path.join(bin, "locks.txt");
+  const savedPath = process.env.PATH;
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const m = message(db, p, { id: "o1", text: "src.ts の openStore を見る。", session: "g1" });
+    const commit = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const first = await beginGlean(db.ingest, p, "g1");
+    await saveText(db.ingest, first, p, root, {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "src.ts の openStore を見る。", role: "states" }],
+        },
+      ],
+    });
+    const rev = () =>
+      Number(db.owner.prepare("select revision from unit where key = 'glean:look'").get()?.revision);
+    // A missing unit or a stale revision is refused for that, not for its excerpt that cannot be read, by check and by save alike
+    const unreadable = (unit: string, revision: number) => ({
+      op: "add_evidence",
+      unit,
+      revision,
+      file: { path: "docs/note.md", commit: "f".repeat(40), lines: [3, 3] },
+      quote: "Back up before a release.",
+      role: "explains",
+    });
+    for (const [op, want] of [
+      [unreadable("glean:nope", 1), /glean:nope: not a record of this project/],
+      [unreadable("glean:look", rev() + 1), /glean:look: changed since you read it/],
+    ] as const) {
+      const stray = await beginGlean(db.ingest, p, "g1");
+      const checked = (await checkText(db.ingest, stray, p, root, { ops: [op] })).text;
+      assert.match(checked, want);
+      assert.doesNotMatch(checked, /is not a commit/);
+      await assert.rejects(saveText(db.ingest, stray, p, root, { ops: [op] }), (e: Error) => {
+        assert.match(e.message, want);
+        assert.doesNotMatch(e.message, /is not a commit/);
+        return true;
+      });
+    }
+
+    writeLockGit(bin, db.file, log);
+    const run = await beginGlean(db.ingest, p, "g1");
+    process.env.PATH = `${bin}${path.delimiter}${savedPath ?? ""}`;
+    assert.match(
+      await saveText(db.ingest, run, p, root, {
+        ops: [
+          {
+            op: "add_evidence",
+            unit: "glean:look",
+            revision: rev(),
+            file: { path: "docs/note.md", lines: [3, 3] },
+            quote: "Back up before a release.",
+            role: "explains",
+          },
+          { op: "anchor", unit: "glean:look", revision: rev(), path: "src.ts", role: "evidence", commit },
+        ],
+      }),
+      /evidence added/,
+    );
+    process.env.PATH = savedPath;
+    const locks = fs.readFileSync(log, "utf8").trim().split("\n");
+    assert.ok(locks.length >= 2, "the fake git answered");
+    assert.deepEqual([...new Set(locks)], ["free"]);
+
+    // src.ts turns openStore into a key after the check, while the lock is held
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file))
+          fs.writeFileSync(path.join(root, rel), "API_KEY=openStore\n");
+        return PROBE.read(r, rel);
+      },
+    };
+    const again = await beginGlean(db.ingest, p, "g1");
+    await saveText(
+      db.ingest,
+      again,
+      p,
+      root,
+      {
+        ops: [
+          {
+            op: "anchor",
+            unit: "glean:look",
+            revision: rev(),
+            path: "src.ts",
+            symbol: "openStore",
+            role: "applies_to",
+          },
+        ],
+      },
+      probe,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select symbol from unit_anchor where role = 'applies_to'")
+        .all()
+        .map((r) => r.symbol),
+      [null],
+    );
+  } finally {
+    process.env.PATH = savedPath;
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, with stale and unsafe inputs refused", async () => {
   const db = tempDb();
   const root = repo();
@@ -273,6 +646,22 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     );
     const issue = Number(/s(\d+) issue_body/.exec(fetched)?.[1]);
     assert.ok(issue > 0, fetched);
+    // A gh that stops answering ends the fetch with its reason instead of holding the tool call
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+    const savedPath = process.env.PATH;
+    try {
+      fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\nsetTimeout(() => {}, 20_000);\n`, {
+        mode: 0o755,
+      });
+      process.env.PATH = `${bin}${path.delimiter}${savedPath ?? ""}`;
+      await assert.rejects(
+        gleanFetch(db.ingest, run, place(p, root), "https://github.com/o/r/issues/9", gh("o/r", 500)),
+        /issues\/9 did not answer within 0\.5 seconds/,
+      );
+    } finally {
+      process.env.PATH = savedPath;
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
     await assert.rejects(
       gleanFetch(db.ingest, run, place(p, root), "https://example.com/notes", fakeGet),
       /Only issues and pull requests/,

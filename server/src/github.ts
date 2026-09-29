@@ -3,7 +3,7 @@
 // Each source keeps its author's GitHub association, which decides who can adopt a proposal; the text is someone else's and is never trusted.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
@@ -60,15 +60,17 @@ const HOST = ["--hostname", "github.com"];
 const plainEnv = () => ({ ...process.env, CLICOLOR_FORCE: "0" });
 
 export const gh =
-  (repo: string): Get =>
+  (repo: string, timeout = 60_000): Get =>
   async (path, all = false) => {
     const { stdout } = await exec(
       "gh",
       ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
-      { encoding: "utf8", maxBuffer: MAX_RESPONSE, env: plainEnv() },
-    ).catch((e: NodeJS.ErrnoException) => {
+      // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
+      { encoding: "utf8", maxBuffer: MAX_RESPONSE, timeout, killSignal: "SIGKILL", env: plainEnv() },
+    ).catch((e: NodeJS.ErrnoException & { killed?: boolean }) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
         throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
+      if (e.killed) throw new Error(`${path.split("?")[0]} did not answer within ${timeout / 1000} seconds`);
       throw e;
     });
     const parsed = JSON.parse(stdout) as unknown;
@@ -153,6 +155,8 @@ type ReviewComment = Comment & {
   path?: string;
   line?: number | null;
   start_line?: number | null;
+  side?: string | null;
+  start_side?: string | null;
   commit_id?: string;
   diff_hunk?: string;
   in_reply_to_id?: number;
@@ -273,6 +277,11 @@ export async function readPull(
   for (const c of reviewComments)
     if (c.body?.trim()) {
       const end = c.line ?? null;
+      // A range that starts on the old side counts its first line in another file than its end, so only the end line is kept
+      const start =
+        c.start_line && c.start_line <= (end ?? 0) && (c.start_side ?? c.side) === c.side
+          ? c.start_line
+          : end;
       items.push(
         item({
           kind: "review_comment",
@@ -285,7 +294,7 @@ export async function readPull(
           createdAt: c.created_at,
           text: c.body,
           path: cleanPath(c.path),
-          lines: end ? [c.start_line ?? end, end] : null,
+          lines: end && start ? [start, end] : null,
           hunk: c.diff_hunk ?? null,
           commit: sha(c.commit_id),
         }),
@@ -498,7 +507,7 @@ export async function linkIssues(
       .execute();
 }
 
-/** The current revision of every source of a pull request and the issues it closes, in time order. */
+/** The current revision of every source of a pull request and the issues it closes, in time order, with whether a run looked at each. */
 export async function pullSources(db: Kysely<DB>, projectId: number, number: number) {
   const artifacts = [
     `pr:${number}`,
@@ -555,6 +564,17 @@ export async function pullSources(db: Kysely<DB>, projectId: number, number: num
         "s.line_start",
         "s.text",
       ])
+      // Whether an earlier run already looked at the source, as trace's sessionSources tells it
+      .select((eb) =>
+        eb
+          .exists(
+            eb
+              .selectFrom("source_processing as p")
+              .whereRef("p.source_id", "=", "s.id")
+              .select(sql`1`.as("x")),
+          )
+          .as("looked"),
+      )
       .orderBy("s.created_at")
       .orderBy("s.id")
       .execute()
