@@ -265,10 +265,7 @@ create table unit_option (
   text text not null check (text <> ''),
   outcome text not null check (outcome in ('chosen', 'rejected', 'deferred', 'proposed')),
   why text,
-  -- For a rejected option, what the owner said would make it worth reconsidering; its words are a `reconsiders` evidence row on the option
-  reconsider_when text check (reconsider_when <> ''),
   unique (unit_id, position),
-  check (reconsider_when is null or outcome = 'rejected'),
   unique (unit_id, id)
 ) strict;
 create trigger unit_option_sealed before insert on unit_option
@@ -291,7 +288,7 @@ create table unit_evidence (
   source_id integer not null references source (id) on delete cascade,
   span_start integer not null check (span_start >= 0),
   span_end integer not null check (span_end > span_start),
-  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements', 'reconsiders')),
+  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements')),
   -- A third party the owner reported ("X said ..."): hearsay by the owner, never X's own statement
   reported_speaker text,
   run_id integer not null references extraction_run (id),
@@ -415,12 +412,6 @@ create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'an active unit needs unretracted evidence')
   where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('finding', 'dead_end', 'question')
     and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null));
-  -- A reconsider condition is the owner's: each needs a quote of the owner, written when the unit is saved. A quote retracted later, or
-  -- forgotten (forget's recheck is exempt, since the row is gone), leaves the unit as it was, and readers show the condition as unsupported
-  select raise(abort, 'a reconsider condition needs a quote of the owner')
-  where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
-    and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
-      where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
   select raise(abort, 'superseded needs a supersedes link from its successor')
   where new.to_state = 'superseded' and not exists (select 1 from unit_link where to_unit = new.unit_id and kind = 'supersedes');
 end;
@@ -503,10 +494,6 @@ create trigger unit_evidence_check before insert on unit_evidence begin
   select raise(abort, 'a reported speaker is the owner reporting someone else, so it must cite an owner session message')
   where new.reported_speaker is not null and (trim(new.reported_speaker) = '' or not exists (select 1 from source
     where id = new.source_id and kind = 'session_message' and author_kind = 'owner'));
-  select raise(abort, 'reconsiders quotes the owner on a rejected option that has a reconsider condition')
-  where new.role = 'reconsiders' and (new.option_id is null
-    or not exists (select 1 from unit_option where id = new.option_id and reconsider_when is not null)
-    or not exists (select 1 from source where id = new.source_id and author_kind = 'owner'));
 end;
 create trigger unit_evidence_retract before update on unit_evidence begin
   select raise(abort, 'evidence is only ever retracted, once')
@@ -615,14 +602,14 @@ create trigger unit_rev_anchor_i after insert on unit_anchor begin update unit s
 create trigger unit_rev_anchor_u after update on unit_anchor begin update unit set revision = revision + 1 where id = new.unit_id; end;
 create trigger unit_rev_alias_i after insert on unit_alias begin update unit set revision = revision + 1 where id = new.unit_id; end;
 
--- Unit search text: body (text, reason, scope, revisit condition, options and their reconsider conditions), identifiers (live anchors), and the newest matching alias set.
+-- Unit search text: body (text, reason, scope, revisit condition, options), identifiers (live anchors), and the newest matching alias set.
 -- search.ts weighs body and identifiers above aliases. Lifecycle is not indexed; queries filter it.
 create view unit_search_text as
 select u.id,
   sphica_terms(u.text || char(10) || coalesce(u.why, '') || char(10) || coalesce(u.scope_note, '') || char(10)
     || coalesce(u.revisit_when, '') || char(10)
-    || coalesce((select group_concat(o.text || ' ' || coalesce(o.why, '') || ' ' || coalesce(o.reconsider_when, ''), char(10))
-      from (select text, why, reconsider_when from unit_option where unit_id = u.id order by position) o), '')) as body,
+    || coalesce((select group_concat(o.text || ' ' || coalesce(o.why, ''), char(10))
+      from (select text, why from unit_option where unit_id = u.id order by position) o), '')) as body,
   sphica_terms(coalesce((select group_concat(a.path || ' ' || coalesce(a.symbol, ''), char(10))
     from (select path, symbol from unit_anchor where unit_id = u.id and retired_at is null order by id) a), '')) as ident,
   sphica_terms(coalesce((select group_concat(j.value, ' ')
@@ -752,4 +739,4 @@ create trigger capture_delivery_insert instead of insert on capture_delivery beg
   select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
 
-pragma user_version = 3;
+pragma user_version = 2;

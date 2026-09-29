@@ -233,7 +233,7 @@ async function judgeUnits(
     ? await Promise.all([
         db
           .selectFrom("unit_option")
-          .select(["unit_id", "text", "outcome", "why"])
+          .select(["unit_id", "text", "outcome", "why", "reconsider_when"])
           .where("unit_id", "in", ids)
           .orderBy("position")
           .execute(),
@@ -268,7 +268,7 @@ async function judgeUnits(
           r.why,
           r.scope_note,
           r.revisit_when,
-          ...opts.flatMap((o) => [o.text, o.why]),
+          ...opts.flatMap((o) => [o.text, o.why, o.reconsider_when]),
           ...anch.flatMap((a) => [a.path, a.symbol]),
         ]
           .filter(Boolean)

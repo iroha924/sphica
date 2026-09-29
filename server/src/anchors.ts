@@ -22,11 +22,16 @@ function readText(root: string, rel: string): string | null | undefined {
   const st = fs.lstatSync(abs, { throwIfNoEntry: false });
   if (!st) return null;
   if (!st.isFile() || st.size > MAX_BYTES) return undefined;
-  // A symlinked directory on the way can lead outside the repository: the real path must stay inside the real root
-  const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
-  if (leaves(inside)) return undefined;
-  const buf = fs.readFileSync(abs);
-  return buf.includes(0) ? undefined : buf.toString("utf8");
+  try {
+    // A symlinked directory on the way can lead outside the repository: the real path must stay inside the real root
+    const inside = path.relative(fs.realpathSync(root), fs.realpathSync(abs));
+    if (leaves(inside)) return undefined;
+    const buf = fs.readFileSync(abs);
+    return buf.includes(0) ? undefined : buf.toString("utf8");
+  } catch {
+    // Not readable here (no permission, or gone since the stat): it cannot be checked, which is not the same as missing
+    return undefined;
+  }
 }
 
 /** The file's lines and the 0-based index of the first one holding symbol as a whole identifier (-1 when none does). */
@@ -103,6 +108,42 @@ export function locate(
   const own = mask(line);
   const cut = mask(before + line) !== mask(before) + own || mask(line + after) !== own + mask(after);
   return { line: i + 1, excerpt: cut ? "[redacted]" : own.trim().slice(0, 200) };
+}
+
+/**
+ * Whether a repository file is there now, apart from any symbol in it: gone when some part of its path does not exist, unknown when there
+ * is no working tree or a symlink on the way leads outside the repository (or cannot be followed).
+ */
+export function fileState(root: string | null, rel: string): "present" | "gone" | "unknown" {
+  if (!root) return "unknown";
+  if (leaves(path.relative(root, path.join(root, rel)))) return "unknown";
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(root);
+  } catch {
+    return "unknown";
+  }
+  let at = root;
+  for (const part of rel.split("/")) {
+    at = path.join(at, part);
+    let st: fs.Stats | undefined;
+    try {
+      st = fs.lstatSync(at, { throwIfNoEntry: false });
+    } catch (e) {
+      // A path through what is now a regular file is gone too
+      if ((e as NodeJS.ErrnoException).code === "ENOTDIR") return "gone";
+      return "unknown";
+    }
+    if (!st) return "gone";
+    if (st.isSymbolicLink()) {
+      try {
+        if (leaves(path.relative(realRoot, fs.realpathSync(at)))) return "unknown";
+      } catch {
+        return "unknown";
+      }
+    }
+  }
+  return "present";
 }
 
 /** The anchor's state in the working tree: the file and symbol are there (at the recorded line or another), gone, or cannot be checked. */

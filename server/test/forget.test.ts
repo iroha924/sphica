@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { afterEach, beforeEach, test } from "node:test";
 import { applyForget, type ForgetOutcome, previewForget } from "../src/forget.ts";
+import { lookOverview } from "../src/overview.ts";
+import { readUnit } from "../src/read.ts";
 import { sha256 } from "../src/text.ts";
 import { at, insert, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -301,4 +303,32 @@ test("a call cancelled before the commit forgets nothing", async () => {
     /cancelled, so nothing was forgotten/,
   );
   assert.equal(exists(src), true);
+});
+
+test("forgetting only a reconsider condition's quote leaves the decision active, and its condition shows as unsupported", async () => {
+  const said = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const cond = message(db, p, { id: "m2", text: "If we need replicas, look at Postgres again." });
+  const u = unit("u1", "decision");
+  const option = insert(db, "unit_option", {
+    unit_id: u,
+    position: 1,
+    text: "Postgres",
+    outcome: "rejected",
+    reconsider_when: "if replicas are needed",
+  });
+  evidence(u, said);
+  evidence(u, cond, { option_id: option, role: "reconsiders", span_start: 0, span_end: 20 });
+  adoption(u, said);
+  activate(u, said);
+  const { outcome } = await forget(cond);
+  assert.equal(lifecycle(u), "active");
+  assert.deepEqual(outcome.units, [{ key: "u1", before: "active", after: "active", removed: 1 }]);
+  assert.match(
+    (await readUnit(db.reader, p, "u1", null)) ?? "",
+    /Reconsider when: if replicas are needed \[unsupported/,
+  );
+  assert.match(
+    await lookOverview(db.reader, p, null),
+    /- u1: rejected option Postgres, reconsider when: if replicas are needed \[unsupported/,
+  );
 });

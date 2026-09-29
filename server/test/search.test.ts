@@ -680,3 +680,38 @@ test("the chain skips a replacement that stayed a candidate", async () => {
     await db.done();
   }
 });
+
+test("a rejected option's reconsider condition is searchable by its own words", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Use SQLite. If we ever need replicas, look at Postgres again.",
+    });
+    await save(db, p, {
+      units: [
+        decision("storage", m, "Use SQLite.", {
+          options: [
+            {
+              text: "Postgres",
+              outcome: "rejected",
+              reconsider_when: "when read replicas become necessary",
+              reconsider_quote: {
+                source: `s${m}`,
+                quote: "If we ever need replicas, look at Postgres again.",
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const hits = await searchUnits(db.reader, p, { question: "read replicas", limit: 10 });
+    assert.deepEqual(
+      hits.hits.map((h) => h.key),
+      ["trace:ext-s1/storage"],
+    );
+  } finally {
+    await db.done();
+  }
+});

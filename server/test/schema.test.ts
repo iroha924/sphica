@@ -82,7 +82,7 @@ const external = (v: Values) =>
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 2);
+  assert.equal(one("pragma user_version").user_version, 3);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -320,6 +320,73 @@ test("options are sealed with the unit, and aliases are append-only strings", ()
   );
   refuses(() => sql("delete from unit_alias where unit_id = ?", u), /append-only/);
   alias("[]");
+});
+
+test("a reconsider condition sits only on a rejected option, and its quote is the owner's on that option", () => {
+  const said = message(db, p, {
+    id: "m1",
+    text: "Use SQLite. If we ever need replicas, look at Postgres again.",
+  });
+  const ai = message(db, p, {
+    id: "m2",
+    text: "Postgres would be back if replicas are needed.",
+    speaker: "assistant",
+  });
+  const u = unit({ key: "u1", kind: "decision" });
+  const option = (position: number, outcome: string, condition: string | null) =>
+    insert(db, "unit_option", {
+      unit_id: u,
+      position,
+      text: `option ${position}`,
+      outcome,
+      reconsider_when: condition,
+    });
+  refuses(() => option(1, "chosen", "if replicas are needed"), /CHECK/);
+  refuses(() => option(1, "rejected", ""), /CHECK/);
+  const plain = option(1, "rejected", null);
+  const pg = option(2, "rejected", "if replicas are needed");
+  const why = /reconsiders quotes the owner/;
+  refuses(() => evidence(u, said, { role: "reconsiders" }), why);
+  refuses(() => evidence(u, said, { role: "reconsiders", option_id: plain }), why);
+  refuses(() => evidence(u, ai, { role: "reconsiders", option_id: pg }), why);
+  evidence(u, said);
+  adoption(u, said);
+  state(u, null, "candidate");
+  refuses(() => state(u, "candidate", "active"), /reconsider condition needs a quote of the owner/);
+  // A quote on the option alone is written before the first state in real saves; here the unit is back to a fresh one
+  const v = unit({ key: "u2", kind: "decision" });
+  const cond = insert(db, "unit_option", {
+    unit_id: v,
+    position: 1,
+    text: "Postgres",
+    outcome: "rejected",
+    reconsider_when: "if replicas are needed",
+  });
+  evidence(v, said);
+  const quote = evidence(v, said, { role: "reconsiders", option_id: cond, span_start: 12, span_end: 40 });
+  adoption(v, said);
+  state(v, null, "candidate");
+  state(v, "candidate", "active");
+  // Retracting only the condition's quote leaves the decision active: the unit still has its own evidence
+  sql(
+    "update unit_evidence set retracted_at = ?, retraction_reason = 'misread', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where id = ?",
+    now,
+    said,
+    quote,
+  );
+  assert.equal(one("select lifecycle from unit where id = ?", v).lifecycle, "active");
+  // Judged again after that retraction (as glean does), the decision comes back: the condition had the owner's words when saved,
+  // and readers now show it as unsupported. Forget's recheck, whose quote row is gone, comes back too
+  state(v, "active", "candidate");
+  state(v, "candidate", "active");
+  state(v, "active", "candidate");
+  sql(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, forget_id) values (?, 'candidate', 'active', ?, 'r', ?)",
+    v,
+    now,
+    forgetBatch(),
+  );
+  assert.equal(one("select lifecycle from unit where id = ?", v).lifecycle, "active");
 });
 
 test("the unit index finds body, options, and the newest matching aliases, and stops finding cleared aliases", () => {

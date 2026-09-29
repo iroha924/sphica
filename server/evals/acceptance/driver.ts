@@ -19,6 +19,7 @@ import { applyForget, previewForget } from "../../src/forget.ts";
 import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
+import { liveOverview, lookOverview } from "../../src/overview.ts";
 import { readSource, readUnit } from "../../src/read.ts";
 import { type Applicable, checkFindings, parseDiff, selectForReview } from "../../src/review.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
@@ -180,6 +181,8 @@ export async function createDriver(world: World): Promise<Driver> {
   let found: UnitHit[] = [];
   /** What the last search with asked returned, as the read server words it. */
   let asked = "";
+  /** What the last overview returned, as the read server words it. */
+  let overview = "";
   let lastRead = "";
   /** A time after every write so far and before the latest glean's, for reading as of just before it (writes carry the real clock). */
   let beforeGlean = "";
@@ -385,8 +388,19 @@ export async function createDriver(world: World): Promise<Driver> {
           replace?: [string, string];
           prepend?: string;
           crlf?: boolean;
+          create?: string;
+          remove?: boolean;
         };
         const abs = path.join(repo, edit.path);
+        if (edit.remove) {
+          fs.rmSync(abs);
+          return;
+        }
+        if (edit.create !== undefined) {
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, edit.create);
+          return;
+        }
         let text = fs.readFileSync(abs, "utf8");
         if (edit.replace) {
           assert.ok(text.includes(edit.replace[0]), `${edit.path} has no ${edit.replace[0]}`);
@@ -406,6 +420,14 @@ export async function createDriver(world: World): Promise<Driver> {
         asked = askedText(
           await askedBefore(db(), await projectId(), { question, limit: 10, notSessions: [] }),
         );
+        return;
+      }
+      if (step.overview && typeof step.overview === "object") {
+        const o = step.overview as { view: "live" | "look"; after?: number };
+        overview =
+          o.view === "live"
+            ? await liveOverview(db(), await projectId(), o.after ?? null)
+            : await lookOverview(db(), await projectId(), repo);
         return;
       }
       if (Array.isArray(step.read)) {
@@ -735,6 +757,13 @@ export async function createDriver(world: World): Promise<Driver> {
           texts.filter((u) => u.text.includes(String(e.no_unit_text_contains))).map((u) => u.key),
           [],
         );
+        return;
+      }
+      if (Array.isArray(e.overview_contains) || Array.isArray(e.overview_lacks)) {
+        for (const w of (e.overview_contains ?? []) as string[])
+          assert.ok(overview.includes(w), `overview lacks "${w}"\n${overview}`);
+        for (const w of (e.overview_lacks ?? []) as string[])
+          assert.ok(!overview.includes(w), `overview shows "${w}"\n${overview}`);
         return;
       }
       if (Array.isArray(e.asked_contains)) {

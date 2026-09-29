@@ -13,6 +13,7 @@ const PER_LAYER = {
   glean: 13,
   forget: 1,
   asked: 2,
+  overview: 5,
 };
 const DELIBERATE_MISSING = new Set(["capture-04", "glean-03"]);
 

@@ -1,5 +1,5 @@
-// Whether db/migrations/0002.sql moves a revision 1 database to revision 2 without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. The revision 1 schema is fixtures/schema-rev1.sql (db/schema.sql at v0.5.7, the last revision 1 release).
+// Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -12,8 +12,11 @@ import { sha256 } from "../src/text.ts";
 
 const root = path.join(import.meta.dirname, "..", "..");
 const REV1 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev1.sql"), "utf8");
-const REV2 = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
-const MIGRATION = fs.readFileSync(path.join(root, "db", "migrations", "0002.sql"), "utf8");
+const REV2 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev2.sql"), "utf8");
+const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
+const MIGRATIONS = [2, 3].map((r) =>
+  fs.readFileSync(path.join(root, "db", "migrations", `${String(r).padStart(4, "0")}.sql`), "utf8"),
+);
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
 let dir: string;
@@ -35,14 +38,19 @@ const create = (name: string, schema: string): DatabaseSync => {
   return raw;
 };
 
-/** The steps `sphica init` runs, written out so the SQL itself is tested apart from the code that runs it. */
+/** The steps `sphica init` runs, written out so the SQL itself is tested apart from the code that runs it: one transaction per revision. */
 const migrate = (raw: DatabaseSync) => {
-  raw.exec("pragma foreign_keys = off");
-  raw.exec("begin immediate");
-  raw.exec(MIGRATION);
-  assert.deepEqual(raw.prepare("pragma foreign_key_check").all(), []);
-  raw.exec("commit");
-  raw.exec("pragma foreign_keys = on");
+  for (;;) {
+    const at = Number((raw.prepare("pragma user_version").get() as { user_version: number }).user_version);
+    const next = MIGRATIONS[at - 1];
+    if (!next) return;
+    raw.exec("pragma foreign_keys = off");
+    raw.exec("begin immediate");
+    raw.exec(next);
+    assert.deepEqual(raw.prepare("pragma foreign_key_check").all(), []);
+    raw.exec("commit");
+    raw.exec("pragma foreign_keys = on");
+  }
 };
 
 /** Table, index, view, and trigger definitions by (type, name). A renamed table's stored SQL quotes its name, so quotes and spacing are dropped. */
@@ -92,6 +100,13 @@ const fill = (raw: DatabaseSync) => {
     now,
   );
   run(
+    "insert into unit_option (unit_id, position, text, outcome, why) values (1, 1, 'Postgres', 'rejected', 'a server')",
+  );
+  run(
+    "insert into unit_evidence (unit_id, option_id, source_id, span_start, span_end, role, run_id, added_at) values (1, 1, 1, 0, 10, 'rejects', 1, ?)",
+    now,
+  );
+  run(
     "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (1, null, 'candidate', ?, 'extracted', 1)",
     now,
   );
@@ -107,6 +122,7 @@ const TABLES = [
   "source",
   "extraction_run",
   "unit",
+  "unit_option",
   "unit_evidence",
   "unit_adoption",
   "unit_state",
@@ -114,20 +130,24 @@ const TABLES = [
 const counts = (raw: DatabaseSync) =>
   TABLES.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n));
 
-test("a migrated revision 1 database has the same definitions as a fresh revision 2 database", () => {
-  const old = create("old.db", REV1);
-  migrate(old);
-  const fresh = create("fresh.db", REV2);
-  assert.deepEqual(definitions(old), definitions(fresh));
-  assert.equal((old.prepare("pragma user_version").get() as { user_version: number }).user_version, 2);
-  assert.deepEqual(
-    old
-      .prepare("pragma integrity_check")
-      .all()
-      .map((r) => ({ ...r })),
-    [{ integrity_check: "ok" }],
-  );
-});
+for (const [from, schema] of [
+  [1, REV1],
+  [2, REV2],
+] as const)
+  test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
+    const old = create("old.db", schema);
+    migrate(old);
+    const fresh = create("fresh.db", CURRENT);
+    assert.deepEqual(definitions(old), definitions(fresh));
+    assert.equal((old.prepare("pragma user_version").get() as { user_version: number }).user_version, 3);
+    assert.deepEqual(
+      old
+        .prepare("pragma integrity_check")
+        .all()
+        .map((r) => ({ ...r })),
+      [{ integrity_check: "ok" }],
+    );
+  });
 
 test("migration keeps every row, the state history, and its ids, and the database keeps working", () => {
   const raw = create("old.db", REV1);
@@ -189,7 +209,7 @@ test("migration keeps every row, the state history, and its ids, and the databas
 
 test("capture writes the same columns at both revisions, and writes into a migrated database", () => {
   const old = create("old.db", REV1);
-  const fresh = create("fresh.db", REV2);
+  const fresh = create("fresh.db", CURRENT);
   const columns = (raw: DatabaseSync) => raw.prepare("pragma table_info(capture_message)").all();
   assert.deepEqual(columns(old), columns(fresh));
   fill(old);
@@ -227,4 +247,41 @@ test("migration keeps unit_state's id counter, so an id once used is never hande
     )
     .run(now);
   assert.equal(Number((raw.prepare("select max(id) as n from unit_state").get() as { n: number }).n), 4);
+});
+
+test("migrating revision 2 keeps options and evidence with their ids, and a rejected option then takes a reconsider condition", () => {
+  const raw = create("old.db", REV2);
+  fill(raw);
+  const rows = (sql: string) =>
+    raw
+      .prepare(sql)
+      .all()
+      .map((r) => ({ ...r }));
+  const options = rows("select id, unit_id, position, text, outcome, why from unit_option order by id");
+  const evidence = rows("select * from unit_evidence order by id");
+  migrate(raw);
+  assert.deepEqual(
+    rows("select id, unit_id, position, text, outcome, why from unit_option order by id"),
+    options,
+  );
+  assert.deepEqual(rows("select * from unit_evidence order by id"), evidence);
+  // The saved decision stays active and searchable, and a new unit's rejected option carries a condition quoted from the owner
+  assert.equal(
+    (raw.prepare("select lifecycle from unit where id = 1").get() as { lifecycle: string }).lifecycle,
+    "active",
+  );
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  run(
+    "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (1, 'trace:session:s1/k2', 'decision', 'do', 'Use WAL', 'supported', 1, ?, ?)",
+    now,
+    sha256("Use WAL"),
+  );
+  run(
+    "insert into unit_option (unit_id, position, text, outcome, reconsider_when) values (2, 1, 'rollback journal', 'rejected', 'if WAL breaks on a network drive')",
+  );
+  run(
+    "insert into unit_evidence (unit_id, option_id, source_id, span_start, span_end, role, run_id, added_at) values (2, 2, 1, 0, 10, 'reconsiders', 1, ?)",
+    now,
+  );
+  assert.equal(Number((raw.prepare("select max(id) as n from unit_evidence").get() as { n: number }).n), 3);
 });
