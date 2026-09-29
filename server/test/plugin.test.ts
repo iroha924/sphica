@@ -732,6 +732,11 @@ test("search with asked shows earlier owner messages from other sessions and say
     text: "Pick the package manager for installs now.",
     session: sessionId(p, "codex", "this-session"),
   });
+  message(db, p, {
+    id: "outer",
+    text: "The package manager installs from the outer session.",
+    session: sessionId(p, "claude-code", "outer-claude"),
+  });
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StdioClientTransport({
@@ -766,6 +771,7 @@ test("search with asked shows earlier owner messages from other sessions and say
       /Pick the package manager for installs now/,
       "this session's own words are left out",
     );
+    assert.doesNotMatch(found, /from the outer session/, "the other host's session is left out too");
     assert.match(
       await search({ asked: true, sources: true }),
       /^asked cannot be combined with sources or path\.$/,

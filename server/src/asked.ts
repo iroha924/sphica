@@ -50,6 +50,9 @@ export async function askedBefore(
   },
 ): Promise<Asked> {
   // Every match up to the caps, so a matter repeated past the first few sessions is still counted
+  const kept = (u: { kind: string; lifecycle: string }) =>
+    (!q.kinds?.length || (q.kinds as string[]).includes(u.kind)) &&
+    (!q.lifecycles?.length || (q.lifecycles as string[]).includes(u.lifecycle));
   const found = await searchSources(db, projectId, q.question, Number.POSITIVE_INFINITY, {
     notSessions: q.notSessions,
   });
@@ -70,11 +73,7 @@ export async function askedBefore(
   const all: Earlier[] = [];
   for (const m of found.hits) {
     const direct = unique(cited.filter((c) => c.source_id === m.id));
-    const shown = direct.filter(
-      (u) =>
-        (!q.kinds?.length || (q.kinds as string[]).includes(u.kind)) &&
-        (!q.lifecycles?.length || (q.lifecycles as string[]).includes(u.lifecycle)),
-    );
+    const shown = direct.filter(kept);
     all.push({
       message: m,
       led: shown.map((u) => ({ ...u, now: [] })),
@@ -90,7 +89,7 @@ export async function askedBefore(
   const messages = all.slice(0, q.limit);
   for (const e of messages) {
     for (const u of e.led) if (u.lifecycle === "superseded") u.now = await liveSuccessors(db, u.id);
-    await sameTurn(db, e);
+    await sameTurn(db, e, kept);
   }
   // A session is traced only when a trace looked at every matching message in it
   const sessions = new Map<string, { decided: boolean; traced: boolean }>();
@@ -147,7 +146,11 @@ async function citing(db: Kysely<DB>, sources: number[]): Promise<(Cited & { rol
 const unique = <T extends { id: number }>(xs: T[]): T[] => [...new Map(xs.map((x) => [x.id, x])).values()];
 
 /** Records quoting other words of the same turn, and the assistant's reply there. Context only: they need not answer the message. */
-async function sameTurn(db: Kysely<DB>, e: Earlier): Promise<void> {
+async function sameTurn(
+  db: Kysely<DB>,
+  e: Earlier,
+  kept: (u: { kind: string; lifecycle: string }) => boolean,
+): Promise<void> {
   const { session, turn, id } = e.message;
   if (!session || !turn) return;
   const others = await db
@@ -167,7 +170,7 @@ async function sameTurn(db: Kysely<DB>, e: Earlier): Promise<void> {
     others.map((o) => o.id),
   )) {
     const k = `${c.id}\0${c.source_id}\0${c.role}`;
-    if (e.direct.has(c.id) || seen.has(k)) continue;
+    if (e.direct.has(c.id) || !kept(c) || seen.has(k)) continue;
     seen.add(k);
     e.context.push({
       key: c.key,

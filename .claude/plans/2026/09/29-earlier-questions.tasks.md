@@ -73,6 +73,16 @@ base: main
   - コミット: `fix(search): keep asked output one message per heading, hidden records hidden, and every session tellable`
   - 結果: red（直す前）`node --test test/asked.test.ts test/plugin.test.ts` → 「a message's text cannot start a heading」「this session's own words are left out」で失敗。1 つずつ直し、その都度次の確かめ（「a record the filters hid does not come back as context」「H still has a message no trace looked at」）が意図どおり落ちることを確かめた。直した後 `node --test test/asked.test.ts test/plugin.test.ts test/search.test.ts` → pass 42 / fail 0。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 62 / 62）。評価を流し直して 0 / 8、13 / 21 で変わらず
 
+- [x] T08: 同じターンの文脈にも kinds と lifecycles をかけ、空振りのテスト 2 件を直す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: なし
+  - 変更: `server/src/asked.ts`, `server/test/asked.test.ts`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/asked.test.ts` → kinds: ["decision"] で、返事だけを引用した finding が文脈に出て落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/asked.test.ts test/plugin.test.ts` → 全部 pass
+  - コミット: `fix(search): apply the kind and lifecycle filters to same-turn context too`
+  - 結果: red（直す前）`node --test test/asked.test.ts` → kinds: ["decision"] で返事だけを引用した finding が文脈に出て「the finding quoting the reply is not a decision」で失敗。直した後 `node --test test/asked.test.ts test/plugin.test.ts` → pass 32 / fail 0（偽の発言が結果にあることと、Claude 側のセッションの発言も除かれることを確かめる形にした）。typecheck → 0
+
 ## P3: 測定と acceptance
 
 - [x] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
@@ -98,3 +108,4 @@ base: main
 2026-09-29 / T04 / plan の「Skill で search の使い方を書いている箇所があれば合わせる」に当たる箇所は Skill に無く、README の機能の一覧だった（plugin/README.md は bundle が写す追跡外のファイル） / T04 の変更欄に `README.md` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）
 2026-09-29 / T05 / knip が入口に無いファイルを未使用とみなすので、`evals/asked/run.ts` を knip.json の入口に足した。測定では、関係ない発言は返さない一方で見落としが多い（語の半分を超える規則の厳しさ）。ひらがなの問いの見落としは u29 の見直しの条件に当たる / T05 の変更欄に `knip.json` を足した（前: `server/evals/asked/run.ts`, `server/evals/asked/corpus.json`）。一致の規則の見直しは plan の対象外なので、数字を PR に書いて持ち主の判断に回す
 2026-09-29 / T07 / Codex レビュー: T01（120d791）は指摘なし。T02（3fdd478）2 件のうち、AI の返事を除く確認が空振り（F1）は採用、当たりのターンが未テスト（F2）は見送り（asked.test.ts の同じターンの文脈と返事がターンを使って通る）。T03（46c35f5）4 件（本文で見出しを偽装できる、隠した記録が文脈に出る、一部だけ trace 済みのセッションを traced と数える、表示しない発言の後継をたどる）は全部採用。T04（5c2e6c7）3 件（両方の環境変数があると Codex のセッションを除き損ねる、`path: ""` を断らない、framed をテストしていない）は全部採用 / 修正タスク T07 を足した。表示しない分の後継（F4）は性能の直しで、red のテストは作らない
+2026-09-29 / T08 / c2a6be3（T07）と main..c2a6be3 の Codex レビュー: 同じターンの文脈に絞り込みがかからない（両方で指摘）は採用。両方のセッション id の除外を Codex 側しか確かめていない、偽の見出しのテストが偽の発言が結果にあることを確かめていない、の 2 件も採用。review-shipping は、Codex が起動した読み取りの MCP には CODEX_THREAD_ID が無く、Codex では今のセッションの発言が返ることを再現した（テストはその環境変数を与えて空振りしていた） / 修正タスク T08 を足した。Codex の件は公開インターフェースに響くので、持ち主に直し方を聞いてから plan を直す

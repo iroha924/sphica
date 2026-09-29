@@ -300,6 +300,10 @@ test("asked output keeps a message on its lines, filtered records out of the con
     });
     const text = askedText(r);
     assert.ok(
+      r.messages.some((e) => e.message.id === forged),
+      "the forged message is among the results",
+    );
+    assert.ok(
       !text.split("\n").some((l) => l.startsWith("## s999")),
       "a message's text cannot start a heading",
     );
@@ -324,5 +328,22 @@ test("asked output keeps a message on its lines, filtered records out of the con
     );
   } finally {
     await db.done();
+  }
+});
+
+test("the kind and lifecycle filters narrow the same-turn context too", async () => {
+  const w = await world();
+  try {
+    const r = await askedBefore(w.db.reader, w.p, {
+      question: "package manager installs",
+      limit: 10,
+      notSessions: [],
+      kinds: ["decision"],
+    });
+    const d = r.messages.find((e) => e.message.id === w.ids.d1);
+    assert.ok(d, "the message is still returned");
+    assert.deepEqual(d?.context, [], "the finding quoting the reply is not a decision");
+  } finally {
+    await w.db.done();
   }
 });
