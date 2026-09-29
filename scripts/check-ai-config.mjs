@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { withoutComments } from "./lib/english.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -329,7 +330,8 @@ try {
 }
 
 // Sphica's MCP tools by server, read from where they are registered, so a Skill can be held against the tools that exist.
-const registeredTools = (file) => [...read(file).matchAll(/registerTool\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
+const registeredTools = (file) =>
+  [...withoutComments(read(file)).matchAll(/registerTool\(\s*"([a-z_]+)"/g)].map((m) => m[1]);
 const sphicaTools = new Map([
   ["sphica", registeredTools("server/src/mcp.ts")],
   ["record", registeredTools("server/src/mcp-record.ts")],
@@ -377,15 +379,14 @@ for (const name of pluginSkills) {
           .map((f) => read(`plugin/skills/${name}/references/${f}`))
       : []),
   ].join("\n");
+  // Hosts take a comma-separated line; a YAML list parses here as an array
+  const listed = fields["allowed-tools"] ?? [];
   const allowed = new Set(
-    (fields["allowed-tools"] ?? "")
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean),
+    (Array.isArray(listed) ? listed : listed.split(",")).map((t) => t.trim()).filter(Boolean),
   );
-  // Sphica's tool names are also plain words (`read`), so only inline code counts; AskUserQuestion is unmistakable anywhere
   const named = [
     ...[...body.matchAll(/`([a-z_]+)`/g)].map((m) => toolId.get(m[1])).filter(Boolean),
+    ...[...body.matchAll(/\bmcp__plugin_sphica_[a-z]+__[a-z_]+/g)].map((m) => m[0]),
     ...(/\bAskUserQuestion\b/.test(body) ? ["AskUserQuestion"] : []),
   ];
   for (const id of new Set([...alwaysAllowed, ...named]))

@@ -116,6 +116,16 @@ base: main
 
 ## P4: 0.6.5 として出す
 
+- [x] T11: allowed-tools の検査の見逃しを直す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T07（直す検査が要る）
+  - 変更: `scripts/check-ai-config.mjs`, `scripts/lib/english.mjs`
+  - red: `bun run verify:ai` → 直す前の検査で、`server/src/mcp.ts` に `// server.registerTool("ghost")` を足し rules に `mcp__plugin_sphica_sphica__ghost` を許可 → 通る。rules の本文に `mcp__plugin_sphica_record__forget_apply` を書いて許可しない → 通る。rules の allowed-tools を YAML の配列にする → `TypeError: ... split is not a function`
+  - 完了条件: 同じ 3 つの入力で、1 と 2 は検査が名指しで落ち、3 は 0 で終わる。`bun run check` → 0
+  - コミット: `fix(check): skip commented registrations, read full tool ids and YAML lists`
+  - 結果: red は上のとおり再現。直した後: 1 は「which no Sphica server registers」、2 は「allowed-tools lacks mcp__plugin_sphica_record__forget_apply」で落ち、3 は 0。`bun run check` → 0
+
 - [-] T08: リリースの種別を確かめ、バージョンをそろえる
   - 種別: 変更
   - 計画: S9
@@ -136,3 +146,4 @@ base: main
 2026-09-29 / T10 / T05 の Codex レビュー: セッション開始のたびにプロジェクトの全オーナー発言を集計する（中、Codex の簡易測定で旧クエリの約 50 倍） / T10 を足し、未 trace のセッションを EXISTS で絞ってから、そのセッションの発言だけを索引で引く形に直した
 2026-09-29 / T08 / 取りやめ。S9 のバージョン上げは pre-commit の求めで T03（d091e11）に入った。`bun run release:plan -- --base v0.6.4` → `plugin`、npm・plugin・marketplace・Codex がすべて 0.6.5 を確かめた
 2026-09-29 / T03 / 計画欄 前: S7、後: S7, S9 / T03 のコミットがバージョン上げ（S9）を実際に担ったので、欄を事実に合わせた
+2026-09-29 / T11 / T07・T10 の Codex レビュー: T10 は差なし。T07 の検査に、コメント中の登録を数える（中）、本文の完全なツール名を見落とす（中）、YAML の配列で例外（低）、「使わない」と書いた AskUserQuestion も許可を求める（低）、reviewer 本文と起動時のツール表のずれを見ない（中） / 前の 3 件は T11 で直した。4 件目は見送り（誤検出は落ちるだけで黙って通らない）。5 件目は見送り（計画で対象外とした別の検査）

@@ -19,6 +19,13 @@ const EXEMPT = /^\/\/\s*english-exempt:\s*(\S.*)$/;
 
 const isComment = (t) => t.type === "SingleLineComment" || t.type === "MultiLineComment";
 
+/** A JavaScript or TypeScript source with its comments removed, so what is written about code is not read as code. */
+export const withoutComments = (source) =>
+  [...jsTokens(source)]
+    .filter((t) => !isComment(t))
+    .map((t) => t.value)
+    .join("");
+
 /**
  * Each line of every comment in a JavaScript or TypeScript source, with its line number.
  * @param {string} source
