@@ -7,9 +7,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { askedBefore, askedText } from "./asked.ts";
 import { openReader } from "./db.ts";
 import { framed } from "./frame.ts";
-import { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
+import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { identify, projectId } from "./project.ts";
@@ -121,7 +122,8 @@ server.registerTool(
     description:
       "Finds records (decisions, constraints, implementations, findings, dead ends, questions) whose text holds most of the query's words, " +
       "active ones first. Use short queries of the subject's words (identifiers, option names, the domain terms). sources: true searches the " +
-      "captured conversation and pull request text instead. An empty result also says how many weaker matches were left out.",
+      "captured conversation and pull request text instead. asked: true finds the owner's earlier messages like the query in other sessions, " +
+      "with the records that quote each and whether a decision was recorded. An empty result also says how many weaker matches were left out.",
     inputSchema: {
       query: z.string().min(1).max(500).describe("Words for the subject, in Japanese or English"),
       cwd: CWD,
@@ -132,6 +134,12 @@ server.registerTool(
         .describe("Only these states (default: all, active first)"),
       path: z.string().max(500).optional().describe("Only records anchored to this repository-relative path"),
       sources: z.boolean().optional().describe("Search captured sources instead of records"),
+      asked: z
+        .boolean()
+        .optional()
+        .describe(
+          "Find the owner's earlier messages like the query, what they led to, and repeats with no recorded decision",
+        ),
       limit: z.number().int().min(1).max(20).optional(),
     },
     annotations: READ_ONLY,
@@ -141,6 +149,23 @@ server.registerTool(
       const p = await projectOf(a.cwd);
       if (typeof p === "string") return text(p);
       const limit = a.limit ?? 8;
+      if (a.asked) {
+        if (a.sources || a.path) return text("asked cannot be combined with sources or path.");
+        // The session this call comes from is left out, so its own words never come back as earlier ones
+        const external = process.env.CLAUDE_CODE_SESSION_ID ?? process.env.CODEX_THREAD_ID;
+        const r = await askedBefore(db, p.id, {
+          question: a.query,
+          limit,
+          notSessions: external ? [external, ...HOSTS.map((h) => sessionId(p.id, h, external))] : [],
+          kinds: a.kinds,
+          lifecycles: a.lifecycles,
+        });
+        if (!r.messages.length)
+          return text(
+            `No earlier owner message ${r.stopped ? `among the first ${r.read} candidates by rank ` : ""}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out.${r.stopped ? " Search with more specific words." : ""}`,
+          );
+        return text(framed(askedText(r)));
+      }
       if (a.sources) {
         const r = await searchSources(db, p.id, a.query, limit);
         if (!r.hits.length)

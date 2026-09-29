@@ -54,13 +54,14 @@ base: main
   - コミット: `feat(search): show what earlier owner messages led to and repeats with no recorded decision`
   - 結果: `node --test test/asked.test.ts` → pass 2 / fail 0（2 回置き換えた決定は後継 bun まで示す、trace 済みで記録なし・未 trace・finding だけを「No recorded decision」、同じターンの AI の返事を引用した記録は文脈に分けて返事を id で示す、絞り込みで隠しても「No recorded decision」と言わず件数を言う、表示 1 件でも 2 セッションの繰り返しを trace 済み・未 trace に分けて示す、決定のあるセッションが入ると繰り返しの行は出ない、今のセッションを除く）。typecheck・lint・knip → 0、`sql:reach` 161 / 161、architecture・english → 通過
 
-- [ ] T04: MCP の search に asked を足す
+- [x] T04: MCP の search に asked を足す
   - 種別: 追加
   - 計画: S5
   - 依存: T03（文の中身が要る）
-  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`
+  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `README.md`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/plugin.test.ts` → 全部 pass（`asked` の文、`sources` や `path` との組み合わせを断る）
   - コミット: `feat(mcp): search earlier owner messages with asked`
+  - 結果: `node --test test/plugin.test.ts` → pass 28 / fail 0（本物の MCP クライアントで、別のセッションの本人の発言に「No recorded decision. Not traced yet: run /sphica:trace old.」が付き、`CLAUDE_CODE_SESSION_ID` のセッションの発言は返らない。`sources` と一緒なら断る）。typecheck → 0、architecture → 通過。README の機能の一覧に 1 行足した
 
 ## P3: 測定と acceptance
 
@@ -81,3 +82,5 @@ base: main
   - コミット: `test(acceptance): cover earlier owner messages and what they led to`
 
 ## 記録
+
+2026-09-29 / T04 / plan の「Skill で search の使い方を書いている箇所があれば合わせる」に当たる箇所は Skill に無く、README の機能の一覧だった（plugin/README.md は bundle が写す追跡外のファイル） / T04 の変更欄に `README.md` を足した（前: `server/src/mcp.ts`, `server/test/plugin.test.ts`）

@@ -9,6 +9,7 @@ import { stripVTControlCharacters } from "node:util";
 import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { sessionId } from "../src/knowledge.ts";
 import {
   compareVersions,
   differingFiles,
@@ -708,6 +709,64 @@ test("search says when it stopped before reading every candidate", async () => {
     const some = await search();
     assert.match(some, /retry budget and cache warm\./);
     assert.match(some, /Stopped after 600 candidates by rank; more may match\./);
+  } finally {
+    await client.close();
+    await db.done();
+  }
+});
+
+// asked: the owner's earlier messages in other sessions, never this session's own words
+test("search with asked shows earlier owner messages from other sessions and says when no decision was recorded", async () => {
+  const db = tempDb();
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-"));
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/asked.git"], { cwd: repo });
+  const p = project(db, "git:github.com/o/asked", "o/asked");
+  const earlier = message(db, p, {
+    id: "old",
+    text: "Which package manager do installs use?",
+    session: "old",
+  });
+  message(db, p, {
+    id: "now",
+    text: "Pick the package manager for installs now.",
+    session: sessionId(p, "claude-code", "this-session"),
+  });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: db.file,
+        CLAUDE_CODE_SESSION_ID: "this-session",
+      },
+      stderr: "ignore",
+    }),
+  );
+  const search = async (args: Record<string, unknown>) => {
+    const r = await client.callTool({
+      name: "search",
+      arguments: { cwd: repo, query: "package manager installs", ...args },
+    });
+    return (r.content as { text: string }[])[0]?.text ?? "";
+  };
+  try {
+    const found = await search({ asked: true });
+    assert.match(found, /Earlier owner messages matching: /);
+    assert.match(found, new RegExp(`## s${earlier}: `));
+    assert.match(found, /No recorded decision\. Not traced yet: run \/sphica:trace old\./);
+    assert.doesNotMatch(
+      found,
+      /Pick the package manager for installs now/,
+      "this session's own words are left out",
+    );
+    assert.match(
+      await search({ asked: true, sources: true }),
+      /^asked cannot be combined with sources or path\.$/,
+    );
   } finally {
     await client.close();
     await db.done();
