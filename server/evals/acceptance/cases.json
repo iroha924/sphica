@@ -18,7 +18,8 @@
     "status": "call the MCP status tool",
     "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
     "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
-    "as_of": "export the evaluation snapshot as of a time and query it"
+    "as_of": "export the evaluation snapshot as of a time and query it",
+    "overview": "call the MCP overview tool (view live or look) in the temp repository"
   },
   "cases": [
     {
@@ -2592,6 +2593,190 @@
           "asked_contains": [
             "利用状況の送信（テレメトリ）は入れない。",
             "No recorded decision. Not traced yet: run /sphica:trace "
+          ]
+        }
+      ]
+    },
+    {
+      "id": "overview-01",
+      "layer": "overview",
+      "lang": "ja",
+      "summary": "The live overview lists every active decision once, and a replaced one is gone from it",
+      "given": [
+        {
+          "case": "status-01"
+        },
+        {
+          "case": "capture-02"
+        }
+      ],
+      "when": {
+        "overview": {
+          "view": "live"
+        }
+      },
+      "then": [
+        {
+          "overview_contains": [
+            "- trace:s-ja-postgres/postgres (u",
+            "- trace:s-ja-telemetry/no-telemetry (u",
+            "That is the end of the list."
+          ],
+          "overview_lacks": ["trace:s-ja-storage/storage"]
+        }
+      ]
+    },
+    {
+      "id": "overview-02",
+      "layer": "overview",
+      "lang": "ja",
+      "summary": "A decision whose anchored file was deleted is listed as a gone file, apart from lost symbols",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "edit_file": {
+            "path": "src/db.ts",
+            "remove": true
+          }
+        }
+      ],
+      "when": {
+        "overview": {
+          "view": "look"
+        }
+      },
+      "then": [
+        {
+          "overview_contains": [
+            "## Files gone\n- trace:s-ja-storage/storage (decision): src/db.ts (applies_to)",
+            "## Symbol not found (the file is still there)\nnone"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "overview-03",
+      "layer": "overview",
+      "lang": "ja",
+      "summary": "A reconsider condition the owner stated is saved on the rejected option with the owner's words",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-replica",
+            "at": "2026-06-10T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "キャッシュは入れない。読み込みが遅いと言われるようになったら、キャッシュをもう一度考える。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-replica",
+          "record": {
+            "units": [
+              {
+                "key": "no-cache",
+                "kind": "decision",
+                "stance": "dont",
+                "text": "キャッシュは入れない",
+                "options": [
+                  {
+                    "text": "キャッシュ",
+                    "outcome": "rejected",
+                    "reconsider_when": "読み込みが遅いと言われるようになったら",
+                    "reconsider_quote": {
+                      "source": "session:s-ja-replica#1.owner",
+                      "quote": "読み込みが遅いと言われるようになったら、キャッシュをもう一度考える。"
+                    }
+                  }
+                ],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-replica#1.owner",
+                    "quote": "キャッシュは入れない。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-replica#1.owner",
+                    "quote": "キャッシュは入れない。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-replica/no-cache",
+          "lifecycle": "active"
+        },
+        {
+          "option": "キャッシュ",
+          "of": "trace:s-ja-replica/no-cache",
+          "outcome": "rejected",
+          "has_evidence": true
+        }
+      ]
+    },
+    {
+      "id": "overview-04",
+      "layer": "overview",
+      "lang": "ja",
+      "summary": "The look overview shows the condition to reconsider for someone to judge, without deciding it",
+      "given": [
+        {
+          "case": "overview-03"
+        }
+      ],
+      "when": {
+        "overview": {
+          "view": "look"
+        }
+      },
+      "then": [
+        {
+          "overview_contains": [
+            "- trace:s-ja-replica/no-cache: rejected option キャッシュ, reconsider when: 読み込みが遅いと言われるようになったら"
+          ],
+          "overview_lacks": ["unsupported"]
+        }
+      ]
+    },
+    {
+      "id": "overview-05",
+      "layer": "overview",
+      "lang": "ja",
+      "summary": "A rule line marked with a record that was replaced is flagged with its successor",
+      "given": [
+        {
+          "case": "status-01"
+        },
+        {
+          "edit_file": {
+            "path": "CLAUDE.md",
+            "create": "- 保存先は SQLite の 1 ファイル <!-- sphica: trace:s-ja-storage/storage -->\n"
+          }
+        }
+      ],
+      "when": {
+        "overview": {
+          "view": "look"
+        }
+      },
+      "then": [
+        {
+          "overview_contains": [
+            "- CLAUDE.md:1: trace:s-ja-storage/storage was superseded by trace:s-ja-postgres/postgres"
           ]
         }
       ]

@@ -166,13 +166,14 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(overview): name live records by id and group by the whole directory`
   - 結果: red（直す前）→ 見出しの数 actual 1 / expected 2 で失敗。直した後 `node --test test/overview.test.ts` → pass 6 / fail 0。`npm test` → 400 / 400 pass。`bun run check` → 0、`bun run verify:ai` → 0
 
-- [ ] T08: acceptance に overview の live と look と見直し条件の case を足し、新しい SQL の呼び出し箇所が全部通ることを確かめる
+- [x] T08: acceptance に overview の live と look と見直し条件の case を足し、新しい SQL の呼び出し箇所が全部通ることを確かめる
   - 種別: 追加
   - 計画: S8
   - 依存: T06（look が要る）, T07（rules Skill が要る）
-  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `scripts/check-sql-live.mjs`
   - 完了条件: `bun run verify` → 0（acceptance の case と `sql:reach` が全件）
   - コミット: `test(acceptance): cover the overview views and reconsider conditions`
+  - 結果: `bun run acceptance` → pass 67 / fail 0（overview-01〜05: live に置き換え後の決定だけが出る、消したファイルが Files gone に出て Symbol not found は none、持ち主の言った見直し条件が引用付きで保存され active、look に条件が unsupported なしで出る、置き換えられた記録の印を付けた CLAUDE.md の行が後継付きで出る）。`bun run verify` → 0（`sql:reach` 170 / 170、`sql:live` 8 / 8）。`npm test` → 全件 pass
 
 ## 記録
 - 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）
@@ -192,3 +193,5 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T14 / T06 の Codex レビュー F1〜F5（返事全体の上限が無い、読めないファイルを none と出す、置き換えを 20 段で打ち切る、300 字を超えるキーのマーカーを見落とす、2,000 件を超えた件数を出さない）/ 修正タスク T14 を足した。F6（有効な制約の却下案の条件も出る）は採らない: 制約にも却下案と条件を持てるので、出すほうが正しい
 - 2026-09-29 / T15 / T13 の Codex レビュー F1（長いキーを 200 バイトで切ると read できない）・F2（切り詰めた見出しが一致すると別のディレクトリがまとまる）、T07 の Codex レビュー F1（README は制約だけ、Skill は決定も対象）・F2（キーを search しても見つからない）/ 修正タスク T15 を足した。決定も下書きの対象に残し、README を Skill に合わせた
 - 2026-09-29 / T15 / T07 に依存するのに P3 に置いていた（検査の失敗をパイプで見逃してコミットした）/ T07 の後ろへ移した
+- 2026-09-29 / T08 / `sql:live` が init の移行先を revision 2 と固定で見ていて、revision 3 で落ちた / db/schema.sql の user_version を読むように直し、変更欄に `scripts/check-sql-live.mjs` を足した（前: 無し）
+- 2026-09-29 / T08 / knowledge-schema Skill は新しい挙動の acceptance の case を先に足して落ちるのを確かめると言うが、この計画では case を実装の後の T08 に置いたので、実装前に落ちることは確かめていない / 記録だけ残す

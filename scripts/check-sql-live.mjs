@@ -163,7 +163,11 @@ await withTempDir(async (dir) => {
     old.close();
     const oldRepo = makeRepo(home);
     const migrated = note("init (revision 1)", runCli(["init", "--cwd", oldRepo], home, covDir));
-    if (!/Migrated: .*\(revision 1 → 2\)/.test(migrated.out))
+    // The revision db/schema.sql is at now, so a new revision keeps this lane checking the whole chain of migrations
+    const current = Number(
+      /pragma user_version = (\d+);/.exec(fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8"))?.[1],
+    );
+    if (!new RegExp(`Migrated: .*\\(revision 1 → ${current}\\)`).test(migrated.out))
       failures.push(`init does not migrate a revision 1 database\n${migrated.out.slice(0, 600)}`);
     runHook(
       {
@@ -184,7 +188,7 @@ await withTempDir(async (dir) => {
     const look = new DatabaseSync(file, { readOnly: true });
     const n = look.prepare("select count(*) as n from source where text = 'after the migration'").get().n;
     const revision = look.prepare("pragma user_version").get().user_version;
-    if (revision !== 2) failures.push(`init left the database at revision ${revision}`);
+    if (revision !== current) failures.push(`init left the database at revision ${revision}, not ${current}`);
     look.close();
     if (n !== 1) failures.push(`capture did not write into the migrated database (${n} rows)`);
   }
