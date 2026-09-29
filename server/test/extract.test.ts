@@ -1304,7 +1304,7 @@ test("trace: the live records go on a page of their own when they do not fit bes
   }
 });
 
-test("trace: a page stays within its size for emoji text, and a long edit list is cut to its first lines", async () => {
+test("trace: a page stays within its size for emoji text, and every edit of a long session is listed", async () => {
   const db: TempDb = tempDb();
   try {
     const p = project(db);
@@ -1325,8 +1325,9 @@ test("trace: a page stays within its size for emoji text, and a long edit list i
     let page = first;
     for (let m = /after: "(s\d+)"/.exec(page); m; m = /after: "(s\d+)"/.exec(page))
       page = await contextText(db.ingest, run, p, null, m[1]);
-    assert.match(page, /- src\/file-99\.ts[\s\S]*- and 50 more edits/);
-    assert.doesNotMatch(page, /src\/file-100\.ts/);
+    // Every edit is listed: a long session edits more than a hundred times, and the anchors come from these paths
+    assert.match(page, /- src\/file-0\.ts[\s\S]*- src\/file-149\.ts/);
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
   } finally {
     await db.done();
   }
@@ -1366,7 +1367,7 @@ test("trace: a tail too long for a page is cut, with the number of lines left ou
     assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
     assert.match(
       page,
-      /- and \d+ more lines left out: find the records this session may replace with search/,
+      /- and \d+ more lines left out: find records with search, and every field definition with the fields tool/,
     );
   } finally {
     await db.done();

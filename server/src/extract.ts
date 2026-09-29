@@ -46,9 +46,6 @@ const PAGE_CHARS = 20_000;
  * server's process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
  */
 const shownTo = new Map<string, { sources: Set<number>; cursors: Set<string> }>();
-/** Lines the last page lists at most, so the edits and live records alone stay within a page. */
-const TAIL_EDITS = 100;
-const TAIL_LIVE = 150;
 /** Runs remembered at once: a run read but never saved is forgotten after this many newer ones, and its sources then stay pending. */
 const SHOWN_RUNS = 100;
 
@@ -290,8 +287,7 @@ async function scopeOf(
     tail: edits.length
       ? [
           "Edits observed (paths only; not proof of an implementation):",
-          ...edits.slice(0, TAIL_EDITS).map((e) => `- ${e.path} (${e.via}, ${e.turn_id ?? "no turn"})`),
-          ...(edits.length > TAIL_EDITS ? [`- and ${edits.length - TAIL_EDITS} more edits`] : []),
+          ...edits.map((e) => `- ${e.path} (${e.via}, ${e.turn_id ?? "no turn"})`),
         ]
       : [],
   };
@@ -350,18 +346,11 @@ export async function contextText(
       : []),
     "Live records of this project (supersedes and conflicts take these keys):",
     ...(live.length
-      ? live
-          .slice(0, TAIL_LIVE)
-          .map(
-            (u) =>
-              `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}) ${inline(u.text).slice(0, 160)}`,
-          )
+      ? live.map(
+          (u) =>
+            `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}) ${inline(u.text).slice(0, 160)}`,
+        )
       : ["None."]),
-    ...(live.length > TAIL_LIVE
-      ? [
-          `- and ${live.length - TAIL_LIVE} more live records: find the ones this session may replace with search`,
-        ]
-      : []),
   ];
   // The tail is cut too when it alone would not fit a page
   const fitted: string[] = [];
@@ -369,7 +358,7 @@ export async function contextText(
   for (const [i, line] of tail.entries()) {
     if (tailSize + line.length + 1 > PAGE_CHARS - 200) {
       fitted.push(
-        `- and ${tail.length - i} more lines left out: find the records this session may replace with search`,
+        `- and ${tail.length - i} more lines left out: find records with search, and every field definition with the fields tool`,
       );
       break;
     }
@@ -453,7 +442,7 @@ export async function saveText(
   root: string | null,
   record: unknown,
 ): Promise<string> {
-  return inTransaction(db, async (trx) => {
+  const text = await inTransaction(db, async (trx) => {
     const run = await bound(trx, id, projectId);
     const scope = await scopeOf(trx, run, root);
     const lines: string[] = [];
@@ -488,7 +477,6 @@ export async function saveText(
               scope.looked.filter((s) => shown.has(s) || cited.has(s)),
             );
           });
-    shownTo.delete(id);
     return [
       ...saved.active.map((k) => `✓ ${k} active`),
       ...saved.superseded.map((k) => `✓ ${k} superseded`),
@@ -498,4 +486,7 @@ export async function saveText(
       "✓ saved",
     ].join("\n");
   });
+  // Forgotten only once the save committed: a failed commit leaves the run retryable with what it was shown
+  shownTo.delete(id);
+  return text;
 }
