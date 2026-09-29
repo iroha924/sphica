@@ -3,7 +3,7 @@ name: rules
 description: Drafts lines for CLAUDE.md, AGENTS.md, or .claude/rules from recorded constraints and decisions the owner picks, each line ending with a marker holding its record key, so Sphica's overview (view look) can flag the line once the record is replaced or withdrawn. It prints the draft and never edits a file. Use only when the user explicitly asks for rule text from Sphica's records.
 argument-hint: "<which constraints, or empty to choose from the list>"
 disable-model-invocation: true
-allowed-tools: mcp__plugin_sphica_sphica__overview, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
+allowed-tools: mcp__plugin_sphica_sphica__overview, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # rules — draft instruction lines from recorded constraints

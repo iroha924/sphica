@@ -3,7 +3,7 @@ name: glean
 description: Adds evidence and corrections to existing Sphica records, or keeps something the owner remembers, only from sources the owner points to (an issue or pull request, a file in the repository, the owner's own words now). Asks the owner for the source before saving anything. Use only when the user explicitly asks.
 argument-hint: "<what to add or correct>"
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__glean_begin, mcp__plugin_sphica_record__glean_fetch, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__glean_begin, mcp__plugin_sphica_record__glean_fetch, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # glean — add what was found later, with its source

@@ -94,7 +94,7 @@ base: main
 
 どの Skill でも読み取りツールが拒否されず、本文と許可のずれが検査で落ちる
 
-- [ ] T07: 全 Skill に読み取りツールを許可し、本文と許可のずれを検査する
+- [x] T07: 全 Skill に読み取りツールを許可し、本文と許可のずれを検査する
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -102,6 +102,7 @@ base: main
   - red: 検査を先に足して `bun run verify:ai` → rules・harvest・review などで `status` などが許可に無い、trace で `AskUserQuestion` が許可に無い、で落ちる
   - 完了条件: `bun run verify:ai` → 0 で終わる。どれか 1 つの Skill から `mcp__plugin_sphica_sphica__status` を消すと落ちる（戻す）
   - コミット: `fix(skills): allow the read tools in every Skill and check body against allowed-tools`
+  - 結果: red: 検査を先に足して `bun run verify:ai` → 6 つの Skill で `status` が無い、review で `search`・`read`・`review_select`・`review_check` が無い、trace で `AskUserQuestion` が無い、で落ちた。直した後: `bun run verify:ai` → 0。rules から `status` を消すと「allowed-tools lacks mcp__plugin_sphica_sphica__status」、登録の無い `mcp__plugin_sphica_sphica__nope` を足すと「which no Sphica server registers」で落ち、戻して 0。`bun run verify` → 0
 
 ## P4: 0.6.5 として出す
 
@@ -121,3 +122,4 @@ base: main
 2026-09-29 / T05 / テストの発言の既定日時（2026-09-10）が実際の時計では 10 月 10 日以降に古くなる / 件数・一覧・status を呼ぶテストに固定の now を渡し、時刻を差し込めないセッション開始のテストは発言を今日の日時にした。SQL の呼び出し箇所はすべてテストが流したので `scripts/lib/sql-call-sites.mjs` は変えず、変更欄から外した
 
 2026-09-29 / T09 / T02・T04 の Codex レビュー: 同じ印の行が重複すると後ろの違いを見逃す（低）、SQL の複数行の文字列の中の `--` 行を誤検出（中）、CR だけの改行で行番号がずれる（低） / 1 件目と 3 件目は T09 を足して直した。2 件目は見送り: 誤検出は検査が落ちるだけで黙って通らず、今の SQL にそういう文字列は無く、直すには SQL の文字列の解釈が要る
+2026-09-29 / T07 / trace の本文は AskUserQuestion をバッククォートなしで書いていて、インラインコードだけを拾う形では当たらなかった / AskUserQuestion は普通の単語と紛れないので、本文のどこにあっても拾うようにした

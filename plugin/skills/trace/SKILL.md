@@ -3,7 +3,7 @@ name: trace
 description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use only when the user explicitly asks.
 argument-hint: "[pending]"
 disable-model-invocation: true
-allowed-tools: mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # trace — keep what a session decided and implemented

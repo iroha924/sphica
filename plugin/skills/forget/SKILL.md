@@ -3,7 +3,7 @@ name: forget
 description: Removes sources the owner chooses from Sphica (a message, a pull request item, a file excerpt), with their search index entries and the bytes left in the database file, and judges the records that cited them again. The owner confirms in a dialog before anything is removed. Use only when the user explicitly asks to forget or delete something Sphica captured.
 argument-hint: "<what to forget>"
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_record__forget_preview, mcp__plugin_sphica_record__forget_apply
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_record__forget_preview, mcp__plugin_sphica_record__forget_apply, mcp__plugin_sphica_sphica__status
 ---
 
 # forget — remove what should not have been kept
