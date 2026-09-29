@@ -22,13 +22,14 @@ base: main
 
 参照と経緯を書かない規則が機械で守られ、既存の違反が無くなる
 
-- [ ] T01: 既存の plan と tasks 14 ファイルを消す
+- [x] T01: 既存の plan と tasks 14 ファイルを消す
   - 種別: 削除
   - 計画: S8
   - 依存: なし
   - 変更: `.claude/plans/2026/09/`
   - 完了条件: `find .claude/plans -type f` → この計画の 2 ファイルだけ
   - コミット: `chore(plans): remove finished plans and task lists`
+  - 結果: `git rm` で 14 ファイルを消し、`find .claude/plans -type f` → この計画の plan と tasks の 2 ファイルだけ
 
 - [ ] T02: コメント規則を書き換え、共通の 3 行が両ファイルで一致することを検査する
   - 種別: 変更
