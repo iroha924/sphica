@@ -82,6 +82,12 @@ const LEAKS: [string, string][] = [
   ["OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123", "sk-proj-abc"],
   ["VOYAGE=pa-abcdefghijklmnopqrstuvwxyz0123", "pa-abcdef"],
   ["gh: ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_abc"],
+  // Markdown emphasis puts an underscore right before the token
+  [
+    "_ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.c2lnbmF0dXJlLXZhbHVl_",
+    "eyJpc3MiOiJhcHAiLCJp",
+  ],
+  ["_ghp_abcdefghijklmnopqrstuvwxyz0123456789_", "ghp_abc"],
   // Stateless installation tokens are a ghs_-prefixed JWT with two dots, up to about 520 characters
   [
     "ログに出ていた ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.Zm9vYmFyLWJhei1xdXV4X3NpZ25hdHVyZS12YWx1ZS0xMjM0NTY3ODkw",
