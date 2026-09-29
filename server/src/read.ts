@@ -68,7 +68,7 @@ async function describe(
   root: string | null,
   asOf: string | undefined,
 ): Promise<string> {
-  const [options, evidence, adoption, anchors, links, states] = await Promise.all([
+  const [options, evidence, adoption, anchors, links, states, fields] = await Promise.all([
     db
       .selectFrom("unit_option")
       .select(["id", "text", "outcome", "why", "reconsider_when"])
@@ -141,6 +141,28 @@ async function describe(
       .where("unit_id", "=", u.id)
       .orderBy("id")
       .execute(),
+    db
+      .selectFrom("unit_field as f")
+      .innerJoin("field_def as d", "d.id", "f.field_def_id")
+      .innerJoin("source as s", "s.id", "f.source_id")
+      .where("f.unit_id", "=", u.id)
+      .where("f.added_at", "<=", asOf ?? "9999")
+      .select([
+        "d.name",
+        "f.value",
+        "f.span_start",
+        "f.span_end",
+        "s.id as source",
+        "s.kind",
+        "s.artifact",
+        "s.author_kind",
+        "s.author_login",
+        "s.author_association",
+        "s.created_at",
+        "s.text",
+      ])
+      .orderBy("f.id")
+      .execute(),
   ]);
   // As of a past time, what happened later has not happened: retractions, retired anchors, and resolved conflicts after it read as open,
   // and the lifecycle is the last state reached by then
@@ -197,6 +219,13 @@ async function describe(
           )
         : ["  none: nobody with the standing to adopt it has, so it is a candidate"]),
     );
+  }
+  if (fields.length) {
+    out.push("Fields:");
+    for (const f of fields)
+      out.push(
+        `  - ${f.name}: ${inline(f.value)} (s${f.source} ${f.kind} ${f.artifact}, ${speaker(f)}, ${f.created_at}): "${inline(cut(f.text, f.span_start, f.span_end))}"`,
+      );
   }
   const live = anchors.filter((a) => !a.retired_at);
   if (live.length) {

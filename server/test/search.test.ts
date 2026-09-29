@@ -715,3 +715,36 @@ test("a rejected option's reconsider condition is searchable by its own words", 
     await db.done();
   }
 });
+
+test("read shows each field value with the words it was quoted from and who said them", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Track the tenant. acme is slow, so cache in Redis." });
+    await save(db, p, {
+      field_defs: [
+        {
+          name: "tenant",
+          type: "text",
+          label: "Tenant",
+          description: "The tenant affected",
+          quote: { source: `s${m}`, quote: "Track the tenant." },
+        },
+      ],
+      units: [
+        decision("cache", m, "cache in Redis.", {
+          fields: [{ name: "tenant", value: "acme", quote: { source: `s${m}`, quote: "acme is slow" } }],
+        }),
+      ],
+    });
+    const text = (await readUnit(db.reader, p, "trace:ext-s1/cache", null)) ?? "";
+    assert.match(
+      text,
+      new RegExp(
+        `Fields:\\n  - tenant: acme \\(s${m} session_message session:s1, the owner, [0-9T:.Z-]+\\): "acme is slow"`,
+      ),
+    );
+  } finally {
+    await db.done();
+  }
+});

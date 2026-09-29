@@ -66,13 +66,14 @@ trace の保存で定義と値を検査して書き、値で検索できる
 
 read と `/sphica:fields` で定義と値が見える
 
-- [ ] T05: `read` に値と引用の `Fields:` を出す
+- [x] T05: `read` に値と引用の `Fields:` を出す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（新しい表が要る）
   - 変更: `server/src/read.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/search.test.ts` → read に name、値、source ref、引用文、話し手、日時が出る。`bun run verify` → 0
   - コミット: `feat(read): show field values with their quotes`
+  - 結果: `cd server && node --test --test-timeout=60000 test/search.test.ts` → 14 pass / 0 fail（`Fields:` の下に `tenant: acme (s<id> session_message session:s1, the owner, <日時>): "acme is slow"`）。HEAD の read.ts では新しい 1 件が落ちる。`bun run verify` → 0（`SQL: tests ran 187 / 187 sites`）
 
 - [ ] T06: 読み取りの MCP に `fields` ツールを足す
   - 種別: 追加
