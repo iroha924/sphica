@@ -143,16 +143,6 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(overview): bound the whole look reply and count every place it could not check`
   - 結果: red（直す前）→ `/- 1 code locations whose file could not be scanned/` に一致せず失敗。直した後 `node --test test/overview.test.ts` → pass 5 / fail 0（64 KiB 未満、Files gone に「100 more not shown」、25 段の置き換えの先が v25、400 字のセッション id のキーの後継が出る）。`npm test` → 399 / 399 pass。`bun run check` → 0、`sql:reach` → 170 / 170
 
-- [x] T15: live の行に u<id> を添え、ディレクトリを切り詰める前の名前でまとめ、rules Skill はキーを直接 read する
-  - 種別: 修正
-  - 計画: S5, S7
-  - 依存: T13（行の切り詰めが要る）, T07（rules Skill が要る）
-  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`, `plugin/skills/rules/SKILL.md`, `README.md`, `README.ja.md`
-  - red: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 先頭 130 字が同じ 2 つのディレクトリが 1 つの見出しにまとまり（見出し 1 件）落ちる
-  - 完了条件: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 全部 pass。`bun run verify:ai` → 0
-  - コミット: `fix(overview): name live records by id and group by the whole directory`
-  - 結果: red（直す前）→ 見出しの数 actual 1 / expected 2 で失敗。直した後 `node --test test/overview.test.ts` → pass 6 / fail 0。`npm test` → 400 / 400 pass。`bun run check` → 0、`bun run verify:ai` → 0
-
 ## P4: 規約の下書きと受け入れ
 
 持ち主が選んだ制約から規約の下書きが出て、両ホストの受け入れ case が揃う。
@@ -165,6 +155,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - 完了条件: `bun run verify:ai` → 0。`cd server && node --test --test-timeout=60000 test/plugin.test.ts` → 全部 pass（rules Skill が明示の呼び出しだけで、Codex の policy が対である）
   - コミット: `feat(rules): draft rule lines for constraints the owner picks, marked with their record keys`
   - 結果: `bun run verify:ai` → 0（plugin Skills 6、`disable-model-invocation: true` と `allow_implicit_invocation: false` の対を検査が確かめる）。`node --test test/plugin.test.ts` → pass 28 / fail 0。`bun run english` → 0
+
+- [x] T15: live の行に u<id> を添え、ディレクトリを切り詰める前の名前でまとめ、rules Skill はキーを直接 read する
+  - 種別: 修正
+  - 計画: S5, S7
+  - 依存: T13（行の切り詰めが要る）, T07（rules Skill が要る）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`, `plugin/skills/rules/SKILL.md`, `README.md`, `README.ja.md`
+  - red: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 先頭 130 字が同じ 2 つのディレクトリが 1 つの見出しにまとまり（見出し 1 件）落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 全部 pass。`bun run verify:ai` → 0
+  - コミット: `fix(overview): name live records by id and group by the whole directory`
+  - 結果: red（直す前）→ 見出しの数 actual 1 / expected 2 で失敗。直した後 `node --test test/overview.test.ts` → pass 6 / fail 0。`npm test` → 400 / 400 pass。`bun run check` → 0、`bun run verify:ai` → 0
 
 - [ ] T08: acceptance に overview の live と look と見直し条件の case を足し、新しい SQL の呼び出し箇所が全部通ることを確かめる
   - 種別: 追加
@@ -191,3 +191,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T07 / Claude と Codex の呼び出し設定の対は `verify:ai`（check-ai-config.mjs）が全 plugin Skill に対して見ていて、plugin.test.ts に足すものが無かった。README の機能一覧に overview と rules を足した / 変更欄を `server/test/plugin.test.ts` から `README.md`, `README.ja.md` に変えた
 - 2026-09-29 / T14 / T06 の Codex レビュー F1〜F5（返事全体の上限が無い、読めないファイルを none と出す、置き換えを 20 段で打ち切る、300 字を超えるキーのマーカーを見落とす、2,000 件を超えた件数を出さない）/ 修正タスク T14 を足した。F6（有効な制約の却下案の条件も出る）は採らない: 制約にも却下案と条件を持てるので、出すほうが正しい
 - 2026-09-29 / T15 / T13 の Codex レビュー F1（長いキーを 200 バイトで切ると read できない）・F2（切り詰めた見出しが一致すると別のディレクトリがまとまる）、T07 の Codex レビュー F1（README は制約だけ、Skill は決定も対象）・F2（キーを search しても見つからない）/ 修正タスク T15 を足した。決定も下書きの対象に残し、README を Skill に合わせた
+- 2026-09-29 / T15 / T07 に依存するのに P3 に置いていた（検査の失敗をパイプで見逃してコミットした）/ T07 の後ろへ移した
