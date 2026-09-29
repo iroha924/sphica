@@ -36,7 +36,8 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
 3. **Read**: `record_context` with the run. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,
    the edits observed, and the project's live records. `(traced before)` marks messages an earlier trace already looked at.
    A long session comes in pages: when a page ends with `call record_context with after: "s<N>"`, call it again with that `after`, until
-   the last page (the one with the live records). Saving marks only the messages you were shown as looked at; the rest stay pending.
+   the last page (the one with the live records). Saving marks as looked at only the messages you were shown and those you quote; the
+   rest stay pending.
    Use `search` and `read` to look at older records this session may replace
 4. **Check**: `record_check` with the run and the record below as `record`. Errors refuse the save; fix and check again. Warnings say what will be
    left out, quarantined, or kept as a candidate, and why

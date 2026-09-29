@@ -174,7 +174,8 @@ server.registerTool(
     title: "What a run may cite",
     description:
       "Prints the run's sources with their refs (s<id>) and this project's live records, a page at a time. A page that ends with " +
-      "'call record_context with after' names the after to pass for the next one; only sources shown count as looked at when saving.",
+      "'call record_context with after' names the after to pass for the next one. Saving counts as looked at only the sources shown " +
+      "and those the record quotes.",
     inputSchema: {
       run: RUN,
       after: z

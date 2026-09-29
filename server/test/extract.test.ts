@@ -1218,7 +1218,7 @@ test("trace: context comes in pages, and saving marks as looked at only the mess
     // Reading only the first page and saving leaves the unread messages waiting for the next trace
     const first = await beginTrace(db.ingest, p, "s1");
     const page = await contextText(db.ingest, first, p, null);
-    assert.ok(page.length < 50_000, `a page of ${page.length} characters`);
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
     assert.match(page, /\d+ more sources follow: call record_context with after: "s\d+"/);
     assert.doesNotMatch(page, /Live records of this project/);
     assert.doesNotMatch(page, /発言 39:/);
@@ -1250,11 +1250,11 @@ test("trace: one message longer than a page is cut with a pointer to read the re
   const db: TempDb = tempDb();
   try {
     const p = project(db);
-    const long = message(db, p, { id: "m1", text: `始まり ${"い".repeat(60_000)} 終わり` });
+    const long = message(db, p, { id: "m1", text: `始まり ${"い".repeat(30_000)} 終わり` });
     const other = message(db, p, { id: "m2", text: "Postgres は使わない。", sent: "2026-09-10T00:01:00Z" });
     const run = await beginTrace(db.ingest, p, "s1");
     const page = await contextText(db.ingest, run, p, null);
-    assert.ok(page.length < 50_000, `a page of ${page.length} characters`);
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
     const rest = new RegExp(`read (s${long}@\\d+) for the rest`).exec(page)?.[1] ?? "";
     assert.ok(rest, page.slice(-200));
     assert.doesNotMatch(page, /終わり/);
@@ -1286,7 +1286,7 @@ test("trace: the live records go on a page of their own when they do not fit bes
   const db: TempDb = tempDb();
   try {
     const p = project(db);
-    message(db, p, { id: "m1", text: "う".repeat(39_900) });
+    message(db, p, { id: "m1", text: "う".repeat(19_900) });
     const run = await beginTrace(db.ingest, p, "s1");
     const first = await contextText(db.ingest, run, p, null);
     const next = /The live records follow: call record_context with after: "(s\d+)"/.exec(first)?.[1];
@@ -1316,13 +1316,54 @@ test("trace: a page stays within its size for emoji text, and a long edit list i
       });
     const run = await beginTrace(db.ingest, p, "s1");
     const first = await contextText(db.ingest, run, p, null);
-    assert.ok(first.length < 41_000, `a page of ${first.length} characters`);
+    assert.ok(first.length < 21_000, `a page of ${first.length} characters`);
     assert.match(first, new RegExp(`read s${emoji}@\\d+ for the rest`));
     let page = first;
     for (let m = /after: "(s\d+)"/.exec(page); m; m = /after: "(s\d+)"/.exec(page))
       page = await contextText(db.ingest, run, p, null, m[1]);
     assert.match(page, /- src\/file-99\.ts[\s\S]*- and 50 more edits/);
     assert.doesNotMatch(page, /src\/file-100\.ts/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("trace: a tail too long for a page is cut, with the number of lines left out", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const said = message(db, p, { id: "m1", text: "Track these fields." });
+    const r = Number(
+      db.owner
+        .prepare(
+          "insert into extraction_run (project_id, origin, target, status, started_at) values (?, 'trace', 'session:s1', 'saved', '2026-09-10T00:00:00.000Z') returning id",
+        )
+        .get(p)?.id,
+    );
+    for (let i = 0; i < 60; i++)
+      insert(db, "field_def", {
+        project_id: p,
+        name: `field_${i}`,
+        type: "text",
+        label: `Field ${i}`,
+        description: "d".repeat(500),
+        source_id: said,
+        span_start: 0,
+        span_end: 5,
+        run_id: r,
+        added_at: "2026-09-10T00:00:00.000Z",
+      });
+    const run = await beginTrace(db.ingest, p, "s1");
+    let page = await contextText(db.ingest, run, p, null);
+    for (let m = /after: "(s\d+)"[^\n]*$/.exec(page); m; m = /after: "(s\d+)"[^\n]*$/.exec(page)) {
+      assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+      page = await contextText(db.ingest, run, p, null, m[1]);
+    }
+    assert.ok(page.length < 21_000, `a page of ${page.length} characters`);
+    assert.match(
+      page,
+      /- and \d+ more lines left out: find the records this session may replace with search/,
+    );
   } finally {
     await db.done();
   }

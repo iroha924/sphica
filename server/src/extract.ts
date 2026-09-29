@@ -36,10 +36,10 @@ import {
 const newRunId = () => crypto.randomBytes(9).toString("base64url");
 
 /**
- * Characters of sources one context page carries. Hosts cut or move a larger reply aside (Claude Code at 25,000 tokens by default), and
- * an agent that never read a message must not mark it traced.
+ * Characters one context page carries. Hosts cut or move a larger reply aside (Claude Code at 25,000 tokens by default), and an agent
+ * that never read a message must not mark it traced. Kept under the token limit even at one token per character (CJK text).
  */
-const PAGE_CHARS = 40_000;
+const PAGE_CHARS = 20_000;
 /**
  * The sources each run was shown, by run id. Saving marks only these (and what the record cites) as looked at. It lives in the record
  * server's process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
@@ -358,7 +358,19 @@ export async function contextText(
         ]
       : []),
   ];
-  const tailSize = tail.join("\n").length;
+  // The tail is cut too when it alone would not fit a page
+  const fitted: string[] = [];
+  let tailSize = 0;
+  for (const [i, line] of tail.entries()) {
+    if (tailSize + line.length + 1 > PAGE_CHARS - 200) {
+      fitted.push(
+        `- and ${tail.length - i} more lines left out: find the records this session may replace with search`,
+      );
+      break;
+    }
+    fitted.push(line);
+    tailSize += line.length + 1;
+  }
   // A source longer than a page is cut: its heading line stays, and the rest is read with read s<id>@<byte>
   const entry = (it: { id: number; text: string }) => {
     if (it.text.length <= PAGE_CHARS) return it.text;
@@ -396,9 +408,9 @@ export async function contextText(
   if (more && last)
     return [
       ...lines,
-      `${left > 0 ? `${left} more ${left === 1 ? "source follows" : "sources follow"}` : "The live records follow"}: call record_context with after: "s${last.id}" and read every page before saving. Only the sources you were shown count as looked at.`,
+      `${left > 0 ? `${left} more ${left === 1 ? "source follows" : "sources follow"}` : "The live records follow"}: call record_context with after: "s${last.id}" and read every page before saving. Only the sources you were shown, and those your record quotes, count as looked at.`,
     ].join("\n");
-  return [...lines, ...tail].join("\n");
+  return [...lines, ...fitted].join("\n");
 }
 
 /** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
