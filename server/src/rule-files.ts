@@ -88,9 +88,11 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
   const paths: string[] = [];
   let entries = 0;
   let unread = 0;
-  let incomplete: string | null = null;
+  let tooDeep = false;
+  // Only the entry budget stops the whole walk; a branch past the depth cap is skipped and its siblings are still read
+  let stopped = false;
   const visit = (rel: string, depth: number) => {
-    if (incomplete) return;
+    if (stopped) return;
     let list: fs.Dirent[];
     try {
       list = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
@@ -100,7 +102,7 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
     }
     for (const d of list) {
       if (++entries > RULE_LIMITS.entries) {
-        incomplete = `stopped after ${RULE_LIMITS.entries} directory entries`;
+        stopped = true;
         return;
       }
       const child = rel ? `${rel}/${d.name}` : d.name;
@@ -111,13 +113,16 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
         d.name !== "node_modules" &&
         (!d.name.startsWith(".") || d.name === ".claude")
       ) {
-        if (depth >= RULE_LIMITS.depth)
-          incomplete ??= `did not look deeper than ${RULE_LIMITS.depth} directories`;
+        if (depth >= RULE_LIMITS.depth) tooDeep = true;
         else visit(child, depth + 1);
       }
     }
   };
   visit("", 1);
-  if (!incomplete && unread) incomplete = `could not read ${unread} director${unread === 1 ? "y" : "ies"}`;
-  return { paths, incomplete };
+  const why = [
+    ...(stopped ? [`stopped after ${RULE_LIMITS.entries} directory entries`] : []),
+    ...(tooDeep ? [`did not look deeper than ${RULE_LIMITS.depth} directories`] : []),
+    ...(unread ? [`could not read ${unread} director${unread === 1 ? "y" : "ies"}`] : []),
+  ];
+  return { paths, incomplete: why.length ? why.join("; ") : null };
 }

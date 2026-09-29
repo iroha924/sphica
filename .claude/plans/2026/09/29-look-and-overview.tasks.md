@@ -195,6 +195,16 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `fix(overview): look up marker keys in slices under SQLite's variable limit`
   - 結果: red（直す前）→ `Error: too many SQL variables` で失敗。直した後 `node --test test/overview.test.ts` → pass 7 / fail 0。`bun run verify` → 0（`sql:reach` 170 / 170、`sql:live` 8 / 8、acceptance 67 / 67）。`npm test` → 402 / 402 pass
 
+- [x] T18: git の外のたどりで、深さの上限に当たった枝のあとも兄弟のディレクトリを読む
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T12（たどりの数え方が要る）
+  - 変更: `server/src/rule-files.ts`, `server/test/rule-files.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 深い枝 `a/...` のあとの `z/AGENTS.md` が読まれず、files が空で落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/rule-files.test.ts` → 全部 pass
+  - コミット: `fix(overview): keep walking siblings after a branch past the depth cap`
+  - 結果: red（直す前）→ files が [] で失敗。直した後 `node --test test/rule-files.test.ts` → pass 12 / fail 0。`bun run check` → 0
+
 ## 記録
 - 2026-09-29 / T01 / `sphica init` の移行テストが revision 2 を固定で期待していた / 変更欄に `server/test/admin.test.ts` を足した（前: 無し）
 - 2026-09-29 / T02 / glean の add_evidence も同じ role 一覧を使っていて、`reconsiders` を渡すと DB のトリガーで分かりにくく落ちる / 入力で除き、変更欄に `server/src/glean.ts`, `server/test/extract.test.ts` を足した（前: 無し）
@@ -218,3 +228,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T16 / T14 の Codex レビュー F1: 読めない通常ファイルで readText が EACCES を投げ、look 全体（と既存の read）が落ちる / 修正タスク T16 を足した。T15 の Codex レビュー F1（全角 180 字まで同じ 2 つのディレクトリが、切り詰めた見出しとパスで区別できない）は端の入力なので採らない
 - 2026-09-29 / T17 / 全差分（main..eabb78b）の Codex レビュー: 指摘 1 件（異なるキーのマーカーが 32,766 を超えると look が SQL の変数の上限で落ちる）/ 修正タスク T17 を足した
 - 2026-09-29 / T17 / T17 だけの Codex 再レビュー: 1 件（数万件のマーカーで look は見出しごとに 50 行と件数しか出さず、続きを取る手段が無い）。look は上限付きで超えた分を件数で言う形が計画で合意した設計（C14）で、入力も端のもの / 採らない。レビューの依頼文に「件数によらず全部出す」と書いたのが強すぎた
+- 2026-09-29 / T18 / PR #225 の GitHub Codex review（e4e49ac）P2: 深さの上限に当たると以降のたどりを全部止める / 修正タスク T18 を足した

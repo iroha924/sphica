@@ -190,3 +190,14 @@ test("a file that cannot be read is unknown to the anchor check, not an error", 
     fs.chmodSync(path.join(root, "secret.ts"), 0o644);
   }
 });
+
+test("outside git, a branch past the depth cap does not stop the walk from reading the directories after it", () => {
+  put(`a/${Array.from({ length: RULE_LIMITS.depth }, (_, i) => `l${i}`).join("/")}/CLAUDE.md`);
+  put("z/AGENTS.md");
+  const r = ruleFiles(root);
+  assert.deepEqual(
+    r.files.map((f) => f.path),
+    ["z/AGENTS.md"],
+  );
+  assert.match(String(r.incomplete), /did not look deeper than/);
+});
