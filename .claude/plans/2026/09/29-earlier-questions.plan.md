@@ -45,7 +45,7 @@ approved_at: 2026-09-29
 - `searchSources`（`server/src/search.ts`）は「語の半分を超える」一致を上限と `stopped` 付きで行う。順番を 1 つの SQL で取ってから中身を引く
 - `searchUnits` の後継は 1 段だけたどる（`server/src/search.ts` の後継のループ）。A → B → C と置き換えると、A の一致から C に届かない（Codex がコードで確認）
 - MCP の読み取りサーバーのツールは status・search・read（`server/src/mcp.ts`）。ツールの一覧は `server/test/plugin.test.ts` で固定
-- ホストのセッション id は `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`（`server/src/extract.ts` の `sessionOf`）。読み取りの MCP のプロセスで取れるかは未検証（取れなければ今のセッションを除けないだけ）
+- ホストのセッション id は `CLAUDE_CODE_SESSION_ID` / `CODEX_THREAD_ID`（`server/src/extract.ts` の `sessionOf`）。Claude Code の読み取りの MCP のプロセスは `CLAUDE_CODE_SESSION_ID` を持つ（2026-09-29、review-shipping が `ps` で確認）。Codex（codex-cli 0.157.1）が起動する MCP のプロセスには `CODEX_THREAD_ID` も他のセッション id も無く、1 つのプロセスが複数のスレッドに使われうる。エージェントのシェルには `CODEX_THREAD_ID` がある（同じく確認）。`/clear` や `/resume` の後も正しいかは未検証
 - `server/src/text.ts` はひらがなだけの語を索引しない（u29）
 
 ## 方針
@@ -72,6 +72,8 @@ approved_at: 2026-09-29
 ### MCP（`server/src/mcp.ts`）
 
 - `search` に `asked: boolean` を足す。`sources: true` か `path` と一緒なら断る文を返す
+- `search` に任意の `session`（今のセッションの id）を足す。`asked` で使い、渡された id と環境変数の id（両方のホストの形）を除く。Codex では MCP に id が渡らないので、ツールと引数の説明、MCP サーバーの instructions に「asked: true では、シェルの `CODEX_THREAD_ID` を session に渡す」と書く
+- 今のセッションが分からない（`session` も環境変数も無い）ときは推測で除かない。見出しを「Owner messages matching:」、繰り返しの行を「Matching messages in N sessions with no recorded decision (current session may be included):」、何も無いときを「No owner message …」にし、最後に「Current session unknown; results and session counts may include its messages. Pass session to exclude it.」を付ける
 - 文の見出しは「Earlier owner messages matching: …」（「questions」とは呼ばない）。何も一致しなければ今と同じ形（止まったら止まったと言う）
 - ツールの説明に 1 文足す。Skill（`plugin/skills`）で search の使い方を書いている箇所があれば合わせる
 
@@ -107,6 +109,7 @@ approved_at: 2026-09-29
 - 採用: 決定の有無は絞り込みの前に判定。棄却: 絞り込んだ後で判定（隠しただけで「記録なし」と言う）
 - 採用: 繰り返しは上限まで読んで数え、表示だけ `limit` で切る。棄却: 表示の `limit` 件で数える（同じセッションが上位を占めると見落とす）
 - 採用: 固定の関係ありの id で測るローカルの評価。棄却: クラウドの評価ループ（費用が大きく、この段階で要るのは検索の誤表示の率だけ）
+- 採用: 今のセッションの id を `session` で受け取り、分からないときは含まれうると言う。棄却: 直近に発言のあったセッションを今のものとみなして除く（本当の過去のセッションを隠しうる）/ 注意書きだけ（Codex では常に混じる）
 - 採用: 後継を今の記録までたどり、`searchUnits` も同じ PR で直す。棄却: 新しい機能だけ直す（同じ不具合が出荷済みの検索に残る）
 
 ## 手順
@@ -140,3 +143,4 @@ approved_at: 2026-09-29
 なし
 
 ## 変更履歴
+2026-09-29 / `search` に任意の `session` を足し、今のセッションが分からないときの言い方を決めた / review-shipping が、Codex の起動する読み取りの MCP には `CODEX_THREAD_ID` が無く、今のスレッドの発言が「過去の発言」として返ることを再現した。別の会話（01a0ea89-9b62-7ab2-993c-034b552ec1c0）で Codex もこの案を支持 / Go 要。持ち主が「session 引数を足す」を選んだ（2026-09-29）

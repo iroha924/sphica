@@ -83,6 +83,16 @@ base: main
   - コミット: `fix(search): apply the kind and lifecycle filters to same-turn context too`
   - 結果: red（直す前）`node --test test/asked.test.ts` → kinds: ["decision"] で返事だけを引用した finding が文脈に出て「the finding quoting the reply is not a decision」で失敗。直した後 `node --test test/asked.test.ts test/plugin.test.ts` → pass 32 / fail 0（偽の発言が結果にあることと、Claude 側のセッションの発言も除かれることを確かめる形にした）。typecheck → 0
 
+- [x] T09: search に session を足し、今のセッションが分からないときは含まれうると言う
+  - 種別: 修正
+  - 計画: S5
+  - 依存: なし
+  - 変更: `server/src/mcp.ts`, `server/src/asked.ts`, `server/test/plugin.test.ts`, `server/test/asked.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/plugin.test.ts` → 環境変数の無い（Codex と同じ）MCP で、session を渡しても今のセッションの発言が返って落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/plugin.test.ts test/asked.test.ts` → 全部 pass。`bun run verify` → 0
+  - コミット: `fix(mcp): take the session to leave out in asked, and say when it is unknown`
+  - 結果: red（直す前）`node --test test/plugin.test.ts` → 環境変数の無い MCP に session を渡しても、今の Codex のセッションの発言が返り「Asked in 2 sessions」に数えられて失敗。直した後 `node --test test/plugin.test.ts test/asked.test.ts` → pass 32 / fail 0（session を渡せば除く、渡さなければ「Owner messages matching:」と注意書き）。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 62 / 62）
+
 ## P3: 測定と acceptance
 
 - [x] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
@@ -109,3 +119,4 @@ base: main
 2026-09-29 / T05 / knip が入口に無いファイルを未使用とみなすので、`evals/asked/run.ts` を knip.json の入口に足した。測定では、関係ない発言は返さない一方で見落としが多い（語の半分を超える規則の厳しさ）。ひらがなの問いの見落としは u29 の見直しの条件に当たる / T05 の変更欄に `knip.json` を足した（前: `server/evals/asked/run.ts`, `server/evals/asked/corpus.json`）。一致の規則の見直しは plan の対象外なので、数字を PR に書いて持ち主の判断に回す
 2026-09-29 / T07 / Codex レビュー: T01（120d791）は指摘なし。T02（3fdd478）2 件のうち、AI の返事を除く確認が空振り（F1）は採用、当たりのターンが未テスト（F2）は見送り（asked.test.ts の同じターンの文脈と返事がターンを使って通る）。T03（46c35f5）4 件（本文で見出しを偽装できる、隠した記録が文脈に出る、一部だけ trace 済みのセッションを traced と数える、表示しない発言の後継をたどる）は全部採用。T04（5c2e6c7）3 件（両方の環境変数があると Codex のセッションを除き損ねる、`path: ""` を断らない、framed をテストしていない）は全部採用 / 修正タスク T07 を足した。表示しない分の後継（F4）は性能の直しで、red のテストは作らない
 2026-09-29 / T08 / c2a6be3（T07）と main..c2a6be3 の Codex レビュー: 同じターンの文脈に絞り込みがかからない（両方で指摘）は採用。両方のセッション id の除外を Codex 側しか確かめていない、偽の見出しのテストが偽の発言が結果にあることを確かめていない、の 2 件も採用。review-shipping は、Codex が起動した読み取りの MCP には CODEX_THREAD_ID が無く、Codex では今のセッションの発言が返ることを再現した（テストはその環境変数を与えて空振りしていた） / 修正タスク T08 を足した。Codex の件は公開インターフェースに響くので、持ち主に直し方を聞いてから plan を直す
+2026-09-29 / T09 / 持ち主が Codex の件で「session 引数を足す」を選び、plan を直した（変更履歴を参照） / 修正タスク T09 を足した

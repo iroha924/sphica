@@ -715,8 +715,9 @@ test("search says when it stopped before reading every candidate", async () => {
   }
 });
 
-// asked: the owner's earlier messages in other sessions, never this session's own words
-test("search with asked shows earlier owner messages from other sessions and says when no decision was recorded", async () => {
+// asked: the owner's earlier messages in other sessions, never this session's own words. Codex gives its MCP servers no session id
+// (codex-cli 0.157.1), so the agent passes it; without one, the result says this session may be included
+test("search with asked leaves out the session it is given and says when it cannot tell the current session", async () => {
   const db = tempDb();
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-"));
   execFileSync("git", ["init", "-q"], { cwd: repo });
@@ -730,26 +731,14 @@ test("search with asked shows earlier owner messages from other sessions and say
   message(db, p, {
     id: "now",
     text: "Pick the package manager for installs now.",
-    session: sessionId(p, "codex", "this-session"),
-  });
-  message(db, p, {
-    id: "outer",
-    text: "The package manager installs from the outer session.",
-    session: sessionId(p, "claude-code", "outer-claude"),
+    session: sessionId(p, "codex", "this-thread"),
   });
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: "/nonexistent",
-        SPHICA_DB: db.file,
-        // Codex started from inside Claude Code carries both; this call is Codex's
-        CLAUDE_CODE_SESSION_ID: "outer-claude",
-        CODEX_THREAD_ID: "this-session",
-      },
+      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );
@@ -761,17 +750,25 @@ test("search with asked shows earlier owner messages from other sessions and say
     return (r.content as { text: string }[])[0]?.text ?? "";
   };
   try {
-    const found = await search({ asked: true });
-    assert.match(found, /Earlier owner messages matching: /);
-    assert.match(found, /^<past-records id="[0-9a-f]+">/, "the result is framed as past records");
-    assert.match(found, new RegExp(`## s${earlier}: `));
-    assert.match(found, /No recorded decision\. Not traced yet: run \/sphica:trace old\./);
+    const given = await search({ asked: true, session: "this-thread" });
+    assert.match(given, /^<past-records id="[0-9a-f]+">/, "the result is framed as past records");
+    assert.match(given, /Earlier owner messages matching: /);
+    assert.match(given, new RegExp(`## s${earlier}: `));
+    assert.match(given, /No recorded decision\. Not traced yet: run \/sphica:trace old\./);
     assert.doesNotMatch(
-      found,
+      given,
       /Pick the package manager for installs now/,
-      "this session's own words are left out",
+      "the given session's own words are left out",
     );
-    assert.doesNotMatch(found, /from the outer session/, "the other host's session is left out too");
+    assert.doesNotMatch(given, /Current session unknown/);
+    const unknown = await search({ asked: true });
+    assert.match(unknown, /Owner messages matching: /);
+    assert.doesNotMatch(unknown, /Earlier owner messages/);
+    assert.match(unknown, /Pick the package manager for installs now/);
+    assert.match(
+      unknown,
+      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\./,
+    );
     assert.match(
       await search({ asked: true, sources: true }),
       /^asked cannot be combined with sources or path\.$/,

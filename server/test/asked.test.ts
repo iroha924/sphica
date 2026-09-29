@@ -218,6 +218,17 @@ test("a matter asked in several sessions with no recorded decision lists them, c
       askedText(r),
       /Asked in 2 sessions with no recorded decision:\n- not traced yet: C \(run \/sphica:trace with each\)\n- traced: B/,
     );
+    // Without the current session known, nothing is called earlier and the count may include it
+    const unknown = askedText(r, false);
+    assert.match(unknown, /^Owner messages matching: /);
+    assert.match(
+      unknown,
+      /Matching messages in 2 sessions with no recorded decision \(current session may be included\):/,
+    );
+    assert.match(
+      unknown,
+      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\.$/,
+    );
     // The current session is left out
     assert.ok(r.messages.every((e) => !["A", "D"].includes(e.message.session ?? "")));
     // With the decided session in view, nothing is listed as repeated

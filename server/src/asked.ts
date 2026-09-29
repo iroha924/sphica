@@ -182,8 +182,15 @@ async function sameTurn(
   }
 }
 
-/** The result as the read MCP server returns it. Record keys and message text are data from the database, kept on single lines. */
-export function askedText(r: Asked): string {
+/** Said when neither the caller nor the host named the current session: its own messages may be among the results. */
+export const UNKNOWN_SESSION =
+  "Current session unknown; results and session counts may include its messages. Pass session to exclude it.";
+
+/**
+ * The result as the read MCP server returns it. Record keys and message text are data from the database, kept on single lines.
+ * `known` says whether the current session was left out; if not, nothing is called earlier.
+ */
+export function askedText(r: Asked, known = true): string {
   const parts = r.messages.map((e) => {
     const m = e.message;
     // The message is kept on one line, so its own words cannot pass for a heading or a verdict
@@ -208,13 +215,15 @@ export function askedText(r: Asked): string {
     if (e.reply !== null) lines.push(`Reply: s${e.reply} (read it with read)`);
     return lines.join("\n");
   });
-  const out = [`Earlier owner messages matching: ${r.terms.join(", ")}`, ...parts];
+  const out = [`${known ? "Earlier owner" : "Owner"} messages matching: ${r.terms.join(", ")}`, ...parts];
   if (r.repeats) {
     const n = r.repeats.untraced.length + r.repeats.traced.length;
     const within = r.stopped ? ` (within the first ${r.read} candidates by rank)` : "";
     out.push(
       [
-        `Asked in ${n} sessions with no recorded decision${within}:`,
+        known
+          ? `Asked in ${n} sessions with no recorded decision${within}:`
+          : `Matching messages in ${n} sessions with no recorded decision (current session may be included)${within}:`,
         ...(r.repeats.untraced.length
           ? [`- not traced yet: ${r.repeats.untraced.map(inline).join(", ")} (run /sphica:trace with each)`]
           : []),
@@ -223,5 +232,6 @@ export function askedText(r: Asked): string {
     );
   }
   if (r.stopped) out.push(`Stopped after ${r.read} candidates by rank; more may match.`);
+  if (!known) out.push(UNKNOWN_SESSION);
   return out.join("\n\n");
 }
