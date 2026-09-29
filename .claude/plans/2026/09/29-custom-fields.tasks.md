@@ -84,13 +84,14 @@ read と `/sphica:fields` で定義と値が見える
   - コミット: `feat(mcp): add the fields tool to the read server`
   - 結果: `cd server && node --test --test-timeout=60000 test/fields.test.ts test/plugin.test.ts` → 29 pass / 0 fail（定義ごとの行と値の付いた記録の件数 2 / 0、ラベルと引用の `|` が `\|` になって列の数が見出しと同じ、改行が空白になり説明は 200 バイトで切れる、別プロジェクトには定義が出ない、本物の読み取りサーバーのツール一覧に `fields`、登録の無いディレクトリでは isError）。`bun run verify` → 0（`SQL: tests ran 188 / 188 sites`）
 
-- [ ] T07: `/sphica:fields` Skill を足す
+- [x] T07: `/sphica:fields` Skill を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T06（`allowed-tools` の検査が登録済みのツール名を求める）
   - 変更: `plugin/skills/fields/SKILL.md`, `plugin/skills/fields/agents/openai.yaml`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify:ai` → 0。`bun run english` → 0
   - コミット: `feat(skills): add /sphica:fields to show field definitions`
+  - 結果: `bun run verify:ai` → 0（plugin Skills 8。最初は allowed-tools に status・search・read が無いと落ち、足して通った。disable-model-invocation と openai.yaml の対もそろう）。`bun run english` → 0。`bun run verify` → 0
 
 ## P4: trace の手順と出荷の準備
 
