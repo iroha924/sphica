@@ -107,6 +107,16 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
   - コミット: `feat(harvest): run the skill in a forked subagent in Claude Code`
   - 結果: Claude Code 2.1.285、`claude -p ... --plugin-dir plugin --permission-mode default --output-format json` で、新しい DB を `sphica init` で作り PR #232 を harvest。`-p` では fork も結果を待つので background では確かめていない（background のツール制限は未検証）。`/sphica:harvest 232` で `$ARGUMENTS` が入り、`disable-model-invocation: true` のまま起動でき、fork の報告に保存行（`✓ harvest:232/... active` と `✓ saved`）がそのまま入った。文脈の増加（固定の事前・事後プロンプトの総入力の差、自動圧縮なし）: 前面 1 回目 41,931、前面 2 回目 41,611、fork 1,122（前面の 2.7%）。source の 4 つ組は 3 回とも同じ 37 件。unit の一致（前面の unit ごとに kind が同じで引用の半分以上が一致する unit があるか）: 前面 1 回目と fork 6/11、前面 2 回目と fork 8/11、前面どうし 5/11。fork との差は前面どうしの揺れを超えない。fork は trace の SKILL.md を Bash で読もうとして 1 回拒否された（`permission_denials`）。保存は済んだ。採用。unit の一致は計画の条件（全 unit）を満たさないため、外れた unit を PR 本文に並べて持ち主の判断を仰ぐ。`bun run verify` → 0
 
+- [x] T09: harvest Skill に `(harvested before)` の意味を書く
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（印が要る）
+  - 変更: `plugin/skills/harvest/SKILL.md`
+  - red: `rg -n 'harvested before' plugin/skills/harvest/SKILL.md` → 何も出ない（印を出すのに Skill が説明していない）
+  - 完了条件: `rg -n 'harvested before' plugin/skills/harvest/SKILL.md` → 読む手順に印の意味がある。`bun run verify` → 0
+  - コミット: `fix(harvest): tell the Skill what the harvested-before mark means`
+  - 結果: 直す前の red コマンド → 出力なし（exit 1）。直した後 → 36 行目に説明がある。`bun run verify:ai` → 8 plugin Skills で通過、`bun run verify` → 0
+
 ## 記録
 
 - 2026-09-30 / T03 / mcp-record.ts は gh() の既定値で足り、変える必要が無かった / 変更欄から `server/src/mcp-record.ts` を外した（前: github.ts, mcp-record.ts, github.test.ts, extract.test.ts）
@@ -121,3 +131,4 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
 - 2026-09-30 / T08 / Codex の T06 レビュー F1: 未到達の操作のテストが checkText だけで、saveText の準備の経路と revision 違いを見ていない / 採用。T08 を足した（テストだけの追加）
 - 2026-09-30 / T07 / fork との差が fork のせいかを見分けるため、計画に無い前面実行の 2 回目（別の新しい DB）を足して揺れの基準にした
 - 2026-09-30 / 全体 / Codex の全差分のレビュー（main..4e8729c）: 2 件。ロックの前に伏せ字の対象だった symbol が後で安全になっても保存されない件は、変更の前も同じ動きで安全側なので棄却。fork の Skill 文面にテストが無い件は、修正ではなく計測で採った実験なので棄却 / review-shipping: 指摘なし（npm pack 41 ファイル、hook の bundle に git の依存なし、verify:ai 通過）
+- 2026-09-30 / T09 / GitHub Codex の 1 回目（df181c5）: P2 1 件、harvest Skill が印を説明していない / 採用。T09 を足した

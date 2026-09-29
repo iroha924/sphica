@@ -33,7 +33,8 @@ as `cwd` to every tool.
 2. **Begin**: `harvest_begin` with `pr`. It reads the pull request and the issues it closes through `gh` (read only), keeps every part as a source
    (an edited body becomes a new revision), and returns a `run` id bound to that pull request
 3. **Read**: `record_context` with the run. Each source is printed as `## s<N> <kind> <artifact> by <login> (<association>) <time>` followed by
-   its text (`, the owner` follows the association for the owner's own account), then the project's live records. Read all of it before writing:
+   its text (`, the owner` follows the association for the owner's own account), then the project's live records. `(harvested before)` marks
+   sources an earlier harvest already looked at: what they decided may already be saved, so search before recording it again. Read all of it before writing:
    when a page ends with `call record_context with after: "s<N>"`, call it again with that `after`, until the last page
 4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
    "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. Fix and check again until there are no errors
