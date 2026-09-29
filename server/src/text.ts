@@ -184,6 +184,8 @@ const SECRETS: [RegExp, string][] = [
   [/\bnapi_[A-Za-z0-9]{30,}/g, "API key"],
   [/\bnpm_[A-Za-z0-9]{36}\b/g, "npm token"],
   [/\bglpat-[A-Za-z0-9_-]{20,}/g, "GitLab token"],
+  // Installation tokens may be stateless: a ghs_-prefixed JWT with dots, hyphens, and underscores, up to about 520 characters
+  [/\bghs_[A-Za-z0-9._-]{36,}/g, "GitHub token"],
   [/\bgh[pousr]_[A-Za-z0-9]{30,}/g, "GitHub token"],
   [/\bgithub_pat_[A-Za-z0-9_]{40,}/g, "GitHub token"],
   [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "Slack token"],

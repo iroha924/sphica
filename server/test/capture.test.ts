@@ -82,6 +82,15 @@ const LEAKS: [string, string][] = [
   ["OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123", "sk-proj-abc"],
   ["VOYAGE=pa-abcdefghijklmnopqrstuvwxyz0123", "pa-abcdef"],
   ["gh: ghp_abcdefghijklmnopqrstuvwxyz0123456789", "ghp_abc"],
+  // Stateless installation tokens are a ghs_-prefixed JWT with two dots, up to about 520 characters
+  [
+    "ログに出ていた ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.Zm9vYmFyLWJhei1xdXV4X3NpZ25hdHVyZS12YWx1ZS0xMjM0NTY3ODkw",
+    "eyJpc3MiOiJhcHAiLCJp",
+  ],
+  [
+    "ログに出ていた ghs_eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAiLCJpbnN0YWxsYXRpb24iOjEyMzQ1Njc4fQ.Zm9vYmFyLWJhei1xdXV4X3NpZ25hdHVyZS12YWx1ZS0xMjM0NTY3ODkw",
+    "Zm9vYmFyLWJhei1xdXV4",
+  ],
   ["url: postgres://sphica_reader:s3cr3t@ep-x.example.com/db", "s3cr3t"],
   ["PGPASSWORD=npg_AbCdEf123456", "npg_AbCdEf"],
   ["npg_AbCdEf123456XY を貼った", "npg_AbCdEf"],
