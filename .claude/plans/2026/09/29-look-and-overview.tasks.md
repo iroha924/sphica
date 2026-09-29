@@ -137,13 +137,14 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 
 持ち主が選んだ制約から規約の下書きが出て、両ホストの受け入れ case が揃う。
 
-- [ ] T07: `/sphica:rules` Skill と Codex の呼び出し設定を足す
+- [x] T07: `/sphica:rules` Skill と Codex の呼び出し設定を足す
   - 種別: 追加
   - 計画: S7
   - 依存: T05（Skill が live を使う）
-  - 変更: `plugin/skills/rules/SKILL.md`, `plugin/skills/rules/agents/openai.yaml`, `server/test/plugin.test.ts`
+  - 変更: `plugin/skills/rules/SKILL.md`, `plugin/skills/rules/agents/openai.yaml`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify:ai` → 0。`cd server && node --test --test-timeout=60000 test/plugin.test.ts` → 全部 pass（rules Skill が明示の呼び出しだけで、Codex の policy が対である）
   - コミット: `feat(rules): draft rule lines for constraints the owner picks, marked with their record keys`
+  - 結果: `bun run verify:ai` → 0（plugin Skills 6、`disable-model-invocation: true` と `allow_implicit_invocation: false` の対を検査が確かめる）。`node --test test/plugin.test.ts` → pass 28 / fail 0。`bun run english` → 0
 
 - [ ] T08: acceptance に overview の live と look と見直し条件の case を足し、新しい SQL の呼び出し箇所が全部通ることを確かめる
   - 種別: 追加
@@ -167,3 +168,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T06 / 引用を失った条件の表示を read と揃えるため、read.ts の UNSUPPORTED を export した / 変更欄に `server/src/read.ts` を足した（前: 無し）
 - 2026-09-29 / T12 / Codex レビュー: 指摘なし
 - 2026-09-29 / T13 / T05 の Codex レビュー F1〜F3（キーが inline を通らず改行で行を偽造できる、長い本文でパスが切り詰めで消える、見出しが切り詰められず 64 KiB を超え得る）/ 修正タスク T13 を足した。look のキーも同じく inline に通した
+- 2026-09-29 / T07 / Claude と Codex の呼び出し設定の対は `verify:ai`（check-ai-config.mjs）が全 plugin Skill に対して見ていて、plugin.test.ts に足すものが無かった。README の機能一覧に overview と rules を足した / 変更欄を `server/test/plugin.test.ts` から `README.md`, `README.ja.md` に変えた
