@@ -74,13 +74,14 @@ base: main
   - コミット: `test(evals): measure unrelated earlier-message matches on a fixed corpus`
   - 結果: `node evals/asked/run.ts`（server/ から）→ unrelated / returned 0 / 8（0.0%）、missed / related 13 / 21（61.9%）。空の問い 4 件（q-tel、q-token、q-log、q-hira）、上限で止まった問いは無し。ひらがなの問い q-hira は db-1・db-3 を見落とした。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 60 / 60）
 
-- [ ] T06: asked の acceptance case を足す
+- [x] T06: asked の acceptance case を足す
   - 種別: 追加
   - 計画: S7
   - 依存: T03（組み立てが要る）
   - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run acceptance` → 追加した case を含めて全部 pass。`bun run verify` → 0
   - コミット: `test(acceptance): cover earlier owner messages and what they led to`
+  - 結果: `bun run acceptance` → pass 62 / fail 0（asked-01: 保存先を聞くと `trace:s-ja-storage/storage (decision, active)` を示す。asked-02: trace していないテレメトリの発言に「No recorded decision. Not traced yet」）。ドライバーに `asked` のステップと `asked_contains` の期待を足し、層ごとの件数に asked: 2 を足した。`bun run verify` → 0（`sql:reach` 161 / 161、`sql:live` 8 / 8）
 
 ## 記録
 
