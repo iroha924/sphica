@@ -18,7 +18,7 @@ import {
   saveText,
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
-import type { Get } from "../src/github.ts";
+import { type Get, gh } from "../src/github.ts";
 import { readSource } from "../src/read.ts";
 import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -339,6 +339,22 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     );
     const issue = Number(/s(\d+) issue_body/.exec(fetched)?.[1]);
     assert.ok(issue > 0, fetched);
+    // A gh that stops answering ends the fetch with its reason instead of holding the tool call
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+    const savedPath = process.env.PATH;
+    try {
+      fs.writeFileSync(path.join(bin, "gh"), `#!${process.execPath}\nsetTimeout(() => {}, 20_000);\n`, {
+        mode: 0o755,
+      });
+      process.env.PATH = `${bin}${path.delimiter}${savedPath ?? ""}`;
+      await assert.rejects(
+        gleanFetch(db.ingest, run, place(p, root), "https://github.com/o/r/issues/9", gh("o/r", 500)),
+        /issues\/9 did not answer within 0\.5 seconds/,
+      );
+    } finally {
+      process.env.PATH = savedPath;
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
     await assert.rejects(
       gleanFetch(db.ingest, run, place(p, root), "https://example.com/notes", fakeGet),
       /Only issues and pull requests/,

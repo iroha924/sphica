@@ -60,15 +60,17 @@ const HOST = ["--hostname", "github.com"];
 const plainEnv = () => ({ ...process.env, CLICOLOR_FORCE: "0" });
 
 export const gh =
-  (repo: string): Get =>
+  (repo: string, timeout = 60_000): Get =>
   async (path, all = false) => {
     const { stdout } = await exec(
       "gh",
       ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
-      { encoding: "utf8", maxBuffer: MAX_RESPONSE, env: plainEnv() },
-    ).catch((e: NodeJS.ErrnoException) => {
+      // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
+      { encoding: "utf8", maxBuffer: MAX_RESPONSE, timeout, killSignal: "SIGKILL", env: plainEnv() },
+    ).catch((e: NodeJS.ErrnoException & { killed?: boolean }) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
         throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
+      if (e.killed) throw new Error(`${path.split("?")[0]} did not answer within ${timeout / 1000} seconds`);
       throw e;
     });
     const parsed = JSON.parse(stdout) as unknown;

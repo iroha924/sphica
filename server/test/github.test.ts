@@ -399,6 +399,29 @@ test("gh is asked for plain JSON even when the owner forces color", async () => 
   }
 });
 
+// A gh stuck on the network must not hold harvest_begin or glean_fetch, even one that ignores SIGTERM
+test("a gh api call that never answers fails with the path it read", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const saved = process.env.PATH;
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nprocess.on('SIGTERM', () => {}); setTimeout(() => {}, 20_000);\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    const started = Date.now();
+    await assert.rejects(
+      gh("o/r", 500)("pulls/1/comments?per_page=100", true),
+      /^Error: pulls\/1\/comments did not answer within 0\.5 seconds$/,
+    );
+    assert.ok(Date.now() - started < 10_000);
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 // A gh stuck on the network must not hold init, even one that ignores SIGTERM: it gives up and init goes on to register the repository
 test("a gh that never answers is given up on as failed", async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));

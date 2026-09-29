@@ -42,14 +42,15 @@ base: main
   - コミット: `fix(harvest): keep only the end line of a reversed or two-sided comment range`
   - 結果: 直す前の `node --test --test-name-pattern='runs backwards' test/github.test.ts` → `CHECK constraint failed: line_end >= line_start` で落ちた。直した後 `node --test --test-timeout=60000 test/github.test.ts` → 12 pass / 0 fail（逆向き 9→3 と LEFT→RIGHT 2→5 は終わりの行だけ、RIGHT の 4→6 はそのまま、start_line が null は 7→7、本文も保存）。`bun run verify` → 0
 
-- [ ] T03: `gh api` の呼び出しに 60 秒のタイムアウトを付ける
+- [x] T03: `gh api` の呼び出しに 60 秒のタイムアウトを付ける
   - 種別: 修正
   - 計画: S3
   - 依存: なし
-  - 変更: `server/src/github.ts`, `server/src/mcp-record.ts`, `server/test/github.test.ts`, `server/test/extract.test.ts`
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`, `server/test/extract.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/github.test.ts` → sleep する偽 gh と短い timeout を渡すテストが、gh の終了を待ってテストの時間切れで落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/github.test.ts test/extract.test.ts` → `gh()` が `<path> did not answer within ...` で失敗し、glean_fetch の経路がそのエラーを返す。`bun run verify` → 0
   - コミット: `fix(github): stop a gh api call that does not answer`
+  - 結果: 直す前の `node --test --test-timeout=20000 --test-name-pattern='never answers fails|glean: sourced' test/github.test.ts test/extract.test.ts` → 2 件とも `test timed out after 20000ms` で落ちた（timeout を受け取らず gh を待ち続ける）。直した後 同じコマンドに `size cap` を足して 3 pass / 0 fail（SIGTERM を無視する偽 gh でも `pulls/1/comments did not answer within 0.5 seconds`、glean_fetch も `issues/9 did not answer ...` で失敗）。`bun run verify` → 0
 
 ## P2: 保存でロックを持つ時間
 
@@ -94,3 +95,6 @@ harvest を Claude Code の fork で動かしたときの文脈の増え方と�
   - コミット: `feat(harvest): run the skill in a forked subagent in Claude Code`
 
 ## 記録
+
+- 2026-09-30 / T03 / mcp-record.ts は gh() の既定値で足り、変える必要が無かった / 変更欄から `server/src/mcp-record.ts` を外した（前: github.ts, mcp-record.ts, github.test.ts, extract.test.ts）
+- 2026-09-30 / T01 / Codex のレビュー F1: 後から始まった別 run が先に保存すると、先の run の context にも印が付く / 棄却。印は「context を読んだ時点で、どこかの run がもう見た」を表し、trace の `(traced before)` と同じ扱い。同じ PR を並行で harvest する場合に限られる
