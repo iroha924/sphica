@@ -93,6 +93,15 @@ base: main
   - コミット: `fix(mcp): take the session to leave out in asked, and say when it is unknown`
   - 結果: red（直す前）`node --test test/plugin.test.ts` → 環境変数の無い MCP に session を渡しても、今の Codex のセッションの発言が返り「Asked in 2 sessions」に数えられて失敗。直した後 `node --test test/plugin.test.ts test/asked.test.ts` → pass 32 / fail 0（session を渡せば除く、渡さなければ「Owner messages matching:」と注意書き）。`bun run verify` → 0（`sql:reach` 161 / 161、acceptance 62 / 62）
 
+- [x] T10: 同じターンの文脈の lifecycle の絞り込みを確かめる
+  - 種別: 変更
+  - 計画: S3
+  - 依存: なし
+  - 変更: `server/test/asked.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/asked.test.ts` → 全部 pass
+  - コミット: `test(search): check the lifecycle filter on same-turn context`
+  - 結果: `node --test test/asked.test.ts` → pass 4 / fail 0。asked.ts の lifecycle の条件を一時的に外すと「the active finding quoting the reply is left out by the lifecycle filter」で落ちることを確かめ、戻した
+
 ## P3: 測定と acceptance
 
 - [x] T05: 固定のコーパスで関係ない発言を返す率を測るローカルの評価を足して流す
@@ -120,3 +129,4 @@ base: main
 2026-09-29 / T07 / Codex レビュー: T01（120d791）は指摘なし。T02（3fdd478）2 件のうち、AI の返事を除く確認が空振り（F1）は採用、当たりのターンが未テスト（F2）は見送り（asked.test.ts の同じターンの文脈と返事がターンを使って通る）。T03（46c35f5）4 件（本文で見出しを偽装できる、隠した記録が文脈に出る、一部だけ trace 済みのセッションを traced と数える、表示しない発言の後継をたどる）は全部採用。T04（5c2e6c7）3 件（両方の環境変数があると Codex のセッションを除き損ねる、`path: ""` を断らない、framed をテストしていない）は全部採用 / 修正タスク T07 を足した。表示しない分の後継（F4）は性能の直しで、red のテストは作らない
 2026-09-29 / T08 / c2a6be3（T07）と main..c2a6be3 の Codex レビュー: 同じターンの文脈に絞り込みがかからない（両方で指摘）は採用。両方のセッション id の除外を Codex 側しか確かめていない、偽の見出しのテストが偽の発言が結果にあることを確かめていない、の 2 件も採用。review-shipping は、Codex が起動した読み取りの MCP には CODEX_THREAD_ID が無く、Codex では今のセッションの発言が返ることを再現した（テストはその環境変数を与えて空振りしていた） / 修正タスク T08 を足した。Codex の件は公開インターフェースに響くので、持ち主に直し方を聞いてから plan を直す
 2026-09-29 / T09 / 持ち主が Codex の件で「session 引数を足す」を選び、plan を直した（変更履歴を参照） / 修正タスク T09 を足した
+2026-09-29 / T10 / a993a6c..2f72815 と main..2f72815 の Codex レビュー: lifecycle の絞り込みのテストが無い（両方で指摘）は採用。誤った id や別プロジェクトの id を session に渡すと除けていないのに「Earlier」と言う（T09 F1）は見送り（呼ぶ側が誤った値を渡したときだけ）。「now」の後継に lifecycle の絞り込みがかからない（全差分 F1）は見送り（後継は結果ではなく、見せた記録が今何に置き換わったかの注記で、隠すと置き換え済みの決定が今も有効に見える）。review-shipping はパックしたもので Codex の条件（id の無い MCP）を再現し、session を渡せば除かれ、渡さなければ注記が付くことを確かめた / T10 を足して終えた

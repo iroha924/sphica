@@ -354,6 +354,17 @@ test("the kind and lifecycle filters narrow the same-turn context too", async ()
     const d = r.messages.find((e) => e.message.id === w.ids.d1);
     assert.ok(d, "the message is still returned");
     assert.deepEqual(d?.context, [], "the finding quoting the reply is not a decision");
+    const superseded = await askedBefore(w.db.reader, w.p, {
+      question: "package manager installs",
+      limit: 10,
+      notSessions: [],
+      lifecycles: ["superseded"],
+    });
+    assert.deepEqual(
+      superseded.messages.find((e) => e.message.id === w.ids.d1)?.context,
+      [],
+      "the active finding quoting the reply is left out by the lifecycle filter",
+    );
   } finally {
     await w.db.done();
   }
