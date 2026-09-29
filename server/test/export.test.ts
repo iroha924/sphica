@@ -396,6 +396,9 @@ test("the save path must land inside the repository, through any symbolic link",
       ".agents/skills/a/SKILL.md",
       ".codex/x.md",
       ".Claude/rules/x.md",
+      ".cursor/rules/x.md",
+      ".github/copilot-instructions.md",
+      ".GitHub/Copilot-Instructions.md",
     ])
       assert.match(String(Object.values(exportPath(root, rule))), /instructions/, rule);
     // Only a Markdown file of the working tree, and no name Windows would silently shorten

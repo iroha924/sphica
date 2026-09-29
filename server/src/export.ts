@@ -239,12 +239,19 @@ export async function exportDecisions(
   return { document };
 }
 
-/** Folders hosts load agent instructions, Skills, and settings from, and the instruction file names, compared without case. */
-const INSTRUCTION_DIRS = new Set([".claude", ".agents", ".codex"]);
+/**
+ * Where coding agents load standing instructions, Skills, and settings from (the same places the review Skill treats as binding rules),
+ * compared without case.
+ */
+const INSTRUCTION_DIRS = new Set([".claude", ".agents", ".codex", ".cursor"]);
 const instructionFile = (relative: string) => {
   const parts = relative.toLowerCase().split(/[\\/]/);
   const names = [...RULE_NAMES].map((n) => n.toLowerCase());
-  return parts.some((p) => INSTRUCTION_DIRS.has(p)) || names.includes(parts.at(-1) ?? "");
+  return (
+    parts.some((p) => INSTRUCTION_DIRS.has(p)) ||
+    names.includes(parts.at(-1) ?? "") ||
+    parts.slice(-2).join("/") === ".github/copilot-instructions.md"
+  );
 };
 
 /**
@@ -315,7 +322,7 @@ export function exportPath(
   if (instructionFile(path.relative(root, target)) || instructionFile(path.relative(rootReal, real)))
     return {
       error:
-        "The path is a file agents load as instructions (CLAUDE.md, AGENTS.md, or under .claude, .agents, .codex).",
+        "The path is a file agents load as instructions (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md, or under .claude, .agents, .codex, .cursor).",
     };
   return { relative: path.relative(root, target).split(path.sep).join("/"), exists: Boolean(self) };
 }

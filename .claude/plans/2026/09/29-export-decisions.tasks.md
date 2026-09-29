@@ -113,6 +113,16 @@ base: main
   - コミット: `fix(export): write only Markdown files outside .git, refuse names Windows shortens`
   - 結果: red は上のとおり再現。直した後: `node --test test/export.test.ts` → 11 pass / 0 fail、`bun run verify` → 0。フォルダーの判定は `docs/folder.md` というフォルダーで確かめるようテストを直した
 
+- [x] T10: Cursor と Copilot の指示ファイルへの書き出しも拒む
+  - 種別: 修正
+  - 計画: S1, S3
+  - 依存: T08（同じ判定を広げる）
+  - 変更: `server/src/export.ts`, `server/test/export.test.ts`, `plugin/skills/export/SKILL.md`
+  - red: `node --test test/export.test.ts` → 直す前のコードで `.cursor/rules/x.md` と `.github/copilot-instructions.md` が通り、落ちる
+  - 完了条件: `node --test test/export.test.ts` → 通る。`bun run verify` → 0
+  - コミット: `fix(export): refuse Cursor and Copilot instruction files too`
+  - 結果: red は上のとおり再現。直した後: `node --test test/export.test.ts` → 11 pass / 0 fail、`bun run verify` → 0
+
 ## 記録
 2026-09-29 / T01 / 引用の切り出しと話し手の表記を使い回すため `read.ts` の `cut` と `speaker` を export した。SQL の呼び出し箇所はテストがすべて流したので台帳は変えなかった / 変更欄 前: `scripts/lib/sql-call-sites.mjs` を含む、後: 外して `server/src/read.ts` を足した
 2026-09-29 / T02 / acceptance の driver は MCP を起動せず、各ツールと同じ関数を直接呼ぶ作りだった / export の step も `exportPath` と `exportDecisions` を直接呼び、本物の入口は plugin のテストで export を呼んで確かめた。書き出しが成功する経路を本物の入口で通すのは A5 の headless 実行で見る
@@ -123,3 +133,4 @@ base: main
 2026-09-29 / T07 / GitHub の Codex レビュー（cecb8cb、P1 なし、P2 6 件）: ハードリンクの保存先、Windows の予約名、ファイルを指すリンクの途中のフォルダー、引用の改行がつぶれる、読み取りの途中の変更、上限の判定が組み立ての後 / 予約名以外の 5 件を T07 で直した。途中の変更は reader の authorizer がトランザクションを許さないため、使った記録の revision を最後に読み直して違えば失敗にした。予約名は見送り: 書き込みが失敗するだけで、黙って別の場所に書かない端の入力
 2026-09-29 / T08 / GitHub の Codex レビュー（45ccca1、P1 なし、P2 3 件）: 指示ファイルへ書き出せる（Security Review）、検査のあとに作られたファイルの上書き、1 件の決定の巨大な根拠で上限の前にメモリを使う / 1 件目を T08 で直した。大文字と小文字を区別せず、`.claude`・`.agents`・`.codex` の中全体と、解決した実際の書き込み先も見る。2 件目は見送り: 同じリポジトリで競合して書く別プロセスという端の入力で、Claude Code の Write は読んでいない既存ファイルの上書きを拒む。3 件目は見送り: glean を重ねた極端な記録という端の入力
 2026-09-29 / T09 / GitHub の Codex レビュー（43c2c0c、P1 なし、P2 2 件）: `.git/config` や Markdown でないファイルに書ける、Windows で `AGENTS.md.` が AGENTS.md になる（Security Review） / 2 件とも T09 で直した
+2026-09-29 / T10 / GitHub の Codex レビュー（2ba9b02、P1 なし、P2 1 件）: `.github/copilot-instructions.md` と `.cursor/rules/` に書ける。指示ファイルの範囲を広げる指摘が毎ラウンド出るため持ち主に聞き、review Skill が拘束力のある規則とする置き場所（第 1 層）に合わせると決まった（2026-09-29） / T10 で直した。次に同じ種類の指摘が出ても、端の入力として見送って PR を終える

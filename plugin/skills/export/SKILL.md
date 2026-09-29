@@ -34,7 +34,8 @@ Pass the repository root as `cwd` to every tool.
    superseded one appears under the decision that replaced it
 2. **Confirm the choice** with the owner, at most 50 decisions
 3. **Ask where to write it**, as a Markdown file (`.md`) relative to the repository root. There is no default. Instruction files
-   (CLAUDE.md, AGENTS.md, anything under `.claude`, `.agents`, `.codex`) and Git's own folder are refused
+   (CLAUDE.md, AGENTS.md, `.github/copilot-instructions.md`, anything under `.claude`, `.agents`, `.codex`, `.cursor`) and Git's
+   own folder are refused
 4. **Call `export`** with the chosen keys and the path. When it answers that nothing was exported, tell the owner the reasons it gives and
    stop; write nothing. Otherwise its first line names the path and says whether it is a new file or replaces an existing one, and every line
    after it is the document
