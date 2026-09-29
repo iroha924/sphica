@@ -9,6 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { locate, masksSymbol } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
+import { readUnit } from "../src/read.ts";
 import { checkRecord, repoPath, saveRecord, type Target } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -390,6 +391,23 @@ test("a rejected option keeps the reconsider condition the owner stated, quoted 
       .all()
       .map((r) => [r.role, r.opt, Buffer.from(r.cut as Uint8Array).toString("utf8")]);
     assert.deepEqual(quoted, [["reconsiders", 1, "レプリカが要るようになったら Postgres をもう一度考える"]]);
+
+    // read shows the condition under its option with the owner's words, and after the quote is retracted, as unsupported
+    const shown = async () => (await readUnit(db.reader, p, "trace:ext-s1/storage", null)) ?? "";
+    assert.match(
+      await shown(),
+      /- Postgres: rejected\n {2}Reconsider when: レプリカが要るようになったら \(the owner's words are quoted below\)\n {2}- s\d+ .*\(reconsiders\): "レプリカが要るようになったら Postgres をもう一度考える"/,
+    );
+    db.owner
+      .prepare(
+        "update unit_evidence set retracted_at = ?, retraction_reason = 'misread', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where role = 'reconsiders'",
+      )
+      .run(now, m);
+    assert.match(
+      await shown(),
+      /Reconsider when: レプリカが要るようになったら \[unsupported: its owner quote was retracted or forgotten/,
+    );
+    assert.equal(state(db, "trace:ext-s1/storage")?.lifecycle, "active");
 
     // The condition is part of what the record says; a record without one keeps the hash it had before conditions existed
     const plain = await save(db, target(p), { units: [decision("plain", {})] }, [m]);

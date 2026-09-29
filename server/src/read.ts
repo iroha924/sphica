@@ -6,6 +6,10 @@ import type { DB } from "./db-types.ts";
 import { inline } from "./panel.ts";
 import { head } from "./text.ts";
 
+/** How a reconsider condition reads once its owner quote is gone. */
+const UNSUPPORTED =
+  "unsupported: its owner quote was retracted or forgotten, so it is not the owner's condition";
+
 /** The bytes of a source a span points at. */
 const cut = (text: string, start: number, end: number) =>
   Buffer.from(text, "utf8").subarray(start, end).toString("utf8");
@@ -67,7 +71,7 @@ async function describe(
   const [options, evidence, adoption, anchors, links, states] = await Promise.all([
     db
       .selectFrom("unit_option")
-      .select(["id", "text", "outcome", "why"])
+      .select(["id", "text", "outcome", "why", "reconsider_when"])
       .where("unit_id", "=", u.id)
       .orderBy("position")
       .execute(),
@@ -168,6 +172,15 @@ async function describe(
     out.push("Options:");
     for (const o of options) {
       out.push(`- ${o.text}: ${o.outcome}${o.why ? `, because ${o.why}` : ""}`);
+      if (o.reconsider_when) {
+        // Without the owner's words standing behind it, the condition is only text an agent once wrote
+        const stands = evidence.some(
+          (e) => e.option_id === o.id && e.role === "reconsiders" && !e.retracted_at,
+        );
+        out.push(
+          `  Reconsider when: ${inline(o.reconsider_when)}${stands ? " (the owner's words are quoted below)" : ` [${UNSUPPORTED}]`}`,
+        );
+      }
       for (const e of evidence.filter((x) => x.option_id === o.id)) out.push(quote(e));
     }
   }

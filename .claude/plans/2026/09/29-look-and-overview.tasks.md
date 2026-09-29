@@ -44,13 +44,14 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `feat(record): save a reconsider condition the owner stated, with its quote`
   - 結果: `node --test test/record.test.ts test/extract.test.ts` → pass 33 / fail 0（引用付きの条件が保存されて active、`reconsiders` の span が持ち主の言葉を切り出す。条件の無い記録の content_hash は以前と同じ式、条件ありとは違う。片方だけ・chosen への条件・AI の引用・evidence に直接 `reconsiders` は拒否、引用が見つからないと quarantined。glean の add_evidence も `reconsiders` を拒否）。`npm test` → 382 / 382 pass。`bun run check` → 0、`bun run verify:ai` → 0
 
-- [ ] T03: `read` の却下案の下に見直し条件と引用を出し、引用を失った条件に unsupported と付ける
+- [x] T03: `read` の却下案の下に見直し条件と引用を出し、引用を失った条件に unsupported と付ける
   - 種別: 追加
   - 計画: S3
   - 依存: T02（条件付きの記録を保存する経路が要る）
   - 変更: `server/src/read.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts` → 全部 pass（`Reconsider when:` と引用が出る。引用を取り消すと unsupported と出て、決定は active のまま）
   - コミット: `feat(read): show a rejected option's reconsider condition and whether its quote still stands`
+  - 結果: `node --test test/record.test.ts` → pass 20 / fail 0（却下案の下に `Reconsider when:` と `(reconsiders)` の引用が出る。引用を取り消すと `[unsupported: its owner quote was retracted or forgotten …]` と出て、決定は active のまま）。`npm test` → 382 / 382 pass。`bun run check` → 0
 
 ## P3: overview ツール
 
