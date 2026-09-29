@@ -207,7 +207,10 @@ export function exportPath(
   root: string,
   given: string,
 ): { relative: string; exists: boolean } | { error: string } {
-  if (given.includes("\0") || path.isAbsolute(given) || path.win32.isAbsolute(given))
+  // The reply names this path to the agent that writes it, so it must read back exactly as checked
+  if (inline(given) !== given || given.includes("\0"))
+    return { error: "The path has characters that cannot be shown as typed; use plain characters." };
+  if (path.isAbsolute(given) || path.win32.isAbsolute(given))
     return { error: "Give a path relative to the repository root." };
   const target = path.resolve(root, given);
   const inside = (base: string, p: string) => {
@@ -245,3 +248,7 @@ export function exportPath(
   if (!inside(fs.realpathSync(root), real)) return { error: "The path leads outside the repository." };
   return { relative: path.relative(root, target).split(path.sep).join("/"), exists: Boolean(self) };
 }
+
+/** The tool's reply: one line naming the checked path, then the document to write as the whole file. */
+export const exportReply = (where: { relative: string; exists: boolean }, document: string): string =>
+  `Write to ${where.relative}, ${where.exists ? "replacing an existing file (show the owner its content first)" : "a new file"}. The rest of this reply, from the next line to the end, is the whole file, unchanged.\n${document}`;

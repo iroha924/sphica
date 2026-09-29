@@ -35,7 +35,8 @@ Pass the repository root as `cwd` to every tool.
 2. **Confirm the choice** with the owner, at most 50 decisions
 3. **Ask where to write it**, as a path relative to the repository root. There is no default
 4. **Call `export`** with the chosen keys and the path. When it answers that nothing was exported, tell the owner the reasons it gives and
-   stop; write nothing. Otherwise its first line says whether the path is a new file or replaces an existing one, and the rest is the document
+   stop; write nothing. Otherwise its first line names the path and says whether it is a new file or replaces an existing one, and every line
+   after it is the document
 5. **Show the owner the whole document**, and when it replaces a file, that file's current content too. Say that the quoted words, which may
    include other people's comments, go into a file others can read. Ask whether to write it (AskUserQuestion in Claude Code). Without a clear
    yes, write nothing

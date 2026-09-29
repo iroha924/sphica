@@ -465,6 +465,7 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
       arguments: { records: ["u1"], path: "docs/decisions.md", cwd: "/nonexistent" },
     });
     assert.match(JSON.stringify(r.content), /not in a registered project/);
+    assert.equal(r.isError, true);
   } finally {
     await client.close();
   }

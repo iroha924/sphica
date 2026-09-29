@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
-import { EXPORT_LIMITS, exportDecisions, exportPath } from "../src/export.ts";
+import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "../src/export.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -280,8 +280,27 @@ test("the save path must land inside the repository, through any symbolic link",
     assert.match(String(Object.values(exportPath(root, "link.md"))), /symbolic link/);
     assert.match(String(Object.values(exportPath(root, "docs"))), /not a regular file/);
     assert.match(String(Object.values(exportPath(root, "docs/decisions.md/x.md"))), /not a folder/);
+    // What the agent is told to write to is exactly what was checked: no character the reply would hide or change
+    for (const bad of ["docs/safe\u200b.md", "docs/a\nb.md", "docs/\u001b[31mx.md", "docs/a\tb.md"])
+      assert.match(
+        String(Object.values(exportPath(root, bad))),
+        /cannot be shown as typed/,
+        JSON.stringify(bad),
+      );
     assert.match(String(Object.values(exportPath(root, "."))), /leaves the repository/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("the reply is one line saying where to write, then the document and nothing else", () => {
+  const doc = "# Decisions exported from Sphica\n\nbody\n";
+  const reply = exportReply({ relative: "docs/decisions.md", exists: false }, doc);
+  const [first, ...rest] = reply.split("\n");
+  assert.match(first ?? "", /^Write to docs\/decisions\.md, a new file\. /);
+  assert.equal(rest.join("\n"), doc);
+  assert.match(
+    exportReply({ relative: "d.md", exists: true }, doc),
+    /^Write to d\.md, replacing an existing file/,
+  );
 });

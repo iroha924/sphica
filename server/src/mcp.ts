@@ -9,7 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
-import { EXPORT_LIMITS, exportDecisions, exportPath } from "./export.ts";
+import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "./export.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
 import { liveOverview, lookOverview } from "./overview.ts";
@@ -284,16 +284,12 @@ server.registerTool(
   async (a) => {
     try {
       const p = await projectOf(a.cwd);
-      if (typeof p === "string") return text(p);
+      if (typeof p === "string") return text(`Nothing was exported: ${p}`, true);
       const where = exportPath(p.root, a.path);
       if ("error" in where) return text(`Nothing was exported: ${where.error}`, true);
       const built = await exportDecisions(db, p.id, p.name, a.records);
       if ("error" in built) return text(built.error, true);
-      return text(
-        `Write to ${head(inline(where.relative), 500)}: ${where.exists ? "this replaces an existing file; show the owner its content first" : "a new file"}. ` +
-          "Write the document below as the whole file, unchanged, from the line after this one to the end of this reply.\n" +
-          built.document,
-      );
+      return text(exportReply(where, built.document));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }
