@@ -449,6 +449,7 @@ test("MCP server instructions and tool descriptions fit in 2,048 characters", as
     assert.match(instructions, /would overturn a past decision.*ask before making the change/);
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
+      "overview",
       "read",
       "review_check",
       "review_select",

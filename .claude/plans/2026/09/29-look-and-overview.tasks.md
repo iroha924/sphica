@@ -95,13 +95,14 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
   - コミット: `feat(overview): check whether anchored files exist and list rule files to scan`
   - 結果: `node --test test/rule-files.test.ts` → pass 7 / fail 0（ファイルが消えたものと関数名だけ消えたものの区別、root の外へ出る symlink と壊れた symlink の親は unknown、git の未追跡を含み ignore を除く、作業ツリーで消した追跡ファイルは出ない、大きすぎ・バイナリ・symlink を件数で出す、200 件の上限、git の外のたどりで node_modules・ドットディレクトリ・symlink を飛ばす、深さ 8 と 5,000 エントリで不完全と出す）。`npm test` → 全件 pass。`bun run check` → 0
 
-- [ ] T05: `overview` の `live` を足す（unit id のページ送り、ディレクトリごとのまとめ、50 件と 64 KiB の上限）
+- [x] T05: `overview` の `live` を足す（unit id のページ送り、ディレクトリごとのまとめ、50 件と 64 KiB の上限）
   - 種別: 追加
   - 計画: S5
   - 依存: なし
-  - 変更: `server/src/overview.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`
+  - 変更: `server/src/overview.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`, `server/test/plugin.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/overview.test.ts` → 全部 pass（fixture の有効な決定と制約を全件出し superseded と withdrawn を出さない、複数ディレクトリの記録は 1 回だけ、ページの間の supersede で取りこぼさない、上限で切れても最低 1 件出て次の `after` が出した最大の id）
   - コミット: `feat(overview): list every live decision and constraint, grouped by directory`
+  - 結果: `node --test test/overview.test.ts` → pass 2 / fail 0（有効な決定と制約 5 件を全部出し、finding・superseded・withdrawn・candidate を出さない。最初の applies_to のディレクトリでまとめ、ルートのファイルは (repository root)、場所の無いものは最後。55 件で 1 ページ目 50 件、ページの間に supersede しても 2 ページ目に残り 5 件と後継が出る）。`npm test` → 392 / 392 pass。`bun run check` → 0、`sql:reach` → 164 / 164
 
 - [ ] T06: `overview` の `look` を足し、forget と取り消しの回帰テストを足す
   - 種別: 追加
@@ -139,3 +140,4 @@ trace が持ち主の言った見直し条件を引用付きで保存でき、`r
 - 2026-09-29 / T10 / T02 の Codex レビュー F1: 持ち主が他人の発言を紹介した一文も条件の引用として通る。採用の引用と同じく author_kind でしか見られず、機械では見分けられない / trace Skill に書き足すだけにした
 - 2026-09-29 / T03, T09 / Codex レビュー: 指摘なし
 - 2026-09-29 / T11 / T10 の Codex レビュー F1: trace Skill の「引用が無いと quarantine」の説明が、見直し条件の引用だけは拒否になった挙動と食い違う / T11 を足して Skill に書いた
+- 2026-09-29 / T05 / 1 行を 600 バイトで切るので 50 行で 64 KiB に届かず、バイトの上限の分岐は通らない / 分岐を置かず、定数のコメントで 64 KiB 未満に収まる理由を書いた。ツール一覧のテスト（plugin.test.ts）に overview を足し、変更欄にも足した（前: 無し）

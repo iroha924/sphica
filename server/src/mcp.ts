@@ -11,6 +11,7 @@ import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
+import { liveOverview } from "./overview.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { identify, projectId } from "./project.ts";
@@ -265,6 +266,36 @@ const notChecked = (e: unknown) =>
     `Decision lane: not checked. Sphica unavailable: ${head(reason(e), 300)}. Report the decision check as not run, not as passed.`,
     true,
   );
+
+server.registerTool(
+  "overview",
+  {
+    title: "Every live decision and constraint",
+    description:
+      "On request, not before every change: view live lists every active decision and constraint of the project, grouped by the directory it " +
+      "applies to, a page at a time (pass after from the previous page). Read a record by its key before relying on it.",
+    inputSchema: {
+      view: z.enum(["live"]).describe("live: every active decision and constraint"),
+      after: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe("With live: the id the previous page said to continue after"),
+      cwd: CWD,
+    },
+    annotations: READ_ONLY,
+  },
+  async (a) => {
+    try {
+      const p = await projectOf(a.cwd);
+      if (typeof p === "string") return text(p);
+      return text(framed(await liveOverview(db, p.id, a.after ?? null)));
+    } catch (e) {
+      return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
+    }
+  },
+);
 
 server.registerTool(
   "review_select",
