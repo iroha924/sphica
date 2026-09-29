@@ -42,7 +42,7 @@ base: main
 
 - [x] T03: 既存の違反コメントを直す
   - 種別: 変更
-  - 計画: S7
+  - 計画: S7, S9
   - 依存: T02（直す基準の文面が要る）
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `server/src/forget.ts`, `server/test/forget.test.ts`, `server/evals/acceptance/load.ts`, `db/migrations/0002.sql`, `db/migrations/0003.sql`, `scripts/check-sql-live.mjs`, `scripts/lib/release-gate.mjs`, `server/test/github.test.ts`, `scripts/bundle.mjs`, `server/src/capture.ts`, `scripts/check-ai-config.mjs`, `scripts/check-tarball.mjs`, `db/schema.sql`, `scripts/release-finish.mjs`
   - 完了条件: `bun run check` → 0 で終わる。`bun run --cwd server test -- test/migrate.test.ts` → 通る（migration の SQL は変わらない）
@@ -116,7 +116,7 @@ base: main
 
 ## P4: 0.6.5 として出す
 
-- [ ] T08: リリースの種別を確かめ、バージョンをそろえる
+- [-] T08: リリースの種別を確かめ、バージョンをそろえる
   - 種別: 変更
   - 計画: S9
   - 依存: T04（ステージする変更が要る）, T05（ステージする変更が要る）, T07（ステージする変更が要る）
@@ -134,3 +134,5 @@ base: main
 2026-09-29 / T09 / T02・T04 の Codex レビュー: 同じ印の行が重複すると後ろの違いを見逃す（低）、SQL の複数行の文字列の中の `--` 行を誤検出（中）、CR だけの改行で行番号がずれる（低） / 1 件目と 3 件目は T09 を足して直した。2 件目は見送り: 誤検出は検査が落ちるだけで黙って通らず、今の SQL にそういう文字列は無く、直すには SQL の文字列の解釈が要る
 2026-09-29 / T07 / trace の本文は AskUserQuestion をバッククォートなしで書いていて、インラインコードだけを拾う形では当たらなかった / AskUserQuestion は普通の単語と紛れないので、本文のどこにあっても拾うようにした
 2026-09-29 / T10 / T05 の Codex レビュー: セッション開始のたびにプロジェクトの全オーナー発言を集計する（中、Codex の簡易測定で旧クエリの約 50 倍） / T10 を足し、未 trace のセッションを EXISTS で絞ってから、そのセッションの発言だけを索引で引く形に直した
+2026-09-29 / T08 / 取りやめ。S9 のバージョン上げは pre-commit の求めで T03（d091e11）に入った。`bun run release:plan -- --base v0.6.4` → `plugin`、npm・plugin・marketplace・Codex がすべて 0.6.5 を確かめた
+2026-09-29 / T03 / 計画欄 前: S7、後: S7, S9 / T03 のコミットがバージョン上げ（S9）を実際に担ったので、欄を事実に合わせた
