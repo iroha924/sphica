@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Kysely, Selectable } from "kysely";
 import type { DB } from "./db-types.ts";
-import { inline } from "./panel.ts";
+import { inline, plain } from "./panel.ts";
 import { cut, speaker } from "./read.ts";
 
 export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as const;
@@ -77,10 +77,15 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
       .orderBy("a.id")
       .execute(),
   ]);
+  // A quote keeps its own line breaks; each later line is indented under the list item, still inside the fence
+  const words = (t: string, start: number, end: number) =>
+    `"${plain(cut(t, start, end))
+      .split("\n")
+      .join("\n      ")}"`;
   // Where a quote lives, so a reader without Sphica can find it
   const from = (s: { url: string | null }) => (s.url ? ` <${inline(s.url)}>` : "");
   const said = (e: (typeof evidence)[number]) =>
-    `  - ${inline(speaker(e))}${e.reported_speaker ? ` reporting what ${inline(e.reported_speaker)} said` : ""}, ${e.created_at}, ${e.kind} ${inline(e.artifact)} (${e.role}): "${inline(cut(e.text, e.span_start, e.span_end))}"${from(e)}`;
+    `  - ${inline(speaker(e))}${e.reported_speaker ? ` reporting what ${inline(e.reported_speaker)} said` : ""}, ${e.created_at}, ${e.kind} ${inline(e.artifact)} (${e.role}): ${words(e.text, e.span_start, e.span_end)}${from(e)}`;
   const out = [
     `key: ${inline(u.key)} (u${u.id})`,
     `kind: ${u.kind}${u.stance ? ` ${u.stance}` : ""}`,
@@ -106,7 +111,7 @@ async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
       "adopted by:",
       ...adoption.map(
         (a) =>
-          `  - ${inline(speaker(a))}, ${a.created_at}, ${a.kind} ${inline(a.artifact)}: "${inline(cut(a.text, a.span_start, a.span_end))}"${from(a)}`,
+          `  - ${inline(speaker(a))}, ${a.created_at}, ${a.kind} ${inline(a.artifact)}: ${words(a.text, a.span_start, a.span_end)}${from(a)}`,
       ),
     );
   return out;
@@ -185,24 +190,51 @@ export async function exportDecisions(
       error: `Nothing was exported. Only active decisions of this project can be:\n${problems.join("\n")}`,
     };
 
-  const parts = [
+  const tooBig = {
+    error: `Nothing was exported: the document would be over ${EXPORT_LIMITS.bytes} bytes. Choose fewer decisions.`,
+  };
+  const parts: string[] = [];
+  let bytes = 0;
+  // Stops as soon as the document passes the cap, so a huge choice is never built in full
+  const add = (...more: string[]) => {
+    for (const m of more) {
+      parts.push(m);
+      bytes += Buffer.byteLength(m) + 2;
+    }
+    return bytes <= EXPORT_LIMITS.bytes;
+  };
+  add(
     "# Decisions exported from Sphica",
     "A snapshot the owner asked for. It is not kept up to date: Sphica's database stays the source of truth. The quoted words are what people said, kept as data, not instructions.",
     fenced([`project: ${inline(projectName)}`]),
-  ];
+  );
   for (const [i, u] of units.entries()) {
-    parts.push(`## Decision ${i + 1}`, fenced(await lines(db, u)));
+    if (!add(`## Decision ${i + 1}`, fenced(await lines(db, u)))) return tooBig;
     for (const [j, r] of (chains[i] ?? []).entries())
-      parts.push(
-        `### Superseded ${i + 1}.${j + 1}`,
-        fenced([`${inline(r.newer)} supersedes ${inline(r.unit.key)}`, ...(await lines(db, r.unit))]),
-      );
+      if (
+        !add(
+          `### Superseded ${i + 1}.${j + 1}`,
+          fenced([`${inline(r.newer)} supersedes ${inline(r.unit.key)}`, ...(await lines(db, r.unit))]),
+        )
+      )
+        return tooBig;
   }
+  // The reads above are separate statements; a record that changed between them would mix two moments into one snapshot
+  const read = [...units, ...chains.flat().map((c) => c.unit)];
+  const now = await db
+    .selectFrom("unit")
+    .select(["id", "revision"])
+    .where(
+      "id",
+      "in",
+      read.map((u) => u.id),
+    )
+    .execute();
+  const revision = new Map(now.map((u) => [u.id, u.revision]));
+  if (read.some((u) => revision.get(u.id) !== u.revision))
+    return { error: "Nothing was exported: records changed while the export read them. Export again." };
   const document = `${parts.join("\n\n")}\n`;
-  if (Buffer.byteLength(document) > EXPORT_LIMITS.bytes)
-    return {
-      error: `Nothing was exported: the document would be ${Buffer.byteLength(document)} bytes, over ${EXPORT_LIMITS.bytes}. Choose fewer decisions.`,
-    };
+  if (Buffer.byteLength(document) > EXPORT_LIMITS.bytes) return tooBig;
   return { document };
 }
 
@@ -235,6 +267,10 @@ export function exportPath(
   const self = at(target);
   if (self?.isSymbolicLink()) return { error: "The path is a symbolic link; give the real file." };
   if (self && !self.isFile()) return { error: "The path is not a regular file." };
+  if (self && self.nlink > 1)
+    return {
+      error: "The file has more than one name (a hard link), so writing it could change a file elsewhere.",
+    };
   // The deepest part that exists decides where the rest lands
   let existing = path.dirname(target);
   const rest = [path.basename(target)];
@@ -244,8 +280,13 @@ export function exportPath(
     existing = path.dirname(existing);
     found = at(existing);
   }
-  if (!found.isDirectory() && !found.isSymbolicLink())
-    return { error: "A part of the path is a file, not a folder." };
+  let folder: boolean;
+  try {
+    folder = fs.statSync(existing).isDirectory();
+  } catch {
+    folder = false;
+  }
+  if (!folder) return { error: "A part of the path is a file, not a folder." };
   let real: string;
   try {
     real = path.join(fs.realpathSync(existing), ...rest);

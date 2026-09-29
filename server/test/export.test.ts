@@ -150,6 +150,64 @@ test("a deferred decision keeps when to revisit it, and a quote keeps the URL it
   }
 });
 
+test("a quote spanning lines keeps its line breaks inside the fence", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const text = "Use:\n  bun test\n```\nDecided.";
+    const m = message(db, p, { id: "m1", text });
+    await save(db, p, [decision(m, text, "cmd")]);
+    const doc = await exported(db, p, ["trace:ext-s1/cmd"]);
+    assert.match(doc, /\(states\): "Use:\n {6} {2}bun test\n {6}```\n {6}Decided\."/);
+    assert.deepEqual(
+      [...doc.matchAll(/^#+ .*$/gm)].map((h) => h[0]),
+      ["# Decisions exported from Sphica", "## Decision 1"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a record that changes while the export reads it refuses the export", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Use pnpm. Decided. An aside." });
+    await save(db, p, [
+      decision(m, "Use pnpm. Decided.", "pnpm", {
+        evidence: [
+          { source: `s${m}`, quote: "Use pnpm. Decided.", role: "states" },
+          { source: `s${m}`, quote: "An aside.", role: "explains" },
+        ],
+      }),
+    ]);
+    // Another connection retracts a quote after the export checked the record and before it reads the quotes
+    let done = false;
+    const racing = new Proxy(db.reader, {
+      get(target, prop, receiver) {
+        if (prop === "selectFrom")
+          return (from: string) => {
+            if (!done && from === "unit_option") {
+              done = true;
+              db.owner
+                .prepare(
+                  "update unit_evidence set retracted_at = '2099-01-01T00:00:00.000Z', retraction_reason = 'wrong', retraction_source_id = source_id, retraction_span_start = span_start, retraction_span_end = span_end where role = 'explains'",
+                )
+                .run();
+            }
+            return target.selectFrom(from as never);
+          };
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const r = await exportDecisions(racing, p, "o/r", ["trace:ext-s1/pnpm"]);
+    assert.ok(done, "the change happened during the export");
+    assert.ok("error" in r && /changed while/.test(r.error), JSON.stringify(r));
+  } finally {
+    await db.done();
+  }
+});
+
 test("a retracted quote is left out", async () => {
   const db = tempDb();
   try {
@@ -255,7 +313,7 @@ test("a document over the byte cap is refused, not cut", async () => {
       await save(db, p, [decision(m, long, `big${i}`)]);
       keys.push(`trace:ext-s1/big${i}`);
     }
-    assert.match(await refused(db, p, keys), /over 61440\. Choose fewer decisions\./);
+    assert.match(await refused(db, p, keys), /over 61440 bytes\. Choose fewer decisions\./);
     // A quote full of backticks is refused for its size too, not by a crash on the way
     const ticks = `${"`a".repeat(200_000)} Decided.`;
     const mt = message(db, p, { id: "mt", text: ticks });
@@ -326,6 +384,10 @@ test("the save path must land inside the repository, through any symbolic link",
       );
     assert.match(String(Object.values(exportPath(root, "."))), /leaves the repository/);
     assert.deepEqual(exportPath(root, "..notes.md"), { relative: "..notes.md", exists: false });
+    fs.linkSync(path.join(outside, "..", "repo", "docs", "decisions.md"), path.join(root, "hard.md"));
+    assert.match(String(Object.values(exportPath(root, "hard.md"))), /more than one name/);
+    fs.symlinkSync(path.join(root, "docs", "decisions.md"), path.join(root, "filelink"));
+    assert.match(String(Object.values(exportPath(root, "filelink/new.md"))), /not a folder/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
