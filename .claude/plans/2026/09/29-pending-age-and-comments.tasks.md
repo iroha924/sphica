@@ -31,13 +31,14 @@ base: main
   - コミット: `chore(plans): remove finished plans and task lists`
   - 結果: `git rm` で 14 ファイルを消し、`find .claude/plans -type f` → この計画の plan と tasks の 2 ファイルだけ
 
-- [ ] T02: コメント規則を書き換え、共通の 3 行が両ファイルで一致することを検査する
+- [x] T02: コメント規則を書き換え、共通の 3 行が両ファイルで一致することを検査する
   - 種別: 変更
   - 計画: S5
   - 依存: なし
   - 変更: `.claude/rules/comments.md`, `AGENTS.md`, `scripts/check-ai-config.mjs`
   - 完了条件: `bun run verify:ai` → 0 で終わる。`comments.md` の共通の 3 行を 1 字変えると落ちる（戻す）
   - コミット: `docs(rules): keep references and history out of code comments`
+  - 結果: `bun run verify:ai` → 0。`comments.md` の comment-length の行に空白を 1 つ足すと「AGENTS.md: the comment-length line differs」で落ち、戻して 0。新しい 2 行に invariant `comment-refs`・`comment-history` を付け、印の集合の検査にも載せた
 
 - [ ] T03: 既存の違反コメントを直す
   - 種別: 変更

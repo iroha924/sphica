@@ -127,6 +127,17 @@ for (const id of claudeSide)
 for (const id of codexSide)
   if (!claudeSide.has(id))
     fail(`CLAUDE.md, .claude/rules: invariant ${id} exists only on the AGENTS.md side`);
+// The comment rules are the same words on both sides, not only the same markers.
+const commentRules = ["comment-length", "comment-refs", "comment-history"];
+const markedLine = (source, id) =>
+  source.split("\n").find((line) => line.endsWith(`<!-- invariant: ${id} -->`));
+const commentsRule = read(".claude/rules/comments.md");
+for (const id of commentRules) {
+  const claudeLine = markedLine(commentsRule, id);
+  if (!claudeLine) fail(`.claude/rules/comments.md: no line for invariant ${id}`);
+  else if (claudeLine !== markedLine(agents, id))
+    fail(`AGENTS.md: the ${id} line differs from .claude/rules/comments.md. Keep the words the same`);
+}
 const claudeVerification = read(".claude/rules/verification.md");
 for (const required of [
   "bun run release:plan -- --base <previous release commit>",
