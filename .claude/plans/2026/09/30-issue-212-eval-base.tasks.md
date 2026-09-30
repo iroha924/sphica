@@ -178,7 +178,7 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - 計画: S8
   - 依存: T11（直す対象の時間のテストが要る）
   - 変更: `server/test/text-properties.test.ts`
-  - red: `bun run verify`（裏で Stryker が 8 並列で動いている状態）→ authorization header の比が 5.8・10.0・41.3 ms（4n/2n が 4.1）で落ちる
+  - red: `bun run verify` → 裏で Stryker が 8 並列で動いている状態で、authorization header の比が 5.8・10.0・41.3 ms（4n/2n が 4.1）になって落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="mask takes time" test/text-properties.test.ts` → 同じ負荷の下で 3 回とも通り、mask に二次の処理を一時的に入れると 3 回の試行すべてで落ちる
   - コミット: `test(text): time mask by its fastest run and allow three tries (T20)`
   - 結果: 直す前は Stryker の負荷の下の verify で 4n/2n が 4.1 になって落ちた（red）。直した後、同じ負荷の下で 3 回とも pass。mask に二次の処理を一時的に入れると「every try grew faster than linear (6.3, 18.0, 57.2 ms; …)」で落ちた（戻した）。`bun run verify` → exit 0
@@ -213,13 +213,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 
 新しい流し方で 1 ループを回せる手順が Skill にある。
 
-- [ ] T15: eval-loop Skill を build ID・plan.json・report.ts の流し方に書き換える
+- [x] T15: eval-loop Skill を build ID・plan.json・report.ts の流し方に書き換える
   - 種別: 変更
   - 計画: S12
   - 依存: T06（build ID と plan.json が要る）, T10（report.ts が要る）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → 通る。Skill の手順に `--variant`、`plan.json`、`collect.ts --build`、`report.ts`、流す前の見積もりの確認がある
   - コミット: `docs(eval-loop): run a loop by build id, firing plan, and report (T15)`
+  - 結果: `bun run verify:ai` → 通る。Skill の手順に見積もりの確認（0）、`--variant`、`plan.json` と fire.ts、`collect.ts --build`、`grade.ts --loop` と 2 人目の採点者、`report.ts`、検索だけの変更はオフラインのベンチで先に比べることがある。`bun run verify` → exit 0
 
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
