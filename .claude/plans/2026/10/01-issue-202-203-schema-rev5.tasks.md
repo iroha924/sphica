@@ -110,7 +110,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - 完了条件: `bun run verify` → 0（型の検査を含む）。`server/test/db.test.ts` の `// @ts-expect-error` を付けた reader への insert が型エラーのままで、外すと型の検査が落ちる
   - コミット: `refactor(db): type the reader connection as read-only (T08)`
 
-- [ ] T21: T04・T05 の Codex の指摘を直す（candidate の後継がいる unit の withdraw を通す、migration の run を id カウンターの復元の後に作る）
+- [x] T21: T04・T05 の Codex の指摘を直す（candidate の後継がいる unit の withdraw を通す、migration の run を id カウンターの復元の後に作る）
   - 種別: 修正
   - 計画: S4, S6
   - 依存: T05（直す対象の withdraw の検査と移行の修復が要る）
@@ -118,6 +118,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - red: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → 採用の無い後継を足しながら元の unit を withdraw する glean の保存が check のエラーで落ち、run を消した rev4 の DB の移行で migration の run が消した id を使い直して落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → その保存で元の unit が withdrawn・後継が candidate になり、同じ保存で後継が active になって元が superseded になったときは withdraw を「しなかった」と返し、migration の run の id が旧カウンター + 1 になるテストが通る
   - コミット: `fix(glean): let a record be withdrawn beside a candidate successor, and keep run ids unused (T21)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="withdrawn beside a successor|whose successor is withdrawn" test/extract.test.ts test/migrate.test.ts` → 直す前は 2 本とも落ちた（red: check の「The record is not valid」/ migration の run の id が 9 でなく 2）。直した後 `node --test test/extract.test.ts test/migrate.test.ts` → 42 pass・0 fail。`bun run verify` → exit 0。review-shipping（1 回目は API の 529 で結果なし、投げ直し）: 指摘なし。save 側の分岐だけを戻すとテストの後半が落ちることを確認
 
 ## P3: index・FK・一意キー・CHECK・値の整理（#203）
 

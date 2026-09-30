@@ -373,7 +373,19 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
       (raw.prepare("select revision from unit where id = ?").get(unit) as { revision: number }).revision,
     );
   const before = revision(2);
+  // Runs 2 to 8 were made and removed: the migration's own run takes the next id, not one of theirs
+  run("update sqlite_sequence set seq = 8 where name = 'extraction_run'");
   const said = migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare("select id, origin from extraction_run order by id")
+      .all()
+      .map((r) => [r.id, r.origin]),
+    [
+      [1, "trace"],
+      [9, "migration"],
+    ],
+  );
   assert.deepEqual(
     raw
       .prepare("select id, lifecycle from unit order by id")

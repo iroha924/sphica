@@ -1160,6 +1160,87 @@ test("glean: a successor that becomes active later supersedes the record it repl
   }
 });
 
+test("glean: a record is withdrawn beside a successor that stays a candidate, and left alone once this save superseded it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const old = message(db, p, { id: "o1", text: "SQLite にしよう。Redis も使う。" });
+    const decided = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...extra,
+    });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [
+        decided("storage", old, "SQLite にしよう。", {
+          adoption: [{ source: `s${old}`, quote: "SQLite にしよう。" }],
+        }),
+        decided("cache", old, "Redis も使う。", {
+          adoption: [{ source: `s${old}`, quote: "Redis も使う。" }],
+        }),
+      ],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, {
+      id: "g",
+      text: "SQLite はやめる。Redis もやめる。Postgres に変える。これで決まり。",
+      session: "g1",
+    });
+    const assistant = message(db, p, {
+      id: "a",
+      text: "Memcached にしましょう。",
+      speaker: "assistant",
+      session: "g1",
+    });
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    const revision = (key: string) =>
+      db.owner.prepare("select revision from unit where key = ?").get(key)?.revision;
+    // The successor has no adoption, so it stays a candidate and replaces nothing: the owner's withdrawal of the old record stands
+    const kept = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      units: [
+        decided("cache-2", assistant, "Memcached にしましょう。", { supersedes: "trace:ext-s1/cache" }),
+      ],
+      ops: [
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/cache",
+          revision: revision("trace:ext-s1/cache"),
+          reason_source: `s${said}`,
+          reason_quote: "Redis もやめる。",
+        },
+      ],
+    });
+    assert.match(kept, /trace:ext-s1\/cache: withdrawn/);
+    assert.deepEqual([state("trace:ext-s1/cache"), state("glean:cache-2")], ["withdrawn", "candidate"]);
+    // Here the successor becomes active in the same save and supersedes the old record first: there is nothing live left to withdraw
+    const replaced = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      units: [
+        decided("storage-2", said, "Postgres に変える。", {
+          adoption: [{ source: `s${said}`, quote: "これで決まり。" }],
+          supersedes: "trace:ext-s1/storage",
+        }),
+      ],
+      ops: [
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/storage",
+          revision: revision("trace:ext-s1/storage"),
+          reason_source: `s${said}`,
+          reason_quote: "SQLite はやめる。",
+        },
+      ],
+    });
+    assert.match(replaced, /trace:ext-s1\/storage: superseded by a record of this save, so not withdrawn/);
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-2")], ["superseded", "active"]);
+  } finally {
+    await db.done();
+  }
+});
+
 test("glean: a successor that becomes active later supersedes a predecessor that was still a candidate", async () => {
   const db = tempDb();
   try {

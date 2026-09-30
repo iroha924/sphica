@@ -463,8 +463,6 @@ export async function checkGlean(
         errors.push(
           `${what}: ${op.unit} is superseded, so there is nothing live to withdraw (withdraw the record that replaced it, if that one no longer holds)`,
         );
-      else if (units.units.some((n) => n.supersedes === u.id))
-        errors.push(`${what}: a record in this save supersedes ${op.unit}, which already replaces it`);
     }
     if (op.op === "resolve_conflict") {
       const open = await db
@@ -793,9 +791,19 @@ export async function saveGlean(
         continue;
       }
       if (op.op === "withdraw") {
+        touched.delete(p.unitId);
+        // A record of this save may have become active and superseded it just above: then nothing live is left to withdraw
+        const held = await trx
+          .selectFrom("unit")
+          .select("lifecycle")
+          .where("id", "=", p.unitId)
+          .executeTakeFirstOrThrow();
+        if (held.lifecycle === "superseded") {
+          changed.push(`${op.unit}: superseded by a record of this save, so not withdrawn`);
+          continue;
+        }
         await move(trx, p.unitId, "withdrawn", `withdrawn: ${head(op.reason_quote, 200)}`, reason.id, runId);
         changed.push(`${op.unit}: withdrawn`);
-        touched.delete(p.unitId);
         continue;
       }
       // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order).

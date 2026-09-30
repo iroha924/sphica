@@ -122,6 +122,12 @@ insert into extraction_run_new (id, project_id, origin, target, session_id, stat
 drop table extraction_run;
 alter table extraction_run_new rename to extraction_run;
 
+-- The repairs below add runs: their ids come after every id a run ever had
+update sqlite_sequence set seq = max(seq, (select s.seq from temp.sphica_sequence s where s.name = sqlite_sequence.name))
+where name in (select name from temp.sphica_sequence);
+insert into sqlite_sequence (name, seq) select s.name, s.seq from temp.sphica_sequence s
+where s.name not in (select name from sqlite_sequence) and s.name in (select name from sqlite_schema where type = 'table');
+
 -- Repairs. Every row changed or removed is noted, and `sphica init` prints the notes.
 create temp table sphica_migration_note (rule text, item text, action text);
 
