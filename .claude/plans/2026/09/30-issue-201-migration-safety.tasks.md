@@ -110,13 +110,14 @@ capture ビューの列の変化と `terms()` の出力の変化がテストで�
 
 npm pack した配布物で案内・バックアップ・移行が通しで動き、版がそろう。
 
-- [ ] T06: sql:live に tarball の deliver.js と cli.js を rev3 の DB に流す検査を足す
+- [x] T06: 配布物の検査（check-tarball.mjs）で、tarball の deliver.js と cli.js を 1 つ前の revision の DB に流す
   - 種別: 追加
   - 計画: S6
   - 依存: T01（`Backed up:` の出力が要る）, T03（版入りの案内が要る）
-  - 変更: `scripts/check-sql-live.mjs`
-  - 完了条件: `bun run sql:live` → tarball の deliver.js が rev3 の DB に版入りの案内を返し、cli.js の init が `Backed up:` と `Migrated: … (revision 3 → 4)` を出し、バックアップが revision 3 で開ける
-  - コミット: `test(live): run the packed hooks and CLI against an older database (T06)`
+  - 変更: `scripts/check-tarball.mjs`
+  - 完了条件: `bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → tarball の deliver.js が rev3 の DB に `npm i -g sphica@<版>` を返し、cli.js の init が `Backed up:` と `Migrated: … (revision 3 → 4)` を出し、バックアップが revision 3 で開ける
+  - コミット: `test(package): run the packed hook and CLI against an older database (T06)`
+  - 結果: `bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → 「CLI 0.6.12 started, …, and backed up and migrated an older database the hook named the version for」で exit 0。`bun run verify` → exit 0
 
 - [-] T07: 版を 0.6.12 にそろえる
   - 種別: 変更
@@ -136,3 +137,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T05 / plan 方針 5 の「reindex() の SQL を定数にして export する」は、使う側がテストにも移行にも無く、未使用の export になる（knip が落とす）。2 重に持たないための策は、棄却した C9 (b) の検査のためだった / 定数化はせず、テストの失敗メッセージと規範の文で reindex() を写す元として名指しした。world.json の 2000 文字を超える 3 本（同じ繰り返しの詰め物）は golden から外した
 - 2026-09-30 / T05 / `.claude/skills/knowledge-schema` は `.agents/skills/knowledge-schema` へのシンボリックリンクだった / 変更欄を実体のパスに変えた（前: `.claude/skills/knowledge-schema/SKILL.md`、後: `.agents/skills/knowledge-schema/SKILL.md`）
 - 2026-09-30 / T03 レビュー / Codex の F1（Codex の子セッションの prompt に案内が出る）は、prompt の持ち主判定（deliver.ts の入口）が CODEX_THREAD_ID を渡していない既存の不具合で、ふだんの prompt 配信も子に出ていた。F2（テストが版の形しか見ない）。どちらも直す / T10 を足した
+- 2026-09-30 / T06 / 配布物を展開して動かす検査は scripts/check-tarball.mjs（CI の check と release が npm pack の tarball に流す）に既にあり、sql:live は src を動かす / 検査を check-tarball.mjs に足した。変更欄（前: `scripts/check-sql-live.mjs`、後: `scripts/check-tarball.mjs`）、完了条件（前: `bun run sql:live` → …、後: 上の check-tarball のコマンド）、コミット件名（前: `test(live): …`、後: `test(package): …`）。plan の A4 は finishing で同じコマンドに読み替えて流す
