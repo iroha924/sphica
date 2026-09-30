@@ -1,7 +1,7 @@
 // Prints the offline retrieval benchmark (bench.ts). Run from server/: node evals/retrieval/run.ts [--compare <git ref>] [--json]
 // --compare copies this runner and corpus into a worktree of the ref and runs them there, so the ref's own terms(), index triggers,
 // and search build and read its database; running both versions against one database would compare the wrong tokenizer.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +31,10 @@ async function summary(): Promise<{ lines: string[]; groups: Summary }> {
 /** Runs this runner and corpus against another ref's source, in a throwaway worktree with that ref's dependencies. */
 function other(ref: string): Summary {
   const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  // The ref's code runs here with the owner's permissions, so only a ref this checkout's history already holds is compared
+  const inHistory = spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", ref, "HEAD"]).status === 0;
+  if (!inHistory)
+    throw new Error(`${ref} is not in this checkout's history; compare only with a ref HEAD contains`);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bench-"));
   const tree = path.join(dir, "tree");
   execFileSync("git", ["-C", root, "worktree", "add", "--detach", tree, ref], { stdio: "ignore" });
@@ -39,7 +43,10 @@ function other(ref: string): Summary {
     fs.mkdirSync(here, { recursive: true });
     for (const f of ["bench.ts", "run.ts", "corpus.json"])
       fs.copyFileSync(path.join(import.meta.dirname, f), path.join(here, f));
-    execFileSync("bun", ["install", "--cwd", "server", "--frozen-lockfile"], { cwd: tree, stdio: "ignore" });
+    execFileSync("bun", ["install", "--cwd", "server", "--frozen-lockfile", "--ignore-scripts"], {
+      cwd: tree,
+      stdio: "ignore",
+    });
     let out: string;
     try {
       out = execFileSync(process.execPath, [path.join("evals", "retrieval", "run.ts"), "--json"], {

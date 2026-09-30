@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { claimRunDir } from "../evals/cloud/codex-home.ts";
-import { type FiringRow, pair, taskFromReceipts } from "../evals/cloud/firing.ts";
+import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
 import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
   answerFormat,
@@ -1053,7 +1053,7 @@ test("the report refuses builds of different bundles or task definitions", () =>
       fs.mkdirSync(path.join(base, name));
       seedTasks(path.join(base, name));
       const file = path.join(base, name, "grades.json");
-      fs.writeFileSync(file, JSON.stringify({ variant: "original", bundle: name, rows: [] }));
+      fs.writeFileSync(file, JSON.stringify({ build: name, variant: "original", bundle: name, rows: [] }));
       return file;
     });
     const r = spawnSync(
@@ -1106,6 +1106,114 @@ test("collect judges runs by the task definitions of their build, not the checko
     );
     const [got] = JSON.parse(fs.readFileSync(out, "utf8")).rows;
     assert.deepEqual(Object.keys(got.gold_signals), ["trace:built/with"]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("a swapped build plans only its gold rows", () => {
+  const tasks = [{ id: "t", prompt: "p", conditions: ["none", "search", "inject", "gold"] }];
+  const slot = (c: string) => `slot-${c}`;
+  assert.deepEqual(
+    planRows("b", "swapped", tasks, 2, slot).map((r) => `${r.condition} ${r.try}`),
+    ["gold 1", "gold 2"],
+  );
+  assert.equal(planRows("b", "original", tasks, 2, slot).length, 8);
+});
+
+test("the report refuses the same build given twice", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-"));
+  try {
+    seedTasks(base);
+    const file = path.join(base, "grades.json");
+    fs.writeFileSync(file, JSON.stringify({ build: "b", variant: "original", bundle: "c", rows: [] }));
+    const r = spawnSync(
+      process.execPath,
+      [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), file, file],
+      { encoding: "utf8", env: childEnv(base) },
+    );
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /given twice/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("collect records the bundled files' hashes with the commit, so builds of one commit with different bundles differ", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    fs.mkdirSync(build);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", bundle: { "mcp.js": "h1" }, repositories: {} }),
+    );
+    seedTasks(build);
+    const out = path.join(base, "loop.json");
+    execFileSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        path.join(base, "none"),
+        "--logs",
+        base,
+        "--out",
+        out,
+      ],
+      { stdio: "ignore", env: childEnv(base) },
+    );
+    assert.match(JSON.parse(fs.readFileSync(out, "utf8")).bundle, /^c .*h1/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("the Codex replay refuses a task or condition the build did not plan, before starting a run", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-codex-"));
+  try {
+    const build = path.join(base, "build");
+    fs.mkdirSync(build);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
+    );
+    seedTasks(build);
+    const row: FiringRow = {
+      build: "b",
+      variant: "original",
+      task: "pilot-dates",
+      condition: "none",
+      slot: "eval-shelf-1",
+      try: 1,
+      prompt: "p",
+      fired_at: null,
+    };
+    fs.writeFileSync(path.join(build, "plan.json"), JSON.stringify([row]));
+    // A git that fails keeps a run that slips past the check from reaching the network
+    const bin = path.join(base, "bin");
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, "git"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const runs = path.join(base, "runs");
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "codex.ts"),
+        "--build",
+        build,
+        "--repo",
+        "eval-shelf-1",
+        "--task",
+        "sphica-search-wording",
+        "--out",
+        runs,
+      ],
+      { encoding: "utf8", env: { ...childEnv(base), PATH: `${bin}${path.delimiter}${process.env.PATH}` } },
+    );
+    assert.match(r.stderr, /not in the build's firing plan/);
+    assert.equal(fs.existsSync(runs), false, "no run was started");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

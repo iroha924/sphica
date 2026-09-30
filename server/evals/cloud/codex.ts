@@ -9,7 +9,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { claimRunDir, isolatedCodexHome } from "./codex-home.ts";
-import { readTasks } from "./firing.ts";
+import { readPlan, readTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const { values: args } = parseArgs({
@@ -36,6 +36,9 @@ const repo = args.repo ?? "";
 const task = plan.tasks.find((t) => t.id === args.task);
 const condition = manifest.repositories[repo]?.condition;
 if (!task || !condition) throw new Error(`unknown task ${args.task} or repository ${repo}`);
+// The build's task definitions hold every project's tasks; a run the build did not plan would be collected as one of its results
+if (!readPlan(args.build).some((r) => r.task === task.id && r.condition === condition))
+  throw new Error(`${task.id} under ${condition} is not in the build's firing plan`);
 
 const { run, dir } = claimRunDir(path.resolve(args.out ?? ""), `${task.id}-${condition}`);
 const work = path.join(dir, "work");

@@ -14,7 +14,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
-import { writePlan, writeTasks } from "./firing.ts";
+import { planRows, writePlan, writeTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const ROOT = path.join(HERE, "..", "..", "..");
@@ -440,20 +440,7 @@ async function main() {
   const slotOf = new Map(CONDITIONS.map((c, i) => [c, `eval-shelf-${i + 1}`]));
   writePlan(
     out,
-    tasks.flatMap((t) =>
-      t.conditions.flatMap((condition) =>
-        Array.from({ length: runs }, (_, i) => ({
-          build: buildId,
-          variant,
-          task: t.id,
-          condition,
-          slot: slotOf.get(condition as (typeof CONDITIONS)[number]) ?? "",
-          try: i + 1,
-          prompt: t.prompt,
-          fired_at: null,
-        })),
-      ),
-    ),
+    planRows(buildId, variant, tasks, runs, (c) => slotOf.get(c as (typeof CONDITIONS)[number]) ?? ""),
   );
   console.log(`built ${CONDITIONS.length} repositories in ${out}`);
 }

@@ -25,6 +25,35 @@ export function readPlan(build: string): FiringRow[] {
 export const writePlan = (build: string, rows: FiringRow[]) =>
   fs.writeFileSync(planFile(build), `${JSON.stringify(rows, null, 2)}\n`);
 
+/**
+ * The firing plan: each task's conditions times the tries. A swapped build plans only its gold rows, the only runs shown the swapped
+ * record and the only ones the counterfactual reads.
+ */
+export function planRows(
+  build: string,
+  variant: string,
+  tasks: { id: string; prompt: string; conditions: string[] }[],
+  runs: number,
+  slotOf: (condition: string) => string,
+): FiringRow[] {
+  return tasks.flatMap((t) =>
+    t.conditions
+      .filter((condition) => variant !== "swapped" || condition === "gold")
+      .flatMap((condition) =>
+        Array.from({ length: runs }, (_, i) => ({
+          build,
+          variant,
+          task: t.id,
+          condition,
+          slot: slotOf(condition),
+          try: i + 1,
+          prompt: t.prompt,
+          fired_at: null,
+        })),
+      ),
+  );
+}
+
 const tasksFile = (build: string) => path.join(build, "tasks.json");
 
 /** The task definitions the build was made from: its runs are collected, graded, and reported against these, not the checkout's. */

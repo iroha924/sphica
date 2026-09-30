@@ -1,6 +1,8 @@
 // The offline retrieval benchmark must run in verify: experiments on search are judged with it, so one that cannot run, or runs with
 // fewer questions, fails here. Its numbers are compared by the experiment's own pull request, never gated here.
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import path from "node:path";
 import { test } from "node:test";
 import { bench } from "../evals/retrieval/bench.ts";
 
@@ -11,4 +13,25 @@ test("the retrieval benchmark runs every question and gives a number for each me
   for (const [k, v] of Object.entries({ ...r.all.recall, mrr: r.all.mrr, falseHit: r.all.falseHit }))
     assert.ok(!Number.isNaN(v), `${k} is a number`);
   assert.deepEqual([...r.byLang.keys()], ["en>en", "en>ja", "ja>en", "ja>ja"]);
+});
+
+test("--compare refuses a ref outside this checkout's history, since the ref's code would run", () => {
+  // A commit object no ref points to: made without touching any branch
+  const loose = execFileSync("git", ["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "not in history"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "t",
+      GIT_AUTHOR_EMAIL: "t@example.invalid",
+      GIT_COMMITTER_NAME: "t",
+      GIT_COMMITTER_EMAIL: "t@example.invalid",
+    },
+  }).trim();
+  const r = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "..", "evals", "retrieval", "run.ts"), "--compare", loose],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /not in this checkout's history/);
 });

@@ -15,7 +15,7 @@ type Graded = GradeRow & {
   second?: { grade: Grade } | { ungraded: string };
   gold_signals?: Record<string, GoldSignal>;
 };
-export type Build = { variant: string; bundle?: string; rows: Graded[] };
+export type Build = { build?: string | null; variant: string; bundle?: string; rows: Graded[] };
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
@@ -184,6 +184,9 @@ if (process.argv[1] === import.meta.filename) {
   const files = process.argv.slice(2);
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
   const builds = files.map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Build);
+  const ids = builds.map((b) => b.build ?? "");
+  if (new Set(ids).size < ids.length)
+    throw new Error("a build is given twice, or a build has no id; each counts once");
   const bundles = new Set(builds.map((b) => b.bundle));
   if (bundles.size > 1)
     throw new Error(

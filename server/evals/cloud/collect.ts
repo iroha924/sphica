@@ -42,6 +42,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "
   build?: string;
   variant?: string;
   commit: string;
+  bundle?: Record<string, string>;
   project?: string;
   repositories: Record<string, { condition: string }>;
 };
@@ -309,7 +310,7 @@ function main() {
           task: "unknown",
           condition: "unknown",
         };
-      // Codex runs of every build share one directory: a run made on another build (or before builds had ids) is not this build's
+      // Codex runs of every build share one directory: a run of another build, or one without a build id, is not this build's
       if (manifest.build && head.build !== manifest.build) {
         console.log(`${name}: a run of build ${head.build ?? "without an id"}, left out`);
         continue;
@@ -396,7 +397,7 @@ function main() {
     }
   fs.writeFileSync(
     out,
-    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: manifest.commit, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify(manifest.bundle ?? {})}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(
