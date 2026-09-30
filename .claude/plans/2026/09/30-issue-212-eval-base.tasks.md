@@ -262,6 +262,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `fix(eval): give parallel Codex runs their own run directories (T24)`
   - 結果: 直す前の命名（時刻だけ、recursive の mkdir）で同じテストが 1 fail（2 つのディレクトリが同じ）。直した後 1 pass。`bun run verify` → exit 0
 
+- [x] T25: Node 26 の CI のログに、テストの順序の seed を出す
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T12（ランダム化が要る）
+  - 変更: `scripts/check-sql-reach.mjs`
+  - 完了条件: `PATH=<node 26>/bin:$PATH TEST_ORDER="--test-randomize --test-random-seed=354" node scripts/check-sql-reach.mjs` → `Randomized test order seed: 354` を出して通る
+  - red: 同じコマンド → テストが通るとテストの出力を隠すので、seed の行が出ない（PR の check (26) のログにも TEST_ORDER の環境変数しか無かった）
+  - コミット: `fix(ci): print the random test order seed that sql:reach hides (T25)`
+  - 結果: 直す前は seed の行が出ず、直した後は `Randomized test order seed: 354` の後に `SQL: tests ran 189 / 189 sites` が出た。`bun run verify` → exit 0。review-shipping は指摘なし
+
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
@@ -287,3 +297,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / A6 / 持ち主がクラウドの 1 ループを「62 run、$9〜$19（反転版は gold の条件だけ）」で承認した / 反転版の gold の行だけを発火できるよう T23 を足した
 - 2026-09-30 / T24 / A6 で Codex の run を並行で流したとき、run 名が時刻（ミリ秒）だけのため同じタスク・条件の 2 run が同じディレクトリを使い 1 run が失われた（流し直した）。名前に乱数を足し、ディレクトリを recursive なしで作ってぶつかったら失敗させる
 - 2026-09-30 / T24 レビュー（Codex） / 指摘なし。サンドボックスでは mkdtemp が EPERM でテストを流せず、テストは手元で流した（1 pass） / なし
+- 2026-09-30 / T25 / A7 の確認で、Node 26 の check はランダムな順序でテストを流していたが、テストを流すのは sql:reach で、通ったときは出力を隠すため seed がログに出なかった。通ったときも seed の行だけを出す / なし
