@@ -784,7 +784,7 @@ test("a state change comes from exactly one of a run or a forget batch of the un
   assert.equal(one("select lifecycle from unit where id = ?", u).lifecycle, "candidate");
 });
 
-test("only a retracted row whose retraction reason was forgotten can be removed, and removing it raises the unit's revision", () => {
+test("a retracted row goes with the source of its retraction reason, never on its own, and going raises the unit's revision", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const reason = message(db, p, { id: "m2", text: "That was wrong." });
   const u = unit({ key: "u1", kind: "decision" });
@@ -799,13 +799,146 @@ test("only a retracted row whose retraction reason was forgotten can be removed,
   );
   const before = Number(one("select revision from unit where id = ?", u).revision);
   refuses(() => sql("delete from unit_evidence where unit_id = ? and role = 'states'", u), /never deleted/);
-  tombstone(reason, forgetBatch());
   refuses(() => sql("delete from unit_evidence where unit_id = ? and role = 'explains'", u), /never deleted/);
   refuses(() => sql("delete from unit_adoption where unit_id = ?", u), /never deleted/);
-  sql("delete from unit_evidence where unit_id = ? and role = 'states'", u);
+  // Removing the reason's source takes the row it explained, and nothing else
+  sql("delete from source where id = ?", reason);
+  assert.deepEqual(
+    db.owner
+      .prepare("select role from unit_evidence where unit_id = ? order by id")
+      .all(u)
+      .map((r) => r.role),
+    ["explains"],
+  );
   assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 1);
   sql("delete from source where id = ?", src);
   assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 3);
+});
+
+test("a run changes once, when it finishes", () => {
+  session(db, p, "s1");
+  const r = insert(db, "extraction_run", {
+    project_id: p,
+    origin: "trace",
+    target: "session:s1",
+    session_id: "s1",
+    status: "running",
+    started_at: now,
+  });
+  refuses(() => sql("update extraction_run set target = 'session:other' where id = ?", r), /changes once/);
+  sql("update extraction_run set status = 'saved', finished_at = ? where id = ?", now, r);
+  refuses(
+    () => sql("update extraction_run set status = 'running', finished_at = null where id = ?", r),
+    /changes once/,
+  );
+  refuses(
+    () => sql("update extraction_run set finished_at = ? where id = ?", at("2026-09-28T00:00:00Z"), r),
+    /changes once/,
+  );
+  refuses(() => sql("update extraction_run set session_id = null where id = ?", r), /changes once/);
+  assert.deepEqual(
+    { ...one("select status, finished_at from extraction_run where id = ?", r) },
+    { status: "saved", finished_at: now },
+  );
+});
+
+test("a delete takes what belongs to the deleted row: a whole project, or a session nothing cites; a cited session is refused", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit({ key: "u1", kind: "decision" });
+  evidence(u, src);
+  adoption(u, src);
+  state(u, null, "candidate");
+  state(u, "candidate", "active");
+  // A second session holds only what nothing cites: its message, an edit, a running run and a saved one, a delivery
+  session(db, p, "s2");
+  message(db, p, { id: "m2", text: "just talk", session: "s2" });
+  sql(
+    "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s2', 't', 'e', 'src/a.ts', 'tool', ?)",
+    now,
+  );
+  for (const status of ["running", "saved"])
+    insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "session:s2",
+      session_id: "s2",
+      status,
+      started_at: now,
+    });
+  sql("insert into delivery (session_id, event, outcome, at) values ('s2', 'prompt', 'nothing', ?)", now);
+  refuses(() => sql("delete from session where id = 's1'"), /records cite this session/);
+  // Each way a record can cite a session keeps it: adoption, a retraction reason, a state's source, a field, and an anchor on its edit
+  const cited = (name: string, cite: (message: number, sessionId: string) => void) => {
+    const said = message(db, p, { id: `c-${name}`, text: "Use SQLite. Decided.", session: `c-${name}` });
+    cite(said, `c-${name}`);
+    refuses(() => sql("delete from session where id = ?", `c-${name}`), /records cite this session/);
+  };
+  const other = unit({ key: "u2", kind: "decision" });
+  evidence(other, src);
+  cited("adoption", (m) => adoption(other, m));
+  cited("retraction", (m) =>
+    sql(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?",
+      now,
+      m,
+      other,
+    ),
+  );
+  cited("state", (m) =>
+    sql(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, null, 'candidate', ?, 'r', ?, (select run_id from unit where id = ?))",
+      other,
+      now,
+      m,
+      other,
+    ),
+  );
+  cited("field", (m) =>
+    insert(db, "field_def", {
+      project_id: p,
+      name: "tenant",
+      type: "text",
+      label: "Tenant",
+      description: "Who it affects",
+      source_id: m,
+      span_start: 0,
+      span_end: 3,
+      run_id: run(db, p),
+      added_at: now,
+    }),
+  );
+  cited("anchor", (_, sessionId) => {
+    sql(
+      "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values (?, 't', 'e', 'src/b.ts', 'tool', ?)",
+      sessionId,
+      now,
+    );
+    insert(db, "unit_anchor", {
+      unit_id: other,
+      path: "src/b.ts",
+      role: "applies_to",
+      edit_observation_id: Number(one("select id from edit_observation where session_id = ?", sessionId).id),
+      run_id: Number(one("select run_id from unit where id = ?", other).run_id),
+      added_at: now,
+    });
+  });
+  sql("delete from session where id = 's2'");
+  assert.equal(one("select count(*) as n from source where session_id = 's2'").n, 0);
+  assert.equal(one("select count(*) as n from edit_observation where session_id = 's2'").n, 0);
+  assert.equal(
+    one("select count(*) as n from extraction_run where target = 'session:s2' and session_id is null").n,
+    2,
+  );
+  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
+  // A whole project goes, cited or not
+  sql("delete from project where id = ?", p);
+  const left = (table: string) => Number(one(`select count(*) as n from ${table}`).n);
+  assert.deepEqual(
+    ["session", "source", "unit", "unit_evidence", "unit_adoption", "unit_state", "delivery"].map(left),
+    [0, 0, 0, 0, 0, 0, 0],
+  );
+  assert.equal(one("select count(*) as n from extraction_run where project_id = ?", p).n, 0);
+  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
 });
 
 test("tombstone: capture skips a message the owner forgot, and stores it again only with other text", () => {

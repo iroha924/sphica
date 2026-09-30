@@ -10,6 +10,10 @@
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
 -- Byte offsets are into the UTF-8 bytes of source.text. Project consistency across tables is enforced by triggers, not only by code.
+-- What a delete takes with it: a row goes with what it belongs to, and a row citing a source goes with that source (cascade; the
+-- no-delete triggers refuse removing such a row on its own). A column naming where a row came from (run_id, forget_id,
+-- edit_observation_id) takes no action: its target goes only with the whole project, removed in the same statement. A session that
+-- records cite is not deleted by hand: forget its messages instead, which judges the records again.
 -- Every foreign key is led by an index on its own columns (a partial one where the column can be null), so removing or moving a parent
 -- row looks its children up instead of scanning them.
 
@@ -111,6 +115,17 @@ when new.kind <> 'session_message' and new.author_kind = 'owner'
   and not exists (select 1 from owner_identity where provider = 'github' and external_id = new.author_external_id) begin
   select raise(abort, 'owner authorship needs a bound owner identity');
 end;
+create trigger session_cited before delete on session
+when exists (select 1 from project where id = old.project_id) and (
+  exists (select 1 from source s where s.session_id = old.id and (
+    exists (select 1 from unit_evidence e where e.source_id = s.id or e.retraction_source_id = s.id)
+    or exists (select 1 from unit_adoption a where a.source_id = s.id or a.retraction_source_id = s.id)
+    or exists (select 1 from field_def d where d.source_id = s.id)
+    or exists (select 1 from unit_field f where f.source_id = s.id)
+    or exists (select 1 from unit_state t where t.source_id = s.id)))
+  or exists (select 1 from edit_observation o join unit_anchor a on a.edit_observation_id = o.id where o.session_id = old.id)) begin
+  select raise(abort, 'records cite this session; forget its messages with /sphica:forget rather than deleting it');
+end;
 create trigger source_session_project before insert on source when new.session_id is not null
   and not exists (select 1 from session where id = new.session_id and project_id = new.project_id) begin
   select raise(abort, 'source and session belong to different projects');
@@ -208,6 +223,17 @@ create table extraction_run (
 ) strict;
 create index extraction_run_project on extraction_run (project_id);
 create index extraction_run_session on extraction_run (session_id) where session_id is not null;
+
+-- A run changes once, when it finishes: only a running run takes a status and a finish time. The one other update is the foreign key
+-- action clearing session_id after its session was deleted
+create trigger extraction_run_frozen before update on extraction_run
+when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
+  or new.reason is not old.reason or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
+  or new.started_at is not old.started_at
+  or (new.session_id is not old.session_id and (new.session_id is not null or exists (select 1 from session where id = old.session_id)))
+  or ((new.status is not old.status or new.finished_at is not old.finished_at) and old.status <> 'running') begin
+  select raise(abort, 'a run changes once, when it finishes');
+end;
 
 -- Which sources an extraction looked at, and what came of them
 create table source_processing (
@@ -314,7 +340,7 @@ create table unit_evidence (
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
   retracted_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retracted_at) is retracted_at),
   retraction_reason text,
-  retraction_source_id integer references source (id),
+  retraction_source_id integer references source (id) on delete cascade,
   retraction_span_start integer,
   retraction_span_end integer,
   foreign key (unit_id, option_id) references unit_option (unit_id, id) on delete cascade,
@@ -344,7 +370,7 @@ create table unit_adoption (
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
   retracted_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retracted_at) is retracted_at),
   retraction_reason text,
-  retraction_source_id integer references source (id),
+  retraction_source_id integer references source (id) on delete cascade,
   retraction_span_start integer,
   retraction_span_end integer,
   unique (unit_id, source_id, span_start, span_end),
@@ -686,15 +712,15 @@ create trigger unit_evidence_retract before update on unit_evidence begin
     and new.retraction_span_end <= length(cast(s.text as blob)));
 end;
 -- Deleting a project (or its unit or source) cascades; only a direct delete of a live link is refused.
--- A retracted row whose retraction reason cites a forgotten source is removed with that source (the reason cannot outlive it).
+-- A retracted row goes with the source its retraction reason cites (the reason cannot outlive it).
 create trigger unit_evidence_no_delete before delete on unit_evidence
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
+  and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
   select raise(abort, 'evidence is retracted, never deleted');
 end;
 create trigger unit_adoption_no_delete before delete on unit_adoption
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
+  and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
   select raise(abort, 'adoption is retracted, never deleted');
 end;
 -- A retraction, or retiring an anchor, that would leave an active unit without its required support must first move it back to candidate

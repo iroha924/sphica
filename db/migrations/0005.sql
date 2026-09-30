@@ -205,6 +205,59 @@ update unit set lifecycle = 'candidate', revision = revision + 1 where id in (se
 drop table temp.sphica_lifecycle;
 
 -- Rebuild the remaining tables whose definition changed.
+create table unit_evidence_new (
+  id integer primary key autoincrement not null,
+  unit_id integer not null references unit (id) on delete cascade,
+  option_id integer,
+  source_id integer not null references source (id) on delete cascade,
+  span_start integer not null check (span_start >= 0),
+  span_end integer not null check (span_end > span_start),
+  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements', 'reconsiders')),
+  -- A third party the owner reported ("X said ..."): hearsay by the owner, never X's own statement
+  reported_speaker text,
+  run_id integer not null references extraction_run (id),
+  added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
+  retracted_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retracted_at) is retracted_at),
+  retraction_reason text,
+  retraction_source_id integer references source (id) on delete cascade,
+  retraction_span_start integer,
+  retraction_span_end integer,
+  foreign key (unit_id, option_id) references unit_option (unit_id, id) on delete cascade,
+  check ((retracted_at is null) = (retraction_reason is null)),
+  check ((retracted_at is null) = (retraction_source_id is null)),
+  check ((retraction_source_id is null) = (retraction_span_start is null)),
+  check ((retraction_source_id is null) = (retraction_span_end is null)),
+  check (retraction_span_end is null or retraction_span_end > retraction_span_start)
+) strict;
+insert into unit_evidence_new (id, unit_id, option_id, source_id, span_start, span_end, role, reported_speaker, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end) select id, unit_id, option_id, source_id, span_start, span_end, role, reported_speaker, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end from unit_evidence;
+drop table unit_evidence;
+alter table unit_evidence_new rename to unit_evidence;
+
+create table unit_adoption_new (
+  id integer primary key autoincrement not null,
+  unit_id integer not null references unit (id) on delete cascade,
+  route text not null check (route in ('owner_statement', 'explicit')),
+  source_id integer not null references source (id) on delete cascade,
+  span_start integer not null check (span_start >= 0),
+  span_end integer not null check (span_end > span_start),
+  run_id integer not null references extraction_run (id),
+  added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
+  retracted_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retracted_at) is retracted_at),
+  retraction_reason text,
+  retraction_source_id integer references source (id) on delete cascade,
+  retraction_span_start integer,
+  retraction_span_end integer,
+  unique (unit_id, source_id, span_start, span_end),
+  check ((retracted_at is null) = (retraction_reason is null)),
+  check ((retracted_at is null) = (retraction_source_id is null)),
+  check ((retraction_source_id is null) = (retraction_span_start is null)),
+  check ((retraction_source_id is null) = (retraction_span_end is null)),
+  check (retraction_span_end is null or retraction_span_end > retraction_span_start)
+) strict;
+insert into unit_adoption_new (id, unit_id, route, source_id, span_start, span_end, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end) select id, unit_id, route, source_id, span_start, span_end, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end from unit_adoption;
+drop table unit_adoption;
+alter table unit_adoption_new rename to unit_adoption;
+
 
 update sqlite_sequence set seq = max(seq, (select s.seq from temp.sphica_sequence s where s.name = sqlite_sequence.name))
 where name in (select name from temp.sphica_sequence);
@@ -220,6 +273,17 @@ create trigger source_owner_bound before insert on source
 when new.kind <> 'session_message' and new.author_kind = 'owner'
   and not exists (select 1 from owner_identity where provider = 'github' and external_id = new.author_external_id) begin
   select raise(abort, 'owner authorship needs a bound owner identity');
+end;
+create trigger session_cited before delete on session
+when exists (select 1 from project where id = old.project_id) and (
+  exists (select 1 from source s where s.session_id = old.id and (
+    exists (select 1 from unit_evidence e where e.source_id = s.id or e.retraction_source_id = s.id)
+    or exists (select 1 from unit_adoption a where a.source_id = s.id or a.retraction_source_id = s.id)
+    or exists (select 1 from field_def d where d.source_id = s.id)
+    or exists (select 1 from unit_field f where f.source_id = s.id)
+    or exists (select 1 from unit_state t where t.source_id = s.id)))
+  or exists (select 1 from edit_observation o join unit_anchor a on a.edit_observation_id = o.id where o.session_id = old.id)) begin
+  select raise(abort, 'records cite this session; forget its messages with /sphica:forget rather than deleting it');
 end;
 create trigger source_session_project before insert on source when new.session_id is not null
   and not exists (select 1 from session where id = new.session_id and project_id = new.project_id) begin
@@ -242,6 +306,14 @@ create index source_forgotten_item on source_forgotten (project_id, artifact, ki
 create index edit_observation_path on edit_observation (path);
 create index extraction_run_project on extraction_run (project_id);
 create index extraction_run_session on extraction_run (session_id) where session_id is not null;
+create trigger extraction_run_frozen before update on extraction_run
+when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
+  or new.reason is not old.reason or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
+  or new.started_at is not old.started_at
+  or (new.session_id is not old.session_id and (new.session_id is not null or exists (select 1 from session where id = old.session_id)))
+  or ((new.status is not old.status or new.finished_at is not old.finished_at) and old.status <> 'running') begin
+  select raise(abort, 'a run changes once, when it finishes');
+end;
 create index source_processing_run on source_processing (run_id);
 create index unit_live on unit (project_id, lifecycle, kind);
 create index unit_run on unit (run_id);
@@ -503,12 +575,12 @@ create trigger unit_evidence_retract before update on unit_evidence begin
 end;
 create trigger unit_evidence_no_delete before delete on unit_evidence
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
+  and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
   select raise(abort, 'evidence is retracted, never deleted');
 end;
 create trigger unit_adoption_no_delete before delete on unit_adoption
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
+  and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
   select raise(abort, 'adoption is retracted, never deleted');
 end;
 create trigger unit_evidence_retract_support after update of retracted_at on unit_evidence

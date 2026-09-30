@@ -135,16 +135,17 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): index every foreign key and the item lookups (T09)`
   - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/github.test.ts test/deliver.test.ts test/search.test.ts test/forget.test.ts test/extract.test.ts` → 直す前の schema と lookup では 16 本が落ちた（red: FK の index の規則、item の lookup、delivery の conflicts、検索と読み取りの後継、forget）。直した後は同じ 6 ファイルと migrate.test.ts で 130 pass・0 fail。`bun run verify` → exit 0
 
-- [ ] T10: FK の動作を揃え、引用のある session の直接削除を拒む
+- [x] T10: FK の動作を揃え、引用のある session の直接削除を拒む
   - 種別: 修正
   - 計画: S3, S4, S6
   - 依存: T03（revision 5 の schema と移行が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/forget.ts`, `server/test/schema.test.ts`, `server/test/forget.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/forget.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 発言を証拠に引用された session の owner 接続での削除が通り、支えの無い active な unit が残って落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/forget.test.ts test/migrate.test.ts` → project の削除で全部消えて `foreign_key_check` が空、引用の無い session は消え、引用のある session は拒まれ、forget は先回りの delete なしで前と同じ結果になるテストが通る
   - コミット: `fix(db): make foreign key actions consistent and refuse deleting a cited session (T10)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 直す前の schema では、retraction の理由の source を消すテストと session の削除のテストが落ちた（red）。直した後 schema・forget・migrate・extract・record・admin のテストは全件 pass（理由の source と一緒に取り下げ済みの行が消え、forget の結果は前と同じ。引用の無い session は消え、6 つの経路のどれかで引用された session は拒まれ、project の削除は全部消えて foreign_key_check が空）。`bun run verify` → exit 0
 
-- [ ] T11: run を凍結する（running の行だけ status と finished_at を変えられる）
+- [x] T11: run を凍結する（running の行だけ status と finished_at を変えられる）
   - 種別: 修正
   - 計画: S3, S4
   - 依存: T02（同じ run を 2 回 saved にする更新が残っていると glean の保存が落ちる）, T10（session の削除のテストが、run の session_id を null にする FK の動作を通す）
@@ -152,6 +153,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → saved の run を running に戻す更新と、run の target の更新が通ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/extract.test.ts test/migrate.test.ts` → それらが拒まれ、running と saved の run を持つ引用の無い session の削除と、trace・harvest・glean の保存が通るテストが通る
   - コミット: `fix(db): freeze an extraction run once it is saved (T11)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="changes once" test/schema.test.ts` → 直す前の schema では落ちた（red）。直した後 schema.test.ts は全件 pass（saved の run を running に戻す・終了時刻や target を変える・session_id を消すのは拒まれ、running から saved は通る。session の削除で session_id が null になるのは通る）。`bun run verify` → exit 0
 
 - [ ] T12: 編集の観測と生きている anchor に一意キーを足し、同じ内容の記録を doctor に出す
   - 種別: 修正
@@ -253,3 +255,6 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T06 / 「withdrawn でない後継は 1 つまで」への plan の変更に、持ち主が Go。plan を approved に戻した（コミットは T06 と一緒）
 - 2026-10-01 / T06 / 変更欄: `server/test/record.test.ts` を外し（名前入りの check のエラーは extract.test.ts の glean の保存で見た）、Go を受けた plan と、後継を 2 つ並べる前提だった検索のテスト `server/test/search.test.ts` を足した
 - 2026-10-01 / T06 / review-shipping: 指摘なし。同じ glean の保存で「A の candidate の後継 B を取り下げ」かつ「新しい記録で A を置き換え」は、名前入りのエラーで 2 回の保存に分けることになる（check は保存の前の状態で見る）。使い勝手の制限で壊れてはいないので直さない
+- 2026-10-01 / T10 / 変更欄から `server/test/forget.test.ts` を外した（forget の既存のテストが、先回りの delete を消した後も同じ結果で通ることで足りた）。retraction の行の削除を「理由の source が forget の墓石にある」から「理由の source が無くなった」に変えたので、それを見ていた schema.test.ts のテストを cascade の形に書き直した
+- 2026-10-01 / T10・T11 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる（件名の末尾は (T10, T11)）
+- 2026-10-01 / T10・T11 / review-shipping: 指摘 3 件（forget.ts と db-write.ts のコメントが墓石の順序を理由に挙げたまま、session の削除のテストが 6 つの引用の経路のうち 1 つしか見ていない） / 同じコミットで直した。T10 の変更欄に `server/src/db-write.ts` を足した。経路を 1 つずつ消すとテストが落ちることを確かめた

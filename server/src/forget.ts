@@ -39,8 +39,8 @@ class Preview extends Error {
 const unknown = (id: number) => new Error(`s${id} is not a source of this project`);
 
 /**
- * Removes the sources inside the caller's transaction and returns what happened. Order matters: the tombstones exist before the
- * deletes (the no-delete triggers let a retracted row go only once its reason is tombstoned), and units are judged after the cascade.
+ * Removes the sources inside the caller's transaction and returns what happened. Order matters: what the deletes take is counted before
+ * them, and units are judged after the cascade (which also takes each retracted row whose reason cited a removed source).
  */
 async function forgetIn(
   trx: Kysely<DB>,
@@ -174,13 +174,6 @@ async function forgetIn(
       })),
     )
     .execute();
-  for (const t of ["unit_evidence", "unit_adoption"] as const)
-    await trx
-      .deleteFrom(t)
-      .where("retraction_source_id", "in", targets)
-      .where("retracted_at", "is not", null)
-      .where("source_id", "not in", targets)
-      .execute();
   outcome.references = Number(
     (await trx.deleteFrom("external_reference").where("owner_source_id", "in", targets).executeTakeFirst())
       .numDeletedRows,

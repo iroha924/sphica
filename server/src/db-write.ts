@@ -119,8 +119,8 @@ const writes = (action: number) =>
   action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE;
 
 /**
- * Only forget removes sources or writes what it removed. The no-delete triggers let a retracted row go once its reason is forgotten,
- * and the record server's code never deletes evidence or adoption, so ingest may not either.
+ * Only forget removes sources or writes what it removed. Evidence and adoption go only with their source (the no-delete triggers
+ * refuse anything else), and the record server's code never deletes them, so ingest may not either.
  */
 const FORGET_ONLY = new Set(["forget_batch", "source_forgotten"]);
 const KEPT_BY_INGEST = new Set(["source", "unit_evidence", "unit_adoption"]);
