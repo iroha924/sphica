@@ -173,13 +173,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `test(text): add property tests with fast-check and a growth check for mask (T11)`
   - 結果: `cd server && node --test test/text-properties.test.ts` → 6 pass・0 fail（seed 20260930、各 300 回）。空振りしないことを、head の上限を 1 ずらす・ftsQuery の引用符を外す・quoteSpan の終わりを 1 ずらす壊し方で確かめ、どれも落ちた（戻した）。mask の時間の比（2n/n と 4n/2n）を手元で 10 回測って最大 2.20、閾値 3.0 で確定（CI での値は PR の CI で見る）。`bun run verify` → exit 0。`bun run release:plan -- --base v0.6.12` → plugin、4 か所とも 0.6.13
 
-- [ ] T12: Node 26 の順序ランダム化と Biome の promise の 2 ルール
+- [x] T12: Node 26 の順序ランダム化と Biome の promise の 2 ルール
   - 種別: 変更
   - 計画: S9
   - 依存: なし
-  - 変更: `.github/workflows/check.yml`, `biome.json`
+  - 変更: `.github/workflows/check.yml`, `biome.json`, `server/package.json`
   - 完了条件: `bun run lint` → 0 件で通る。`cd server && node --test --test-randomize --test-random-seed=12345 test/*.test.ts` を Node 26 で流して通る（順序依存が出たら直す）
   - コミット: `ci: run tests in random order on Node 26 and flag floating promises (T12)`
+  - 結果: `bun run lint` → 0 件で通り、一時ファイルの `f();` には noFloatingPromises が出た（消した）。`cd server && TEST_ORDER="--test-randomize --test-random-seed=12345" bun run test`（Node 26.10）→ Randomized test order seed: 12345、475 pass・0 fail。`actionlint` → 通る。`bun run verify` → exit 0
 
 - [ ] T13: trace・glean の Skill の JSON 欄と zod の型の突き合わせ
   - 種別: 追加
@@ -226,3 +227,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T09 レビュー / Codex の F1（none の run にも本文を渡す）・F2（反転版を元版の expect と against で採点する）・F3（presented の受け渡しのテストが無い）は直す。F4（偽の claude では CLAUDE.md を読まないことを確かめられない）はテストでは直せないので、本物の claude -p での確かめ（入力 3,216 トークン、見えるかを問うて false、T09 の結果欄）を根拠に残す / T19 を足した
 - 2026-09-30 / T11 / fast-check 4.10.2 と依存の pure-rand 8.4.2 は、どちらも dubzzz の GitHub から SLSA provenance つきで公開（fast-check は 2017 年から、週 5,300 万ダウンロード、MIT）。最初の head/tail の性質は「h === s なら可」で空振りしていたので、上限に収まらない入力では必ず上限に収まることを見る形に直した。ftsQuery は Unicode の生成だけでは FTS5 の記号を含む識別子がほとんど出ず空振りしていたので、記号と識別子を混ぜた生成を足した。mask は 800 万文字を超える `sk-aaa…` でスタックがあふれるが、呼び出し側が 2MiB を超えて渡さない（capture は 128KiB で切る、anchors は 2MiB までのファイル）ので製品では起きない。時間のテストの長さは 4n が 200 万文字以内に収まるようにした。変更欄の `bun.lock` は `server/bun.lock` の誤り（前: `bun.lock`、後: `server/bun.lock`）
 - 2026-09-30 / T11 / release-scope.mjs は server/package.json と server/bun.lock の変更を中身によらずパッケージの入力とみなすので、devDependency の fast-check を足すとバージョンの更新とリリースが要る。持ち主が「0.6.13 に上げてリリース」を選んだ（ほかの案: 依存を足さず自前の生成器、バージョンの検査を直す） / 版の 4 ファイルを T11 に入れた
+- 2026-09-30 / T12 / 最初は NODE_OPTIONS でランダム化を渡したが、plugin.test.ts の「identifies the running MCP …」がどの seed でも落ちた。順序依存ではなく、テストが起動する子の node が NODE_OPTIONS の `--test-randomize` を受け継ぎ、`--test` 無しで止まるため（単独でもランダム化の指定があれば落ちる）。server の test の script に `$TEST_ORDER` を足し、CI の Node 26 の lane だけがそれに run 番号の seed を渡す形にした（変更欄に server/package.json を足した）
