@@ -76,13 +76,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `test(eval): add superseded, abstention, poisoned, and override tasks (T04)`
   - 結果: `cd server && node evals/cloud/build.ts --project tsundoku --out <scratch>/build-t04` → built 4 repositories。fixture で trace:s-en-npm/npm active・harvest:12/pnpm superseded・glean:csv/no-notes candidate・harvest:20/prefix active・harvest:20/reject-all candidate・trace:s-ja-storage/storage active。gold.json は gold のある 6 タスクに本文、pilot-sort と abstention-notes は空。`bun run verify` → exit 0
 
-- [ ] T05: gold key ごとの `in_delivery`・`in_search`・`read`
+- [x] T05: gold key ごとの `in_delivery`・`in_search`・`read`
   - 種別: 追加
   - 計画: S4
   - 依存: なし
   - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/judge.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → Codex の `mcp_tool_call` の入力例から 3 信号が出る。Claude のログは、呼び出しと結果が交互なら信号が出て、並行（結果の前に次の呼び出し）なら `unknown` になるテストが通る
   - コミット: `feat(eval): record per gold key whether it was delivered, in a search result, or read (T05)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 15 pass・0 fail（Codex の search・read の結果、壊れたログで unknown、Claude の交互・違うツールが並行で unknown・同じツールの並行、ログ無しで unknown）。`bun run verify` → exit 0
 
 - [ ] T06: build ID、plan.json、`collect.ts --build`
   - 種別: 変更
@@ -178,3 +179,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T03 / world.json は既存の PR #20 の第三者コメントで足り、変えなかった（変更欄から外した）。override のケースで、プロンプトの配信が理由を載せないこと（ファイルに紐付く配信だけが理由を載せる設計）と、同じセッションの 2 回目のプロンプトにも同じ記録を出すことが分かった。前者は仕様、後者は #205（何を既に見せたとみなすか）の範囲なので、ケースは今の契約（名指しで決定が出る、決定は変わらない）だけを固定した。第三者の命令文が配信に出ないことは既存の injection-08 が見ている
 - 2026-09-30 / T03 / T03 の結果欄の「`bun run verify` → exit 0」は誤り。verify の終了コードを見ずにコミットし、実際は acceptance-cases.test.ts の 2 本が落ちていた（完了したタスクの欄は変えない規則なのでここに書く） / T16 を足して直した。以後はコミットの前に verify の exit を確かめる
 - 2026-09-30 / T04 / 記録は fixture.ts を変えず、tasks.json の fixture.cases（given の case は流されないので依存順に並べる）と setups に受け入れケースを足して入れた。build.ts に --dry-run は無く、--out の一時ディレクトリへの build（push はしない）で確かめた / 変更欄と完了条件を変えた（前: tasks.json・fixture.ts・eval-grade.test.ts と --dry-run、後: tasks.json と --out への build）。superseded は保存先ではなく status-02（pnpm → npm）を使った（override が保存先の決定を使うため）。abstention の条件は gold の記録が無いので none・search・inject にした（plan は none・inject・gold）。既存 4 タスクに overlap を足した
+- 2026-09-30 / T05 / Codex の read の引数は `u4` のような番号で key を持たない（実物の events.jsonl で確認）。read の判定は引数ではなく結果の先頭行（`<key> (u<id>, revision`）で行った。search の結果は `## <key> (u<id>)`

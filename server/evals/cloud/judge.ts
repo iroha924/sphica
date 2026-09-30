@@ -60,6 +60,104 @@ export function foundInClaudeLog(log: string | null, gold: string[]): Tri {
     : "no";
 }
 
+/** Per gold key: whether a delivery carried it, whether a search result named it, whether a read result showed it. */
+export type GoldSignal = { in_delivery: Tri | "not_applicable"; in_search: Tri; read: Tri };
+
+const delivery = (condition: string, key: string, emittedUnits: string[], goldHookOutput: string | null) =>
+  condition === "inject"
+    ? emittedUnits.includes(key)
+      ? "yes"
+      : "no"
+    : condition === "gold"
+      ? goldHookOutput?.includes(key)
+        ? "yes"
+        : "no"
+      : "not_applicable";
+
+/** A search result lists a record as `## <key> (u<id>)`; a read result opens with `<key> (u<id>, revision`. */
+const inSearch = (text: string, key: string) => text.includes(`## ${key} (u`);
+const inRead = (text: string, key: string) => text.includes(`${key} (u`) && !inSearch(text, key);
+
+/** The three signals per gold key from Codex's JSONL events, where each tool call carries its own result. */
+export function goldSignalsFromCodex(
+  condition: string,
+  gold: string[],
+  emittedUnits: string[],
+  goldHookOutput: string | null,
+  events: string | null,
+): Record<string, GoldSignal> {
+  const readable = events !== null && foundInCodexEvents(events, []) !== "unknown";
+  const results: { tool: string; text: string }[] = [];
+  for (const line of readable ? (events ?? "").split("\n") : []) {
+    if (!line.trim()) continue;
+    const e = JSON.parse(line) as {
+      type?: string;
+      item?: { type?: string; server?: string; tool?: string; result?: { content?: { text?: string }[] } };
+    };
+    const it = e.item;
+    if (e.type === "item.completed" && it?.type === "mcp_tool_call" && it.server === "sphica" && it.tool)
+      results.push({ tool: it.tool, text: (it.result?.content ?? []).map((c) => c.text ?? "").join("\n") });
+  }
+  const seen = (tool: string, key: string, test: (t: string, k: string) => boolean): Tri =>
+    !readable ? "unknown" : results.some((r) => r.tool === tool && test(r.text, key)) ? "yes" : "no";
+  return Object.fromEntries(
+    gold.map((key) => [
+      key,
+      {
+        in_delivery: delivery(condition, key, emittedUnits, goldHookOutput),
+        in_search: seen("search", key, inSearch),
+        read: seen("read", key, inRead),
+      },
+    ]),
+  );
+}
+
+/**
+ * The same from a routine run log, where results carry no call id. A result is tied to a call only when every Sphica call still waiting
+ * for its result is the same tool; a result that could belong to a search or a read makes both signals unknown for the keys it names.
+ */
+export function goldSignalsFromClaude(
+  condition: string,
+  gold: string[],
+  emittedUnits: string[],
+  goldHookOutput: string | null,
+  log: string | null,
+): Record<string, GoldSignal> {
+  const hits = new Map(gold.map((k) => [k, { search: false, read: false, unsure: false }]));
+  const waiting: string[] = [];
+  for (const line of (log ?? "").split("\n")) {
+    const call = /\btool_use mcp__sphica__(\w+)/.exec(line);
+    if (call) {
+      waiting.push(call[1] ?? "");
+      continue;
+    }
+    if (!/\btool_result\b/.test(line) || !waiting.length) continue;
+    const tools = new Set(waiting);
+    const tool = waiting.shift() ?? "";
+    for (const [key, h] of hits) {
+      if (!line.includes(`${key} (u`)) continue;
+      if (tools.size > 1) h.unsure = true;
+      else if (tool === "search" && inSearch(line, key)) h.search = true;
+      else if (tool === "read" && inRead(line, key)) h.read = true;
+    }
+  }
+  return Object.fromEntries(
+    gold.map((key) => {
+      const h = hits.get(key) ?? { search: false, read: false, unsure: false };
+      const tri = (yes: boolean): Tri =>
+        log === null ? "unknown" : yes ? "yes" : h.unsure ? "unknown" : "no";
+      return [
+        key,
+        {
+          in_delivery: delivery(condition, key, emittedUnits, goldHookOutput),
+          in_search: tri(h.search),
+          read: tri(h.read),
+        },
+      ];
+    }),
+  );
+}
+
 /** Codex's final output checked against answer.schema.json; a valid answer is rendered to text so graders read the same kind of answer. */
 export function answerFormat(raw: string | null): {
   format: "valid" | "invalid" | "refused_or_empty";

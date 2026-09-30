@@ -14,6 +14,9 @@ import {
   deliveredSignal,
   foundInClaudeLog,
   foundInCodexEvents,
+  type GoldSignal,
+  goldSignalsFromClaude,
+  goldSignalsFromCodex,
   type Tri,
 } from "./judge.ts";
 
@@ -56,6 +59,8 @@ type Row = {
   delivered: "yes" | "no" | "not_applicable";
   delivered_units: string[];
   found: Tri;
+  /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
+  gold_signals: Record<string, GoldSignal>;
   signals: {
     searches: number;
     empty_searches: number;
@@ -89,6 +94,7 @@ const excludedRow = (
   delivered: "not_applicable",
   delivered_units: [],
   found: "unknown",
+  gold_signals: {},
   signals: null,
 });
 
@@ -250,6 +256,7 @@ function main() {
           delivered: deliveredSignal(condition, gold, emitted, goldOut || null),
           delivered_units: emitted,
           found: foundInClaudeLog(log, gold),
+          gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
           signals: log === null ? null : signals(log),
         });
         collected++;
@@ -356,6 +363,7 @@ function main() {
         delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
         delivered_units: emitted,
         found,
+        gold_signals: goldSignalsFromCodex(result.condition, gold, emitted, read("gold-receipt.txt"), events),
         // A missing or broken event log cannot say how many searches or errors there were
         signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },
       });

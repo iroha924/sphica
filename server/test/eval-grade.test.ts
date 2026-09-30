@@ -13,6 +13,8 @@ import {
   deliveredSignal,
   foundInClaudeLog,
   foundInCodexEvents,
+  goldSignalsFromClaude,
+  goldSignalsFromCodex,
 } from "../evals/cloud/judge.ts";
 import { checkAnswer, checkGrade, type Grade } from "../evals/cloud/schema-check.ts";
 
@@ -437,4 +439,70 @@ printf '%s' ${JSON.stringify(JSON.stringify({ ...grade }))} > "$2"
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+// Per gold key, a search result, a read, and a delivery are told apart; a result that could belong to either tool says unknown, not no
+test("gold signals separate delivery, search, and read, and stay unknown when a result cannot be tied to its call", () => {
+  const key = "harvest:157/keep-search";
+  const search = `## ${key} (u1): decision do, active`;
+  const read = `<past-records id="a">\n${key} (u1, revision 3): decision do, active`;
+  const call = (tool: string, text: string) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "mcp_tool_call", server: "sphica", tool, result: { content: [{ type: "text", text }] } },
+    });
+  assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, call("search", search))[key], {
+    in_delivery: "not_applicable",
+    in_search: "yes",
+    read: "no",
+  });
+  assert.deepEqual(goldSignalsFromCodex("inject", [key], [key], null, call("read", read))[key], {
+    in_delivery: "yes",
+    in_search: "no",
+    read: "yes",
+  });
+  assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "{bad json")[key], {
+    in_delivery: "not_applicable",
+    in_search: "unknown",
+    read: "unknown",
+  });
+  const use = (tool: string) => `[t] tool_use mcp__sphica__${tool}: {}`;
+  const result = (text: string) => `[t] tool_result: ${text.replaceAll("\n", " ")}`;
+  assert.deepEqual(
+    goldSignalsFromClaude(
+      "gold",
+      [key],
+      [],
+      `...${key}...`,
+      [use("search"), result(search), use("read"), result(read)].join("\n"),
+    )[key],
+    { in_delivery: "yes", in_search: "yes", read: "yes" },
+  );
+  // Two different calls waiting: the result cannot be tied to one of them
+  assert.deepEqual(
+    goldSignalsFromClaude(
+      "search",
+      [key],
+      [],
+      null,
+      [use("search"), use("read"), result(search), result("nothing")].join("\n"),
+    )[key],
+    { in_delivery: "not_applicable", in_search: "unknown", read: "unknown" },
+  );
+  // Two searches waiting: whichever it answers, it is a search
+  assert.deepEqual(
+    goldSignalsFromClaude(
+      "search",
+      [key],
+      [],
+      null,
+      [use("search"), use("search"), result("none"), result(search)].join("\n"),
+    )[key],
+    { in_delivery: "not_applicable", in_search: "yes", read: "no" },
+  );
+  assert.deepEqual(goldSignalsFromClaude("none", [key], [], null, null)[key], {
+    in_delivery: "not_applicable",
+    in_search: "unknown",
+    read: "unknown",
+  });
 });
