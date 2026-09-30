@@ -163,3 +163,48 @@ test("mask takes time in proportion to the input on shapes that stress its patte
     assert.ok(tries.length < 3, `${name}: every try grew faster than linear (${tries.join("; ")})`);
   }
 });
+
+// Each shape mask knows, at the shortest length it hides and one character short of it (found missing by a mutation run: removing a
+// whole shape from the list failed no test)
+const at = (prefix: string, n: number, ch = "a") => `${prefix}${ch.repeat(n)}`;
+const SHAPES: [string, string, string][] = [
+  ["OpenAI or Anthropic key", at("sk-", 20), at("sk-", 19)],
+  ["Stripe key", at("sk_live_", 16), at("sk_live_", 15)],
+  ["webhook signing secret", at("whsec_", 16), at("whsec_", 15)],
+  ["pa- key", at("pa-", 20), at("pa-", 19)],
+  ["Google API key", at("AIza", 35), at("AIza", 34)],
+  ["npg_ database password", at("npg_", 12), at("npg_", 11)],
+  ["napi key", at("napi_", 30), at("napi_", 29)],
+  ["npm token", at("npm_", 36), at("npm_", 35)],
+  ["GitLab token", at("glpat-", 20), at("glpat-", 19)],
+  [
+    "stateless GitHub token",
+    `ghs_eyJ${"a".repeat(5)}.${"b".repeat(8)}.${"c".repeat(8)}`,
+    `ghs_eyJ${"a".repeat(5)}.${"b".repeat(7)}.${"c".repeat(8)}`,
+  ],
+  ["GitHub token", at("ghp_", 30), at("ghp_", 29)],
+  ["fine-grained GitHub token", at("github_pat_", 40), at("github_pat_", 39)],
+  ["Slack token", at("xoxb-", 10), at("xoxb-", 9)],
+  ["Slack webhook", "https://hooks.slack.com/services/T0/B0/x", "https://hooks.slack.com/servicesx"],
+  ["AWS key", at("AKIA", 16, "A"), at("AKIA", 15, "A")],
+  [
+    "JWT",
+    `eyJ${"a".repeat(8)}.${"b".repeat(8)}.${"c".repeat(8)}`,
+    `eyJ${"a".repeat(8)}.${"b".repeat(7)}.${"c".repeat(8)}`,
+  ],
+  ["pasted Bearer value", `Bearer ${"a".repeat(15)}1`, `Bearer ${"a".repeat(16)}`],
+  ["Authorization header", `Authorization: Basic ${"a".repeat(8)}`, `Authorization: Basic ${"a".repeat(7)}`],
+  [
+    "bearer in another header",
+    `-H "X-Auth: bearer ${"a".repeat(16)}"`,
+    `-H "X-Auth: bearer ${"a".repeat(15)}"`,
+  ],
+  ["mysql -p password", "mysql -u root -psecretpw books", "mysql -u root -p books"],
+];
+
+test("every shape mask knows is hidden at its shortest length and kept one character short", () => {
+  for (const [name, hidden, kept] of SHAPES) {
+    assert.notEqual(mask(`see ${hidden} here`), `see ${hidden} here`, `${name} is hidden`);
+    assert.equal(mask(`see ${kept} here`), `see ${kept} here`, `${name} one short is kept`);
+  }
+});

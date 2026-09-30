@@ -748,3 +748,44 @@ test("read shows each field value with the words it was quoted from and who said
     await db.done();
   }
 });
+
+// Found by a mutation run: a hit must carry only its own options and anchors, the limit must cut the hits, and aliasOnly must mean every
+// matched term came from aliases
+test("each hit carries only its own options and anchors, the limit cuts the hits, and aliasOnly needs every term from aliases", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Cache covers on disk. Decided." });
+    const b = message(db, p, { id: "m2", text: "Cache ratings in memory. Decided." });
+    await save(db, p, {
+      units: [
+        decision("covers", a, "Cache covers on disk.", {
+          options: [{ text: "memory", outcome: "rejected", why: "covers are large" }],
+          anchors: [{ path: "src/covers.ts", role: "applies_to" }],
+          aliases: ["thumbnail store"],
+        }),
+        decision("ratings", b, "Cache ratings in memory.", {
+          options: [{ text: "disk", outcome: "rejected", why: "ratings change often" }],
+          anchors: [{ path: "src/ratings.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const { hits } = await searchUnits(db.reader, p, { question: "cache", limit: 10 });
+    const of = (key: string) => hits.find((h) => h.key === `trace:ext-s1/${key}`);
+    assert.deepEqual(
+      of("covers")?.options.map((o) => o.text),
+      ["memory"],
+    );
+    assert.deepEqual(
+      of("ratings")?.anchors.map((x) => x.path),
+      ["src/ratings.ts"],
+    );
+    assert.equal((await searchUnits(db.reader, p, { question: "cache", limit: 1 })).hits.length, 1);
+    const alias = (await searchUnits(db.reader, p, { question: "thumbnail store", limit: 10 })).hits;
+    assert.equal(alias.find((h) => h.key.endsWith("/covers"))?.aliasOnly, true);
+    const mixed = (await searchUnits(db.reader, p, { question: "cache thumbnail", limit: 10 })).hits;
+    assert.equal(mixed.find((h) => h.key.endsWith("/covers"))?.aliasOnly, false);
+  } finally {
+    await db.done();
+  }
+});

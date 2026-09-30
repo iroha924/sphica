@@ -211,13 +211,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `test(pairs): match the trace and glean Skills' JSON fields with the zod types (T13)`
   - 結果: `bun run pairs` → 通る。trace の表から `aliases` の行を消すと「never mentions fields the save path accepts: aliases」、glean の表に `undo_all` を足すと op の食い違いで落ちた（戻した）。`bun run verify` → exit 0
 
-- [ ] T14: Stryker を手で 1 回流し、意味のある生存変異をテストで殺す
+- [x] T14: Stryker を手で 1 回流し、意味のある生存変異をテストで殺す
   - 種別: 追加
   - 計画: S11
   - 依存: T11（プロパティテストが入った後の生存変異を見る）
   - 変更: `server/test/text-properties.test.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test test/text-properties.test.ts test/search.test.ts` → 足したテストが通る。Stryker の版・コマンド・対象・生存変異の数と除外の理由を結果に残す
   - コミット: `test: kill the surviving mutants that matter in text, anchors, and search (T14)`
+  - 結果: Stryker 10.0.0（@stryker-mutator/core と tap-runner、使い捨ての worktree に `npm i --no-save`、依存には入れていない）、`npx stryker run`（tap runner、inPlace、tsconfigFile を外す、対象 src/text.ts・src/anchors.ts・src/search.ts、テスト 5 本）→ 1,367 変異のうち killed 844・survived 436（text 324・search 70・anchors 42）。足したテストの後に text と search で流し直すと、text の survived 324 → 249、search 70 → 62。`cd server && node --test test/text-properties.test.ts test/search.test.ts` → 通る。`bun run verify` → exit 0
 
 ## P5: 評価ループの手順
 
@@ -252,3 +253,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T12 / 最初は NODE_OPTIONS でランダム化を渡したが、plugin.test.ts の「identifies the running MCP …」がどの seed でも落ちた。順序依存ではなく、テストが起動する子の node が NODE_OPTIONS の `--test-randomize` を受け継ぎ、`--test` 無しで止まるため（単独でもランダム化の指定があれば落ちる）。server の test の script に `$TEST_ORDER` を足し、CI の Node 26 の lane だけがそれに run 番号の seed を渡す形にした（変更欄に server/package.json を足した）
 - 2026-09-30 / T11 / 時間のテストは各長さの 5 回の中央値で比を見ていたが、ほかの処理（テストファイルの並列実行、裏の Stryker）で 1 回の測定が遅れると比が 3 を超えた。最小値で測り、形ごとに 3 回まで試す形にした / T20 を足した
 - 2026-09-30 / T10 レビュー / Codex の F1（gold − inject に run ID と n が無い）・F2（採点者の一致が score と implements_rejected だけ）・F3（未採点だけの反転版の行が消える）は、どれも再現つきで直す / T21 を足した。counterfactual のタスクの一覧は、report の CLI が tasks.json の swapped.tasks から渡す。T12 のレビューは指摘なし
+- 2026-09-30 / T14 / Stryker は TypeScript 7 に tsconfig を書き換える API（ts.parseConfigFileTextToJson）が無くて落ち、sandbox では server/ の外の db/schema.sql を読めなかったので、tsconfigFile を外し inPlace で流した（使い捨ての worktree の中）。意味があるとして殺したもの: 伏せ字の形ごとの一覧（項目ごと消してもどのテストも落ちなかった 20 種、最小の長さと 1 文字足りない長さで検査）、search のヒットに別の記録の options と anchors が混ざる、limit、aliasOnly。残したもの: QUESTION の語の一覧の文字列（44）、visible の正規表現（101、Unicode の性質で決まる）、検索の候補の上限の境目（2,000 件を作る必要があり重い）、anchors の locateIn の文字列と条件（多くは記録の位置の探し方の細部で、別の issue の範囲）。変更欄から anchors.test.ts を外した（無いファイル）
