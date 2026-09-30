@@ -11,9 +11,9 @@ const { values: args, positionals } = parseArgs({
 const build = positionals[0];
 if (!build) throw new Error("give the build directory");
 const rows = readPlan(build);
-if (args.condition && !rows.some((r) => r.condition === args.condition))
+if (args.condition !== undefined && !rows.some((r) => r.condition === args.condition))
   throw new Error(`the firing plan has no rows for condition ${args.condition}`);
-const wanted = (r: (typeof rows)[number]) => !args.condition || r.condition === args.condition;
+const wanted = (r: (typeof rows)[number]) => args.condition === undefined || r.condition === args.condition;
 const next = rows.find((r) => r.fired_at === null && wanted(r));
 if (!next) {
   console.log(JSON.stringify({ done: true, fired: rows.filter((r) => r.fired_at !== null).length }));

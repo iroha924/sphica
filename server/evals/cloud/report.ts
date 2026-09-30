@@ -11,6 +11,7 @@ import type { Grade } from "./schema-check.ts";
 type TaskInfo = { id: string; lang?: string; overlap?: boolean | null; gold?: string[] };
 type Graded = GradeRow & {
   tests?: string;
+  gold?: string[];
   grade?: Grade;
   ungraded?: string;
   second?: { grade: Grade } | { ungraded: string };
@@ -170,19 +171,22 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
     "",
     "## Gold signals per key: delivered / in a search result / read (yes, no, unknown, not applicable)",
   );
-  const signals = original
-    .filter((r) => !r.excluded)
-    .flatMap((r) =>
-      Object.entries(r.gold_signals ?? {}).map(([key, s]) => ({
-        group: `${r.model} ${r.condition} ${key}`,
-        s,
-      })),
-    );
+  // An excluded run keeps its gold keys with no signals, so each key's row shows how many of its runs were left out
+  const signals = original.flatMap((r) =>
+    r.excluded
+      ? (r.gold ?? []).map((key) => ({ group: `${r.model} ${r.condition} ${key}`, s: null }))
+      : Object.entries(r.gold_signals ?? {}).map(([key, s]) => ({
+          group: `${r.model} ${r.condition} ${key}`,
+          s: s as GoldSignal | null,
+        })),
+  );
   for (const [k, xs] of groupBy(signals, (x) => x.group)) {
     const tally = (f: keyof GoldSignal) =>
-      ["yes", "no", "unknown", "not_applicable"].map((v) => xs.filter((x) => x.s[f] === v).length).join("/");
+      ["yes", "no", "unknown", "not_applicable"]
+        .map((v) => xs.filter((x) => x.s?.[f] === v).length)
+        .join("/");
     lines.push(
-      `${k}: delivered ${tally("in_delivery")}, search ${tally("in_search")}, read ${tally("read")}`,
+      `${k}: delivered ${tally("in_delivery")}, search ${tally("in_search")}, read ${tally("read")}, excluded ${xs.filter((x) => !x.s).length}`,
     );
   }
   return lines;
@@ -193,7 +197,7 @@ if (process.argv[1] === import.meta.filename) {
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
   const builds = files.map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Build);
   const ids = builds.map((b) => b.build ?? "");
-  if (new Set(ids).size < ids.length)
+  if (ids.some((id) => !id) || new Set(ids).size < ids.length)
     throw new Error("a build is given twice, or a build has no id; each counts once");
   const bundles = new Set(builds.map((b) => b.bundle));
   if (bundles.size > 1)

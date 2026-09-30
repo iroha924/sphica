@@ -312,6 +312,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `fix(eval): address the fourth GitHub Codex review of the eval base (T29)`
   - 結果: 直す前の `evals/` で 2 本が意図した理由で落ち、直した後 39 pass。`bun run verify` → exit 0
 
+- [x] T30: GitHub の Codex の 5 回目のレビューの指摘を直す（除外した run を gold key ごとの信号に数える、build ID の無い grades を拒む、空の `--condition` を拒む）
+  - 種別: 修正
+  - 計画: S5, S7
+  - 依存: T29
+  - 変更: `server/evals/cloud/report.ts`, `server/evals/cloud/fire.ts`, `server/test/eval-grade.test.ts`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 足した・直したテストが通る
+  - red: 直す前の `evals/` で → 信号の行に excluded が無く、`--condition ''` で次の行が発火済みになり、build ID の無い grades を含む report が exit 0
+  - コミット: `fix(eval): address the fifth GitHub Codex review of the eval base (T30)`
+  - 結果: 直す前の `evals/` で 3 本が意図した理由で落ち、ID の無い grades を含む report が exit 0。直した後 37 pass、ID の無い grades は「a build has no id」で止まる。`bun run verify` → exit 0
+
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
@@ -342,3 +352,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / GitHub Codex 2 回目（91cc0b7） / 7 件（P1 3、P2 3、P3 1）。6 件を T27 で直す。P2（fire.ts を同時に流すと同じ行を取り合う）は T06 レビューの F2 と同じで直さない: 発火は 1 行ずつ手で行い、同時に流す手順は無い / T27 を足した
 - 2026-09-30 / GitHub Codex 3 回目（9429fb6） / 4 件（P1 1、P2 3）。3 件を T28 で直す。P2（別の project の build を 1 つの report にまとめられる）は直さない: 承認したループ自体が tsundoku と sphica の両方の build にまたがり、report はタスクごとに分けて出すので、どの project の run かは区別できる / T28 を足した
 - 2026-09-30 / GitHub Codex 4 回目（34b5531） / 3 件（P1 1、P2 2）。2 件を T29 で直す。P2（fixture を build の間に作り直すと、同じ commit と bundle の build が別の記録を見た run をまとめる）は直さない: 1 つのループの build は続けて作り、その間に fixture を作り直す手順は無い / T29 を足した
+- 2026-09-30 / GitHub Codex 5 回目（f7f7f5e） / 4 件（P1 1、P2 3）。持ち主が「直して止める」（6 回目は頼まない）を選んだ。3 件を T30 で直す。P2（4〜5 行の JSDoc が 3 行の規則を超える）は直さない: 規則は区切りの `/**` と `*/` を除いた本文で数えるのがこのリポジトリの慣習で（main の server/src に本文 3 行の JSDoc が 33 個）、この PR で足したコメントの本文はどれも 3 行以内 / T30 を足した

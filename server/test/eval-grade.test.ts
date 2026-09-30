@@ -882,7 +882,10 @@ test("the report splits by group, lists gold minus inject per task with every ru
   assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 1/);
   assert.match(out, /runs by codex: 0 \/ 5 agree on every graded field \(Claude.s grade missing 3\)/);
   assert.match(out, /g2 \(t1 gold\): score 1 vs 0; followed presented vs not_applicable \(Codex vs Claude\)/);
-  assert.match(out, /codex inject k\/1: delivered 1\/0\/0\/0, search 0\/0\/1\/0, read 0\/1\/0\/0/);
+  assert.match(
+    out,
+    /codex inject k\/1: delivered 1\/0\/0\/0, search 0\/0\/1\/0, read 0\/1\/0\/0, excluded 0/,
+  );
 });
 
 // Review of the counterfactual grading: only a run that was shown the record is judged on following it, and a swapped run is judged on
@@ -1002,6 +1005,7 @@ test("fire marks the next unfired row, only of the condition asked for, and repo
     assert.equal(fire().task, "a");
     // A condition the plan does not have is refused, not reported as done
     assert.throws(() => fire("--condition", "glod"), /no rows for condition glod/);
+    assert.throws(() => fire("--condition", ""), /no rows for condition/);
   } finally {
     fs.rmSync(build, { recursive: true, force: true });
   }
@@ -1263,6 +1267,64 @@ test("grade refuses a second grader it does not know, before grading anything", 
     );
     assert.match(r.stderr, /--second is claude or none/);
     assert.equal(fs.existsSync(ran), false, "no grader was started");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("the report counts excluded runs in each gold key's signals, and refuses a build without an id", () => {
+  const out = report(
+    [
+      {
+        variant: "original",
+        rows: [
+          {
+            ...row,
+            run: "e1",
+            task: "t1",
+            condition: "inject",
+            excluded: "no result branch",
+            gold: ["trace:a/b"],
+          },
+          {
+            ...row,
+            run: "e2",
+            task: "t1",
+            condition: "inject",
+            grade,
+            gold: ["trace:a/b"],
+            gold_signals: { "trace:a/b": { in_delivery: "yes", in_search: "no", read: "no" } },
+          },
+        ],
+      },
+    ],
+    [{ id: "t1", gold: ["trace:a/b"] }],
+  ).join("\n");
+  assert.match(
+    out,
+    /codex inject trace:a\/b: delivered 1\/0\/0\/0, search 0\/1\/0\/0, read 0\/1\/0\/0, excluded 1/,
+  );
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-"));
+  try {
+    const files = (
+      [
+        ["a", { build: "a", variant: "original", bundle: "c", rows: [] }],
+        ["b", { variant: "original", bundle: "c", rows: [] }],
+      ] as const
+    ).map(([name, body]) => {
+      fs.mkdirSync(path.join(base, name));
+      seedTasks(path.join(base, name));
+      const file = path.join(base, name, "grades.json");
+      fs.writeFileSync(file, JSON.stringify(body));
+      return file;
+    });
+    const r = spawnSync(
+      process.execPath,
+      [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), ...files],
+      { encoding: "utf8", env: childEnv(base) },
+    );
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /has no id/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
