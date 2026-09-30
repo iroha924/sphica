@@ -142,7 +142,6 @@ const FORGET_WRITES: Record<number, Set<string>> = {
   [C.SQLITE_INSERT]: new Set(["forget_batch", "source_forgotten", "unit_state", "source_fts", "unit_fts"]),
   [C.SQLITE_DELETE]: new Set([
     "source",
-    "external_reference",
     "unit_evidence",
     "unit_adoption",
     "source_processing",

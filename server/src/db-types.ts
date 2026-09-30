@@ -89,16 +89,6 @@ export interface EditObservation {
   via: string;
 }
 
-export interface ExternalReference {
-  added_at: string;
-  id: Generated<number>;
-  owner_source_id: number;
-  project_id: number;
-  span_end: number;
-  span_start: number;
-  url: string;
-}
-
 export interface ExtractionRun {
   draft_id: string | null;
   finished_at: string | null;
@@ -106,7 +96,6 @@ export interface ExtractionRun {
   input_bytes: number | null;
   origin: string;
   project_id: number;
-  reason: string | null;
   session_id: string | null;
   started_at: string;
   status: string;
@@ -372,7 +361,6 @@ export interface DB {
   delivery: Delivery;
   delivery_unit: DeliveryUnit;
   edit_observation: EditObservation;
-  external_reference: ExternalReference;
   extraction_run: ExtractionRun;
   field_def: FieldDef;
   forget_batch: ForgetBatch;

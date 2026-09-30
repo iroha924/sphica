@@ -221,7 +221,7 @@ test("superseded, withdrawn, and candidate units keep their state and lose only 
   );
 });
 
-test("forgetting a retraction's reason removes the retracted row it explained, and an owner's unfetched reference goes with its message", async () => {
+test("forgetting a retraction's reason removes the retracted row it explained", async () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite." });
   const reason = message(db, p, { id: "m2", text: "No, that was wrong. See https://notes.example/x" });
   const u = unit("u1", "finding");
@@ -233,16 +233,7 @@ test("forgetting a retraction's reason removes the retracted row it explained, a
     reason,
     u,
   );
-  insert(db, "external_reference", {
-    project_id: p,
-    url: "https://notes.example/x",
-    owner_source_id: reason,
-    span_start: 0,
-    span_end: 3,
-    added_at: now,
-  });
   const { outcome } = await forget(reason);
-  assert.equal(outcome.references, 1);
   assert.deepEqual(outcome.units, [{ key: "u1", before: "candidate", after: "candidate", removed: 1 }]);
   assert.deepEqual(
     db.owner
@@ -251,7 +242,6 @@ test("forgetting a retraction's reason removes the retracted row it explained, a
       .map((r) => r.role),
     ["explains"],
   );
-  assert.equal(Number(one("select count(*) as n from external_reference").n), 0);
 });
 
 test("nothing is forgotten when what the sources support changed after the preview", async () => {
@@ -282,7 +272,6 @@ test("an unknown id or another project's id is refused, and an id already forgot
     sources: [],
     already: [src],
     units: [],
-    references: 0,
     fields: { definitions: 0, values: 0 },
   });
   assert.equal(again.cleanup, "done");

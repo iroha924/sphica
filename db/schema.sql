@@ -3,7 +3,7 @@
 -- A database of another generation is refused without being changed.
 --
 -- Four boundaries:
---   captured sources   session, source, artifact_link, edit_observation, external_reference: what was said or written, never rewritten
+--   captured sources   session, source, artifact_link, edit_observation: what was said or written, never rewritten
 --                      (the owner can forget chosen sources: forget_batch and source_forgotten keep what was removed, without its text)
 --   extracted units    unit and its option, evidence, adoption, link, state, anchor, alias tables: what was decided or implemented
 --   processing         extraction_run, source_processing: what has been looked at and saved, so gaps are counted
@@ -73,10 +73,10 @@ create table source (
   author_login text,
   author_external_id text,
   author_association text,
-  -- The comment or thread this replies to, or the thread a resolution event closed
+  -- The comment or thread this replies to
   parent_external_id text,
-  -- For pr_event: merged | closed | reopened | thread_resolved
-  event_kind text check (event_kind in ('merged', 'closed', 'reopened', 'thread_resolved')),
+  -- For pr_event: merged (the one event harvest records)
+  event_kind text check (event_kind in ('merged')),
   -- Where it lives on the web; any other scheme (javascript:, file:) is never kept, since readers may show it as a link
   url text check (url glob 'https://*' or url glob 'http://*'),
   created_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', created_at) is created_at),
@@ -155,20 +155,6 @@ create table artifact_link (
   primary key (project_id, from_artifact, to_artifact, kind)
 ) strict;
 
--- A reference the owner gave that Sphica could not fetch (a meeting-notes URL). It never counts as a fetched source:
--- a claim supported only by it stays unsourced until the text is fetched and checked.
-create table external_reference (
-  id integer primary key autoincrement not null,
-  project_id integer not null references project (id) on delete cascade,
-  url text not null check (url <> ''),
-  owner_source_id integer not null references source (id),
-  span_start integer not null check (span_start >= 0),
-  span_end integer not null check (span_end > span_start),
-  added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
-) strict;
-create index external_reference_project on external_reference (project_id);
-create index external_reference_source on external_reference (owner_source_id);
-
 -- One owner-confirmed deletion of chosen sources. It stands in for an extraction run on the state changes the deletion causes.
 create table forget_batch (
   id integer primary key autoincrement not null,
@@ -218,14 +204,12 @@ create table extraction_run (
   origin text not null check (origin in ('trace', 'harvest', 'glean', 'migration')),
   target text not null,
   session_id text references session (id) on delete set null,
-  status text not null check (status in ('running', 'saved', 'failed', 'capped')),
-  reason text,
+  status text not null check (status in ('running', 'saved')),
   input_bytes integer check (input_bytes >= 0),
   -- The CLI-issued draft this run saves. A saved run's draft saves nothing again; the draft is bound to this run's project and target
   draft_id text unique,
   started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
   finished_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', finished_at) is finished_at),
-  check (status in ('running', 'saved') or reason is not null),
   check (finished_at >= started_at)
 ) strict;
 create index extraction_run_project on extraction_run (project_id);
@@ -235,7 +219,7 @@ create index extraction_run_session on extraction_run (session_id) where session
 -- action clearing session_id after its session was deleted
 create trigger extraction_run_frozen before update on extraction_run
 when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
-  or new.reason is not old.reason or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
+  or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
   or new.started_at is not old.started_at
   or (new.session_id is not old.session_id and (new.session_id is not null or exists (select 1 from session where id = old.session_id)))
   or ((new.status is not old.status or new.finished_at is not old.finished_at) and old.status <> 'running') begin
@@ -246,7 +230,7 @@ end;
 create table source_processing (
   source_id integer not null references source (id) on delete cascade,
   run_id integer not null references extraction_run (id) on delete cascade,
-  outcome text not null check (outcome in ('units', 'no_unit', 'failed', 'capped')),
+  outcome text not null check (outcome in ('units', 'no_unit')),
   primary key (source_id, run_id)
 ) strict;
 create index source_processing_run on source_processing (run_id);
@@ -402,7 +386,7 @@ create trigger unit_adoption_route before insert on unit_adoption begin
   select raise(abort, 'explicit adoption needs the owner or a maintainer (OWNER, MEMBER, COLLABORATOR association)')
   where new.route = 'explicit' and not exists (select 1 from source where id = new.source_id
     and (author_kind = 'owner' or author_association in ('OWNER', 'MEMBER', 'COLLABORATOR')));
-  select raise(abort, 'merge and thread resolution events are not adoption')
+  select raise(abort, 'a merge is not adoption')
   where exists (select 1 from source where id = new.source_id and kind = 'pr_event');
   select raise(abort, 'adoption applies to decisions and constraints')
   where not exists (select 1 from unit where id = new.unit_id and kind in ('decision', 'constraint'));
@@ -411,7 +395,7 @@ end;
 create table unit_link (
   from_unit integer not null references unit (id) on delete cascade,
   to_unit integer not null references unit (id) on delete cascade,
-  kind text not null check (kind in ('supersedes', 'implements', 'conflicts')),
+  kind text not null check (kind in ('supersedes', 'conflicts')),
   run_id integer not null references extraction_run (id),
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
   -- A conflict stays unresolved (and suppresses automatic delivery of both) until resolved with a reason
@@ -840,11 +824,6 @@ end;
 create trigger source_processing_project before insert on source_processing begin
   select raise(abort, 'source and run belong to different projects')
   where (select project_id from source where id = new.source_id) is not (select project_id from extraction_run where id = new.run_id);
-end;
-create trigger external_reference_check before insert on external_reference begin
-  select raise(abort, 'an external reference needs an owner span of the same project')
-  where not exists (select 1 from source s where s.id = new.owner_source_id and s.author_kind = 'owner' and s.project_id = new.project_id
-    and new.span_end <= length(cast(s.text as blob)));
 end;
 
 -- Every change to a unit's relations raises its revision (stale drafts are refused against it)

@@ -89,7 +89,7 @@ test("every foreign key is led by an index on its own columns", () => {
       )
       .all() as { name: string }[]
   ).map((t) => t.name);
-  assert.ok(tables.length >= 25, tables.join(" "));
+  assert.ok(tables.length >= 24, tables.join(" "));
   const unled: string[] = [];
   let keys = 0;
   for (const table of tables) {
@@ -131,7 +131,7 @@ test("every foreign key is led by an index on its own columns", () => {
       if (!led) unled.push(`${table} (${columns.join(", ")})`);
     }
   }
-  assert.ok(keys >= 50, `${keys} foreign keys`);
+  assert.ok(keys >= 45, `${keys} foreign keys`);
   assert.deepEqual(unled, []);
 });
 
@@ -262,6 +262,51 @@ test("the small checks: lines, retraction spans and times, whole characters, dat
     run_id: runId,
     added_at: now,
   });
+});
+
+test("values no release wrote are gone: other pull request events, failed or capped runs, implements links, unfetched references", () => {
+  refuses(
+    () =>
+      external({
+        kind: "pr_event",
+        artifact: "pr:1",
+        external_id: "pr:1#closed",
+        event_kind: "closed",
+        indexed: 0,
+      }),
+    /constraint failed/,
+  );
+  refuses(
+    () =>
+      insert(db, "extraction_run", {
+        project_id: p,
+        origin: "trace",
+        target: "t",
+        status: "capped",
+        started_at: now,
+      }),
+    /constraint failed/,
+  );
+  const a = unit({ key: "a", kind: "finding" });
+  const b = unit({ key: "b", kind: "finding" });
+  refuses(
+    () =>
+      insert(db, "unit_link", {
+        from_unit: a,
+        to_unit: b,
+        kind: "implements",
+        run_id: Number(one("select run_id from unit where id = ?", a).run_id),
+        added_at: now,
+      }),
+    /constraint failed/,
+  );
+  assert.equal(one("select count(*) as n from sqlite_schema where name = 'external_reference'").n, 0);
+  assert.deepEqual(
+    (db.owner.prepare("pragma table_info(extraction_run)").all() as { name: string }[]).filter(
+      (c) => c.name === "reason",
+    ),
+    [],
+  );
 });
 
 test("the database carries its generation and revision", () => {

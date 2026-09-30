@@ -359,7 +359,7 @@ test("reading as of a past time shows no retraction made after it", async () => 
       .run(run0);
     db.owner
       .prepare(
-        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) select a.id, b.id, 'implements', ?, '2099-01-01T00:00:00.000Z' from unit a, unit b where a.key = 'trace:ext-s1/npm' and b.key = 'trace:ext-s1/pnpm'",
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) select a.id, b.id, 'conflicts', ?, '2099-01-01T00:00:00.000Z' from unit a, unit b where a.key = 'trace:ext-s1/npm' and b.key = 'trace:ext-s1/pnpm'",
       )
       .run(run0);
     // One of two pieces of evidence is retracted, dated after the as-of time below
@@ -381,7 +381,7 @@ test("reading as of a past time shows no retraction made after it", async () => 
     assert.doesNotMatch(before, /retracted|later mistake|withdrawn|later withdrawal/);
     assert.match(before, /decision do, active/);
     assert.match(before, /package\.json/);
-    assert.doesNotMatch(before, /later\.json|Implemented by/);
+    assert.doesNotMatch(before, /later\.json|Conflicts with/);
     assert.equal(await readUnit(db.reader, p, "trace:ext-s1/npm", null, asOf), null);
     assert.match(
       (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null)) ?? "",

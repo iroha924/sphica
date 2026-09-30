@@ -243,13 +243,9 @@ async function describe(
   for (const l of links) {
     if (l.kind === "supersedes")
       out.push(l.from_id === u.id ? `Supersedes ${l.to_key}` : `Superseded by ${l.from_key}`);
-    else if (l.kind === "conflicts")
-      out.push(
-        `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
-      );
     else
       out.push(
-        `${l.from_id === u.id ? "Implements" : "Implemented by"} ${l.from_id === u.id ? l.to_key : l.from_key}`,
+        `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
       );
   }
   out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);

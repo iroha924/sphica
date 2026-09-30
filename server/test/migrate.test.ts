@@ -301,7 +301,7 @@ test("migrating revision 4 keeps every column of every row", () => {
   fill(raw);
   raw
     .prepare(
-      "update extraction_run set session_id = 's1', reason = 'why', input_bytes = 42, draft_id = 'draft', finished_at = ?",
+      "update extraction_run set session_id = 's1', input_bytes = 42, draft_id = 'draft', finished_at = ?",
     )
     .run(new Date("2026-09-21T00:00:00Z").toISOString());
   const tables = (
@@ -314,18 +314,34 @@ test("migrating revision 4 keeps every column of every row", () => {
   assert.ok(tables.includes("extraction_run") && tables.length >= 25, tables.join(" "));
   const rows = () =>
     new Map(
-      tables.map((t) => [
-        t,
-        raw
-          .prepare(`select * from ${t} order by rowid`)
-          .all()
-          .map((r) => ({ ...r })),
-      ]),
+      tables
+        .filter((t) => raw.prepare("select 1 from sqlite_schema where type = 'table' and name = ?").get(t))
+        .map((t) => [
+          t,
+          raw
+            .prepare(`select * from ${t} order by rowid`)
+            .all()
+            .map((r) => ({ ...r })),
+        ]),
     );
   const before = rows();
-  assert.ok(Object.values(before.get("extraction_run")?.[0] ?? {}).every((v) => v !== null));
+  // The run's reason is the one column revision 5 drops, and was never written
+  assert.ok(
+    Object.entries(before.get("extraction_run")?.[0] ?? {}).every(([k, v]) => v !== null || k === "reason"),
+  );
   migrate(raw);
-  assert.deepEqual(rows(), before);
+  const after = rows();
+  // Columns revision 5 drops are left out of the comparison, and so are tables it drops
+  for (const [table, list] of before) {
+    const now = after.get(table);
+    if (!now) continue;
+    const columns = new Set(Object.keys(now[0] ?? list[0] ?? {}));
+    assert.deepEqual(
+      now,
+      list.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => columns.has(k)))),
+      table,
+    );
+  }
 });
 
 // Revision 4 let a superseded unit outlive its successor. It goes back to candidate, through a state the migration itself writes
@@ -663,6 +679,54 @@ test("migrating revision 4 repairs the small values revision 5 refuses, and list
     assert.ok(said.includes(rule), `${rule}\n${said}`);
 });
 
+// Rows with values no release of this generation wrote were written outside Sphica: the migration stops, names every one, and changes nothing
+test("migrating revision 4 stops on values no release wrote, and lists every row", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  run(
+    "insert into source (project_id, kind, artifact, external_id, revision, author_kind, event_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'pr_event', 'pr:1', 'pr:1#closed', 1, 'person', 'closed', ?, ?, 'closed', 6, ?, 0)",
+    now,
+    now,
+    sha256("closed"),
+  );
+  run(
+    "insert into extraction_run (project_id, origin, target, status, reason, started_at) values (1, 'trace', 't', 'failed', 'timeout', ?)",
+    now,
+  );
+  run("insert into source_processing (source_id, run_id, outcome) values (1, 2, 'capped')");
+  run(
+    "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, 'impl', 'implementation', 'impl', 'supported', 1, ?, ?)",
+    now,
+    sha256("impl"),
+  );
+  run(
+    "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (2, 1, 'implements', 1, ?)",
+    now,
+  );
+  run(
+    "insert into external_reference (project_id, url, owner_source_id, span_start, span_end, added_at) values (1, 'https://notes.example/x', 1, 0, 3, ?)",
+    now,
+  );
+  const tables = ["source", "extraction_run", "source_processing", "unit_link", "external_reference"];
+  const count = () =>
+    tables.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n));
+  const before = count();
+  assert.throws(
+    () => migrate(raw),
+    (e: Error) =>
+      [
+        /a pull request event other than a merge: 1 row\n\s*source \d+ \(closed\)/,
+        /an extraction run that failed, was capped, or carries a reason: 1 row\n\s*run 2 \(failed\)/,
+        /a source processing outcome that failed or was capped: 1 row\n\s*source 1 in run 2 \(capped\)/,
+        /an implements link between records: 1 row\n\s*unit 2 implements unit 1/,
+        /an unfetched reference \(revision 5 has no table for it\): 1 row\n\s*reference 1 https:\/\/notes\.example\/x/,
+      ].every((re) => re.test(e.message)) && /still at revision 4/.test(e.message),
+  );
+  assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 4);
+  assert.deepEqual(count(), before);
+});
+
 // Revision 4 counted an edit outside any turn once per send, and let a record hold two live anchors on one place
 test("migrating revision 4 removes repeated edit observations and retires repeated live anchors, and says so", () => {
   const raw = create("old.db", REV4);
@@ -855,7 +919,16 @@ test("migrating revision 4 keeps the id counter of every table, so an id once us
       .map((r) => [r.name, r.seq]);
   const before = counters();
   migrate(raw);
-  assert.deepEqual(counters(), before);
+  // A table revision 5 drops takes its counter with it
+  const kept = new Set(
+    (raw.prepare("select name from sqlite_schema where type = 'table'").all() as { name: string }[]).map(
+      (t) => t.name,
+    ),
+  );
+  assert.deepEqual(
+    counters(),
+    before.filter(([name]) => kept.has(String(name))),
+  );
   const run = raw
     .prepare(
       "insert into extraction_run (project_id, origin, target, status, started_at) values (1, 'trace', 'session:s1', 'running', ?) returning id",

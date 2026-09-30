@@ -205,13 +205,14 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): add the small checks on lines, spans, times, anchors, urls, and aliases (T14)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks|small values" test/schema.test.ts test/migrate.test.ts` → 直す前のコードでは 2 本とも落ちた（red）。直した後は pass（開始行の無い終了行、負の取り下げの span、追加より前の取り下げ、文字の途中の span、作成より前の state、開始より前の終了、自分や別の記録の anchor への置き換え、javascript: の URL、索引に入るアシスタントの返答、文面の違う alias がそれぞれ拒まれ、移行はそれぞれを一番近い許される値に直して一覧に出す）。`bun run verify` → exit 0
 
-- [ ] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
+- [x] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
   - 種別: 削除
   - 計画: S3, S4, S6, S9
   - 依存: T13（0005.check.sql が要る）, T10（forget.ts の delete を揃えた後の形が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `db/migrations/0005.check.sql`, `server/src/knowledge.ts`, `server/src/forget.ts`, `server/src/db-write.ts`, `server/src/db-types.ts`, `scripts/check-pairs.mjs`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/forget.test.ts`, `server/test/db.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `db/migrations/0005.check.sql`, `server/src/forget.ts`, `server/src/db-write.ts`, `server/src/read.ts`, `server/src/db-types.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/forget.test.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/forget.test.ts test/db.test.ts && bun run pairs` → 消した値が拒まれ、その値の行か `external_reference` の行を入れた rev4 の DB の移行が全件を例外の文に出して revision 4 のまま全表の行が変わらないテストが通る。`rg -n "external_reference" db/schema.sql server/src --glob '!db-types.ts'` → 該当なし
   - コミット: `refactor(db): remove values and the table no release ever wrote (T15)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="no release wrote" test/schema.test.ts test/migrate.test.ts` → 直す前の schema では 2 本とも落ちた（red）。直した後は pass（消した値が拒まれ、external_reference と run の reason 列が無い。rev4 の DB にその値の行があると、5 種類とも全件を例外の文に出して revision 4 のまま全表の行が変わらない）。`bun run verify` → exit 0。`rg -n "external_reference" db/schema.sql server/src --glob "!db-types.ts"` → 該当なし
 
 ## P4: ingest の allow list
 
@@ -294,3 +295,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T13・T23 / Codex のレビュー（6d91e358..8fc246d1）: 指摘 0 件
 - 2026-10-01 / T14 / 変更欄に `server/src/github.ts`（http(s) でない URL は保存しない）と、新しい規則に当たった準備を直した overview・record・search のテストを足した（固定の古い時刻で state や取り下げを書いていた、索引に入ったアシスタントの返答をわざと作っていた）
 - 2026-10-01 / T14 / review-shipping: 指摘 1 件（再現済み）。文字の途中で切れた引用を広げて重複になったとき、取り下げ済みの行を残して生きている行を消していた / 生きている行を先に残すようにし、テストを足した
+- 2026-10-01 / T15 / 前提の裏取り: v0.5.0〜v0.6.14 の各タグで `git grep` し、pr_event の closed・reopened・thread_resolved、run と処理結果の failed・capped、run の reason、implements の link、external_reference への insert を書くコードが無いことを確かめた（review-shipping も 23 タグで独立に確認）。run の reason 列も消した。変更欄: `knowledge.ts`・`check-pairs.mjs`・`db.test.ts` は変わらず（これらの値は突き合わせの対象外）、`read.ts`（Implemented by の行）・`search.test.ts` を足した
+- 2026-10-01 / T15 / review-shipping: 指摘 3 件（schema のコメントとトリガーの文面、forget のテストの題名に、消した値の説明が残っていた） / 同じコミットで直した
