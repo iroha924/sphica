@@ -268,7 +268,7 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - 依存: T12（ランダム化が要る）
   - 変更: `scripts/check-sql-reach.mjs`
   - 完了条件: `PATH=<node 26>/bin:$PATH TEST_ORDER="--test-randomize --test-random-seed=354" node scripts/check-sql-reach.mjs` → `Randomized test order seed: 354` を出して通る
-  - red: 同じコマンド → テストが通るとテストの出力を隠すので、seed の行が出ない（PR の check (26) のログにも TEST_ORDER の環境変数しか無かった）
+  - red: `PATH=<node 26>/bin:$PATH TEST_ORDER="--test-randomize --test-random-seed=354" node scripts/check-sql-reach.mjs` → テストが通るとテストの出力を隠すので、seed の行が出ない（PR の check (26) のログにも TEST_ORDER の環境変数しか無かった）
   - コミット: `fix(ci): print the random test order seed that sql:reach hides (T25)`
   - 結果: 直す前は seed の行が出ず、直した後は `Randomized test order seed: 354` の後に `SQL: tests ran 189 / 189 sites` が出た。`bun run verify` → exit 0。review-shipping は指摘なし
 
@@ -278,47 +278,47 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - 依存: T06（build と plan.json）, T10（report.ts）, T23（fire の --condition）
   - 変更: `server/evals/cloud/firing.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/fire.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/schema-check.ts`, `server/evals/cloud/grade.schema.json`, `server/test/eval-grade.test.ts`, `server/test/search.test.ts`, `server/test/text-properties.test.ts`, `scripts/check-pairs.mjs`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 足したテスト（build のタスク定義で collect する、Claude の採点が無い run と対象外の信号を出す、bundle の違う build を拒む、打ち間違えた条件を拒む、切れた patch の proposes_rejected が unknown）が通る
-  - red: 同じコマンドを直す前の `evals/cloud/` で → 5 本が落ちる（gold のキーが checkout の harvest:157/keep-search、一致の節に行が無い、report が exit 0、fire が done を返す、proposes_rejected が no のまま）
+  - red: `cd server && node --test test/eval-grade.test.ts` → 直す前の `evals/cloud/` では、5 本が落ちる（gold のキーが checkout の harvest:157/keep-search、一致の節に行が無い、report が exit 0、fire が done を返す、proposes_rejected が no のまま）
   - コミット: `fix(eval): address the first GitHub Codex review of the eval base (T26)`
   - 結果: 直す前の `evals/cloud/` で 5 本が意図した理由で落ち、直した後 30 pass。leaves は segs が `["root","file"]` のとき `leaves` が false を返し、旧い性質は true を求めて落ちる入力だった。既存の 3 つの build に tasks.json を写して report を流し直し、同じ数字（一致 41 / 59、41 / 61、Claude の採点が無い run 0）。`bun run verify` → exit 0。check-pairs.mjs はコメントだけの変更なので review-shipping は流していない
 
 - [x] T27: GitHub の Codex の 2 回目のレビューの指摘を直す（`--compare` は HEAD の履歴にある ref だけを install スクリプトなしで、collect の bundle に同梱ファイルのハッシュを、Codex の再生は build の計画にあるタスクと条件だけ、report は同じ build を 2 度数えない、反転版の計画は gold の行だけ、コメント）
   - 種別: 修正
   - 計画: S1, S5, S6, S7
-  - 依存: T26
+  - 依存: T26（build のタスク定義と report の検査の上に足す）
   - 変更: `server/evals/retrieval/run.ts`, `server/evals/cloud/firing.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`, `server/test/retrieval-bench.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts test/retrieval-bench.test.ts` → 足した 5 本が通る
-  - red: 同じコマンドを直す前の `evals/`（firing.ts は新しい関数の形で、gold に絞る行を外したもの）で → 5 本が落ちる（反転版の計画に 8 行、同じ build 2 度で exit 0、bundle が `c` だけ、計画に無いタスクで git clone まで進む、履歴に無い ref を比べて exit 0）
+  - red: `cd server && node --test test/eval-grade.test.ts test/retrieval-bench.test.ts` → 直す前の `evals/` （firing.ts は新しい関数の形で gold に絞る行を外したもの）では、5 本が落ちる（反転版の計画に 8 行、同じ build 2 度で exit 0、bundle が `c` だけ、計画に無いタスクで git clone まで進む、履歴に無い ref を比べて exit 0）
   - コミット: `fix(eval): address the second GitHub Codex review of the eval base (T27)`
   - 結果: 直す前の `evals/` で 5 本が意図した理由で落ち、直した後 36 pass。`bun run verify` → exit 0
 
 - [x] T28: GitHub の Codex の 3 回目のレビューの指摘を直す（report に隠しテストの失敗を点数と並べて出す、`--second` の打ち間違いを拒む、ベンチのテストの子プロセスの環境を隔離する）
   - 種別: 修正
   - 計画: S1, S7
-  - 依存: T27
+  - 依存: T27（run.ts と report の検査の上に足す）
   - 変更: `server/evals/cloud/report.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`, `server/test/retrieval-bench.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts test/retrieval-bench.test.ts` → 足した 2 本が通る
-  - red: 同じ 2 本を直す前の `evals/` で → 2 本が落ちる（report に隠しテストの行が無い、`--second claud` を拒まない）
+  - red: `cd server && node --test test/eval-grade.test.ts` → 直す前の `evals/` では、2 本が落ちる（report に隠しテストの行が無い、`--second claud` を拒まない）
   - コミット: `fix(eval): address the third GitHub Codex review of the eval base (T28)`
   - 結果: 直す前の `evals/` で 2 本が意図した理由で落ち、直した後 38 pass。今回のループの report を流し直すと、点数 2.00 の claude gold でも隠しテストが 10 run 中 2 run 落ちていた。`bun run verify` → exit 0
 
 - [x] T29: GitHub の Codex の 4 回目のレビューの指摘を直す（結果の取れなかった隠しテストを数える、`--compare` と `--json` の併用を拒む）
   - 種別: 修正
   - 計画: S1, S7
-  - 依存: T28
+  - 依存: T28（report の隠しテストの列の上に足す）
   - 変更: `server/evals/cloud/report.ts`, `server/evals/retrieval/run.ts`, `server/test/eval-grade.test.ts`, `server/test/retrieval-bench.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts test/retrieval-bench.test.ts` → 足した・直した 2 本が通る
-  - red: 同じ 2 本を直す前の `evals/` で → 2 本が落ちる（`0 passed, ? failed` の行が数から消える、`--compare HEAD --json` が片側だけ出して exit 0）
+  - red: `cd server && node --test test/eval-grade.test.ts test/retrieval-bench.test.ts` → 直す前の `evals/` では、2 本が落ちる（`0 passed, ? failed` の行が数から消える、`--compare HEAD --json` が片側だけ出して exit 0）
   - コミット: `fix(eval): address the fourth GitHub Codex review of the eval base (T29)`
   - 結果: 直す前の `evals/` で 2 本が意図した理由で落ち、直した後 39 pass。`bun run verify` → exit 0
 
 - [x] T30: GitHub の Codex の 5 回目のレビューの指摘を直す（除外した run を gold key ごとの信号に数える、build ID の無い grades を拒む、空の `--condition` を拒む）
   - 種別: 修正
   - 計画: S5, S7
-  - 依存: T29
+  - 依存: T29（report の検査の上に足す）
   - 変更: `server/evals/cloud/report.ts`, `server/evals/cloud/fire.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 足した・直したテストが通る
-  - red: 直す前の `evals/` で → 信号の行に excluded が無く、`--condition ''` で次の行が発火済みになり、build ID の無い grades を含む report が exit 0
+  - red: `cd server && node --test test/eval-grade.test.ts` → 直す前の `evals/` では、信号の行に excluded が無く、`--condition ''` で次の行が発火済みになり、build ID の無い grades を含む report が exit 0
   - コミット: `fix(eval): address the fifth GitHub Codex review of the eval base (T30)`
   - 結果: 直す前の `evals/` で 3 本が意図した理由で落ち、ID の無い grades を含む report が exit 0。直した後 37 pass、ID の無い grades は「a build has no id」で止まる。`bun run verify` → exit 0
 
