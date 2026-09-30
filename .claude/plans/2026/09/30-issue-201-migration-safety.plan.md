@@ -101,9 +101,9 @@ approved_at: 2026-09-30
 - A1: `bun run verify` → 0 で終わる
 - A2: `cd server && node --test test/admin.test.ts test/migrate.test.ts` → 失敗する移行を差し込んだ rev1 の DB で、移行が途中で止まり、バックアップが revision 1・元の行数（WAL にだけあった行を含む）で開け、戻し方どおりに置き換えると owner で元の行が読めるテストが通る
 - A3: `cd server && node --test test/deliver.test.ts` → 同じセッションで一般の障害警告の後でも、不一致の案内（`npm i -g sphica@<version>` を含む）が SessionStart と prompt で 1 回ずつ返るテストが通る
-- A4: `bun run sql:live` → tarball の deliver.js が rev3 の DB に版入りの案内を返し、cli.js の init が `Backed up:` と `Migrated: … (revision 3 → 4)` を出す
+- A4: `bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → tarball の deliver.js が rev3 の DB に版入りの案内を返し、cli.js の init が `Backed up:` と `Migrated: … (revision 3 → 4)` を出す
 - A5: `rg -n "doctor --reindex" server/src .claude/skills` → terms() の変更時の手順として書いた箇所が残っていない（doctor の索引が壊れたときの案内は残る）
-- A6: `bun run release:plan -- --base <前のリリースのコミット>` → `plugin`。`package.json` と 3 つの manifest の版が一致する
+- A6: `bun run release:plan -- --base v0.6.11` → `plugin`。`package.json` と 3 つの manifest の版が一致する
 
 ## リスク
 
@@ -117,3 +117,5 @@ approved_at: 2026-09-30
 なし
 
 ## 変更履歴
+- 2026-09-30 / A4 と方針 6 の検査の置き場を sql:live から scripts/check-tarball.mjs に / 配布物を展開して動かす検査が既にそこにあり、CI の check と release が流す / Go 不要（検査の置き場だけで範囲は同じ）
+- 2026-09-30 / 方針 5 の reindex() の SQL の定数化をやめた / 使う側が無く未使用の export になる / Go 不要
