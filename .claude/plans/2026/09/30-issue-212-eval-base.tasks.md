@@ -182,13 +182,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `ci: run tests in random order on Node 26 and flag floating promises (T12)`
   - 結果: `bun run lint` → 0 件で通り、一時ファイルの `f();` には noFloatingPromises が出た（消した）。`cd server && TEST_ORDER="--test-randomize --test-random-seed=12345" bun run test`（Node 26.10）→ Randomized test order seed: 12345、475 pass・0 fail。`actionlint` → 通る。`bun run verify` → exit 0
 
-- [ ] T13: trace・glean の Skill の JSON 欄と zod の型の突き合わせ
+- [x] T13: trace・glean の Skill の JSON 欄と zod の型の突き合わせ
   - 種別: 追加
   - 計画: S10
   - 依存: なし
   - 変更: `scripts/check-pairs.mjs`
   - 完了条件: `bun run pairs` → 通り、Skill の欄の表から 1 行を一時的に消すと落ちる（戻す）
   - コミット: `test(pairs): match the trace and glean Skills' JSON fields with the zod types (T13)`
+  - 結果: `bun run pairs` → 通る。trace の表から `aliases` の行を消すと「never mentions fields the save path accepts: aliases」、glean の表に `undo_all` を足すと op の食い違いで落ちた（戻した）。`bun run verify` → exit 0
 
 - [ ] T14: Stryker を手で 1 回流し、意味のある生存変異をテストで殺す
   - 種別: 追加

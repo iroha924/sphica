@@ -479,6 +479,58 @@ if (TRAILER !== null) {
   }
 }
 
+// ---- The record fields the trace and glean Skills describe match what the save paths accept ----
+//
+// The Skills tell the agent which JSON fields to write; server/src/record.ts and server/src/glean.ts reject anything else (strict zod).
+// A field added on one side only is either refused on save or never written.
+{
+  /** The keys of a zod object written as `const <name> = z\n  .object({ ... })`, at its own indentation. */
+  const zodKeys = (file, name) => {
+    const block = grab(
+      file,
+      new RegExp(`const ${name} = z\\s*\\.object\\(\\{\\n([\\s\\S]*?)\\n  \\}\\)`),
+      `the ${name} object`,
+    );
+    const keys = [...(block ?? "").matchAll(/^ {4}([a-z_]+):/gm)].map((m) => m[1]);
+    if (block !== null && keys.length === 0) fail.push(`cannot extract any keys of ${name} from ${file}`);
+    return keys;
+  };
+  /** The backticked names in the first column of the Skill table that starts with the given header. */
+  const tableNames = (file, header) => {
+    const table = grab(
+      file,
+      new RegExp(`${header}\\n\\|---\\|---\\|\\n((?:\\|.*\\n)+)`),
+      `the ${header} table`,
+    );
+    const names = (table ?? "")
+      .split("\n")
+      .flatMap((row) => [...(row.split("|")[1] ?? "").matchAll(/`([a-z_]+)`/g)].map((m) => m[1]));
+    if (table !== null && names.length === 0)
+      fail.push(`cannot extract any names from the ${header} table in ${file}`);
+    return { names, text: table ?? "" };
+  };
+  const recordKeys = [
+    ...zodKeys("server/src/record.ts", "Unit"),
+    ...zodKeys("server/src/record.ts", "Record"),
+  ].filter((k) => k !== "units");
+  const trace = tableNames("plugin/skills/trace/SKILL.md", "\\| Field \\| Rule \\|");
+  const unknown = trace.names.filter((n) => !recordKeys.includes(n));
+  if (unknown.length)
+    fail.push(`the trace Skill's field table names fields the save path refuses: ${unknown.join(", ")}`);
+  const untold = recordKeys.filter((k) => !trace.text.includes(`\`${k}\``));
+  if (untold.length)
+    fail.push(
+      `the trace Skill's field table never mentions fields the save path accepts: ${untold.join(", ")}`,
+    );
+  const ops = [...read("server/src/glean.ts").matchAll(/op: z\.literal\("([a-z_]+)"\)/g)].map((m) => m[1]);
+  if (ops.length === 0) fail.push("cannot extract any op literals from server/src/glean.ts");
+  const glean = tableNames("plugin/skills/glean/SKILL.md", "\\| Op \\| What it does \\|");
+  if (!same(glean.names, ops))
+    fail.push(
+      `the glean Skill's op table (${glean.names.join(", ")}) differs from the ops glean.ts accepts (${ops.join(", ")})`,
+    );
+}
+
 if (fail.length) {
   console.error(`\n${fail.map((f) => `  ${f}`).join("\n\n")}\n`);
   process.exit(1);
