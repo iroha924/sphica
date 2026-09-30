@@ -1,7 +1,7 @@
 // Looks after this machine's database (~/.sphica/sphica.db). The owner runs these locally, with the owner connection (no authorizer).
 //
 //   sphica init                 creates the database and applies db/schema.sql. Safe to run again (an older revision is migrated)
-//   sphica doctor --reindex     rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
+//   sphica doctor --reindex     rebuilds the full-text index (FTS) when doctor finds it broken
 
 import fs from "node:fs";
 import path from "node:path";

@@ -87,13 +87,14 @@ capture ビューの列の変化と `terms()` の出力の変化がテストで�
   - コミット: `test(schema): compare every capture view's columns across all revisions (T04)`
   - 結果: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 12 pass・0 fail。schema.sql の capture_edit から via を一時的に外すと `--test-name-pattern="every capture view"` が 3 fail（戻した）。`bun run verify` → exit 0
 
-- [ ] T05: terms() の golden、reindex の SQL の定数化、規範の文の置き換え
+- [x] T05: terms() の golden、reindex の SQL の定数化、規範の文の置き換え
   - 種別: 追加
   - 計画: S5
   - 依存: なし
-  - 変更: `server/test/fixtures/terms-golden.json`, `server/test/terms-golden.test.ts`, `server/src/admin.ts`, `server/src/text.ts`, `.claude/skills/knowledge-schema/SKILL.md`
+  - 変更: `server/test/fixtures/terms-golden.json`, `server/test/terms-golden.test.ts`, `server/src/admin.ts`, `server/src/text.ts`, `.agents/skills/knowledge-schema/SKILL.md`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/terms-golden.test.ts` → 通り、`terms()` の規則を一時的に変えると revision と移行を求めるメッセージで落ちる（手で確かめて戻す）。`rg -n "doctor --reindex" server/src .claude/skills` → terms() の変更時の手順として書いた箇所が無い
   - コミット: `test(search): pin terms() output and rebuild the index through a migration (T05)`
+  - 結果: `cd server && node --test test/terms-golden.test.ts` → 1 pass（54 入力）。MAX_TERM を一時的に 10 にすると 1 fail で revision と移行を求めるメッセージが出た（戻した）。Node 24.15（ICU 78.2）と 26.10（ICU 78.3）で golden の出力は同じ。`rg -n "doctor --reindex" server/src .claude/skills` → 残るのは doctor の壊れた索引の案内・コマンド定義・knowledge-schema の Writers 表だけ。`bun run verify` → exit 0
 
 ## P4: 配布物の確認と版
 
@@ -122,3 +123,5 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T02 / backups() を admin.ts から forget.ts が読むと、記録サーバーの bundle に CLI の部品（cli/view.ts）が入る / バックアップの場所の関数を server/src/backups.ts に分け、forget の Skill の「残るもの」も直した。変更欄（前: `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`、後: それに `server/src/backups.ts` と `plugin/skills/forget/SKILL.md` を足した）
 - 2026-09-30 / T01 レビュー / Codex の F1〜F4: F2（時計が戻ると今回のバックアップを刈り込む）・F3（消せない古いバックアップで移行済みの init が落ちる）・F4（移行なしのテストが件数だけ比べる）は直す。F1（バックアップ後・最初の移行前に capture が書いた行は戻すと消える）は、戻す以上バックアップ後の記録は失われるので防げない。エラーの戻し方に「バックアップの後の記録は入っていない」と書いて扱う / T08 を足した
 - 2026-09-30 / T02 レビュー / Codex の F1（バックアップと同じ名前のディレクトリを 1 件と数える）は、手で置かない限り起きない入力なので直さない。F2（テストが MCP の 3 か所を通らず空振りする）は直す / T09 を足した
+- 2026-09-30 / T05 / plan 方針 5 の「reindex() の SQL を定数にして export する」は、使う側がテストにも移行にも無く、未使用の export になる（knip が落とす）。2 重に持たないための策は、棄却した C9 (b) の検査のためだった / 定数化はせず、テストの失敗メッセージと規範の文で reindex() を写す元として名指しした。world.json の 2000 文字を超える 3 本（同じ繰り返しの詰め物）は golden から外した
+- 2026-09-30 / T05 / `.claude/skills/knowledge-schema` は `.agents/skills/knowledge-schema` へのシンボリックリンクだった / 変更欄を実体のパスに変えた（前: `.claude/skills/knowledge-schema/SKILL.md`、後: `.agents/skills/knowledge-schema/SKILL.md`）

@@ -35,7 +35,8 @@ function singular(w: string): string {
 
 /**
  * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.
- * **Changing the rules leaves existing indexes as they were.** A PR that changes them tells the owner to run `sphica doctor --reindex` in its release steps.
+ * **Changing the rules leaves existing indexes as they were.** A PR that changes them raises the schema revision and ships a migration that rebuilds
+ * the indexes as reindex() in admin.ts does (server/test/terms-golden.test.ts fails until it is decided).
  */
 export function terms(text: string): string[] {
   const norm = text.normalize("NFKC").toLowerCase();
