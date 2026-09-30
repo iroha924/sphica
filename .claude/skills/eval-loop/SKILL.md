@@ -54,7 +54,7 @@ Loop progress:
    slots, `manifest.json` (with the build id and variant), and `plan.json`. It never rebuilds an existing directory; each build keeps its own.
    Push one build's slots at a time
 3. For each row, `node evals/cloud/fire.ts <build dir>` marks the next unfired row fired and prints its slot and prompt; fire that slot's
-   routine (`routines.json`) with RemoteTrigger right after. For Codex, `node evals/cloud/codex.ts --build <build dir> --repo <slot> --task <task>`;
+   routine (`routines.json`) with RemoteTrigger right after (`--condition gold` fires only a swapped build's gold rows). For Codex, `node evals/cloud/codex.ts --build <build dir> --repo <slot> --task <task>`;
    each run records the build id, so runs of another build are left out when collecting
 4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the signals). Then
    `node evals/cloud/collect.ts --build <build dir>` writes `<build dir>/loop.json`. It takes only branches built on this build, pairs them with

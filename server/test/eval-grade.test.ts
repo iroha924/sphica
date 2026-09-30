@@ -946,3 +946,42 @@ test("grader agreement counts a difference in cited_gold or flags", () => {
   assert.match(out, /c1 \(t1 gold\): cited_gold yes vs no/);
   assert.match(out, /f1 \(t1 gold\): flags off_task vs \(none\)/);
 });
+
+// fire.ts marks rows in plan order, only the condition asked for when one is given, and says when none is left
+test("fire marks the next unfired row, only of the condition asked for, and reports when none is left", () => {
+  const build = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fire-"));
+  try {
+    const row = (task: string, condition: string): FiringRow => ({
+      build: "b",
+      variant: "swapped",
+      task,
+      condition,
+      slot: condition === "gold" ? "eval-shelf-4" : "eval-shelf-1",
+      try: 1,
+      prompt: task,
+      fired_at: null,
+    });
+    fs.writeFileSync(
+      path.join(build, "plan.json"),
+      JSON.stringify([row("a", "none"), row("a", "gold"), row("b", "gold")]),
+    );
+    const fire = (...extra: string[]) =>
+      JSON.parse(
+        execFileSync(
+          process.execPath,
+          [path.join(import.meta.dirname, "..", "evals", "cloud", "fire.ts"), build, ...extra],
+          { encoding: "utf8" },
+        ),
+      );
+    assert.deepEqual([fire("--condition", "gold").task, fire("--condition", "gold").task], ["a", "b"]);
+    assert.equal(fire("--condition", "gold").done, true);
+    const plan = JSON.parse(fs.readFileSync(path.join(build, "plan.json"), "utf8")) as FiringRow[];
+    assert.deepEqual(
+      plan.map((r) => r.fired_at !== null),
+      [false, true, true],
+    );
+    assert.equal(fire().task, "a");
+  } finally {
+    fs.rmSync(build, { recursive: true, force: true });
+  }
+});

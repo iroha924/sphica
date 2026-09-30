@@ -234,6 +234,15 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 
 新しい流し方で 1 ループを回せる手順が Skill にある。
 
+- [x] T23: fire.ts に `--condition` を足し、反転版は gold の条件だけを発火できるようにする
+  - 種別: 追加
+  - 計画: S12
+  - 依存: T06（発火の計画と fire.ts が要る）
+  - 変更: `server/evals/cloud/fire.ts`, `server/test/eval-grade.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - 完了条件: `cd server && node --test --test-name-pattern="fire marks" test/eval-grade.test.ts` → 指定した条件の行だけが計画の順に発火済みになり、残りが無ければ done を返す
+  - コミット: `feat(eval): fire only one condition's rows when asked (T23)`
+  - 結果: `cd server && node --test --test-name-pattern="fire marks" test/eval-grade.test.ts` → 1 pass。`bun run verify` → exit 0
+
 - [x] T15: eval-loop Skill を build ID・plan.json・report.ts の流し方に書き換える
   - 種別: 変更
   - 計画: S12
@@ -265,3 +274,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T10 レビュー / Codex の F1（gold − inject に run ID と n が無い）・F2（採点者の一致が score と implements_rejected だけ）・F3（未採点だけの反転版の行が消える）は、どれも再現つきで直す / T21 を足した。counterfactual のタスクの一覧は、report の CLI が tasks.json の swapped.tasks から渡す。T12 のレビューは指摘なし
 - 2026-09-30 / T14 / Stryker は TypeScript 7 に tsconfig を書き換える API（ts.parseConfigFileTextToJson）が無くて落ち、sandbox では server/ の外の db/schema.sql を読めなかったので、tsconfigFile を外し inPlace で流した（使い捨ての worktree の中）。意味があるとして殺したもの: 伏せ字の形ごとの一覧（項目ごと消してもどのテストも落ちなかった 20 種、最小の長さと 1 文字足りない長さで検査）、search のヒットに別の記録の options と anchors が混ざる、limit、aliasOnly。残したもの: QUESTION の語の一覧の文字列（44）、visible の正規表現（101、Unicode の性質で決まる）、検索の候補の上限の境目（2,000 件を作る必要があり重い）、anchors の locateIn の文字列と条件（多くは記録の位置の探し方の細部で、別の issue の範囲）。変更欄から anchors.test.ts を外した（無いファイル）
 - 2026-09-30 / 全差分レビュー（Codex） / P1（試行 1 が結果を残さず試行 2 だけ残ると割り当てが入れ替わる）は T06 レビューの F3 と同じで、同じタスク×条件の試行は区別の意味が無く、結果の無い発火がどれだったかはブランチから分からない。分母は正しいので直さない。P2（read の引数に key があっても結果に記録が無ければ no）は、T05 で read を「結果が記録を見せたか」と決めたとおりで直さず、plan の文面を実装に合わせた。P2（一致の判定から cited_gold と flags が漏れる）は直す / T22 を足した。review-shipping は指摘なし（0.6.13 の配布物は 0.6.12 とバージョンの文字列 3 か所だけ違い、dist と db は同じバイト）
+- 2026-09-30 / A6 / 持ち主がクラウドの 1 ループを「62 run、$9〜$19（反転版は gold の条件だけ）」で承認した / 反転版の gold の行だけを発火できるよう T23 を足した
