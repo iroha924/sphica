@@ -126,16 +126,16 @@ test("parseDiff takes every added line of a hunk, even one that looks like a fil
   );
 });
 
-/** The median time of mask over 5 runs, after one warm-up run. */
+/** The fastest of 5 runs of mask, after one warm-up run: the least touched by other work on the machine (test files run in parallel). */
 function timed(input: string): number {
   mask(input);
-  const ms: number[] = [];
+  let best = Number.POSITIVE_INFINITY;
   for (let i = 0; i < 5; i++) {
     const t = performance.now();
     mask(input);
-    ms.push(performance.now() - t);
+    best = Math.min(best, performance.now() - t);
   }
-  return ms.sort((a, b) => a - b)[2] ?? 0;
+  return best;
 }
 
 // Shapes that make a backtracking pattern slow: long runs a secret pattern starts to match and then fails on
@@ -147,14 +147,19 @@ const ADVERSARIAL: [string, (n: number) => string][] = [
   ["private key header", (n) => "-----BEGIN ".repeat(n)],
 ];
 
-// Doubling the input must not much more than double the time: each ratio is from one length to the next (2n/n and 4n/2n)
+// Doubling the input must not much more than double the time: each ratio is from one length to the next (2n/n and 4n/2n). A busy machine
+// can slow one measurement, so each shape gets up to three tries; a pattern that really grows faster than linear fails all of them
 test("mask takes time in proportion to the input on shapes that stress its patterns", () => {
   for (const [name, make] of ADVERSARIAL) {
     // Callers never pass more than 2 MiB (capture cuts at 128 KiB, anchors read files up to 2 MiB), so 4n stays within that
     let n = 1000;
     while (timed(make(n)) < 5 && n < 500_000) n *= 2;
-    const [a, b, c] = [timed(make(n)), timed(make(2 * n)), timed(make(4 * n))];
-    for (const ratio of [b / a, c / b])
-      assert.ok(ratio <= 3, `${name}: times ${a.toFixed(1)}, ${b.toFixed(1)}, ${c.toFixed(1)} ms`);
+    const tries: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const [a, b, c] = [timed(make(n)), timed(make(2 * n)), timed(make(4 * n))];
+      if (b / a <= 3 && c / b <= 3) break;
+      tries.push(`${a.toFixed(1)}, ${b.toFixed(1)}, ${c.toFixed(1)} ms`);
+    }
+    assert.ok(tries.length < 3, `${name}: every try grew faster than linear (${tries.join("; ")})`);
   }
 });

@@ -173,6 +173,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `test(text): add property tests with fast-check and a growth check for mask (T11)`
   - 結果: `cd server && node --test test/text-properties.test.ts` → 6 pass・0 fail（seed 20260930、各 300 回）。空振りしないことを、head の上限を 1 ずらす・ftsQuery の引用符を外す・quoteSpan の終わりを 1 ずらす壊し方で確かめ、どれも落ちた（戻した）。mask の時間の比（2n/n と 4n/2n）を手元で 10 回測って最大 2.20、閾値 3.0 で確定（CI での値は PR の CI で見る）。`bun run verify` → exit 0。`bun run release:plan -- --base v0.6.12` → plugin、4 か所とも 0.6.13
 
+- [x] T20: mask の時間のテストを、ほかの処理で忙しいマシンでも揺れないようにする
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T11（直す対象の時間のテストが要る）
+  - 変更: `server/test/text-properties.test.ts`
+  - red: `bun run verify`（裏で Stryker が 8 並列で動いている状態）→ authorization header の比が 5.8・10.0・41.3 ms（4n/2n が 4.1）で落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="mask takes time" test/text-properties.test.ts` → 同じ負荷の下で 3 回とも通り、mask に二次の処理を一時的に入れると 3 回の試行すべてで落ちる
+  - コミット: `test(text): time mask by its fastest run and allow three tries (T20)`
+  - 結果: 直す前は Stryker の負荷の下の verify で 4n/2n が 4.1 になって落ちた（red）。直した後、同じ負荷の下で 3 回とも pass。mask に二次の処理を一時的に入れると「every try grew faster than linear (6.3, 18.0, 57.2 ms; …)」で落ちた（戻した）。`bun run verify` → exit 0
+
 - [x] T12: Node 26 の順序ランダム化と Biome の promise の 2 ルール
   - 種別: 変更
   - 計画: S9
@@ -229,3 +239,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T11 / fast-check 4.10.2 と依存の pure-rand 8.4.2 は、どちらも dubzzz の GitHub から SLSA provenance つきで公開（fast-check は 2017 年から、週 5,300 万ダウンロード、MIT）。最初の head/tail の性質は「h === s なら可」で空振りしていたので、上限に収まらない入力では必ず上限に収まることを見る形に直した。ftsQuery は Unicode の生成だけでは FTS5 の記号を含む識別子がほとんど出ず空振りしていたので、記号と識別子を混ぜた生成を足した。mask は 800 万文字を超える `sk-aaa…` でスタックがあふれるが、呼び出し側が 2MiB を超えて渡さない（capture は 128KiB で切る、anchors は 2MiB までのファイル）ので製品では起きない。時間のテストの長さは 4n が 200 万文字以内に収まるようにした。変更欄の `bun.lock` は `server/bun.lock` の誤り（前: `bun.lock`、後: `server/bun.lock`）
 - 2026-09-30 / T11 / release-scope.mjs は server/package.json と server/bun.lock の変更を中身によらずパッケージの入力とみなすので、devDependency の fast-check を足すとバージョンの更新とリリースが要る。持ち主が「0.6.13 に上げてリリース」を選んだ（ほかの案: 依存を足さず自前の生成器、バージョンの検査を直す） / 版の 4 ファイルを T11 に入れた
 - 2026-09-30 / T12 / 最初は NODE_OPTIONS でランダム化を渡したが、plugin.test.ts の「identifies the running MCP …」がどの seed でも落ちた。順序依存ではなく、テストが起動する子の node が NODE_OPTIONS の `--test-randomize` を受け継ぎ、`--test` 無しで止まるため（単独でもランダム化の指定があれば落ちる）。server の test の script に `$TEST_ORDER` を足し、CI の Node 26 の lane だけがそれに run 番号の seed を渡す形にした（変更欄に server/package.json を足した）
+- 2026-09-30 / T11 / 時間のテストは各長さの 5 回の中央値で比を見ていたが、ほかの処理（テストファイルの並列実行、裏の Stryker）で 1 回の測定が遅れると比が 3 を超えた。最小値で測り、形ごとに 3 回まで試す形にした / T20 を足した
