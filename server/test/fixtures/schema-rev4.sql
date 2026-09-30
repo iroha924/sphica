@@ -184,11 +184,10 @@ create table edit_observation (
 create index edit_observation_path on edit_observation (path);
 
 -- One extraction by trace, harvest, or glean. target names what it read: `session:<uuid>`, `pr:<n>`, or `glean`.
--- A migration that changes lifecycles records itself as a run too (origin migration, target `revision:<n>`), so each change names where it came from.
 create table extraction_run (
   id integer primary key autoincrement not null,
   project_id integer not null references project (id) on delete cascade,
-  origin text not null check (origin in ('trace', 'harvest', 'glean', 'migration')),
+  origin text not null check (origin in ('trace', 'harvest', 'glean')),
   target text not null,
   session_id text references session (id) on delete set null,
   status text not null check (status in ('running', 'saved', 'failed', 'capped')),
@@ -868,4 +867,4 @@ create trigger capture_delivery_insert instead of insert on capture_delivery beg
   select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
 
-pragma user_version = 5;
+pragma user_version = 4;

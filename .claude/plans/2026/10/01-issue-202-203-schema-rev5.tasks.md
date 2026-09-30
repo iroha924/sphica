@@ -40,13 +40,23 @@ revision 5 を開き、表を作り直す移行と、止める行・直した行
   - コミット: `refactor(record): mark a run saved once, after every write of the save (T02)`
   - 結果: `cd server && node --test --test-timeout=60000 test/record.test.ts test/extract.test.ts` → 47 pass・0 fail。run の更新をトリガーで数え、trace・harvest（2 本）・glean（操作だけ / 新しい unit あり）がどれも 1 回で saved になる。直す前のコードでは glean が 2 回で落ちることを確かめた。`bun run verify` → exit 0。review-shipping: 出荷されるコードに `saveText` を通らない呼び出しは無い。harvest をテストが見ていないという指摘は同じコミットで足した
 
-- [ ] T03: revision 5 を開く（全表を作り直す 0005.sql、sqlite_sequence の保持、rev4 の fixture、origin の migration）
+- [x] T03: revision 5 を開く（全表を作り直す 0005.sql、sqlite_sequence の保持、rev4 の fixture、origin の migration）
   - 種別: 変更
   - 計画: S3, S4, S10
   - 依存: T01（移行が成功した後の出力と optimize の手順が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/knowledge.ts`, `scripts/check-pairs.mjs`, `scripts/check-tarball.mjs`, `server/test/fixtures/schema-rev4.sql`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/sqlite.ts`, `server/src/knowledge.ts`, `server/src/trace.ts`, `scripts/check-pairs.mjs`, `server/test/fixtures/schema-rev4.sql`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 実際の `admin.migrate()` で、移行した rev1〜rev4 の DB が新規の DB と同じ定義になり、最大 id の行を消した rev4 の DB で全 autoincrement 表の次の id が旧値 + 1 になるテストが通る。`bun run verify` → 0
-  - コミット: `feat(db): open schema revision 5 with a migration that rebuilds every table and keeps id counters (T03)`
+  - コミット: `feat(db): open schema revision 5 with a migration that rebuilds tables and keeps id counters (T03)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 16 pass・0 fail（実際の `admin.migrate()` で、rev1〜rev4 が新規の DB と同じ定義 / rev4 の全 autoincrement 表のカウンターが移行の前後で同じで、次の run の id が 9 / 全表の全列が移行の前後で同じ）。列を入れ替えた 0005.sql では全列の比較が落ちることを確かめた。`bun run verify` → exit 0。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → 配布物の CLI が rev4 の DB をバックアップして移行。review-shipping: 持ち主の DB の写し（895 source・118 unit）と 111 MB の合成 DB の移行で行・カウンター・FTS に差分なし。作り直した表の列の中身をテストが見ていないという指摘は同じコミットで足した
+
+- [ ] T20: 止めた行・直した行の一覧を、行数に比例する時間で組み立てる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の一覧の組み立てが要る）
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="many rows" test/admin.test.ts` → 同じ規則の 10 万行を止める移行で、一覧の組み立てに数秒かかり、時間の上限の assert で落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 10 万行でも全件が出て、上限の時間内に終わるテストが通る
+  - コミット: `fix(init): build the list of stopped rows in linear time (T20)`
 
 ## P2: 書き込みの境界と状態遷移（#202）
 
@@ -206,3 +216,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 ## 記録
 
 - 2026-10-01 / T01・T19 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットでバージョンが上がっていないと落とす（#201 の T01 と同じ） / バージョンを 0.6.15 に上げるのを T19 から T01 へ移した。T01 の変更欄: `server/src/admin.ts`, `server/test/admin.test.ts` → それに 4 つの manifest を足した。T19 の題名: 「Skill を直し、バージョンを上げ、配布物の検査を rev4 に向ける」→「Skill を直し、配布物の検査を rev4 に向ける」、変更欄から `package.json` と 4 つの manifest を外し、コミット件名を docs(skill) に変えた。完了条件の release:plan の確認は T19 に残す
+- 2026-10-01 / T03 / `db-types.ts` は codegen しても変わらず（origin は文字列の列）、`check-tarball.mjs` は fixture の一番新しい revision を自動で使うので変更が要らなかった。origin の型を `trace.ts` で使い、`schema.test.ts` の revision の期待値を 5 にした / 変更欄: `server/src/db-types.ts`・`scripts/check-tarball.mjs` を外し、`server/src/trace.ts`・`server/test/schema.test.ts` を足した
+- 2026-10-01 / T01 / Codex のレビュー（04e02b9）: 指摘 1 件（P2）。同じ規則の行を足すたびに配列を全件コピーするので一覧の組み立てが二乗時間になり、10 万行で 7.7 秒、その間は書き込みロックを持ったまま / 採用。修正タスク T20 を足した
+- 2026-10-01 / T02 / Codex のレビュー（4873c4c）: 指摘 0 件（テストは read-only のため Codex 側では未実行） / そのまま
+- 2026-10-01 / T03 / review-shipping が、配布物の検査（`check-tarball.mjs`）は中身の無い rev4 の DB で「Backed up」「Migrated」の行だけを見ていると指摘 / T19 で、記録の入った DB を配布物の CLI で移行する形にできるかを見る

@@ -2,6 +2,7 @@
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import { iso } from "./db.ts";
 import type { DB, Session } from "./db-types.ts";
+import type { BeginOrigin } from "./knowledge.ts";
 
 /** Days after its last owner message that an untraced session stops counting as waiting. Its messages stay and are still found. */
 export const PENDING_DAYS = 30;
@@ -92,7 +93,7 @@ export async function openRun(
   db: Kysely<DB>,
   v: {
     projectId: number;
-    origin: "trace" | "harvest" | "glean";
+    origin: BeginOrigin;
     target: string;
     sessionId: string | null;
     draftId: string;

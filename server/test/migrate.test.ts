@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7.
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
+import { migrate as migrateFile } from "../src/admin.ts";
+import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { sha256 } from "../src/text.ts";
 
@@ -14,10 +16,8 @@ const root = path.join(import.meta.dirname, "..", "..");
 const REV1 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev1.sql"), "utf8");
 const REV2 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev2.sql"), "utf8");
 const REV3 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev3.sql"), "utf8");
+const REV4 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev4.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
-const MIGRATIONS = [2, 3, 4].map((r) =>
-  fs.readFileSync(path.join(root, "db", "migrations", `${String(r).padStart(4, "0")}.sql`), "utf8"),
-);
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
 let dir: string;
@@ -31,34 +31,41 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+const files = new Map<DatabaseSync, string>();
 const create = (name: string, schema: string): DatabaseSync => {
   const raw = connectWriter("owner", path.join(dir, name), true);
   open.push(raw);
+  files.set(raw, path.join(dir, name));
   raw.exec("pragma journal_mode = wal");
   raw.exec(schema);
   return raw;
 };
 
-/** The steps `sphica init` runs, written out so the SQL itself is tested apart from the code that runs it: one transaction per revision. */
-const migrate = (raw: DatabaseSync) => {
-  for (;;) {
-    const at = Number((raw.prepare("pragma user_version").get() as { user_version: number }).user_version);
-    const next = MIGRATIONS[at - 1];
-    if (!next) return;
-    raw.exec("pragma foreign_keys = off");
-    raw.exec("begin immediate");
-    raw.exec(next);
-    assert.deepEqual(raw.prepare("pragma foreign_key_check").all(), []);
-    raw.exec("commit");
-    raw.exec("pragma foreign_keys = on");
+/** Migrates the way `sphica init` does, and returns what it printed. raw stays open, as a session's connection does during init. */
+const migrate = (raw: DatabaseSync): string => {
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (t: string) => said.push(t);
+  try {
+    migrateFile(files.get(raw) ?? "");
+  } finally {
+    console.log = log;
   }
+  return said.join("\n");
 };
 
-/** Table, index, view, and trigger definitions by (type, name). A renamed table's stored SQL quotes its name, so quotes and spacing are dropped. */
+/**
+ * Table, index, view, and trigger definitions by (type, name). A renamed table's stored SQL quotes its name, so quotes and spacing are dropped.
+ * The planner's statistics tables are left out: a finished migration refreshes them, and a fresh database has none yet.
+ */
 const definitions = (raw: DatabaseSync) =>
   new Map(
     (
-      raw.prepare("select type, name, sql from sqlite_schema where sql is not null").all() as {
+      raw
+        .prepare(
+          "select type, name, sql from sqlite_schema where sql is not null and name not like 'sqlite_stat%'",
+        )
+        .all() as {
         type: string;
         name: string;
         sql: string;
@@ -135,13 +142,17 @@ for (const [from, schema] of [
   [1, REV1],
   [2, REV2],
   [3, REV3],
+  [4, REV4],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
     migrate(old);
     const fresh = create("fresh.db", CURRENT);
     assert.deepEqual(definitions(old), definitions(fresh));
-    assert.equal((old.prepare("pragma user_version").get() as { user_version: number }).user_version, 4);
+    assert.equal(
+      (old.prepare("pragma user_version").get() as { user_version: number }).user_version,
+      SCHEMA_REVISION,
+    );
     assert.deepEqual(
       old
         .prepare("pragma integrity_check")
@@ -215,6 +226,7 @@ for (const [from, schema] of [
   [1, REV1],
   [2, REV2],
   [3, REV3],
+  [4, REV4],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -239,6 +251,7 @@ test("a fixture of every earlier revision is kept, each at its own revision", ()
     [1, REV1],
     [2, REV2],
     [3, REV3],
+    [4, REV4],
   ] as const)
     assert.match(schema, new RegExp(`pragma user_version = ${from};`));
 });
@@ -280,6 +293,71 @@ test("migration keeps unit_state's id counter, so an id once used is never hande
     )
     .run(now);
   assert.equal(Number((raw.prepare("select max(id) as n from unit_state").get() as { n: number }).n), 4);
+});
+
+// A rebuilt table is copied column by column: a column left out, or two swapped, would keep every count and still lose what was recorded
+test("migrating revision 4 keeps every column of every row", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  raw
+    .prepare(
+      "update extraction_run set session_id = 's1', reason = 'why', input_bytes = 42, draft_id = 'draft', finished_at = ?",
+    )
+    .run(new Date("2026-09-21T00:00:00Z").toISOString());
+  const tables = (
+    raw
+      .prepare(
+        "select name from sqlite_schema where type = 'table' and sql not like 'CREATE VIRTUAL%' and name not like '%\\_fts\\_%' escape '\\' and name not like 'sqlite\\_%' escape '\\' order by name",
+      )
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.includes("extraction_run") && tables.length >= 25, tables.join(" "));
+  const rows = () =>
+    new Map(
+      tables.map((t) => [
+        t,
+        raw
+          .prepare(`select * from ${t} order by rowid`)
+          .all()
+          .map((r) => ({ ...r })),
+      ]),
+    );
+  const before = rows();
+  assert.ok(Object.values(before.get("extraction_run")?.[0] ?? {}).every((v) => v !== null));
+  migrate(raw);
+  assert.deepEqual(rows(), before);
+});
+
+// Rebuilding a table drops its counter with it. A counter can be above every id left: the highest rows were removed, or all of them
+test("migrating revision 4 keeps the id counter of every table, so an id once used is never handed out again", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const counted = (
+    raw
+      .prepare("select name from sqlite_schema where type = 'table' and sql like '%autoincrement%'")
+      .all() as {
+      name: string;
+    }[]
+  ).map((t) => t.name);
+  assert.ok(counted.includes("extraction_run") && counted.length > 10, counted.join(" "));
+  for (const name of counted) {
+    const had = raw.prepare("update sqlite_sequence set seq = seq + 7 where name = ?").run(name).changes;
+    if (!had) raw.prepare("insert into sqlite_sequence (name, seq) values (?, 7)").run(name);
+  }
+  const counters = () =>
+    raw
+      .prepare("select name, seq from sqlite_sequence order by name")
+      .all()
+      .map((r) => [r.name, r.seq]);
+  const before = counters();
+  migrate(raw);
+  assert.deepEqual(counters(), before);
+  const run = raw
+    .prepare(
+      "insert into extraction_run (project_id, origin, target, status, started_at) values (1, 'trace', 'session:s1', 'running', ?) returning id",
+    )
+    .get(now) as { id: number };
+  assert.equal(run.id, 9, "the run made before was 1, and the counter stood at 8");
 });
 
 test("migrating revision 2 keeps options and evidence with their ids, and a rejected option then takes a reconsider condition", () => {

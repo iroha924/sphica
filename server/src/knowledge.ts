@@ -38,6 +38,10 @@ export const WORK_STATUSES = ["active", "blocked", "paused", "done", "abandoned"
 /** @public Read as text by scripts/check-pairs.mjs. */
 export const FIELD_TYPES = ["text", "enum", "integer", "date"] as const;
 
+/** @public Read as text by scripts/check-pairs.mjs. A migration run is written by a migration's SQL, never by a begin tool. */
+export const RUN_ORIGINS = ["trace", "harvest", "glean", "migration"] as const;
+export type BeginOrigin = Exclude<(typeof RUN_ORIGINS)[number], "migration">;
+
 /** @public Read as text by scripts/check-pairs.mjs. */
 export const HOSTS = ["claude-code", "codex"] as const;
 export type Host = (typeof HOSTS)[number];
