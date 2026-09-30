@@ -9,8 +9,9 @@ import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
 import { backupDir, backupPath, backups } from "./backups.ts";
 import { indent } from "./cli/view.ts";
-import { dbFile, iso, SCHEMA_REVISION } from "./db.ts";
+import { dbFile, iso, SCHEMA_REVISION, sqliteCode } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
+import { packageVersionAt, ROOT } from "./plugin.ts";
 import { generationOf } from "./sqlite.ts";
 import { plural } from "./text.ts";
 
@@ -60,7 +61,7 @@ function backUp(raw: DatabaseSync, file: string, from: number): string {
 
 /**
  * Keeps this run's backup and the KEEP - 1 newest others. Runs only after every migration step committed, so a failing run never removes
- * one. A backup that cannot be removed (open in another process on Windows), or a directory that cannot be listed, is left for the next
+ * an older one. A backup that cannot be removed (open in another process on Windows), or a directory that cannot be listed, is left for the next
  * migration; the database is already migrated.
  */
 function prune(file: string, kept: string): void {
@@ -78,6 +79,21 @@ function prune(file: string, kept: string): void {
 
 const versionOf = (raw: DatabaseSync): number =>
   (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
+
+const SQLITE_BUSY = 5;
+
+/**
+ * The revision the database is committed at after a failed step, or null when that cannot be told. An open transaction (its rollback
+ * failed) would show a revision that closing the connection takes back, so it is not read.
+ */
+function committed(raw: DatabaseSync): number | null {
+  if (raw.isTransaction) return null;
+  try {
+    return versionOf(raw);
+  } catch {
+    return null;
+  }
+}
 
 /** Runs fn in a transaction that takes the write lock first. On failure it rolls back and rethrows the original error. */
 function immediate<T>(raw: DatabaseSync, fn: () => T): T {
@@ -118,7 +134,7 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
         const script = MIGRATION(dir, r);
         if (!fs.existsSync(script))
           throw new Error(
-            `No migration from revision ${r - 1}. Move the database aside, then run \`sphica init\`.`,
+            `This Sphica has no migration script for revision ${r} (${script} is missing). Reinstall sphica (\`npm i -g sphica@${packageVersionAt(ROOT) ?? "latest"}\`), then run \`sphica init\` again.`,
           );
         raw.exec("pragma foreign_keys = off");
         try {
@@ -137,9 +153,31 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
         }
       }
     } catch (e) {
+      const said = (e as Error).message.replace(/\.$/, "");
+      const now = committed(raw);
+      // No step committed: going back would only lose what capture wrote since the backup, so this run's copy goes and nothing is pruned
+      if (now === from) {
+        let left = "the backup made for this run was removed";
+        try {
+          fs.rmSync(backup, { force: true });
+        } catch {
+          left = `the backup made for this run is still at ${backup}; delete it yourself`;
+        }
+        const retry =
+          sqliteCode(e) === SQLITE_BUSY
+            ? " Another process is writing to the database. Run `sphica init` again when it has finished."
+            : "";
+        throw new Error(
+          `${said}. No migration step was committed: the database is still at revision ${from}, and there is no need to replace it with a backup (${left}).${retry}`,
+        );
+      }
       const base = path.basename(file);
+      const state =
+        now === null
+          ? "The committed revision could not be confirmed after the failure"
+          : `The database is now at revision ${now} (this run, or another \`sphica init\` running at the same time, migrated it that far)`;
       throw new Error(
-        `${(e as Error).message}. The database before migrating is at ${backup} (anything recorded after it was made is not in it). To go back to it, close every session using Sphica, move ${base}, ${base}-wal, and ${base}-shm in ${path.dirname(file)} aside, then copy the backup to ${file}.`,
+        `${said}. ${state}. The database before migrating is at ${backup} (anything recorded after it was made is not in it). To go back to it, close every session using Sphica, move ${base}, ${base}-wal, and ${base}-shm in ${path.dirname(file)} aside, then copy the backup to ${file}.`,
       );
     }
     prune(file, backup);

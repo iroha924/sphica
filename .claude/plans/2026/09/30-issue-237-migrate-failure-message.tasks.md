@@ -22,7 +22,7 @@ base: main
 
 移行が始まらなかった失敗で復元手順が出なくなり、その実行のバックアップが残らなくなる。パッケージに入る変更なので、同じコミットでバージョンを上げる。
 
-- [ ] T01: `migrate()` の失敗の文面を 3 分岐にし、commit されていないときはその実行のバックアップを消す
+- [x] T01: `migrate()` の失敗の文面を 3 分岐にし、commit されていないときはその実行のバックアップを消す
   - 種別: 修正
   - 計画: S1, S2
   - 依存: なし
@@ -30,5 +30,8 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → ロックのテスト（CLI）は出力に `To go back to it` が出てバックアップが 1 つ増えて落ち、スクリプトが無いテストは `Move the database aside` と復元手順が出て落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → ロックのテスト（CLI）、スクリプトが無いテスト、1 ステップ commit 後のテスト（`is now at revision 2`）が通る。`bun run verify` → 0。`bun run release:plan -- --base v0.6.13` → `plugin`、4 か所とも 0.6.14
   - コミット: `fix(init): do not tell the owner to restore a backup when no migration step was committed (T01)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 直す前は 3 本が落ちた（red: ロックのテストは出力に `To go back to it` が出て `No migration step was committed` が無い / スクリプトが無いテストは `No migration from revision 1. Move the database aside` が出る / 1 ステップ commit 後のテストは `is now at revision 2` が無い）。直した後は 30 pass・0 fail、ロックのテストは 5.6 秒。`bun run verify` → exit 0。`bun run release:plan -- --base v0.6.13` → plugin、4 か所とも 0.6.14。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → exit 0
 
 ## 記録
+
+- 2026-09-30 / T01 / review-shipping（コミット前）の指摘は 1 件: `prune()` のコメントが「失敗した実行は 1 つも消さない」のままで、今は自分のバックアップを消す / 採用。同じコミットで「古いものは消さない」に直した
