@@ -228,22 +228,24 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 
 記録サーバーの接続が、保存に必要な書き込み以外をできない。
 
-- [ ] T16: ingest の source の insert をビュー経由にする
+- [x] T16: ingest の source の insert をビュー経由にする
   - 種別: 変更
   - 計画: S3, S4, S5
   - 依存: T09（item の lookup に session_id is null が入っていて、insert の後の id の引き直しが同じ index を使う）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/github.ts`, `server/src/glean.ts`, `server/src/db-types.ts`, `server/test/schema.test.ts`, `server/test/github.test.ts`, `server/test/extract.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/github.ts`, `server/src/glean.ts`, `server/src/db-types.ts`, `server/test/schema.test.ts`, `server/test/github.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/github.test.ts test/extract.test.ts test/migrate.test.ts` → `ingest_source` への insert が source の行を作って id が引け、kind が session_message の insert は拒まれ、harvest と glean の excerpt の保存が通るテストが通る
   - コミット: `refactor(db): write external sources through a view that cannot take session messages (T16)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/github.test.ts test/extract.test.ts test/migrate.test.ts` → 全件 pass（`ingest_source` への insert が session_id の無い source を作って id が引け、session_message と session_id を渡す insert は拒まれ、harvest と glean の抜粋の保存が通る）。`bun run verify` → exit 0
 
-- [ ] T17: ingest の authorizer を allow list にし、トリガーとの対応表を検査する
+- [x] T17: ingest の authorizer を allow list にし、トリガーとの対応表を検査する
   - 種別: 修正
   - 計画: S5
   - 依存: T16（source への直接 insert を拒むには、ビュー経由の経路が要る）, T11（run の更新が 1 回で、列が status と finished_at だけ）, T15（対応表に載せる表とトリガーが確定している）, T12（同）, T07（同）, T06（同）
-  - 変更: `server/src/db-write.ts`, `server/test/db.test.ts`, `server/test/plugin.test.ts`
+  - 変更: `server/src/db-write.ts`, `server/test/db.test.ts`, `server/test/extract.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/db.test.ts` → ingest 接続で、FTS の `delete-all` と偽の行、`sphica_generation` の削除、project の key と session の更新、delivery・work・edit_observation・source_processing・extraction_run の削除、source への直接 insert、unit の revision の直接更新が通ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/db.test.ts test/plugin.test.ts test/extract.test.ts test/cli.test.ts && bun run verify` → それらが拒まれ、trace・harvest・glean（新しい unit あり / 操作だけ）の保存と init の登録が ingest 接続で通り、全トリガーの本文が書く表が対応表にあるテストが通る。verify が 0
   - コミット: `fix(db): let the ingest connection write only what the record server needs (T17)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/db.test.ts` → 直す前の authorizer では、issue の書き込みの一覧の最初（全文索引の delete-all）から通ってしまい落ちた（red）。直した後は全件 pass（一覧の書き込みはどれも not authorized、saved の run を running に戻すのは schema の凍結が拒む、全トリガーの本文の書き込みが一覧と同じ。一覧から 1 つ消すと落ちる）。trace・harvest・glean の保存と init の登録は extract・github・record・cli のテストで通った。`bun run verify` → exit 0
 
 ## P5: 通しの検査と出荷
 
@@ -309,3 +311,6 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T15 / review-shipping: 指摘 3 件（schema のコメントとトリガーの文面、forget のテストの題名に、消した値の説明が残っていた） / 同じコミットで直した
 - 2026-10-01 / T14 / Codex のレビュー（de0d92dd）: 指摘 5 件（P2、再現済み）。F1: 文字の途中の採用を広げると、重複を片付ける前に表の一意制約で移行が止まる。F2: 終端が 0 以下の取り下げの span は、開始だけを 0 にすると CHECK で止まる。F3: 証拠の重複の片付けが二乗の時間（2 万行で 6.7 秒）。F4・F5: 置き換え先と取り下げの span の検査が update にしか無く、insert で素通りする / 全部採用。修正タスク T24 を足した。負の取り下げの span は値で直さず、移行を止める側に移した（どのリリースも書かない値で、直す先の値が決まらない）
 - 2026-10-01 / T24 / review-shipping: 指摘 2 件（採用の insert の取り下げ span の検査にテストが無い、置き換え先が自分自身かの節が隣の節と重なって要らない） / テストを足し（検査を消すと落ちることを確かめた）、要らない節を消した。広げる処理は 40 通りのランダムな DB で古い規則と同じ結果になることを、レビュー担当が確かめた
+- 2026-10-01 / T16・T17 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる。変更欄: T16 から extract.test.ts を外し（glean の抜粋の保存は既存のテストで通った）、T17 は plugin.test.ts を外して extract.test.ts を足した（run の更新をテスト用のトリガーで数えていたのを、allow list がそのトリガーの書き込みを拒むので、流した SQL を数える形にした）
+- 2026-10-01 / T16・T17 / review-shipping（1 回目は 10 分無応答で打ち切り、投げ直し）: 実際の ingest の書き込みを全部記録し、どれも allow list の中だと確かめた。指摘 2 件（トリガーの本文の読み取りが upsert・`update or`・引用符付きの名前を見落とす、harvest の lookup の数の検査が緩い） / 読み取れない書き方を見たら落ちるようにし、数を 2 倍ちょうどに固定した
+- 2026-10-01 / T15・T24 / Codex のレビュー（14774d8e..ff1b273c）: 指摘 1 件（P2、以前からある穴、再現済み）。取り下げ済みの行を insert すると、理由が同じ project の持ち主の発言の中かを見ない（update でしか見ていない） / 採用。修正タスク T25 で、取り下げ済みの行の insert そのものを拒む

@@ -230,9 +230,10 @@ test("stores sources with who wrote them, adds a revision only when text changed
     const asked = await statements(async () => {
       ids = await storeItems(db.ingest, p, first.items);
     });
-    // Each item is looked up by its id through the unique index of items, not by scanning the project's sources
+    // Each item is looked up by its id through the unique index of items, not by scanning the project's sources: once for its latest
+    // revision, and once for the id of a revision just written
     const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
-    assert.equal(lookups.length, first.items.length);
+    assert.equal(lookups.length, 2 * first.items.length);
     for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
     await linkIssues(db.ingest, p, 7, first.closes);
     await linkIssues(db.ingest, p, 7, first.closes);

@@ -124,6 +124,36 @@ export interface ForgetBatch {
   project_id: number;
 }
 
+export interface IngestSource {
+  artifact: string | null;
+  author_association: string | null;
+  author_external_id: string | null;
+  author_kind: string | null;
+  author_login: string | null;
+  available_at: string | null;
+  blob_sha: string | null;
+  captured_at: string | null;
+  commit_sha: string | null;
+  content_hash: Buffer | null;
+  created_at: string | null;
+  diff_hunk: string | null;
+  event_kind: string | null;
+  external_id: string | null;
+  indexed: number | null;
+  kind: string | null;
+  line_end: number | null;
+  line_start: number | null;
+  original_bytes: number | null;
+  parent_external_id: string | null;
+  path: string | null;
+  project_id: number | null;
+  redacted: number | null;
+  revision: number | null;
+  text: string | null;
+  truncated: number | null;
+  url: string | null;
+}
+
 export interface OwnerIdentity {
   bound_at: string;
   external_id: string;
@@ -364,6 +394,7 @@ export interface DB {
   extraction_run: ExtractionRun;
   field_def: FieldDef;
   forget_batch: ForgetBatch;
+  ingest_source: IngestSource;
   owner_identity: OwnerIdentity;
   project: Project;
   session: Session;

@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { sql } from "kysely";
 import { openReader, SCHEMA_REVISION } from "../src/db.ts";
-import { connectWriter } from "../src/db-write.ts";
+import { connectWriter, INGEST_TRIGGER_WRITES } from "../src/db-write.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { connectReader } from "../src/sqlite.ts";
 import { sha256 } from "../src/text.ts";
@@ -97,7 +97,10 @@ test("the MCP and search connection can read but not write", async () => {
 });
 
 test("the ingest connection can write rows but cannot change the schema", () => {
-  assert.equal(attempt(ingest, "update project set name = 'o/r2' where id = ?", p), null);
+  assert.equal(
+    attempt(ingest, "insert into project (key, name) values ('git:github.com/o/new', 'o/new')"),
+    null,
+  );
   for (const ddl of [
     "create table x (a)",
     "drop table unit_anchor",
@@ -109,6 +112,70 @@ test("the ingest connection can write rows but cannot change the schema", () => 
     "pragma foreign_keys = off",
   ])
     assert.match(attempt(ingest, ddl) ?? "", /not authorized/, ddl);
+});
+
+// The record server reads text anyone wrote. Its connection writes only what its code writes: anything else is refused before it runs
+test("the ingest connection is refused every write its code never makes", () => {
+  const r = run(db, p);
+  db.owner.prepare("update extraction_run set status = 'saved', finished_at = ? where id = ?").run(now, r);
+  session(db, p, "s2");
+  const refused = [
+    ["the full-text index's commands", "insert into unit_fts (unit_fts) values ('delete-all')"],
+    ["the full-text index's commands", "insert into source_fts (source_fts) values ('delete-all')"],
+    ["a fake full-text row", "insert into source_fts (rowid, lexemes) values (999, 'owner words')"],
+    ["removing a full-text row", "delete from unit_fts where rowid = 1"],
+    [
+      "a session message written directly",
+      "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s2', 'x', 1, 's2', 'owner', '2026-09-12T00:00:00.000Z', '2026-09-12T00:00:00.000Z', 'forged', 6, zeroblob(32), 1)",
+    ],
+    ["the schema generation", "delete from sphica_generation"],
+    ["a project's key", "update project set key = 'git:github.com/x/y' where id = 1"],
+    ["a session", "update session set branch = 'x' where id = 's2'"],
+    ["a delivery", "delete from delivery"],
+    ["the current work", "delete from work"],
+    ["an edit observation", "delete from edit_observation"],
+    ["a processing outcome", "delete from source_processing"],
+    ["a run", `delete from extraction_run where id = ${r}`],
+    ["a unit's revision", "update unit set revision = revision + 1"],
+    ["a unit's lifecycle", "update unit set lifecycle = 'active'"],
+  ] as const;
+  for (const [what, text] of refused) assert.match(attempt(ingest, text) ?? "", /not authorized/, what);
+  // The run's status is a column the record server sets: the schema, not the connection, keeps a saved run saved
+  assert.match(
+    attempt(ingest, `update extraction_run set status = 'running' where id = ${r}`) ?? "",
+    /changes once/,
+  );
+});
+
+// A trigger writes under the connection that fired it. One the ingest connection can fire but whose writes are not listed would fail the
+// save that fired it, at run time; this reads every trigger body and compares
+test("every trigger an ingest write can fire has its writes listed for the ingest connection", () => {
+  const bodies = db.owner
+    .prepare(
+      "select name, sql from sqlite_schema where type = 'trigger' and name not like 'capture\\_%' escape '\\' order by name",
+    )
+    .all() as { name: string; sql: string }[];
+  assert.ok(bodies.length > 20, `${bodies.length} triggers`);
+  const found: Record<string, string[]> = {};
+  for (const { name, sql } of bodies) {
+    const body = sql.slice(sql.search(/\bbegin\b/i));
+    // A way of writing this reader does not know fails here rather than going unlisted
+    assert.doesNotMatch(
+      body,
+      /\breplace\s+into\b|\bon\s+conflict\b[^;]*\bdo\s+update\b|\bupdate\s+or\b|\b(?:into|update|from)\s+["`[]/i,
+      name,
+    );
+    const writes = [
+      ...[...body.matchAll(/\binsert\s+(?:or\s+\w+\s+)?into\s+(\w+)/gi)].map((m) => `insert ${m[1]}`),
+      ...[...body.matchAll(/\bupdate\s+(\w+)\s+set\b/gi)].map((m) => `update ${m[1]}`),
+      ...[...body.matchAll(/\bdelete\s+from\s+(\w+)/gi)].map((m) => `delete ${m[1]}`),
+    ];
+    if (writes.length) found[name] = [...new Set(writes)].sort();
+  }
+  const listed = Object.fromEntries(
+    Object.entries(INGEST_TRIGGER_WRITES).map(([k, v]) => [k, [...v].sort()]),
+  );
+  assert.deepEqual(listed, found);
 });
 
 // The record server holds an ingest connection; if it could bind an identity, text it reads could make itself the owner's words.

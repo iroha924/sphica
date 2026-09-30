@@ -6,6 +6,7 @@ import { z } from "zod";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { cleanGit } from "./git.ts";
+import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { type Checked, checkRecord, prepareRecord, repoPath, saveRecord, type Target } from "./record.ts";
 import {
@@ -588,14 +589,15 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
   if (forgotten.same)
     throw new Error(`the owner forgot ${x.path} lines ${x.lines.join("-")}; cite something else`);
   const now = iso(Date.now());
-  const row = await trx
-    .insertInto("source")
+  const revision = Math.max(found?.revision ?? 0, forgotten.last) + 1;
+  await trx
+    .insertInto("ingest_source")
     .values({
       project_id: projectId,
       kind: "file_excerpt",
       artifact: `file:${x.path}`,
       external_id: external,
-      revision: Math.max(found?.revision ?? 0, forgotten.last) + 1,
+      revision,
       author_kind: "person",
       created_at: now,
       captured_at: now,
@@ -611,9 +613,8 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
       blob_sha: x.blob,
       indexed: 1,
     })
-    .returning("id")
-    .executeTakeFirstOrThrow();
-  return row.id;
+    .execute();
+  return itemId(trx, projectId, "file_excerpt", external, revision);
 }
 
 /** Moves a unit to a state, or leaves it when the schema's rules refuse (returns the refusal). */

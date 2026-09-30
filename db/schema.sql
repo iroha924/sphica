@@ -959,6 +959,23 @@ create table delivery_unit (
 ) strict;
 create index delivery_unit_unit on delivery_unit (unit_id);
 
+-- The one way the record server writes a source. It has no session columns, so it can never write a session message: those are the
+-- owner's own words, and only capture writes them. A view insert returns no id; the writer looks the row up by its item key
+create view ingest_source as
+  select project_id, kind, artifact, external_id, revision, author_kind, author_login, author_external_id, author_association,
+    parent_external_id, event_kind, url, created_at, available_at, captured_at, text, truncated, redacted, original_bytes,
+    content_hash, path, line_start, line_end, diff_hunk, commit_sha, blob_sha, indexed
+  from source where session_id is null;
+create trigger ingest_source_insert instead of insert on ingest_source begin
+  insert into source (project_id, kind, artifact, external_id, revision, author_kind, author_login, author_external_id, author_association,
+    parent_external_id, event_kind, url, created_at, available_at, captured_at, text, truncated, redacted, original_bytes,
+    content_hash, path, line_start, line_end, diff_hunk, commit_sha, blob_sha, indexed, session_id, turn_id)
+  values (new.project_id, new.kind, new.artifact, new.external_id, new.revision, new.author_kind, new.author_login, new.author_external_id,
+    new.author_association, new.parent_external_id, new.event_kind, new.url, new.created_at, new.available_at, new.captured_at,
+    new.text, coalesce(new.truncated, 0), coalesce(new.redacted, 0), new.original_bytes, new.content_hash, new.path, new.line_start,
+    new.line_end, new.diff_hunk, new.commit_sha, new.blob_sha, new.indexed, null, null);
+end;
+
 -- The views the capture connection may write. The capture authorizer allows inserts into these views only; the triggers derive
 -- project, artifact, and indexing from the session and the speaker, so capture cannot write another project's rows or third-party text.
 create view capture_session as select id, project_id, host, external_id, branch, started_at from session;

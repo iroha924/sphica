@@ -1555,72 +1555,76 @@ test("a save marks its run saved with one update: trace, glean with changes only
   const db = tempDb();
   try {
     const p = project(db);
-    // Counts every update of a run, whatever it sets
-    db.owner.exec(
-      "create table run_update (run integer not null) strict; create trigger run_update_count after update on extraction_run begin insert into run_update values (new.id); end;",
-    );
+    // Counts the updates of a run each save asks the database for, whatever they set; saves go in the order of their runs
+    const updates: number[] = [];
+    const counted = async (save: () => Promise<unknown>) =>
+      updates.push((await statements(save)).filter((s) => /^update "extraction_run"/.test(s)).length);
     const runs = () =>
       db.owner
-        .prepare(
-          "select r.origin, r.status, r.finished_at is not null as finished, (select count(*) from run_update where run = r.id) as updates from extraction_run r order by r.id",
-        )
+        .prepare("select origin, status, finished_at is not null as finished from extraction_run order by id")
         .all()
-        .map((r) => [r.origin, r.status, r.finished, r.updates]);
+        .map((r, i) => [r.origin, r.status, r.finished, updates[i] ?? 0]);
     const m = message(db, p, { id: "o1", text: "Use SQLite. It is enough." });
     const traced = await beginTrace(db.ingest, p, "s1");
     assert.deepEqual(runs(), [["trace", "running", 0, 0]]);
-    await saveText(db.ingest, traced, p, null, {
-      units: [
-        {
-          key: "db",
-          kind: "finding",
-          text: "SQLite",
-          evidence: [
-            { source: `s${m}`, quote: "Use SQLite.", role: "states" },
-            { source: `s${m}`, quote: "It is enough.", role: "explains" },
-          ],
-        },
-      ],
-    });
+    await counted(async () =>
+      saveText(db.ingest, traced, p, null, {
+        units: [
+          {
+            key: "db",
+            kind: "finding",
+            text: "SQLite",
+            evidence: [
+              { source: `s${m}`, quote: "Use SQLite.", role: "states" },
+              { source: `s${m}`, quote: "It is enough.", role: "explains" },
+            ],
+          },
+        ],
+      }),
+    );
     assert.deepEqual(runs(), [["trace", "saved", 1, 1]]);
     session(db, p, "g1");
     const said = message(db, p, { id: "g", text: "It is not enough. Postgres is needed.", session: "g1" });
     const revision = () =>
       db.owner.prepare("select revision from unit where key = 'trace:ext-s1/db'").get()?.revision;
-    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
-      ops: [
-        {
-          op: "retract_evidence",
-          unit: "trace:ext-s1/db",
-          revision: revision(),
-          source: `s${m}`,
-          quote: "It is enough.",
-          reason_source: `s${said}`,
-          reason_quote: "It is not enough.",
-        },
-      ],
-    });
+    await counted(async () =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+        ops: [
+          {
+            op: "retract_evidence",
+            unit: "trace:ext-s1/db",
+            revision: revision(),
+            source: `s${m}`,
+            quote: "It is enough.",
+            reason_source: `s${said}`,
+            reason_quote: "It is not enough.",
+          },
+        ],
+      }),
+    );
     assert.deepEqual(runs().at(-1), ["glean", "saved", 1, 1]);
-    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
-      units: [
-        {
-          key: "pg",
-          kind: "finding",
-          text: "Postgres",
-          evidence: [{ source: `s${said}`, quote: "Postgres is needed.", role: "states" }],
-        },
-      ],
-      ops: [
-        {
-          op: "add_evidence",
-          unit: "trace:ext-s1/db",
-          revision: revision(),
-          source: `s${said}`,
-          quote: "It is not enough.",
-          role: "explains",
-        },
-      ],
-    });
+    await counted(async () =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+        units: [
+          {
+            key: "pg",
+            kind: "finding",
+            text: "Postgres",
+            evidence: [{ source: `s${said}`, quote: "Postgres is needed.", role: "states" }],
+          },
+        ],
+        ops: [
+          {
+            op: "add_evidence",
+            unit: "trace:ext-s1/db",
+            revision: revision(),
+            source: `s${said}`,
+            quote: "It is not enough.",
+            role: "explains",
+          },
+        ],
+      }),
+    );
     assert.deepEqual(runs(), [
       ["trace", "saved", 1, 1],
       ["glean", "saved", 1, 1],
@@ -1832,9 +1836,8 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
         },
       ],
     });
-    db.owner.exec(
-      "create table run_update (run integer not null) strict; create trigger run_update_count after update on extraction_run begin insert into run_update values (new.id); end;",
-    );
+    const updates: number[] = [];
+
     const harvest = async (n: number) => {
       const run = (await beginHarvest(db.ingest, p, n, contributor(n))).run;
       const body = db.owner
@@ -1843,7 +1846,14 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
       return {
         kind: body.author_kind,
         context: await contextText(db.ingest, run, p, null),
-        saved: await saveText(db.ingest, run, p, null, record(`s${body.id}`)),
+        saved: await (async () => {
+          let text = "";
+          const asked = await statements(async () => {
+            text = await saveText(db.ingest, run, p, null, record(`s${body.id}`));
+          });
+          updates.push(asked.filter((s) => /^update "extraction_run"/.test(s)).length);
+          return text;
+        })(),
       };
     };
     const before = await harvest(5);
@@ -1859,11 +1869,9 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
     // Each harvest run is marked saved by one update, after its record is written
     assert.deepEqual(
       db.owner
-        .prepare(
-          "select r.status, (select count(*) from run_update where run = r.id) as updates from extraction_run r order by r.id",
-        )
+        .prepare("select status from extraction_run order by id")
         .all()
-        .map((r) => [r.status, r.updates]),
+        .map((r, i) => [r.status, updates[i]]),
       [
         ["saved", 1],
         ["saved", 1],

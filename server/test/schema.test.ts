@@ -348,6 +348,54 @@ test("values no release wrote are gone: other pull request events, failed or cap
   );
 });
 
+test("the record server writes a source through a view that cannot take a session message", () => {
+  session(db, p, "s1");
+  const row = (v: Values) =>
+    sql(
+      `insert into ingest_source (${Object.keys(v).join(", ")}) values (${Object.keys(v)
+        .map(() => "?")
+        .join(", ")})`,
+      ...Object.values(v),
+    );
+  const item = {
+    project_id: p,
+    kind: "pr_body",
+    artifact: "pr:1",
+    external_id: "pr:1",
+    revision: 1,
+    author_kind: "person",
+    created_at: now,
+    captured_at: now,
+    text: "Use SQLite",
+    original_bytes: 10,
+    content_hash: sha256("Use SQLite"),
+    indexed: 1,
+  };
+  row(item);
+  assert.deepEqual(
+    { ...one("select kind, session_id, truncated, redacted from source where external_id = 'pr:1'") },
+    {
+      kind: "pr_body",
+      session_id: null,
+      truncated: 0,
+      redacted: 0,
+    },
+  );
+  // The owner's words come only through capture: a session message cannot be written here, nor claim a session
+  refuses(
+    () =>
+      row({
+        ...item,
+        kind: "session_message",
+        artifact: "session:s1",
+        external_id: "m9",
+        author_kind: "owner",
+      }),
+    /constraint failed/,
+  );
+  refuses(() => row({ ...item, external_id: "pr:2", session_id: "s1" }), /no column named session_id/);
+});
+
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
   assert.equal(one("pragma user_version").user_version, 5);
