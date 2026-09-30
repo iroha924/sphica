@@ -32,6 +32,16 @@ base: main
   - コミット: `fix(init): back up the database before migrating and say how to restore it (T01)`
   - 結果: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 直す前は新しい 2 本が落ちた（red: 移行ディレクトリの引数が無く失敗する移行が走らない / バックアップが無い）。直した後は 25 pass・0 fail。`bun run verify` → exit 0。`bun run release:plan -- --base v0.6.11` → plugin、4 か所とも 0.6.12
 
+- [x] T08: T01 のレビュー指摘を直す（今回のバックアップを刈り込まない、消せない古いバックアップで init を落とさない、移行なしのテストを名前で比べる、戻し方にバックアップ後の記録が入らないことを書く）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の migrate() と prune() が要る）
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern=backup test/admin.test.ts` → 消せない古いバックアップで ERR_FS_EISDIR が migrate() から漏れて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 時計が戻った 3 つの完成品と消せない 1 つがあっても移行が終わり、今回のバックアップが残るテストが通る
+  - コミット: `fix(init): keep this run's backup when pruning and never fail init over an old one (T08)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern=backup test/admin.test.ts` → 直す前は新しいテストが ERR_FS_EISDIR で落ちた（red）。直した後 `node --test test/admin.test.ts` → 26 pass・0 fail。`bun run verify` → exit 0
+
 ## P2: 持ち主への案内
 
 forget の画面でバックアップの場所が分かり、revision の不一致では入れるべき CLI の版が 1 回届く。
@@ -99,3 +109,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T01 / 実物の migrate() を通すテストは admin.test.ts にあり、migrate.test.ts は SQL を自前の手順で流す / 変更欄と red を migrate.test.ts から admin.test.ts に変えた（前: `server/src/admin.ts`, `server/test/migrate.test.ts`、後: `server/src/admin.ts`, `server/test/admin.test.ts` と版の 4 ファイル）
 - 2026-09-30 / T01, T07 / pre-commit の bundle の検査が、パッケージの入力を変えるコミットに版の更新を同じコミットで求めた（#208 の T01 も同じ形） / 版の 4 ファイルを T01 に入れ、T07 は取りやめ。S6 の版の更新は T01 が担う
 - 2026-09-30 / T02 / backups() を admin.ts から forget.ts が読むと、記録サーバーの bundle に CLI の部品（cli/view.ts）が入る / バックアップの場所の関数を server/src/backups.ts に分け、forget の Skill の「残るもの」も直した。変更欄（前: `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`、後: それに `server/src/backups.ts` と `plugin/skills/forget/SKILL.md` を足した）
+- 2026-09-30 / T01 レビュー / Codex の F1〜F4: F2（時計が戻ると今回のバックアップを刈り込む）・F3（消せない古いバックアップで移行済みの init が落ちる）・F4（移行なしのテストが件数だけ比べる）は直す。F1（バックアップ後・最初の移行前に capture が書いた行は戻すと消える）は、戻す以上バックアップ後の記録は失われるので防げない。エラーの戻し方に「バックアップの後の記録は入っていない」と書いて扱う / T08 を足した

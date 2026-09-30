@@ -586,5 +586,26 @@ test("a successful migration keeps the three newest backups and leaves another r
   assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
   // Nothing to migrate makes no backup
   await quiet(() => migrate(file));
-  assert.equal(backups(file).length, left.length);
+  assert.deepEqual(backups(file), left);
+});
+
+test("pruning keeps this run's backup even when older ones carry later times, and a backup it cannot remove does not fail init", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  // A clock that moved back: three completed backups look newer than the one this run makes
+  const later = [1, 2, 3].map((d) => `sphica.rev1.2099010${d}T000000000Z.${d}.db`);
+  for (const name of later) fs.writeFileSync(path.join(dir, name), "");
+  // One that cannot be removed (a directory stands in for a file another process holds open on Windows)
+  const stuck = "sphica.rev1.20200101T000000000Z.9.db";
+  fs.mkdirSync(path.join(dir, stuck));
+  await quiet(() => migrate(file));
+  assert.equal(revisionOf(file), SCHEMA_REVISION);
+  const left = backups(file);
+  const made = left.filter((f) => ![...later, stuck].includes(f));
+  assert.equal(made.length, 1, "this run's backup is kept");
+  assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
+  assert.ok(left.includes(stuck));
 });
