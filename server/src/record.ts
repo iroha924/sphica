@@ -990,10 +990,14 @@ export async function saveRecord(
       .values({ source_id: s, run_id: runId, outcome: cited.has(s) ? "units" : "no_unit" })
       .onConflict((oc) => oc.doNothing())
       .execute();
+  return saved;
+}
+
+/** Marks the run saved. Called once, after every write of the save: a saved run changes no more. */
+export async function finishRun(trx: Kysely<DB>, runId: number): Promise<void> {
   await trx
     .updateTable("extraction_run")
-    .set({ status: "saved", finished_at: now })
+    .set({ status: "saved", finished_at: iso(Date.now()) })
     .where("id", "=", runId)
     .execute();
-  return saved;
 }

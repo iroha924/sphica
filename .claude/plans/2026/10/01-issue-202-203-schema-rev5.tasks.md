@@ -31,13 +31,14 @@ revision 5 を開き、表を作り直す移行と、止める行・直した行
   - コミット: `feat(init): run a migration's check script first and print every row it stops on or repairs (T01)`
   - 結果: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 33 pass・0 fail（新しい 3 本: check の 3 行が例外の文に 1 行ずつ出て revision 1 のまま・バックアップは消える / 修復の 3 行が移行の後に 1 回だけ出て、check は step の前に走り、`sqlite_stat1` ができる / 前の step が commit した後の停止でも一覧と戻し方が出る）。temp 表は接続ごとなので「残らない」は、読んだ直後に drop する実装と、後の step で一覧が繰り返されないことで見た。`pragma optimize` を no-op にすると統計の assert が落ちることを確かめた。`bun run verify` → exit 0。review-shipping の指摘（optimize・commit 後の停止・check の順序をテストが見ていない）は同じコミットでテストを足した
 
-- [ ] T02: run を saved にする更新を、全部の操作の後の 1 回にまとめる
+- [x] T02: run を saved にする更新を、全部の操作の後の 1 回にまとめる
   - 種別: 変更
   - 計画: S2
   - 依存: なし
   - 変更: `server/src/record.ts`, `server/src/glean.ts`, `server/src/extract.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts test/extract.test.ts` → trace・harvest・glean（新しい unit あり / 操作だけ）の保存で、`extraction_run` の更新が 1 回だけ走り saved になるテストが通る
   - コミット: `refactor(record): mark a run saved once, after every write of the save (T02)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/record.test.ts test/extract.test.ts` → 47 pass・0 fail。run の更新をトリガーで数え、trace・harvest（2 本）・glean（操作だけ / 新しい unit あり）がどれも 1 回で saved になる。直す前のコードでは glean が 2 回で落ちることを確かめた。`bun run verify` → exit 0。review-shipping: 出荷されるコードに `saveText` を通らない呼び出しは無い。harvest をテストが見ていないという指摘は同じコミットで足した
 
 - [ ] T03: revision 5 を開く（全表を作り直す 0005.sql、sqlite_sequence の保持、rev4 の fixture、origin の migration）
   - 種別: 変更

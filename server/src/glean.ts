@@ -833,10 +833,5 @@ export async function saveGlean(
       changed.push(`${o.key}: superseded`);
     }
   }
-  await trx
-    .updateTable("extraction_run")
-    .set({ status: "saved", finished_at: now })
-    .where("id", "=", runId)
-    .execute();
   return { units, changed };
 }

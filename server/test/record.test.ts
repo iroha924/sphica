@@ -385,7 +385,8 @@ test("an owner's directive becomes an active decision whose spans cut the quoted
         [other, "no_unit"],
       ],
     );
-    assert.equal(db.owner.prepare("select status from extraction_run").get()?.status, "saved");
+    // The caller marks the run saved, once every write of the save is done
+    assert.equal(db.owner.prepare("select status from extraction_run").get()?.status, "running");
   } finally {
     await db.done();
   }

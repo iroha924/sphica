@@ -1311,6 +1311,87 @@ test("glean: a retraction of words cited by the record and an option says it ret
   }
 });
 
+test("a save marks its run saved with one update: trace, glean with changes only, and glean with a new record", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    // Counts every update of a run, whatever it sets
+    db.owner.exec(
+      "create table run_update (run integer not null) strict; create trigger run_update_count after update on extraction_run begin insert into run_update values (new.id); end;",
+    );
+    const runs = () =>
+      db.owner
+        .prepare(
+          "select r.origin, r.status, r.finished_at is not null as finished, (select count(*) from run_update where run = r.id) as updates from extraction_run r order by r.id",
+        )
+        .all()
+        .map((r) => [r.origin, r.status, r.finished, r.updates]);
+    const m = message(db, p, { id: "o1", text: "Use SQLite. It is enough." });
+    const traced = await beginTrace(db.ingest, p, "s1");
+    assert.deepEqual(runs(), [["trace", "running", 0, 0]]);
+    await saveText(db.ingest, traced, p, null, {
+      units: [
+        {
+          key: "db",
+          kind: "finding",
+          text: "SQLite",
+          evidence: [
+            { source: `s${m}`, quote: "Use SQLite.", role: "states" },
+            { source: `s${m}`, quote: "It is enough.", role: "explains" },
+          ],
+        },
+      ],
+    });
+    assert.deepEqual(runs(), [["trace", "saved", 1, 1]]);
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "It is not enough. Postgres is needed.", session: "g1" });
+    const revision = () =>
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/db'").get()?.revision;
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      ops: [
+        {
+          op: "retract_evidence",
+          unit: "trace:ext-s1/db",
+          revision: revision(),
+          source: `s${m}`,
+          quote: "It is enough.",
+          reason_source: `s${said}`,
+          reason_quote: "It is not enough.",
+        },
+      ],
+    });
+    assert.deepEqual(runs().at(-1), ["glean", "saved", 1, 1]);
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      units: [
+        {
+          key: "pg",
+          kind: "finding",
+          text: "Postgres",
+          evidence: [{ source: `s${said}`, quote: "Postgres is needed.", role: "states" }],
+        },
+      ],
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "trace:ext-s1/db",
+          revision: revision(),
+          source: `s${said}`,
+          quote: "It is not enough.",
+          role: "explains",
+        },
+      ],
+    });
+    assert.deepEqual(runs(), [
+      ["trace", "saved", 1, 1],
+      ["glean", "saved", 1, 1],
+      ["glean", "saved", 1, 1],
+    ]);
+    assert.equal(db.owner.prepare("select count(*) as n from unit where key = 'glean:pg'").get()?.n, 1);
+  } finally {
+    await db.done();
+  }
+});
+
 // An implementation is active only with code proof: replacing its commit-pinned anchor judges it again
 test("glean: replacing an implementation's only code proof puts it back to candidate", async () => {
   const db = tempDb();
@@ -1484,6 +1565,9 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
         },
       ],
     });
+    db.owner.exec(
+      "create table run_update (run integer not null) strict; create trigger run_update_count after update on extraction_run begin insert into run_update values (new.id); end;",
+    );
     const harvest = async (n: number) => {
       const run = (await beginHarvest(db.ingest, p, n, contributor(n))).run;
       const body = db.owner
@@ -1505,6 +1589,19 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
     assert.match(after.context, /pr_body pr:6 by hana \(CONTRIBUTOR, the owner\)/);
     assert.match(before.context, /pr_body pr:5 by hana \(CONTRIBUTOR\) /);
     assert.match(after.saved, /harvest:6\/notes active/);
+    // Each harvest run is marked saved by one update, after its record is written
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select r.status, (select count(*) from run_update where run = r.id) as updates from extraction_run r order by r.id",
+        )
+        .all()
+        .map((r) => [r.status, r.updates]),
+      [
+        ["saved", 1],
+        ["saved", 1],
+      ],
+    );
   } finally {
     await db.done();
   }

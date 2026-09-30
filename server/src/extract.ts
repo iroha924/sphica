@@ -20,7 +20,7 @@ import { checkGlean, prepareGlean, saveGlean } from "./glean.ts";
 import { HOSTS, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import type { Place } from "./project.ts";
-import { checkRecord, prepareRecord, saveRecord, type Target } from "./record.ts";
+import { checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "./record.ts";
 import type { Probe } from "./repo-facts.ts";
 import { plural } from "./text.ts";
 import {
@@ -486,6 +486,7 @@ export async function saveText(
               scope.looked.filter((s) => shown.has(s) || cited.has(s)),
             );
           });
+    await finishRun(trx, run.id);
     return [
       ...saved.active.map((k) => `✓ ${k} active`),
       ...saved.superseded.map((k) => `✓ ${k} superseded`),
