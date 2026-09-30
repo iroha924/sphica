@@ -44,13 +44,14 @@ base: main
 
 superseded・abstention・poisoned・override の製品側の挙動がケースで固定される。
 
-- [ ] T03: 受け入れケースに 4 種を足す
+- [x] T03: 受け入れケースに 4 種を足す
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/world.json`
+  - 変更: `server/evals/acceptance/cases.json`
   - 完了条件: `bun run acceptance` → 4 種を含めて通る（今のコードで落ちたケースは、修正タスクを足して直してから）
   - コミット: `test(acceptance): pin superseded, abstention, poisoned, and override behavior (T03)`
+  - 結果: `bun run acceptance` → 79 pass・0 fail（新しい retrieval-13・injection-11・injection-12・capture-11・injection-13 を含む）。`bun run verify` → exit 0
 
 ## P3: 評価ループの記録・採点・報告
 
@@ -163,3 +164,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
+- 2026-09-30 / T03 / world.json は既存の PR #20 の第三者コメントで足り、変えなかった（変更欄から外した）。override のケースで、プロンプトの配信が理由を載せないこと（ファイルに紐付く配信だけが理由を載せる設計）と、同じセッションの 2 回目のプロンプトにも同じ記録を出すことが分かった。前者は仕様、後者は #205（何を既に見せたとみなすか）の範囲なので、ケースは今の契約（名指しで決定が出る、決定は変わらない）だけを固定した。第三者の命令文が配信に出ないことは既存の injection-08 が見ている
