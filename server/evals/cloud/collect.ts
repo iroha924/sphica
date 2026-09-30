@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { pair, readPlan } from "./firing.ts";
+import { type FiringRow, pair, readPlan, taskFromReceipts } from "./firing.ts";
 import {
   answerFormat,
   capPatch,
@@ -168,8 +168,10 @@ function hiddenTest(work: string, task: Task): string {
 
 /** The task a run carried out: by the prompt its hooks received, else the build's only task (slots built before every slot logged prompts) */
 const built = plan.tasks.filter((t) => t.project === manifest.project);
-const taskOf = (text: string) =>
-  plan.tasks.find((t) => text.includes(t.prompt)) ?? (built.length === 1 ? built[0] : undefined);
+const taskOf = (text: string, firing: FiringRow[]) => {
+  const id = taskFromReceipts(text, firing, plan.tasks);
+  return plan.tasks.find((t) => t.id === id) ?? (built.length === 1 ? built[0] : undefined);
+};
 
 function main() {
   const rows: Row[] = [];
@@ -202,7 +204,7 @@ function main() {
       const show = (file: string) =>
         spawnSync("git", ["-C", dir, "show", `${branch}:${file}`], { encoding: "utf8" }).stdout ?? "";
       const receipts = show(".eval/receipts.jsonl");
-      const task = taskOf(receipts);
+      const task = taskOf(receipts, firing);
       if (!task) continue;
       const work = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
       try {
@@ -292,8 +294,16 @@ function main() {
           return null;
         }
       };
-      const head = parse<{ task: string; condition: string }>(startedAt) ??
-        parse<{ task: string; condition: string }>(resultText) ?? { task: "unknown", condition: "unknown" };
+      const head = parse<{ task: string; condition: string; build?: string }>(startedAt) ??
+        parse<{ task: string; condition: string; build?: string }>(resultText) ?? {
+          task: "unknown",
+          condition: "unknown",
+        };
+      // Codex runs of every build share one directory: a run made on another build (or before builds had ids) is not this build's
+      if (manifest.build && head.build !== manifest.build) {
+        console.log(`${name}: a run of build ${head.build ?? "without an id"}, left out`);
+        continue;
+      }
       if (!resultText) {
         rows.push(
           excludedRow(

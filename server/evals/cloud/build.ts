@@ -43,6 +43,9 @@ if (!Number.isInteger(runs) || runs < 1)
   throw new Error("--runs takes a whole number of Claude runs per task and condition");
 const buildId = `${args.project}-${variant}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
 const out = path.resolve(args.out ?? path.join(os.homedir(), ".cache", "sphica-eval", "builds", buildId));
+// A build is never rebuilt in place: its firing plan and collected results belong to what was pushed from it
+if (fs.existsSync(out))
+  throw new Error(`${out} already exists; give a new --out, or leave it out for a new build id`);
 const owner = args.owner ?? "";
 
 type Task = { id: string; project: string; prompt: string; gold: string[]; conditions: string[] };
@@ -311,7 +314,6 @@ async function main() {
   if (sha256(tarball) !== NODE.sha256)
     throw new Error(`${args.node} does not match the Node ${NODE.version} sha256`);
   execFileSync("bun", ["run", "bundle"], { cwd: ROOT, stdio: "ignore" });
-  fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const base = path.join(out, "fixture.db");
   if (args.project === "tsundoku") await fixture(base);

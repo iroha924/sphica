@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { type FiringRow, pair } from "../evals/cloud/firing.ts";
+import { type FiringRow, pair, taskFromReceipts } from "../evals/cloud/firing.ts";
 import { blindPrompt, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
   answerFormat,
@@ -613,7 +613,7 @@ test("collect reads a swapped build's gold from the swapped record and does not 
       path.join(build, "manifest.json"),
       JSON.stringify({ build: "b", variant: "swapped", commit: "c", repositories: {} }),
     );
-    const head = { task: "pilot-dates", condition: "gold" };
+    const head = { build: "b", task: "pilot-dates", condition: "gold" };
     fs.mkdirSync(path.join(codex, "sw", "work"), { recursive: true });
     fs.writeFileSync(path.join(codex, "sw", "started.json"), JSON.stringify(head));
     fs.writeFileSync(
@@ -640,6 +640,84 @@ test("collect reads a swapped build's gold from the swapped record and does not 
     assert.equal(loop.variant, "swapped");
     assert.deepEqual(loop.rows[0].gold, ["trace:s-en-dates-local/local"]);
     assert.equal(loop.rows[0].tests, "not run (swapped variant)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// Review of the build id and firing plan
+test("a run's task comes from the prompt the build planned, even after tasks.json changed its wording", () => {
+  const row: FiringRow = {
+    build: "b",
+    variant: "original",
+    task: "pilot-dates",
+    condition: "none",
+    slot: "eval-shelf-1",
+    try: 1,
+    prompt: "an older wording of the prompt",
+    fired_at: null,
+  };
+  assert.equal(taskFromReceipts('{"prompt":"an older wording of the prompt"}', [row], []), "pilot-dates");
+  assert.equal(
+    taskFromReceipts('{"prompt":"the current wording"}', [], [{ id: "t", prompt: "the current wording" }]),
+    "t",
+  );
+  assert.equal(taskFromReceipts("{}", [row], [{ id: "t", prompt: "the current wording" }]), undefined);
+});
+
+test("collect leaves out Codex runs of another build, and build refuses an output directory that already exists", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    const codex = path.join(base, "codex");
+    fs.mkdirSync(build);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", repositories: {} }),
+    );
+    for (const [name, id] of [
+      ["mine", "b"],
+      ["theirs", "a"],
+    ] as const) {
+      fs.mkdirSync(path.join(codex, name), { recursive: true });
+      fs.writeFileSync(
+        path.join(codex, name, "started.json"),
+        JSON.stringify({ build: id, task: "pilot-sort", condition: "none" }),
+      );
+    }
+    const out = path.join(base, "loop.json");
+    execFileSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        codex,
+        "--logs",
+        base,
+        "--out",
+        out,
+      ],
+      { stdio: "ignore" },
+    );
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(out, "utf8")).rows.map((r: { run: string }) => r.run),
+      ["mine"],
+    );
+    const again = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "build.ts"),
+        "--project",
+        "tsundoku",
+        "--out",
+        build,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.match(again.stderr, /already exists/);
+    assert.ok(fs.existsSync(path.join(build, "manifest.json")), "the earlier build is kept");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

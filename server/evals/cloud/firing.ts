@@ -45,3 +45,17 @@ export function pair<R extends { task: string; condition: string; started: strin
   }
   return { matched, missing, unplanned: left };
 }
+
+/**
+ * The task a run carried out, from the prompt its hooks received: the build's planned prompts first (tasks.json may have been reworded since
+ * the build), then the current tasks.
+ */
+export function taskFromReceipts(
+  receipts: string,
+  rows: Pick<FiringRow, "task" | "prompt">[],
+  tasks: { id: string; prompt: string }[],
+): string | undefined {
+  return (
+    rows.find((r) => receipts.includes(r.prompt))?.task ?? tasks.find((t) => receipts.includes(t.prompt))?.id
+  );
+}

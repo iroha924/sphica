@@ -104,6 +104,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): build under an id with a firing plan, and collect against the plan (T06)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 16 pass・0 fail（照合の順序、発火済みで結果の無い行、計画に無い結果、計画ファイルの無い build を collect が拒む）。`node evals/cloud/build.ts --project tsundoku` を 2 回 → builds/ に 2 つの build が残り、plan.json は 50 行（7 タスクの条件 25 × 2 試行）、`node evals/cloud/fire.ts <build>` → 1 行目（pilot-dates none try 1）に発火時刻が付き left 49（確かめた build は消した）。`bun run verify` → exit 0
 
+- [x] T18: T06 のレビュー指摘を直す（既存の出力先を消さない、build の時点の prompt でタスクを決める、別の build の Codex の run を外す）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T06（直す対象の build ID と collect が要る）
+  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/firing.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test test/eval-grade.test.ts` → build A の Codex の run が build B の collect に混ざり、既存の `--out` を渡すと build が消えて 1 fail
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 別の build の run が外れ、既存の出力先で build が止まり、tasks.json の prompt が変わっても計画の prompt でタスクが決まるテストが通る
+  - コミット: `fix(eval): keep builds apart: no rebuild in place, planned prompts, and runs of this build only (T18)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 直す前は 1 fail（red）。直した後 20 pass・0 fail。`bun run verify` → exit 0
+
 - [x] T07: counterfactual の反転版の記録と `--variant swapped`
   - 種別: 追加
   - 計画: S6
@@ -195,3 +205,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T06 / 発火の計画の読み書きと照合を firing.ts に、発火の印を付ける手順を fire.ts に分けた。collect の `--build` を必須にし、loop.json は build のディレクトリに書く（先頭に build ID と variant）。knip の entry に fire.ts を足した / 変更欄（前: build.ts・collect.ts・テスト、後: それに firing.ts・fire.ts・knip.json を足した）
 - 2026-09-30 / T05 レビュー / Codex の F1〜F5（並行の違うツールの結果を順番で決める、Sphica 以外の結果を取る、本文に引用された見出しを取る、空や欠けたログを no にする、壊れたイベントで no か例外）はすべて再現つきで、直す / T17 を足した。同じツールだけが並行している間は、そのツールの結果として扱う
 - 2026-09-30 / T07 / counterfactual のタスクを pilot-dates と superseded-install にした（plan は pilot-dates と sphica-search-wording）。sphica の fixture は実際の PR を harvest した DB で、反転版には実在の PR の中に架空の出典を作ることになるため。superseded-install は status-02 を外すだけで pnpm が今の決定として残り、新しい記録は要らない。pilot-dates は反転版の記録（local time で保存）を tasks.json の swapped.steps に持つ。collect も swapped の gold と hidden test の扱いを知る必要があり、変更欄に collect.ts を足し fixture.ts を外した
+- 2026-09-30 / T06 レビュー / Codex の F1（既存の --out を消す）・F4（build の後に prompt が変わると結果を読み落とす）・F5（別の build の Codex の run が混ざる）は直す。F2（fire.ts を同時に流すと同じ行を選ぶ）は、発火を 1 つずつ行う手順では起きない入力なので直さない。F3（同じタスク×条件の試行 1 が結果を残さず試行 2 だけ残すと、試行番号の割り当てが入れ替わる）は、同じタスク×条件の試行は区別の意味が無く分母（結果 1・結果なし 1）は正しいので直さない / T18 を足した。codex.ts は `--build` を必須にし、started.json と result.json に build ID を書く
