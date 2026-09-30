@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { bindOwner, dbInit, inspect, migrate, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
+import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { fakeGhPath } from "./fake-gh.ts";
 import { at, hash } from "./temp-db.ts";
 
@@ -463,7 +464,9 @@ test("sphica init migrates a revision 1 database in place and keeps its records"
   revision1(file);
   assert.throws(
     () => connectWriter("ingest", file),
-    /Run `npm i -g sphica@\d+\.\d+\.\d+`, then `sphica init` to migrate it/,
+    new RegExp(
+      `Run \`npm i -g sphica@${packageVersionAt(ROOT)?.replaceAll(".", "\\.")}\`, then \`sphica init\` to migrate it`,
+    ),
   );
   const said: string[] = [];
   const log = console.log;

@@ -74,6 +74,16 @@ forget の画面でバックアップの場所が分かり、revision の不一�
   - コミット: `fix(deliver): name the CLI version to install when the database revision differs (T03)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="another revision" test/deliver.test.ts` → 直す前は、先に別の警告を出したセッションの SessionStart が空を返して落ちた（red）。直した後 `node --test test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 60 pass・0 fail。`bun run verify` → exit 0
 
+- [x] T10: T03 のレビュー指摘を直す（Codex の子セッションの prompt を持ち主の発話と見ない、案内の版をこのパッケージの版と照合する）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す対象の案内とテストが要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/db.test.ts`, `server/test/admin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → CODEX_THREAD_ID が親のまま子の session_id で来た prompt に不一致の案内を返して落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 子の prompt は空、案内の版は packageVersionAt(ROOT) と一致して通る
+  - コミット: `fix(deliver): leave a Codex child's prompt alone and check the exact CLI version named (T10)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 直す前は子の prompt に案内が返り 1 fail（red）。直した後 60 pass・0 fail。`bun run verify` → exit 0
+
 ## P3: schema と索引の検査
 
 capture ビューの列の変化と `terms()` の出力の変化がテストで落ちる。
@@ -125,3 +135,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T02 レビュー / Codex の F1（バックアップと同じ名前のディレクトリを 1 件と数える）は、手で置かない限り起きない入力なので直さない。F2（テストが MCP の 3 か所を通らず空振りする）は直す / T09 を足した
 - 2026-09-30 / T05 / plan 方針 5 の「reindex() の SQL を定数にして export する」は、使う側がテストにも移行にも無く、未使用の export になる（knip が落とす）。2 重に持たないための策は、棄却した C9 (b) の検査のためだった / 定数化はせず、テストの失敗メッセージと規範の文で reindex() を写す元として名指しした。world.json の 2000 文字を超える 3 本（同じ繰り返しの詰め物）は golden から外した
 - 2026-09-30 / T05 / `.claude/skills/knowledge-schema` は `.agents/skills/knowledge-schema` へのシンボリックリンクだった / 変更欄を実体のパスに変えた（前: `.claude/skills/knowledge-schema/SKILL.md`、後: `.agents/skills/knowledge-schema/SKILL.md`）
+- 2026-09-30 / T03 レビュー / Codex の F1（Codex の子セッションの prompt に案内が出る）は、prompt の持ち主判定（deliver.ts の入口）が CODEX_THREAD_ID を渡していない既存の不具合で、ふだんの prompt 配信も子に出ていた。F2（テストが版の形しか見ない）。どちらも直す / T10 を足した

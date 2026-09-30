@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -530,8 +531,10 @@ test("a database of another revision names the CLI version to install, once per 
   const repo = checkout();
   try {
     db.owner.exec(`pragma user_version = ${SCHEMA_REVISION - 1}`);
+    const version = packageVersionAt(ROOT);
+    assert.ok(version);
     const behind = new RegExp(
-      `revision ${SCHEMA_REVISION - 1}.*npm i -g sphica@\\d+\\.\\d+\\.\\d+.*sphica init`,
+      `revision ${SCHEMA_REVISION - 1}.*npm i -g sphica@${version.replaceAll(".", "\\.")}\`.*sphica init`,
     );
     const session = `behind-${Date.now()}`;
     const edit = (file: string, s = session) =>
@@ -563,6 +566,27 @@ test("a database of another revision names the CLI version to install, once per 
       );
     assert.match(await prompt(), behind);
     assert.equal(await prompt(), "");
+    // A Codex child started from the owner's shell inherits the parent's thread id; its prompt is not the owner's
+    const thread = process.env.CODEX_THREAD_ID;
+    process.env.CODEX_THREAD_ID = "parent-thread";
+    try {
+      assert.equal(
+        await deliver(
+          {
+            hook_event_name: "UserPromptSubmit",
+            session_id: `child-${Date.now()}`,
+            cwd: repo,
+            prompt: "go on",
+          },
+          "codex",
+          db.file,
+        ),
+        "",
+      );
+    } finally {
+      if (thread === undefined) delete process.env.CODEX_THREAD_ID;
+      else process.env.CODEX_THREAD_ID = thread;
+    }
     // Shell commands stay quiet
     assert.equal(
       await deliver(

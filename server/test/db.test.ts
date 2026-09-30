@@ -7,6 +7,7 @@ import { after, before, test } from "node:test";
 import { sql } from "kysely";
 import { openReader, SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
+import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { connectReader } from "../src/sqlite.ts";
 import { sha256 } from "../src/text.ts";
 import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
@@ -424,7 +425,9 @@ test("the forget connection refuses a database of an older revision", () => {
   raw.close();
   assert.throws(
     () => connectWriter("forget", file),
-    /Run `npm i -g sphica@\d+\.\d+\.\d+`, then `sphica init` to migrate it/,
+    new RegExp(
+      `Run \`npm i -g sphica@${packageVersionAt(ROOT)?.replaceAll(".", "\\.")}\`, then \`sphica init\` to migrate it`,
+    ),
   );
   fs.rmSync(dir, { recursive: true, force: true });
 });

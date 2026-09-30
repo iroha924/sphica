@@ -638,7 +638,11 @@ export async function deliver(
             : "pre_edit"
           : null;
   if (!event || !input.session_id) return "";
-  if (event === "prompt" && !isOwnerTurn(input)) return "";
+  if (
+    event === "prompt" &&
+    !isOwnerTurn(input, undefined, undefined, host === "codex" ? process.env.CODEX_THREAD_ID : undefined)
+  )
+    return "";
   // A headless review (claude -p "/review") still gets the check; only reviews inside subagents are left to the parent
   if (event === "review" && input.agent_id) return "";
   const ti = input.tool_input ?? {};
