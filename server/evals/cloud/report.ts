@@ -148,7 +148,7 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
       "flags",
     ] as const;
     const shown = (g: Grade | undefined, f: (typeof fields)[number]) =>
-      f === "flags" ? [...(g?.flags ?? [])].sort().join(",") || "(none)" : String(g?.[f]);
+      f === "flags" ? [...new Set(g?.flags ?? [])].sort().join(",") || "(none)" : String(g?.[f]);
     const differ = (r: Graded) => {
       const other = r.second && "grade" in r.second ? r.second.grade : undefined;
       return fields

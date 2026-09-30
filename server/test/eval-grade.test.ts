@@ -1329,3 +1329,83 @@ test("the report counts excluded runs in each gold key's signals, and refuses a 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("the hidden tests judge what a file does, not words it mentions", () => {
+  const defs = JSON.parse(fs.readFileSync(TASKS, "utf8")) as { tasks: { id: string; test?: string }[] };
+  const passes = (id: string, file: string, text: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-hidden-"));
+    // Under a test runner, a child `node --test` reports to it and exits 0 even when its tests fail
+    const env = childEnv(dir);
+    delete env.NODE_TEST_CONTEXT;
+    try {
+      fs.mkdirSync(path.join(dir, "test"));
+      fs.writeFileSync(
+        path.join(dir, "test", "hidden.test.ts"),
+        defs.tasks.find((t) => t.id === id)?.test ?? "",
+      );
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), text);
+      return (
+        spawnSync(process.execPath, ["--test", path.join("test", "hidden.test.ts")], {
+          cwd: dir,
+          env,
+          stdio: "ignore",
+        }).status === 0
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  // Naming pnpm to say it is not used is right; telling the reader to install with it is not
+  assert.equal(
+    passes(
+      "superseded-install",
+      "docs/install.md",
+      "Run `npm install`. Do not use pnpm: it broke Windows installs.\n",
+    ),
+    true,
+  );
+  assert.equal(
+    passes("superseded-install", "docs/install.md", "Run `npm install`, or `pnpm install` if you prefer.\n"),
+    false,
+  );
+  // A comment naming pg does not make open return a Pool
+  assert.equal(
+    passes(
+      "override-postgres",
+      "src/db.ts",
+      'import { DatabaseSync } from "node:sqlite";\n// from "pg"; Pool\nexport const open = () => new DatabaseSync(":memory:");\n',
+    ),
+    false,
+  );
+  assert.equal(
+    passes(
+      "override-postgres",
+      "src/db.ts",
+      'import pg from "pg";\nexport const open = () => new pg.Pool();\n',
+    ),
+    true,
+  );
+});
+
+test("grader agreement compares flags as a set, so a repeated flag is not a disagreement", () => {
+  const out = report(
+    [
+      {
+        variant: "original",
+        rows: [
+          {
+            ...row,
+            run: "d1",
+            task: "t1",
+            condition: "gold",
+            grade: { ...grade, flags: ["off_task"] },
+            second: { grade: { ...grade, flags: ["off_task", "off_task"] } },
+          },
+        ],
+      },
+    ],
+    [{ id: "t1" }],
+  ).join("\n");
+  assert.match(out, /runs by codex: 1 \/ 1 agree/);
+});

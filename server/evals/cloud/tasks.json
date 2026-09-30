@@ -76,7 +76,7 @@
       "gold": ["trace:s-en-npm/npm"],
       "expect": "The package manager decision was replaced: the project went back to npm because pnpm broke Windows contributors. A good run writes install steps with npm, not pnpm, naming the newer decision when it came up.",
       "against": "The install steps use pnpm (the replaced decision) instead of npm",
-      "test": "import assert from \"node:assert/strict\";\nimport fs from \"node:fs\";\nimport { test } from \"node:test\";\n\ntest(\"completion: docs/install.md exists and says how to install\", () => {\n  const text = fs.readFileSync(new URL(\"../docs/install.md\", import.meta.url), \"utf8\");\n  assert.match(text, /install/i);\n});\n\ntest(\"compliance: it installs with npm, not pnpm\", () => {\n  const text = fs.readFileSync(new URL(\"../docs/install.md\", import.meta.url), \"utf8\");\n  assert.match(text, /npm (i|install|ci)\\b/);\n  assert.doesNotMatch(text, /pnpm/);\n});\n",
+      "test": "import assert from \"node:assert/strict\";\nimport fs from \"node:fs\";\nimport { test } from \"node:test\";\n\ntest(\"completion: docs/install.md exists and says how to install\", () => {\n  const text = fs.readFileSync(new URL(\"../docs/install.md\", import.meta.url), \"utf8\");\n  assert.match(text, /install/i);\n});\n\ntest(\"compliance: it installs with npm, not pnpm\", () => {\n  const text = fs.readFileSync(new URL(\"../docs/install.md\", import.meta.url), \"utf8\");\n  assert.match(text, /npm (i|install|ci)\\b/);\n  // Naming pnpm to say it is not used is right; an install command with it is not\n  assert.doesNotMatch(text, /pnpm (i|install|add)\\b/);\n});\n",
       "project": "tsundoku"
     },
     {
@@ -114,7 +114,7 @@
       "prompt": "保存先を Postgres に変えます。前に SQLite の 1 ファイルにした決定があるのは知っていますが、家族で本棚を共有したいので、今回ははっきり Postgres にしてください。src/db.ts の open を、pg の Pool を返すように書き換えてください。",
       "gold": ["trace:s-ja-storage/storage"],
       "expect": "The owner names the recorded SQLite decision and overrides it on purpose. A good run mentions the old decision and its reason once and makes the change; stopping to ask for confirmation again is a miss.",
-      "test": "import assert from \"node:assert/strict\";\nimport fs from \"node:fs\";\nimport { test } from \"node:test\";\n\ntest(\"completion: open returns a pg Pool\", () => {\n  const text = fs.readFileSync(new URL(\"../src/db.ts\", import.meta.url), \"utf8\");\n  assert.match(text, /from \"pg\"|require\\(\"pg\"\\)/);\n  assert.match(text, /Pool/);\n});\n",
+      "test": "import assert from \"node:assert/strict\";\nimport fs from \"node:fs\";\nimport { test } from \"node:test\";\n\ntest(\"completion: open returns a pg Pool\", () => {\n  // Comments do not count: the code has to import pg, build a Pool, and stop opening SQLite\n  const code = fs\n    .readFileSync(new URL(\"../src/db.ts\", import.meta.url), \"utf8\")\n    .replace(/\\/\\*[\\s\\S]*?\\*\\/|\\/\\/.*$/gm, \"\");\n  assert.match(code, /from \"pg\"|require\\(\"pg\"\\)/);\n  assert.match(code, /new (pg\\.)?Pool\\(/);\n  assert.doesNotMatch(code, /new DatabaseSync\\(/);\n});\n",
       "project": "tsundoku"
     }
   ],

@@ -322,6 +322,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `fix(eval): address the fifth GitHub Codex review of the eval base (T30)`
   - 結果: 直す前の `evals/` で 3 本が意図した理由で落ち、ID の無い grades を含む report が exit 0。直した後 37 pass、ID の無い grades は「a build has no id」で止まる。`bun run verify` → exit 0
 
+- [x] T31: リリース前の GitHub の Codex のレビューの指摘を直す（superseded-install の隠しテストは pnpm の名前ではなく pnpm でのインストールの指示を落とす、override-postgres の隠しテストはコメントを除いたコードで pg の Pool を作るかを見る、採点者の一致の flags を集合で比べる）
+  - 種別: 修正
+  - 計画: S3, S7
+  - 依存: T30（report の一致の節の上に足す）
+  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 隠しテストを見本の文書とコードに流すテストと、重なった flag のテストが通る
+  - red: `cd server && node --test test/eval-grade.test.ts` → 直す前の tasks.json と report.ts では、「pnpm は使わない」と書いた npm の文書が落ち、コメントで pg を名指ししただけの SQLite のコードが通り、flags の重なりが不一致に数えられる
+  - コミット: `fix(eval): make the hidden tests judge what the patch does (T31)`
+  - 結果: 直す前は 2 本が意図した理由で落ちた（子の `node --test` は親のテストの NODE_TEST_CONTEXT を受け継ぐと失敗しても exit 0 になるので、子の環境から外した）。旧い postgres のテストはコメントだけの patch で exit 0。直した後 39 pass。今回のループで postgres の隠しテストを通った patch はどれも足した行に `new Pool(` があり、結果は変わらない。superseded-install の claude gold の 2 件の失敗は「npm を使い pnpm は使わない」と書いた文書で、新しいテストでは通る。`bun run verify` → exit 0
+
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
@@ -353,3 +363,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / GitHub Codex 3 回目（9429fb6） / 4 件（P1 1、P2 3）。3 件を T28 で直す。P2（別の project の build を 1 つの report にまとめられる）は直さない: 承認したループ自体が tsundoku と sphica の両方の build にまたがり、report はタスクごとに分けて出すので、どの project の run かは区別できる / T28 を足した
 - 2026-09-30 / GitHub Codex 4 回目（34b5531） / 3 件（P1 1、P2 2）。2 件を T29 で直す。P2（fixture を build の間に作り直すと、同じ commit と bundle の build が別の記録を見た run をまとめる）は直さない: 1 つのループの build は続けて作り、その間に fixture を作り直す手順は無い / T29 を足した
 - 2026-09-30 / GitHub Codex 5 回目（f7f7f5e） / 4 件（P1 1、P2 3）。持ち主が「直して止める」（6 回目は頼まない）を選んだ。3 件を T30 で直す。P2（4〜5 行の JSDoc が 3 行の規則を超える）は直さない: 規則は区切りの `/**` と `*/` を除いた本文で数えるのがこのリポジトリの慣習で（main の server/src に本文 3 行の JSDoc が 33 個）、この PR で足したコメントの本文はどれも 3 行以内 / T30 を足した
+- 2026-09-30 / GitHub Codex 6 回目（32a364a、リリースの門のための依頼） / P1 0、P2 3。持ち主が「直してもう 1 回」を選んだ。3 件とも T31 で直す。今回のループの「Claude の gold で隠しテストが 10 run 中 2 run 落ちた」は superseded-install の隠しテストの誤判定だった（patch で確認） / T31 を足した
