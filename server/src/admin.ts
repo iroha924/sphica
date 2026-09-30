@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
+import { backupDir, backups } from "./backups.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
@@ -23,24 +24,8 @@ const MIGRATIONS = (): string => path.join(dbDir(), "migrations");
 const MIGRATION = (dir: string, revision: number): string =>
   path.join(dir, `${String(revision).padStart(4, "0")}.sql`);
 
-/** Copies made before a migration, next to the database: sphica.rev<from>.<UTC time to the millisecond>.<pid>.db */
-const backupDir = (file: string = dbFile()): string => path.join(path.dirname(file), "backups");
-const BACKUP = /^sphica\.rev\d+\.(\d{8}T\d{9}Z)\.\d+\.db$/;
 /** How many completed backups a successful migration keeps */
 const KEEP = 3;
-
-/** Completed backups, newest first. A `.partial` file is another run still writing (or one that stopped) and is never counted. */
-function backups(file: string = dbFile()): string[] {
-  const dir = backupDir(file);
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => BACKUP.test(f))
-    .sort(
-      (a, b) => (BACKUP.exec(b)?.[1] ?? "").localeCompare(BACKUP.exec(a)?.[1] ?? "") || b.localeCompare(a),
-    )
-    .map((f) => path.join(dir, f));
-}
 
 /**
  * Writes a consistent copy of the database (VACUUM INTO reads through the WAL) to a `.partial` file, checks it, then gives it its

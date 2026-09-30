@@ -245,7 +245,7 @@ server.registerTool(
   async (a, extra) =>
     tool(async () => {
       const p = await projectOf(a.cwd, extra._meta);
-      return forgetText(await previewForget(dbFile(), p.projectId, idsOf(a.sources)));
+      return forgetText(await previewForget(dbFile(), p.projectId, idsOf(a.sources)), dbFile());
     }),
 );
 
@@ -275,7 +275,7 @@ server.registerTool(
           answer = await server.server.elicitInput(
             {
               mode: "form",
-              message: `Forget ${plural(n, "source")} for good?\n${forgetText(seen)}`,
+              message: `Forget ${plural(n, "source")} for good?\n${forgetText(seen, dbFile())}`,
               requestedSchema: {
                 type: "object",
                 properties: {
@@ -303,7 +303,7 @@ server.registerTool(
       const done = await applyForget(dbFile(), p.projectId, ids, seen, extra.signal);
       return [
         n ? `Forgot ${plural(n, "source")}.` : "Nothing new to forget.",
-        forgetText(done.outcome),
+        forgetText(done.outcome, dbFile()),
         done.cleanup === "done"
           ? "The deleted text was cleared from the database file."
           : "Clearing the deleted text from the database file did not finish (another session may be reading it), so it may stay there until you run forget_apply with the same sources again.",

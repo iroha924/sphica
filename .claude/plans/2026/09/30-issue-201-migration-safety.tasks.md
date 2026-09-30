@@ -36,13 +36,14 @@ base: main
 
 forget の画面でバックアップの場所が分かり、revision の不一致では入れるべき CLI の版が 1 回届く。
 
-- [ ] T02: forget の preview・確認・完了にバックアップの場所と件数を出す
+- [x] T02: forget の preview・確認・完了にバックアップの場所と件数を出す
   - 種別: 追加
   - 計画: S2
   - 依存: T01（バックアップの置き場所と名前の規則が要る）
-  - 変更: `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`
+  - 変更: `server/src/backups.ts`, `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`, `plugin/skills/forget/SKILL.md`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → バックアップが 2 つある場合に preview・確認文面・完了の返答に場所と件数が出て、0 のときは出ないテストが通る
   - コミット: `feat(forget): show where Sphica's backups are before and after forgetting (T02)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 16 pass・0 fail（新しいテストは 2 つの完成品と 1 つの .partial で「2 backups」を出し、0 のとき backup を言わない）。`bun run verify` → exit 0
 
 - [ ] T03: 不一致の案内に CLI の版を入れ、delivery は別の 1 回印で prompt でも返す
   - 種別: 修正
@@ -97,3 +98,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 
 - 2026-09-30 / T01 / 実物の migrate() を通すテストは admin.test.ts にあり、migrate.test.ts は SQL を自前の手順で流す / 変更欄と red を migrate.test.ts から admin.test.ts に変えた（前: `server/src/admin.ts`, `server/test/migrate.test.ts`、後: `server/src/admin.ts`, `server/test/admin.test.ts` と版の 4 ファイル）
 - 2026-09-30 / T01, T07 / pre-commit の bundle の検査が、パッケージの入力を変えるコミットに版の更新を同じコミットで求めた（#208 の T01 も同じ形） / 版の 4 ファイルを T01 に入れ、T07 は取りやめ。S6 の版の更新は T01 が担う
+- 2026-09-30 / T02 / backups() を admin.ts から forget.ts が読むと、記録サーバーの bundle に CLI の部品（cli/view.ts）が入る / バックアップの場所の関数を server/src/backups.ts に分け、forget の Skill の「残るもの」も直した。変更欄（前: `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`、後: それに `server/src/backups.ts` と `plugin/skills/forget/SKILL.md` を足した）
