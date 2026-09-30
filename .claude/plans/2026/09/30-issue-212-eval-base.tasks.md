@@ -272,6 +272,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `fix(ci): print the random test order seed that sql:reach hides (T25)`
   - 結果: 直す前は seed の行が出ず、直した後は `Randomized test order seed: 354` の後に `SQL: tests ran 189 / 189 sites` が出た。`bun run verify` → exit 0。review-shipping は指摘なし
 
+- [x] T26: GitHub の Codex の 1 回目のレビューの指摘を直す（build にタスク定義を持たせる、Claude の採点が無い run を一致に数える、配信の信号の対象外を出す、fire の条件の打ち間違いを拒む、子プロセスの環境を隔離する、切れた patch の再提案を unknown にする、別の bundle の混在を拒む、コメント、leaves の生成）
+  - 種別: 修正
+  - 計画: S5, S7
+  - 依存: T06（build と plan.json）, T10（report.ts）, T23（fire の --condition）
+  - 変更: `server/evals/cloud/firing.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/fire.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/schema-check.ts`, `server/evals/cloud/grade.schema.json`, `server/test/eval-grade.test.ts`, `server/test/search.test.ts`, `server/test/text-properties.test.ts`, `scripts/check-pairs.mjs`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 足したテスト（build のタスク定義で collect する、Claude の採点が無い run と対象外の信号を出す、bundle の違う build を拒む、打ち間違えた条件を拒む、切れた patch の proposes_rejected が unknown）が通る
+  - red: 同じコマンドを直す前の `evals/cloud/` で → 5 本が落ちる（gold のキーが checkout の harvest:157/keep-search、一致の節に行が無い、report が exit 0、fire が done を返す、proposes_rejected が no のまま）
+  - コミット: `fix(eval): address the first GitHub Codex review of the eval base (T26)`
+  - 結果: 直す前の `evals/cloud/` で 5 本が意図した理由で落ち、直した後 30 pass。leaves は segs が `["root","file"]` のとき `leaves` が false を返し、旧い性質は true を求めて落ちる入力だった。既存の 3 つの build に tasks.json を写して report を流し直し、同じ数字（一致 41 / 59、41 / 61、Claude の採点が無い run 0）。`bun run verify` → exit 0。check-pairs.mjs はコメントだけの変更なので review-shipping は流していない
+
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
@@ -298,3 +308,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T24 / A6 で Codex の run を並行で流したとき、run 名が時刻（ミリ秒）だけのため同じタスク・条件の 2 run が同じディレクトリを使い 1 run が失われた（流し直した）。名前に乱数を足し、ディレクトリを recursive なしで作ってぶつかったら失敗させる
 - 2026-09-30 / T24 レビュー（Codex） / 指摘なし。サンドボックスでは mkdtemp が EPERM でテストを流せず、テストは手元で流した（1 pass） / なし
 - 2026-09-30 / T25 / A7 の確認で、Node 26 の check はランダムな順序でテストを流していたが、テストを流すのは sql:reach で、通ったときは出力を隠すため seed がログに出なかった。通ったときも seed の行だけを出す / なし
+- 2026-09-30 / GitHub Codex 1 回目（caa455f） / 11 件（P1 2、P2 9）。10 件を T26 で直す。P2（Claude のログの search の結果で、本文に引用された見出しを gold と取る）は直さない: ルーティンのログは改行を空白に潰した抜き書きで、結果の区切りを取り戻せない。本文が別の記録の見出しを `## <key> (uN)` の形で引用する入力に限られる / T26 を足した。既存の 3 つの build には、build の後に tasks.json が変わっていない（最後の変更 03:11Z、build 04:32Z 以降）ので今の tasks.json を写した

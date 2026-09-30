@@ -1,9 +1,9 @@
-// The loop report over one or more graded builds (an original and a swapped build of one loop): the table by model and condition, the
-// same split by language pair, word overlap, and whether the task has a gold record; gold minus inject per task and model with every run;
-// re-proposals; the counterfactual; grader agreement; and each gold key's signals. Counts keep n, excluded, and ungraded beside them.
+// The loop report over the graded builds of one bundle (an original and a swapped build of one loop), against the task definitions they
+// were built from. Every count keeps n, excluded, and ungraded beside it.
 // Run: node evals/cloud/report.ts <build dir>/grades.json [<build dir>/grades.json ...]
 import fs from "node:fs";
 import path from "node:path";
+import { readTasks } from "./firing.ts";
 import type { GradeRow } from "./grading.ts";
 import type { GoldSignal } from "./judge.ts";
 import type { Grade } from "./schema-check.ts";
@@ -15,7 +15,7 @@ type Graded = GradeRow & {
   second?: { grade: Grade } | { ungraded: string };
   gold_signals?: Record<string, GoldSignal>;
 };
-export type Build = { variant: string; rows: Graded[] };
+export type Build = { variant: string; bundle?: string; rows: Graded[] };
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
@@ -103,7 +103,9 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
     original.filter((r) => r.grade && r.grade.proposes_rejected !== "not_applicable"),
     (r) => `${r.model} ${r.condition}`,
   ))
-    lines.push(`${k}: ${rows.filter((r) => r.grade?.proposes_rejected === "yes").length} / ${rows.length}`);
+    lines.push(
+      `${k}: ${rows.filter((r) => r.grade?.proposes_rejected === "yes").length} / ${rows.length} (unknown ${rows.filter((r) => r.grade?.proposes_rejected === "unknown").length})`,
+    );
 
   // Every gold run of a counterfactual task counts, graded or not, so a side whose runs all failed to grade still shows it was run
   lines.push("", "## Counterfactual: which record the run followed (gold runs of the counterfactual tasks)");
@@ -122,8 +124,11 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   }
 
   lines.push("", "## Grader agreement (Codex's grade is the one counted; Claude's is kept beside it)");
-  const both = [...original, ...swapped].filter((r) => r.grade && r.second && "grade" in r.second);
-  for (const [k, rows] of groupBy(both, (r) => `runs by ${r.model}`)) {
+  // Every run Codex graded counts, so a run Claude failed to grade shows as missing rather than vanishing from the agreement
+  const graded = [...original, ...swapped].filter((r) => r.grade);
+  for (const [k, all] of groupBy(graded, (r) => `runs by ${r.model}`)) {
+    const rows = all.filter((r) => r.second && "grade" in r.second);
+    const missing = all.filter((r) => !rows.includes(r));
     // Every graded field but the free-text reason; flags compare as a set
     const fields = [
       "score",
@@ -142,12 +147,21 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
         .map((f) => `${f} ${shown(r.grade, f)} vs ${shown(other, f)}`);
     };
     const agree = rows.filter((r) => differ(r).length === 0);
-    lines.push(`${k}: ${agree.length} / ${rows.length} agree on every graded field`);
+    lines.push(
+      `${k}: ${agree.length} / ${all.length} agree on every graded field (Claude's grade missing ${missing.length})`,
+    );
+    for (const r of missing)
+      lines.push(
+        `  ${r.run} (${r.task} ${r.condition}): no Claude grade${r.second && "ungraded" in r.second ? ` (${r.second.ungraded})` : ""}`,
+      );
     for (const r of rows.filter((x) => !agree.includes(x)))
       lines.push(`  ${r.run} (${r.task} ${r.condition}): ${differ(r).join("; ")} (Codex vs Claude)`);
   }
 
-  lines.push("", "## Gold signals per key: delivered / in a search result / read (yes, no, unknown)");
+  lines.push(
+    "",
+    "## Gold signals per key: delivered / in a search result / read (yes, no, unknown, not applicable)",
+  );
   const signals = original
     .filter((r) => !r.excluded)
     .flatMap((r) =>
@@ -158,7 +172,7 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
     );
   for (const [k, xs] of groupBy(signals, (x) => x.group)) {
     const tally = (f: keyof GoldSignal) =>
-      ["yes", "no", "unknown"].map((v) => xs.filter((x) => x.s[f] === v).length).join("/");
+      ["yes", "no", "unknown", "not_applicable"].map((v) => xs.filter((x) => x.s[f] === v).length).join("/");
     lines.push(
       `${k}: delivered ${tally("in_delivery")}, search ${tally("in_search")}, read ${tally("read")}`,
     );
@@ -170,9 +184,16 @@ if (process.argv[1] === import.meta.filename) {
   const files = process.argv.slice(2);
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
   const builds = files.map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Build);
-  const plan = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "tasks.json"), "utf8")) as {
-    tasks: TaskInfo[];
-    swapped: { tasks: Record<string, string[]> };
-  };
+  const bundles = new Set(builds.map((b) => b.bundle));
+  if (bundles.size > 1)
+    throw new Error(
+      `the builds come from different bundles (${[...bundles].join(", ")}); report one loop at a time`,
+    );
+  const defs = files.map((f) => fs.readFileSync(path.join(path.dirname(f), "tasks.json"), "utf8"));
+  if (new Set(defs).size > 1)
+    throw new Error("the builds were made from different task definitions; report one loop at a time");
+  const plan = readTasks<{ tasks: TaskInfo[]; swapped: { tasks: Record<string, string[]> } }>(
+    path.dirname(files[0] ?? ""),
+  );
   console.log(report(builds, plan.tasks, Object.keys(plan.swapped.tasks)).join("\n"));
 }

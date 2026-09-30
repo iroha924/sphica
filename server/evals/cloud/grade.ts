@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { isolatedCodexHome } from "./codex-home.ts";
+import { readTasks } from "./firing.ts";
 import {
   blindPrompt,
   type Cell,
@@ -29,8 +30,8 @@ const { values: args } = parseArgs({
   },
 });
 
-const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: GradeTask[] };
 if (!args.loop) throw new Error("--loop <build dir>/loop.json names what to grade");
+const plan = readTasks<{ tasks: GradeTask[] }>(path.dirname(args.loop));
 const out = args.out ?? path.join(path.dirname(args.loop), "grades.json");
 const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
   build?: string | null;

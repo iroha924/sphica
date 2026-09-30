@@ -28,6 +28,18 @@ import {
   SCHEMA_FILES,
 } from "../evals/cloud/schema-check.ts";
 
+const TASKS = path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json");
+// A build holds a copy of the task definitions it was made from
+const seedTasks = (build: string) => fs.copyFileSync(TASKS, path.join(build, "tasks.json"));
+
+/** A child's environment: a temporary home, and none of the owner's Sphica paths. */
+function childEnv(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.SPHICA_DB;
+  delete env.SPHICA_HOME;
+  return env;
+}
+
 const grade: Grade = {
   score: 2,
   reason: "kept the recorded search design",
@@ -198,6 +210,7 @@ test("collect keeps a started run without a result, and a failed run, as exclude
     const codex = path.join(base, "codex");
     fs.mkdirSync(build);
     fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+    seedTasks(build);
     const run = (name: string, files: Record<string, unknown>) => {
       fs.mkdirSync(path.join(codex, name), { recursive: true });
       for (const [f, v] of Object.entries(files))
@@ -233,7 +246,7 @@ test("collect keeps a started run without a result, and a failed run, as exclude
         "--out",
         out,
       ],
-      { stdio: "ignore" },
+      { stdio: "ignore", env: childEnv(base) },
     );
     const all = JSON.parse(fs.readFileSync(out, "utf8")).rows as {
       run: string;
@@ -311,6 +324,7 @@ test("a grade is counted only from a zero exit and a valid shape; anything else 
   // A cut patch cannot show that nothing matches: "no" becomes unknown
   const cut = receiveGrade({ status: 0, output: good }, true, true) as { graded: typeof grade };
   assert.equal(cut.graded.implements_rejected, "unknown");
+  assert.equal(cut.graded.proposes_rejected, "unknown");
   // not_applicable only when the task has no "Against", and only then
   const na = JSON.stringify({
     ...grade,
@@ -386,6 +400,7 @@ test("collect refuses a build with slots but no firing plan, since fired runs wi
       path.join(build, "manifest.json"),
       JSON.stringify({ commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
     );
+    seedTasks(build);
     const r = spawnSync(
       process.execPath,
       [
@@ -397,7 +412,7 @@ test("collect refuses a build with slots but no firing plan, since fired runs wi
         "--logs",
         base,
       ],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: childEnv(base) },
     );
     assert.match(r.stderr, /no firing plan at .*plan\.json/);
   } finally {
@@ -483,6 +498,7 @@ printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output:
     );
     const loop = path.join(base, "loop.json");
     fs.writeFileSync(loop, JSON.stringify({ bundle: "c", rows: [{ ...row, answer_format: "valid" }] }));
+    seedTasks(base);
     const r = spawnSync(
       process.execPath,
       [
@@ -665,6 +681,7 @@ test("collect reads a swapped build's gold from the swapped record and does not 
       path.join(build, "manifest.json"),
       JSON.stringify({ build: "b", variant: "swapped", commit: "c", repositories: {} }),
     );
+    seedTasks(build);
     const head = { build: "b", task: "pilot-dates", condition: "gold" };
     fs.mkdirSync(path.join(codex, "sw", "work"), { recursive: true });
     fs.writeFileSync(path.join(codex, "sw", "started.json"), JSON.stringify(head));
@@ -686,7 +703,7 @@ test("collect reads a swapped build's gold from the swapped record and does not 
         "--out",
         out,
       ],
-      { stdio: "ignore" },
+      { stdio: "ignore", env: childEnv(base) },
     );
     const loop = JSON.parse(fs.readFileSync(out, "utf8"));
     assert.equal(loop.variant, "swapped");
@@ -727,6 +744,7 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
       path.join(build, "manifest.json"),
       JSON.stringify({ build: "b", commit: "c", repositories: {} }),
     );
+    seedTasks(build);
     for (const [name, id] of [
       ["mine", "b"],
       ["theirs", "a"],
@@ -751,7 +769,7 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
         "--out",
         out,
       ],
-      { stdio: "ignore" },
+      { stdio: "ignore", env: childEnv(base) },
     );
     assert.deepEqual(
       JSON.parse(fs.readFileSync(out, "utf8")).rows.map((r: { run: string }) => r.run),
@@ -766,7 +784,7 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
         "--out",
         build,
       ],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: childEnv(base) },
     );
     assert.match(again.stderr, /already exists/);
     assert.ok(fs.existsSync(path.join(build, "manifest.json")), "the earlier build is kept");
@@ -859,12 +877,12 @@ test("the report splits by group, lists gold minus inject per task with every ru
     out,
     /t1 codex: gold n 2 \(g1 2, g2 1\) inject n 3 \(i1 0, i2 excluded, i3 1\), difference of mean scores 1\.00 \(preliminary/,
   );
-  assert.match(out, /codex inject: 1 \/ 2\n/);
+  assert.match(out, /codex inject: 1 \/ 2 \(unknown 0\)\n/);
   assert.match(out, /t1 codex gold original: n 2, presented 2, other 0/);
   assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 1/);
-  assert.match(out, /runs by codex: 0 \/ 2 agree/);
+  assert.match(out, /runs by codex: 0 \/ 5 agree on every graded field \(Claude.s grade missing 3\)/);
   assert.match(out, /g2 \(t1 gold\): score 1 vs 0; followed presented vs not_applicable \(Codex vs Claude\)/);
-  assert.match(out, /codex inject k\/1: delivered 1\/0\/0, search 0\/0\/1, read 0\/1\/0/);
+  assert.match(out, /codex inject k\/1: delivered 1\/0\/0\/0, search 0\/0\/1\/0, read 0\/1\/0\/0/);
 });
 
 // Review of the counterfactual grading: only a run that was shown the record is judged on following it, and a swapped run is judged on
@@ -913,7 +931,7 @@ test("the report names each run in gold minus inject, compares every graded fiel
     ["t1"],
   ).join("\n");
   assert.match(out, /t1 codex: gold n 2 \(g1 2, g2 ungraded\) inject n 2 \(i1 0, i2 excluded\)/);
-  assert.match(out, /runs by codex: 0 \/ 1 agree/);
+  assert.match(out, /runs by codex: 0 \/ 2 agree on every graded field \(Claude.s grade missing 1\)/);
   assert.match(out, /g1 \(t1 gold\): followed presented vs other/);
   assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 0, neither 0, ungraded 1, excluded 0/);
 });
@@ -971,7 +989,7 @@ test("fire marks the next unfired row, only of the condition asked for, and repo
         execFileSync(
           process.execPath,
           [path.join(import.meta.dirname, "..", "evals", "cloud", "fire.ts"), build, ...extra],
-          { encoding: "utf8" },
+          { encoding: "utf8", env: childEnv(build) },
         ),
       );
     assert.deepEqual([fire("--condition", "gold").task, fire("--condition", "gold").task], ["a", "b"]);
@@ -982,6 +1000,8 @@ test("fire marks the next unfired row, only of the condition asked for, and repo
       [false, true, true],
     );
     assert.equal(fire().task, "a");
+    // A condition the plan does not have is refused, not reported as done
+    assert.throws(() => fire("--condition", "glod"), /no rows for condition glod/);
   } finally {
     fs.rmSync(build, { recursive: true, force: true });
   }
@@ -998,5 +1018,95 @@ test("two Codex runs of one task and condition started in the same millisecond g
     assert.ok(a.run.startsWith("pilot-dates-search-2026-09-30T04-52-09-077Z"));
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test("the report counts a run Claude failed to grade as missing, and delivery signals that do not apply", () => {
+  const out = report(
+    [
+      {
+        variant: "original",
+        rows: [
+          {
+            ...row,
+            run: "m1",
+            task: "t1",
+            condition: "search",
+            grade,
+            second: { ungraded: "claude exited 1" },
+            gold_signals: { "trace:a/b": { in_delivery: "not_applicable", in_search: "no", read: "no" } },
+          },
+        ],
+      },
+    ],
+    [{ id: "t1" }],
+  ).join("\n");
+  assert.match(out, /runs by codex: 0 \/ 1 agree on every graded field \(Claude's grade missing 1\)/);
+  assert.match(out, /m1 \(t1 search\): no Claude grade \(claude exited 1\)/);
+  assert.match(out, /codex search trace:a\/b: delivered 0\/0\/0\/1, search 0\/1\/0\/0, read 0\/1\/0\/0/);
+});
+
+test("the report refuses builds of different bundles or task definitions", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-"));
+  try {
+    const files = ["a", "b"].map((name) => {
+      fs.mkdirSync(path.join(base, name));
+      seedTasks(path.join(base, name));
+      const file = path.join(base, name, "grades.json");
+      fs.writeFileSync(file, JSON.stringify({ variant: "original", bundle: name, rows: [] }));
+      return file;
+    });
+    const r = spawnSync(
+      process.execPath,
+      [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), ...files],
+      { encoding: "utf8", env: childEnv(base) },
+    );
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /different bundles/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("collect judges runs by the task definitions of their build, not the checkout's", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    const codex = path.join(base, "codex");
+    fs.mkdirSync(build);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", variant: "original", commit: "c", repositories: {} }),
+    );
+    const defs = JSON.parse(fs.readFileSync(TASKS, "utf8")) as { tasks: { id: string; gold?: string[] }[] };
+    for (const t of defs.tasks) if (t.id === "sphica-search-wording") t.gold = ["trace:built/with"];
+    fs.writeFileSync(path.join(build, "tasks.json"), JSON.stringify(defs));
+    const head = { build: "b", task: "sphica-search-wording", condition: "none" };
+    fs.mkdirSync(path.join(codex, "r", "work"), { recursive: true });
+    fs.writeFileSync(path.join(codex, "r", "started.json"), JSON.stringify(head));
+    fs.writeFileSync(
+      path.join(codex, "r", "result.json"),
+      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+    );
+    const out = path.join(base, "loop.json");
+    execFileSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        codex,
+        "--logs",
+        base,
+        "--out",
+        out,
+      ],
+      { stdio: "ignore", env: childEnv(base) },
+    );
+    const [got] = JSON.parse(fs.readFileSync(out, "utf8")).rows;
+    assert.deepEqual(Object.keys(got.gold_signals), ["trace:built/with"]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });

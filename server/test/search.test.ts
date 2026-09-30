@@ -749,8 +749,6 @@ test("read shows each field value with the words it was quoted from and who said
   }
 });
 
-// Found by a mutation run: a hit must carry only its own options and anchors, the limit must cut the hits, and aliasOnly must mean every
-// matched term came from aliases
 test("each hit carries only its own options and anchors, the limit cuts the hits, and aliasOnly needs every term from aliases", async () => {
   const db = tempDb();
   try {

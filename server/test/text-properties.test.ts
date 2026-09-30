@@ -85,7 +85,10 @@ test("a span quoteSpan returns holds exactly the quote", () => {
 });
 
 test("leaves is false for any path below the base and true for one that climbs out", () => {
-  const segment = fc.stringMatching(/^[A-Za-z0-9._-]{1,12}$/).filter((s) => s !== "." && s !== "..");
+  // "root" is the base's own name: "../root/x" climbs out and back in
+  const segment = fc
+    .stringMatching(/^[A-Za-z0-9._-]{1,12}$/)
+    .filter((s) => s !== "." && s !== ".." && s !== "root");
   fc.assert(
     fc.property(fc.array(segment, { minLength: 1, maxLength: 5 }), (segs) => {
       const base = path.resolve("/repo/root");
@@ -164,8 +167,7 @@ test("mask takes time in proportion to the input on shapes that stress its patte
   }
 });
 
-// Each shape mask knows, at the shortest length it hides and one character short of it (found missing by a mutation run: removing a
-// whole shape from the list failed no test)
+// Each shape mask knows, at the shortest length it hides and one character short of it, so dropping a shape from the list fails a test
 const at = (prefix: string, n: number, ch = "a") => `${prefix}${ch.repeat(n)}`;
 const SHAPES: [string, string, string][] = [
   ["OpenAI or Anthropic key", at("sk-", 20), at("sk-", 19)],

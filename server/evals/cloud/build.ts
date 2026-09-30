@@ -14,7 +14,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
-import { writePlan } from "./firing.ts";
+import { writePlan, writeTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const ROOT = path.join(HERE, "..", "..", "..");
@@ -436,6 +436,7 @@ async function main() {
     (manifest.repositories as Record<string, unknown>)[repo] = { condition, fixture: fixtureHash };
   }
   fs.writeFileSync(path.join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeTasks(out, plan);
   const slotOf = new Map(CONDITIONS.map((c, i) => [c, `eval-shelf-${i + 1}`]));
   writePlan(
     out,

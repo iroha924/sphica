@@ -1,6 +1,5 @@
-// Takes the next unfired row of a build's firing plan, marks it fired now, and prints what to fire: the slot (its routine is in
-// ~/.cache/sphica-eval/routines.json) and the prompt. Fire the routine right after; a row marked but never fired shows as a run with no result.
-// --condition fires only that condition's rows (a swapped build is judged on its gold runs); rows never fired are not asked for.
+// Marks the next unfired row of a build's firing plan (only --condition's rows when given) and prints its slot and prompt; fire that
+// slot's routine (~/.cache/sphica-eval/routines.json) right after, since a marked row never fired shows as a run with no result.
 // Run: node evals/cloud/fire.ts <build dir> [--condition <condition>]
 import { parseArgs } from "node:util";
 import { readPlan, writePlan } from "./firing.ts";
@@ -12,6 +11,8 @@ const { values: args, positionals } = parseArgs({
 const build = positionals[0];
 if (!build) throw new Error("give the build directory");
 const rows = readPlan(build);
+if (args.condition && !rows.some((r) => r.condition === args.condition))
+  throw new Error(`the firing plan has no rows for condition ${args.condition}`);
 const wanted = (r: (typeof rows)[number]) => !args.condition || r.condition === args.condition;
 const next = rows.find((r) => r.fired_at === null && wanted(r));
 if (!next) {

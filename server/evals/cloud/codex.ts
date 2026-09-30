@@ -9,6 +9,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { claimRunDir, isolatedCodexHome } from "./codex-home.ts";
+import { readTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const { values: args } = parseArgs({
@@ -21,11 +22,11 @@ const { values: args } = parseArgs({
 });
 
 type Task = { id: string; prompt: string; gold: string[] };
-const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
 if (!args.build)
   throw new Error(
     "--build <dir> names the build whose slot to replay (~/.cache/sphica-eval/builds/<build id>)",
   );
+const plan = readTasks<{ tasks: Task[] }>(args.build);
 const manifest = JSON.parse(fs.readFileSync(path.join(args.build, "manifest.json"), "utf8")) as {
   build?: string;
   owner?: string;

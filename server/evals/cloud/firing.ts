@@ -25,6 +25,18 @@ export function readPlan(build: string): FiringRow[] {
 export const writePlan = (build: string, rows: FiringRow[]) =>
   fs.writeFileSync(planFile(build), `${JSON.stringify(rows, null, 2)}\n`);
 
+const tasksFile = (build: string) => path.join(build, "tasks.json");
+
+/** The task definitions the build was made from: its runs are collected, graded, and reported against these, not the checkout's. */
+export function readTasks<T>(build: string): T {
+  const file = tasksFile(build);
+  if (!fs.existsSync(file)) throw new Error(`no task definitions at ${file} (build.ts copies them)`);
+  return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+}
+
+export const writeTasks = (build: string, tasks: unknown) =>
+  fs.writeFileSync(tasksFile(build), `${JSON.stringify(tasks, null, 2)}\n`);
+
 /**
  * Pairs each fired row with a result, by task and condition, in the order the rows were fired and the runs started. A row left over had no
  * result; a result left over was not asked for by this plan.

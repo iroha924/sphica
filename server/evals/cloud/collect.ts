@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { type FiringRow, pair, readPlan, taskFromReceipts } from "./firing.ts";
+import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
 import {
   answerFormat,
   capPatch,
@@ -22,7 +22,6 @@ import {
   type Tri,
 } from "./judge.ts";
 
-const HERE = import.meta.dirname;
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
 const { values: args } = parseArgs({
   options: {
@@ -34,13 +33,10 @@ const { values: args } = parseArgs({
 });
 
 type Task = { id: string; prompt: string; test?: string; project?: string; gold?: string[] };
-const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
-  tasks: Task[];
-  swapped: { tasks: Record<string, string[]> };
-};
 const build = args.build ?? "";
 if (!build)
   throw new Error("--build <dir> names the build to collect (~/.cache/sphica-eval/builds/<build id>)");
+const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[]> } }>(build);
 const out = args.out ?? path.join(build, "loop.json");
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;

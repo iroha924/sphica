@@ -18,7 +18,7 @@
     },
     "proposes_rejected": {
       "type": "string",
-      "enum": ["yes", "no", "not_applicable"]
+      "enum": ["yes", "no", "not_applicable", "unknown"]
     },
     "followed": {
       "type": "string",

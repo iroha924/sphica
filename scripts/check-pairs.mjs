@@ -481,8 +481,7 @@ if (TRAILER !== null) {
 
 // ---- The record fields the trace and glean Skills describe match what the save paths accept ----
 //
-// The Skills tell the agent which JSON fields to write; server/src/record.ts and server/src/glean.ts reject anything else (strict zod).
-// A field added on one side only is either refused on save or never written.
+// The save paths reject any field not in their strict zod types, so a field added on one side only is refused or never written.
 {
   /** The keys of a zod object written as `const <name> = z\n  .object({ ... })`, at its own indentation. */
   const zodKeys = (file, name) => {
