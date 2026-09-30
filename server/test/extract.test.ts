@@ -22,7 +22,7 @@ import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
 import { readSource } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
-import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
+import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-extract-home-"));
@@ -1021,7 +1021,11 @@ test("glean: a cited file excerpt is stored masked, and quotes touching masked t
       const c = await checkText(db.ingest, r, p, root, record);
       return c.ok ? saveText(db.ingest, r, p, root, record) : Promise.reject(new Error(c.text));
     };
-    await cite([1, 3], "Rotate the key before a release.");
+    const asked = await statements(() => cite([1, 3], "Rotate the key before a release."));
+    // Looking an excerpt up by its id uses the unique index of items, not a scan of the project's sources
+    const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
+    assert.ok(lookups.length > 0);
+    for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
     const rows = db.owner
       .prepare(
         "select id, revision, text, redacted, truncated from source where external_id = ? order by revision",

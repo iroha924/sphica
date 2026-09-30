@@ -124,14 +124,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 
 名前を挙げた lookup が index を使い、重複と規則に合わない値が入らず、使われていない値と表が消える。
 
-- [ ] T09: FK の列に index を足し、規則をテストで守り、item の lookup に session_id is null を足す
+- [x] T09: FK の列に index を足し、規則をテストで守り、item の lookup に session_id is null を足す
   - 種別: 修正
   - 計画: S3, S4, S6, S8
   - 依存: T03（revision 5 の schema と移行が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/github.ts`, `server/src/glean.ts`, `server/test/schema.test.ts`, `server/test/github.test.ts`, `server/test/deliver.test.ts`, `server/test/search.test.ts`, `server/test/forget.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/github.ts`, `server/src/glean.ts`, `server/test/temp-db.ts`, `server/test/schema.test.ts`, `server/test/github.test.ts`, `server/test/extract.test.ts`, `server/test/deliver.test.ts`, `server/test/search.test.ts`, `server/test/forget.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → FK の列（の組）を先頭に持つ index が無い表が一覧になって落ちる（`unit_link.to_unit`、`delivery_unit.unit_id` など）
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/github.test.ts test/deliver.test.ts test/search.test.ts test/forget.test.ts test/migrate.test.ts` → FK の index の規則のテストが通り、delivery の conflicts・後継の lookup・item の lookup・forget が触る列のクエリプランに index 名が出るテストが通る
   - コミット: `fix(db): index every foreign key and the item lookups (T09)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/github.test.ts test/deliver.test.ts test/search.test.ts test/forget.test.ts test/extract.test.ts` → 直す前の schema と lookup では 16 本が落ちた（red: FK の index の規則、item の lookup、delivery の conflicts、検索と読み取りの後継、forget）。直した後は同じ 6 ファイルと migrate.test.ts で 130 pass・0 fail。`bun run verify` → exit 0
 
 - [ ] T10: FK の動作を揃え、引用のある session の直接削除を拒む
   - 種別: 修正
@@ -243,3 +244,9 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T06 / 実装の前に、plan の unique index だと取り下げた後継が枠を塞ぐことに気づいた / Codex と新しい会話で相談して「withdrawn でない後継は 1 つまで」のトリガーに合意。plan の方針 5・2 を直し、status を draft に戻して持ち主の Go を待つ。T06 の題名・red・完了条件を合わせた（前の値: 題名「後継を 1 つにし、…」、red「1 つの unit に 2 つ目の後継、…」、完了条件は「後継を withdraw した後は…」の句が無い）。T06 に依存する T17 は Go まで着手しない
 - 2026-10-01 / T04・T05 / Codex のレビュー（3a1aee15）: 指摘 2 件（どちらも P2、再現済み）。F1: 同じ保存で supersede される unit への withdraw を check で拒むのは、後継が candidate に留まる場合に有効な取り下げを落とす（0.6.14 では通る）。F2: migration の run を id カウンターの復元より前に作るので、消した run の id を使い直す / 2 件とも採用。修正タスク T21 を足した
 - 2026-10-01 / T07 / review-shipping（1 回目は API の 529 で結果なし、投げ直し）: 指摘なし。5 つの変異（古い retract トリガー、retire のトリガー無し、修復の insert 無し、同じ場所の検査無し、retire の前に戻さない）がそれぞれ新しいテストを落とすことを確認
+- 2026-10-01 / T21 / Codex の個別レビューは投げない。Codex 自身の指摘の直しで、review-shipping が再現で確かめた。最後の全差分レビューで見る
+- 2026-10-01 / T07 / Codex のレビュー（155a08ae）: 指摘 0 件。unit_support が revision 4 の 3 つの規則と同じ判定であることを確かめた
+- 2026-10-01 / T09 / 変更欄に `server/test/temp-db.ts`（実際のコードが流す SQL を記録する `statements()` と、クエリプランを出す `plan()`）と `server/test/extract.test.ts`（glean の抜粋の lookup）を足した
+- 2026-10-01 / T09 / `bun run verify` が 1 回、テストが 1 本 900 秒以上かかって落ち、acceptance の 1 件が本物の `gh` に届いた。単独でも、流し直しても通った（2 分） / 再現しないので手を入れない。実行中のスリープを疑うが未確認
+- 2026-10-01 / T09 / review-shipping（1 回目は 10 分無応答で打ち切り、投げ直し）: 指摘 2 件（forget のプランの検査が preview だけで apply を見ていない、関数の説明が 2 つ並んでいる） / 同じコミットで直した
+- 2026-10-01 / T06 / 「withdrawn でない後継は 1 つまで」への plan の変更に、持ち主が Go。plan を approved に戻した（コミットは T06 と一緒）

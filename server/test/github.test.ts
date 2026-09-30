@@ -15,7 +15,7 @@ import {
   repoOf,
   storeItems,
 } from "../src/github.ts";
-import { at, insert, project, tempDb } from "./temp-db.ts";
+import { at, insert, plan, project, statements, tempDb } from "./temp-db.ts";
 
 const sha = (c: string) => c.repeat(40);
 const user = (login: string, id: number, type = "User") => ({ login, id, type });
@@ -194,7 +194,14 @@ test("stores sources with who wrote them, adds a revision only when text changed
       bound_at: at("2026-01-01T00:00:00Z"),
     });
     const first = await readPull(fake("Fixes #14. Switch to pnpm."), 7);
-    const ids = await storeItems(db.ingest, p, first.items);
+    let ids: (number | null)[] = [];
+    const asked = await statements(async () => {
+      ids = await storeItems(db.ingest, p, first.items);
+    });
+    // Each item is looked up by its id through the unique index of items, not by scanning the project's sources
+    const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
+    assert.equal(lookups.length, first.items.length);
+    for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
     await linkIssues(db.ingest, p, 7, first.closes);
     await linkIssues(db.ingest, p, 7, first.closes);
     const kinds = db.owner

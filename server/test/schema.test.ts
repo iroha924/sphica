@@ -80,6 +80,61 @@ const external = (v: Values) =>
     ...v,
   });
 
+// Removing or moving a parent row makes SQLite look for its children. Without an index led by the child's key, that is a scan of the child table
+test("every foreign key is led by an index on its own columns", () => {
+  const tables = (
+    db.owner
+      .prepare(
+        "select name from sqlite_schema where type = 'table' and sql not like 'CREATE VIRTUAL%' and name not glob '*_fts_*' and name not glob 'sqlite_*'",
+      )
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.length >= 25, tables.join(" "));
+  const unled: string[] = [];
+  let keys = 0;
+  for (const table of tables) {
+    const parts = new Map<number, { seq: number; from: string }[]>();
+    for (const f of db.owner.prepare(`pragma foreign_key_list(${table})`).all() as {
+      id: number;
+      seq: number;
+      from: string;
+    }[])
+      parts.set(f.id, [...(parts.get(f.id) ?? []), f]);
+    const primary = (db.owner.prepare(`pragma table_info(${table})`).all() as { name: string; pk: number }[])
+      .filter((c) => c.pk)
+      .sort((a, b) => a.pk - b.pk)
+      .map((c) => c.name);
+    const indexes = (
+      db.owner.prepare(`pragma index_list(${table})`).all() as { name: string; partial: number }[]
+    ).map((i) => ({
+      columns: (db.owner.prepare(`pragma index_info(${i.name})`).all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
+      // A partial index serves the key only when it leaves out nothing but the rows whose key is null
+      where: i.partial
+        ? String(one("select sql from sqlite_schema where name = ?", i.name).sql)
+            .split(/\bwhere\b/)[1]
+            ?.trim()
+        : null,
+    }));
+    for (const key of parts.values()) {
+      keys++;
+      const columns = key.sort((a, b) => a.seq - b.seq).map((c) => c.from);
+      const leads = (index: string[]) => columns.every((c) => index.slice(0, columns.length).includes(c));
+      const led =
+        leads(primary) ||
+        indexes.some(
+          (i) =>
+            leads(i.columns) &&
+            (i.where === null || (columns.length === 1 && i.where === `${columns[0]} is not null`)),
+        );
+      if (!led) unled.push(`${table} (${columns.join(", ")})`);
+    }
+  }
+  assert.ok(keys >= 50, `${keys} foreign keys`);
+  assert.deepEqual(unled, []);
+});
+
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
   assert.equal(one("pragma user_version").user_version, 5);

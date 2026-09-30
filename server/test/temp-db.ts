@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import type { Kysely } from "kysely";
 import { openReader } from "../src/db.ts";
 import type { DB } from "../src/db-types.ts";
@@ -44,6 +44,30 @@ export function tempDb(): TempDb {
     },
   };
 }
+
+/** Runs fn and returns every SQL statement prepared meanwhile, on any connection of this process: what the code really asks the database. */
+export async function statements(fn: () => unknown): Promise<string[]> {
+  const prepare = DatabaseSync.prototype.prepare;
+  const seen: string[] = [];
+  DatabaseSync.prototype.prepare = function (this: DatabaseSync, ...args: Parameters<typeof prepare>) {
+    seen.push(String(args[0]));
+    return prepare.apply(this, args);
+  };
+  try {
+    await fn();
+  } finally {
+    DatabaseSync.prototype.prepare = prepare;
+  }
+  return seen;
+}
+
+/** How SQLite would run a statement, on one line. Its parameters are left unbound: the plan depends on the statement, not the values. */
+export const plan = (db: TempDb, sql: string): string =>
+  db.owner
+    .prepare(`explain query plan ${sql}`)
+    .all()
+    .map((r) => String(r.detail))
+    .join(" | ");
 
 /** Fixture time in the form the schema CHECK requires (ISO 8601 UTC with milliseconds). */
 export const at = (s: string): string => new Date(s).toISOString();

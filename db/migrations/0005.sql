@@ -208,9 +208,17 @@ end;
 create trigger source_fts_ad after delete on source when old.indexed = 1 begin
   delete from source_fts where rowid = old.id;
 end;
+create index external_reference_project on external_reference (project_id);
+create index external_reference_source on external_reference (owner_source_id);
+create index forget_batch_project on forget_batch (project_id);
+create index source_forgotten_batch on source_forgotten (batch_id);
 create index source_forgotten_item on source_forgotten (project_id, artifact, kind, external_id, content_hash);
 create index edit_observation_path on edit_observation (path);
+create index extraction_run_project on extraction_run (project_id);
+create index extraction_run_session on extraction_run (session_id) where session_id is not null;
+create index source_processing_run on source_processing (run_id);
 create index unit_live on unit (project_id, lifecycle, kind);
+create index unit_run on unit (run_id);
 create trigger unit_insert_candidate before insert on unit when new.lifecycle <> 'candidate' begin
   select raise(abort, 'units start as candidates');
 end;
@@ -244,6 +252,12 @@ end;
 create unique index unit_evidence_unit_once on unit_evidence (unit_id, source_id, span_start, span_end, role) where option_id is null;
 create unique index unit_evidence_option_once on unit_evidence (option_id, source_id, span_start, span_end, role) where option_id is not null;
 create index unit_evidence_source on unit_evidence (source_id);
+create index unit_evidence_option on unit_evidence (unit_id, option_id);
+create index unit_evidence_retraction on unit_evidence (retraction_source_id) where retraction_source_id is not null;
+create index unit_evidence_run on unit_evidence (run_id);
+create index unit_adoption_source on unit_adoption (source_id);
+create index unit_adoption_retraction on unit_adoption (retraction_source_id) where retraction_source_id is not null;
+create index unit_adoption_run on unit_adoption (run_id);
 create trigger unit_adoption_route before insert on unit_adoption begin
   select raise(abort, 'owner_statement adoption needs an owner-authored source')
   where new.route = 'owner_statement' and not exists (select 1 from source where id = new.source_id and author_kind = 'owner');
@@ -255,6 +269,8 @@ create trigger unit_adoption_route before insert on unit_adoption begin
   select raise(abort, 'adoption applies to decisions and constraints')
   where not exists (select 1 from unit where id = new.unit_id and kind in ('decision', 'constraint'));
 end;
+create index unit_link_to on unit_link (to_unit, kind);
+create index unit_link_run on unit_link (run_id);
 create trigger unit_link_frozen before update on unit_link begin
   select raise(abort, 'links are frozen; only an unresolved conflict can be resolved, once')
   where new.from_unit is not old.from_unit or new.to_unit is not old.to_unit or new.kind is not old.kind
@@ -272,6 +288,9 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
     select 1 from chain where id = new.from_unit);
 end;
 create index unit_state_order on unit_state (unit_id, id);
+create index unit_state_source on unit_state (source_id) where source_id is not null;
+create index unit_state_run on unit_state (run_id) where run_id is not null;
+create index unit_state_forget on unit_state (forget_id) where forget_id is not null;
 create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'the first state of a unit is candidate, from no state')
   where not exists (select 1 from unit_state where unit_id = new.unit_id)
@@ -315,6 +334,9 @@ create trigger unit_state_apply after insert on unit_state begin
 end;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
 create index unit_anchor_unit on unit_anchor (unit_id, retired_at);
+create index unit_anchor_observation on unit_anchor (edit_observation_id) where edit_observation_id is not null;
+create index unit_anchor_replaced on unit_anchor (replaced_by) where replaced_by is not null;
+create index unit_anchor_run on unit_anchor (run_id);
 create trigger unit_anchor_frozen before update on unit_anchor begin
   select raise(abort, 'anchors are replaced, not edited; retirement happens once')
   where new.unit_id is not old.unit_id or new.path is not old.path or new.symbol is not old.symbol or new.commit_sha is not old.commit_sha
@@ -346,6 +368,7 @@ select u.id as unit_id, case
 end as missing
 from unit u;
 create index unit_alias_unit on unit_alias (unit_id, id);
+create index unit_alias_run on unit_alias (run_id);
 create trigger unit_alias_terms before insert on unit_alias begin
   select raise(abort, 'each alias is a non-empty string of at most 40 characters')
   where exists (select 1 from json_each(new.terms) where type <> 'text' or length(trim(value)) = 0 or length(value) > 40);
@@ -357,6 +380,7 @@ create trigger unit_alias_no_delete before delete on unit_alias when exists (sel
   select raise(abort, 'alias sets are append-only; write an empty set to clear');
 end;
 create index field_def_source on field_def (source_id);
+create index field_def_run on field_def (run_id);
 create trigger field_def_check before insert on field_def begin
   select raise(abort, 'a field definition, its source, and its run belong to one project')
   where new.project_id is not (select project_id from source where id = new.source_id)
@@ -385,6 +409,7 @@ when exists (select 1 from project where id = old.project_id) and exists (select
 end;
 create index unit_field_def on unit_field (field_def_id);
 create index unit_field_source on unit_field (source_id);
+create index unit_field_run on unit_field (run_id);
 create trigger unit_field_check before insert on unit_field begin
   select raise(abort, 'a field value, its unit, definition, source, and run belong to one project')
   where (select project_id from unit where id = new.unit_id) is not (select project_id from field_def where id = new.field_def_id)
@@ -595,7 +620,9 @@ create trigger unit_fts_field_d after delete on unit_field when exists (select 1
   insert into unit_fts (rowid, body, ident, alias) select id, body, ident, alias from unit_search_text where id = old.unit_id;
 end;
 create index work_open on work (project_id, updated_at desc) where status in ('active', 'blocked', 'paused');
+create index work_run on work (run_id) where run_id is not null;
 create index delivery_session on delivery (session_id, at);
+create index delivery_unit_unit on delivery_unit (unit_id);
 create view capture_session as select id, project_id, host, external_id, branch, started_at from session;
 create trigger capture_session_insert instead of insert on capture_session begin
   select raise(abort, 'the session already exists with different details')

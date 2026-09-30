@@ -412,6 +412,8 @@ export async function storeItems(
       .where("project_id", "=", projectId)
       .where("kind", "=", it.kind)
       .where("external_id", "=", it.externalId)
+      // Items have no session: saying so lets the lookup use the unique index of items
+      .where("session_id", "is", null)
       .orderBy("revision", "desc")
       .executeTakeFirst();
     // What the owner forgot of this item: the same words are never stored again, and a revision older than a forgotten one is not current

@@ -560,6 +560,7 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
     .where("project_id", "=", projectId)
     .where("kind", "=", "file_excerpt")
     .where("external_id", "=", external)
+    .where("session_id", "is", null)
     .orderBy("revision", "desc")
     .executeTakeFirst();
   const forgotten = await forgottenExcerpt(trx, projectId, x);

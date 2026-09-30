@@ -10,7 +10,7 @@ import { applyForget, type ForgetOutcome, forgetText, previewForget } from "../s
 import { lookOverview } from "../src/overview.ts";
 import { readUnit } from "../src/read.ts";
 import { sha256 } from "../src/text.ts";
-import { at, insert, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
+import { at, insert, message, plan, project, run, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 let db: TempDb;
 let p: number;
@@ -80,10 +80,32 @@ const exists = (id: number) => Number(one("select count(*) as n from source wher
 const indexed = (word: string) =>
   Number(one("select count(*) as n from source_fts where source_fts match ?", word).n);
 
-/** Preview, then apply what the preview showed (the owner's confirmation). */
+/**
+ * Previews, then applies what the preview showed (the owner's confirmation). On the way it checks that nothing either step asks the
+ * database scans a table that grows with the records.
+ */
 async function forget(...ids: number[]) {
-  const seen = await previewForget(db.file, p, ids);
-  return applyForget(db.file, p, ids, seen);
+  let seen: Awaited<ReturnType<typeof previewForget>> | undefined;
+  let done: Awaited<ReturnType<typeof applyForget>> | undefined;
+  const asked = await statements(async () => {
+    seen = await previewForget(db.file, p, ids);
+    done = await applyForget(db.file, p, ids, seen);
+  });
+  const queries = asked.filter((s) => /^(select|delete|update|insert)/i.test(s));
+  // Sources still held that nobody asked about would pass the check below by default
+  if (seen?.sources.length)
+    assert.ok(
+      queries.some((s) => /"unit_evidence"/.test(s)),
+      "the forget looks at what cites the sources",
+    );
+  for (const s of queries)
+    assert.doesNotMatch(
+      plan(db, s),
+      /SCAN (unit_evidence|unit_adoption|unit_state|unit_field|field_def|source_forgotten|source_processing)\b/,
+      s,
+    );
+  if (!done) throw new Error("the forget did not finish");
+  return done;
 }
 
 test("forgetting the only source of an active decision removes the row and its index entry, and the decision leaves active", async () => {

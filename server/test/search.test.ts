@@ -11,7 +11,7 @@ import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
   const t: Target = {
@@ -86,7 +86,13 @@ test("search keeps records holding most of the question's words, filters them, a
     assert.deepEqual(await keys("CI push", { kinds: ["decision"] }), []);
     assert.deepEqual(await keys("pnpm", { lifecycles: ["active"] }), []);
     // Kind and lifecycle filters hold for successors too; a path filter still brings the successor of a record anchored there
-    assert.deepEqual(await keys("pnpm", { lifecycles: ["superseded"] }), ["trace:ext-s1/pnpm"]);
+    const found = await statements(async () => {
+      assert.deepEqual(await keys("pnpm", { lifecycles: ["superseded"] }), ["trace:ext-s1/pnpm"]);
+    });
+    // A superseded hit's successors are found through the index on the unit a link points at
+    const successors = found.filter((s) => s.includes('"unit_link"'));
+    assert.ok(successors.length > 0);
+    for (const s of successors) assert.match(plan(db, s), /SEARCH l USING (COVERING )?INDEX unit_link_to/, s);
     assert.deepEqual(
       await keys("pnpm", { kinds: ["finding", "decision"], lifecycles: ["superseded", "active"] }),
       ["trace:ext-s1/npm", "trace:ext-s1/pnpm"],
@@ -162,7 +168,14 @@ test("read shows cited words and who said them, links, history, and each anchor 
         },
       ],
     });
-    const text = (await readUnit(db.reader, p, "trace:ext-s1/storage", root)) ?? "";
+    let text = "";
+    const read = await statements(async () => {
+      text = (await readUnit(db.reader, p, "trace:ext-s1/storage", root)) ?? "";
+    });
+    // Reading a record finds its links from either end by index
+    const links = read.filter((s) => s.includes('"unit_link"'));
+    assert.ok(links.length > 0);
+    for (const s of links) assert.doesNotMatch(plan(db, s), /SCAN l\b/, s);
     for (const want of [
       /decision do, active/,
       /Why: サーバーは要らない/,

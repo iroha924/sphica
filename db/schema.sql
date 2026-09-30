@@ -10,6 +10,8 @@
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
 -- Byte offsets are into the UTF-8 bytes of source.text. Project consistency across tables is enforced by triggers, not only by code.
+-- Every foreign key is led by an index on its own columns (a partial one where the column can be null), so removing or moving a parent
+-- row looks its children up instead of scanning them.
 
 create table sphica_generation (generation integer not null check (generation = 2)) strict;
 insert into sphica_generation values (2);
@@ -145,6 +147,8 @@ create table external_reference (
   span_end integer not null check (span_end > span_start),
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
 ) strict;
+create index external_reference_project on external_reference (project_id);
+create index external_reference_source on external_reference (owner_source_id);
 
 -- One owner-confirmed deletion of chosen sources. It stands in for an extraction run on the state changes the deletion causes.
 create table forget_batch (
@@ -152,6 +156,7 @@ create table forget_batch (
   project_id integer not null references project (id) on delete cascade,
   at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', at) is at)
 ) strict;
+create index forget_batch_project on forget_batch (project_id);
 
 -- A source the owner forgot: its original id and identity, never its text. Capture, harvest, and glean skip an item matching one,
 -- so the same words are not stored again; changed text is new speech and is stored. source_id has no foreign key: the row is gone.
@@ -166,6 +171,7 @@ create table source_forgotten (
   content_hash blob not null check (length(content_hash) = 32),
   batch_id integer not null references forget_batch (id) on delete cascade
 ) strict;
+create index source_forgotten_batch on source_forgotten (batch_id);
 -- Not unique: an edited item that returns to earlier text has two revisions with the same hash, and both can be forgotten
 create index source_forgotten_item on source_forgotten (project_id, artifact, kind, external_id, content_hash);
 
@@ -200,6 +206,8 @@ create table extraction_run (
   finished_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', finished_at) is finished_at),
   check (status in ('running', 'saved') or reason is not null)
 ) strict;
+create index extraction_run_project on extraction_run (project_id);
+create index extraction_run_session on extraction_run (session_id) where session_id is not null;
 
 -- Which sources an extraction looked at, and what came of them
 create table source_processing (
@@ -208,6 +216,7 @@ create table source_processing (
   outcome text not null check (outcome in ('units', 'no_unit', 'failed', 'capped')),
   primary key (source_id, run_id)
 ) strict;
+create index source_processing_run on source_processing (run_id);
 
 -- An extracted unit. Its text is never rewritten: corrections are successors, withdrawals, retractions, and anchor replacements.
 -- extraction: supported (every evidence span was found in retained text) or quarantined (with reason).
@@ -242,6 +251,7 @@ create table unit (
   check (unsourced = 0 or lifecycle <> 'active')
 ) strict;
 create index unit_live on unit (project_id, lifecycle, kind);
+create index unit_run on unit (run_id);
 create trigger unit_insert_candidate before insert on unit when new.lifecycle <> 'candidate' begin
   select raise(abort, 'units start as candidates');
 end;
@@ -317,6 +327,9 @@ create table unit_evidence (
 create unique index unit_evidence_unit_once on unit_evidence (unit_id, source_id, span_start, span_end, role) where option_id is null;
 create unique index unit_evidence_option_once on unit_evidence (option_id, source_id, span_start, span_end, role) where option_id is not null;
 create index unit_evidence_source on unit_evidence (source_id);
+create index unit_evidence_option on unit_evidence (unit_id, option_id);
+create index unit_evidence_retraction on unit_evidence (retraction_source_id) where retraction_source_id is not null;
+create index unit_evidence_run on unit_evidence (run_id);
 
 -- Evidence that the project adopted a decision or constraint. route: owner_statement (an owner-kind source span) or
 -- explicit (an explicit disposition in a source, such as a maintainer's reply saying it is adopted). A merge or a resolved thread is never adoption.
@@ -341,6 +354,9 @@ create table unit_adoption (
   check ((retraction_source_id is null) = (retraction_span_end is null)),
   check (retraction_span_end is null or retraction_span_end > retraction_span_start)
 ) strict;
+create index unit_adoption_source on unit_adoption (source_id);
+create index unit_adoption_retraction on unit_adoption (retraction_source_id) where retraction_source_id is not null;
+create index unit_adoption_run on unit_adoption (run_id);
 create trigger unit_adoption_route before insert on unit_adoption begin
   select raise(abort, 'owner_statement adoption needs an owner-authored source')
   where new.route = 'owner_statement' and not exists (select 1 from source where id = new.source_id and author_kind = 'owner');
@@ -367,6 +383,9 @@ create table unit_link (
   check ((resolved_at is null) = (resolution is null)),
   check (kind = 'conflicts' or resolved_at is null)
 ) strict;
+-- Lookups by the unit a link points at: its successors, and its conflicts from either side
+create index unit_link_to on unit_link (to_unit, kind);
+create index unit_link_run on unit_link (run_id);
 create trigger unit_link_frozen before update on unit_link begin
   select raise(abort, 'links are frozen; only an unresolved conflict can be resolved, once')
   where new.from_unit is not old.from_unit or new.to_unit is not old.to_unit or new.kind is not old.kind
@@ -399,6 +418,9 @@ create table unit_state (
   check ((run_id is null) <> (forget_id is null))
 ) strict;
 create index unit_state_order on unit_state (unit_id, id);
+create index unit_state_source on unit_state (source_id) where source_id is not null;
+create index unit_state_run on unit_state (run_id) where run_id is not null;
+create index unit_state_forget on unit_state (forget_id) where forget_id is not null;
 create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'the first state of a unit is candidate, from no state')
   where not exists (select 1 from unit_state where unit_id = new.unit_id)
@@ -463,6 +485,9 @@ create table unit_anchor (
 ) strict;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
 create index unit_anchor_unit on unit_anchor (unit_id, retired_at);
+create index unit_anchor_observation on unit_anchor (edit_observation_id) where edit_observation_id is not null;
+create index unit_anchor_replaced on unit_anchor (replaced_by) where replaced_by is not null;
+create index unit_anchor_run on unit_anchor (run_id);
 -- Anchors are retired and replaced, never edited in place (except setting retired_at and replaced_by once)
 create trigger unit_anchor_frozen before update on unit_anchor begin
   select raise(abort, 'anchors are replaced, not edited; retirement happens once')
@@ -510,6 +535,7 @@ create table unit_alias (
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
 ) strict;
 create index unit_alias_unit on unit_alias (unit_id, id);
+create index unit_alias_run on unit_alias (run_id);
 create trigger unit_alias_terms before insert on unit_alias begin
   select raise(abort, 'each alias is a non-empty string of at most 40 characters')
   where exists (select 1 from json_each(new.terms) where type <> 'text' or length(trim(value)) = 0 or length(value) > 40);
@@ -545,6 +571,7 @@ create table field_def (
   check ((type = 'enum') = (enum_values is not null))
 ) strict;
 create index field_def_source on field_def (source_id);
+create index field_def_run on field_def (run_id);
 create trigger field_def_check before insert on field_def begin
   select raise(abort, 'a field definition, its source, and its run belong to one project')
   where new.project_id is not (select project_id from source where id = new.source_id)
@@ -588,6 +615,7 @@ create table unit_field (
 ) strict;
 create index unit_field_def on unit_field (field_def_id);
 create index unit_field_source on unit_field (source_id);
+create index unit_field_run on unit_field (run_id);
 create trigger unit_field_check before insert on unit_field begin
   select raise(abort, 'a field value, its unit, definition, source, and run belong to one project')
   where (select project_id from unit where id = new.unit_id) is not (select project_id from field_def where id = new.field_def_id)
@@ -826,6 +854,7 @@ create table work (
   unique (project_id, key)
 ) strict;
 create index work_open on work (project_id, updated_at desc) where status in ('active', 'blocked', 'paused');
+create index work_run on work (run_id) where run_id is not null;
 
 -- What a delivery hook emitted or suppressed, and how many eligible units it left out. No source text is copied here.
 -- chars is the delivered length without the omission note (Sphica's own text), since the read budget adds it up.
@@ -847,6 +876,7 @@ create table delivery_unit (
   unit_id integer not null references unit (id) on delete cascade,
   primary key (delivery_id, unit_id)
 ) strict;
+create index delivery_unit_unit on delivery_unit (unit_id);
 
 -- The views the capture connection may write. The capture authorizer allows inserts into these views only; the triggers derive
 -- project, artifact, and indexing from the session and the speaker, so capture cannot write another project's rows or third-party text.
