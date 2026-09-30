@@ -168,7 +168,7 @@ drop table temp.sphica_anchor;
 
 -- Supersedes links revision 5 refuses are removed first, so the lifecycle repairs below see what is left: a record replacing one of
 -- another kind (a decision and a constraint may replace each other), and every live successor of a record but one (an active one first,
--- then the newest). Withdrawn successors keep their links: they hold no place.
+-- then the newest). Withdrawn, quarantined, and unsourced successors keep their links: they hold no place.
 create temp table sphica_link (from_unit integer not null, to_unit integer not null, rule text not null, primary key (from_unit, to_unit));
 insert or ignore into sphica_link
 select l.from_unit, l.to_unit, 'a supersedes link between records of kinds that cannot replace each other'
@@ -178,10 +178,10 @@ where l.kind = 'supersedes' and a.kind <> b.kind
 insert or ignore into sphica_link
 select l.from_unit, l.to_unit, 'a second successor of a record whose first successor is not withdrawn'
 from unit_link l join unit s on s.id = l.from_unit
-where l.kind = 'supersedes' and s.lifecycle <> 'withdrawn'
+where l.kind = 'supersedes' and s.lifecycle <> 'withdrawn' and s.extraction = 'supported' and s.unsourced = 0
   and not exists (select 1 from sphica_link x where x.from_unit = l.from_unit and x.to_unit = l.to_unit)
   and l.from_unit <> (select k.from_unit from unit_link k join unit n on n.id = k.from_unit
-    where k.to_unit = l.to_unit and k.kind = 'supersedes' and n.lifecycle <> 'withdrawn'
+    where k.to_unit = l.to_unit and k.kind = 'supersedes' and n.lifecycle <> 'withdrawn' and n.extraction = 'supported' and n.unsourced = 0
       and not exists (select 1 from sphica_link x where x.from_unit = k.from_unit and x.to_unit = k.to_unit)
     order by n.lifecycle = 'active' desc, n.id desc limit 1);
 insert into sphica_migration_note
@@ -199,7 +199,7 @@ insert or ignore into sphica_lifecycle
 select u.id, 'a superseded record whose successors are all withdrawn, or that has none'
 from unit u where u.lifecycle = 'superseded' and not exists (
   select 1 from unit_link l join unit s on s.id = l.from_unit
-  where l.to_unit = u.id and l.kind = 'supersedes' and s.lifecycle <> 'withdrawn');
+  where l.to_unit = u.id and l.kind = 'supersedes' and s.lifecycle <> 'withdrawn' and s.extraction = 'supported' and s.unsourced = 0);
 -- The support rule of revision 5, only while this asks it (the view is created for good with the others at the end)
 create view unit_support as
 select u.id as unit_id, case
@@ -453,7 +453,8 @@ create trigger unit_state_rules before insert on unit_state begin
     (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
     or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
     or (new.from_state = 'superseded' and new.to_state = 'candidate' and not exists (
-      select 1 from unit_link l where l.to_unit = new.unit_id and l.kind = 'supersedes'
+      select 1 from unit_link l join unit s on s.id = l.from_unit where l.to_unit = new.unit_id and l.kind = 'supersedes'
+        and s.extraction = 'supported' and s.unsourced = 0
         and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
@@ -486,7 +487,8 @@ create trigger unit_state_restore after insert on unit_state when new.to_state =
   select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
   from unit_link l join unit o on o.id = l.to_unit
   where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
-    and not exists (select 1 from unit_link k where k.to_unit = o.id and k.kind = 'supersedes' and k.from_unit <> new.unit_id
+    and not exists (select 1 from unit_link k join unit s on s.id = k.from_unit where k.to_unit = o.id and k.kind = 'supersedes'
+      and k.from_unit <> new.unit_id and s.extraction = 'supported' and s.unsourced = 0
       and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
@@ -676,10 +678,12 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
   where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
     and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
-  -- One successor at a time: a withdrawn one gives its place up. States are read from history, as in unit_state_rules
+  -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
+  -- become active, nor be withdrawn. States are read from history, as in unit_state_rules
   select raise(abort, 'the record already has a successor that is not withdrawn')
-  where new.kind = 'supersedes' and exists (select 1 from unit_link l where l.to_unit = new.to_unit and l.kind = 'supersedes'
-    and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
+  where new.kind = 'supersedes' and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+    where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
+      and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'state and unit belong to different projects')

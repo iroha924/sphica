@@ -375,6 +375,9 @@ export async function checkRecord(
             [...others.values()].map((o) => o.id),
           )
           .where("n.lifecycle", "<>", "withdrawn")
+          // Quarantined or unsourced, a successor can never become active, so it holds no place
+          .where("n.extraction", "=", "supported")
+          .where("n.unsourced", "=", 0)
           .execute()
       : []
     ).map((h) => [h.to_unit, h]),

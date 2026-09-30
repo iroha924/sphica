@@ -402,6 +402,29 @@ test("a record has one live successor at a time, of a kind that can replace it",
   refuses(() => link(second, old), /already has a successor that is not withdrawn/);
   state(first, "candidate", "withdrawn");
   link(second, old);
+  // A quarantined or unsourced successor can never become active or be withdrawn, so it takes no place
+  const other = made("other", "finding");
+  const quarantined = unit({
+    key: "q",
+    kind: "finding",
+    extraction: "quarantined",
+    extraction_reason: "quote not found",
+  });
+  state(quarantined, null, "candidate");
+  link(quarantined, other);
+  const unsourced = unit({ key: "n", kind: "finding", unsourced: 1 });
+  state(unsourced, null, "candidate");
+  link(unsourced, other);
+  const sourced = made("sourced", "finding");
+  link(sourced, other);
+  // Its only live successor withdrawn, the record comes back, though the quarantined and unsourced ones still point at it
+  state(other, "candidate", "active");
+  state(sourced, "candidate", "active");
+  state(other, "active", "superseded");
+  state(sourced, "active", "withdrawn");
+  assert.equal(one("select lifecycle from unit where id = ?", other).lifecycle, "candidate");
+  // And from there a superseded record with only quarantined or unsourced successors left may be moved back by hand too
+  state(other, "candidate", "withdrawn");
   assert.deepEqual(
     db.owner
       .prepare("select from_unit from unit_link where to_unit = ? order by from_unit")

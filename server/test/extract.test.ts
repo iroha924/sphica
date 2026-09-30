@@ -1180,8 +1180,9 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
       adoption: [{ source: `s${source}`, quote }],
       ...extra,
     });
+    const cache = message(db, p, { id: "o2", text: "Redis を使う。" });
     await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
-      units: [decided("storage", old, "SQLite にしよう。")],
+      units: [decided("storage", old, "SQLite にしよう。"), decided("cache", cache, "Redis を使う。")],
     });
     session(db, p, "g1");
     const said = message(db, p, {
@@ -1240,7 +1241,8 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
     });
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-4")], ["superseded", "active"]);
     // A successor still waiting for adoption holds the place too, and the refusal names it
-    const { adoption: _, ...unadopted } = decided("storage-5", said, "やっぱり Postgres はやめる。", {
+    // Quoting the earlier session keeps it sourced, and without adoption it waits as a candidate
+    const { adoption: _, ...unadopted } = decided("storage-5", old, "SQLite にしよう。", {
       supersedes: "glean:storage-4",
     });
     await glean({ units: [unadopted] });
@@ -1249,6 +1251,18 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
       glean({ units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })] }),
       /glean:storage-4 already has a successor, glean:storage-5 \(candidate\); withdraw it first, or supersede it instead/,
     );
+    // A successor whose quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place
+    await glean({
+      units: [decided("cache-q", said, "引用に無い言葉。", { supersedes: "trace:ext-s1/cache" })],
+    });
+    assert.equal(
+      db.owner.prepare("select extraction from unit where key = 'glean:cache-q'").get()?.extraction,
+      "quarantined",
+    );
+    await glean({
+      units: [decided("cache-2", said, "Postgres にする。", { supersedes: "trace:ext-s1/cache" })],
+    });
+    assert.deepEqual([state("trace:ext-s1/cache"), state("glean:cache-2")], ["superseded", "active"]);
   } finally {
     await db.done();
   }

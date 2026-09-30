@@ -356,7 +356,8 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
       to,
       now,
     );
-  // 2 was replaced by 3, which was withdrawn. 4 was replaced by 5, which is still a candidate: that one stays superseded
+  // 2 was replaced by 3, which was withdrawn. 4 was replaced by 5, which is still a candidate: that one stays superseded.
+  // 6 points only at 7, a quarantined unit that can never become active: 6 comes back too
   for (const key of ["left", "gone", "kept", "waiting"]) finding(key);
   for (const [old, next] of [
     [2, 3],
@@ -368,6 +369,16 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
     move(old, "candidate", "superseded");
   }
   move(3, "candidate", "withdrawn");
+  finding("alone");
+  run(
+    "insert into unit (project_id, key, kind, text, extraction, extraction_reason, run_id, created_at, content_hash) values (1, 'quarantined', 'finding', 'q', 'quarantined', 'quote not found', 1, ?, ?)",
+    now,
+    sha256("quarantined"),
+  );
+  move(6, null, "candidate");
+  move(7, null, "candidate");
+  supersedes(7, 6);
+  move(6, "candidate", "superseded");
   const revision = (unit: number) =>
     Number(
       (raw.prepare("select revision from unit where id = ?").get(unit) as { revision: number }).revision,
@@ -397,6 +408,8 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
       [3, "withdrawn"],
       [4, "superseded"],
       [5, "candidate"],
+      [6, "candidate"],
+      [7, "candidate"],
     ],
   );
   assert.equal(revision(2), before + 1);
@@ -430,7 +443,7 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
   );
   assert.match(
     said,
-    /Changed while migrating to revision 5: 1 row[^\n]*\n\s*a superseded record whose successors are all withdrawn, or that has none: 1 row\n\s*unit 2 left \(superseded\) → back to candidate/,
+    /Changed while migrating to revision 5: 2 rows[^\n]*\n\s*a superseded record whose successors are all withdrawn, or that has none: 2 rows\n\s*unit 2 left \(superseded\) → back to candidate\n\s*unit 6 alone \(superseded\) → back to candidate/,
   );
   // The unit is judged again like any candidate, and the rules of revision 5 apply to it
   move(2, "candidate", "withdrawn");
@@ -530,13 +543,23 @@ test("migrating revision 4 keeps one live successor of a record and removes link
   const newer = made("newer", "constraint", [null, "candidate"]);
   const finding = made("finding", "finding", [null, "candidate"]);
   for (const u of [gone, older, newer, finding]) supersedes(u, 1);
+  // A quarantined successor can never become active: it holds no place and keeps its link
+  run(
+    "insert into unit (project_id, key, kind, stance, text, extraction, extraction_reason, run_id, created_at, content_hash) values (1, 'quarantined', 'decision', 'do', 'q', 'quarantined', 'quote not found', 1, ?, ?)",
+    now,
+    sha256("quarantined"),
+  );
+  const quarantined = Number(
+    (raw.prepare("select id from unit where key = 'quarantined'").get() as { id: number }).id,
+  );
+  supersedes(quarantined, 1);
   const said = migrate(raw);
   assert.deepEqual(
     raw
       .prepare("select from_unit from unit_link where to_unit = 1 and kind = 'supersedes' order by from_unit")
       .all()
       .map((r) => r.from_unit),
-    [gone, newer],
+    [gone, newer, quarantined],
   );
   assert.match(
     said,

@@ -463,7 +463,8 @@ create trigger unit_state_rules before insert on unit_state begin
     (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
     or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
     or (new.from_state = 'superseded' and new.to_state = 'candidate' and not exists (
-      select 1 from unit_link l where l.to_unit = new.unit_id and l.kind = 'supersedes'
+      select 1 from unit_link l join unit s on s.id = l.from_unit where l.to_unit = new.unit_id and l.kind = 'supersedes'
+        and s.extraction = 'supported' and s.unsourced = 0
         and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
@@ -499,7 +500,8 @@ create trigger unit_state_restore after insert on unit_state when new.to_state =
   select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
   from unit_link l join unit o on o.id = l.to_unit
   where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
-    and not exists (select 1 from unit_link k where k.to_unit = o.id and k.kind = 'supersedes' and k.from_unit <> new.unit_id
+    and not exists (select 1 from unit_link k join unit s on s.id = k.from_unit where k.to_unit = o.id and k.kind = 'supersedes'
+      and k.from_unit <> new.unit_id and s.extraction = 'supported' and s.unsourced = 0
       and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 
@@ -770,10 +772,12 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
   where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
     and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
-  -- One successor at a time: a withdrawn one gives its place up. States are read from history, as in unit_state_rules
+  -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
+  -- become active, nor be withdrawn. States are read from history, as in unit_state_rules
   select raise(abort, 'the record already has a successor that is not withdrawn')
-  where new.kind = 'supersedes' and exists (select 1 from unit_link l where l.to_unit = new.to_unit and l.kind = 'supersedes'
-    and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
+  where new.kind = 'supersedes' and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+    where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
+      and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'state and unit belong to different projects')

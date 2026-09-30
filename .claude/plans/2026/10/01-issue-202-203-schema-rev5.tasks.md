@@ -121,7 +121,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(glean): let a record be withdrawn beside a candidate successor, and keep run ids unused (T21)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="withdrawn beside a successor|whose successor is withdrawn" test/extract.test.ts test/migrate.test.ts` → 直す前は 2 本とも落ちた（red: check の「The record is not valid」/ migration の run の id が 9 でなく 2）。直した後 `node --test test/extract.test.ts test/migrate.test.ts` → 42 pass・0 fail。`bun run verify` → exit 0。review-shipping（1 回目は API の 529 で結果なし、投げ直し）: 指摘なし。save 側の分岐だけを戻すとテストの後半が落ちることを確認
 
-- [ ] T22: 隔離された後継と出典の無い後継を、生きた後継に数えない
+- [x] T22: 隔離された後継と出典の無い後継を、生きた後継に数えない
   - 種別: 修正
   - 計画: S3, S4, S6
   - 依存: T06（直す対象の後継の規則が要る）
@@ -129,6 +129,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/extract.test.ts` → 隔離された後継が付いた unit に、支えのある新しい後継を付けようとすると拒まれて落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/extract.test.ts test/migrate.test.ts` → 隔離された後継・出典の無い後継がいても新しい後継を付けられ、その後継が active になると元の unit が superseded になるテストが通る
   - コミット: `fix(db): let quarantined and unsourced successors hold no place (T22)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="one live successor at a time|brings back the record|keeps one live successor" test/schema.test.ts test/extract.test.ts test/migrate.test.ts` → 直す前のコードでは 3 本とも落ちた（red）。直した後 schema・extract・migrate のテストは 75 pass・0 fail（隔離された後継・出典の無い後継がいても新しい後継を付けられ、active になると元が superseded になる。生きた後継を取り下げると元は candidate に戻る。移行は隔離された後継しか無い superseded の unit を candidate に戻す）。`bun run verify` → exit 0
 
 ## P3: index・FK・一意キー・CHECK・値の整理（#203）
 
@@ -272,3 +273,4 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T12 / review-shipping: 指摘 2 件。1: glean の「anchor P」と「P から Q への replace_anchor」を同じ保存で並べると、check は通るのに生の UNIQUE エラーで落ちる（再現） / glean の保存で replace_anchor を先に流すようにし、テストでその保存を通した。2: check と保存の間にファイルが変わって symbol が伏せ字の対象になると、保存時に symbol が消えて一意キーがぶつかりうる / ファイルが保存の最中に変わるときだけの端の入力なので直さない
 - 2026-10-01 / T09 / Codex のレビュー（744b4e06）: 指摘 2 件（どちらもテストの穴）。F1: forget のプランの検査が external_reference の全走査を見逃す / external_reference は T15 で表ごと消すので直さない。F2: トリガーの中の検索は `statements()` に現れない / 仕組みの限界。FK の子の検索は FK の index の規則のテストが守る。T13 で `statements()` のコメントに 1 行書く
 - 2026-10-01 / T06 / Codex のレビュー（94416206）: 指摘 1 件（P1、再現済み）。引用が見つからず隔離された後継（と出典の無い後継）は active になれず取り下げもできないのに、生きた後継として枠を塞ぎ、元の unit を二度と置き換えられない / 採用。修正タスク T22 を足した
+- 2026-10-01 / T22 / review-shipping: 指摘 2 件（どちらもテストの穴）。復帰の条件と移行の修復の条件を元に戻してもテストが通った / 生きた後継を取り下げたら、隔離された後継が残っていても元の unit が candidate に戻るテストと、隔離された後継しか無い superseded の unit を移行が candidate に戻すテストを足した。条件を戻すと 2 本とも落ちることを確かめた
