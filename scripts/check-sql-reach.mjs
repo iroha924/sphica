@@ -32,6 +32,9 @@ if (r.status !== 0) {
   console.error(`${r.stdout ?? ""}${r.stderr ?? ""}`);
   process.exit(1);
 }
+// The test output is hidden on success, so a randomized run shows its seed here to be rerun in the same order
+const seeds = new Set(`${r.stdout ?? ""}${r.stderr ?? ""}`.match(/Randomized test order seed: \d+/g));
+for (const s of seeds) console.log(s);
 
 const sites = callSites(root).filter((s) => !LIVE_FILES.some((f) => s.startsWith(`${f}:`)));
 const covered = coveredSites(covDir, root, sites);

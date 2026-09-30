@@ -72,7 +72,11 @@ jobs:
 
       # Uses the same source of truth as the local pre-push: Biome, types, the package bundle, tests (with sql:reach counting whether every SQL
       # ran against a real SQLite database), and sql:live, which runs the CLI and capture as child processes against a database in a temp HOME.
+      # On Node 26 the tests run in a random order, from a seed printed in the log, so a test that leans on another's leftovers shows up.
+      # The flag goes to the test command, not NODE_OPTIONS, which children would inherit (a child node refuses --test-randomize without --test)
       - name: Lint, types, bundle, tests, SQL reach, and the child process lane
+        env:
+          TEST_ORDER: ${{ matrix.node == '26' && format('--test-randomize --test-random-seed={0}', github.run_number) || '' }}
         run: bun run verify
 
       # **Check what ships as a tarball.** dist and db are untracked, so `git diff` shows nothing.

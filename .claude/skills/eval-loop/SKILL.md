@@ -21,8 +21,8 @@ description: Runs one turn of Sphica's evaluation loop on real agents. Builds th
 | What | Where |
 |---|---|
 | Tasks, prompts, gold keys, hidden tests | `server/evals/cloud/tasks.json` |
-| Slot builder, collector, Codex replay, fixture writer | `server/evals/cloud/build.ts`, `collect.ts`, `codex.ts`, `fixture.ts` |
-| Built slots, fixtures, Codex runs, run logs, old results | `~/.cache/sphica-eval/` (`build/`, `fixtures/`, `codex-runs/`, `logs/`, `archive/`) |
+| Slot builder, firing plan, collector, Codex replay, grader, report, fixture writer | `server/evals/cloud/build.ts`, `fire.ts`, `collect.ts`, `codex.ts`, `grade.ts`, `report.ts`, `fixture.ts` |
+| Builds (slots, `plan.json`, `loop.json`, `grades.json`), fixtures, Codex runs, run logs, old results | `~/.cache/sphica-eval/` (`builds/<build id>/`, `fixtures/`, `codex-runs/`, `logs/`, `archive/`) |
 | Routine ids per slot | `~/.cache/sphica-eval/routines.json` |
 | Routine token | `~/.config/sphica-eval`. Never print it; fire with the RemoteTrigger tool instead |
 
@@ -35,25 +35,55 @@ Run the `node evals/cloud/*.ts` commands from `server/`.
 
 ```text
 Loop progress:
+- [ ] 0. Estimate the cost and get the owner's word before firing
 - [ ] 1. Fixture current with db/schema.sql (rebuild after any schema change)
-- [ ] 2. Archive the last loop, build, delete old claude/eval-* branches, push the 4 slots
-- [ ] 3. Fire each routine at least twice with the task prompt; run codex.ts for all four slots
-- [ ] 4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the failure signals and for
-   `found`). Then `node evals/cloud/collect.ts --fired <slot>=<n> ...` (required for every slot, with how many times it was fired; `=0` for a slot not fired) writes
-   `~/.cache/sphica-eval/loop.json`: per run the hidden tests, the patch, the final answer, and four signals kept apart: `delivered`, `found`,
-   Codex's `answer_format`, and `excluded` with the reason. Every Codex run that wrote `started.json` and every fired Claude run is a row,
-   so a failed or missing run stays in the denominator. A missing log makes `found` unknown, never no, and its counters null
-5. `node evals/cloud/grade.ts` grades each result row blind through `grade.schema.json` with its own HOME and CODEX_HOME (the grader sees the task, `expect`, `against`, the
-   answer, and the patch; never the model or the condition) and writes `~/.cache/sphica-eval/grades.json` with a table by model and
-   condition. A grade that fails its schema, or answers `not_applicable` when the task has `against` (or anything else when it has none), is `ungraded`, not a score. Report both models side by side with n: started, excluded,
-   ungraded, the score spread, each signal including unknown, Codex's answer formats, and the tracked failure (delivered or found, and still made the change
-   `against` describes). Grade the final answer and the patch, not the answer alone. build.ts drops the slot's "Before implementing"
-   section (the owner's Go) and stops if a copy still asks for it, so a stop at a plan is the model's own
-6. To credit a wording change, measure old and new on the same slots and records: check out the commit before the change in a worktree,
-   run its `build.ts` (old) and HEAD's (new), and run steps 2 to 5 for each. Tasks: the conflict tasks (`against` set) and pilot-display (a related
+- [ ] 2. Build, delete old claude/eval-* branches, push the 4 slots
+- [ ] 3. Fire every row of the firing plan; run codex.ts for the same tasks and conditions
+- [ ] 4. Save the logs, collect
+- [ ] 5. Grade with both graders
+- [ ] 6. For the counterfactual, repeat 2 to 5 with --variant swapped
+- [ ] 7. Report
+```
+
+0. Count the Claude runs the firing plan will ask for (`plan.json` has one row per task, condition, and try) and multiply by $0.15 to $0.30.
+   Show the owner the count and the range before firing: spending beyond an approved loop needs their word. Codex runs and grading use the
+   owner's subscriptions
+1. For tsundoku the fixture is built from `tasks.json`'s `fixture.cases` and `fixture.setups` (a case's `given` cases are not run, so list them
+   in order). For sphica it is a harvested database; rebuild it after a schema change
+2. `node evals/cloud/build.ts --project <project> [--variant original|swapped] [--runs <n>]` writes `~/.cache/sphica-eval/builds/<build id>/`: the four
+   slots, `manifest.json` (with the build id and variant), and `plan.json`. It never rebuilds an existing directory; each build keeps its own.
+   Push one build's slots at a time
+3. For each row, `node evals/cloud/fire.ts <build dir>` marks the next unfired row fired and prints its slot and prompt; fire that slot's
+   routine (`routines.json`) with RemoteTrigger right after (`--condition gold` fires only a swapped build's gold rows). For Codex, `node evals/cloud/codex.ts --build <build dir> --repo <slot> --task <task>`;
+   each run records the build id, so runs of another build are left out when collecting
+4. Save each run's log to `~/.cache/sphica-eval/logs/<branch session id>.log` first (collect reads it for the signals). Then
+   `node evals/cloud/collect.ts --build <build dir>` writes `<build dir>/loop.json`. It takes only branches built on this build, pairs them with
+   the fired rows by task and condition in firing order, and keeps a fired row with no branch as an excluded row with its task and condition,
+   so the denominator holds every run asked for. Per run: the hidden tests (not run for a swapped build), the patch, the final answer,
+   `delivered`, `found`, Codex's `answer_format`, `excluded` with the reason, and per gold key `gold_signals` (`in_delivery`, `in_search`,
+   `read`). A signal that cannot be told (no log, a broken event, a result not tied to one tool) is unknown, never no
+5. `node evals/cloud/grade.ts --loop <build dir>/loop.json` grades each result row blind through `grade.schema.json` (Codex with its own HOME and
+   CODEX_HOME) and again with Claude (`claude -p` in an empty directory with no settings sources, MCP servers, tools, or skills; `--second none`
+   skips it). The grader sees the task, `expect`, `against`, the record shown (counterfactual tasks' gold runs only), the answer, and the patch;
+   never the model or the condition. Codex's grade is the one counted; Claude's is kept beside it for agreement. A grade that fails its schema, or
+   answers `not_applicable` where it does not fit (`implements_rejected` and `proposes_rejected` without an `against`, `followed` without a record
+   shown), is `ungraded`, not a score. build.ts drops the slot's "Before implementing" section (the owner's Go) and stops if a copy still asks for
+   it, so a stop at a plan is the model's own. The JSON schema files are written from the zod schemas: `node evals/cloud/schema-check.ts --write`
+6. The counterfactual: `build.ts --variant swapped` builds only the tasks in `tasks.json`'s `swapped.tasks`, without the records the original gold
+   came from and with the swapped record instead. Its runs are graded on whether they followed the record they were shown, not on the original expectation
+7. `node evals/cloud/report.ts <build dir>/grades.json [<swapped build dir>/grades.json]` prints the table by model and condition; the same by
+   language pair, word overlap (`overlap` in tasks.json, labelled by hand), and whether the task has gold; gold minus inject per task and model
+   with every run (fewer than 3 graded runs a side is marked preliminary); re-proposals; the counterfactual; grader agreement with each
+   disagreement; and each gold key's signals. Report both models side by side with n, excluded, and ungraded
+8. To credit a wording change, measure old and new on the same slots and records: check out the commit before the change in a worktree,
+   run its `build.ts` (old) and HEAD's (new), and run steps 2 to 7 for each. Tasks: the conflict tasks (`against` set) and pilot-display (a related
    record the request does not conflict with). inject and gold 3 runs each, none and search 2 each, both models. Ship the wording only if, on the
    new run, both models have tracked failure 0 in the conflict tasks' inject and gold, pilot-display is implemented (score >= 1) in every graded
    run, and none and search show no `stopped_at_plan`; report 3 runs as preliminary
+
+For search changes alone, use the offline benchmark first: `node evals/retrieval/run.ts --compare <ref>` builds each side's index with that
+side's `terms()` and search, and prints recall@k and MRR (questions with gold) and how often a question with no gold returned anything, overall
+and by language pair and overlap. The experiment's issue names the main measure and the drop it allows before the numbers are taken.
 
 ## Traps seen in earlier loops
 

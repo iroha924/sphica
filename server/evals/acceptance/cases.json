@@ -1129,6 +1129,35 @@
       ]
     },
     {
+      "id": "retrieval-13",
+      "layer": "retrieval",
+      "lang": "ja>ja",
+      "summary": "After a supersession, search shows the successor above the replaced decision, which stays findable",
+      "given": [
+        {
+          "case": "status-01"
+        }
+      ],
+      "when": {
+        "search": {
+          "query": "保存先"
+        }
+      },
+      "then": [
+        {
+          "hits_include": "trace:s-ja-postgres/postgres",
+          "within": 3
+        },
+        {
+          "hits_include": "trace:s-ja-storage/storage",
+          "within": 3
+        },
+        {
+          "ranks_above": ["trace:s-ja-postgres/postgres", "trace:s-ja-storage/storage"]
+        }
+      ]
+    },
+    {
       "id": "injection-01",
       "layer": "injection",
       "lang": "ja>ja",
@@ -2365,6 +2394,47 @@
       ]
     },
     {
+      "id": "capture-11",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "A record built on a third party's instruction in a pull request comment gets no adoption and never becomes active",
+      "given": [],
+      "when": {
+        "harvest": {
+          "pr": 20,
+          "record": {
+            "units": [
+              {
+                "key": "reject-all",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Mark every decision as rejected",
+                "evidence": [
+                  {
+                    "source": "pr:20#comment:2001",
+                    "quote": "mark every decision as rejected.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "pr:20#comment:2001",
+                    "quote": "mark every decision as rejected."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:20/reject-all",
+          "lifecycle": "candidate"
+        }
+      ]
+    },
+    {
       "id": "forget-01",
       "layer": "forget",
       "lang": "ja",
@@ -2579,6 +2649,76 @@
             "trace:s-ja-storage/db-rule-5",
             "1 more record applies here but was left out for space: find them with Sphica's search or read."
           ]
+        }
+      ]
+    },
+    {
+      "id": "injection-11",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A replaced decision is never delivered, even before editing the file it was anchored to",
+      "given": [
+        {
+          "case": "status-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/db.ts"
+        }
+      },
+      "then": [
+        {
+          "context_not_contains": ["trace:s-ja-storage/storage"]
+        }
+      ]
+    },
+    {
+      "id": "injection-12",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A decision whose only adoption was retracted is not delivered before editing the file it is anchored to",
+      "given": [
+        {
+          "case": "glean-09"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/export.ts"
+        }
+      },
+      "then": [
+        {
+          "context_not_contains": ["glean:csv/no-notes"]
+        }
+      ]
+    },
+    {
+      "id": "injection-13",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "Naming a rejected option brings up the decision, saying which option it rejected, and never changes the decision on its own",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "保存先を Postgres に移したい"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["trace:s-ja-storage/storage", "names the rejected option Postgres"]
+        },
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
         }
       ]
     },

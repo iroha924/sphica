@@ -8,12 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
-import { isolatedCodexHome } from "./codex-home.ts";
+import { claimRunDir, isolatedCodexHome } from "./codex-home.ts";
+import { readPlan, readTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const { values: args } = parseArgs({
   options: {
-    build: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "build") },
+    build: { type: "string" },
     out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "codex-runs") },
     repo: { type: "string" },
     task: { type: "string" },
@@ -21,8 +22,13 @@ const { values: args } = parseArgs({
 });
 
 type Task = { id: string; prompt: string; gold: string[] };
-const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
-const manifest = JSON.parse(fs.readFileSync(path.join(args.build ?? "", "manifest.json"), "utf8")) as {
+if (!args.build)
+  throw new Error(
+    "--build <dir> names the build whose slot to replay (~/.cache/sphica-eval/builds/<build id>)",
+  );
+const plan = readTasks<{ tasks: Task[] }>(args.build);
+const manifest = JSON.parse(fs.readFileSync(path.join(args.build, "manifest.json"), "utf8")) as {
+  build?: string;
   owner?: string;
   repositories: Record<string, { condition: string }>;
 };
@@ -30,9 +36,11 @@ const repo = args.repo ?? "";
 const task = plan.tasks.find((t) => t.id === args.task);
 const condition = manifest.repositories[repo]?.condition;
 if (!task || !condition) throw new Error(`unknown task ${args.task} or repository ${repo}`);
+// The build's task definitions hold every project's tasks; a run the build did not plan would be collected as one of its results
+if (!readPlan(args.build).some((r) => r.task === task.id && r.condition === condition))
+  throw new Error(`${task.id} under ${condition} is not in the build's firing plan`);
 
-const run = `${task.id}-${condition}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-const dir = path.join(path.resolve(args.out ?? ""), run);
+const { run, dir } = claimRunDir(path.resolve(args.out ?? ""), `${task.id}-${condition}`);
 const work = path.join(dir, "work");
 const home = path.join(dir, "home");
 const codexHome = path.join(dir, "codex-home");
@@ -41,11 +49,12 @@ for (const d of [home, codexHome, tmp]) fs.mkdirSync(d, { recursive: true });
 // The run counts from here: collect takes started.json as the denominator, and result.json is written whatever happens below
 fs.writeFileSync(
   path.join(dir, "started.json"),
-  `${JSON.stringify({ run, model: "codex", repo, condition, task: task.id, at: new Date().toISOString() }, null, 2)}\n`,
+  `${JSON.stringify({ run, build: manifest.build, model: "codex", repo, condition, task: task.id, at: new Date().toISOString() }, null, 2)}\n`,
 );
 const started = Date.now();
 const result: Record<string, unknown> = {
   run,
+  build: manifest.build,
   model: "codex",
   repo,
   condition,

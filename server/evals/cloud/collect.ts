@@ -8,35 +8,57 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
 import {
   answerFormat,
   capPatch,
   deliveredSignal,
   foundInClaudeLog,
   foundInCodexEvents,
+  type GoldSignal,
+  goldSignalsFromClaude,
+  goldSignalsFromCodex,
+  presentedText,
   type Tri,
 } from "./judge.ts";
 
-const HERE = import.meta.dirname;
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
 const { values: args } = parseArgs({
   options: {
-    build: { type: "string", default: path.join(CACHE, "build") },
+    build: { type: "string" },
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
-    out: { type: "string", default: path.join(CACHE, "loop.json") },
-    // How many runs each Claude slot was fired for (repeatable, <slot>=<n>): a fired run with no result branch is kept as excluded
-    fired: { type: "string", multiple: true, default: [] },
+    out: { type: "string" },
   },
 });
 
 type Task = { id: string; prompt: string; test?: string; project?: string; gold?: string[] };
-const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
-const manifest = JSON.parse(fs.readFileSync(path.join(args.build ?? "", "manifest.json"), "utf8")) as {
+const build = args.build ?? "";
+if (!build)
+  throw new Error("--build <dir> names the build to collect (~/.cache/sphica-eval/builds/<build id>)");
+const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[]> } }>(build);
+const out = args.out ?? path.join(build, "loop.json");
+const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
+  build?: string;
+  variant?: string;
   commit: string;
+  bundle?: Record<string, string>;
   project?: string;
   repositories: Record<string, { condition: string }>;
 };
+const swapped = manifest.variant === "swapped";
+/** A swapped build's gold is the swapped record, not the task's original one */
+const goldOf = (task: Task) => (swapped ? (plan.swapped.tasks[task.id] ?? []) : (task.gold ?? []));
+/** The gold slot's rendering of a counterfactual task's record: what the grader checks the run followed. Other tasks have none. */
+const goldSlot = Object.entries(manifest.repositories).find(([, r]) => r.condition === "gold")?.[0];
+const shown = goldSlot
+  ? (JSON.parse(fs.readFileSync(path.join(build, goldSlot, ".tools", "gold.json"), "utf8")) as {
+      id: string;
+      text: string;
+    }[])
+  : [];
+const presentedOf = (task: Task, condition: string) =>
+  presentedText(task.id, condition, shown, plan.swapped.tasks);
 
 type Row = {
   model: "claude" | "codex";
@@ -56,6 +78,9 @@ type Row = {
   delivered: "yes" | "no" | "not_applicable";
   delivered_units: string[];
   found: Tri;
+  /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
+  gold_signals: Record<string, GoldSignal>;
+  presented: string | null;
   signals: {
     searches: number;
     empty_searches: number;
@@ -85,12 +110,16 @@ const excludedRow = (
   answer_format_reason: null,
   patch: "",
   patch_truncated: false,
-  gold: plan.tasks.find((t) => t.id === task)?.gold ?? [],
+  gold: ((t) => (t ? goldOf(t) : []))(plan.tasks.find((t) => t.id === task)),
   delivered: "not_applicable",
   delivered_units: [],
   found: "unknown",
+  gold_signals: {},
+  presented: null,
   signals: null,
 });
+
+const withoutStart = ({ started: _started, ...r }: Row & { started: string }): Row => r;
 
 /** Failure signals in a run's text: a routine run log, or Codex's JSONL events. */
 function signals(log: string): NonNullable<Row["signals"]> {
@@ -115,6 +144,8 @@ function signals(log: string): NonNullable<Row["signals"]> {
  */
 function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
+  // The hidden test checks the original record's rule, which a swapped run is not given
+  if (swapped) return "not run (swapped variant)";
   if (process.platform !== "darwin")
     return "not run (hidden tests run only on macOS, where sandbox-exec denies network)";
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
@@ -147,28 +178,18 @@ function hiddenTest(work: string, task: Task): string {
 
 /** The task a run carried out: by the prompt its hooks received, else the build's only task (slots built before every slot logged prompts) */
 const built = plan.tasks.filter((t) => t.project === manifest.project);
-const taskOf = (text: string) =>
-  plan.tasks.find((t) => text.includes(t.prompt)) ?? (built.length === 1 ? built[0] : undefined);
+const taskOf = (text: string, firing: FiringRow[]) => {
+  const id = taskFromReceipts(text, firing, plan.tasks);
+  return plan.tasks.find((t) => t.id === id) ?? (built.length === 1 ? built[0] : undefined);
+};
 
 function main() {
   const rows: Row[] = [];
-  const fired = new Map(
-    (args.fired ?? []).map((f) => {
-      const [slot, n] = f.split("=");
-      if (!slot || !/^\d+$/.test(n ?? "")) throw new Error(`--fired takes <slot>=<n>, got ${f}`);
-      if (!Object.hasOwn(manifest.repositories, slot)) throw new Error(`unknown slot ${slot} in --fired`);
-      return [slot, Number(n)] as const;
-    }),
-  );
-  // Without a count, a Claude run that pushed no branch would vanish from the denominator
-  for (const repo of Object.keys(manifest.repositories))
-    if (!fired.has(repo))
-      throw new Error(
-        `missing --fired ${repo}=<n> (how many runs each Claude slot was fired for, 0 when none)`,
-      );
+  // The firing plan is the denominator: every fired row is one run asked for, with its task, even when it pushed no branch
+  const firing = Object.keys(manifest.repositories).length ? readPlan(build) : [];
+  const claude: (Row & { started: string })[] = [];
   for (const [repo, { condition }] of Object.entries(manifest.repositories)) {
-    let collected = 0;
-    const dir = path.join(args.build ?? "", repo);
+    const dir = path.join(build, repo);
     execFileSync("git", [
       "-C",
       dir,
@@ -193,7 +214,7 @@ function main() {
       const show = (file: string) =>
         spawnSync("git", ["-C", dir, "show", `${branch}:${file}`], { encoding: "utf8" }).stdout ?? "";
       const receipts = show(".eval/receipts.jsonl");
-      const task = taskOf(receipts);
+      const task = taskOf(receipts, firing);
       if (!task) continue;
       const work = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
       try {
@@ -214,7 +235,7 @@ function main() {
         const session = branch.replace("origin/claude/eval-", "");
         const logFile = path.join(args.logs ?? "", `${session}.log`);
         const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : null;
-        const gold = task.gold ?? [];
+        const gold = goldOf(task);
         const emitted = deliveries
           .filter((d) => d.outcome === "emitted")
           .flatMap((d) => JSON.parse(d.units) as string[]);
@@ -234,7 +255,8 @@ function main() {
           },
         );
         const cut = capPatch(diff);
-        rows.push({
+        claude.push({
+          started,
           model: "claude",
           task: task.id,
           condition,
@@ -250,20 +272,23 @@ function main() {
           delivered: deliveredSignal(condition, gold, emitted, goldOut || null),
           delivered_units: emitted,
           found: foundInClaudeLog(log, gold),
+          gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
+          presented: presentedOf(task, condition),
           signals: log === null ? null : signals(log),
         });
-        collected++;
       } finally {
         execFileSync("git", ["-C", dir, "worktree", "remove", "--force", work]);
       }
     }
-    // A fired run that left no result branch is still one of the runs asked for
-    const task = built.length === 1 ? built[0] : undefined;
-    for (let i = collected; i < (fired.get(repo) ?? 0); i++)
-      rows.push(
-        excludedRow("claude", task?.id ?? "unknown", condition, `${repo}#${i + 1}`, "no result branch"),
-      );
   }
+  const { matched, missing, unplanned } = pair(firing, claude);
+  for (const [, r] of matched) rows.push(withoutStart(r));
+  for (const r of unplanned) {
+    console.log(`${r.run}: ${r.task} ${r.condition} ran but the firing plan did not ask for it; kept`);
+    rows.push(withoutStart(r));
+  }
+  for (const f of missing)
+    rows.push(excludedRow("claude", f.task, f.condition, `${f.slot}#${f.try}`, "no result branch"));
   if (fs.existsSync(args.codex ?? ""))
     for (const name of fs.readdirSync(args.codex ?? "")) {
       const dir = path.join(args.codex ?? "", name);
@@ -280,8 +305,16 @@ function main() {
           return null;
         }
       };
-      const head = parse<{ task: string; condition: string }>(startedAt) ??
-        parse<{ task: string; condition: string }>(resultText) ?? { task: "unknown", condition: "unknown" };
+      const head = parse<{ task: string; condition: string; build?: string }>(startedAt) ??
+        parse<{ task: string; condition: string; build?: string }>(resultText) ?? {
+          task: "unknown",
+          condition: "unknown",
+        };
+      // Codex runs of every build share one directory: a run of another build, or one without a build id, is not this build's
+      if (manifest.build && head.build !== manifest.build) {
+        console.log(`${name}: a run of build ${head.build ?? "without an id"}, left out`);
+        continue;
+      }
       if (!resultText) {
         rows.push(
           excludedRow(
@@ -332,7 +365,7 @@ function main() {
         rows.push(excludedRow("codex", result.task, result.condition, name, "unknown task"));
         continue;
       }
-      const gold = task.gold ?? [];
+      const gold = goldOf(task);
       const events = read("events.jsonl");
       const found = foundInCodexEvents(events, gold);
       const emitted = (result.deliveries ?? [])
@@ -356,13 +389,15 @@ function main() {
         delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
         delivered_units: emitted,
         found,
+        presented: presentedOf(task, result.condition),
+        gold_signals: goldSignalsFromCodex(result.condition, gold, emitted, read("gold-receipt.txt"), events),
         // A missing or broken event log cannot say how many searches or errors there were
         signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },
       });
     }
   fs.writeFileSync(
-    args.out ?? "",
-    `${JSON.stringify({ bundle: manifest.commit, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    out,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify(manifest.bundle ?? {})}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(

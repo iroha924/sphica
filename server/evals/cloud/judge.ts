@@ -60,6 +60,151 @@ export function foundInClaudeLog(log: string | null, gold: string[]): Tri {
     : "no";
 }
 
+/** Per gold key: whether a delivery carried it, whether a search result named it, whether a read result showed it. */
+export type GoldSignal = { in_delivery: Tri | "not_applicable"; in_search: Tri; read: Tri };
+
+const delivery = (condition: string, key: string, emittedUnits: string[], goldHookOutput: string | null) =>
+  condition === "inject"
+    ? emittedUnits.includes(key)
+      ? "yes"
+      : "no"
+    : condition === "gold"
+      ? goldHookOutput?.includes(key)
+        ? "yes"
+        : "no"
+      : "not_applicable";
+
+/**
+ * A search result lists a record as a line `## <key> (u<id>)`; a read result opens a record with the line `<key> (u<id>, revision <n>)`.
+ * In Codex's events a result keeps its line breaks, so only a line that starts with the heading counts, not one quoted in a record's body.
+ */
+const esc = (key: string) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const inSearch = (text: string, key: string, lines: boolean) =>
+  new RegExp(`${lines ? "(^|\\n)" : ""}## ${esc(key)} \\(u\\d+\\)`).test(text);
+const inRead = (text: string, key: string, lines: boolean) =>
+  new RegExp(`${lines ? "(^|\\n)" : ""}${esc(key)} \\(u\\d+, revision \\d+\\)`).test(text);
+
+/** The three signals per gold key from Codex's JSONL events, where each tool call carries its own result. */
+export function goldSignalsFromCodex(
+  condition: string,
+  gold: string[],
+  emittedUnits: string[],
+  goldHookOutput: string | null,
+  events: string | null,
+): Record<string, GoldSignal> {
+  // Any line that is not an event object, or a Sphica call without a result, leaves the log unable to prove "no"
+  let readable = events !== null && events.trim() !== "";
+  const results: { tool: string; text: string }[] = [];
+  for (const line of readable ? (events ?? "").split("\n") : []) {
+    if (!line.trim()) continue;
+    let e: unknown;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      readable = false;
+      break;
+    }
+    if (typeof e !== "object" || e === null) {
+      readable = false;
+      break;
+    }
+    const { type, item: it } = e as {
+      type?: string;
+      item?: {
+        type?: string;
+        server?: string;
+        tool?: string;
+        result?: { content?: { text?: string }[] } | null;
+      };
+    };
+    if (type !== "item.completed" || it?.type !== "mcp_tool_call" || it.server !== "sphica" || !it.tool)
+      continue;
+    if (!it.result || !Array.isArray(it.result.content)) {
+      readable = false;
+      break;
+    }
+    results.push({ tool: it.tool, text: it.result.content.map((c) => c.text ?? "").join("\n") });
+  }
+  const seen = (tool: string, key: string, test: typeof inSearch): Tri =>
+    !readable ? "unknown" : results.some((r) => r.tool === tool && test(r.text, key, true)) ? "yes" : "no";
+  return Object.fromEntries(
+    gold.map((key) => [
+      key,
+      {
+        in_delivery: delivery(condition, key, emittedUnits, goldHookOutput),
+        in_search: seen("search", key, inSearch),
+        read: seen("read", key, inRead),
+      },
+    ]),
+  );
+}
+
+/**
+ * The same from a routine run log, where results carry no call id and every tool's calls appear. A result is tied to a tool only while
+ * the calls waiting are all that tool; from the moment two tools wait at once until none waits, a result naming a gold key makes its signals unknown.
+ * A log that ends with a call still waiting, or holds no call at all, cannot prove "no".
+ */
+export function goldSignalsFromClaude(
+  condition: string,
+  gold: string[],
+  emittedUnits: string[],
+  goldHookOutput: string | null,
+  log: string | null,
+): Record<string, GoldSignal> {
+  const hits = new Map(gold.map((k) => [k, { search: false, read: false, unsure: false }]));
+  const waiting: string[] = [];
+  let calls = 0;
+  let tangled = false;
+  for (const line of (log ?? "").split("\n")) {
+    const call = /\btool_use (\S+?):/.exec(line);
+    if (call) {
+      calls++;
+      waiting.push(call[1] ?? "");
+      if (new Set(waiting).size > 1) tangled = true;
+      continue;
+    }
+    if (!/\btool_result\b/.test(line) || !waiting.length) continue;
+    const tool = waiting.shift() ?? "";
+    for (const [key, h] of hits) {
+      const named = inSearch(line, key, false) || inRead(line, key, false);
+      if (!named) continue;
+      if (tangled) h.unsure = true;
+      else if (tool === "mcp__sphica__search" && inSearch(line, key, false)) h.search = true;
+      else if (tool === "mcp__sphica__read" && inRead(line, key, false)) h.read = true;
+    }
+    if (!waiting.length) tangled = false;
+  }
+  const blind = log === null || calls === 0 || waiting.length > 0;
+  return Object.fromEntries(
+    gold.map((key) => {
+      const h = hits.get(key) ?? { search: false, read: false, unsure: false };
+      const tri = (yes: boolean): Tri => (yes ? "yes" : blind || h.unsure ? "unknown" : "no");
+      return [
+        key,
+        {
+          in_delivery: delivery(condition, key, emittedUnits, goldHookOutput),
+          in_search: tri(h.search),
+          read: tri(h.read),
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * The record a counterfactual task's run was surely shown, as the gold slot rendered it: only the gold condition gives it for certain, so
+ * other conditions' runs are not judged on following it (and a blind prompt carrying it would hint at the condition).
+ */
+export function presentedText(
+  task: string,
+  condition: string,
+  shown: { id: string; text: string }[],
+  counterfactual: Record<string, string[]>,
+): string | null {
+  if (condition !== "gold" || !counterfactual[task]) return null;
+  return shown.find((g) => g.id === task)?.text ?? null;
+}
+
 /** Codex's final output checked against answer.schema.json; a valid answer is rendered to text so graders read the same kind of answer. */
 export function answerFormat(raw: string | null): {
   format: "valid" | "invalid" | "refused_or_empty";

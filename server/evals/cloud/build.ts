@@ -1,6 +1,6 @@
 // Builds the bootstrap repositories of the cloud evaluation (plan step 9): one per condition (none, search, inject, gold), each holding the same
 // project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
-// Run: node evals/cloud/build.ts --project tsundoku|sphica [--out <dir>] [--owner <github owner>]
+// Run: node evals/cloud/build.ts --project tsundoku|sphica [--variant original|swapped] [--runs <n>] [--out <dir>] [--owner <github owner>]
 // Repository names hide the condition; the mapping stays in <out>/manifest.json on this machine.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -14,6 +14,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
+import { planRows, writePlan, writeTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const ROOT = path.join(HERE, "..", "..", "..");
@@ -26,25 +27,48 @@ const CONDITIONS = ["none", "search", "inject", "gold"] as const;
 
 const { values: args } = parseArgs({
   options: {
-    out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "build") },
+    // Each build keeps its own directory, so an original and a swapped build of one loop can both be collected
+    out: { type: "string" },
+    variant: { type: "string", default: "original" },
+    runs: { type: "string", default: "2" },
     owner: { type: "string", default: "iroha924" },
     node: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", NODE.file) },
     project: { type: "string", default: "tsundoku" },
   },
 });
-const out = path.resolve(args.out ?? "");
+const variant = args.variant ?? "original";
+if (variant !== "original" && variant !== "swapped") throw new Error("--variant is original or swapped");
+const runs = Number(args.runs);
+if (!Number.isInteger(runs) || runs < 1)
+  throw new Error("--runs takes a whole number of Claude runs per task and condition");
+const buildId = `${args.project}-${variant}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
+const out = path.resolve(args.out ?? path.join(os.homedir(), ".cache", "sphica-eval", "builds", buildId));
+// A build is never rebuilt in place: its firing plan and collected results belong to what was pushed from it
+if (fs.existsSync(out))
+  throw new Error(`${out} already exists; give a new --out, or leave it out for a new build id`);
 const owner = args.owner ?? "";
 
-type Task = { id: string; project: string; prompt: string; gold: string[] };
+type Task = { id: string; project: string; prompt: string; gold: string[]; conditions: string[] };
 type Project = { source: string; repo?: string; base?: string; fixture: string };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
   fixture: { cases: string[]; setups: string[] };
+  swapped: { drop: { cases: string[]; setups: string[] }; steps: Step[]; tasks: Record<string, string[]> };
   projects: Record<string, Project>;
   tasks: Task[];
 };
 const project = plan.projects[args.project ?? ""];
 if (!project) throw new Error(`unknown project ${args.project}`);
-const tasks = plan.tasks.filter((t) => t.project === args.project);
+// A swapped build carries only the tasks with a swapped record, each pointing at that record as its gold
+const tasks = plan.tasks
+  .filter((t) => t.project === args.project)
+  .flatMap((t) =>
+    args.variant !== "swapped"
+      ? [t]
+      : plan.swapped.tasks[t.id]
+        ? [{ ...t, gold: plan.swapped.tasks[t.id] ?? [] }]
+        : [],
+  );
+if (!tasks.length) throw new Error(`no ${args.variant} tasks for ${args.project}`);
 
 const sha256 = (buf: Buffer | string) => crypto.createHash("sha256").update(buf).digest("hex");
 
@@ -54,14 +78,17 @@ async function fixture(file: string): Promise<void> {
   const driver = await createDriver(world);
   try {
     const byId = new Map(cases.map((c) => [c.id, c]));
-    for (const id of plan.fixture.cases) {
+    const swapped = args.variant === "swapped";
+    const dropped = (list: string[], drop: string[]) => list.filter((x) => !swapped || !drop.includes(x));
+    for (const id of dropped(plan.fixture.cases, plan.swapped.drop.cases)) {
       const c = byId.get(id);
       if (!c) throw new Error(`no case ${id}`);
       for (const g of c.given) if (!g.case) await driver.run(g);
       await driver.run(c.when);
     }
-    for (const name of plan.fixture.setups)
+    for (const name of dropped(plan.fixture.setups, plan.swapped.drop.setups))
       for (const [k, v] of Object.entries(setups[name] as Step)) await driver.run({ [k]: v });
+    if (swapped) for (const step of plan.swapped.steps) await driver.run(step);
     await driver.snapshot(file);
   } finally {
     await driver.done();
@@ -287,12 +314,13 @@ async function main() {
   if (sha256(tarball) !== NODE.sha256)
     throw new Error(`${args.node} does not match the Node ${NODE.version} sha256`);
   execFileSync("bun", ["run", "bundle"], { cwd: ROOT, stdio: "ignore" });
-  fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
   const base = path.join(out, "fixture.db");
   if (args.project === "tsundoku") await fixture(base);
   else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
   const manifest: Record<string, unknown> = {
+    build: buildId,
+    variant,
     built: new Date().toISOString(),
     commit: execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     bundle: Object.fromEntries(
@@ -408,6 +436,12 @@ async function main() {
     (manifest.repositories as Record<string, unknown>)[repo] = { condition, fixture: fixtureHash };
   }
   fs.writeFileSync(path.join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  writeTasks(out, plan);
+  const slotOf = new Map(CONDITIONS.map((c, i) => [c, `eval-shelf-${i + 1}`]));
+  writePlan(
+    out,
+    planRows(buildId, variant, tasks, runs, (c) => slotOf.get(c as (typeof CONDITIONS)[number]) ?? ""),
+  );
   console.log(`built ${CONDITIONS.length} repositories in ${out}`);
 }
 
