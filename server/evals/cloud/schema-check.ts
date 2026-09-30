@@ -1,79 +1,46 @@
-// Exact checks for the two fixed shapes the evaluation reads from Codex: a grade (grade.schema.json) and an evaluation run's answer
-// (answer.schema.json). Hand-written for these two shapes only; a value that does not match is kept apart with the reason, never counted.
+// The two fixed shapes the evaluation reads from Codex: a grade (grade.schema.json) and an evaluation run's answer (answer.schema.json).
+// The zod schemas here are the one source: the JSON files Codex gets through --output-schema are written from them
+// (node evals/cloud/schema-check.ts --write), and a value that does not match is kept apart with the reason, never counted.
+import fs from "node:fs";
+import path from "node:path";
+import { z } from "zod";
 
-export type Grade = {
-  score: 0 | 1 | 2;
-  reason: string;
-  cited_gold: "yes" | "no";
-  implements_rejected: "yes" | "no" | "not_applicable" | "unknown";
-  flags: ("stopped_at_plan" | "read_scaffolding" | "off_task")[];
-};
+const gradeSchema = z.strictObject({
+  score: z.literal([0, 1, 2]),
+  reason: z.string(),
+  cited_gold: z.enum(["yes", "no"]),
+  implements_rejected: z.enum(["yes", "no", "not_applicable", "unknown"]),
+  flags: z.array(z.enum(["stopped_at_plan", "read_scaffolding", "off_task"])),
+});
 
-export type Answer = {
-  implemented: boolean;
-  summary: string;
-  past_decisions: { ref: string; how_used: "followed" | "overrode" | "mentioned" }[];
-  unverified: string[];
-};
+const answerSchema = z.strictObject({
+  implemented: z.boolean(),
+  summary: z.string(),
+  past_decisions: z.array(
+    z.strictObject({ ref: z.string(), how_used: z.enum(["followed", "overrode", "mentioned"]) }),
+  ),
+  unverified: z.array(z.string()),
+});
 
+export type Grade = z.infer<typeof gradeSchema>;
+export type Answer = z.infer<typeof answerSchema>;
 export type Checked<T> = { ok: true; value: T } | { ok: false; reason: string };
 
-type Rule = (v: unknown) => string | null;
+/** The JSON Schema Codex's --output-schema takes: without $schema, as its strict mode wants every object closed and every key required. */
+export function jsonSchemaOf(schema: z.ZodType): Record<string, unknown> {
+  const { $schema: _, ...rest } = z.toJSONSchema(schema) as Record<string, unknown>;
+  return rest;
+}
 
-const oneOf =
-  (...allowed: unknown[]): Rule =>
-  (v) =>
-    allowed.includes(v) ? null : `must be one of ${allowed.map((a) => JSON.stringify(a)).join(", ")}`;
-const isString: Rule = (v) => (typeof v === "string" ? null : "must be a string");
-const isBoolean: Rule = (v) => (typeof v === "boolean" ? null : "must be a boolean");
-const listOf =
-  (item: Rule): Rule =>
-  (v) => {
-    if (!Array.isArray(v)) return "must be an array";
-    for (const [i, x] of v.entries()) {
-      const why = item(x);
-      if (why) return `[${i}] ${why}`;
-    }
-    return null;
-  };
-const shape =
-  (fields: Record<string, Rule>): Rule =>
-  (v) => {
-    if (typeof v !== "object" || v === null || Array.isArray(v)) return "must be an object";
-    // Own keys only: `in` would take inherited names such as constructor as allowed
-    for (const key of Object.keys(v)) if (!Object.hasOwn(fields, key)) return `${key}: not allowed`;
-    for (const [key, rule] of Object.entries(fields)) {
-      if (!Object.hasOwn(v, key)) return `${key}: missing`;
-      const why = rule((v as Record<string, unknown>)[key]);
-      if (why) return `${key}: ${why}`;
-    }
-    return null;
-  };
-
-const gradeRule = shape({
-  score: oneOf(0, 1, 2),
-  reason: isString,
-  cited_gold: oneOf("yes", "no"),
-  implements_rejected: oneOf("yes", "no", "not_applicable", "unknown"),
-  flags: listOf(oneOf("stopped_at_plan", "read_scaffolding", "off_task")),
-});
-
-const answerRule = shape({
-  implemented: isBoolean,
-  summary: isString,
-  past_decisions: listOf(shape({ ref: isString, how_used: oneOf("followed", "overrode", "mentioned") })),
-  unverified: listOf(isString),
-});
-
-const check = <T>(rule: Rule, v: unknown): Checked<T> => {
-  const why = rule(v);
-  return why
-    ? { ok: false, reason: why.startsWith("must") ? `value ${why}` : why }
-    : { ok: true, value: v as T };
+const check = <T>(schema: z.ZodType<T>, v: unknown): Checked<T> => {
+  const r = schema.safeParse(v);
+  if (r.success) return { ok: true, value: r.data };
+  const first = r.error.issues[0];
+  return { ok: false, reason: `${first?.path.join(".") || "value"}: ${first?.message ?? "does not match"}` };
 };
 
-export const checkGrade = (v: unknown): Checked<Grade> => check<Grade>(gradeRule, v);
-export const checkAnswer = (v: unknown): Checked<Answer> => check<Answer>(answerRule, v);
+export const checkGrade = (v: unknown): Checked<Grade> => check(gradeSchema, v);
+export const checkAnswer = (v: unknown): Checked<Answer> => check(answerSchema, v);
 
 /** Parses a model's final output: empty and non-JSON text are reasons, not values. */
 export function parseOutput(text: string): { ok: true; value: unknown } | { ok: false; reason: string } {
@@ -84,3 +51,12 @@ export function parseOutput(text: string): { ok: true; value: unknown } | { ok: 
     return { ok: false, reason: "not JSON" };
   }
 }
+
+export const SCHEMA_FILES = { "grade.schema.json": gradeSchema, "answer.schema.json": answerSchema };
+
+if (process.argv[1] === import.meta.filename && process.argv[2] === "--write")
+  for (const [name, schema] of Object.entries(SCHEMA_FILES))
+    fs.writeFileSync(
+      path.join(import.meta.dirname, name),
+      `${JSON.stringify(jsonSchemaOf(schema), null, 2)}\n`,
+    );

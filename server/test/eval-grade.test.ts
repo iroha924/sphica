@@ -17,7 +17,13 @@ import {
   goldSignalsFromClaude,
   goldSignalsFromCodex,
 } from "../evals/cloud/judge.ts";
-import { checkAnswer, checkGrade, type Grade } from "../evals/cloud/schema-check.ts";
+import {
+  checkAnswer,
+  checkGrade,
+  type Grade,
+  jsonSchemaOf,
+  SCHEMA_FILES,
+} from "../evals/cloud/schema-check.ts";
 
 const grade: Grade = {
   score: 2,
@@ -720,5 +726,34 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
     assert.ok(fs.existsSync(path.join(build, "manifest.json")), "the earlier build is kept");
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// The schema files are written from the zod schemas, and Codex's strict mode wants every object closed with every key required
+test("the schema files are what the zod schemas write, and every object in them is closed with all keys required", () => {
+  for (const [name, schema] of Object.entries(SCHEMA_FILES)) {
+    const file = JSON.parse(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "evals", "cloud", name), "utf8"),
+    );
+    assert.deepEqual(
+      file,
+      jsonSchemaOf(schema),
+      `${name} is stale: run node evals/cloud/schema-check.ts --write`,
+    );
+    const objects = (v: unknown): Record<string, unknown>[] =>
+      typeof v !== "object" || v === null
+        ? []
+        : [
+            ...((v as { type?: string }).type === "object" ? [v as Record<string, unknown>] : []),
+            ...Object.values(v).flatMap(objects),
+          ];
+    for (const o of objects(file)) {
+      assert.equal(o.additionalProperties, false, name);
+      assert.deepEqual(
+        [...(o.required as string[])].sort(),
+        Object.keys(o.properties as object).sort(),
+        name,
+      );
+    }
   }
 });

@@ -123,13 +123,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): add a swapped gold variant for the counterfactual check (T07)`
   - 結果: `cd server && node evals/cloud/build.ts --project tsundoku --variant swapped --runs 2 --out <scratch>` → built 4 repositories、fixture に trace:s-en-dates-local/local と harvest:12/pnpm が active で、元の utc と npm は無い。gold.json は 2 タスクとも反転版の本文、plan.json 16 行、manifest の variant は swapped。`node --test test/eval-grade.test.ts` → 18 pass・0 fail（swapped の build を collect すると gold が反転版の key、tests が not run）。`bun run verify` → exit 0
 
-- [ ] T08: 評価スキーマを zod から作る
+- [x] T08: 評価スキーマを zod から作る
   - 種別: 変更
   - 計画: S10
   - 依存: なし
   - 変更: `server/evals/cloud/schema-check.ts`, `server/evals/cloud/answer.schema.json`, `server/evals/cloud/grade.schema.json`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → zod から作った JSON Schema がファイルと一致し、全 object が `additionalProperties: false` で全プロパティ required のテストが通る
   - コミット: `refactor(eval): generate the answer and grade schemas from zod (T08)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 21 pass・0 fail（既存の形の検査と理由の文面のテストもそのまま通る）。grade.schema.json の off_task を一時的に書き換えると、新しいテストが stale で落ちた（戻した）。`bun run verify` → exit 0
 
 - [ ] T09: 採点の欄（`proposes_rejected`、`followed`）と 2 人目の採点者
   - 種別: 追加
@@ -206,3 +207,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T05 レビュー / Codex の F1〜F5（並行の違うツールの結果を順番で決める、Sphica 以外の結果を取る、本文に引用された見出しを取る、空や欠けたログを no にする、壊れたイベントで no か例外）はすべて再現つきで、直す / T17 を足した。同じツールだけが並行している間は、そのツールの結果として扱う
 - 2026-09-30 / T07 / counterfactual のタスクを pilot-dates と superseded-install にした（plan は pilot-dates と sphica-search-wording）。sphica の fixture は実際の PR を harvest した DB で、反転版には実在の PR の中に架空の出典を作ることになるため。superseded-install は status-02 を外すだけで pnpm が今の決定として残り、新しい記録は要らない。pilot-dates は反転版の記録（local time で保存）を tasks.json の swapped.steps に持つ。collect も swapped の gold と hidden test の扱いを知る必要があり、変更欄に collect.ts を足し fixture.ts を外した
 - 2026-09-30 / T06 レビュー / Codex の F1（既存の --out を消す）・F4（build の後に prompt が変わると結果を読み落とす）・F5（別の build の Codex の run が混ざる）は直す。F2（fire.ts を同時に流すと同じ行を選ぶ）は、発火を 1 つずつ行う手順では起きない入力なので直さない。F3（同じタスク×条件の試行 1 が結果を残さず試行 2 だけ残すと、試行番号の割り当てが入れ替わる）は、同じタスク×条件の試行は区別の意味が無く分母（結果 1・結果なし 1）は正しいので直さない / T18 を足した。codex.ts は `--build` を必須にし、started.json と result.json に build ID を書く
+- 2026-09-30 / T08 / zod から作ると grade の score の型が `integer` から `number` になる（値は enum の 0・1・2 に限られ、受け取る値は同じ）。JSON ファイルは `node evals/cloud/schema-check.ts --write` で作り、$schema は付けない
