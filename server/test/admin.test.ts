@@ -703,3 +703,126 @@ test("a missing migration script says to reinstall, not to move the database or 
   assert.equal(revisionOf(file), 1);
   assert.deepEqual(backups(file), []);
 });
+
+/** The shipped migrations copied into dir, so a test can add a check script or extend a step. */
+function copiedMigrations(dir: string): string {
+  fs.mkdirSync(dir);
+  for (const f of fs.readdirSync(MIGRATIONS)) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(dir, f));
+  return dir;
+}
+
+test("a migration's check script that lists rows stops the migration, names every row, and changes nothing", () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const migrations = copiedMigrations(path.join(home, "migrations"));
+  fs.writeFileSync(
+    path.join(migrations, "0002.check.sql"),
+    `create temp table sphica_migration_stop (rule text, item text);
+     insert into sphica_migration_stop select 'a project Sphica did not register', 'project ' || id || char(10) || 'forged line' from project;
+     insert into sphica_migration_stop values ('a second rule', 'unit 1'), ('a second rule', 'unit 2');`,
+  );
+  let error: Error | null = null;
+  const log = console.log;
+  console.log = () => {};
+  try {
+    migrate(file, migrations);
+  } catch (e) {
+    error = e as Error;
+  } finally {
+    console.log = log;
+  }
+  assert.ok(error, "the migration stops");
+  assert.match(error.message, /has 3 rows that revision 2 cannot take/);
+  assert.match(error.message, /No migration step was committed: the database is still at revision 1/);
+  assert.deepEqual(error.message.split("\n").slice(1), [
+    "a project Sphica did not register: 1 row",
+    "  project 1 forged line",
+    "a second rule: 2 rows",
+    "  unit 1",
+    "  unit 2",
+  ]);
+  assert.equal(revisionOf(file), 1);
+  assert.deepEqual(backups(file), [], "the backup made for this run is removed");
+  const look = new DatabaseSync(file, { readOnly: true });
+  assert.equal(look.prepare("select 1 from sqlite_schema where name = 'forget_batch'").get(), undefined);
+  look.close();
+});
+
+test("rows a migration repairs are all printed after it commits, one line each", () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const migrations = copiedMigrations(path.join(home, "migrations"));
+  fs.appendFileSync(
+    path.join(migrations, "0002.sql"),
+    `create temp table sphica_migration_note (rule text, item text, action text);
+     insert into sphica_migration_note values ('end before start', 'run 1', 'finished_at set to started_at'),
+       ('end before start', 'run 2' || char(10) || 'forged', 'finished_at set to started_at'), ('a duplicate', 'anchor 7', 'removed');`,
+  );
+  // The check runs before its step: one that ran after would see the table the step creates, and stop
+  fs.writeFileSync(
+    path.join(migrations, "0002.check.sql"),
+    `create temp table sphica_migration_stop (rule text, item text);
+     insert into sphica_migration_stop select 'the check ran after the step', name from sqlite_schema where name = 'forget_batch';`,
+  );
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (t: string) => said.push(t);
+  try {
+    assert.equal(migrate(file, migrations), 1);
+  } finally {
+    console.log = log;
+  }
+  assert.equal(revisionOf(file), SCHEMA_REVISION);
+  const after = new DatabaseSync(file, { readOnly: true });
+  assert.ok(after.prepare("select 1 from sqlite_schema where name = 'forget_batch'").get());
+  assert.ok(
+    after.prepare("select 1 from sqlite_schema where name = 'sqlite_stat1'").get(),
+    "a finished migration refreshes the planner's statistics",
+  );
+  after.close();
+  const note = said.find((s) => s.includes("Changed while migrating")) ?? "";
+  assert.deepEqual(
+    note.split("\n").map((l) => l.trim()),
+    [
+      "Changed while migrating to revision 2: 3 rows (the backup keeps them as they were)",
+      "a duplicate: 1 row",
+      "anchor 7 → removed",
+      "end before start: 2 rows",
+      "run 1 → finished_at set to started_at",
+      "run 2 forged → finished_at set to started_at",
+    ],
+  );
+  // The note table is read and dropped inside the step, so a later step starts without it
+  assert.equal(said.filter((s) => s.includes("Changed while migrating")).length, 1);
+});
+
+test("a check that stops after an earlier step committed lists its rows and says how to go back", () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const migrations = copiedMigrations(path.join(home, "migrations"));
+  fs.writeFileSync(
+    path.join(migrations, "0003.check.sql"),
+    `create temp table sphica_migration_stop (rule text, item text);
+     insert into sphica_migration_stop values ('a row revision 3 cannot take', 'unit 1');`,
+  );
+  let error: Error | null = null;
+  const log = console.log;
+  console.log = () => {};
+  try {
+    migrate(file, migrations);
+  } catch (e) {
+    error = e as Error;
+  } finally {
+    console.log = log;
+  }
+  assert.ok(error, "the migration stops");
+  assert.equal(revisionOf(file), 2, "the first step stays committed");
+  const [backup] = backups(file);
+  assert.ok(backup, "the backup is kept");
+  assert.match(error.message, /is now at revision 2 /);
+  assert.ok(error.message.includes(path.join(home, "backups", backup)), error.message);
+  assert.deepEqual(error.message.split("\n").slice(1), ["a row revision 3 cannot take: 1 row", "  unit 1"]);
+});

@@ -22,13 +22,14 @@ base: main
 
 revision 5 を開き、表を作り直す移行と、止める行・直した行を全件出す仕組みが動く。以降のタスクは schema.sql と 0005.sql を同じコミットで変える。
 
-- [ ] T01: migrate() に事前検査の手順、停止と修復の全件の出力、成功後の pragma optimize を入れる
+- [x] T01: migrate() に事前検査の手順、停止と修復の全件の出力、成功後の pragma optimize を入れる
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 差し込んだ移行ディレクトリで、`<revision>.check.sql` が temp 表に行を入れると全件が例外の文に出て revision が変わらず、修復の temp 表の行は移行の後に全件出て、どちらの temp 表も残らないテストが通る
   - コミット: `feat(init): run a migration's check script first and print every row it stops on or repairs (T01)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 33 pass・0 fail（新しい 3 本: check の 3 行が例外の文に 1 行ずつ出て revision 1 のまま・バックアップは消える / 修復の 3 行が移行の後に 1 回だけ出て、check は step の前に走り、`sqlite_stat1` ができる / 前の step が commit した後の停止でも一覧と戻し方が出る）。temp 表は接続ごとなので「残らない」は、読んだ直後に drop する実装と、後の step で一覧が繰り返されないことで見た。`pragma optimize` を no-op にすると統計の assert が落ちることを確かめた。`bun run verify` → exit 0。review-shipping の指摘（optimize・commit 後の停止・check の順序をテストが見ていない）は同じコミットでテストを足した
 
 - [ ] T02: run を saved にする更新を、全部の操作の後の 1 回にまとめる
   - 種別: 変更
@@ -193,12 +194,14 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 規則を破る行・消した最大 id・検索できる unit を含む rev4 の DB を実際の `admin.migrate()` で移行し、修復の件数と全件、全 autoincrement 表の次の id、検索の結果、ingest での trace と glean の保存、capture の書き込みが 1 つのテストで通る
   - コミット: `test(db): migrate a populated revision 4 database and keep using it (T18)`
 
-- [ ] T19: Skill を直し、バージョンを上げ、配布物の検査を rev4 に向ける
+- [ ] T19: Skill を直し、配布物の検査を rev4 に向ける
   - 種別: 変更
   - 計画: S9, S10
   - 依存: T18（出荷する移行が通しで確かめられている）
-  - 変更: `.claude/skills/knowledge-schema/SKILL.md`, `package.json`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `scripts/check-tarball.mjs`
+  - 変更: `.claude/skills/knowledge-schema/SKILL.md`, `scripts/check-tarball.mjs`
   - 完了条件: `bun run release:plan -- --base v0.6.14` → `plugin` で、4 か所のバージョンが一致する。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → deliver が rev4 の DB にバージョン入りの案内を返し、init が `Backed up:` と `Migrated: … (revision 4 → 5)` を出す。`bun run verify` → 0
-  - コミット: `chore(release): bump the version for schema revision 5 and update the schema skill (T19)`
+  - コミット: `docs(skill): describe schema revision 5 in the schema skill and check the tarball against revision 4 (T19)`
 
 ## 記録
+
+- 2026-10-01 / T01・T19 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットでバージョンが上がっていないと落とす（#201 の T01 と同じ） / バージョンを 0.6.15 に上げるのを T19 から T01 へ移した。T01 の変更欄: `server/src/admin.ts`, `server/test/admin.test.ts` → それに 4 つの manifest を足した。T19 の題名: 「Skill を直し、バージョンを上げ、配布物の検査を rev4 に向ける」→「Skill を直し、配布物の検査を rev4 に向ける」、変更欄から `package.json` と 4 つの manifest を外し、コミット件名を docs(skill) に変えた。完了条件の release:plan の確認は T19 に残す
