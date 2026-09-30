@@ -218,6 +218,31 @@ test("the small checks: lines, retraction spans and times, whole characters, dat
   refuses(() => retract(-1, 3), /constraint failed/);
   refuses(() => retract(0, 3, at("2026-01-01T00:00:00Z")), /constraint failed/);
   refuses(() => retract(1, 3), /inside a character/);
+  // Written already retracted, the reason's span is checked the same way
+  refuses(
+    () =>
+      evidence(u, src, {
+        role: "explains",
+        retracted_at: now,
+        retraction_reason: "wrong",
+        retraction_source_id: src,
+        retraction_span_start: 1,
+        retraction_span_end: 3,
+      }),
+    /inside a character/,
+  );
+  const decided = unit({ key: "d9", kind: "decision" });
+  refuses(
+    () =>
+      adoption(decided, src, {
+        retracted_at: now,
+        retraction_reason: "wrong",
+        retraction_source_id: src,
+        retraction_span_start: 1,
+        retraction_span_end: 3,
+      }),
+    /inside a character/,
+  );
   retract(0, 3);
   const late = unit({ key: "late", kind: "finding", created_at: at("2026-12-01T00:00:00Z") });
   refuses(() => state(late, null, "candidate"), /comes after its unit was created/);
@@ -242,6 +267,20 @@ test("the small checks: lines, retraction spans and times, whole characters, dat
   );
   refuses(
     () => sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, elsewhere, a1),
+    /same record/,
+  );
+  // Written already retired, the same rule holds
+  refuses(
+    () =>
+      insert(db, "unit_anchor", {
+        unit_id: u,
+        path: "c.ts",
+        role: "applies_to",
+        run_id: runId,
+        added_at: now,
+        retired_at: now,
+        replaced_by: elsewhere,
+      }),
     /same record/,
   );
   refuses(

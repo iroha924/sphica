@@ -205,6 +205,16 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): add the small checks on lines, spans, times, anchors, urls, and aliases (T14)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks|small values" test/schema.test.ts test/migrate.test.ts` → 直す前のコードでは 2 本とも落ちた（red）。直した後は pass（開始行の無い終了行、負の取り下げの span、追加より前の取り下げ、文字の途中の span、作成より前の state、開始より前の終了、自分や別の記録の anchor への置き換え、javascript: の URL、索引に入るアシスタントの返答、文面の違う alias がそれぞれ拒まれ、移行はそれぞれを一番近い許される値に直して一覧に出す）。`bun run verify` → exit 0
 
+- [x] T24: T14 の Codex の指摘を直す（広げた採用の重複で移行が止まる、終端が 0 以下の取り下げの span、証拠の重複の片付けの時間、置き換え先と取り下げの span を insert でも検査する）
+  - 種別: 修正
+  - 計画: S3, S4
+  - 依存: T14（直す対象の CHECK と移行の修復が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `db/migrations/0005.check.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 文字の途中の採用が 2 つ同じ範囲に広がる rev4 の DB の移行が一意制約で落ち、負の取り下げの span が値の修復で CHECK に当たり、置き換え先が別の記録の anchor・取り下げの span が文字の途中の行を insert で入れられ、証拠 2 万行の移行が 7 秒かかる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 広げた採用は 1 つ残って一覧に出て、負の取り下げの span は移行を止めて一覧に出し、insert でも拒まれ、証拠 2 万行の移行が 3 秒以内に終わるテストが通る
+  - コミット: `fix(db): widen spans before moving rows, stop on negative retraction spans, check inserts too (T24)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks|small values|no release wrote" test/schema.test.ts test/migrate.test.ts` → 直す前のコードでは 3 本が落ちた（red）。証拠 2 万行の移行は直す前 6.9 秒・直した後 0.3 秒（上限 3 秒）。直した後 schema・migrate のテストは全件 pass。`bun run verify` → exit 0
+
 - [x] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
   - 種別: 削除
   - 計画: S3, S4, S6, S9
@@ -297,3 +307,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T14 / review-shipping: 指摘 1 件（再現済み）。文字の途中で切れた引用を広げて重複になったとき、取り下げ済みの行を残して生きている行を消していた / 生きている行を先に残すようにし、テストを足した
 - 2026-10-01 / T15 / 前提の裏取り: v0.5.0〜v0.6.14 の各タグで `git grep` し、pr_event の closed・reopened・thread_resolved、run と処理結果の failed・capped、run の reason、implements の link、external_reference への insert を書くコードが無いことを確かめた（review-shipping も 23 タグで独立に確認）。run の reason 列も消した。変更欄: `knowledge.ts`・`check-pairs.mjs`・`db.test.ts` は変わらず（これらの値は突き合わせの対象外）、`read.ts`（Implemented by の行）・`search.test.ts` を足した
 - 2026-10-01 / T15 / review-shipping: 指摘 3 件（schema のコメントとトリガーの文面、forget のテストの題名に、消した値の説明が残っていた） / 同じコミットで直した
+- 2026-10-01 / T14 / Codex のレビュー（de0d92dd）: 指摘 5 件（P2、再現済み）。F1: 文字の途中の採用を広げると、重複を片付ける前に表の一意制約で移行が止まる。F2: 終端が 0 以下の取り下げの span は、開始だけを 0 にすると CHECK で止まる。F3: 証拠の重複の片付けが二乗の時間（2 万行で 6.7 秒）。F4・F5: 置き換え先と取り下げの span の検査が update にしか無く、insert で素通りする / 全部採用。修正タスク T24 を足した。負の取り下げの span は値で直さず、移行を止める側に移した（どのリリースも書かない値で、直す先の値が決まらない）
+- 2026-10-01 / T24 / review-shipping: 指摘 2 件（採用の insert の取り下げ span の検査にテストが無い、置き換え先が自分自身かの節が隣の節と重なって要らない） / テストを足し（検査を消すと落ちることを確かめた）、要らない節を消した。広げる処理は 40 通りのランダムな DB で古い規則と同じ結果になることを、レビュー担当が確かめた

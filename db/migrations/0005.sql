@@ -172,88 +172,81 @@ select 'a retraction dated before what it retracts', 'evidence ' || id || ' of u
 from unit_evidence where retracted_at < added_at order by id;
 update unit_evidence set retracted_at = added_at where retracted_at < added_at;
 insert into sphica_migration_note
-select 'a retraction span starting before its text', 'evidence ' || id || ' of unit ' || unit_id, 'starts at the text'
-from unit_evidence where retraction_span_start < 0 order by id;
-update unit_evidence set retraction_span_start = 0 where retraction_span_start < 0;
-insert into sphica_migration_note
 select 'a retraction dated before what it retracts', 'adoption ' || id || ' of unit ' || unit_id, 'retracted when it was added'
 from unit_adoption where retracted_at < added_at order by id;
 update unit_adoption set retracted_at = added_at where retracted_at < added_at;
+-- A span that cuts a character widens to the whole character (a UTF-8 character has at most three continuation bytes). The widened spans
+-- are worked out apart first: adoption keeps its table's unique span through the rebuild, so rows widening onto one span go before any
+-- row moves
+create temp table sphica_widen (tbl text not null, which text not null, id integer not null, src integer not null, s integer not null,
+  e integer not null, what text not null, primary key (tbl, which, id));
+insert into sphica_widen select 'unit_evidence', 'span', id, source_id, span_start, span_end, 'evidence' from unit_evidence
+where source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF'
+  or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF');
+insert into sphica_widen select 'unit_adoption', 'span', id, source_id, span_start, span_end, 'adoption' from unit_adoption
+where source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF'
+  or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF');
+insert into sphica_widen select 'field_def', 'span', id, source_id, span_start, span_end, 'field definition' from field_def
+where source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF'
+  or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF');
+insert into sphica_widen select 'unit_field', 'span', id, source_id, span_start, span_end, 'field value' from unit_field
+where source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF'
+  or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF');
+insert into sphica_widen select 'unit_evidence', 'retraction', id, retraction_source_id, retraction_span_start, retraction_span_end, 'evidence retraction reason' from unit_evidence
+where retraction_source_id is not null and (hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF'
+  or hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF');
+insert into sphica_widen select 'unit_adoption', 'retraction', id, retraction_source_id, retraction_span_start, retraction_span_end, 'adoption retraction reason' from unit_adoption
+where retraction_source_id is not null and (hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF'
+  or hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF');
+update sphica_widen set s = s - 1 where hex(substr((select cast(text as blob) from source where id = src), s + 1, 1)) between '80' and 'BF';
+update sphica_widen set s = s - 1 where hex(substr((select cast(text as blob) from source where id = src), s + 1, 1)) between '80' and 'BF';
+update sphica_widen set s = s - 1 where hex(substr((select cast(text as blob) from source where id = src), s + 1, 1)) between '80' and 'BF';
+update sphica_widen set e = e + 1 where hex(substr((select cast(text as blob) from source where id = src), e + 1, 1)) between '80' and 'BF';
+update sphica_widen set e = e + 1 where hex(substr((select cast(text as blob) from source where id = src), e + 1, 1)) between '80' and 'BF';
+update sphica_widen set e = e + 1 where hex(substr((select cast(text as blob) from source where id = src), e + 1, 1)) between '80' and 'BF';
 insert into sphica_migration_note
-select 'a retraction span starting before its text', 'adoption ' || id || ' of unit ' || unit_id, 'starts at the text'
-from unit_adoption where retraction_span_start < 0 order by id;
-update unit_adoption set retraction_span_start = 0 where retraction_span_start < 0;
--- A span that cuts a character widens to the whole character (a UTF-8 character has at most three continuation bytes)
-insert into sphica_migration_note
-select 'a span that cuts a character (evidence)', 'unit_evidence ' || id, 'widened to whole characters' from unit_evidence where (source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF' or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF')) order by id;
-update unit_evidence set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_evidence set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_evidence set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_evidence set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update unit_evidence set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update unit_evidence set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-insert into sphica_migration_note
-select 'a span that cuts a character (adoption)', 'unit_adoption ' || id, 'widened to whole characters' from unit_adoption where (source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF' or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF')) order by id;
-update unit_adoption set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_adoption set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_adoption set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_adoption set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update unit_adoption set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update unit_adoption set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-insert into sphica_migration_note
-select 'a span that cuts a character (field definition)', 'field_def ' || id, 'widened to whole characters' from field_def where (source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF' or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF')) order by id;
-update field_def set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update field_def set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update field_def set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update field_def set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update field_def set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update field_def set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-insert into sphica_migration_note
-select 'a span that cuts a character (field value)', 'unit_field ' || id, 'widened to whole characters' from unit_field where (source_id is not null and (hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF' or hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF')) order by id;
-update unit_field set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_field set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_field set span_start = span_start - 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_start + 1, 1)) between '80' and 'BF';
-update unit_field set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update unit_field set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-update unit_field set span_end = span_end + 1 where source_id is not null and hex(substr((select cast(text as blob) from source where id = source_id), span_end + 1, 1)) between '80' and 'BF';
-insert into sphica_migration_note
-select 'a span that cuts a character (evidence retraction reason)', 'unit_evidence ' || id, 'widened to whole characters' from unit_evidence where (retraction_source_id is not null and (hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF' or hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF')) order by id;
-update unit_evidence set retraction_span_start = retraction_span_start - 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF';
-update unit_evidence set retraction_span_start = retraction_span_start - 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF';
-update unit_evidence set retraction_span_start = retraction_span_start - 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF';
-update unit_evidence set retraction_span_end = retraction_span_end + 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF';
-update unit_evidence set retraction_span_end = retraction_span_end + 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF';
-update unit_evidence set retraction_span_end = retraction_span_end + 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF';
-insert into sphica_migration_note
-select 'a span that cuts a character (adoption retraction reason)', 'unit_adoption ' || id, 'widened to whole characters' from unit_adoption where (retraction_source_id is not null and (hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF' or hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF')) order by id;
-update unit_adoption set retraction_span_start = retraction_span_start - 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF';
-update unit_adoption set retraction_span_start = retraction_span_start - 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF';
-update unit_adoption set retraction_span_start = retraction_span_start - 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_start + 1, 1)) between '80' and 'BF';
-update unit_adoption set retraction_span_end = retraction_span_end + 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF';
-update unit_adoption set retraction_span_end = retraction_span_end + 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF';
-update unit_adoption set retraction_span_end = retraction_span_end + 1 where retraction_source_id is not null and hex(substr((select cast(text as blob) from source where id = retraction_source_id), retraction_span_end + 1, 1)) between '80' and 'BF';
+select 'a span that cuts a character (' || what || ')', tbl || ' ' || id, 'widened to whole characters' from sphica_widen order by tbl, which, id;
+
 -- Widening can make two rows cite the same words: a live one stays over a retracted one, then the first
+create temp table sphica_twice (tbl text not null, id integer not null, unit_id integer not null);
+insert into sphica_twice
+select 'unit_evidence', id, unit_id from (
+  select e.id, e.unit_id, row_number() over (partition by e.unit_id, e.option_id, e.source_id, coalesce(w.s, e.span_start),
+    coalesce(w.e, e.span_end), e.role order by e.retracted_at is null desc, e.id) as n
+  from unit_evidence e left join sphica_widen w on w.tbl = 'unit_evidence' and w.which = 'span' and w.id = e.id)
+where n > 1;
+insert into sphica_twice
+select 'unit_adoption', id, unit_id from (
+  select a.id, a.unit_id, row_number() over (partition by a.unit_id, a.source_id, coalesce(w.s, a.span_start), coalesce(w.e, a.span_end)
+    order by a.retracted_at is null desc, a.id) as n
+  from unit_adoption a left join sphica_widen w on w.tbl = 'unit_adoption' and w.which = 'span' and w.id = a.id)
+where n > 1;
 insert into sphica_migration_note
-select 'evidence citing the same words twice after widening', 'evidence ' || e.id || ' of unit ' || e.unit_id, 'removed'
-from unit_evidence e where exists (select 1 from unit_evidence k where k.unit_id = e.unit_id
-  and k.option_id is e.option_id and k.source_id = e.source_id and k.span_start = e.span_start and k.span_end = e.span_end
-  and k.role = e.role and ((k.retracted_at is null) > (e.retracted_at is null)
-    or ((k.retracted_at is null) = (e.retracted_at is null) and k.id < e.id))) order by e.id;
-delete from unit_evidence where exists (select 1 from unit_evidence k where k.unit_id = unit_evidence.unit_id
-  and k.option_id is unit_evidence.option_id and k.source_id = unit_evidence.source_id and k.span_start = unit_evidence.span_start
-  and k.span_end = unit_evidence.span_end and k.role = unit_evidence.role
-  and ((k.retracted_at is null) > (unit_evidence.retracted_at is null)
-    or ((k.retracted_at is null) = (unit_evidence.retracted_at is null) and k.id < unit_evidence.id)));
-insert into sphica_migration_note
-select 'adoption citing the same words twice after widening', 'adoption ' || a.id || ' of unit ' || a.unit_id, 'removed'
-from unit_adoption a where exists (select 1 from unit_adoption k where k.unit_id = a.unit_id
-  and k.source_id = a.source_id and k.span_start = a.span_start and k.span_end = a.span_end
-  and ((k.retracted_at is null) > (a.retracted_at is null)
-    or ((k.retracted_at is null) = (a.retracted_at is null) and k.id < a.id))) order by a.id;
-delete from unit_adoption where exists (select 1 from unit_adoption k where k.unit_id = unit_adoption.unit_id
-  and k.source_id = unit_adoption.source_id and k.span_start = unit_adoption.span_start and k.span_end = unit_adoption.span_end
-  and ((k.retracted_at is null) > (unit_adoption.retracted_at is null)
-    or ((k.retracted_at is null) = (unit_adoption.retracted_at is null) and k.id < unit_adoption.id)));
+select case tbl when 'unit_evidence' then 'evidence' else 'adoption' end || ' citing the same words twice after widening',
+  case tbl when 'unit_evidence' then 'evidence ' else 'adoption ' end || id || ' of unit ' || unit_id, 'removed'
+from sphica_twice order by tbl, id;
+delete from unit_evidence where id in (select id from sphica_twice where tbl = 'unit_evidence');
+delete from unit_adoption where id in (select id from sphica_twice where tbl = 'unit_adoption');
+drop table temp.sphica_twice;
+update unit_evidence set span_start = (select s from sphica_widen w where w.tbl = 'unit_evidence' and w.which = 'span' and w.id = unit_evidence.id),
+  span_end = (select e from sphica_widen w where w.tbl = 'unit_evidence' and w.which = 'span' and w.id = unit_evidence.id)
+where id in (select id from sphica_widen where tbl = 'unit_evidence' and which = 'span');
+update unit_adoption set span_start = (select s from sphica_widen w where w.tbl = 'unit_adoption' and w.which = 'span' and w.id = unit_adoption.id),
+  span_end = (select e from sphica_widen w where w.tbl = 'unit_adoption' and w.which = 'span' and w.id = unit_adoption.id)
+where id in (select id from sphica_widen where tbl = 'unit_adoption' and which = 'span');
+update field_def set span_start = (select s from sphica_widen w where w.tbl = 'field_def' and w.which = 'span' and w.id = field_def.id),
+  span_end = (select e from sphica_widen w where w.tbl = 'field_def' and w.which = 'span' and w.id = field_def.id)
+where id in (select id from sphica_widen where tbl = 'field_def' and which = 'span');
+update unit_field set span_start = (select s from sphica_widen w where w.tbl = 'unit_field' and w.which = 'span' and w.id = unit_field.id),
+  span_end = (select e from sphica_widen w where w.tbl = 'unit_field' and w.which = 'span' and w.id = unit_field.id)
+where id in (select id from sphica_widen where tbl = 'unit_field' and which = 'span');
+update unit_evidence set retraction_span_start = (select s from sphica_widen w where w.tbl = 'unit_evidence' and w.which = 'retraction' and w.id = unit_evidence.id),
+  retraction_span_end = (select e from sphica_widen w where w.tbl = 'unit_evidence' and w.which = 'retraction' and w.id = unit_evidence.id)
+where id in (select id from sphica_widen where tbl = 'unit_evidence' and which = 'retraction');
+update unit_adoption set retraction_span_start = (select s from sphica_widen w where w.tbl = 'unit_adoption' and w.which = 'retraction' and w.id = unit_adoption.id),
+  retraction_span_end = (select e from sphica_widen w where w.tbl = 'unit_adoption' and w.which = 'retraction' and w.id = unit_adoption.id)
+where id in (select id from sphica_widen where tbl = 'unit_adoption' and which = 'retraction');
+drop table temp.sphica_widen;
 
 
 -- Paths revision 5 refuses (a control character, or a spelling like `a//b` or `./a` that names a place two ways): an edit observation
@@ -907,6 +900,10 @@ create trigger unit_evidence_check before insert on unit_evidence begin
   select raise(abort, 'evidence span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
   select raise(abort, 'a span starts or ends inside a character')
+  where new.retraction_source_id is not null and (
+    hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
+    or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF');
+  select raise(abort, 'a span starts or ends inside a character')
   where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
      or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
   select raise(abort, 'a reported speaker is the owner reporting someone else, so it must cite an owner session message')
@@ -963,6 +960,10 @@ create trigger unit_adoption_check before insert on unit_adoption begin
   select raise(abort, 'adoption span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
   select raise(abort, 'a span starts or ends inside a character')
+  where new.retraction_source_id is not null and (
+    hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
+    or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF');
+  select raise(abort, 'a span starts or ends inside a character')
   where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
      or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
 end;
@@ -1007,6 +1008,8 @@ create trigger unit_state_project before insert on unit_state begin
        and (select project_id from unit where id = new.unit_id) is not (select project_id from source where id = new.source_id));
 end;
 create trigger unit_anchor_project before insert on unit_anchor begin
+  select raise(abort, 'an anchor is replaced by another anchor of the same record')
+  where new.replaced_by is not null and not exists (select 1 from unit_anchor where id = new.replaced_by and unit_id = new.unit_id);
   select raise(abort, 'anchor and unit belong to different projects')
   where (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'the edit observation must be of this path in a session of the same project')

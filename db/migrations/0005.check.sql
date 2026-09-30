@@ -25,3 +25,12 @@ select 'an implements link between records', 'unit ' || from_unit || ' implement
 where kind = 'implements' order by from_unit, to_unit;
 insert into sphica_migration_stop
 select 'an unfetched reference (revision 5 has no table for it)', 'reference ' || id || ' ' || url from external_reference order by id;
+
+-- A retraction's reason cites a span of the owner's words that starts before the text: no release wrote one, and no span can be told
+-- from it
+insert into sphica_migration_stop
+select 'a retraction span starting before its text', 'evidence ' || id || ' of unit ' || unit_id from unit_evidence
+where retraction_span_start < 0 order by id;
+insert into sphica_migration_stop
+select 'a retraction span starting before its text', 'adoption ' || id || ' of unit ' || unit_id from unit_adoption
+where retraction_span_start < 0 order by id;

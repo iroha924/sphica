@@ -553,7 +553,7 @@ test("migrating revision 4 stops, changing nothing, when a file excerpt has a pa
 });
 
 // The repairs run while the migration holds the write lock, with the indexes dropped: they must not slow down faster than the rows grow
-test("migrating revision 4 with many anchors and edit observations and nothing to repair takes time in proportion to them", () => {
+test("migrating revision 4 with many anchors, edit observations, and evidence and nothing to repair takes time in proportion to them", () => {
   const raw = create("old.db", REV4);
   fill(raw);
   raw.exec(
@@ -566,12 +566,15 @@ test("migrating revision 4 with many anchors and edit observations and nothing t
   raw.exec(
     "with recursive n(i) as (select 1 union all select i + 1 from n where i < 20000) insert into unit_anchor (unit_id, path, role, run_id, added_at) select 2 + i % 5000, 'p' || i || '.ts', 'applies_to', 1, '2026-09-20T00:00:00.000Z' from n",
   );
+  raw.exec(
+    "with recursive n(i) as (select 0 union all select i + 1 from n where i < 19999) insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) select 2 + i % 5000, 1, 0, 3, case i / 5000 when 0 then 'states' when 1 then 'proposes' when 2 then 'rejects' else 'explains' end, 1, '2026-09-20T00:00:00.000Z' from n",
+  );
   const started = performance.now();
   const said = migrate(raw);
   const took = performance.now() - started;
   assert.doesNotMatch(said, /Changed while migrating/);
-  // Measured: well under a second here, over 20 seconds when each row looked for its duplicates alone
-  assert.ok(took < 10000, `took ${Math.round(took)} ms`);
+  // Measured: 0.3 seconds here; 7 seconds when each evidence row looked for its duplicates alone, 22 when each anchor did
+  assert.ok(took < 3000, `took ${Math.round(took)} ms`);
 });
 
 // Revision 4 let small values through that revision 5 refuses. Each takes the nearest value revision 5 accepts, and is listed
@@ -611,7 +614,7 @@ test("migrating revision 4 repairs the small values revision 5 refuses, and list
     now,
   );
   run(
-    "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = 1, retraction_span_start = -2, retraction_span_end = 3 where id = 1",
+    "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = 1, retraction_span_start = 0, retraction_span_end = 3 where id = 1",
     new Date("2026-01-01T00:00:00Z").toISOString(),
   );
   run(
@@ -638,8 +641,34 @@ test("migrating revision 4 repairs the small values revision 5 refuses, and list
     sha256("other"),
     now,
   );
+  // Two adoptions of one unit, one cutting the first character: widened, they are the same, and the adoption table keeps its spans unique
+  run(
+    "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s1', 'm3', 1, 's1', 'owner', ?, ?, ?, ?, ?, 1)",
+    now,
+    now,
+    text,
+    Buffer.byteLength(text),
+    sha256(`${text}3`),
+  );
+  const said3 = Number(
+    (raw.prepare("select id from source where external_id = 'm3'").get() as { id: number }).id,
+  );
+  for (const start of [0, 1])
+    run(
+      "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (1, 'owner_statement', ?, ?, 6, 1, ?)",
+      said3,
+      start,
+      now,
+    );
   const said = migrate(raw);
   const one = (sql: string) => ({ ...(raw.prepare(sql).get() as object) });
+  assert.deepEqual(
+    raw
+      .prepare("select span_start, span_end from unit_adoption where source_id = ?")
+      .all(said3)
+      .map((r) => [r.span_start, r.span_end]),
+    [[0, 6]],
+  );
   assert.deepEqual(one("select url, indexed from source where id = 2"), { url: null, indexed: 0 });
   assert.deepEqual(one("select line_start, line_end from source where id = 3"), {
     line_start: null,
@@ -650,13 +679,9 @@ test("migrating revision 4 repairs the small values revision 5 refuses, and list
     span_end: 6,
     retracted_at: null,
   });
-  assert.deepEqual(
-    one("select retracted_at = added_at as same, retraction_span_start from unit_adoption where id = 1"),
-    {
-      same: 1,
-      retraction_span_start: 0,
-    },
-  );
+  assert.deepEqual(one("select retracted_at = added_at as same from unit_adoption where id = 1"), {
+    same: 1,
+  });
   assert.deepEqual(one("select at from unit_state where unit_id = 2"), { at: now });
   assert.deepEqual(one("select finished_at = started_at as same from extraction_run where id = 1"), {
     same: 1,
@@ -672,7 +697,7 @@ test("migrating revision 4 repairs the small values revision 5 refuses, and list
     "an anchor replaced by itself or by another record's anchor: 1 row",
     "an alias set bound to other words than its record's: 1 row",
     "a retraction dated before what it retracts: 1 row",
-    "a retraction span starting before its text: 1 row",
+    "adoption citing the same words twice after widening: 1 row",
     "a span that cuts a character (evidence): 1 row",
     "evidence citing the same words twice after widening: 1 row",
   ])
@@ -708,6 +733,10 @@ test("migrating revision 4 stops on values no release wrote, and lists every row
     "insert into external_reference (project_id, url, owner_source_id, span_start, span_end, added_at) values (1, 'https://notes.example/x', 1, 0, 3, ?)",
     now,
   );
+  run(
+    "update unit_evidence set retracted_at = ?, retraction_reason = 'r', retraction_source_id = 1, retraction_span_start = -1, retraction_span_end = 3 where id = 1",
+    now,
+  );
   const tables = ["source", "extraction_run", "source_processing", "unit_link", "external_reference"];
   const count = () =>
     tables.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n));
@@ -721,6 +750,7 @@ test("migrating revision 4 stops on values no release wrote, and lists every row
         /a source processing outcome that failed or was capped: 1 row\n\s*source 1 in run 2 \(capped\)/,
         /an implements link between records: 1 row\n\s*unit 2 implements unit 1/,
         /an unfetched reference \(revision 5 has no table for it\): 1 row\n\s*reference 1 https:\/\/notes\.example\/x/,
+        /a retraction span starting before its text: 1 row\n\s*evidence 1 of unit 1/,
       ].every((re) => re.test(e.message)) && /still at revision 4/.test(e.message),
   );
   assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 4);

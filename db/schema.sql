@@ -708,6 +708,10 @@ create trigger unit_evidence_check before insert on unit_evidence begin
   select raise(abort, 'evidence span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
   select raise(abort, 'a span starts or ends inside a character')
+  where new.retraction_source_id is not null and (
+    hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
+    or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF');
+  select raise(abort, 'a span starts or ends inside a character')
   where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
      or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
   select raise(abort, 'a reported speaker is the owner reporting someone else, so it must cite an owner session message')
@@ -767,6 +771,10 @@ create trigger unit_adoption_check before insert on unit_adoption begin
   select raise(abort, 'adoption span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
   select raise(abort, 'a span starts or ends inside a character')
+  where new.retraction_source_id is not null and (
+    hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
+    or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF');
+  select raise(abort, 'a span starts or ends inside a character')
   where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
      or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
 end;
@@ -811,6 +819,8 @@ create trigger unit_state_project before insert on unit_state begin
        and (select project_id from unit where id = new.unit_id) is not (select project_id from source where id = new.source_id));
 end;
 create trigger unit_anchor_project before insert on unit_anchor begin
+  select raise(abort, 'an anchor is replaced by another anchor of the same record')
+  where new.replaced_by is not null and not exists (select 1 from unit_anchor where id = new.replaced_by and unit_id = new.unit_id);
   select raise(abort, 'anchor and unit belong to different projects')
   where (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'the edit observation must be of this path in a session of the same project')
