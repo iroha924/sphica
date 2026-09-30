@@ -78,13 +78,14 @@ forget の画面でバックアップの場所が分かり、revision の不一�
 
 capture ビューの列の変化と `terms()` の出力の変化がテストで落ちる。
 
-- [ ] T04: 4 つの capture ビューの列を全 fixture と比べ、fixture のそろいを検査する
+- [x] T04: 4 つの capture ビューの列を全 fixture と比べ、fixture のそろいを検査する
   - 種別: 追加
   - 計画: S4
   - 依存: なし
   - 変更: `server/test/migrate.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 4 つのビューについて rev1..3 と現在を比べるテストが通り、一時的にビューの列を 1 つ変えると落ちる（手で確かめて戻す）
   - コミット: `test(schema): compare every capture view's columns across all revisions (T04)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 12 pass・0 fail。schema.sql の capture_edit から via を一時的に外すと `--test-name-pattern="every capture view"` が 3 fail（戻した）。`bun run verify` → exit 0
 
 - [ ] T05: terms() の golden、reindex の SQL の定数化、規範の文の置き換え
   - 種別: 追加
