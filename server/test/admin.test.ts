@@ -506,3 +506,85 @@ test("a migration that would leave a broken reference changes nothing", () => {
   assert.equal(look.prepare("select 1 from sqlite_schema where name = 'forget_batch'").get(), undefined);
   look.close();
 });
+
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "db", "migrations");
+/** Completed backups in the database's backups/ directory, oldest first. */
+const backups = (file: string) => {
+  const dir = path.join(path.dirname(file), "backups");
+  return fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
+};
+
+// A migration can commit its first steps and then fail. The copy made before the first step is what the owner restores.
+test("a migration that fails after committing a step leaves a backup at the old revision that restores every row", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  // A row still only in the WAL (a session holds the database open and nothing has checkpointed) belongs in the backup too
+  const held = connectWriter("owner", file);
+  held.exec("pragma wal_autocheckpoint = 0");
+  held.prepare("insert into project (key, name) values ('git:a/b', 'a/b')").run();
+  const migrations = path.join(home, "migrations");
+  fs.mkdirSync(migrations);
+  fs.copyFileSync(path.join(MIGRATIONS, "0002.sql"), path.join(migrations, "0002.sql"));
+  fs.writeFileSync(path.join(migrations, "0003.sql"), "select * from no_such_table;\n");
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (t: string) => said.push(t);
+  let error: Error | null = null;
+  try {
+    migrate(file, migrations);
+  } catch (e) {
+    error = e as Error;
+  } finally {
+    console.log = log;
+  }
+  held.close();
+  assert.ok(error, "the broken migration fails");
+  assert.equal(revisionOf(file), 2, "the first step was committed");
+  const [backup, ...rest] = backups(file);
+  assert.deepEqual(rest, []);
+  assert.match(backup ?? "", /^sphica\.rev1\.\d{8}T\d{9}Z\.\d+\.db$/);
+  const copy = path.join(home, "backups", backup ?? "");
+  assert.match(said.join("\n"), new RegExp(`Backed up: .*${backup?.replaceAll(".", "\\.")}`));
+  assert.ok(error.message.includes(copy), error.message);
+  assert.match(error.message, /sphica\.db-wal/);
+  // Restore as the message says: move the database and its WAL files aside, then copy the backup into place
+  for (const f of [file, `${file}-wal`, `${file}-shm`]) if (fs.existsSync(f)) fs.renameSync(f, `${f}.broken`);
+  fs.copyFileSync(copy, file);
+  assert.equal(revisionOf(file), 1);
+  const raw = new DatabaseSync(file, { readOnly: true });
+  assert.deepEqual(
+    RECORDS.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n)),
+    [2, 1, 1, 1, 1, 2],
+  );
+  raw.close();
+});
+
+test("a successful migration keeps the three newest backups and leaves another run's partial file alone", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  const old = [
+    "sphica.rev1.20260901T000000000Z.10.db",
+    "sphica.rev3.20260902T000000000Z.11.db",
+    "sphica.rev2.20260903T000000000Z.12.db",
+  ];
+  for (const name of old) fs.writeFileSync(path.join(dir, name), "");
+  const partial = "sphica.rev1.20260904T000000000Z.13.db.partial";
+  fs.writeFileSync(path.join(dir, partial), "");
+  fs.writeFileSync(path.join(dir, "notes.txt"), "");
+  await quiet(() => migrate(file));
+  const left = backups(file);
+  const made = left.filter((f) => !old.includes(f) && f !== partial && f !== "notes.txt");
+  assert.equal(made.length, 1);
+  assert.deepEqual(
+    left.filter((f) => f !== made[0]),
+    ["notes.txt", partial, old[1], old[2]].sort(),
+  );
+  assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
+  // Nothing to migrate makes no backup
+  await quiet(() => migrate(file));
+  assert.equal(backups(file).length, left.length);
+});

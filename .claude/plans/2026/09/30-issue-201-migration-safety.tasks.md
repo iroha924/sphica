@@ -22,14 +22,15 @@ base: main
 
 移行が途中で失敗しても、検査済みのバックアップから移行前の DB に戻せる。
 
-- [ ] T01: 移行の前に検査済みのバックアップを取り、戻し方を出し、成功後に刈り込む
+- [x] T01: 移行の前に検査済みのバックアップを取り、戻し方を出し、成功後に刈り込む
   - 種別: 修正
   - 計画: S1
   - 依存: なし
-  - 変更: `server/src/admin.ts`, `server/test/migrate.test.ts`
-  - red: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 失敗する移行を差し込んだ rev1 の DB の移行の後に、revision 1 のバックアップが見つからず落ちる
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - red: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 失敗する移行を差し込んだ rev1 の DB の移行の後に、revision 1 のバックアップが見つからず落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts test/admin.test.ts` → バックアップが revision 1・元の行数（WAL にだけあった行を含む）で開け、戻し方どおりに置き換えると元の行が読め、成功後は完成品が 3 つに刈り込まれ、他プロセスの `.partial` が残るテストが通る
   - コミット: `fix(init): back up the database before migrating and say how to restore it (T01)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 直す前は新しい 2 本が落ちた（red: 移行ディレクトリの引数が無く失敗する移行が走らない / バックアップが無い）。直した後は 25 pass・0 fail。`bun run verify` → exit 0。`bun run release:plan -- --base v0.6.11` → plugin、4 か所とも 0.6.12
 
 ## P2: 持ち主への案内
 
@@ -84,12 +85,15 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
   - 完了条件: `bun run sql:live` → tarball の deliver.js が rev3 の DB に版入りの案内を返し、cli.js の init が `Backed up:` と `Migrated: … (revision 3 → 4)` を出し、バックアップが revision 3 で開ける
   - コミット: `test(live): run the packed hooks and CLI against an older database (T06)`
 
-- [ ] T07: 版を 0.6.12 にそろえる
+- [-] T07: 版を 0.6.12 にそろえる
   - 種別: 変更
   - 計画: S6
   - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base 4d4dcc9` → `plugin`。`bun run verify` → 0 で終わる
+  - 完了条件: `bun run release:plan -- --base v0.6.11` → `plugin`。`bun run verify` → 0 で終わる
   - コミット: `chore(release): bump to 0.6.12 (T07)`
 
 ## 記録
+
+- 2026-09-30 / T01 / 実物の migrate() を通すテストは admin.test.ts にあり、migrate.test.ts は SQL を自前の手順で流す / 変更欄と red を migrate.test.ts から admin.test.ts に変えた（前: `server/src/admin.ts`, `server/test/migrate.test.ts`、後: `server/src/admin.ts`, `server/test/admin.test.ts` と版の 4 ファイル）
+- 2026-09-30 / T01, T07 / pre-commit の bundle の検査が、パッケージの入力を変えるコミットに版の更新を同じコミットで求めた（#208 の T01 も同じ形） / 版の 4 ファイルを T01 に入れ、T07 は取りやめ。S6 の版の更新は T01 が担う
