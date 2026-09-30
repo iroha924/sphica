@@ -410,7 +410,7 @@ export async function checkGlean(
       else {
         let q = db
           .selectFrom("unit_anchor")
-          .select("id")
+          .select(["id", "path", "symbol", "role", "commit_sha"])
           .where("unit_id", "=", u.id)
           .where("path", "=", from)
           .where("retired_at", "is", null);
@@ -419,6 +419,16 @@ export async function checkGlean(
         const name = `${from}${op.from.symbol ? ` ${op.from.symbol}` : ""}`;
         if (live.length === 1) {
           replaces = live[0]?.id ?? null;
+          // Two live anchors on one place cannot both exist, and replacing a place with itself moves nothing
+          const held = live[0];
+          if (
+            held &&
+            held.commit_sha === null &&
+            held.path === repoPath(op.to.path) &&
+            held.symbol === (op.to.symbol ?? null) &&
+            held.role === op.to.role
+          )
+            errors.push(`${what}: the anchor on ${name} is already that place`);
           if (replaces !== null && replaced.has(replaces))
             errors.push(`${what}: another operation in this batch already replaces ${name}`);
           if (replaces !== null) replaced.add(replaces);
@@ -703,6 +713,30 @@ export async function saveGlean(
       refresh(c.units.facts, rel);
       const symbol = to.symbol && !symbolMasked(c.units.facts, rel, to.symbol) ? to.symbol : null;
       const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
+      // When the anchor about to be retired is an active implementation's code proof, the unit goes back to candidate first (the schema
+      // refuses the reverse order) and is judged again below
+      if (op.op === "replace_anchor") {
+        const held = await trx
+          .selectFrom("unit_anchor as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .select(["u.kind", "u.lifecycle", "a.role", "a.commit_sha", "a.edit_observation_id"])
+          .where("a.id", "=", p.replaces ?? -1)
+          .executeTakeFirst();
+        if (
+          held?.kind === "implementation" &&
+          held.lifecycle === "active" &&
+          held.role === "evidence" &&
+          (held.commit_sha !== null || held.edit_observation_id !== null)
+        )
+          await move(
+            trx,
+            p.unitId,
+            "candidate",
+            "glean: code anchor replaced, support checked again",
+            null,
+            runId,
+          );
+      }
       const added = await trx
         .insertInto("unit_anchor")
         .values({
@@ -726,29 +760,6 @@ export async function saveGlean(
           .where("id", "=", p.replaces ?? -1)
           .where("retired_at", "is", null)
           .execute();
-      // When the retired anchor was an active implementation's code proof, it goes back to candidate and is judged again below
-      if (op.op === "replace_anchor") {
-        const held = await trx
-          .selectFrom("unit_anchor as a")
-          .innerJoin("unit as u", "u.id", "a.unit_id")
-          .select(["u.kind", "u.lifecycle", "a.role", "a.commit_sha", "a.edit_observation_id"])
-          .where("a.id", "=", p.replaces ?? -1)
-          .executeTakeFirst();
-        if (
-          held?.kind === "implementation" &&
-          held.lifecycle === "active" &&
-          held.role === "evidence" &&
-          (held.commit_sha !== null || held.edit_observation_id !== null)
-        )
-          await move(
-            trx,
-            p.unitId,
-            "candidate",
-            "glean: code anchor replaced, support checked again",
-            null,
-            runId,
-          );
-      }
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
     } else {
       const reason = await spanOf(op.reason_source, op.reason_quote);

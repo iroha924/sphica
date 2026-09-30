@@ -416,22 +416,8 @@ create trigger unit_state_rules before insert on unit_state begin
         and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
-  select raise(abort, 'an active decision or constraint needs unretracted evidence and adoption')
-  where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('decision', 'constraint') and (
-    not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
-    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null)));
-  select raise(abort, 'an active implementation needs code or commit evidence')
-  where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind = 'implementation' and not (
-    exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
-      and e.retracted_at is null and e.role = 'implements' and s.kind in ('commit_message', 'file_excerpt'))
-    or exists (select 1 from unit_anchor a where a.unit_id = u.id and a.retired_at is null and a.role = 'evidence'
-      and (a.commit_sha is not null or (a.edit_observation_id is not null and exists (select 1 from unit_evidence e
-        join source s on s.id = e.source_id join edit_observation o on o.id = a.edit_observation_id
-        where e.unit_id = u.id and e.option_id is null and e.retracted_at is null and e.role = 'implements'
-          and s.session_id = o.session_id))))));
-  select raise(abort, 'an active unit needs unretracted evidence')
-  where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('finding', 'dead_end', 'question')
-    and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null));
+  select raise(abort, (select missing from unit_support where unit_id = new.unit_id))
+  where new.to_state = 'active' and (select missing from unit_support where unit_id = new.unit_id) is not null;
   -- A reconsider condition is the owner's: each needs a quote of the owner, written when the unit is saved. A quote retracted later, or
   -- forgotten (forget's recheck is exempt, since the row is gone), leaves the unit as it was, and readers show the condition as unsupported
   select raise(abort, 'a reconsider condition needs a quote of the owner')
@@ -488,6 +474,30 @@ end;
 create trigger unit_anchor_no_delete before delete on unit_anchor when exists (select 1 from unit where id = old.unit_id) begin
   select raise(abort, 'anchors are retired, never deleted');
 end;
+
+-- What an active unit must have, in one place: missing says what it lacks, and is null when it lacks nothing. Activating reads it, and so
+-- does every change that can take support away (a retraction, retiring an anchor), so the two never disagree.
+-- Evidence on an option supports the option, never the unit.
+create view unit_support as
+select u.id as unit_id, case
+  when u.kind in ('decision', 'constraint') and (
+    not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
+    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null))
+    then 'an active decision or constraint needs unretracted evidence and adoption'
+  when u.kind = 'implementation' and not (
+    exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
+      and e.retracted_at is null and e.role = 'implements' and s.kind in ('commit_message', 'file_excerpt'))
+    or exists (select 1 from unit_anchor a where a.unit_id = u.id and a.retired_at is null and a.role = 'evidence'
+      and (a.commit_sha is not null or (a.edit_observation_id is not null and exists (select 1 from unit_evidence e
+        join source s on s.id = e.source_id join edit_observation o on o.id = a.edit_observation_id
+        where e.unit_id = u.id and e.option_id is null and e.retracted_at is null and e.role = 'implements'
+          and s.session_id = o.session_id)))))
+    then 'an active implementation needs code or commit evidence'
+  when u.kind in ('finding', 'dead_end', 'question')
+    and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
+    then 'an active unit needs unretracted evidence'
+end as missing
+from unit u;
 
 -- Search-only aliases in Japanese and English, written by the agent with the unit. Each set is bound to the unit's content_hash when written;
 -- only the newest set whose hash matches is indexed. Older sets stay for as-of snapshots. Never evidence, never shown as something said.
@@ -649,16 +659,21 @@ when exists (select 1 from unit where id = old.unit_id) and exists (select 1 fro
   and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
   select raise(abort, 'adoption is retracted, never deleted');
 end;
--- A retraction that would leave an active unit without its required support must first move it back to candidate
+-- A retraction, or retiring an anchor, that would leave an active unit without its required support must first move it back to candidate
 create trigger unit_evidence_retract_support after update of retracted_at on unit_evidence
-when exists (select 1 from unit where id = new.unit_id and lifecycle = 'active')
-  and not exists (select 1 from unit_evidence where unit_id = new.unit_id and retracted_at is null) begin
+when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
+  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
   select raise(abort, 'move the unit back to candidate before retracting its last evidence');
 end;
 create trigger unit_adoption_retract_support after update of retracted_at on unit_adoption
-when exists (select 1 from unit where id = new.unit_id and lifecycle = 'active')
-  and not exists (select 1 from unit_adoption where unit_id = new.unit_id and retracted_at is null) begin
+when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
+  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
   select raise(abort, 'move the unit back to candidate before retracting its last adoption');
+end;
+create trigger unit_anchor_retire_support after update of retired_at on unit_anchor
+when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
+  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
+  select raise(abort, 'move the unit back to candidate before retiring its last code anchor');
 end;
 create trigger unit_adoption_check before insert on unit_adoption begin
   select raise(abort, 'adoption and unit belong to different projects')

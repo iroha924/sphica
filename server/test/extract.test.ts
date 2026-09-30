@@ -1447,6 +1447,33 @@ test("glean: replacing an implementation's only code proof puts it back to candi
       ],
     });
     assert.equal(state()?.lifecycle, "candidate");
+    // Replacing an anchor with the place it already is would leave two live anchors on one place for a moment: refused by name
+    await assert.rejects(
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+        ops: [
+          {
+            op: "replace_anchor",
+            unit: "trace:ext-s1/open",
+            revision: state()?.revision,
+            from: { path: "src.ts", symbol: "openStore" },
+            to: { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            source: `s${said}`,
+            quote: "場所が変わった。",
+          },
+        ],
+      }),
+      /the anchor on src\.ts openStore is already that place/,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select role, retired_at is null as live from unit_anchor order by id")
+        .all()
+        .map((a) => [a.role, a.live]),
+      [
+        ["evidence", 0],
+        ["applies_to", 1],
+      ],
+    );
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

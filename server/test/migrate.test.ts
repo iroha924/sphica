@@ -425,6 +425,51 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
   assert.throws(() => move(2, "withdrawn", "candidate"), /not a lifecycle change/);
 });
 
+// Revision 4 kept a decision active on an option's evidence alone. Revision 5 counts only the unit's own, and the migration applies that once
+test("migrating revision 4 puts an active unit without its own support back to candidate, and says so", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  // Unit 1 has evidence of its own and on its option. Retracting its own leaves the option's, which revision 4 accepted
+  run(
+    "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = 1, retraction_span_start = 0, retraction_span_end = 3 where unit_id = 1 and option_id is null",
+    now,
+  );
+  assert.equal(
+    (raw.prepare("select lifecycle from unit where id = 1").get() as { lifecycle: string }).lifecycle,
+    "active",
+  );
+  const said = migrate(raw);
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare(
+          "select u.lifecycle, s.from_state, s.to_state, s.reason, r.origin from unit u join unit_state s on s.unit_id = u.id join extraction_run r on r.id = s.run_id where u.id = 1 order by s.id desc limit 1",
+        )
+        .get(),
+    },
+    {
+      lifecycle: "candidate",
+      from_state: "active",
+      to_state: "candidate",
+      reason: "schema revision 5: an active record without the support an active record needs",
+      origin: "migration",
+    },
+  );
+  assert.match(
+    said,
+    /an active record without the support an active record needs: 1 row\n\s*unit 1 trace:session:s1\/k \(active\) → back to candidate/,
+  );
+  assert.throws(
+    () =>
+      run(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (1, 'candidate', 'active', ?, 'r', 1)",
+        now,
+      ),
+    /needs unretracted evidence and adoption/,
+  );
+});
+
 // Rebuilding a table drops its counter with it. A counter can be above every id left: the highest rows were removed, or all of them
 test("migrating revision 4 keeps the id counter of every table, so an id once used is never handed out again", () => {
   const raw = create("old.db", REV4);

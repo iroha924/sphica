@@ -83,16 +83,16 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): allow only the listed lifecycle transitions (T05)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="listed transitions" test/schema.test.ts` → 直す前の schema では落ちた（red）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/admin.test.ts test/extract.test.ts test/record.test.ts test/forget.test.ts` → 全件 pass。移行のテストは、後継が withdrawn の superseded の unit が candidate に戻り、最後の state が migration の run で、revision が 1 増え、一覧に出ることを見る（後継が candidate の unit は superseded のまま）。`bun run verify` → exit 0。review-shipping: 修復の条件を変えると移行のテストが落ちることを確認済み。指摘 1 件（superseded への withdraw）は同じコミットで直した
 
-- [ ] T06: 後継を 1 つにし、kind の組を限り、後継が withdrawn になったら元の unit を candidate に戻す
+- [ ] T06: withdrawn でない後継を 1 つまでにし、kind の組を限り、後継が withdrawn になったら元の unit を candidate に戻す
   - 種別: 修正
   - 計画: S3, S4, S6
   - 依存: T05（superseded→candidate の遷移が要る）
   - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
-  - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 1 つの unit に 2 つ目の後継、finding が decision を supersede する link が通り、唯一の後継を withdraw しても元の unit が superseded のままで落ちる
-  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/record.test.ts test/extract.test.ts` → それらが拒まれ、glean の withdraw で元の unit が支えが揃っていれば active に戻り、後継が 2 つある rev4 の DB の移行で決めた 1 つが残って一覧に出るテストが通る
+  - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 後継が withdrawn でない unit に 2 つ目の後継、finding が decision を supersede する link が通り、唯一の後継を withdraw しても元の unit が superseded のままで落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/record.test.ts test/extract.test.ts` → それらが拒まれ、後継を withdraw した後は元の unit に新しい後継を付けられ（withdrawn の後継の link は残る）、glean の withdraw で元の unit が支えが揃っていれば active に戻り、withdrawn でない後継が 2 つある rev4 の DB の移行で決めた 1 つが残って一覧に出るテストが通る
   - コミット: `fix(db): keep one successor per unit and bring the old unit back when it is withdrawn (T06)`
 
-- [ ] T07: 支えの規則を 1 つのビューにし、retract と anchor の retire でも同じ規則で拒む
+- [x] T07: 支えの規則を 1 つのビューにし、retract と anchor の retire でも同じ規則で拒む
   - 種別: 修正
   - 計画: S3, S4, S6
   - 依存: T05（支えの足りない active な unit を candidate に戻す移行の修復が、遷移表と migration の run を使う）
@@ -100,6 +100,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → option の証拠だけが残る active な unit の、最後の unit 単位の証拠の retract が通ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/extract.test.ts test/record.test.ts test/forget.test.ts` → その retract と、active な implementation の最後のコードの anchor の retire が拒まれ、glean の replace_anchor は同じ組への置き換えをエラーにして別の組へは通り、支えの足りない active な unit を入れた rev4 の DB の移行で candidate に戻って一覧に出るテストが通る
   - コミット: `fix(db): judge support with one rule when activating, retracting, and retiring an anchor (T07)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="judged by one rule" test/schema.test.ts` → 直す前の schema では Missing expected exception で落ちた（red）。直した後 `node --test test/*.test.ts` → 512 pass・0 fail（schema: option の証拠だけが残る decision の最後の証拠の retract と、active な implementation の commit 付き anchor の retire が拒まれる / migrate: 支えの足りない active な unit が candidate に戻って一覧に出る / extract: 同じ場所への replace_anchor はエラー、別の場所へは通って candidate に戻る）。`bun run verify` → exit 0
 
 - [ ] T08: reader の型を ReadonlyKysely にする
   - 種別: 変更
@@ -108,6 +109,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - 変更: `server/src/db.ts`, `server/src/mcp.ts`, `server/src/deliver.ts`, `server/src/search.ts`, `server/src/read.ts`, `server/src/status.ts`, `server/src/overview.ts`, `server/src/project.ts`, `server/src/cli/common.ts`, `server/test/db.test.ts`
   - 完了条件: `bun run verify` → 0（型の検査を含む）。`server/test/db.test.ts` の `// @ts-expect-error` を付けた reader への insert が型エラーのままで、外すと型の検査が落ちる
   - コミット: `refactor(db): type the reader connection as read-only (T08)`
+
+- [ ] T21: T04・T05 の Codex の指摘を直す（candidate の後継がいる unit の withdraw を通す、migration の run を id カウンターの復元の後に作る）
+  - 種別: 修正
+  - 計画: S4, S6
+  - 依存: T05（直す対象の withdraw の検査と移行の修復が要る）
+  - 変更: `server/src/glean.ts`, `db/migrations/0005.sql`, `server/test/extract.test.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → 採用の無い後継を足しながら元の unit を withdraw する glean の保存が check のエラーで落ち、run を消した rev4 の DB の移行で migration の run が消した id を使い直して落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → その保存で元の unit が withdrawn・後継が candidate になり、同じ保存で後継が active になって元が superseded になったときは withdraw を「しなかった」と返し、migration の run の id が旧カウンター + 1 になるテストが通る
+  - コミット: `fix(glean): let a record be withdrawn beside a candidate successor, and keep run ids unused (T21)`
 
 ## P3: index・FK・一意キー・CHECK・値の整理（#203）
 
@@ -229,3 +239,6 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T04・T05 / コミット前の出荷レビューを 1 回で済ませるため、2 つを 1 コミットにまとめる（件名の末尾は (T04, T05)）
 - 2026-10-01 / T05 / review-shipping が再現: superseded の unit への glean の withdraw は 0.6.14 では通ったが、遷移表の下では保存全体が読めないエラーで落ちる / 遷移表（合意済み）は変えず、`checkGlean` が withdraw の対象が superseded のとき（と、同じ保存の中で supersede されるとき）に名前入りのエラーを返すようにした。glean の Skill の表に 1 文足した。変更欄に `server/src/glean.ts`・`plugin/skills/glean/SKILL.md`・`server/test/extract.test.ts` を足した
 - 2026-10-01 / T03 / Codex のレビュー（dd892aa0）: 指摘 0 件。行を入れていない表は空のまま前後を比べている、という未検証の点は T18 で全表に行を入れて埋める
+- 2026-10-01 / T06 / 実装の前に、plan の unique index だと取り下げた後継が枠を塞ぐことに気づいた / Codex と新しい会話で相談して「withdrawn でない後継は 1 つまで」のトリガーに合意。plan の方針 5・2 を直し、status を draft に戻して持ち主の Go を待つ。T06 の題名・red・完了条件を合わせた（前の値: 題名「後継を 1 つにし、…」、red「1 つの unit に 2 つ目の後継、…」、完了条件は「後継を withdraw した後は…」の句が無い）。T06 に依存する T17 は Go まで着手しない
+- 2026-10-01 / T04・T05 / Codex のレビュー（3a1aee15）: 指摘 2 件（どちらも P2、再現済み）。F1: 同じ保存で supersede される unit への withdraw を check で拒むのは、後継が candidate に留まる場合に有効な取り下げを落とす（0.6.14 では通る）。F2: migration の run を id カウンターの復元より前に作るので、消した run の id を使い直す / 2 件とも採用。修正タスク T21 を足した
+- 2026-10-01 / T07 / review-shipping（1 回目は API の 529 で結果なし、投げ直し）: 指摘なし。5 つの変異（古い retract トリガー、retire のトリガー無し、修復の insert 無し、同じ場所の検査無し、retire の前に戻さない）がそれぞれ新しいテストを落とすことを確認

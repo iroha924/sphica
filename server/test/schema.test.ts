@@ -277,6 +277,62 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
   );
 });
 
+test("support is judged by one rule: a retraction or a retired anchor that takes it away is refused while the unit is active", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const retract = (id: number) =>
+    sql(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where id = ?",
+      now,
+      src,
+      id,
+    );
+  // Evidence on an option supports the option: left alone with it, the decision has none of its own
+  const d = unit({ key: "d1", kind: "decision" });
+  const option = insert(db, "unit_option", { unit_id: d, position: 1, text: "SQLite", outcome: "chosen" });
+  const own = evidence(d, src);
+  evidence(d, src, { option_id: option });
+  adoption(d, src);
+  state(d, null, "candidate");
+  state(d, "candidate", "active");
+  refuses(() => retract(own), /back to candidate before retracting its last evidence/);
+  state(d, "active", "candidate");
+  retract(own);
+  refuses(() => state(d, "candidate", "active"), /needs unretracted evidence and adoption/);
+  // An implementation's proof can be a commit-pinned anchor: retiring it is the same loss
+  const i = unit({ key: "i1", kind: "implementation" });
+  evidence(i, src, { role: "implements" });
+  const runId = Number(one("select run_id from unit where id = ?", i).run_id);
+  const anchor = (path: string, commit: string | null) =>
+    insert(db, "unit_anchor", {
+      unit_id: i,
+      path,
+      role: "evidence",
+      commit_sha: commit,
+      run_id: runId,
+      added_at: now,
+    });
+  const proof = anchor("src/db.ts", "a".repeat(40));
+  const plain = anchor("src/other.ts", null);
+  state(i, null, "candidate");
+  state(i, "candidate", "active");
+  const retire = (id: number) => sql("update unit_anchor set retired_at = ? where id = ?", now, id);
+  retire(plain);
+  refuses(() => retire(proof), /back to candidate before retiring its last code anchor/);
+  state(i, "active", "candidate");
+  retire(proof);
+  refuses(() => state(i, "candidate", "active"), /needs code or commit evidence/);
+  assert.deepEqual(
+    db.owner
+      .prepare("select unit_id, missing from unit_support where unit_id in (?, ?) order by unit_id")
+      .all(d, i)
+      .map((r) => r.missing),
+    [
+      "an active decision or constraint needs unretracted evidence and adoption",
+      "an active implementation needs code or commit evidence",
+    ],
+  );
+});
+
 test("an unsourced or quarantined unit never becomes active", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const u = unit({ key: "u2", kind: "constraint", unsourced: 1 });

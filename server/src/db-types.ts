@@ -344,6 +344,11 @@ export interface UnitState {
   unit_id: number;
 }
 
+export interface UnitSupport {
+  missing: string | null;
+  unit_id: number | null;
+}
+
 export interface Work {
   branch: string | null;
   current: string;
@@ -388,5 +393,6 @@ export interface DB {
   unit_option: UnitOption;
   unit_search_text: UnitSearchText;
   unit_state: UnitState;
+  unit_support: UnitSupport;
   work: Work;
 }
