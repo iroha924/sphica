@@ -51,6 +51,16 @@ const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "
 const swapped = manifest.variant === "swapped";
 /** A swapped build's gold is the swapped record, not the task's original one */
 const goldOf = (task: Task) => (swapped ? (plan.swapped.tasks[task.id] ?? []) : (task.gold ?? []));
+/** The gold slot's rendering of a counterfactual task's record: what the grader checks the run followed. Other tasks have none. */
+const goldSlot = Object.entries(manifest.repositories).find(([, r]) => r.condition === "gold")?.[0];
+const shown = goldSlot
+  ? (JSON.parse(fs.readFileSync(path.join(build, goldSlot, ".tools", "gold.json"), "utf8")) as {
+      id: string;
+      text: string;
+    }[])
+  : [];
+const presentedOf = (task: Task) =>
+  plan.swapped.tasks[task.id] ? (shown.find((g) => g.id === task.id)?.text ?? null) : null;
 
 type Row = {
   model: "claude" | "codex";
@@ -72,6 +82,7 @@ type Row = {
   found: Tri;
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
+  presented: string | null;
   signals: {
     searches: number;
     empty_searches: number;
@@ -106,6 +117,7 @@ const excludedRow = (
   delivered_units: [],
   found: "unknown",
   gold_signals: {},
+  presented: null,
   signals: null,
 });
 
@@ -263,6 +275,7 @@ function main() {
           delivered_units: emitted,
           found: foundInClaudeLog(log, gold),
           gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
+          presented: presentedOf(task),
           signals: log === null ? null : signals(log),
         });
       } finally {
@@ -378,6 +391,7 @@ function main() {
         delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
         delivered_units: emitted,
         found,
+        presented: presentedOf(task),
         gold_signals: goldSignalsFromCodex(result.condition, gold, emitted, read("gold-receipt.txt"), events),
         // A missing or broken event log cannot say how many searches or errors there were
         signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },

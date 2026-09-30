@@ -16,6 +16,8 @@ const { values: args } = parseArgs({
   options: {
     loop: { type: "string", default: path.join(CACHE, "loop.json") },
     out: { type: "string", default: path.join(CACHE, "grades.json") },
+    // The second grader: Claude grades the same runs with the same prompt and schema, for agreement only; "none" skips it
+    second: { type: "string", default: "claude" },
   },
 });
 
@@ -68,7 +70,48 @@ function gradeOne(prompt: string): { status: number | null; output: string } {
   }
 }
 
-const graded: (GradeRow & { grade?: Grade; ungraded?: string })[] = [];
+/**
+ * The second grader: Claude through the owner's subscription (--bare would need an API key), in an empty directory with no settings
+ * sources, MCP servers, tools, or skills, so no CLAUDE.md, hook, or plugin adds context to the blind prompt.
+ */
+function gradeClaude(prompt: string): { status: number | null; output: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
+  try {
+    const schema = fs.readFileSync(path.join(HERE, "grade.schema.json"), "utf8");
+    const r = spawnSync(
+      "claude",
+      [
+        "-p",
+        "--setting-sources",
+        "",
+        "--strict-mcp-config",
+        "--tools",
+        "",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--output-format",
+        "json",
+        "--json-schema",
+        schema,
+      ],
+      { cwd: dir, input: prompt, encoding: "utf8", timeout: 15 * 60_000 },
+    );
+    let output = "";
+    try {
+      const structured = (JSON.parse(r.stdout) as { structured_output?: unknown }).structured_output;
+      output = structured === undefined ? "" : JSON.stringify(structured);
+    } catch {}
+    return { status: r.status, output };
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const graded: (GradeRow & {
+  grade?: Grade;
+  ungraded?: string;
+  second?: { grade: Grade } | { ungraded: string };
+})[] = [];
 for (const row of loop.rows) {
   if (row.excluded) {
     graded.push(row);
@@ -79,8 +122,18 @@ for (const row of loop.rows) {
     graded.push({ ...row, ungraded: `unknown task ${row.task}` });
     continue;
   }
-  const got = receiveGrade(gradeOne(blindPrompt(task, row)), row.patch_truncated, task.against !== undefined);
-  graded.push("graded" in got ? { ...row, grade: got.graded } : { ...row, ungraded: got.ungraded });
+  const prompt = blindPrompt(task, row);
+  const accept = (run: { status: number | null; output: string }) =>
+    receiveGrade(run, row.patch_truncated, task.against !== undefined, Boolean(row.presented));
+  const got = accept(gradeOne(prompt));
+  // The second grade is kept beside the first for agreement; the table's values stay Codex's
+  const other = args.second === "claude" ? accept(gradeClaude(prompt)) : null;
+  const second = other && ("graded" in other ? { grade: other.graded } : { ungraded: other.ungraded });
+  graded.push({
+    ...row,
+    ...("graded" in got ? { grade: got.graded } : { ungraded: got.ungraded }),
+    ...(second ? { second } : {}),
+  });
   console.log(
     `${row.model} ${row.condition} ${row.run}: ${"graded" in got ? `score ${got.graded.score}` : `ungraded (${got.ungraded})`}`,
   );

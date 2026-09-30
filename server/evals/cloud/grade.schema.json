@@ -16,6 +16,14 @@
       "type": "string",
       "enum": ["yes", "no", "not_applicable", "unknown"]
     },
+    "proposes_rejected": {
+      "type": "string",
+      "enum": ["yes", "no", "not_applicable"]
+    },
+    "followed": {
+      "type": "string",
+      "enum": ["presented", "other", "neither", "not_applicable"]
+    },
     "flags": {
       "type": "array",
       "items": {
@@ -24,6 +32,14 @@
       }
     }
   },
-  "required": ["score", "reason", "cited_gold", "implements_rejected", "flags"],
+  "required": [
+    "score",
+    "reason",
+    "cited_gold",
+    "implements_rejected",
+    "proposes_rejected",
+    "followed",
+    "flags"
+  ],
   "additionalProperties": false
 }

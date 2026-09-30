@@ -30,6 +30,8 @@ const grade: Grade = {
   reason: "kept the recorded search design",
   cited_gold: "yes",
   implements_rejected: "no",
+  proposes_rejected: "no",
+  followed: "not_applicable",
   flags: [],
 };
 
@@ -307,7 +309,11 @@ test("a grade is counted only from a zero exit and a valid shape; anything else 
   const cut = receiveGrade({ status: 0, output: good }, true, true) as { graded: typeof grade };
   assert.equal(cut.graded.implements_rejected, "unknown");
   // not_applicable only when the task has no "Against", and only then
-  const na = JSON.stringify({ ...grade, implements_rejected: "not_applicable" });
+  const na = JSON.stringify({
+    ...grade,
+    implements_rejected: "not_applicable",
+    proposes_rejected: "not_applicable",
+  });
   assert.match(
     (receiveGrade({ status: 0, output: na }, false, true) as { ungraded: string }).ungraded,
     /not_applicable/,
@@ -317,8 +323,21 @@ test("a grade is counted only from a zero exit and a valid shape; anything else 
     /not_applicable/,
   );
   assert.deepEqual(receiveGrade({ status: 0, output: na }, false, false), {
-    graded: { ...grade, implements_rejected: "not_applicable" },
+    graded: { ...grade, implements_rejected: "not_applicable", proposes_rejected: "not_applicable" },
   });
+  // followed is judged only when an earlier record was shown, and then always
+  assert.match(
+    (receiveGrade({ status: 0, output: good }, false, true, true) as { ungraded: string }).ungraded,
+    /followed/,
+  );
+  const followed = JSON.stringify({ ...grade, followed: "presented" });
+  assert.deepEqual(receiveGrade({ status: 0, output: followed }, false, true, true), {
+    graded: { ...grade, followed: "presented" },
+  });
+  assert.match(
+    (receiveGrade({ status: 0, output: followed }, false, true, false) as { ungraded: string }).ungraded,
+    /followed/,
+  );
 });
 
 test("the table counts every started run and the tracked failure per model and condition", () => {
@@ -448,6 +467,17 @@ printf '%s' ${JSON.stringify(JSON.stringify({ ...grade }))} > "$2"
 `,
       { mode: 0o755 },
     );
+    // A fake claude that records how it was started and answers with the grade as structured output
+    const claudeSeen = path.join(base, "claude-seen");
+    fs.writeFileSync(
+      path.join(bin, "claude"),
+      `#!/bin/sh
+{ pwd; for a in "$@"; do printf '[%s]\\n' "$a"; done; } > ${JSON.stringify(claudeSeen)}
+cat > /dev/null
+printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output: { ...grade, score: 1 } }))}
+`,
+      { mode: 0o755 },
+    );
     const loop = path.join(base, "loop.json");
     fs.writeFileSync(loop, JSON.stringify({ bundle: "c", rows: [{ ...row, answer_format: "valid" }] }));
     const r = spawnSync(
@@ -476,6 +506,19 @@ printf '%s' ${JSON.stringify(JSON.stringify({ ...grade }))} > "$2"
     assert.match(got, /^config\.toml$/m);
     assert.doesNotMatch(got, /hooks\.json|mcp_servers/);
     assert.match(got, /model = "m"/);
+    // The second grader starts in an empty directory with no settings sources, MCP servers, tools, or skills
+    const started = fs.readFileSync(claudeSeen, "utf8");
+    assert.doesNotMatch(started.split("\n")[0] ?? "", new RegExp(owner));
+    for (const a of [
+      "[--setting-sources]\n[]",
+      "[--strict-mcp-config]",
+      "[--tools]\n[]",
+      "[--disable-slash-commands]",
+    ])
+      assert.ok(started.includes(a), a);
+    const out = JSON.parse(fs.readFileSync(path.join(base, "grades.json"), "utf8"));
+    assert.equal(out.rows[0].grade.score, 2, "the table keeps Codex's grade");
+    assert.equal(out.rows[0].second.grade.score, 1);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

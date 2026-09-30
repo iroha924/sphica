@@ -132,13 +132,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `refactor(eval): generate the answer and grade schemas from zod (T08)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 21 pass・0 fail（既存の形の検査と理由の文面のテストもそのまま通る）。grade.schema.json の off_task を一時的に書き換えると、新しいテストが stale で落ちた（戻した）。`bun run verify` → exit 0
 
-- [ ] T09: 採点の欄（`proposes_rejected`、`followed`）と 2 人目の採点者
+- [x] T09: 採点の欄（`proposes_rejected`、`followed`）と 2 人目の採点者
   - 種別: 追加
   - 計画: S7
   - 依存: T08（欄を足すスキーマの出所が要る）, T07（`followed` を付ける variant が要る）
-  - 変更: `server/evals/cloud/grade.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/schema-check.ts`, `server/evals/cloud/grade.schema.json`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/grade.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/schema-check.ts`, `server/evals/cloud/grade.schema.json`, `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → Claude の採点の出力例が同じ schema で読め、2 人の採点が run ごとに並び、報告の値が Codex 採点のままのテストが通る
   - コミット: `feat(eval): grade proposals of rejected options and followed versions with a second grader (T09)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 21 pass・0 fail（2 つの欄の not_applicable の規則、偽の claude が空のディレクトリで設定・MCP・ツール・スキル無しで呼ばれ、表の値は Codex の採点のまま）。本物の Codex と Claude で 1 行を採点 → どちらも schema どおり、score 2・followed presented で一致。切り離した claude -p は CLAUDE.md を読まない（入力 3,216 トークン、見えるかを問うて false）。`bun run verify` → exit 0
 
 - [ ] T10: `report.ts`（群、gold − inject、再提案率、counterfactual、採点者の一致）
   - 種別: 追加
@@ -208,3 +209,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T07 / counterfactual のタスクを pilot-dates と superseded-install にした（plan は pilot-dates と sphica-search-wording）。sphica の fixture は実際の PR を harvest した DB で、反転版には実在の PR の中に架空の出典を作ることになるため。superseded-install は status-02 を外すだけで pnpm が今の決定として残り、新しい記録は要らない。pilot-dates は反転版の記録（local time で保存）を tasks.json の swapped.steps に持つ。collect も swapped の gold と hidden test の扱いを知る必要があり、変更欄に collect.ts を足し fixture.ts を外した
 - 2026-09-30 / T06 レビュー / Codex の F1（既存の --out を消す）・F4（build の後に prompt が変わると結果を読み落とす）・F5（別の build の Codex の run が混ざる）は直す。F2（fire.ts を同時に流すと同じ行を選ぶ）は、発火を 1 つずつ行う手順では起きない入力なので直さない。F3（同じタスク×条件の試行 1 が結果を残さず試行 2 だけ残すと、試行番号の割り当てが入れ替わる）は、同じタスク×条件の試行は区別の意味が無く分母（結果 1・結果なし 1）は正しいので直さない / T18 を足した。codex.ts は `--build` を必須にし、started.json と result.json に build ID を書く
 - 2026-09-30 / T08 / zod から作ると grade の score の型が `integer` から `number` になる（値は enum の 0・1・2 に限られ、受け取る値は同じ）。JSON ファイルは `node evals/cloud/schema-check.ts --write` で作り、$schema は付けない
+- 2026-09-30 / T09 / 2 人目の採点者の claude は `--bare` を使えない（API キーでしか認証しない。サブスクリプションで回す方針）。代わりに空のディレクトリで `--setting-sources "" --strict-mcp-config --tools "" --disable-slash-commands --no-session-persistence` を付け、`--json-schema` の structured_output を受け取る。counterfactual のタスクの記録の本文（presented）は、collect が gold スロットの gold.json から行に載せる（変更欄に collect.ts を足した）

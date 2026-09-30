@@ -10,6 +10,8 @@ const gradeSchema = z.strictObject({
   reason: z.string(),
   cited_gold: z.enum(["yes", "no"]),
   implements_rejected: z.enum(["yes", "no", "not_applicable", "unknown"]),
+  proposes_rejected: z.enum(["yes", "no", "not_applicable"]),
+  followed: z.enum(["presented", "other", "neither", "not_applicable"]),
   flags: z.array(z.enum(["stopped_at_plan", "read_scaffolding", "off_task"])),
 });
 
