@@ -35,3 +35,4 @@ base: main
 ## 記録
 
 - 2026-09-30 / T01 / review-shipping（コミット前）の指摘は 1 件: `prune()` のコメントが「失敗した実行は 1 つも消さない」のままで、今は自分のバックアップを消す / 採用。同じコミットで「古いものは消さない」に直した
+- 2026-09-30 / T01 / Codex のレビュー（5ddc0d9、新しい会話。全差分 `main..5ddc0d9` も同じ範囲）は指摘 0 件。Codex はテスト・verify を流していない（read-only）。release:plan は Codex の環境では GitHub の設定を読めず exit 1 / 直しなし。テスト・verify・release:plan は Claude が流して結果欄のとおり
