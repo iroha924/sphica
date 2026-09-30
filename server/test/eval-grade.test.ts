@@ -17,6 +17,7 @@ import {
   goldSignalsFromClaude,
   goldSignalsFromCodex,
 } from "../evals/cloud/judge.ts";
+import { report } from "../evals/cloud/report.ts";
 import {
   checkAnswer,
   checkGrade,
@@ -799,4 +800,63 @@ test("the schema files are what the zod schemas write, and every object in them 
       );
     }
   }
+});
+
+// The loop report: every group keeps its n and its runs, gold minus inject is per task and model, and agreement lists each disagreement
+test("the report splits by group, lists gold minus inject per task with every run, and counts re-proposals, the counterfactual, and agreement", () => {
+  const g = (over: Partial<Grade>): Grade => ({ ...grade, ...over });
+  const base = { ...row, task: "t1", presented: null };
+  const rows = [
+    {
+      ...base,
+      run: "g1",
+      condition: "gold",
+      grade: g({ score: 2, followed: "presented" }),
+      second: { grade: g({ score: 2 }) },
+    },
+    {
+      ...base,
+      run: "g2",
+      condition: "gold",
+      grade: g({ score: 1, followed: "presented" }),
+      second: { grade: g({ score: 0 }) },
+    },
+    {
+      ...base,
+      run: "i1",
+      condition: "inject",
+      grade: g({ score: 0, proposes_rejected: "yes", implements_rejected: "yes" }),
+    },
+    { ...base, run: "i2", condition: "inject", excluded: "no result branch" },
+    {
+      ...base,
+      run: "i3",
+      condition: "inject",
+      grade: g({ score: 1 }),
+      gold_signals: {
+        "k/1": { in_delivery: "yes" as const, in_search: "unknown" as const, read: "no" as const },
+      },
+    },
+  ];
+  const swapped = [{ ...base, run: "s1", condition: "gold", grade: g({ followed: "other" }) }];
+  const out = report(
+    [
+      { variant: "original", rows },
+      { variant: "swapped", rows: swapped },
+    ],
+    [{ id: "t1", lang: "ja>en", overlap: false, gold: ["k/1"] }],
+  ).join("\n");
+  assert.match(
+    out,
+    /codex inject: n 3 \(excluded 1, ungraded 0\), mean score 0\.50 \[0 1\], tracked failure 1/,
+  );
+  assert.match(out, /codex gold ja>en: n 2/);
+  assert.match(out, /codex inject no overlap: n 3/);
+  assert.match(out, /t1 codex: gold \[2 1\] inject \[0 1\], difference 1\.00 \(preliminary/);
+  assert.match(out, /codex inject: 1 \/ 2\n/);
+  assert.match(out, /t1 codex gold original: presented 2, other 0/);
+  assert.match(out, /t1 codex gold swapped: presented 0, other 1/);
+  assert.match(out, /runs by codex: 1 \/ 2 agree/);
+  assert.match(out, /g2 \(t1 gold\): Codex 1\/no, Claude 0\/no/);
+  assert.match(out, /codex inject k\/1: delivered 1\/0\/0, search 0\/0\/1, read 0\/1\/0/);
 });

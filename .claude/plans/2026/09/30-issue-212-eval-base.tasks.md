@@ -141,13 +141,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): grade proposals of rejected options and followed versions with a second grader (T09)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 21 pass・0 fail（2 つの欄の not_applicable の規則、偽の claude が空のディレクトリで設定・MCP・ツール・スキル無しで呼ばれ、表の値は Codex の採点のまま）。本物の Codex と Claude で 1 行を採点 → どちらも schema どおり、score 2・followed presented で一致。切り離した claude -p は CLAUDE.md を読まない（入力 3,216 トークン、見えるかを問うて false）。`bun run verify` → exit 0
 
-- [ ] T10: `report.ts`（群、gold − inject、再提案率、counterfactual、採点者の一致）
+- [x] T10: `report.ts`（群、gold − inject、再提案率、counterfactual、採点者の一致）
   - 種別: 追加
   - 計画: S7
   - 依存: T05（gold key の信号が要る）, T06（build ごとの結果が要る）, T09（採点の欄が要る）
-  - 変更: `server/evals/cloud/report.ts`, `server/evals/cloud/grading.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/report.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`, `knip.json`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 作った loop と grades の入力から、言語の組み合わせ別・overlap 別・gold の有無別、タスク×モデルの gold − inject（各 run と n）、再提案率、元版と反転版の並び、採点者の一致率が出るテストが通る
   - コミット: `feat(eval): report by group, gold minus inject per task, re-proposals, and grader agreement (T10)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 22 pass・0 fail（モデル×条件の n・除外・未採点、言語・overlap・gold の有無の群、タスク×モデルの gold − inject を各 run と「予備」の印つきで、再提案率、元版と反転版の followed、採点者の一致と不一致の一覧、gold key ごとの信号）。`bun run verify` → exit 0
 
 ## P4: テスト
 
@@ -210,3 +211,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T06 レビュー / Codex の F1（既存の --out を消す）・F4（build の後に prompt が変わると結果を読み落とす）・F5（別の build の Codex の run が混ざる）は直す。F2（fire.ts を同時に流すと同じ行を選ぶ）は、発火を 1 つずつ行う手順では起きない入力なので直さない。F3（同じタスク×条件の試行 1 が結果を残さず試行 2 だけ残すと、試行番号の割り当てが入れ替わる）は、同じタスク×条件の試行は区別の意味が無く分母（結果 1・結果なし 1）は正しいので直さない / T18 を足した。codex.ts は `--build` を必須にし、started.json と result.json に build ID を書く
 - 2026-09-30 / T08 / zod から作ると grade の score の型が `integer` から `number` になる（値は enum の 0・1・2 に限られ、受け取る値は同じ）。JSON ファイルは `node evals/cloud/schema-check.ts --write` で作り、$schema は付けない
 - 2026-09-30 / T09 / 2 人目の採点者の claude は `--bare` を使えない（API キーでしか認証しない。サブスクリプションで回す方針）。代わりに空のディレクトリで `--setting-sources "" --strict-mcp-config --tools "" --disable-slash-commands --no-session-persistence` を付け、`--json-schema` の structured_output を受け取る。counterfactual のタスクの記録の本文（presented）は、collect が gold スロットの gold.json から行に載せる（変更欄に collect.ts を足した）
+- 2026-09-30 / T10 / grade.ts は `--loop <build dir>/loop.json` を必須にし、grades.json を同じ build のディレクトリに書き、build ID と variant を引き継ぐ（report が元版と反転版を分けるため）。grading.ts は変えなかった / 変更欄（前: report.ts・grading.ts・テスト、後: report.ts・grade.ts・テスト・knip.json）

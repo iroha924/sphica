@@ -1,6 +1,6 @@
 // Grades one evaluation loop blind (step 5 of the eval-loop Skill): every result row of loop.json goes to Codex with only the task and the
 // run's own answer and patch, in an empty directory, and comes back through grade.schema.json; the table counts every started run.
-// Run: node evals/cloud/grade.ts [--loop <loop.json>] [--out <grades.json>]
+// Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--out <grades.json>] [--second claude|none]
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,18 +11,25 @@ import { blindPrompt, type Cell, type GradeRow, type GradeTask, receiveGrade, ta
 import type { Grade } from "./schema-check.ts";
 
 const HERE = import.meta.dirname;
-const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
 const { values: args } = parseArgs({
   options: {
-    loop: { type: "string", default: path.join(CACHE, "loop.json") },
-    out: { type: "string", default: path.join(CACHE, "grades.json") },
+    // A build's loop.json (collect writes it in the build directory); the grades go beside it
+    loop: { type: "string" },
+    out: { type: "string" },
     // The second grader: Claude grades the same runs with the same prompt and schema, for agreement only; "none" skips it
     second: { type: "string", default: "claude" },
   },
 });
 
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: GradeTask[] };
-const loop = JSON.parse(fs.readFileSync(args.loop ?? "", "utf8")) as { bundle: string; rows: GradeRow[] };
+if (!args.loop) throw new Error("--loop <build dir>/loop.json names what to grade");
+const out = args.out ?? path.join(path.dirname(args.loop), "grades.json");
+const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
+  build?: string | null;
+  variant?: string;
+  bundle: string;
+  rows: GradeRow[];
+};
 
 /**
  * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
@@ -141,8 +148,8 @@ for (const row of loop.rows) {
 
 const table = tabulate(graded);
 fs.writeFileSync(
-  args.out ?? "",
-  `${JSON.stringify({ bundle: loop.bundle, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
+  out,
+  `${JSON.stringify({ build: loop.build ?? null, variant: loop.variant ?? "original", bundle: loop.bundle, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
 );
 
 const fmt = (c: Cell) =>
