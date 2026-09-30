@@ -67,13 +67,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 
 クラウドのループの報告で、検索の失敗と利用の失敗、群、gold − inject、再提案率、counterfactual、採点者の一致が読める。
 
-- [ ] T04: クラウドのタスクに 4 種を足し、fixture に記録を足す
+- [x] T04: クラウドのタスクに 4 種を足し、fixture に記録を足す
   - 種別: 追加
   - 計画: S3
   - 依存: なし
-  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/fixture.ts`, `server/test/eval-grade.test.ts`
-  - 完了条件: `cd server && node evals/cloud/build.ts --dry-run` 相当の既存の検査（build が fixture と gold の本文を確かめる）が 8 タスクで通る。`node --test test/eval-grade.test.ts` → 通る
+  - 変更: `server/evals/cloud/tasks.json`
+  - 完了条件: `cd server && node evals/cloud/build.ts --project tsundoku --out <scratch>` → 4 スロットが作れ、fixture の記録の状態と gold の本文が意図どおり。`bun run verify` → exit 0
   - コミット: `test(eval): add superseded, abstention, poisoned, and override tasks (T04)`
+  - 結果: `cd server && node evals/cloud/build.ts --project tsundoku --out <scratch>/build-t04` → built 4 repositories。fixture で trace:s-en-npm/npm active・harvest:12/pnpm superseded・glean:csv/no-notes candidate・harvest:20/prefix active・harvest:20/reject-all candidate・trace:s-ja-storage/storage active。gold.json は gold のある 6 タスクに本文、pilot-sort と abstention-notes は空。`bun run verify` → exit 0
 
 - [ ] T05: gold key ごとの `in_delivery`・`in_search`・`read`
   - 種別: 追加
@@ -176,3 +177,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
 - 2026-09-30 / T03 / world.json は既存の PR #20 の第三者コメントで足り、変えなかった（変更欄から外した）。override のケースで、プロンプトの配信が理由を載せないこと（ファイルに紐付く配信だけが理由を載せる設計）と、同じセッションの 2 回目のプロンプトにも同じ記録を出すことが分かった。前者は仕様、後者は #205（何を既に見せたとみなすか）の範囲なので、ケースは今の契約（名指しで決定が出る、決定は変わらない）だけを固定した。第三者の命令文が配信に出ないことは既存の injection-08 が見ている
 - 2026-09-30 / T03 / T03 の結果欄の「`bun run verify` → exit 0」は誤り。verify の終了コードを見ずにコミットし、実際は acceptance-cases.test.ts の 2 本が落ちていた（完了したタスクの欄は変えない規則なのでここに書く） / T16 を足して直した。以後はコミットの前に verify の exit を確かめる
+- 2026-09-30 / T04 / 記録は fixture.ts を変えず、tasks.json の fixture.cases（given の case は流されないので依存順に並べる）と setups に受け入れケースを足して入れた。build.ts に --dry-run は無く、--out の一時ディレクトリへの build（push はしない）で確かめた / 変更欄と完了条件を変えた（前: tasks.json・fixture.ts・eval-grade.test.ts と --dry-run、後: tasks.json と --out への build）。superseded は保存先ではなく status-02（pnpm → npm）を使った（override が保存先の決定を使うため）。abstention の条件は gold の記録が無いので none・search・inject にした（plan は none・inject・gold）。既存 4 タスクに overlap を足した
