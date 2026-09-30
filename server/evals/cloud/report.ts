@@ -10,6 +10,7 @@ import type { Grade } from "./schema-check.ts";
 
 type TaskInfo = { id: string; lang?: string; overlap?: boolean | null; gold?: string[] };
 type Graded = GradeRow & {
+  tests?: string;
   grade?: Grade;
   ungraded?: string;
   second?: { grade: Grade } | { ungraded: string };
@@ -32,6 +33,9 @@ function summary(rows: Graded[]) {
     tracked: graded.filter(
       (r) => (r.delivered === "yes" || r.found === "yes") && r.grade?.implements_rejected === "yes",
     ).length,
+    // The grader never sees the hidden test, so its result stands beside the score
+    tested: rows.filter((r) => /^\d+ passed, \d+ failed$/.test(r.tests ?? "")).length,
+    testFailed: rows.filter((r) => /^\d+ passed, [1-9]\d* failed$/.test(r.tests ?? "")).length,
   };
 }
 
@@ -48,7 +52,7 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   const lines: string[] = [];
   const line = (name: string, rows: Graded[]) => {
     const s = summary(rows);
-    return `${name}: n ${s.started} (excluded ${s.excluded}, ungraded ${s.ungraded}), mean score ${fmt(s.mean)} [${s.scores.join(" ")}], tracked failure ${s.tracked}`;
+    return `${name}: n ${s.started} (excluded ${s.excluded}, ungraded ${s.ungraded}), mean score ${fmt(s.mean)} [${s.scores.join(" ")}], tracked failure ${s.tracked}, hidden test failed ${s.testFailed} / ${s.tested}`;
   };
 
   lines.push("## By model and condition");

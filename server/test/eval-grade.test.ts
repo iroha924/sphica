@@ -1218,3 +1218,51 @@ test("the Codex replay refuses a task or condition the build did not plan, befor
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("the report shows the hidden test's failures beside the score, since the grader never sees them", () => {
+  const out = report(
+    [
+      {
+        variant: "original",
+        rows: [
+          { ...row, run: "h1", task: "t1", condition: "none", tests: "0 passed, 1 failed", grade },
+          { ...row, run: "h2", task: "t1", condition: "none", tests: "1 passed, 0 failed", grade },
+          { ...row, run: "h3", task: "t1", condition: "none", tests: "none", grade },
+        ],
+      },
+    ],
+    [{ id: "t1" }],
+  ).join("\n");
+  assert.match(out, /codex none: n 3 .*hidden test failed 1 \/ 2/);
+});
+
+test("grade refuses a second grader it does not know, before grading anything", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
+  try {
+    const bin = path.join(base, "bin");
+    fs.mkdirSync(bin);
+    const ran = path.join(base, "ran");
+    for (const name of ["codex", "claude"])
+      fs.writeFileSync(path.join(bin, name), `#!/bin/sh\ntouch ${JSON.stringify(ran)}\nexit 1\n`, {
+        mode: 0o755,
+      });
+    seedTasks(base);
+    const loop = path.join(base, "loop.json");
+    fs.writeFileSync(loop, JSON.stringify({ bundle: "c", rows: [{ ...row, answer_format: "valid" }] }));
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"),
+        "--loop",
+        loop,
+        "--second",
+        "claud",
+      ],
+      { encoding: "utf8", env: { ...childEnv(base), PATH: `${bin}${path.delimiter}${process.env.PATH}` } },
+    );
+    assert.match(r.stderr, /--second is claude or none/);
+    assert.equal(fs.existsSync(ran), false, "no grader was started");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

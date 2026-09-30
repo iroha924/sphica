@@ -31,6 +31,7 @@ const { values: args } = parseArgs({
 });
 
 if (!args.loop) throw new Error("--loop <build dir>/loop.json names what to grade");
+if (args.second !== "claude" && args.second !== "none") throw new Error("--second is claude or none");
 const plan = readTasks<{ tasks: GradeTask[] }>(path.dirname(args.loop));
 const out = args.out ?? path.join(path.dirname(args.loop), "grades.json");
 const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
