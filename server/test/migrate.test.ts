@@ -558,6 +558,111 @@ test("migrating revision 4 with many anchors and edit observations and nothing t
   assert.ok(took < 10000, `took ${Math.round(took)} ms`);
 });
 
+// Revision 4 let small values through that revision 5 refuses. Each takes the nearest value revision 5 accepts, and is listed
+test("migrating revision 4 repairs the small values revision 5 refuses, and lists each", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  const later = new Date("2026-09-21T00:00:00Z").toISOString();
+  const text = "日本語で決めた。";
+  run(
+    "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed, url) values (1, 'session_message', 'session:s1', 'm2', 1, 's1', 'assistant', ?, ?, ?, ?, ?, 1, 'javascript:alert(1)')",
+    now,
+    now,
+    text,
+    Buffer.byteLength(text),
+    sha256(text),
+  );
+  run(
+    "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed, line_end) values (1, 'pr_comment', 'pr:1', 'c1', 1, 'person', ?, ?, 'x', 1, ?, 1, 4)",
+    now,
+    now,
+    sha256("x"),
+  );
+  // Unit 1's evidence cuts the first character (bytes 0-2) at byte 1, and its adoption was retracted before it was added
+  // A retracted row citing the whole words, then a live one that cut them: widened, they cite the same words, and the live one stays
+  run(
+    "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end) values (1, 2, 0, 6, 'explains', 1, ?, ?, 'r', 1, 0, 3)",
+    now,
+    later,
+  );
+  run(
+    "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (1, 2, 1, 6, 'explains', 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (1, 'owner_statement', 1, 0, 3, 1, ?)",
+    now,
+  );
+  run(
+    "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = 1, retraction_span_start = -2, retraction_span_end = 3 where id = 1",
+    new Date("2026-01-01T00:00:00Z").toISOString(),
+  );
+  run(
+    "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, 'late', 'finding', 'late', 'supported', 1, ?, ?)",
+    now,
+    sha256("late"),
+  );
+  run(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (2, null, 'candidate', ?, 'r', 1)",
+    new Date("2026-01-01T00:00:00Z").toISOString(),
+  );
+  run(
+    "update extraction_run set finished_at = ? where id = 1",
+    new Date("2026-01-01T00:00:00Z").toISOString(),
+  );
+  // An anchor written already retired and pointing at itself: revision 4 took it
+  run(
+    "insert into unit_anchor (id, unit_id, path, role, run_id, added_at, retired_at, replaced_by) values (7, 1, 'a.ts', 'applies_to', 1, ?, ?, 7)",
+    now,
+    later,
+  );
+  run(
+    "insert into unit_alias (unit_id, terms, content_hash, run_id, added_at) values (1, '[\"x\"]', ?, 1, ?)",
+    sha256("other"),
+    now,
+  );
+  const said = migrate(raw);
+  const one = (sql: string) => ({ ...(raw.prepare(sql).get() as object) });
+  assert.deepEqual(one("select url, indexed from source where id = 2"), { url: null, indexed: 0 });
+  assert.deepEqual(one("select line_start, line_end from source where id = 3"), {
+    line_start: null,
+    line_end: null,
+  });
+  assert.deepEqual(one("select span_start, span_end, retracted_at from unit_evidence where source_id = 2"), {
+    span_start: 0,
+    span_end: 6,
+    retracted_at: null,
+  });
+  assert.deepEqual(
+    one("select retracted_at = added_at as same, retraction_span_start from unit_adoption where id = 1"),
+    {
+      same: 1,
+      retraction_span_start: 0,
+    },
+  );
+  assert.deepEqual(one("select at from unit_state where unit_id = 2"), { at: now });
+  assert.deepEqual(one("select finished_at = started_at as same from extraction_run where id = 1"), {
+    same: 1,
+  });
+  assert.deepEqual(one("select replaced_by from unit_anchor"), { replaced_by: null });
+  assert.deepEqual(one("select count(*) as n from unit_alias"), { n: 0 });
+  for (const rule of [
+    "a run that finished before it started: 1 row",
+    "an end line without a start line: 1 row",
+    "a web address that is not http or https: 1 row",
+    "an assistant reply in the search index: 1 row",
+    "a state dated before its record was made: 1 row",
+    "an anchor replaced by itself or by another record's anchor: 1 row",
+    "an alias set bound to other words than its record's: 1 row",
+    "a retraction dated before what it retracts: 1 row",
+    "a retraction span starting before its text: 1 row",
+    "a span that cuts a character (evidence): 1 row",
+    "evidence citing the same words twice after widening: 1 row",
+  ])
+    assert.ok(said.includes(rule), `${rule}\n${said}`);
+});
+
 // Revision 4 counted an edit outside any turn once per send, and let a record hold two live anchors on one place
 test("migrating revision 4 removes repeated edit observations and retires repeated live anchors, and says so", () => {
   const raw = create("old.db", REV4);

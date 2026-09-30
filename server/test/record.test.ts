@@ -483,7 +483,7 @@ test("a rejected option keeps the reconsider condition the owner stated, quoted 
       .prepare(
         "update unit_evidence set retracted_at = ?, retraction_reason = 'misread', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where role = 'reconsiders'",
       )
-      .run(now, m);
+      .run(new Date().toISOString(), m);
     assert.match(
       await shown(),
       /Reconsider when: レプリカが要るようになったら \[unsupported: its owner quote was retracted or forgotten/,

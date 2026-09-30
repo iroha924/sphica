@@ -453,7 +453,8 @@ export async function storeItems(
         author_association: it.association,
         parent_external_id: it.parent,
         event_kind: it.event,
-        url: it.url,
+        // Only a web address is kept: a reader may show it as a link
+        url: it.url && /^https?:\/\//.test(it.url) ? it.url : null,
         created_at: created,
         // Only the first revision's time is known to be when it became visible; an edit's time is not in the REST response
         available_at: latest || lastForgotten ? null : created,

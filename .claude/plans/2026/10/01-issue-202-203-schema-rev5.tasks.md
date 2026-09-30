@@ -195,14 +195,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): check paths with one rule in sources, edit observations, and anchors (T13)`
   - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/github.test.ts` → 直す前のコードでは新しいテスト 4 本が落ちた（red）。直した後 schema・migrate・github・project・capture のテストは全件 pass（3 つの表が同じ path を拒む、制御文字の path の review comment は path と行なしで保存、capture は制御文字の名前のファイルを記録しない、移行は観測と anchor を外して一覧に出し、file_excerpt なら何も変えずに止まる）。3 つの式の 1 つを変えると `bun run pairs` が落ちることを確かめた。`bun run verify` → exit 0
 
-- [ ] T14: 細かい CHECK を足す
+- [x] T14: 細かい CHECK を足す
   - 種別: 修正
   - 計画: S3, S4
   - 依存: T03（revision 5 の schema と移行が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/github.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/overview.test.ts`, `server/test/record.test.ts`, `server/test/search.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → `line_start` の無い `line_end`、負の retraction の span、`added_at` より前の `retracted_at`、文字を切る span、unit の作成より前の state、開始より前の終了、自分を指す `replaced_by`、`javascript:` の url、`indexed = 1` の assistant の source、hash の違う alias が入ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → それぞれが拒まれ、それぞれの行を入れた rev4 の DB の移行が plan の方針 2 のとおりに直して一覧に出すテストが通る
   - コミット: `fix(db): add the small checks on lines, spans, times, anchors, urls, and aliases (T14)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks|small values" test/schema.test.ts test/migrate.test.ts` → 直す前のコードでは 2 本とも落ちた（red）。直した後は pass（開始行の無い終了行、負の取り下げの span、追加より前の取り下げ、文字の途中の span、作成より前の state、開始より前の終了、自分や別の記録の anchor への置き換え、javascript: の URL、索引に入るアシスタントの返答、文面の違う alias がそれぞれ拒まれ、移行はそれぞれを一番近い許される値に直して一覧に出す）。`bun run verify` → exit 0
 
 - [ ] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
   - 種別: 削除
@@ -290,3 +291,6 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T12・T22 / Codex のレビュー（fc5b7e7d..26cc50df）: 指摘 3 件（P2、再現済み）。F1: 互いの移動元を使う replace_anchor の連鎖が check を通って生の UNIQUE エラーになる。F2: 移行の anchor の重複の片付けが相関サブクエリで二乗の時間（32,000 件で 8.6 秒）。F3: 同じ保存で隔離される後継も枠を取り、隣の正常な後継を拒む / 3 件とも採用。修正タスク T23 を足した。出典の無い後継（glean が保存の後で決める）が同じ保存で枠を取る件は、check の時点では分からないので残す（2 回の保存に分ければ通る）
 - 2026-10-01 / T23 / 完了条件の移行の時間の上限を 4 秒から 10 秒に変えた（前: 4 秒、後: 10 秒） / review-shipping が CI の遅いマシンでの余裕の薄さを指摘。二乗の版は 22 秒なので 10 秒でも捕まる
 - 2026-10-01 / T23 / review-shipping: 指摘 4 件。トリガーの新しい条件が、隔離された後継を先に保存するテストでは通らない / 正常な後継を先にしたテストに変え、条件を消すと落ちることを確かめた。時間の上限 / 上の行。置き換えの連鎖が輪（p→q と q→p）だとどちらの順でも「前に置け」と言う、自分の場所への置き換えで 2 つ目の誤ったエラーが出る / 案内に「2 回の保存に分ける」を足し、自分の場所の場合は 2 つ目を出さない。出典の無い後継は check の時点で枠を取る / 前からある、厳しい側の差なので残す（上の T12・T22 の記録と同じ）
+- 2026-10-01 / T13・T23 / Codex のレビュー（6d91e358..8fc246d1）: 指摘 0 件
+- 2026-10-01 / T14 / 変更欄に `server/src/github.ts`（http(s) でない URL は保存しない）と、新しい規則に当たった準備を直した overview・record・search のテストを足した（固定の古い時刻で state や取り下げを書いていた、索引に入ったアシスタントの返答をわざと作っていた）
+- 2026-10-01 / T14 / review-shipping: 指摘 1 件（再現済み）。文字の途中で切れた引用を広げて重複になったとき、取り下げ済みの行を残して生きている行を消していた / 生きている行を先に残すようにし、テストを足した

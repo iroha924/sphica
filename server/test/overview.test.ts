@@ -10,9 +10,7 @@ import { inTransaction } from "../src/db.ts";
 import { liveOverview, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { at, message, project, type TempDb, tempDb } from "./temp-db.ts";
-
-const now = at("2026-09-29T00:00:00Z");
+import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], root: string | null = null) {
   const t: Target = {
@@ -73,7 +71,7 @@ test("live lists every active decision and constraint once by directory, and not
       .prepare(
         "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', ?, 'r', run_id from unit where key = 'trace:ext-s1/gone'",
       )
-      .run(now);
+      .run(new Date().toISOString());
     const page = await liveOverview(db.reader, p, null);
     assert.deepEqual(keys(page).sort(), [
       "trace:ext-s1/db",
@@ -203,7 +201,7 @@ test("look names gone files apart from lost symbols, conditions to reconsider, a
       .prepare(
         "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', ?, 'r', run_id from unit where key = 'trace:ext-s1/dropped-rule'",
       )
-      .run(now);
+      .run(new Date().toISOString());
 
     const look = await lookOverview(db.reader, p, root);
     const under = (title: string) => look.split("\n\n").find((x) => x.startsWith(`## ${title}`)) ?? "";

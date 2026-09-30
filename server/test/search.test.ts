@@ -607,23 +607,6 @@ test("an owner-message search keeps only the owner's words outside the named ses
         session: `old${n}`,
       }),
     );
-    // An assistant reply is never indexed in practice; this one is, so only the author filter keeps it out
-    insert(db, "source", {
-      project_id: p,
-      kind: "session_message",
-      artifact: "session:old0",
-      external_id: "a",
-      revision: 1,
-      session_id: "old0",
-      author_kind: "assistant",
-      created_at: at("2026-09-10T00:00:00Z"),
-      available_at: at("2026-09-10T00:00:00Z"),
-      captured_at: at("2026-09-10T00:00:00Z"),
-      text: "What is the retry budget? It is three.",
-      original_bytes: 38,
-      content_hash: hash(2),
-      indexed: 1,
-    });
     insert(db, "source", {
       project_id: p,
       kind: "pr_body",

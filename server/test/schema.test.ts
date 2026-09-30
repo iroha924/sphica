@@ -171,6 +171,99 @@ test("an edit is observed once per turn, also outside any turn, and a record hol
   anchor({ symbol: "open" });
 });
 
+test("the small checks: lines, retraction spans and times, whole characters, dates, replacements, web addresses, and aliases", () => {
+  const src = message(db, p, { id: "m1", text: "日本語で決めた。" });
+  refuses(
+    () => external({ kind: "pr_comment", artifact: "pr:1", external_id: "c1", line_end: 3 }),
+    /constraint failed/,
+  );
+  refuses(
+    () => external({ kind: "pr_body", artifact: "pr:2", external_id: "b2", url: "javascript:alert(1)" }),
+    /constraint failed/,
+  );
+  external({ kind: "pr_body", artifact: "pr:3", external_id: "b3", url: "https://github.com/o/r/pull/3" });
+  refuses(
+    () =>
+      insert(db, "source", {
+        project_id: p,
+        kind: "session_message",
+        artifact: "session:s1",
+        external_id: "a1",
+        revision: 1,
+        session_id: "s1",
+        author_kind: "assistant",
+        created_at: now,
+        captured_at: now,
+        text: "reply",
+        original_bytes: 5,
+        content_hash: sha256("reply"),
+        indexed: 1,
+      }),
+    /constraint failed/,
+  );
+  const u = unit({ key: "u1", kind: "finding" });
+  // The first character is three bytes: a span from byte 1 starts inside it, and one ending at byte 4 ends inside the second
+  refuses(() => evidence(u, src, { span_start: 1, span_end: 6 }), /inside a character/);
+  refuses(() => evidence(u, src, { span_start: 0, span_end: 4 }), /inside a character/);
+  const e = evidence(u, src, { span_start: 0, span_end: 6 });
+  const retract = (start: number, end: number, when = now) =>
+    sql(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = ?, retraction_span_end = ? where id = ?",
+      when,
+      src,
+      start,
+      end,
+      e,
+    );
+  refuses(() => retract(-1, 3), /constraint failed/);
+  refuses(() => retract(0, 3, at("2026-01-01T00:00:00Z")), /constraint failed/);
+  refuses(() => retract(1, 3), /inside a character/);
+  retract(0, 3);
+  const late = unit({ key: "late", kind: "finding", created_at: at("2026-12-01T00:00:00Z") });
+  refuses(() => state(late, null, "candidate"), /comes after its unit was created/);
+  const r = run(db, p);
+  refuses(
+    () =>
+      sql(
+        "update extraction_run set status = 'saved', finished_at = ? where id = ?",
+        at("2020-01-01T00:00:00Z"),
+        r,
+      ),
+    /constraint failed/,
+  );
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  const anchor = (unitId: number, path: string) =>
+    insert(db, "unit_anchor", { unit_id: unitId, path, role: "applies_to", run_id: runId, added_at: now });
+  const a1 = anchor(u, "a.ts");
+  const elsewhere = anchor(late, "b.ts");
+  refuses(
+    () => sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, a1, a1),
+    /same record/,
+  );
+  refuses(
+    () => sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, elsewhere, a1),
+    /same record/,
+  );
+  refuses(
+    () =>
+      insert(db, "unit_alias", {
+        unit_id: u,
+        terms: '["x"]',
+        content_hash: sha256("other words"),
+        run_id: runId,
+        added_at: now,
+      }),
+    /bound to the words of its unit/,
+  );
+  insert(db, "unit_alias", {
+    unit_id: u,
+    terms: '["x"]',
+    content_hash: sha256("u1"),
+    run_id: runId,
+    added_at: now,
+  });
+});
+
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
   assert.equal(one("pragma user_version").user_version, 5);
