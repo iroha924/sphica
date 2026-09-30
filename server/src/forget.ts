@@ -309,11 +309,18 @@ export function forgetText(o: ForgetOutcome, file: string): string {
     );
   if (o.units.length || o.fields.values)
     lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
-  const copies = backups(file).length;
+  let copies: number | null;
+  try {
+    copies = backups(file).length;
+  } catch {
+    copies = null;
+  }
   lines.push(
-    copies
-      ? `Copies outside the database are not touched: capture's waiting and set-aside files, and ${plural(copies, "backup")} made before migrating, in ${backupDir(file)}. Delete those backups yourself if the words must go from them too.`
-      : "Copies outside the database (capture's waiting and set-aside files) are not touched.",
+    copies === null
+      ? `Copies outside the database are not touched: capture's waiting and set-aside files. Backups made before migrating in ${backupDir(file)} could not be listed; look there yourself if the words must go from every copy.`
+      : copies
+        ? `Copies outside the database are not touched: capture's waiting and set-aside files, and ${plural(copies, "backup")} made before migrating, in ${backupDir(file)}. Delete those backups yourself if the words must go from them too.`
+        : "Copies outside the database (capture's waiting and set-aside files) are not touched.",
   );
   return lines.join("\n");
 }

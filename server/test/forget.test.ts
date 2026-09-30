@@ -474,4 +474,13 @@ test("the preview and the result name the backups made before migrating, and say
   const told = forgetText(seen, db.file);
   assert.ok(told.includes(`2 backups made before migrating, in ${dir}`), told);
   assert.match(told, /Delete those backups yourself/);
+  // A directory that cannot be listed does not stop forgetting; the owner is told to look there
+  fs.chmodSync(dir, 0o300);
+  try {
+    assert.ok(
+      forgetText(seen, db.file).includes(`Backups made before migrating in ${dir} could not be listed`),
+    );
+  } finally {
+    fs.chmodSync(dir, 0o700);
+  }
 });

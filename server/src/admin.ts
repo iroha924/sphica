@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
-import { backupDir, backups } from "./backups.ts";
+import { backupDir, backupPath, backups } from "./backups.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
@@ -28,19 +28,18 @@ const MIGRATION = (dir: string, revision: number): string =>
 const KEEP = 3;
 
 /**
- * Writes a consistent copy of the database (VACUUM INTO reads through the WAL) to a `.partial` file, checks it, then gives it its
- * final name. Nothing is migrated without it. Only this run's own `.partial` is removed on failure.
+ * Writes a consistent copy (VACUUM INTO reads through the WAL) to a `.partial` file, puts it back in WAL mode (the copy comes out in rollback
+ * mode, where a restored database's readers would block writers), checks it, then names it. Only this run's own `.partial` is removed on failure.
  */
 function backUp(raw: DatabaseSync, file: string, from: number): string {
-  const dir = backupDir(file);
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const stamp = new Date().toISOString().replace(/[-:.]/g, "");
-  const done = path.join(dir, `sphica.rev${from}.${stamp}.${process.pid}.db`);
+  fs.mkdirSync(backupDir(file), { recursive: true, mode: 0o700 });
+  const done = backupPath(file, from);
   const partial = `${done}.partial`;
   try {
     raw.prepare("vacuum into ?").run(partial);
-    const look = new DatabaseSync(partial, { readOnly: true });
+    const look = new DatabaseSync(partial);
     try {
+      look.exec("pragma journal_mode = wal");
       const check = look.prepare("pragma quick_check").all() as { quick_check: string }[];
       if (check.length !== 1 || check[0]?.quick_check !== "ok")
         throw new Error(`the copy failed its check (${check.map((c) => c.quick_check).join("; ")})`);
@@ -51,9 +50,9 @@ function backUp(raw: DatabaseSync, file: string, from: number): string {
     }
     fs.renameSync(partial, done);
   } catch (e) {
-    fs.rmSync(partial, { force: true });
+    for (const f of [partial, `${partial}-wal`, `${partial}-shm`]) fs.rmSync(f, { force: true });
     throw new Error(
-      `Could not back up ${file} before migrating it, so nothing was migrated (${(e as Error).message}). Check free space in ${dir}.`,
+      `Could not back up ${file} before migrating it, so nothing was migrated (${(e as Error).message}). Check free space in ${backupDir(file)}.`,
     );
   }
   return done;
@@ -104,10 +103,9 @@ function withOwner<T>(file: string, fn: (raw: DatabaseSync) => T, create = false
 }
 
 /**
- * Moves the database up to SCHEMA_REVISION, one migration per transaction. Foreign keys are off while tables are rebuilt (the pragma
- * has no effect inside a transaction), and foreign_key_check must come back empty before each commit. The revision is read under
- * the write lock, so a concurrent init that already moved it does nothing more. Returns the revision it started from.
- * **A backup is made before the first step**: a later step can fail after earlier ones committed, and a committed step can be wrong.
+ * Moves the database up to SCHEMA_REVISION, one migration per transaction with foreign keys off (the pragma is ignored inside one) and
+ * foreign_key_check empty before each commit; the revision is read under the write lock, so a concurrent init does nothing more.
+ * **A backup comes first**: a later step can fail after earlier ones committed, and a committed step can be wrong.
  */
 export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): number {
   return withOwner(file, (raw) => {

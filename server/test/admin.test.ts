@@ -560,7 +560,24 @@ test("a migration that fails after committing a step leaves a backup at the old 
     RECORDS.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n)),
     [2, 1, 1, 1, 1, 2],
   );
+  // Restored, it is in WAL mode like the original, so readers do not block writers
+  assert.equal((raw.prepare("pragma journal_mode").get() as { journal_mode: string }).journal_mode, "wal");
   raw.close();
+});
+
+// SPHICA_DB can put two databases in one directory: each one's backups carry its own name, and pruning one never touches the other's
+test("backups are named after their database, and pruning leaves another database's backups alone", async () => {
+  const home = tmp();
+  const file = path.join(home, "work.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  const others = [1, 2, 3].map((d) => `sphica.rev1.2099010${d}T000000000Z.${d}.db`);
+  for (const name of others) fs.writeFileSync(path.join(dir, name), "");
+  await quiet(() => migrate(file));
+  const left = backups(file);
+  for (const name of others) assert.ok(left.includes(name), name);
+  assert.equal(left.filter((f) => /^work\.rev1\.\d{8}T\d{9}Z\.\d+\.db$/.test(f)).length, 1);
 });
 
 test("a successful migration keeps the three newest backups and leaves another run's partial file alone", async () => {
@@ -586,10 +603,10 @@ test("a successful migration keeps the three newest backups and leaves another r
     left.filter((f) => f !== made[0]),
     ["notes.txt", partial, old[1], old[2]].sort(),
   );
-  assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
   // Nothing to migrate makes no backup
   await quiet(() => migrate(file));
   assert.deepEqual(backups(file), left);
+  assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
 });
 
 // The backup was made and every step committed: a backups/ directory that cannot even be listed leaves pruning for later, not a failed init

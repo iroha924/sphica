@@ -94,6 +94,16 @@ forget の画面でバックアップの場所が分かり、revision の不一�
   - コミット: `fix(deliver): leave a Codex child's prompt alone and check the exact CLI version named (T10)`
   - 結果: `cd server && node --test --test-timeout=60000 test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 直す前は子の prompt に案内が返り 1 fail（red）。直した後 60 pass・0 fail。`bun run verify` → exit 0
 
+- [x] T12: GitHub Codex の 1 回目の指摘を直す（バックアップを WAL に戻す、名前を DB ごとにする、forget は一覧できなくても止めない、migrate() のコメントを 3 行に）
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T11（直す対象の backUp() と prune() が要る）, T09（直す対象の forget の案内が要る）
+  - 変更: `server/src/backups.ts`, `server/src/admin.ts`, `server/src/forget.ts`, `server/test/admin.test.ts`, `server/test/forget.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/admin.test.ts test/forget.test.ts` → 戻したバックアップの journal_mode が delete、work.db のバックアップが sphica.rev… の名前、一覧できない backups/ で forgetText が EACCES を投げて 3 fail
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts test/forget.test.ts test/plugin.test.ts` → 3 本とも通る
+  - コミット: `fix(init): keep backups in WAL mode and per database; forget goes on if they cannot be listed (T12)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/admin.test.ts test/forget.test.ts` → 直す前は journal_mode 'delete'、名前の不一致、EACCES で 3 fail（red）。直した後 `node --test test/admin.test.ts test/forget.test.ts test/plugin.test.ts` → 72 pass・0 fail。`bun run verify` → exit 0。check-tarball → exit 0
+
 ## P3: schema と索引の検査
 
 capture ビューの列の変化と `terms()` の出力の変化がテストで落ちる。
@@ -149,3 +159,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T03 レビュー / Codex の F1（Codex の子セッションの prompt に案内が出る）は、prompt の持ち主判定（deliver.ts の入口）が CODEX_THREAD_ID を渡していない既存の不具合で、ふだんの prompt 配信も子に出ていた。F2（テストが版の形しか見ない）。どちらも直す / T10 を足した
 - 2026-09-30 / T06 / 配布物を展開して動かす検査は scripts/check-tarball.mjs（CI の check と release が npm pack の tarball に流す）に既にあり、sql:live は src を動かす / 検査を check-tarball.mjs に足した。変更欄（前: `scripts/check-sql-live.mjs`、後: `scripts/check-tarball.mjs`）、完了条件（前: `bun run sql:live` → …、後: 上の check-tarball のコマンド）、コミット件名（前: `test(live): …`、後: `test(package): …`）。plan の A4 は finishing で同じコマンドに読み替えて流す
 - 2026-09-30 / 全差分レビュー（Codex、新しい会話） / 指摘 1 件: 一覧できない backups/ で移行済みの init が落ちる。要件（古いバックアップで init を落とさない）の漏れなので直す / T11 を足した
+- 2026-09-30 / GitHub Codex 1 回目（d537cb2） / P1 1 件（migrate() のコメントが 4 行）と P2 3 件（バックアップが rollback モードで出る、同じディレクトリの別 DB のバックアップを刈り込む、一覧できない backups/ で forget が止まる）。すべて直す / T12 を足した
