@@ -199,9 +199,10 @@ create table edit_observation (
   path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
     and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
   via text not null check (via in ('tool', 'status')),
-  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at),
-  unique (session_id, turn_id, path, via)
+  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
 ) strict;
+-- One row per path, way, and turn of a session; an observation outside any turn (turn_id null) counts once too
+create unique index edit_observation_once on edit_observation (session_id, coalesce(turn_id, ''), path, via);
 create index edit_observation_path on edit_observation (path);
 
 -- One extraction by trace, harvest, or glean. target names what it read: `session:<uuid>`, `pr:<n>`, or `glean`.
@@ -277,6 +278,8 @@ create table unit (
   check (unsourced = 0 or lifecycle <> 'active')
 ) strict;
 create index unit_live on unit (project_id, lifecycle, kind);
+-- The same words saved twice under two keys are allowed (a rewrite is a successor), and doctor counts them
+create index unit_content on unit (project_id, content_hash);
 create index unit_run on unit (run_id);
 create trigger unit_insert_candidate before insert on unit when new.lifecycle <> 'candidate' begin
   select raise(abort, 'units start as candidates');
@@ -521,6 +524,10 @@ create table unit_anchor (
 ) strict;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
 create index unit_anchor_unit on unit_anchor (unit_id, retired_at);
+-- One live anchor per place of a unit: a symbol, or the lines when it has no symbol
+create unique index unit_anchor_live_once on unit_anchor (unit_id, path, role, coalesce(commit_sha, ''), coalesce(symbol, ''),
+  coalesce(case when symbol is null then line_start end, 0), coalesce(case when symbol is null then line_end end, 0))
+  where retired_at is null;
 create index unit_anchor_observation on unit_anchor (edit_observation_id) where edit_observation_id is not null;
 create index unit_anchor_replaced on unit_anchor (replaced_by) where replaced_by is not null;
 create index unit_anchor_run on unit_anchor (run_id);

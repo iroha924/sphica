@@ -135,6 +135,42 @@ test("every foreign key is led by an index on its own columns", () => {
   assert.deepEqual(unled, []);
 });
 
+test("an edit is observed once per turn, also outside any turn, and a record holds one live anchor per place", () => {
+  session(db, p, "s1");
+  const observe = (turn: string | null) =>
+    sql(
+      "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s1', ?, 'e', 'src/a.ts', 'tool', ?)",
+      turn,
+      now,
+    );
+  observe(null);
+  observe(null);
+  observe("t1");
+  observe("t1");
+  assert.equal(one("select count(*) as n from edit_observation").n, 2);
+  const u = unit({ key: "u1", kind: "finding" });
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  const anchor = (v: Values) =>
+    insert(db, "unit_anchor", {
+      unit_id: u,
+      path: "src/a.ts",
+      role: "applies_to",
+      run_id: runId,
+      added_at: now,
+      ...v,
+    });
+  const first = anchor({ symbol: "open", line_start: 3, line_end: 3 });
+  refuses(() => anchor({ symbol: "open", line_start: 9, line_end: 9 }), /UNIQUE constraint failed/);
+  // Without a symbol the lines tell places apart
+  anchor({ line_start: 1, line_end: 2 });
+  anchor({ line_start: 5, line_end: 6 });
+  refuses(() => anchor({ line_start: 5, line_end: 6 }), /UNIQUE constraint failed/);
+  anchor({ symbol: "open", role: "evidence" });
+  // Retired, the place is free again
+  sql("update unit_anchor set retired_at = ? where id = ?", now, first);
+  anchor({ symbol: "open" });
+});
+
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
   assert.equal(one("pragma user_version").user_version, 5);

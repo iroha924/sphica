@@ -131,6 +131,41 @@ where s.name not in (select name from sqlite_sequence) and s.name in (select nam
 -- Repairs. Every row changed or removed is noted, and `sphica init` prints the notes.
 create temp table sphica_migration_note (rule text, item text, action text);
 
+-- Edit observations repeated for a session, turn (none counting as one), path, and way: the first stays, and anchors citing a later one
+-- cite the first instead
+create temp table sphica_observation (id integer primary key not null, keep integer not null);
+insert into sphica_observation
+select o.id, (select min(k.id) from edit_observation k where k.session_id = o.session_id and coalesce(k.turn_id, '') = coalesce(o.turn_id, '')
+  and k.path = o.path and k.via = o.via)
+from edit_observation o;
+delete from sphica_observation where id = keep;
+insert into sphica_migration_note
+select 'an edit observation recorded twice', 'observation ' || o.id || ' of ' || e.path || ' in session ' || e.session_id,
+  'removed; observation ' || o.keep || ' stays'
+from sphica_observation o join edit_observation e on e.id = o.id order by o.id;
+update unit_anchor set edit_observation_id = (select keep from sphica_observation where id = unit_anchor.edit_observation_id)
+where edit_observation_id in (select id from sphica_observation);
+delete from edit_observation where id in (select id from sphica_observation);
+drop table temp.sphica_observation;
+
+-- Live anchors of one unit on the same place: the newest stays live, and each older one is retired and points at it
+create temp table sphica_anchor (id integer primary key not null, keep integer not null);
+insert into sphica_anchor
+select a.id, (select max(k.id) from unit_anchor k where k.unit_id = a.unit_id and k.retired_at is null and k.path = a.path
+  and k.role = a.role and coalesce(k.commit_sha, '') = coalesce(a.commit_sha, '') and coalesce(k.symbol, '') = coalesce(a.symbol, '')
+  and coalesce(case when k.symbol is null then k.line_start end, 0) = coalesce(case when a.symbol is null then a.line_start end, 0)
+  and coalesce(case when k.symbol is null then k.line_end end, 0) = coalesce(case when a.symbol is null then a.line_end end, 0))
+from unit_anchor a where a.retired_at is null;
+delete from sphica_anchor where id = keep;
+insert into sphica_migration_note
+select 'two live anchors of a record on one place', 'anchor ' || x.id || ' of unit ' || a.unit_id || ' on ' || a.path,
+  'retired; anchor ' || x.keep || ' stays'
+from sphica_anchor x join unit_anchor a on a.id = x.id order by x.id;
+update unit_anchor set retired_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), replaced_by = (select keep from sphica_anchor where id = unit_anchor.id)
+where id in (select id from sphica_anchor);
+update unit set revision = revision + 1 where id in (select a.unit_id from sphica_anchor x join unit_anchor a on a.id = x.id);
+drop table temp.sphica_anchor;
+
 -- Supersedes links revision 5 refuses are removed first, so the lifecycle repairs below see what is left: a record replacing one of
 -- another kind (a decision and a constraint may replace each other), and every live successor of a record but one (an active one first,
 -- then the newest). Withdrawn successors keep their links: they hold no place.
@@ -205,6 +240,20 @@ update unit set lifecycle = 'candidate', revision = revision + 1 where id in (se
 drop table temp.sphica_lifecycle;
 
 -- Rebuild the remaining tables whose definition changed.
+create table edit_observation_new (
+  id integer primary key autoincrement not null,
+  session_id text not null references session (id) on delete cascade,
+  turn_id text,
+  tool_event_id text,
+  path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
+    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
+  via text not null check (via in ('tool', 'status')),
+  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
+) strict;
+insert into edit_observation_new (id, session_id, turn_id, tool_event_id, path, via, observed_at) select id, session_id, turn_id, tool_event_id, path, via, observed_at from edit_observation;
+drop table edit_observation;
+alter table edit_observation_new rename to edit_observation;
+
 create table unit_evidence_new (
   id integer primary key autoincrement not null,
   unit_id integer not null references unit (id) on delete cascade,
@@ -303,6 +352,7 @@ create index external_reference_source on external_reference (owner_source_id);
 create index forget_batch_project on forget_batch (project_id);
 create index source_forgotten_batch on source_forgotten (batch_id);
 create index source_forgotten_item on source_forgotten (project_id, artifact, kind, external_id, content_hash);
+create unique index edit_observation_once on edit_observation (session_id, coalesce(turn_id, ''), path, via);
 create index edit_observation_path on edit_observation (path);
 create index extraction_run_project on extraction_run (project_id);
 create index extraction_run_session on extraction_run (session_id) where session_id is not null;
@@ -316,6 +366,7 @@ when new.id is not old.id or new.project_id is not old.project_id or new.origin 
 end;
 create index source_processing_run on source_processing (run_id);
 create index unit_live on unit (project_id, lifecycle, kind);
+create index unit_content on unit (project_id, content_hash);
 create index unit_run on unit (run_id);
 create trigger unit_insert_candidate before insert on unit when new.lifecycle <> 'candidate' begin
   select raise(abort, 'units start as candidates');
@@ -440,6 +491,9 @@ create trigger unit_state_restore after insert on unit_state when new.to_state =
 end;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
 create index unit_anchor_unit on unit_anchor (unit_id, retired_at);
+create unique index unit_anchor_live_once on unit_anchor (unit_id, path, role, coalesce(commit_sha, ''), coalesce(symbol, ''),
+  coalesce(case when symbol is null then line_start end, 0), coalesce(case when symbol is null then line_end end, 0))
+  where retired_at is null;
 create index unit_anchor_observation on unit_anchor (edit_observation_id) where edit_observation_id is not null;
 create index unit_anchor_replaced on unit_anchor (replaced_by) where replaced_by is not null;
 create index unit_anchor_run on unit_anchor (run_id);

@@ -437,6 +437,60 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
   assert.throws(() => move(2, "withdrawn", "candidate"), /not a lifecycle change/);
 });
 
+// Revision 4 counted an edit outside any turn once per send, and let a record hold two live anchors on one place
+test("migrating revision 4 removes repeated edit observations and retires repeated live anchors, and says so", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  for (let i = 0; i < 2; i++)
+    run(
+      "insert into edit_observation (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s1', null, 'e', 'src/a.ts', 'tool', ?)",
+      now,
+    );
+  const anchor = () =>
+    Number(
+      (
+        raw
+          .prepare(
+            "insert into unit_anchor (unit_id, path, symbol, role, edit_observation_id, run_id, added_at) values (1, 'src/a.ts', 'open', 'applies_to', 2, 1, ?) returning id",
+          )
+          .get(now) as { id: number }
+      ).id,
+    );
+  const older = anchor();
+  const newer = anchor();
+  const said = migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare("select id from edit_observation")
+      .all()
+      .map((r) => r.id),
+    [1],
+  );
+  assert.deepEqual(
+    raw
+      .prepare(
+        "select id, edit_observation_id, retired_at is not null as retired, replaced_by from unit_anchor order by id",
+      )
+      .all()
+      .map((r) => [r.id, r.edit_observation_id, r.retired, r.replaced_by]),
+    [
+      [older, 1, 1, newer],
+      [newer, 1, 0, null],
+    ],
+  );
+  assert.match(
+    said,
+    /an edit observation recorded twice: 1 row\n\s*observation 2 of src\/a\.ts in session s1 → removed; observation 1 stays/,
+  );
+  assert.match(
+    said,
+    new RegExp(
+      `two live anchors of a record on one place: 1 row\\n\\s*anchor ${older} of unit 1 on src/a\\.ts → retired; anchor ${newer} stays`,
+    ),
+  );
+});
+
 // Revision 4 let a record have several live successors, of any kind. Revision 5 keeps one: an active one first, then the newest
 test("migrating revision 4 keeps one live successor of a record and removes links between kinds that cannot replace each other", () => {
   const raw = create("old.db", REV4);

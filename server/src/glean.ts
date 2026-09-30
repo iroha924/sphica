@@ -655,7 +655,12 @@ export async function saveGlean(
     return { id: s.id, start: at[0], end: at[1] };
   };
   const touched = new Map<number, string>();
-  for (const p of c.ops) {
+  // Replacements retire before new anchors land, so a batch that anchors a place another op moves off never holds two live anchors on it
+  const ordered = [
+    ...c.ops.filter((p) => p.input.op === "replace_anchor"),
+    ...c.ops.filter((p) => p.input.op !== "replace_anchor"),
+  ];
+  for (const p of ordered) {
     const op = p.input;
     touched.set(p.unitId, op.unit);
     if (op.op === "add_evidence") {

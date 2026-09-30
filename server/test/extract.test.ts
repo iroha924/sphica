@@ -909,6 +909,8 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     const back = { unit: "glean:csv/no-notes", revision: rev(), ...pin };
     assert.equal(await checks([moveOff, back]), true);
     assert.equal(await checks([back, moveOff]), true);
+    // And it saves: the move lands first, so the place is never held twice
+    await ops([back, moveOff]);
     // Two replacements of one anchor would leave both new anchors live
     const twice = {
       unit: "glean:csv/no-notes",

@@ -121,6 +121,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(glean): let a record be withdrawn beside a candidate successor, and keep run ids unused (T21)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="withdrawn beside a successor|whose successor is withdrawn" test/extract.test.ts test/migrate.test.ts` → 直す前は 2 本とも落ちた（red: check の「The record is not valid」/ migration の run の id が 9 でなく 2）。直した後 `node --test test/extract.test.ts test/migrate.test.ts` → 42 pass・0 fail。`bun run verify` → exit 0。review-shipping（1 回目は API の 529 で結果なし、投げ直し）: 指摘なし。save 側の分岐だけを戻すとテストの後半が落ちることを確認
 
+- [ ] T22: 隔離された後継と出典の無い後継を、生きた後継に数えない
+  - 種別: 修正
+  - 計画: S3, S4, S6
+  - 依存: T06（直す対象の後継の規則が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/record.ts`, `server/test/schema.test.ts`, `server/test/extract.test.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/extract.test.ts` → 隔離された後継が付いた unit に、支えのある新しい後継を付けようとすると拒まれて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/extract.test.ts test/migrate.test.ts` → 隔離された後継・出典の無い後継がいても新しい後継を付けられ、その後継が active になると元の unit が superseded になるテストが通る
+  - コミット: `fix(db): let quarantined and unsourced successors hold no place (T22)`
+
 ## P3: index・FK・一意キー・CHECK・値の整理（#203）
 
 名前を挙げた lookup が index を使い、重複と規則に合わない値が入らず、使われていない値と表が消える。
@@ -155,14 +164,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): freeze an extraction run once it is saved (T11)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="changes once" test/schema.test.ts` → 直す前の schema では落ちた（red）。直した後 schema.test.ts は全件 pass（saved の run を running に戻す・終了時刻や target を変える・session_id を消すのは拒まれ、running から saved は通る。session の削除で session_id が null になるのは通る）。`bun run verify` → exit 0
 
-- [ ] T12: 編集の観測と生きている anchor に一意キーを足し、同じ内容の記録を doctor に出す
+- [x] T12: 編集の観測と生きている anchor に一意キーを足し、同じ内容の記録を doctor に出す
   - 種別: 修正
   - 計画: S3, S4, S9
   - 依存: T07（replace_anchor が同じ組への置き換えを拒むようになっていないと、一意キーと衝突する）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/admin.ts`, `server/src/cli.ts`, `server/test/schema.test.ts`, `server/test/capture.test.ts`, `server/test/migrate.test.ts`, `server/test/cli.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/cli.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/admin.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → turn_id が null の同じ capture_edit の insert 2 回で 2 行になり、同じ場所の生きている anchor が 2 つ入って落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/capture.test.ts test/migrate.test.ts test/cli.test.ts` → どちらも 1 行に収まり、重複を入れた rev4 の DB の移行で決めた行が残って一覧に出て、`sphica doctor` が同じ内容の生きている記録の組の数を出すテストが通る
   - コミット: `fix(db): keep edit observations and live anchors unique, and report duplicates in doctor (T12)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="observed once per turn|repeated edit observations|hold the same words|given twice in a record" test/schema.test.ts test/migrate.test.ts test/admin.test.ts test/record.test.ts` → 直す前のコードでは 4 本とも落ちた（red）。直した後 schema・migrate・admin・record・capture のテストは 143 pass・0 fail（turn の無い観測も 1 行、同じ場所の生きた anchor は 1 つ、記録の中の同じ anchor は 1 つにまとめる、移行は重複を片付けて一覧に出す、doctor が同じ文面の生きた記録の組を数える）。glean の [anchor P, P からの replace_anchor] の保存は、順序の直しを戻すと UNIQUE で落ちることを確かめた。`bun run verify` → exit 0
 
 - [ ] T13: path の CHECK を 3 つの表で同じ式にする
   - 種別: 修正
@@ -258,3 +268,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T10 / 変更欄から `server/test/forget.test.ts` を外した（forget の既存のテストが、先回りの delete を消した後も同じ結果で通ることで足りた）。retraction の行の削除を「理由の source が forget の墓石にある」から「理由の source が無くなった」に変えたので、それを見ていた schema.test.ts のテストを cascade の形に書き直した
 - 2026-10-01 / T10・T11 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる（件名の末尾は (T10, T11)）
 - 2026-10-01 / T10・T11 / review-shipping: 指摘 3 件（forget.ts と db-write.ts のコメントが墓石の順序を理由に挙げたまま、session の削除のテストが 6 つの引用の経路のうち 1 つしか見ていない） / 同じコミットで直した。T10 の変更欄に `server/src/db-write.ts` を足した。経路を 1 つずつ消すとテストが落ちることを確かめた
+- 2026-10-01 / T12 / 変更欄を実態に合わせた（前: admin.ts・capture.test.ts・cli.test.ts を含む。後: record.ts（同じ anchor を 2 回書いた記録を 1 つにまとめる）・glean.ts・record.test.ts・admin.test.ts・extract.test.ts を足し、変えていない 3 つを外した）。生きた anchor の一意キーは、symbol があれば symbol、無ければ行で場所を分ける（record.ts が symbol の無い anchor を行で分けて保存するため）
+- 2026-10-01 / T12 / review-shipping: 指摘 2 件。1: glean の「anchor P」と「P から Q への replace_anchor」を同じ保存で並べると、check は通るのに生の UNIQUE エラーで落ちる（再現） / glean の保存で replace_anchor を先に流すようにし、テストでその保存を通した。2: check と保存の間にファイルが変わって symbol が伏せ字の対象になると、保存時に symbol が消えて一意キーがぶつかりうる / ファイルが保存の最中に変わるときだけの端の入力なので直さない
+- 2026-10-01 / T09 / Codex のレビュー（744b4e06）: 指摘 2 件（どちらもテストの穴）。F1: forget のプランの検査が external_reference の全走査を見逃す / external_reference は T15 で表ごと消すので直さない。F2: トリガーの中の検索は `statements()` に現れない / 仕組みの限界。FK の子の検索は FK の index の規則のテストが守る。T13 で `statements()` のコメントに 1 行書く
+- 2026-10-01 / T06 / Codex のレビュー（94416206）: 指摘 1 件（P1、再現済み）。引用が見つからず隔離された後継（と出典の無い後継）は active になれず取り下げもできないのに、生きた後継として枠を塞ぎ、元の unit を二度と置き換えられない / 採用。修正タスク T22 を足した

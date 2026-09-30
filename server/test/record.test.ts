@@ -67,6 +67,47 @@ async function save(db: TempDb, t: Target, record: unknown, looked: number[] = [
 const state = (db: TempDb, key: string) =>
   db.owner.prepare("select lifecycle, extraction, extraction_reason from unit where key = ?").get(key);
 
+test("an anchor given twice in a record is kept once, since a record holds one live anchor per place", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    const { checked } = await save(
+      db,
+      target(p),
+      {
+        units: [
+          {
+            key: "twice",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [
+              { path: "a.ts", role: "applies_to" },
+              { path: "a.ts", role: "applies_to" },
+              { path: "a.ts", role: "evidence" },
+            ],
+          },
+        ],
+      },
+      [m],
+    );
+    assert.ok(
+      checked.problems.some((x) => /the anchor on a\.ts appears twice; left out/.test(x)),
+      checked.problems.join(" | "),
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select role from unit_anchor order by id")
+        .all()
+        .map((r) => r.role),
+      ["applies_to", "evidence"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("an anchor's excerpt is masked before it is cut, and a symbol masking swallows is not kept", async () => {
   const db = tempDb();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-anchor-"));

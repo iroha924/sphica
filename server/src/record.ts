@@ -565,6 +565,25 @@ export async function checkRecord(
       problems.push(`${key}: another path-only anchor on ${x.path} already covers it; left out`);
       anchors.splice(anchors.indexOf(x), 1);
     }
+    // The schema keeps one live anchor per place: a symbol, or lines when there is no symbol
+    const places = new Set<string>();
+    for (const x of [...anchors]) {
+      const at = [
+        x.path,
+        x.role,
+        x.commit ?? "",
+        x.symbol ?? "",
+        x.symbol ? "" : x.lines ? place(x) : "",
+      ].join("\0");
+      if (!places.has(at)) {
+        places.add(at);
+        continue;
+      }
+      problems.push(
+        `${key}: the anchor on ${x.path}${x.symbol ? ` ${x.symbol}` : ""} appears twice; left out`,
+      );
+      anchors.splice(anchors.indexOf(x), 1);
+    }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
     const bad = aliases.filter((a) => !a || a.length > 40);

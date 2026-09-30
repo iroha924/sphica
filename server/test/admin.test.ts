@@ -350,6 +350,30 @@ test("doctor says stuck recordings are sent again after the next turn", () => {
   assert.match(r.out, /sent again after the next turn/, r.out);
 });
 
+test("doctor counts live records that hold the same words", () => {
+  const home = tmp();
+  cli(home, "init");
+  const raw = connectWriter("owner", path.join(home, ".sphica", "sphica.db"));
+  raw.prepare("insert into project (key, name) values ('git:x/y', 'x/y')").run();
+  raw
+    .prepare(
+      "insert into extraction_run (project_id, origin, target, status, started_at) values (1, 'trace', 'session:s', 'running', ?)",
+    )
+    .run(at("2026-09-01T00:00:00Z"));
+  const unit = (key: string, words: number) =>
+    raw
+      .prepare(
+        "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, ?, 'finding', ?, 'supported', 1, ?, ?)",
+      )
+      .run(key, key, at("2026-09-01T00:00:00Z"), hash(words));
+  unit("a", 1);
+  unit("b", 2);
+  assert.doesNotMatch(cli(home, "doctor").out, /hold the same words/);
+  unit("c", 1);
+  raw.close();
+  assert.match(cli(home, "doctor").out, /1 set of live records hold the same words/);
+});
+
 test("doctor does not count a migration's own run as an extraction", () => {
   const home = tmp();
   cli(home, "init");
