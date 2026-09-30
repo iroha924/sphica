@@ -302,6 +302,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `fix(eval): address the third GitHub Codex review of the eval base (T28)`
   - 結果: 直す前の `evals/` で 2 本が意図した理由で落ち、直した後 38 pass。今回のループの report を流し直すと、点数 2.00 の claude gold でも隠しテストが 10 run 中 2 run 落ちていた。`bun run verify` → exit 0
 
+- [x] T29: GitHub の Codex の 4 回目のレビューの指摘を直す（結果の取れなかった隠しテストを数える、`--compare` と `--json` の併用を拒む）
+  - 種別: 修正
+  - 計画: S1, S7
+  - 依存: T28
+  - 変更: `server/evals/cloud/report.ts`, `server/evals/retrieval/run.ts`, `server/test/eval-grade.test.ts`, `server/test/retrieval-bench.test.ts`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts test/retrieval-bench.test.ts` → 足した・直した 2 本が通る
+  - red: 同じ 2 本を直す前の `evals/` で → 2 本が落ちる（`0 passed, ? failed` の行が数から消える、`--compare HEAD --json` が片側だけ出して exit 0）
+  - コミット: `fix(eval): address the fourth GitHub Codex review of the eval base (T29)`
+  - 結果: 直す前の `evals/` で 2 本が意図した理由で落ち、直した後 39 pass。`bun run verify` → exit 0
+
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
@@ -331,3 +341,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / GitHub Codex 1 回目（caa455f） / 11 件（P1 2、P2 9）。10 件を T26 で直す。P2（Claude のログの search の結果で、本文に引用された見出しを gold と取る）は直さない: ルーティンのログは改行を空白に潰した抜き書きで、結果の区切りを取り戻せない。本文が別の記録の見出しを `## <key> (uN)` の形で引用する入力に限られる / T26 を足した。既存の 3 つの build には、build の後に tasks.json が変わっていない（最後の変更 03:11Z、build 04:32Z 以降）ので今の tasks.json を写した
 - 2026-09-30 / GitHub Codex 2 回目（91cc0b7） / 7 件（P1 3、P2 3、P3 1）。6 件を T27 で直す。P2（fire.ts を同時に流すと同じ行を取り合う）は T06 レビューの F2 と同じで直さない: 発火は 1 行ずつ手で行い、同時に流す手順は無い / T27 を足した
 - 2026-09-30 / GitHub Codex 3 回目（9429fb6） / 4 件（P1 1、P2 3）。3 件を T28 で直す。P2（別の project の build を 1 つの report にまとめられる）は直さない: 承認したループ自体が tsundoku と sphica の両方の build にまたがり、report はタスクごとに分けて出すので、どの project の run かは区別できる / T28 を足した
+- 2026-09-30 / GitHub Codex 4 回目（34b5531） / 3 件（P1 1、P2 2）。2 件を T29 で直す。P2（fixture を build の間に作り直すと、同じ commit と bundle の build が別の記録を見た run をまとめる）は直さない: 1 つのループの build は続けて作り、その間に fixture を作り直す手順は無い / T29 を足した

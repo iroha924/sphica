@@ -71,6 +71,9 @@ const args = process.argv.slice(2);
 const at = args.indexOf("--compare");
 const ref = at >= 0 ? args[at + 1] : undefined;
 if (at >= 0 && !ref) throw new Error("--compare needs a git ref");
+// --json is what another ref's run prints for the comparison to read; it prints one side only
+if (ref && args.includes("--json"))
+  throw new Error("--json prints this tree only; leave it out with --compare");
 const mine = await summary();
 if (args.includes("--json")) process.stdout.write(`${JSON.stringify(mine.groups)}\n`);
 else if (ref) {

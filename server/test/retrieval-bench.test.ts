@@ -17,11 +17,17 @@ test("the retrieval benchmark runs every question and gives a number for each me
   assert.deepEqual([...r.byLang.keys()], ["en>en", "en>ja", "ja>en", "ja>ja"]);
 });
 
-test("--compare refuses a ref outside this checkout's history, since the ref's code would run", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bench-home-"));
+/** A child's environment: a temporary home, and none of the owner's Sphica paths. */
+function childEnv(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
   delete env.SPHICA_DB;
   delete env.SPHICA_HOME;
+  return env;
+}
+
+test("--compare refuses a ref outside this checkout's history, since the ref's code would run", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bench-home-"));
+  const env = childEnv(home);
   // A commit object no ref points to: made without touching any branch
   const loose = execFileSync("git", ["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "not in history"], {
     encoding: "utf8",
@@ -41,4 +47,16 @@ test("--compare refuses a ref outside this checkout's history, since the ref's c
   fs.rmSync(home, { recursive: true, force: true });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /not in this checkout's history/);
+});
+
+test("--compare with --json is refused, since --json prints one side only", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bench-home-"));
+  const r = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "..", "evals", "retrieval", "run.ts"), "--compare", "HEAD", "--json"],
+    { encoding: "utf8", env: childEnv(home) },
+  );
+  fs.rmSync(home, { recursive: true, force: true });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--json prints this tree only/);
 });

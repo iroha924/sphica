@@ -1228,12 +1228,13 @@ test("the report shows the hidden test's failures beside the score, since the gr
           { ...row, run: "h1", task: "t1", condition: "none", tests: "0 passed, 1 failed", grade },
           { ...row, run: "h2", task: "t1", condition: "none", tests: "1 passed, 0 failed", grade },
           { ...row, run: "h3", task: "t1", condition: "none", tests: "none", grade },
+          { ...row, run: "h4", task: "t1", condition: "none", tests: "0 passed, ? failed", grade },
         ],
       },
     ],
     [{ id: "t1" }],
   ).join("\n");
-  assert.match(out, /codex none: n 3 .*hidden test failed 1 \/ 2/);
+  assert.match(out, /codex none: n 4 .*hidden test failed 1 \/ 3 \(no result 1\)/);
 });
 
 test("grade refuses a second grader it does not know, before grading anything", () => {

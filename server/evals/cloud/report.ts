@@ -34,8 +34,12 @@ function summary(rows: Graded[]) {
       (r) => (r.delivered === "yes" || r.found === "yes") && r.grade?.implements_rejected === "yes",
     ).length,
     // The grader never sees the hidden test, so its result stands beside the score
-    tested: rows.filter((r) => /^\d+ passed, \d+ failed$/.test(r.tests ?? "")).length,
-    testFailed: rows.filter((r) => /^\d+ passed, [1-9]\d* failed$/.test(r.tests ?? "")).length,
+    // A test that ran but gave no count (timed out, crashed, no summary) is "?" and counts as unavailable, not as passing
+    tested: rows.filter((r) => /^[\d?]+ passed, [\d?]+ failed$/.test(r.tests ?? "")).length,
+    testFailed: rows.filter((r) => /^[\d?]+ passed, [1-9]\d* failed$/.test(r.tests ?? "")).length,
+    testUnavailable: rows.filter(
+      (r) => /^[\d?]+ passed, [\d?]+ failed$/.test(r.tests ?? "") && r.tests?.includes("?"),
+    ).length,
   };
 }
 
@@ -52,7 +56,7 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   const lines: string[] = [];
   const line = (name: string, rows: Graded[]) => {
     const s = summary(rows);
-    return `${name}: n ${s.started} (excluded ${s.excluded}, ungraded ${s.ungraded}), mean score ${fmt(s.mean)} [${s.scores.join(" ")}], tracked failure ${s.tracked}, hidden test failed ${s.testFailed} / ${s.tested}`;
+    return `${name}: n ${s.started} (excluded ${s.excluded}, ungraded ${s.ungraded}), mean score ${fmt(s.mean)} [${s.scores.join(" ")}], tracked failure ${s.tracked}, hidden test failed ${s.testFailed} / ${s.tested} (no result ${s.testUnavailable})`;
   };
 
   lines.push("## By model and condition");
