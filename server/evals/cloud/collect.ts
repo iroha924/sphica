@@ -18,6 +18,7 @@ import {
   type GoldSignal,
   goldSignalsFromClaude,
   goldSignalsFromCodex,
+  presentedText,
   type Tri,
 } from "./judge.ts";
 
@@ -59,8 +60,8 @@ const shown = goldSlot
       text: string;
     }[])
   : [];
-const presentedOf = (task: Task) =>
-  plan.swapped.tasks[task.id] ? (shown.find((g) => g.id === task.id)?.text ?? null) : null;
+const presentedOf = (task: Task, condition: string) =>
+  presentedText(task.id, condition, shown, plan.swapped.tasks);
 
 type Row = {
   model: "claude" | "codex";
@@ -275,7 +276,7 @@ function main() {
           delivered_units: emitted,
           found: foundInClaudeLog(log, gold),
           gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
-          presented: presentedOf(task),
+          presented: presentedOf(task, condition),
           signals: log === null ? null : signals(log),
         });
       } finally {
@@ -391,7 +392,7 @@ function main() {
         delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
         delivered_units: emitted,
         found,
-        presented: presentedOf(task),
+        presented: presentedOf(task, result.condition),
         gold_signals: goldSignalsFromCodex(result.condition, gold, emitted, read("gold-receipt.txt"), events),
         // A missing or broken event log cannot say how many searches or errors there were
         signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },

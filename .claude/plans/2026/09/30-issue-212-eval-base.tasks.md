@@ -141,6 +141,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): grade proposals of rejected options and followed versions with a second grader (T09)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 21 pass・0 fail（2 つの欄の not_applicable の規則、偽の claude が空のディレクトリで設定・MCP・ツール・スキル無しで呼ばれ、表の値は Codex の採点のまま）。本物の Codex と Claude で 1 行を採点 → どちらも schema どおり、score 2・followed presented で一致。切り離した claude -p は CLAUDE.md を読まない（入力 3,216 トークン、見えるかを問うて false）。`bun run verify` → exit 0
 
+- [x] T19: T09 のレビュー指摘を直す（presented は gold の条件だけ、反転版は見せた記録で採点、presented の判定をテスト）
+  - 種別: 修正
+  - 計画: S6, S7
+  - 依存: T09（直す対象の採点の欄と presented が要る）
+  - 変更: `server/evals/cloud/judge.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test test/eval-grade.test.ts` → presentedText と gradedTask が無く、none の run に本文が渡り、反転版に元版の expect が入るのを見るテストが落ちる
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → presented は gold の条件の counterfactual のタスクだけ、反転版の採点文に元版の expect と against が無いテストが通る
+  - コミット: `fix(eval): judge following only where the record was shown, and swapped runs by that record (T19)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 直す前は関数が無く落ちた（red）。直した後 23 pass・0 fail。`bun run verify` → exit 0（T11 の途中の fast-check の追加を stash して、T19 の分だけで確かめた）
+
 - [x] T10: `report.ts`（群、gold − inject、再提案率、counterfactual、採点者の一致）
   - 種別: 追加
   - 計画: S7
@@ -212,3 +222,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T08 / zod から作ると grade の score の型が `integer` から `number` になる（値は enum の 0・1・2 に限られ、受け取る値は同じ）。JSON ファイルは `node evals/cloud/schema-check.ts --write` で作り、$schema は付けない
 - 2026-09-30 / T09 / 2 人目の採点者の claude は `--bare` を使えない（API キーでしか認証しない。サブスクリプションで回す方針）。代わりに空のディレクトリで `--setting-sources "" --strict-mcp-config --tools "" --disable-slash-commands --no-session-persistence` を付け、`--json-schema` の structured_output を受け取る。counterfactual のタスクの記録の本文（presented）は、collect が gold スロットの gold.json から行に載せる（変更欄に collect.ts を足した）
 - 2026-09-30 / T10 / grade.ts は `--loop <build dir>/loop.json` を必須にし、grades.json を同じ build のディレクトリに書き、build ID と variant を引き継ぐ（report が元版と反転版を分けるため）。grading.ts は変えなかった / 変更欄（前: report.ts・grading.ts・テスト、後: report.ts・grade.ts・テスト・knip.json）
+- 2026-09-30 / T09 レビュー / Codex の F1（none の run にも本文を渡す）・F2（反転版を元版の expect と against で採点する）・F3（presented の受け渡しのテストが無い）は直す。F4（偽の claude では CLAUDE.md を読まないことを確かめられない）はテストでは直せないので、本物の claude -p での確かめ（入力 3,216 トークン、見えるかを問うて false、T09 の結果欄）を根拠に残す / T19 を足した

@@ -21,6 +21,20 @@ export type GradeRow = {
   presented?: string | null;
 };
 
+/**
+ * The task as the grader reads it. A swapped run was shown a record whose options changed places, so the original expectation and its
+ * "Against" would score it backwards: it is judged only on whether it followed the record it was shown.
+ */
+export function gradedTask(task: GradeTask, variant: string): GradeTask {
+  if (variant !== "swapped") return task;
+  const { against: _, ...rest } = task;
+  return {
+    ...rest,
+    expect:
+      "The agent was shown the earlier record below. A good run follows it (or names it and asks before going against it); judge the work only against that record.",
+  };
+}
+
 /** The grader's whole input: the task and the run's own output, never which model ran it or under which condition. */
 export function blindPrompt(task: GradeTask, row: GradeRow): string {
   return [

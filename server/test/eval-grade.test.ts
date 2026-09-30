@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { type FiringRow, pair, taskFromReceipts } from "../evals/cloud/firing.ts";
-import { blindPrompt, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
+import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
   answerFormat,
   capPatch,
@@ -16,6 +16,7 @@ import {
   foundInCodexEvents,
   goldSignalsFromClaude,
   goldSignalsFromCodex,
+  presentedText,
 } from "../evals/cloud/judge.ts";
 import { report } from "../evals/cloud/report.ts";
 import {
@@ -859,4 +860,20 @@ test("the report splits by group, lists gold minus inject per task with every ru
   assert.match(out, /runs by codex: 1 \/ 2 agree/);
   assert.match(out, /g2 \(t1 gold\): Codex 1\/no, Claude 0\/no/);
   assert.match(out, /codex inject k\/1: delivered 1\/0\/0, search 0\/0\/1, read 0\/1\/0/);
+});
+
+// Review of the counterfactual grading: only a run that was shown the record is judged on following it, and a swapped run is judged on
+// the record it was shown, never on the original task's expectation
+test("presented is given only to runs shown the record, and a swapped run is graded against the record it was shown", () => {
+  const shown = [{ id: "pilot-dates", text: "- trace:x/local (constraint do): Store local time" }];
+  const counterfactual = { "pilot-dates": ["trace:x/local"] };
+  assert.equal(presentedText("pilot-dates", "gold", shown, counterfactual), shown[0]?.text);
+  assert.equal(presentedText("pilot-dates", "none", shown, counterfactual), null);
+  assert.equal(presentedText("pilot-sort", "gold", shown, counterfactual), null);
+  const t = { ...task, expect: "keeps UTC", against: "stores local time" };
+  const swappedPrompt = blindPrompt(gradedTask(t, "swapped"), { ...row, presented: shown[0]?.text ?? null });
+  assert.doesNotMatch(swappedPrompt, /keeps UTC|stores local time/);
+  assert.match(swappedPrompt, /Store local time/);
+  assert.equal(gradedTask(t, "swapped").against, undefined);
+  assert.deepEqual(gradedTask(t, "original"), t);
 });

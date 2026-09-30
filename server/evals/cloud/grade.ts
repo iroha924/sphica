@@ -7,7 +7,15 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { isolatedCodexHome } from "./codex-home.ts";
-import { blindPrompt, type Cell, type GradeRow, type GradeTask, receiveGrade, tabulate } from "./grading.ts";
+import {
+  blindPrompt,
+  type Cell,
+  type GradeRow,
+  type GradeTask,
+  gradedTask,
+  receiveGrade,
+  tabulate,
+} from "./grading.ts";
 import type { Grade } from "./schema-check.ts";
 
 const HERE = import.meta.dirname;
@@ -129,9 +137,14 @@ for (const row of loop.rows) {
     graded.push({ ...row, ungraded: `unknown task ${row.task}` });
     continue;
   }
-  const prompt = blindPrompt(task, row);
+  const prompt = blindPrompt(gradedTask(task, loop.variant ?? "original"), row);
   const accept = (run: { status: number | null; output: string }) =>
-    receiveGrade(run, row.patch_truncated, task.against !== undefined, Boolean(row.presented));
+    receiveGrade(
+      run,
+      row.patch_truncated,
+      gradedTask(task, loop.variant ?? "original").against !== undefined,
+      Boolean(row.presented),
+    );
   const got = accept(gradeOne(prompt));
   // The second grade is kept beside the first for agreement; the table's values stay Codex's
   const other = args.second === "claude" ? accept(gradeClaude(prompt)) : null;

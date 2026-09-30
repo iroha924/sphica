@@ -191,6 +191,20 @@ export function goldSignalsFromClaude(
   );
 }
 
+/**
+ * The record a counterfactual task's run was surely shown, as the gold slot rendered it: only the gold condition gives it for certain, so
+ * other conditions' runs are not judged on following it (and a blind prompt carrying it would hint at the condition).
+ */
+export function presentedText(
+  task: string,
+  condition: string,
+  shown: { id: string; text: string }[],
+  counterfactual: Record<string, string[]>,
+): string | null {
+  if (condition !== "gold" || !counterfactual[task]) return null;
+  return shown.find((g) => g.id === task)?.text ?? null;
+}
+
 /** Codex's final output checked against answer.schema.json; a valid answer is rendered to text so graders read the same kind of answer. */
 export function answerFormat(raw: string | null): {
   format: "valid" | "invalid" | "refused_or_empty";
