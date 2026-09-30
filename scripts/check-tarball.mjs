@@ -88,6 +88,19 @@ try {
     const raw = new DatabaseSync(file);
     raw.exec("pragma journal_mode = wal");
     raw.exec(fs.readFileSync(path.join(schemas, `schema-rev${older}.sql`), "utf8"));
+    // Records the shipped migration must carry over: a project, a session, and one message of the owner. The index triggers need the
+    // tokenizer to compile; this stand-in is never used for the index, which the migration rebuilds with the real one
+    raw.function("sphica_terms", (text) => String(text ?? ""));
+    const when = "2026-09-01T00:00:00.000Z";
+    raw.exec(
+      `insert into project (key, name) values ('git:github.com/example/behind', 'example/behind');
+       insert into session (id, project_id, host, external_id, started_at) values ('s1', 1, 'claude-code', 'e1', '${when}');`,
+    );
+    raw
+      .prepare(
+        "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s1', 'm1', 1, 's1', 'owner', ?, ?, 'Use SQLite.', 11, zeroblob(32), 0)",
+      )
+      .run(when, when);
     raw.close();
     const repo = path.join(behind, "repo");
     fs.mkdirSync(repo);
@@ -123,6 +136,12 @@ try {
     const at = copy.prepare("pragma user_version").get().user_version;
     copy.close();
     if (at !== older) throw new Error(`the backup is at revision ${at}, not ${older}`);
+    const after = new DatabaseSync(path.join(behind, ".sphica", "sphica.db"), { readOnly: true });
+    const now = after.prepare("pragma user_version").get().user_version;
+    const kept = after.prepare("select count(*) as n from source where external_id = 'm1'").get().n;
+    after.close();
+    if (now <= older || kept !== 1)
+      throw new Error(`the migrated database is at revision ${now} with ${kept} of its 1 message`);
   } finally {
     fs.rmSync(behind, { recursive: true, force: true });
   }

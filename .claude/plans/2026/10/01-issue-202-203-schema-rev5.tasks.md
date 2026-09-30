@@ -271,13 +271,14 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `test(db): migrate a populated revision 4 database and keep using it (T18)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="populated revision 4" test/migrate.test.ts` → pass（external_reference を除く全表に行があり、全カウンターが最大 id より上の rev4 の DB を実際の `admin.migrate()` で移行。修復は 1 件で、増えたのは migration の run と state の 1 行ずつだけ、カウンターは下がらず migration の run は旧カウンター + 1、検索は field の値・alias・source を見つけ、ingest の接続で trace の保存と glean の取り下げが通り、capture の書き込みが索引に入る）。`bun run verify` → exit 0。テストだけの追加なので review-shipping は流していない（対象はパッケージに入る変更）
 
-- [ ] T19: Skill を直し、配布物の検査を rev4 に向ける
+- [x] T19: Skill を直し、配布物の検査を rev4 に向ける
   - 種別: 変更
   - 計画: S9, S10
   - 依存: T18（出荷する移行が通しで確かめられている）
-  - 変更: `.claude/skills/knowledge-schema/SKILL.md`, `scripts/check-tarball.mjs`
+  - 変更: `.agents/skills/knowledge-schema/SKILL.md`, `scripts/check-tarball.mjs`
   - 完了条件: `bun run release:plan -- --base v0.6.14` → `plugin` で、4 か所のバージョンが一致する。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → deliver が rev4 の DB にバージョン入りの案内を返し、init が `Backed up:` と `Migrated: … (revision 4 → 5)` を出す。`bun run verify` → 0
   - コミット: `docs(skill): describe schema revision 5 and check the tarball against revision 4 (T19)`
+  - 結果: `bun run release:plan -- --base v0.6.14` → plugin、4 か所とも 0.6.15。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → 43 files、配布物の CLI が記録の入った rev4 の DB をバックアップして移行し、発言が残って revision 5 になる。`bun run verify` → exit 0
 
 ## 記録
 
@@ -328,3 +329,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T15・T24 / Codex のレビュー（14774d8e..ff1b273c）: 指摘 1 件（P2、以前からある穴、再現済み）。取り下げ済みの行を insert すると、理由が同じ project の持ち主の発言の中かを見ない（update でしか見ていない） / 採用。修正タスク T25 で、取り下げ済みの行の insert そのものを拒む
 - 2026-10-01 / T08 / 読み取りの関数の引数を `ReadonlyKysely<DB>` にすると、書き込み用の `Kysely<DB>` がそこへ代入できず（kysely の型で、書き込みのメソッドの戻り値が合わない）、記録サーバーの呼び出し口が 100 か所以上型エラーになった / 読み取りの関数は `Reads = Pick<ReadonlyKysely<DB>, "selectFrom" | "fn" | "dynamic">` を取るようにした（どちらの接続も渡せ、関数の中から書けない）。`openReader()` は plan どおり `ReadonlyKysely<DB>` を返す。変更欄を実態に合わせた（前: mcp.ts を含む 10 ファイル。後: 読み取りの関数を持つモジュールと acceptance の driver・temp-db.ts。mcp.ts は変わらず）
 - 2026-10-01 / T08・T25 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる。review-shipping は 10 分無応答で打ち切られた（3 度目）。頼んだ検査のうち、`openReader()` を `Kysely<DB>` に戻すと `@ts-expect-error` が未使用になって型検査が落ちること、server/src に取り下げ済みの行を insert する所が無いこと、tsconfig が src・test・evals を含むことを、自分で確かめた
+- 2026-10-01 / T19 / 変更欄の Skill のパスを実ファイルに合わせた（`.claude/skills/knowledge-schema` は `.agents/skills/knowledge-schema` へのリンク）。配布物の検査は、移行する古い DB に記録を入れ、移行後も残ることを見る形にした（T03 の記録の宿題）
+- 2026-10-01 / T19 / review-shipping: 差分への指摘なし。依頼文に「Windows のジョブもこの検査を流す」と書いたのは誤りで、流すのは ubuntu の check と release だけ（Windows のジョブは配布物の起動と init・doctor だけを見る）

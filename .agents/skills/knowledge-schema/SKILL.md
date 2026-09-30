@@ -36,6 +36,15 @@ schema.sql's new state; `sphica init` runs each in one transaction with foreign 
 `server/test/migrate.test.ts` compares a migrated DB with a fresh one; keep the previous revision's schema in `server/test/fixtures/`.
 Keep the capture views' columns unchanged across a revision, since capture writes across the change
 
+Rows the new revision refuses are handled in three ways, and none is left to fail the rebuild:
+
+- **Repaired**: take the nearest value the new rules accept, or the row goes when it is derived (a duplicate, an observation). Write each into the temp table
+  `sphica_migration_note (rule, item, action)`; `migrate()` prints every row after the step commits. A lifecycle repair adds a state from a run with origin
+  `migration` (target `revision:<n>`) and sets `unit.lifecycle` and `revision` by hand, since the triggers are dropped during the rebuild
+- **Stopped**: a row no release wrote, or a source the migration may not remove (only the owner's forget removes sources). `<revision>.check.sql` runs first in
+  the same transaction and fills `sphica_migration_stop (rule, item)`; any row stops the step with every row listed and nothing changed
+- **Rebuilt tables** lose their `sqlite_sequence` row: save the counters first and put back the larger of old and copied, before anything inserts into the table
+
 ## When changing the schema
 
 1. Regenerate `server/src/db-types.ts` with `bun run codegen`. **Do not edit it by hand.** CI's `codegen:check` fails on drift
@@ -43,6 +52,9 @@ Keep the capture views' columns unchanged across a revision, since capture write
 3. Give time columns `check (strftime('%Y-%m-%dT%H:%M:%fZ', column) is column)` (with `=`, an invalid string passes as NULL). Writers use `iso()` in `server/src/db.ts`
 4. Enforce cross-table consistency (same project, spans inside the source) with triggers, not only in code; `server/test/schema.test.ts` tries each refusal on a real DB
 5. A value set lives in a CHECK and in `server/src/knowledge.ts`; `scripts/check-pairs.mjs` compares them. Add a pair there when you add a set
+6. Lead every foreign key with an index on its own columns (`schema.test.ts` checks it). A row goes with what it belongs to or with a source it cites
+   (cascade); a column naming where a row came from (`run_id`, `forget_id`, `edit_observation_id`) takes no action
+7. Keep one path rule: `source.path`, `edit_observation.path`, and `unit_anchor.path` share one CHECK expression (`bun run pairs` compares them)
 
 ## The record model
 
@@ -55,9 +67,13 @@ Four boundaries (the header of schema.sql):
 | Processing | `extraction_run`, `source_processing` | What each run looked at, so untraced sessions are counted, not guessed |
 | Work and delivery | `work`, `delivery`, `delivery_unit` | Current work, and what the hooks showed (unit ids, never text) |
 
-- **Lifecycle changes only through `unit_state`.** Its trigger checks the activation rules and sets `unit.lifecycle`: a decision or constraint needs
-  unretracted evidence and adoption; an implementation needs code or commit evidence (or an `evidence` anchor on a path its session edited); a finding,
-  dead end, or question needs evidence. Quarantined and unsourced units never become active. Code attempts the move and reports the trigger's refusal
+- **Lifecycle changes only through `unit_state`**, along a fixed table: the first state is candidate; candidate → active, superseded, or withdrawn;
+  active → candidate, superseded, or withdrawn; superseded → candidate only when no live successor is left; withdrawn is final. Its trigger sets `unit.lifecycle`.
+  Code attempts the move and reports the trigger's refusal
+- **Support is one view**, `unit_support`: a decision or constraint needs unit-level unretracted evidence and adoption; an implementation needs code or commit
+  evidence (or an `evidence` anchor on a path its session edited); a finding, dead end, or question needs unit-level evidence. Activating, retracting, and
+  retiring an anchor all read it, so they never disagree. Quarantined and unsourced units never become active
+- **One live successor**: a record has at most one successor that is supported, sourced, and not withdrawn. Withdrawing it brings the record back to candidate
 - **Evidence is a byte span of retained text** (`span_start`, `span_end` into the UTF-8 bytes of `source.text`). Quotes are located by the save path, never trusted
 - **Adoption** routes: `owner_statement` (an owner-kind source) or `explicit` (the owner, or OWNER / MEMBER / COLLABORATOR). A merge or a resolved thread never adopts
 - **Aliases** are search words bound to the unit's `content_hash`; only the newest matching set is indexed. They are never evidence
@@ -86,7 +102,7 @@ Processes of the same OS user can rewrite the file directly, so this is not an O
 |---|---|---|
 | owner | none | creating the DB, reindex, the database check in `doctor` |
 | reader | reads and allowed functions (`READER_FUNCTIONS`) only | the read MCP server (`mcp.ts`), delivery reads, `doctor`'s project list |
-| ingest | rejects DDL, ATTACH, virtual tables, writing pragmas | the record MCP server, project registration |
+| ingest | writes only what the record server's code writes: listed tables, listed update columns, deletes of `artifact_link`, and inside triggers only what `INGEST_TRIGGER_WRITES` lists (a test compares it with every trigger body). Sources go through the view `ingest_source`, which cannot take a session message | the record MCP server, project registration |
 | forget | inserts into `forget_batch`, `source_forgotten`, `unit_state`; deletes sources and what cites them; `secure_delete` and `wal_checkpoint` pragmas. Ingest may do none of the forget-only writes | `forget_apply` in the record server |
 | capture | inserts into the capture views only; reads only `project`'s id, key, and name, `session`'s id, and `source`'s id, session, external id, and kind; functions only inside the views' triggers (`TRIGGER_FUNCTIONS`) | capture and delivery logging |
 
@@ -100,7 +116,8 @@ Processes of the same OS user can rewrite the file directly, so this is not an O
 
 ## How to write SQL
 
-Write queries with kysely and let it infer types. Only `sqlite.ts`, `db-write.ts`, `db.ts`, `admin.ts`, and `kysely-node-sqlite.ts` may use node:sqlite
+Write queries with kysely and let it infer types. `openReader()` returns kysely's `ReadonlyKysely<DB>`, and a function that only reads takes `Reads`
+(in `db.ts`), which both the reader and a writer fit and which cannot write. Only `sqlite.ts`, `db-write.ts`, `db.ts`, `admin.ts`, and `kysely-node-sqlite.ts` may use node:sqlite
 directly (`bun run sql`). Name a node:sqlite connection `raw`, and keep `raw.prepare(` on one line (the SQL ledger finds call sites by line).
 
 | Shape | How to write it |
