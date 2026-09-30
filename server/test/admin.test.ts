@@ -550,6 +550,7 @@ test("a migration that fails after committing a step leaves a backup at the old 
   const copy = path.join(home, "backups", backup ?? "");
   assert.match(said.join("\n"), new RegExp(`Backed up: .*${backup?.replaceAll(".", "\\.")}`));
   assert.ok(error.message.includes(copy), error.message);
+  assert.match(error.message, /is now at revision 2 /);
   assert.match(error.message, /sphica\.db-wal/);
   // Restore as the message says: move the database and its WAL files aside, then copy the backup into place
   for (const f of [file, `${file}-wal`, `${file}-shm`]) if (fs.existsSync(f)) fs.renameSync(f, `${f}.broken`);
@@ -645,4 +646,60 @@ test("pruning keeps this run's backup even when older ones carry later times, an
   assert.equal(made.length, 1, "this run's backup is kept");
   assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
   assert.ok(left.includes(stuck));
+});
+
+// Another connection holds the write lock past the busy timeout: the first step never starts, so there is nothing to go back to
+test("sphica init that cannot take the write lock says no step was committed and removes the backup it made", () => {
+  const home = tmp();
+  const file = path.join(home, ".sphica", "sphica.db");
+  fs.mkdirSync(path.join(home, ".sphica", "backups"), { recursive: true });
+  revision1(file);
+  const old = [1, 2, 3].map((d) => `sphica.rev1.2026090${d}T000000000Z.${d}.db`);
+  for (const name of old) fs.writeFileSync(path.join(home, ".sphica", "backups", name), "");
+  const held = connectWriter("owner", file);
+  held.exec("begin immediate");
+  let r: ReturnType<typeof cli>;
+  try {
+    r = cli(home, "init");
+  } finally {
+    held.exec("rollback");
+    held.close();
+  }
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /Backed up: [\s\S]*No migration step was committed/, r.out);
+  assert.match(r.out, /still at revision 1,/, r.out);
+  assert.match(r.out, /the backup made for this run was removed/, r.out);
+  assert.match(r.out, /Run `sphica init` again when it has finished/, r.out);
+  assert.doesNotMatch(r.out, /To go back to it/, r.out);
+  assert.equal(revisionOf(file), 1);
+  assert.deepEqual(backups(file), old, "failing again and again adds no backup and removes no older one");
+  const again = cli(home, "init");
+  assert.equal(again.code, 0, again.out);
+  assert.equal(revisionOf(file), SCHEMA_REVISION);
+});
+
+test("a missing migration script says to reinstall, not to move the database or restore a backup", () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const empty = path.join(home, "migrations");
+  fs.mkdirSync(empty);
+  let error: Error | null = null;
+  const log = console.log;
+  console.log = () => {};
+  try {
+    migrate(file, empty);
+  } catch (e) {
+    error = e as Error;
+  } finally {
+    console.log = log;
+  }
+  assert.ok(error);
+  assert.match(error.message, /no migration script for revision 2 /);
+  assert.ok(error.message.includes(path.join(empty, "0002.sql")), error.message);
+  assert.match(error.message, /Reinstall sphica \(`npm i -g sphica@\d+\.\d+\.\d+`\)/);
+  assert.match(error.message, /No migration step was committed/);
+  assert.doesNotMatch(error.message, /Move the database aside|To go back to it|when it has finished/);
+  assert.equal(revisionOf(file), 1);
+  assert.deepEqual(backups(file), []);
 });
