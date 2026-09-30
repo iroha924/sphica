@@ -145,3 +145,4 @@ approved_at: 2026-09-30
 なし
 
 ## 変更履歴
+- 2026-09-30 / counterfactual のタスクを pilot-dates と superseded-install に変えた / sphica-search-wording の fixture は実際の PR の harvest で、反転版に架空の出典が要る。superseded-install は status-02 を外すだけで反転する / Go 不要（件数と費用は同じ）

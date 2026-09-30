@@ -601,3 +601,46 @@ test("gold signals say unknown when the log cannot tie a result to its call or i
   assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "42")[key], unknown);
   assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "null")[key], unknown);
 });
+
+// A swapped build's runs are judged against the swapped record: its gold is that record, and the original rule's hidden test is not run
+test("collect reads a swapped build's gold from the swapped record and does not run the hidden test", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    const codex = path.join(base, "codex");
+    fs.mkdirSync(build);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", variant: "swapped", commit: "c", repositories: {} }),
+    );
+    const head = { task: "pilot-dates", condition: "gold" };
+    fs.mkdirSync(path.join(codex, "sw", "work"), { recursive: true });
+    fs.writeFileSync(path.join(codex, "sw", "started.json"), JSON.stringify(head));
+    fs.writeFileSync(
+      path.join(codex, "sw", "result.json"),
+      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+    );
+    const out = path.join(base, "loop.json");
+    execFileSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        codex,
+        "--logs",
+        base,
+        "--out",
+        out,
+      ],
+      { stdio: "ignore" },
+    );
+    const loop = JSON.parse(fs.readFileSync(out, "utf8"));
+    assert.equal(loop.variant, "swapped");
+    assert.deepEqual(loop.rows[0].gold, ["trace:s-en-dates-local/local"]);
+    assert.equal(loop.rows[0].tests, "not run (swapped variant)");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

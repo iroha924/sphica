@@ -33,7 +33,10 @@ const { values: args } = parseArgs({
 });
 
 type Task = { id: string; prompt: string; test?: string; project?: string; gold?: string[] };
-const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
+const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
+  tasks: Task[];
+  swapped: { tasks: Record<string, string[]> };
+};
 const build = args.build ?? "";
 if (!build)
   throw new Error("--build <dir> names the build to collect (~/.cache/sphica-eval/builds/<build id>)");
@@ -45,6 +48,9 @@ const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "
   project?: string;
   repositories: Record<string, { condition: string }>;
 };
+const swapped = manifest.variant === "swapped";
+/** A swapped build's gold is the swapped record, not the task's original one */
+const goldOf = (task: Task) => (swapped ? (plan.swapped.tasks[task.id] ?? []) : (task.gold ?? []));
 
 type Row = {
   model: "claude" | "codex";
@@ -95,7 +101,7 @@ const excludedRow = (
   answer_format_reason: null,
   patch: "",
   patch_truncated: false,
-  gold: plan.tasks.find((t) => t.id === task)?.gold ?? [],
+  gold: ((t) => (t ? goldOf(t) : []))(plan.tasks.find((t) => t.id === task)),
   delivered: "not_applicable",
   delivered_units: [],
   found: "unknown",
@@ -128,6 +134,8 @@ function signals(log: string): NonNullable<Row["signals"]> {
  */
 function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
+  // The hidden test checks the original record's rule, which a swapped run is not given
+  if (swapped) return "not run (swapped variant)";
   if (process.platform !== "darwin")
     return "not run (hidden tests run only on macOS, where sandbox-exec denies network)";
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
@@ -215,7 +223,7 @@ function main() {
         const session = branch.replace("origin/claude/eval-", "");
         const logFile = path.join(args.logs ?? "", `${session}.log`);
         const log = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : null;
-        const gold = task.gold ?? [];
+        const gold = goldOf(task);
         const emitted = deliveries
           .filter((d) => d.outcome === "emitted")
           .flatMap((d) => JSON.parse(d.units) as string[]);
@@ -336,7 +344,7 @@ function main() {
         rows.push(excludedRow("codex", result.task, result.condition, name, "unknown task"));
         continue;
       }
-      const gold = task.gold ?? [];
+      const gold = goldOf(task);
       const events = read("events.jsonl");
       const found = foundInCodexEvents(events, gold);
       const emitted = (result.deliveries ?? [])

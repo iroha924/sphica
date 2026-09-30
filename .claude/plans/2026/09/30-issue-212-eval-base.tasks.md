@@ -104,13 +104,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): build under an id with a firing plan, and collect against the plan (T06)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 16 pass・0 fail（照合の順序、発火済みで結果の無い行、計画に無い結果、計画ファイルの無い build を collect が拒む）。`node evals/cloud/build.ts --project tsundoku` を 2 回 → builds/ に 2 つの build が残り、plan.json は 50 行（7 タスクの条件 25 × 2 試行）、`node evals/cloud/fire.ts <build>` → 1 行目（pilot-dates none try 1）に発火時刻が付き left 49（確かめた build は消した）。`bun run verify` → exit 0
 
-- [ ] T07: counterfactual の反転版の記録と `--variant swapped`
+- [x] T07: counterfactual の反転版の記録と `--variant swapped`
   - 種別: 追加
   - 計画: S6
   - 依存: T06（build ID と plan.json が要る）
-  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/fixture.ts`, `server/evals/cloud/tasks.json`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/tasks.json`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → swapped の build の gold 記録で採った案と却下案が入れ替わり、run に variant が付き、hidden test が使われないテストが通る
   - コミット: `feat(eval): add a swapped gold variant for the counterfactual check (T07)`
+  - 結果: `cd server && node evals/cloud/build.ts --project tsundoku --variant swapped --runs 2 --out <scratch>` → built 4 repositories、fixture に trace:s-en-dates-local/local と harvest:12/pnpm が active で、元の utc と npm は無い。gold.json は 2 タスクとも反転版の本文、plan.json 16 行、manifest の variant は swapped。`node --test test/eval-grade.test.ts` → 18 pass・0 fail（swapped の build を collect すると gold が反転版の key、tests が not run）。`bun run verify` → exit 0
 
 - [ ] T08: 評価スキーマを zod から作る
   - 種別: 変更
@@ -193,3 +194,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T05 / Codex の read の引数は `u4` のような番号で key を持たない（実物の events.jsonl で確認）。read の判定は引数ではなく結果の先頭行（`<key> (u<id>, revision`）で行った。search の結果は `## <key> (u<id>)`
 - 2026-09-30 / T06 / 発火の計画の読み書きと照合を firing.ts に、発火の印を付ける手順を fire.ts に分けた。collect の `--build` を必須にし、loop.json は build のディレクトリに書く（先頭に build ID と variant）。knip の entry に fire.ts を足した / 変更欄（前: build.ts・collect.ts・テスト、後: それに firing.ts・fire.ts・knip.json を足した）
 - 2026-09-30 / T05 レビュー / Codex の F1〜F5（並行の違うツールの結果を順番で決める、Sphica 以外の結果を取る、本文に引用された見出しを取る、空や欠けたログを no にする、壊れたイベントで no か例外）はすべて再現つきで、直す / T17 を足した。同じツールだけが並行している間は、そのツールの結果として扱う
+- 2026-09-30 / T07 / counterfactual のタスクを pilot-dates と superseded-install にした（plan は pilot-dates と sphica-search-wording）。sphica の fixture は実際の PR を harvest した DB で、反転版には実在の PR の中に架空の出典を作ることになるため。superseded-install は status-02 を外すだけで pnpm が今の決定として残り、新しい記録は要らない。pilot-dates は反転版の記録（local time で保存）を tasks.json の swapped.steps に持つ。collect も swapped の gold と hidden test の扱いを知る必要があり、変更欄に collect.ts を足し fixture.ts を外した

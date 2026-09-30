@@ -49,12 +49,23 @@ type Task = { id: string; project: string; prompt: string; gold: string[]; condi
 type Project = { source: string; repo?: string; base?: string; fixture: string };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
   fixture: { cases: string[]; setups: string[] };
+  swapped: { drop: { cases: string[]; setups: string[] }; steps: Step[]; tasks: Record<string, string[]> };
   projects: Record<string, Project>;
   tasks: Task[];
 };
 const project = plan.projects[args.project ?? ""];
 if (!project) throw new Error(`unknown project ${args.project}`);
-const tasks = plan.tasks.filter((t) => t.project === args.project);
+// A swapped build carries only the tasks with a swapped record, each pointing at that record as its gold
+const tasks = plan.tasks
+  .filter((t) => t.project === args.project)
+  .flatMap((t) =>
+    args.variant !== "swapped"
+      ? [t]
+      : plan.swapped.tasks[t.id]
+        ? [{ ...t, gold: plan.swapped.tasks[t.id] ?? [] }]
+        : [],
+  );
+if (!tasks.length) throw new Error(`no ${args.variant} tasks for ${args.project}`);
 
 const sha256 = (buf: Buffer | string) => crypto.createHash("sha256").update(buf).digest("hex");
 
@@ -64,14 +75,17 @@ async function fixture(file: string): Promise<void> {
   const driver = await createDriver(world);
   try {
     const byId = new Map(cases.map((c) => [c.id, c]));
-    for (const id of plan.fixture.cases) {
+    const swapped = args.variant === "swapped";
+    const dropped = (list: string[], drop: string[]) => list.filter((x) => !swapped || !drop.includes(x));
+    for (const id of dropped(plan.fixture.cases, plan.swapped.drop.cases)) {
       const c = byId.get(id);
       if (!c) throw new Error(`no case ${id}`);
       for (const g of c.given) if (!g.case) await driver.run(g);
       await driver.run(c.when);
     }
-    for (const name of plan.fixture.setups)
+    for (const name of dropped(plan.fixture.setups, plan.swapped.drop.setups))
       for (const [k, v] of Object.entries(setups[name] as Step)) await driver.run({ [k]: v });
+    if (swapped) for (const step of plan.swapped.steps) await driver.run(step);
     await driver.snapshot(file);
   } finally {
     await driver.done();

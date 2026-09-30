@@ -129,5 +129,68 @@
       "base": "f65ff35",
       "fixture": "~/.cache/sphica-eval/fixtures/sphica.db (harvest of PRs 146, 148, 151, 154, 157 by evals/cloud/fixture.ts)"
     }
+  },
+  "swapped": {
+    "note": "The counterfactual variant: the gold record's chosen and rejected options change places, as a record of its own with a source of its own. A swapped build holds only these tasks; its runs are graded on whether they followed the record shown, and the hidden test is not run.",
+    "drop": {
+      "cases": ["status-02"],
+      "setups": ["trace_en_dates"]
+    },
+    "steps": [
+      {
+        "session": {
+          "id": "s-en-dates-local",
+          "host": "codex",
+          "at": "2026-03-15T08:00:00Z",
+          "turns": [
+            {
+              "owner": "Store every timestamp in the reader's local time, the way they read it. Convert to UTC only when syncing.",
+              "assistant": "Done.",
+              "edits": ["src/dates.ts"]
+            }
+          ]
+        }
+      },
+      {
+        "trace": {
+          "session": "s-en-dates-local",
+          "record": {
+            "units": [
+              {
+                "key": "local",
+                "kind": "constraint",
+                "stance": "do",
+                "text": "Store every timestamp in the reader's local time; convert to UTC only when syncing",
+                "evidence": [
+                  {
+                    "source": "session:s-en-dates-local#1.owner",
+                    "quote": "Store every timestamp in the reader's local time, the way they read it.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-dates-local#1.owner",
+                    "quote": "Store every timestamp in the reader's local time, the way they read it."
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/dates.ts",
+                    "symbol": "toStored",
+                    "role": "applies_to"
+                  }
+                ],
+                "aliases": ["日付", "タイムゾーン", "時刻の保存", "UTC", "timezone", "timestamp"]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "tasks": {
+      "pilot-dates": ["trace:s-en-dates-local/local"],
+      "superseded-install": ["harvest:12/pnpm"]
+    }
   }
 }
