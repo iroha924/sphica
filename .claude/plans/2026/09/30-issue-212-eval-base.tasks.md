@@ -160,6 +160,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): report by group, gold minus inject per task, re-proposals, and grader agreement (T10)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 22 pass・0 fail（モデル×条件の n・除外・未採点、言語・overlap・gold の有無の群、タスク×モデルの gold − inject を各 run と「予備」の印つきで、再提案率、元版と反転版の followed、採点者の一致と不一致の一覧、gold key ごとの信号）。`bun run verify` → exit 0
 
+- [x] T21: T10 のレビュー指摘を直す（gold − inject に各 run と n、採点者の一致は全部の欄で、未採点だけの counterfactual の側も出す）
+  - 種別: 修正
+  - 計画: S7
+  - 依存: T10（直す対象の report が要る）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="names each run" test/eval-grade.test.ts` → run ID と n が出ず、followed の食い違いを一致と数え、未採点だけの反転版の行が消えて落ちる
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 3 つの指摘の入力で、run ごとの値、全欄の食い違い、未採点・除外の数が出るテストが通る
+  - コミット: `fix(eval): name every run in the report, compare every graded field, keep ungraded sides (T21)`
+  - 結果: `cd server && node --test --test-name-pattern="names each run" test/eval-grade.test.ts` → 直す前は 1 fail（red）。直した後 `node --test test/eval-grade.test.ts` → 24 pass・0 fail。`bun run verify` → exit 0
+
 ## P4: テスト
 
 性質・時間・順序・promise・Skill と型の食い違いが機械で見つかる。
@@ -241,3 +251,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T11 / release-scope.mjs は server/package.json と server/bun.lock の変更を中身によらずパッケージの入力とみなすので、devDependency の fast-check を足すとバージョンの更新とリリースが要る。持ち主が「0.6.13 に上げてリリース」を選んだ（ほかの案: 依存を足さず自前の生成器、バージョンの検査を直す） / 版の 4 ファイルを T11 に入れた
 - 2026-09-30 / T12 / 最初は NODE_OPTIONS でランダム化を渡したが、plugin.test.ts の「identifies the running MCP …」がどの seed でも落ちた。順序依存ではなく、テストが起動する子の node が NODE_OPTIONS の `--test-randomize` を受け継ぎ、`--test` 無しで止まるため（単独でもランダム化の指定があれば落ちる）。server の test の script に `$TEST_ORDER` を足し、CI の Node 26 の lane だけがそれに run 番号の seed を渡す形にした（変更欄に server/package.json を足した）
 - 2026-09-30 / T11 / 時間のテストは各長さの 5 回の中央値で比を見ていたが、ほかの処理（テストファイルの並列実行、裏の Stryker）で 1 回の測定が遅れると比が 3 を超えた。最小値で測り、形ごとに 3 回まで試す形にした / T20 を足した
+- 2026-09-30 / T10 レビュー / Codex の F1（gold − inject に run ID と n が無い）・F2（採点者の一致が score と implements_rejected だけ）・F3（未採点だけの反転版の行が消える）は、どれも再現つきで直す / T21 を足した。counterfactual のタスクの一覧は、report の CLI が tasks.json の swapped.tasks から渡す。T12 のレビューは指摘なし

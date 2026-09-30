@@ -846,6 +846,7 @@ test("the report splits by group, lists gold minus inject per task with every ru
       { variant: "swapped", rows: swapped },
     ],
     [{ id: "t1", lang: "ja>en", overlap: false, gold: ["k/1"] }],
+    ["t1"],
   ).join("\n");
   assert.match(
     out,
@@ -853,12 +854,15 @@ test("the report splits by group, lists gold minus inject per task with every ru
   );
   assert.match(out, /codex gold ja>en: n 2/);
   assert.match(out, /codex inject no overlap: n 3/);
-  assert.match(out, /t1 codex: gold \[2 1\] inject \[0 1\], difference 1\.00 \(preliminary/);
+  assert.match(
+    out,
+    /t1 codex: gold n 2 \(g1 2, g2 1\) inject n 3 \(i1 0, i2 excluded, i3 1\), difference of mean scores 1\.00 \(preliminary/,
+  );
   assert.match(out, /codex inject: 1 \/ 2\n/);
-  assert.match(out, /t1 codex gold original: presented 2, other 0/);
-  assert.match(out, /t1 codex gold swapped: presented 0, other 1/);
-  assert.match(out, /runs by codex: 1 \/ 2 agree/);
-  assert.match(out, /g2 \(t1 gold\): Codex 1\/no, Claude 0\/no/);
+  assert.match(out, /t1 codex gold original: n 2, presented 2, other 0/);
+  assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 1/);
+  assert.match(out, /runs by codex: 0 \/ 2 agree/);
+  assert.match(out, /g2 \(t1 gold\): score 1 vs 0; followed presented vs not_applicable \(Codex vs Claude\)/);
   assert.match(out, /codex inject k\/1: delivered 1\/0\/0, search 0\/0\/1, read 0\/1\/0/);
 });
 
@@ -876,4 +880,39 @@ test("presented is given only to runs shown the record, and a swapped run is gra
   assert.match(swappedPrompt, /Store local time/);
   assert.equal(gradedTask(t, "swapped").against, undefined);
   assert.deepEqual(gradedTask(t, "original"), t);
+});
+
+// Review of the report: every run of gold minus inject is named with its grade, agreement covers every graded field, and a counterfactual
+// side with no graded run still shows how many runs it had
+test("the report names each run in gold minus inject, compares every graded field, and keeps an ungraded counterfactual side", () => {
+  const g = (over: Partial<Grade>): Grade => ({ ...grade, ...over });
+  const base = { ...row, task: "t1", presented: null };
+  const rows = [
+    {
+      ...base,
+      run: "g1",
+      condition: "gold",
+      presented: "rec",
+      grade: g({ score: 2, followed: "presented" }),
+      second: { grade: g({ score: 2, followed: "other" }) },
+    },
+    { ...base, run: "g2", condition: "gold", presented: "rec", ungraded: "empty output" },
+    { ...base, run: "i1", condition: "inject", grade: g({ score: 0 }) },
+    { ...base, run: "i2", condition: "inject", excluded: "no result branch" },
+  ];
+  const swapped = [
+    { ...base, run: "s1", condition: "gold", presented: "swapped rec", ungraded: "empty output" },
+  ];
+  const out = report(
+    [
+      { variant: "original", rows },
+      { variant: "swapped", rows: swapped },
+    ],
+    [{ id: "t1", lang: "ja>en", overlap: false, gold: ["k/1"] }],
+    ["t1"],
+  ).join("\n");
+  assert.match(out, /t1 codex: gold n 2 \(g1 2, g2 ungraded\) inject n 2 \(i1 0, i2 excluded\)/);
+  assert.match(out, /runs by codex: 0 \/ 1 agree/);
+  assert.match(out, /g1 \(t1 gold\): followed presented vs other/);
+  assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 0, neither 0, ungraded 1, excluded 0/);
 });

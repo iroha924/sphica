@@ -41,7 +41,7 @@ const groupBy = <T>(xs: T[], key: (x: T) => string) => {
   return new Map([...out].sort(([a], [b]) => a.localeCompare(b)));
 };
 
-export function report(builds: Build[], tasks: TaskInfo[]): string[] {
+export function report(builds: Build[], tasks: TaskInfo[], counterfactual: string[] = []): string[] {
   const info = new Map(tasks.map((t) => [t.id, t]));
   const original = builds.filter((b) => b.variant !== "swapped").flatMap((b) => b.rows);
   const swapped = builds.filter((b) => b.variant === "swapped").flatMap((b) => b.rows);
@@ -84,8 +84,14 @@ export function report(builds: Build[], tasks: TaskInfo[]): string[] {
       Math.min(gold.scores.length, inject.scores.length) < 3
         ? " (preliminary: fewer than 3 graded runs a side)"
         : "";
+    const each = (side: Graded[]) =>
+      side
+        .map((r) => `${r.run} ${r.excluded ? "excluded" : r.grade ? r.grade.score : "ungraded"}`)
+        .join(", ");
+    const g = rows.filter((r) => r.condition === "gold");
+    const i = rows.filter((r) => r.condition === "inject");
     lines.push(
-      `${k}: gold [${gold.scores.join(" ")}] inject [${inject.scores.join(" ")}], difference ${fmt(diff)}${small}; excluded ${gold.excluded}/${inject.excluded}, ungraded ${gold.ungraded}/${inject.ungraded}`,
+      `${k}: gold n ${g.length} (${each(g)}) inject n ${i.length} (${each(i)}), difference of mean scores ${fmt(diff)}${small}`,
     );
   }
 
@@ -99,32 +105,36 @@ export function report(builds: Build[], tasks: TaskInfo[]): string[] {
   ))
     lines.push(`${k}: ${rows.filter((r) => r.grade?.proposes_rejected === "yes").length} / ${rows.length}`);
 
-  lines.push("", "## Counterfactual: which record the run followed");
+  // Every gold run of a counterfactual task counts, graded or not, so a side whose runs all failed to grade still shows it was run
+  lines.push("", "## Counterfactual: which record the run followed (gold runs of the counterfactual tasks)");
   for (const [k, rows] of groupBy(
     [
       ...original.map((r) => ({ ...r, variant: "original" })),
       ...swapped.map((r) => ({ ...r, variant: "swapped" })),
-    ].filter((r) => r.grade && r.grade.followed !== "not_applicable"),
+    ].filter((r) => r.condition === "gold" && counterfactual.includes(r.task)),
     (r) => `${r.task} ${r.model} ${r.condition} ${r.variant}`,
   )) {
     const count = (f: Grade["followed"]) => rows.filter((r) => r.grade?.followed === f).length;
-    lines.push(`${k}: presented ${count("presented")}, other ${count("other")}, neither ${count("neither")}`);
+    const s = summary(rows);
+    lines.push(
+      `${k}: n ${s.started}, presented ${count("presented")}, other ${count("other")}, neither ${count("neither")}, ungraded ${s.ungraded}, excluded ${s.excluded}`,
+    );
   }
 
   lines.push("", "## Grader agreement (Codex's grade is the one counted; Claude's is kept beside it)");
   const both = [...original, ...swapped].filter((r) => r.grade && r.second && "grade" in r.second);
   for (const [k, rows] of groupBy(both, (r) => `runs by ${r.model}`)) {
-    const agree = rows.filter((r) => {
+    const fields = ["score", "implements_rejected", "proposes_rejected", "followed"] as const;
+    const differ = (r: Graded) => {
       const other = r.second && "grade" in r.second ? r.second.grade : undefined;
-      return other?.score === r.grade?.score && other?.implements_rejected === r.grade?.implements_rejected;
-    });
-    lines.push(`${k}: ${agree.length} / ${rows.length} agree on score and implements_rejected`);
-    for (const r of rows.filter((x) => !agree.includes(x))) {
-      const other = r.second && "grade" in r.second ? r.second.grade : undefined;
-      lines.push(
-        `  ${r.run} (${r.task} ${r.condition}): Codex ${r.grade?.score}/${r.grade?.implements_rejected}, Claude ${other?.score}/${other?.implements_rejected}`,
-      );
-    }
+      return fields
+        .filter((f) => other?.[f] !== r.grade?.[f])
+        .map((f) => `${f} ${r.grade?.[f]} vs ${other?.[f]}`);
+    };
+    const agree = rows.filter((r) => differ(r).length === 0);
+    lines.push(`${k}: ${agree.length} / ${rows.length} agree on every graded field`);
+    for (const r of rows.filter((x) => !agree.includes(x)))
+      lines.push(`  ${r.run} (${r.task} ${r.condition}): ${differ(r).join("; ")} (Codex vs Claude)`);
   }
 
   lines.push("", "## Gold signals per key: delivered / in a search result / read (yes, no, unknown)");
@@ -150,8 +160,9 @@ if (process.argv[1] === import.meta.filename) {
   const files = process.argv.slice(2);
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
   const builds = files.map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Build);
-  const tasks = (
-    JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "tasks.json"), "utf8")) as { tasks: TaskInfo[] }
-  ).tasks;
-  console.log(report(builds, tasks).join("\n"));
+  const plan = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "tasks.json"), "utf8")) as {
+    tasks: TaskInfo[];
+    swapped: { tasks: Record<string, string[]> };
+  };
+  console.log(report(builds, plan.tasks, Object.keys(plan.swapped.tasks)).join("\n"));
 }
