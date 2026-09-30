@@ -9,7 +9,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
 import { migrate as migrateFile } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
-import { connectWriter } from "../src/db-write.ts";
+import { connectWriter, openWriter } from "../src/db-write.ts";
+import { beginGlean, beginTrace, saveText } from "../src/extract.ts";
 import { sha256 } from "../src/text.ts";
 
 const root = path.join(import.meta.dirname, "..", "..");
@@ -1029,4 +1030,203 @@ test("migrating revision 3 keeps the saved unit searchable, and a new unit then 
     now,
   );
   assert.deepEqual(hits("acme"), [2]);
+});
+
+// One revision 4 database with rows in every table, a row each repair meets, and counters above the highest ids: after the migration the
+// same database takes a trace, a glean, and a capture, and finds by search what it held
+test("a populated revision 4 database migrates and keeps working: rows, ids, search, the record server, and capture", async () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  const id = (sql: string) => Number((raw.prepare(sql).get() as { id: number }).id);
+  run(
+    "insert into owner_identity (provider, external_id, login, bound_at) values ('github', '42', 'hana', ?)",
+    now,
+  );
+  run(
+    "insert into artifact_link (project_id, from_artifact, to_artifact, kind) values (1, 'pr:7', 'issue:3', 'closes')",
+  );
+  run("insert into forget_batch (project_id, at) values (1, ?)", now);
+  run(
+    "insert into source_forgotten (source_id, project_id, artifact, kind, external_id, revision, content_hash, batch_id) values (99, 1, 'session:s1', 'session_message', 'gone', 1, ?, 1)",
+    sha256("gone"),
+  );
+  run(
+    "insert into edit_observation (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s1', 't1', 'e1', 'src/db.ts', 'tool', ?)",
+    now,
+  );
+  run("insert into source_processing (source_id, run_id, outcome) values (1, 1, 'units')");
+  run(
+    "insert into unit_anchor (unit_id, path, symbol, role, edit_observation_id, run_id, added_at) values (1, 'src/db.ts', 'open', 'applies_to', 1, 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit_alias (unit_id, terms, content_hash, run_id, added_at) values (1, '[\"storage\"]', (select content_hash from unit where id = 1), 1, ?)",
+    now,
+  );
+  // A second record with a field value, conflicting with the first
+  run(
+    "insert into field_def (project_id, name, type, label, description, source_id, span_start, span_end, run_id, added_at) values (1, 'tenant', 'text', 'Tenant', 'Who it affects', 1, 0, 3, 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, 'trace:session:s1/k2', 'finding', 'Decided', 'supported', 1, ?, ?)",
+    now,
+    sha256("Decided"),
+  );
+  run(
+    "insert into unit_field (unit_id, field_def_id, value, source_id, span_start, span_end, run_id, added_at) values (2, 1, 'acme', 1, 0, 3, 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (2, 1, 12, 20, 'states', 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (2, null, 'candidate', ?, 'r', 1)",
+    now,
+  );
+  run(
+    "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (2, 1, 'conflicts', 1, ?)",
+    now,
+  );
+  run(
+    "insert into work (project_id, key, title, goal, current, next, status, run_id, updated_at) values (1, 'w', 'Work', 'Goal', 'Now', '[]', 'active', 1, ?)",
+    now,
+  );
+  run(
+    "insert into delivery (session_id, event, outcome, eligible, at) values ('s1', 'prompt', 'emitted', 1, ?)",
+    now,
+  );
+  run("insert into delivery_unit (delivery_id, unit_id) values (1, 1)");
+  // One row a repair meets: a superseded record whose successor was withdrawn
+  run(
+    "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, 'trace:session:s1/old', 'finding', 'Older', 'supported', 1, ?, ?)",
+    now,
+    sha256("Older"),
+  );
+  const old = id("select id from unit where key = 'trace:session:s1/old'");
+  run(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'r', 1)",
+    old,
+    now,
+  );
+  run(
+    "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (2, ?, 'supersedes', 1, ?)",
+    old,
+    now,
+  );
+  run(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, 'candidate', 'superseded', ?, 'r', 1)",
+    old,
+    now,
+  );
+  run(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (2, 'candidate', 'withdrawn', ?, 'r', 1)",
+    now,
+  );
+  // Every table holds a row, and every counter stands above its highest id
+  const tables = (
+    raw
+      .prepare(
+        "select name from sqlite_schema where type = 'table' and sql not like 'CREATE VIRTUAL%' and name not glob '*_fts_*' and name not glob 'sqlite_*' and name <> 'external_reference'",
+      )
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  const count = (t: string) =>
+    Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n);
+  assert.deepEqual(
+    tables.filter((t) => count(t) === 0),
+    [],
+    "every table holds a row",
+  );
+  run("update sqlite_sequence set seq = seq + 5");
+  const counters = new Map(
+    (raw.prepare("select name, seq from sqlite_sequence").all() as { name: string; seq: number }[]).map(
+      (r) => [r.name, r.seq],
+    ),
+  );
+  const before = new Map(tables.map((t) => [t, count(t)]));
+  const said = migrate(raw);
+  // Only the repair changed anything: the withdrawn successor's record is a candidate again, through a state the migration wrote
+  assert.match(said, /a superseded record whose successors are all withdrawn, or that has none: 1 row/);
+  const after = new Map(tables.map((t) => [t, count(t)]));
+  const grew = [...after].filter(([t, n]) => n !== before.get(t));
+  assert.deepEqual(grew, [
+    ["extraction_run", (before.get("extraction_run") ?? 0) + 1],
+    ["unit_state", (before.get("unit_state") ?? 0) + 1],
+  ]);
+  for (const [name, seq] of counters)
+    if (name !== "external_reference")
+      assert.ok(
+        Number(
+          (raw.prepare("select seq from sqlite_sequence where name = ?").get(name) as { seq: number }).seq,
+        ) >= seq,
+        name,
+      );
+  assert.equal(
+    Number(
+      (raw.prepare("select id from extraction_run where origin = 'migration'").get() as { id: number }).id,
+    ),
+    (counters.get("extraction_run") ?? 0) + 1,
+  );
+  // Search finds what the database held
+  const hits = (table: string, word: string) =>
+    (
+      raw.prepare(`select rowid from ${table} where ${table} match ?`).all(`"${word}"`) as { rowid: number }[]
+    ).map((r) => Number(r.rowid));
+  assert.deepEqual(hits("unit_fts", "acme"), [2]);
+  assert.deepEqual(hits("unit_fts", "storage"), [1]);
+  assert.deepEqual(hits("source_fts", "sqlite"), [1]);
+  // The record server writes into it through its own connection, and so does capture
+  const saved = {
+    HOME: process.env.HOME,
+    SPHICA_DB: process.env.SPHICA_DB,
+    SPHICA_HOME: process.env.SPHICA_HOME,
+  };
+  process.env.HOME = dir;
+  process.env.SPHICA_DB = path.join(dir, "none.db");
+  delete process.env.SPHICA_HOME;
+  const ingest = openWriter("ingest", path.join(dir, "old.db"));
+  try {
+    const out = await saveText(ingest, await beginTrace(ingest, 1, "s1"), 1, null, {
+      units: [
+        {
+          key: "wal",
+          kind: "finding",
+          text: "SQLite",
+          evidence: [{ source: "s1", quote: "Use SQLite.", role: "states" }],
+        },
+      ],
+    });
+    assert.match(out, /wal active/);
+    const key = /(\S+\/wal) active/.exec(out)?.[1] ?? "";
+    const revision = Number(
+      (raw.prepare("select revision from unit where key = ?").get(key) as { revision: number } | undefined)
+        ?.revision,
+    );
+    const glean = await saveText(ingest, await beginGlean(ingest, 1, "s1"), 1, null, {
+      ops: [{ op: "withdraw", unit: key, revision, reason_source: "s1", reason_quote: "Decided." }],
+    });
+    assert.match(glean, new RegExp(`${key.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}: withdrawn`));
+    assert.equal(
+      (raw.prepare("select lifecycle from unit where key = ?").get(key) as { lifecycle: string }).lifecycle,
+      "withdrawn",
+    );
+  } finally {
+    await ingest.destroy();
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+  const capture = connectWriter("capture", path.join(dir, "old.db"));
+  open.push(capture);
+  const text = "and use WAL";
+  capture
+    .prepare(
+      "insert into capture_message (external_id, session_id, turn_id, speaker, created_at, captured_at, text, truncated, redacted, original_bytes, content_hash) values ('m9', 's1', 't', 'owner', ?, ?, ?, 0, 0, ?, ?)",
+    )
+    .run(now, now, text, Buffer.byteLength(text), sha256(text));
+  assert.deepEqual(hits("source_fts", "wal"), [id("select id from source where external_id = 'm9'")]);
 });

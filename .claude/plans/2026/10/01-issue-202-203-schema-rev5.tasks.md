@@ -262,13 +262,14 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 
 記録の入った rev4 の DB が移行の後もそのまま使え、配布物が rev4 の DB を移行できる。
 
-- [ ] T18: 記録の入った rev4 の DB を移行し、同じ DB で修復・id・検索・保存・capture を続けて確かめる
+- [x] T18: 記録の入った rev4 の DB を移行し、同じ DB で修復・id・検索・保存・capture を続けて確かめる
   - 種別: 追加
   - 計画: S4
   - 依存: T17（移行した DB への ingest の保存が、allow list の下で通ることを見る）, T14（修復の規則が全部入っている）
   - 変更: `server/test/migrate.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 規則を破る行・消した最大 id・検索できる unit を含む rev4 の DB を実際の `admin.migrate()` で移行し、修復の件数と全件、全 autoincrement 表の次の id、検索の結果、ingest での trace と glean の保存、capture の書き込みが 1 つのテストで通る
   - コミット: `test(db): migrate a populated revision 4 database and keep using it (T18)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="populated revision 4" test/migrate.test.ts` → pass（external_reference を除く全表に行があり、全カウンターが最大 id より上の rev4 の DB を実際の `admin.migrate()` で移行。修復は 1 件で、増えたのは migration の run と state の 1 行ずつだけ、カウンターは下がらず migration の run は旧カウンター + 1、検索は field の値・alias・source を見つけ、ingest の接続で trace の保存と glean の取り下げが通り、capture の書き込みが索引に入る）。`bun run verify` → exit 0。テストだけの追加なので review-shipping は流していない（対象はパッケージに入る変更）
 
 - [ ] T19: Skill を直し、配布物の検査を rev4 に向ける
   - 種別: 変更
