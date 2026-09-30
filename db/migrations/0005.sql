@@ -131,6 +131,50 @@ where s.name not in (select name from sqlite_sequence) and s.name in (select nam
 -- Repairs. Every row changed or removed is noted, and `sphica init` prints the notes.
 create temp table sphica_migration_note (rule text, item text, action text);
 
+-- Paths revision 5 refuses (a control character, or a spelling like `a//b` or `./a` that names a place two ways): an edit observation
+-- or an anchor with one is removed, and a review comment keeps its text without the path. A file excerpt with one stops the migration
+-- before this (0005.check.sql): its path is its identity.
+insert into sphica_migration_note
+select 'an anchor whose path revision 5 refuses', 'anchor ' || id || ' of unit ' || unit_id, 'removed'
+from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+update unit set revision = revision + 1 where id in (select unit_id from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'));
+insert into sphica_migration_note
+select 'an anchor replaced by one whose path revision 5 refuses', 'anchor ' || id || ' of unit ' || unit_id, 'no longer points at what replaced it'
+from unit_anchor where replaced_by in (select id from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*')) order by id;
+update unit_anchor set replaced_by = null where replaced_by in (select id from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'));
+delete from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*');
+insert into sphica_migration_note
+select 'an edit observation whose path revision 5 refuses', 'observation ' || id || ' in session ' || session_id, 'removed'
+from edit_observation where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+update unit_anchor set edit_observation_id = null
+where edit_observation_id in (select id from edit_observation where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'));
+delete from edit_observation where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*');
+insert into sphica_migration_note
+select 'a source whose path revision 5 refuses', 'source ' || id || ' (' || kind || ')', 'path and lines removed; the text stays'
+from source where path is not null and kind <> 'file_excerpt' and not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+update source set path = null, line_start = null, line_end = null
+where path is not null and kind <> 'file_excerpt' and not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*');
+
 -- Edit observations repeated for a session, turn (none counting as one), path, and way: the first stays, and anchors citing a later one
 -- cite the first instead
 create temp table sphica_observation (id integer primary key not null, keep integer not null);
@@ -240,13 +284,65 @@ update unit set lifecycle = 'candidate', revision = revision + 1 where id in (se
 drop table temp.sphica_lifecycle;
 
 -- Rebuild the remaining tables whose definition changed.
+create table source_new (
+  id integer primary key autoincrement not null,
+  project_id integer not null references project (id) on delete cascade,
+  kind text not null check (kind in ('session_message', 'pr_body', 'issue_body', 'pr_comment', 'issue_comment', 'review',
+    'review_comment', 'commit_message', 'pr_event', 'file_excerpt')),
+  -- The artifact it belongs to: `session:<uuid>`, `pr:<n>`, `issue:<n>`, `commit:<sha>`, `file:<path>`
+  artifact text not null check (artifact <> ''),
+  external_id text not null check (external_id <> ''),
+  revision integer not null check (revision > 0),
+  session_id text references session (id) on delete cascade,
+  turn_id text,
+  author_kind text not null check (author_kind in ('owner', 'assistant', 'person', 'bot')),
+  author_login text,
+  author_external_id text,
+  author_association text,
+  -- The comment or thread this replies to, or the thread a resolution event closed
+  parent_external_id text,
+  -- For pr_event: merged | closed | reopened | thread_resolved
+  event_kind text check (event_kind in ('merged', 'closed', 'reopened', 'thread_resolved')),
+  url text,
+  created_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', created_at) is created_at),
+  available_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', available_at) is available_at),
+  captured_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', captured_at) is captured_at),
+  text text not null,
+  truncated integer not null default 0 check (truncated in (0, 1)),
+  redacted integer not null default 0 check (redacted in (0, 1)),
+  original_bytes integer not null check (original_bytes >= 0),
+  content_hash blob not null check (length(content_hash) = 32),
+  -- Code position of a review comment or a file excerpt: a normalized repository-relative path with forward slashes
+  path text check (path is null or (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  line_start integer check (line_start > 0),
+  line_end integer check (line_end >= line_start),
+  diff_hunk text,
+  commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
+  blob_sha text check (blob_sha is null or (length(blob_sha) = 40 and blob_sha not glob '*[^0-9a-f]*')),
+  -- 1 when searched in the source index (owner words and third-party text; assistant replies are not)
+  indexed integer not null check (indexed in (0, 1)),
+  check ((kind = 'session_message') = (session_id is not null)),
+  check ((kind = 'pr_event') = (event_kind is not null)),
+  check (kind <> 'session_message' or author_kind in ('owner', 'assistant')),
+  check (kind = 'session_message' or author_kind <> 'assistant'),
+  check (kind <> 'file_excerpt' or (path is not null and commit_sha is not null and blob_sha is not null
+    and line_start is not null and line_end is not null)),
+  check (truncated = 1 or redacted = 1 or original_bytes = length(cast(text as blob)))
+) strict;
+insert into source_new (id, project_id, kind, artifact, external_id, revision, session_id, turn_id, author_kind, author_login, author_external_id, author_association, parent_external_id, event_kind, url, created_at, available_at, captured_at, text, truncated, redacted, original_bytes, content_hash, path, line_start, line_end, diff_hunk, commit_sha, blob_sha, indexed) select id, project_id, kind, artifact, external_id, revision, session_id, turn_id, author_kind, author_login, author_external_id, author_association, parent_external_id, event_kind, url, created_at, available_at, captured_at, text, truncated, redacted, original_bytes, content_hash, path, line_start, line_end, diff_hunk, commit_sha, blob_sha, indexed from source;
+drop table source;
+alter table source_new rename to source;
+
 create table edit_observation_new (
   id integer primary key autoincrement not null,
   session_id text not null references session (id) on delete cascade,
   turn_id text,
   tool_event_id text,
-  path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
-    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
+  path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
   via text not null check (via in ('tool', 'status')),
   observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
 ) strict;
@@ -306,6 +402,29 @@ create table unit_adoption_new (
 insert into unit_adoption_new (id, unit_id, route, source_id, span_start, span_end, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end) select id, unit_id, route, source_id, span_start, span_end, run_id, added_at, retracted_at, retraction_reason, retraction_source_id, retraction_span_start, retraction_span_end from unit_adoption;
 drop table unit_adoption;
 alter table unit_adoption_new rename to unit_adoption;
+
+create table unit_anchor_new (
+  id integer primary key autoincrement not null,
+  unit_id integer not null references unit (id) on delete cascade,
+  path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
+  symbol text,
+  commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
+  line_start integer check (line_start > 0),
+  line_end integer check (line_end >= line_start),
+  excerpt text,
+  role text not null check (role in ('applies_to', 'evidence')),
+  -- For work recorded before a commit: the edit observation of this path in the session, checked against the working tree when saved
+  edit_observation_id integer references edit_observation (id),
+  run_id integer not null references extraction_run (id),
+  added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
+  retired_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retired_at) is retired_at),
+  replaced_by integer references unit_anchor (id)
+) strict;
+insert into unit_anchor_new (id, unit_id, path, symbol, commit_sha, line_start, line_end, excerpt, role, edit_observation_id, run_id, added_at, retired_at, replaced_by) select id, unit_id, path, symbol, commit_sha, line_start, line_end, excerpt, role, edit_observation_id, run_id, added_at, retired_at, replaced_by from unit_anchor;
+drop table unit_anchor;
+alter table unit_anchor_new rename to unit_anchor;
 
 
 update sqlite_sequence set seq = max(seq, (select s.seq from temp.sphica_sequence s where s.name = sqlite_sequence.name))

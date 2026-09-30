@@ -213,6 +213,7 @@ const cleanPath = (p: string | undefined): string | null =>
   p &&
   !p.startsWith("/") &&
   !p.includes("\\") &&
+  !/\p{Cc}/u.test(p) &&
   !p.split("/").some((x) => x === "" || x === "." || x === "..")
     ? p
     : null;
@@ -294,7 +295,8 @@ export async function readPull(
           createdAt: c.created_at,
           text: c.body,
           path: cleanPath(c.path),
-          lines: end && start ? [start, end] : null,
+          // Lines mean nothing without the path they are in
+          lines: cleanPath(c.path) && end && start ? [start, end] : null,
           hunk: c.diff_hunk ?? null,
           commit: sha(c.commit_id),
         }),

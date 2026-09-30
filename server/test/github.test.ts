@@ -183,6 +183,38 @@ test("reads the body, comments, reviews with text, review comments with their po
   assert.equal(repoOf("local:x"), null);
 });
 
+test("a review comment on a path with a control character is kept without the path, which the database refuses", async () => {
+  const base = fake("Switch to pnpm.");
+  const get: Get = async (p, all) =>
+    p.startsWith("pulls/7/comments")
+      ? [
+          {
+            id: 77,
+            body: "a bell in the name",
+            user: user("dev", 2),
+            created_at: "2026-03-17T12:30:00Z",
+            html_url: "u",
+            path: "src/a\u0007b.ts",
+            line: 3,
+            commit_id: sha("a"),
+          },
+        ]
+      : base(p, all);
+  const bell = (await readPull(get, 7)).items.find((i) => i.externalId === "review_comment:77");
+  assert.ok(bell, "the comment is kept");
+  assert.deepEqual([bell.path, bell.lines], [null, null]);
+  const db = tempDb();
+  try {
+    await storeItems(db.ingest, project(db), [bell]);
+    assert.equal(
+      db.owner.prepare("select path from source where external_id = 'review_comment:77'").get()?.path,
+      null,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("stores sources with who wrote them, adds a revision only when text changed, and lists the current revisions with closed issues", async () => {
   const db = tempDb();
   try {

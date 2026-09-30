@@ -175,14 +175,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): keep edit observations and live anchors unique, and report duplicates in doctor (T12)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="observed once per turn|repeated edit observations|hold the same words|given twice in a record" test/schema.test.ts test/migrate.test.ts test/admin.test.ts test/record.test.ts` → 直す前のコードでは 4 本とも落ちた（red）。直した後 schema・migrate・admin・record・capture のテストは 143 pass・0 fail（turn の無い観測も 1 行、同じ場所の生きた anchor は 1 つ、記録の中の同じ anchor は 1 つにまとめる、移行は重複を片付けて一覧に出す、doctor が同じ文面の生きた記録の組を数える）。glean の [anchor P, P からの replace_anchor] の保存は、順序の直しを戻すと UNIQUE で落ちることを確かめた。`bun run verify` → exit 0
 
-- [ ] T13: path の CHECK を 3 つの表で同じ式にする
+- [x] T13: path の CHECK を 3 つの表で同じ式にする
   - 種別: 修正
   - 計画: S3, S4, S6, S9
   - 依存: T03（止める行の検査 0005.check.sql を置く revision 5 の移行が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `db/migrations/0005.check.sql`, `server/src/github.ts`, `scripts/check-pairs.mjs`, `server/test/schema.test.ts`, `server/test/github.test.ts`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `db/migrations/0005.check.sql`, `server/src/github.ts`, `server/src/project.ts`, `server/src/worktree.ts`, `scripts/check-pairs.mjs`, `server/test/schema.test.ts`, `server/test/github.test.ts`, `server/test/migrate.test.ts`, `server/test/project.test.ts`, `server/test/capture.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → `a//b`・`./a`・制御文字を含む path が `edit_observation` と `unit_anchor` に入ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/github.test.ts test/migrate.test.ts && bun run pairs` → 3 つの表が同じ path を拒み、制御文字を含む path の review comment は path なしで保存され、合わない path の行を入れた rev4 の DB の移行が決めたとおり（観測と anchor は外す、review_comment は path を null、file_excerpt は止まる）になり、3 つの式が違うと pairs が落ちる
   - コミット: `fix(db): check paths with one rule in sources, edit observations, and anchors (T13)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/github.test.ts` → 直す前のコードでは新しいテスト 4 本が落ちた（red）。直した後 schema・migrate・github・project・capture のテストは全件 pass（3 つの表が同じ path を拒む、制御文字の path の review comment は path と行なしで保存、capture は制御文字の名前のファイルを記録しない、移行は観測と anchor を外して一覧に出し、file_excerpt なら何も変えずに止まる）。3 つの式の 1 つを変えると `bun run pairs` が落ちることを確かめた。`bun run verify` → exit 0
 
 - [ ] T14: 細かい CHECK を足す
   - 種別: 修正
@@ -274,3 +275,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T09 / Codex のレビュー（744b4e06）: 指摘 2 件（どちらもテストの穴）。F1: forget のプランの検査が external_reference の全走査を見逃す / external_reference は T15 で表ごと消すので直さない。F2: トリガーの中の検索は `statements()` に現れない / 仕組みの限界。FK の子の検索は FK の index の規則のテストが守る。T13 で `statements()` のコメントに 1 行書く
 - 2026-10-01 / T06 / Codex のレビュー（94416206）: 指摘 1 件（P1、再現済み）。引用が見つからず隔離された後継（と出典の無い後継）は active になれず取り下げもできないのに、生きた後継として枠を塞ぎ、元の unit を二度と置き換えられない / 採用。修正タスク T22 を足した
 - 2026-10-01 / T22 / review-shipping: 指摘 2 件（どちらもテストの穴）。復帰の条件と移行の修復の条件を元に戻してもテストが通った / 生きた後継を取り下げたら、隔離された後継が残っていても元の unit が candidate に戻るテストと、隔離された後継しか無い superseded の unit を移行が candidate に戻すテストを足した。条件を戻すと 2 本とも落ちることを確かめた
+- 2026-10-01 / T13 / 変更欄に `server/src/project.ts`・`server/src/worktree.ts`（capture が制御文字を含む path を記録する前に落とす）とそのテスト（project.test.ts・capture.test.ts）を足した。review comment の path を落としたときは行も落とす（path の無い行に意味は無い。移行の修復と同じ）
+- 2026-10-01 / T13 / review-shipping: 指摘 4 件。worktree の制御文字の検査にテストが無い / テストを足した。worktree と 0005.sql のコメントが実態と違う（replaced_by を消した anchor が一覧に出ない、起きない場合を書いている） / 直して一覧にも出すようにした。リポジトリ直下の `c:notes.md` のような名前を DB が拒み capture 側は通す / 前の revision から同じ規則で、この変更で入ったものではないので直さない

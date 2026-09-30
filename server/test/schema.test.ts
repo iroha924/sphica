@@ -264,8 +264,44 @@ test("file excerpts need a normalized repository path, both line bounds, and hex
       ...extra,
     });
   excerpt("docs/運用メモ.md");
-  for (const bad of ["C:\\Windows\\win.ini", "../x", "/etc/passwd", "a//b", "./a", "a/./b", "a\\b"])
+  for (const bad of [
+    "C:\\Windows\\win.ini",
+    "../x",
+    "/etc/passwd",
+    "a//b",
+    "./a",
+    "a/./b",
+    "a\\b",
+    "a/.",
+    "src/a\u0001.ts",
+    "a\u007f",
+  ])
     refuses(() => excerpt(bad), /constraint failed/);
+  // Edit observations and anchors take the same rule: an anchor meets an observation by its exact path
+  session(db, p, "s1");
+  const u = unit({ key: "paths", kind: "finding" });
+  for (const bad of ["a//b", "./a", "a/./b", "src/a\u0001.ts", "a\u007f", "a/.."]) {
+    refuses(
+      () =>
+        sql(
+          "insert into edit_observation (session_id, turn_id, path, via, observed_at) values ('s1', 't', ?, 'tool', ?)",
+          bad,
+          now,
+        ),
+      /constraint failed/,
+    );
+    refuses(
+      () =>
+        insert(db, "unit_anchor", {
+          unit_id: u,
+          path: bad,
+          role: "applies_to",
+          run_id: Number(one("select run_id from unit where id = ?", u).run_id),
+          added_at: now,
+        }),
+      /constraint failed/,
+    );
+  }
   refuses(() => excerpt("src/a.ts", { line_end: null }), /constraint failed/);
   refuses(() => excerpt("src/b.ts", { commit_sha: "G".repeat(40) }), /constraint failed/);
 });

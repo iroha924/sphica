@@ -450,6 +450,92 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
   assert.throws(() => move(2, "withdrawn", "candidate"), /not a lifecycle change/);
 });
 
+// Revision 4 let an observation or an anchor spell a path two ways, or hold a control character. Revision 5 takes one spelling
+test("migrating revision 4 removes observations and anchors with a path revision 5 refuses, and keeps a comment without its path", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  run(
+    "insert into edit_observation (session_id, turn_id, path, via, observed_at) values ('s1', 't', 'src//a.ts', 'tool', ?)",
+    now,
+  );
+  run(
+    "insert into unit_anchor (unit_id, path, role, edit_observation_id, run_id, added_at) values (1, 'src//a.ts', 'applies_to', 1, 1, ?)",
+    now,
+  );
+  run(
+    "insert into unit_anchor (unit_id, path, role, run_id, added_at) values (1, 'src/fine.ts', 'applies_to', 1, ?)",
+    now,
+  );
+  const text = "look here";
+  run(
+    "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed, path, line_start, line_end) values (1, 'review_comment', 'pr:1', 'review_comment:1', 1, 'person', ?, ?, ?, ?, ?, 1, ?, 3, 4)",
+    now,
+    now,
+    text,
+    Buffer.byteLength(text),
+    sha256(text),
+    "src/a\u0001.ts",
+  );
+  const said = migrate(raw);
+  assert.equal(
+    Number((raw.prepare("select count(*) as n from edit_observation").get() as { n: number }).n),
+    0,
+  );
+  assert.deepEqual(
+    raw
+      .prepare("select path from unit_anchor")
+      .all()
+      .map((r) => r.path),
+    ["src/fine.ts"],
+  );
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare("select path, line_start, line_end, text from source where kind = 'review_comment'")
+        .get(),
+    },
+    { path: null, line_start: null, line_end: null, text },
+  );
+  for (const rule of [
+    "an anchor whose path revision 5 refuses: 1 row",
+    "an edit observation whose path revision 5 refuses: 1 row",
+    "a source whose path revision 5 refuses: 1 row",
+  ])
+    assert.ok(said.includes(rule), said);
+});
+
+// A file excerpt's path is its identity, and only the owner's forget removes a source: the migration stops and names it
+test("migrating revision 4 stops, changing nothing, when a file excerpt has a path revision 5 refuses", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const text = "line";
+  raw
+    .prepare(
+      "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed, path, line_start, line_end, commit_sha, blob_sha) values (1, 'file_excerpt', 'file:a', 'file:src\u0001a.ts@x#L1-1', 1, 'person', ?, ?, ?, ?, ?, 1, ?, 1, 1, ?, ?)",
+    )
+    .run(
+      now,
+      now,
+      text,
+      Buffer.byteLength(text),
+      sha256(text),
+      "src\u0001a.ts",
+      "a".repeat(40),
+      "b".repeat(40),
+    );
+  const before = raw.prepare("select count(*) as n from source").get();
+  assert.throws(
+    () => migrate(raw),
+    (e: Error) =>
+      /a file excerpt whose path revision 5 refuses \(forget it to go on\): 1 row\n\s*source 2 file:src.?a\.ts@x#L1-1/.test(
+        e.message,
+      ) && /No migration step was committed: the database is still at revision 4/.test(e.message),
+  );
+  assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 4);
+  assert.deepEqual(raw.prepare("select count(*) as n from source").get(), before);
+});
+
 // Revision 4 counted an edit outside any turn once per send, and let a record hold two live anchors on one place
 test("migrating revision 4 removes repeated edit observations and retires repeated live anchors, and says so", () => {
   const raw = create("old.db", REV4);

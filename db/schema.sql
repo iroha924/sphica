@@ -9,6 +9,8 @@
 --   processing         extraction_run, source_processing: what has been looked at and saved, so gaps are counted
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
+-- Paths (a source's, an edit observation's, an anchor's) are repository-relative with forward slashes, in one form, so one place
+-- has one spelling: the three CHECKs are the same expression (scripts/check-pairs.mjs compares them).
 -- Byte offsets are into the UTF-8 bytes of source.text. Project consistency across tables is enforced by triggers, not only by code.
 -- What a delete takes with it: a row goes with what it belongs to, and a row citing a source goes with that source (cascade; the
 -- no-delete triggers refuse removing such a row on its own). A column naming where a row came from (run_id, forget_id,
@@ -85,9 +87,9 @@ create table source (
   original_bytes integer not null check (original_bytes >= 0),
   content_hash blob not null check (length(content_hash) = 32),
   -- Code position of a review comment or a file excerpt: a normalized repository-relative path with forward slashes
-  path text check (path is null or (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
-    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*' and path not glob '*//*'
-    and path not glob './*' and path not glob '*[/].[/]*')),
+  path text check (path is null or (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*')),
   line_start integer check (line_start > 0),
   line_end integer check (line_end >= line_start),
   diff_hunk text,
@@ -196,8 +198,9 @@ create table edit_observation (
   session_id text not null references session (id) on delete cascade,
   turn_id text,
   tool_event_id text,
-  path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
-    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
+  path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
   via text not null check (via in ('tool', 'status')),
   observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
 ) strict;
@@ -509,8 +512,9 @@ end;
 create table unit_anchor (
   id integer primary key autoincrement not null,
   unit_id integer not null references unit (id) on delete cascade,
-  path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
-    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
+  path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
+    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
   symbol text,
   commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
   line_start integer check (line_start > 0),

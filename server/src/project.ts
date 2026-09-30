@@ -203,7 +203,8 @@ export function localRoots(roots = [path.join(os.homedir(), "Projects")]): {
 export function relativeTo(root: string, file: string, cwd = root): string | null {
   const abs = path.resolve(cwd, file);
   const rel = path.relative(root, abs);
-  if (!rel || leaves(rel)) return null;
+  // The database refuses a path with a control character (no filesystem call takes a NUL either)
+  if (!rel || leaves(rel) || /\p{Cc}/u.test(rel)) return null;
   return rel.split(path.sep).join("/");
 }
 
