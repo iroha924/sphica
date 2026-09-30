@@ -85,13 +85,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): record per gold key whether it was delivered, in a search result, or read (T05)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 15 pass・0 fail（Codex の search・read の結果、壊れたログで unknown、Claude の交互・違うツールが並行で unknown・同じツールの並行、ログ無しで unknown）。`bun run verify` → exit 0
 
-- [ ] T06: build ID、plan.json、`collect.ts --build`
+- [x] T06: build ID、plan.json、`collect.ts --build`
   - 種別: 変更
   - 計画: S5
   - 依存: なし
-  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/firing.ts`, `server/evals/cloud/fire.ts`, `server/test/eval-grade.test.ts`, `knip.json`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 計画の行にブランチが照合され、ブランチの無い行が task・condition 付きの run 無しとして残るテストが通る。2 回の build が互いの出力を消さない
   - コミット: `feat(eval): build under an id with a firing plan, and collect against the plan (T06)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 16 pass・0 fail（照合の順序、発火済みで結果の無い行、計画に無い結果、計画ファイルの無い build を collect が拒む）。`node evals/cloud/build.ts --project tsundoku` を 2 回 → builds/ に 2 つの build が残り、plan.json は 50 行（7 タスクの条件 25 × 2 試行）、`node evals/cloud/fire.ts <build>` → 1 行目（pilot-dates none try 1）に発火時刻が付き left 49（確かめた build は消した）。`bun run verify` → exit 0
 
 - [ ] T07: counterfactual の反転版の記録と `--variant swapped`
   - 種別: 追加
@@ -180,3 +181,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T03 / T03 の結果欄の「`bun run verify` → exit 0」は誤り。verify の終了コードを見ずにコミットし、実際は acceptance-cases.test.ts の 2 本が落ちていた（完了したタスクの欄は変えない規則なのでここに書く） / T16 を足して直した。以後はコミットの前に verify の exit を確かめる
 - 2026-09-30 / T04 / 記録は fixture.ts を変えず、tasks.json の fixture.cases（given の case は流されないので依存順に並べる）と setups に受け入れケースを足して入れた。build.ts に --dry-run は無く、--out の一時ディレクトリへの build（push はしない）で確かめた / 変更欄と完了条件を変えた（前: tasks.json・fixture.ts・eval-grade.test.ts と --dry-run、後: tasks.json と --out への build）。superseded は保存先ではなく status-02（pnpm → npm）を使った（override が保存先の決定を使うため）。abstention の条件は gold の記録が無いので none・search・inject にした（plan は none・inject・gold）。既存 4 タスクに overlap を足した
 - 2026-09-30 / T05 / Codex の read の引数は `u4` のような番号で key を持たない（実物の events.jsonl で確認）。read の判定は引数ではなく結果の先頭行（`<key> (u<id>, revision`）で行った。search の結果は `## <key> (u<id>)`
+- 2026-09-30 / T06 / 発火の計画の読み書きと照合を firing.ts に、発火の印を付ける手順を fire.ts に分けた。collect の `--build` を必須にし、loop.json は build のディレクトリに書く（先頭に build ID と variant）。knip の entry に fire.ts を足した / 変更欄（前: build.ts・collect.ts・テスト、後: それに firing.ts・fire.ts・knip.json を足した）

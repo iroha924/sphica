@@ -1,6 +1,6 @@
 // Builds the bootstrap repositories of the cloud evaluation (plan step 9): one per condition (none, search, inject, gold), each holding the same
 // project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
-// Run: node evals/cloud/build.ts --project tsundoku|sphica [--out <dir>] [--owner <github owner>]
+// Run: node evals/cloud/build.ts --project tsundoku|sphica [--variant original|swapped] [--runs <n>] [--out <dir>] [--owner <github owner>]
 // Repository names hide the condition; the mapping stays in <out>/manifest.json on this machine.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -14,6 +14,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
+import { writePlan } from "./firing.ts";
 
 const HERE = import.meta.dirname;
 const ROOT = path.join(HERE, "..", "..", "..");
@@ -26,16 +27,25 @@ const CONDITIONS = ["none", "search", "inject", "gold"] as const;
 
 const { values: args } = parseArgs({
   options: {
-    out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "build") },
+    // Each build keeps its own directory, so an original and a swapped build of one loop can both be collected
+    out: { type: "string" },
+    variant: { type: "string", default: "original" },
+    runs: { type: "string", default: "2" },
     owner: { type: "string", default: "iroha924" },
     node: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", NODE.file) },
     project: { type: "string", default: "tsundoku" },
   },
 });
-const out = path.resolve(args.out ?? "");
+const variant = args.variant ?? "original";
+if (variant !== "original" && variant !== "swapped") throw new Error("--variant is original or swapped");
+const runs = Number(args.runs);
+if (!Number.isInteger(runs) || runs < 1)
+  throw new Error("--runs takes a whole number of Claude runs per task and condition");
+const buildId = `${args.project}-${variant}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
+const out = path.resolve(args.out ?? path.join(os.homedir(), ".cache", "sphica-eval", "builds", buildId));
 const owner = args.owner ?? "";
 
-type Task = { id: string; project: string; prompt: string; gold: string[] };
+type Task = { id: string; project: string; prompt: string; gold: string[]; conditions: string[] };
 type Project = { source: string; repo?: string; base?: string; fixture: string };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
   fixture: { cases: string[]; setups: string[] };
@@ -293,6 +303,8 @@ async function main() {
   if (args.project === "tsundoku") await fixture(base);
   else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
   const manifest: Record<string, unknown> = {
+    build: buildId,
+    variant,
     built: new Date().toISOString(),
     commit: execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     bundle: Object.fromEntries(
@@ -408,6 +420,24 @@ async function main() {
     (manifest.repositories as Record<string, unknown>)[repo] = { condition, fixture: fixtureHash };
   }
   fs.writeFileSync(path.join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  const slotOf = new Map(CONDITIONS.map((c, i) => [c, `eval-shelf-${i + 1}`]));
+  writePlan(
+    out,
+    tasks.flatMap((t) =>
+      t.conditions.flatMap((condition) =>
+        Array.from({ length: runs }, (_, i) => ({
+          build: buildId,
+          variant,
+          task: t.id,
+          condition,
+          slot: slotOf.get(condition as (typeof CONDITIONS)[number]) ?? "",
+          try: i + 1,
+          prompt: t.prompt,
+          fired_at: null,
+        })),
+      ),
+    ),
+  );
   console.log(`built ${CONDITIONS.length} repositories in ${out}`);
 }
 

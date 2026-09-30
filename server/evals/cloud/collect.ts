@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { pair, readPlan } from "./firing.ts";
 import {
   answerFormat,
   capPatch,
@@ -24,18 +25,22 @@ const HERE = import.meta.dirname;
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
 const { values: args } = parseArgs({
   options: {
-    build: { type: "string", default: path.join(CACHE, "build") },
+    build: { type: "string" },
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
-    out: { type: "string", default: path.join(CACHE, "loop.json") },
-    // How many runs each Claude slot was fired for (repeatable, <slot>=<n>): a fired run with no result branch is kept as excluded
-    fired: { type: "string", multiple: true, default: [] },
+    out: { type: "string" },
   },
 });
 
 type Task = { id: string; prompt: string; test?: string; project?: string; gold?: string[] };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as { tasks: Task[] };
-const manifest = JSON.parse(fs.readFileSync(path.join(args.build ?? "", "manifest.json"), "utf8")) as {
+const build = args.build ?? "";
+if (!build)
+  throw new Error("--build <dir> names the build to collect (~/.cache/sphica-eval/builds/<build id>)");
+const out = args.out ?? path.join(build, "loop.json");
+const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
+  build?: string;
+  variant?: string;
   commit: string;
   project?: string;
   repositories: Record<string, { condition: string }>;
@@ -98,6 +103,8 @@ const excludedRow = (
   signals: null,
 });
 
+const withoutStart = ({ started: _started, ...r }: Row & { started: string }): Row => r;
+
 /** Failure signals in a run's text: a routine run log, or Codex's JSONL events. */
 function signals(log: string): NonNullable<Row["signals"]> {
   const count = (re: RegExp) => (log.match(re) ?? []).length;
@@ -158,23 +165,11 @@ const taskOf = (text: string) =>
 
 function main() {
   const rows: Row[] = [];
-  const fired = new Map(
-    (args.fired ?? []).map((f) => {
-      const [slot, n] = f.split("=");
-      if (!slot || !/^\d+$/.test(n ?? "")) throw new Error(`--fired takes <slot>=<n>, got ${f}`);
-      if (!Object.hasOwn(manifest.repositories, slot)) throw new Error(`unknown slot ${slot} in --fired`);
-      return [slot, Number(n)] as const;
-    }),
-  );
-  // Without a count, a Claude run that pushed no branch would vanish from the denominator
-  for (const repo of Object.keys(manifest.repositories))
-    if (!fired.has(repo))
-      throw new Error(
-        `missing --fired ${repo}=<n> (how many runs each Claude slot was fired for, 0 when none)`,
-      );
+  // The firing plan is the denominator: every fired row is one run asked for, with its task, even when it pushed no branch
+  const firing = Object.keys(manifest.repositories).length ? readPlan(build) : [];
+  const claude: (Row & { started: string })[] = [];
   for (const [repo, { condition }] of Object.entries(manifest.repositories)) {
-    let collected = 0;
-    const dir = path.join(args.build ?? "", repo);
+    const dir = path.join(build, repo);
     execFileSync("git", [
       "-C",
       dir,
@@ -240,7 +235,8 @@ function main() {
           },
         );
         const cut = capPatch(diff);
-        rows.push({
+        claude.push({
+          started,
           model: "claude",
           task: task.id,
           condition,
@@ -259,18 +255,19 @@ function main() {
           gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
           signals: log === null ? null : signals(log),
         });
-        collected++;
       } finally {
         execFileSync("git", ["-C", dir, "worktree", "remove", "--force", work]);
       }
     }
-    // A fired run that left no result branch is still one of the runs asked for
-    const task = built.length === 1 ? built[0] : undefined;
-    for (let i = collected; i < (fired.get(repo) ?? 0); i++)
-      rows.push(
-        excludedRow("claude", task?.id ?? "unknown", condition, `${repo}#${i + 1}`, "no result branch"),
-      );
   }
+  const { matched, missing, unplanned } = pair(firing, claude);
+  for (const [, r] of matched) rows.push(withoutStart(r));
+  for (const r of unplanned) {
+    console.log(`${r.run}: ${r.task} ${r.condition} ran but the firing plan did not ask for it; kept`);
+    rows.push(withoutStart(r));
+  }
+  for (const f of missing)
+    rows.push(excludedRow("claude", f.task, f.condition, `${f.slot}#${f.try}`, "no result branch"));
   if (fs.existsSync(args.codex ?? ""))
     for (const name of fs.readdirSync(args.codex ?? "")) {
       const dir = path.join(args.codex ?? "", name);
@@ -369,8 +366,8 @@ function main() {
       });
     }
   fs.writeFileSync(
-    args.out ?? "",
-    `${JSON.stringify({ bundle: manifest.commit, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    out,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: manifest.commit, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(

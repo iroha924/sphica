@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { type FiringRow, pair } from "../evals/cloud/firing.ts";
 import { blindPrompt, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
   answerFormat,
@@ -348,7 +349,7 @@ test("the table counts every started run and the tracked failure per model and c
   );
 });
 
-test("collect needs a fired count for every slot and refuses unknown slot names", () => {
+test("collect refuses a build with slots but no firing plan, since fired runs without a branch would vanish", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
   try {
     const build = path.join(base, "build");
@@ -357,31 +358,64 @@ test("collect needs a fired count for every slot and refuses unknown slot names"
       path.join(build, "manifest.json"),
       JSON.stringify({ commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
     );
-    const collect = (...extra: string[]) =>
-      spawnSync(
-        process.execPath,
-        [
-          path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
-          "--build",
-          build,
-          "--codex",
-          path.join(base, "codex"),
-          "--logs",
-          base,
-          "--out",
-          path.join(base, "loop.json"),
-          ...extra,
-        ],
-        { encoding: "utf8" },
-      );
-    assert.match(collect().stderr, /--fired eval-shelf-1=<n>/);
-    assert.match(
-      collect("--fired", "eval-shelf-1=1", "--fired", "eval-shelf-9=1").stderr,
-      /unknown slot eval-shelf-9/,
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        base,
+        "--logs",
+        base,
+      ],
+      { encoding: "utf8" },
     );
+    assert.match(r.stderr, /no firing plan at .*plan\.json/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+// Fired rows are the denominator: each takes the earliest unpaired result of its task and condition; unfired rows are not asked for
+test("the firing plan pairs results by task and condition in firing order, and keeps a fired row with no result", () => {
+  const row = (task: string, condition: string, n: number, fired: string | null): FiringRow => ({
+    build: "b",
+    variant: "original",
+    task,
+    condition,
+    slot: "eval-shelf-1",
+    try: n,
+    prompt: task,
+    fired_at: fired,
+  });
+  const plan = [
+    row("a", "none", 1, "2026-09-30T00:00:01.000Z"),
+    row("a", "none", 2, "2026-09-30T00:00:02.000Z"),
+    row("b", "none", 1, "2026-09-30T00:00:03.000Z"),
+    row("b", "inject", 1, null),
+  ];
+  const result = (task: string, condition: string, started: string) => ({ task, condition, started });
+  const { matched, missing, unplanned } = pair(plan, [
+    result("a", "none", "2026-09-30T00:01:02.000Z"),
+    result("a", "none", "2026-09-30T00:01:01.000Z"),
+    result("c", "none", "2026-09-30T00:01:03.000Z"),
+  ]);
+  assert.deepEqual(
+    matched.map(([f, r]) => [f.task, f.try, r.started]),
+    [
+      ["a", 1, "2026-09-30T00:01:01.000Z"],
+      ["a", 2, "2026-09-30T00:01:02.000Z"],
+    ],
+  );
+  assert.deepEqual(
+    missing.map((f) => [f.task, f.condition, f.try]),
+    [["b", "none", 1]],
+  );
+  assert.deepEqual(
+    unplanned.map((r) => r.task),
+    ["c"],
+  );
 });
 
 test("the grader runs with its own HOME and CODEX_HOME holding only the login and the model settings", () => {

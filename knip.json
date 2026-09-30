@@ -18,6 +18,7 @@
         "evals/cloud/collect.ts",
         "evals/cloud/grade.ts",
         "evals/cloud/fixture.ts",
+        "evals/cloud/fire.ts",
         "evals/asked/run.ts",
         "evals/retrieval/run.ts"
       ],
