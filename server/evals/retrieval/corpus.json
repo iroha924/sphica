@@ -1,0 +1,1087 @@
+{
+  "note": "Records and questions for the offline retrieval benchmark (server/evals/retrieval/run.ts). Each record is saved through the real save path from one owner message; overlap says by hand whether the question shares a word with the gold record's text or aliases. Questions with no gold measure how often search returns something anyway.",
+  "records": [
+    {
+      "key": "storage",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "保存先は Postgres じゃなくて SQLite にしよう。各ユーザーに DB サーバーを立てさせたくない。",
+      "quote": "保存先は Postgres じゃなくて SQLite にしよう。",
+      "text": "保存先は SQLite の 1 ファイルにする",
+      "why": "各ユーザーに DB サーバーを立てさせたくない",
+      "options": [
+        {
+          "text": "SQLite",
+          "outcome": "chosen"
+        },
+        {
+          "text": "Postgres",
+          "outcome": "rejected",
+          "why": "各ユーザーにサーバーの運用が要る"
+        }
+      ],
+      "aliases": ["database", "storage", "データベース", "保存先"],
+      "supersedes": null
+    },
+    {
+      "key": "no-telemetry",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "dont",
+      "message": "利用状況の送信（テレメトリ）は入れない。ローカルで完結させるのが売り。",
+      "quote": "利用状況の送信（テレメトリ）は入れない。",
+      "text": "利用状況の送信（テレメトリ）は入れない",
+      "why": "ローカルで完結させるのがこのアプリの売り",
+      "options": [
+        {
+          "text": "telemetry",
+          "outcome": "rejected",
+          "why": "ローカルで完結させる"
+        }
+      ],
+      "aliases": ["telemetry", "usage analytics", "usage stats", "tracking", "テレメトリ", "利用状況"],
+      "supersedes": null
+    },
+    {
+      "key": "crash-optin",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "クラッシュレポートは本人が設定でオンにしたときだけ送る。",
+      "quote": "クラッシュレポートは本人が設定でオンにしたときだけ送る。",
+      "text": "クラッシュレポートはオプトインで送る",
+      "why": "黙って送ると信頼を失う",
+      "options": [],
+      "aliases": ["crash report", "opt-in", "クラッシュ", "障害報告"],
+      "supersedes": null
+    },
+    {
+      "key": "i18n-later",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "多言語対応は v2 まで保留にする。まず日本語で使い切ってもらう。",
+      "quote": "多言語対応は v2 まで保留にする。",
+      "text": "多言語対応は v2 まで保留",
+      "why": "まず日本語の利用者で使い切ってもらう",
+      "options": [],
+      "aliases": ["translations", "i18n", "localization", "多言語", "翻訳", "国際化"],
+      "supersedes": null
+    },
+    {
+      "key": "zod",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "入力の検証には zod を使う。型と検証を一か所で書ける。",
+      "quote": "入力の検証には zod を使う。",
+      "text": "入力の検証に zod を使う",
+      "why": "型と検証を一か所で書ける",
+      "options": [
+        {
+          "text": "zod",
+          "outcome": "chosen"
+        },
+        {
+          "text": "io-ts",
+          "outcome": "rejected",
+          "why": "書き方が重い"
+        }
+      ],
+      "aliases": ["validation", "schema", "バリデーション", "検証"],
+      "supersedes": null
+    },
+    {
+      "key": "cover-webp",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "表紙画像は WebP で保存する。PNG だとサイズが大きすぎる。",
+      "quote": "表紙画像は WebP で保存する。",
+      "text": "表紙画像は WebP で保存する",
+      "why": "PNG だとサイズが大きすぎる",
+      "options": [
+        {
+          "text": "WebP",
+          "outcome": "chosen"
+        },
+        {
+          "text": "PNG",
+          "outcome": "rejected",
+          "why": "サイズが大きい"
+        }
+      ],
+      "aliases": ["cover image", "image format", "画像形式", "表紙"],
+      "supersedes": null
+    },
+    {
+      "key": "dark-mode",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "ダークモードは OS の設定に合わせる。アプリ内の切り替えは付けない。",
+      "quote": "ダークモードは OS の設定に合わせる。",
+      "text": "ダークモードは OS の設定に従う",
+      "why": "設定画面を増やしたくない",
+      "options": [
+        {
+          "text": "アプリ内の切り替え",
+          "outcome": "rejected",
+          "why": "設定画面が増える"
+        }
+      ],
+      "aliases": ["dark mode", "theme", "テーマ", "配色"],
+      "supersedes": null
+    },
+    {
+      "key": "sync-later",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "端末間の同期は今は作らない。エクスポートとインポートで足りる。",
+      "quote": "端末間の同期は今は作らない。",
+      "text": "端末間の同期は作らない（今は）",
+      "why": "エクスポートとインポートで足りる",
+      "options": [],
+      "aliases": ["sync", "cloud sync", "同期", "複数端末"],
+      "supersedes": null
+    },
+    {
+      "key": "export-json",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "エクスポートは JSON 1 ファイルにする。CSV は項目が入れ子で表せない。",
+      "quote": "エクスポートは JSON 1 ファイルにする。",
+      "text": "エクスポートは JSON 1 ファイル",
+      "why": "CSV では入れ子の項目を表せない",
+      "options": [
+        {
+          "text": "JSON",
+          "outcome": "chosen"
+        },
+        {
+          "text": "CSV",
+          "outcome": "rejected",
+          "why": "入れ子を表せない"
+        }
+      ],
+      "aliases": ["export", "backup file", "書き出し", "エクスポート"],
+      "supersedes": null
+    },
+    {
+      "key": "isbn-lookup",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "ISBN からの書誌取得は国会図書館の API を使う。無料で制限が緩い。",
+      "quote": "ISBN からの書誌取得は国会図書館の API を使う。",
+      "text": "書誌の取得は国会図書館の API",
+      "why": "無料で制限が緩い",
+      "options": [
+        {
+          "text": "国会図書館 API",
+          "outcome": "chosen"
+        },
+        {
+          "text": "Google Books API",
+          "outcome": "rejected",
+          "why": "キーと上限が要る"
+        }
+      ],
+      "aliases": ["ISBN", "book metadata", "書誌", "蔵書データ"],
+      "supersedes": null
+    },
+    {
+      "key": "no-login",
+      "lang": "ja",
+      "kind": "constraint",
+      "stance": "dont",
+      "message": "アカウント登録は作らない。ログインなしで使えることが前提。",
+      "quote": "アカウント登録は作らない。",
+      "text": "アカウント登録（ログイン）を作らない",
+      "why": "ログインなしで使えることが前提",
+      "options": [],
+      "aliases": ["login", "account", "sign up", "ログイン", "アカウント"],
+      "supersedes": null
+    },
+    {
+      "key": "keyboard",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "主な操作には全部キーボードショートカットを付ける。",
+      "quote": "主な操作には全部キーボードショートカットを付ける。",
+      "text": "主な操作にキーボードショートカットを付ける",
+      "why": "マウスなしで使いたい利用者が多い",
+      "options": [],
+      "aliases": ["shortcuts", "keyboard", "ショートカット", "キー操作"],
+      "supersedes": null
+    },
+    {
+      "key": "font-system",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "フォントは OS の標準を使う。Web フォントは読み込みが遅い。",
+      "quote": "フォントは OS の標準を使う。",
+      "text": "フォントは OS 標準を使う",
+      "why": "Web フォントは読み込みが遅い",
+      "options": [
+        {
+          "text": "Web フォント",
+          "outcome": "rejected",
+          "why": "読み込みが遅い"
+        }
+      ],
+      "aliases": ["font", "typeface", "フォント", "書体"],
+      "supersedes": null
+    },
+    {
+      "key": "electron-no",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "dont",
+      "message": "Electron は使わない。Tauri にする。配布サイズが一桁違う。",
+      "quote": "Electron は使わない。Tauri にする。",
+      "text": "デスクトップ版は Electron ではなく Tauri",
+      "why": "配布サイズが一桁違う",
+      "options": [
+        {
+          "text": "Tauri",
+          "outcome": "chosen"
+        },
+        {
+          "text": "Electron",
+          "outcome": "rejected",
+          "why": "配布サイズが大きい"
+        }
+      ],
+      "aliases": ["desktop", "Tauri", "Electron", "デスクトップ"],
+      "supersedes": null
+    },
+    {
+      "key": "test-vitest",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "テストは node:test で書く。vitest は入れない。",
+      "quote": "テストは node:test で書く。",
+      "text": "テストは node:test で書く",
+      "why": "依存を増やさない",
+      "options": [
+        {
+          "text": "node:test",
+          "outcome": "chosen"
+        },
+        {
+          "text": "vitest",
+          "outcome": "rejected",
+          "why": "依存が増える"
+        }
+      ],
+      "aliases": ["testing", "test runner", "テスト"],
+      "supersedes": null
+    },
+    {
+      "key": "release-monthly",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "リリースは月に 1 回にまとめる。",
+      "quote": "リリースは月に 1 回にまとめる。",
+      "text": "リリースは月 1 回",
+      "why": "利用者が更新に疲れない",
+      "options": [],
+      "aliases": ["release cadence", "リリース", "更新頻度"],
+      "supersedes": null
+    },
+    {
+      "key": "npm-first",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "パッケージ管理は npm にする。",
+      "quote": "パッケージ管理は npm にする。",
+      "text": "パッケージ管理は npm",
+      "why": "標準で入っている",
+      "options": [],
+      "aliases": ["package manager", "パッケージ管理"],
+      "supersedes": null
+    },
+    {
+      "key": "pnpm",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "やっぱり pnpm にする。yarn は lockfile の衝突が多かった。npm からも移る。",
+      "quote": "やっぱり pnpm にする。",
+      "text": "パッケージ管理は pnpm",
+      "why": "yarn は lockfile の衝突が多かった",
+      "options": [
+        {
+          "text": "pnpm",
+          "outcome": "chosen"
+        },
+        {
+          "text": "yarn",
+          "outcome": "rejected",
+          "why": "lockfile の衝突が多い"
+        }
+      ],
+      "aliases": ["package manager", "パッケージ管理", "pnpm"],
+      "supersedes": "npm-first"
+    },
+    {
+      "key": "search-fts",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "蔵書の検索は SQLite の全文検索（FTS5）で作る。",
+      "quote": "蔵書の検索は SQLite の全文検索（FTS5）で作る。",
+      "text": "蔵書の検索は SQLite の FTS5",
+      "why": "外部の検索サーバーを置かない",
+      "options": [
+        {
+          "text": "Elasticsearch",
+          "outcome": "rejected",
+          "why": "サーバーが要る"
+        }
+      ],
+      "aliases": ["search", "full-text", "全文検索", "検索"],
+      "supersedes": null
+    },
+    {
+      "key": "thumb-dead",
+      "lang": "ja",
+      "kind": "dead_end",
+      "stance": null,
+      "message": "表紙のサムネイルを Canvas で作るのは遅すぎて諦めた。",
+      "quote": "表紙のサムネイルを Canvas で作るのは遅すぎて諦めた。",
+      "text": "サムネイルを Canvas で作るのは遅すぎた",
+      "why": null,
+      "options": [],
+      "aliases": ["thumbnail", "canvas", "サムネイル"],
+      "supersedes": null
+    },
+    {
+      "key": "utc",
+      "lang": "en",
+      "kind": "constraint",
+      "stance": "do",
+      "message": "Store every timestamp in UTC. Convert to local time only when showing it.",
+      "quote": "Store every timestamp in UTC.",
+      "text": "Store timestamps in UTC; convert to local time only for display",
+      "why": "Sorting and sync break when stored times carry offsets",
+      "options": [],
+      "aliases": ["timezone", "UTC", "タイムゾーン", "時刻", "日付"],
+      "supersedes": null
+    },
+    {
+      "key": "local-display",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Show dates in the reader's local time with the short format.",
+      "quote": "Show dates in the reader's local time with the short format.",
+      "text": "Show dates in local time, short format",
+      "why": "Readers expect their own clock",
+      "options": [],
+      "aliases": ["date format", "表示形式", "日付の表示"],
+      "supersedes": null
+    },
+    {
+      "key": "offscreen",
+      "lang": "en",
+      "kind": "dead_end",
+      "stance": null,
+      "message": "We tried making thumbnails in an OffscreenCanvas worker; Safari lacked support, so we dropped it.",
+      "quote": "We tried making thumbnails in an OffscreenCanvas worker; Safari lacked support, so we dropped it.",
+      "text": "Thumbnails in an OffscreenCanvas worker failed on Safari",
+      "why": null,
+      "options": [],
+      "aliases": ["worker", "thread", "OffscreenCanvas", "サムネイル", "別スレッド"],
+      "supersedes": null
+    },
+    {
+      "key": "a11y",
+      "lang": "en",
+      "kind": "constraint",
+      "stance": "do",
+      "message": "Every control needs a visible label and keyboard focus. Screen readers must reach everything.",
+      "quote": "Every control needs a visible label and keyboard focus.",
+      "text": "Every control has a visible label and keyboard focus",
+      "why": "Screen readers must reach everything",
+      "options": [],
+      "aliases": ["accessibility", "a11y", "screen reader", "アクセシビリティ"],
+      "supersedes": null
+    },
+    {
+      "key": "offline-first",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "The app works fully offline. Network features are optional add-ons.",
+      "quote": "The app works fully offline.",
+      "text": "The app works fully offline",
+      "why": "Readers use it on trains and planes",
+      "options": [],
+      "aliases": ["offline", "network", "オフライン"],
+      "supersedes": null
+    },
+    {
+      "key": "encrypt-no",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "dont",
+      "message": "We will not encrypt the local database. The OS disk encryption covers it.",
+      "quote": "We will not encrypt the local database.",
+      "text": "Do not encrypt the local database",
+      "why": "OS disk encryption already covers it",
+      "options": [
+        {
+          "text": "SQLCipher",
+          "outcome": "rejected",
+          "why": "OS disk encryption covers it"
+        }
+      ],
+      "aliases": ["encryption", "at rest", "暗号化"],
+      "supersedes": null
+    },
+    {
+      "key": "license-mit",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "License the code under MIT.",
+      "quote": "License the code under MIT.",
+      "text": "The code is MIT licensed",
+      "why": "Simplest for contributors",
+      "options": [
+        {
+          "text": "GPL",
+          "outcome": "rejected",
+          "why": "scares off contributors"
+        }
+      ],
+      "aliases": ["license", "ライセンス"],
+      "supersedes": null
+    },
+    {
+      "key": "errors-toast",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Show errors as a toast with a retry button, never as a modal.",
+      "quote": "Show errors as a toast with a retry button, never as a modal.",
+      "text": "Errors appear as a toast with retry, not a modal",
+      "why": "Modals block reading",
+      "options": [
+        {
+          "text": "modal",
+          "outcome": "rejected",
+          "why": "blocks reading"
+        }
+      ],
+      "aliases": ["error message", "toast", "エラー表示"],
+      "supersedes": null
+    },
+    {
+      "key": "rate-limit",
+      "lang": "en",
+      "kind": "constraint",
+      "stance": "do",
+      "message": "Call the metadata API at most once per second.",
+      "quote": "Call the metadata API at most once per second.",
+      "text": "Call the metadata API at most once per second",
+      "why": "The provider bans clients that go faster",
+      "options": [],
+      "aliases": ["rate limit", "throttle", "API 制限"],
+      "supersedes": null
+    },
+    {
+      "key": "cache-covers",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Cache cover images on disk for 30 days.",
+      "quote": "Cache cover images on disk for 30 days.",
+      "text": "Cover images are cached on disk for 30 days",
+      "why": "Covers rarely change",
+      "options": [],
+      "aliases": ["cache", "キャッシュ"],
+      "supersedes": null
+    },
+    {
+      "key": "css-plain",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Write plain CSS with custom properties. No Tailwind.",
+      "quote": "Write plain CSS with custom properties. No Tailwind.",
+      "text": "Plain CSS with custom properties, no Tailwind",
+      "why": "Few screens; a framework adds build steps",
+      "options": [
+        {
+          "text": "Tailwind",
+          "outcome": "rejected",
+          "why": "adds build steps"
+        }
+      ],
+      "aliases": ["styling", "CSS", "スタイル"],
+      "supersedes": null
+    },
+    {
+      "key": "logs-local",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Logs stay on the device, in a rotating file of 5 MB.",
+      "quote": "Logs stay on the device, in a rotating file of 5 MB.",
+      "text": "Logs stay on the device in a 5 MB rotating file",
+      "why": "Nothing leaves the device",
+      "options": [],
+      "aliases": ["logging", "log file", "ログ"],
+      "supersedes": null
+    },
+    {
+      "key": "undo",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Deleting a book can be undone for 10 seconds instead of asking for confirmation.",
+      "quote": "Deleting a book can be undone for 10 seconds instead of asking for confirmation.",
+      "text": "Deleting a book is undoable for 10 seconds instead of a confirm dialog",
+      "why": "Confirm dialogs get clicked through",
+      "options": [
+        {
+          "text": "confirm dialog",
+          "outcome": "rejected",
+          "why": "gets clicked through"
+        }
+      ],
+      "aliases": ["undo", "delete", "削除", "取り消し"],
+      "supersedes": null
+    },
+    {
+      "key": "ratings-5",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Ratings use five stars, no half stars.",
+      "quote": "Ratings use five stars, no half stars.",
+      "text": "Ratings are five whole stars",
+      "why": "Half stars add noise",
+      "options": [],
+      "aliases": ["rating", "stars", "評価"],
+      "supersedes": null
+    },
+    {
+      "key": "tags-free",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Tags are free text; there is no fixed list.",
+      "quote": "Tags are free text; there is no fixed list.",
+      "text": "Tags are free text, no fixed list",
+      "why": "Readers organize differently",
+      "options": [],
+      "aliases": ["tags", "labels", "タグ"],
+      "supersedes": null
+    },
+    {
+      "key": "import-goodreads",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Support importing the Goodreads CSV export.",
+      "quote": "Support importing the Goodreads CSV export.",
+      "text": "Import the Goodreads CSV export",
+      "why": "Most new users come from Goodreads",
+      "options": [],
+      "aliases": ["import", "Goodreads", "インポート"],
+      "supersedes": null
+    },
+    {
+      "key": "barcode-camera",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Scan ISBN barcodes with the camera on mobile.",
+      "quote": "Scan ISBN barcodes with the camera on mobile.",
+      "text": "Scan ISBN barcodes with the phone camera",
+      "why": "Typing ISBNs is tedious",
+      "options": [],
+      "aliases": ["barcode", "camera", "バーコード"],
+      "supersedes": null
+    },
+    {
+      "key": "notif-none",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "dont",
+      "message": "No push notifications. Reading reminders nag.",
+      "quote": "No push notifications.",
+      "text": "No push notifications",
+      "why": "Reminders nag",
+      "options": [],
+      "aliases": ["notifications", "push", "通知"],
+      "supersedes": null
+    },
+    {
+      "key": "goal-yearly",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Reading goals are per year, counted in books.",
+      "quote": "Reading goals are per year, counted in books.",
+      "text": "Reading goals are yearly book counts",
+      "why": "Pages vary too much between books",
+      "options": [
+        {
+          "text": "page goals",
+          "outcome": "rejected",
+          "why": "pages vary"
+        }
+      ],
+      "aliases": ["reading goal", "目標"],
+      "supersedes": null
+    },
+    {
+      "key": "stats-local",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Reading statistics are computed on the device from the local database.",
+      "quote": "Reading statistics are computed on the device from the local database.",
+      "text": "Reading statistics are computed locally",
+      "why": "No server",
+      "options": [],
+      "aliases": ["statistics", "stats", "統計"],
+      "supersedes": null
+    }
+  ],
+  "questions": [
+    {
+      "id": "jj01",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "DB サーバーを使わない理由",
+      "gold": ["storage"]
+    },
+    {
+      "id": "jj02",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "テレメトリは入れる？",
+      "gold": ["no-telemetry"]
+    },
+    {
+      "id": "jj03",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "表紙画像の形式は？",
+      "gold": ["cover-webp"]
+    },
+    {
+      "id": "jj04",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "エクスポートの形式",
+      "gold": ["export-json"]
+    },
+    {
+      "id": "jj05",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "パッケージ管理は何を使う？",
+      "gold": ["pnpm"]
+    },
+    {
+      "id": "jj06",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "全文検索はどう作る？",
+      "gold": ["search-fts"]
+    },
+    {
+      "id": "jj07",
+      "lang": "ja>ja",
+      "overlap": false,
+      "text": "データはどこにしまう？",
+      "gold": ["storage"]
+    },
+    {
+      "id": "jj08",
+      "lang": "ja>ja",
+      "overlap": false,
+      "text": "使い方のデータを集めてもいい？",
+      "gold": ["no-telemetry"]
+    },
+    {
+      "id": "jj09",
+      "lang": "ja>ja",
+      "overlap": false,
+      "text": "英語版はいつ出す？",
+      "gold": ["i18n-later"]
+    },
+    {
+      "id": "jj10",
+      "lang": "ja>ja",
+      "overlap": false,
+      "text": "スマホとパソコンで本棚をそろえられる？",
+      "gold": ["sync-later"]
+    },
+    {
+      "id": "jj11",
+      "lang": "ja>ja",
+      "overlap": false,
+      "text": "デスクトップアプリの枠組みは何？",
+      "gold": ["electron-no"]
+    },
+    {
+      "id": "jj12",
+      "lang": "ja>ja",
+      "overlap": false,
+      "text": "黒い画面にできる？",
+      "gold": ["dark-mode"]
+    },
+    {
+      "id": "ee01",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "which timezone do we store timestamps in",
+      "gold": ["utc"]
+    },
+    {
+      "id": "ee02",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "why pnpm and not yarn",
+      "gold": ["pnpm"]
+    },
+    {
+      "id": "ee03",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "is the local database encrypted",
+      "gold": ["encrypt-no"]
+    },
+    {
+      "id": "ee04",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "how do we show errors",
+      "gold": ["errors-toast"]
+    },
+    {
+      "id": "ee05",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "can we import from Goodreads",
+      "gold": ["import-goodreads"]
+    },
+    {
+      "id": "ee06",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "do we send push notifications",
+      "gold": ["notif-none"]
+    },
+    {
+      "id": "ee07",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "does it need internet",
+      "gold": ["offline-first"]
+    },
+    {
+      "id": "ee08",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "should I use Tailwind for the new screen",
+      "gold": ["css-plain"]
+    },
+    {
+      "id": "ee09",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "how fast may we hit the book info service",
+      "gold": ["rate-limit"]
+    },
+    {
+      "id": "ee10",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "what happens when someone removes a book by mistake",
+      "gold": ["undo"]
+    },
+    {
+      "id": "ee11",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "can a book get 3.5",
+      "gold": ["ratings-5"]
+    },
+    {
+      "id": "ee12",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "what open source terms do we use",
+      "gold": ["license-mit"]
+    },
+    {
+      "id": "je01",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "日付はどのタイムゾーンで保存する？",
+      "gold": ["utc"]
+    },
+    {
+      "id": "je02",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "サムネイルを別スレッドで作ろうとしたことはある？",
+      "gold": ["offscreen"]
+    },
+    {
+      "id": "je03",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "アクセシビリティの決まりは？",
+      "gold": ["a11y"]
+    },
+    {
+      "id": "je04",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "オフラインで動く？",
+      "gold": ["offline-first"]
+    },
+    {
+      "id": "je05",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "暗号化はする？",
+      "gold": ["encrypt-no"]
+    },
+    {
+      "id": "je06",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "通知は出す？",
+      "gold": ["notif-none"]
+    },
+    {
+      "id": "je07",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "時刻の保存はどうそろえる？",
+      "gold": ["utc"]
+    },
+    {
+      "id": "je08",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "本を消したら戻せる？",
+      "gold": ["undo"]
+    },
+    {
+      "id": "je09",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "星の数は半分もつけられる？",
+      "gold": ["ratings-5"]
+    },
+    {
+      "id": "je10",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "年間で何冊読むか決められる？",
+      "gold": ["goal-yearly"]
+    },
+    {
+      "id": "je11",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "ラベル分けは自由？",
+      "gold": ["tags-free"]
+    },
+    {
+      "id": "je12",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "カメラで本を登録できる？",
+      "gold": ["barcode-camera"]
+    },
+    {
+      "id": "ej01",
+      "lang": "en>ja",
+      "overlap": true,
+      "text": "Do we collect usage analytics?",
+      "gold": ["no-telemetry"]
+    },
+    {
+      "id": "ej02",
+      "lang": "en>ja",
+      "overlap": true,
+      "text": "When will we add translations?",
+      "gold": ["i18n-later"]
+    },
+    {
+      "id": "ej03",
+      "lang": "en>ja",
+      "overlap": true,
+      "text": "what do we use for validation",
+      "gold": ["zod"]
+    },
+    {
+      "id": "ej04",
+      "lang": "en>ja",
+      "overlap": true,
+      "text": "is there a login",
+      "gold": ["no-login"]
+    },
+    {
+      "id": "ej05",
+      "lang": "en>ja",
+      "overlap": true,
+      "text": "which font do we use",
+      "gold": ["font-system"]
+    },
+    {
+      "id": "ej06",
+      "lang": "en>ja",
+      "overlap": true,
+      "text": "is there dark mode",
+      "gold": ["dark-mode"]
+    },
+    {
+      "id": "ej07",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "why not Postgres",
+      "gold": ["storage"]
+    },
+    {
+      "id": "ej08",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "do we report crashes automatically",
+      "gold": ["crash-optin"]
+    },
+    {
+      "id": "ej09",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "where does book info come from",
+      "gold": ["isbn-lookup"]
+    },
+    {
+      "id": "ej10",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "how often do we ship",
+      "gold": ["release-monthly"]
+    },
+    {
+      "id": "ej11",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "which test framework",
+      "gold": ["test-vitest"]
+    },
+    {
+      "id": "ej12",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "why not Electron",
+      "gold": ["electron-no"]
+    },
+    {
+      "id": "na01",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "ログの保存期間は？",
+      "gold": []
+    },
+    {
+      "id": "na02",
+      "lang": "en>en",
+      "overlap": null,
+      "text": "which CI provider do we use",
+      "gold": []
+    },
+    {
+      "id": "na03",
+      "lang": "ja>en",
+      "overlap": null,
+      "text": "課金の仕組みはどうなっている？",
+      "gold": []
+    },
+    {
+      "id": "na04",
+      "lang": "en>ja",
+      "overlap": null,
+      "text": "How long do we keep backups?",
+      "gold": []
+    },
+    {
+      "id": "na05",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "決済手段は？",
+      "gold": []
+    },
+    {
+      "id": "na06",
+      "lang": "en>en",
+      "overlap": null,
+      "text": "which cloud region do we deploy to",
+      "gold": []
+    },
+    {
+      "id": "na07",
+      "lang": "ja>en",
+      "overlap": null,
+      "text": "採用面接の手順は？",
+      "gold": []
+    },
+    {
+      "id": "na08",
+      "lang": "en>ja",
+      "overlap": null,
+      "text": "what is the office wifi password",
+      "gold": []
+    },
+    {
+      "id": "na09",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "広告は入れる？",
+      "gold": []
+    },
+    {
+      "id": "na10",
+      "lang": "en>en",
+      "overlap": null,
+      "text": "how do we price the pro plan",
+      "gold": []
+    },
+    {
+      "id": "na11",
+      "lang": "ja>en",
+      "overlap": null,
+      "text": "社内チャットは何を使う？",
+      "gold": []
+    },
+    {
+      "id": "na12",
+      "lang": "en>ja",
+      "overlap": null,
+      "text": "which GPU do we train on",
+      "gold": []
+    }
+  ]
+}

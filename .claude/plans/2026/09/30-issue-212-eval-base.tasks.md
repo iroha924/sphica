@@ -22,13 +22,14 @@ base: main
 
 モデルを呼ばずに、検索の変更を main と並べて正解あり・正解なしの指標で比べられる。
 
-- [ ] T01: 検索ベンチのコーパスとランナー、verify で動くことを見るテスト
+- [x] T01: 検索ベンチのコーパスとランナー、verify で動くことを見るテスト
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `server/evals/retrieval/corpus.json`, `server/evals/retrieval/run.ts`, `server/test/retrieval-bench.test.ts`
+  - 変更: `server/evals/retrieval/corpus.json`, `server/evals/retrieval/bench.ts`, `server/evals/retrieval/run.ts`, `server/test/retrieval-bench.test.ts`, `knip.json`
   - 完了条件: `cd server && node evals/retrieval/run.ts` → 正解あり 48・正解なし 12 と、recall@1/5/10・MRR・誤表示率を全体・言語の組み合わせ別・overlap 別に出す。`node --test test/retrieval-bench.test.ts` → 通り、コーパスの質問を一時的に 1 件削ると件数不足で落ちる（戻す）
   - コミット: `test(search): add an offline retrieval benchmark with answerable and unanswerable questions (T01)`
+  - 結果: `cd server && node evals/retrieval/run.ts` → 正解あり 48・正解なし 12。全体 R@1/5/10 47.9%・MRR 0.479・正解なしで返した率 0.0%。overlap 79.2%、no overlap 16.7%。言語別 en>en 50.0%、en>ja 75.0%、ja>en 25.0%、ja>ja 41.7%（いずれも R@1）。`node --test test/retrieval-bench.test.ts` → 1 pass（0.3 秒）。質問を 1 件消すと actual 47 / expected 48 で落ちた（戻した）。`bun run verify` → exit 0
 
 - [ ] T02: `--compare <ref>` で旧版の worktree に DB を作って並べる
   - 種別: 追加
@@ -159,3 +160,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `docs(eval-loop): run a loop by build id, firing plan, and report (T15)`
 
 ## 記録
+- 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
