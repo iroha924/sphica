@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { beginGlean, checkText } from "../src/extract.ts";
 import { applyForget, type ForgetOutcome, forgetText, previewForget } from "../src/forget.ts";
@@ -383,7 +384,7 @@ test("forgetting a field definition's source removes the definition and every va
   assert.equal(units("acme"), 2);
   const seen = await previewForget(db.file, p, [defined]);
   assert.deepEqual(seen.fields, { definitions: 1, values: 2 });
-  assert.match(forgetText(seen), /1 field definition and 2 field values go with them/);
+  assert.match(forgetText(seen, db.file), /1 field definition and 2 field values go with them/);
   assert.equal(values(), 2, "the preview rolls back");
   const [r1, r2] = [revision(u1), revision(u2)];
   const { outcome, cleanup } = await applyForget(db.file, p, [defined], seen);
@@ -451,8 +452,35 @@ test("a value's words leave no bytes once its quoted source is forgotten, and th
   assert.equal(inFiles(), true);
   const seen = await previewForget(db.file, p, [said]);
   assert.deepEqual(seen.units, []);
-  assert.match(forgetText(seen), /Records keep their own text/);
+  assert.match(forgetText(seen, db.file), /Records keep their own text/);
   const { cleanup } = await applyForget(db.file, p, [said], seen);
   assert.equal(cleanup, "done");
   assert.equal(inFiles(), false);
+});
+
+// A backup made before a migration still holds the words; the owner is told where, before typing the count and after
+test("the preview and the result name the backups made before migrating, and say nothing of them when there are none", async () => {
+  const src = message(db, p, { id: "m1", text: "a secret" });
+  const seen = await previewForget(db.file, p, [src]);
+  assert.doesNotMatch(forgetText(seen, db.file), /backup/);
+  const dir = path.join(path.dirname(db.file), "backups");
+  fs.mkdirSync(dir);
+  for (const name of [
+    "sphica.rev2.20260901T000000000Z.10.db",
+    "sphica.rev3.20260902T000000000Z.11.db",
+    "sphica.rev3.20260903T000000000Z.12.db.partial",
+  ])
+    fs.writeFileSync(path.join(dir, name), "");
+  const told = forgetText(seen, db.file);
+  assert.ok(told.includes(`2 backups made before migrating, in ${dir}`), told);
+  assert.match(told, /Delete those backups yourself/);
+  // A directory that cannot be listed does not stop forgetting; the owner is told to look there
+  fs.chmodSync(dir, 0o300);
+  try {
+    assert.ok(
+      forgetText(seen, db.file).includes(`Backups made before migrating in ${dir} could not be listed`),
+    );
+  } finally {
+    fs.chmodSync(dir, 0o700);
+  }
 });

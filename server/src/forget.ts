@@ -3,6 +3,7 @@
 // confirmed a preview.
 
 import { type Kysely, sql } from "kysely";
+import { backupDir, backups } from "./backups.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
@@ -288,7 +289,7 @@ export async function applyForget(
 }
 
 /** The preview and the result in words, without the forgotten text (it would be copied into the session the owner wants it gone from). */
-export function forgetText(o: ForgetOutcome): string {
+export function forgetText(o: ForgetOutcome, file: string): string {
   const lines = o.sources.map(
     (s) => `- s${s.id} ${s.kind} in ${inline(s.artifact).slice(0, 120)} (${plural(s.bytes, "byte")})`,
   );
@@ -308,6 +309,18 @@ export function forgetText(o: ForgetOutcome): string {
     );
   if (o.units.length || o.fields.values)
     lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
-  lines.push("Copies outside the database (capture's waiting and set-aside files, backups) are not touched.");
+  let copies: number | null;
+  try {
+    copies = backups(file).length;
+  } catch {
+    copies = null;
+  }
+  lines.push(
+    copies === null
+      ? `Copies outside the database are not touched: capture's waiting and set-aside files. Backups made before migrating in ${backupDir(file)} could not be listed; look there yourself if the words must go from every copy.`
+      : copies
+        ? `Copies outside the database are not touched: capture's waiting and set-aside files, and ${plural(copies, "backup")} made before migrating, in ${backupDir(file)}. Delete those backups yourself if the words must go from them too.`
+        : "Copies outside the database (capture's waiting and set-aside files) are not touched.",
+  );
   return lines.join("\n");
 }

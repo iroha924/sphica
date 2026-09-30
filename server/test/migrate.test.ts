@@ -209,11 +209,42 @@ test("migration keeps every row, the state history, and its ids, and the databas
   );
 });
 
-test("capture writes the same columns at both revisions, and writes into a migrated database", () => {
+// Capture checks only the generation, so it keeps writing into a database of an older revision until init migrates it
+const CAPTURE_VIEWS = ["capture_session", "capture_message", "capture_edit", "capture_delivery"];
+for (const [from, schema] of [
+  [1, REV1],
+  [2, REV2],
+  [3, REV3],
+] as const)
+  test(`every capture view has the same columns at revision ${from} as now`, () => {
+    const old = create("old.db", schema);
+    const fresh = create("fresh.db", CURRENT);
+    for (const view of CAPTURE_VIEWS) {
+      const columns = (raw: DatabaseSync) => raw.prepare(`pragma table_info(${view})`).all();
+      assert.notDeepEqual(columns(fresh), [], `${view} exists now`);
+      assert.deepEqual(columns(old), columns(fresh), view);
+    }
+  });
+
+test("a fixture of every earlier revision is kept, each at its own revision", () => {
+  const current = Number(/pragma user_version = (\d+);/.exec(CURRENT)?.[1]);
+  const kept = fs
+    .readdirSync(path.join(import.meta.dirname, "fixtures"))
+    .filter((f) => /^schema-rev\d+\.sql$/.test(f));
+  assert.deepEqual(
+    kept.sort(),
+    Array.from({ length: current - 1 }, (_, i) => `schema-rev${i + 1}.sql`).sort(),
+  );
+  for (const [from, schema] of [
+    [1, REV1],
+    [2, REV2],
+    [3, REV3],
+  ] as const)
+    assert.match(schema, new RegExp(`pragma user_version = ${from};`));
+});
+
+test("capture writes into a migrated database", () => {
   const old = create("old.db", REV1);
-  const fresh = create("fresh.db", CURRENT);
-  const columns = (raw: DatabaseSync) => raw.prepare("pragma table_info(capture_message)").all();
-  assert.deepEqual(columns(old), columns(fresh));
   fill(old);
   migrate(old);
   const capture = connectWriter("capture", path.join(dir, "old.db"));

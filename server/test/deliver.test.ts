@@ -7,8 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
-import { inTransaction } from "../src/db.ts";
+import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -519,6 +520,90 @@ test("an unavailable database is said once per session before an edit, never pas
       "outside a project there is nothing to check",
     );
   } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// After a plugin update the database can be a revision behind until the owner runs init. The owner needs the CLI version to install:
+// an older CLI's init sees its own revision and migrates nothing
+test("a database of another revision names the CLI version to install, once per session, even after another warning and on a prompt", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    db.owner.exec(`pragma user_version = ${SCHEMA_REVISION - 1}`);
+    const version = packageVersionAt(ROOT);
+    assert.ok(version);
+    const behind = new RegExp(
+      `revision ${SCHEMA_REVISION - 1}.*npm i -g sphica@${version.replaceAll(".", "\\.")}\`.*sphica init`,
+    );
+    const session = `behind-${Date.now()}`;
+    const edit = (file: string, s = session) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: s,
+          cwd: repo,
+          tool_name: "Write",
+          tool_input: { file_path: "src/db.ts" },
+        },
+        "claude-code",
+        file,
+      );
+    // Another failure was already said in this session
+    assert.match(await edit(path.join(repo, "none.db")), /^Sphica unavailable: no database/);
+    const start = () =>
+      deliver({ hook_event_name: "SessionStart", session_id: session, cwd: repo }, "claude-code", db.file);
+    assert.match(await start(), behind);
+    assert.equal(await start(), "");
+    assert.equal(await edit(db.file), "");
+    // A session already open when the plugin was updated sees it on the owner's next prompt
+    const open = `open-${Date.now()}`;
+    const prompt = () =>
+      deliver(
+        { hook_event_name: "UserPromptSubmit", session_id: open, cwd: repo, prompt: "go on" },
+        "claude-code",
+        db.file,
+      );
+    assert.match(await prompt(), behind);
+    assert.equal(await prompt(), "");
+    // A Codex child started from the owner's shell inherits the parent's thread id; its prompt is not the owner's
+    const thread = process.env.CODEX_THREAD_ID;
+    process.env.CODEX_THREAD_ID = "parent-thread";
+    try {
+      assert.equal(
+        await deliver(
+          {
+            hook_event_name: "UserPromptSubmit",
+            session_id: `child-${Date.now()}`,
+            cwd: repo,
+            prompt: "go on",
+          },
+          "codex",
+          db.file,
+        ),
+        "",
+      );
+    } finally {
+      if (thread === undefined) delete process.env.CODEX_THREAD_ID;
+      else process.env.CODEX_THREAD_ID = thread;
+    }
+    // Shell commands stay quiet
+    assert.equal(
+      await deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: `shell-${Date.now()}`,
+          cwd: repo,
+          tool_name: "Bash",
+          tool_input: { command: "cat src/db.ts" },
+        },
+        "claude-code",
+        db.file,
+      ),
+      "",
+    );
+  } finally {
+    await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });

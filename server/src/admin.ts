@@ -1,12 +1,13 @@
 // Looks after this machine's database (~/.sphica/sphica.db). The owner runs these locally, with the owner connection (no authorizer).
 //
 //   sphica init                 creates the database and applies db/schema.sql. Safe to run again (an older revision is migrated)
-//   sphica doctor --reindex     rebuilds the full-text index (FTS). Run it after changing the rules of terms() in server/src/text.ts
+//   sphica doctor --reindex     rebuilds the full-text index (FTS) when doctor finds it broken
 
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
+import { backupDir, backupPath, backups } from "./backups.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
@@ -19,8 +20,61 @@ const say = (text: string) => console.log(indent(text));
 // assets.ts alone decides where bundled files live (the shipped package and the working tree differ).
 const SCHEMA = (): string => path.join(dbDir(), "schema.sql");
 /** db/migrations/<revision>.sql moves a database from the revision before it (0002.sql: 1 → 2). */
-const MIGRATION = (revision: number): string =>
-  path.join(dbDir(), "migrations", `${String(revision).padStart(4, "0")}.sql`);
+const MIGRATIONS = (): string => path.join(dbDir(), "migrations");
+const MIGRATION = (dir: string, revision: number): string =>
+  path.join(dir, `${String(revision).padStart(4, "0")}.sql`);
+
+/** How many completed backups a successful migration keeps */
+const KEEP = 3;
+
+/**
+ * Writes a consistent copy (VACUUM INTO reads through the WAL) to a `.partial` file, puts it back in WAL mode (the copy comes out in rollback
+ * mode, where a restored database's readers would block writers), checks it, then names it. Only this run's own `.partial` is removed on failure.
+ */
+function backUp(raw: DatabaseSync, file: string, from: number): string {
+  fs.mkdirSync(backupDir(file), { recursive: true, mode: 0o700 });
+  const done = backupPath(file, from);
+  const partial = `${done}.partial`;
+  try {
+    raw.prepare("vacuum into ?").run(partial);
+    const look = new DatabaseSync(partial);
+    try {
+      look.exec("pragma journal_mode = wal");
+      const check = look.prepare("pragma quick_check").all() as { quick_check: string }[];
+      if (check.length !== 1 || check[0]?.quick_check !== "ok")
+        throw new Error(`the copy failed its check (${check.map((c) => c.quick_check).join("; ")})`);
+      if (versionOf(look) !== from)
+        throw new Error(`the copy is at revision ${versionOf(look)}, not ${from}`);
+    } finally {
+      look.close();
+    }
+    fs.renameSync(partial, done);
+  } catch (e) {
+    for (const f of [partial, `${partial}-wal`, `${partial}-shm`]) fs.rmSync(f, { force: true });
+    throw new Error(
+      `Could not back up ${file} before migrating it, so nothing was migrated (${(e as Error).message}). Check free space in ${backupDir(file)}.`,
+    );
+  }
+  return done;
+}
+
+/**
+ * Keeps this run's backup and the KEEP - 1 newest others. Runs only after every migration step committed, so a failing run never removes
+ * one. A backup that cannot be removed (open in another process on Windows), or a directory that cannot be listed, is left for the next
+ * migration; the database is already migrated.
+ */
+function prune(file: string, kept: string): void {
+  let all: string[];
+  try {
+    all = backups(file);
+  } catch {
+    return;
+  }
+  for (const old of all.filter((b) => b !== kept).slice(KEEP - 1))
+    try {
+      fs.rmSync(old, { force: true });
+    } catch {}
+}
 
 const versionOf = (raw: DatabaseSync): number =>
   (raw.prepare("pragma user_version").get() as { user_version: number }).user_version;
@@ -49,35 +103,46 @@ function withOwner<T>(file: string, fn: (raw: DatabaseSync) => T, create = false
 }
 
 /**
- * Moves the database up to SCHEMA_REVISION, one migration per transaction. Foreign keys are off while tables are rebuilt (the pragma
- * has no effect inside a transaction), and foreign_key_check must come back empty before each commit. The revision is read under
- * the write lock, so a concurrent init that already moved it does nothing more. Returns the revision it started from.
+ * Moves the database up to SCHEMA_REVISION, one migration per transaction with foreign keys off (the pragma is ignored inside one) and
+ * foreign_key_check empty before each commit; the revision is read under the write lock, so a concurrent init does nothing more.
+ * **A backup comes first**: a later step can fail after earlier ones committed, and a committed step can be wrong.
  */
-export function migrate(file: string = dbFile()): number {
+export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): number {
   return withOwner(file, (raw) => {
     const from = versionOf(raw);
-    for (let r = from + 1; r <= SCHEMA_REVISION; r++) {
-      const script = MIGRATION(r);
-      if (!fs.existsSync(script))
-        throw new Error(
-          `No migration from revision ${r - 1}. Move the database aside, then run \`sphica init\`.`,
-        );
-      raw.exec("pragma foreign_keys = off");
-      try {
-        immediate(raw, () => {
-          if (versionOf(raw) !== r - 1) return;
-          raw.exec(fs.readFileSync(script, "utf8"));
-          const broken = raw.prepare("pragma foreign_key_check").all().length;
-          if (broken)
-            throw new Error(
-              `Migration to revision ${r} left ${plural(broken, "broken reference")}; nothing was changed`,
-            );
-          if (versionOf(raw) !== r) throw new Error(`${path.basename(script)} did not set revision ${r}`);
-        });
-      } finally {
-        raw.exec("pragma foreign_keys = on");
+    if (from >= SCHEMA_REVISION) return from;
+    const backup = backUp(raw, file, from);
+    say(`Backed up: ${backup} (revision ${from})`);
+    try {
+      for (let r = from + 1; r <= SCHEMA_REVISION; r++) {
+        const script = MIGRATION(dir, r);
+        if (!fs.existsSync(script))
+          throw new Error(
+            `No migration from revision ${r - 1}. Move the database aside, then run \`sphica init\`.`,
+          );
+        raw.exec("pragma foreign_keys = off");
+        try {
+          immediate(raw, () => {
+            if (versionOf(raw) !== r - 1) return;
+            raw.exec(fs.readFileSync(script, "utf8"));
+            const broken = raw.prepare("pragma foreign_key_check").all().length;
+            if (broken)
+              throw new Error(
+                `Migration to revision ${r} left ${plural(broken, "broken reference")}; nothing was changed`,
+              );
+            if (versionOf(raw) !== r) throw new Error(`${path.basename(script)} did not set revision ${r}`);
+          });
+        } finally {
+          raw.exec("pragma foreign_keys = on");
+        }
       }
+    } catch (e) {
+      const base = path.basename(file);
+      throw new Error(
+        `${(e as Error).message}. The database before migrating is at ${backup} (anything recorded after it was made is not in it). To go back to it, close every session using Sphica, move ${base}, ${base}-wal, and ${base}-shm in ${path.dirname(file)} aside, then copy the backup to ${file}.`,
+      );
     }
+    prune(file, backup);
     return from;
   });
 }

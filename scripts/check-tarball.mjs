@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Checks an npm pack tarball the way users receive it (run by CI check and release). Usage: node scripts/check-tarball.mjs <tgz>
-// It checks the file list (scripts/lib/tarball.mjs), that the version matches the repository, and that the CLI starts outside the repository and creates a database in a temp HOME
+// It checks the file list (scripts/lib/tarball.mjs), that the version matches the repository, that the CLI starts outside the repository and creates a database in a temp HOME,
+// and that an older database gets the version-naming notice from the delivery hook and a backup before init migrates it
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { hasBannedName } from "./lib/banned-name.mjs";
 import { tarballProblems, trackedDistribution } from "./lib/tarball.mjs";
 
@@ -73,6 +75,57 @@ try {
   }
   if (!/✓ GitHub owner\s+hana \(id 42\)/.test(doctor))
     throw new Error(`doctor did not show the bound GitHub account\n${doctor}`);
+  // After a plugin update the database can be a revision behind. The shipped hook names the CLI version to install, and that version's init
+  // backs the database up before migrating it
+  const behind = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-behind-"));
+  try {
+    const schemas = path.join(root, "server", "test", "fixtures");
+    const older = Math.max(
+      ...fs.readdirSync(schemas).map((f) => Number(/^schema-rev(\d+)\.sql$/.exec(f)?.[1] ?? 0)),
+    );
+    fs.mkdirSync(path.join(behind, ".sphica"));
+    const file = path.join(behind, ".sphica", "sphica.db");
+    const raw = new DatabaseSync(file);
+    raw.exec("pragma journal_mode = wal");
+    raw.exec(fs.readFileSync(path.join(schemas, `schema-rev${older}.sql`), "utf8"));
+    raw.close();
+    const repo = path.join(behind, "repo");
+    fs.mkdirSync(repo);
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/example/behind.git"], { cwd: repo });
+    const env = { ...parentEnv, HOME: behind, USERPROFILE: behind };
+    const said = execFileSync(process.execPath, [path.join(pkg, "dist", "deliver.js")], {
+      cwd: repo,
+      encoding: "utf8",
+      env,
+      input: JSON.stringify({
+        hook_event_name: "SessionStart",
+        session_id: `tarball-${process.pid}-${Date.now()}`,
+        cwd: repo,
+      }),
+    });
+    if (!said.includes(`npm i -g sphica@${version}\``))
+      throw new Error(
+        `the delivery hook did not name sphica@${version} for a revision ${older} database\n${said}`,
+      );
+    const migrated = execFileSync(process.execPath, [path.join(pkg, "dist", "cli.js"), "init"], {
+      cwd: out,
+      encoding: "utf8",
+      env,
+    });
+    if (
+      !/Backed up: /.test(migrated) ||
+      !new RegExp(`Migrated: .*\\(revision ${older} → \\d+\\)`).test(migrated)
+    )
+      throw new Error(`init did not back up and migrate a revision ${older} database\n${migrated}`);
+    const [backup] = fs.readdirSync(path.join(behind, ".sphica", "backups"));
+    const copy = new DatabaseSync(path.join(behind, ".sphica", "backups", backup ?? ""), { readOnly: true });
+    const at = copy.prepare("pragma user_version").get().user_version;
+    copy.close();
+    if (at !== older) throw new Error(`the backup is at revision ${at}, not ${older}`);
+  } finally {
+    fs.rmSync(behind, { recursive: true, force: true });
+  }
   const filesIn = (dir) =>
     fs
       .readdirSync(dir, { withFileTypes: true, recursive: true })
@@ -89,7 +142,7 @@ try {
   if (fs.existsSync(path.join(pkg, "dist", "dashboard")))
     throw new Error("tarball still contains dist/dashboard");
   console.log(
-    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, and bound the GitHub account`,
+    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, bound the GitHub account, and backed up and migrated an older database the hook named the version for`,
   );
 } finally {
   fs.rmSync(out, { recursive: true, force: true });

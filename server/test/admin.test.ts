@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { bindOwner, dbInit, inspect, migrate, reindex } from "../src/admin.ts";
 import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
+import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { fakeGhPath } from "./fake-gh.ts";
 import { at, hash } from "./temp-db.ts";
 
@@ -463,7 +464,9 @@ test("sphica init migrates a revision 1 database in place and keeps its records"
   revision1(file);
   assert.throws(
     () => connectWriter("ingest", file),
-    /Update the sphica CLI .*then run `sphica init` to migrate it/,
+    new RegExp(
+      `Run \`npm i -g sphica@${packageVersionAt(ROOT)?.replaceAll(".", "\\.")}\`, then \`sphica init\` to migrate it`,
+    ),
   );
   const said: string[] = [];
   const log = console.log;
@@ -505,4 +508,141 @@ test("a migration that would leave a broken reference changes nothing", () => {
   const look = new DatabaseSync(file, { readOnly: true });
   assert.equal(look.prepare("select 1 from sqlite_schema where name = 'forget_batch'").get(), undefined);
   look.close();
+});
+
+const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "db", "migrations");
+/** Completed backups in the database's backups/ directory, oldest first. */
+const backups = (file: string) => {
+  const dir = path.join(path.dirname(file), "backups");
+  return fs.existsSync(dir) ? fs.readdirSync(dir).sort() : [];
+};
+
+// A migration can commit its first steps and then fail. The copy made before the first step is what the owner restores.
+test("a migration that fails after committing a step leaves a backup at the old revision that restores every row", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  // A row still only in the WAL (a session holds the database open and nothing has checkpointed) belongs in the backup too
+  const held = connectWriter("owner", file);
+  held.exec("pragma wal_autocheckpoint = 0");
+  held.prepare("insert into project (key, name) values ('git:a/b', 'a/b')").run();
+  const migrations = path.join(home, "migrations");
+  fs.mkdirSync(migrations);
+  fs.copyFileSync(path.join(MIGRATIONS, "0002.sql"), path.join(migrations, "0002.sql"));
+  fs.writeFileSync(path.join(migrations, "0003.sql"), "select * from no_such_table;\n");
+  const said: string[] = [];
+  const log = console.log;
+  console.log = (t: string) => said.push(t);
+  let error: Error | null = null;
+  try {
+    migrate(file, migrations);
+  } catch (e) {
+    error = e as Error;
+  } finally {
+    console.log = log;
+  }
+  held.close();
+  assert.ok(error, "the broken migration fails");
+  assert.equal(revisionOf(file), 2, "the first step was committed");
+  const [backup, ...rest] = backups(file);
+  assert.deepEqual(rest, []);
+  assert.match(backup ?? "", /^sphica\.rev1\.\d{8}T\d{9}Z\.\d+\.db$/);
+  const copy = path.join(home, "backups", backup ?? "");
+  assert.match(said.join("\n"), new RegExp(`Backed up: .*${backup?.replaceAll(".", "\\.")}`));
+  assert.ok(error.message.includes(copy), error.message);
+  assert.match(error.message, /sphica\.db-wal/);
+  // Restore as the message says: move the database and its WAL files aside, then copy the backup into place
+  for (const f of [file, `${file}-wal`, `${file}-shm`]) if (fs.existsSync(f)) fs.renameSync(f, `${f}.broken`);
+  fs.copyFileSync(copy, file);
+  assert.equal(revisionOf(file), 1);
+  const raw = new DatabaseSync(file, { readOnly: true });
+  assert.deepEqual(
+    RECORDS.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n)),
+    [2, 1, 1, 1, 1, 2],
+  );
+  // Restored, it is in WAL mode like the original, so readers do not block writers
+  assert.equal((raw.prepare("pragma journal_mode").get() as { journal_mode: string }).journal_mode, "wal");
+  raw.close();
+});
+
+// SPHICA_DB can put two databases in one directory: each one's backups carry its own name, and pruning one never touches the other's
+test("backups are named after their database, and pruning leaves another database's backups alone", async () => {
+  const home = tmp();
+  const file = path.join(home, "work.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  const others = [1, 2, 3].map((d) => `sphica.rev1.2099010${d}T000000000Z.${d}.db`);
+  for (const name of others) fs.writeFileSync(path.join(dir, name), "");
+  await quiet(() => migrate(file));
+  const left = backups(file);
+  for (const name of others) assert.ok(left.includes(name), name);
+  assert.equal(left.filter((f) => /^work\.rev1\.\d{8}T\d{9}Z\.\d+\.db$/.test(f)).length, 1);
+});
+
+test("a successful migration keeps the three newest backups and leaves another run's partial file alone", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  const old = [
+    "sphica.rev1.20260901T000000000Z.10.db",
+    "sphica.rev3.20260902T000000000Z.11.db",
+    "sphica.rev2.20260903T000000000Z.12.db",
+  ];
+  for (const name of old) fs.writeFileSync(path.join(dir, name), "");
+  const partial = "sphica.rev1.20260904T000000000Z.13.db.partial";
+  fs.writeFileSync(path.join(dir, partial), "");
+  fs.writeFileSync(path.join(dir, "notes.txt"), "");
+  await quiet(() => migrate(file));
+  const left = backups(file);
+  const made = left.filter((f) => !old.includes(f) && f !== partial && f !== "notes.txt");
+  assert.equal(made.length, 1);
+  assert.deepEqual(
+    left.filter((f) => f !== made[0]),
+    ["notes.txt", partial, old[1], old[2]].sort(),
+  );
+  // Nothing to migrate makes no backup
+  await quiet(() => migrate(file));
+  assert.deepEqual(backups(file), left);
+  assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
+});
+
+// The backup was made and every step committed: a backups/ directory that cannot even be listed leaves pruning for later, not a failed init
+test("a backups directory that cannot be listed does not fail a finished migration", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  fs.chmodSync(dir, 0o300);
+  try {
+    await quiet(() => migrate(file));
+    assert.equal(revisionOf(file), SCHEMA_REVISION);
+  } finally {
+    fs.chmodSync(dir, 0o700);
+  }
+  assert.equal(backups(file).length, 1);
+});
+
+test("pruning keeps this run's backup even when older ones carry later times, and a backup it cannot remove does not fail init", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  // A clock that moved back: three completed backups look newer than the one this run makes
+  const later = [1, 2, 3].map((d) => `sphica.rev1.2099010${d}T000000000Z.${d}.db`);
+  for (const name of later) fs.writeFileSync(path.join(dir, name), "");
+  // One that cannot be removed (a directory stands in for a file another process holds open on Windows)
+  const stuck = "sphica.rev1.20200101T000000000Z.9.db";
+  fs.mkdirSync(path.join(dir, stuck));
+  await quiet(() => migrate(file));
+  assert.equal(revisionOf(file), SCHEMA_REVISION);
+  const left = backups(file);
+  const made = left.filter((f) => ![...later, stuck].includes(f));
+  assert.equal(made.length, 1, "this run's backup is kept");
+  assert.equal(revisionOf(path.join(dir, made[0] ?? "")), 1);
+  assert.ok(left.includes(stuck));
 });

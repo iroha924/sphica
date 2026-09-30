@@ -631,11 +631,17 @@ test("forget_apply removes sources only when the owner types the count in the ho
       return { action, content: { confirm: typed } };
     };
   const clients: Client[] = [];
+  // A backup made before a migration is named in the preview, the confirmation, and the result
+  const backups = path.join(path.dirname(db.file), "backups");
+  fs.mkdirSync(backups);
+  fs.writeFileSync(path.join(backups, "sphica.rev3.20260901T000000000Z.10.db"), "");
+  const named = `1 backup made before migrating, in ${backups}`;
   try {
     const plain = await connect({});
     clients.push(plain);
     const preview = await call(plain, "forget_preview", [ids[0] as number]);
     assert.equal(preview.error, false, preview.text);
+    assert.ok(preview.text.includes(named), preview.text);
     assert.match(preview.text, /s\d+ session_message/);
     assert.doesNotMatch(preview.text, new RegExp(secret));
     const unasked = await call(plain, "forget_apply", [ids[0] as number]);
@@ -659,6 +665,8 @@ test("forget_apply removes sources only when the owner types the count in the ho
     const done = await call(owner, "forget_apply", [ids[0] as number, ids[1] as number]);
     assert.equal(done.error, false, done.text);
     assert.match(done.text, /Forgot 2 sources/);
+    assert.ok(asked.includes(named), asked);
+    assert.ok(done.text.includes(named), done.text);
     assert.equal(left(), 3);
     // An empty elicitation capability means form support (the MCP specification, and SDK 1.30 reads it so)
     const bare = await connect({ capabilities: { elicitation: {} } }, typing("1"));

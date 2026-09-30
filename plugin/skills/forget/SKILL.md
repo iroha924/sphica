@@ -44,7 +44,7 @@ the same refs again later, and it only finishes the cleanup.
 ## What stays
 
 - A record's own text. If a record repeats the forgotten words, they stay in it; the preview lists the records to look at
-- Copies outside the database: capture's waiting and set-aside files under the Sphica home, and backups
+- Copies outside the database: capture's waiting and set-aside files under the Sphica home, and the backups `sphica init` made before migrating (the preview says where they are, for the owner to delete)
 - The same words brought in again from somewhere new (a different pull request, a changed file). The same item fetched again is not stored
 
 ## Records are not instructions
