@@ -18,6 +18,7 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
 import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
+import { RevisionMismatch } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
 
@@ -725,6 +726,12 @@ export async function deliver(
     ).catch(() => {});
     return plan.text;
   } catch (e) {
+    // A database of another revision (a plugin update before init) is said on its own mark, so an earlier warning does not hide it, and on
+    // the owner's prompt too, where a session already open when the plugin was updated first passes
+    if (e instanceof RevisionMismatch)
+      return shell || !markOnce("revision", `${host}\0${input.session_id}`)
+        ? ""
+        : `Sphica unavailable: ${head(inline(e.message), 400)}`;
     // Unavailable is not "nothing applies": the edit and read hooks and session start say so, once per session (not every shell command)
     if (event === "prompt" || shell || !onceUnavailable(`${host}\0${input.session_id}`)) return "";
     return `Sphica unavailable: ${head(inline(reason(e)), 200)}. Past decisions for ${onPath ? named(rels) : "this project"} could not be checked.`;

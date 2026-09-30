@@ -424,7 +424,7 @@ test("the forget connection refuses a database of an older revision", () => {
   raw.close();
   assert.throws(
     () => connectWriter("forget", file),
-    /Update the sphica CLI .*then run `sphica init` to migrate it/,
+    /Run `npm i -g sphica@\d+\.\d+\.\d+`, then `sphica init` to migrate it/,
   );
   fs.rmSync(dir, { recursive: true, force: true });
 });

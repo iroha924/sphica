@@ -463,7 +463,7 @@ test("sphica init migrates a revision 1 database in place and keeps its records"
   revision1(file);
   assert.throws(
     () => connectWriter("ingest", file),
-    /Update the sphica CLI .*then run `sphica init` to migrate it/,
+    /Run `npm i -g sphica@\d+\.\d+\.\d+`, then `sphica init` to migrate it/,
   );
   const said: string[] = [];
   const log = console.log;

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { constants as C, DatabaseSync } from "node:sqlite";
+import { packageVersionAt, ROOT } from "./plugin.ts";
 
 /** Schema generation (the `sphica_generation` table). A database of another generation is refused without being changed. */
 const SCHEMA_GENERATION = 2;
@@ -60,12 +61,22 @@ export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "n
   const got = (raw.prepare("pragma user_version").get() as { user_version: number } | undefined)
     ?.user_version;
   if (got === SCHEMA_REVISION) return;
-  throw new Error(
-    `The database schema is revision ${got}, but this Sphica expects revision ${SCHEMA_REVISION}. ` +
-      ((got ?? 0) < SCHEMA_REVISION
-        ? "Update the sphica CLI (`npm i -g sphica`), then run `sphica init` to migrate it (records are kept)."
-        : "Update sphica."),
-  );
+  throw new RevisionMismatch(got ?? 0);
+}
+
+/**
+ * The database is at another revision than this Sphica. An older one is migrated by `sphica init` of **this** version: after a plugin
+ * update the CLI installed with npm can still be the older one, whose init sees its own revision and migrates nothing.
+ */
+export class RevisionMismatch extends Error {
+  constructor(got: number) {
+    super(
+      `The database schema is revision ${got}, but this Sphica expects revision ${SCHEMA_REVISION}. ` +
+        (got < SCHEMA_REVISION
+          ? `Run \`npm i -g sphica@${packageVersionAt(ROOT) ?? "latest"}\`, then \`sphica init\` to migrate it (records are kept, and a backup is made first).`
+          : "Update sphica."),
+    );
+  }
 }
 
 /**

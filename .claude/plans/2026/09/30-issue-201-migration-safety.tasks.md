@@ -64,7 +64,7 @@ forget の画面でバックアップの場所が分かり、revision の不一�
   - コミット: `test(forget): check the backup notice through the record server (T09)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="forget_apply removes" test/plugin.test.ts` → 1 pass・0 fail
 
-- [ ] T03: 不一致の案内に CLI の版を入れ、delivery は別の 1 回印で prompt でも返す
+- [x] T03: 不一致の案内に CLI の版を入れ、delivery は別の 1 回印で prompt でも返す
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -72,6 +72,7 @@ forget の画面でバックアップの場所が分かり、revision の不一�
   - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 一般の障害警告を出した同じセッションで、rev3 の DB に対する SessionStart と prompt が案内を返さず、案内に `sphica@<version>` が無くて落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 版入りの案内が SessionStart と prompt で 1 回ずつ返り、shell では返らないテストが通る
   - コミット: `fix(deliver): name the CLI version to install when the database revision differs (T03)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="another revision" test/deliver.test.ts` → 直す前は、先に別の警告を出したセッションの SessionStart が空を返して落ちた（red）。直した後 `node --test test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 60 pass・0 fail。`bun run verify` → exit 0
 
 ## P3: schema と索引の検査
 
