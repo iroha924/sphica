@@ -5,10 +5,10 @@ import { test } from "node:test";
 import { loadAcceptance, quoteSources } from "../evals/acceptance/load.ts";
 
 const PER_LAYER = {
-  capture: 10,
+  capture: 11,
   status: 7,
-  retrieval: 12,
-  injection: 10,
+  retrieval: 13,
+  injection: 13,
   review: 8,
   glean: 13,
   forget: 1,
@@ -32,7 +32,7 @@ test("every language direction has answerable and unanswerable retrieval cases",
   const { cases } = loadAcceptance();
   for (const lang of ["ja>ja", "en>en", "ja>en", "en>ja"]) {
     const these = cases.filter((c) => c.layer === "retrieval" && c.lang === lang);
-    assert.equal(these.length, 3, lang);
+    assert.ok(these.length >= 3, lang);
     assert.equal(these.filter((c) => JSON.stringify(c.then).includes("no_active_unit_hits")).length, 1, lang);
   }
 });

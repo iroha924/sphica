@@ -53,6 +53,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `test(acceptance): pin superseded, abstention, poisoned, and override behavior (T03)`
   - 結果: `bun run acceptance` → 79 pass・0 fail（新しい retrieval-13・injection-11・injection-12・capture-11・injection-13 を含む）。`bun run verify` → exit 0
 
+- [x] T16: 受け入れケースの層ごとの件数と、言語ごとの retrieval の件数の検査を直す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（足したケースが要る）
+  - 変更: `server/test/acceptance-cases.test.ts`
+  - red: `cd server && node --test test/acceptance-cases.test.ts` → capture 11・retrieval 13・injection 13 が決めた件数と違い、ja>ja の retrieval が 4 件で 2 fail
+  - 完了条件: `cd server && node --test test/acceptance-cases.test.ts` → 通る。`bun run verify` → exit 0
+  - コミット: `test(acceptance): count the new cases per layer (T16)`
+  - 結果: `cd server && node --test test/acceptance-cases.test.ts` → 直す前は 2 fail（red、T03 のコミットの後の verify で見つけた）。直した後 4 pass。`bun run verify` → exit 0
+
 ## P3: 評価ループの記録・採点・報告
 
 クラウドのループの報告で、検索の失敗と利用の失敗、群、gold − inject、再提案率、counterfactual、採点者の一致が読める。
@@ -165,3 +175,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
 - 2026-09-30 / T03 / world.json は既存の PR #20 の第三者コメントで足り、変えなかった（変更欄から外した）。override のケースで、プロンプトの配信が理由を載せないこと（ファイルに紐付く配信だけが理由を載せる設計）と、同じセッションの 2 回目のプロンプトにも同じ記録を出すことが分かった。前者は仕様、後者は #205（何を既に見せたとみなすか）の範囲なので、ケースは今の契約（名指しで決定が出る、決定は変わらない）だけを固定した。第三者の命令文が配信に出ないことは既存の injection-08 が見ている
+- 2026-09-30 / T03 / T03 の結果欄の「`bun run verify` → exit 0」は誤り。verify の終了コードを見ずにコミットし、実際は acceptance-cases.test.ts の 2 本が落ちていた（完了したタスクの欄は変えない規則なのでここに書く） / T16 を足して直した。以後はコミットの前に verify の exit を確かめる
