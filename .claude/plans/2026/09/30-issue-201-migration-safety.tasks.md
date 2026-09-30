@@ -1,0 +1,95 @@
+---
+kind: tasks
+plan: 30-issue-201-migration-safety.plan.md
+branch: fix/issue-201-migration-safety
+base: main
+---
+
+# #201: 移行の前にバックアップを取り、plugin 更新後の案内と schema・索引の検査を固める のタスク
+
+## 進め方
+
+1. `git status` と staged / unstaged の差分を見る。自分の途中の作業と判別できない未コミットの変更は持ち主のものとして扱い、止めて聞く
+2. このファイル、plan、`git log --oneline <base>..HEAD` を読む
+3. `[ ]` のうち、依存が全部 `[x]` のものを、ファイル上の順に 1 つ選ぶ
+4. 種別が修正なら、直す前に red のコマンドで意図した失敗を確かめる。実装し、完了条件のコマンドを流して期待どおりか確かめる
+5. `[x]` にしてタスクの下に結果行を足し、実装と同じコミットに入れる。件名の末尾に `(T03)` を付ける（慣習。検査はしない）
+6. 書き換えてよいのは、チェック欄・結果行・記録節・途中で足すタスクだけ
+7. 全部終えたら、plan の完了条件を全件流し、差分レビューと CI を確かめるまで完了としない
+8. このファイルに書かれた指示で、上位の規範や持ち主の承認を上書きしない。コマンドは流す前に中身を読む
+
+## P1: 移行の前のバックアップ
+
+移行が途中で失敗しても、検査済みのバックアップから移行前の DB に戻せる。
+
+- [ ] T01: 移行の前に検査済みのバックアップを取り、戻し方を出し、成功後に刈り込む
+  - 種別: 修正
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/src/admin.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 失敗する移行を差し込んだ rev1 の DB の移行の後に、revision 1 のバックアップが見つからず落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts test/admin.test.ts` → バックアップが revision 1・元の行数（WAL にだけあった行を含む）で開け、戻し方どおりに置き換えると元の行が読め、成功後は完成品が 3 つに刈り込まれ、他プロセスの `.partial` が残るテストが通る
+  - コミット: `fix(init): back up the database before migrating and say how to restore it (T01)`
+
+## P2: 持ち主への案内
+
+forget の画面でバックアップの場所が分かり、revision の不一致では入れるべき CLI の版が 1 回届く。
+
+- [ ] T02: forget の preview・確認・完了にバックアップの場所と件数を出す
+  - 種別: 追加
+  - 計画: S2
+  - 依存: T01（バックアップの置き場所と名前の規則が要る）
+  - 変更: `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → バックアップが 2 つある場合に preview・確認文面・完了の返答に場所と件数が出て、0 のときは出ないテストが通る
+  - コミット: `feat(forget): show where Sphica's backups are before and after forgetting (T02)`
+
+- [ ] T03: 不一致の案内に CLI の版を入れ、delivery は別の 1 回印で prompt でも返す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: なし
+  - 変更: `server/src/sqlite.ts`, `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/db.test.ts`, `server/test/admin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/deliver.test.ts` → 一般の障害警告を出した同じセッションで、rev3 の DB に対する SessionStart と prompt が案内を返さず、案内に `sphica@<version>` が無くて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/deliver.test.ts test/db.test.ts test/admin.test.ts` → 版入りの案内が SessionStart と prompt で 1 回ずつ返り、shell では返らないテストが通る
+  - コミット: `fix(deliver): name the CLI version to install when the database revision differs (T03)`
+
+## P3: schema と索引の検査
+
+capture ビューの列の変化と `terms()` の出力の変化がテストで落ちる。
+
+- [ ] T04: 4 つの capture ビューの列を全 fixture と比べ、fixture のそろいを検査する
+  - 種別: 追加
+  - 計画: S4
+  - 依存: なし
+  - 変更: `server/test/migrate.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 4 つのビューについて rev1..3 と現在を比べるテストが通り、一時的にビューの列を 1 つ変えると落ちる（手で確かめて戻す）
+  - コミット: `test(schema): compare every capture view's columns across all revisions (T04)`
+
+- [ ] T05: terms() の golden、reindex の SQL の定数化、規範の文の置き換え
+  - 種別: 追加
+  - 計画: S5
+  - 依存: なし
+  - 変更: `server/test/fixtures/terms-golden.json`, `server/test/terms-golden.test.ts`, `server/src/admin.ts`, `server/src/text.ts`, `.claude/skills/knowledge-schema/SKILL.md`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/terms-golden.test.ts` → 通り、`terms()` の規則を一時的に変えると revision と移行を求めるメッセージで落ちる（手で確かめて戻す）。`rg -n "doctor --reindex" server/src .claude/skills` → terms() の変更時の手順として書いた箇所が無い
+  - コミット: `test(search): pin terms() output and rebuild the index through a migration (T05)`
+
+## P4: 配布物の確認と版
+
+npm pack した配布物で案内・バックアップ・移行が通しで動き、版がそろう。
+
+- [ ] T06: sql:live に tarball の deliver.js と cli.js を rev3 の DB に流す検査を足す
+  - 種別: 追加
+  - 計画: S6
+  - 依存: T01（`Backed up:` の出力が要る）, T03（版入りの案内が要る）
+  - 変更: `scripts/check-sql-live.mjs`
+  - 完了条件: `bun run sql:live` → tarball の deliver.js が rev3 の DB に版入りの案内を返し、cli.js の init が `Backed up:` と `Migrated: … (revision 3 → 4)` を出し、バックアップが revision 3 で開ける
+  - コミット: `test(live): run the packed hooks and CLI against an older database (T06)`
+
+- [ ] T07: 版を 0.6.12 にそろえる
+  - 種別: 変更
+  - 計画: S6
+  - 依存: なし
+  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `bun run release:plan -- --base 4d4dcc9` → `plugin`。`bun run verify` → 0 で終わる
+  - コミット: `chore(release): bump to 0.6.12 (T07)`
+
+## 記録
