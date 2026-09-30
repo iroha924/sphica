@@ -49,7 +49,7 @@ revision 5 を開き、表を作り直す移行と、止める行・直した行
   - コミット: `feat(db): open schema revision 5 with a migration that rebuilds tables and keeps id counters (T03)`
   - 結果: `cd server && node --test --test-timeout=60000 test/migrate.test.ts` → 16 pass・0 fail（実際の `admin.migrate()` で、rev1〜rev4 が新規の DB と同じ定義 / rev4 の全 autoincrement 表のカウンターが移行の前後で同じで、次の run の id が 9 / 全表の全列が移行の前後で同じ）。列を入れ替えた 0005.sql では全列の比較が落ちることを確かめた。`bun run verify` → exit 0。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → 配布物の CLI が rev4 の DB をバックアップして移行。review-shipping: 持ち主の DB の写し（895 source・118 unit）と 111 MB の合成 DB の移行で行・カウンター・FTS に差分なし。作り直した表の列の中身をテストが見ていないという指摘は同じコミットで足した
 
-- [ ] T20: 止めた行・直した行の一覧を、行数に比例する時間で組み立てる
+- [x] T20: 止めた行・直した行の一覧を、行数に比例する時間で組み立てる
   - 種別: 修正
   - 計画: S1
   - 依存: T01（直す対象の一覧の組み立てが要る）
@@ -57,6 +57,7 @@ revision 5 を開き、表を作り直す移行と、止める行・直した行
   - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="many rows" test/admin.test.ts` → 同じ規則の 10 万行を止める移行で、一覧の組み立てに数秒かかり、時間の上限の assert で落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 10 万行でも全件が出て、上限の時間内に終わるテストが通る
   - コミット: `fix(init): build the list of stopped rows in linear time (T20)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="many rows" test/admin.test.ts` → 直す前は took 7658 ms で落ちた（red）。直した後 `node --test test/admin.test.ts` → 34 pass・0 fail（10 万行の全件が出て約 120 ms）。`bun run verify` → exit 0。review-shipping: 指摘なし（一覧の出力は前と同じ。12 コアに 24 の負荷をかけても 400 ms）
 
 ## P2: 書き込みの境界と状態遷移（#202）
 
@@ -87,7 +88,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 1 つの unit に 2 つ目の後継、finding が decision を supersede する link が通り、唯一の後継を withdraw しても元の unit が superseded のままで落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/record.test.ts test/extract.test.ts` → それらが拒まれ、glean の withdraw で元の unit が支えが揃っていれば active に戻り、後継が 2 つある rev4 の DB の移行で決めた 1 つが残って一覧に出るテストが通る
-  - コミット: `fix(db): keep one successor per unit and bring the old unit back when its successor is withdrawn (T06)`
+  - コミット: `fix(db): keep one successor per unit and bring the old unit back when it is withdrawn (T06)`
 
 - [ ] T07: 支えの規則を 1 つのビューにし、retract と anchor の retire でも同じ規則で拒む
   - 種別: 修正
@@ -144,7 +145,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/admin.ts`, `server/src/cli.ts`, `server/test/schema.test.ts`, `server/test/capture.test.ts`, `server/test/migrate.test.ts`, `server/test/cli.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → turn_id が null の同じ capture_edit の insert 2 回で 2 行になり、同じ場所の生きている anchor が 2 つ入って落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/capture.test.ts test/migrate.test.ts test/cli.test.ts` → どちらも 1 行に収まり、重複を入れた rev4 の DB の移行で決めた行が残って一覧に出て、`sphica doctor` が同じ内容の生きている記録の組の数を出すテストが通る
-  - コミット: `fix(db): keep edit observations and live anchors unique, and report duplicate records in doctor (T12)`
+  - コミット: `fix(db): keep edit observations and live anchors unique, and report duplicates in doctor (T12)`
 
 - [ ] T13: path の CHECK を 3 つの表で同じ式にする
   - 種別: 修正
@@ -211,7 +212,7 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - 依存: T18（出荷する移行が通しで確かめられている）
   - 変更: `.claude/skills/knowledge-schema/SKILL.md`, `scripts/check-tarball.mjs`
   - 完了条件: `bun run release:plan -- --base v0.6.14` → `plugin` で、4 か所のバージョンが一致する。`bun run bundle && cd plugin && node ../scripts/check-tarball.mjs "$(npm pack --silent)"` → deliver が rev4 の DB にバージョン入りの案内を返し、init が `Backed up:` と `Migrated: … (revision 4 → 5)` を出す。`bun run verify` → 0
-  - コミット: `docs(skill): describe schema revision 5 in the schema skill and check the tarball against revision 4 (T19)`
+  - コミット: `docs(skill): describe schema revision 5 and check the tarball against revision 4 (T19)`
 
 ## 記録
 
@@ -220,3 +221,4 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T01 / Codex のレビュー（04e02b9）: 指摘 1 件（P2）。同じ規則の行を足すたびに配列を全件コピーするので一覧の組み立てが二乗時間になり、10 万行で 7.7 秒、その間は書き込みロックを持ったまま / 採用。修正タスク T20 を足した
 - 2026-10-01 / T02 / Codex のレビュー（4873c4c）: 指摘 0 件（テストは read-only のため Codex 側では未実行） / そのまま
 - 2026-10-01 / T03 / review-shipping が、配布物の検査（`check-tarball.mjs`）は中身の無い rev4 の DB で「Backed up」「Migrated」の行だけを見ていると指摘 / T19 で、記録の入った DB を配布物の CLI で移行する形にできるかを見る
+- 2026-10-01 / T03・T06・T12・T19 / commit-msg の検査は件名を 100 文字までに限る / コミット件名の欄を短くした（T03: every table → tables、T06: its successor is withdrawn → it is withdrawn、T12: duplicate records → duplicates、T19: in the schema skill を削った）

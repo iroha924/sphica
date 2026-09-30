@@ -826,3 +826,35 @@ test("a check that stops after an earlier step committed lists its rows and says
   assert.ok(error.message.includes(path.join(home, "backups", backup)), error.message);
   assert.deepEqual(error.message.split("\n").slice(1), ["a row revision 3 cannot take: 1 row", "  unit 1"]);
 });
+
+// The list is built while the write lock is held, so it must not slow down faster than the rows grow
+test("a check that stops on many rows of one rule lists them all without holding the lock for seconds", () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const migrations = copiedMigrations(path.join(home, "migrations"));
+  fs.writeFileSync(
+    path.join(migrations, "0002.check.sql"),
+    `create temp table sphica_migration_stop (rule text, item text);
+     with recursive n(i) as (select 1 union all select i + 1 from n where i < 100000)
+     insert into sphica_migration_stop select 'one rule', 'row ' || i from n;`,
+  );
+  let error: Error | null = null;
+  const log = console.log;
+  console.log = () => {};
+  const started = performance.now();
+  try {
+    migrate(file, migrations);
+  } catch (e) {
+    error = e as Error;
+  } finally {
+    console.log = log;
+  }
+  const took = performance.now() - started;
+  assert.ok(error, "the migration stops");
+  const lines = error.message.split("\n");
+  assert.equal(lines.length, 100002);
+  assert.equal(lines[1], "one rule: 100000 rows");
+  assert.equal(lines.at(-1), "  row 100000");
+  assert.ok(took < 3000, `took ${Math.round(took)} ms`);
+});

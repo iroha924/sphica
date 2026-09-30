@@ -103,7 +103,11 @@ function taken(raw: DatabaseSync, table: string): Row[] {
 /** One line per row under its rule. The text comes from the database, so each row stays on its own line. */
 function listed(rows: Row[]): string {
   const rules = new Map<string, Row[]>();
-  for (const r of rows) rules.set(r.rule, [...(rules.get(r.rule) ?? []), r]);
+  for (const r of rows) {
+    const of = rules.get(r.rule);
+    if (of) of.push(r);
+    else rules.set(r.rule, [r]);
+  }
   return [...rules]
     .flatMap(([rule, of]) => [
       `${inline(String(rule))}: ${plural(of.length, "row")}`,
