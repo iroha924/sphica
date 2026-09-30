@@ -540,3 +540,64 @@ test("gold signals separate delivery, search, and read, and stay unknown when a 
     read: "unknown",
   });
 });
+
+// Review of the gold signals: every case where the log cannot say must come out unknown, and a quoted heading is not a result
+test("gold signals say unknown when the log cannot tie a result to its call or is incomplete, and ignore quoted headings", () => {
+  const key = "harvest:157/keep-search";
+  const heading = `## ${key} (u1): decision do, active`;
+  const use = (tool: string) => `[t] tool_use ${tool}: {}`;
+  const result = (text: string) => `[t] tool_result: ${text}`;
+  const unknown = { in_delivery: "not_applicable", in_search: "unknown", read: "unknown" };
+  // A read and a search waiting: the read's empty result first cannot make the search's hit a "no"
+  assert.deepEqual(
+    goldSignalsFromClaude(
+      "search",
+      [key],
+      [],
+      null,
+      [use("mcp__sphica__search"), use("mcp__sphica__read"), result("nothing"), result(heading)].join("\n"),
+    )[key],
+    unknown,
+  );
+  // Another tool's result is not a Sphica result
+  assert.notEqual(
+    goldSignalsFromClaude(
+      "search",
+      [key],
+      [],
+      null,
+      [use("mcp__sphica__search"), use("Bash"), result("no match"), result(heading)].join("\n"),
+    )[key]?.in_search,
+    "yes",
+  );
+  // An empty log, or a call whose result is missing, cannot prove no
+  assert.deepEqual(goldSignalsFromClaude("search", [key], [], null, "")[key], unknown);
+  assert.deepEqual(
+    goldSignalsFromClaude("search", [key], [], null, use("mcp__sphica__search"))[key],
+    unknown,
+  );
+  // Codex: a heading quoted inside another record's body is not a hit; broken events cannot prove no
+  const call = (tool: string, text: string | null) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "mcp_tool_call",
+        server: "sphica",
+        tool,
+        ...(text === null ? {} : { result: { content: [{ type: "text", text }] } }),
+      },
+    });
+  assert.equal(
+    goldSignalsFromCodex(
+      "search",
+      [key],
+      [],
+      null,
+      call("search", `## other/key (u2): decision\nIt says "${heading}" in a quote`),
+    )[key]?.in_search,
+    "no",
+  );
+  assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, call("search", null))[key], unknown);
+  assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "42")[key], unknown);
+  assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "null")[key], unknown);
+});

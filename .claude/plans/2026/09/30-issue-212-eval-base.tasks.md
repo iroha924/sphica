@@ -85,6 +85,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `feat(eval): record per gold key whether it was delivered, in a search result, or read (T05)`
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 15 pass・0 fail（Codex の search・read の結果、壊れたログで unknown、Claude の交互・違うツールが並行で unknown・同じツールの並行、ログ無しで unknown）。`bun run verify` → exit 0
 
+- [x] T17: T05 のレビュー指摘を直す（並行の呼び出し、他のツールの結果、引用された見出し、欠けたログ、壊れたイベントを unknown に）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象の信号の解析が要る）
+  - 変更: `server/evals/cloud/judge.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="cannot tie" test/eval-grade.test.ts` → search と read が並行して read の空の結果が先に返ると in_search が no になって落ちる
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 5 つの指摘の入力がどれも unknown か正しい値になって通る
+  - コミット: `fix(eval): say unknown when a gold signal cannot be tied to its call (T17)`
+  - 結果: `cd server && node --test --test-name-pattern="cannot tie" test/eval-grade.test.ts` → 直す前は 1 fail（red）。直した後 `node --test test/eval-grade.test.ts` → 17 pass・0 fail。loop5 の実物のルーティンのログ 4 本で unknown は 0 件（search・read を分けて出た）。`bun run verify` → exit 0
+
 - [x] T06: build ID、plan.json、`collect.ts --build`
   - 種別: 変更
   - 計画: S5
@@ -182,3 +192,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T04 / 記録は fixture.ts を変えず、tasks.json の fixture.cases（given の case は流されないので依存順に並べる）と setups に受け入れケースを足して入れた。build.ts に --dry-run は無く、--out の一時ディレクトリへの build（push はしない）で確かめた / 変更欄と完了条件を変えた（前: tasks.json・fixture.ts・eval-grade.test.ts と --dry-run、後: tasks.json と --out への build）。superseded は保存先ではなく status-02（pnpm → npm）を使った（override が保存先の決定を使うため）。abstention の条件は gold の記録が無いので none・search・inject にした（plan は none・inject・gold）。既存 4 タスクに overlap を足した
 - 2026-09-30 / T05 / Codex の read の引数は `u4` のような番号で key を持たない（実物の events.jsonl で確認）。read の判定は引数ではなく結果の先頭行（`<key> (u<id>, revision`）で行った。search の結果は `## <key> (u<id>)`
 - 2026-09-30 / T06 / 発火の計画の読み書きと照合を firing.ts に、発火の印を付ける手順を fire.ts に分けた。collect の `--build` を必須にし、loop.json は build のディレクトリに書く（先頭に build ID と variant）。knip の entry に fire.ts を足した / 変更欄（前: build.ts・collect.ts・テスト、後: それに firing.ts・fire.ts・knip.json を足した）
+- 2026-09-30 / T05 レビュー / Codex の F1〜F5（並行の違うツールの結果を順番で決める、Sphica 以外の結果を取る、本文に引用された見出しを取る、空や欠けたログを no にする、壊れたイベントで no か例外）はすべて再現つきで、直す / T17 を足した。同じツールだけが並行している間は、そのツールの結果として扱う

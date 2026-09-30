@@ -74,9 +74,15 @@ const delivery = (condition: string, key: string, emittedUnits: string[], goldHo
         : "no"
       : "not_applicable";
 
-/** A search result lists a record as `## <key> (u<id>)`; a read result opens with `<key> (u<id>, revision`. */
-const inSearch = (text: string, key: string) => text.includes(`## ${key} (u`);
-const inRead = (text: string, key: string) => text.includes(`${key} (u`) && !inSearch(text, key);
+/**
+ * A search result lists a record as a line `## <key> (u<id>)`; a read result opens a record with the line `<key> (u<id>, revision <n>)`.
+ * In Codex's events a result keeps its line breaks, so only a line that starts with the heading counts, not one quoted in a record's body.
+ */
+const esc = (key: string) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const inSearch = (text: string, key: string, lines: boolean) =>
+  new RegExp(`${lines ? "(^|\\n)" : ""}## ${esc(key)} \\(u\\d+\\)`).test(text);
+const inRead = (text: string, key: string, lines: boolean) =>
+  new RegExp(`${lines ? "(^|\\n)" : ""}${esc(key)} \\(u\\d+, revision \\d+\\)`).test(text);
 
 /** The three signals per gold key from Codex's JSONL events, where each tool call carries its own result. */
 export function goldSignalsFromCodex(
@@ -86,20 +92,41 @@ export function goldSignalsFromCodex(
   goldHookOutput: string | null,
   events: string | null,
 ): Record<string, GoldSignal> {
-  const readable = events !== null && foundInCodexEvents(events, []) !== "unknown";
+  // Any line that is not an event object, or a Sphica call without a result, leaves the log unable to prove "no"
+  let readable = events !== null && events.trim() !== "";
   const results: { tool: string; text: string }[] = [];
   for (const line of readable ? (events ?? "").split("\n") : []) {
     if (!line.trim()) continue;
-    const e = JSON.parse(line) as {
+    let e: unknown;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      readable = false;
+      break;
+    }
+    if (typeof e !== "object" || e === null) {
+      readable = false;
+      break;
+    }
+    const { type, item: it } = e as {
       type?: string;
-      item?: { type?: string; server?: string; tool?: string; result?: { content?: { text?: string }[] } };
+      item?: {
+        type?: string;
+        server?: string;
+        tool?: string;
+        result?: { content?: { text?: string }[] } | null;
+      };
     };
-    const it = e.item;
-    if (e.type === "item.completed" && it?.type === "mcp_tool_call" && it.server === "sphica" && it.tool)
-      results.push({ tool: it.tool, text: (it.result?.content ?? []).map((c) => c.text ?? "").join("\n") });
+    if (type !== "item.completed" || it?.type !== "mcp_tool_call" || it.server !== "sphica" || !it.tool)
+      continue;
+    if (!it.result || !Array.isArray(it.result.content)) {
+      readable = false;
+      break;
+    }
+    results.push({ tool: it.tool, text: it.result.content.map((c) => c.text ?? "").join("\n") });
   }
-  const seen = (tool: string, key: string, test: (t: string, k: string) => boolean): Tri =>
-    !readable ? "unknown" : results.some((r) => r.tool === tool && test(r.text, key)) ? "yes" : "no";
+  const seen = (tool: string, key: string, test: typeof inSearch): Tri =>
+    !readable ? "unknown" : results.some((r) => r.tool === tool && test(r.text, key, true)) ? "yes" : "no";
   return Object.fromEntries(
     gold.map((key) => [
       key,
@@ -113,8 +140,9 @@ export function goldSignalsFromCodex(
 }
 
 /**
- * The same from a routine run log, where results carry no call id. A result is tied to a call only when every Sphica call still waiting
- * for its result is the same tool; a result that could belong to a search or a read makes both signals unknown for the keys it names.
+ * The same from a routine run log, where results carry no call id and every tool's calls appear. A result is tied to a tool only while
+ * the calls waiting are all that tool; from the moment two tools wait at once until none waits, a result naming a gold key makes its signals unknown.
+ * A log that ends with a call still waiting, or holds no call at all, cannot prove "no".
  */
 export function goldSignalsFromClaude(
   condition: string,
@@ -125,27 +153,32 @@ export function goldSignalsFromClaude(
 ): Record<string, GoldSignal> {
   const hits = new Map(gold.map((k) => [k, { search: false, read: false, unsure: false }]));
   const waiting: string[] = [];
+  let calls = 0;
+  let tangled = false;
   for (const line of (log ?? "").split("\n")) {
-    const call = /\btool_use mcp__sphica__(\w+)/.exec(line);
+    const call = /\btool_use (\S+?):/.exec(line);
     if (call) {
+      calls++;
       waiting.push(call[1] ?? "");
+      if (new Set(waiting).size > 1) tangled = true;
       continue;
     }
     if (!/\btool_result\b/.test(line) || !waiting.length) continue;
-    const tools = new Set(waiting);
     const tool = waiting.shift() ?? "";
     for (const [key, h] of hits) {
-      if (!line.includes(`${key} (u`)) continue;
-      if (tools.size > 1) h.unsure = true;
-      else if (tool === "search" && inSearch(line, key)) h.search = true;
-      else if (tool === "read" && inRead(line, key)) h.read = true;
+      const named = inSearch(line, key, false) || inRead(line, key, false);
+      if (!named) continue;
+      if (tangled) h.unsure = true;
+      else if (tool === "mcp__sphica__search" && inSearch(line, key, false)) h.search = true;
+      else if (tool === "mcp__sphica__read" && inRead(line, key, false)) h.read = true;
     }
+    if (!waiting.length) tangled = false;
   }
+  const blind = log === null || calls === 0 || waiting.length > 0;
   return Object.fromEntries(
     gold.map((key) => {
       const h = hits.get(key) ?? { search: false, read: false, unsure: false };
-      const tri = (yes: boolean): Tri =>
-        log === null ? "unknown" : yes ? "yes" : h.unsure ? "unknown" : "no";
+      const tri = (yes: boolean): Tri => (yes ? "yes" : blind || h.unsure ? "unknown" : "no");
       return [
         key,
         {
