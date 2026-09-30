@@ -592,6 +592,23 @@ test("a successful migration keeps the three newest backups and leaves another r
   assert.deepEqual(backups(file), left);
 });
 
+// The backup was made and every step committed: a backups/ directory that cannot even be listed leaves pruning for later, not a failed init
+test("a backups directory that cannot be listed does not fail a finished migration", async () => {
+  const home = tmp();
+  const file = path.join(home, "sphica.db");
+  revision1(file);
+  const dir = path.join(home, "backups");
+  fs.mkdirSync(dir);
+  fs.chmodSync(dir, 0o300);
+  try {
+    await quiet(() => migrate(file));
+    assert.equal(revisionOf(file), SCHEMA_REVISION);
+  } finally {
+    fs.chmodSync(dir, 0o700);
+  }
+  assert.equal(backups(file).length, 1);
+});
+
 test("pruning keeps this run's backup even when older ones carry later times, and a backup it cannot remove does not fail init", async () => {
   const home = tmp();
   const file = path.join(home, "sphica.db");

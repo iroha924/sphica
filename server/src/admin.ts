@@ -61,12 +61,17 @@ function backUp(raw: DatabaseSync, file: string, from: number): string {
 
 /**
  * Keeps this run's backup and the KEEP - 1 newest others. Runs only after every migration step committed, so a failing run never removes
- * one. A backup that cannot be removed (open in another process on Windows) is left for the next migration; the database is already migrated.
+ * one. A backup that cannot be removed (open in another process on Windows), or a directory that cannot be listed, is left for the next
+ * migration; the database is already migrated.
  */
 function prune(file: string, kept: string): void {
-  for (const old of backups(file)
-    .filter((b) => b !== kept)
-    .slice(KEEP - 1))
+  let all: string[];
+  try {
+    all = backups(file);
+  } catch {
+    return;
+  }
+  for (const old of all.filter((b) => b !== kept).slice(KEEP - 1))
     try {
       fs.rmSync(old, { force: true });
     } catch {}

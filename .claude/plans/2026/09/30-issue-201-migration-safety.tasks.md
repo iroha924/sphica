@@ -42,6 +42,16 @@ base: main
   - コミット: `fix(init): keep this run's backup when pruning and never fail init over an old one (T08)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern=backup test/admin.test.ts` → 直す前は新しいテストが ERR_FS_EISDIR で落ちた（red）。直した後 `node --test test/admin.test.ts` → 26 pass・0 fail。`bun run verify` → exit 0
 
+- [x] T11: 全差分レビューの指摘を直す（一覧を取れない backups/ で、移行の済んだ init を落とさない）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T08（直す対象の prune() が要る）
+  - 変更: `server/src/admin.ts`, `server/test/admin.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="cannot be listed" test/admin.test.ts` → 書き込みと通過はできて一覧できない backups/（0o300）で、刈り込みの readdir が EACCES を投げて落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → その backups/ でも移行が終わり、バックアップが 1 つ残って通る
+  - コミット: `fix(init): leave pruning for later when the backups directory cannot be listed (T11)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="cannot be listed" test/admin.test.ts` → 直す前は EACCES, scandir で 1 fail（red）。直した後 `node --test test/admin.test.ts` → 27 pass・0 fail。`bun run verify` → exit 0
+
 ## P2: 持ち主への案内
 
 forget の画面でバックアップの場所が分かり、revision の不一致では入れるべき CLI の版が 1 回届く。
@@ -138,3 +148,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T05 / `.claude/skills/knowledge-schema` は `.agents/skills/knowledge-schema` へのシンボリックリンクだった / 変更欄を実体のパスに変えた（前: `.claude/skills/knowledge-schema/SKILL.md`、後: `.agents/skills/knowledge-schema/SKILL.md`）
 - 2026-09-30 / T03 レビュー / Codex の F1（Codex の子セッションの prompt に案内が出る）は、prompt の持ち主判定（deliver.ts の入口）が CODEX_THREAD_ID を渡していない既存の不具合で、ふだんの prompt 配信も子に出ていた。F2（テストが版の形しか見ない）。どちらも直す / T10 を足した
 - 2026-09-30 / T06 / 配布物を展開して動かす検査は scripts/check-tarball.mjs（CI の check と release が npm pack の tarball に流す）に既にあり、sql:live は src を動かす / 検査を check-tarball.mjs に足した。変更欄（前: `scripts/check-sql-live.mjs`、後: `scripts/check-tarball.mjs`）、完了条件（前: `bun run sql:live` → …、後: 上の check-tarball のコマンド）、コミット件名（前: `test(live): …`、後: `test(package): …`）。plan の A4 は finishing で同じコマンドに読み替えて流す
+- 2026-09-30 / 全差分レビュー（Codex、新しい会話） / 指摘 1 件: 一覧できない backups/ で移行済みの init が落ちる。要件（古いバックアップで init を落とさない）の漏れなので直す / T11 を足した
