@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
-import { isolatedCodexHome } from "./codex-home.ts";
+import { claimRunDir, isolatedCodexHome } from "./codex-home.ts";
 
 const HERE = import.meta.dirname;
 const { values: args } = parseArgs({
@@ -36,8 +36,7 @@ const task = plan.tasks.find((t) => t.id === args.task);
 const condition = manifest.repositories[repo]?.condition;
 if (!task || !condition) throw new Error(`unknown task ${args.task} or repository ${repo}`);
 
-const run = `${task.id}-${condition}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-const dir = path.join(path.resolve(args.out ?? ""), run);
+const { run, dir } = claimRunDir(path.resolve(args.out ?? ""), `${task.id}-${condition}`);
 const work = path.join(dir, "work");
 const home = path.join(dir, "home");
 const codexHome = path.join(dir, "codex-home");

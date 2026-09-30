@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { claimRunDir } from "../evals/cloud/codex-home.ts";
 import { type FiringRow, pair, taskFromReceipts } from "../evals/cloud/firing.ts";
 import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
@@ -983,5 +984,19 @@ test("fire marks the next unfired row, only of the condition asked for, and repo
     assert.equal(fire().task, "a");
   } finally {
     fs.rmSync(build, { recursive: true, force: true });
+  }
+});
+
+test("two Codex runs of one task and condition started in the same millisecond get their own directories", () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-runs-"));
+  try {
+    const now = new Date("2026-09-30T04:52:09.077Z");
+    const a = claimRunDir(out, "pilot-dates-search", now);
+    const b = claimRunDir(out, "pilot-dates-search", now);
+    assert.notEqual(a.dir, b.dir);
+    assert.notEqual(a.run, b.run);
+    assert.ok(a.run.startsWith("pilot-dates-search-2026-09-30T04-52-09-077Z"));
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
   }
 });

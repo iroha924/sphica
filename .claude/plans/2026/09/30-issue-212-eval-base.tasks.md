@@ -252,6 +252,15 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `docs(eval-loop): run a loop by build id, firing plan, and report (T15)`
   - 結果: `bun run verify:ai` → 通る。Skill の手順に見積もりの確認（0）、`--variant`、`plan.json` と fire.ts、`collect.ts --build`、`grade.ts --loop` と 2 人目の採点者、`report.ts`、検索だけの変更はオフラインのベンチで先に比べることがある。`bun run verify` → exit 0
 
+- [x] T24: 同じタスクと条件の Codex の run を並行で始めても、run の名前とディレクトリがぶつからないようにする
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T06（codex.ts の --build が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex.ts`, `server/test/eval-grade.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="same millisecond" test/eval-grade.test.ts` → 同じミリ秒に始めた 2 つの run が別のディレクトリを持つ
+  - コミット: `fix(eval): give parallel Codex runs their own run directories (T24)`
+  - 結果: 直す前の命名（時刻だけ、recursive の mkdir）で同じテストが 1 fail（2 つのディレクトリが同じ）。直した後 1 pass。`bun run verify` → exit 0
+
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
 - 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
@@ -275,3 +284,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T14 / Stryker は TypeScript 7 に tsconfig を書き換える API（ts.parseConfigFileTextToJson）が無くて落ち、sandbox では server/ の外の db/schema.sql を読めなかったので、tsconfigFile を外し inPlace で流した（使い捨ての worktree の中）。意味があるとして殺したもの: 伏せ字の形ごとの一覧（項目ごと消してもどのテストも落ちなかった 20 種、最小の長さと 1 文字足りない長さで検査）、search のヒットに別の記録の options と anchors が混ざる、limit、aliasOnly。残したもの: QUESTION の語の一覧の文字列（44）、visible の正規表現（101、Unicode の性質で決まる）、検索の候補の上限の境目（2,000 件を作る必要があり重い）、anchors の locateIn の文字列と条件（多くは記録の位置の探し方の細部で、別の issue の範囲）。変更欄から anchors.test.ts を外した（無いファイル）
 - 2026-09-30 / 全差分レビュー（Codex） / P1（試行 1 が結果を残さず試行 2 だけ残ると割り当てが入れ替わる）は T06 レビューの F3 と同じで、同じタスク×条件の試行は区別の意味が無く、結果の無い発火がどれだったかはブランチから分からない。分母は正しいので直さない。P2（read の引数に key があっても結果に記録が無ければ no）は、T05 で read を「結果が記録を見せたか」と決めたとおりで直さず、plan の文面を実装に合わせた。P2（一致の判定から cited_gold と flags が漏れる）は直す / T22 を足した。review-shipping は指摘なし（0.6.13 の配布物は 0.6.12 とバージョンの文字列 3 か所だけ違い、dist と db は同じバイト）
 - 2026-09-30 / A6 / 持ち主がクラウドの 1 ループを「62 run、$9〜$19（反転版は gold の条件だけ）」で承認した / 反転版の gold の行だけを発火できるよう T23 を足した
+- 2026-09-30 / T24 / A6 で Codex の run を並行で流したとき、run 名が時刻（ミリ秒）だけのため同じタスク・条件の 2 run が同じディレクトリを使い 1 run が失われた（流し直した）。名前に乱数を足し、ディレクトリを recursive なしで作ってぶつかったら失敗させる
