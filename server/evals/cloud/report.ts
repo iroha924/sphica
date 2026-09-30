@@ -124,12 +124,22 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   lines.push("", "## Grader agreement (Codex's grade is the one counted; Claude's is kept beside it)");
   const both = [...original, ...swapped].filter((r) => r.grade && r.second && "grade" in r.second);
   for (const [k, rows] of groupBy(both, (r) => `runs by ${r.model}`)) {
-    const fields = ["score", "implements_rejected", "proposes_rejected", "followed"] as const;
+    // Every graded field but the free-text reason; flags compare as a set
+    const fields = [
+      "score",
+      "cited_gold",
+      "implements_rejected",
+      "proposes_rejected",
+      "followed",
+      "flags",
+    ] as const;
+    const shown = (g: Grade | undefined, f: (typeof fields)[number]) =>
+      f === "flags" ? [...(g?.flags ?? [])].sort().join(",") || "(none)" : String(g?.[f]);
     const differ = (r: Graded) => {
       const other = r.second && "grade" in r.second ? r.second.grade : undefined;
       return fields
-        .filter((f) => other?.[f] !== r.grade?.[f])
-        .map((f) => `${f} ${r.grade?.[f]} vs ${other?.[f]}`);
+        .filter((f) => shown(other, f) !== shown(r.grade, f))
+        .map((f) => `${f} ${shown(r.grade, f)} vs ${shown(other, f)}`);
     };
     const agree = rows.filter((r) => differ(r).length === 0);
     lines.push(`${k}: ${agree.length} / ${rows.length} agree on every graded field`);

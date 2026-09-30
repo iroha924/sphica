@@ -170,6 +170,16 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - コミット: `fix(eval): name every run in the report, compare every graded field, keep ungraded sides (T21)`
   - 結果: `cd server && node --test --test-name-pattern="names each run" test/eval-grade.test.ts` → 直す前は 1 fail（red）。直した後 `node --test test/eval-grade.test.ts` → 24 pass・0 fail。`bun run verify` → exit 0
 
+- [x] T22: 全差分レビューの指摘を直す（採点者の一致に cited_gold と flags も入れる）
+  - 種別: 修正
+  - 計画: S7
+  - 依存: T21（直す対象の一致の判定が要る）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="cited_gold or flags" test/eval-grade.test.ts` → cited_gold だけ、flags だけが違う 2 件を「2 / 2 agree」と数えて落ちる
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → reason 以外の全欄の食い違いが出るテストが通る
+  - コミット: `fix(eval): count cited_gold and flags in grader agreement (T22)`
+  - 結果: `cd server && node --test --test-name-pattern="cited_gold or flags" test/eval-grade.test.ts` → 直す前は 1 fail（red）。直した後 `node --test test/eval-grade.test.ts` → 25 pass・0 fail。`bun run verify` → exit 0
+
 ## P4: テスト
 
 性質・時間・順序・promise・Skill と型の食い違いが機械で見つかる。
@@ -254,3 +264,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T11 / 時間のテストは各長さの 5 回の中央値で比を見ていたが、ほかの処理（テストファイルの並列実行、裏の Stryker）で 1 回の測定が遅れると比が 3 を超えた。最小値で測り、形ごとに 3 回まで試す形にした / T20 を足した
 - 2026-09-30 / T10 レビュー / Codex の F1（gold − inject に run ID と n が無い）・F2（採点者の一致が score と implements_rejected だけ）・F3（未採点だけの反転版の行が消える）は、どれも再現つきで直す / T21 を足した。counterfactual のタスクの一覧は、report の CLI が tasks.json の swapped.tasks から渡す。T12 のレビューは指摘なし
 - 2026-09-30 / T14 / Stryker は TypeScript 7 に tsconfig を書き換える API（ts.parseConfigFileTextToJson）が無くて落ち、sandbox では server/ の外の db/schema.sql を読めなかったので、tsconfigFile を外し inPlace で流した（使い捨ての worktree の中）。意味があるとして殺したもの: 伏せ字の形ごとの一覧（項目ごと消してもどのテストも落ちなかった 20 種、最小の長さと 1 文字足りない長さで検査）、search のヒットに別の記録の options と anchors が混ざる、limit、aliasOnly。残したもの: QUESTION の語の一覧の文字列（44）、visible の正規表現（101、Unicode の性質で決まる）、検索の候補の上限の境目（2,000 件を作る必要があり重い）、anchors の locateIn の文字列と条件（多くは記録の位置の探し方の細部で、別の issue の範囲）。変更欄から anchors.test.ts を外した（無いファイル）
+- 2026-09-30 / 全差分レビュー（Codex） / P1（試行 1 が結果を残さず試行 2 だけ残ると割り当てが入れ替わる）は T06 レビューの F3 と同じで、同じタスク×条件の試行は区別の意味が無く、結果の無い発火がどれだったかはブランチから分からない。分母は正しいので直さない。P2（read の引数に key があっても結果に記録が無ければ no）は、T05 で read を「結果が記録を見せたか」と決めたとおりで直さず、plan の文面を実装に合わせた。P2（一致の判定から cited_gold と flags が漏れる）は直す / T22 を足した。review-shipping は指摘なし（0.6.13 の配布物は 0.6.12 とバージョンの文字列 3 か所だけ違い、dist と db は同じバイト）

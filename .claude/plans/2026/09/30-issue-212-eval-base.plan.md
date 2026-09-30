@@ -72,7 +72,7 @@ approved_at: 2026-09-30
    - override: 持ち主が今の依頼で却下案を名指ししたとき、配信は古い決定と理由を 1 回見せる。承認は自動で判定しない
 3. クラウドのタスク 4 件を足す（superseded・abstention・poisoned・override）。fixture に必要な記録を足す。条件は override・superseded・poisoned が 4 条件、abstention は none・inject・gold。各タスクに `lang` と `overlap`
 4. 評価ループの記録（`collect.ts`、`judge.ts`）
-   - gold key ごとに `in_delivery`（inject の delivery_unit）、`in_search`（search の結果に key が出た）、`read`（read の引数に key）。Codex は `mcp_tool_call` から取り、今のイベント形の入力例をテストに置く。Claude はログで呼び出しと結果の対応が一意に決まるとき（前の結果が返るまで次の呼び出しが無い）だけ出し、決まらないときは `unknown`。集約の `delivered`・`found` は残す
+   - gold key ごとに `in_delivery`（inject の delivery_unit）、`in_search`（search の結果に key が出た）、`read`（read の結果が gold の記録を見せた。Codex の read の引数は key でなく `u4` のような番号のため、結果の先頭行で判定する）。Codex は `mcp_tool_call` から取り、今のイベント形の入力例をテストに置く。Claude はログで呼び出しと結果の対応が一意に決まるとき（前の結果が返るまで次の呼び出しが無い）だけ出し、決まらないときは `unknown`。集約の `delivered`・`found` は残す
    - build に ID を持たせる: `build.ts --variant original|swapped` は `~/.cache/sphica-eval/builds/<build-id>/` に出力し、前の build を消さない。`plan.json`（タスク×条件×試行、各行に build-id と variant）をその中に書く。RemoteTrigger で発火するたびに、その行に発火時刻を付ける
    - `collect.ts --build <id>` は、その build の main を祖先に持つブランチだけを取り、計画の行に task・condition・試行で照合する。照合できない行は run 無しとして残す。`--fired` は計画ファイルに置き換える
 5. counterfactual gold: 却下案のある 2 タスク（pilot-dates、sphica-search-wording）だけ。反転版は、採った案と却下案を入れ替え、理由も合う文に書き直した架空の記録として fixture に別に持つ。流し方は original の build → 発火 → collect、次に swapped の build → 発火 → collect。hidden test は反転版では使わない
@@ -148,3 +148,4 @@ approved_at: 2026-09-30
 ## 変更履歴
 - 2026-09-30 / counterfactual のタスクを pilot-dates と superseded-install に変えた / sphica-search-wording の fixture は実際の PR の harvest で、反転版に架空の出典が要る。superseded-install は status-02 を外すだけで反転する / Go 不要（件数と費用は同じ）
 - 2026-09-30 / 0.6.13 に上げてリリースする / release-scope が devDependency の追加もパッケージの入力とみなすため。持ち主が 3 案（自前の生成器、リリース、検査を直す）からリリースを選んだ / Go 済み（持ち主が決定）
+- 2026-09-30 / 方針 4 の `read` を「引数に key」から「結果が記録を見せた」に直した / Codex の read の引数は番号で key を持たない（T05 の記録） / Go 不要（実装に合わせた文面の訂正）

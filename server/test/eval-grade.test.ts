@@ -916,3 +916,33 @@ test("the report names each run in gold minus inject, compares every graded fiel
   assert.match(out, /g1 \(t1 gold\): followed presented vs other/);
   assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 0, neither 0, ungraded 1, excluded 0/);
 });
+
+// Review of the report: agreement covers every graded field, cited_gold and flags too
+test("grader agreement counts a difference in cited_gold or flags", () => {
+  const base = { ...row, task: "t1", presented: null, condition: "gold" };
+  const out = report(
+    [
+      {
+        variant: "original",
+        rows: [
+          {
+            ...base,
+            run: "c1",
+            grade: { ...grade, cited_gold: "yes" },
+            second: { grade: { ...grade, cited_gold: "no" } },
+          },
+          {
+            ...base,
+            run: "f1",
+            grade: { ...grade, flags: ["off_task"] },
+            second: { grade: { ...grade, flags: [] } },
+          },
+        ],
+      },
+    ],
+    [{ id: "t1" }],
+  ).join("\n");
+  assert.match(out, /runs by codex: 0 \/ 2 agree/);
+  assert.match(out, /c1 \(t1 gold\): cited_gold yes vs no/);
+  assert.match(out, /f1 \(t1 gold\): flags off_task vs \(none\)/);
+});
