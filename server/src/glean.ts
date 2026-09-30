@@ -314,8 +314,8 @@ export async function checkGlean(
     }
     return { s, at };
   };
-  // Anchors an earlier operation in this batch replaces: a second replacement would leave both new anchors live
-  const replaced = new Set<number>();
+  // Anchors an operation in this batch replaces, and which operation: a second replacement would leave both new anchors live
+  const replaced = new Map<number, number>();
   // Anchors added earlier in this batch, by unit, path, symbol, and role
   const anchored = new Set<string>();
   const places: {
@@ -326,6 +326,8 @@ export async function checkGlean(
     role: "applies_to" | "evidence";
     commit: string | null;
     name: string;
+    /** The operation's index, for a replacement; a plain anchor lands after every replacement of the batch */
+    replacing: number | null;
   }[] = [];
   for (const [i, op] of parsed.data.ops.entries()) {
     const what = `ops.${i} ${op.op} ${op.unit}`;
@@ -431,7 +433,7 @@ export async function checkGlean(
             errors.push(`${what}: the anchor on ${name} is already that place`);
           if (replaces !== null && replaced.has(replaces))
             errors.push(`${what}: another operation in this batch already replaces ${name}`);
-          if (replaces !== null) replaced.add(replaces);
+          if (replaces !== null) replaced.set(replaces, i);
         } else if (!live.length) errors.push(`${what}: no live anchor on ${name}`);
         else errors.push(`${what}: ${live.length} live anchors on ${name}; give from.symbol`);
       }
@@ -445,7 +447,16 @@ export async function checkGlean(
       const k = [u.id, rel, dest.symbol ?? "", dest.role, commit ?? ""].join("\0");
       if (anchored.has(k)) errors.push(`${what}: another operation in this batch already anchors ${name}`);
       anchored.add(k);
-      places.push({ what, unit: u.id, rel, symbol: dest.symbol ?? null, role: dest.role, commit, name });
+      places.push({
+        what,
+        unit: u.id,
+        rel,
+        symbol: dest.symbol ?? null,
+        role: dest.role,
+        commit,
+        name,
+        replacing: op.op === "replace_anchor" ? i : null,
+      });
     }
     if (
       op.op === "retract_evidence" ||
@@ -506,8 +517,10 @@ export async function checkGlean(
     }
     ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces });
   }
-  // Checked after every op is read: an anchor any op of this batch retires no longer counts as live
+  // Checked after every op is read. Replacements run first, in their order, each placing its new anchor before retiring the old one, and
+  // plain anchors after them: an anchor retired by then no longer counts as live
   for (const x of places) {
+    const gone = [...replaced].filter(([, by]) => x.replacing === null || by < x.replacing).map(([id]) => id);
     let q = db
       .selectFrom("unit_anchor")
       .select("id")
@@ -515,11 +528,17 @@ export async function checkGlean(
       .where("path", "=", x.rel)
       .where("role", "=", x.role)
       .where("retired_at", "is", null)
-      .where("id", "not in", [...replaced, -1]);
+      .where("id", "not in", [...gone, -1]);
     q = x.symbol ? q.where("symbol", "=", x.symbol) : q.where("symbol", "is", null);
     q = x.commit ? q.where("commit_sha", "=", x.commit) : q.where("commit_sha", "is", null);
-    if (await q.executeTakeFirst())
-      errors.push(`${x.what}: the record already has a live anchor on ${x.name}`);
+    const held = await q.executeTakeFirst();
+    // A replacement onto its own place is refused above
+    if (!held || (x.replacing !== null && replaced.get(held.id) === x.replacing)) continue;
+    errors.push(
+      replaced.has(held.id)
+        ? `${x.what}: a later operation of this batch moves the anchor off ${x.name}; put that replacement before this one, or make the moves in two saves`
+        : `${x.what}: the record already has a live anchor on ${x.name}`,
+    );
   }
   return { errors, problems, units, ops };
 }

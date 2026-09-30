@@ -536,6 +536,28 @@ test("migrating revision 4 stops, changing nothing, when a file excerpt has a pa
   assert.deepEqual(raw.prepare("select count(*) as n from source").get(), before);
 });
 
+// The repairs run while the migration holds the write lock, with the indexes dropped: they must not slow down faster than the rows grow
+test("migrating revision 4 with many anchors and edit observations and nothing to repair takes time in proportion to them", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  raw.exec(
+    "with recursive n(i) as (select 1 union all select i + 1 from n where i < 20000) insert into edit_observation (session_id, turn_id, path, via, observed_at) select 's1', null, 'p' || i || '.ts', 'tool', '2026-09-20T00:00:00.000Z' from n",
+  );
+  // Spread over many records, as a real database is: one record's search text holds all its anchors
+  raw.exec(
+    "with recursive n(i) as (select 1 union all select i + 1 from n where i < 5000) insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) select 1, 'k' || i, 'finding', 'f' || i, 'supported', 1, '2026-09-20T00:00:00.000Z', zeroblob(32) from n",
+  );
+  raw.exec(
+    "with recursive n(i) as (select 1 union all select i + 1 from n where i < 20000) insert into unit_anchor (unit_id, path, role, run_id, added_at) select 2 + i % 5000, 'p' || i || '.ts', 'applies_to', 1, '2026-09-20T00:00:00.000Z' from n",
+  );
+  const started = performance.now();
+  const said = migrate(raw);
+  const took = performance.now() - started;
+  assert.doesNotMatch(said, /Changed while migrating/);
+  // Measured: well under a second here, over 20 seconds when each row looked for its duplicates alone
+  assert.ok(took < 10000, `took ${Math.round(took)} ms`);
+});
+
 // Revision 4 counted an edit outside any turn once per send, and let a record hold two live anchors on one place
 test("migrating revision 4 removes repeated edit observations and retires repeated live anchors, and says so", () => {
   const raw = create("old.db", REV4);

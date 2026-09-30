@@ -921,6 +921,32 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
       ops([twice, twice]),
       /ops\.1 .*another operation in this batch already replaces src\.ts openStore/,
     );
+    // A chain of moves: each lands before the one after it retires its old anchor, so the move off a place comes first
+    const offOther = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      ...replace({ path: "src.ts", symbol: "other" }),
+      to: { path: "src.ts", role: "applies_to" },
+    };
+    const ontoOther = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      ...replace({ path: "src.ts", symbol: "openStore" }),
+    };
+    await assert.rejects(
+      ops([ontoOther, offOther]),
+      /ops\.0 .*a later operation of this batch moves the anchor off src\.ts other; put that replacement before this one, or make the moves in two saves/,
+    );
+    await ops([offOther, ontoOther]);
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select coalesce(symbol, '-') as symbol from unit_anchor where unit_id = (select id from unit where key = 'glean:csv/no-notes') and retired_at is null and path = 'src.ts' order by symbol",
+        )
+        .all()
+        .map((r) => r.symbol),
+      ["-", "other"],
+    );
     await refused(
       { op: "retract_evidence", source: `s${issue}`, reason_source: `s${reply}`, reason_quote: "了解。" },
       /only the owner's words/,
@@ -1263,6 +1289,14 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
       units: [decided("cache-2", said, "Postgres にする。", { supersedes: "trace:ext-s1/cache" })],
     });
     assert.deepEqual([state("trace:ext-s1/cache"), state("glean:cache-2")], ["superseded", "active"]);
+    // In one save too: a quarantined successor takes no place from a sound one beside it
+    await glean({
+      units: [
+        decided("storage-9", said, "Postgres にする。", { supersedes: "glean:cache-2" }),
+        decided("storage-8", said, "また別の引用に無い言葉。", { supersedes: "glean:cache-2" }),
+      ],
+    });
+    assert.deepEqual([state("glean:storage-8"), state("glean:storage-9")], ["candidate", "active"]);
   } finally {
     await db.done();
   }

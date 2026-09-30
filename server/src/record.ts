@@ -601,19 +601,20 @@ export async function checkRecord(
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
-      else if (claimed.has(old.id))
+      // A quarantined successor never becomes active, so it takes no place from another in the same save
+      else if (claimed.has(old.id) && !quarantine.length)
         errors.push(`${key}: another record in this save already supersedes ${u.supersedes}`);
       else if (!replaceable(u.kind, old.kind))
         errors.push(
           `${key}: a ${u.kind} cannot supersede ${u.supersedes}, a ${old.kind} (a record supersedes one of its own kind; a decision and a constraint can replace each other)`,
         );
-      else if (holders.has(old.id)) {
+      else if (holders.has(old.id) && !quarantine.length) {
         const h = holders.get(old.id);
         errors.push(
           `${key}: ${u.supersedes} already has a successor, ${h?.key} (${h?.lifecycle}); withdraw it first, or supersede it instead`,
         );
       } else supersedes = old.id;
-      if (supersedes !== null) claimed.add(supersedes);
+      if (supersedes !== null && !quarantine.length) claimed.add(supersedes);
     }
     const conflicts = u.conflicts.flatMap((k) => {
       const other = others.get(k);

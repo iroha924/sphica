@@ -779,7 +779,9 @@ create trigger unit_link_check before insert on unit_link begin
   -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
   -- become active, nor be withdrawn. States are read from history, as in unit_state_rules
   select raise(abort, 'the record already has a successor that is not withdrawn')
-  where new.kind = 'supersedes' and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+  where new.kind = 'supersedes'
+    and exists (select 1 from unit n where n.id = new.from_unit and n.extraction = 'supported' and n.unsourced = 0)
+    and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
     where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
       and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;

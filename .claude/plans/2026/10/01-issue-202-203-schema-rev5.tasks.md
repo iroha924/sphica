@@ -175,6 +175,16 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): keep edit observations and live anchors unique, and report duplicates in doctor (T12)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="observed once per turn|repeated edit observations|hold the same words|given twice in a record" test/schema.test.ts test/migrate.test.ts test/admin.test.ts test/record.test.ts` → 直す前のコードでは 4 本とも落ちた（red）。直した後 schema・migrate・admin・record・capture のテストは 143 pass・0 fail（turn の無い観測も 1 行、同じ場所の生きた anchor は 1 つ、記録の中の同じ anchor は 1 つにまとめる、移行は重複を片付けて一覧に出す、doctor が同じ文面の生きた記録の組を数える）。glean の [anchor P, P からの replace_anchor] の保存は、順序の直しを戻すと UNIQUE で落ちることを確かめた。`bun run verify` → exit 0
 
+- [x] T23: T12・T22 の Codex の指摘を直す（anchor の移動の連鎖、移行の重複の片付けの時間、同じ保存の隔離された後継）
+  - 種別: 修正
+  - 計画: S4, S6
+  - 依存: T12（直す対象の一意キーと移行の片付けが要る）, T22（直す対象の生きた後継の条件が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/glean.ts`, `server/src/record.ts`, `server/test/extract.test.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → [p→q, q→r] の replace_anchor の保存が生の UNIQUE エラーで落ち、同じ保存で隔離される後継の隣の正常な後継が拒まれ、重複の無い 5000 unit・20000 anchor の rev4 の DB の移行に 22 秒かかって落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → 連鎖は順序が逆なら名前入りのエラー、正しい順なら保存でき、隔離される後継の隣の正常な後継が active になり、その移行が 10 秒以内に終わるテストが通る
+  - コミット: `fix(glean): order chained anchor moves, share a save with quarantined successors, dedupe fast (T23)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/extract.test.ts test/migrate.test.ts` → 直す前のコードでは 3 本が落ちた（red: 連鎖の保存が UNIQUE、隔離される後継の隣の正常な後継が拒まれる、移行に 22 秒）。直した後は全件 pass（連鎖は逆順なら名前入りのエラー・正しい順なら保存、正常な後継を先・隔離される後継を後に並べても正常な方が active、移行は 0.65 秒）。トリガーの新しい条件を消すとテストが落ちることを確かめた。`bun run verify` → exit 0
+
 - [x] T13: path の CHECK を 3 つの表で同じ式にする
   - 種別: 修正
   - 計画: S3, S4, S6, S9
@@ -277,3 +287,6 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T22 / review-shipping: 指摘 2 件（どちらもテストの穴）。復帰の条件と移行の修復の条件を元に戻してもテストが通った / 生きた後継を取り下げたら、隔離された後継が残っていても元の unit が candidate に戻るテストと、隔離された後継しか無い superseded の unit を移行が candidate に戻すテストを足した。条件を戻すと 2 本とも落ちることを確かめた
 - 2026-10-01 / T13 / 変更欄に `server/src/project.ts`・`server/src/worktree.ts`（capture が制御文字を含む path を記録する前に落とす）とそのテスト（project.test.ts・capture.test.ts）を足した。review comment の path を落としたときは行も落とす（path の無い行に意味は無い。移行の修復と同じ）
 - 2026-10-01 / T13 / review-shipping: 指摘 4 件。worktree の制御文字の検査にテストが無い / テストを足した。worktree と 0005.sql のコメントが実態と違う（replaced_by を消した anchor が一覧に出ない、起きない場合を書いている） / 直して一覧にも出すようにした。リポジトリ直下の `c:notes.md` のような名前を DB が拒み capture 側は通す / 前の revision から同じ規則で、この変更で入ったものではないので直さない
+- 2026-10-01 / T12・T22 / Codex のレビュー（fc5b7e7d..26cc50df）: 指摘 3 件（P2、再現済み）。F1: 互いの移動元を使う replace_anchor の連鎖が check を通って生の UNIQUE エラーになる。F2: 移行の anchor の重複の片付けが相関サブクエリで二乗の時間（32,000 件で 8.6 秒）。F3: 同じ保存で隔離される後継も枠を取り、隣の正常な後継を拒む / 3 件とも採用。修正タスク T23 を足した。出典の無い後継（glean が保存の後で決める）が同じ保存で枠を取る件は、check の時点では分からないので残す（2 回の保存に分ければ通る）
+- 2026-10-01 / T23 / 完了条件の移行の時間の上限を 4 秒から 10 秒に変えた（前: 4 秒、後: 10 秒） / review-shipping が CI の遅いマシンでの余裕の薄さを指摘。二乗の版は 22 秒なので 10 秒でも捕まる
+- 2026-10-01 / T23 / review-shipping: 指摘 4 件。トリガーの新しい条件が、隔離された後継を先に保存するテストでは通らない / 正常な後継を先にしたテストに変え、条件を消すと落ちることを確かめた。時間の上限 / 上の行。置き換えの連鎖が輪（p→q と q→p）だとどちらの順でも「前に置け」と言う、自分の場所への置き換えで 2 つ目の誤ったエラーが出る / 案内に「2 回の保存に分ける」を足し、自分の場所の場合は 2 つ目を出さない。出典の無い後継は check の時点で枠を取る / 前からある、厳しい側の差なので残す（上の T12・T22 の記録と同じ）

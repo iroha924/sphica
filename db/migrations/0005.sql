@@ -179,9 +179,10 @@ where path is not null and kind <> 'file_excerpt' and not (path <> '' and path <
 -- cite the first instead
 create temp table sphica_observation (id integer primary key not null, keep integer not null);
 insert into sphica_observation
-select o.id, (select min(k.id) from edit_observation k where k.session_id = o.session_id and coalesce(k.turn_id, '') = coalesce(o.turn_id, '')
-  and k.path = o.path and k.via = o.via)
-from edit_observation o;
+select o.id, k.keep from edit_observation o join (
+  select session_id, coalesce(turn_id, '') as turn, path, via, min(id) as keep from edit_observation
+  group by session_id, coalesce(turn_id, ''), path, via having count(*) > 1) k
+on k.session_id = o.session_id and k.turn = coalesce(o.turn_id, '') and k.path = o.path and k.via = o.via;
 delete from sphica_observation where id = keep;
 insert into sphica_migration_note
 select 'an edit observation recorded twice', 'observation ' || o.id || ' of ' || e.path || ' in session ' || e.session_id,
@@ -195,11 +196,18 @@ drop table temp.sphica_observation;
 -- Live anchors of one unit on the same place: the newest stays live, and each older one is retired and points at it
 create temp table sphica_anchor (id integer primary key not null, keep integer not null);
 insert into sphica_anchor
-select a.id, (select max(k.id) from unit_anchor k where k.unit_id = a.unit_id and k.retired_at is null and k.path = a.path
-  and k.role = a.role and coalesce(k.commit_sha, '') = coalesce(a.commit_sha, '') and coalesce(k.symbol, '') = coalesce(a.symbol, '')
-  and coalesce(case when k.symbol is null then k.line_start end, 0) = coalesce(case when a.symbol is null then a.line_start end, 0)
-  and coalesce(case when k.symbol is null then k.line_end end, 0) = coalesce(case when a.symbol is null then a.line_end end, 0))
-from unit_anchor a where a.retired_at is null;
+select a.id, k.keep from unit_anchor a join (
+  select unit_id, path, role, coalesce(commit_sha, '') as c, coalesce(symbol, '') as s,
+    coalesce(case when symbol is null then line_start end, 0) as l1, coalesce(case when symbol is null then line_end end, 0) as l2,
+    max(id) as keep
+  from unit_anchor where retired_at is null
+  group by unit_id, path, role, coalesce(commit_sha, ''), coalesce(symbol, ''),
+    coalesce(case when symbol is null then line_start end, 0), coalesce(case when symbol is null then line_end end, 0)
+  having count(*) > 1) k
+on k.unit_id = a.unit_id and k.path = a.path and k.role = a.role and k.c = coalesce(a.commit_sha, '') and k.s = coalesce(a.symbol, '')
+  and k.l1 = coalesce(case when a.symbol is null then a.line_start end, 0)
+  and k.l2 = coalesce(case when a.symbol is null then a.line_end end, 0)
+where a.retired_at is null;
 delete from sphica_anchor where id = keep;
 insert into sphica_migration_note
 select 'two live anchors of a record on one place', 'anchor ' || x.id || ' of unit ' || a.unit_id || ' on ' || a.path,
@@ -800,7 +808,9 @@ create trigger unit_link_check before insert on unit_link begin
   -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
   -- become active, nor be withdrawn. States are read from history, as in unit_state_rules
   select raise(abort, 'the record already has a successor that is not withdrawn')
-  where new.kind = 'supersedes' and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+  where new.kind = 'supersedes'
+    and exists (select 1 from unit n where n.id = new.from_unit and n.extraction = 'supported' and n.unsourced = 0)
+    and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
     where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
       and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
