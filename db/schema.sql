@@ -707,10 +707,9 @@ create trigger unit_evidence_check before insert on unit_evidence begin
      or (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'evidence span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
-  select raise(abort, 'a span starts or ends inside a character')
-  where new.retraction_source_id is not null and (
-    hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
-    or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF');
+  -- A retraction cites the owner's words, which only the retraction's own update checks: a row is never written already retracted
+  select raise(abort, 'evidence is written live, then retracted')
+  where new.retracted_at is not null or new.retraction_source_id is not null;
   select raise(abort, 'a span starts or ends inside a character')
   where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
      or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
@@ -770,10 +769,8 @@ create trigger unit_adoption_check before insert on unit_adoption begin
      or (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'adoption span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
-  select raise(abort, 'a span starts or ends inside a character')
-  where new.retraction_source_id is not null and (
-    hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
-    or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF');
+  select raise(abort, 'adoption is written live, then retracted')
+  where new.retracted_at is not null or new.retraction_source_id is not null;
   select raise(abort, 'a span starts or ends inside a character')
   where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
      or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';

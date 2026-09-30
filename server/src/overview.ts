@@ -1,9 +1,8 @@
 // On-request overviews for MCP overview: every live decision and constraint by directory (live), and records that need a look (look).
 // Both read the database and the working tree only, and name records by key so the agent reads each before relying on it.
 import path from "node:path";
-import type { Kysely } from "kysely";
 import { checkAnchor, fileState } from "./anchors.ts";
-import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
 import { UNSUPPORTED } from "./read.ts";
 import { ruleFiles } from "./rule-files.ts";
@@ -29,7 +28,7 @@ function pathList(paths: string[]): string {
 }
 
 /** A page of the project's active decisions and constraints in id order after `after`, grouped by the directory each first applies to. */
-export async function liveOverview(db: Kysely<DB>, projectId: number, after: number | null): Promise<string> {
+export async function liveOverview(db: Reads, projectId: number, after: number | null): Promise<string> {
   const live = db
     .selectFrom("unit")
     .where("project_id", "=", projectId)
@@ -109,7 +108,7 @@ const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/
  * Records that need a look: live records whose anchored file is gone or whose symbol is not found, written conditions for reconsidering,
  * and marked lines in instruction files whose record was replaced or withdrawn. It says what each is and never decides or changes anything.
  */
-export async function lookOverview(db: Kysely<DB>, projectId: number, root: string | null): Promise<string> {
+export async function lookOverview(db: Reads, projectId: number, root: string | null): Promise<string> {
   const notChecked: string[] = [];
   const sections: string[] = [];
   // One budget for the whole reply, so many long lines under one heading cannot push it past what a host passes on
@@ -282,7 +281,7 @@ export async function lookOverview(db: Kysely<DB>, projectId: number, root: stri
 }
 
 /** The end of a record's supersedes chain: the schema refuses cycles, so it ends. The caller says when the end is not active. */
-async function successor(db: Kysely<DB>, id: number): Promise<{ key: string; lifecycle: string } | null> {
+async function successor(db: Reads, id: number): Promise<{ key: string; lifecycle: string } | null> {
   let end: { key: string; lifecycle: string } | null = null;
   let at = id;
   for (;;) {

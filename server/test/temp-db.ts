@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Kysely } from "kysely";
+import type { ReadonlyKysely } from "kysely/readonly";
 import { openReader } from "../src/db.ts";
 import type { DB } from "../src/db-types.ts";
 import { connectWriter, openWriter } from "../src/db-write.ts";
@@ -14,7 +15,7 @@ const SCHEMA = fs.readFileSync(path.join(import.meta.dirname, "..", "..", "db", 
 
 export type TempDb = {
   file: string;
-  reader: Kysely<DB>;
+  reader: ReadonlyKysely<DB>;
   ingest: Kysely<DB>;
   capture: Kysely<DB>;
   /** A connection without the authorizer, for inserting fixtures and checking from outside the permissions */

@@ -1,6 +1,6 @@
 // What trace reads: sessions not traced yet, the run a draft is bound to, and a session's sources, edits, and the project's live records.
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB, Session } from "./db-types.ts";
 import type { BeginOrigin } from "./knowledge.ts";
 
@@ -32,7 +32,7 @@ const untracedOwner = (eb: InSession) =>
  * or not: a session the owner came back to stays recent even when its untraced messages are old. Session start runs this, so each
  * session is read through its own messages (the source_session index), never by grouping the whole project.
  */
-export const untracedSessions = (db: Kysely<DB>, projectId: number) =>
+export const untracedSessions = (db: Reads, projectId: number) =>
   db
     .selectFrom("session as s")
     .where("s.project_id", "=", projectId)
@@ -61,7 +61,7 @@ export const untracedSessions = (db: Kysely<DB>, projectId: number) =>
  * first of them. `total` counts the whole group, beyond the limit.
  */
 export async function pendingSessions(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   group: "recent" | "older",
   now: Date = new Date(),
@@ -115,7 +115,7 @@ export async function openRun(
   return r.id;
 }
 
-export async function runOf(db: Kysely<DB>, draftId: string): Promise<Run | null> {
+export async function runOf(db: Reads, draftId: string): Promise<Run | null> {
   return (
     (await db
       .selectFrom("extraction_run")
@@ -126,7 +126,7 @@ export async function runOf(db: Kysely<DB>, draftId: string): Promise<Run | null
 }
 
 /** A session's messages in order, with whether an earlier run already looked at each. */
-export async function sessionSources(db: Kysely<DB>, sessionId: string) {
+export async function sessionSources(db: Reads, sessionId: string) {
   return db
     .selectFrom("source as m")
     .where("m.session_id", "=", sessionId)
@@ -150,7 +150,7 @@ export async function sessionSources(db: Kysely<DB>, sessionId: string) {
     .execute();
 }
 
-export async function sessionEdits(db: Kysely<DB>, sessionId: string) {
+export async function sessionEdits(db: Reads, sessionId: string) {
   return db
     .selectFrom("edit_observation")
     .where("session_id", "=", sessionId)
@@ -160,7 +160,7 @@ export async function sessionEdits(db: Kysely<DB>, sessionId: string) {
 }
 
 /** Active and candidate records of the project, newest first: what a new record may supersede or conflict with. */
-export async function liveUnits(db: Kysely<DB>, projectId: number, limit = 40) {
+export async function liveUnits(db: Reads, projectId: number, limit = 40) {
   return db
     .selectFrom("unit")
     .where("project_id", "=", projectId)

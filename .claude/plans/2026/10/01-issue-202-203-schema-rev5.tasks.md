@@ -103,13 +103,14 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): judge support with one rule when activating, retracting, and retiring an anchor (T07)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="judged by one rule" test/schema.test.ts` → 直す前の schema では Missing expected exception で落ちた（red）。直した後 `node --test test/*.test.ts` → 512 pass・0 fail（schema: option の証拠だけが残る decision の最後の証拠の retract と、active な implementation の commit 付き anchor の retire が拒まれる / migrate: 支えの足りない active な unit が candidate に戻って一覧に出る / extract: 同じ場所への replace_anchor はエラー、別の場所へは通って candidate に戻る）。`bun run verify` → exit 0
 
-- [ ] T08: reader の型を ReadonlyKysely にする
+- [x] T08: reader の型を ReadonlyKysely にする
   - 種別: 変更
   - 計画: S7
   - 依存: なし
-  - 変更: `server/src/db.ts`, `server/src/mcp.ts`, `server/src/deliver.ts`, `server/src/search.ts`, `server/src/read.ts`, `server/src/status.ts`, `server/src/overview.ts`, `server/src/project.ts`, `server/src/cli/common.ts`, `server/test/db.test.ts`
+  - 変更: `server/src/db.ts`, `server/src/cli/common.ts`, `server/src/deliver.ts`, `server/src/search.ts`, `server/src/read.ts`, `server/src/status.ts`, `server/src/overview.ts`, `server/src/project.ts`, `server/src/asked.ts`, `server/src/export.ts`, `server/src/fields.ts`, `server/src/review.ts`, `server/src/trace.ts`, `server/src/extract.ts`, `server/src/github.ts`, `server/src/glean.ts`, `server/src/record.ts`, `server/evals/acceptance/driver.ts`, `server/test/temp-db.ts`, `server/test/db.test.ts`
   - 完了条件: `bun run verify` → 0（型の検査を含む）。`server/test/db.test.ts` の `// @ts-expect-error` を付けた reader への insert が型エラーのままで、外すと型の検査が落ちる
   - コミット: `refactor(db): type the reader connection as read-only (T08)`
+  - 結果: `bun run verify` → exit 0（型検査を含む）。`server/test/db.test.ts` の reader への insert は `@ts-expect-error` のまま型検査が通り、`openReader()` を `Kysely<DB>` に戻すと「Unused @ts-expect-error」で型検査が落ちることを確かめた。実行時も reader の接続が書き込みを拒む
 
 - [x] T21: T04・T05 の Codex の指摘を直す（candidate の後継がいる unit の withdraw を通す、migration の run を id カウンターの復元の後に作る）
   - 種別: 修正
@@ -215,6 +216,16 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): widen spans before moving rows, stop on negative retraction spans, check inserts too (T24)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks|small values|no release wrote" test/schema.test.ts test/migrate.test.ts` → 直す前のコードでは 3 本が落ちた（red）。証拠 2 万行の移行は直す前 6.9 秒・直した後 0.3 秒（上限 3 秒）。直した後 schema・migrate のテストは全件 pass。`bun run verify` → exit 0
 
+- [x] T25: 取り下げ済みの証拠と採用の行の insert を拒む
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T24（置き換える insert 時の取り下げ span の検査が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/test/schema.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks" test/schema.test.ts` → 別の project の発言や本文の外を理由に引用した取り下げ済みの行が insert で入って落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → 取り下げ済みの証拠と採用の insert がどれも拒まれ、移行（表の作り直しはトリガーの前に行を写す）が通るテストが通る
+  - コミット: `fix(db): refuse writing evidence or adoption already retracted (T25)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks" test/schema.test.ts` → 直す前の schema では、別の project の発言を理由に引用した取り下げ済みの行が insert で入って落ちた（red）。直した後 schema・migrate のテストは全件 pass（取り下げ済みの証拠と採用の insert はどれも拒まれ、移行は通る）。`bun run verify` → exit 0
+
 - [x] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
   - 種別: 削除
   - 計画: S3, S4, S6, S9
@@ -314,3 +325,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T16・T17 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる。変更欄: T16 から extract.test.ts を外し（glean の抜粋の保存は既存のテストで通った）、T17 は plugin.test.ts を外して extract.test.ts を足した（run の更新をテスト用のトリガーで数えていたのを、allow list がそのトリガーの書き込みを拒むので、流した SQL を数える形にした）
 - 2026-10-01 / T16・T17 / review-shipping（1 回目は 10 分無応答で打ち切り、投げ直し）: 実際の ingest の書き込みを全部記録し、どれも allow list の中だと確かめた。指摘 2 件（トリガーの本文の読み取りが upsert・`update or`・引用符付きの名前を見落とす、harvest の lookup の数の検査が緩い） / 読み取れない書き方を見たら落ちるようにし、数を 2 倍ちょうどに固定した
 - 2026-10-01 / T15・T24 / Codex のレビュー（14774d8e..ff1b273c）: 指摘 1 件（P2、以前からある穴、再現済み）。取り下げ済みの行を insert すると、理由が同じ project の持ち主の発言の中かを見ない（update でしか見ていない） / 採用。修正タスク T25 で、取り下げ済みの行の insert そのものを拒む
+- 2026-10-01 / T08 / 読み取りの関数の引数を `ReadonlyKysely<DB>` にすると、書き込み用の `Kysely<DB>` がそこへ代入できず（kysely の型で、書き込みのメソッドの戻り値が合わない）、記録サーバーの呼び出し口が 100 か所以上型エラーになった / 読み取りの関数は `Reads = Pick<ReadonlyKysely<DB>, "selectFrom" | "fn" | "dynamic">` を取るようにした（どちらの接続も渡せ、関数の中から書けない）。`openReader()` は plan どおり `ReadonlyKysely<DB>` を返す。変更欄を実態に合わせた（前: mcp.ts を含む 10 ファイル。後: 読み取りの関数を持つモジュールと acceptance の driver・temp-db.ts。mcp.ts は変わらず）
+- 2026-10-01 / T08・T25 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる。review-shipping は 10 分無応答で打ち切られた（3 度目）。頼んだ検査のうち、`openReader()` を `Kysely<DB>` に戻すと `@ts-expect-error` が未使用になって型検査が落ちること、server/src に取り下げ済みの行を insert する所が無いこと、tsconfig が src・test・evals を含むことを、自分で確かめた

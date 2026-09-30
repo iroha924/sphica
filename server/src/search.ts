@@ -1,8 +1,8 @@
 // Search over records (units) and retained sources. Ranked word search (FTS5 bm25) finds candidates; a candidate counts as a hit only
 // when it holds more than half of the question's content terms (text.ts queryTerms). Weaker matches are counted, not shown, so a question
 // with no answer comes back empty instead of returning whatever shares one word with it.
-import { type Kysely, sql } from "kysely";
-import type { DB } from "./db-types.ts";
+import { sql } from "kysely";
+import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { ftsQuery, queryTerms, terms } from "./text.ts";
 
@@ -45,7 +45,7 @@ export type UnitQuery = {
 const strong = (matched: number, of: number) => matched * 2 > of;
 
 export async function searchUnits(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   q: UnitQuery,
 ): Promise<{ hits: UnitHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
@@ -170,7 +170,7 @@ export type Successor = {
  * The records at the end of a record's supersedes chain: each adopted replacement is followed until one that nothing replaced, so a
  * record replaced twice leads to the one that holds now. A visited set keeps a cycle from looping.
  */
-export async function liveSuccessors(db: Kysely<DB>, id: number): Promise<Successor[]> {
+export async function liveSuccessors(db: Reads, id: number): Promise<Successor[]> {
   const seen = new Set([id]);
   const found: Successor[] = [];
   const replaced = new Set<number>();
@@ -223,7 +223,7 @@ type UnitRow = {
 
 /** Runs the term check on one page of candidates, adding the hits; returns how many were weaker. */
 async function judgeUnits(
-  db: Kysely<DB>,
+  db: Reads,
   rows: UnitRow[],
   wanted: string[],
   hits: (UnitHit & { rank: number })[],
@@ -328,7 +328,7 @@ export type SourceHit = {
  * `owner` narrows them to the owner's own messages outside the given sessions, before the caps, so other text never uses them up.
  */
 export async function searchSources(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   question: string,
   limit: number,

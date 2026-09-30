@@ -2,7 +2,7 @@
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import {
   EVIDENCE_ROLES,
@@ -219,7 +219,7 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
 }
 
 export async function checkRecord(
-  db: Kysely<DB>,
+  db: Reads,
   target: Target,
   raw: unknown,
   facts: RepoFacts = prepareRecord(target.root, raw),

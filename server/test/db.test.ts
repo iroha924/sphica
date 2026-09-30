@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
-import { sql } from "kysely";
+import { type Kysely, sql } from "kysely";
 import { openReader, SCHEMA_REVISION } from "../src/db.ts";
+import type { DB } from "../src/db-types.ts";
 import { connectWriter, INGEST_TRIGGER_WRITES } from "../src/db-write.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { connectReader } from "../src/sqlite.ts";
@@ -94,6 +95,19 @@ test("the MCP and search connection can read but not write", async () => {
   assert.match(attempt(reader, "create table x (a)") ?? "", /readonly|not authorized/);
   assert.match(attempt(reader, "attach database ':memory:' as x") ?? "", /not authorized/);
   assert.match(attempt(reader, "select load_extension('x')") ?? "", /not authorized/);
+});
+
+// The reader is read-only by type too: a write through it does not compile, so it never reaches the connection that would refuse it
+test("a write through the reader's handle is a type error", async () => {
+  const r = openReader(db.file);
+  try {
+    const insert = r.insertInto("project");
+    // @ts-expect-error the read-only handle's insertInto is a type error, so the statement cannot be written
+    const write = () => insert.values({ key: "git:github.com/o/typed", name: "o/typed" }).execute();
+    await assert.rejects(write(), /not authorized|readonly/i);
+  } finally {
+    await r.destroy();
+  }
 });
 
 test("the ingest connection can write rows but cannot change the schema", () => {
@@ -250,7 +264,10 @@ test("the capture connection writes only through its views, and FTS is filled by
   try {
     const hit = await sql<{
       n: number;
-    }>`select count(*) as n from source_fts where source_fts match '"自動"'`.execute(r);
+      // A raw statement needs kysely's executor, which the read-only type does not show; the connection itself still only reads
+    }>`select count(*) as n from source_fts where source_fts match '"自動"'`.execute(
+      r as unknown as Kysely<DB>,
+    );
     assert.equal(hit.rows[0]?.n, 1, "stored in FTS");
     assert.equal(
       (await r.selectFrom("edit_observation").selectAll().where("session_id", "=", "無い").execute()).length,

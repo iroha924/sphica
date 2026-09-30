@@ -1,7 +1,8 @@
 // The full view of one record or source for MCP read: a record's text, options, the exact words cited as evidence and adoption with who
 // said them, its links and state history, and each anchor checked against the working tree now.
-import type { Kysely, Selectable } from "kysely";
+import type { Selectable } from "kysely";
 import { checkAnchor } from "./anchors.ts";
+import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline } from "./panel.ts";
 import { head } from "./text.ts";
@@ -27,7 +28,7 @@ export const speaker = (s: {
 
 /** A record by key (`trace:<session>/<key>`, `harvest:<n>/<key>`, `glean:<key>`) or by `u<id>`, as text; null when there is none. */
 export async function readUnit(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   ref: string,
   root: string | null,
@@ -63,7 +64,7 @@ export async function readUnit(
 }
 
 async function describe(
-  db: Kysely<DB>,
+  db: Reads,
   u: Selectable<DB["unit"]>,
   root: string | null,
   asOf: string | undefined,
@@ -253,7 +254,7 @@ async function describe(
 }
 
 /** A retained source by `s<id>`, with who wrote it and where it lives; null when there is none. */
-export async function readSource(db: Kysely<DB>, projectId: number, ref: string): Promise<string | null> {
+export async function readSource(db: Reads, projectId: number, ref: string): Promise<string | null> {
   // s<id>@<byte> reads on from that byte: a source can hold more than one reply carries
   const m = /^s([1-9][0-9]{0,15})(?:@(\d{1,9}))?$/.exec(ref);
   if (!m) return null;

@@ -3,7 +3,7 @@
 // evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { cleanGit } from "./git.ts";
 import { itemId } from "./github.ts";
@@ -250,7 +250,7 @@ export function prepareGlean(root: string | null, raw: unknown, probe?: Probe): 
  * with no adoption, are kept as unsourced (the owner remembering is not a source).
  */
 export async function checkGlean(
-  db: Kysely<DB>,
+  db: Reads,
   target: Target,
   raw: unknown,
   facts: GleanFacts = prepareGlean(target.root, raw),
@@ -549,7 +549,7 @@ export async function checkGlean(
  * and the last forgotten revision, which new text numbers after.
  */
 async function forgottenExcerpt(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   x: Excerpt,
 ): Promise<{ same: boolean; last: number }> {

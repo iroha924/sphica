@@ -218,7 +218,20 @@ test("the small checks: lines, retraction spans and times, whole characters, dat
   refuses(() => retract(-1, 3), /constraint failed/);
   refuses(() => retract(0, 3, at("2026-01-01T00:00:00Z")), /constraint failed/);
   refuses(() => retract(1, 3), /inside a character/);
-  // Written already retracted, the reason's span is checked the same way
+  // A row is never written already retracted: the retraction's own update is what checks the owner's words it cites
+  const elsewhere2 = message(db, other, { id: "o1", text: "Not here.", session: "o-s" });
+  refuses(
+    () =>
+      evidence(u, src, {
+        role: "proposes",
+        retracted_at: now,
+        retraction_reason: "wrong",
+        retraction_source_id: elsewhere2,
+        retraction_span_start: 0,
+        retraction_span_end: 3,
+      }),
+    /written live, then retracted/,
+  );
   refuses(
     () =>
       evidence(u, src, {
@@ -229,7 +242,7 @@ test("the small checks: lines, retraction spans and times, whole characters, dat
         retraction_span_start: 1,
         retraction_span_end: 3,
       }),
-    /inside a character/,
+    /written live, then retracted/,
   );
   const decided = unit({ key: "d9", kind: "decision" });
   refuses(
@@ -241,7 +254,7 @@ test("the small checks: lines, retraction spans and times, whole characters, dat
         retraction_span_start: 1,
         retraction_span_end: 3,
       }),
-    /inside a character/,
+    /written live, then retracted/,
   );
   retract(0, 3);
   const late = unit({ key: "late", kind: "finding", created_at: at("2026-12-01T00:00:00Z") });

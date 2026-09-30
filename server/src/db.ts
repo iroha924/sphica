@@ -3,6 +3,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import { Kysely, ParseJSONResultsPlugin, SqliteDialect, sql } from "kysely";
+import type { ReadonlyKysely } from "kysely/readonly";
 import type { DB } from "./db-types.ts";
 import { adapt } from "./kysely-node-sqlite.ts";
 import { connectReader, dbFile } from "./sqlite.ts";
@@ -33,9 +34,15 @@ export function kyselyOn(connect: () => DatabaseSync): Kysely<DB> {
   });
 }
 
+/**
+ * What a reading function takes: only the query starters that read. The read-only connection's handle and a writing one both fit, and
+ * neither can be written through from inside the function.
+ */
+export type Reads = Pick<ReadonlyKysely<DB>, "selectFrom" | "fn" | "dynamic">;
+
 /** A read-only connection, used by the read MCP server, the delivery hooks, and the projects in `doctor`. */
-export function openReader(file: string = dbFile()): Kysely<DB> {
-  return kyselyOn(() => connectReader(file));
+export function openReader(file: string = dbFile()): ReadonlyKysely<DB> {
+  return kyselyOn(() => connectReader(file)) as unknown as ReadonlyKysely<DB>;
 }
 
 /**

@@ -1,6 +1,6 @@
 // What Sphica holds for one project: current work and coverage (captured, extracted, and still waiting), for MCP status and the CLI.
-import { type Kysely, sql } from "kysely";
-import type { DB } from "./db-types.ts";
+import { sql } from "kysely";
+import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
 import { head, plural } from "./text.ts";
@@ -21,7 +21,7 @@ type Coverage = {
 
 /** Untraced sessions, split by whether their last owner message is within PENDING_DAYS of now (status and session start share this). */
 export async function pendingCount(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   now: Date = new Date(),
 ): Promise<{ recent: number; older: number }> {
@@ -36,7 +36,7 @@ export async function pendingCount(
   return { recent: Number(r?.recent ?? 0), older: Number(r?.older ?? 0) };
 }
 
-async function coverage(db: Kysely<DB>, projectId: number, now: Date): Promise<Coverage> {
+async function coverage(db: Reads, projectId: number, now: Date): Promise<Coverage> {
   const count = async (q: Promise<{ n: number | string | bigint } | undefined>) => Number((await q)?.n ?? 0);
   const units = (where: (q: ReturnType<typeof unitBase>) => ReturnType<typeof unitBase>) =>
     count(
@@ -93,12 +93,7 @@ async function coverage(db: Kysely<DB>, projectId: number, now: Date): Promise<C
   return { sessions, pending, emptySessions, sources, active, candidates, quarantined, work };
 }
 
-export async function status(
-  db: Kysely<DB>,
-  projectId: number,
-  name: string,
-  now = new Date(),
-): Promise<string> {
+export async function status(db: Reads, projectId: number, name: string, now = new Date()): Promise<string> {
   const c = await coverage(db, projectId, now);
   const lines = [
     `${name}`,

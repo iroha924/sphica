@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import type { SOURCE_KINDS } from "./knowledge.ts";
 import { sha256 } from "./text.ts";
@@ -481,7 +481,7 @@ export async function storeItems(
 
 /** The id of the item revision just written through ingest_source, which returns none. The item key is unique among items. */
 export async function itemId(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   kind: string,
   externalId: string,
@@ -533,7 +533,7 @@ export async function linkIssues(
 }
 
 /** The current revision of every source of a pull request and the issues it closes, in time order, with whether a run looked at each. */
-export async function pullSources(db: Kysely<DB>, projectId: number, number: number) {
+export async function pullSources(db: Reads, projectId: number, number: number) {
   const artifacts = [
     `pr:${number}`,
     ...(

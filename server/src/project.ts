@@ -9,9 +9,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Kysely } from "kysely";
 import { leaves } from "./anchors.ts";
-import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 import { sphicaHome } from "./sqlite.ts";
 
 export type Place = { key: string; root: string; name: string };
@@ -160,7 +159,7 @@ export function nameLocal(dir: string, name: string): Place {
 }
 
 /** The project id, or null (only `sphica init` creates one). */
-export async function projectId(db: Kysely<DB>, key: string): Promise<number | null> {
+export async function projectId(db: Reads, key: string): Promise<number | null> {
   const r = await db.selectFrom("project").select("id").where("key", "=", key).executeTakeFirst();
   return r?.id ?? null;
 }
