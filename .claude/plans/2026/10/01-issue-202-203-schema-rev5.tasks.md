@@ -63,7 +63,7 @@ revision 5 を開き、表を作り直す移行と、止める行・直した行
 
 unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規則が 1 つになる。reader の書き込みは型エラーになる。
 
-- [ ] T04: unit の残りの列を凍結し、revision は 1 ずつしか上がらないようにする
+- [x] T04: unit の残りの列を凍結し、revision は 1 ずつしか上がらないようにする
   - 種別: 修正
   - 計画: S3, S4
   - 依存: T03（revision 5 の schema と移行が要る）
@@ -71,15 +71,17 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → active な unit の `no_code_surface`・`created_at`・`revision` と、candidate の `extraction`・`unsourced` の更新が通ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → それらの更新が拒まれ、移行した DB が新規と同じ定義のテストが通る
   - コミット: `fix(db): freeze the remaining unit columns and let revision rise only by one (T04)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 直す前の schema では新しいテストが Missing expected exception で落ちた（red）。直した後 `node --test test/schema.test.ts test/migrate.test.ts` → 全件 pass（schema 24・migrate 17）。`bun run verify` → exit 0
 
-- [ ] T05: 状態の遷移表を入れ、合わない現在の状態を移行で candidate に戻す
+- [x] T05: 状態の遷移表を入れ、合わない現在の状態を移行で candidate に戻す
   - 種別: 修正
   - 計画: S3, S4
   - 依存: T03（origin の migration の run と、修復の一覧の仕組みが要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/cli.ts`, `server/src/glean.ts`, `plugin/skills/glean/SKILL.md`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/admin.test.ts`, `server/test/extract.test.ts`, `server/test/forget.test.ts`, `server/test/search.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → active→active、superseded→active、withdrawn→active、最初の行が withdrawn から、null→active、後継が active でない superseded が通ってしまい落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/record.test.ts test/forget.test.ts` → 遷移表の外が拒まれ、active な後継の無い superseded の unit を入れた rev4 の DB の移行で、その unit が candidate になり、lifecycle が最後の state と一致し、revision が 1 増え、一覧に出るテストが通る
   - コミット: `fix(db): allow only the listed lifecycle transitions (T05)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="listed transitions" test/schema.test.ts` → 直す前の schema では落ちた（red）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/admin.test.ts test/extract.test.ts test/record.test.ts test/forget.test.ts` → 全件 pass。移行のテストは、後継が withdrawn の superseded の unit が candidate に戻り、最後の state が migration の run で、revision が 1 増え、一覧に出ることを見る（後継が candidate の unit は superseded のまま）。`bun run verify` → exit 0。review-shipping: 修復の条件を変えると移行のテストが落ちることを確認済み。指摘 1 件（superseded への withdraw）は同じコミットで直した
 
 - [ ] T06: 後継を 1 つにし、kind の組を限り、後継が withdrawn になったら元の unit を candidate に戻す
   - 種別: 修正
@@ -222,3 +224,8 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T02 / Codex のレビュー（4873c4c）: 指摘 0 件（テストは read-only のため Codex 側では未実行） / そのまま
 - 2026-10-01 / T03 / review-shipping が、配布物の検査（`check-tarball.mjs`）は中身の無い rev4 の DB で「Backed up」「Migrated」の行だけを見ていると指摘 / T19 で、記録の入った DB を配布物の CLI で移行する形にできるかを見る
 - 2026-10-01 / T03・T06・T12・T19 / commit-msg の検査は件名を 100 文字までに限る / コミット件名の欄を短くした（T03: every table → tables、T06: its successor is withdrawn → it is withdrawn、T12: duplicate records → duplicates、T19: in the schema skill を削った）
+- 2026-10-01 / T05 / 変更欄に `server/src/cli.ts`（doctor の「last extraction」が migration の run を数えない）と、そのテストの `server/test/admin.test.ts`、新しい規則に合わせて準備を直した `server/test/forget.test.ts`（最初の state を withdrawn にしていた）と `server/test/search.test.ts`（unit の created_at を後から書き換えていた。T04 の凍結に当たる）を足した
+- 2026-10-01 / T05 / 移行で candidate に戻す superseded の unit は「withdrawn でない後継が 1 つも無いもの」にした。plan の方針 2 は「active な後継の無い superseded」だが、後継が active から candidate に戻っただけの状態は遷移表の中で起こり、その unit は superseded のままが正しい / 遷移表（superseded→candidate は後継が全部 withdrawn のときだけ）と同じ条件に揃えた。範囲は変わらない
+- 2026-10-01 / T04・T05 / コミット前の出荷レビューを 1 回で済ませるため、2 つを 1 コミットにまとめる（件名の末尾は (T04, T05)）
+- 2026-10-01 / T05 / review-shipping が再現: superseded の unit への glean の withdraw は 0.6.14 では通ったが、遷移表の下では保存全体が読めないエラーで落ちる / 遷移表（合意済み）は変えず、`checkGlean` が withdraw の対象が superseded のとき（と、同じ保存の中で supersede されるとき）に名前入りのエラーを返すようにした。glean の Skill の表に 1 文足した。変更欄に `server/src/glean.ts`・`plugin/skills/glean/SKILL.md`・`server/test/extract.test.ts` を足した
+- 2026-10-01 / T03 / Codex のレビュー（dd892aa0）: 指摘 0 件。行を入れていない表は空のまま前後を比べている、という未検証の点は T18 で全表に行を入れて埋める

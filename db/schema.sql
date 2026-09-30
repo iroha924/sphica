@@ -249,9 +249,14 @@ create trigger unit_run_project before insert on unit
 when not exists (select 1 from extraction_run where id = new.run_id and project_id = new.project_id) begin
   select raise(abort, 'unit and run belong to different projects');
 end;
-create trigger unit_text_frozen before update of project_id, key, kind, stance, text, why, scope_note, revisit_when, content_hash, run_id
+-- Everything a unit was saved with is frozen, so a quarantined or unsourced unit cannot be relabelled and then activated
+create trigger unit_text_frozen before update of project_id, key, kind, stance, text, why, scope_note, revisit_when, no_code_surface,
+  extraction, extraction_reason, unsourced, run_id, created_at, content_hash
 on unit begin
   select raise(abort, 'unit text is never rewritten; record a successor');
+end;
+create trigger unit_revision_step before update of revision on unit when new.revision is not old.revision + 1 begin
+  select raise(abort, 'a unit''s revision rises by one with each change to its relations');
 end;
 create trigger unit_lifecycle_via_state before update of lifecycle on unit
 when new.lifecycle is not (select to_state from unit_state where unit_id = new.id order by id desc limit 1) begin
@@ -395,9 +400,20 @@ create table unit_state (
 ) strict;
 create index unit_state_order on unit_state (unit_id, id);
 create trigger unit_state_rules before insert on unit_state begin
+  select raise(abort, 'the first state of a unit is candidate, from no state')
+  where not exists (select 1 from unit_state where unit_id = new.unit_id)
+    and (new.from_state is not null or new.to_state <> 'candidate');
   select raise(abort, 'from_state must be the current lifecycle')
   where new.from_state is not (select lifecycle from unit where id = new.unit_id)
     and exists (select 1 from unit_state where unit_id = new.unit_id);
+  -- A successor's state is read from its history, not its lifecycle column: a row written in the same statement may not be applied yet
+  select raise(abort, 'not a lifecycle change a unit can make: withdrawn is final, and a superseded unit only returns to candidate once every successor is withdrawn')
+  where exists (select 1 from unit_state where unit_id = new.unit_id) and not (
+    (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
+    or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
+    or (new.from_state = 'superseded' and new.to_state = 'candidate' and not exists (
+      select 1 from unit_link l where l.to_unit = new.unit_id and l.kind = 'supersedes'
+        and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
   select raise(abort, 'an active decision or constraint needs unretracted evidence and adoption')
@@ -422,8 +438,9 @@ create trigger unit_state_rules before insert on unit_state begin
   where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
     and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
       where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
-  select raise(abort, 'superseded needs a supersedes link from its successor')
-  where new.to_state = 'superseded' and not exists (select 1 from unit_link where to_unit = new.unit_id and kind = 'supersedes');
+  select raise(abort, 'superseded needs a supersedes link from an active successor')
+  where new.to_state = 'superseded' and not exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+    where l.to_unit = new.unit_id and l.kind = 'supersedes' and s.lifecycle = 'active');
 end;
 -- The one update allowed is the foreign key action clearing source_id after its source was forgotten
 create trigger unit_state_append_only before update on unit_state

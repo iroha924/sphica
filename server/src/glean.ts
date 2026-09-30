@@ -447,6 +447,15 @@ export async function checkGlean(
       if (got && got.s.author_kind !== "owner")
         errors.push(`${what}: only the owner's words can retract, withdraw, or resolve`);
     }
+    // A superseded record is no longer the live answer: only its successors' withdrawal brings it back, and nothing else moves it
+    if (op.op === "withdraw") {
+      if (u.lifecycle === "superseded")
+        errors.push(
+          `${what}: ${op.unit} is superseded, so there is nothing live to withdraw (withdraw the record that replaced it, if that one no longer holds)`,
+        );
+      else if (units.units.some((n) => n.supersedes === u.id))
+        errors.push(`${what}: a record in this save supersedes ${op.unit}, which already replaces it`);
+    }
     if (op.op === "resolve_conflict") {
       const open = await db
         .selectFrom("unit_link as l")

@@ -350,6 +350,25 @@ test("doctor says stuck recordings are sent again after the next turn", () => {
   assert.match(r.out, /sent again after the next turn/, r.out);
 });
 
+test("doctor does not count a migration's own run as an extraction", () => {
+  const home = tmp();
+  cli(home, "init");
+  const file = path.join(home, ".sphica", "sphica.db");
+  const raw = connectWriter("owner", file);
+  raw.prepare("insert into project (key, name) values ('git:x/y', 'x/y')").run();
+  const saved = (origin: string, target: string) =>
+    raw
+      .prepare(
+        "insert into extraction_run (project_id, origin, target, status, started_at, finished_at) values (1, ?, ?, 'saved', ?, ?)",
+      )
+      .run(origin, target, at("2026-09-01T00:00:00Z"), at("2026-09-01T00:00:00Z"));
+  saved("migration", "revision:5");
+  assert.doesNotMatch(cli(home, "doctor").out, /last extraction/);
+  saved("trace", "session:s");
+  raw.close();
+  assert.match(cli(home, "doctor").out, /last extraction/);
+});
+
 test("the owner's GitHub account is bound once; the same id again is kept, another is reported and not added", async () => {
   const file = path.join(tmp(), "sphica.db");
   await quiet(() => dbInit(file));

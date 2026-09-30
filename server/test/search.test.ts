@@ -330,12 +330,15 @@ test("reading as of a past time shows no retraction made after it", async () => 
           ],
           anchors: [{ path: "package.json", role: "applies_to" }],
         }),
-        decision("npm", m, "It installs faster."),
       ],
     });
     // A record, an anchor, and a link that came after the as-of time below
     const run0 = Number(db.owner.prepare("select id from extraction_run limit 1").get()?.id);
-    db.owner.exec("update unit set created_at = '2099-01-01T00:00:00.000Z' where key = 'trace:ext-s1/npm'");
+    db.owner
+      .prepare(
+        "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (?, 'trace:ext-s1/npm', 'finding', 'npm', 'supported', ?, '2099-01-01T00:00:00.000Z', zeroblob(32))",
+      )
+      .run(p, run0);
     db.owner
       .prepare(
         "insert into unit_anchor (unit_id, path, role, run_id, added_at) select id, 'later.json', 'applies_to', ?, '2099-01-01T00:00:00.000Z' from unit where key = 'trace:ext-s1/pnpm'",

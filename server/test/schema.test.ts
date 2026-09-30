@@ -195,6 +195,88 @@ test("units start as candidates and change lifecycle only through state events t
   refuses(() => state(u, "candidate", "withdrawn"), /from_state must be the current lifecycle/);
 });
 
+test("what a unit was saved with stays as saved: a quarantined unit is never marked supported, and revision rises only by one", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit({ key: "u1", kind: "decision", no_code_surface: "a policy, no code" });
+  state(u, null, "candidate");
+  evidence(u, src);
+  adoption(u, src);
+  state(u, "candidate", "active");
+  refuses(() => sql("update unit set no_code_surface = null where id = ?", u), /never rewritten/);
+  refuses(
+    () => sql("update unit set created_at = ? where id = ?", at("2020-01-01T00:00:00Z"), u),
+    /never rewritten/,
+  );
+  const revision = Number(one("select revision from unit where id = ?", u).revision);
+  refuses(() => sql("update unit set revision = 1 where id = ?", u), /rises by one/);
+  refuses(() => sql("update unit set revision = revision + 2 where id = ?", u), /rises by one/);
+  refuses(() => sql("update unit set revision = revision where id = ?", u), /rises by one/);
+  assert.equal(one("select revision from unit where id = ?", u).revision, revision);
+  // The path a quarantined or unsourced unit would take to become active: marked supported or sourced while still a candidate
+  const q = unit({
+    key: "u2",
+    kind: "finding",
+    extraction: "quarantined",
+    extraction_reason: "quote not found",
+  });
+  state(q, null, "candidate");
+  refuses(
+    () => sql("update unit set extraction = 'supported', extraction_reason = null where id = ?", q),
+    /never rewritten/,
+  );
+  refuses(() => sql("update unit set extraction_reason = 'other' where id = ?", q), /never rewritten/);
+  const n = unit({ key: "u3", kind: "finding", unsourced: 1 });
+  refuses(() => sql("update unit set unsourced = 0 where id = ?", n), /never rewritten/);
+  // Relations still raise the revision, one step at a time
+  evidence(q, src);
+  assert.equal(one("select revision from unit where id = ?", q).revision, 3);
+});
+
+test("a lifecycle moves only along the listed transitions, and withdrawn is final", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const fresh = unit({ key: "fresh", kind: "finding" });
+  evidence(fresh, src);
+  refuses(() => state(fresh, null, "active"), /first state of a unit is candidate/);
+  refuses(() => state(fresh, "withdrawn", "candidate"), /first state of a unit is candidate/);
+  const old = unit({ key: "old", kind: "finding" });
+  evidence(old, src);
+  state(old, null, "candidate");
+  refuses(() => state(old, null, "candidate"), /current lifecycle/);
+  refuses(() => state(old, "candidate", "candidate"), /not a lifecycle change/);
+  state(old, "candidate", "active");
+  refuses(() => state(old, "active", "active"), /not a lifecycle change/);
+  const next = unit({ key: "next", kind: "finding" });
+  evidence(next, src);
+  state(next, null, "candidate");
+  insert(db, "unit_link", {
+    from_unit: next,
+    to_unit: old,
+    kind: "supersedes",
+    run_id: Number(one("select run_id from unit where id = ?", next).run_id),
+    added_at: now,
+  });
+  // A successor that is not active yet replaces nothing
+  refuses(() => state(old, "active", "superseded"), /needs a supersedes link from an active successor/);
+  state(next, "candidate", "active");
+  state(old, "active", "superseded");
+  // Two live answers: the old one cannot come back beside its successor
+  refuses(() => state(old, "superseded", "active"), /not a lifecycle change/);
+  refuses(() => state(old, "superseded", "withdrawn"), /not a lifecycle change/);
+  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
+  state(next, "active", "candidate");
+  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
+  state(next, "candidate", "withdrawn");
+  for (const to of ["candidate", "active", "superseded"])
+    refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
+  state(old, "superseded", "candidate");
+  state(old, "candidate", "active");
+  state(old, "active", "withdrawn");
+  assert.deepEqual(
+    [old, next].map((u) => one("select lifecycle from unit where id = ?", u).lifecycle),
+    ["withdrawn", "withdrawn"],
+  );
+});
+
 test("an unsourced or quarantined unit never becomes active", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const u = unit({ key: "u2", kind: "constraint", unsourced: 1 });

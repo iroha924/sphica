@@ -1138,6 +1138,23 @@ test("glean: a successor that becomes active later supersedes the record it repl
       ],
     });
     assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["active", "superseded"]);
+    // The replaced record is no longer live: withdrawing it is refused by name, before anything is written
+    await assert.rejects(
+      glean({
+        ops: [
+          {
+            op: "withdraw",
+            unit: "trace:ext-s1/storage",
+            revision: db.owner.prepare("select revision from unit where key = 'trace:ext-s1/storage'").get()
+              ?.revision,
+            reason_source: `s${said}`,
+            reason_quote: "Postgres に変える。",
+          },
+        ],
+      }),
+      /trace:ext-s1\/storage is superseded, so there is nothing live to withdraw/,
+    );
+    assert.equal(state("trace:ext-s1/storage"), "superseded");
   } finally {
     await db.done();
   }

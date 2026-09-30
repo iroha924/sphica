@@ -182,7 +182,8 @@ test("superseded, withdrawn, and candidate units keep their state and lose only 
   move(old, "active", "superseded");
   const gone = unit("gone", "finding");
   evidence(gone, src);
-  move(gone, null, "withdrawn");
+  move(gone, null, "candidate");
+  move(gone, "candidate", "withdrawn");
   const waiting = unit("waiting", "finding");
   evidence(waiting, src);
   move(waiting, null, "candidate");

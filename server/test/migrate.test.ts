@@ -328,6 +328,103 @@ test("migrating revision 4 keeps every column of every row", () => {
   assert.deepEqual(rows(), before);
 });
 
+// Revision 4 let a superseded unit outlive its successor. It goes back to candidate, through a state the migration itself writes
+test("migrating revision 4 puts a superseded unit whose successor is withdrawn back to candidate, and says so", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  const finding = (key: string) =>
+    run(
+      "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (1, ?, 'finding', ?, 'supported', 1, ?, ?)",
+      key,
+      key,
+      now,
+      sha256(key),
+    );
+  const move = (unit: number, from: string | null, to: string) =>
+    run(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', 1)",
+      unit,
+      from,
+      to,
+      now,
+    );
+  const supersedes = (from: number, to: number) =>
+    run(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'supersedes', 1, ?)",
+      from,
+      to,
+      now,
+    );
+  // 2 was replaced by 3, which was withdrawn. 4 was replaced by 5, which is still a candidate: that one stays superseded
+  for (const key of ["left", "gone", "kept", "waiting"]) finding(key);
+  for (const [old, next] of [
+    [2, 3],
+    [4, 5],
+  ] as const) {
+    move(old, null, "candidate");
+    move(next, null, "candidate");
+    supersedes(next, old);
+    move(old, "candidate", "superseded");
+  }
+  move(3, "candidate", "withdrawn");
+  const revision = (unit: number) =>
+    Number(
+      (raw.prepare("select revision from unit where id = ?").get(unit) as { revision: number }).revision,
+    );
+  const before = revision(2);
+  const said = migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare("select id, lifecycle from unit order by id")
+      .all()
+      .map((u) => [u.id, u.lifecycle]),
+    [
+      [1, "active"],
+      [2, "candidate"],
+      [3, "withdrawn"],
+      [4, "superseded"],
+      [5, "candidate"],
+    ],
+  );
+  assert.equal(revision(2), before + 1);
+  assert.deepEqual(
+    {
+      ...raw
+        .prepare(
+          "select s.from_state, s.to_state, s.reason, r.origin, r.target, r.status, r.project_id from unit_state s join extraction_run r on r.id = s.run_id where s.unit_id = 2 order by s.id desc limit 1",
+        )
+        .get(),
+    },
+    {
+      from_state: "superseded",
+      to_state: "candidate",
+      reason: "schema revision 5: a superseded record whose successors are all withdrawn, or that has none",
+      origin: "migration",
+      target: "revision:5",
+      status: "saved",
+      project_id: 1,
+    },
+  );
+  assert.equal(
+    Number(
+      (
+        raw.prepare("select count(*) as n from extraction_run where origin = 'migration'").get() as {
+          n: number;
+        }
+      ).n,
+    ),
+    1,
+  );
+  assert.match(
+    said,
+    /Changed while migrating to revision 5: 1 row[^\n]*\n\s*a superseded record whose successors are all withdrawn, or that has none: 1 row\n\s*unit 2 left \(superseded\) → back to candidate/,
+  );
+  // The unit is judged again like any candidate, and the rules of revision 5 apply to it
+  move(2, "candidate", "withdrawn");
+  assert.throws(() => move(2, "withdrawn", "candidate"), /not a lifecycle change/);
+});
+
 // Rebuilding a table drops its counter with it. A counter can be above every id left: the highest rows were removed, or all of them
 test("migrating revision 4 keeps the id counter of every table, so an id once used is never handed out again", () => {
   const raw = create("old.db", REV4);

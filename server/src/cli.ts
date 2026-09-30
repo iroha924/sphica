@@ -185,6 +185,8 @@ async function doctor(cwd: string): Promise<void> {
               .select((r) => r.fn.max("r.finished_at").as("at"))
               .whereRef("r.project_id", "=", "p.id")
               .where("r.status", "=", "saved")
+              // A migration's own run is not an extraction
+              .where("r.origin", "<>", "migration")
               .as("extracted"),
           ])
           .orderBy("p.name")
