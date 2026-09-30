@@ -31,13 +31,14 @@ base: main
   - コミット: `test(search): add an offline retrieval benchmark with answerable and unanswerable questions (T01)`
   - 結果: `cd server && node evals/retrieval/run.ts` → 正解あり 48・正解なし 12。全体 R@1/5/10 47.9%・MRR 0.479・正解なしで返した率 0.0%。overlap 79.2%、no overlap 16.7%。言語別 en>en 50.0%、en>ja 75.0%、ja>en 25.0%、ja>ja 41.7%（いずれも R@1）。`node --test test/retrieval-bench.test.ts` → 1 pass（0.3 秒）。質問を 1 件消すと actual 47 / expected 48 で落ちた（戻した）。`bun run verify` → exit 0
 
-- [ ] T02: `--compare <ref>` で旧版の worktree に DB を作って並べる
+- [x] T02: `--compare <ref>` で旧版の worktree に DB を作って並べる
   - 種別: 追加
   - 計画: S1
   - 依存: T01（写すランナーとコーパスが要る）
   - 変更: `server/evals/retrieval/run.ts`
   - 完了条件: `cd server && node evals/retrieval/run.ts --compare main` → main と作業ツリーの 2 列で同じ指標を出す。ランナーの API が無い古い ref（例: `v0.5.0`）ではその旨で落ちる
   - コミット: `test(search): compare the retrieval benchmark against another ref, each with its own index (T02)`
+  - 結果: `cd server && node evals/retrieval/run.ts --compare main` → main と this tree の 2 列（1.7 秒、worktree は片付く）。作業ツリーの STOP に語を一時的に足すと this tree だけが 47.9% → 50.0% に変わり、main は変わらない（戻した）。`--compare v0.4.0` → 「the benchmark does not run against v0.4.0 (its source lacks what the runner uses)」で落ちる。`bun run verify` → exit 0
 
 ## P2: 受け入れケースの 4 種
 
@@ -161,3 +162,4 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 
 ## 記録
 - 2026-09-30 / T01 / テストからも同じ計算を呼ぶため、計算を bench.ts に分け、run.ts は出力だけにした。knip の entry に run.ts を足した / 変更欄（前: corpus.json・run.ts・テスト、後: それに bench.ts と knip.json を足した）。overlap の質問で外れた 5 件は、質問にだけある語で「半分より多く」の規則を満たさないためで、ラベルは正しい
+- 2026-09-30 / T02 / 完了条件の古い ref の例 v0.5.0 は、ランナーが使う API がそろっていて通った / 落ちることは v0.4.0（generation 1）で確かめた（前: `v0.5.0`、後: `v0.4.0`）
