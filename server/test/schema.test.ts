@@ -323,12 +323,56 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
   state(next, "candidate", "withdrawn");
   for (const to of ["candidate", "active", "superseded"])
     refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
-  state(old, "superseded", "candidate");
+  // Its last live successor withdrawn, the old record is a candidate again, by a state the schema writes
+  assert.deepEqual(
+    {
+      ...one(
+        "select from_state, to_state, reason from unit_state where unit_id = ? order by id desc limit 1",
+        old,
+      ),
+    },
+    { from_state: "superseded", to_state: "candidate", reason: "its successor was withdrawn" },
+  );
   state(old, "candidate", "active");
   state(old, "active", "withdrawn");
   assert.deepEqual(
     [old, next].map((u) => one("select lifecycle from unit where id = ?", u).lifecycle),
     ["withdrawn", "withdrawn"],
+  );
+});
+
+test("a record has one live successor at a time, of a kind that can replace it", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const link = (from: number, to: number) =>
+    insert(db, "unit_link", {
+      from_unit: from,
+      to_unit: to,
+      kind: "supersedes",
+      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
+      added_at: now,
+    });
+  const made = (key: string, kind: string) => {
+    const u = unit({ key, kind });
+    evidence(u, src);
+    state(u, null, "candidate");
+    return u;
+  };
+  const old = made("old", "decision");
+  refuses(() => link(made("finding", "finding"), old), /supersedes one of its own kind/);
+  const first = made("first", "constraint");
+  link(first, old);
+  // A candidate successor holds the place: a second one would make two answers once both are adopted
+  const second = made("second", "decision");
+  refuses(() => link(second, old), /already has a successor that is not withdrawn/);
+  state(first, "candidate", "withdrawn");
+  link(second, old);
+  assert.deepEqual(
+    db.owner
+      .prepare("select from_unit from unit_link where to_unit = ? order by from_unit")
+      .all(old)
+      .map((r) => r.from_unit),
+    [first, second],
+    "the withdrawn successor's link stays",
   );
 });
 

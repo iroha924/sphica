@@ -83,14 +83,15 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): allow only the listed lifecycle transitions (T05)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="listed transitions" test/schema.test.ts` → 直す前の schema では落ちた（red）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/admin.test.ts test/extract.test.ts test/record.test.ts test/forget.test.ts` → 全件 pass。移行のテストは、後継が withdrawn の superseded の unit が candidate に戻り、最後の state が migration の run で、revision が 1 増え、一覧に出ることを見る（後継が candidate の unit は superseded のまま）。`bun run verify` → exit 0。review-shipping: 修復の条件を変えると移行のテストが落ちることを確認済み。指摘 1 件（superseded への withdraw）は同じコミットで直した
 
-- [ ] T06: withdrawn でない後継を 1 つまでにし、kind の組を限り、後継が withdrawn になったら元の unit を candidate に戻す
+- [x] T06: withdrawn でない後継を 1 つまでにし、kind の組を限り、後継が withdrawn になったら元の unit を candidate に戻す
   - 種別: 修正
   - 計画: S3, S4, S6
   - 依存: T05（superseded→candidate の遷移が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0005.sql`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
+  - 変更: `.claude/plans/2026/10/01-issue-202-203-schema-rev5.plan.md`, `db/schema.sql`, `db/migrations/0005.sql`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `server/test/extract.test.ts`, `server/test/search.test.ts`
   - red: `cd server && node --test --test-timeout=60000 test/schema.test.ts` → 後継が withdrawn でない unit に 2 つ目の後継、finding が decision を supersede する link が通り、唯一の後継を withdraw しても元の unit が superseded のままで落ちる
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts test/record.test.ts test/extract.test.ts` → それらが拒まれ、後継を withdraw した後は元の unit に新しい後継を付けられ（withdrawn の後継の link は残る）、glean の withdraw で元の unit が支えが揃っていれば active に戻り、withdrawn でない後継が 2 つある rev4 の DB の移行で決めた 1 つが残って一覧に出るテストが通る
   - コミット: `fix(db): keep one successor per unit and bring the old unit back when it is withdrawn (T06)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="one live successor|brings back the record|keeps one live successor" test/schema.test.ts test/extract.test.ts test/migrate.test.ts` → 直す前のコードでは 3 本とも落ちた（red）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/extract.test.ts test/search.test.ts` → 全件 pass（種類の合わない supersede と 2 つ目の生きた後継は拒まれ、後継を取り下げると元の記録が candidate に戻って同じ保存で active になり、その後は新しい後継を付けられる。取り下げた後継の link は残る。移行は生きた後継を 1 つ残し、種類の合わない link を外して一覧に出す）。`bun run verify` → exit 0
 
 - [x] T07: 支えの規則を 1 つのビューにし、retract と anchor の retire でも同じ規則で拒む
   - 種別: 修正
@@ -250,3 +251,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T09 / `bun run verify` が 1 回、テストが 1 本 900 秒以上かかって落ち、acceptance の 1 件が本物の `gh` に届いた。単独でも、流し直しても通った（2 分） / 再現しないので手を入れない。実行中のスリープを疑うが未確認
 - 2026-10-01 / T09 / review-shipping（1 回目は 10 分無応答で打ち切り、投げ直し）: 指摘 2 件（forget のプランの検査が preview だけで apply を見ていない、関数の説明が 2 つ並んでいる） / 同じコミットで直した
 - 2026-10-01 / T06 / 「withdrawn でない後継は 1 つまで」への plan の変更に、持ち主が Go。plan を approved に戻した（コミットは T06 と一緒）
+- 2026-10-01 / T06 / 変更欄: `server/test/record.test.ts` を外し（名前入りの check のエラーは extract.test.ts の glean の保存で見た）、Go を受けた plan と、後継を 2 つ並べる前提だった検索のテスト `server/test/search.test.ts` を足した
+- 2026-10-01 / T06 / review-shipping: 指摘なし。同じ glean の保存で「A の candidate の後継 B を取り下げ」かつ「新しい記録で A を置き換え」は、名前入りのエラーで 2 回の保存に分けることになる（check は保存の前の状態で見る）。使い勝手の制限で壊れてはいないので直さない

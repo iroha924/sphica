@@ -354,12 +354,30 @@ export async function checkRecord(
     (linked.length
       ? await db
           .selectFrom("unit")
-          .select(["id", "key", "lifecycle"])
+          .select(["id", "key", "kind", "lifecycle"])
           .where("project_id", "=", target.projectId)
           .where("key", "in", linked)
           .execute()
       : []
     ).map((u) => [u.key, u]),
+  );
+  // A record has at most one successor that is not withdrawn: the one already there holds the place
+  const holders = new Map(
+    (others.size
+      ? await db
+          .selectFrom("unit_link as l")
+          .innerJoin("unit as n", "n.id", "l.from_unit")
+          .select(["l.to_unit", "n.key", "n.lifecycle"])
+          .where("l.kind", "=", "supersedes")
+          .where(
+            "l.to_unit",
+            "in",
+            [...others.values()].map((o) => o.id),
+          )
+          .where("n.lifecycle", "<>", "withdrawn")
+          .execute()
+      : []
+    ).map((h) => [h.to_unit, h]),
   );
 
   // Logins that speak as a maintainer somewhere in this project: their commits and events carry no association of their own
@@ -563,7 +581,16 @@ export async function checkRecord(
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
       else if (claimed.has(old.id))
         errors.push(`${key}: another record in this save already supersedes ${u.supersedes}`);
-      else supersedes = old.id;
+      else if (!replaceable(u.kind, old.kind))
+        errors.push(
+          `${key}: a ${u.kind} cannot supersede ${u.supersedes}, a ${old.kind} (a record supersedes one of its own kind; a decision and a constraint can replace each other)`,
+        );
+      else if (holders.has(old.id)) {
+        const h = holders.get(old.id);
+        errors.push(
+          `${key}: ${u.supersedes} already has a successor, ${h?.key} (${h?.lifecycle}); withdraw it first, or supersede it instead`,
+        );
+      } else supersedes = old.id;
       if (supersedes !== null) claimed.add(supersedes);
     }
     const conflicts = u.conflicts.flatMap((k) => {
@@ -698,6 +725,11 @@ const contentHash = (u: UnitInput): Buffer =>
       ),
     ]),
   );
+
+/** Which kinds can replace which: the same kind, or a decision and a constraint either way. The schema checks the same pairs. */
+const replaceable = (successor: string, old: string): boolean =>
+  successor === old ||
+  (["decision", "constraint"].includes(successor) && ["decision", "constraint"].includes(old));
 
 /** Messages the schema's activation rules raise; anything else is a real failure. */
 export const ACTIVATION = /needs|cannot become active/;

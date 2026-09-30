@@ -803,8 +803,27 @@ export async function saveGlean(
           changed.push(`${op.unit}: superseded by a record of this save, so not withdrawn`);
           continue;
         }
+        const replaced = await trx
+          .selectFrom("unit_link as l")
+          .innerJoin("unit as o", "o.id", "l.to_unit")
+          .select(["o.id", "o.key"])
+          .where("l.from_unit", "=", p.unitId)
+          .where("l.kind", "=", "supersedes")
+          .where("o.lifecycle", "=", "superseded")
+          .execute();
         await move(trx, p.unitId, "withdrawn", `withdrawn: ${head(op.reason_quote, 200)}`, reason.id, runId);
         changed.push(`${op.unit}: withdrawn`);
+        // The schema brings back what this record replaced; it is judged again below like any candidate
+        for (const o of replaced) {
+          const now = await trx
+            .selectFrom("unit")
+            .select("lifecycle")
+            .where("id", "=", o.id)
+            .executeTakeFirstOrThrow();
+          if (now.lifecycle !== "candidate") continue;
+          changed.push(`${o.key}: no longer superseded`);
+          touched.set(o.id, o.key);
+        }
         continue;
       }
       // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order).

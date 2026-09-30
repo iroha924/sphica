@@ -664,7 +664,6 @@ test("the chain skips a replacement that stayed a candidate", async () => {
     const a = message(db, p, { id: "m1", text: "Use pnpm for installs." });
     const b = message(db, p, { id: "m2", text: "Go back to npm." });
     const c = message(db, p, { id: "m3", text: "Maybe yarn." });
-    const d = message(db, p, { id: "m4", text: "Move to bun." });
     await save(db, p, { units: [decision("pnpm", a, "Use pnpm for installs.")] });
     await save(db, p, {
       units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
@@ -682,7 +681,7 @@ test("the chain skips a replacement that stayed a candidate", async () => {
         },
       ],
     });
-    await save(db, p, { units: [decision("bun", d, "Move to bun.", { supersedes: "trace:ext-s1/npm" })] });
+    // A record holds one live successor at a time, so npm stays the answer while yarn waits for adoption
     const lifecycle = db.owner
       .prepare("select lifecycle from unit where key = 'trace:ext-s1/yarn'")
       .get()?.lifecycle;
@@ -690,7 +689,7 @@ test("the chain skips a replacement that stayed a candidate", async () => {
     const r = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
     assert.deepEqual(
       r.hits.map((h) => h.key),
-      ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
+      ["trace:ext-s1/npm", "trace:ext-s1/pnpm"],
     );
   } finally {
     await db.done();

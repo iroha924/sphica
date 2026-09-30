@@ -12,7 +12,7 @@ approved_at: 2026-10-01
 
 - schema を revision 4 → 5 に上げる。移行は 1 本で、ほぼ全部の表を作り直す。既存の行で新しい規則に合わないものは、直すか外して `sphica init` の出力に全件出す。Sphica が書かない行（DB を外から書き換えたもの）と、消すしかない source があるときだけ、何も変えずに止まって全件を出す
 - ingest 接続（記録サーバー）の書き込みを、表・操作・列ごとに許可したものだけにする。session の発言の直接の書き込み、全文索引の直接の操作、run を saved から戻すことを止める
-- unit の状態は決めた遷移表の外へ動かない。後継は 1 つだけで、後継が取り下げられたら元の unit は candidate に戻る。支えの規則は 1 つのビューにして、有効にするときと証拠を取り下げるときで同じものを使う
+- unit の状態は決めた遷移表の外へ動かない。取り下げられていない後継は 1 つまでで、後継が取り下げられたら元の unit は candidate に戻り、新しい後継を持てる。支えの規則は 1 つのビューにして、有効にするときと証拠を取り下げるときで同じものを使う
 - reader に書き込みを書くと型エラーになる。FK の列には必ず index があり、テストが守る。引用のある session を手で消すことは拒む
 - 重複を止める一意キー（編集の観測、生きている anchor）、3 つの表で同じ path の規則、細かい CHECK を足す。どのリリースも書かない値と表（`external_reference` など）を消す
 - #203 から外すもの: delivery の行の保持期間（#205 の判断待ち）、project の key の正規化（spool・登録・harvest をまたぐので別の計画）。PR は #202 を閉じ、#203 はこの 2 項目を残して開いたままにする
@@ -65,7 +65,7 @@ approved_at: 2026-10-01
    - `server/test/fixtures/schema-rev4.sql` を今の schema.sql の写しで足す
 2. 既存の行の扱い（3 類）
    - 値で直す: `line_end` だけある → null / 負の `retraction_span_start` → 0 / `retracted_at < added_at` → `added_at` / 文字を切る span → 文字の境界まで広げる / `unit_state.at < unit.created_at` → `created_at` / `finished_at < started_at` → `started_at` / 自分や別の unit を指す `replaced_by` → null / `http://`・`https://` で始まらない url → null / assistant の `indexed = 1` → 0 / path が規則に合わない review_comment の source → path と行を null / active なのに支えが足りない unit、active な後継の無い superseded の unit → candidate
-   - 外す: 重複した edit_observation（id の小さい方を残し、anchor は付け替える）/ path が規則に合わない edit_observation（指す anchor の `edit_observation_id` は null）と anchor / 重複した生きている anchor（id の大きい方を残し、古い方を retire して `replaced_by` に残す行）/ 2 つ目以降の後継の link（active な後継のうち id の最も大きいもの、無ければ id の最も大きいものを残す）と kind の組が合わない link / hash が unit と合わない alias。link の整理で残す後継を決めてから、状態の修復をする
+   - 外す: 重複した edit_observation（id の小さい方を残し、anchor は付け替える）/ path が規則に合わない edit_observation（指す anchor の `edit_observation_id` は null）と anchor / 重複した生きている anchor（id の大きい方を残し、古い方を retire して `replaced_by` に残す行）/ withdrawn でない後継が 2 つ以上ある unit の、2 つ目以降の link（withdrawn でない後継のうち、active で id の最も大きいもの、無ければ id の最も大きいものを残す。withdrawn の後継の link は残す）と kind の組が合わない link / hash が unit と合わない alias。link の整理で残す後継を決めてから、状態の修復をする
    - 止める（0005.check.sql）: どのリリースも書かない値を持つ行（消すと決めた値）、`external_reference` の行、path が規則に合わない file_excerpt の source。メッセージは「Sphica が書かない行がある。一覧の行を直すか、source は前のバージョンの /sphica:forget で忘れてから、もう一度 `sphica init`」
 3. ingest の allow list（`server/src/db-write.ts`、`db/schema.sql`、`github.ts`、`glean.ts`）
    - 既定は DENY。許すのは READ / SELECT / FUNCTION / TRANSACTION / SAVEPOINT / RECURSIVE、値なしの `pragma data_version`、FTS5 の内部テーブルへの書き込み、下の対応表
@@ -82,9 +82,9 @@ approved_at: 2026-10-01
    - `revision` は `old.revision + 1` 以外を拒む
 5. 遷移表と後継（`db/schema.sql`、`record.ts`、`glean.ts`）
    - 最初の行は null→candidate だけ。2 行目以降は `from_state` が今の lifecycle。candidate→{active, superseded, withdrawn}、active→{candidate, superseded, withdrawn}、superseded→candidate（後継が全部 withdrawn のときだけ）。withdrawn からは動かない。from ≠ to。superseded へは supersedes の link を持つ後継が active のときだけ
-   - `create unique index unit_link_one_successor on unit_link (to_unit) where kind = 'supersedes'`
+   - withdrawn でない後継は 1 つまで: `unit_link` の before insert のトリガーが、同じ `to_unit` に supersedes の link を持ち、最新の state が withdrawn でない後継が既にあれば拒む。candidate と superseded の後継も枠を持つ。withdrawn の後継の link は残り、その後は新しい後継を付けられる。`record.ts` の check は、枠が塞がっているとき後継の名前入りのエラーを返す
    - supersedes の kind の組は、同じ kind どうしか、decision と constraint の間。`unit_link_check` と `record.ts` の check の両方に入れる
-   - 後継が withdrawn になったら、AFTER INSERT のトリガーが、それが supersede していて今 superseded の unit に superseded→candidate の行を入れる（run_id・forget_id は引き継ぐ）。`glean.ts` の withdraw は、戻った unit を同じ保存の中で判定し直す
+   - 後継が withdrawn になったら、AFTER INSERT のトリガーが、それが supersede していて今 superseded の unit のうち、最新の state が withdrawn でない後継がほかに無いものに superseded→candidate の行を入れる（run_id・forget_id は引き継ぐ。後継の状態は `unit.lifecycle` ではなく state の履歴で読む: 同じ文の中でまだ反映されていないことがある）。`glean.ts` の withdraw は、戻った unit を同じ保存の中で判定し直す
 6. 支えのビュー（`db/schema.sql`、`glean.ts`）
    - ビュー `unit_support (unit_id, missing)`。`missing` は足りない理由の文で、足りていれば null。中身は今の 3 つの規則（decision・constraint は unit 単位の証拠と採用、implementation はコードかコミットの証拠、finding・dead_end・question は unit 単位の証拠）。文言は今と同じにして、コードの `ACTIVATION` を変えない
    - 使う場所: activate、証拠の retract、採用の retract、anchor の retire。retract・retire の後で unit が active かつ `missing` が null でなければ abort
@@ -122,6 +122,7 @@ approved_at: 2026-10-01
 - 採用: 既存の行を 3 類に分け、止めるのは Sphica が書かない行と消すしかない source だけ。棄却: 全部を止めずに直す（書かれなかった run を saved と偽り、source を確認なしに消すことになる）、合わない行があれば常に止める（持ち主が直せない行で plugin だけ新しい状態から動けなくなる）
 - 採用: 修復の一覧は上限なしで全件出す。棄却: 規則ごとに先頭 20 行（残りをどう直したか後から確かめられない）
 - 採用: session_message の直接 insert はビュー `ingest_source` で止める。棄却: authorizer だけで止める（値を見られない）
+- 採用: 「withdrawn でない後継は 1 つまで」をトリガーで書く。棄却: `unit_link (to_unit) where kind = 'supersedes'` の unique index（link は消せないので、取り下げた後継が枠を塞ぎ続け、元の unit を二度と置き換えられない）、link に列を足して partial index にする（後継の状態を link 側へ写す仕組みと、その列を守る規則が要る）、active の後継だけを数える（candidate の後継が 2 つ並び、両方 active になった時点で生きた答えが 2 つになる）
 - 採用: 引用のある session の直接削除を拒む。棄却: 削除を通して `edit_observation_id` を null にする（支えの無い active な unit が残る）
 - 採用: FK の index は列の組で検査する。棄却: 各列がどれかの index の先頭（複合 FK の検索を保証しない）
 - 採用: project の key の正規化は別の計画。棄却: 重なる組を別の key へ退避（通常の作業ディレクトリから読めなくなる）、重なる組を触らず探すときに旧 key を先に見る（3 つ目の clone で project が増え、spool を取り違える）、移行で統合（session の id と trace の unit の key が project の id を含む）
@@ -168,3 +169,5 @@ approved_at: 2026-10-01
 なし
 
 ## 変更履歴
+
+- 2026-10-01 / 方針 5 の「後継は 1 つ」を unique index から「withdrawn でない後継は 1 つまで」のトリガーに変え、方針 2 の link の修復と要点を合わせた / unique index だと取り下げた後継が枠を塞ぎ、candidate に戻った unit を新しい記録で置き換えられない（issue #202 の「one successor」と「every successor is withdrawn」が両立しない）。Codex と新しい会話（01a0f31d-8d84-7aa1-b248-35197e7561fc）で 1 往復、合意 / Go 要（許す履歴と移行で外す link が変わる）。2026-10-01 に持ち主が Go

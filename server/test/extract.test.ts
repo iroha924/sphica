@@ -1164,6 +1164,94 @@ test("glean: a successor that becomes active later supersedes the record it repl
   }
 });
 
+test("glean: withdrawing the successor brings back the record it replaced, and a record takes one live successor of its kind", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const old = message(db, p, { id: "o1", text: "SQLite にしよう。" });
+    const decided = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      adoption: [{ source: `s${source}`, quote }],
+      ...extra,
+    });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [decided("storage", old, "SQLite にしよう。")],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, {
+      id: "g",
+      text: "Postgres にする。やっぱり Postgres はやめる。",
+      session: "g1",
+    });
+    const glean = async (record: unknown) =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, record);
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    await glean({
+      units: [decided("storage-2", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
+    });
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-2")], ["superseded", "active"]);
+    // A finding cannot replace a decision, and a second successor waits for the first to be withdrawn
+    await assert.rejects(
+      glean({
+        units: [
+          {
+            key: "note",
+            kind: "finding",
+            text: "Postgres",
+            evidence: [{ source: `s${said}`, quote: "Postgres にする。", role: "states" }],
+            supersedes: "glean:storage-2",
+          },
+        ],
+      }),
+      /a finding cannot supersede glean:storage-2, a decision/,
+    );
+    await assert.rejects(
+      glean({
+        units: [decided("storage-3", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
+      }),
+      /trace:ext-s1\/storage is already superseded/,
+    );
+    const out = await glean({
+      ops: [
+        {
+          op: "withdraw",
+          unit: "glean:storage-2",
+          revision: db.owner.prepare("select revision from unit where key = 'glean:storage-2'").get()
+            ?.revision,
+          reason_source: `s${said}`,
+          reason_quote: "やっぱり Postgres はやめる。",
+        },
+      ],
+    });
+    assert.match(out, /glean:storage-2: withdrawn/);
+    assert.match(out, /trace:ext-s1\/storage: no longer superseded/);
+    assert.match(out, /trace:ext-s1\/storage: active/);
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-2")], ["active", "withdrawn"]);
+    // Its successor withdrawn, the record can be replaced again
+    await glean({
+      units: [decided("storage-4", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
+    });
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-4")], ["superseded", "active"]);
+    // A successor still waiting for adoption holds the place too, and the refusal names it
+    const { adoption: _, ...unadopted } = decided("storage-5", said, "やっぱり Postgres はやめる。", {
+      supersedes: "glean:storage-4",
+    });
+    await glean({ units: [unadopted] });
+    assert.equal(state("glean:storage-5"), "candidate");
+    await assert.rejects(
+      glean({ units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })] }),
+      /glean:storage-4 already has a successor, glean:storage-5 \(candidate\); withdraw it first, or supersede it instead/,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("glean: a record is withdrawn beside a successor that stays a candidate, and left alone once this save superseded it", async () => {
   const db = tempDb();
   try {

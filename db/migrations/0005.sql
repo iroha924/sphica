@@ -131,6 +131,32 @@ where s.name not in (select name from sqlite_sequence) and s.name in (select nam
 -- Repairs. Every row changed or removed is noted, and `sphica init` prints the notes.
 create temp table sphica_migration_note (rule text, item text, action text);
 
+-- Supersedes links revision 5 refuses are removed first, so the lifecycle repairs below see what is left: a record replacing one of
+-- another kind (a decision and a constraint may replace each other), and every live successor of a record but one (an active one first,
+-- then the newest). Withdrawn successors keep their links: they hold no place.
+create temp table sphica_link (from_unit integer not null, to_unit integer not null, rule text not null, primary key (from_unit, to_unit));
+insert or ignore into sphica_link
+select l.from_unit, l.to_unit, 'a supersedes link between records of kinds that cannot replace each other'
+from unit_link l join unit a on a.id = l.from_unit join unit b on b.id = l.to_unit
+where l.kind = 'supersedes' and a.kind <> b.kind
+  and not (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'));
+insert or ignore into sphica_link
+select l.from_unit, l.to_unit, 'a second successor of a record whose first successor is not withdrawn'
+from unit_link l join unit s on s.id = l.from_unit
+where l.kind = 'supersedes' and s.lifecycle <> 'withdrawn'
+  and not exists (select 1 from sphica_link x where x.from_unit = l.from_unit and x.to_unit = l.to_unit)
+  and l.from_unit <> (select k.from_unit from unit_link k join unit n on n.id = k.from_unit
+    where k.to_unit = l.to_unit and k.kind = 'supersedes' and n.lifecycle <> 'withdrawn'
+      and not exists (select 1 from sphica_link x where x.from_unit = k.from_unit and x.to_unit = k.to_unit)
+    order by n.lifecycle = 'active' desc, n.id desc limit 1);
+insert into sphica_migration_note
+select x.rule, 'unit ' || a.id || ' ' || a.key || ' supersedes unit ' || b.id || ' ' || b.key, 'link removed'
+from sphica_link x join unit a on a.id = x.from_unit join unit b on b.id = x.to_unit order by x.from_unit, x.to_unit;
+delete from unit_link where kind = 'supersedes' and exists (select 1 from sphica_link x
+  where x.from_unit = unit_link.from_unit and x.to_unit = unit_link.to_unit);
+update unit set revision = revision + 1 where id in (select from_unit from sphica_link union select to_unit from sphica_link);
+drop table temp.sphica_link;
+
 -- Units whose lifecycle the new rules cannot have reached go back to candidate. The state history is kept and one state is added,
 -- from a run that names this migration, since the triggers that would apply it are dropped here.
 create temp table sphica_lifecycle (unit_id integer primary key not null, rule text not null);
@@ -332,6 +358,14 @@ end;
 create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
 end;
+create trigger unit_state_restore after insert on unit_state when new.to_state = 'withdrawn' begin
+  insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id)
+  select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
+  from unit_link l join unit o on o.id = l.to_unit
+  where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
+    and not exists (select 1 from unit_link k where k.to_unit = o.id and k.kind = 'supersedes' and k.from_unit <> new.unit_id
+      and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
+end;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
 create index unit_anchor_unit on unit_anchor (unit_id, retired_at);
 create index unit_anchor_observation on unit_anchor (edit_observation_id) where edit_observation_id is not null;
@@ -513,6 +547,13 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'linked units belong to different projects')
   where (select project_id from unit where id = new.from_unit) is not (select project_id from unit where id = new.to_unit)
      or (select project_id from unit where id = new.from_unit) is not (select project_id from extraction_run where id = new.run_id);
+  select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
+  where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
+    and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
+  -- One successor at a time: a withdrawn one gives its place up. States are read from history, as in unit_state_rules
+  select raise(abort, 'the record already has a successor that is not withdrawn')
+  where new.kind = 'supersedes' and exists (select 1 from unit_link l where l.to_unit = new.to_unit and l.kind = 'supersedes'
+    and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'state and unit belong to different projects')

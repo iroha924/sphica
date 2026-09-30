@@ -437,6 +437,66 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
   assert.throws(() => move(2, "withdrawn", "candidate"), /not a lifecycle change/);
 });
 
+// Revision 4 let a record have several live successors, of any kind. Revision 5 keeps one: an active one first, then the newest
+test("migrating revision 4 keeps one live successor of a record and removes links between kinds that cannot replace each other", () => {
+  const raw = create("old.db", REV4);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  const made = (key: string, kind: string, ...states: [string | null, string][]) => {
+    run(
+      "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (1, ?, ?, ?, ?, 'supported', 1, ?, ?)",
+      key,
+      kind,
+      ["decision", "constraint"].includes(kind) ? "do" : null,
+      key,
+      now,
+      sha256(key),
+    );
+    const id = Number((raw.prepare("select id from unit where key = ?").get(key) as { id: number }).id);
+    for (const [from, to] of states)
+      run(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', 1)",
+        id,
+        from,
+        to,
+        now,
+      );
+    return id;
+  };
+  const supersedes = (from: number, to: number) =>
+    run(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'supersedes', 1, ?)",
+      from,
+      to,
+      now,
+    );
+  // Unit 1 (a decision) has four successors: a withdrawn one, two candidates, and a finding
+  const gone = made("gone", "decision", [null, "candidate"], ["candidate", "withdrawn"]);
+  const older = made("older", "decision", [null, "candidate"]);
+  const newer = made("newer", "constraint", [null, "candidate"]);
+  const finding = made("finding", "finding", [null, "candidate"]);
+  for (const u of [gone, older, newer, finding]) supersedes(u, 1);
+  const said = migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare("select from_unit from unit_link where to_unit = 1 and kind = 'supersedes' order by from_unit")
+      .all()
+      .map((r) => r.from_unit),
+    [gone, newer],
+  );
+  assert.match(
+    said,
+    /a supersedes link between records of kinds that cannot replace each other: 1 row\n\s*unit \d+ finding supersedes unit 1 [^\n]* → link removed/,
+  );
+  assert.match(
+    said,
+    /a second successor of a record whose first successor is not withdrawn: 1 row\n\s*unit \d+ older supersedes unit 1 [^\n]* → link removed/,
+  );
+  // The rule holds from here on: the live successor keeps its place
+  const another = made("another", "decision", [null, "candidate"]);
+  assert.throws(() => supersedes(another, 1), /already has a successor that is not withdrawn/);
+});
+
 // Revision 4 kept a decision active on an option's evidence alone. Revision 5 counts only the unit's own, and the migration applies that once
 test("migrating revision 4 puts an active unit without its own support back to candidate, and says so", () => {
   const raw = create("old.db", REV4);

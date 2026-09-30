@@ -463,6 +463,16 @@ end;
 create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
 end;
+-- Withdrawing a record's last live successor brings the record back to candidate, to be judged again. Successors are read from history:
+-- the withdrawal just written may not be applied to its unit yet
+create trigger unit_state_restore after insert on unit_state when new.to_state = 'withdrawn' begin
+  insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id)
+  select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
+  from unit_link l join unit o on o.id = l.to_unit
+  where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
+    and not exists (select 1 from unit_link k where k.to_unit = o.id and k.kind = 'supersedes' and k.from_unit <> new.unit_id
+      and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
+end;
 
 -- Where a unit applies in code, or code cited as evidence. Validated against the working tree when served, never cached here.
 create table unit_anchor (
@@ -724,6 +734,13 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'linked units belong to different projects')
   where (select project_id from unit where id = new.from_unit) is not (select project_id from unit where id = new.to_unit)
      or (select project_id from unit where id = new.from_unit) is not (select project_id from extraction_run where id = new.run_id);
+  select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
+  where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
+    and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
+  -- One successor at a time: a withdrawn one gives its place up. States are read from history, as in unit_state_rules
+  select raise(abort, 'the record already has a successor that is not withdrawn')
+  where new.kind = 'supersedes' and exists (select 1 from unit_link l where l.to_unit = new.to_unit and l.kind = 'supersedes'
+    and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'state and unit belong to different projects')
