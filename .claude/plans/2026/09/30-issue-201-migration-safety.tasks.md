@@ -55,6 +55,15 @@ forget の画面でバックアップの場所が分かり、revision の不一�
   - コミット: `feat(forget): show where Sphica's backups are before and after forgetting (T02)`
   - 結果: `cd server && node --test --test-timeout=60000 test/forget.test.ts` → 16 pass・0 fail（新しいテストは 2 つの完成品と 1 つの .partial で「2 backups」を出し、0 のとき backup を言わない）。`bun run verify` → exit 0
 
+- [x] T09: T02 のレビュー指摘を直す（MCP の preview・確認・完了の 3 か所にバックアップの案内が出ることをテストで見る）
+  - 種別: 追加
+  - 計画: S2
+  - 依存: T02（案内を出す forgetText の呼び出しが要る）
+  - 変更: `server/test/plugin.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 --test-name-pattern="forget_apply removes" test/plugin.test.ts` → forget_preview の返答・elicitation の文面・forget_apply の返答に「1 backup made before migrating, in <dir>」が入って通る
+  - コミット: `test(forget): check the backup notice through the record server (T09)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="forget_apply removes" test/plugin.test.ts` → 1 pass・0 fail
+
 - [ ] T03: 不一致の案内に CLI の版を入れ、delivery は別の 1 回印で prompt でも返す
   - 種別: 修正
   - 計画: S3
@@ -110,3 +119,4 @@ npm pack した配布物で案内・バックアップ・移行が通しで動�
 - 2026-09-30 / T01, T07 / pre-commit の bundle の検査が、パッケージの入力を変えるコミットに版の更新を同じコミットで求めた（#208 の T01 も同じ形） / 版の 4 ファイルを T01 に入れ、T07 は取りやめ。S6 の版の更新は T01 が担う
 - 2026-09-30 / T02 / backups() を admin.ts から forget.ts が読むと、記録サーバーの bundle に CLI の部品（cli/view.ts）が入る / バックアップの場所の関数を server/src/backups.ts に分け、forget の Skill の「残るもの」も直した。変更欄（前: `server/src/forget.ts`, `server/src/mcp-record.ts`, `server/src/admin.ts`, `server/test/forget.test.ts`、後: それに `server/src/backups.ts` と `plugin/skills/forget/SKILL.md` を足した）
 - 2026-09-30 / T01 レビュー / Codex の F1〜F4: F2（時計が戻ると今回のバックアップを刈り込む）・F3（消せない古いバックアップで移行済みの init が落ちる）・F4（移行なしのテストが件数だけ比べる）は直す。F1（バックアップ後・最初の移行前に capture が書いた行は戻すと消える）は、戻す以上バックアップ後の記録は失われるので防げない。エラーの戻し方に「バックアップの後の記録は入っていない」と書いて扱う / T08 を足した
+- 2026-09-30 / T02 レビュー / Codex の F1（バックアップと同じ名前のディレクトリを 1 件と数える）は、手で置かない限り起きない入力なので直さない。F2（テストが MCP の 3 か所を通らず空振りする）は直す / T09 を足した
