@@ -24,6 +24,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "@types/node": "^24.13.6",
+    "fast-check": "4.10.2",
     "js-tokens": "10.0.0",
     "knip": "6.36.0",
     "kysely-codegen": "0.20.0",

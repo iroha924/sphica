@@ -15,7 +15,7 @@ approved_at: 2026-09-30
 - 評価ループの記録と報告を広げる: gold key ごとの `in_delivery`・`in_search`・`read`、言語の組み合わせと語の重なりの群、タスク×モデルの gold − inject、再提案率、counterfactual gold（元版と反転版の 2 build）、Claude と Codex の 2 人の採点の一致率。発火の計画を分母にする
 - テストを足す: fast-check のプロパティテスト、`mask()` の時間の伸び、Node 26 lane の順序ランダム化、Biome の promise の 2 ルール、`z.toJSONSchema()` を評価スキーマの出所に、Skill の JSON 欄と zod の型の突き合わせ。Stryker は依存にせず手で 1 回
 - 最後にクラウドの 1 ループ（Claude 約 62 run、$9〜$19）。流す前に持ち主にこの数字で確かめる
-- 変えないもの: 出荷する製品のコード（受け入れケースが落ちて見つかった不具合の修正を除く）、schema、MCP ツール
+- 変えないもの: 出荷する製品のコード（受け入れケースが落ちて見つかった不具合の修正を除く）、schema、MCP ツール。devDependency（fast-check）を足すので、版は 0.6.13 に上げてリリースする（後から持ち主が決定）
 
 ## 持ち主の決定
 
@@ -24,6 +24,7 @@ approved_at: 2026-09-30
 - クラウド評価で、承認済みの 1 ループを超えてクレジットを使う前に持ち主に確かめる
 - 開発ルール・制約（依存など）は変えてよい。変える案は持ち主が結果と一緒に決める
 - やらない: embedding・ベクトル検索、日本語形態素解析、promptfoo
+- fast-check を足すとバージョンの検査がリリースを求めるので、0.6.13 に上げてリリースする（実装中に持ち主が追加）
 - 利用者に API キーや追加課金を求める機能は作らない
 
 ## 目的
@@ -146,3 +147,4 @@ approved_at: 2026-09-30
 
 ## 変更履歴
 - 2026-09-30 / counterfactual のタスクを pilot-dates と superseded-install に変えた / sphica-search-wording の fixture は実際の PR の harvest で、反転版に架空の出典が要る。superseded-install は status-02 を外すだけで反転する / Go 不要（件数と費用は同じ）
+- 2026-09-30 / 0.6.13 に上げてリリースする / release-scope が devDependency の追加もパッケージの入力とみなすため。持ち主が 3 案（自前の生成器、リリース、検査を直す）からリリースを選んだ / Go 済み（持ち主が決定）

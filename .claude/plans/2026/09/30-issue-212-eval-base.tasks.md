@@ -164,13 +164,14 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 
 性質・時間・順序・promise・Skill と型の食い違いが機械で見つかる。
 
-- [ ] T11: fast-check のプロパティテストと `mask()` の時間のテスト
+- [x] T11: fast-check のプロパティテストと `mask()` の時間のテスト
   - 種別: 追加
   - 計画: S8
   - 依存: なし
-  - 変更: `server/package.json`, `bun.lock`, `server/test/text-properties.test.ts`
+  - 変更: `server/package.json`, `server/bun.lock`, `server/test/text-properties.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/text-properties.test.ts` → 通る。`mask()` の比を 10 回測った値を結果に残し、閾値を確定する
   - コミット: `test(text): add property tests with fast-check and a growth check for mask (T11)`
+  - 結果: `cd server && node --test test/text-properties.test.ts` → 6 pass・0 fail（seed 20260930、各 300 回）。空振りしないことを、head の上限を 1 ずらす・ftsQuery の引用符を外す・quoteSpan の終わりを 1 ずらす壊し方で確かめ、どれも落ちた（戻した）。mask の時間の比（2n/n と 4n/2n）を手元で 10 回測って最大 2.20、閾値 3.0 で確定（CI での値は PR の CI で見る）。`bun run verify` → exit 0。`bun run release:plan -- --base v0.6.12` → plugin、4 か所とも 0.6.13
 
 - [ ] T12: Node 26 の順序ランダム化と Biome の promise の 2 ルール
   - 種別: 変更
@@ -223,3 +224,5 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
 - 2026-09-30 / T09 / 2 人目の採点者の claude は `--bare` を使えない（API キーでしか認証しない。サブスクリプションで回す方針）。代わりに空のディレクトリで `--setting-sources "" --strict-mcp-config --tools "" --disable-slash-commands --no-session-persistence` を付け、`--json-schema` の structured_output を受け取る。counterfactual のタスクの記録の本文（presented）は、collect が gold スロットの gold.json から行に載せる（変更欄に collect.ts を足した）
 - 2026-09-30 / T10 / grade.ts は `--loop <build dir>/loop.json` を必須にし、grades.json を同じ build のディレクトリに書き、build ID と variant を引き継ぐ（report が元版と反転版を分けるため）。grading.ts は変えなかった / 変更欄（前: report.ts・grading.ts・テスト、後: report.ts・grade.ts・テスト・knip.json）
 - 2026-09-30 / T09 レビュー / Codex の F1（none の run にも本文を渡す）・F2（反転版を元版の expect と against で採点する）・F3（presented の受け渡しのテストが無い）は直す。F4（偽の claude では CLAUDE.md を読まないことを確かめられない）はテストでは直せないので、本物の claude -p での確かめ（入力 3,216 トークン、見えるかを問うて false、T09 の結果欄）を根拠に残す / T19 を足した
+- 2026-09-30 / T11 / fast-check 4.10.2 と依存の pure-rand 8.4.2 は、どちらも dubzzz の GitHub から SLSA provenance つきで公開（fast-check は 2017 年から、週 5,300 万ダウンロード、MIT）。最初の head/tail の性質は「h === s なら可」で空振りしていたので、上限に収まらない入力では必ず上限に収まることを見る形に直した。ftsQuery は Unicode の生成だけでは FTS5 の記号を含む識別子がほとんど出ず空振りしていたので、記号と識別子を混ぜた生成を足した。mask は 800 万文字を超える `sk-aaa…` でスタックがあふれるが、呼び出し側が 2MiB を超えて渡さない（capture は 128KiB で切る、anchors は 2MiB までのファイル）ので製品では起きない。時間のテストの長さは 4n が 200 万文字以内に収まるようにした。変更欄の `bun.lock` は `server/bun.lock` の誤り（前: `bun.lock`、後: `server/bun.lock`）
+- 2026-09-30 / T11 / release-scope.mjs は server/package.json と server/bun.lock の変更を中身によらずパッケージの入力とみなすので、devDependency の fast-check を足すとバージョンの更新とリリースが要る。持ち主が「0.6.13 に上げてリリース」を選んだ（ほかの案: 依存を足さず自前の生成器、バージョンの検査を直す） / 版の 4 ファイルを T11 に入れた
