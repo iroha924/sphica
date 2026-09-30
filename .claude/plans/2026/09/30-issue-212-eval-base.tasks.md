@@ -258,6 +258,7 @@ superseded・abstention・poisoned・override の製品側の挙動がケース�
   - 依存: T06（codex.ts の --build が要る）
   - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="same millisecond" test/eval-grade.test.ts` → 同じミリ秒に始めた 2 つの run が別のディレクトリを持つ
+  - red: `cd server && node --test --test-name-pattern="same millisecond" test/eval-grade.test.ts` → 時刻だけの名前では 2 つの run が同じディレクトリになって 1 fail
   - コミット: `fix(eval): give parallel Codex runs their own run directories (T24)`
   - 結果: 直す前の命名（時刻だけ、recursive の mkdir）で同じテストが 1 fail（2 つのディレクトリが同じ）。直した後 1 pass。`bun run verify` → exit 0
 
