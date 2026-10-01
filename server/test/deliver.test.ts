@@ -285,6 +285,55 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
+test("a compact or clear session start counts reads again from there; startup, resume, and fork do not", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rules = Array.from({ length: 10 }, (_, n) => `Short rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: rules.join(" ") });
+    await save(db, p, {
+      units: rules.map((r, n) =>
+        decided(`k${n}`, m, r, { anchors: [{ path: `src/g${n}.ts`, role: "applies_to" }] }),
+      ),
+    });
+    const at = (input: Record<string, unknown>) =>
+      deliver({ session_id: "windows", cwd: repo, ...input }, "claude-code", db.file);
+    const start = (source: string) => at({ hook_event_name: "SessionStart", source });
+    const read = (n: number) =>
+      at({
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, `src/g${n}.ts`) },
+      }).then((t) => [...t.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]));
+    await start("startup");
+    for (let n = 0; n < 8; n++) assert.deepEqual(await read(n), [`trace:ext-s1/k${n}`]);
+    assert.deepEqual(await read(8), [], "the budget is spent");
+    for (const source of ["resume", "fork", "startup"]) {
+      await start(source);
+      assert.deepEqual(await read(0), [], `${source} keeps what was shown`);
+      assert.deepEqual(await read(8), [], `${source} keeps the budget spent`);
+    }
+    for (const source of ["compact", "clear"]) {
+      // Nothing else applies at start, so the marker is written with an empty delivery
+      assert.equal(await start(source), "");
+      assert.deepEqual(await read(0), ["trace:ext-s1/k0"], `${source} shows a record again`);
+      assert.deepEqual(await read(8), ["trace:ext-s1/k8"], `${source} gives the budget back`);
+    }
+    assert.deepEqual(
+      db.owner
+        .prepare("select reason from delivery where event = 'session_start' order by id")
+        .all()
+        .map((r) => r.reason),
+      ["startup", "fork", "startup", "compact", "clear"],
+      "a resume after a delivered start is skipped and writes nothing",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("subagent reads and edits count apart from the main conversation and from each other", async () => {
   const db = tempDb();
   const repo = checkout();

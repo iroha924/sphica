@@ -45,7 +45,7 @@ base: main
   - コミット: `fix(deliver): count shown records and the read budget per agent (T02)`
   - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="subagent" test/deliver.test.ts` → 子 A が読んだ後の親の Read が [] で落ちた（期待 trace:ext-s1/k10）。直した後 → 1 pass。`node --test test/deliver.test.ts` → 22 pass。lint・typecheck → 通過
 
-- [ ] T03: 親の compact と clear で読む前の窓を区切る
+- [x] T03: 親の compact と clear で読む前の窓を区切る
   - 種別: 修正
   - 計画: S2
   - 依存: T02（窓の検索が agent_id で絞った行を前提にする）
@@ -53,6 +53,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="compact|clear" test/deliver.test.ts` → compact の後に同じ path を Read しても記録が出ないので落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="compact|clear" test/deliver.test.ts` → pass。compact・clear で区切られ、startup・resume・fork では区切られず、本文が空でも区切りの行が書かれる
   - コミット: `fix(deliver): start counting reads again after compaction or clear (T03)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="compact|clear" test/deliver.test.ts` → startup・resume・fork の確認は通り、compact の後の Read が [] で落ちた（期待 trace:ext-s1/k0）。直した後 → 1 pass。`node --test test/deliver.test.ts` → 23 pass。lint・typecheck → 通過
 
 - [ ] T04: 読む前とセッション開始の配信を、書き込みロックを取ってから計画する
   - 種別: 修正

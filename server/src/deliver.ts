@@ -244,9 +244,14 @@ const agentOf = (input: { agent_id?: unknown }): string | null =>
 const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery }, "d">) =>
   agent === null ? eb("d.agent_id", "is", null) : eb("d.agent_id", "=", agent);
 
+/** How a host started a session. A compaction or a clear drops what earlier hooks added, so reads count from its session start on. */
+const START_SOURCES = new Set(["startup", "resume", "clear", "compact", "fork"]);
+const RESTARTS = ["compact", "clear"];
+
 /**
- * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown yet, within the read
- * budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
+ * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
+ * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
+ * reads can repeat one, and a restart whose start could not be logged is not seen).
  */
 async function beforeRead(
   db: Reads,
@@ -256,11 +261,21 @@ async function beforeRead(
   agent: string | null,
   how: "reading" | "named",
 ): Promise<Plan> {
+  const restart = await db
+    .selectFrom("delivery as d")
+    .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
+    .where("d.event", "=", "session_start")
+    .where("d.reason", "in", RESTARTS)
+    .select((eb) => eb.fn.max("d.id").as("id"))
+    .executeTakeFirst();
+  const since = restart?.id ?? 0;
   const sent = await db
     .selectFrom("delivery as d")
     .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
     .where("d.session_id", "=", session)
     .where(sameAgent(agent))
+    .where("d.id", ">", since)
     .where("d.outcome", "=", "emitted")
     .select(["x.unit_id", "d.event"])
     .execute();
@@ -269,6 +284,7 @@ async function beforeRead(
     .selectFrom("delivery as d")
     .where("d.session_id", "=", session)
     .where(sameAgent(agent))
+    .where("d.id", ">", since)
     .where("d.event", "=", "pre_read")
     .where("d.outcome", "=", "emitted")
     .where(({ exists, selectFrom }) =>
@@ -746,17 +762,21 @@ export async function deliver(
             ? await onPrompt(db, pid, place.root, input.prompt ?? "")
             : call
               ? await beforeReview(db, pid, place.root, call)
-              : await atStart(db, pid, branchOf(place.root), {
-                  file,
-                  key: place.key,
-                  host,
-                  owner: isOwnerTurn(
-                    input,
-                    undefined,
-                    undefined,
-                    host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                  ),
-                });
+              : {
+                  ...(await atStart(db, pid, branchOf(place.root), {
+                    file,
+                    key: place.key,
+                    host,
+                    owner: isOwnerTurn(
+                      input,
+                      undefined,
+                      undefined,
+                      host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                    ),
+                  })),
+                  // The start source marks where reads count from, so it is logged even when the start delivered nothing
+                  reason: input.source && START_SOURCES.has(input.source) ? input.source : null,
+                };
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
     // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
     if (onPath && !plan.text) return "";
