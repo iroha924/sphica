@@ -76,13 +76,14 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
   - コミット: `test(deliver): keep the empty-log test independent of the date (T07)`
   - 結果: 発言の日時を 2026-01-01 に固定し、session_start が "" を返して session_start・nothing の行が残ることを見る形にした。red 実測: 空ログを省く条件を pre_read・pre_edit 以外にも広げる退行を一時的に入れると、直す前のテストは pass、直した後のテストは fail 1 で落ちた。`node --test --test-name-pattern="deliver nothing write no rows" test/deliver.test.ts` → pass 1 / fail 0
 
-- [ ] T05: 展開した deliver.js がロック中に 1 秒未満で目的の記録を返す検査
+- [x] T05: 展開した deliver.js がロック中に 1 秒未満で目的の記録を返す検査
   - 種別: 追加
   - 計画: S5
   - 依存: T03（ロック中に応答する実装が無いと検査が落ちる）
   - 変更: `scripts/check-tarball.mjs`
   - 完了条件: `bun run bundle && npm pack --pack-destination <tmp> && node scripts/check-tarball.mjs <tgz>` → exit 0（ロック前の別 session で肯定確認、ロック中の起動から終了が 1 秒未満で additionalContext に目的の key が入る、ロックは finally で解放）
   - コミット: `test(release): check the packed delivery hook answers under a write lock (T05)`
+  - 結果: `bun run bundle && (cd plugin && npm pack --pack-destination <tmp>) && node scripts/check-tarball.mjs <tgz>` → 「43 files ... and delivered under a write lock」で exit 0。T03 より前の deliver.ts で作った tarball では `under a write lock the delivery hook took 5291 ms` で落ちることを確かめた
 
 ## P3: リリースの準備
 
@@ -99,3 +100,4 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
 - 2026-10-01 / T04 / review の配信のテストは review-bridge.test.ts にまとまっているので、そちらに足した。変更欄: deliver.test.ts → review-bridge.test.ts。withdrawn は owner 接続で unit_state に active → withdrawn を入れて作った（trigger は通る）
 - 2026-10-01 / T01 / Codex のレビュー（44ae063c）: 指摘 1 件（P2）。空ログのテストが未 trace の通知の有無（日付）に依存し、空の session_start のログを確かめていない / 採用。修正タスク T07 を足した
 - 2026-10-01 / T02 / Codex のレビュー（2e7c09dc）: 指摘 0 件
+- 2026-10-01 / T05 / macOS の一時ディレクトリはリンク（/var → /private/var）で、git の root は実体のパスで返るため、Read の path が root の外に見えて配信が空になった / 一時ディレクトリを realpathSync で実体に揃えた
