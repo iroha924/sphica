@@ -49,6 +49,17 @@ class NotBuilt extends Error {}
 
 type Session = World["sessions"][number];
 
+/** One delivery hook call of an inject step. event subagent_start is the host's SubagentStart. */
+type Inject = {
+  event: string;
+  path?: string;
+  prompt?: string;
+  source?: string;
+  host?: Host;
+  agent_id?: string;
+  command?: string;
+};
+
 const CLI = path.join(import.meta.dirname, "..", "..", "src", "cli.ts");
 /** Variables from the shell running the cases that would point hooks and the CLI at the owner's sessions or database. */
 const LEAKY = [
@@ -152,22 +163,30 @@ export async function createDriver(world: World): Promise<Driver> {
   /** What the delivery hooks returned for the last inject step, one entry per call. */
   let delivered: string[] = [];
   let injectSession = 0;
-  /** Calls the delivery hook the way Claude Code would, in a fresh session each time a case injects. */
-  const inject = async (i: { event: string; path?: string; prompt?: string; source?: string }) => {
+  /**
+   * Calls the delivery hook the way the host would (Claude Code unless the call names Codex), in a fresh session each time a case injects.
+   * A call with agent_id runs inside that subagent; a read with a command is a shell command naming the path.
+   */
+  const inject = async (i: Inject) => {
     const input = {
       session_id: `inject-${++injectSession}-${path.basename(dir)}`,
       cwd: repo,
-      ...(i.event === "pre_edit" || i.event === "pre_read"
-        ? {
-            hook_event_name: "PreToolUse",
-            tool_name: i.event === "pre_read" ? "Read" : "Edit",
-            tool_input: { file_path: path.join(repo, i.path ?? "") },
-          }
-        : i.event === "prompt"
-          ? { hook_event_name: "UserPromptSubmit", prompt: i.prompt ?? "" }
-          : { hook_event_name: "SessionStart", source: i.source ?? "startup" }),
+      ...(i.agent_id ? { agent_id: i.agent_id, agent_type: "Explore" } : {}),
+      ...(i.event === "pre_read" && i.command !== undefined
+        ? { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: i.command } }
+        : i.event === "pre_edit" || i.event === "pre_read"
+          ? {
+              hook_event_name: "PreToolUse",
+              tool_name: i.event === "pre_read" ? "Read" : "Edit",
+              tool_input: { file_path: path.join(repo, i.path ?? "") },
+            }
+          : i.event === "prompt"
+            ? { hook_event_name: "UserPromptSubmit", prompt: i.prompt ?? "" }
+            : i.event === "subagent_start"
+              ? { hook_event_name: "SubagentStart" }
+              : { hook_event_name: "SessionStart", source: i.source ?? "startup" }),
     };
-    return deliver(input, "claude-code", file);
+    return deliver(input, i.host ?? "claude-code", file);
   };
   /** Every delivery a session could see: start, a prompt naming the needle, and an edit of every anchored path. */
   const everything = async (needle: string) => {
@@ -576,14 +595,7 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.inject && typeof step.inject === "object") {
-        const i = step.inject as {
-          event: string;
-          path?: string;
-          prompt?: string;
-          source?: string;
-          repeat?: number;
-          sequence?: { event: string; path?: string; prompt?: string }[];
-        };
+        const i = step.inject as Inject & { repeat?: number; sequence?: Inject[] };
         // A repeat stays in one session: the second call shows what the same session sees again
         delivered = [];
         const repeat = i.repeat ?? 1;
@@ -1163,12 +1175,14 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       // One expectation per call of a sequence, in order
       if (Array.isArray(e.each_context)) {
-        const each = e.each_context as { contains?: string[]; empty?: true }[];
+        const each = e.each_context as { contains?: string[]; lacks?: string[]; empty?: true }[];
         assert.equal(delivered.length, each.length, "one expectation per call");
         each.forEach((want, n) => {
           if (want.empty) assert.equal(delivered[n], "", `call ${n + 1} delivered\n${delivered[n]}`);
           for (const w of want.contains ?? [])
             assert.ok(delivered[n]?.includes(w), `call ${n + 1} lacks "${w}"\n${delivered[n]}`);
+          for (const w of want.lacks ?? [])
+            assert.ok(!delivered[n]?.includes(w), `call ${n + 1} has "${w}"\n${delivered[n]}`);
         });
         return;
       }

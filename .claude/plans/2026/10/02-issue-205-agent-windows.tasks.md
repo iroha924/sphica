@@ -92,13 +92,14 @@ base: main
 
 受け入れケースで固定し、0.6.17 に揃える。
 
-- [ ] T06: 受け入れの driver にホスト・agent_id・event を足し、ケースを足す
+- [x] T06: 受け入れの driver にホスト・agent_id・event を足し、ケースを足す
   - 種別: 追加
   - 計画: S5
   - 依存: T04（並行と窓の挙動がケースの期待になる）, T05（SubagentStart のケースが要る）
   - 変更: `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run verify` → exit 0（受け入れケースを含む）
   - コミット: `test(acceptance): pin per-agent and compaction delivery cases (T06)`
+  - 結果: driver に呼び出しごとの host・agent_id・command（Bash）・subagent_start と each_context の lacks を足し、injection-24〜28 を足した。main の worktree に新しい driver と cases を写して `SPHICA_ACCEPTANCE_LAYER=injection node --test evals/acceptance/run.ts` → 5 件とも落ちた（検索の行が無い / compact・clear の後の Read に記録が無い / Codex の子の後に親へ記録が無い）。このブランチで `bun run acceptance` → 97 pass、`node --test test/acceptance-cases.test.ts` → 4 pass。bun run verify は完了条件の 12 段目で流す
 
 - [-] T07: release:plan を流し、0.6.17 に揃える
   - 種別: 変更

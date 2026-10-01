@@ -8,7 +8,7 @@ const PER_LAYER = {
   capture: 13,
   status: 7,
   retrieval: 13,
-  injection: 23,
+  injection: 28,
   review: 8,
   glean: 14,
   forget: 1,
