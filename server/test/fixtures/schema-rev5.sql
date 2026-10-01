@@ -936,8 +936,6 @@ create index work_run on work (run_id) where run_id is not null;
 
 -- What a delivery hook emitted or suppressed, and how many eligible units it left out. No source text is copied here.
 -- chars is the delivered length without the omission note (Sphica's own text), since the read budget adds it up.
--- A session_start's reason is the host's start source or 'subagent'; agent_id is the subagent (null: the main conversation).
--- agent_id is written the way SQLite stores a column ALTER TABLE added, so a migrated database has the same definition.
 create table delivery (
   id integer primary key autoincrement not null,
   session_id text references session (id) on delete cascade,
@@ -949,7 +947,7 @@ create table delivery (
   omitted integer not null default 0 check (omitted >= 0 and omitted <= eligible),
   chars integer not null default 0 check (chars >= 0),
   at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', at) is at)
-, agent_id text check (length(agent_id) between 1 and 200)) strict;
+) strict;
 create index delivery_session on delivery (session_id, at);
 create table delivery_unit (
   delivery_id integer not null references delivery (id) on delete cascade,
@@ -1026,19 +1024,5 @@ create trigger capture_delivery_insert instead of insert on capture_delivery beg
   insert into delivery_unit (delivery_id, unit_id)
   select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
--- The same as capture_delivery with the subagent the delivery ran in. capture_delivery keeps its columns, since an older plugin's
--- capture writes through it into a database of this revision
-create view capture_delivery_scoped as
-  select session_id, agent_id, event, outcome, reason, path, eligible, omitted, chars, at, null as units from delivery;
-create trigger capture_delivery_scoped_insert instead of insert on capture_delivery_scoped begin
-  select raise(abort, 'the unit and the delivered session belong to different projects')
-  where exists (select 1 from json_each(coalesce(new.units, '[]')) j
-    where (select project_id from unit where id = j.value) is not (select project_id from session where id = new.session_id));
-  insert into delivery (session_id, agent_id, event, outcome, reason, path, eligible, omitted, chars, at)
-  values (new.session_id, new.agent_id, new.event, new.outcome, new.reason, new.path, coalesce(new.eligible, 0),
-    coalesce(new.omitted, 0), coalesce(new.chars, 0), new.at);
-  insert into delivery_unit (delivery_id, unit_id)
-  select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
-end;
 
-pragma user_version = 6;
+pragma user_version = 5;

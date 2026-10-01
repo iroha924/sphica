@@ -22,13 +22,14 @@ base: main
 
 配信のログにエージェントの欄ができ、古いビューを変えずに新しいビューから書ける。
 
-- [ ] T01: delivery.agent_id と capture_delivery_scoped を revision 6 で足す
+- [x] T01: delivery.agent_id と capture_delivery_scoped を revision 6 で足す
   - 種別: 追加
-  - 計画: S1
+  - 計画: S1, S6
   - 依存: なし
-  - 変更: `db/schema.sql`, `db/migrations/0006.sql`, `server/test/fixtures/schema-rev5.sql`, `server/src/db-types.ts`, `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/migrate.test.ts`, `server/test/db.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0006.sql`, `server/test/fixtures/schema-rev5.sql`, `server/src/db-types.ts`, `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/migrate.test.ts`, `server/test/db.test.ts`, `server/test/schema.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/migrate.test.ts test/db.test.ts test/schema.test.ts` → pass。rev 5 の delivery・delivery_unit の行が残り、capture_delivery の列が変わらず、capture の役が capture_delivery_scoped に agent_id 付きで書ける
   - コミット: `feat(schema): add delivery.agent_id and a scoped capture view in revision 6 (T01)`
+  - 結果: `bun run release:plan -- --base v0.6.16` → plugin。4 つのファイルを 0.6.17 にした。`node --test test/migrate.test.ts test/db.test.ts test/schema.test.ts` → 83 pass / 0 fail（rev 5 から移行した DB と新しい DB の定義が一致、rev 5 の delivery が agent_id null で残る、capture の役が両方のビューに書けて delivery へ直接は書けない、agent_id の空と 201 文字は CHECK で拒否）。`bun run test`（server）→ 545 pass。lint・typecheck・pairs・architecture・codegen:check → 通過
 
 ## P2: 数え方の修正
 
@@ -85,7 +86,7 @@ base: main
   - 完了条件: `bun run verify` → exit 0（受け入れケースを含む）
   - コミット: `test(acceptance): pin per-agent and compaction delivery cases (T06)`
 
-- [ ] T07: release:plan を流し、0.6.17 に揃える
+- [-] T07: release:plan を流し、0.6.17 に揃える
   - 種別: 変更
   - 計画: S6
   - 依存: T06（リリースに入る変更が揃っている）
@@ -94,3 +95,4 @@ base: main
   - コミット: `chore(release): 0.6.17 (T07)`
 
 ## 記録
+- 2026-10-02 / T01・T07 / pre-commit の bundle 検査が、パッケージに入る変更をバージョンを上げずにコミットさせない（前回の PR も最初のタスクで上げていた） / T01 の変更欄に schema.test.ts と 4 つのバージョンのファイルを足し（前: schema・migration・fixture・db-types・sqlite・db-write・migrate.test・db.test）、release:plan と 0.6.17 への更新を T01 でした。T07 は取りやめ（S6 は T01 が担う）

@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14.
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -18,6 +18,7 @@ const REV1 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV2 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev2.sql"), "utf8");
 const REV3 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev3.sql"), "utf8");
 const REV4 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev4.sql"), "utf8");
+const REV5 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev5.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -144,6 +145,7 @@ for (const [from, schema] of [
   [2, REV2],
   [3, REV3],
   [4, REV4],
+  [5, REV5],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -228,6 +230,7 @@ for (const [from, schema] of [
   [2, REV2],
   [3, REV3],
   [4, REV4],
+  [5, REV5],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -253,6 +256,7 @@ test("a fixture of every earlier revision is kept, each at its own revision", ()
     [2, REV2],
     [3, REV3],
     [4, REV4],
+    [5, REV5],
   ] as const)
     assert.match(schema, new RegExp(`pragma user_version = ${from};`));
 });
@@ -270,6 +274,65 @@ test("capture writes into a migrated database", () => {
     )
     .run(now, now, text, Buffer.byteLength(text), sha256(text));
   assert.equal(Number((old.prepare("select count(*) as n from source").get() as { n: number }).n), 2);
+});
+
+test("migrating revision 5 keeps every delivery and its units in the main conversation, and both capture views write", () => {
+  const raw = create("old.db", REV5);
+  fill(raw);
+  raw
+    .prepare(
+      "insert into delivery (session_id, event, outcome, reason, path, eligible, omitted, chars, at) values ('s1', 'pre_read', 'emitted', null, 'src/db.ts', 2, 1, 40, ?)",
+    )
+    .run(now);
+  raw.prepare("insert into delivery_unit (delivery_id, unit_id) values (1, 1)").run();
+  const rows = (r: DatabaseSync) =>
+    r
+      .prepare(
+        "select id, session_id, event, outcome, reason, path, eligible, omitted, chars, at from delivery order by id",
+      )
+      .all()
+      .map((x) => ({ ...x }));
+  const before = rows(raw);
+  migrate(raw);
+  assert.deepEqual(rows(raw).slice(0, 1), before);
+  assert.deepEqual(
+    raw
+      .prepare("select agent_id from delivery")
+      .all()
+      .map((x) => ({ ...x })),
+    [{ agent_id: null }],
+  );
+  assert.deepEqual(
+    raw
+      .prepare("select delivery_id, unit_id from delivery_unit")
+      .all()
+      .map((x) => ({ ...x })),
+    [{ delivery_id: 1, unit_id: 1 }],
+  );
+  const capture = connectWriter("capture", path.join(dir, "old.db"));
+  open.push(capture);
+  capture
+    .prepare(
+      "insert into capture_delivery (session_id, event, outcome, eligible, at, units) values ('s1', 'pre_read', 'emitted', 1, ?, '[1]')",
+    )
+    .run(now);
+  capture
+    .prepare(
+      "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, eligible, at, units) values ('s1', 'agent-a', 'pre_read', 'emitted', 1, ?, '[1]')",
+    )
+    .run(now);
+  assert.deepEqual(
+    raw
+      .prepare(
+        "select d.agent_id, x.unit_id from delivery d join delivery_unit x on x.delivery_id = d.id where d.id > 1 order by d.id",
+      )
+      .all()
+      .map((x) => ({ ...x })),
+    [
+      { agent_id: null, unit_id: 1 },
+      { agent_id: "agent-a", unit_id: 1 },
+    ],
+  );
 });
 
 test("migration keeps unit_state's id counter, so an id once used is never handed out again", () => {

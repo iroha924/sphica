@@ -411,7 +411,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 5);
+  assert.equal(one("pragma user_version").user_version, 6);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -1041,6 +1041,37 @@ test("a delivery can list only units of the delivered session's project", () => 
       ),
     /different projects/,
   );
+});
+
+test("the scoped delivery view also lists only units of the delivered session's project, and takes a bounded agent id", () => {
+  session(db, p, "s1");
+  const foreign = unit({ key: "c", kind: "question" }, other);
+  const own = unit({ key: "d", kind: "question" });
+  sql(
+    "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, at, units) values ('s1', 'a1', 'pre_read', 'emitted', ?, json_array(?))",
+    now,
+    own,
+  );
+  assert.equal(db.owner.prepare("select count(*) as n from delivery_unit where unit_id = ?").get(own)?.n, 1);
+  refuses(
+    () =>
+      sql(
+        "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, at, units) values ('s1', 'a1', 'pre_read', 'emitted', ?, json_array(?))",
+        now,
+        foreign,
+      ),
+    /different projects/,
+  );
+  for (const bad of ["", "a".repeat(201)])
+    refuses(
+      () =>
+        sql(
+          "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, at, units) values ('s1', ?, 'pre_read', 'emitted', ?, '[]')",
+          bad,
+          now,
+        ),
+      /CHECK constraint failed/,
+    );
 });
 
 test("forgetting a project removes everything under it despite the no-delete rules", () => {
