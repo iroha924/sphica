@@ -285,6 +285,63 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
+test("SubagentStart gives the subagent the session-start records and a search line, every time, without restarting its reads", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "No telemetry. Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("no-telemetry", m, "No telemetry.", { stance: "dont" }),
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    insert(db, "work", {
+      project_id: p,
+      key: "w",
+      title: "Rework CSV export",
+      goal: "g",
+      current: "notes removed",
+      next: "[]",
+      status: "active",
+      updated_at: "2026-09-27T00:00:00.000Z",
+    });
+    const at = (input: Record<string, unknown>) =>
+      deliver({ session_id: "subs", cwd: repo, ...input }, "claude-code", db.file);
+    const start = () => at({ hook_event_name: "SubagentStart", agent_id: "sub-1", agent_type: "Explore" });
+    const read = (agent?: string) =>
+      at({
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+        ...(agent ? { agent_id: agent } : {}),
+      });
+    const first = await start();
+    assert.match(first, /Work: Rework CSV export/);
+    assert.match(first, /trace:ext-s1\/no-telemetry/);
+    assert.match(first, /search Sphica's past records/);
+    assert.match(await read("sub-1"), /trace:ext-s1\/sqlite/);
+    // The host sends SubagentStart again when the subagent resumes with its context, so it says the set again but keeps the reads
+    assert.equal(await start(), first);
+    assert.equal(await read("sub-1"), "");
+    // The main conversation's start was never delivered, so its resume still delivers after a subagent's start
+    assert.match(await at({ hook_event_name: "SessionStart", source: "resume" }), /Work: Rework CSV export/);
+    assert.deepEqual(
+      db.owner
+        .prepare("select agent_id, reason from delivery where event = 'session_start' order by id")
+        .all()
+        .map((r) => `${r.agent_id ?? "main"}:${r.reason}`),
+      ["sub-1:subagent", "sub-1:subagent", "main:resume"],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("an agent id the log cannot store counts as the main conversation and is still logged", async () => {
   const db = tempDb();
   const repo = checkout();

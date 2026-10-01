@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Automatic delivery of past records into Claude Code and Codex: at session start (current work and a few broad constraints), before an edit or a read
+// Automatic delivery of past records into Claude Code and Codex: at session and subagent start (current work and a few broad constraints), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
@@ -58,6 +58,8 @@ const leftOut = (n: number) =>
   n > 0
     ? `- ${n} more record${n === 1 ? " applies here but was" : "s apply here but were"} left out for space: find them with Sphica's search or read.`
     : "";
+/** Sphica's own line for a subagent, which starts without the conversation where Sphica's tools were introduced. */
+const SEARCH_FIRST = "- Before choosing an approach, search Sphica's past records for it.";
 const workLeftOut = (n: number) =>
   n > 0
     ? `- ${n} more work item${n === 1 ? "" : "s"} not shown: Sphica's status lists the 5 most recently updated.`
@@ -485,7 +487,7 @@ async function atStart(
   db: Reads,
   projectId: number,
   branch: string | null,
-  place: { file: string; key: string; host: Host; owner: boolean },
+  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean },
 ): Promise<Plan> {
   const current = db
     .selectFrom("work")
@@ -537,7 +539,12 @@ async function atStart(
   const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
   const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    ...noted(f.text, lead, [leftOut(broadLeft), workLeftOut(workLeft), await waiting(db, projectId, place)]),
+    ...noted(f.text, lead, [
+      leftOut(broadLeft),
+      workLeftOut(workLeft),
+      await waiting(db, projectId, place),
+      place.subagent ? SEARCH_FIRST : "",
+    ]),
     units: shownUnits,
     eligible: (workTotal ?? 0) + (broadTotal ?? 0),
     omitted: workLeft + broadLeft,
@@ -720,7 +727,7 @@ export async function deliver(
   const call = reviewCall(input);
   const event: Event | null = call
     ? "review"
-    : name === "SessionStart"
+    : name === "SessionStart" || name === "SubagentStart"
       ? "session_start"
       : name === "UserPromptSubmit"
         ? "prompt"
@@ -808,6 +815,7 @@ export async function deliver(
                     file,
                     key: place.key,
                     host,
+                    subagent: name === "SubagentStart",
                     owner: isOwnerTurn(
                       input,
                       undefined,
@@ -815,8 +823,14 @@ export async function deliver(
                       host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
                     ),
                   })),
-                  // The start source marks where reads count from, so it is logged even when the start delivered nothing
-                  reason: input.source && START_SOURCES.has(input.source) ? input.source : null,
+                  // The start source marks where reads count from, so it is logged even when the start delivered nothing. A subagent's
+                  // start never restarts its count: the host also sends it when a subagent with its context resumes
+                  reason:
+                    name === "SubagentStart"
+                      ? "subagent"
+                      : input.source && START_SOURCES.has(input.source)
+                        ? input.source
+                        : null,
                 };
     const entry: Entry = {
       projectId: pid,

@@ -79,13 +79,14 @@ base: main
 
 サブエージェントの開始時に、作業中の件・広い constraint・検索の 1 行が両ホストで届く。
 
-- [ ] T05: SubagentStart で開始の一式と検索の 1 行を配信する
+- [x] T05: SubagentStart で開始の一式と検索の 1 行を配信する
   - 種別: 追加
   - 計画: S4
   - 依存: T02（agent_id 付きでログを書く）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `plugin/hooks/hooks.json`, `plugin/hooks/codex.json`, `scripts/check-ai-config.mjs`, `scripts/check-tarball.mjs`
   - 完了条件: `cd server && node --test --test-name-pattern="SubagentStart" test/deliver.test.ts` → pass。`bun run verify:ai` → exit 0（両ホストの配線の検査を含む）
   - コミット: `feat(deliver): give subagents the session-start records and a search line (T05)`
+  - 結果: `node --test --test-name-pattern="SubagentStart" test/deliver.test.ts` → 1 pass（作業中の件・広い constraint・検索の 1 行、2 回目の SubagentStart も同じ本文で子の読み込みは区切らない、子の開始の後の親の resume は配信される、ログは sub-1:subagent）。`bun run verify:ai` → 通過。SubagentStart を両方の hook ファイルから一時的に外すと 3 件の違反で落ちることを確かめて戻した。`bun run bundle` と `npm pack` の tarball で `node scripts/check-tarball.mjs` → 通過（SubagentStart に hookEventName SubagentStart で検索の行を返す）。`node --test test/deliver.test.ts` → 28 pass
 
 ## P4: 受け入れケースとリリース
 

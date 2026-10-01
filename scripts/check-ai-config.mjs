@@ -285,7 +285,7 @@ try {
   const codexDeliver = ["$", '{PLUGIN_ROOT}/dist/deliver.js" codex'].join("");
   const codexDeliverWindows =
     "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex";
-  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse"]) {
+  for (const event of ["SessionStart", "SubagentStart", "UserPromptSubmit", "PreToolUse"]) {
     const groups = (codexHooks?.[event] ?? []).filter((group) =>
       (group.hooks ?? []).some((hook) => hook.command?.includes(codexDeliver)),
     );
@@ -301,9 +301,18 @@ try {
       fail("plugin/hooks/codex.json: the PreToolUse delivery matcher must cover apply_patch and Bash");
     }
   }
+  const claudeHooks = JSON.parse(read("plugin/hooks/hooks.json")).hooks;
+  // A subagent starts without the main conversation's context, so both hosts give it the session-start records
+  for (const event of ["SessionStart", "SubagentStart"])
+    if (
+      !(claudeHooks?.[event] ?? []).some((group) =>
+        (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
+      )
+    )
+      fail(`plugin/hooks/hooks.json: ${event} is not wired to delivery`);
   // Claude Code reads with the Read tool and, often, with shell commands (Bash): the delivery hook must see both
-  const claudeDeliver = (JSON.parse(read("plugin/hooks/hooks.json")).hooks?.PreToolUse ?? []).filter(
-    (group) => (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
+  const claudeDeliver = (claudeHooks?.PreToolUse ?? []).filter((group) =>
+    (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
   );
   if (
     !claudeDeliver.some((group) =>
