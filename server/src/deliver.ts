@@ -788,6 +788,8 @@ export async function deliver(
         .where("session_id", "=", sessionId(pid, host, input.session_id))
         .where("agent_id", "is", null)
         .where("event", "=", "session_start")
+        // A subagent's start the host sent without its agent id is still not the main conversation's
+        .where((eb) => eb.or([eb("reason", "is", null), eb("reason", "!=", "subagent")]))
         .where("outcome", "=", "emitted")
         .executeTakeFirst();
       if (said) return "";

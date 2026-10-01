@@ -1242,15 +1242,12 @@ test("a subagent start never takes the owner's pending notice, even without an a
     const today = new Date().toISOString();
     for (let n = 0; n < 3; n++)
       message(db, p, { id: `m${n}`, text: `untraced ${n}`, session: `s${n}`, sent: today });
-    const at = (name: string) =>
-      deliver(
-        { hook_event_name: name, source: "startup", session_id: "parent", cwd: repo },
-        "claude-code",
-        db.file,
-      );
+    const at = (name: string, source = "startup") =>
+      deliver({ hook_event_name: name, source, session_id: "parent", cwd: repo }, "claude-code", db.file);
     assert.doesNotMatch(await at("SubagentStart"), /waiting to be traced/);
+    // Nor does it count as the main conversation's start, which would skip the owner's resume as already delivered
     assert.match(
-      await at("SessionStart"),
+      await at("SessionStart", "resume"),
       /3 sessions waiting to be traced/,
       "the owner still gets today's pending notice",
     );

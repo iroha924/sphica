@@ -120,6 +120,16 @@ base: main
   - コミット: `fix(deliver): keep the pending-trace notice for the owner's own session start (T10)`
   - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="pending notice" test/deliver.test.ts` → agent_id の無い SubagentStart の本文に案内が出て落ちた。直した後 → 1 pass。`node --test test/deliver.test.ts` → 29 pass。lint・typecheck → 通過
 
+- [x] T11: agent_id の無い SubagentStart のログを、親の resume の判定に数えない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T10（直すテストが要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="pending notice" test/deliver.test.ts` → agent_id の無い SubagentStart の後の親の resume が、開始を出し済みとして飛ばされ、案内が出ないので落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="pending notice" test/deliver.test.ts` → pass
+  - コミット: `fix(deliver): do not take a subagent start for the main conversation's on resume (T11)`
+  - 結果: red 実測: 親の開始を resume にしたテストが、直す前のコードで "the owner still gets today's pending notice" で落ちた。resume の判定から reason が subagent の行を外した後 → 1 pass。`node --test test/deliver.test.ts` → 29 pass。typecheck → 通過
+
 - [-] T07: release:plan を流し、0.6.17 に揃える
   - 種別: 変更
   - 計画: S6
@@ -135,3 +145,4 @@ base: main
 - 2026-10-02 / T02 / Codex のタスクレビュー F1（P3、再現済み）: 先頭が NUL の agent_id は JS の length が 1 で SQLite の length が 0 になり、CHECK で log が失敗する / 採用。T08 を足した
 - 2026-10-02 / T03・T04 / Codex のタスクレビュー F1（P2）: compact・clear のテストは、開始の配信が trace 待ちの案内に左右され 30 日後に落ちる。F2（P2、再現済み）: 並行の文字数のテストは全部の応答が空でも通る / 両方採用。T09 を足した
 - 2026-10-02 / T08・T05 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart は isOwnerTurn が真になり得て、持ち主向けの案内を受け取りその日の 1 回を使う / 採用。T10 を足した
+- 2026-10-02 / T10 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart のログが親の resume の判定に当たり、持ち主の resume が飛ばされる / 採用。T11 を足した
