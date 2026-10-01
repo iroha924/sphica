@@ -146,3 +146,4 @@ base: main
 - 2026-10-02 / T03・T04 / Codex のタスクレビュー F1（P2）: compact・clear のテストは、開始の配信が trace 待ちの案内に左右され 30 日後に落ちる。F2（P2、再現済み）: 並行の文字数のテストは全部の応答が空でも通る / 両方採用。T09 を足した
 - 2026-10-02 / T08・T05 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart は isOwnerTurn が真になり得て、持ち主向けの案内を受け取りその日の 1 回を使う / 採用。T10 を足した
 - 2026-10-02 / T10 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart のログが親の resume の判定に当たり、持ち主の resume が飛ばされる / 採用。T11 を足した
+- 2026-10-02 / 全体 / Codex の全差分レビュー（main..1df24e60）: F1（P2、再現済み）は T11 で直した内容と同じ。ほかに指摘なし。review-shipping（1df24e60）: 指摘なし（tarball の中身、0.6.16 からの更新、0.6.16 の capture が revision 6 に書けること、両ホストの SubagentStart の入出力を確認）
