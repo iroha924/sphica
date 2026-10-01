@@ -285,6 +285,71 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
+test("subagent reads and edits count apart from the main conversation and from each other", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rules = Array.from({ length: 11 }, (_, n) => `Short rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: rules.join(" ") });
+    await save(db, p, {
+      units: rules.map((r, n) =>
+        decided(`k${n}`, m, r, {
+          anchors: [{ path: n === 10 ? "src/shared.ts" : `src/g${n}.ts`, role: "applies_to" }],
+        }),
+      ),
+    });
+    const call = (tool: string, file: string, agent?: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "agents",
+          cwd: repo,
+          tool_name: tool,
+          tool_input: { file_path: path.join(repo, file) },
+          ...(agent ? { agent_id: agent, agent_type: "Explore" } : {}),
+        },
+        "claude-code",
+        db.file,
+      );
+    const keys = (text: string) => [...text.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]);
+    // Child A spends its whole read budget: the shared record and seven more
+    assert.deepEqual(keys(await call("Read", "src/shared.ts", "agent-a")), ["trace:ext-s1/k10"]);
+    for (let n = 0; n < 7; n++) assert.equal(keys(await call("Read", `src/g${n}.ts`, "agent-a")).length, 1);
+    assert.deepEqual(keys(await call("Read", "src/g7.ts", "agent-a")), [], "child A's budget is spent");
+    // Neither the main conversation nor child B saw what child A was shown, and their budgets are untouched
+    assert.deepEqual(keys(await call("Read", "src/shared.ts")), ["trace:ext-s1/k10"]);
+    assert.deepEqual(keys(await call("Read", "src/g7.ts")), ["trace:ext-s1/k7"]);
+    assert.deepEqual(keys(await call("Read", "src/shared.ts", "agent-b")), ["trace:ext-s1/k10"]);
+    assert.deepEqual(
+      keys(await call("Read", "src/shared.ts")),
+      [],
+      "the main conversation still sees a record once",
+    );
+    // A child's edit does not stop the main conversation's later read of the same file
+    assert.deepEqual(keys(await call("Edit", "src/g9.ts", "agent-b")), ["trace:ext-s1/k9"]);
+    assert.deepEqual(keys(await call("Read", "src/g9.ts")), ["trace:ext-s1/k9"]);
+    assert.deepEqual(
+      db.owner
+        .prepare("select agent_id, event from delivery order by id")
+        .all()
+        .map((r) => `${r.agent_id ?? "main"}:${r.event}`),
+      [
+        // The read past child A's budget still logs its omission note
+        ...Array(9).fill("agent-a:pre_read"),
+        "main:pre_read",
+        "main:pre_read",
+        "agent-b:pre_read",
+        "agent-b:pre_edit",
+        "main:pre_read",
+      ],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // Only `..` itself or `../...` leave the repository; a folder named `..config` is inside it
 test("an edit under a folder whose name starts with two dots is delivered", async () => {
   const db = tempDb();

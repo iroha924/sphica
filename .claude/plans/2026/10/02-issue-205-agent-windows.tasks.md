@@ -35,7 +35,7 @@ base: main
 
 サブエージェント・compaction・並行の読み込みで、表示済みと予算が正しく数えられる。
 
-- [ ] T02: 配信のログに agent_id を付け、表示済みと予算をエージェントごとに数える
+- [x] T02: 配信のログに agent_id を付け、表示済みと予算をエージェントごとに数える
   - 種別: 修正
   - 計画: S2
   - 依存: T01（agent_id の列と書き込み先のビューが要る）
@@ -43,6 +43,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="subagent" test/deliver.test.ts` → 子の Read の後に親が同じ path を Read すると記録が出ない（親の表示済みにされている）ので落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="subagent" test/deliver.test.ts` → pass。子 A・子 B・親が別々に数えられ、子の Edit が親の Read を止めない
   - コミット: `fix(deliver): count shown records and the read budget per agent (T02)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="subagent" test/deliver.test.ts` → 子 A が読んだ後の親の Read が [] で落ちた（期待 trace:ext-s1/k10）。直した後 → 1 pass。`node --test test/deliver.test.ts` → 22 pass。lint・typecheck → 通過
 
 - [ ] T03: 親の compact と clear で読む前の窓を区切る
   - 種別: 修正

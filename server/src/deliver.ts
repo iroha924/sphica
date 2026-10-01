@@ -7,11 +7,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ExpressionBuilder } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
-import type { DB } from "./db-types.ts";
+import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
@@ -233,21 +234,33 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
   };
 }
 
+/** The subagent a hook ran in, or null for the main conversation. The host's id is kept only when the log column takes it. */
+const agentOf = (input: { agent_id?: unknown }): string | null =>
+  typeof input.agent_id === "string" && input.agent_id.length >= 1 && input.agent_id.length <= 200
+    ? input.agent_id
+    : null;
+
+/** Deliveries of one conversation: the main one, or one subagent, which starts with its own context. */
+const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery }, "d">) =>
+  agent === null ? eb("d.agent_id", "is", null) : eb("d.agent_id", "=", agent);
+
 /**
- * Before a read: the decisions and constraints anchored to the path that this session has not been shown yet, within the read budget
- * left for the session. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
+ * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown yet, within the read
+ * budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
  */
 async function beforeRead(
   db: Reads,
   projectId: number,
   rels: string[],
   session: string,
+  agent: string | null,
   how: "reading" | "named",
 ): Promise<Plan> {
   const sent = await db
     .selectFrom("delivery as d")
     .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
     .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
     .where("d.outcome", "=", "emitted")
     .select(["x.unit_id", "d.event"])
     .execute();
@@ -255,6 +268,7 @@ async function beforeRead(
   const spent = await db
     .selectFrom("delivery as d")
     .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
     .where("d.event", "=", "pre_read")
     .where("d.outcome", "=", "emitted")
     .where(({ exists, selectFrom }) =>
@@ -603,6 +617,7 @@ async function log(
   projectId: number,
   host: Host,
   external: string,
+  agent: string | null,
   event: Event,
   plan: Plan,
   outcome: string,
@@ -618,9 +633,10 @@ async function log(
         .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
         .execute();
       await trx
-        .insertInto("capture_delivery")
+        .insertInto("capture_delivery_scoped")
         .values({
           session_id: id,
+          agent_id: agent,
           event,
           outcome,
           reason: plan.reason,
@@ -708,6 +724,7 @@ export async function deliver(
         .selectFrom("delivery")
         .select("id")
         .where("session_id", "=", sessionId(pid, host, input.session_id))
+        .where("agent_id", "is", null)
         .where("event", "=", "session_start")
         .where("outcome", "=", "emitted")
         .executeTakeFirst();
@@ -722,6 +739,7 @@ export async function deliver(
               pid,
               rels,
               sessionId(pid, host, input.session_id),
+              agentOf(input),
               shell ? "named" : "reading",
             )
           : event === "prompt"
@@ -747,6 +765,7 @@ export async function deliver(
       pid,
       host,
       input.session_id,
+      agentOf(input),
       event,
       plan,
       plan.text ? "emitted" : "nothing",
