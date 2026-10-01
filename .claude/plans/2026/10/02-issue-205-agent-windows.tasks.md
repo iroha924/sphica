@@ -110,7 +110,7 @@ base: main
   - コミット: `test(deliver): keep the window test off the clock and the concurrent tests off empty answers (T09)`
   - 結果: 作業中の件を入れて開始の配信が必ず本文を持つようにし、clear の前に作業を done にして本文の無い開始でも区切りの行が書かれることを見る形にした。together() は子プロセスが 0 以外で終わると失敗し、文字数のケースは 1000 字より多く届いたことと unavailable が無いことも見る。`node --test --test-name-pattern="compact|clear|concurrent" test/deliver.test.ts` → 4 pass
 
-- [ ] T10: SubagentStart に持ち主向けの trace 待ちの案内を出さない
+- [x] T10: SubagentStart に持ち主向けの trace 待ちの案内を出さない
   - 種別: 修正
   - 計画: S4
   - 依存: T05（SubagentStart の配信が要る）
@@ -118,6 +118,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="pending notice" test/deliver.test.ts` → agent_id の無い SubagentStart が案内を受け取り、その日の持ち主の SessionStart に案内が出ないので落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="pending notice" test/deliver.test.ts` → pass
   - コミット: `fix(deliver): keep the pending-trace notice for the owner's own session start (T10)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="pending notice" test/deliver.test.ts` → agent_id の無い SubagentStart の本文に案内が出て落ちた。直した後 → 1 pass。`node --test test/deliver.test.ts` → 29 pass。lint・typecheck → 通過
 
 - [-] T07: release:plan を流し、0.6.17 に揃える
   - 種別: 変更

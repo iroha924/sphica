@@ -816,12 +816,15 @@ export async function deliver(
                     key: place.key,
                     host,
                     subagent: name === "SubagentStart",
-                    owner: isOwnerTurn(
-                      input,
-                      undefined,
-                      undefined,
-                      host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                    ),
+                    // A subagent's start is never the owner's, even when the host leaves out its agent id
+                    owner:
+                      name !== "SubagentStart" &&
+                      isOwnerTurn(
+                        input,
+                        undefined,
+                        undefined,
+                        host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                      ),
                   })),
                   // The start source marks where reads count from, so it is logged even when the start delivered nothing. A subagent's
                   // start never restarts its count: the host also sends it when a subagent with its context resumes

@@ -1234,6 +1234,32 @@ test("session start tells about sessions waiting to be traced, once a day, even 
   }
 });
 
+test("a subagent start never takes the owner's pending notice, even without an agent id", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const today = new Date().toISOString();
+    for (let n = 0; n < 3; n++)
+      message(db, p, { id: `m${n}`, text: `untraced ${n}`, session: `s${n}`, sent: today });
+    const at = (name: string) =>
+      deliver(
+        { hook_event_name: name, source: "startup", session_id: "parent", cwd: repo },
+        "claude-code",
+        db.file,
+      );
+    assert.doesNotMatch(await at("SubagentStart"), /waiting to be traced/);
+    assert.match(
+      await at("SessionStart"),
+      /3 sessions waiting to be traced/,
+      "the owner still gets today's pending notice",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // The notice names trace the way the host starts Skills, and a headless run neither sees it nor uses up the day's notice
 test("the waiting-sessions notice follows the host and is kept for the owner's sessions", async () => {
   const db = tempDb();
