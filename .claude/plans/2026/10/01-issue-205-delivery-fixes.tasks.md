@@ -109,6 +109,24 @@ GitHub の Codex の指摘を直し、Security Review と要約コメントが�
   - コミット: `docs(release): keep the tarball check's header to three lines (T08)`
   - 結果: red 実測: `sed -n '2,5p' scripts/check-tarball.mjs` → 直す前は 4 行のコメントだった。直した後 `sed -n '2,4p' scripts/check-tarball.mjs` → 3 行
 
+- [x] T09: リリースの関門を未解決スレッド 0 だけにする
+  - 種別: 変更
+  - 計画: S7
+  - 依存: なし
+  - 変更: `scripts/lib/release-gate.mjs`, `scripts/lib/release-gate.d.mts`, `scripts/release-gate.mjs`, `scripts/release-plan.mjs`, `server/test/release-gate.test.ts`, `server/test/release-gate-cli.test.ts`
+  - 完了条件: `cd server && node --test test/release-gate.test.ts test/release-gate-cli.test.ts` → pass。`bun run check` → exit 0
+  - コミット: `chore(release): gate on unresolved review threads only, the owner reads the Codex review (T09, T10)`
+  - 結果: `node --test test/release-gate.test.ts test/release-gate-cli.test.ts` → pass 13 / fail 0。`bun run check` → exit 0（.d.mts の型を直した後）
+
+- [x] T10: Review 節と plugin-release スキルを新しい運用に直す
+  - 種別: 変更
+  - 計画: S7
+  - 依存: T09（関門が見るものを文書に書く）
+  - 変更: `CLAUDE.md`, `.agents/skills/plugin-release/SKILL.md`
+  - 完了条件: `rg -n -i "security review|review summary" CLAUDE.md .agents scripts` → 0 件。`bun run verify:ai` → exit 0
+  - コミット: `chore(release): gate on unresolved review threads only, the owner reads the Codex review (T09, T10)`
+  - 結果: `rg -n -i "security review|review summary" CLAUDE.md .agents scripts` → 0 件。`bun run verify:ai` → exit 0
+
 ## 記録
 - 2026-10-01 / T01・T06 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットで版が上がっていないと落とす（前回の計画と同じ） / 0.6.16 への版の上げを T06 から T01 へ移した。T01 の変更欄: deliver.ts・deliver.test.ts → それに 4 つの manifest を足した。T01 の計画欄: S1 → S1, S6。T06 は取りやめ（コードを変えないコミットになり、release:plan と verify の確認は plan の完了条件 A1・A5 で流す）。`bun run release:plan -- --base v0.6.15` → release kind: plugin、inputs: server/src/deliver.ts
 - 2026-10-01 / T04 / review の配信のテストは review-bridge.test.ts にまとまっているので、そちらに足した。変更欄: deliver.test.ts → review-bridge.test.ts。withdrawn は owner 接続で unit_state に active → withdrawn を入れて作った（trigger は通る）
@@ -119,3 +137,4 @@ GitHub の Codex の指摘を直し、Security Review と要約コメントが�
 - 2026-10-01 / T05 / Codex のレビュー（7e96b024）: 指摘 0 件。1 秒の上限の CI での余裕は未計測とされた / 手元で 3 回測り、ロックなし 65 ms、ロック中 354〜360 ms（250 ms の待ちを含む）。CI の結果は push の後に見る
 - 2026-10-01 / 全体 / review-shipping（main..7e96b024）: 指摘 0 件。展開した dist/deliver.js に 250 ms の待ちが入っていること、LOG_WAIT_MS を 5000 にすると check-tarball が落ちること、修正を戻すと 4 本のテストが落ちること、`bun run verify` → exit 0 を確かめた。未検証として、Windows でプロンプトの絶対表記のドライブ文字の大小が root と違うと当たらない（c: と C:）が挙がった / 直さない。Windows で git が返す root の大小を確かめられず、相対表記なら当たる端の入力のため。PR 本文の Declined findings に書く
 - 2026-10-01 / PR #242 / GitHub の Codex レビュー 1 回目（37625c6、手動の依頼）: 指摘 1 件（P1 の札だが中身はコメントの長さの規範）。check-tarball の冒頭コメントが 4 行 / 採用、T08
+- 2026-10-01 / T09・T10 / 持ち主の提案で運用を変えた（plan の変更履歴）。GitHub の Codex は持ち主が見て、指摘を共有する。依頼済みの `@codex review`（11:41）は 37625c6 への指摘 1 件を返し、T08 で直した

@@ -143,62 +143,14 @@ test("rejects a commit whose release dry run failed or did not run", () => {
   );
 });
 
-const row = (
-  name: string,
-  state = "✅ **Completed** <relative-time>t</relative-time>",
-  sha = COMMIT.slice(0, 7),
-) => `| x **${name}** | ${state} | \`${sha}\` | PR opened |`;
-const summary = (
-  headSha: string,
-  status = "completed",
-  user: object = { id: 199175422, type: "Bot" },
-  rows = [row("Code Review"), row("Security Review")],
-) => ({
-  user,
-  body: `<!-- codex-pull-request-review-summary -->\n<!-- codex-security-review:v1 {"headSha":"${headSha}","status":"${status}"} -->\n## Codex Review Summary\n\n| Review | Status | Commit | Review trigger |\n| --- | --- | --- | --- |\n${rows.join("\n")}\n`,
-});
-const reviewed = { commit: COMMIT, comments: [summary(COMMIT)], threads: [{ isResolved: true }] };
-
-// The PR body is written by the agent whose work was reviewed; only the connector's own summary and the threads prove the review
-test("passes only when Codex's own summary marks the tag commit completed and no thread is open", () => {
-  assert.deepEqual(reviewProblems(reviewed), []);
-  const fails = (input: { comments?: unknown[]; threads?: unknown[] }, why: RegExp) =>
-    assert.match(reviewProblems({ ...reviewed, ...input }).join("\n"), why);
-  fails({ comments: [] }, /found 0/);
-  fails({ comments: [summary(COMMIT, "completed", { id: 42, type: "User" })] }, /found 0/);
-  fails({ comments: [summary(COMMIT, "completed", { id: 199175422, type: "User" })] }, /found 0/);
-  fails({ comments: [summary(COMMIT), summary(COMMIT)] }, /found 2/);
-  fails({ comments: [summary("b".repeat(40))] }, /not the tag commit/);
-  fails({ comments: [summary(COMMIT, "running")] }, /running, not completed/);
-  fails(
-    { comments: [{ ...summary(COMMIT), body: "<!-- codex-security-review:v1 {headSha} -->" }] },
-    /not valid JSON/,
-  );
-  fails({ threads: [{ isResolved: true }, { isResolved: false }] }, /1 review thread is unresolved/);
-  fails({ threads: [{}] }, /unresolved/);
-  // The marker may follow one review only: the table's Code Review and Security Review rows must both be done, on this commit
-  const bot = { id: 199175422, type: "Bot" };
-  fails(
-    {
-      comments: [
-        summary(COMMIT, "completed", bot, [
-          row("Code Review", "🔄 **Running** since t"),
-          row("Security Review"),
-        ]),
-      ],
-    },
-    /Code Review/,
-  );
-  fails(
-    {
-      comments: [
-        summary(COMMIT, "completed", bot, [
-          row("Code Review"),
-          row("Security Review", "✅ **Completed** t", "bbbbbbb"),
-        ]),
-      ],
-    },
-    /Security Review/,
-  );
-  fails({ comments: [summary(COMMIT, "completed", bot, [row("Security Review")])] }, /Code Review/);
+// The owner reads the Codex review; the gate only stops a release with a finding nobody fixed or declined
+test("passes only when no review thread is left unresolved", () => {
+  assert.deepEqual(reviewProblems({ threads: [] }), []);
+  assert.deepEqual(reviewProblems({ threads: [{ isResolved: true }] }), []);
+  assert.deepEqual(reviewProblems({ threads: [{ isResolved: true }, { isResolved: false }] }), [
+    "1 review thread is unresolved",
+  ]);
+  assert.deepEqual(reviewProblems({ threads: [{}, { isResolved: false }] }), [
+    "2 review threads are unresolved",
+  ]);
 });

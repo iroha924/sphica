@@ -97,6 +97,7 @@ approved_at: 2026-10-01
 - S4: superseded・withdrawn の記録を自動配信しない受け入れケースと review の単体テスト
 - S5: check-tarball に、展開した deliver.js がロック中に 1 秒未満で目的の記録を返す検査を足す
 - S6: release:plan を流し、0.6.16 に揃える
+- S7: リリースの関門から GitHub の Codex の要約コメントと Security Review の判定を外し、未解決のレビュースレッド 0 だけを見る。CLAUDE.md の Review 節、plugin-release スキル、release:plan の案内を「CI は Claude、GitHub の Codex レビューは持ち主が見て指摘を共有する」に直す
 
 ## 完了条件
 
@@ -119,3 +120,4 @@ approved_at: 2026-10-01
 なし
 
 ## 変更履歴
+- 2026-10-01 / S7 を足した / 持ち主が ChatGPT のプランを下げて Security Review と要約コメントが無くなり、関門が通らなくなった。持ち主の提案で、GitHub の Codex レビューは持ち主が見て指摘を共有し、Claude は CI を見る運用に変えた。過去の決定 release-gate-codex-review（ボットの要約を API で確かめる）を置き換える。関門には未解決スレッド 0 だけを残す（ボットの表示に依らず、resolve し忘れを止める） / Go 済み（持ち主が A を選び、運用の変更を提案した）
