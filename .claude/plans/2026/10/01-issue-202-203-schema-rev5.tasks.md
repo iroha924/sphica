@@ -236,6 +236,16 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): keep REPLACE out of the code, since its delete bypasses the ingest limits (T26)`
   - 結果: 足すと `bun run sql` がどれも挙げて exit 1、外すと exit 0。直す前の検査はこの規則を持たず exit 0（red）
 
+- [x] T27: GitHub の Codex レビュー 1 回目の指摘を直す
+  - 種別: 修正
+  - 計画: S3, S6, S9
+  - 依存: T26
+  - 変更: `server/src/record.ts`, `db/schema.sql`, `db/migrations/0005.sql`, `db/migrations/0005.check.sql`, `.agents/skills/knowledge-schema/SKILL.md`, `server/test/record.test.ts`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="path|finishes at its start" test/schema.test.ts test/migrate.test.ts test/record.test.ts` → 開始が時計より後の run を saved にすると CHECK で落ち、C1 の制御文字（U+0080〜U+009F）を含む path が source・edit_observation に入り、移行でも外れない
+  - 完了条件: 同じコマンドが通る。`rg -n --hidden "external_reference" .agents .claude/skills plugin` → 該当なし。`bun run verify` → exit 0
+  - コミット: `fix(db): finish runs no earlier than they began, refuse C1 controls in paths (T27)`
+  - 結果: 直す前は 3 本落ちた（red: finished_at の CHECK、C1 の path が insert で通る、移行で外れる anchor が 1 行のまま）。直した後は schema・migrate・record・extract・db のテストが全件 pass
+
 - [x] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
   - 種別: 削除
   - 計画: S3, S4, S6, S9
@@ -345,3 +355,5 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T26 / review-shipping: 指摘 3 件。schema の制約の `on conflict replace` は普通の insert を REPLACE にするのに検査が schema を読まない、`.orReplace ()` のように括弧の前に空白があると漏れる / 2 件とも検査に足した（pre-commit の対象にも schema を足した）。英文の "or replace" に当たる誤検出は、今のファイルに無く、当たったら書き換えれば済むので見送り
 - 2026-10-01 / 完了条件 A1 / スリープ中の `bun run verify` は acceptance の 1 件が 600〜900 秒かかって落ちた（2 回、落ちたケースは毎回別）。マシンを起こした状態で T26 を入れて流し直すと exit 0（acceptance 79 件 pass、72 秒）
 - 2026-10-01 / 全差分 / Codex のレビュー（e6028dc3..680fd62f）: 指摘 0 件。revision 1〜4 から 5 への移行が新規の DB と全 166 定義で一致し、移行後の保存・検索・後継の取り下げと復帰・forget の cascade が実際の authorizer の下で通ることを、メモリ上の SQLite で確かめた（bun run verify と npm pack は read-only のため流していない）
+- 2026-10-01 / PR #241 / GitHub の Codex レビュー 1 回目（468111c）: 指摘 3 件（P2）。F1: begin と save の間に時計が戻ると finished_at の CHECK で保存全体が落ちる（再現済み）。F2: path の規則が C1 の制御文字を通し、コード側（`\p{Cc}`）と食い違う。F3: knowledge-schema Skill の表に external_reference が残る / 3 件とも採用、T27。完了条件 A6 の rg は隠しディレクトリを見ていなかった。F1 と同じ類の、保存をまたいで時計が戻ったときの state の at と取り下げの時刻は直さない（数時間をまたいで時計が戻るときだけの端の入力）
+- 2026-10-01 / T27 / review-shipping: 指摘なし。ingest の接続での max() の更新、GLOB の範囲が文字コードで比べられること（U+0080〜009F が当たり U+00A0 以降は当たらない）、移行の一覧に path が出ないこと、verify と配布物の検査を確かめた

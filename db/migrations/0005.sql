@@ -256,42 +256,42 @@ insert into sphica_migration_note
 select 'an anchor whose path revision 5 refuses', 'anchor ' || id || ' of unit ' || unit_id, 'removed'
 from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*') order by id;
 update unit set revision = revision + 1 where id in (select unit_id from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'));
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'));
 insert into sphica_migration_note
 select 'an anchor replaced by one whose path revision 5 refuses', 'anchor ' || id || ' of unit ' || unit_id, 'no longer points at what replaced it'
 from unit_anchor where replaced_by in (select id from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*')) order by id;
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')) order by id;
 update unit_anchor set replaced_by = null where replaced_by in (select id from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'));
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'));
 delete from unit_anchor where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*');
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*');
 insert into sphica_migration_note
 select 'an edit observation whose path revision 5 refuses', 'observation ' || id || ' in session ' || session_id, 'removed'
 from edit_observation where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*') order by id;
 update unit_anchor set edit_observation_id = null
 where edit_observation_id in (select id from edit_observation where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'));
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'));
 delete from edit_observation where not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*');
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*');
 insert into sphica_migration_note
 select 'a source whose path revision 5 refuses', 'source ' || id || ' (' || kind || ')', 'path and lines removed; the text stays'
 from source where path is not null and kind <> 'file_excerpt' and not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*') order by id;
 update source set path = null, line_start = null, line_end = null
 where path is not null and kind <> 'file_excerpt' and not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*');
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*');
 
 -- Edit observations repeated for a session, turn (none counting as one), path, and way: the first stays, and anchors citing a later one
 -- cite the first instead
@@ -442,7 +442,7 @@ create table source_new (
   -- Code position of a review comment or a file excerpt: a normalized repository-relative path with forward slashes
   path text check (path is null or (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')),
   line_start integer check (line_start > 0),
   line_end integer check (line_end is null or (line_start is not null and line_end >= line_start)),
   diff_hunk text,
@@ -470,7 +470,7 @@ create table edit_observation_new (
   tool_event_id text,
   path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
   via text not null check (via in ('tool', 'status')),
   observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
 ) strict;
@@ -568,7 +568,7 @@ create table unit_anchor_new (
   unit_id integer not null references unit (id) on delete cascade,
   path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
   symbol text,
   commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
   line_start integer check (line_start > 0),

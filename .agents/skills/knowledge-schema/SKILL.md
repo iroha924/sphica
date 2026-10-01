@@ -62,7 +62,7 @@ Four boundaries (the header of schema.sql):
 
 | Boundary | Tables | Rule |
 |---|---|---|
-| Captured sources | `session`, `source`, `artifact_link`, `edit_observation`, `external_reference` | Never rewritten. A changed external item (an edited PR body) is a new `revision` |
+| Captured sources | `session`, `source`, `artifact_link`, `edit_observation` | Never rewritten. A changed external item (an edited PR body) is a new `revision` |
 | Units | `unit` and its `unit_option`, `unit_evidence`, `unit_adoption`, `unit_link`, `unit_state`, `unit_anchor`, `unit_alias` | Text never rewritten; corrections are successors (`supersedes`), retractions, and anchor replacements |
 | Processing | `extraction_run`, `source_processing` | What each run looked at, so untraced sessions are counted, not guessed |
 | Work and delivery | `work`, `delivery`, `delivery_unit` | Current work, and what the hooks showed (unit ids, never text) |

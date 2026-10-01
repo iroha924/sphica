@@ -1048,11 +1048,17 @@ export async function saveRecord(
   return saved;
 }
 
-/** Marks the run saved. Called once, after every write of the save: a saved run changes no more. */
+/**
+ * Marks the run saved. Called once, after every write of the save: a saved run changes no more.
+ * The clock can step back after begin, so the run finishes no earlier than it started.
+ */
 export async function finishRun(trx: Kysely<DB>, runId: number): Promise<void> {
   await trx
     .updateTable("extraction_run")
-    .set({ status: "saved", finished_at: iso(Date.now()) })
+    .set((eb) => ({
+      status: "saved",
+      finished_at: eb.fn<string>("max", [eb.val(iso(Date.now())), eb.ref("started_at")]),
+    }))
     .where("id", "=", runId)
     .execute();
 }

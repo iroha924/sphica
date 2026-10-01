@@ -8,7 +8,7 @@ insert into sphica_migration_stop
 select 'a file excerpt whose path revision 5 refuses (forget it to go on)', 'source ' || id || ' ' || external_id
 from source where kind = 'file_excerpt' and not (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*') order by id;
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*') order by id;
 
 -- Values no release of this generation ever wrote: such a row was written outside Sphica, and revision 5 no longer has the value
 insert into sphica_migration_stop

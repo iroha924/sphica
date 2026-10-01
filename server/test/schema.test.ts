@@ -513,12 +513,13 @@ test("file excerpts need a normalized repository path, both line bounds, and hex
     "a/.",
     "src/a\u0001.ts",
     "a\u007f",
+    "a\u0085b",
   ])
     refuses(() => excerpt(bad), /constraint failed/);
   // Edit observations and anchors take the same rule: an anchor meets an observation by its exact path
   session(db, p, "s1");
   const u = unit({ key: "paths", kind: "finding" });
-  for (const bad of ["a//b", "./a", "a/./b", "src/a\u0001.ts", "a\u007f", "a/.."]) {
+  for (const bad of ["a//b", "./a", "a/./b", "src/a\u0001.ts", "a\u007f", "a\u009f", "a/.."]) {
     refuses(
       () =>
         sql(

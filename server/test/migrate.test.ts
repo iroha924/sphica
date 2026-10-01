@@ -484,6 +484,12 @@ test("migrating revision 4 removes observations and anchors with a path revision
     "insert into unit_anchor (unit_id, path, role, run_id, added_at) values (1, 'src/fine.ts', 'applies_to', 1, ?)",
     now,
   );
+  // The code refuses every control character, C1 included
+  run(
+    "insert into unit_anchor (unit_id, path, role, run_id, added_at) values (1, ?, 'applies_to', 1, ?)",
+    "src/a\u0085.ts",
+    now,
+  );
   const text = "look here";
   run(
     "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed, path, line_start, line_end) values (1, 'review_comment', 'pr:1', 'review_comment:1', 1, 'person', ?, ?, ?, ?, ?, 1, ?, 3, 4)",
@@ -515,7 +521,7 @@ test("migrating revision 4 removes observations and anchors with a path revision
     { path: null, line_start: null, line_end: null, text },
   );
   for (const rule of [
-    "an anchor whose path revision 5 refuses: 1 row",
+    "an anchor whose path revision 5 refuses: 2 rows",
     "an edit observation whose path revision 5 refuses: 1 row",
     "a source whose path revision 5 refuses: 1 row",
   ])

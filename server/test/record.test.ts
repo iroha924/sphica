@@ -11,7 +11,7 @@ import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../s
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { readUnit } from "../src/read.ts";
-import { checkRecord, repoPath, saveRecord, type Target, valueInQuote } from "../src/record.ts";
+import { checkRecord, finishRun, repoPath, saveRecord, type Target, valueInQuote } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -66,6 +66,29 @@ async function save(db: TempDb, t: Target, record: unknown, looked: number[] = [
 
 const state = (db: TempDb, key: string) =>
   db.owner.prepare("select lifecycle, extraction, extraction_reason from unit where key = ?").get(key);
+
+// The clock can step back between begin and save, and a run never finishes before it started
+test("a run whose start is later than the clock finishes at its start", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const later = "2999-01-01T00:00:00.000Z";
+    const runId = insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "x",
+      status: "running",
+      started_at: later,
+    });
+    await finishRun(db.ingest, runId);
+    assert.deepEqual(
+      { ...db.owner.prepare("select status, finished_at from extraction_run where id = ?").get(runId) },
+      { status: "saved", finished_at: later },
+    );
+  } finally {
+    await db.done();
+  }
+});
 
 test("an anchor given twice in a record is kept once, since a record holds one live anchor per place", async () => {
   const db = tempDb();

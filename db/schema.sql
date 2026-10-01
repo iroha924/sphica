@@ -90,7 +90,7 @@ create table source (
   -- Code position of a review comment or a file excerpt: a normalized repository-relative path with forward slashes
   path text check (path is null or (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')),
   line_start integer check (line_start > 0),
   line_end integer check (line_end is null or (line_start is not null and line_end >= line_start)),
   diff_hunk text,
@@ -188,7 +188,7 @@ create table edit_observation (
   tool_event_id text,
   path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
   via text not null check (via in ('tool', 'status')),
   observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
 ) strict;
@@ -505,7 +505,7 @@ create table unit_anchor (
   unit_id integer not null references unit (id) on delete cascade,
   path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
     and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || ']*'),
+    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
   symbol text,
   commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
   line_start integer check (line_start > 0),
