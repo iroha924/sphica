@@ -206,6 +206,7 @@ const opOf = (action: number): "insert" | "update" | "delete" | undefined =>
 /**
  * The record server reads text anyone wrote, so its connection writes only what its own code writes: the owner identity, a session's
  * messages, the full-text indexes' commands, and the schema generation are out of its reach, and it deletes nothing but stale links.
+ * REPLACE's implicit delete never reaches the authorizer; scripts/check-sql.mjs keeps it out of the code instead.
  */
 function ingestAuthorizer(
   action: number,

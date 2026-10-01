@@ -226,6 +226,16 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
   - コミット: `fix(db): refuse writing evidence or adoption already retracted (T25)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="the small checks" test/schema.test.ts` → 直す前の schema では、別の project の発言を理由に引用した取り下げ済みの行が insert で入って落ちた（red）。直した後 schema・migrate のテストは全件 pass（取り下げ済みの証拠と採用の insert はどれも拒まれ、移行は通る）。`bun run verify` → exit 0
 
+- [x] T26: REPLACE をコードに書けなくする
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T17（REPLACE がすり抜ける allow list）
+  - 変更: `scripts/check-sql.mjs`, `server/src/db-write.ts`, `lefthook.yml`
+  - red: `server/src` の 1 ファイルに `.orReplace()`・`.orReplace ()`・改行をまたぐ `INSERT OR REPLACE` を、`db/schema.sql` に `unique on conflict replace` を足して `bun run sql` → 直す前の検査は exit 0
+  - 完了条件: 同じものを足して `bun run sql` がどれも挙げて exit 1、外すと exit 0。`bun run verify` → exit 0
+  - コミット: `fix(db): keep REPLACE out of the code, since its delete bypasses the ingest limits (T26)`
+  - 結果: 足すと `bun run sql` がどれも挙げて exit 1、外すと exit 0。直す前の検査はこの規則を持たず exit 0（red）
+
 - [x] T15: どのリリースも書かない値と external_reference の表を消し、該当行があれば移行を止める
   - 種別: 削除
   - 計画: S3, S4, S6, S9
@@ -331,3 +341,6 @@ unit の状態が遷移表の外へ動かず、後継は 1 つで、支えの規
 - 2026-10-01 / T08・T25 / 出荷レビューを 1 回で済ませるため 1 コミットにまとめる。review-shipping は 10 分無応答で打ち切られた（3 度目）。頼んだ検査のうち、`openReader()` を `Kysely<DB>` に戻すと `@ts-expect-error` が未使用になって型検査が落ちること、server/src に取り下げ済みの行を insert する所が無いこと、tsconfig が src・test・evals を含むことを、自分で確かめた
 - 2026-10-01 / T19 / 変更欄の Skill のパスを実ファイルに合わせた（`.claude/skills/knowledge-schema` は `.agents/skills/knowledge-schema` へのリンク）。配布物の検査は、移行する古い DB に記録を入れ、移行後も残ることを見る形にした（T03 の記録の宿題）
 - 2026-10-01 / T19 / review-shipping: 差分への指摘なし。依頼文に「Windows のジョブもこの検査を流す」と書いたのは誤りで、流すのは ubuntu の check と release だけ（Windows のジョブは配布物の起動と init・doctor だけを見る）
+- 2026-10-01 / T16・T17・T08・T25 / Codex のレビュー（22bca244..4eac1a93）: 指摘 1 件（P2、再現済み）。INSERT OR REPLACE の暗黙の削除は authorizer に届かず、delete のトリガーも動かないので、取り下げた行を生きた行で上書きでき、work の key も変えられる。今のコードに REPLACE を出す所は無い / 採用。authorizer では REPLACE を見分けられず（insert としか届かない）、recursive_triggers を入れると既存のトリガーの動きが変わるので、修正タスク T26 で REPLACE をコードに書けなくする機械の検査を足した
+- 2026-10-01 / T26 / review-shipping: 指摘 3 件。schema の制約の `on conflict replace` は普通の insert を REPLACE にするのに検査が schema を読まない、`.orReplace ()` のように括弧の前に空白があると漏れる / 2 件とも検査に足した（pre-commit の対象にも schema を足した）。英文の "or replace" に当たる誤検出は、今のファイルに無く、当たったら書き換えれば済むので見送り
+- 2026-10-01 / 完了条件 A1 / スリープ中の `bun run verify` は acceptance の 1 件が 600〜900 秒かかって落ちた（2 回、落ちたケースは毎回別）。マシンを起こした状態で T26 を入れて流し直すと exit 0（acceptance 79 件 pass、72 秒）

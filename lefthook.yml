@@ -33,7 +33,7 @@ pre-commit:
     # This checks only how SQL is written. Whether SQL ran against a real SQLite database (sql:reach) and the child process lane (sql:live)
     # rerun the tests, so pre-push verify and CI check them.
     - name: sql
-      glob: "{server/src/**/*.ts,server/test/**/*.ts,scripts/check-sql.mjs}"
+      glob: "{server/src/**/*.ts,server/test/**/*.ts,db/schema.sql,scripts/check-sql.mjs}"
       run: bun run sql
     - name: architecture
       glob: "{server/src/**/*.ts,scripts/check-architecture.mjs}"
