@@ -3336,6 +3336,292 @@
       ]
     },
     {
+      "id": "injection-24",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A subagent's reads count apart from the main conversation and from other subagents: each is shown the anchored decision once, and a subagent start brings the search line",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "subagent_start",
+              "agent_id": "agent-a"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts",
+              "agent_id": "agent-a"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts",
+              "agent_id": "agent-b"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts",
+              "agent_id": "agent-a"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "contains": ["search Sphica's past records"]
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "empty": true
+            },
+            {
+              "empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-25",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "After compaction a read shows the decision again; a resume keeps it shown",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "session_start",
+              "source": "startup"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "session_start",
+              "source": "resume"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "session_start",
+              "source": "compact"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "lacks": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "empty": true
+            },
+            {
+              "empty": true
+            },
+            {
+              "lacks": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-26",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "After /clear a read shows the decision again",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            },
+            {
+              "event": "session_start",
+              "source": "clear"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "lacks": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-27",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A subagent started again keeps what it was shown, and a subagent's start does not count as the main conversation's start on resume",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "subagent_start",
+              "agent_id": "agent-a"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts",
+              "agent_id": "agent-a"
+            },
+            {
+              "event": "subagent_start",
+              "agent_id": "agent-a"
+            },
+            {
+              "event": "pre_read",
+              "path": "src/db.ts",
+              "agent_id": "agent-a"
+            },
+            {
+              "event": "session_start",
+              "source": "resume"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": ["search Sphica's past records"]
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "contains": ["search Sphica's past records"]
+            },
+            {
+              "empty": true
+            },
+            {
+              "lacks": ["search Sphica's past records"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "injection-28",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "In Codex, a subagent's shell command naming the anchored file shows the decision once to that subagent, and the main conversation still sees it",
+      "given": [
+        {
+          "case": "capture-01"
+        }
+      ],
+      "when": {
+        "inject": {
+          "sequence": [
+            {
+              "event": "pre_read",
+              "command": "cat src/db.ts",
+              "host": "codex",
+              "agent_id": "019a-child"
+            },
+            {
+              "event": "pre_read",
+              "command": "sed -n 1,20p src/db.ts",
+              "host": "codex",
+              "agent_id": "019a-child"
+            },
+            {
+              "event": "pre_read",
+              "command": "cat src/db.ts",
+              "host": "codex"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            },
+            {
+              "empty": true
+            },
+            {
+              "contains": ["trace:s-ja-storage/storage"]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "asked-01",
       "layer": "asked",
       "lang": "ja>ja",

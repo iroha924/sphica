@@ -29,6 +29,20 @@ export interface CaptureDelivery {
   units: string | null;
 }
 
+export interface CaptureDeliveryScoped {
+  agent_id: string | null;
+  at: string | null;
+  chars: number | null;
+  eligible: number | null;
+  event: string | null;
+  omitted: number | null;
+  outcome: string | null;
+  path: string | null;
+  reason: string | null;
+  session_id: string | null;
+  units: string | null;
+}
+
 export interface CaptureEdit {
   observed_at: string | null;
   path: string | null;
@@ -62,6 +76,7 @@ export interface CaptureSession {
 }
 
 export interface Delivery {
+  agent_id: string | null;
   at: string;
   chars: Generated<number>;
   eligible: Generated<number>;
@@ -385,6 +400,7 @@ export interface Work {
 export interface DB {
   artifact_link: ArtifactLink;
   capture_delivery: CaptureDelivery;
+  capture_delivery_scoped: CaptureDeliveryScoped;
   capture_edit: CaptureEdit;
   capture_message: CaptureMessage;
   capture_session: CaptureSession;

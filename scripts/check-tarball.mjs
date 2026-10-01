@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Checks an npm pack tarball the way users receive it (run by CI check and release). Usage: node scripts/check-tarball.mjs <tgz>
 // It checks the file list, the version, that the CLI starts outside the repository and creates a database in a temp HOME, that the hook names
-// the version for an older database that init then backs up and migrates, and that the hook delivers quickly under a write lock
+// the version for an older database that init then backs up and migrates, that the hook delivers quickly under a write lock, and answers SubagentStart
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -249,6 +249,27 @@ try {
       throw new Error(
         `under a write lock the delivery hook took ${Math.round(held.ms)} ms (under 1000 expected) and gave\n${held.context}`,
       );
+    const sub = JSON.parse(
+      execFileSync(process.execPath, [path.join(pkg, "dist", "deliver.js")], {
+        cwd: repo,
+        encoding: "utf8",
+        env,
+        input: JSON.stringify({
+          hook_event_name: "SubagentStart",
+          agent_id: "tarball-agent",
+          agent_type: "Explore",
+          session_id: `subagent-${process.pid}-${Date.now()}`,
+          cwd: repo,
+        }),
+      }) || "{}",
+    ).hookSpecificOutput;
+    if (
+      sub?.hookEventName !== "SubagentStart" ||
+      !sub.additionalContext?.includes("search Sphica's past records")
+    )
+      throw new Error(
+        `the delivery hook did not answer SubagentStart with the search line\n${JSON.stringify(sub)}`,
+      );
   } finally {
     fs.rmSync(locked, { recursive: true, force: true });
   }
@@ -268,7 +289,7 @@ try {
   if (fs.existsSync(path.join(pkg, "dist", "dashboard")))
     throw new Error("tarball still contains dist/dashboard");
   console.log(
-    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, bound the GitHub account, backed up and migrated an older database the hook named the version for, and delivered under a write lock`,
+    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, bound the GitHub account, backed up and migrated an older database the hook named the version for, delivered under a write lock, and answered SubagentStart`,
   );
 } finally {
   fs.rmSync(out, { recursive: true, force: true });

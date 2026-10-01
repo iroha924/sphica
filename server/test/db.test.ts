@@ -303,6 +303,40 @@ test("the capture connection logs a delivery with its units through the view", (
   );
 });
 
+test("the capture connection logs a delivery with the subagent it ran in through the scoped view", () => {
+  const raw = capture();
+  try {
+    raw
+      .prepare(
+        "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('ds', ?, 'claude-code', 'ds', null, ?)",
+      )
+      .run(p, now);
+    for (const agent of [null, "agent-a"])
+      raw
+        .prepare(
+          "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, at, units) values ('ds', ?, 'pre_read', 'emitted', ?, '[]')",
+        )
+        .run(agent, now);
+  } finally {
+    raw.close();
+  }
+  assert.deepEqual(
+    db.owner
+      .prepare("select agent_id from delivery where session_id = 'ds' order by id")
+      .all()
+      .map((r) => ({ ...r })),
+    [{ agent_id: null }, { agent_id: "agent-a" }],
+  );
+  assert.match(
+    attempt(
+      capture,
+      "insert into delivery (session_id, agent_id, event, outcome, at) values ('ds', 'agent-a', 'pre_read', 'emitted', '2026-09-12T00:00:00.000Z')",
+    ) ?? "",
+    /not authorized/,
+    "the table itself stays closed",
+  );
+});
+
 test("the capture connection cannot touch base tables, units, other sources, or FTS, and cannot read text", () => {
   session(db, p, "s-other");
   const runId = run(db, p);

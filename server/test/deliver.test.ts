@@ -1,7 +1,7 @@
 // Automatic delivery against real SQLite and a git checkout: which records reach the model before an edit, on a prompt, and at session
 // start, which never do, and that each delivery is logged by unit id without its text.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -279,6 +279,233 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
     // The session a delivery opens carries its branch (capture never fills it in later), so work can be matched to it
     const branch = db.owner.prepare("select branch from session where external_id = 'budget'").get()?.branch;
     assert.ok(branch && branch === branchOf(repo), String(branch));
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("SubagentStart gives the subagent the session-start records and a search line, every time, without restarting its reads", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "No telemetry. Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("no-telemetry", m, "No telemetry.", { stance: "dont" }),
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    insert(db, "work", {
+      project_id: p,
+      key: "w",
+      title: "Rework CSV export",
+      goal: "g",
+      current: "notes removed",
+      next: "[]",
+      status: "active",
+      updated_at: "2026-09-27T00:00:00.000Z",
+    });
+    const at = (input: Record<string, unknown>) =>
+      deliver({ session_id: "subs", cwd: repo, ...input }, "claude-code", db.file);
+    const start = () => at({ hook_event_name: "SubagentStart", agent_id: "sub-1", agent_type: "Explore" });
+    const read = (agent?: string) =>
+      at({
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+        ...(agent ? { agent_id: agent } : {}),
+      });
+    const first = await start();
+    assert.match(first, /Work: Rework CSV export/);
+    assert.match(first, /trace:ext-s1\/no-telemetry/);
+    assert.match(first, /search Sphica's past records/);
+    assert.match(await read("sub-1"), /trace:ext-s1\/sqlite/);
+    // The host sends SubagentStart again when the subagent resumes with its context, so it says the set again but keeps the reads
+    assert.equal(await start(), first);
+    assert.equal(await read("sub-1"), "");
+    // The main conversation's start was never delivered, so its resume still delivers after a subagent's start
+    assert.match(await at({ hook_event_name: "SessionStart", source: "resume" }), /Work: Rework CSV export/);
+    assert.deepEqual(
+      db.owner
+        .prepare("select agent_id, reason from delivery where event = 'session_start' order by id")
+        .all()
+        .map((r) => `${r.agent_id ?? "main"}:${r.reason}`),
+      ["sub-1:subagent", "sub-1:subagent", "main:resume"],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("an agent id the log cannot store counts as the main conversation and is still logged", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const read = (agent: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "ids",
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, "src/db.ts") },
+          agent_id: agent,
+        },
+        "claude-code",
+        db.file,
+      );
+    // SQLite measures a string to its first NUL, so this id would fail the column's length check
+    assert.match(await read("\u0000a"), /trace:ext-s1\/sqlite/);
+    assert.equal(await read("\u0000a"), "", "the first delivery was logged");
+    assert.equal(await read("x".repeat(201)), "", "an overlong id is the main conversation too");
+    assert.deepEqual(
+      db.owner
+        .prepare("select agent_id from delivery")
+        .all()
+        .map((r) => r.agent_id),
+      [null],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a compact or clear session start counts reads again from there; startup, resume, and fork do not", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rules = Array.from({ length: 10 }, (_, n) => `Short rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: rules.join(" ") });
+    await save(db, p, {
+      units: rules.map((r, n) =>
+        decided(`k${n}`, m, r, { anchors: [{ path: `src/g${n}.ts`, role: "applies_to" }] }),
+      ),
+    });
+    // A work item makes every start deliver text, whatever the clock says about sessions waiting to be traced
+    insert(db, "work", {
+      project_id: p,
+      key: "w",
+      title: "Rework CSV export",
+      goal: "g",
+      current: "notes removed",
+      next: "[]",
+      status: "active",
+      updated_at: "2026-09-27T00:00:00.000Z",
+    });
+    const at = (input: Record<string, unknown>) =>
+      deliver({ session_id: "windows", cwd: repo, ...input }, "claude-code", db.file);
+    const start = (source: string) => at({ hook_event_name: "SessionStart", source });
+    const read = (n: number) =>
+      at({
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, `src/g${n}.ts`) },
+      }).then((t) => [...t.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]));
+    await start("startup");
+    for (let n = 0; n < 8; n++) assert.deepEqual(await read(n), [`trace:ext-s1/k${n}`]);
+    assert.deepEqual(await read(8), [], "the budget is spent");
+    for (const source of ["resume", "fork", "startup"]) {
+      await start(source);
+      assert.deepEqual(await read(0), [], `${source} keeps what was shown`);
+      assert.deepEqual(await read(8), [], `${source} keeps the budget spent`);
+    }
+    assert.match(await start("compact"), /Rework CSV export/);
+    assert.deepEqual(await read(0), ["trace:ext-s1/k0"], "compact shows a record again");
+    assert.deepEqual(await read(8), ["trace:ext-s1/k8"], "compact gives the budget back");
+    // A start with nothing to deliver is still logged, so it still marks where reads count from
+    db.owner.prepare("update work set status = 'done'").run();
+    assert.equal(await start("clear"), "");
+    assert.deepEqual(await read(0), ["trace:ext-s1/k0"], "clear shows a record again");
+    assert.deepEqual(await read(8), ["trace:ext-s1/k8"], "clear gives the budget back");
+    assert.deepEqual(
+      db.owner
+        .prepare("select reason from delivery where event = 'session_start' order by id")
+        .all()
+        .map((r) => r.reason),
+      ["startup", "fork", "startup", "compact", "clear"],
+      "a resume after a delivered start is skipped and writes nothing",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("subagent reads and edits count apart from the main conversation and from each other", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const rules = Array.from({ length: 11 }, (_, n) => `Short rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: rules.join(" ") });
+    await save(db, p, {
+      units: rules.map((r, n) =>
+        decided(`k${n}`, m, r, {
+          anchors: [{ path: n === 10 ? "src/shared.ts" : `src/g${n}.ts`, role: "applies_to" }],
+        }),
+      ),
+    });
+    const call = (tool: string, file: string, agent?: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "agents",
+          cwd: repo,
+          tool_name: tool,
+          tool_input: { file_path: path.join(repo, file) },
+          ...(agent ? { agent_id: agent, agent_type: "Explore" } : {}),
+        },
+        "claude-code",
+        db.file,
+      );
+    const keys = (text: string) => [...text.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]);
+    // Child A spends its whole read budget: the shared record and seven more
+    assert.deepEqual(keys(await call("Read", "src/shared.ts", "agent-a")), ["trace:ext-s1/k10"]);
+    for (let n = 0; n < 7; n++) assert.equal(keys(await call("Read", `src/g${n}.ts`, "agent-a")).length, 1);
+    assert.deepEqual(keys(await call("Read", "src/g7.ts", "agent-a")), [], "child A's budget is spent");
+    // Neither the main conversation nor child B saw what child A was shown, and their budgets are untouched
+    assert.deepEqual(keys(await call("Read", "src/shared.ts")), ["trace:ext-s1/k10"]);
+    assert.deepEqual(keys(await call("Read", "src/g7.ts")), ["trace:ext-s1/k7"]);
+    assert.deepEqual(keys(await call("Read", "src/shared.ts", "agent-b")), ["trace:ext-s1/k10"]);
+    assert.deepEqual(
+      keys(await call("Read", "src/shared.ts")),
+      [],
+      "the main conversation still sees a record once",
+    );
+    // A child's edit does not stop the main conversation's later read of the same file
+    assert.deepEqual(keys(await call("Edit", "src/g9.ts", "agent-b")), ["trace:ext-s1/k9"]);
+    assert.deepEqual(keys(await call("Read", "src/g9.ts")), ["trace:ext-s1/k9"]);
+    assert.deepEqual(
+      db.owner
+        .prepare("select agent_id, event from delivery order by id")
+        .all()
+        .map((r) => `${r.agent_id ?? "main"}:${r.event}`),
+      [
+        // The read past child A's budget still logs its omission note
+        ...Array(9).fill("agent-a:pre_read"),
+        "main:pre_read",
+        "main:pre_read",
+        "agent-b:pre_read",
+        "agent-b:pre_edit",
+        "main:pre_read",
+      ],
+    );
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
@@ -1007,6 +1234,29 @@ test("session start tells about sessions waiting to be traced, once a day, even 
   }
 });
 
+test("a subagent start never takes the owner's pending notice, even without an agent id", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const today = new Date().toISOString();
+    for (let n = 0; n < 3; n++)
+      message(db, p, { id: `m${n}`, text: `untraced ${n}`, session: `s${n}`, sent: today });
+    const at = (name: string, source = "startup") =>
+      deliver({ hook_event_name: name, source, session_id: "parent", cwd: repo }, "claude-code", db.file);
+    assert.doesNotMatch(await at("SubagentStart"), /waiting to be traced/);
+    // Nor does it count as the main conversation's start, which would skip the owner's resume as already delivered
+    assert.match(
+      await at("SessionStart", "resume"),
+      /3 sessions waiting to be traced/,
+      "the owner still gets today's pending notice",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // The notice names trace the way the host starts Skills, and a headless run neither sees it nor uses up the day's notice
 test("the waiting-sessions notice follows the host and is kept for the owner's sessions", async () => {
   const db = tempDb();
@@ -1226,6 +1476,138 @@ test("a delivery answers within a second while another connection holds the writ
     );
     assert.match(await read("fresh"), /trace:ext-s1\/sqlite/, "a failed log still answers");
     assert.equal(sessions(), had, "no session row is left without its delivery");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Starts delivery hook processes and gives them their input together, once they have loaded and wait on stdin, so their reads overlap
+ * the way a host's parallel tool calls do. Returns each process's additionalContext.
+ */
+async function together(file: string, home: string, inputs: Record<string, unknown>[]): Promise<string[]> {
+  const kids = inputs.map(() =>
+    spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: file },
+      stdio: ["pipe", "pipe", "inherit"],
+    }),
+  );
+  const outs = kids.map(
+    (k) =>
+      new Promise<string>((resolve, reject) => {
+        let out = "";
+        k.stdout.on("data", (d) => {
+          out += d;
+        });
+        k.on("error", reject);
+        k.on("close", (code) =>
+          code === 0
+            ? resolve(out ? JSON.parse(out).hookSpecificOutput.additionalContext : "")
+            : reject(new Error(`the delivery hook exited with ${code}`)),
+        );
+      }),
+  );
+  await new Promise((r) => setTimeout(r, 1500));
+  kids.forEach((k, i) => {
+    k.stdin.end(JSON.stringify(inputs[i]));
+  });
+  return Promise.all(outs);
+}
+
+/** Records for the concurrent reads: two on one file, twelve short ones on a file each, and six files of four long records with reasons. */
+async function concurrent(): Promise<{
+  db: TempDb;
+  repo: string;
+  read: (session: string, file: string) => Record<string, unknown>;
+}> {
+  const db = tempDb();
+  const repo = checkout();
+  const p = project(db);
+  const short = Array.from({ length: 14 }, (_, n) => `Short rule ${n}.`);
+  const long = Array.from({ length: 24 }, (_, n) => `Long rule ${n} ${"y".repeat(300)}.`);
+  const m = message(db, p, { id: "m1", text: [...short, ...long].join(" ") });
+  await save(db, p, {
+    units: [
+      ...short
+        .slice(0, 2)
+        .map((r, n) => decided(`same${n}`, m, r, { anchors: [{ path: "src/same.ts", role: "applies_to" }] })),
+      ...short
+        .slice(2)
+        .map((r, n) =>
+          decided(`one${n}`, m, r, { anchors: [{ path: `src/one${n}.ts`, role: "applies_to" }] }),
+        ),
+      ...long.map((r, n) =>
+        decided(`long${n}`, m, r, {
+          why: `Reason ${n} ${"z".repeat(200)}`,
+          anchors: [{ path: `src/long${n % 6}.ts`, role: "applies_to" }],
+        }),
+      ),
+    ],
+  });
+  const read = (session: string, file: string) => ({
+    hook_event_name: "PreToolUse",
+    session_id: session,
+    cwd: repo,
+    tool_name: "Read",
+    tool_input: { file_path: path.join(repo, file) },
+  });
+  return { db, repo, read };
+}
+
+const keysIn = (texts: string[]) =>
+  texts.flatMap((t) => [...t.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]));
+
+test("concurrent reads of one file deliver each record once", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    const same = keysIn(
+      await together(
+        db.file,
+        repo,
+        Array.from({ length: 6 }, () => read("overlap", "src/same.ts")),
+      ),
+    );
+    assert.deepEqual(same.sort(), ["trace:ext-s1/same0", "trace:ext-s1/same1"]);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("concurrent reads of different files stop at the read budget's 8 records", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    for (let n = 0; n < 7; n++) await deliver(read("units", `src/one${n}.ts`), "claude-code", db.file);
+    const more = keysIn(
+      await together(
+        db.file,
+        repo,
+        Array.from({ length: 5 }, (_, n) => read("units", `src/one${n + 7}.ts`)),
+      ),
+    );
+    assert.equal(more.length, 1, `delivered ${more.join(", ")}`);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("concurrent reads of long records stop at the read budget's 3000 characters", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    const texts = await together(
+      db.file,
+      repo,
+      Array.from({ length: 6 }, (_, n) => read("chars", `src/long${n}.ts`)),
+    );
+    // Each read alone would carry about 1500 characters; together they carry what one conversation's reads may, besides the request
+    const shown = texts
+      .filter((t) => /^- trace:/m.test(t))
+      .map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
+    const records = shown.join("").length - shown.length * (CONFIRM.length + 1);
+    assert.ok(records > 1000 && records <= 3000, `${records} characters in ${shown.length} reads`);
+    assert.ok(!texts.some((t) => t.includes("Sphica unavailable")), texts.join("\n"));
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

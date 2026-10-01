@@ -53,7 +53,13 @@ const DDL = (): Set<number> =>
 const readsDataVersion = (p1: string | null, p2: string | null) => p1 === "data_version" && p2 === null;
 
 /** Views capture may insert into. Their triggers derive project, artifact, and indexing from the session (db/schema.sql). */
-const CAPTURE_VIEWS = new Set(["capture_session", "capture_message", "capture_edit", "capture_delivery"]);
+const CAPTURE_VIEWS = new Set([
+  "capture_session",
+  "capture_message",
+  "capture_edit",
+  "capture_delivery",
+  "capture_delivery_scoped",
+]);
 
 /** Tables that may be written inside triggers, keyed by trigger name (the authorizer's 5th argument). */
 const TRIGGER_WRITES: Record<string, Set<string>> = {
@@ -61,12 +67,14 @@ const TRIGGER_WRITES: Record<string, Set<string>> = {
   capture_message_insert: new Set(["source"]),
   capture_edit_insert: new Set(["edit_observation"]),
   capture_delivery_insert: new Set(["delivery", "delivery_unit"]),
+  capture_delivery_scoped_insert: new Set(["delivery", "delivery_unit"]),
   source_fts_ai: new Set(["source_fts"]),
 };
 
 /** Functions a capture view's trigger may call (the delivery log fills defaults and expands its unit list); capture's own statements may not. */
 const TRIGGER_FUNCTIONS: Record<string, Set<string>> = {
   capture_delivery_insert: new Set(["coalesce", "json_each", "last_insert_rowid"]),
+  capture_delivery_scoped_insert: new Set(["coalesce", "json_each", "last_insert_rowid"]),
 };
 
 /**

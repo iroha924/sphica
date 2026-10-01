@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Automatic delivery of past records into Claude Code and Codex: at session start (current work and a few broad constraints), before an edit or a read
+// Automatic delivery of past records into Claude Code and Codex: at session and subagent start (current work and a few broad constraints), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).
 // Only active, supported, sourced records without an unresolved conflict are delivered; candidates never are. What was delivered is logged
@@ -7,11 +7,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { ExpressionBuilder, Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
-import type { DB } from "./db-types.ts";
+import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
@@ -57,6 +58,8 @@ const leftOut = (n: number) =>
   n > 0
     ? `- ${n} more record${n === 1 ? " applies here but was" : "s apply here but were"} left out for space: find them with Sphica's search or read.`
     : "";
+/** Sphica's own line for a subagent, which starts without the conversation where Sphica's tools were introduced. */
+const SEARCH_FIRST = "- Before choosing an approach, search Sphica's past records for it.";
 const workLeftOut = (n: number) =>
   n > 0
     ? `- ${n} more work item${n === 1 ? "" : "s"} not shown: Sphica's status lists the 5 most recently updated.`
@@ -234,20 +237,48 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
 }
 
 /**
- * Before a read: the decisions and constraints anchored to the path that this session has not been shown yet, within the read budget
- * left for the session. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
+ * The subagent a hook ran in, or null for the main conversation. Only visible ASCII is kept, which SQLite measures as JavaScript does
+ * (it stops at a NUL), so the log's length check never refuses a delivery.
+ */
+const agentOf = (input: { agent_id?: unknown }): string | null =>
+  typeof input.agent_id === "string" && /^[\x21-\x7e]{1,200}$/.test(input.agent_id) ? input.agent_id : null;
+
+/** Deliveries of one conversation: the main one, or one subagent, which starts with its own context. */
+const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery }, "d">) =>
+  agent === null ? eb("d.agent_id", "is", null) : eb("d.agent_id", "=", agent);
+
+/** How a host started a session. A compaction or a clear drops what earlier hooks added, so reads count from its session start on. */
+const START_SOURCES = new Set(["startup", "resume", "clear", "compact", "fork"]);
+const RESTARTS = ["compact", "clear"];
+
+/**
+ * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
+ * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
+ * reads can repeat one, and a restart whose start could not be logged is not seen).
  */
 async function beforeRead(
   db: Reads,
   projectId: number,
   rels: string[],
   session: string,
+  agent: string | null,
   how: "reading" | "named",
 ): Promise<Plan> {
+  const restart = await db
+    .selectFrom("delivery as d")
+    .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
+    .where("d.event", "=", "session_start")
+    .where("d.reason", "in", RESTARTS)
+    .select((eb) => eb.fn.max("d.id").as("id"))
+    .executeTakeFirst();
+  const since = restart?.id ?? 0;
   const sent = await db
     .selectFrom("delivery as d")
     .innerJoin("delivery_unit as x", "x.delivery_id", "d.id")
     .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
+    .where("d.id", ">", since)
     .where("d.outcome", "=", "emitted")
     .select(["x.unit_id", "d.event"])
     .execute();
@@ -255,6 +286,8 @@ async function beforeRead(
   const spent = await db
     .selectFrom("delivery as d")
     .where("d.session_id", "=", session)
+    .where(sameAgent(agent))
+    .where("d.id", ">", since)
     .where("d.event", "=", "pre_read")
     .where("d.outcome", "=", "emitted")
     .where(({ exists, selectFrom }) =>
@@ -454,7 +487,7 @@ async function atStart(
   db: Reads,
   projectId: number,
   branch: string | null,
-  place: { file: string; key: string; host: Host; owner: boolean },
+  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean },
 ): Promise<Plan> {
   const current = db
     .selectFrom("work")
@@ -506,7 +539,12 @@ async function atStart(
   const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
   const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    ...noted(f.text, lead, [leftOut(broadLeft), workLeftOut(workLeft), await waiting(db, projectId, place)]),
+    ...noted(f.text, lead, [
+      leftOut(broadLeft),
+      workLeftOut(workLeft),
+      await waiting(db, projectId, place),
+      place.subagent ? SEARCH_FIRST : "",
+    ]),
     units: shownUnits,
     eligible: (workTotal ?? 0) + (broadTotal ?? 0),
     omitted: workLeft + broadLeft,
@@ -598,45 +636,85 @@ function onceUnavailable(session: string): boolean {
   return markOnce("unavailable", session);
 }
 
-async function log(
-  file: string,
-  projectId: number,
-  host: Host,
-  external: string,
-  event: Event,
-  plan: Plan,
-  outcome: string,
-  branch: string | null,
-): Promise<void> {
+/** Where one delivery is logged: its session, the subagent it ran in, and its event. */
+type Entry = {
+  projectId: number;
+  host: Host;
+  external: string;
+  agent: string | null;
+  event: Event;
+  branch: string | null;
+};
+
+/** Writes one delivery and the session row it hangs on, inside the caller's transaction. */
+async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
+  const id = sessionId(e.projectId, e.host, e.external);
+  const now = iso(Date.now());
+  await trx
+    .insertInto("capture_session")
+    .values({
+      id,
+      project_id: e.projectId,
+      host: e.host,
+      external_id: e.external,
+      branch: e.branch,
+      started_at: now,
+    })
+    .execute();
+  await trx
+    .insertInto("capture_delivery_scoped")
+    .values({
+      session_id: id,
+      agent_id: e.agent,
+      event: e.event,
+      outcome: plan.text ? "emitted" : "nothing",
+      reason: plan.reason,
+      path: plan.path,
+      eligible: plan.eligible,
+      omitted: plan.omitted,
+      // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
+      chars: plan.text.length - plan.note.length,
+      at: now,
+      units: JSON.stringify(plan.units),
+    })
+    .execute();
+}
+
+async function log(file: string, e: Entry, plan: Plan): Promise<void> {
   const cap = openWriter("capture", file, LOG_WAIT_MS);
   try {
-    const id = sessionId(projectId, host, external);
-    const now = iso(Date.now());
-    await inTransaction(cap, async (trx) => {
-      await trx
-        .insertInto("capture_session")
-        .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
-        .execute();
-      await trx
-        .insertInto("capture_delivery")
-        .values({
-          session_id: id,
-          event,
-          outcome,
-          reason: plan.reason,
-          path: plan.path,
-          eligible: plan.eligible,
-          omitted: plan.omitted,
-          // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
-          chars: plan.text.length - plan.note.length,
-          at: now,
-          units: JSON.stringify(plan.units),
-        })
-        .execute();
-    });
+    await inTransaction(cap, (trx) => write(trx, e, plan));
   } finally {
     await cap.destroy().catch(() => {});
   }
+}
+
+/**
+ * Plans a delivery while holding the write lock and logs it before letting go, so concurrent reads see each other's log: none shows a
+ * record twice or past the budget. When the lock is not free soon, the delivery is planned without it and answered unlogged; when only the
+ * log fails, the plan is still answered. A failure to plan is not hidden.
+ */
+async function lockedPlan(
+  file: string,
+  e: Entry,
+  make: () => Promise<Plan>,
+  keep: (plan: Plan) => boolean,
+): Promise<Plan> {
+  const cap = openWriter("capture", file, LOG_WAIT_MS);
+  let held = false;
+  let plan = null as Plan | null;
+  try {
+    await inTransaction(cap, async (trx) => {
+      held = true;
+      plan = await make();
+      if (keep(plan)) await write(trx, e, plan);
+    });
+  } catch (err) {
+    if (held && !plan) throw err;
+  } finally {
+    await cap.destroy().catch(() => {});
+  }
+  return plan ?? make();
 }
 
 /** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
@@ -649,7 +727,7 @@ export async function deliver(
   const call = reviewCall(input);
   const event: Event | null = call
     ? "review"
-    : name === "SessionStart"
+    : name === "SessionStart" || name === "SubagentStart"
       ? "session_start"
       : name === "UserPromptSubmit"
         ? "prompt"
@@ -708,50 +786,73 @@ export async function deliver(
         .selectFrom("delivery")
         .select("id")
         .where("session_id", "=", sessionId(pid, host, input.session_id))
+        .where("agent_id", "is", null)
         .where("event", "=", "session_start")
+        // A subagent's start the host sent without its agent id is still not the main conversation's
+        .where((eb) => eb.or([eb("reason", "is", null), eb("reason", "!=", "subagent")]))
         .where("outcome", "=", "emitted")
         .executeTakeFirst();
       if (said) return "";
     }
-    const plan =
+    const reader = db;
+    const session = input.session_id;
+    const make = async (): Promise<Plan> =>
       event === "pre_edit"
-        ? await beforeEdit(db, pid, rels)
+        ? await beforeEdit(reader, pid, rels)
         : event === "pre_read"
           ? await beforeRead(
-              db,
+              reader,
               pid,
               rels,
-              sessionId(pid, host, input.session_id),
+              sessionId(pid, host, session),
+              agentOf(input),
               shell ? "named" : "reading",
             )
           : event === "prompt"
-            ? await onPrompt(db, pid, place.root, input.prompt ?? "")
+            ? await onPrompt(reader, pid, place.root, input.prompt ?? "")
             : call
-              ? await beforeReview(db, pid, place.root, call)
-              : await atStart(db, pid, branchOf(place.root), {
-                  file,
-                  key: place.key,
-                  host,
-                  owner: isOwnerTurn(
-                    input,
-                    undefined,
-                    undefined,
-                    host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
-                  ),
-                });
-    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
-    // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
-    if (onPath && !plan.text) return "";
-    await log(
-      file,
-      pid,
+              ? await beforeReview(reader, pid, place.root, call)
+              : {
+                  ...(await atStart(reader, pid, branchOf(place.root), {
+                    file,
+                    key: place.key,
+                    host,
+                    subagent: name === "SubagentStart",
+                    // A subagent's start is never the owner's, even when the host leaves out its agent id
+                    owner:
+                      name !== "SubagentStart" &&
+                      isOwnerTurn(
+                        input,
+                        undefined,
+                        undefined,
+                        host === "codex" ? process.env.CODEX_THREAD_ID : undefined,
+                      ),
+                  })),
+                  // The start source marks where reads count from, so it is logged even when the start delivered nothing. A subagent's
+                  // start never restarts its count: the host also sends it when a subagent with its context resumes
+                  reason:
+                    name === "SubagentStart"
+                      ? "subagent"
+                      : input.source && START_SOURCES.has(input.source)
+                        ? input.source
+                        : null,
+                };
+    const entry: Entry = {
+      projectId: pid,
       host,
-      input.session_id,
+      external: session,
+      agent: agentOf(input),
       event,
-      plan,
-      plan.text ? "emitted" : "nothing",
-      branchOf(place.root),
-    ).catch(() => {});
+      branch: branchOf(place.root),
+    };
+    // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
+    const keep = (p: Plan) => !(onPath && !p.text);
+    // What a read shows depends on the log, and a session start's row marks where reads count from
+    if (event === "pre_read" || event === "session_start")
+      return (await lockedPlan(file, entry, make, keep)).text;
+    const plan = await make();
+    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
+    if (keep(plan)) await log(file, entry, plan).catch(() => {});
     return plan.text;
   } catch (e) {
     // A database of another revision (a plugin update before init) is said on its own mark, so an earlier warning does not hide it, and on
