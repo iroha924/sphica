@@ -66,6 +66,16 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
   - コミット: `test(deliver): pin that superseded and withdrawn records are never delivered (T04)`
   - 結果: `node --test --test-name-pattern="capture-1[23]|glean-14|injection-(1[4-9]|2[0-3])" evals/acceptance/run.ts` → 13 件 pass（初回 green。今のコードの lifecycle の絞り込みを固定するテスト）。deliverable() の絞り込みを一時的に active・superseded・withdrawn に広げると injection-14〜23 の 10 件と review のテストが落ちることを確かめた。`node --test test/review-bridge.test.ts test/acceptance-cases.test.ts` → pass 14 / fail 0
 
+- [x] T07: 空ログのテストを日付に依存させず、空の session_start のログを確かめる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象のテスト）
+  - 変更: `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="deliver nothing write no rows" test/deliver.test.ts` → 直す前のテストは session_start に emitted を期待し、未 trace の通知（直近 30 日）が消える 2026-10-11 以降は正しい実装でも落ちる。空の session_start のログを省く退行も捕まえない
+  - 完了条件: `cd server && node --test test/deliver.test.ts` → pass。session_start が空を返し nothing の行が残ることを見る
+  - コミット: `test(deliver): keep the empty-log test independent of the date (T07)`
+  - 結果: 発言の日時を 2026-01-01 に固定し、session_start が "" を返して session_start・nothing の行が残ることを見る形にした。red 実測: 空ログを省く条件を pre_read・pre_edit 以外にも広げる退行を一時的に入れると、直す前のテストは pass、直した後のテストは fail 1 で落ちた。`node --test --test-name-pattern="deliver nothing write no rows" test/deliver.test.ts` → pass 1 / fail 0
+
 - [ ] T05: 展開した deliver.js がロック中に 1 秒未満で目的の記録を返す検査
   - 種別: 追加
   - 計画: S5
@@ -87,3 +97,5 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
 ## 記録
 - 2026-10-01 / T01・T06 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットで版が上がっていないと落とす（前回の計画と同じ） / 0.6.16 への版の上げを T06 から T01 へ移した。T01 の変更欄: deliver.ts・deliver.test.ts → それに 4 つの manifest を足した。T01 の計画欄: S1 → S1, S6。T06 は取りやめ（コードを変えないコミットになり、release:plan と verify の確認は plan の完了条件 A1・A5 で流す）。`bun run release:plan -- --base v0.6.15` → release kind: plugin、inputs: server/src/deliver.ts
 - 2026-10-01 / T04 / review の配信のテストは review-bridge.test.ts にまとまっているので、そちらに足した。変更欄: deliver.test.ts → review-bridge.test.ts。withdrawn は owner 接続で unit_state に active → withdrawn を入れて作った（trigger は通る）
+- 2026-10-01 / T01 / Codex のレビュー（44ae063c）: 指摘 1 件（P2）。空ログのテストが未 trace の通知の有無（日付）に依存し、空の session_start のログを確かめていない / 採用。修正タスク T07 を足した
+- 2026-10-01 / T02 / Codex のレビュー（2e7c09dc）: 指摘 0 件

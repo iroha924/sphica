@@ -1053,7 +1053,8 @@ test("reads and edits that deliver nothing write no rows, while empty session st
   const repo = checkout();
   try {
     const p = project(db);
-    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    // Sent long ago, so session start has no waiting-sessions notice and nothing to say on any day the test runs
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file.", sent: "2026-01-01T00:00:00Z" });
     await save(db, p, {
       units: [
         decided("sqlite", m, "Keep one SQLite file.", {
@@ -1088,10 +1089,13 @@ test("reads and edits that deliver nothing write no rows, while empty session st
     const shown = rows();
     assert.equal(await tool("Read", "src/db.ts"), "", "already shown in this session");
     assert.deepEqual(rows(), shown, "a read emptied by an earlier delivery adds no row");
-    await deliver(
-      { hook_event_name: "SessionStart", source: "startup", session_id: session, cwd: repo },
-      "claude-code",
-      db.file,
+    assert.equal(
+      await deliver(
+        { hook_event_name: "SessionStart", source: "startup", session_id: session, cwd: repo },
+        "claude-code",
+        db.file,
+      ),
+      "",
     );
     await deliver(
       { hook_event_name: "UserPromptSubmit", prompt: "今日の天気は？", session_id: session, cwd: repo },
@@ -1104,7 +1108,7 @@ test("reads and edits that deliver nothing write no rows, while empty session st
         .all()
         .map((r) => [r.event, r.outcome]),
       [
-        ["session_start", "emitted"],
+        ["session_start", "nothing"],
         ["prompt", "nothing"],
       ],
     );
