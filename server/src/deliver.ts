@@ -234,11 +234,12 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
   };
 }
 
-/** The subagent a hook ran in, or null for the main conversation. The host's id is kept only when the log column takes it. */
+/**
+ * The subagent a hook ran in, or null for the main conversation. Only visible ASCII is kept, which SQLite measures as JavaScript does
+ * (it stops at a NUL), so the log's length check never refuses a delivery.
+ */
 const agentOf = (input: { agent_id?: unknown }): string | null =>
-  typeof input.agent_id === "string" && input.agent_id.length >= 1 && input.agent_id.length <= 200
-    ? input.agent_id
-    : null;
+  typeof input.agent_id === "string" && /^[\x21-\x7e]{1,200}$/.test(input.agent_id) ? input.agent_id : null;
 
 /** Deliveries of one conversation: the main one, or one subagent, which starts with its own context. */
 const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery }, "d">) =>

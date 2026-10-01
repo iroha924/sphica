@@ -285,6 +285,49 @@ test("reads deliver within a session-wide budget, never a unit twice, and only d
   }
 });
 
+test("an agent id the log cannot store counts as the main conversation and is still logged", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const read = (agent: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "ids",
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, "src/db.ts") },
+          agent_id: agent,
+        },
+        "claude-code",
+        db.file,
+      );
+    // SQLite measures a string to its first NUL, so this id would fail the column's length check
+    assert.match(await read("\u0000a"), /trace:ext-s1\/sqlite/);
+    assert.equal(await read("\u0000a"), "", "the first delivery was logged");
+    assert.equal(await read("x".repeat(201)), "", "an overlong id is the main conversation too");
+    assert.deepEqual(
+      db.owner
+        .prepare("select agent_id from delivery")
+        .all()
+        .map((r) => r.agent_id),
+      [null],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("a compact or clear session start counts reads again from there; startup, resume, and fork do not", async () => {
   const db = tempDb();
   const repo = checkout();

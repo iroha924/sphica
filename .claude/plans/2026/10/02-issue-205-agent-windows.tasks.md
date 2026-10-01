@@ -65,7 +65,7 @@ base: main
   - コミット: `fix(deliver): plan reads and session starts under the write lock (T04)`
   - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="concurrent" test/deliver.test.ts` → 3 件とも落ちた（同じ 2 件が 5 回ずつ / 予算の後に 5 件 / 6 回の読み込みで 8846 字）。2 回流して同じ。直した後 → 3 pass を 3 回続けて確認。`node --test test/deliver.test.ts` → 26 pass（ロック中に 1 秒未満で答える既存のテストと、trigger でログを拒んでも本文が返り session 行が残らない既存のテストを含む）。lint・typecheck → 通過
 
-- [ ] T08: 境界で agent_id を SQLite が数える長さと同じ文字の範囲に絞る
+- [x] T08: 境界で agent_id を SQLite が数える長さと同じ文字の範囲に絞る
   - 種別: 修正
   - 計画: S2
   - 依存: T02（agentOf が要る）
@@ -73,6 +73,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="agent id" test/deliver.test.ts` → 先頭が NUL の agent_id の配信がログに残らず、同じ Read で記録がもう一度出るので落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="agent id" test/deliver.test.ts` → pass。受け付けない agent_id はメインの会話として数えられ、ログに残る
   - コミット: `fix(deliver): accept only agent ids the log can store (T08)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="agent id" test/deliver.test.ts` → "the first delivery was logged" で落ちた（NUL で始まる id のログが CHECK で拒まれ、同じ記録が再び出た）。直した後 → `--test-name-pattern="agent id|subagent"` 2 pass。lint・typecheck → 通過
 
 ## P3: SubagentStart
 
