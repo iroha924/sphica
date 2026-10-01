@@ -1,7 +1,7 @@
 // Automatic delivery against real SQLite and a git checkout: which records reach the model before an edit, on a prompt, and at session
 // start, which never do, and that each delivery is logged by unit id without its text.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1340,6 +1340,133 @@ test("a delivery answers within a second while another connection holds the writ
     );
     assert.match(await read("fresh"), /trace:ext-s1\/sqlite/, "a failed log still answers");
     assert.equal(sessions(), had, "no session row is left without its delivery");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Starts delivery hook processes and gives them their input together, once they have loaded and wait on stdin, so their reads overlap
+ * the way a host's parallel tool calls do. Returns each process's additionalContext.
+ */
+async function together(file: string, home: string, inputs: Record<string, unknown>[]): Promise<string[]> {
+  const kids = inputs.map(() =>
+    spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: file },
+      stdio: ["pipe", "pipe", "inherit"],
+    }),
+  );
+  const outs = kids.map(
+    (k) =>
+      new Promise<string>((resolve, reject) => {
+        let out = "";
+        k.stdout.on("data", (d) => {
+          out += d;
+        });
+        k.on("error", reject);
+        k.on("close", () => resolve(out ? JSON.parse(out).hookSpecificOutput.additionalContext : ""));
+      }),
+  );
+  await new Promise((r) => setTimeout(r, 1500));
+  kids.forEach((k, i) => {
+    k.stdin.end(JSON.stringify(inputs[i]));
+  });
+  return Promise.all(outs);
+}
+
+/** Records for the concurrent reads: two on one file, twelve short ones on a file each, and six files of four long records with reasons. */
+async function concurrent(): Promise<{
+  db: TempDb;
+  repo: string;
+  read: (session: string, file: string) => Record<string, unknown>;
+}> {
+  const db = tempDb();
+  const repo = checkout();
+  const p = project(db);
+  const short = Array.from({ length: 14 }, (_, n) => `Short rule ${n}.`);
+  const long = Array.from({ length: 24 }, (_, n) => `Long rule ${n} ${"y".repeat(300)}.`);
+  const m = message(db, p, { id: "m1", text: [...short, ...long].join(" ") });
+  await save(db, p, {
+    units: [
+      ...short
+        .slice(0, 2)
+        .map((r, n) => decided(`same${n}`, m, r, { anchors: [{ path: "src/same.ts", role: "applies_to" }] })),
+      ...short
+        .slice(2)
+        .map((r, n) =>
+          decided(`one${n}`, m, r, { anchors: [{ path: `src/one${n}.ts`, role: "applies_to" }] }),
+        ),
+      ...long.map((r, n) =>
+        decided(`long${n}`, m, r, {
+          why: `Reason ${n} ${"z".repeat(200)}`,
+          anchors: [{ path: `src/long${n % 6}.ts`, role: "applies_to" }],
+        }),
+      ),
+    ],
+  });
+  const read = (session: string, file: string) => ({
+    hook_event_name: "PreToolUse",
+    session_id: session,
+    cwd: repo,
+    tool_name: "Read",
+    tool_input: { file_path: path.join(repo, file) },
+  });
+  return { db, repo, read };
+}
+
+const keysIn = (texts: string[]) =>
+  texts.flatMap((t) => [...t.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]));
+
+test("concurrent reads of one file deliver each record once", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    const same = keysIn(
+      await together(
+        db.file,
+        repo,
+        Array.from({ length: 6 }, () => read("overlap", "src/same.ts")),
+      ),
+    );
+    assert.deepEqual(same.sort(), ["trace:ext-s1/same0", "trace:ext-s1/same1"]);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("concurrent reads of different files stop at the read budget's 8 records", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    for (let n = 0; n < 7; n++) await deliver(read("units", `src/one${n}.ts`), "claude-code", db.file);
+    const more = keysIn(
+      await together(
+        db.file,
+        repo,
+        Array.from({ length: 5 }, (_, n) => read("units", `src/one${n + 7}.ts`)),
+      ),
+    );
+    assert.equal(more.length, 1, `delivered ${more.join(", ")}`);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("concurrent reads of long records stop at the read budget's 3000 characters", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    const texts = await together(
+      db.file,
+      repo,
+      Array.from({ length: 6 }, (_, n) => read("chars", `src/long${n}.ts`)),
+    );
+    // Each read alone would carry about 1500 characters; together they carry what one conversation's reads may, besides the request
+    const shown = texts
+      .filter((t) => /^- trace:/m.test(t))
+      .map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
+    const records = shown.join("").length - shown.length * (CONFIRM.length + 1);
+    assert.ok(records <= 3000, `${records} characters in ${shown.length} reads`);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

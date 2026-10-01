@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExpressionBuilder } from "kysely";
+import type { ExpressionBuilder, Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
@@ -628,47 +628,85 @@ function onceUnavailable(session: string): boolean {
   return markOnce("unavailable", session);
 }
 
-async function log(
-  file: string,
-  projectId: number,
-  host: Host,
-  external: string,
-  agent: string | null,
-  event: Event,
-  plan: Plan,
-  outcome: string,
-  branch: string | null,
-): Promise<void> {
+/** Where one delivery is logged: its session, the subagent it ran in, and its event. */
+type Entry = {
+  projectId: number;
+  host: Host;
+  external: string;
+  agent: string | null;
+  event: Event;
+  branch: string | null;
+};
+
+/** Writes one delivery and the session row it hangs on, inside the caller's transaction. */
+async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
+  const id = sessionId(e.projectId, e.host, e.external);
+  const now = iso(Date.now());
+  await trx
+    .insertInto("capture_session")
+    .values({
+      id,
+      project_id: e.projectId,
+      host: e.host,
+      external_id: e.external,
+      branch: e.branch,
+      started_at: now,
+    })
+    .execute();
+  await trx
+    .insertInto("capture_delivery_scoped")
+    .values({
+      session_id: id,
+      agent_id: e.agent,
+      event: e.event,
+      outcome: plan.text ? "emitted" : "nothing",
+      reason: plan.reason,
+      path: plan.path,
+      eligible: plan.eligible,
+      omitted: plan.omitted,
+      // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
+      chars: plan.text.length - plan.note.length,
+      at: now,
+      units: JSON.stringify(plan.units),
+    })
+    .execute();
+}
+
+async function log(file: string, e: Entry, plan: Plan): Promise<void> {
   const cap = openWriter("capture", file, LOG_WAIT_MS);
   try {
-    const id = sessionId(projectId, host, external);
-    const now = iso(Date.now());
-    await inTransaction(cap, async (trx) => {
-      await trx
-        .insertInto("capture_session")
-        .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
-        .execute();
-      await trx
-        .insertInto("capture_delivery_scoped")
-        .values({
-          session_id: id,
-          agent_id: agent,
-          event,
-          outcome,
-          reason: plan.reason,
-          path: plan.path,
-          eligible: plan.eligible,
-          omitted: plan.omitted,
-          // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
-          chars: plan.text.length - plan.note.length,
-          at: now,
-          units: JSON.stringify(plan.units),
-        })
-        .execute();
-    });
+    await inTransaction(cap, (trx) => write(trx, e, plan));
   } finally {
     await cap.destroy().catch(() => {});
   }
+}
+
+/**
+ * Plans a delivery while holding the write lock and logs it before letting go, so concurrent reads see each other's log: none shows a
+ * record twice or past the budget. When the lock is not free soon, the delivery is planned without it and answered unlogged; when only the
+ * log fails, the plan is still answered. A failure to plan is not hidden.
+ */
+async function lockedPlan(
+  file: string,
+  e: Entry,
+  make: () => Promise<Plan>,
+  keep: (plan: Plan) => boolean,
+): Promise<Plan> {
+  const cap = openWriter("capture", file, LOG_WAIT_MS);
+  let held = false;
+  let plan = null as Plan | null;
+  try {
+    await inTransaction(cap, async (trx) => {
+      held = true;
+      plan = await make();
+      if (keep(plan)) await write(trx, e, plan);
+    });
+  } catch (err) {
+    if (held && !plan) throw err;
+  } finally {
+    await cap.destroy().catch(() => {});
+  }
+  return plan ?? make();
 }
 
 /** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
@@ -746,24 +784,26 @@ export async function deliver(
         .executeTakeFirst();
       if (said) return "";
     }
-    const plan =
+    const reader = db;
+    const session = input.session_id;
+    const make = async (): Promise<Plan> =>
       event === "pre_edit"
-        ? await beforeEdit(db, pid, rels)
+        ? await beforeEdit(reader, pid, rels)
         : event === "pre_read"
           ? await beforeRead(
-              db,
+              reader,
               pid,
               rels,
-              sessionId(pid, host, input.session_id),
+              sessionId(pid, host, session),
               agentOf(input),
               shell ? "named" : "reading",
             )
           : event === "prompt"
-            ? await onPrompt(db, pid, place.root, input.prompt ?? "")
+            ? await onPrompt(reader, pid, place.root, input.prompt ?? "")
             : call
-              ? await beforeReview(db, pid, place.root, call)
+              ? await beforeReview(reader, pid, place.root, call)
               : {
-                  ...(await atStart(db, pid, branchOf(place.root), {
+                  ...(await atStart(reader, pid, branchOf(place.root), {
                     file,
                     key: place.key,
                     host,
@@ -777,20 +817,22 @@ export async function deliver(
                   // The start source marks where reads count from, so it is logged even when the start delivered nothing
                   reason: input.source && START_SOURCES.has(input.source) ? input.source : null,
                 };
-    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
-    // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
-    if (onPath && !plan.text) return "";
-    await log(
-      file,
-      pid,
+    const entry: Entry = {
+      projectId: pid,
       host,
-      input.session_id,
-      agentOf(input),
+      external: session,
+      agent: agentOf(input),
       event,
-      plan,
-      plan.text ? "emitted" : "nothing",
-      branchOf(place.root),
-    ).catch(() => {});
+      branch: branchOf(place.root),
+    };
+    // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
+    const keep = (p: Plan) => !(onPath && !p.text);
+    // What a read shows depends on the log, and a session start's row marks where reads count from
+    if (event === "pre_read" || event === "session_start")
+      return (await lockedPlan(file, entry, make, keep)).text;
+    const plan = await make();
+    if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
+    if (keep(plan)) await log(file, entry, plan).catch(() => {});
     return plan.text;
   } catch (e) {
     // A database of another revision (a plugin update before init) is said on its own mark, so an earlier warning does not hide it, and on

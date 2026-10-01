@@ -55,14 +55,24 @@ base: main
   - コミット: `fix(deliver): start counting reads again after compaction or clear (T03)`
   - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="compact|clear" test/deliver.test.ts` → startup・resume・fork の確認は通り、compact の後の Read が [] で落ちた（期待 trace:ext-s1/k0）。直した後 → 1 pass。`node --test test/deliver.test.ts` → 23 pass。lint・typecheck → 通過
 
-- [ ] T04: 読む前とセッション開始の配信を、書き込みロックを取ってから計画する
+- [x] T04: 読む前とセッション開始の配信を、書き込みロックを取ってから計画する
   - 種別: 修正
   - 計画: S3
   - 依存: T03（ロックの中で計画するのは窓まで入った数え方）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/deliver-concurrent.test.ts`
-  - red: `cd server && node --test test/deliver-concurrent.test.ts` → 同じセッションで deliver.ts を同時に起動すると同じ key が 2 回以上返るか、予算を超えるので落ちる
-  - 完了条件: `cd server && node --test test/deliver-concurrent.test.ts` → pass（重なる unit・件数の上限・文字数の上限の 3 件）。`node --test --test-name-pattern="log fail" test/deliver.test.ts` → BUSY 以外のログの失敗で本文が返り、途中の行が残らない
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="concurrent" test/deliver.test.ts` → 同じセッションで deliver.ts を同時に起動すると同じ key が 2 回以上返るか、予算を超えるので落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="concurrent|write lock" test/deliver.test.ts` → pass（重なる unit・件数の上限・文字数の上限の 3 件と、ロック中・BUSY 以外のログの失敗で本文が返り途中の行が残らない既存のテスト）
   - コミット: `fix(deliver): plan reads and session starts under the write lock (T04)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="concurrent" test/deliver.test.ts` → 3 件とも落ちた（同じ 2 件が 5 回ずつ / 予算の後に 5 件 / 6 回の読み込みで 8846 字）。2 回流して同じ。直した後 → 3 pass を 3 回続けて確認。`node --test test/deliver.test.ts` → 26 pass（ロック中に 1 秒未満で答える既存のテストと、trigger でログを拒んでも本文が返り session 行が残らない既存のテストを含む）。lint・typecheck → 通過
+
+- [ ] T08: 境界で agent_id を SQLite が数える長さと同じ文字の範囲に絞る
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（agentOf が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="agent id" test/deliver.test.ts` → 先頭が NUL の agent_id の配信がログに残らず、同じ Read で記録がもう一度出るので落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="agent id" test/deliver.test.ts` → pass。受け付けない agent_id はメインの会話として数えられ、ログに残る
+  - コミット: `fix(deliver): accept only agent ids the log can store (T08)`
 
 ## P3: SubagentStart
 
@@ -98,3 +108,6 @@ base: main
 
 ## 記録
 - 2026-10-02 / T01・T07 / pre-commit の bundle 検査が、パッケージに入る変更をバージョンを上げずにコミットさせない（前回の PR も最初のタスクで上げていた） / T01 の変更欄に schema.test.ts と 4 つのバージョンのファイルを足し（前: schema・migration・fixture・db-types・sqlite・db-write・migrate.test・db.test）、release:plan と 0.6.17 への更新を T01 でした。T07 は取りやめ（S6 は T01 が担う）
+- 2026-10-02 / T04 / 並行のテストは deliver.test.ts の補助関数（save・decided・checkout）を使うので、新しいファイルではなく deliver.test.ts に置いた / 変更欄から server/test/deliver-concurrent.test.ts を外し、red と完了条件のコマンドを deliver.test.ts の --test-name-pattern に変えた（前: node --test test/deliver-concurrent.test.ts と --test-name-pattern="log fail"）。BUSY 以外のログの失敗は既存のテスト（trigger で拒む）が見ている
+- 2026-10-02 / T01 / Codex のタスクレビュー: 指摘なし
+- 2026-10-02 / T02 / Codex のタスクレビュー F1（P3、再現済み）: 先頭が NUL の agent_id は JS の length が 1 で SQLite の length が 0 になり、CHECK で log が失敗する / 採用。T08 を足した
