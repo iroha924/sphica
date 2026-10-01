@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Checks an npm pack tarball the way users receive it (run by CI check and release). Usage: node scripts/check-tarball.mjs <tgz>
-// It checks the file list (scripts/lib/tarball.mjs), that the version matches the repository, that the CLI starts outside the repository and creates a database in a temp HOME,
-// that an older database gets the version-naming notice from the delivery hook and a backup before init migrates it, and that the delivery
-// hook answers quickly with its record while another connection holds the write lock
+// It checks the file list, the version, that the CLI starts outside the repository and creates a database in a temp HOME, that the hook names
+// the version for an older database that init then backs up and migrates, and that the hook delivers quickly under a write lock
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

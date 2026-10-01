@@ -95,6 +95,20 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
   - 完了条件: `bun run release:plan -- --base v0.6.15` → plugin、4 ファイルが 0.6.16
   - コミット: `chore(release): bump to 0.6.16 (T06)`
 
+## P4: GitHub の Codex の指摘とリリースの関門
+
+GitHub の Codex の指摘を直し、Security Review と要約コメントが無くなった後も関門が Code Review の完了を確かめられるようにする。
+
+- [x] T08: check-tarball の冒頭コメントを 3 行に縮める
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（直す対象のコメント）
+  - 変更: `scripts/check-tarball.mjs`
+  - red: `sed -n '2,5p' scripts/check-tarball.mjs` → 直す前は冒頭のコメントが 4 行で、コメントは 1〜3 行という規範（.claude/rules/comments.md）を超える
+  - 完了条件: `sed -n '2,4p' scripts/check-tarball.mjs` → コメント 3 行で、検査の中身を全部名指しする
+  - コミット: `docs(release): keep the tarball check's header to three lines (T08)`
+  - 結果: red 実測: `sed -n '2,5p' scripts/check-tarball.mjs` → 直す前は 4 行のコメントだった。直した後 `sed -n '2,4p' scripts/check-tarball.mjs` → 3 行
+
 ## 記録
 - 2026-10-01 / T01・T06 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットで版が上がっていないと落とす（前回の計画と同じ） / 0.6.16 への版の上げを T06 から T01 へ移した。T01 の変更欄: deliver.ts・deliver.test.ts → それに 4 つの manifest を足した。T01 の計画欄: S1 → S1, S6。T06 は取りやめ（コードを変えないコミットになり、release:plan と verify の確認は plan の完了条件 A1・A5 で流す）。`bun run release:plan -- --base v0.6.15` → release kind: plugin、inputs: server/src/deliver.ts
 - 2026-10-01 / T04 / review の配信のテストは review-bridge.test.ts にまとまっているので、そちらに足した。変更欄: deliver.test.ts → review-bridge.test.ts。withdrawn は owner 接続で unit_state に active → withdrawn を入れて作った（trigger は通る）
@@ -104,3 +118,4 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
 - 2026-10-01 / T03 / Codex のレビュー（fda80f5b）: 指摘 0 件
 - 2026-10-01 / T05 / Codex のレビュー（7e96b024）: 指摘 0 件。1 秒の上限の CI での余裕は未計測とされた / 手元で 3 回測り、ロックなし 65 ms、ロック中 354〜360 ms（250 ms の待ちを含む）。CI の結果は push の後に見る
 - 2026-10-01 / 全体 / review-shipping（main..7e96b024）: 指摘 0 件。展開した dist/deliver.js に 250 ms の待ちが入っていること、LOG_WAIT_MS を 5000 にすると check-tarball が落ちること、修正を戻すと 4 本のテストが落ちること、`bun run verify` → exit 0 を確かめた。未検証として、Windows でプロンプトの絶対表記のドライブ文字の大小が root と違うと当たらない（c: と C:）が挙がった / 直さない。Windows で git が返す root の大小を確かめられず、相対表記なら当たる端の入力のため。PR 本文の Declined findings に書く
+- 2026-10-01 / PR #242 / GitHub の Codex レビュー 1 回目（37625c6、手動の依頼）: 指摘 1 件（P1 の札だが中身はコメントの長さの規範）。check-tarball の冒頭コメントが 4 行 / 採用、T08
