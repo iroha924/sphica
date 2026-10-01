@@ -1047,7 +1047,7 @@ test("the waiting-sessions notice follows the host and is kept for the owner's s
   }
 });
 
-// Nothing reads a read or edit that delivered nothing, and each such row is a write competing for the lock (#205)
+// Nothing reads a read or edit that delivered nothing, and each such row is a write competing for the lock
 test("reads and edits that deliver nothing write no rows, while empty session starts and prompts are still logged", async () => {
   const db = tempDb();
   const repo = checkout();
@@ -1108,6 +1108,59 @@ test("reads and edits that deliver nothing write no rows, while empty session st
         ["prompt", "nothing"],
       ],
     );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// A prompt names a path only where no ASCII letter, digit, or path character continues it: another file whose name contains the
+// anchored path is not it, while Japanese written right next to it, quotes, and either separator are
+test("a prompt names a path on its boundaries, with either separator, not as a substring", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/lib/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const prompt = (text: string) =>
+      deliver(
+        { hook_event_name: "UserPromptSubmit", prompt: text, session_id: "s", cwd: repo },
+        "claude-code",
+        db.file,
+      );
+    const back = repo.split("/").join("\\");
+    for (const text of [
+      "src/lib/db.ts を直して",
+      "src/lib/db.tsを直して",
+      "「src/lib/db.ts」を見て",
+      "`src/lib/db.ts` を見て",
+      "(src/lib/db.ts)",
+      "./src/lib/db.ts",
+      "src\\lib/db.ts を直して",
+      ".\\src\\lib/db.ts を直して",
+      `${repo}/src/lib/db.ts を直して`,
+      `${back}\\src/lib\\db.ts を直して`,
+      "Fix src/lib/db.ts.",
+    ])
+      assert.match(await prompt(text), /trace:ext-s1\/sqlite/, text);
+    for (const text of [
+      "web/src/lib/db.ts を直して",
+      "web/src/lib/db.tsx を直して",
+      "src/lib/db.ts.bak を直して",
+      "src/lib/db.ts._bak を直して",
+      "src/lib/db.ts.$bak を直して",
+      "web\\src\\lib\\db.ts を直して",
+      "..\\src\\lib\\db.ts を直して",
+      "/elsewhere/src/lib/db.ts を直して",
+    ])
+      assert.equal(await prompt(text), "", text);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

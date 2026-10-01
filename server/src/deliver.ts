@@ -346,8 +346,23 @@ async function namedInCommand(
     );
 }
 
+/**
+ * Whether a prompt names a path (relative or absolute under the root, either separator) with no ASCII letter, digit, or path character
+ * continuing it, so another file containing the path never matches while Japanese may touch it. Matched before NFKC, which merges paths.
+ */
+function pathNamed(prompt: string, root: string, rel: string): boolean {
+  const steps = (p: string) =>
+    p
+      .split(/[\\/]/)
+      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\\\/]");
+  return new RegExp(
+    `(?<![A-Za-z0-9_$.\\-/\\\\])(?:(?:\\.[\\\\/])?${steps(rel)}|${steps(path.join(root, rel))})(?![A-Za-z0-9_$\\-/\\\\]|\\.[A-Za-z0-9_$])`,
+  ).test(prompt);
+}
+
 /** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
-async function onPrompt(db: Reads, projectId: number, prompt: string): Promise<Plan> {
+async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
   const word = (w: string, s: string) =>
@@ -383,7 +398,7 @@ async function onPrompt(db: Reads, projectId: number, prompt: string): Promise<P
   const hits: { u: (typeof units)[number]; why: string }[] = [];
   for (const u of units) {
     const a = anchors.find(
-      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || text.includes(x.path)),
+      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || pathNamed(prompt, root, x.path)),
     );
     const o = options.find(
       (x) => x.unit_id === u.id && x.text.length >= 3 && word(x.text.normalize("NFKC").toLowerCase(), lower),
@@ -703,7 +718,7 @@ export async function deliver(
               shell ? "named" : "reading",
             )
           : event === "prompt"
-            ? await onPrompt(db, pid, input.prompt ?? "")
+            ? await onPrompt(db, pid, place.root, input.prompt ?? "")
             : call
               ? await beforeReview(db, pid, place.root, call)
               : await atStart(db, pid, branchOf(place.root), {

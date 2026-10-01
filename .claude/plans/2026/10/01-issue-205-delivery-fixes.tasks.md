@@ -32,7 +32,7 @@ base: main
   - コミット: `fix(deliver): stop logging reads and edits that delivered nothing (T01)`
   - 結果: red 実測: 直す前のコードで新しいテストが `actual: { delivery: 100, session: 2 }, expected: { delivery: 0, session: 1 }` で落ちた。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 24 / fail 0（既存テストの nothing 行の期待を emitted だけに直した）
 
-- [ ] T02: プロンプトの path を境界と区切りの規則で照合する
+- [x] T02: プロンプトの path を境界と区切りの規則で照合する
   - 種別: 修正
   - 計画: S2
   - 依存: なし
@@ -40,6 +40,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="prompt names a path" test/deliver.test.ts` → `web/src/db.tsx`・`web/src/db.ts`・`src/db.ts.bak`・`src/db.ts._bak`・`src/db.ts.$bak`・`web\src\db.ts`・`..\src\db.ts` が `src/db.ts` の記録を出して落ちる（と、`src\lib/db.ts`・`.\src\lib/db.ts`・root を含む絶対表記が当たらずに落ちる）
   - 完了条件: `cd server && node --test test/deliver.test.ts` → pass（上の否定例は出ず、`src/db.tsを直して`・`「src/db.ts」`・`` `src/db.ts` ``・`(src/db.ts)`・混在区切り・絶対表記は出る）
   - コミット: `fix(deliver): match a path named in a prompt on its boundaries, not as a substring (T02)`
+  - 結果: red 実測: 直す前のコードで、肯定例 3 件（`src\lib/db.ts`、`.\src\lib/db.ts`、区切りの混ざった root の絶対表記）が外れ、否定例 6 件（`web/src/lib/db.ts`、`.tsx`、`.bak`、`._bak`、`.$bak`、`/elsewhere/src/lib/db.ts`）が当たった。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 25 / fail 0
 
 - [ ] T03: ログを短い待ち時間の 1 トランザクションで書き、ロック中は本文だけ返す
   - 種別: 修正
