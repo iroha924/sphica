@@ -2294,6 +2294,70 @@
       ]
     },
     {
+      "id": "glean-14",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "The owner withdraws one of the anchored records and one standing constraint",
+      "given": [
+        {
+          "case": "capture-12"
+        },
+        {
+          "session": {
+            "id": "s-ja-retire3",
+            "host": "claude-code",
+            "at": "2026-03-25T11:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙をメモリにキャッシュする話と、ログを日本語にする話は取り消す。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-retire3",
+          "record": {
+            "ops": [
+              {
+                "op": "withdraw",
+                "unit": "trace:s-ja-retire/cover-memory",
+                "reason_source": "session:s-ja-retire3#1.owner",
+                "reason_quote": "表紙をメモリにキャッシュする話と、ログを日本語にする話は取り消す。"
+              },
+              {
+                "op": "withdraw",
+                "unit": "trace:s-ja-retire/log-ja",
+                "reason_source": "session:s-ja-retire3#1.owner",
+                "reason_quote": "表紙をメモリにキャッシュする話と、ログを日本語にする話は取り消す。"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-ja-retire/log-ja",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-ja-retire/cover-ttl",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-retire/commit-en",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
       "id": "capture-09",
       "layer": "capture",
       "lang": "en",
@@ -2431,6 +2495,267 @@
         {
           "unit": "harvest:20/reject-all",
           "lifecycle": "candidate"
+        }
+      ]
+    },
+    {
+      "id": "capture-12",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "Two records anchored to the same file and two standing constraints, set up to be replaced or withdrawn in part",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-retire",
+            "host": "claude-code",
+            "at": "2026-03-24T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙の取得結果はメモリにキャッシュする。Redis は使わない。",
+                "assistant": "了解です。",
+                "edits": []
+              },
+              {
+                "owner": "表紙のキャッシュは 10 分で捨てる。ここも Redis には頼らない。",
+                "assistant": "了解です。",
+                "edits": []
+              },
+              {
+                "owner": "ログのメッセージは日本語で書く。",
+                "assistant": "了解です。",
+                "edits": []
+              },
+              {
+                "owner": "コミットメッセージは英語で書く。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-retire",
+          "record": {
+            "units": [
+              {
+                "key": "cover-memory",
+                "kind": "decision",
+                "stance": "do",
+                "text": "表紙の取得結果はメモリにキャッシュする",
+                "options": [
+                  {
+                    "text": "Redis",
+                    "outcome": "rejected"
+                  }
+                ],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-retire#1.owner",
+                    "quote": "表紙の取得結果はメモリにキャッシュする。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-retire#1.owner",
+                    "quote": "表紙の取得結果はメモリにキャッシュする。"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/cover.ts",
+                    "role": "applies_to"
+                  }
+                ]
+              },
+              {
+                "key": "cover-ttl",
+                "kind": "decision",
+                "stance": "do",
+                "text": "表紙のキャッシュは 10 分で捨てる",
+                "options": [
+                  {
+                    "text": "Redis",
+                    "outcome": "rejected"
+                  }
+                ],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-retire#2.owner",
+                    "quote": "表紙のキャッシュは 10 分で捨てる。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-retire#2.owner",
+                    "quote": "表紙のキャッシュは 10 分で捨てる。"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/cover.ts",
+                    "role": "applies_to"
+                  }
+                ]
+              },
+              {
+                "key": "log-ja",
+                "kind": "constraint",
+                "stance": "do",
+                "text": "ログのメッセージは日本語で書く",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-retire#3.owner",
+                    "quote": "ログのメッセージは日本語で書く。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-retire#3.owner",
+                    "quote": "ログのメッセージは日本語で書く。"
+                  }
+                ]
+              },
+              {
+                "key": "commit-en",
+                "kind": "constraint",
+                "stance": "do",
+                "text": "コミットメッセージは英語で書く",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-retire#4.owner",
+                    "quote": "コミットメッセージは英語で書く。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-retire#4.owner",
+                    "quote": "コミットメッセージは英語で書く。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-retire/cover-ttl",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-retire/log-ja",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-retire/commit-en",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "capture-13",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "Later records replace one of the anchored records and one standing constraint",
+      "given": [
+        {
+          "case": "capture-12"
+        },
+        {
+          "session": {
+            "id": "s-ja-retire2",
+            "host": "claude-code",
+            "at": "2026-03-25T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙のキャッシュはメモリをやめてディスクに置く。前の決定は置き換える。",
+                "assistant": "了解です。",
+                "edits": []
+              },
+              {
+                "owner": "ログのメッセージも英語に変える。前のは置き換える。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-retire2",
+          "record": {
+            "units": [
+              {
+                "key": "cover-disk",
+                "kind": "decision",
+                "stance": "do",
+                "text": "表紙のキャッシュはディスクに置く",
+                "supersedes": "trace:s-ja-retire/cover-memory",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-retire2#1.owner",
+                    "quote": "表紙のキャッシュはメモリをやめてディスクに置く。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-retire2#1.owner",
+                    "quote": "表紙のキャッシュはメモリをやめてディスクに置く。"
+                  }
+                ]
+              },
+              {
+                "key": "log-en",
+                "kind": "constraint",
+                "stance": "do",
+                "text": "ログのメッセージは英語で書く",
+                "supersedes": "trace:s-ja-retire/log-ja",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-retire2#2.owner",
+                    "quote": "ログのメッセージも英語に変える。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-retire2#2.owner",
+                    "quote": "ログのメッセージも英語に変える。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "superseded"
+        },
+        {
+          "unit": "trace:s-ja-retire/log-ja",
+          "lifecycle": "superseded"
+        },
+        {
+          "unit": "trace:s-ja-retire/cover-ttl",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-retire/commit-en",
+          "lifecycle": "active"
         }
       ]
     },
@@ -2719,6 +3044,294 @@
         {
           "unit": "trace:s-ja-storage/storage",
           "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "injection-14",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A superseded record is not delivered before editing the file both are anchored to, while an active one in the same place is",
+      "given": [
+        {
+          "case": "capture-13"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/cover.ts"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "superseded"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-15",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A superseded record is not delivered before reading the file both are anchored to, while an active one in the same place is",
+      "given": [
+        {
+          "case": "capture-13"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_read",
+          "path": "src/cover.ts"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "superseded"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-16",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A superseded record is not delivered on a prompt naming the file both are anchored to, while an active one in the same place is",
+      "given": [
+        {
+          "case": "capture-13"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "src/cover.ts のキャッシュを見直したい"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "superseded"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-17",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A superseded record is not delivered on a prompt naming the option both rejected, while an active one in the same place is",
+      "given": [
+        {
+          "case": "capture-13"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "表紙のキャッシュに Redis を使いたい"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "superseded"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-18",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A superseded record is not delivered at session start among the standing constraints, while an active one in the same place is",
+      "given": [
+        {
+          "case": "capture-13"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "session_start"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/log-ja",
+          "lifecycle": "superseded"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/commit-en"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/log-ja"]
+        }
+      ]
+    },
+    {
+      "id": "injection-19",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A withdrawn record is not delivered before editing the file both are anchored to, while an active one in the same place is",
+      "given": [
+        {
+          "case": "glean-14"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/cover.ts"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-20",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A withdrawn record is not delivered before reading the file both are anchored to, while an active one in the same place is",
+      "given": [
+        {
+          "case": "glean-14"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_read",
+          "path": "src/cover.ts"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-21",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A withdrawn record is not delivered on a prompt naming the file both are anchored to, while an active one in the same place is",
+      "given": [
+        {
+          "case": "glean-14"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "src/cover.ts のキャッシュを見直したい"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-22",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A withdrawn record is not delivered on a prompt naming the option both rejected, while an active one in the same place is",
+      "given": [
+        {
+          "case": "glean-14"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "prompt",
+          "prompt": "表紙のキャッシュに Redis を使いたい"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/cover-memory",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/cover-ttl"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/cover-memory"]
+        }
+      ]
+    },
+    {
+      "id": "injection-23",
+      "layer": "injection",
+      "lang": "ja",
+      "summary": "A withdrawn record is not delivered at session start among the standing constraints, while an active one in the same place is",
+      "given": [
+        {
+          "case": "glean-14"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "session_start"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-retire/log-ja",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "context_contains": ["trace:s-ja-retire/commit-en"]
+        },
+        {
+          "context_not_contains": ["trace:s-ja-retire/log-ja"]
         }
       ]
     },

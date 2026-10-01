@@ -51,19 +51,20 @@ base: main
   - 完了条件: `cd server && node --test test/deliver.test.ts test/db.test.ts` → pass（ロック中は 1 秒以内に本文が返りログは 0 行、解放後の同じ Read で同じ記録がもう一度出る、後段の insert が失敗したら session 行も残らない）。saveText と capture のバッチのロック時間を一時 DB で測り、入力の件数・サイズと一緒に結果行に残す
   - コミット: `fix(deliver): answer before the log when the database is write-locked (T03)`
   - 結果: red 実測: 直す前のコードで `read took 5231 ms` で落ちた。log を 1 トランザクションにしない形へ一時的に戻すと `no session row is left without its delivery` で落ちることも確かめた。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts test/db.test.ts test/capture.test.ts` → pass 78 / fail 0
-  - 結果: ロック時間の実測（一時 DB、2 回とも同じ値）: capture の write() に 500 件・各 1800 バイトのメッセージで 44 ms、record の保存（openRun・checkRecord・saveRecord を 1 トランザクション）に証拠・採用・anchor 1 つ・別名 2 つを持つ決定 20 件で 24 ms。250 ms のままにした
+  - 結果: ロック時間の実測 `node test/.tmp-measure/measure.ts` → 2 回とも同じ値（一時のスクリプトで、測った後に消した）。capture の write() に 500 件・各 1800 バイトのメッセージで 44 ms、record の保存（openRun・checkRecord・saveRecord を 1 トランザクション）に証拠・採用・anchor 1 つ・別名 2 つを持つ決定 20 件で 24 ms。250 ms のままにした
 
 ## P2: 退役した記録の固定と配布物の検査
 
 superseded・withdrawn の記録が自動配信に出ないことと、展開した配布物がロック中もすぐ答えることを、検査で固定する。
 
-- [ ] T04: superseded・withdrawn の記録を自動配信しない受け入れケースと review のテスト
+- [x] T04: superseded・withdrawn の記録を自動配信しない受け入れケースと review のテスト
   - 種別: 追加
   - 計画: S4
   - 依存: なし
-  - 変更: `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `server/test/deliver.test.ts`
+  - 変更: `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `server/test/review-bridge.test.ts`
   - 完了条件: `cd server && node --test test/acceptance-cases.test.ts test/deliver.test.ts && bun run acceptance` → pass（superseded と withdrawn それぞれ pre_edit・pre_read・prompt の path・prompt の option・session_start の独立ケースで出ず、同じ条件の active の記録は出る。review も同じ）。今のコードで初回 green の見込みなので、その旨を結果行に書く
   - コミット: `test(deliver): pin that superseded and withdrawn records are never delivered (T04)`
+  - 結果: `node --test --test-name-pattern="capture-1[23]|glean-14|injection-(1[4-9]|2[0-3])" evals/acceptance/run.ts` → 13 件 pass（初回 green。今のコードの lifecycle の絞り込みを固定するテスト）。deliverable() の絞り込みを一時的に active・superseded・withdrawn に広げると injection-14〜23 の 10 件と review のテストが落ちることを確かめた。`node --test test/review-bridge.test.ts test/acceptance-cases.test.ts` → pass 14 / fail 0
 
 - [ ] T05: 展開した deliver.js がロック中に 1 秒未満で目的の記録を返す検査
   - 種別: 追加
@@ -85,3 +86,4 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
 
 ## 記録
 - 2026-10-01 / T01・T06 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットで版が上がっていないと落とす（前回の計画と同じ） / 0.6.16 への版の上げを T06 から T01 へ移した。T01 の変更欄: deliver.ts・deliver.test.ts → それに 4 つの manifest を足した。T01 の計画欄: S1 → S1, S6。T06 は取りやめ（コードを変えないコミットになり、release:plan と verify の確認は plan の完了条件 A1・A5 で流す）。`bun run release:plan -- --base v0.6.15` → release kind: plugin、inputs: server/src/deliver.ts
+- 2026-10-01 / T04 / review の配信のテストは review-bridge.test.ts にまとまっているので、そちらに足した。変更欄: deliver.test.ts → review-bridge.test.ts。withdrawn は owner 接続で unit_state に active → withdrawn を入れて作った（trigger は通る）
