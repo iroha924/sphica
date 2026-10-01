@@ -397,6 +397,17 @@ test("a compact or clear session start counts reads again from there; startup, r
         decided(`k${n}`, m, r, { anchors: [{ path: `src/g${n}.ts`, role: "applies_to" }] }),
       ),
     });
+    // A work item makes every start deliver text, whatever the clock says about sessions waiting to be traced
+    insert(db, "work", {
+      project_id: p,
+      key: "w",
+      title: "Rework CSV export",
+      goal: "g",
+      current: "notes removed",
+      next: "[]",
+      status: "active",
+      updated_at: "2026-09-27T00:00:00.000Z",
+    });
     const at = (input: Record<string, unknown>) =>
       deliver({ session_id: "windows", cwd: repo, ...input }, "claude-code", db.file);
     const start = (source: string) => at({ hook_event_name: "SessionStart", source });
@@ -414,12 +425,14 @@ test("a compact or clear session start counts reads again from there; startup, r
       assert.deepEqual(await read(0), [], `${source} keeps what was shown`);
       assert.deepEqual(await read(8), [], `${source} keeps the budget spent`);
     }
-    for (const source of ["compact", "clear"]) {
-      // Nothing else applies at start, so the marker is written with an empty delivery
-      assert.equal(await start(source), "");
-      assert.deepEqual(await read(0), ["trace:ext-s1/k0"], `${source} shows a record again`);
-      assert.deepEqual(await read(8), ["trace:ext-s1/k8"], `${source} gives the budget back`);
-    }
+    assert.match(await start("compact"), /Rework CSV export/);
+    assert.deepEqual(await read(0), ["trace:ext-s1/k0"], "compact shows a record again");
+    assert.deepEqual(await read(8), ["trace:ext-s1/k8"], "compact gives the budget back");
+    // A start with nothing to deliver is still logged, so it still marks where reads count from
+    db.owner.prepare("update work set status = 'done'").run();
+    assert.equal(await start("clear"), "");
+    assert.deepEqual(await read(0), ["trace:ext-s1/k0"], "clear shows a record again");
+    assert.deepEqual(await read(8), ["trace:ext-s1/k8"], "clear gives the budget back");
     assert.deepEqual(
       db.owner
         .prepare("select reason from delivery where event = 'session_start' order by id")
@@ -1465,7 +1478,11 @@ async function together(file: string, home: string, inputs: Record<string, unkno
           out += d;
         });
         k.on("error", reject);
-        k.on("close", () => resolve(out ? JSON.parse(out).hookSpecificOutput.additionalContext : ""));
+        k.on("close", (code) =>
+          code === 0
+            ? resolve(out ? JSON.parse(out).hookSpecificOutput.additionalContext : "")
+            : reject(new Error(`the delivery hook exited with ${code}`)),
+        );
       }),
   );
   await new Promise((r) => setTimeout(r, 1500));
@@ -1566,7 +1583,8 @@ test("concurrent reads of long records stop at the read budget's 3000 characters
       .filter((t) => /^- trace:/m.test(t))
       .map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
     const records = shown.join("").length - shown.length * (CONFIRM.length + 1);
-    assert.ok(records <= 3000, `${records} characters in ${shown.length} reads`);
+    assert.ok(records > 1000 && records <= 3000, `${records} characters in ${shown.length} reads`);
+    assert.ok(!texts.some((t) => t.includes("Sphica unavailable")), texts.join("\n"));
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

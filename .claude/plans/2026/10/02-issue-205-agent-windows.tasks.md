@@ -99,7 +99,25 @@ base: main
   - 変更: `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run verify` → exit 0（受け入れケースを含む）
   - コミット: `test(acceptance): pin per-agent and compaction delivery cases (T06)`
-  - 結果: driver に呼び出しごとの host・agent_id・command（Bash）・subagent_start と each_context の lacks を足し、injection-24〜28 を足した。main の worktree に新しい driver と cases を写して `SPHICA_ACCEPTANCE_LAYER=injection node --test evals/acceptance/run.ts` → 5 件とも落ちた（検索の行が無い / compact・clear の後の Read に記録が無い / Codex の子の後に親へ記録が無い）。このブランチで `bun run acceptance` → 97 pass、`node --test test/acceptance-cases.test.ts` → 4 pass。bun run verify は完了条件の 12 段目で流す
+  - 結果: driver に呼び出しごとの host・agent_id・command（Bash）・subagent_start と each_context の lacks を足し、injection-24〜28 を足した。main の worktree に新しい driver と cases を写して `SPHICA_ACCEPTANCE_LAYER=injection node --test evals/acceptance/run.ts` → 5 件とも落ちた（検索の行が無い / compact・clear の後の Read に記録が無い / Codex の子の後に親へ記録が無い）。このブランチで `bun run acceptance` → 97 pass、`node --test test/acceptance-cases.test.ts` → 4 pass。チェックの直後に `bun run verify` → exit 0（受け入れ 97 pass を含む）
+
+- [x] T09: compact・clear のテストを日付に依存させず、並行の文字数のテストが空の応答で通らないようにする
+  - 種別: 変更
+  - 計画: S3
+  - 依存: T04（直すテストが要る）
+  - 変更: `server/test/deliver.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="compact|clear|concurrent" test/deliver.test.ts` → pass。開始の配信が作業中の件で必ず本文を持ち、子プロセスが 0 で終わり、文字数のケースが 1000 字より多く届いたことを確かめる
+  - コミット: `test(deliver): keep the window test off the clock and the concurrent tests off empty answers (T09)`
+  - 結果: 作業中の件を入れて開始の配信が必ず本文を持つようにし、clear の前に作業を done にして本文の無い開始でも区切りの行が書かれることを見る形にした。together() は子プロセスが 0 以外で終わると失敗し、文字数のケースは 1000 字より多く届いたことと unavailable が無いことも見る。`node --test --test-name-pattern="compact|clear|concurrent" test/deliver.test.ts` → 4 pass
+
+- [ ] T10: SubagentStart に持ち主向けの trace 待ちの案内を出さない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（SubagentStart の配信が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="pending notice" test/deliver.test.ts` → agent_id の無い SubagentStart が案内を受け取り、その日の持ち主の SessionStart に案内が出ないので落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="pending notice" test/deliver.test.ts` → pass
+  - コミット: `fix(deliver): keep the pending-trace notice for the owner's own session start (T10)`
 
 - [-] T07: release:plan を流し、0.6.17 に揃える
   - 種別: 変更
@@ -114,3 +132,5 @@ base: main
 - 2026-10-02 / T04 / 並行のテストは deliver.test.ts の補助関数（save・decided・checkout）を使うので、新しいファイルではなく deliver.test.ts に置いた / 変更欄から server/test/deliver-concurrent.test.ts を外し、red と完了条件のコマンドを deliver.test.ts の --test-name-pattern に変えた（前: node --test test/deliver-concurrent.test.ts と --test-name-pattern="log fail"）。BUSY 以外のログの失敗は既存のテスト（trigger で拒む）が見ている
 - 2026-10-02 / T01 / Codex のタスクレビュー: 指摘なし
 - 2026-10-02 / T02 / Codex のタスクレビュー F1（P3、再現済み）: 先頭が NUL の agent_id は JS の length が 1 で SQLite の length が 0 になり、CHECK で log が失敗する / 採用。T08 を足した
+- 2026-10-02 / T03・T04 / Codex のタスクレビュー F1（P2）: compact・clear のテストは、開始の配信が trace 待ちの案内に左右され 30 日後に落ちる。F2（P2、再現済み）: 並行の文字数のテストは全部の応答が空でも通る / 両方採用。T09 を足した
+- 2026-10-02 / T08・T05 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart は isOwnerTurn が真になり得て、持ち主向けの案内を受け取りその日の 1 回を使う / 採用。T10 を足した
