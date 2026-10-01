@@ -216,14 +216,13 @@ test("delivery brings anchored, named, and broad records, never candidates or co
       )
       .all()
       .map((r) => [r.event, r.outcome, r.units]);
-    assert.deepEqual(logged.slice(0, 6), [
+    // Reads and edits that delivered nothing are not logged
+    assert.deepEqual(logged.slice(0, 3), [
       ["pre_edit", "emitted", 1],
-      ["pre_edit", "nothing", 0],
-      ["pre_edit", "nothing", 0],
       ["pre_read", "emitted", 1],
-      ["pre_read", "nothing", 0],
       ["pre_edit", "emitted", 1],
     ]);
+    assert.ok(!logged.some(([e, o]) => (e === "pre_edit" || e === "pre_read") && o !== "emitted"));
     assert.ok(logged.some(([e, o]) => e === "session_start" && o === "emitted"));
   } finally {
     await db.done();
@@ -1043,6 +1042,73 @@ test("the waiting-sessions notice follows the host and is kept for the owner's s
   } finally {
     if (thread === undefined) delete process.env.CODEX_THREAD_ID;
     else process.env.CODEX_THREAD_ID = thread;
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Nothing reads a read or edit that delivered nothing, and each such row is a write competing for the lock (#205)
+test("reads and edits that deliver nothing write no rows, while empty session starts and prompts are still logged", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const session = crypto.randomUUID();
+    const tool = (tool_name: string, file: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: session,
+          cwd: repo,
+          tool_name,
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const rows = () => ({
+      delivery: db.owner.prepare("select count(*) as n from delivery").get()?.n,
+      session: db.owner.prepare("select count(*) as n from session").get()?.n,
+    });
+    const before = rows();
+    for (let n = 0; n < 50; n++) {
+      assert.equal(await tool("Read", "src/plain.ts"), "");
+      assert.equal(await tool("Edit", "src/plain.ts"), "");
+    }
+    assert.deepEqual(rows(), before, "unanchored reads and edits add no delivery or session rows");
+    assert.match(await tool("Read", "src/db.ts"), /trace:ext-s1\/sqlite/);
+    const shown = rows();
+    assert.equal(await tool("Read", "src/db.ts"), "", "already shown in this session");
+    assert.deepEqual(rows(), shown, "a read emptied by an earlier delivery adds no row");
+    await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: session, cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    await deliver(
+      { hook_event_name: "UserPromptSubmit", prompt: "今日の天気は？", session_id: session, cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select event, outcome from delivery where event in ('session_start', 'prompt') order by id")
+        .all()
+        .map((r) => [r.event, r.outcome]),
+      [
+        ["session_start", "emitted"],
+        ["prompt", "nothing"],
+      ],
+    );
+  } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }

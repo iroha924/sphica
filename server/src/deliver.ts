@@ -718,6 +718,8 @@ export async function deliver(
                   ),
                 });
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
+    // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
+    if (onPath && !plan.text) return "";
     await log(
       file,
       pid,

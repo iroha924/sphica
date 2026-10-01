@@ -22,14 +22,15 @@ base: main
 
 紐付けの無い Read・Edit が行を増やさず、プロンプトの path が別のファイルに当たらず、書き込みロック中も本文がすぐ返る。
 
-- [ ] T01: 空の Read・Edit の配信でログを書かない
+- [x] T01: 空の Read・Edit の配信でログを書かない
   - 種別: 修正
-  - 計画: S1
+  - 計画: S1, S6
   - 依存: なし
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern="no rows" test/deliver.test.ts` → 新しい session で紐付けの無い path を 50 回 Read・Edit すると delivery と session が増えて落ちる
   - 完了条件: `cd server && node --test test/deliver.test.ts` → pass（delivery と session の増分 0、配信済みで空になった再 Read もログが増えない、session_start と prompt の空ログは残る）
   - コミット: `fix(deliver): stop logging reads and edits that delivered nothing (T01)`
+  - 結果: red 実測: 直す前のコードで新しいテストが `actual: { delivery: 100, session: 2 }, expected: { delivery: 0, session: 1 }` で落ちた。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 24 / fail 0（既存テストの nothing 行の期待を emitted だけに直した）
 
 - [ ] T02: プロンプトの path を境界と区切りの規則で照合する
   - 種別: 修正
@@ -71,12 +72,13 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
 
 ## P3: リリースの準備
 
-- [ ] T06: 0.6.16 に揃える
+- [-] T06: リリースの区分と版の一致を確かめる（取りやめ。S6 は T01 が担う）
   - 種別: 変更
   - 計画: S6
-  - 依存: T01（パッケージに入る変更が要る）, T02（同じ）, T03（同じ）
-  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base v0.6.15` → plugin、4 ファイルが 0.6.16 で揃い `bun run verify` → exit 0
+  - 依存: T01（版を上げたコミット）
+  - 変更: `plugin/package.json`
+  - 完了条件: `bun run release:plan -- --base v0.6.15` → plugin、4 ファイルが 0.6.16
   - コミット: `chore(release): bump to 0.6.16 (T06)`
 
 ## 記録
+- 2026-10-01 / T01・T06 / pre-commit の bundle の検査が、パッケージの入力を変える最初のコミットで版が上がっていないと落とす（前回の計画と同じ） / 0.6.16 への版の上げを T06 から T01 へ移した。T01 の変更欄: deliver.ts・deliver.test.ts → それに 4 つの manifest を足した。T01 の計画欄: S1 → S1, S6。T06 は取りやめ（コードを変えないコミットになり、release:plan と verify の確認は plan の完了条件 A1・A5 で流す）。`bun run release:plan -- --base v0.6.15` → release kind: plugin、inputs: server/src/deliver.ts
