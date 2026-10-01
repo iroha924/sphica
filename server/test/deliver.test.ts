@@ -216,14 +216,13 @@ test("delivery brings anchored, named, and broad records, never candidates or co
       )
       .all()
       .map((r) => [r.event, r.outcome, r.units]);
-    assert.deepEqual(logged.slice(0, 6), [
+    // Reads and edits that delivered nothing are not logged
+    assert.deepEqual(logged.slice(0, 3), [
       ["pre_edit", "emitted", 1],
-      ["pre_edit", "nothing", 0],
-      ["pre_edit", "nothing", 0],
       ["pre_read", "emitted", 1],
-      ["pre_read", "nothing", 0],
       ["pre_edit", "emitted", 1],
     ]);
+    assert.ok(!logged.some(([e, o]) => (e === "pre_edit" || e === "pre_read") && o !== "emitted"));
     assert.ok(logged.some(([e, o]) => e === "session_start" && o === "emitted"));
   } finally {
     await db.done();
@@ -1043,6 +1042,191 @@ test("the waiting-sessions notice follows the host and is kept for the owner's s
   } finally {
     if (thread === undefined) delete process.env.CODEX_THREAD_ID;
     else process.env.CODEX_THREAD_ID = thread;
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Nothing reads a read or edit that delivered nothing, and each such row is a write competing for the lock
+test("reads and edits that deliver nothing write no rows, while empty session starts and prompts are still logged", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    // Sent long ago, so session start has no waiting-sessions notice and nothing to say on any day the test runs
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file.", sent: "2026-01-01T00:00:00Z" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const session = crypto.randomUUID();
+    const tool = (tool_name: string, file: string) =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: session,
+          cwd: repo,
+          tool_name,
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const rows = () => ({
+      delivery: db.owner.prepare("select count(*) as n from delivery").get()?.n,
+      session: db.owner.prepare("select count(*) as n from session").get()?.n,
+    });
+    const before = rows();
+    for (let n = 0; n < 50; n++) {
+      assert.equal(await tool("Read", "src/plain.ts"), "");
+      assert.equal(await tool("Edit", "src/plain.ts"), "");
+    }
+    assert.deepEqual(rows(), before, "unanchored reads and edits add no delivery or session rows");
+    assert.match(await tool("Read", "src/db.ts"), /trace:ext-s1\/sqlite/);
+    const shown = rows();
+    assert.equal(await tool("Read", "src/db.ts"), "", "already shown in this session");
+    assert.deepEqual(rows(), shown, "a read emptied by an earlier delivery adds no row");
+    assert.equal(
+      await deliver(
+        { hook_event_name: "SessionStart", source: "startup", session_id: session, cwd: repo },
+        "claude-code",
+        db.file,
+      ),
+      "",
+    );
+    await deliver(
+      { hook_event_name: "UserPromptSubmit", prompt: "今日の天気は？", session_id: session, cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select event, outcome from delivery where event in ('session_start', 'prompt') order by id")
+        .all()
+        .map((r) => [r.event, r.outcome]),
+      [
+        ["session_start", "nothing"],
+        ["prompt", "nothing"],
+      ],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// A prompt names a path only where no ASCII letter, digit, or path character continues it: another file whose name contains the
+// anchored path is not it, while Japanese written right next to it, quotes, and either separator are
+test("a prompt names a path on its boundaries, with either separator, not as a substring", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/lib/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const prompt = (text: string) =>
+      deliver(
+        { hook_event_name: "UserPromptSubmit", prompt: text, session_id: "s", cwd: repo },
+        "claude-code",
+        db.file,
+      );
+    const back = repo.split("/").join("\\");
+    for (const text of [
+      "src/lib/db.ts を直して",
+      "src/lib/db.tsを直して",
+      "「src/lib/db.ts」を見て",
+      "`src/lib/db.ts` を見て",
+      "(src/lib/db.ts)",
+      "./src/lib/db.ts",
+      "src\\lib/db.ts を直して",
+      ".\\src\\lib/db.ts を直して",
+      `${repo}/src/lib/db.ts を直して`,
+      `${back}\\src/lib\\db.ts を直して`,
+      "Fix src/lib/db.ts.",
+    ])
+      assert.match(await prompt(text), /trace:ext-s1\/sqlite/, text);
+    for (const text of [
+      "web/src/lib/db.ts を直して",
+      "web/src/lib/db.tsx を直して",
+      "src/lib/db.ts.bak を直して",
+      "src/lib/db.ts._bak を直して",
+      "src/lib/db.ts.$bak を直して",
+      "web\\src\\lib\\db.ts を直して",
+      "..\\src\\lib\\db.ts を直して",
+      "/elsewhere/src/lib/db.ts を直して",
+    ])
+      assert.equal(await prompt(text), "", text);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The host kills a hook after 5 seconds, so a delivery must not wait on another connection's write lock to log itself. A delivery that
+// could not be logged is shown again on the next read
+test("a delivery answers within a second while another connection holds the write lock, and is shown again once it is released", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const call = (session: string, tool_name: string, tool_input: Record<string, unknown>) =>
+      deliver(
+        { hook_event_name: "PreToolUse", session_id: session, cwd: repo, tool_name, tool_input },
+        "claude-code",
+        db.file,
+      );
+    const read = (session: string) => call(session, "Read", { file_path: path.join(repo, "src/db.ts") });
+    const rows = () => db.owner.prepare("select count(*) as n from delivery").get()?.n;
+    const before = rows();
+    db.owner.exec("begin immediate");
+    try {
+      for (const [what, run] of [
+        ["read", () => read("locked")],
+        ["shell", () => call("shell", "Bash", { command: "cat src/db.ts" })],
+      ] as const) {
+        const started = performance.now();
+        const text = await run();
+        const took = performance.now() - started;
+        assert.match(text, /trace:ext-s1\/sqlite/, what);
+        assert.ok(took < 1000, `${what} took ${Math.round(took)} ms`);
+      }
+    } finally {
+      db.owner.exec("rollback");
+    }
+    assert.equal(rows(), before, "nothing was logged under the lock");
+    assert.match(
+      await read("locked"),
+      /trace:ext-s1\/sqlite/,
+      "a delivery that was not logged is shown again",
+    );
+    assert.equal(await read("locked"), "", "and once logged, not a third time");
+
+    // The session row and the delivery row are written together or not at all
+    const sessions = () => db.owner.prepare("select count(*) as n from session").get()?.n;
+    const had = sessions();
+    db.owner.exec(
+      "create trigger refuse_delivery before insert on delivery begin select raise(abort, 'refused'); end",
+    );
+    assert.match(await read("fresh"), /trace:ext-s1\/sqlite/, "a failed log still answers");
+    assert.equal(sessions(), had, "no session row is left without its delivery");
+  } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }

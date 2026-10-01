@@ -64,13 +64,10 @@ Hand it over only after `bun run verify` passes.
 
 - `review-shipping`: before a commit that changes the package, versions, bundle inputs, or check scripts
 - Codex: before merging each PR. Ask by following the `codex-review` Skill
-- GitHub's Codex (ChatGPT connector) reviews a PR when it is created and again only when someone comments `@codex review` (a push starts nothing); its Security Review runs with each Code Review. Claude owns watching it and deciding on re-reviews; the owner only looks at finished PRs.
-  The summary comment's table (Codex Review Summary) is the source of truth: when the head commit's Code Review is Completed, it is done (👀 in the PR body means running,
-  👍 means everything finished with no findings). Findings are unresolved review threads, Security Review ones included; read each, decide whether to fix or decline it, then resolve it.
-  One round, one request: fix every finding of the round, push once, confirm it reached the remote, then comment `@codex review` once (it posts under the owner's name, and a request on a head you are about to replace is a wasted round).
-  Stop when a round has no P1 and every new P2 is an edge input; record those in the PR body's "Declined findings".
+- GitHub's Codex (ChatGPT connector) reviews a PR when it is created and when someone comments `@codex review`. The owner watches it, requests re-reviews, and shares its findings with Claude; Claude watches CI and does not comment `@codex review`.
+  For each shared finding, decide whether to fix or decline it, then resolve its thread. Record declined ones in the PR body's "Declined findings".
   File an issue for a declined finding only when it will really help later (you can say what would make it worth revisiting), and ask the owner first. If none is worth one, finish without mentioning it.
-  Ask the owner for the final call only when the head's Code Review is Completed, there are 0 unresolved threads, and CI has fully passed
+  Ask the owner for the final call when CI has fully passed and there are 0 unresolved threads
 
 ## Text that goes out
 

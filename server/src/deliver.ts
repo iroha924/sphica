@@ -10,7 +10,7 @@ import path from "node:path";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
-import { dbFile, iso, openReader, type Reads } from "./db.ts";
+import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
@@ -40,6 +40,11 @@ const LIMITS: Record<Event, { units: number; chars: number }> = {
   prompt: { units: 3, chars: 900 + ASK },
   review: { units: 5, chars: 1500 },
 };
+/**
+ * How long the log waits for another connection's write lock. The host kills the hook after 5 seconds, so a delivery that cannot be logged
+ * soon is answered unlogged (and may be shown again) rather than lost.
+ */
+const LOG_WAIT_MS = 250;
 /** Reads are far more frequent than edits, so what reads deliver over one session is capped too (the request on each is not counted). */
 const READ_SESSION = { units: 8, chars: 3000 };
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -346,8 +351,23 @@ async function namedInCommand(
     );
 }
 
+/**
+ * Whether a prompt names a path (relative or absolute under the root, either separator) with no ASCII letter, digit, or path character
+ * continuing it, so another file containing the path never matches while Japanese may touch it. Matched before NFKC, which merges paths.
+ */
+function pathNamed(prompt: string, root: string, rel: string): boolean {
+  const steps = (p: string) =>
+    p
+      .split(/[\\/]/)
+      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\\\/]");
+  return new RegExp(
+    `(?<![A-Za-z0-9_$.\\-/\\\\])(?:(?:\\.[\\\\/])?${steps(rel)}|${steps(path.join(root, rel))})(?![A-Za-z0-9_$\\-/\\\\]|\\.[A-Za-z0-9_$])`,
+  ).test(prompt);
+}
+
 /** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
-async function onPrompt(db: Reads, projectId: number, prompt: string): Promise<Plan> {
+async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
   const word = (w: string, s: string) =>
@@ -383,7 +403,7 @@ async function onPrompt(db: Reads, projectId: number, prompt: string): Promise<P
   const hits: { u: (typeof units)[number]; why: string }[] = [];
   for (const u of units) {
     const a = anchors.find(
-      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || text.includes(x.path)),
+      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || pathNamed(prompt, root, x.path)),
     );
     const o = options.find(
       (x) => x.unit_id === u.id && x.text.length >= 3 && word(x.text.normalize("NFKC").toLowerCase(), lower),
@@ -588,30 +608,32 @@ async function log(
   outcome: string,
   branch: string | null,
 ): Promise<void> {
-  const cap = openWriter("capture", file);
+  const cap = openWriter("capture", file, LOG_WAIT_MS);
   try {
     const id = sessionId(projectId, host, external);
     const now = iso(Date.now());
-    await cap
-      .insertInto("capture_session")
-      .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
-      .execute();
-    await cap
-      .insertInto("capture_delivery")
-      .values({
-        session_id: id,
-        event,
-        outcome,
-        reason: plan.reason,
-        path: plan.path,
-        eligible: plan.eligible,
-        omitted: plan.omitted,
-        // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
-        chars: plan.text.length - plan.note.length,
-        at: now,
-        units: JSON.stringify(plan.units),
-      })
-      .execute();
+    await inTransaction(cap, async (trx) => {
+      await trx
+        .insertInto("capture_session")
+        .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
+        .execute();
+      await trx
+        .insertInto("capture_delivery")
+        .values({
+          session_id: id,
+          event,
+          outcome,
+          reason: plan.reason,
+          path: plan.path,
+          eligible: plan.eligible,
+          omitted: plan.omitted,
+          // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
+          chars: plan.text.length - plan.note.length,
+          at: now,
+          units: JSON.stringify(plan.units),
+        })
+        .execute();
+    });
   } finally {
     await cap.destroy().catch(() => {});
   }
@@ -703,7 +725,7 @@ export async function deliver(
               shell ? "named" : "reading",
             )
           : event === "prompt"
-            ? await onPrompt(db, pid, input.prompt ?? "")
+            ? await onPrompt(db, pid, place.root, input.prompt ?? "")
             : call
               ? await beforeReview(db, pid, place.root, call)
               : await atStart(db, pid, branchOf(place.root), {
@@ -718,6 +740,8 @@ export async function deliver(
                   ),
                 });
     if (call && plan.text && toldBefore(`${host}\0${input.session_id}`, plan.once ?? plan.text)) return "";
+    // Nothing reads an empty read or edit, and they are the most frequent calls: each row would be a write competing for the lock
+    if (onPath && !plan.text) return "";
     await log(
       file,
       pid,

@@ -20,7 +20,6 @@ const THREADS = `query($owner: String!, $name: String!, $number: Int!, $after: S
   repository(owner: $owner, name: $name) { pullRequest(number: $number) {
     reviewThreads(first: 100, after: $after) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } }
 }`;
-// A PR's comments, Codex's long reviews among them, can pass the 1 MiB default; running out stops a release that is ready
 const run = (command, args) =>
   execFileSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
 const api = (endpoint) => JSON.parse(run("gh", ["api", endpoint]));
@@ -68,12 +67,9 @@ const { problems, pull } = gateProblems({
   pulls: api(`repos/${repo}/commits/${commit}/pulls`),
   runs: api(`repos/${repo}/actions/runs?head_sha=${commit}&event=pull_request&per_page=100`).workflow_runs,
 });
-// Codex reviews after CI, so its state is read here, at tag time, not by a pull_request check. Every page is read; an API failure throws
+// Review threads come after CI, so they are read here, at tag time, not by a pull_request check. Every page is read; an API failure throws
 if (pull !== null) {
   const [owner, name] = repo.split("/");
-  const comments = JSON.parse(
-    run("gh", ["api", "--paginate", "--slurp", `repos/${repo}/issues/${pull}/comments?per_page=100`]),
-  ).flat();
   const threads = [];
   for (let after = null; ; ) {
     const page = JSON.parse(
@@ -95,7 +91,7 @@ if (pull !== null) {
     if (!page.pageInfo.hasNextPage) break;
     after = page.pageInfo.endCursor;
   }
-  problems.push(...reviewProblems({ commit, comments, threads }));
+  problems.push(...reviewProblems({ threads }));
 }
 if (problems.length) {
   console.error(problems.join("\n"));

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Checks an npm pack tarball the way users receive it (run by CI check and release). Usage: node scripts/check-tarball.mjs <tgz>
-// It checks the file list (scripts/lib/tarball.mjs), that the version matches the repository, that the CLI starts outside the repository and creates a database in a temp HOME,
-// and that an older database gets the version-naming notice from the delivery hook and a backup before init migrates it
+// It checks the file list, the version, that the CLI starts outside the repository and creates a database in a temp HOME, that the hook names
+// the version for an older database that init then backs up and migrates, and that the hook delivers quickly under a write lock
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -145,6 +145,113 @@ try {
   } finally {
     fs.rmSync(behind, { recursive: true, force: true });
   }
+  // The host kills a hook after 5 seconds: the shipped hook must answer quickly, with the record, while another connection holds the
+  // write lock. The record is written as the record server would leave it (a saved run, evidence, adoption, candidate then active)
+  // The real path, as git reports the root (a macOS temp directory is a link), so the read path is inside it
+  const locked = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-locked-")));
+  try {
+    const env = { ...parentEnv, HOME: locked, USERPROFILE: locked };
+    execFileSync(process.execPath, [path.join(pkg, "dist", "cli.js"), "init"], {
+      cwd: out,
+      encoding: "utf8",
+      env,
+    });
+    const file = path.join(locked, ".sphica", "sphica.db");
+    const raw = new DatabaseSync(file);
+    raw.exec("pragma foreign_keys = on");
+    raw.function("sphica_terms", (text) => String(text ?? ""));
+    const when = new Date().toISOString();
+    const said = "Keep one SQLite file.";
+    const key = "trace:locked/one-file";
+    raw.exec(
+      `insert into project (key, name) values ('git:github.com/example/locked', 'example/locked');
+       insert into session (id, project_id, host, external_id, started_at) values ('s1', (select id from project where key = 'git:github.com/example/locked'), 'claude-code', 'e1', '${when}');`,
+    );
+    const pid = raw.prepare("select id from project where key = 'git:github.com/example/locked'").get().id;
+    const source = raw
+      .prepare(
+        "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (?, 'session_message', 'session:s1', 'm1', 1, 's1', 'owner', ?, ?, ?, ?, zeroblob(32), 0) returning id",
+      )
+      .get(pid, when, when, said, said.length).id;
+    const run = raw
+      .prepare(
+        "insert into extraction_run (project_id, origin, target, session_id, status, started_at) values (?, 'trace', 'session:s1', 's1', 'running', ?) returning id",
+      )
+      .get(pid, when).id;
+    const unit = raw
+      .prepare(
+        "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (?, ?, 'decision', 'do', ?, 'supported', ?, ?, zeroblob(32)) returning id",
+      )
+      .get(pid, key, said, run, when).id;
+    const span = [unit, source, 0, said.length, run, when];
+    raw
+      .prepare(
+        "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (?, ?, ?, ?, 'states', ?, ?)",
+      )
+      .run(...span);
+    raw
+      .prepare(
+        "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (?, 'owner_statement', ?, ?, ?, ?, ?)",
+      )
+      .run(...span);
+    raw
+      .prepare(
+        "insert into unit_anchor (unit_id, path, role, run_id, added_at) values (?, 'src/db.ts', 'applies_to', ?, ?)",
+      )
+      .run(unit, run, when);
+    for (const [from, to] of [
+      [null, "candidate"],
+      ["candidate", "active"],
+    ])
+      raw
+        .prepare(
+          "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, ?, ?, ?, 'saved', ?, ?)",
+        )
+        .run(unit, from, to, when, source, run);
+    raw.prepare("update extraction_run set status = 'saved', finished_at = ? where id = ?").run(when, run);
+    raw.close();
+    const repo = path.join(locked, "repo");
+    fs.mkdirSync(repo);
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/example/locked.git"], { cwd: repo });
+    const read = (session) => {
+      const started = performance.now();
+      const answer = execFileSync(process.execPath, [path.join(pkg, "dist", "deliver.js")], {
+        cwd: repo,
+        encoding: "utf8",
+        env,
+        input: JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, "src", "db.ts") },
+          session_id: `${session}-${process.pid}-${Date.now()}`,
+          cwd: repo,
+        }),
+      });
+      return {
+        ms: performance.now() - started,
+        context: answer ? JSON.parse(answer).hookSpecificOutput?.additionalContext : "",
+      };
+    };
+    const free = read("unlocked");
+    if (!free.context?.includes(key))
+      throw new Error(`the delivery hook did not deliver ${key}\n${free.context}`);
+    const holder = new DatabaseSync(file);
+    let held;
+    try {
+      holder.exec("begin immediate");
+      held = read("locked");
+    } finally {
+      if (holder.isTransaction) holder.exec("rollback");
+      holder.close();
+    }
+    if (!held.context?.includes(key) || held.ms >= 1000)
+      throw new Error(
+        `under a write lock the delivery hook took ${Math.round(held.ms)} ms (under 1000 expected) and gave\n${held.context}`,
+      );
+  } finally {
+    fs.rmSync(locked, { recursive: true, force: true });
+  }
   const filesIn = (dir) =>
     fs
       .readdirSync(dir, { withFileTypes: true, recursive: true })
@@ -161,7 +268,7 @@ try {
   if (fs.existsSync(path.join(pkg, "dist", "dashboard")))
     throw new Error("tarball still contains dist/dashboard");
   console.log(
-    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, bound the GitHub account, and backed up and migrated an older database the hook named the version for`,
+    `tarball: ${paths.size} files matching the shipped list. CLI ${version} started, created a database, bound the GitHub account, backed up and migrated an older database the hook named the version for, and delivered under a write lock`,
   );
 } finally {
   fs.rmSync(out, { recursive: true, force: true });

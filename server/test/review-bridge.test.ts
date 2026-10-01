@@ -357,3 +357,62 @@ test("a review that leaves decisions out says how many and where to find them", 
     await w.done();
   }
 });
+
+test("a review is never given a superseded or withdrawn record, while an active one on the same path is", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Keep one SQLite file. Cache in memory. Log in Japanese. Cache on disk.",
+    });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+        decided("memory", m, "Cache in memory.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+        decided("japanese", m, "Log in Japanese.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ],
+    });
+    await save(db, p, {
+      units: [decided("disk", m, "Cache on disk.", { supersedes: "trace:ext-s1/memory" })],
+    });
+    const id = (key: string) =>
+      db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id;
+    const run = db.owner.prepare("select max(id) as id from extraction_run").get()?.id;
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, 'active', 'withdrawn', ?, 'withdrawn', ?)",
+      )
+      .run(id("japanese") as number, new Date().toISOString(), run as number);
+    assert.deepEqual(
+      db.owner
+        .prepare("select key, lifecycle from unit where key in (?, ?) order by key")
+        .all("trace:ext-s1/japanese", "trace:ext-s1/memory")
+        .map((r) => [r.key, r.lifecycle]),
+      [
+        ["trace:ext-s1/japanese", "withdrawn"],
+        ["trace:ext-s1/memory", "superseded"],
+      ],
+    );
+    fs.writeFileSync(path.join(repo, "src", "db.ts"), "export const open = () => 7;\n");
+    const out = await deliver(
+      {
+        hook_event_name: "UserPromptExpansion",
+        expansion_type: "slash_command",
+        command_name: "review",
+        session_id: crypto.randomUUID(),
+        cwd: repo,
+      } as never,
+      "claude-code",
+      db.file,
+    );
+    assert.match(out, /trace:ext-s1\/sqlite /);
+    assert.doesNotMatch(out, /trace:ext-s1\/(memory|japanese)/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

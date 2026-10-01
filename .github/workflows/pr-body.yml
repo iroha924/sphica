@@ -1,5 +1,5 @@
 # Checks that the Verification section of the PR body mentions the Codex review (only that the word is there). The body is written by the author whose work
-# was reviewed, so this checks the record, not the review: release-gate reads the Codex summary itself before a release.
+# was reviewed, so this checks the record, not the review: the owner reads the Codex review before approving a release.
 # The body is untrusted, so it is passed through an environment variable and only read (never expanded into shell expressions).
 name: pr-body
 

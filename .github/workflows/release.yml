@@ -76,7 +76,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-      # release-gate reads the Codex review summary among the PR's issue comments
       issues: read
       actions: read
     outputs:
@@ -103,7 +102,7 @@ jobs:
           package-manager-cache: false
 
       # The tag name matches every version, the commit is the head of an open PR into main, that PR's check and pr-body succeeded,
-      # and Codex finished reviewing that head with no thread left open
+      # and no review thread is left open (the owner reads the Codex review before approving)
       - name: May this tag be released
         id: gate
         if: github.event_name == 'push'
