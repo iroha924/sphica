@@ -1,7 +1,6 @@
--- Revision 5 → 6 of generation 2: the subagent a delivery ran in, and a capture view that writes it.
--- `sphica init` runs this in one transaction with foreign keys off (set outside the transaction), then checks foreign_key_check before
--- committing. Every statement matches db/schema.sql at revision 6; server/test/migrate.test.ts compares a migrated database with a fresh one.
--- Existing rows keep agent_id null (the main conversation), and capture_delivery keeps its columns.
+-- Revision 5 → 6 of generation 2: the subagent a delivery ran in (existing rows keep null, the main conversation), and a capture view
+-- that writes it while capture_delivery keeps its columns. `sphica init` runs this in one transaction with foreign keys off, then checks
+-- foreign_key_check. Every statement matches db/schema.sql at revision 6; server/test/migrate.test.ts compares the two.
 
 alter table delivery add column agent_id text check (length(agent_id) between 1 and 200);
 

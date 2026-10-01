@@ -130,6 +130,15 @@ base: main
   - コミット: `fix(deliver): do not take a subagent start for the main conversation's on resume (T11)`
   - 結果: red 実測: 親の開始を resume にしたテストが、直す前のコードで "the owner still gets today's pending notice" で落ちた。resume の判定から reason が subagent の行を外した後 → 1 pass。`node --test test/deliver.test.ts` → 29 pass。typecheck → 通過
 
+- [x] T12: 移行と delivery の表のコメントを 3 行に縮める
+  - 種別: 変更
+  - 計画: S1
+  - 依存: T01（直すコメントが要る）
+  - 変更: `db/migrations/0006.sql`, `db/schema.sql`
+  - 完了条件: `cd server && node --test test/migrate.test.ts test/schema.test.ts` → pass
+  - コミット: `docs(schema): keep the revision 6 comments to three lines (T12)`
+  - 結果: 0006.sql の冒頭（4 行）と schema.sql の delivery の上（このブランチで 2 行から 4 行にしていた）を 3 行にした。`node --test test/migrate.test.ts test/schema.test.ts` → 63 pass。`bun run codegen:check` → 一致
+
 - [-] T07: release:plan を流し、0.6.17 に揃える
   - 種別: 変更
   - 計画: S6
@@ -147,3 +156,4 @@ base: main
 - 2026-10-02 / T08・T05 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart は isOwnerTurn が真になり得て、持ち主向けの案内を受け取りその日の 1 回を使う / 採用。T10 を足した
 - 2026-10-02 / T10 / Codex のタスクレビュー F1（P2）: agent_id の無い SubagentStart のログが親の resume の判定に当たり、持ち主の resume が飛ばされる / 採用。T11 を足した
 - 2026-10-02 / 全体 / Codex の全差分レビュー（main..1df24e60）: F1（P2、再現済み）は T11 で直した内容と同じ。ほかに指摘なし。review-shipping（1df24e60）: 指摘なし（tarball の中身、0.6.16 からの更新、0.6.16 の capture が revision 6 に書けること、両ホストの SubagentStart の入出力を確認）
+- 2026-10-02 / 全体 / GitHub の Codex レビュー（f4f8446）P1: db/migrations/0006.sql の冒頭のコメントが 4 行で、1〜3 行の規則に反する / 採用。T12 を足し、同じ規則に反していた schema.sql の delivery のコメントも直した。check-comments は参照だけを見て行数は見ない。行数の検査は既存の 3 行を超えるコメント（SQL 4、JS/TS 37）を直してからでないと足せないので、今回は足さない

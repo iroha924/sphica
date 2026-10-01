@@ -934,10 +934,9 @@ create table work (
 create index work_open on work (project_id, updated_at desc) where status in ('active', 'blocked', 'paused');
 create index work_run on work (run_id) where run_id is not null;
 
--- What a delivery hook emitted or suppressed, and how many eligible units it left out. No source text is copied here.
--- chars is the delivered length without the omission note (Sphica's own text), since the read budget adds it up.
--- A session_start's reason is the host's start source or 'subagent'; agent_id is the subagent (null: the main conversation).
--- agent_id is written the way SQLite stores a column ALTER TABLE added, so a migrated database has the same definition.
+-- What a delivery hook emitted or suppressed, and how many eligible units it left out (no source text). chars leaves out the omission note,
+-- since the read budget adds it up. A session_start's reason is the start source or 'subagent'; agent_id is the subagent (null: main),
+-- written the way SQLite stores a column ALTER TABLE added, so a migrated database has the same definition.
 create table delivery (
   id integer primary key autoincrement not null,
   session_id text references session (id) on delete cascade,
