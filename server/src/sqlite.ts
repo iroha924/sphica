@@ -49,12 +49,12 @@ export function requireFile(file: string): void {
  * PRAGMAs). `enableDefensive` stops direct writes to the FTS5 shadow tables. The owner has no reason to write them
  * either, so every connection enables it (node:sqlite enables it by default; this keeps it on if the default changes).
  */
-export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "none"): void {
+export function prepare(raw: DatabaseSync, check: "generation" | "revision" | "none", busyMs = 5000): void {
   raw.enableDefensive(true);
   raw.exec("pragma foreign_keys = on");
   // How long concurrent imports and recordings wait for each other. On timeout this fails with SQLITE_BUSY, and
   // recording retries on its next send.
-  raw.exec("pragma busy_timeout = 5000");
+  raw.exec(`pragma busy_timeout = ${Math.trunc(busyMs)}`);
   if (check === "none") return;
   checkGeneration(raw);
   if (check === "generation") return;

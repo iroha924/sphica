@@ -42,7 +42,7 @@ base: main
   - コミット: `fix(deliver): match a path named in a prompt on its boundaries, not as a substring (T02)`
   - 結果: red 実測: 直す前のコードで、肯定例 3 件（`src\lib/db.ts`、`.\src\lib/db.ts`、区切りの混ざった root の絶対表記）が外れ、否定例 6 件（`web/src/lib/db.ts`、`.tsx`、`.bak`、`._bak`、`.$bak`、`/elsewhere/src/lib/db.ts`）が当たった。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 25 / fail 0
 
-- [ ] T03: ログを短い待ち時間の 1 トランザクションで書き、ロック中は本文だけ返す
+- [x] T03: ログを短い待ち時間の 1 トランザクションで書き、ロック中は本文だけ返す
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -50,6 +50,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern="write lock" test/deliver.test.ts` → 別接続が `begin immediate` を握っている間、紐付けのある path の Read と Bash の名指しで deliver() が 1 秒以内に返らず落ちる
   - 完了条件: `cd server && node --test test/deliver.test.ts test/db.test.ts` → pass（ロック中は 1 秒以内に本文が返りログは 0 行、解放後の同じ Read で同じ記録がもう一度出る、後段の insert が失敗したら session 行も残らない）。saveText と capture のバッチのロック時間を一時 DB で測り、入力の件数・サイズと一緒に結果行に残す
   - コミット: `fix(deliver): answer before the log when the database is write-locked (T03)`
+  - 結果: red 実測: 直す前のコードで `read took 5231 ms` で落ちた。log を 1 トランザクションにしない形へ一時的に戻すと `no session row is left without its delivery` で落ちることも確かめた。直した後 `node --test test/deliver.test.ts test/deliver-codex.test.ts test/db.test.ts test/capture.test.ts` → pass 78 / fail 0
+  - 結果: ロック時間の実測（一時 DB、2 回とも同じ値）: capture の write() に 500 件・各 1800 バイトのメッセージで 44 ms、record の保存（openRun・checkRecord・saveRecord を 1 トランザクション）に証拠・採用・anchor 1 つ・別名 2 つを持つ決定 20 件で 24 ms。250 ms のままにした
 
 ## P2: 退役した記録の固定と配布物の検査
 

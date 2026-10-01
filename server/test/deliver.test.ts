@@ -1166,3 +1166,64 @@ test("a prompt names a path on its boundaries, with either separator, not as a s
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// The host kills a hook after 5 seconds, so a delivery must not wait on another connection's write lock to log itself. A delivery that
+// could not be logged is shown again on the next read
+test("a delivery answers within a second while another connection holds the write lock, and is shown again once it is released", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const call = (session: string, tool_name: string, tool_input: Record<string, unknown>) =>
+      deliver(
+        { hook_event_name: "PreToolUse", session_id: session, cwd: repo, tool_name, tool_input },
+        "claude-code",
+        db.file,
+      );
+    const read = (session: string) => call(session, "Read", { file_path: path.join(repo, "src/db.ts") });
+    const rows = () => db.owner.prepare("select count(*) as n from delivery").get()?.n;
+    const before = rows();
+    db.owner.exec("begin immediate");
+    try {
+      for (const [what, run] of [
+        ["read", () => read("locked")],
+        ["shell", () => call("shell", "Bash", { command: "cat src/db.ts" })],
+      ] as const) {
+        const started = performance.now();
+        const text = await run();
+        const took = performance.now() - started;
+        assert.match(text, /trace:ext-s1\/sqlite/, what);
+        assert.ok(took < 1000, `${what} took ${Math.round(took)} ms`);
+      }
+    } finally {
+      db.owner.exec("rollback");
+    }
+    assert.equal(rows(), before, "nothing was logged under the lock");
+    assert.match(
+      await read("locked"),
+      /trace:ext-s1\/sqlite/,
+      "a delivery that was not logged is shown again",
+    );
+    assert.equal(await read("locked"), "", "and once logged, not a third time");
+
+    // The session row and the delivery row are written together or not at all
+    const sessions = () => db.owner.prepare("select count(*) as n from session").get()?.n;
+    const had = sessions();
+    db.owner.exec(
+      "create trigger refuse_delivery before insert on delivery begin select raise(abort, 'refused'); end",
+    );
+    assert.match(await read("fresh"), /trace:ext-s1\/sqlite/, "a failed log still answers");
+    assert.equal(sessions(), had, "no session row is left without its delivery");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

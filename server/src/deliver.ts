@@ -10,7 +10,7 @@ import path from "node:path";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
-import { dbFile, iso, openReader, type Reads } from "./db.ts";
+import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
@@ -40,6 +40,11 @@ const LIMITS: Record<Event, { units: number; chars: number }> = {
   prompt: { units: 3, chars: 900 + ASK },
   review: { units: 5, chars: 1500 },
 };
+/**
+ * How long the log waits for another connection's write lock. The host kills the hook after 5 seconds, so a delivery that cannot be logged
+ * soon is answered unlogged (and may be shown again) rather than lost.
+ */
+const LOG_WAIT_MS = 250;
 /** Reads are far more frequent than edits, so what reads deliver over one session is capped too (the request on each is not counted). */
 const READ_SESSION = { units: 8, chars: 3000 };
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -603,30 +608,32 @@ async function log(
   outcome: string,
   branch: string | null,
 ): Promise<void> {
-  const cap = openWriter("capture", file);
+  const cap = openWriter("capture", file, LOG_WAIT_MS);
   try {
     const id = sessionId(projectId, host, external);
     const now = iso(Date.now());
-    await cap
-      .insertInto("capture_session")
-      .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
-      .execute();
-    await cap
-      .insertInto("capture_delivery")
-      .values({
-        session_id: id,
-        event,
-        outcome,
-        reason: plan.reason,
-        path: plan.path,
-        eligible: plan.eligible,
-        omitted: plan.omitted,
-        // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
-        chars: plan.text.length - plan.note.length,
-        at: now,
-        units: JSON.stringify(plan.units),
-      })
-      .execute();
+    await inTransaction(cap, async (trx) => {
+      await trx
+        .insertInto("capture_session")
+        .values({ id, project_id: projectId, host, external_id: external, branch, started_at: now })
+        .execute();
+      await trx
+        .insertInto("capture_delivery")
+        .values({
+          session_id: id,
+          event,
+          outcome,
+          reason: plan.reason,
+          path: plan.path,
+          eligible: plan.eligible,
+          omitted: plan.omitted,
+          // The omission note is Sphica's own text, so it is not counted (the read budget adds these up)
+          chars: plan.text.length - plan.note.length,
+          at: now,
+          units: JSON.stringify(plan.units),
+        })
+        .execute();
+    });
   } finally {
     await cap.destroy().catch(() => {});
   }

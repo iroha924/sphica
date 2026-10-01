@@ -296,14 +296,23 @@ function forgetAuthorizer(action: number, p1: string | null, p2: string | null):
  * **The tokenizer function is always registered.** A connection without it writing to knowledge / message would fail the FTS trigger
  * with no such function (the index is never silently incomplete; fail-closed).
  */
-export function connectWriter(role: WriteRole, file: string = dbFile(), create = false): DatabaseSync {
+export function connectWriter(
+  role: WriteRole,
+  file: string = dbFile(),
+  create = false,
+  busyMs?: number,
+): DatabaseSync {
   requireRuntime();
   if (!create) requireFile(file);
   const raw = new DatabaseSync(file);
   try {
     // Every role refuses another generation. Ingest and forget check the revision: owner handles revisions, and capture keeps writing
     // across a revision change within a generation (rejected rows go to rejected/).
-    prepare(raw, create ? "none" : role === "ingest" || role === "forget" ? "revision" : "generation");
+    prepare(
+      raw,
+      create ? "none" : role === "ingest" || role === "forget" ? "revision" : "generation",
+      busyMs,
+    );
     raw.function("sphica_terms", { deterministic: true }, (text) => terms(String(text ?? "")).join(" "));
   } catch (e) {
     raw.close();
@@ -336,7 +345,7 @@ export function connectWriter(role: WriteRole, file: string = dbFile(), create =
   return raw;
 }
 
-/** kysely around a writing connection. The connection opens on the first query (kyselyOn in db.ts). */
-export function openWriter(role: WriteRole, file: string = dbFile()): Kysely<DB> {
-  return kyselyOn(() => connectWriter(role, file));
+/** kysely around a writing connection. The connection opens on the first query (kyselyOn in db.ts). busyMs shortens the lock wait. */
+export function openWriter(role: WriteRole, file: string = dbFile(), busyMs?: number): Kysely<DB> {
+  return kyselyOn(() => connectWriter(role, file, false, busyMs));
 }
