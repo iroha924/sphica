@@ -15,7 +15,7 @@ import {
   repoOf,
   storeItems,
 } from "../src/github.ts";
-import { at, insert, project, tempDb } from "./temp-db.ts";
+import { at, insert, plan, project, statements, tempDb } from "./temp-db.ts";
 
 const sha = (c: string) => c.repeat(40);
 const user = (login: string, id: number, type = "User") => ({ login, id, type });
@@ -183,6 +183,38 @@ test("reads the body, comments, reviews with text, review comments with their po
   assert.equal(repoOf("local:x"), null);
 });
 
+test("a review comment on a path with a control character is kept without the path, which the database refuses", async () => {
+  const base = fake("Switch to pnpm.");
+  const get: Get = async (p, all) =>
+    p.startsWith("pulls/7/comments")
+      ? [
+          {
+            id: 77,
+            body: "a bell in the name",
+            user: user("dev", 2),
+            created_at: "2026-03-17T12:30:00Z",
+            html_url: "u",
+            path: "src/a\u0007b.ts",
+            line: 3,
+            commit_id: sha("a"),
+          },
+        ]
+      : base(p, all);
+  const bell = (await readPull(get, 7)).items.find((i) => i.externalId === "review_comment:77");
+  assert.ok(bell, "the comment is kept");
+  assert.deepEqual([bell.path, bell.lines], [null, null]);
+  const db = tempDb();
+  try {
+    await storeItems(db.ingest, project(db), [bell]);
+    assert.equal(
+      db.owner.prepare("select path from source where external_id = 'review_comment:77'").get()?.path,
+      null,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("stores sources with who wrote them, adds a revision only when text changed, and lists the current revisions with closed issues", async () => {
   const db = tempDb();
   try {
@@ -194,7 +226,15 @@ test("stores sources with who wrote them, adds a revision only when text changed
       bound_at: at("2026-01-01T00:00:00Z"),
     });
     const first = await readPull(fake("Fixes #14. Switch to pnpm."), 7);
-    const ids = await storeItems(db.ingest, p, first.items);
+    let ids: (number | null)[] = [];
+    const asked = await statements(async () => {
+      ids = await storeItems(db.ingest, p, first.items);
+    });
+    // Each item is looked up by its id through the unique index of items, not by scanning the project's sources: once for its latest
+    // revision, and once for the id of a revision just written
+    const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
+    assert.equal(lookups.length, 2 * first.items.length);
+    for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
     await linkIssues(db.ingest, p, 7, first.closes);
     await linkIssues(db.ingest, p, 7, first.closes);
     const kinds = db.owner

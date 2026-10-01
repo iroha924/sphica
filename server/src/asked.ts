@@ -1,7 +1,7 @@
 // Earlier owner messages like the current question, on request: what records cite each one, whether a decision was recorded, and
 // the same matter asked across sessions with none. Only direct quotes tie a record to a message; the rest of its turn is context.
-import type { Kysely } from "kysely";
-import type { DB } from "./db-types.ts";
+
+import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import { liveSuccessors, type SourceHit, type Successor, searchSources } from "./search.ts";
@@ -41,7 +41,7 @@ export type Asked = {
 };
 
 export async function askedBefore(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   q: {
     question: string;
@@ -121,7 +121,7 @@ export async function askedBefore(
 type Cited = { source_id: number; id: number; key: string; kind: string; lifecycle: string };
 
 /** Supported records whose standing evidence or adoption quotes one of the sources. */
-async function citing(db: Kysely<DB>, sources: number[]): Promise<(Cited & { role: string })[]> {
+async function citing(db: Reads, sources: number[]): Promise<(Cited & { role: string })[]> {
   const [evidence, adoption] = await Promise.all([
     db
       .selectFrom("unit_evidence as e")
@@ -149,7 +149,7 @@ const unique = <T extends { id: number }>(xs: T[]): T[] => [...new Map(xs.map((x
 
 /** Records quoting other words of the same turn, and the assistant's reply there. Context only: they need not answer the message. */
 async function sameTurn(
-  db: Kysely<DB>,
+  db: Reads,
   e: Earlier,
   kept: (u: { kind: string; lifecycle: string }) => boolean,
 ): Promise<void> {

@@ -2,7 +2,8 @@
 // owner can commit. Every string that came from outside sits inside a fenced code block, so a quote cannot add links, HTML, or headings.
 import fs from "node:fs";
 import path from "node:path";
-import type { Kysely, Selectable } from "kysely";
+import type { Selectable } from "kysely";
+import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
 import { cut, speaker } from "./read.ts";
@@ -13,7 +14,7 @@ export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as con
 type Unit = Selectable<DB["unit"]>;
 
 /** A chosen record by key or `u<id>`, or why it cannot be exported. */
-async function chosen(db: Kysely<DB>, projectId: number, ref: string): Promise<Unit | string> {
+async function chosen(db: Reads, projectId: number, ref: string): Promise<Unit | string> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
   const u = await db
     .selectFrom("unit")
@@ -28,7 +29,7 @@ async function chosen(db: Kysely<DB>, projectId: number, ref: string): Promise<U
 }
 
 /** The record's own lines: what it says, its options, and the quotes that still stand behind it. */
-async function lines(db: Kysely<DB>, u: Unit): Promise<string[]> {
+async function lines(db: Reads, u: Unit): Promise<string[]> {
   const [options, evidence, adoption] = await Promise.all([
     db
       .selectFrom("unit_option")
@@ -134,7 +135,7 @@ function fenced(body: string[]): string {
  * The records a decision replaced, newest first, walked back through `supersedes`, each once. The walk stops at EXPORT_LIMITS.depth;
  * a record there that still replaced another makes the chain incomplete, so that is an error, not a shorter chain.
  */
-async function replaced(db: Kysely<DB>, from: Unit): Promise<{ newer: string; unit: Unit }[] | string> {
+async function replaced(db: Reads, from: Unit): Promise<{ newer: string; unit: Unit }[] | string> {
   const seen = new Set([from.id]);
   const out: { newer: string; unit: Unit }[] = [];
   let frontier = [from];
@@ -170,7 +171,7 @@ async function replaced(db: Kysely<DB>, from: Unit): Promise<{ newer: string; un
 
 /** The Markdown document for the chosen decisions, or every reason it could not be written. Nothing partial is returned. */
 export async function exportDecisions(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   projectName: string,
   refs: string[],

@@ -89,6 +89,8 @@ test("relative paths are from the root, and paths outside it are null", () => {
   assert.equal(relativeTo("/w/repo", "/w/repo/server/src/db.ts"), "server/src/db.ts");
   assert.equal(relativeTo("/w/repo", "src/db.ts", "/w/repo/server"), "server/src/db.ts");
   assert.equal(relativeTo("/w/repo", "/w/other/x.ts"), null);
+  // The database refuses a path with a control character, so an edit of such a file is not recorded
+  assert.equal(relativeTo("/w/repo", "/w/repo/src/a\u0007b.ts"), null);
   assert.equal(relativeTo("/w/repo", "../x.ts"), null);
   assert.equal(relativeTo("/w/repo", "/w/repo"), null);
   // A name starting with `..` is inside the root.

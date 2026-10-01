@@ -50,6 +50,7 @@ const PAIRS = [
     "OPTION_OUTCOMES",
   ],
   ["session.host", /host text not null check \(host in \(([^)]*)\)\)/, "HOSTS"],
+  ["extraction_run.origin", /origin text not null check \(origin in \(([^)]*)\)\)/, "RUN_ORIGINS"],
   ["unit_evidence.role", /role text not null check \(role in \(('states'[^)]*)\)\)/, "EVIDENCE_ROLES"],
   ["work.status", /status text not null check \(status in \(('active', 'blocked'[^)]*)\)\)/, "WORK_STATUSES"],
   ["source.kind", /kind text not null check \(kind in \(('session_message'[^)]*)\)\)/, "SOURCE_KINDS"],
@@ -71,6 +72,28 @@ for (const [column, re, constant] of PAIRS) {
     fail.push(
       `${column} does not match: the database has ${db.join(" / ")}, and ${constant} in knowledge.ts has ${code.join(" / ")}`,
     );
+}
+
+// ---- One path rule for sources, edit observations, and anchors ----
+//
+// Anchors meet edit observations by exact path, so one place must have one spelling in all three. The CHECKs are copies of one
+// expression; a copy changed alone would let a path into one table that another refuses.
+{
+  const schema = read("db/schema.sql");
+  const rules = [
+    ["source", /path text check \(path is null or \(([\s\S]*?)\)\),\n {2}line_start/],
+    [
+      "edit_observation",
+      /create table edit_observation[\s\S]*?path text not null check \(([\s\S]*?)\),\n {2}via/,
+    ],
+    ["unit_anchor", /create table unit_anchor[\s\S]*?path text not null check \(([\s\S]*?)\),\n {2}symbol/],
+  ].map(([table, re]) => [table, schema.match(re)?.[1]?.replace(/\s+/g, " ").trim()]);
+  for (const [table, rule] of rules)
+    if (!rule) fail.push(`cannot find the path CHECK of ${table} in db/schema.sql`);
+  const [, first] = rules[0];
+  for (const [table, rule] of rules.slice(1))
+    if (first && rule && rule !== first)
+      fail.push(`the path CHECK of ${table} differs from source's; keep the three the same expression`);
 }
 
 // ---- Status glyphs match between the CLI and the review ledger ----

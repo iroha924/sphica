@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import type { SOURCE_KINDS } from "./knowledge.ts";
 import { sha256 } from "./text.ts";
@@ -213,6 +213,7 @@ const cleanPath = (p: string | undefined): string | null =>
   p &&
   !p.startsWith("/") &&
   !p.includes("\\") &&
+  !/\p{Cc}/u.test(p) &&
   !p.split("/").some((x) => x === "" || x === "." || x === "..")
     ? p
     : null;
@@ -294,7 +295,8 @@ export async function readPull(
           createdAt: c.created_at,
           text: c.body,
           path: cleanPath(c.path),
-          lines: end && start ? [start, end] : null,
+          // Lines mean nothing without the path they are in
+          lines: cleanPath(c.path) && end && start ? [start, end] : null,
           hunk: c.diff_hunk ?? null,
           commit: sha(c.commit_id),
         }),
@@ -412,6 +414,8 @@ export async function storeItems(
       .where("project_id", "=", projectId)
       .where("kind", "=", it.kind)
       .where("external_id", "=", it.externalId)
+      // Items have no session: saying so lets the lookup use the unique index of items
+      .where("session_id", "is", null)
       .orderBy("revision", "desc")
       .executeTakeFirst();
     // What the owner forgot of this item: the same words are never stored again, and a revision older than a forgotten one is not current
@@ -435,21 +439,23 @@ export async function storeItems(
     const bound = authorId !== null && owners.has(authorId) && SPOKEN.has(it.kind);
     const kind = bound ? "owner" : it.author?.type === "Bot" ? "bot" : "person";
     const created = iso(it.createdAt);
-    const row = await db
-      .insertInto("source")
+    const revision = Math.max(latest?.revision ?? 0, lastForgotten) + 1;
+    await db
+      .insertInto("ingest_source")
       .values({
         project_id: projectId,
         kind: it.kind,
         artifact: it.artifact,
         external_id: it.externalId,
-        revision: Math.max(latest?.revision ?? 0, lastForgotten) + 1,
+        revision,
         author_kind: kind,
         author_login: it.author?.login ?? null,
         author_external_id: authorId,
         author_association: it.association,
         parent_external_id: it.parent,
         event_kind: it.event,
-        url: it.url,
+        // Only a web address is kept: a reader may show it as a link
+        url: it.url && /^https?:\/\//.test(it.url) ? it.url : null,
         created_at: created,
         // Only the first revision's time is known to be when it became visible; an edit's time is not in the REST response
         available_at: latest || lastForgotten ? null : created,
@@ -467,11 +473,30 @@ export async function storeItems(
         commit_sha: it.commit,
         indexed: it.kind === "pr_event" ? 0 : 1,
       })
-      .returning("id")
-      .executeTakeFirstOrThrow();
-    ids.push(row.id);
+      .execute();
+    ids.push(await itemId(db, projectId, it.kind, it.externalId, revision));
   }
   return ids;
+}
+
+/** The id of the item revision just written through ingest_source, which returns none. The item key is unique among items. */
+export async function itemId(
+  db: Reads,
+  projectId: number,
+  kind: string,
+  externalId: string,
+  revision: number,
+): Promise<number> {
+  const row = await db
+    .selectFrom("source")
+    .select("id")
+    .where("project_id", "=", projectId)
+    .where("kind", "=", kind)
+    .where("external_id", "=", externalId)
+    .where("revision", "=", revision)
+    .where("session_id", "is", null)
+    .executeTakeFirstOrThrow();
+  return row.id;
 }
 
 /** Records that a pull request closes issues, by artifact. */
@@ -508,7 +533,7 @@ export async function linkIssues(
 }
 
 /** The current revision of every source of a pull request and the issues it closes, in time order, with whether a run looked at each. */
-export async function pullSources(db: Kysely<DB>, projectId: number, number: number) {
+export async function pullSources(db: Reads, projectId: number, number: number) {
   const artifacts = [
     `pr:${number}`,
     ...(

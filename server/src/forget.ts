@@ -18,8 +18,6 @@ export type ForgetOutcome = {
   already: number[];
   /** Units whose evidence, adoption, or retraction reasons are removed, and their lifecycle before and after */
   units: { key: string; before: string; after: string; removed: number }[];
-  /** Unfetched references the owner gave in a forgotten message */
-  references: number;
   /** Field definitions quoting a forgotten source, and field values removed with them or quoting one themselves */
   fields: { definitions: number; values: number };
 };
@@ -39,8 +37,8 @@ class Preview extends Error {
 const unknown = (id: number) => new Error(`s${id} is not a source of this project`);
 
 /**
- * Removes the sources inside the caller's transaction and returns what happened. Order matters: the tombstones exist before the
- * deletes (the no-delete triggers let a retracted row go only once its reason is tombstoned), and units are judged after the cascade.
+ * Removes the sources inside the caller's transaction and returns what happened. Order matters: what the deletes take is counted before
+ * them, and units are judged after the cascade (which also takes each retracted row whose reason cited a removed source).
  */
 async function forgetIn(
   trx: Kysely<DB>,
@@ -80,7 +78,6 @@ async function forgetIn(
     sources: rows.map((r) => ({ id: r.id, kind: r.kind, artifact: r.artifact, bytes: r.bytes })),
     already,
     units: [],
-    references: 0,
     fields: { definitions: 0, values: 0 },
   };
   if (!rows.length) return outcome;
@@ -174,17 +171,6 @@ async function forgetIn(
       })),
     )
     .execute();
-  for (const t of ["unit_evidence", "unit_adoption"] as const)
-    await trx
-      .deleteFrom(t)
-      .where("retraction_source_id", "in", targets)
-      .where("retracted_at", "is not", null)
-      .where("source_id", "not in", targets)
-      .execute();
-  outcome.references = Number(
-    (await trx.deleteFrom("external_reference").where("owner_source_id", "in", targets).executeTakeFirst())
-      .numDeletedRows,
-  );
   await trx.deleteFrom("source").where("id", "in", targets).execute();
 
   // Judge active units again with the rules saving uses: back to candidate, then try active. Other lifecycles keep their state
@@ -301,8 +287,6 @@ export function forgetText(o: ForgetOutcome, file: string): string {
     const change = u.before === u.after ? `stays ${u.after}` : `${u.before} → ${u.after}`;
     lines.push(`- record ${inline(u.key).slice(0, 120)}: ${change}, loses ${plural(u.removed, "citation")}`);
   }
-  if (o.references)
-    lines.push(`- ${plural(o.references, "unfetched reference")} the forgotten messages gave`);
   if (o.fields.definitions || o.fields.values)
     lines.push(
       `- ${plural(o.fields.definitions, "field definition")} and ${plural(o.fields.values, "field value")} go with them`,

@@ -2,7 +2,7 @@
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import {
   EVIDENCE_ROLES,
@@ -219,7 +219,7 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
 }
 
 export async function checkRecord(
-  db: Kysely<DB>,
+  db: Reads,
   target: Target,
   raw: unknown,
   facts: RepoFacts = prepareRecord(target.root, raw),
@@ -354,12 +354,33 @@ export async function checkRecord(
     (linked.length
       ? await db
           .selectFrom("unit")
-          .select(["id", "key", "lifecycle"])
+          .select(["id", "key", "kind", "lifecycle"])
           .where("project_id", "=", target.projectId)
           .where("key", "in", linked)
           .execute()
       : []
     ).map((u) => [u.key, u]),
+  );
+  // A record has at most one successor that is not withdrawn: the one already there holds the place
+  const holders = new Map(
+    (others.size
+      ? await db
+          .selectFrom("unit_link as l")
+          .innerJoin("unit as n", "n.id", "l.from_unit")
+          .select(["l.to_unit", "n.key", "n.lifecycle"])
+          .where("l.kind", "=", "supersedes")
+          .where(
+            "l.to_unit",
+            "in",
+            [...others.values()].map((o) => o.id),
+          )
+          .where("n.lifecycle", "<>", "withdrawn")
+          // Quarantined or unsourced, a successor can never become active, so it holds no place
+          .where("n.extraction", "=", "supported")
+          .where("n.unsourced", "=", 0)
+          .execute()
+      : []
+    ).map((h) => [h.to_unit, h]),
   );
 
   // Logins that speak as a maintainer somewhere in this project: their commits and events carry no association of their own
@@ -547,6 +568,25 @@ export async function checkRecord(
       problems.push(`${key}: another path-only anchor on ${x.path} already covers it; left out`);
       anchors.splice(anchors.indexOf(x), 1);
     }
+    // The schema keeps one live anchor per place: a symbol, or lines when there is no symbol
+    const places = new Set<string>();
+    for (const x of [...anchors]) {
+      const at = [
+        x.path,
+        x.role,
+        x.commit ?? "",
+        x.symbol ?? "",
+        x.symbol ? "" : x.lines ? place(x) : "",
+      ].join("\0");
+      if (!places.has(at)) {
+        places.add(at);
+        continue;
+      }
+      problems.push(
+        `${key}: the anchor on ${x.path}${x.symbol ? ` ${x.symbol}` : ""} appears twice; left out`,
+      );
+      anchors.splice(anchors.indexOf(x), 1);
+    }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
     const bad = aliases.filter((a) => !a || a.length > 40);
@@ -561,10 +601,20 @@ export async function checkRecord(
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
-      else if (claimed.has(old.id))
+      // A quarantined successor never becomes active, so it takes no place from another in the same save
+      else if (claimed.has(old.id) && !quarantine.length)
         errors.push(`${key}: another record in this save already supersedes ${u.supersedes}`);
-      else supersedes = old.id;
-      if (supersedes !== null) claimed.add(supersedes);
+      else if (!replaceable(u.kind, old.kind))
+        errors.push(
+          `${key}: a ${u.kind} cannot supersede ${u.supersedes}, a ${old.kind} (a record supersedes one of its own kind; a decision and a constraint can replace each other)`,
+        );
+      else if (holders.has(old.id) && !quarantine.length) {
+        const h = holders.get(old.id);
+        errors.push(
+          `${key}: ${u.supersedes} already has a successor, ${h?.key} (${h?.lifecycle}); withdraw it first, or supersede it instead`,
+        );
+      } else supersedes = old.id;
+      if (supersedes !== null && !quarantine.length) claimed.add(supersedes);
     }
     const conflicts = u.conflicts.flatMap((k) => {
       const other = others.get(k);
@@ -698,6 +748,11 @@ const contentHash = (u: UnitInput): Buffer =>
       ),
     ]),
   );
+
+/** Which kinds can replace which: the same kind, or a decision and a constraint either way. The schema checks the same pairs. */
+const replaceable = (successor: string, old: string): boolean =>
+  successor === old ||
+  (["decision", "constraint"].includes(successor) && ["decision", "constraint"].includes(old));
 
 /** Messages the schema's activation rules raise; anything else is a real failure. */
 export const ACTIVATION = /needs|cannot become active/;
@@ -990,10 +1045,20 @@ export async function saveRecord(
       .values({ source_id: s, run_id: runId, outcome: cited.has(s) ? "units" : "no_unit" })
       .onConflict((oc) => oc.doNothing())
       .execute();
+  return saved;
+}
+
+/**
+ * Marks the run saved. Called once, after every write of the save: a saved run changes no more.
+ * The clock can step back after begin, so the run finishes no earlier than it started.
+ */
+export async function finishRun(trx: Kysely<DB>, runId: number): Promise<void> {
   await trx
     .updateTable("extraction_run")
-    .set({ status: "saved", finished_at: now })
+    .set((eb) => ({
+      status: "saved",
+      finished_at: eb.fn<string>("max", [eb.val(iso(Date.now())), eb.ref("started_at")]),
+    }))
     .where("id", "=", runId)
     .execute();
-  return saved;
 }

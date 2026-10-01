@@ -9,9 +9,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Kysely } from "kysely";
 import { leaves } from "./anchors.ts";
-import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 import { sphicaHome } from "./sqlite.ts";
 
 export type Place = { key: string; root: string; name: string };
@@ -160,7 +159,7 @@ export function nameLocal(dir: string, name: string): Place {
 }
 
 /** The project id, or null (only `sphica init` creates one). */
-export async function projectId(db: Kysely<DB>, key: string): Promise<number | null> {
+export async function projectId(db: Reads, key: string): Promise<number | null> {
   const r = await db.selectFrom("project").select("id").where("key", "=", key).executeTakeFirst();
   return r?.id ?? null;
 }
@@ -203,7 +202,8 @@ export function localRoots(roots = [path.join(os.homedir(), "Projects")]): {
 export function relativeTo(root: string, file: string, cwd = root): string | null {
   const abs = path.resolve(cwd, file);
   const rel = path.relative(root, abs);
-  if (!rel || leaves(rel)) return null;
+  // The database refuses a path with a control character (no filesystem call takes a NUL either)
+  if (!rel || leaves(rel) || /\p{Cc}/u.test(rel)) return null;
   return rel.split(path.sep).join("/");
 }
 

@@ -169,6 +169,20 @@ async function doctor(cwd: string): Promise<void> {
             ? owners.map((o) => `${inline(o.login ?? "?")} (id ${inline(o.external_id)})`).join(" / ")
             : "none. Bind it with sphica init while gh is signed in",
         );
+        // Two keys holding the same words are allowed (a rewrite is saved as a successor); several live ones are usually a record saved twice
+        const twice = await db
+          .selectFrom("unit")
+          .select("project_id")
+          .where("lifecycle", "in", ["active", "candidate"])
+          .groupBy(["project_id", "content_hash"])
+          .having((eb) => eb.fn.countAll(), ">", 1)
+          .execute();
+        if (twice.length)
+          say(
+            "warn",
+            "Records",
+            `${plural(twice.length, "set")} of live records hold the same words. Read them with Sphica's read and withdraw the extra ones with /sphica:glean`,
+          );
         const { found } = localRoots();
         const rows = await db
           .selectFrom("project as p")
@@ -185,6 +199,8 @@ async function doctor(cwd: string): Promise<void> {
               .select((r) => r.fn.max("r.finished_at").as("at"))
               .whereRef("r.project_id", "=", "p.id")
               .where("r.status", "=", "saved")
+              // A migration's own run is not an extraction
+              .where("r.origin", "<>", "migration")
               .as("extracted"),
           ])
           .orderBy("p.name")

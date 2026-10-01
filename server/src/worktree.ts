@@ -23,8 +23,11 @@ const git = (root: string, args: string[]): string | null => {
   }
 };
 
-/** Paths git prints relative to the root. Ones the edit table would refuse (a backslash in a POSIX name) are skipped here. */
-const usable = (p: string): boolean => p !== "" && !p.includes("\\");
+/**
+ * Paths git prints relative to the root. Ones the edit table would refuse (a backslash in a POSIX name, a control character) are
+ * skipped here, so one odd file name cannot get its turn's record rejected.
+ */
+const usable = (p: string): boolean => p !== "" && !p.includes("\\") && !/\p{Cc}/u.test(p);
 
 /**
  * Reads `git status --porcelain=v2 -z`. The signature is the entry without its path plus the file's size and mtime, so a second edit

@@ -7,10 +7,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Kysely } from "kysely";
+import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
-import { dbFile, iso, openReader } from "./db.ts";
+import { dbFile, iso, openReader, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
@@ -66,7 +66,7 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
 };
 
 /** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
-const deliverable = (db: Kysely<DB>, projectId: number) =>
+const deliverable = (db: Reads, projectId: number) =>
   db
     .selectFrom("unit as u")
     .where("u.project_id", "=", projectId)
@@ -100,7 +100,7 @@ const clip = (text: string, n: number) => {
  * For file-bound deliveries: each record's reason and the options it rejected, so it can be weighed without opening it. Records without them
  * get nothing added. They are record text like the rest, shown after the key.
  */
-async function reasons(db: Kysely<DB>, ids: number[]): Promise<Map<number, string>> {
+async function reasons(db: Reads, ids: number[]): Promise<Map<number, string>> {
   if (!ids.length) return new Map();
   const [whys, options] = await Promise.all([
     db.selectFrom("unit").select(["id", "why"]).where("id", "in", ids).execute(),
@@ -132,7 +132,7 @@ async function reasons(db: Kysely<DB>, ids: number[]): Promise<Map<number, strin
  * renders its records with this too, so gold gives exactly what a delivery gives.
  */
 export async function recordLines(
-  db: Kysely<DB>,
+  db: Reads,
   units: { id: number; key: string; kind: string; stance: string | null; text: string }[],
 ): Promise<string[]> {
   const why = await reasons(
@@ -187,7 +187,7 @@ type Plan = {
   once?: string;
 };
 
-const anchoredTo = (db: Kysely<DB>, projectId: number, rels: string[]) =>
+const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
   deliverable(db, projectId)
     .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
     .where("a.path", "in", rels)
@@ -204,7 +204,7 @@ const named = (rels: string[]) =>
     : `${rels.slice(0, 3).map(inline).join(", ")} and ${rels.length - 3} more`;
 
 /** Before an edit: the records anchored to any of the edited paths (a Codex patch can touch several), chosen together within one limit. */
-async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Promise<Plan> {
+async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise<Plan> {
   const rows = await anchoredTo(db, projectId, rels).execute();
   const shown = rows.slice(0, LIMITS.pre_edit.units);
   const why = await reasons(
@@ -233,7 +233,7 @@ async function beforeEdit(db: Kysely<DB>, projectId: number, rels: string[]): Pr
  * left for the session. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent reads can repeat one).
  */
 async function beforeRead(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   rels: string[],
   session: string,
@@ -310,7 +310,7 @@ function shellPatch(input: HookInput): string | null {
  * with or without `./`, absolute, and with either separator (PowerShell on Windows).
  */
 async function namedInCommand(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   root: string,
   cwd: string,
@@ -347,7 +347,7 @@ async function namedInCommand(
 }
 
 /** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
-async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Promise<Plan> {
+async function onPrompt(db: Reads, projectId: number, prompt: string): Promise<Plan> {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
   const word = (w: string, s: string) =>
@@ -416,7 +416,7 @@ async function onPrompt(db: Kysely<DB>, projectId: number, prompt: string): Prom
  * would use up the notice), at most once a local day per database and project (a mark that cannot be written shows it again).
  */
 async function waiting(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   place: { file: string; key: string; host: Host; owner: boolean },
 ): Promise<string> {
@@ -431,7 +431,7 @@ async function waiting(
 }
 
 async function atStart(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   branch: string | null,
   place: { file: string; key: string; host: Host; owner: boolean },
@@ -497,7 +497,7 @@ async function atStart(
 
 /** Before the user's own review command: the recorded decisions the local change touches, or why it could not be checked. */
 async function beforeReview(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   root: string,
   call: { name: string; args: string },
@@ -671,7 +671,7 @@ export async function deliver(
     .filter((r) => r && !leaves(r))
     .map((r) => r.split(path.sep).join("/"));
   if (onPath && !shell && !rels.length) return "";
-  let db: Kysely<DB> | null = null;
+  let db: ReadonlyKysely<DB> | null = null;
   try {
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);

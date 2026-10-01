@@ -11,7 +11,7 @@ import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../s
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { readUnit } from "../src/read.ts";
-import { checkRecord, repoPath, saveRecord, type Target, valueInQuote } from "../src/record.ts";
+import { checkRecord, finishRun, repoPath, saveRecord, type Target, valueInQuote } from "../src/record.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -66,6 +66,70 @@ async function save(db: TempDb, t: Target, record: unknown, looked: number[] = [
 
 const state = (db: TempDb, key: string) =>
   db.owner.prepare("select lifecycle, extraction, extraction_reason from unit where key = ?").get(key);
+
+// The clock can step back between begin and save, and a run never finishes before it started
+test("a run whose start is later than the clock finishes at its start", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const later = "2999-01-01T00:00:00.000Z";
+    const runId = insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "x",
+      status: "running",
+      started_at: later,
+    });
+    await finishRun(db.ingest, runId);
+    assert.deepEqual(
+      { ...db.owner.prepare("select status, finished_at from extraction_run where id = ?").get(runId) },
+      { status: "saved", finished_at: later },
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("an anchor given twice in a record is kept once, since a record holds one live anchor per place", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    const { checked } = await save(
+      db,
+      target(p),
+      {
+        units: [
+          {
+            key: "twice",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [
+              { path: "a.ts", role: "applies_to" },
+              { path: "a.ts", role: "applies_to" },
+              { path: "a.ts", role: "evidence" },
+            ],
+          },
+        ],
+      },
+      [m],
+    );
+    assert.ok(
+      checked.problems.some((x) => /the anchor on a\.ts appears twice; left out/.test(x)),
+      checked.problems.join(" | "),
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select role from unit_anchor order by id")
+        .all()
+        .map((r) => r.role),
+      ["applies_to", "evidence"],
+    );
+  } finally {
+    await db.done();
+  }
+});
 
 test("an anchor's excerpt is masked before it is cut, and a symbol masking swallows is not kept", async () => {
   const db = tempDb();
@@ -385,7 +449,8 @@ test("an owner's directive becomes an active decision whose spans cut the quoted
         [other, "no_unit"],
       ],
     );
-    assert.equal(db.owner.prepare("select status from extraction_run").get()?.status, "saved");
+    // The caller marks the run saved, once every write of the save is done
+    assert.equal(db.owner.prepare("select status from extraction_run").get()?.status, "running");
   } finally {
     await db.done();
   }
@@ -441,7 +506,7 @@ test("a rejected option keeps the reconsider condition the owner stated, quoted 
       .prepare(
         "update unit_evidence set retracted_at = ?, retraction_reason = 'misread', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where role = 'reconsiders'",
       )
-      .run(now, m);
+      .run(new Date().toISOString(), m);
     assert.match(
       await shown(),
       /Reconsider when: レプリカが要るようになったら \[unsupported: its owner quote was retracted or forgotten/,

@@ -433,6 +433,15 @@ test("a self-referential symlink in the tree does not stop the snapshot", () => 
   assert.deepEqual(Object.keys(snap?.entries ?? {}).sort(), ["a.txt", "loop"]);
 });
 
+// The database refuses a path with a control character: such a file is left out, so it cannot make its turn's record rejected
+test("a file whose name holds a control character is left out of the snapshot", () => {
+  const repo = fs.mkdtempSync(path.join(home, "bell-"));
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  fs.writeFileSync(path.join(repo, "a.txt"), "a");
+  fs.writeFileSync(path.join(repo, "b\u0007c.txt"), "b");
+  assert.deepEqual(Object.keys(snapshot(repo)?.entries ?? {}), ["a.txt"]);
+});
+
 test("a turn records the paths git status shows changing, including edits made outside the edit tools and files committed in the turn", () => {
   const repo = path.join(home, "status-repo");
   const git = (...args: string[]) =>

@@ -3,21 +3,13 @@
 -- A database of another generation is refused without being changed.
 --
 -- Four boundaries:
---   captured sources   session, source, artifact_link, edit_observation: what was said or written, never rewritten
+--   captured sources   session, source, artifact_link, edit_observation, external_reference: what was said or written, never rewritten
 --                      (the owner can forget chosen sources: forget_batch and source_forgotten keep what was removed, without its text)
 --   extracted units    unit and its option, evidence, adoption, link, state, anchor, alias tables: what was decided or implemented
 --   processing         extraction_run, source_processing: what has been looked at and saved, so gaps are counted
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
--- Paths (a source's, an edit observation's, an anchor's) are repository-relative with forward slashes, in one form, so one place
--- has one spelling: the three CHECKs are the same expression (scripts/check-pairs.mjs compares them).
 -- Byte offsets are into the UTF-8 bytes of source.text. Project consistency across tables is enforced by triggers, not only by code.
--- What a delete takes with it: a row goes with what it belongs to, and a row citing a source goes with that source (cascade; the
--- no-delete triggers refuse removing such a row on its own). A column naming where a row came from (run_id, forget_id,
--- edit_observation_id) takes no action: its target goes only with the whole project, removed in the same statement. A session that
--- records cite is not deleted by hand: forget its messages instead, which judges the records again.
--- Every foreign key is led by an index on its own columns (a partial one where the column can be null), so removing or moving a parent
--- row looks its children up instead of scanning them.
 
 create table sphica_generation (generation integer not null check (generation = 2)) strict;
 insert into sphica_generation values (2);
@@ -73,12 +65,11 @@ create table source (
   author_login text,
   author_external_id text,
   author_association text,
-  -- The comment or thread this replies to
+  -- The comment or thread this replies to, or the thread a resolution event closed
   parent_external_id text,
-  -- For pr_event: merged (the one event harvest records)
-  event_kind text check (event_kind in ('merged')),
-  -- Where it lives on the web; any other scheme (javascript:, file:) is never kept, since readers may show it as a link
-  url text check (url glob 'https://*' or url glob 'http://*'),
+  -- For pr_event: merged | closed | reopened | thread_resolved
+  event_kind text check (event_kind in ('merged', 'closed', 'reopened', 'thread_resolved')),
+  url text,
   created_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', created_at) is created_at),
   available_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', available_at) is available_at),
   captured_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', captured_at) is captured_at),
@@ -88,11 +79,11 @@ create table source (
   original_bytes integer not null check (original_bytes >= 0),
   content_hash blob not null check (length(content_hash) = 32),
   -- Code position of a review comment or a file excerpt: a normalized repository-relative path with forward slashes
-  path text check (path is null or (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
-    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')),
+  path text check (path is null or (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
+    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*' and path not glob '*//*'
+    and path not glob './*' and path not glob '*[/].[/]*')),
   line_start integer check (line_start > 0),
-  line_end integer check (line_end is null or (line_start is not null and line_end >= line_start)),
+  line_end integer check (line_end >= line_start),
   diff_hunk text,
   commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
   blob_sha text check (blob_sha is null or (length(blob_sha) = 40 and blob_sha not glob '*[^0-9a-f]*')),
@@ -102,7 +93,6 @@ create table source (
   check ((kind = 'pr_event') = (event_kind is not null)),
   check (kind <> 'session_message' or author_kind in ('owner', 'assistant')),
   check (kind = 'session_message' or author_kind <> 'assistant'),
-  check (author_kind <> 'assistant' or indexed = 0),
   check (kind <> 'file_excerpt' or (path is not null and commit_sha is not null and blob_sha is not null
     and line_start is not null and line_end is not null)),
   check (truncated = 1 or redacted = 1 or original_bytes = length(cast(text as blob)))
@@ -118,17 +108,6 @@ create trigger source_owner_bound before insert on source
 when new.kind <> 'session_message' and new.author_kind = 'owner'
   and not exists (select 1 from owner_identity where provider = 'github' and external_id = new.author_external_id) begin
   select raise(abort, 'owner authorship needs a bound owner identity');
-end;
-create trigger session_cited before delete on session
-when exists (select 1 from project where id = old.project_id) and (
-  exists (select 1 from source s where s.session_id = old.id and (
-    exists (select 1 from unit_evidence e where e.source_id = s.id or e.retraction_source_id = s.id)
-    or exists (select 1 from unit_adoption a where a.source_id = s.id or a.retraction_source_id = s.id)
-    or exists (select 1 from field_def d where d.source_id = s.id)
-    or exists (select 1 from unit_field f where f.source_id = s.id)
-    or exists (select 1 from unit_state t where t.source_id = s.id)))
-  or exists (select 1 from edit_observation o join unit_anchor a on a.edit_observation_id = o.id where o.session_id = old.id)) begin
-  select raise(abort, 'records cite this session; forget its messages with /sphica:forget rather than deleting it');
 end;
 create trigger source_session_project before insert on source when new.session_id is not null
   and not exists (select 1 from session where id = new.session_id and project_id = new.project_id) begin
@@ -155,13 +134,24 @@ create table artifact_link (
   primary key (project_id, from_artifact, to_artifact, kind)
 ) strict;
 
+-- A reference the owner gave that Sphica could not fetch (a meeting-notes URL). It never counts as a fetched source:
+-- a claim supported only by it stays unsourced until the text is fetched and checked.
+create table external_reference (
+  id integer primary key autoincrement not null,
+  project_id integer not null references project (id) on delete cascade,
+  url text not null check (url <> ''),
+  owner_source_id integer not null references source (id),
+  span_start integer not null check (span_start >= 0),
+  span_end integer not null check (span_end > span_start),
+  added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
+) strict;
+
 -- One owner-confirmed deletion of chosen sources. It stands in for an extraction run on the state changes the deletion causes.
 create table forget_batch (
   id integer primary key autoincrement not null,
   project_id integer not null references project (id) on delete cascade,
   at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', at) is at)
 ) strict;
-create index forget_batch_project on forget_batch (project_id);
 
 -- A source the owner forgot: its original id and identity, never its text. Capture, harvest, and glean skip an item matching one,
 -- so the same words are not stored again; changed text is new speech and is stored. source_id has no foreign key: the row is gone.
@@ -176,7 +166,6 @@ create table source_forgotten (
   content_hash blob not null check (length(content_hash) = 32),
   batch_id integer not null references forget_batch (id) on delete cascade
 ) strict;
-create index source_forgotten_batch on source_forgotten (batch_id);
 -- Not unique: an edited item that returns to earlier text has two revisions with the same hash, and both can be forgotten
 create index source_forgotten_item on source_forgotten (project_id, artifact, kind, external_id, content_hash);
 
@@ -186,54 +175,38 @@ create table edit_observation (
   session_id text not null references session (id) on delete cascade,
   turn_id text,
   tool_event_id text,
-  path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
-    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
+  path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
+    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
   via text not null check (via in ('tool', 'status')),
-  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at)
+  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at),
+  unique (session_id, turn_id, path, via)
 ) strict;
--- One row per path, way, and turn of a session; an observation outside any turn (turn_id null) counts once too
-create unique index edit_observation_once on edit_observation (session_id, coalesce(turn_id, ''), path, via);
 create index edit_observation_path on edit_observation (path);
 
 -- One extraction by trace, harvest, or glean. target names what it read: `session:<uuid>`, `pr:<n>`, or `glean`.
--- A migration that changes lifecycles records itself as a run too (origin migration, target `revision:<n>`), so each change names where it came from.
 create table extraction_run (
   id integer primary key autoincrement not null,
   project_id integer not null references project (id) on delete cascade,
-  origin text not null check (origin in ('trace', 'harvest', 'glean', 'migration')),
+  origin text not null check (origin in ('trace', 'harvest', 'glean')),
   target text not null,
   session_id text references session (id) on delete set null,
-  status text not null check (status in ('running', 'saved')),
+  status text not null check (status in ('running', 'saved', 'failed', 'capped')),
+  reason text,
   input_bytes integer check (input_bytes >= 0),
   -- The CLI-issued draft this run saves. A saved run's draft saves nothing again; the draft is bound to this run's project and target
   draft_id text unique,
   started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
   finished_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', finished_at) is finished_at),
-  check (finished_at >= started_at)
+  check (status in ('running', 'saved') or reason is not null)
 ) strict;
-create index extraction_run_project on extraction_run (project_id);
-create index extraction_run_session on extraction_run (session_id) where session_id is not null;
-
--- A run changes once, when it finishes: only a running run takes a status and a finish time. The one other update is the foreign key
--- action clearing session_id after its session was deleted
-create trigger extraction_run_frozen before update on extraction_run
-when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
-  or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
-  or new.started_at is not old.started_at
-  or (new.session_id is not old.session_id and (new.session_id is not null or exists (select 1 from session where id = old.session_id)))
-  or ((new.status is not old.status or new.finished_at is not old.finished_at) and old.status <> 'running') begin
-  select raise(abort, 'a run changes once, when it finishes');
-end;
 
 -- Which sources an extraction looked at, and what came of them
 create table source_processing (
   source_id integer not null references source (id) on delete cascade,
   run_id integer not null references extraction_run (id) on delete cascade,
-  outcome text not null check (outcome in ('units', 'no_unit')),
+  outcome text not null check (outcome in ('units', 'no_unit', 'failed', 'capped')),
   primary key (source_id, run_id)
 ) strict;
-create index source_processing_run on source_processing (run_id);
 
 -- An extracted unit. Its text is never rewritten: corrections are successors, withdrawals, retractions, and anchor replacements.
 -- extraction: supported (every evidence span was found in retained text) or quarantined (with reason).
@@ -268,9 +241,6 @@ create table unit (
   check (unsourced = 0 or lifecycle <> 'active')
 ) strict;
 create index unit_live on unit (project_id, lifecycle, kind);
--- The same words saved twice under two keys are allowed (a rewrite is a successor), and doctor counts them
-create index unit_content on unit (project_id, content_hash);
-create index unit_run on unit (run_id);
 create trigger unit_insert_candidate before insert on unit when new.lifecycle <> 'candidate' begin
   select raise(abort, 'units start as candidates');
 end;
@@ -278,14 +248,9 @@ create trigger unit_run_project before insert on unit
 when not exists (select 1 from extraction_run where id = new.run_id and project_id = new.project_id) begin
   select raise(abort, 'unit and run belong to different projects');
 end;
--- Everything a unit was saved with is frozen, so a quarantined or unsourced unit cannot be relabelled and then activated
-create trigger unit_text_frozen before update of project_id, key, kind, stance, text, why, scope_note, revisit_when, no_code_surface,
-  extraction, extraction_reason, unsourced, run_id, created_at, content_hash
+create trigger unit_text_frozen before update of project_id, key, kind, stance, text, why, scope_note, revisit_when, content_hash, run_id
 on unit begin
   select raise(abort, 'unit text is never rewritten; record a successor');
-end;
-create trigger unit_revision_step before update of revision on unit when new.revision is not old.revision + 1 begin
-  select raise(abort, 'a unit''s revision rises by one with each change to its relations');
 end;
 create trigger unit_lifecycle_via_state before update of lifecycle on unit
 when new.lifecycle is not (select to_state from unit_state where unit_id = new.id order by id desc limit 1) begin
@@ -333,7 +298,7 @@ create table unit_evidence (
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
   retracted_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retracted_at) is retracted_at),
   retraction_reason text,
-  retraction_source_id integer references source (id) on delete cascade,
+  retraction_source_id integer references source (id),
   retraction_span_start integer,
   retraction_span_end integer,
   foreign key (unit_id, option_id) references unit_option (unit_id, id) on delete cascade,
@@ -341,16 +306,11 @@ create table unit_evidence (
   check ((retracted_at is null) = (retraction_source_id is null)),
   check ((retraction_source_id is null) = (retraction_span_start is null)),
   check ((retraction_source_id is null) = (retraction_span_end is null)),
-  check (retraction_span_end is null or retraction_span_end > retraction_span_start),
-  check (retraction_span_start >= 0),
-  check (retracted_at >= added_at)
+  check (retraction_span_end is null or retraction_span_end > retraction_span_start)
 ) strict;
 create unique index unit_evidence_unit_once on unit_evidence (unit_id, source_id, span_start, span_end, role) where option_id is null;
 create unique index unit_evidence_option_once on unit_evidence (option_id, source_id, span_start, span_end, role) where option_id is not null;
 create index unit_evidence_source on unit_evidence (source_id);
-create index unit_evidence_option on unit_evidence (unit_id, option_id);
-create index unit_evidence_retraction on unit_evidence (retraction_source_id) where retraction_source_id is not null;
-create index unit_evidence_run on unit_evidence (run_id);
 
 -- Evidence that the project adopted a decision or constraint. route: owner_statement (an owner-kind source span) or
 -- explicit (an explicit disposition in a source, such as a maintainer's reply saying it is adopted). A merge or a resolved thread is never adoption.
@@ -365,7 +325,7 @@ create table unit_adoption (
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
   retracted_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', retracted_at) is retracted_at),
   retraction_reason text,
-  retraction_source_id integer references source (id) on delete cascade,
+  retraction_source_id integer references source (id),
   retraction_span_start integer,
   retraction_span_end integer,
   unique (unit_id, source_id, span_start, span_end),
@@ -373,20 +333,15 @@ create table unit_adoption (
   check ((retracted_at is null) = (retraction_source_id is null)),
   check ((retraction_source_id is null) = (retraction_span_start is null)),
   check ((retraction_source_id is null) = (retraction_span_end is null)),
-  check (retraction_span_end is null or retraction_span_end > retraction_span_start),
-  check (retraction_span_start >= 0),
-  check (retracted_at >= added_at)
+  check (retraction_span_end is null or retraction_span_end > retraction_span_start)
 ) strict;
-create index unit_adoption_source on unit_adoption (source_id);
-create index unit_adoption_retraction on unit_adoption (retraction_source_id) where retraction_source_id is not null;
-create index unit_adoption_run on unit_adoption (run_id);
 create trigger unit_adoption_route before insert on unit_adoption begin
   select raise(abort, 'owner_statement adoption needs an owner-authored source')
   where new.route = 'owner_statement' and not exists (select 1 from source where id = new.source_id and author_kind = 'owner');
   select raise(abort, 'explicit adoption needs the owner or a maintainer (OWNER, MEMBER, COLLABORATOR association)')
   where new.route = 'explicit' and not exists (select 1 from source where id = new.source_id
     and (author_kind = 'owner' or author_association in ('OWNER', 'MEMBER', 'COLLABORATOR')));
-  select raise(abort, 'a merge is not adoption')
+  select raise(abort, 'merge and thread resolution events are not adoption')
   where exists (select 1 from source where id = new.source_id and kind = 'pr_event');
   select raise(abort, 'adoption applies to decisions and constraints')
   where not exists (select 1 from unit where id = new.unit_id and kind in ('decision', 'constraint'));
@@ -395,7 +350,7 @@ end;
 create table unit_link (
   from_unit integer not null references unit (id) on delete cascade,
   to_unit integer not null references unit (id) on delete cascade,
-  kind text not null check (kind in ('supersedes', 'conflicts')),
+  kind text not null check (kind in ('supersedes', 'implements', 'conflicts')),
   run_id integer not null references extraction_run (id),
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at),
   -- A conflict stays unresolved (and suppresses automatic delivery of both) until resolved with a reason
@@ -406,9 +361,6 @@ create table unit_link (
   check ((resolved_at is null) = (resolution is null)),
   check (kind = 'conflicts' or resolved_at is null)
 ) strict;
--- Lookups by the unit a link points at: its successors, and its conflicts from either side
-create index unit_link_to on unit_link (to_unit, kind);
-create index unit_link_run on unit_link (run_id);
 create trigger unit_link_frozen before update on unit_link begin
   select raise(abort, 'links are frozen; only an unresolved conflict can be resolved, once')
   where new.from_unit is not old.from_unit or new.to_unit is not old.to_unit or new.kind is not old.kind
@@ -441,38 +393,36 @@ create table unit_state (
   check ((run_id is null) <> (forget_id is null))
 ) strict;
 create index unit_state_order on unit_state (unit_id, id);
-create index unit_state_source on unit_state (source_id) where source_id is not null;
-create index unit_state_run on unit_state (run_id) where run_id is not null;
-create index unit_state_forget on unit_state (forget_id) where forget_id is not null;
 create trigger unit_state_rules before insert on unit_state begin
-  select raise(abort, 'the first state of a unit is candidate, from no state')
-  where not exists (select 1 from unit_state where unit_id = new.unit_id)
-    and (new.from_state is not null or new.to_state <> 'candidate');
   select raise(abort, 'from_state must be the current lifecycle')
   where new.from_state is not (select lifecycle from unit where id = new.unit_id)
     and exists (select 1 from unit_state where unit_id = new.unit_id);
-  -- A successor's state is read from its history, not its lifecycle column: a row written in the same statement may not be applied yet
-  select raise(abort, 'not a lifecycle change a unit can make: withdrawn is final, and a superseded unit only returns to candidate once every successor is withdrawn')
-  where exists (select 1 from unit_state where unit_id = new.unit_id) and not (
-    (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
-    or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
-    or (new.from_state = 'superseded' and new.to_state = 'candidate' and not exists (
-      select 1 from unit_link l join unit s on s.id = l.from_unit where l.to_unit = new.unit_id and l.kind = 'supersedes'
-        and s.extraction = 'supported' and s.unsourced = 0
-        and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
-  select raise(abort, (select missing from unit_support where unit_id = new.unit_id))
-  where new.to_state = 'active' and (select missing from unit_support where unit_id = new.unit_id) is not null;
+  select raise(abort, 'an active decision or constraint needs unretracted evidence and adoption')
+  where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('decision', 'constraint') and (
+    not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
+    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null)));
+  select raise(abort, 'an active implementation needs code or commit evidence')
+  where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind = 'implementation' and not (
+    exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
+      and e.retracted_at is null and e.role = 'implements' and s.kind in ('commit_message', 'file_excerpt'))
+    or exists (select 1 from unit_anchor a where a.unit_id = u.id and a.retired_at is null and a.role = 'evidence'
+      and (a.commit_sha is not null or (a.edit_observation_id is not null and exists (select 1 from unit_evidence e
+        join source s on s.id = e.source_id join edit_observation o on o.id = a.edit_observation_id
+        where e.unit_id = u.id and e.option_id is null and e.retracted_at is null and e.role = 'implements'
+          and s.session_id = o.session_id))))));
+  select raise(abort, 'an active unit needs unretracted evidence')
+  where new.to_state = 'active' and exists (select 1 from unit u where u.id = new.unit_id and u.kind in ('finding', 'dead_end', 'question')
+    and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null));
   -- A reconsider condition is the owner's: each needs a quote of the owner, written when the unit is saved. A quote retracted later, or
   -- forgotten (forget's recheck is exempt, since the row is gone), leaves the unit as it was, and readers show the condition as unsupported
   select raise(abort, 'a reconsider condition needs a quote of the owner')
   where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
     and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
       where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
-  select raise(abort, 'superseded needs a supersedes link from an active successor')
-  where new.to_state = 'superseded' and not exists (select 1 from unit_link l join unit s on s.id = l.from_unit
-    where l.to_unit = new.unit_id and l.kind = 'supersedes' and s.lifecycle = 'active');
+  select raise(abort, 'superseded needs a supersedes link from its successor')
+  where new.to_state = 'superseded' and not exists (select 1 from unit_link where to_unit = new.unit_id and kind = 'supersedes');
 end;
 -- The one update allowed is the foreign key action clearing source_id after its source was forgotten
 create trigger unit_state_append_only before update on unit_state
@@ -487,29 +437,17 @@ end;
 create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
 end;
--- Withdrawing a record's last live successor brings the record back to candidate, to be judged again. Successors are read from history:
--- the withdrawal just written may not be applied to its unit yet
-create trigger unit_state_restore after insert on unit_state when new.to_state = 'withdrawn' begin
-  insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id)
-  select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
-  from unit_link l join unit o on o.id = l.to_unit
-  where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
-    and not exists (select 1 from unit_link k join unit s on s.id = k.from_unit where k.to_unit = o.id and k.kind = 'supersedes'
-      and k.from_unit <> new.unit_id and s.extraction = 'supported' and s.unsourced = 0
-      and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
-end;
 
 -- Where a unit applies in code, or code cited as evidence. Validated against the working tree when served, never cached here.
 create table unit_anchor (
   id integer primary key autoincrement not null,
   unit_id integer not null references unit (id) on delete cascade,
-  path text not null check (path <> '' and path <> '.' and path <> '..' and path not glob '/*' and path not glob '[A-Za-z]:*' and path not glob '*\*'
-    and path not glob '*//*' and path not glob './*' and path not glob '../*' and path not glob '*/./*' and path not glob '*/../*'
-    and path not glob '*/.' and path not glob '*/..' and path not glob '*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*'),
+  path text not null check (path <> '' and path not glob '/*' and path not glob '*[/]..[/]*' and path not glob '..[/]*'
+    and path not glob '*[/]..' and path <> '..' and path not glob '*\*' and path not glob '[A-Za-z]:*'),
   symbol text,
   commit_sha text check (commit_sha is null or (length(commit_sha) = 40 and commit_sha not glob '*[^0-9a-f]*')),
   line_start integer check (line_start > 0),
-  line_end integer check (line_end is null or (line_start is not null and line_end >= line_start)),
+  line_end integer check (line_end >= line_start),
   excerpt text,
   role text not null check (role in ('applies_to', 'evidence')),
   -- For work recorded before a commit: the edit observation of this path in the session, checked against the working tree when saved
@@ -521,13 +459,6 @@ create table unit_anchor (
 ) strict;
 create index unit_anchor_path on unit_anchor (path, role) where retired_at is null;
 create index unit_anchor_unit on unit_anchor (unit_id, retired_at);
--- One live anchor per place of a unit: a symbol, or the lines when it has no symbol
-create unique index unit_anchor_live_once on unit_anchor (unit_id, path, role, coalesce(commit_sha, ''), coalesce(symbol, ''),
-  coalesce(case when symbol is null then line_start end, 0), coalesce(case when symbol is null then line_end end, 0))
-  where retired_at is null;
-create index unit_anchor_observation on unit_anchor (edit_observation_id) where edit_observation_id is not null;
-create index unit_anchor_replaced on unit_anchor (replaced_by) where replaced_by is not null;
-create index unit_anchor_run on unit_anchor (run_id);
 -- Anchors are retired and replaced, never edited in place (except setting retired_at and replaced_by once)
 create trigger unit_anchor_frozen before update on unit_anchor begin
   select raise(abort, 'anchors are replaced, not edited; retirement happens once')
@@ -535,37 +466,10 @@ create trigger unit_anchor_frozen before update on unit_anchor begin
     or new.line_start is not old.line_start or new.line_end is not old.line_end or new.excerpt is not old.excerpt or new.role is not old.role
     or new.edit_observation_id is not old.edit_observation_id or new.run_id is not old.run_id or new.added_at is not old.added_at
     or old.retired_at is not null or new.retired_at is null;
-  select raise(abort, 'an anchor is replaced by another anchor of the same record')
-  where new.replaced_by is not null and (new.replaced_by = new.id
-    or not exists (select 1 from unit_anchor where id = new.replaced_by and unit_id = new.unit_id));
 end;
 create trigger unit_anchor_no_delete before delete on unit_anchor when exists (select 1 from unit where id = old.unit_id) begin
   select raise(abort, 'anchors are retired, never deleted');
 end;
-
--- What an active unit must have, in one place: missing says what it lacks, and is null when it lacks nothing. Activating reads it, and so
--- does every change that can take support away (a retraction, retiring an anchor), so the two never disagree.
--- Evidence on an option supports the option, never the unit.
-create view unit_support as
-select u.id as unit_id, case
-  when u.kind in ('decision', 'constraint') and (
-    not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
-    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null))
-    then 'an active decision or constraint needs unretracted evidence and adoption'
-  when u.kind = 'implementation' and not (
-    exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
-      and e.retracted_at is null and e.role = 'implements' and s.kind in ('commit_message', 'file_excerpt'))
-    or exists (select 1 from unit_anchor a where a.unit_id = u.id and a.retired_at is null and a.role = 'evidence'
-      and (a.commit_sha is not null or (a.edit_observation_id is not null and exists (select 1 from unit_evidence e
-        join source s on s.id = e.source_id join edit_observation o on o.id = a.edit_observation_id
-        where e.unit_id = u.id and e.option_id is null and e.retracted_at is null and e.role = 'implements'
-          and s.session_id = o.session_id)))))
-    then 'an active implementation needs code or commit evidence'
-  when u.kind in ('finding', 'dead_end', 'question')
-    and not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
-    then 'an active unit needs unretracted evidence'
-end as missing
-from unit u;
 
 -- Search-only aliases in Japanese and English, written by the agent with the unit. Each set is bound to the unit's content_hash when written;
 -- only the newest set whose hash matches is indexed. Older sets stay for as-of snapshots. Never evidence, never shown as something said.
@@ -578,10 +482,7 @@ create table unit_alias (
   added_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', added_at) is added_at)
 ) strict;
 create index unit_alias_unit on unit_alias (unit_id, id);
-create index unit_alias_run on unit_alias (run_id);
 create trigger unit_alias_terms before insert on unit_alias begin
-  select raise(abort, 'an alias set is bound to the words of its unit as they are')
-  where new.content_hash is not (select content_hash from unit where id = new.unit_id);
   select raise(abort, 'each alias is a non-empty string of at most 40 characters')
   where exists (select 1 from json_each(new.terms) where type <> 'text' or length(trim(value)) = 0 or length(value) > 40);
 end;
@@ -616,7 +517,6 @@ create table field_def (
   check ((type = 'enum') = (enum_values is not null))
 ) strict;
 create index field_def_source on field_def (source_id);
-create index field_def_run on field_def (run_id);
 create trigger field_def_check before insert on field_def begin
   select raise(abort, 'a field definition, its source, and its run belong to one project')
   where new.project_id is not (select project_id from source where id = new.source_id)
@@ -627,9 +527,6 @@ create trigger field_def_check before insert on field_def begin
   where not exists (select 1 from source where id = new.source_id and author_kind = 'owner');
   select raise(abort, 'field definition span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
-  select raise(abort, 'a span starts or ends inside a character')
-  where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
-     or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
   select raise(abort, 'enum values are distinct non-empty strings of at most 100 characters')
   where new.enum_values is not null and (exists (select 1 from json_each(new.enum_values)
       where type <> 'text' or length(trim(value)) = 0 or length(value) > 100)
@@ -663,7 +560,6 @@ create table unit_field (
 ) strict;
 create index unit_field_def on unit_field (field_def_id);
 create index unit_field_source on unit_field (source_id);
-create index unit_field_run on unit_field (run_id);
 create trigger unit_field_check before insert on unit_field begin
   select raise(abort, 'a field value, its unit, definition, source, and run belong to one project')
   where (select project_id from unit where id = new.unit_id) is not (select project_id from field_def where id = new.field_def_id)
@@ -675,9 +571,6 @@ create trigger unit_field_check before insert on unit_field begin
   where exists (select 1 from unit_state where unit_id = new.unit_id) or exists (select 1 from unit_alias where unit_id = new.unit_id);
   select raise(abort, 'field value span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
-  select raise(abort, 'a span starts or ends inside a character')
-  where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
-     or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
   select raise(abort, 'the field does not apply to this kind of unit')
   where exists (select 1 from field_def d where d.id = new.field_def_id and json_array_length(d.kinds) > 0
     and not exists (select 1 from json_each(d.kinds) j where j.value = (select kind from unit where id = new.unit_id)));
@@ -707,12 +600,6 @@ create trigger unit_evidence_check before insert on unit_evidence begin
      or (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'evidence span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
-  -- A retraction cites the owner's words, which only the retraction's own update checks: a row is never written already retracted
-  select raise(abort, 'evidence is written live, then retracted')
-  where new.retracted_at is not null or new.retraction_source_id is not null;
-  select raise(abort, 'a span starts or ends inside a character')
-  where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
-     or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
   select raise(abort, 'a reported speaker is the owner reporting someone else, so it must cite an owner session message')
   where new.reported_speaker is not null and (trim(new.reported_speaker) = '' or not exists (select 1 from source
     where id = new.source_id and kind = 'session_message' and author_kind = 'owner'));
@@ -731,37 +618,29 @@ create trigger unit_evidence_retract before update on unit_evidence begin
   where not exists (select 1 from source s where s.id = new.retraction_source_id and s.author_kind = 'owner'
     and s.project_id = (select project_id from unit where id = new.unit_id)
     and new.retraction_span_end <= length(cast(s.text as blob)));
-  select raise(abort, 'a span starts or ends inside a character')
-  where hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
-     or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF';
 end;
 -- Deleting a project (or its unit or source) cascades; only a direct delete of a live link is refused.
--- A retracted row goes with the source its retraction reason cites (the reason cannot outlive it).
+-- A retracted row whose retraction reason cites a forgotten source is removed with that source (the reason cannot outlive it).
 create trigger unit_evidence_no_delete before delete on unit_evidence
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
+  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
   select raise(abort, 'evidence is retracted, never deleted');
 end;
 create trigger unit_adoption_no_delete before delete on unit_adoption
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
-  and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
+  and not (old.retracted_at is not null and exists (select 1 from source_forgotten where source_id = old.retraction_source_id)) begin
   select raise(abort, 'adoption is retracted, never deleted');
 end;
--- A retraction, or retiring an anchor, that would leave an active unit without its required support must first move it back to candidate
+-- A retraction that would leave an active unit without its required support must first move it back to candidate
 create trigger unit_evidence_retract_support after update of retracted_at on unit_evidence
-when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
-  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
+when exists (select 1 from unit where id = new.unit_id and lifecycle = 'active')
+  and not exists (select 1 from unit_evidence where unit_id = new.unit_id and retracted_at is null) begin
   select raise(abort, 'move the unit back to candidate before retracting its last evidence');
 end;
 create trigger unit_adoption_retract_support after update of retracted_at on unit_adoption
-when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
-  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
+when exists (select 1 from unit where id = new.unit_id and lifecycle = 'active')
+  and not exists (select 1 from unit_adoption where unit_id = new.unit_id and retracted_at is null) begin
   select raise(abort, 'move the unit back to candidate before retracting its last adoption');
-end;
-create trigger unit_anchor_retire_support after update of retired_at on unit_anchor
-when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
-  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
-  select raise(abort, 'move the unit back to candidate before retiring its last code anchor');
 end;
 create trigger unit_adoption_check before insert on unit_adoption begin
   select raise(abort, 'adoption and unit belong to different projects')
@@ -769,11 +648,6 @@ create trigger unit_adoption_check before insert on unit_adoption begin
      or (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'adoption span is outside the source text')
   where new.span_end > (select length(cast(text as blob)) from source where id = new.source_id);
-  select raise(abort, 'adoption is written live, then retracted')
-  where new.retracted_at is not null or new.retraction_source_id is not null;
-  select raise(abort, 'a span starts or ends inside a character')
-  where hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_start + 1, 1)) between '80' and 'BF'
-     or hex(substr((select cast(text as blob) from source where id = new.source_id), new.span_end + 1, 1)) between '80' and 'BF';
 end;
 create trigger unit_adoption_retract before update on unit_adoption begin
   select raise(abort, 'adoption is only ever retracted, once')
@@ -784,29 +658,13 @@ create trigger unit_adoption_retract before update on unit_adoption begin
   where not exists (select 1 from source s where s.id = new.retraction_source_id and s.author_kind = 'owner'
     and s.project_id = (select project_id from unit where id = new.unit_id)
     and new.retraction_span_end <= length(cast(s.text as blob)));
-  select raise(abort, 'a span starts or ends inside a character')
-  where hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_start + 1, 1)) between '80' and 'BF'
-     or hex(substr((select cast(text as blob) from source where id = new.retraction_source_id), new.retraction_span_end + 1, 1)) between '80' and 'BF';
 end;
 create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'linked units belong to different projects')
   where (select project_id from unit where id = new.from_unit) is not (select project_id from unit where id = new.to_unit)
      or (select project_id from unit where id = new.from_unit) is not (select project_id from extraction_run where id = new.run_id);
-  select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
-  where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
-    and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
-  -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
-  -- become active, nor be withdrawn. States are read from history, as in unit_state_rules
-  select raise(abort, 'the record already has a successor that is not withdrawn')
-  where new.kind = 'supersedes'
-    and exists (select 1 from unit n where n.id = new.from_unit and n.extraction = 'supported' and n.unsourced = 0)
-    and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
-    where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
-      and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create trigger unit_state_project before insert on unit_state begin
-  select raise(abort, 'a state comes after its unit was created')
-  where new.at < (select created_at from unit where id = new.unit_id);
   select raise(abort, 'state and unit belong to different projects')
   where (new.run_id is not null
        and (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id))
@@ -816,8 +674,6 @@ create trigger unit_state_project before insert on unit_state begin
        and (select project_id from unit where id = new.unit_id) is not (select project_id from source where id = new.source_id));
 end;
 create trigger unit_anchor_project before insert on unit_anchor begin
-  select raise(abort, 'an anchor is replaced by another anchor of the same record')
-  where new.replaced_by is not null and not exists (select 1 from unit_anchor where id = new.replaced_by and unit_id = new.unit_id);
   select raise(abort, 'anchor and unit belong to different projects')
   where (select project_id from unit where id = new.unit_id) is not (select project_id from extraction_run where id = new.run_id);
   select raise(abort, 'the edit observation must be of this path in a session of the same project')
@@ -831,6 +687,11 @@ end;
 create trigger source_processing_project before insert on source_processing begin
   select raise(abort, 'source and run belong to different projects')
   where (select project_id from source where id = new.source_id) is not (select project_id from extraction_run where id = new.run_id);
+end;
+create trigger external_reference_check before insert on external_reference begin
+  select raise(abort, 'an external reference needs an owner span of the same project')
+  where not exists (select 1 from source s where s.id = new.owner_source_id and s.author_kind = 'owner' and s.project_id = new.project_id
+    and new.span_end <= length(cast(s.text as blob)));
 end;
 
 -- Every change to a unit's relations raises its revision (stale drafts are refused against it)
@@ -932,7 +793,6 @@ create table work (
   unique (project_id, key)
 ) strict;
 create index work_open on work (project_id, updated_at desc) where status in ('active', 'blocked', 'paused');
-create index work_run on work (run_id) where run_id is not null;
 
 -- What a delivery hook emitted or suppressed, and how many eligible units it left out. No source text is copied here.
 -- chars is the delivered length without the omission note (Sphica's own text), since the read budget adds it up.
@@ -954,24 +814,6 @@ create table delivery_unit (
   unit_id integer not null references unit (id) on delete cascade,
   primary key (delivery_id, unit_id)
 ) strict;
-create index delivery_unit_unit on delivery_unit (unit_id);
-
--- The one way the record server writes a source. It has no session columns, so it can never write a session message: those are the
--- owner's own words, and only capture writes them. A view insert returns no id; the writer looks the row up by its item key
-create view ingest_source as
-  select project_id, kind, artifact, external_id, revision, author_kind, author_login, author_external_id, author_association,
-    parent_external_id, event_kind, url, created_at, available_at, captured_at, text, truncated, redacted, original_bytes,
-    content_hash, path, line_start, line_end, diff_hunk, commit_sha, blob_sha, indexed
-  from source where session_id is null;
-create trigger ingest_source_insert instead of insert on ingest_source begin
-  insert into source (project_id, kind, artifact, external_id, revision, author_kind, author_login, author_external_id, author_association,
-    parent_external_id, event_kind, url, created_at, available_at, captured_at, text, truncated, redacted, original_bytes,
-    content_hash, path, line_start, line_end, diff_hunk, commit_sha, blob_sha, indexed, session_id, turn_id)
-  values (new.project_id, new.kind, new.artifact, new.external_id, new.revision, new.author_kind, new.author_login, new.author_external_id,
-    new.author_association, new.parent_external_id, new.event_kind, new.url, new.created_at, new.available_at, new.captured_at,
-    new.text, coalesce(new.truncated, 0), coalesce(new.redacted, 0), new.original_bytes, new.content_hash, new.path, new.line_start,
-    new.line_end, new.diff_hunk, new.commit_sha, new.blob_sha, new.indexed, null, null);
-end;
 
 -- The views the capture connection may write. The capture authorizer allows inserts into these views only; the triggers derive
 -- project, artifact, and indexing from the session and the speaker, so capture cannot write another project's rows or third-party text.
@@ -1025,4 +867,4 @@ create trigger capture_delivery_insert instead of insert on capture_delivery beg
   select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
 
-pragma user_version = 5;
+pragma user_version = 4;

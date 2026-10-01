@@ -89,16 +89,6 @@ export interface EditObservation {
   via: string;
 }
 
-export interface ExternalReference {
-  added_at: string;
-  id: Generated<number>;
-  owner_source_id: number;
-  project_id: number;
-  span_end: number;
-  span_start: number;
-  url: string;
-}
-
 export interface ExtractionRun {
   draft_id: string | null;
   finished_at: string | null;
@@ -106,7 +96,6 @@ export interface ExtractionRun {
   input_bytes: number | null;
   origin: string;
   project_id: number;
-  reason: string | null;
   session_id: string | null;
   started_at: string;
   status: string;
@@ -133,6 +122,36 @@ export interface ForgetBatch {
   at: string;
   id: Generated<number>;
   project_id: number;
+}
+
+export interface IngestSource {
+  artifact: string | null;
+  author_association: string | null;
+  author_external_id: string | null;
+  author_kind: string | null;
+  author_login: string | null;
+  available_at: string | null;
+  blob_sha: string | null;
+  captured_at: string | null;
+  commit_sha: string | null;
+  content_hash: Buffer | null;
+  created_at: string | null;
+  diff_hunk: string | null;
+  event_kind: string | null;
+  external_id: string | null;
+  indexed: number | null;
+  kind: string | null;
+  line_end: number | null;
+  line_start: number | null;
+  original_bytes: number | null;
+  parent_external_id: string | null;
+  path: string | null;
+  project_id: number | null;
+  redacted: number | null;
+  revision: number | null;
+  text: string | null;
+  truncated: number | null;
+  url: string | null;
 }
 
 export interface OwnerIdentity {
@@ -344,6 +363,11 @@ export interface UnitState {
   unit_id: number;
 }
 
+export interface UnitSupport {
+  missing: string | null;
+  unit_id: number | null;
+}
+
 export interface Work {
   branch: string | null;
   current: string;
@@ -367,10 +391,10 @@ export interface DB {
   delivery: Delivery;
   delivery_unit: DeliveryUnit;
   edit_observation: EditObservation;
-  external_reference: ExternalReference;
   extraction_run: ExtractionRun;
   field_def: FieldDef;
   forget_batch: ForgetBatch;
+  ingest_source: IngestSource;
   owner_identity: OwnerIdentity;
   project: Project;
   session: Session;
@@ -388,5 +412,6 @@ export interface DB {
   unit_option: UnitOption;
   unit_search_text: UnitSearchText;
   unit_state: UnitState;
+  unit_support: UnitSupport;
   work: Work;
 }

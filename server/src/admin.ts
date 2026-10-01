@@ -11,6 +11,7 @@ import { backupDir, backupPath, backups } from "./backups.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION, sqliteCode } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
+import { inline } from "./panel.ts";
 import { packageVersionAt, ROOT } from "./plugin.ts";
 import { generationOf } from "./sqlite.ts";
 import { plural } from "./text.ts";
@@ -24,6 +25,12 @@ const SCHEMA = (): string => path.join(dbDir(), "schema.sql");
 const MIGRATIONS = (): string => path.join(dbDir(), "migrations");
 const MIGRATION = (dir: string, revision: number): string =>
   path.join(dir, `${String(revision).padStart(4, "0")}.sql`);
+/** Runs first when present: it lists the rows this revision cannot take in the temp table STOP, and the migration changes nothing. */
+const CHECK = (dir: string, revision: number): string =>
+  path.join(dir, `${String(revision).padStart(4, "0")}.check.sql`);
+/** Temp tables a migration fills: rows it stops on (rule, item), and rows it repaired or removed (rule, item, action). */
+const STOP = "sphica_migration_stop";
+const NOTE = "sphica_migration_note";
 
 /** How many completed backups a successful migration keeps */
 const KEEP = 3;
@@ -82,6 +89,44 @@ const versionOf = (raw: DatabaseSync): number =>
 
 const SQLITE_BUSY = 5;
 
+type Row = { rule: string; item: string; action?: string };
+
+/** Every row of a migration's temp table, which is then dropped. Read inside the transaction: a rollback takes the table with it. */
+function taken(raw: DatabaseSync, table: string): Row[] {
+  if (!raw.prepare("select 1 from temp.sqlite_schema where type = 'table' and name = ?").get(table))
+    return [];
+  const rows = raw.prepare(`select * from temp.${table} order by rule, rowid`).all() as Row[];
+  raw.exec(`drop table temp.${table}`);
+  return rows;
+}
+
+/** One line per row under its rule. The text comes from the database, so each row stays on its own line. */
+function listed(rows: Row[]): string {
+  const rules = new Map<string, Row[]>();
+  for (const r of rows) {
+    const of = rules.get(r.rule);
+    if (of) of.push(r);
+    else rules.set(r.rule, [r]);
+  }
+  return [...rules]
+    .flatMap(([rule, of]) => [
+      `${inline(String(rule))}: ${plural(of.length, "row")}`,
+      ...of.map((r) => `  ${inline(String(r.item))}${r.action ? ` → ${inline(String(r.action))}` : ""}`),
+    ])
+    .join("\n");
+}
+
+/** A migration's check found rows the new revision cannot take. Nothing of that step was changed. */
+class Stop extends Error {
+  list: string;
+  constructor(revision: number, rows: Row[]) {
+    super(
+      `The database has ${plural(rows.length, "row")} that revision ${revision} cannot take, and Sphica writes no such row (listed below). Fix the rows, or forget a listed source with /sphica:forget on the Sphica version that still opens this database, then run \`sphica init\` again`,
+    );
+    this.list = listed(rows);
+  }
+}
+
 /**
  * The revision the database is committed at after a failed step, or null when that cannot be told. An open transaction (its rollback
  * failed) would show a revision that closing the connection takes back, so it is not read.
@@ -106,6 +151,13 @@ function immediate<T>(raw: DatabaseSync, fn: () => T): T {
     raw.exec("rollback");
     throw e;
   }
+}
+
+/** Refreshes the planner's statistics after a write that finished. A failure here never fails what already succeeded. */
+function optimize(raw: DatabaseSync): void {
+  try {
+    raw.exec("pragma optimize");
+  } catch {}
 }
 
 /** Opens a connection, runs fn, and always closes it. */
@@ -138,8 +190,13 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
           );
         raw.exec("pragma foreign_keys = off");
         try {
-          immediate(raw, () => {
-            if (versionOf(raw) !== r - 1) return;
+          const notes = immediate(raw, () => {
+            if (versionOf(raw) !== r - 1) return [];
+            if (fs.existsSync(CHECK(dir, r))) {
+              raw.exec(fs.readFileSync(CHECK(dir, r), "utf8"));
+              const stops = taken(raw, STOP);
+              if (stops.length) throw new Stop(r, stops);
+            }
             raw.exec(fs.readFileSync(script, "utf8"));
             const broken = raw.prepare("pragma foreign_key_check").all().length;
             if (broken)
@@ -147,13 +204,19 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
                 `Migration to revision ${r} left ${plural(broken, "broken reference")}; nothing was changed`,
               );
             if (versionOf(raw) !== r) throw new Error(`${path.basename(script)} did not set revision ${r}`);
+            return taken(raw, NOTE);
           });
+          if (notes.length)
+            say(
+              `Changed while migrating to revision ${r}: ${plural(notes.length, "row")} (the backup keeps them as they were)\n${listed(notes)}`,
+            );
         } finally {
           raw.exec("pragma foreign_keys = on");
         }
       }
     } catch (e) {
       const said = (e as Error).message.replace(/\.$/, "");
+      const list = e instanceof Stop ? `\n${e.list}` : "";
       const now = committed(raw);
       // No step committed: going back would only lose what capture wrote since the backup, so this run's copy goes and nothing is pruned
       if (now === from) {
@@ -168,7 +231,7 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
             ? " Another process is writing to the database. Run `sphica init` again when it has finished."
             : "";
         throw new Error(
-          `${said}. No migration step was committed: the database is still at revision ${from}, and there is no need to replace it with a backup (${left}).${retry}`,
+          `${said}. No migration step was committed: the database is still at revision ${from}, and there is no need to replace it with a backup (${left}).${retry}${list}`,
         );
       }
       const base = path.basename(file);
@@ -177,9 +240,10 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
           ? "The committed revision could not be confirmed after the failure"
           : `The database is now at revision ${now} (this run, or another \`sphica init\` running at the same time, migrated it that far)`;
       throw new Error(
-        `${said}. ${state}. The database before migrating is at ${backup} (anything recorded after it was made is not in it). To go back to it, close every session using Sphica, move ${base}, ${base}-wal, and ${base}-shm in ${path.dirname(file)} aside, then copy the backup to ${file}.`,
+        `${said}. ${state}. The database before migrating is at ${backup} (anything recorded after it was made is not in it). To go back to it, close every session using Sphica, move ${base}, ${base}-wal, and ${base}-shm in ${path.dirname(file)} aside, then copy the backup to ${file}.${list}`,
       );
     }
+    optimize(raw);
     prune(file, backup);
     return from;
   });
@@ -230,6 +294,7 @@ export function dbInit(file: string = dbFile()): void {
           throw new Error(
             `db/schema.sql has user_version ${versionOf(raw)}, but the code expects ${SCHEMA_REVISION}`,
           );
+        optimize(raw);
       },
       true,
     );
@@ -291,8 +356,8 @@ export function bindOwner(user: { id: number; login: string }, file: string = db
  * Changing the rules leaves existing rows indexed with the old rules, and they stop matching query terms.
  */
 export function reindex(file: string = dbFile()): void {
-  const counts = withOwner(file, (raw) =>
-    immediate(raw, () => {
+  const counts = withOwner(file, (raw) => {
+    const n = immediate(raw, () => {
       raw.exec("insert into unit_fts (unit_fts) values ('delete-all')");
       raw.exec(
         "insert into unit_fts (rowid, body, ident, alias) select id, body, ident, alias from unit_search_text",
@@ -306,8 +371,10 @@ export function reindex(file: string = dbFile()): void {
         units: n("select count(*) as n from unit"),
         sources: n("select count(*) as n from source where indexed = 1"),
       };
-    }),
-  );
+    });
+    optimize(raw);
+    return n;
+  });
   say(`Rebuilt the index: ${plural(counts.units, "unit")}, ${plural(counts.sources, "source")}`);
 }
 

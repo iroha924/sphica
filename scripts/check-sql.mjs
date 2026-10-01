@@ -43,9 +43,19 @@ const RULES = [
     /\.orderBy\(\s*([`'"])[^`'"]*\s+(?:asc|desc)\1/g,
     "do not embed the direction in the string. Write orderBy(expr, 'desc')",
   ],
+  // REPLACE deletes the conflicting row without telling the authorizer or firing delete triggers, so it bypasses the write limits.
+  // A constraint's `on conflict replace` in the schema turns every plain insert into one
+  [
+    /\.orReplace\s*\(|\.replaceInto\s*\(|\bor\s+replace\b|\breplace\s+into\b|\bconflict\s+replace\b/gi,
+    "REPLACE deletes rows the authorizer never sees. Use onConflict(doNothing / doUpdateSet)",
+  ],
 ];
 
-const files = [...walk(path.join(root, "server/src")), ...walk(path.join(root, "server/test"))];
+const files = [
+  ...walk(path.join(root, "server/src")),
+  ...walk(path.join(root, "server/test")),
+  path.join(root, "db/schema.sql"),
+];
 for (const file of files) {
   const rel = path.relative(root, file).split(path.sep).join("/");
   const text = fs.readFileSync(file, "utf8");
@@ -61,4 +71,6 @@ if (fail.length) {
   console.error(`SQL style:\n${fail.map((f) => `  ${f}`).join("\n")}`);
   process.exit(1);
 }
-console.log(`SQL style: raw SQL only in the ${RAW_SQL_OK.size} allowed files, no deprecated orderBy`);
+console.log(
+  `SQL style: raw SQL only in the ${RAW_SQL_OK.size} allowed files, no deprecated orderBy, no REPLACE`,
+);

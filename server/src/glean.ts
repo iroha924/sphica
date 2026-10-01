@@ -3,9 +3,10 @@
 // evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
-import { iso } from "./db.ts";
+import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { cleanGit } from "./git.ts";
+import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { type Checked, checkRecord, prepareRecord, repoPath, saveRecord, type Target } from "./record.ts";
 import {
@@ -249,7 +250,7 @@ export function prepareGlean(root: string | null, raw: unknown, probe?: Probe): 
  * with no adoption, are kept as unsourced (the owner remembering is not a source).
  */
 export async function checkGlean(
-  db: Kysely<DB>,
+  db: Reads,
   target: Target,
   raw: unknown,
   facts: GleanFacts = prepareGlean(target.root, raw),
@@ -314,8 +315,8 @@ export async function checkGlean(
     }
     return { s, at };
   };
-  // Anchors an earlier operation in this batch replaces: a second replacement would leave both new anchors live
-  const replaced = new Set<number>();
+  // Anchors an operation in this batch replaces, and which operation: a second replacement would leave both new anchors live
+  const replaced = new Map<number, number>();
   // Anchors added earlier in this batch, by unit, path, symbol, and role
   const anchored = new Set<string>();
   const places: {
@@ -326,6 +327,8 @@ export async function checkGlean(
     role: "applies_to" | "evidence";
     commit: string | null;
     name: string;
+    /** The operation's index, for a replacement; a plain anchor lands after every replacement of the batch */
+    replacing: number | null;
   }[] = [];
   for (const [i, op] of parsed.data.ops.entries()) {
     const what = `ops.${i} ${op.op} ${op.unit}`;
@@ -410,7 +413,7 @@ export async function checkGlean(
       else {
         let q = db
           .selectFrom("unit_anchor")
-          .select("id")
+          .select(["id", "path", "symbol", "role", "commit_sha"])
           .where("unit_id", "=", u.id)
           .where("path", "=", from)
           .where("retired_at", "is", null);
@@ -419,9 +422,19 @@ export async function checkGlean(
         const name = `${from}${op.from.symbol ? ` ${op.from.symbol}` : ""}`;
         if (live.length === 1) {
           replaces = live[0]?.id ?? null;
+          // Two live anchors on one place cannot both exist, and replacing a place with itself moves nothing
+          const held = live[0];
+          if (
+            held &&
+            held.commit_sha === null &&
+            held.path === repoPath(op.to.path) &&
+            held.symbol === (op.to.symbol ?? null) &&
+            held.role === op.to.role
+          )
+            errors.push(`${what}: the anchor on ${name} is already that place`);
           if (replaces !== null && replaced.has(replaces))
             errors.push(`${what}: another operation in this batch already replaces ${name}`);
-          if (replaces !== null) replaced.add(replaces);
+          if (replaces !== null) replaced.set(replaces, i);
         } else if (!live.length) errors.push(`${what}: no live anchor on ${name}`);
         else errors.push(`${what}: ${live.length} live anchors on ${name}; give from.symbol`);
       }
@@ -435,7 +448,16 @@ export async function checkGlean(
       const k = [u.id, rel, dest.symbol ?? "", dest.role, commit ?? ""].join("\0");
       if (anchored.has(k)) errors.push(`${what}: another operation in this batch already anchors ${name}`);
       anchored.add(k);
-      places.push({ what, unit: u.id, rel, symbol: dest.symbol ?? null, role: dest.role, commit, name });
+      places.push({
+        what,
+        unit: u.id,
+        rel,
+        symbol: dest.symbol ?? null,
+        role: dest.role,
+        commit,
+        name,
+        replacing: op.op === "replace_anchor" ? i : null,
+      });
     }
     if (
       op.op === "retract_evidence" ||
@@ -446,6 +468,13 @@ export async function checkGlean(
       const got = await span(op.reason_source, op.reason_quote, what);
       if (got && got.s.author_kind !== "owner")
         errors.push(`${what}: only the owner's words can retract, withdraw, or resolve`);
+    }
+    // A superseded record is no longer the live answer: only its successors' withdrawal brings it back, and nothing else moves it
+    if (op.op === "withdraw") {
+      if (u.lifecycle === "superseded")
+        errors.push(
+          `${what}: ${op.unit} is superseded, so there is nothing live to withdraw (withdraw the record that replaced it, if that one no longer holds)`,
+        );
     }
     if (op.op === "resolve_conflict") {
       const open = await db
@@ -489,8 +518,10 @@ export async function checkGlean(
     }
     ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces });
   }
-  // Checked after every op is read: an anchor any op of this batch retires no longer counts as live
+  // Checked after every op is read. Replacements run first, in their order, each placing its new anchor before retiring the old one, and
+  // plain anchors after them: an anchor retired by then no longer counts as live
   for (const x of places) {
+    const gone = [...replaced].filter(([, by]) => x.replacing === null || by < x.replacing).map(([id]) => id);
     let q = db
       .selectFrom("unit_anchor")
       .select("id")
@@ -498,11 +529,17 @@ export async function checkGlean(
       .where("path", "=", x.rel)
       .where("role", "=", x.role)
       .where("retired_at", "is", null)
-      .where("id", "not in", [...replaced, -1]);
+      .where("id", "not in", [...gone, -1]);
     q = x.symbol ? q.where("symbol", "=", x.symbol) : q.where("symbol", "is", null);
     q = x.commit ? q.where("commit_sha", "=", x.commit) : q.where("commit_sha", "is", null);
-    if (await q.executeTakeFirst())
-      errors.push(`${x.what}: the record already has a live anchor on ${x.name}`);
+    const held = await q.executeTakeFirst();
+    // A replacement onto its own place is refused above
+    if (!held || (x.replacing !== null && replaced.get(held.id) === x.replacing)) continue;
+    errors.push(
+      replaced.has(held.id)
+        ? `${x.what}: a later operation of this batch moves the anchor off ${x.name}; put that replacement before this one, or make the moves in two saves`
+        : `${x.what}: the record already has a live anchor on ${x.name}`,
+    );
   }
   return { errors, problems, units, ops };
 }
@@ -512,7 +549,7 @@ export async function checkGlean(
  * and the last forgotten revision, which new text numbers after.
  */
 async function forgottenExcerpt(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   x: Excerpt,
 ): Promise<{ same: boolean; last: number }> {
@@ -543,6 +580,7 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
     .where("project_id", "=", projectId)
     .where("kind", "=", "file_excerpt")
     .where("external_id", "=", external)
+    .where("session_id", "is", null)
     .orderBy("revision", "desc")
     .executeTakeFirst();
   const forgotten = await forgottenExcerpt(trx, projectId, x);
@@ -551,14 +589,15 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
   if (forgotten.same)
     throw new Error(`the owner forgot ${x.path} lines ${x.lines.join("-")}; cite something else`);
   const now = iso(Date.now());
-  const row = await trx
-    .insertInto("source")
+  const revision = Math.max(found?.revision ?? 0, forgotten.last) + 1;
+  await trx
+    .insertInto("ingest_source")
     .values({
       project_id: projectId,
       kind: "file_excerpt",
       artifact: `file:${x.path}`,
       external_id: external,
-      revision: Math.max(found?.revision ?? 0, forgotten.last) + 1,
+      revision,
       author_kind: "person",
       created_at: now,
       captured_at: now,
@@ -574,9 +613,8 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
       blob_sha: x.blob,
       indexed: 1,
     })
-    .returning("id")
-    .executeTakeFirstOrThrow();
-  return row.id;
+    .execute();
+  return itemId(trx, projectId, "file_excerpt", external, revision);
 }
 
 /** Moves a unit to a state, or leaves it when the schema's rules refuse (returns the refusal). */
@@ -637,7 +675,12 @@ export async function saveGlean(
     return { id: s.id, start: at[0], end: at[1] };
   };
   const touched = new Map<number, string>();
-  for (const p of c.ops) {
+  // Replacements retire before new anchors land, so a batch that anchors a place another op moves off never holds two live anchors on it
+  const ordered = [
+    ...c.ops.filter((p) => p.input.op === "replace_anchor"),
+    ...c.ops.filter((p) => p.input.op !== "replace_anchor"),
+  ];
+  for (const p of ordered) {
     const op = p.input;
     touched.set(p.unitId, op.unit);
     if (op.op === "add_evidence") {
@@ -694,6 +737,30 @@ export async function saveGlean(
       refresh(c.units.facts, rel);
       const symbol = to.symbol && !symbolMasked(c.units.facts, rel, to.symbol) ? to.symbol : null;
       const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
+      // When the anchor about to be retired is an active implementation's code proof, the unit goes back to candidate first (the schema
+      // refuses the reverse order) and is judged again below
+      if (op.op === "replace_anchor") {
+        const held = await trx
+          .selectFrom("unit_anchor as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .select(["u.kind", "u.lifecycle", "a.role", "a.commit_sha", "a.edit_observation_id"])
+          .where("a.id", "=", p.replaces ?? -1)
+          .executeTakeFirst();
+        if (
+          held?.kind === "implementation" &&
+          held.lifecycle === "active" &&
+          held.role === "evidence" &&
+          (held.commit_sha !== null || held.edit_observation_id !== null)
+        )
+          await move(
+            trx,
+            p.unitId,
+            "candidate",
+            "glean: code anchor replaced, support checked again",
+            null,
+            runId,
+          );
+      }
       const added = await trx
         .insertInto("unit_anchor")
         .values({
@@ -717,29 +784,6 @@ export async function saveGlean(
           .where("id", "=", p.replaces ?? -1)
           .where("retired_at", "is", null)
           .execute();
-      // When the retired anchor was an active implementation's code proof, it goes back to candidate and is judged again below
-      if (op.op === "replace_anchor") {
-        const held = await trx
-          .selectFrom("unit_anchor as a")
-          .innerJoin("unit as u", "u.id", "a.unit_id")
-          .select(["u.kind", "u.lifecycle", "a.role", "a.commit_sha", "a.edit_observation_id"])
-          .where("a.id", "=", p.replaces ?? -1)
-          .executeTakeFirst();
-        if (
-          held?.kind === "implementation" &&
-          held.lifecycle === "active" &&
-          held.role === "evidence" &&
-          (held.commit_sha !== null || held.edit_observation_id !== null)
-        )
-          await move(
-            trx,
-            p.unitId,
-            "candidate",
-            "glean: code anchor replaced, support checked again",
-            null,
-            runId,
-          );
-      }
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
     } else {
       const reason = await spanOf(op.reason_source, op.reason_quote);
@@ -773,9 +817,38 @@ export async function saveGlean(
         continue;
       }
       if (op.op === "withdraw") {
+        touched.delete(p.unitId);
+        // A record of this save may have become active and superseded it just above: then nothing live is left to withdraw
+        const held = await trx
+          .selectFrom("unit")
+          .select("lifecycle")
+          .where("id", "=", p.unitId)
+          .executeTakeFirstOrThrow();
+        if (held.lifecycle === "superseded") {
+          changed.push(`${op.unit}: superseded by a record of this save, so not withdrawn`);
+          continue;
+        }
+        const replaced = await trx
+          .selectFrom("unit_link as l")
+          .innerJoin("unit as o", "o.id", "l.to_unit")
+          .select(["o.id", "o.key"])
+          .where("l.from_unit", "=", p.unitId)
+          .where("l.kind", "=", "supersedes")
+          .where("o.lifecycle", "=", "superseded")
+          .execute();
         await move(trx, p.unitId, "withdrawn", `withdrawn: ${head(op.reason_quote, 200)}`, reason.id, runId);
         changed.push(`${op.unit}: withdrawn`);
-        touched.delete(p.unitId);
+        // The schema brings back what this record replaced; it is judged again below like any candidate
+        for (const o of replaced) {
+          const now = await trx
+            .selectFrom("unit")
+            .select("lifecycle")
+            .where("id", "=", o.id)
+            .executeTakeFirstOrThrow();
+          if (now.lifecycle !== "candidate") continue;
+          changed.push(`${o.key}: no longer superseded`);
+          touched.set(o.id, o.key);
+        }
         continue;
       }
       // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order).
@@ -833,10 +906,5 @@ export async function saveGlean(
       changed.push(`${o.key}: superseded`);
     }
   }
-  await trx
-    .updateTable("extraction_run")
-    .set({ status: "saved", finished_at: now })
-    .where("id", "=", runId)
-    .execute();
   return { units, changed };
 }

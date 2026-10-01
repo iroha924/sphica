@@ -1,9 +1,8 @@
 // The decision lane of a code review: which active records a diff touches, and whether a reviewer's verdicts about them are backed.
 // A record applies when the diff changes a path it is anchored to, or, for a record with no code location that says not to do something
 // (or to defer it), when an added line names one of its options. Candidates and superseded records never apply.
-import type { Kysely } from "kysely";
 import { z } from "zod";
-import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 
 /** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */
 export type FileDiff = { path: string; added: string[]; lines: number[]; gone?: true };
@@ -121,7 +120,7 @@ export type Applicable = {
 
 /** Active, supported, sourced records the diff touches, each with why it applies. */
 export async function selectForReview(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   files: FileDiff[],
 ): Promise<Applicable[]> {
@@ -222,7 +221,7 @@ const Findings = z.array(Finding).max(MAX_FINDINGS);
  * each applicable record gets one outcome (asked only while they fit in the findings limit), and never contradictory ones.
  */
 export async function checkFindings(
-  db: Kysely<DB>,
+  db: Reads,
   projectId: number,
   files: FileDiff[],
   raw: unknown,

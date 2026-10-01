@@ -12,7 +12,7 @@ import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
 before(() => {
@@ -131,7 +131,17 @@ test("delivery brings anchored, named, and broad records, never candidates or co
         tool_input: { file_path: path.join(repo, file) },
       });
 
-    const dates = await edit("src/dates.ts");
+    let dates = "";
+    const asked = await statements(async () => {
+      dates = await edit("src/dates.ts");
+    });
+    // Holding back records in a conflict looks links up from both ends by index: a scan of every link would run once per record
+    const conflicts = asked.filter((s) => s.includes('"unit_link"'));
+    assert.ok(conflicts.length > 0);
+    for (const s of conflicts) {
+      assert.doesNotMatch(plan(db, s), /SCAN l\b/, s);
+      assert.match(plan(db, s), /unit_link_to/, s);
+    }
     assert.match(dates, /Active decisions applying to src\/dates\.ts \(current code relevance unverified\)/);
     assert.match(dates, /trace:ext-s1\/utc/);
     assert.doesNotMatch(dates, /maybe/, "a candidate is never delivered");

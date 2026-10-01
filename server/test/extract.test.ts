@@ -22,7 +22,7 @@ import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
 import { readSource } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
-import { insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
+import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-extract-home-"));
@@ -909,6 +909,8 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     const back = { unit: "glean:csv/no-notes", revision: rev(), ...pin };
     assert.equal(await checks([moveOff, back]), true);
     assert.equal(await checks([back, moveOff]), true);
+    // And it saves: the move lands first, so the place is never held twice
+    await ops([back, moveOff]);
     // Two replacements of one anchor would leave both new anchors live
     const twice = {
       unit: "glean:csv/no-notes",
@@ -918,6 +920,32 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     await assert.rejects(
       ops([twice, twice]),
       /ops\.1 .*another operation in this batch already replaces src\.ts openStore/,
+    );
+    // A chain of moves: each lands before the one after it retires its old anchor, so the move off a place comes first
+    const offOther = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      ...replace({ path: "src.ts", symbol: "other" }),
+      to: { path: "src.ts", role: "applies_to" },
+    };
+    const ontoOther = {
+      unit: "glean:csv/no-notes",
+      revision: rev(),
+      ...replace({ path: "src.ts", symbol: "openStore" }),
+    };
+    await assert.rejects(
+      ops([ontoOther, offOther]),
+      /ops\.0 .*a later operation of this batch moves the anchor off src\.ts other; put that replacement before this one, or make the moves in two saves/,
+    );
+    await ops([offOther, ontoOther]);
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select coalesce(symbol, '-') as symbol from unit_anchor where unit_id = (select id from unit where key = 'glean:csv/no-notes') and retired_at is null and path = 'src.ts' order by symbol",
+        )
+        .all()
+        .map((r) => r.symbol),
+      ["-", "other"],
     );
     await refused(
       { op: "retract_evidence", source: `s${issue}`, reason_source: `s${reply}`, reason_quote: "了解。" },
@@ -1021,7 +1049,11 @@ test("glean: a cited file excerpt is stored masked, and quotes touching masked t
       const c = await checkText(db.ingest, r, p, root, record);
       return c.ok ? saveText(db.ingest, r, p, root, record) : Promise.reject(new Error(c.text));
     };
-    await cite([1, 3], "Rotate the key before a release.");
+    const asked = await statements(() => cite([1, 3], "Rotate the key before a release."));
+    // Looking an excerpt up by its id uses the unique index of items, not a scan of the project's sources
+    const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
+    assert.ok(lookups.length > 0);
+    for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
     const rows = db.owner
       .prepare(
         "select id, revision, text, redacted, truncated from source where external_id = ? order by revision",
@@ -1138,6 +1170,214 @@ test("glean: a successor that becomes active later supersedes the record it repl
       ],
     });
     assert.deepEqual([state("glean:storage-2"), state("trace:ext-s1/storage")], ["active", "superseded"]);
+    // The replaced record is no longer live: withdrawing it is refused by name, before anything is written
+    await assert.rejects(
+      glean({
+        ops: [
+          {
+            op: "withdraw",
+            unit: "trace:ext-s1/storage",
+            revision: db.owner.prepare("select revision from unit where key = 'trace:ext-s1/storage'").get()
+              ?.revision,
+            reason_source: `s${said}`,
+            reason_quote: "Postgres に変える。",
+          },
+        ],
+      }),
+      /trace:ext-s1\/storage is superseded, so there is nothing live to withdraw/,
+    );
+    assert.equal(state("trace:ext-s1/storage"), "superseded");
+  } finally {
+    await db.done();
+  }
+});
+
+test("glean: withdrawing the successor brings back the record it replaced, and a record takes one live successor of its kind", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const old = message(db, p, { id: "o1", text: "SQLite にしよう。" });
+    const decided = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      adoption: [{ source: `s${source}`, quote }],
+      ...extra,
+    });
+    const cache = message(db, p, { id: "o2", text: "Redis を使う。" });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [decided("storage", old, "SQLite にしよう。"), decided("cache", cache, "Redis を使う。")],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, {
+      id: "g",
+      text: "Postgres にする。やっぱり Postgres はやめる。",
+      session: "g1",
+    });
+    const glean = async (record: unknown) =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, record);
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    await glean({
+      units: [decided("storage-2", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
+    });
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-2")], ["superseded", "active"]);
+    // A finding cannot replace a decision, and a second successor waits for the first to be withdrawn
+    await assert.rejects(
+      glean({
+        units: [
+          {
+            key: "note",
+            kind: "finding",
+            text: "Postgres",
+            evidence: [{ source: `s${said}`, quote: "Postgres にする。", role: "states" }],
+            supersedes: "glean:storage-2",
+          },
+        ],
+      }),
+      /a finding cannot supersede glean:storage-2, a decision/,
+    );
+    await assert.rejects(
+      glean({
+        units: [decided("storage-3", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
+      }),
+      /trace:ext-s1\/storage is already superseded/,
+    );
+    const out = await glean({
+      ops: [
+        {
+          op: "withdraw",
+          unit: "glean:storage-2",
+          revision: db.owner.prepare("select revision from unit where key = 'glean:storage-2'").get()
+            ?.revision,
+          reason_source: `s${said}`,
+          reason_quote: "やっぱり Postgres はやめる。",
+        },
+      ],
+    });
+    assert.match(out, /glean:storage-2: withdrawn/);
+    assert.match(out, /trace:ext-s1\/storage: no longer superseded/);
+    assert.match(out, /trace:ext-s1\/storage: active/);
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-2")], ["active", "withdrawn"]);
+    // Its successor withdrawn, the record can be replaced again
+    await glean({
+      units: [decided("storage-4", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
+    });
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-4")], ["superseded", "active"]);
+    // A successor still waiting for adoption holds the place too, and the refusal names it
+    // Quoting the earlier session keeps it sourced, and without adoption it waits as a candidate
+    const { adoption: _, ...unadopted } = decided("storage-5", old, "SQLite にしよう。", {
+      supersedes: "glean:storage-4",
+    });
+    await glean({ units: [unadopted] });
+    assert.equal(state("glean:storage-5"), "candidate");
+    await assert.rejects(
+      glean({ units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })] }),
+      /glean:storage-4 already has a successor, glean:storage-5 \(candidate\); withdraw it first, or supersede it instead/,
+    );
+    // A successor whose quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place
+    await glean({
+      units: [decided("cache-q", said, "引用に無い言葉。", { supersedes: "trace:ext-s1/cache" })],
+    });
+    assert.equal(
+      db.owner.prepare("select extraction from unit where key = 'glean:cache-q'").get()?.extraction,
+      "quarantined",
+    );
+    await glean({
+      units: [decided("cache-2", said, "Postgres にする。", { supersedes: "trace:ext-s1/cache" })],
+    });
+    assert.deepEqual([state("trace:ext-s1/cache"), state("glean:cache-2")], ["superseded", "active"]);
+    // In one save too: a quarantined successor takes no place from a sound one beside it
+    await glean({
+      units: [
+        decided("storage-9", said, "Postgres にする。", { supersedes: "glean:cache-2" }),
+        decided("storage-8", said, "また別の引用に無い言葉。", { supersedes: "glean:cache-2" }),
+      ],
+    });
+    assert.deepEqual([state("glean:storage-8"), state("glean:storage-9")], ["candidate", "active"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("glean: a record is withdrawn beside a successor that stays a candidate, and left alone once this save superseded it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const old = message(db, p, { id: "o1", text: "SQLite にしよう。Redis も使う。" });
+    const decided = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...extra,
+    });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [
+        decided("storage", old, "SQLite にしよう。", {
+          adoption: [{ source: `s${old}`, quote: "SQLite にしよう。" }],
+        }),
+        decided("cache", old, "Redis も使う。", {
+          adoption: [{ source: `s${old}`, quote: "Redis も使う。" }],
+        }),
+      ],
+    });
+    session(db, p, "g1");
+    const said = message(db, p, {
+      id: "g",
+      text: "SQLite はやめる。Redis もやめる。Postgres に変える。これで決まり。",
+      session: "g1",
+    });
+    const assistant = message(db, p, {
+      id: "a",
+      text: "Memcached にしましょう。",
+      speaker: "assistant",
+      session: "g1",
+    });
+    const state = (key: string) =>
+      db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+    const revision = (key: string) =>
+      db.owner.prepare("select revision from unit where key = ?").get(key)?.revision;
+    // The successor has no adoption, so it stays a candidate and replaces nothing: the owner's withdrawal of the old record stands
+    const kept = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      units: [
+        decided("cache-2", assistant, "Memcached にしましょう。", { supersedes: "trace:ext-s1/cache" }),
+      ],
+      ops: [
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/cache",
+          revision: revision("trace:ext-s1/cache"),
+          reason_source: `s${said}`,
+          reason_quote: "Redis もやめる。",
+        },
+      ],
+    });
+    assert.match(kept, /trace:ext-s1\/cache: withdrawn/);
+    assert.deepEqual([state("trace:ext-s1/cache"), state("glean:cache-2")], ["withdrawn", "candidate"]);
+    // Here the successor becomes active in the same save and supersedes the old record first: there is nothing live left to withdraw
+    const replaced = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+      units: [
+        decided("storage-2", said, "Postgres に変える。", {
+          adoption: [{ source: `s${said}`, quote: "これで決まり。" }],
+          supersedes: "trace:ext-s1/storage",
+        }),
+      ],
+      ops: [
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/storage",
+          revision: revision("trace:ext-s1/storage"),
+          reason_source: `s${said}`,
+          reason_quote: "SQLite はやめる。",
+        },
+      ],
+    });
+    assert.match(replaced, /trace:ext-s1\/storage: superseded by a record of this save, so not withdrawn/);
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-2")], ["superseded", "active"]);
   } finally {
     await db.done();
   }
@@ -1311,6 +1551,91 @@ test("glean: a retraction of words cited by the record and an option says it ret
   }
 });
 
+test("a save marks its run saved with one update: trace, glean with changes only, and glean with a new record", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    // Counts the updates of a run each save asks the database for, whatever they set; saves go in the order of their runs
+    const updates: number[] = [];
+    const counted = async (save: () => Promise<unknown>) =>
+      updates.push((await statements(save)).filter((s) => /^update "extraction_run"/.test(s)).length);
+    const runs = () =>
+      db.owner
+        .prepare("select origin, status, finished_at is not null as finished from extraction_run order by id")
+        .all()
+        .map((r, i) => [r.origin, r.status, r.finished, updates[i] ?? 0]);
+    const m = message(db, p, { id: "o1", text: "Use SQLite. It is enough." });
+    const traced = await beginTrace(db.ingest, p, "s1");
+    assert.deepEqual(runs(), [["trace", "running", 0, 0]]);
+    await counted(async () =>
+      saveText(db.ingest, traced, p, null, {
+        units: [
+          {
+            key: "db",
+            kind: "finding",
+            text: "SQLite",
+            evidence: [
+              { source: `s${m}`, quote: "Use SQLite.", role: "states" },
+              { source: `s${m}`, quote: "It is enough.", role: "explains" },
+            ],
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(runs(), [["trace", "saved", 1, 1]]);
+    session(db, p, "g1");
+    const said = message(db, p, { id: "g", text: "It is not enough. Postgres is needed.", session: "g1" });
+    const revision = () =>
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/db'").get()?.revision;
+    await counted(async () =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+        ops: [
+          {
+            op: "retract_evidence",
+            unit: "trace:ext-s1/db",
+            revision: revision(),
+            source: `s${m}`,
+            quote: "It is enough.",
+            reason_source: `s${said}`,
+            reason_quote: "It is not enough.",
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(runs().at(-1), ["glean", "saved", 1, 1]);
+    await counted(async () =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, {
+        units: [
+          {
+            key: "pg",
+            kind: "finding",
+            text: "Postgres",
+            evidence: [{ source: `s${said}`, quote: "Postgres is needed.", role: "states" }],
+          },
+        ],
+        ops: [
+          {
+            op: "add_evidence",
+            unit: "trace:ext-s1/db",
+            revision: revision(),
+            source: `s${said}`,
+            quote: "It is not enough.",
+            role: "explains",
+          },
+        ],
+      }),
+    );
+    assert.deepEqual(runs(), [
+      ["trace", "saved", 1, 1],
+      ["glean", "saved", 1, 1],
+      ["glean", "saved", 1, 1],
+    ]);
+    assert.equal(db.owner.prepare("select count(*) as n from unit where key = 'glean:pg'").get()?.n, 1);
+  } finally {
+    await db.done();
+  }
+});
+
 // An implementation is active only with code proof: replacing its commit-pinned anchor judges it again
 test("glean: replacing an implementation's only code proof puts it back to candidate", async () => {
   const db = tempDb();
@@ -1349,6 +1674,33 @@ test("glean: replacing an implementation's only code proof puts it back to candi
       ],
     });
     assert.equal(state()?.lifecycle, "candidate");
+    // Replacing an anchor with the place it already is would leave two live anchors on one place for a moment: refused by name
+    await assert.rejects(
+      saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+        ops: [
+          {
+            op: "replace_anchor",
+            unit: "trace:ext-s1/open",
+            revision: state()?.revision,
+            from: { path: "src.ts", symbol: "openStore" },
+            to: { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            source: `s${said}`,
+            quote: "場所が変わった。",
+          },
+        ],
+      }),
+      /the anchor on src\.ts openStore is already that place/,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select role, retired_at is null as live from unit_anchor order by id")
+        .all()
+        .map((a) => [a.role, a.live]),
+      [
+        ["evidence", 0],
+        ["applies_to", 1],
+      ],
+    );
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
@@ -1484,6 +1836,8 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
         },
       ],
     });
+    const updates: number[] = [];
+
     const harvest = async (n: number) => {
       const run = (await beginHarvest(db.ingest, p, n, contributor(n))).run;
       const body = db.owner
@@ -1492,7 +1846,14 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
       return {
         kind: body.author_kind,
         context: await contextText(db.ingest, run, p, null),
-        saved: await saveText(db.ingest, run, p, null, record(`s${body.id}`)),
+        saved: await (async () => {
+          let text = "";
+          const asked = await statements(async () => {
+            text = await saveText(db.ingest, run, p, null, record(`s${body.id}`));
+          });
+          updates.push(asked.filter((s) => /^update "extraction_run"/.test(s)).length);
+          return text;
+        })(),
       };
     };
     const before = await harvest(5);
@@ -1505,6 +1866,17 @@ test("harvest: the bound owner's words adopt in a pull request where they are on
     assert.match(after.context, /pr_body pr:6 by hana \(CONTRIBUTOR, the owner\)/);
     assert.match(before.context, /pr_body pr:5 by hana \(CONTRIBUTOR\) /);
     assert.match(after.saved, /harvest:6\/notes active/);
+    // Each harvest run is marked saved by one update, after its record is written
+    assert.deepEqual(
+      db.owner
+        .prepare("select status from extraction_run order by id")
+        .all()
+        .map((r, i) => [r.status, updates[i]]),
+      [
+        ["saved", 1],
+        ["saved", 1],
+      ],
+    );
   } finally {
     await db.done();
   }

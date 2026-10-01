@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type Kysely, sql } from "kysely";
+import type { ReadonlyKysely } from "kysely/readonly";
 import { checkAnchor } from "../../src/anchors.ts";
 import { askedBefore, askedText } from "../../src/asked.ts";
 import { flush, onHook } from "../../src/capture.ts";
@@ -129,7 +130,7 @@ export async function createDriver(world: World): Promise<Driver> {
   fs.writeFileSync(path.join(dir, "bin", "gh"), fakeGh(ghState), { mode: 0o755 });
   process.env.PATH = `${path.join(dir, "bin")}${path.delimiter}${saved.PATH ?? ""}`;
   cli("init", "--cwd", repo);
-  let reader: Kysely<DB> | null = null;
+  let reader: ReadonlyKysely<DB> | null = null;
   let ingest: Kysely<DB> | null = null;
   /** The ingest connection, as the record MCP server opens it */
   const writer = () => {
@@ -892,7 +893,8 @@ export async function createDriver(world: World): Promise<Driver> {
         const left = await sql<{
           n: number;
         }>`select count(*) as n from source_fts where source_fts match ${ftsQuery(e.source_index_misses)}`.execute(
-          db(),
+          // A raw statement needs kysely's executor, which the read-only type does not show; the connection itself still only reads
+          db() as unknown as Kysely<DB>,
         );
         assert.equal(Number(left.rows[0]?.n), 0, `the index still holds ${e.source_index_misses}`);
         return;

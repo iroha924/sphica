@@ -114,23 +114,133 @@ function captureAuthorizer(
   return C.SQLITE_DENY;
 }
 
-/** Only the owner's `sphica init` binds an identity: ingest runs the record server, which reads text anyone wrote. */
+/** Whether an action writes a row */
 const writes = (action: number) =>
   action === C.SQLITE_INSERT || action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE;
 
-/**
- * Only forget removes sources or writes what it removed. The no-delete triggers let a retracted row go once its reason is forgotten,
- * and the record server's code never deletes evidence or adoption, so ingest may not either.
- */
-const FORGET_ONLY = new Set(["forget_batch", "source_forgotten"]);
-const KEPT_BY_INGEST = new Set(["source", "unit_evidence", "unit_adoption"]);
+/** The statements the record server writes itself: its tables, and for an update the columns it sets. Everything else is refused. */
+const INGEST_INSERTS = new Set([
+  "project",
+  "ingest_source",
+  "extraction_run",
+  "source_processing",
+  "unit",
+  "unit_option",
+  "unit_evidence",
+  "unit_adoption",
+  "unit_link",
+  "unit_state",
+  "unit_anchor",
+  "unit_alias",
+  "field_def",
+  "unit_field",
+  "work",
+  "artifact_link",
+]);
+const RETRACTION = [
+  "retracted_at",
+  "retraction_reason",
+  "retraction_source_id",
+  "retraction_span_start",
+  "retraction_span_end",
+];
+const INGEST_UPDATES: Record<string, Set<string>> = {
+  extraction_run: new Set(["status", "finished_at"]),
+  unit_anchor: new Set(["retired_at", "replaced_by"]),
+  unit_link: new Set(["resolved_at", "resolution"]),
+  unit_evidence: new Set(RETRACTION),
+  unit_adoption: new Set(RETRACTION),
+  // The upsert of the current work
+  work: new Set(["title", "goal", "current", "next", "status", "branch", "run_id", "updated_at"]),
+};
+/** Pull request links follow the current body, so an issue it no longer closes is unlinked */
+const INGEST_DELETES = new Set(["artifact_link"]);
 
-function ingestAuthorizer(action: number, p1: string | null, p2: string | null): number {
+/**
+ * What each trigger that an ingest write can fire may write, as `<insert|update|delete> <table>`. server/test/db.test.ts compares it
+ * with the trigger bodies in the schema, so a trigger added there without an entry here fails the test, not a save.
+ * @public Read by server/test/db.test.ts.
+ */
+export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
+  ingest_source_insert: ["insert source"],
+  source_fts_ai: ["insert source_fts"],
+  source_fts_ad: ["delete source_fts"],
+  unit_state_apply: ["update unit"],
+  unit_state_restore: ["insert unit_state"],
+  ...Object.fromEntries(
+    [
+      "evidence_i",
+      "evidence_u",
+      "evidence_d",
+      "adoption_i",
+      "adoption_u",
+      "adoption_d",
+      "link_i",
+      "link_u",
+      "anchor_i",
+      "anchor_u",
+      "alias_i",
+      "field_i",
+      "field_d",
+    ].map((t) => [`unit_rev_${t}`, ["update unit"]]),
+  ),
+  unit_fts_ai: ["insert unit_fts"],
+  unit_fts_ad: ["delete unit_fts"],
+  ...Object.fromEntries(
+    ["option_i", "anchor_i", "anchor_u", "anchor_d", "alias_i", "alias_d", "field_i", "field_d"].map((t) => [
+      `unit_fts_${t}`,
+      ["delete unit_fts", "insert unit_fts"],
+    ]),
+  ),
+};
+
+const opOf = (action: number): "insert" | "update" | "delete" | undefined =>
+  action === C.SQLITE_INSERT
+    ? "insert"
+    : action === C.SQLITE_UPDATE
+      ? "update"
+      : action === C.SQLITE_DELETE
+        ? "delete"
+        : undefined;
+
+/**
+ * The record server reads text anyone wrote, so its connection writes only what its own code writes: the owner identity, a session's
+ * messages, the full-text indexes' commands, and the schema generation are out of its reach, and it deletes nothing but stale links.
+ * REPLACE's implicit delete never reaches the authorizer; scripts/check-sql.mjs keeps it out of the code instead.
+ */
+function ingestAuthorizer(
+  action: number,
+  p1: string | null,
+  p2: string | null,
+  trigger: string | null,
+): number {
   if (DDL().has(action)) return C.SQLITE_DENY;
-  if (writes(action) && (p1 === "owner_identity" || FORGET_ONLY.has(p1 ?? ""))) return C.SQLITE_DENY;
-  if (action === C.SQLITE_DELETE && KEPT_BY_INGEST.has(p1 ?? "")) return C.SQLITE_DENY;
+  const op = opOf(action);
+  if (op) {
+    const table = p1 ?? "";
+    // FTS5 writes its own tables while it runs; defensive mode refuses a statement that names them
+    if (SHADOW.test(table)) return C.SQLITE_OK;
+    if (trigger !== null)
+      return INGEST_TRIGGER_WRITES[trigger]?.includes(`${op} ${table}`) ? C.SQLITE_OK : C.SQLITE_DENY;
+    const allowed =
+      op === "insert"
+        ? INGEST_INSERTS.has(table)
+        : op === "update"
+          ? INGEST_UPDATES[table]?.has(p2 ?? "")
+          : INGEST_DELETES.has(table);
+    return allowed ? C.SQLITE_OK : C.SQLITE_DENY;
+  }
   if (action === C.SQLITE_PRAGMA) return readsDataVersion(p1, p2) ? C.SQLITE_OK : C.SQLITE_DENY;
-  return C.SQLITE_OK;
+  if (
+    action === C.SQLITE_READ ||
+    action === C.SQLITE_SELECT ||
+    action === C.SQLITE_FUNCTION ||
+    action === C.SQLITE_RECURSIVE ||
+    action === C.SQLITE_TRANSACTION ||
+    action === C.SQLITE_SAVEPOINT
+  )
+    return C.SQLITE_OK;
+  return C.SQLITE_DENY;
 }
 
 /**
@@ -142,7 +252,6 @@ const FORGET_WRITES: Record<number, Set<string>> = {
   [C.SQLITE_INSERT]: new Set(["forget_batch", "source_forgotten", "unit_state", "source_fts", "unit_fts"]),
   [C.SQLITE_DELETE]: new Set([
     "source",
-    "external_reference",
     "unit_evidence",
     "unit_adoption",
     "source_processing",
@@ -200,7 +309,8 @@ export function connectWriter(role: WriteRole, file: string = dbFile(), create =
     raw.close();
     throw e;
   }
-  if (role === "ingest") raw.setAuthorizer(ingestAuthorizer);
+  if (role === "ingest")
+    raw.setAuthorizer((action, p1, p2, _db, trigger) => ingestAuthorizer(action, p1, p2, trigger));
   else if (role === "forget") raw.setAuthorizer(forgetAuthorizer);
   else if (role === "capture") {
     let own = false;

@@ -80,9 +80,338 @@ const external = (v: Values) =>
     ...v,
   });
 
+// Removing or moving a parent row makes SQLite look for its children. Without an index led by the child's key, that is a scan of the child table
+test("every foreign key is led by an index on its own columns", () => {
+  const tables = (
+    db.owner
+      .prepare(
+        "select name from sqlite_schema where type = 'table' and sql not like 'CREATE VIRTUAL%' and name not glob '*_fts_*' and name not glob 'sqlite_*'",
+      )
+      .all() as { name: string }[]
+  ).map((t) => t.name);
+  assert.ok(tables.length >= 24, tables.join(" "));
+  const unled: string[] = [];
+  let keys = 0;
+  for (const table of tables) {
+    const parts = new Map<number, { seq: number; from: string }[]>();
+    for (const f of db.owner.prepare(`pragma foreign_key_list(${table})`).all() as {
+      id: number;
+      seq: number;
+      from: string;
+    }[])
+      parts.set(f.id, [...(parts.get(f.id) ?? []), f]);
+    const primary = (db.owner.prepare(`pragma table_info(${table})`).all() as { name: string; pk: number }[])
+      .filter((c) => c.pk)
+      .sort((a, b) => a.pk - b.pk)
+      .map((c) => c.name);
+    const indexes = (
+      db.owner.prepare(`pragma index_list(${table})`).all() as { name: string; partial: number }[]
+    ).map((i) => ({
+      columns: (db.owner.prepare(`pragma index_info(${i.name})`).all() as { name: string }[]).map(
+        (c) => c.name,
+      ),
+      // A partial index serves the key only when it leaves out nothing but the rows whose key is null
+      where: i.partial
+        ? String(one("select sql from sqlite_schema where name = ?", i.name).sql)
+            .split(/\bwhere\b/)[1]
+            ?.trim()
+        : null,
+    }));
+    for (const key of parts.values()) {
+      keys++;
+      const columns = key.sort((a, b) => a.seq - b.seq).map((c) => c.from);
+      const leads = (index: string[]) => columns.every((c) => index.slice(0, columns.length).includes(c));
+      const led =
+        leads(primary) ||
+        indexes.some(
+          (i) =>
+            leads(i.columns) &&
+            (i.where === null || (columns.length === 1 && i.where === `${columns[0]} is not null`)),
+        );
+      if (!led) unled.push(`${table} (${columns.join(", ")})`);
+    }
+  }
+  assert.ok(keys >= 45, `${keys} foreign keys`);
+  assert.deepEqual(unled, []);
+});
+
+test("an edit is observed once per turn, also outside any turn, and a record holds one live anchor per place", () => {
+  session(db, p, "s1");
+  const observe = (turn: string | null) =>
+    sql(
+      "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s1', ?, 'e', 'src/a.ts', 'tool', ?)",
+      turn,
+      now,
+    );
+  observe(null);
+  observe(null);
+  observe("t1");
+  observe("t1");
+  assert.equal(one("select count(*) as n from edit_observation").n, 2);
+  const u = unit({ key: "u1", kind: "finding" });
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  const anchor = (v: Values) =>
+    insert(db, "unit_anchor", {
+      unit_id: u,
+      path: "src/a.ts",
+      role: "applies_to",
+      run_id: runId,
+      added_at: now,
+      ...v,
+    });
+  const first = anchor({ symbol: "open", line_start: 3, line_end: 3 });
+  refuses(() => anchor({ symbol: "open", line_start: 9, line_end: 9 }), /UNIQUE constraint failed/);
+  // Without a symbol the lines tell places apart
+  anchor({ line_start: 1, line_end: 2 });
+  anchor({ line_start: 5, line_end: 6 });
+  refuses(() => anchor({ line_start: 5, line_end: 6 }), /UNIQUE constraint failed/);
+  anchor({ symbol: "open", role: "evidence" });
+  // Retired, the place is free again
+  sql("update unit_anchor set retired_at = ? where id = ?", now, first);
+  anchor({ symbol: "open" });
+});
+
+test("the small checks: lines, retraction spans and times, whole characters, dates, replacements, web addresses, and aliases", () => {
+  const src = message(db, p, { id: "m1", text: "日本語で決めた。" });
+  refuses(
+    () => external({ kind: "pr_comment", artifact: "pr:1", external_id: "c1", line_end: 3 }),
+    /constraint failed/,
+  );
+  refuses(
+    () => external({ kind: "pr_body", artifact: "pr:2", external_id: "b2", url: "javascript:alert(1)" }),
+    /constraint failed/,
+  );
+  external({ kind: "pr_body", artifact: "pr:3", external_id: "b3", url: "https://github.com/o/r/pull/3" });
+  refuses(
+    () =>
+      insert(db, "source", {
+        project_id: p,
+        kind: "session_message",
+        artifact: "session:s1",
+        external_id: "a1",
+        revision: 1,
+        session_id: "s1",
+        author_kind: "assistant",
+        created_at: now,
+        captured_at: now,
+        text: "reply",
+        original_bytes: 5,
+        content_hash: sha256("reply"),
+        indexed: 1,
+      }),
+    /constraint failed/,
+  );
+  const u = unit({ key: "u1", kind: "finding" });
+  // The first character is three bytes: a span from byte 1 starts inside it, and one ending at byte 4 ends inside the second
+  refuses(() => evidence(u, src, { span_start: 1, span_end: 6 }), /inside a character/);
+  refuses(() => evidence(u, src, { span_start: 0, span_end: 4 }), /inside a character/);
+  const e = evidence(u, src, { span_start: 0, span_end: 6 });
+  const retract = (start: number, end: number, when = now) =>
+    sql(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = ?, retraction_span_end = ? where id = ?",
+      when,
+      src,
+      start,
+      end,
+      e,
+    );
+  refuses(() => retract(-1, 3), /constraint failed/);
+  refuses(() => retract(0, 3, at("2026-01-01T00:00:00Z")), /constraint failed/);
+  refuses(() => retract(1, 3), /inside a character/);
+  // A row is never written already retracted: the retraction's own update is what checks the owner's words it cites
+  const elsewhere2 = message(db, other, { id: "o1", text: "Not here.", session: "o-s" });
+  refuses(
+    () =>
+      evidence(u, src, {
+        role: "proposes",
+        retracted_at: now,
+        retraction_reason: "wrong",
+        retraction_source_id: elsewhere2,
+        retraction_span_start: 0,
+        retraction_span_end: 3,
+      }),
+    /written live, then retracted/,
+  );
+  refuses(
+    () =>
+      evidence(u, src, {
+        role: "explains",
+        retracted_at: now,
+        retraction_reason: "wrong",
+        retraction_source_id: src,
+        retraction_span_start: 1,
+        retraction_span_end: 3,
+      }),
+    /written live, then retracted/,
+  );
+  const decided = unit({ key: "d9", kind: "decision" });
+  refuses(
+    () =>
+      adoption(decided, src, {
+        retracted_at: now,
+        retraction_reason: "wrong",
+        retraction_source_id: src,
+        retraction_span_start: 1,
+        retraction_span_end: 3,
+      }),
+    /written live, then retracted/,
+  );
+  retract(0, 3);
+  const late = unit({ key: "late", kind: "finding", created_at: at("2026-12-01T00:00:00Z") });
+  refuses(() => state(late, null, "candidate"), /comes after its unit was created/);
+  const r = run(db, p);
+  refuses(
+    () =>
+      sql(
+        "update extraction_run set status = 'saved', finished_at = ? where id = ?",
+        at("2020-01-01T00:00:00Z"),
+        r,
+      ),
+    /constraint failed/,
+  );
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  const anchor = (unitId: number, path: string) =>
+    insert(db, "unit_anchor", { unit_id: unitId, path, role: "applies_to", run_id: runId, added_at: now });
+  const a1 = anchor(u, "a.ts");
+  const elsewhere = anchor(late, "b.ts");
+  refuses(
+    () => sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, a1, a1),
+    /same record/,
+  );
+  refuses(
+    () => sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, elsewhere, a1),
+    /same record/,
+  );
+  // Written already retired, the same rule holds
+  refuses(
+    () =>
+      insert(db, "unit_anchor", {
+        unit_id: u,
+        path: "c.ts",
+        role: "applies_to",
+        run_id: runId,
+        added_at: now,
+        retired_at: now,
+        replaced_by: elsewhere,
+      }),
+    /same record/,
+  );
+  refuses(
+    () =>
+      insert(db, "unit_alias", {
+        unit_id: u,
+        terms: '["x"]',
+        content_hash: sha256("other words"),
+        run_id: runId,
+        added_at: now,
+      }),
+    /bound to the words of its unit/,
+  );
+  insert(db, "unit_alias", {
+    unit_id: u,
+    terms: '["x"]',
+    content_hash: sha256("u1"),
+    run_id: runId,
+    added_at: now,
+  });
+});
+
+test("values no release wrote are gone: other pull request events, failed or capped runs, implements links, unfetched references", () => {
+  refuses(
+    () =>
+      external({
+        kind: "pr_event",
+        artifact: "pr:1",
+        external_id: "pr:1#closed",
+        event_kind: "closed",
+        indexed: 0,
+      }),
+    /constraint failed/,
+  );
+  refuses(
+    () =>
+      insert(db, "extraction_run", {
+        project_id: p,
+        origin: "trace",
+        target: "t",
+        status: "capped",
+        started_at: now,
+      }),
+    /constraint failed/,
+  );
+  const a = unit({ key: "a", kind: "finding" });
+  const b = unit({ key: "b", kind: "finding" });
+  refuses(
+    () =>
+      insert(db, "unit_link", {
+        from_unit: a,
+        to_unit: b,
+        kind: "implements",
+        run_id: Number(one("select run_id from unit where id = ?", a).run_id),
+        added_at: now,
+      }),
+    /constraint failed/,
+  );
+  assert.equal(one("select count(*) as n from sqlite_schema where name = 'external_reference'").n, 0);
+  assert.deepEqual(
+    (db.owner.prepare("pragma table_info(extraction_run)").all() as { name: string }[]).filter(
+      (c) => c.name === "reason",
+    ),
+    [],
+  );
+});
+
+test("the record server writes a source through a view that cannot take a session message", () => {
+  session(db, p, "s1");
+  const row = (v: Values) =>
+    sql(
+      `insert into ingest_source (${Object.keys(v).join(", ")}) values (${Object.keys(v)
+        .map(() => "?")
+        .join(", ")})`,
+      ...Object.values(v),
+    );
+  const item = {
+    project_id: p,
+    kind: "pr_body",
+    artifact: "pr:1",
+    external_id: "pr:1",
+    revision: 1,
+    author_kind: "person",
+    created_at: now,
+    captured_at: now,
+    text: "Use SQLite",
+    original_bytes: 10,
+    content_hash: sha256("Use SQLite"),
+    indexed: 1,
+  };
+  row(item);
+  assert.deepEqual(
+    { ...one("select kind, session_id, truncated, redacted from source where external_id = 'pr:1'") },
+    {
+      kind: "pr_body",
+      session_id: null,
+      truncated: 0,
+      redacted: 0,
+    },
+  );
+  // The owner's words come only through capture: a session message cannot be written here, nor claim a session
+  refuses(
+    () =>
+      row({
+        ...item,
+        kind: "session_message",
+        artifact: "session:s1",
+        external_id: "m9",
+        author_kind: "owner",
+      }),
+    /constraint failed/,
+  );
+  refuses(() => row({ ...item, external_id: "pr:2", session_id: "s1" }), /no column named session_id/);
+});
+
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 4);
+  assert.equal(one("pragma user_version").user_version, 5);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -173,8 +502,45 @@ test("file excerpts need a normalized repository path, both line bounds, and hex
       ...extra,
     });
   excerpt("docs/運用メモ.md");
-  for (const bad of ["C:\\Windows\\win.ini", "../x", "/etc/passwd", "a//b", "./a", "a/./b", "a\\b"])
+  for (const bad of [
+    "C:\\Windows\\win.ini",
+    "../x",
+    "/etc/passwd",
+    "a//b",
+    "./a",
+    "a/./b",
+    "a\\b",
+    "a/.",
+    "src/a\u0001.ts",
+    "a\u007f",
+    "a\u0085b",
+  ])
     refuses(() => excerpt(bad), /constraint failed/);
+  // Edit observations and anchors take the same rule: an anchor meets an observation by its exact path
+  session(db, p, "s1");
+  const u = unit({ key: "paths", kind: "finding" });
+  for (const bad of ["a//b", "./a", "a/./b", "src/a\u0001.ts", "a\u007f", "a\u009f", "a/.."]) {
+    refuses(
+      () =>
+        sql(
+          "insert into edit_observation (session_id, turn_id, path, via, observed_at) values ('s1', 't', ?, 'tool', ?)",
+          bad,
+          now,
+        ),
+      /constraint failed/,
+    );
+    refuses(
+      () =>
+        insert(db, "unit_anchor", {
+          unit_id: u,
+          path: bad,
+          role: "applies_to",
+          run_id: Number(one("select run_id from unit where id = ?", u).run_id),
+          added_at: now,
+        }),
+      /constraint failed/,
+    );
+  }
   refuses(() => excerpt("src/a.ts", { line_end: null }), /constraint failed/);
   refuses(() => excerpt("src/b.ts", { commit_sha: "G".repeat(40) }), /constraint failed/);
 });
@@ -193,6 +559,211 @@ test("units start as candidates and change lifecycle only through state events t
   refuses(() => sql("update unit set text = 'x' where id = ?", u), /never rewritten/);
   refuses(() => sql("update unit_state set to_state = 'candidate' where unit_id = ?", u), /append-only/);
   refuses(() => state(u, "candidate", "withdrawn"), /from_state must be the current lifecycle/);
+});
+
+test("what a unit was saved with stays as saved: a quarantined unit is never marked supported, and revision rises only by one", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit({ key: "u1", kind: "decision", no_code_surface: "a policy, no code" });
+  state(u, null, "candidate");
+  evidence(u, src);
+  adoption(u, src);
+  state(u, "candidate", "active");
+  refuses(() => sql("update unit set no_code_surface = null where id = ?", u), /never rewritten/);
+  refuses(
+    () => sql("update unit set created_at = ? where id = ?", at("2020-01-01T00:00:00Z"), u),
+    /never rewritten/,
+  );
+  const revision = Number(one("select revision from unit where id = ?", u).revision);
+  refuses(() => sql("update unit set revision = 1 where id = ?", u), /rises by one/);
+  refuses(() => sql("update unit set revision = revision + 2 where id = ?", u), /rises by one/);
+  refuses(() => sql("update unit set revision = revision where id = ?", u), /rises by one/);
+  assert.equal(one("select revision from unit where id = ?", u).revision, revision);
+  // The path a quarantined or unsourced unit would take to become active: marked supported or sourced while still a candidate
+  const q = unit({
+    key: "u2",
+    kind: "finding",
+    extraction: "quarantined",
+    extraction_reason: "quote not found",
+  });
+  state(q, null, "candidate");
+  refuses(
+    () => sql("update unit set extraction = 'supported', extraction_reason = null where id = ?", q),
+    /never rewritten/,
+  );
+  refuses(() => sql("update unit set extraction_reason = 'other' where id = ?", q), /never rewritten/);
+  const n = unit({ key: "u3", kind: "finding", unsourced: 1 });
+  refuses(() => sql("update unit set unsourced = 0 where id = ?", n), /never rewritten/);
+  // Relations still raise the revision, one step at a time
+  evidence(q, src);
+  assert.equal(one("select revision from unit where id = ?", q).revision, 3);
+});
+
+test("a lifecycle moves only along the listed transitions, and withdrawn is final", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const fresh = unit({ key: "fresh", kind: "finding" });
+  evidence(fresh, src);
+  refuses(() => state(fresh, null, "active"), /first state of a unit is candidate/);
+  refuses(() => state(fresh, "withdrawn", "candidate"), /first state of a unit is candidate/);
+  const old = unit({ key: "old", kind: "finding" });
+  evidence(old, src);
+  state(old, null, "candidate");
+  refuses(() => state(old, null, "candidate"), /current lifecycle/);
+  refuses(() => state(old, "candidate", "candidate"), /not a lifecycle change/);
+  state(old, "candidate", "active");
+  refuses(() => state(old, "active", "active"), /not a lifecycle change/);
+  const next = unit({ key: "next", kind: "finding" });
+  evidence(next, src);
+  state(next, null, "candidate");
+  insert(db, "unit_link", {
+    from_unit: next,
+    to_unit: old,
+    kind: "supersedes",
+    run_id: Number(one("select run_id from unit where id = ?", next).run_id),
+    added_at: now,
+  });
+  // A successor that is not active yet replaces nothing
+  refuses(() => state(old, "active", "superseded"), /needs a supersedes link from an active successor/);
+  state(next, "candidate", "active");
+  state(old, "active", "superseded");
+  // Two live answers: the old one cannot come back beside its successor
+  refuses(() => state(old, "superseded", "active"), /not a lifecycle change/);
+  refuses(() => state(old, "superseded", "withdrawn"), /not a lifecycle change/);
+  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
+  state(next, "active", "candidate");
+  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
+  state(next, "candidate", "withdrawn");
+  for (const to of ["candidate", "active", "superseded"])
+    refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
+  // Its last live successor withdrawn, the old record is a candidate again, by a state the schema writes
+  assert.deepEqual(
+    {
+      ...one(
+        "select from_state, to_state, reason from unit_state where unit_id = ? order by id desc limit 1",
+        old,
+      ),
+    },
+    { from_state: "superseded", to_state: "candidate", reason: "its successor was withdrawn" },
+  );
+  state(old, "candidate", "active");
+  state(old, "active", "withdrawn");
+  assert.deepEqual(
+    [old, next].map((u) => one("select lifecycle from unit where id = ?", u).lifecycle),
+    ["withdrawn", "withdrawn"],
+  );
+});
+
+test("a record has one live successor at a time, of a kind that can replace it", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const link = (from: number, to: number) =>
+    insert(db, "unit_link", {
+      from_unit: from,
+      to_unit: to,
+      kind: "supersedes",
+      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
+      added_at: now,
+    });
+  const made = (key: string, kind: string) => {
+    const u = unit({ key, kind });
+    evidence(u, src);
+    state(u, null, "candidate");
+    return u;
+  };
+  const old = made("old", "decision");
+  refuses(() => link(made("finding", "finding"), old), /supersedes one of its own kind/);
+  const first = made("first", "constraint");
+  link(first, old);
+  // A candidate successor holds the place: a second one would make two answers once both are adopted
+  const second = made("second", "decision");
+  refuses(() => link(second, old), /already has a successor that is not withdrawn/);
+  state(first, "candidate", "withdrawn");
+  link(second, old);
+  // A quarantined or unsourced successor can never become active or be withdrawn, so it takes no place
+  const other = made("other", "finding");
+  const quarantined = unit({
+    key: "q",
+    kind: "finding",
+    extraction: "quarantined",
+    extraction_reason: "quote not found",
+  });
+  state(quarantined, null, "candidate");
+  link(quarantined, other);
+  const unsourced = unit({ key: "n", kind: "finding", unsourced: 1 });
+  state(unsourced, null, "candidate");
+  link(unsourced, other);
+  const sourced = made("sourced", "finding");
+  link(sourced, other);
+  // Its only live successor withdrawn, the record comes back, though the quarantined and unsourced ones still point at it
+  state(other, "candidate", "active");
+  state(sourced, "candidate", "active");
+  state(other, "active", "superseded");
+  state(sourced, "active", "withdrawn");
+  assert.equal(one("select lifecycle from unit where id = ?", other).lifecycle, "candidate");
+  // And from there a superseded record with only quarantined or unsourced successors left may be moved back by hand too
+  state(other, "candidate", "withdrawn");
+  assert.deepEqual(
+    db.owner
+      .prepare("select from_unit from unit_link where to_unit = ? order by from_unit")
+      .all(old)
+      .map((r) => r.from_unit),
+    [first, second],
+    "the withdrawn successor's link stays",
+  );
+});
+
+test("support is judged by one rule: a retraction or a retired anchor that takes it away is refused while the unit is active", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const retract = (id: number) =>
+    sql(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where id = ?",
+      now,
+      src,
+      id,
+    );
+  // Evidence on an option supports the option: left alone with it, the decision has none of its own
+  const d = unit({ key: "d1", kind: "decision" });
+  const option = insert(db, "unit_option", { unit_id: d, position: 1, text: "SQLite", outcome: "chosen" });
+  const own = evidence(d, src);
+  evidence(d, src, { option_id: option });
+  adoption(d, src);
+  state(d, null, "candidate");
+  state(d, "candidate", "active");
+  refuses(() => retract(own), /back to candidate before retracting its last evidence/);
+  state(d, "active", "candidate");
+  retract(own);
+  refuses(() => state(d, "candidate", "active"), /needs unretracted evidence and adoption/);
+  // An implementation's proof can be a commit-pinned anchor: retiring it is the same loss
+  const i = unit({ key: "i1", kind: "implementation" });
+  evidence(i, src, { role: "implements" });
+  const runId = Number(one("select run_id from unit where id = ?", i).run_id);
+  const anchor = (path: string, commit: string | null) =>
+    insert(db, "unit_anchor", {
+      unit_id: i,
+      path,
+      role: "evidence",
+      commit_sha: commit,
+      run_id: runId,
+      added_at: now,
+    });
+  const proof = anchor("src/db.ts", "a".repeat(40));
+  const plain = anchor("src/other.ts", null);
+  state(i, null, "candidate");
+  state(i, "candidate", "active");
+  const retire = (id: number) => sql("update unit_anchor set retired_at = ? where id = ?", now, id);
+  retire(plain);
+  refuses(() => retire(proof), /back to candidate before retiring its last code anchor/);
+  state(i, "active", "candidate");
+  retire(proof);
+  refuses(() => state(i, "candidate", "active"), /needs code or commit evidence/);
+  assert.deepEqual(
+    db.owner
+      .prepare("select unit_id, missing from unit_support where unit_id in (?, ?) order by unit_id")
+      .all(d, i)
+      .map((r) => r.missing),
+    [
+      "an active decision or constraint needs unretracted evidence and adoption",
+      "an active implementation needs code or commit evidence",
+    ],
+  );
 });
 
 test("an unsourced or quarantined unit never becomes active", () => {
@@ -547,7 +1118,7 @@ test("a state change comes from exactly one of a run or a forget batch of the un
   assert.equal(one("select lifecycle from unit where id = ?", u).lifecycle, "candidate");
 });
 
-test("only a retracted row whose retraction reason was forgotten can be removed, and removing it raises the unit's revision", () => {
+test("a retracted row goes with the source of its retraction reason, never on its own, and going raises the unit's revision", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const reason = message(db, p, { id: "m2", text: "That was wrong." });
   const u = unit({ key: "u1", kind: "decision" });
@@ -562,13 +1133,146 @@ test("only a retracted row whose retraction reason was forgotten can be removed,
   );
   const before = Number(one("select revision from unit where id = ?", u).revision);
   refuses(() => sql("delete from unit_evidence where unit_id = ? and role = 'states'", u), /never deleted/);
-  tombstone(reason, forgetBatch());
   refuses(() => sql("delete from unit_evidence where unit_id = ? and role = 'explains'", u), /never deleted/);
   refuses(() => sql("delete from unit_adoption where unit_id = ?", u), /never deleted/);
-  sql("delete from unit_evidence where unit_id = ? and role = 'states'", u);
+  // Removing the reason's source takes the row it explained, and nothing else
+  sql("delete from source where id = ?", reason);
+  assert.deepEqual(
+    db.owner
+      .prepare("select role from unit_evidence where unit_id = ? order by id")
+      .all(u)
+      .map((r) => r.role),
+    ["explains"],
+  );
   assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 1);
   sql("delete from source where id = ?", src);
   assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 3);
+});
+
+test("a run changes once, when it finishes", () => {
+  session(db, p, "s1");
+  const r = insert(db, "extraction_run", {
+    project_id: p,
+    origin: "trace",
+    target: "session:s1",
+    session_id: "s1",
+    status: "running",
+    started_at: now,
+  });
+  refuses(() => sql("update extraction_run set target = 'session:other' where id = ?", r), /changes once/);
+  sql("update extraction_run set status = 'saved', finished_at = ? where id = ?", now, r);
+  refuses(
+    () => sql("update extraction_run set status = 'running', finished_at = null where id = ?", r),
+    /changes once/,
+  );
+  refuses(
+    () => sql("update extraction_run set finished_at = ? where id = ?", at("2026-09-28T00:00:00Z"), r),
+    /changes once/,
+  );
+  refuses(() => sql("update extraction_run set session_id = null where id = ?", r), /changes once/);
+  assert.deepEqual(
+    { ...one("select status, finished_at from extraction_run where id = ?", r) },
+    { status: "saved", finished_at: now },
+  );
+});
+
+test("a delete takes what belongs to the deleted row: a whole project, or a session nothing cites; a cited session is refused", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const u = unit({ key: "u1", kind: "decision" });
+  evidence(u, src);
+  adoption(u, src);
+  state(u, null, "candidate");
+  state(u, "candidate", "active");
+  // A second session holds only what nothing cites: its message, an edit, a running run and a saved one, a delivery
+  session(db, p, "s2");
+  message(db, p, { id: "m2", text: "just talk", session: "s2" });
+  sql(
+    "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values ('s2', 't', 'e', 'src/a.ts', 'tool', ?)",
+    now,
+  );
+  for (const status of ["running", "saved"])
+    insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "session:s2",
+      session_id: "s2",
+      status,
+      started_at: now,
+    });
+  sql("insert into delivery (session_id, event, outcome, at) values ('s2', 'prompt', 'nothing', ?)", now);
+  refuses(() => sql("delete from session where id = 's1'"), /records cite this session/);
+  // Each way a record can cite a session keeps it: adoption, a retraction reason, a state's source, a field, and an anchor on its edit
+  const cited = (name: string, cite: (message: number, sessionId: string) => void) => {
+    const said = message(db, p, { id: `c-${name}`, text: "Use SQLite. Decided.", session: `c-${name}` });
+    cite(said, `c-${name}`);
+    refuses(() => sql("delete from session where id = ?", `c-${name}`), /records cite this session/);
+  };
+  const other = unit({ key: "u2", kind: "decision" });
+  evidence(other, src);
+  cited("adoption", (m) => adoption(other, m));
+  cited("retraction", (m) =>
+    sql(
+      "update unit_evidence set retracted_at = ?, retraction_reason = 'wrong', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?",
+      now,
+      m,
+      other,
+    ),
+  );
+  cited("state", (m) =>
+    sql(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, null, 'candidate', ?, 'r', ?, (select run_id from unit where id = ?))",
+      other,
+      now,
+      m,
+      other,
+    ),
+  );
+  cited("field", (m) =>
+    insert(db, "field_def", {
+      project_id: p,
+      name: "tenant",
+      type: "text",
+      label: "Tenant",
+      description: "Who it affects",
+      source_id: m,
+      span_start: 0,
+      span_end: 3,
+      run_id: run(db, p),
+      added_at: now,
+    }),
+  );
+  cited("anchor", (_, sessionId) => {
+    sql(
+      "insert into capture_edit (session_id, turn_id, tool_event_id, path, via, observed_at) values (?, 't', 'e', 'src/b.ts', 'tool', ?)",
+      sessionId,
+      now,
+    );
+    insert(db, "unit_anchor", {
+      unit_id: other,
+      path: "src/b.ts",
+      role: "applies_to",
+      edit_observation_id: Number(one("select id from edit_observation where session_id = ?", sessionId).id),
+      run_id: Number(one("select run_id from unit where id = ?", other).run_id),
+      added_at: now,
+    });
+  });
+  sql("delete from session where id = 's2'");
+  assert.equal(one("select count(*) as n from source where session_id = 's2'").n, 0);
+  assert.equal(one("select count(*) as n from edit_observation where session_id = 's2'").n, 0);
+  assert.equal(
+    one("select count(*) as n from extraction_run where target = 'session:s2' and session_id is null").n,
+    2,
+  );
+  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
+  // A whole project goes, cited or not
+  sql("delete from project where id = ?", p);
+  const left = (table: string) => Number(one(`select count(*) as n from ${table}`).n);
+  assert.deepEqual(
+    ["session", "source", "unit", "unit_evidence", "unit_adoption", "unit_state", "delivery"].map(left),
+    [0, 0, 0, 0, 0, 0, 0],
+  );
+  assert.equal(one("select count(*) as n from extraction_run where project_id = ?", p).n, 0);
+  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
 });
 
 test("tombstone: capture skips a message the owner forgot, and stores it again only with other text", () => {

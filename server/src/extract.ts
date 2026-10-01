@@ -4,7 +4,7 @@
 import crypto from "node:crypto";
 import type { Kysely } from "kysely";
 import { flush, TOOL_FLUSH_BUDGET_MS } from "./capture.ts";
-import { inTransaction } from "./db.ts";
+import { inTransaction, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import {
   type Get,
@@ -20,7 +20,7 @@ import { checkGlean, prepareGlean, saveGlean } from "./glean.ts";
 import { HOSTS, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import type { Place } from "./project.ts";
-import { checkRecord, prepareRecord, saveRecord, type Target } from "./record.ts";
+import { checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "./record.ts";
 import type { Probe } from "./repo-facts.ts";
 import { plural } from "./text.ts";
 import {
@@ -51,11 +51,7 @@ const shownTo = new Map<string, { sources: Set<number>; cursors: Set<string> }>(
 const SHOWN_RUNS = 100;
 
 /** Sessions of the project with owner messages not traced yet, as text: recent ones first, then the older ones apart. */
-export async function pendingText(
-  db: Kysely<DB>,
-  projectId: number,
-  now: Date = new Date(),
-): Promise<string> {
+export async function pendingText(db: Reads, projectId: number, now: Date = new Date()): Promise<string> {
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const [recent, older] = await Promise.all([
     pendingSessions(db, projectId, "recent", now),
@@ -96,7 +92,7 @@ export async function pendingText(
  * The session of this project a trace or glean is about: a session id from pending, or the host's session id (Claude Code's
  * CLAUDE_SESSION_ID, Codex's CODEX_THREAD_ID) given by the Skill. Only sessions captured in this project are accepted.
  */
-async function sessionOf(db: Kysely<DB>, projectId: number, given: string | undefined): Promise<string> {
+async function sessionOf(db: Reads, projectId: number, given: string | undefined): Promise<string> {
   const external = given ?? process.env.CLAUDE_CODE_SESSION_ID ?? process.env.CODEX_THREAD_ID;
   if (!external) throw new Error("Pass the session: an id from trace_pending, or this session's id");
   const candidates = [external, ...HOSTS.map((h) => sessionId(projectId, h, external))];
@@ -155,7 +151,7 @@ export async function beginHarvest(
 }
 
 /** The run behind an id, refused when it belongs to another project or was saved already. */
-async function bound(db: Kysely<DB>, id: string, projectId: number): Promise<Run> {
+async function bound(db: Reads, id: string, projectId: number): Promise<Run> {
   const run = await runOf(db, id);
   if (!run) throw new Error(`No run ${id.slice(0, 40)}. Begin again`);
   if (run.project_id !== projectId) throw new Error("This run belongs to another project");
@@ -199,7 +195,7 @@ export async function gleanFetch(
 
 /** The key namespace, the sources the run may mark as looked at, and what context prints: a heading, one entry per source, and a tail. */
 async function scopeOf(
-  db: Kysely<DB>,
+  db: Reads,
   run: Run,
   root: string | null,
 ): Promise<{
@@ -299,7 +295,7 @@ async function scopeOf(
  * and only the last carries the edits, fields, and live records, so an agent has to read to the end to have them.
  */
 export async function contextText(
-  db: Kysely<DB>,
+  db: Reads,
   id: string,
   projectId: number,
   root: string | null,
@@ -411,7 +407,7 @@ export async function contextText(
 
 /** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
 export async function checkText(
-  db: Kysely<DB>,
+  db: Reads,
   id: string,
   projectId: number,
   root: string | null,
@@ -486,6 +482,7 @@ export async function saveText(
               scope.looked.filter((s) => shown.has(s) || cited.has(s)),
             );
           });
+    await finishRun(trx, run.id);
     return [
       ...saved.active.map((k) => `✓ ${k} active`),
       ...saved.superseded.map((k) => `✓ ${k} superseded`),

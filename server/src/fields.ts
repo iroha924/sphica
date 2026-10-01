@@ -1,8 +1,7 @@
 // The fields the owner defined for this project, as one Markdown table: what each tracks and how many records carry a value, so the
 // owner can judge whether the trial is worth keeping. Every cell is text people or agents wrote, so it is flattened and its pipes escaped.
 
-import type { Kysely } from "kysely";
-import type { DB } from "./db-types.ts";
+import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
 
@@ -13,7 +12,7 @@ import { inline } from "./panel.ts";
 const cell = (s: string) =>
   [...inline(s)].slice(0, 200).join("").replaceAll("\\", "\\\\").replaceAll("|", "\\|");
 
-export async function fieldsTable(db: Kysely<DB>, projectId: number): Promise<string> {
+export async function fieldsTable(db: Reads, projectId: number): Promise<string> {
   const defs = await db
     .selectFrom("field_def as d")
     .innerJoin("source as s", "s.id", "d.source_id")
@@ -61,6 +60,6 @@ export async function fieldsTable(db: Kysely<DB>, projectId: number): Promise<st
 }
 
 /** The table as the read server returns it: wrapped as past records, since every cell is text someone wrote. */
-export async function fieldsText(db: Kysely<DB>, projectId: number): Promise<string> {
+export async function fieldsText(db: Reads, projectId: number): Promise<string> {
   return framed(await fieldsTable(db, projectId));
 }

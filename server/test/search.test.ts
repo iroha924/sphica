@@ -11,7 +11,7 @@ import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
   const t: Target = {
@@ -86,7 +86,13 @@ test("search keeps records holding most of the question's words, filters them, a
     assert.deepEqual(await keys("CI push", { kinds: ["decision"] }), []);
     assert.deepEqual(await keys("pnpm", { lifecycles: ["active"] }), []);
     // Kind and lifecycle filters hold for successors too; a path filter still brings the successor of a record anchored there
-    assert.deepEqual(await keys("pnpm", { lifecycles: ["superseded"] }), ["trace:ext-s1/pnpm"]);
+    const found = await statements(async () => {
+      assert.deepEqual(await keys("pnpm", { lifecycles: ["superseded"] }), ["trace:ext-s1/pnpm"]);
+    });
+    // A superseded hit's successors are found through the index on the unit a link points at
+    const successors = found.filter((s) => s.includes('"unit_link"'));
+    assert.ok(successors.length > 0);
+    for (const s of successors) assert.match(plan(db, s), /SEARCH l USING (COVERING )?INDEX unit_link_to/, s);
     assert.deepEqual(
       await keys("pnpm", { kinds: ["finding", "decision"], lifecycles: ["superseded", "active"] }),
       ["trace:ext-s1/npm", "trace:ext-s1/pnpm"],
@@ -162,7 +168,14 @@ test("read shows cited words and who said them, links, history, and each anchor 
         },
       ],
     });
-    const text = (await readUnit(db.reader, p, "trace:ext-s1/storage", root)) ?? "";
+    let text = "";
+    const read = await statements(async () => {
+      text = (await readUnit(db.reader, p, "trace:ext-s1/storage", root)) ?? "";
+    });
+    // Reading a record finds its links from either end by index
+    const links = read.filter((s) => s.includes('"unit_link"'));
+    assert.ok(links.length > 0);
+    for (const s of links) assert.doesNotMatch(plan(db, s), /SCAN l\b/, s);
     for (const want of [
       /decision do, active/,
       /Why: サーバーは要らない/,
@@ -330,12 +343,15 @@ test("reading as of a past time shows no retraction made after it", async () => 
           ],
           anchors: [{ path: "package.json", role: "applies_to" }],
         }),
-        decision("npm", m, "It installs faster."),
       ],
     });
     // A record, an anchor, and a link that came after the as-of time below
     const run0 = Number(db.owner.prepare("select id from extraction_run limit 1").get()?.id);
-    db.owner.exec("update unit set created_at = '2099-01-01T00:00:00.000Z' where key = 'trace:ext-s1/npm'");
+    db.owner
+      .prepare(
+        "insert into unit (project_id, key, kind, text, extraction, run_id, created_at, content_hash) values (?, 'trace:ext-s1/npm', 'finding', 'npm', 'supported', ?, '2099-01-01T00:00:00.000Z', zeroblob(32))",
+      )
+      .run(p, run0);
     db.owner
       .prepare(
         "insert into unit_anchor (unit_id, path, role, run_id, added_at) select id, 'later.json', 'applies_to', ?, '2099-01-01T00:00:00.000Z' from unit where key = 'trace:ext-s1/pnpm'",
@@ -343,7 +359,7 @@ test("reading as of a past time shows no retraction made after it", async () => 
       .run(run0);
     db.owner
       .prepare(
-        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) select a.id, b.id, 'implements', ?, '2099-01-01T00:00:00.000Z' from unit a, unit b where a.key = 'trace:ext-s1/npm' and b.key = 'trace:ext-s1/pnpm'",
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) select a.id, b.id, 'conflicts', ?, '2099-01-01T00:00:00.000Z' from unit a, unit b where a.key = 'trace:ext-s1/npm' and b.key = 'trace:ext-s1/pnpm'",
       )
       .run(run0);
     // One of two pieces of evidence is retracted, dated after the as-of time below
@@ -365,7 +381,7 @@ test("reading as of a past time shows no retraction made after it", async () => 
     assert.doesNotMatch(before, /retracted|later mistake|withdrawn|later withdrawal/);
     assert.match(before, /decision do, active/);
     assert.match(before, /package\.json/);
-    assert.doesNotMatch(before, /later\.json|Implemented by/);
+    assert.doesNotMatch(before, /later\.json|Conflicts with/);
     assert.equal(await readUnit(db.reader, p, "trace:ext-s1/npm", null, asOf), null);
     assert.match(
       (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null)) ?? "",
@@ -591,23 +607,6 @@ test("an owner-message search keeps only the owner's words outside the named ses
         session: `old${n}`,
       }),
     );
-    // An assistant reply is never indexed in practice; this one is, so only the author filter keeps it out
-    insert(db, "source", {
-      project_id: p,
-      kind: "session_message",
-      artifact: "session:old0",
-      external_id: "a",
-      revision: 1,
-      session_id: "old0",
-      author_kind: "assistant",
-      created_at: at("2026-09-10T00:00:00Z"),
-      available_at: at("2026-09-10T00:00:00Z"),
-      captured_at: at("2026-09-10T00:00:00Z"),
-      text: "What is the retry budget? It is three.",
-      original_bytes: 38,
-      content_hash: hash(2),
-      indexed: 1,
-    });
     insert(db, "source", {
       project_id: p,
       kind: "pr_body",
@@ -648,7 +647,6 @@ test("the chain skips a replacement that stayed a candidate", async () => {
     const a = message(db, p, { id: "m1", text: "Use pnpm for installs." });
     const b = message(db, p, { id: "m2", text: "Go back to npm." });
     const c = message(db, p, { id: "m3", text: "Maybe yarn." });
-    const d = message(db, p, { id: "m4", text: "Move to bun." });
     await save(db, p, { units: [decision("pnpm", a, "Use pnpm for installs.")] });
     await save(db, p, {
       units: [decision("npm", b, "Go back to npm.", { supersedes: "trace:ext-s1/pnpm" })],
@@ -666,7 +664,7 @@ test("the chain skips a replacement that stayed a candidate", async () => {
         },
       ],
     });
-    await save(db, p, { units: [decision("bun", d, "Move to bun.", { supersedes: "trace:ext-s1/npm" })] });
+    // A record holds one live successor at a time, so npm stays the answer while yarn waits for adoption
     const lifecycle = db.owner
       .prepare("select lifecycle from unit where key = 'trace:ext-s1/yarn'")
       .get()?.lifecycle;
@@ -674,7 +672,7 @@ test("the chain skips a replacement that stayed a candidate", async () => {
     const r = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
     assert.deepEqual(
       r.hits.map((h) => h.key),
-      ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
+      ["trace:ext-s1/npm", "trace:ext-s1/pnpm"],
     );
   } finally {
     await db.done();
