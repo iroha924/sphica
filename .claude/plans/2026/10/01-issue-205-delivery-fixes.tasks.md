@@ -101,3 +101,6 @@ superseded・withdrawn の記録が自動配信に出ないことと、展開し
 - 2026-10-01 / T01 / Codex のレビュー（44ae063c）: 指摘 1 件（P2）。空ログのテストが未 trace の通知の有無（日付）に依存し、空の session_start のログを確かめていない / 採用。修正タスク T07 を足した
 - 2026-10-01 / T02 / Codex のレビュー（2e7c09dc）: 指摘 0 件
 - 2026-10-01 / T05 / macOS の一時ディレクトリはリンク（/var → /private/var）で、git の root は実体のパスで返るため、Read の path が root の外に見えて配信が空になった / 一時ディレクトリを realpathSync で実体に揃えた
+- 2026-10-01 / T03 / Codex のレビュー（fda80f5b）: 指摘 0 件
+- 2026-10-01 / T05 / Codex のレビュー（7e96b024）: 指摘 0 件。1 秒の上限の CI での余裕は未計測とされた / 手元で 3 回測り、ロックなし 65 ms、ロック中 354〜360 ms（250 ms の待ちを含む）。CI の結果は push の後に見る
+- 2026-10-01 / 全体 / review-shipping（main..7e96b024）: 指摘 0 件。展開した dist/deliver.js に 250 ms の待ちが入っていること、LOG_WAIT_MS を 5000 にすると check-tarball が落ちること、修正を戻すと 4 本のテストが落ちること、`bun run verify` → exit 0 を確かめた。未検証として、Windows でプロンプトの絶対表記のドライブ文字の大小が root と違うと当たらない（c: と C:）が挙がった / 直さない。Windows で git が返す root の大小を確かめられず、相対表記なら当たる端の入力のため。PR 本文の Declined findings に書く
