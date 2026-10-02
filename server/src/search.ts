@@ -104,7 +104,7 @@ export async function searchUnits(
   const stopped = ranked.length > UNIT_SCAN_MAX;
   let weaker = 0;
   let read = 0;
-  const hits: (UnitHit & { rank: number })[] = [];
+  const hits: (UnitHit & { rank: number; created: string })[] = [];
   for (let at = 0; at < Math.min(ranked.length, UNIT_SCAN_MAX); at += UNIT_PAGE) {
     const part = ranked.slice(at, Math.min(at + UNIT_PAGE, UNIT_SCAN_MAX));
     // Rows are read through the same filters, so a unit gone or changed since the order was taken is simply not read,
@@ -123,6 +123,7 @@ export async function searchUnits(
           "u.scope_note",
           "u.revisit_when",
           "u.content_hash",
+          "u.created_at",
           "f.rank",
         ])
         .where(
@@ -154,21 +155,57 @@ export async function searchUnits(
           aliasOnly: false,
           successorOf: h.key,
           rank: h.rank,
+          created: h.created,
         });
       }
-  hits.sort(
-    (a, b) =>
-      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
-      b.matched.length - a.matched.length ||
-      a.rank - b.rank,
-  );
   return {
-    hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h),
+    hits: ordered(hits)
+      .slice(0, q.limit)
+      .map(({ rank: _rank, created: _created, ...h }) => h),
     weaker,
     terms: wanted,
     stopped,
     read,
   };
+}
+
+/** A rank within this share of a band's first rank counts as a near tie */
+const BAND = 0.05;
+
+/**
+ * Hits by lifecycle, then by how many query terms they hold, then by bm25. Inside one such group, rows whose rank is within BAND of the
+ * first row of their band are a near tie, and the newer record goes first among them. Each band is measured from its own first row,
+ * never widened through neighbours, so the order does not depend on the order the hits came in.
+ */
+export function ordered<
+  T extends { id: number; created: string; lifecycle: string; matched: string[]; rank: number },
+>(hits: T[]): T[] {
+  const group = (h: T) => `${LIFE_ORDER[h.lifecycle] ?? 9}/${h.matched.length}`;
+  const base = [...hits].sort(
+    (a, b) =>
+      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
+      b.matched.length - a.matched.length ||
+      a.rank - b.rank ||
+      a.id - b.id,
+  );
+  const out: T[] = [];
+  for (let at = 0; at < base.length; ) {
+    const lead = base[at] as T;
+    let end = at + 1;
+    while (
+      end < base.length &&
+      group(base[end] as T) === group(lead) &&
+      Math.abs((base[end] as T).rank - lead.rank) <= BAND * Math.abs(lead.rank)
+    )
+      end++;
+    out.push(
+      ...base
+        .slice(at, end)
+        .sort((a, b) => b.created.localeCompare(a.created) || a.rank - b.rank || a.id - b.id),
+    );
+    at = end;
+  }
+  return out;
 }
 
 export type Successor = {
@@ -234,6 +271,7 @@ type UnitRow = {
   scope_note: string | null;
   revisit_when: string | null;
   content_hash: Uint8Array | Buffer;
+  created_at: string;
   rank: number;
 };
 
@@ -242,7 +280,7 @@ async function judgeUnits(
   db: Reads,
   rows: UnitRow[],
   wanted: string[],
-  hits: (UnitHit & { rank: number })[],
+  hits: (UnitHit & { rank: number; created: string })[],
 ): Promise<number> {
   const ids = rows.map((r) => r.id);
   const [options, anchors, aliases, fields] = ids.length
@@ -321,6 +359,7 @@ async function judgeUnits(
       matched,
       aliasOnly: matched.every((w) => !own.has(w)),
       rank: r.rank,
+      created: r.created_at,
     });
   }
   return weaker;
