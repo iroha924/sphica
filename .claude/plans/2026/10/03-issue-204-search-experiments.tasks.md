@@ -44,13 +44,14 @@ base: main
 
 測るだけの E1 のあと、E2・E3a・E3b を 1 つずつ入れて直前の採用済みのコミットと比べ、基準に届かないものは revert する。
 
-- [ ] T03: E1 日本語の取りこぼしを分類する `--misses` を足す
+- [x] T03: E1 日本語の取りこぼしを分類する `--misses` を足す
   - 種別: 追加
   - 計画: S2
   - 依存: T02（分類の対象の ja-split の質問が要る）
   - 変更: `server/evals/retrieval/run.ts`, `server/evals/retrieval/bench.ts`, `server/test/retrieval-bench.test.ts`
   - 完了条件: `cd server && node evals/retrieval/run.ts --misses` → ja>ja と ja>en の外れた質問ごとに、一致した語・足りない語・原因が出て、「分割だけを直せば過半数に届く質問」の数が出る。数値と bigram を別の計画にするかの判断を #204 のコメントの下書きにする（投稿は持ち主の承認の後）
   - コミット: `test(bench): classify missed Japanese questions by the cause of each missing term (T03)`
+  - 結果: `node --test test/retrieval-bench.test.ts` → 6 pass。`node evals/retrieval/run.ts --misses` → ja>ja と ja>en の外れ 29 問: split 3、identifier 2、vocabulary 17、mixed 7、ranked 0。分割だけを直せば過半数に届くのは 6 問（20.7%）で、基準（20% 以上かつ 3 問以上）をぎりぎり満たす。ただし 6 問のうち 5 問は ja-split の set（分割の違いを含むように書いた質問）で、base の 60 問からは jj07（データ と データベース）の 1 問だけ。#204 への下書き: bigram 索引は別の計画の候補として書き、この内訳を添える（T08 でまとめる）
 
 - [ ] T04: E2 `terms()` で camelCase と snake_case の部分も語にして測る
   - 種別: 変更

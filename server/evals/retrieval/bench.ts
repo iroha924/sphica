@@ -7,6 +7,7 @@ import path from "node:path";
 import { inTransaction } from "../../src/db.ts";
 import { checkRecord, saveRecord, type Target } from "../../src/record.ts";
 import { searchUnits } from "../../src/search.ts";
+import { queryTerms, terms } from "../../src/text.ts";
 import { openRun } from "../../src/trace.ts";
 import { hash, insert, message, project, type TempDb, tempDb } from "../../test/temp-db.ts";
 
@@ -235,4 +236,76 @@ export async function bench(corpus: Corpus = JSON.parse(fs.readFileSync(CORPUS, 
   } finally {
     await db.done();
   }
+}
+
+/**
+ * Why a missing question term is not in the gold record's terms: split when the gold holds its characters inside a longer word,
+ * identifier when those characters are Latin (a part of an identifier, which #204's identifier experiment covers), vocabulary otherwise.
+ * The check is by characters, so a one-character term found inside an unrelated word also counts as split.
+ */
+export type MissCause = "split" | "identifier" | "vocabulary";
+export type Miss = {
+  id: string;
+  lang: string;
+  gold: string;
+  matched: string[];
+  missing: { term: string; cause: MissCause }[];
+  /** The one cause of its missing terms, or mixed; ranked when every term matched and the record was still not returned */
+  cause: MissCause | "mixed" | "ranked";
+  /** Whether the question would hold more than half of its terms if only the Japanese split misses were fixed */
+  splitAlone: boolean;
+};
+
+/** The Japanese-side questions the bench missed (ja>ja and ja>en), with each missing term and its cause. */
+export function misses(result: Result, corpus: Corpus = JSON.parse(fs.readFileSync(CORPUS, "utf8"))): Miss[] {
+  const records = new Map(corpus.records.map((r) => [r.key, r]));
+  const out: Miss[] = [];
+  for (const row of result.rows) {
+    const q = corpus.questions.find((x) => x.id === row.id);
+    if (!q?.gold.length || row.rank > 0 || !["ja>ja", "ja>en"].includes(q.lang)) continue;
+    // The closest gold: the one holding most of the question's terms
+    const judged = q.gold.map((key) => {
+      const r = records.get(key);
+      if (!r) throw new Error(`question ${q.id}: no record ${key}`);
+      const body = [
+        r.text,
+        r.why,
+        ...r.options.flatMap((o) => [o.text, o.why]),
+        ...(r.anchors ?? []).flatMap((a) => [a.path, a.symbol]),
+        ...r.aliases,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const own = new Set(terms(body));
+      const flat = body.normalize("NFKC").toLowerCase();
+      const wanted = queryTerms(q.text);
+      const matched = wanted.filter((w) => own.has(w));
+      // A term the gold holds as characters but not as a term was cut differently; one it lacks entirely is another word
+      const missing = wanted
+        .filter((w) => !own.has(w))
+        .map((term) => ({
+          term,
+          cause: (!flat.includes(term)
+            ? "vocabulary"
+            : /^[\p{Script=Latin}0-9]/u.test(term)
+              ? "identifier"
+              : "split") as MissCause,
+        }));
+      const fixable = matched.length + missing.filter((m) => m.cause === "split").length;
+      return { key, matched, missing, splitAlone: fixable * 2 > wanted.length };
+    });
+    const best = judged.sort((a, b) => b.matched.length - a.matched.length)[0];
+    if (!best) continue;
+    const causes = new Set(best.missing.map((m) => m.cause));
+    out.push({
+      id: q.id,
+      lang: q.lang,
+      gold: best.key,
+      matched: best.matched,
+      missing: best.missing,
+      cause: causes.size === 0 ? "ranked" : causes.size > 1 ? "mixed" : (best.missing[0]?.cause ?? "ranked"),
+      splitAlone: best.splitAlone && causes.has("split"),
+    });
+  }
+  return out;
 }

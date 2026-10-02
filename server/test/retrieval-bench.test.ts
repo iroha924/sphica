@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { bench } from "../evals/retrieval/bench.ts";
+import { bench, misses } from "../evals/retrieval/bench.ts";
 
 test("the retrieval benchmark runs every question and gives a number for each measure", async () => {
   const r = await bench();
@@ -96,4 +96,34 @@ test("the bench stops when a record cannot be stored as written", async () => {
     bench({ records: [record({ anchors: [{ path: "/abs/db.ts" }] })], questions: [] }),
     /record reader: .*not inside the repository/,
   );
+});
+
+test("a missed Japanese question is told apart by whether its words were cut differently or are other words", async () => {
+  const corpus = {
+    records: [
+      record({
+        key: "read-shelf",
+        kind: "decision",
+        stance: "do",
+        message: "既読本は下段に出す。",
+        quote: "既読本は下段に出す。",
+        text: "既読本は下段に出す",
+        anchors: [],
+      }),
+    ],
+    questions: [
+      // 既読の本 is cut into 既, 読, 本; the record holds 既 and 読本
+      { id: "s", lang: "ja>ja", overlap: true, text: "既読の本の場所", gold: ["read-shelf"] },
+    ],
+  };
+  const [m] = misses(await bench(corpus), corpus);
+  assert.equal(m?.id, "s");
+  assert.deepEqual(m?.matched, ["既"]);
+  assert.deepEqual(m?.missing, [
+    { term: "読", cause: "split" },
+    { term: "本", cause: "split" },
+    { term: "場所", cause: "vocabulary" },
+  ]);
+  assert.equal(m?.cause, "mixed");
+  assert.equal(m?.splitAlone, true);
 });
