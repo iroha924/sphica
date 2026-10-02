@@ -12,7 +12,7 @@ approved_at: 2026-10-02
 
 - remote から作る project の key で、host はどの形式（scp・ssh・git・https）でも小文字にし、host が github.com なら path も小文字にする。小文字化は ASCII の A-Z だけ（SQLite の `lower()` と同じ）
 - schema revision 8 で、正規化されていない `git:` の key を insert / update で拒む trigger を足す（project テーブルは作り直さない）
-- マイグレーション 0008 は、正規化すると同じ key になる project のグループのうち、中身（9 つの project_id を持つテーブルの行）があるのが 1 つ以下なら、空の重複を消して残りを正規の key に直す。中身のある project が 2 つ以上なら revision 8 を当てずに止め、一覧と「前のリリースを使い続けて issue で知らせる」案内を出す
+- マイグレーション 0008 は、正規化すると同じ key になる project のグループのうち、中身（9 つの project_id を持つテーブルの行）があるのが 1 つ以下なら、空の重複を消して残りを正規の key に直す。中身のある project が 2 つ以上なら revision 8 を当てずに止め、一覧と「issue で知らせてほしい」案内を出す
 - capture の spool には、今までの規則で作った key（legacyKey）を書き続け、送るときは完全一致 → 正規化した key の順で探す。revision 7 の DB でも 8 の DB でも行き先を取り違えない
 - 変えないもの: `local:` の key、github.com 以外の path の大文字小文字、spool の形式（v2）、ほかのテーブル
 - npm と 3 つの manifest を 0.6.21 にそろえて出す
@@ -56,7 +56,7 @@ approved_at: 2026-10-02
   - trigger `project_key_canonical_insert`（before insert on project）と `project_key_canonical_update`（before update of key on project）: `new.key glob 'git:*'` で、`new.key` が SQL で書いた `normalizeKey` と違えば `raise(abort, 'the project key is not normalized')`。SQL の式は schema.sql と 0008.sql で同じ文字列にする
   - `0008.check.sql`: 正規化した key が同じ project のグループのうち、9 テーブルのどれかに行がある project が 2 つ以上あるグループを、`sphica_migration_stop` に project ごとに入れる（id、key、テーブルごとの行数）
   - `0008.sql` の順序: (1) 各グループで残す project を決める（中身のある 1 つ、全部空なら id が最小のもの）、(2) 残さない空の project を delete、(3) 残す project の key と name を正規化した値に update、(4) trigger を作る、(5) `pragma user_version = 8`。消したもの・直したものは `sphica_migration_note` に 1 行ずつ書く。project の id・created_at・`sqlite_sequence` はそのまま
-- **止まったときの文面**（`server/src/admin.ts`）: 今の Stop の文面は rule ごとに差し替えられるようにし、この rule では「revision 8 は当てていない。このバージョンの Sphica はこれらの project をまとめられない。前のリリース（0.6.20 と、同じバージョンのプラグイン）を使い続け、下の一覧を新しい issue で知らせてほしい」と出す。forget や DB の削除は勧めない。commit 済みの revision とバックアップの既存の報告（3 通りの文面）はそのまま
+- **止まったときの文面**（`server/src/admin.ts`）: 今の Stop の文面は rule ごとに差し替えられるようにし、この rule では「revision 8 は当てていない。このバージョンの Sphica はこれらの project をまとめられない。まとめられる Sphica が移行するまで検索・読み取り・記録のツールは使えず、その間も capture は記録を続ける。下の一覧を issue で知らせてほしい」と出す。forget や DB の削除は勧めない。commit 済みの revision とバックアップの既存の報告（3 通りの文面）はそのまま
 - **capture**（`server/src/capture.ts`）: spool の記録の `project` には `place.legacyKey` を書く。送るときは、`write()` の `BEGIN IMMEDIATE` のトランザクションの中で、記録ごとに完全一致で project を探し、無ければ `normalizeKey(project)` で探し、決まった id を同じトランザクションで session の id の導出と message・edit の書き込みに使う。1 件ずつ送り直すときも、そのトランザクションの中で探し直す（失敗したバッチの対応表を使い回さない）。トランザクションの中で見つからない記録は今までどおり unregistered/ へ置き、rejected/ へは移さない。unregistered/ に置かれた記録も同じ規則で送る。spool の形式（`v: 2`）は変えない
 - **ほかの key の利用者**: init の登録、両 MCP サーバーの `projectId`、`writePlace`、delivery、`localRoots`/doctor、GitHub の harvest/glean は `identify().key` を使うので、正規化した key になる。`localRoots` は 2 つのディレクトリが同じ key になったら今までどおり ambiguous として扱う
 - **リリース**: `bun run release:plan -- --base v0.6.20` が `plugin` を返したら、npm と 3 つの manifest を 0.6.21 にそろえる
@@ -93,7 +93,7 @@ approved_at: 2026-10-02
 
 ## リスク
 
-- 利用者の DB に中身のある project が 2 つぶつかっていた → revision 8 で止まり、前のリリースを使い続けてもらう。報告が来たらマージの道具を issue にする
+- 利用者の DB に中身のある project が 2 つぶつかっていた → revision 8 で止まり、検索と記録のツールは使えないまま（capture は続く）。報告が来たらマージの道具を issue にする
 - legacyKey の規則を消し忘れて残り続ける → コメントに消せる条件を書く
 - trigger の SQL の式と JS の関数がずれる → A4 のテストで落とす
 
@@ -103,3 +103,4 @@ approved_at: 2026-10-02
 
 ## 変更履歴
 - 2026-10-02 / A2 の test-name-pattern を "revision 8" から "revision 7" に / テストの名前が既存の「migrating revision N」に合わせて移行元の revision を名乗るため / Go 不要
+- 2026-10-02 / 衝突で止まったときの案内から「0.6.20 と同じバージョンのプラグインを使い続ける」を外し、検索などは使えず capture は続くことと issue での報告だけにした / marketplace が 0.6.21 を指すので、プラグインを 0.6.20 に留める手順が無く、守れない案内になる（review-shipping の指摘）/ Go 不要（案内を出す範囲は同じ）

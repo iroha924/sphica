@@ -1408,7 +1408,8 @@ test("migrating revision 7 stops, changing nothing of revision 8, when two proje
       /project 2 git:github\.com\/O\/R \(becomes git:github\.com\/o\/r\): 1 sessions/.test(e.message) &&
       /^Revision 8 was not applied: 2 projects with records/.test(e.message) &&
       /cannot merge them/.test(e.message) &&
-      /npm i -g sphica@0\.6\.20/.test(e.message) &&
+      /Capture keeps recording into this database/.test(e.message) &&
+      !/sphica@0\.6\.20|plugin of the same version/.test(e.message) &&
       /Forgetting sources does not resolve it/.test(e.message) &&
       !/Sphica writes no such row/.test(e.message) &&
       /No migration step was committed: the database is still at revision 7/.test(e.message),

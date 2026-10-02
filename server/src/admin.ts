@@ -122,7 +122,7 @@ function listed(rows: Row[]): string {
  */
 const STOP_ADVICE: Record<string, (revision: number, rows: Row[]) => string> = {
   "projects with records whose keys become one once normalized": (revision, rows) =>
-    `Revision ${revision} was not applied: ${plural(rows.length, "project")} with records have keys that become one once normalized (listed below), and this Sphica cannot merge them. Search and recording tools stay unavailable on this version until they are merged. Keep using sphica 0.6.20 (\`npm i -g sphica@0.6.20\`) with the plugin of the same version, and report the list below at https://github.com/iroha924/sphica/issues. Forgetting sources does not resolve it`,
+    `Revision ${revision} was not applied: ${plural(rows.length, "project")} with records have keys that become one once normalized (listed below), and this Sphica cannot merge them. Search, read, and the record tools stay unavailable until a Sphica that can merge them migrates this database. Capture keeps recording into this database meanwhile. Report the list below at https://github.com/iroha924/sphica/issues. Forgetting sources does not resolve it`,
 };
 
 /** A migration's check found rows the new revision cannot take. Nothing of that step was changed. */

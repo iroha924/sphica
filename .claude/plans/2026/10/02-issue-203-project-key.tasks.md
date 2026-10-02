@@ -99,6 +99,17 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - 結果: red: `node --test --test-name-pattern="without a project key" test/capture.test.ts` → `TypeError: Cannot read properties of null (reading 'startsWith')`
   - 結果: `cd server && node --test test/capture.test.ts` → 36 pass
 
+- [x] T09: 衝突で止まったときの案内から、守れない「0.6.20 と同じバージョンのプラグインを使い続ける」を外す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す案内がある）
+  - 変更: `server/src/admin.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-name-pattern="says how to go on" test/migrate.test.ts` → 案内に「Capture keeps recording」が無く、`sphica@0.6.20` を含むので fail
+  - 完了条件: `cd server && node --test test/migrate.test.ts` → pass（案内が capture は続くことと issue での報告を言い、0.6.20 とプラグインのバージョンに触れない）
+  - コミット: `fix(migrate): drop advice to pin the plugin from the collision stop (T09)`
+  - 結果: red: `node --test --test-name-pattern="says how to go on" test/migrate.test.ts` → fail
+  - 結果: `cd server && node --test test/migrate.test.ts` → 40 pass
+
 ## P3: リリースの準備
 
 npm と 3 つの manifest が 0.6.21 にそろう。
@@ -122,3 +133,4 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 
 - 2026-10-02 / T02 / Codex のタスクレビュー（73f85f0d）で F1（P2）: schema が受け付ける `git:HOST/` の key で 0008.sql の name が空になり CHECK で落ちる。手元で再現 / 採る。T07 を足して直した
 - 2026-10-02 / T04 / Codex のタスクレビュー（2075dc92）で F1（P2）: project が null の spool 記録で normalizeKey が TypeError を投げ、同じ送信の正常な記録も送れない。手元で再現 / 採る。T08 を足して直した
+- 2026-10-02 / 全差分 / Codex の全差分レビュー（8bf3ed00）は指摘なし。review-shipping は 1 件: 衝突の停止の案内が、marketplace が 0.6.21 を指すのにプラグインを 0.6.20 に留めるよう言い、doctor と MCP の案内も init へ戻るだけ / 案内の誤りを採る。T09 を足して直した。doctor と MCP が init を案内する点は、止まった init が理由を出すので変えない
