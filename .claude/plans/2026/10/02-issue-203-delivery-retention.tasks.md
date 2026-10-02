@@ -54,3 +54,5 @@ base: main
   - 結果: `node --test --test-name-pattern="retention timing" test/deliver.test.ts` → 3 回続けて pass（使用中のセッションの古い行 10,000 を消せる 10,000 行より前に置いた一時ファイル DB で、子プロセスの pre_read が記録を返し、delivery が 1 行増えて 200 行減った）。上限を一時的に 1ms にして実測した時間は 53ms と 51ms（入力を渡してから終了まで）。`node --test --test-name-pattern="older capture" test/db.test.ts` → pass（0.6.17 の authorizer との差は delivery・delivery_unit の delete の許可だけなので、今の authorizer でそれを拒むように包み、capture_delivery と capture_delivery_scoped に unit 付きで書けて、prune は not authorized になることを確かめた）。`node --test test/deliver.test.ts test/db.test.ts` → 53 pass。`bun run check` → exit 0
 
 ## 記録
+- 2026-10-02 / T01 / Codex のタスクレビュー（ddee5a25）: 指摘なし（移行後と新規の定義の一致、delivery_unit の保存、prune の境界、0.6.17 の規則の capture からの書き込みをメモリ DB で実測。指定のテストは sandbox の EPERM で Codex 側では走らず、手元で 87 pass）
+- 2026-10-02 / T02 / Codex のタスクレビュー（06df0c22）: 指摘なし（prune の失敗はログと session 行ごと戻り本文は返る、revision 6 の DB は reader の接続で拒まれ prune に届かない、を確認）
