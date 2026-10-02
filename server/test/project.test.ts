@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { migrate } from "../src/admin.ts";
+import { connectWriter } from "../src/db-write.ts";
 import {
   hostWorkspace,
   identify,
@@ -255,4 +257,62 @@ test("the workspace Codex names in a call is read only from a file URL in its sa
   assert.equal(named(1), null);
   assert.equal(hostWorkspace(undefined), null);
   assert.equal(hostWorkspace({ sandboxCwd: pathToFileURL(dir).href }), null);
+});
+
+// The migration and the key triggers fold keys in SQL; a key either side folds differently would be refused, or split one project in two
+test("normalizeKey and the database's key rules agree (parity)", () => {
+  const keys = [
+    "git:GitHub.COM/O/R",
+    "git:github.com/O/r/Sub",
+    "git:GitLab.Example/Team/Repo",
+    "git:HOST",
+    "git:Host.Example",
+    "git:BÜCHER.example/X",
+    "git:bücher.example/Ä",
+    "git:github.com/Ä/B",
+    "git:example.com:2222/O",
+  ];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-parity-"));
+  try {
+    const old = connectWriter("owner", path.join(tmp, "old.db"), true);
+    const fresh = connectWriter("owner", path.join(tmp, "fresh.db"), true);
+    try {
+      const root = path.join(import.meta.dirname, "..", "..");
+      old.exec(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8"));
+      fresh.exec(fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8"));
+      keys.forEach((k, i) => {
+        // Distinct names keep the keys from colliding: a suffix that folds to itself
+        const key = `${k}-${i}`;
+        old.prepare("insert into project (key, name) values (?, 'x')").run(key);
+        const canonical = normalizeKey(key);
+        fresh.prepare("insert into project (key, name) values (?, 'x')").run(canonical);
+        if (canonical !== key)
+          assert.throws(
+            () => fresh.prepare("insert into project (key, name) values (?, 'x')").run(key),
+            /the project key is not normalized/,
+            key,
+          );
+      });
+      const log = console.log;
+      console.log = () => {};
+      try {
+        migrate(path.join(tmp, "old.db"));
+      } finally {
+        console.log = log;
+      }
+      const migrated = old
+        .prepare("select key from project order by id")
+        .all()
+        .map((r) => r.key);
+      assert.deepEqual(
+        migrated,
+        keys.map((k, i) => normalizeKey(`${k}-${i}`)),
+      );
+    } finally {
+      old.close();
+      fresh.close();
+    }
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

@@ -34,13 +34,15 @@ base: main
   - 結果: `cd server && node --test test/project.test.ts` → 13 pass。`tsc --noEmit` → エラーなし
   - 結果: `bun run release:plan -- --base v0.6.20` → plugin。npm と 3 つの manifest を 0.6.21 にした
 
-- [ ] T02: schema revision 8（正規でない key を拒む trigger、空の重複をまとめるマイグレーション、中身のある衝突で止める check）
+- [x] T02: schema revision 8（正規でない key を拒む trigger、空の重複をまとめるマイグレーション、中身のある衝突で止める check）
   - 種別: 追加
   - 計画: S2
   - 依存: T01（JS と SQL の正規化が同じ結果になるテストに `normalizeKey` が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0008.sql`, `db/migrations/0008.check.sql`, `server/src/sqlite.ts`, `server/test/migrate.test.ts`, `server/test/project.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0008.sql`, `db/migrations/0008.check.sql`, `server/src/sqlite.ts`, `server/test/migrate.test.ts`, `server/test/project.test.ts`, `server/test/schema.test.ts`, `server/test/fixtures/schema-rev7.sql`
   - 完了条件: `cd server && node --test test/migrate.test.ts test/project.test.ts` → pass（衝突なしの改名で id・created_at・sqlite_sequence が残る、空の重複が消える、中身のある 2 つの衝突で revision 7 のまま止まる、revision 8 の定義が新しい DB と一致、trigger が正規でない key の insert / update を拒む、JS と SQL の parity が Unicode を含めて一致）
   - コミット: `feat(db): enforce normalized project keys in schema revision 8 (T02)`
+  - 結果: `cd server && node --test test/migrate.test.ts test/project.test.ts` → 53 pass（revision 7 の改名・空の重複の削除・最古を残す・中身のある衝突で 7 のまま止まる・trigger の拒否・parity。revision 7 の定義比較と capture view の列比較も pass）
+  - 結果: `bun run verify` → 0 で終わる
 
 - [ ] T03: マイグレーションが止まったときの文面を rule ごとにし、project の衝突には前のリリースを使い続けて issue で知らせる案内を出す
   - 種別: 変更
@@ -85,3 +87,5 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 ## 記録
 
 - 2026-10-02 / T01 / pre-commit の bundle 検査が、package の入力を変えるコミットにバージョンの更新を求めて止めた / T01 の計画を S1 → S1, S6、変更に 4 つのバージョンのファイルを足した。T06 は S6 が T01 に移ったので取りやめ
+- 2026-10-02 / T02 / revision の値を固定で見る `server/test/schema.test.ts` と、revision 7 の fixture が要った / T02 の変更欄に `server/test/schema.test.ts`, `server/test/fixtures/schema-rev7.sql` を足した
+- 2026-10-02 / T01 / Codex のタスクレビュー（c3ae3eed）は指摘なし。sandbox で一時ディレクトリを作れずテストの一部は Codex 側で未実行 / 同じテストを手元で流し 13 pass を確認済み
