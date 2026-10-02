@@ -385,8 +385,8 @@ test("the capture connection prunes old deliveries and their units only through 
   );
 });
 
-// A 0.6.17 capture keeps logging into a database of this revision until its plugin updates. Its authorizer is this one without the
-// pruning deletes, so this one is wrapped to refuse those, and both delivery views must still take a delivery with its units
+// Pruning must not change what logging a delivery needs: the delivery views delete nothing, so a capture refused the pruning deletes
+// (the authorizer before revision 7) still logs a delivery with its units through both
 test("an older capture, which may delete nothing, still logs deliveries with their units through both views", () => {
   const older = () => {
     const set = DatabaseSync.prototype.setAuthorizer;
