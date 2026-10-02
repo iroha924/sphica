@@ -6,12 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { bench } from "../evals/retrieval/bench.ts";
+import { bench, misses } from "../evals/retrieval/bench.ts";
 
 test("the retrieval benchmark runs every question and gives a number for each measure", async () => {
   const r = await bench();
-  assert.equal(r.all.answerable, 48);
-  assert.equal(r.all.unanswerable, 12);
+  assert.equal(r.all.answerable, 93);
+  assert.equal(r.all.unanswerable, 20);
   for (const [k, v] of Object.entries({ ...r.all.recall, mrr: r.all.mrr, falseHit: r.all.falseHit }))
     assert.ok(!Number.isNaN(v), `${k} is a number`);
   assert.deepEqual([...r.byLang.keys()], ["en>en", "en>ja", "ja>en", "ja>ja"]);
@@ -59,4 +59,90 @@ test("--compare with --json is refused, since --json prints one side only", () =
   fs.rmSync(home, { recursive: true, force: true });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /--json prints this tree only/);
+});
+
+/** A one-record corpus with what an experiment's question sets need: anchors, a save time, and an implementation's code evidence. */
+const record = (over: Record<string, unknown> = {}) => ({
+  key: "reader",
+  kind: "implementation",
+  stance: null,
+  message: "connectReader opens the reader connection read only.",
+  quote: "connectReader opens the reader connection read only.",
+  text: "connectReader opens the reader connection read only",
+  why: null,
+  options: [],
+  aliases: [],
+  supersedes: null,
+  anchors: [{ path: "server/src/db.ts", symbol: "connectReader" }],
+  created_at: "2026-03-04T05:06:07.000Z",
+  ...over,
+});
+
+test("a record's anchors, save time, and code evidence are stored as written, and its question is scored by set", async () => {
+  const before = Date.now;
+  const r = await bench({
+    records: [record()],
+    questions: [
+      { id: "i1", lang: "en>en", overlap: true, text: "reader connection", gold: ["reader"], set: "ident" },
+    ],
+  });
+  assert.equal(Date.now, before, "the bench puts the clock back");
+  assert.equal(r.rows[0]?.rank, 1);
+  assert.deepEqual([...r.bySet.keys()], ["set ident"]);
+});
+
+test("the bench stops when a record cannot be stored as written", async () => {
+  await assert.rejects(
+    bench({ records: [record({ anchors: [{ path: "/abs/db.ts" }] })], questions: [] }),
+    /record reader: .*not inside the repository/,
+  );
+});
+
+test("a missed Japanese question is told apart by whether its words were cut differently or are other words", async () => {
+  const corpus = {
+    records: [
+      record({
+        key: "read-shelf",
+        kind: "decision",
+        stance: "do",
+        message: "既読本は下段に出す。",
+        quote: "既読本は下段に出す。",
+        text: "既読本は下段に出す",
+        anchors: [],
+      }),
+    ],
+    questions: [
+      // The question cuts the record's compound into three words; the record holds the first and a two-character compound
+      { id: "s", lang: "ja>ja", overlap: true, text: "既読の本の場所", gold: ["read-shelf"] },
+    ],
+  };
+  const [m] = misses(await bench(corpus), corpus);
+  assert.equal(m?.id, "s");
+  assert.deepEqual(m?.matched, ["既"]);
+  assert.deepEqual(m?.missing, [
+    { term: "読", cause: "split" },
+    { term: "本", cause: "split" },
+    { term: "場所", cause: "vocabulary" },
+  ]);
+  assert.equal(m?.cause, "mixed");
+  assert.equal(m?.splitAlone, true);
+});
+
+test("a missed question the rules leave no term to search is counted as excluded, not as a ranking miss", async () => {
+  const corpus = {
+    records: [
+      record({
+        key: "make",
+        kind: "decision",
+        stance: "do",
+        message: "つくる。",
+        quote: "つくる。",
+        text: "つくる",
+        anchors: [],
+      }),
+    ],
+    questions: [{ id: "h", lang: "ja>ja", overlap: true, text: "つくる", gold: ["make"] }],
+  };
+  const [m] = misses(await bench(corpus), corpus);
+  assert.equal(m?.cause, "excluded");
 });

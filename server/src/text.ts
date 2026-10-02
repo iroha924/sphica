@@ -14,6 +14,16 @@ const HIRAGANA_ONLY = /^[\p{Script=Hiragana}ー]+$/u;
 const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "and", "or", "for", "on", "it", "be"]);
 // Identifiers the Segmenter splits (file names, snake_case, OT-123, #27) are also kept whole as terms.
 const IDENT = /#\d+|[a-z0-9][a-z0-9_./#-]*[a-z0-9]/g;
+// camelCase and snake_case names also give their parts (connectReader gives reader), cut only at "_" and a lower-case letter or digit before
+// a capital, so SQLite stays whole. A name is an ASCII piece of a word between Japanese characters, never part of an accented or Greek word,
+// with at most 6 parts of letters then digits, or digits, so long base64 and hashes stay whole (a short one can split). Linear time.
+const WORD = /[\p{L}\p{M}\p{N}_]+/gu;
+// english-exempt: the long vowel and iteration marks belong to Japanese words
+const JAPANESE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]+/u;
+const COMPOUND = /^[A-Za-z0-9_]*(?:[A-Za-z0-9]_|_[A-Za-z0-9]|[a-z0-9][A-Z])[A-Za-z0-9_]*$/;
+const CUT = /_+|(?<=[a-z0-9])(?=[A-Z])/;
+const MAX_PARTS = 6;
+const NAME_PART = /^(?:[A-Za-z]+[0-9]*|[0-9]+)$/;
 // Overly long chunks are not terms (base64 or hashes).
 const MAX_TERM = 100;
 // A kanji word with trailing kana (a conjugated verb) is kept as its kanji, so its conjugated forms meet.
@@ -37,12 +47,14 @@ function singular(w: string): string {
 export const identTerm = (x: string): string => singular(x.normalize("NFKC").toLowerCase());
 
 /**
- * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.
+ * Returns search terms in order of appearance (with duplicates). Indexes and queries use the same rules, except that queries leave out the parts
+ * of a name (parts = false), so a name in a question counts once.
  * **Changing the rules leaves existing indexes as they were.** A PR that changes them raises the schema revision and ships a migration that rebuilds
  * the indexes as reindex() in admin.ts does (server/test/terms-golden.test.ts fails until it is decided).
  */
-export function terms(text: string): string[] {
-  const norm = text.normalize("NFKC").toLowerCase();
+export function terms(text: string, parts = true): string[] {
+  const nfkc = text.normalize("NFKC");
+  const norm = nfkc.toLowerCase();
   const out: string[] = [];
   const keep = (w: string) => {
     if (w.length > MAX_TERM || STOP.has(w) || HIRAGANA_ONLY.test(w)) return;
@@ -50,6 +62,14 @@ export function terms(text: string): string[] {
   };
   for (const s of segmenter.segment(norm)) if (s.isWordLike) keep(s.segment.trim());
   for (const m of norm.matchAll(IDENT)) if (m[0].length >= 3) keep(m[0]);
+  if (parts)
+    for (const [word] of nfkc.matchAll(WORD))
+      for (const w of word.split(JAPANESE)) {
+        if (w.length > MAX_TERM || !COMPOUND.test(w)) continue;
+        const cut = w.split(CUT).filter(Boolean);
+        if (cut.length <= MAX_PARTS && cut.every((p) => NAME_PART.test(p)))
+          for (const p of cut) if (p.length >= 2) keep(p.toLowerCase());
+      }
   return out.filter(Boolean);
 }
 
@@ -104,9 +124,9 @@ const QUESTION = new Set([
 // The list compared in the form terms() folds a question to ("does" becomes "doe")
 const FOLDED_QUESTION = new Set([...QUESTION].flatMap((w) => terms(w)));
 
-/** A question's content terms: its terms without question framing, each once, in order. */
+/** A question's content terms, each once, in order, without question framing; a name in it counts once, whole, so its parts never weigh in. */
 export function queryTerms(question: string): string[] {
-  return [...new Set(terms(question).filter((w) => !FOLDED_QUESTION.has(w)))].slice(0, 24);
+  return [...new Set(terms(question, false).filter((w) => !FOLDED_QUESTION.has(w)))].slice(0, 24);
 }
 
 /**

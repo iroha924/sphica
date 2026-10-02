@@ -411,7 +411,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 8);
+  assert.equal(one("pragma user_version").user_version, 9);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {

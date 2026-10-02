@@ -880,3 +880,32 @@ test("search path filter takes ./ as anchors do and refuses a path that is not r
     await db.done();
   }
 });
+
+test("an identifier in a question counts once, whole, and a part of an identifier in a record finds it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "connectreader opens the database read only." });
+    const b = message(db, p, { id: "m2", text: "MAX_UPLOAD_BYTES is 2 MB." });
+    const c = message(db, p, { id: "m3", text: "__MAX_COVER_UPLOAD_BYTES caps a cover at 1 MB." });
+    const d = message(db, p, { id: "m4", text: "SQLite_get reads one row." });
+    await save(db, p, {
+      units: [
+        decision("open", a, "connectreader opens the database read only."),
+        decision("upload", b, "MAX_UPLOAD_BYTES is 2 MB."),
+        decision("cover", c, "__MAX_COVER_UPLOAD_BYTES caps a cover at 1 MB."),
+        decision("get", d, "SQLite_get reads one row."),
+      ],
+    });
+    const keys = async (question: string) =>
+      (await searchUnits(db.reader, p, { question, limit: 10 })).hits.map((h) => h.key);
+    // The question's parts would make the record hold one term in three
+    assert.deepEqual(await keys("connectReader"), ["trace:ext-s1/open"]);
+    // Shared parts (max, upload, byte) do not make another identifier strong
+    assert.deepEqual(await keys("MAX_COVER_UPLOAD_BYTES"), ["trace:ext-s1/cover"]);
+    assert.deepEqual(await keys("cover upload"), ["trace:ext-s1/cover"]);
+    assert.deepEqual(await keys("sqlite"), ["trace:ext-s1/get"]);
+  } finally {
+    await db.done();
+  }
+});

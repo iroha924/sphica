@@ -1,11 +1,11 @@
-// Prints the offline retrieval benchmark (bench.ts). Run from server/: node evals/retrieval/run.ts [--compare <git ref>] [--json]
+// Prints the offline retrieval benchmark (bench.ts). Run from server/: node evals/retrieval/run.ts [--compare <git ref>] [--json] [--misses]
 // --compare copies this runner and corpus into a worktree of the ref and runs them there, so the ref's own terms(), index triggers,
 // and search build and read its database; running both versions against one database would compare the wrong tokenizer.
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { bench, type Scores } from "./bench.ts";
+import { bench, misses, type Scores } from "./bench.ts";
 
 type Summary = { name: string; scores: Scores }[];
 
@@ -19,11 +19,11 @@ async function summary(): Promise<{ lines: string[]; groups: Summary }> {
   const r = await bench();
   const lines = r.rows.map(
     (row) =>
-      `${row.id} (${row.lang}${row.overlap ? ", overlap" : ""}): ${row.overlap === null ? (row.hits ? `${row.hits} hits` : "empty") : row.rank ? `gold at ${row.rank}` : "missed"}`,
+      `${row.id} (${row.lang}${row.set === "base" ? "" : `, ${row.set}`}${row.overlap ? ", overlap" : ""}): ${row.overlap === null ? (row.hits ? `${row.hits} hits` : "empty") : row.rank ? `gold at ${row.rank}` : "missed"}`,
   );
   const groups: Summary = [
     { name: "all", scores: r.all },
-    ...[...r.byLang, ...r.byOverlap].map(([name, scores]) => ({ name, scores })),
+    ...[...r.byLang, ...r.byOverlap, ...r.bySet].map(([name, scores]) => ({ name, scores })),
   ];
   return { lines, groups };
 }
@@ -74,6 +74,28 @@ if (at >= 0 && !ref) throw new Error("--compare needs a git ref");
 // --json is what another ref's run prints for the comparison to read; it prints one side only
 if (ref && args.includes("--json"))
   throw new Error("--json prints this tree only; leave it out with --compare");
+/** The Japanese-side misses by cause, and how many fixing the splitting alone would bring past half of their terms. */
+async function printMisses() {
+  const ms = misses(await bench());
+  for (const m of ms)
+    console.log(
+      `${m.id} (${m.lang}) gold ${m.gold}: ${m.cause}${m.splitAlone ? ", split alone reaches" : ""}; matched [${m.matched.join(", ")}] missing [${m.missing.map((x) => `${x.term}: ${x.cause}`).join(", ")}]`,
+    );
+  const count = (c: string) => ms.filter((m) => m.cause === c).length;
+  const alone = ms.filter((m) => m.splitAlone).length;
+  console.log(
+    `\n${ms.length} missed: split ${count("split")}, identifier ${count("identifier")}, vocabulary ${count("vocabulary")}, mixed ${count("mixed")}, excluded ${count("excluded")}, ranked ${count("ranked")}`,
+  );
+  console.log(
+    `split alone reaches: ${alone} (${ms.length ? ((alone / ms.length) * 100).toFixed(1) : "0.0"}%)`,
+  );
+}
+
+if (args.includes("--misses")) {
+  if (ref || args.includes("--json")) throw new Error("--misses prints this tree only; use it alone");
+  await printMisses();
+  process.exit(0);
+}
 const mine = await summary();
 if (args.includes("--json")) process.stdout.write(`${JSON.stringify(mine.groups)}\n`);
 else if (ref) {

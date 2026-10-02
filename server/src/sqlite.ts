@@ -14,7 +14,7 @@ import { packageVersionAt, ROOT } from "./plugin.ts";
 /** Schema generation (the `sphica_generation` table). A database of another generation is refused without being changed. */
 const SCHEMA_GENERATION = 2;
 /** Revision within the generation. Keep it equal to `pragma user_version` at the end of db/schema.sql. */
-export const SCHEMA_REVISION = 8;
+export const SCHEMA_REVISION = 9;
 
 /** Connection roles: owner applies the schema, reader only reads, ingest imports, capture records conversations and deliveries (append only, but for pruning old deliveries). */
 export type Role = "owner" | "reader" | "ingest" | "capture" | "forget";

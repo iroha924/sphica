@@ -1,5 +1,5 @@
 {
-  "note": "Records and questions for the offline retrieval benchmark (server/evals/retrieval/run.ts). Each record is saved through the real save path from one owner message; overlap says by hand whether the question shares a word with the gold record's text or aliases. Questions with no gold measure how often search returns something anyway.",
+  "note": "Records and questions for the offline retrieval benchmark (server/evals/retrieval/run.ts). Each record is saved through the real save path from one owner message; overlap says by hand whether the question shares a word with the gold record's text or aliases. Questions with no gold measure how often search returns something anyway. set says which experiment a question was written for (base when absent). A ja-split question holds at least one word that the splitter cuts differently from the gold record; it may also differ in vocabulary, which run.ts --misses reports per term. Questions in a set were written before the experiments ran and are not changed after.",
   "records": [
     {
       "key": "storage",
@@ -660,6 +660,624 @@
       "options": [],
       "aliases": ["statistics", "stats", "統計"],
       "supersedes": null
+    },
+    {
+      "key": "cover-cache-ttl",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "coverCacheTtlDays は 30 日にする。",
+      "quote": "coverCacheTtlDays は 30 日にする。",
+      "text": "coverCacheTtlDays は 30 日にする",
+      "why": null,
+      "options": [],
+      "aliases": ["表紙", "キャッシュ期限"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/covers/cache.ts",
+          "symbol": "coverCacheTtlDays"
+        }
+      ]
+    },
+    {
+      "key": "isbn-normalize",
+      "lang": "en",
+      "kind": "implementation",
+      "stance": null,
+      "message": "normalizeIsbn strips hyphens and turns ISBN-10 into ISBN-13.",
+      "quote": "normalizeIsbn strips hyphens and turns ISBN-10 into ISBN-13.",
+      "text": "normalizeIsbn strips hyphens and turns ISBN-10 into ISBN-13",
+      "why": null,
+      "options": [],
+      "aliases": ["ISBN", "hyphen"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/books/isbn.ts",
+          "symbol": "normalizeIsbn"
+        }
+      ]
+    },
+    {
+      "key": "shelf-sort",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "shelf_sort_key orders the books on a shelf; drag and drop rewrites it.",
+      "quote": "shelf_sort_key orders the books on a shelf; drag and drop rewrites it.",
+      "text": "shelf_sort_key orders the books on a shelf; drag and drop rewrites it",
+      "why": null,
+      "options": [],
+      "aliases": ["drag and drop"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/shelf/order.ts",
+          "symbol": "shelf_sort_key"
+        }
+      ]
+    },
+    {
+      "key": "import-batch",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "importGoodreadsCsv commits every 500 rows.",
+      "quote": "importGoodreadsCsv commits every 500 rows.",
+      "text": "importGoodreadsCsv commits every 500 rows",
+      "why": null,
+      "options": [],
+      "aliases": ["batch size"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/import/goodreads.ts",
+          "symbol": "importGoodreadsCsv"
+        }
+      ]
+    },
+    {
+      "key": "metadata-retry",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "fetchBookMetadata は失敗したら 2 回までやり直す。",
+      "quote": "fetchBookMetadata は失敗したら 2 回までやり直す。",
+      "text": "fetchBookMetadata は失敗したら 2 回までやり直す",
+      "why": null,
+      "options": [],
+      "aliases": ["再試行"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/api/metadata.ts",
+          "symbol": "fetchBookMetadata"
+        }
+      ]
+    },
+    {
+      "key": "cover-upload-max",
+      "lang": "ja",
+      "kind": "constraint",
+      "stance": "do",
+      "message": "MAX_COVER_UPLOAD_BYTES は 2 MB を超えない。",
+      "quote": "MAX_COVER_UPLOAD_BYTES は 2 MB を超えない。",
+      "text": "MAX_COVER_UPLOAD_BYTES は 2 MB を超えない",
+      "why": null,
+      "options": [],
+      "aliases": ["上限"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/covers/upload.ts",
+          "symbol": "MAX_COVER_UPLOAD_BYTES"
+        }
+      ]
+    },
+    {
+      "key": "theme-tokens",
+      "lang": "en",
+      "kind": "implementation",
+      "stance": null,
+      "message": "applyThemeTokens writes the CSS custom properties of the current look.",
+      "quote": "applyThemeTokens writes the CSS custom properties of the current look.",
+      "text": "applyThemeTokens writes the CSS custom properties of the current look",
+      "why": null,
+      "options": [],
+      "aliases": ["custom properties"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "src/ui/theme.ts",
+          "symbol": "applyThemeTokens"
+        }
+      ]
+    },
+    {
+      "key": "reading-log",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "reading_log テーブルに読んだページ数を日ごとに残す。",
+      "quote": "reading_log テーブルに読んだページ数を日ごとに残す。",
+      "text": "reading_log テーブルに読んだページ数を日ごとに残す",
+      "why": null,
+      "options": [],
+      "aliases": ["読書記録"],
+      "supersedes": null,
+      "anchors": [
+        {
+          "path": "db/schema.sql",
+          "symbol": "reading_log"
+        }
+      ]
+    },
+    {
+      "key": "conflict-lww",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "When two devices edit the same book, the last write wins.",
+      "quote": "When two devices edit the same book, the last write wins.",
+      "text": "When two devices edit the same book, the last write wins",
+      "why": null,
+      "options": [],
+      "aliases": ["conflict", "sync"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
+    },
+    {
+      "key": "conflict-loss",
+      "lang": "en",
+      "kind": "finding",
+      "stance": null,
+      "message": "Last write wins lost notes when two devices edited the same book offline.",
+      "quote": "Last write wins lost notes when two devices edited the same book offline.",
+      "text": "Last write wins lost notes when two devices edited the same book offline",
+      "why": null,
+      "options": [],
+      "aliases": ["conflict", "data loss"],
+      "supersedes": null,
+      "created_at": "2026-06-01T09:00:00.000Z"
+    },
+    {
+      "key": "thumb-size",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Thumbnails are 240 px wide WebP images.",
+      "quote": "Thumbnails are 240 px wide WebP images.",
+      "text": "Thumbnails are 240 px wide WebP images",
+      "why": null,
+      "options": [],
+      "aliases": ["thumbnail", "サムネイル"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "thumb-sharp",
+      "lang": "en",
+      "kind": "implementation",
+      "stance": null,
+      "message": "Thumbnails are made at 240 px with sharp in the import worker.",
+      "quote": "Thumbnails are made at 240 px with sharp in the import worker.",
+      "text": "Thumbnails are made at 240 px with sharp in the import worker",
+      "why": null,
+      "options": [],
+      "aliases": ["thumbnail", "sharp", "サムネイル"],
+      "supersedes": null,
+      "created_at": "2026-07-01T09:00:00.000Z"
+    },
+    {
+      "key": "body-14",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Body text is 14 px.",
+      "quote": "Body text is 14 px.",
+      "text": "Body text is 14 px",
+      "why": null,
+      "options": [],
+      "aliases": ["font size", "文字サイズ", "本文"],
+      "supersedes": null,
+      "created_at": "2026-01-10T09:00:00.000Z"
+    },
+    {
+      "key": "body-16",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Body text is 16 px.",
+      "quote": "Body text is 16 px.",
+      "text": "Body text is 16 px",
+      "why": null,
+      "options": [],
+      "aliases": ["font size", "文字サイズ", "本文"],
+      "supersedes": "body-14",
+      "created_at": "2026-06-10T09:00:00.000Z"
+    },
+    {
+      "key": "read-shelf",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "既読本は本棚の下段にまとめて表示する。",
+      "quote": "既読本は本棚の下段にまとめて表示する。",
+      "text": "既読本は本棚の下段にまとめて表示する",
+      "why": null,
+      "options": [],
+      "aliases": ["下段"],
+      "supersedes": null
+    },
+    {
+      "key": "bunko-same",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "文庫本と単行本は同じ本として扱う。",
+      "quote": "文庫本と単行本は同じ本として扱う。",
+      "text": "文庫本と単行本は同じ本として扱う",
+      "why": null,
+      "options": [],
+      "aliases": ["版"],
+      "supersedes": null
+    },
+    {
+      "key": "author-kana",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "著者名はフリガナで並べる。",
+      "quote": "著者名はフリガナで並べる。",
+      "text": "著者名はフリガナで並べる",
+      "why": null,
+      "options": [],
+      "aliases": ["フリガナ"],
+      "supersedes": null
+    },
+    {
+      "key": "publisher-api",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "出版社名は書誌 API の値をそのまま使う。",
+      "quote": "出版社名は書誌 API の値をそのまま使う。",
+      "text": "出版社名は書誌 API の値をそのまま使う",
+      "why": null,
+      "options": [],
+      "aliases": ["書誌"],
+      "supersedes": null
+    },
+    {
+      "key": "volume-number",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "巻数はシリーズごとに数字で持つ。",
+      "quote": "巻数はシリーズごとに数字で持つ。",
+      "text": "巻数はシリーズごとに数字で持つ",
+      "why": null,
+      "options": [],
+      "aliases": ["シリーズ"],
+      "supersedes": null
+    },
+    {
+      "key": "loan-due",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "貸出中の本には返却予定日を出す。",
+      "quote": "貸出中の本には返却予定日を出す。",
+      "text": "貸出中の本には返却予定日を出す",
+      "why": null,
+      "options": [],
+      "aliases": ["返却予定日"],
+      "supersedes": null
+    },
+    {
+      "key": "unread-count",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Each shelf shows how many of its books are unread.",
+      "quote": "Each shelf shows how many of its books are unread.",
+      "text": "Each shelf shows how many of its books are unread",
+      "why": null,
+      "options": [],
+      "aliases": ["未読本数", "unread"],
+      "supersedes": null
+    },
+    {
+      "key": "paperback-card",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Paperbacks get a smaller card on the shelf.",
+      "quote": "Paperbacks get a smaller card on the shelf.",
+      "text": "Paperbacks get a smaller card on the shelf",
+      "why": null,
+      "options": [],
+      "aliases": ["文庫本", "paperback"],
+      "supersedes": null
+    },
+    {
+      "key": "sort-title",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "蔵書の並び替えはタイトル順を既定にする。",
+      "quote": "蔵書の並び替えはタイトル順を既定にする。",
+      "text": "蔵書の並び替えはタイトル順を既定にする",
+      "why": null,
+      "options": [],
+      "aliases": ["並び替え", "sort order"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "sort-title-scatter",
+      "lang": "ja",
+      "kind": "finding",
+      "stance": null,
+      "message": "蔵書の並び替えをタイトル順にすると全集の巻が散らばる。",
+      "quote": "蔵書の並び替えをタイトル順にすると全集の巻が散らばる。",
+      "text": "蔵書の並び替えをタイトル順にすると全集の巻が散らばる",
+      "why": null,
+      "options": [],
+      "aliases": ["並び替え", "sort order"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
+    },
+    {
+      "key": "notes-plain",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Notes are plain text without rich formatting.",
+      "quote": "Notes are plain text without rich formatting.",
+      "text": "Notes are plain text without rich formatting",
+      "why": null,
+      "options": [],
+      "aliases": ["notes", "formatting"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "notes-markup",
+      "lang": "en",
+      "kind": "finding",
+      "stance": null,
+      "message": "Rich formatting pasted into notes showed up as raw markup.",
+      "quote": "Rich formatting pasted into notes showed up as raw markup.",
+      "text": "Rich formatting pasted into notes showed up as raw markup",
+      "why": null,
+      "options": [],
+      "aliases": ["notes", "formatting"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
+    },
+    {
+      "key": "covers-on-import",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Covers are fetched from the metadata API when a book is imported.",
+      "quote": "Covers are fetched from the metadata API when a book is imported.",
+      "text": "Covers are fetched from the metadata API when a book is imported",
+      "why": null,
+      "options": [],
+      "aliases": ["cover", "import"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "covers-import-timeout",
+      "lang": "en",
+      "kind": "dead_end",
+      "stance": null,
+      "message": "Fetching every cover from the metadata API during a large import timed out.",
+      "quote": "Fetching every cover from the metadata API during a large import timed out.",
+      "text": "Fetching every cover from the metadata API during a large import timed out",
+      "why": null,
+      "options": [],
+      "aliases": ["cover", "import"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
+    },
+    {
+      "key": "backup-weekly",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "バックアップは週 1 回、JSON で書き出す。",
+      "quote": "バックアップは週 1 回、JSON で書き出す。",
+      "text": "バックアップは週 1 回、JSON で書き出す",
+      "why": "手動の書き出しを忘れても戻せるように",
+      "options": [],
+      "aliases": ["backup", "バックアップ"],
+      "supersedes": null,
+      "created_at": "2026-03-01T09:00:00.000Z"
+    },
+    {
+      "key": "backup-daily",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "バックアップは週 1 回をやめて毎日、JSON で書き出す。",
+      "quote": "バックアップは週 1 回をやめて毎日、JSON で書き出す。",
+      "text": "バックアップは週 1 回をやめて毎日、JSON で書き出す",
+      "why": "週 1 回だと 1 週間分の登録を失うことがあった",
+      "options": [],
+      "aliases": ["backup", "バックアップ"],
+      "supersedes": null,
+      "created_at": "2026-08-01T09:00:00.000Z"
+    },
+    {
+      "key": "stats-hourly",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "読書統計は 1 時間ごとに計算し直す。",
+      "quote": "読書統計は 1 時間ごとに計算し直す。",
+      "text": "読書統計は 1 時間ごとに計算し直す",
+      "why": "画面を開くたびに計算すると重い",
+      "options": [],
+      "aliases": ["statistics", "統計"],
+      "supersedes": null,
+      "created_at": "2026-02-01T09:00:00.000Z"
+    },
+    {
+      "key": "stats-on-finish",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "読書統計は 1 時間ごとをやめて、本を読み終えたときだけ計算し直す。",
+      "quote": "読書統計は 1 時間ごとをやめて、本を読み終えたときだけ計算し直す。",
+      "text": "読書統計は 1 時間ごとをやめて、本を読み終えたときだけ計算し直す",
+      "why": null,
+      "options": [],
+      "aliases": ["statistics", "統計"],
+      "supersedes": null,
+      "created_at": "2026-09-01T09:00:00.000Z"
+    },
+    {
+      "key": "history-20",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Search history keeps the last 20 queries.",
+      "quote": "Search history keeps the last 20 queries.",
+      "text": "Search history keeps the last 20 queries",
+      "why": "a short list fits on a phone screen",
+      "options": [],
+      "aliases": ["search history", "recent searches"],
+      "supersedes": null,
+      "created_at": "2026-02-01T09:00:00.000Z"
+    },
+    {
+      "key": "history-50",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Search history keeps the last 50 queries instead of 20.",
+      "quote": "Search history keeps the last 50 queries instead of 20.",
+      "text": "Search history keeps the last 50 queries instead of 20",
+      "why": null,
+      "options": [],
+      "aliases": ["search history", "recent searches"],
+      "supersedes": null,
+      "created_at": "2026-08-01T09:00:00.000Z"
+    },
+    {
+      "key": "used-price",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "古本は購入価格を空欄のまま登録できる。",
+      "quote": "古本は購入価格を空欄のまま登録できる。",
+      "text": "古本は購入価格を空欄のまま登録できる",
+      "why": null,
+      "options": [],
+      "aliases": ["購入価格"],
+      "supersedes": null
+    },
+    {
+      "key": "tankobon-size",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "単行本の表紙は大きめのカードで出す。",
+      "quote": "単行本の表紙は大きめのカードで出す。",
+      "text": "単行本の表紙は大きめのカードで出す",
+      "why": null,
+      "options": [],
+      "aliases": ["カード"],
+      "supersedes": null
+    },
+    {
+      "key": "dup-merge",
+      "lang": "en",
+      "kind": "decision",
+      "stance": "do",
+      "message": "Duplicate books are merged by ISBN.",
+      "quote": "Duplicate books are merged by ISBN.",
+      "text": "Duplicate books are merged by ISBN",
+      "why": null,
+      "options": [],
+      "aliases": ["duplicates", "merge"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "dup-merge-editions",
+      "lang": "en",
+      "kind": "finding",
+      "stance": null,
+      "message": "Merging duplicate books by ISBN merged different printings.",
+      "quote": "Merging duplicate books by ISBN merged different printings.",
+      "text": "Merging duplicate books by ISBN merged different printings",
+      "why": null,
+      "options": [],
+      "aliases": ["duplicates", "merge"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
+    },
+    {
+      "key": "wishlist-separate",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "欲しい本リストは本棚とは別の画面にする。",
+      "quote": "欲しい本リストは本棚とは別の画面にする。",
+      "text": "欲しい本リストは本棚とは別の画面にする",
+      "why": null,
+      "options": [],
+      "aliases": ["欲しい本", "wishlist"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "wishlist-lost",
+      "lang": "ja",
+      "kind": "finding",
+      "stance": null,
+      "message": "欲しい本リストを本棚と別の画面にしたら使われなくなった。",
+      "quote": "欲しい本リストを本棚と別の画面にしたら使われなくなった。",
+      "text": "欲しい本リストを本棚と別の画面にしたら使われなくなった",
+      "why": null,
+      "options": [],
+      "aliases": ["欲しい本", "wishlist"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
+    },
+    {
+      "key": "lazy-images",
+      "lang": "ja",
+      "kind": "decision",
+      "stance": "do",
+      "message": "表紙画像の読み込みは画面に出る直前まで遅らせて、一覧のスクロールを軽く保つ。",
+      "quote": "表紙画像の読み込みは画面に出る直前まで遅らせて、一覧のスクロールを軽く保つ。",
+      "text": "表紙画像の読み込みは画面に出る直前まで遅らせて、一覧のスクロールを軽く保つ",
+      "why": null,
+      "options": [],
+      "aliases": ["画像", "読み込み"],
+      "supersedes": null,
+      "created_at": "2026-04-01T09:00:00.000Z"
+    },
+    {
+      "key": "lazy-images-fast",
+      "lang": "ja",
+      "kind": "finding",
+      "stance": null,
+      "message": "表紙画像の読み込みを遅らせるとスクロールが軽い。",
+      "quote": "表紙画像の読み込みを遅らせるとスクロールが軽い。",
+      "text": "表紙画像の読み込みを遅らせるとスクロールが軽い",
+      "why": null,
+      "options": [],
+      "aliases": ["画像", "読み込み"],
+      "supersedes": null,
+      "created_at": "2026-05-01T09:00:00.000Z"
     }
   ],
   "questions": [
@@ -1082,6 +1700,430 @@
       "overlap": null,
       "text": "which GPU do we train on",
       "gold": []
+    },
+    {
+      "id": "i01",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "where is the shelf sort key",
+      "gold": ["shelf-sort"],
+      "set": "ident"
+    },
+    {
+      "id": "i02",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "how many rows does each goodreads csv import commit",
+      "gold": ["import-batch"],
+      "set": "ident"
+    },
+    {
+      "id": "i03",
+      "lang": "en>en",
+      "overlap": false,
+      "text": "theme tokens",
+      "gold": ["theme-tokens"],
+      "set": "ident"
+    },
+    {
+      "id": "i04",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "what does isbn normalize do",
+      "gold": ["isbn-normalize"],
+      "set": "ident"
+    },
+    {
+      "id": "i05",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "theme の tokens はどこで当てる？",
+      "gold": ["theme-tokens"],
+      "set": "ident"
+    },
+    {
+      "id": "i06",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "ISBN の normalize はどうなっている？",
+      "gold": ["isbn-normalize"],
+      "set": "ident"
+    },
+    {
+      "id": "i07",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "cover cache の ttl は何日？",
+      "gold": ["cover-cache-ttl"],
+      "set": "ident"
+    },
+    {
+      "id": "i08",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "book metadata の取得は何回やり直す？",
+      "gold": ["metadata-retry"],
+      "set": "ident"
+    },
+    {
+      "id": "i09",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "cover upload の上限は？",
+      "gold": ["cover-upload-max"],
+      "set": "ident"
+    },
+    {
+      "id": "i10",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "how long is the cover cache ttl",
+      "gold": ["cover-cache-ttl"],
+      "set": "ident"
+    },
+    {
+      "id": "i11",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "what is in the reading log",
+      "gold": ["reading-log"],
+      "set": "ident"
+    },
+    {
+      "id": "i12",
+      "lang": "en>ja",
+      "overlap": false,
+      "text": "max cover upload bytes",
+      "gold": ["cover-upload-max"],
+      "set": "ident"
+    },
+    {
+      "id": "in1",
+      "lang": "en>en",
+      "overlap": null,
+      "text": "how do we normalize author names",
+      "gold": [],
+      "set": "ident"
+    },
+    {
+      "id": "in2",
+      "lang": "en>en",
+      "overlap": null,
+      "text": "what is the max page count per book",
+      "gold": [],
+      "set": "ident"
+    },
+    {
+      "id": "in3",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "upload の進み具合は表示する？",
+      "gold": [],
+      "set": "ident"
+    },
+    {
+      "id": "in4",
+      "lang": "en>ja",
+      "overlap": null,
+      "text": "how do we sort search results",
+      "gold": [],
+      "set": "ident"
+    },
+    {
+      "id": "t03",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "what happens when two devices edit the same book",
+      "gold": ["conflict-lww"],
+      "set": "tie"
+    },
+    {
+      "id": "t04",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "did last write wins ever lose data",
+      "gold": ["conflict-loss"],
+      "set": "tie"
+    },
+    {
+      "id": "t05",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "サムネイルの幅は何 px？",
+      "gold": ["thumb-size", "thumb-sharp"],
+      "set": "tie"
+    },
+    {
+      "id": "t06",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "サムネイルはどのライブラリで作っている？",
+      "gold": ["thumb-sharp"],
+      "set": "tie"
+    },
+    {
+      "id": "t09",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "本文の文字サイズは？",
+      "gold": ["body-16"],
+      "set": "tie"
+    },
+    {
+      "id": "tn1",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "バックアップの暗号化は？",
+      "gold": [],
+      "set": "tie"
+    },
+    {
+      "id": "tn2",
+      "lang": "en>en",
+      "overlap": null,
+      "text": "do two devices share their reading goals",
+      "gold": [],
+      "set": "tie"
+    },
+    {
+      "id": "s01",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "既読の本はどこに出る？",
+      "gold": ["read-shelf"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s02",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "文庫と単行本は分ける？",
+      "gold": ["bunko-same"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s03",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "著者の名前はどう並べる？",
+      "gold": ["author-kana"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s04",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "出版社の名前はどこから取る？",
+      "gold": ["publisher-api"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s05",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "シリーズの何巻かはどう持つ？",
+      "gold": ["volume-number"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s06",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "貸し出し中の本はどう見える？",
+      "gold": ["loan-due"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s07",
+      "lang": "ja>en",
+      "overlap": true,
+      "text": "未読の本の数は出る？",
+      "gold": ["unread-count"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s08",
+      "lang": "ja>en",
+      "overlap": false,
+      "text": "文庫のカードの大きさは？",
+      "gold": ["paperback-card"],
+      "set": "ja-split"
+    },
+    {
+      "id": "sn1",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "読本の作り方は？",
+      "gold": [],
+      "set": "ja-split"
+    },
+    {
+      "id": "sn2",
+      "lang": "ja>ja",
+      "overlap": null,
+      "text": "名前の変更はできる？",
+      "gold": [],
+      "set": "ja-split"
+    },
+    {
+      "id": "t10",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "蔵書の並び替えの既定は？",
+      "gold": ["sort-title"],
+      "set": "tie"
+    },
+    {
+      "id": "t11",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "タイトル順の並び替えで困ったことは？",
+      "gold": ["sort-title-scatter"],
+      "set": "tie"
+    },
+    {
+      "id": "t12",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "can notes have rich formatting",
+      "gold": ["notes-plain"],
+      "set": "tie"
+    },
+    {
+      "id": "t13",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "what went wrong with formatting pasted into notes",
+      "gold": ["notes-markup"],
+      "set": "tie"
+    },
+    {
+      "id": "t14",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "where do covers come from when a book is imported",
+      "gold": ["covers-on-import"],
+      "set": "tie"
+    },
+    {
+      "id": "t15",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "did fetching covers during a large import fail",
+      "gold": ["covers-import-timeout"],
+      "set": "tie"
+    },
+    {
+      "id": "t16",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "バックアップはいつ書き出す？",
+      "gold": ["backup-daily"],
+      "set": "tie"
+    },
+    {
+      "id": "t17",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "バックアップを週 1 回にした理由は？",
+      "gold": ["backup-weekly"],
+      "set": "tie"
+    },
+    {
+      "id": "t18",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "読書統計はいつ計算し直す？",
+      "gold": ["stats-on-finish"],
+      "set": "tie"
+    },
+    {
+      "id": "t19",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "読書統計を 1 時間ごとに計算していた理由は？",
+      "gold": ["stats-hourly"],
+      "set": "tie"
+    },
+    {
+      "id": "t20",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "how many queries does search history keep",
+      "gold": ["history-50"],
+      "set": "tie"
+    },
+    {
+      "id": "t21",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "why did search history keep 20 queries",
+      "gold": ["history-20"],
+      "set": "tie"
+    },
+    {
+      "id": "s09",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "古い本の購入価格は空でいい？",
+      "gold": ["used-price"],
+      "set": "ja-split"
+    },
+    {
+      "id": "s10",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "単行の本の表紙カードは？",
+      "gold": ["tankobon-size"],
+      "set": "ja-split"
+    },
+    {
+      "id": "t22",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "how are duplicate books merged",
+      "gold": ["dup-merge"],
+      "set": "tie"
+    },
+    {
+      "id": "t23",
+      "lang": "en>en",
+      "overlap": true,
+      "text": "did merging duplicate books by ISBN go wrong",
+      "gold": ["dup-merge-editions"],
+      "set": "tie"
+    },
+    {
+      "id": "t24",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "欲しい本リストはどこに出す？",
+      "gold": ["wishlist-separate"],
+      "set": "tie"
+    },
+    {
+      "id": "t25",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "欲しい本リストを別の画面にしてどうなった？",
+      "gold": ["wishlist-lost"],
+      "set": "tie"
+    },
+    {
+      "id": "t26",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "表紙画像の読み込みはいつする？",
+      "gold": ["lazy-images"],
+      "set": "tie"
+    },
+    {
+      "id": "t27",
+      "lang": "ja>ja",
+      "overlap": true,
+      "text": "表紙画像の読み込みを遅らせてスクロールはどうなった？",
+      "gold": ["lazy-images-fast"],
+      "set": "tie"
     }
   ]
 }
