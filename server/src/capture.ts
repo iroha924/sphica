@@ -536,31 +536,24 @@ const chunks = <T>(xs: T[], n = ROWS): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 
 /**
- * The project each spooled key names: the key itself, else its normalized form. Looked up inside the write's transaction, so a migration
- * that removes or renames a project cannot come between the lookup and the write.
+ * The project each spooled key names: the key itself, else the only project whose key normalizes as it does. Two such projects (a split
+ * not migrated yet) leave the record held, since writing into either could keep the migration from merging them. Looked up inside the
+ * write's transaction, so a migration that removes or renames a project cannot come between the lookup and the write.
  */
 async function projectsOf(trx: Kysely<DB>, keys: string[]): Promise<Map<string, number>> {
-  const wanted = [...new Set(keys.flatMap((k) => [k, normalizeKey(k)]))];
-  if (!wanted.length) return new Map();
-  const ids = new Map(
-    (await trx.selectFrom("project").select(["id", "key"]).where("key", "in", wanted).execute()).map((p) => [
-      p.key,
-      p.id,
-    ]),
-  );
+  if (!keys.length) return new Map();
+  const all = await trx.selectFrom("project").select(["id", "key"]).execute();
+  const exact = new Map(all.map((p) => [p.key, p.id]));
+  const normal = Map.groupBy(all, (p) => normalizeKey(p.key));
   const found = new Map<string, number>();
   for (const k of keys) {
-    const id = ids.get(k) ?? ids.get(normalizeKey(k));
+    const same = normal.get(normalizeKey(k));
+    const id = exact.get(k) ?? (same?.length === 1 ? same[0]?.id : undefined);
     if (id !== undefined) found.set(k, id);
   }
   return found;
 }
 
-/**
- * Writes a batch of records in one transaction. **The capture connection can write only to the capture views** (db/schema.sql, db-write.ts).
- * The views' triggers accept an identical resend and refuse a resend with different content, so ids are fixed when queued.
- * **Counts do not use affected rows.** Inserting into a view affects 0 rows, so the messages present before sending are subtracted instead.
- */
 export async function write(
   db: Kysely<DB>,
   batch: Spooled[],

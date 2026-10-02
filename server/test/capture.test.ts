@@ -1188,3 +1188,41 @@ test("a queued record without a project key goes to rejected/ and the rest are s
     await db.done();
   }
 });
+
+// Before migrating, a third spelling must not pick one of two projects its key normalizes to: writing into the empty one would leave
+// two projects with records, which revision 8 refuses to merge
+test("a legacy key held while two projects share its normalized key stays held, and the migration still merges them", async () => {
+  reset();
+  const db = tempDb(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8"));
+  try {
+    db.owner.exec(
+      "insert into project (key, name) values ('git:GitHub.com/O/R', 'O/R'), ('git:github.com/o/r', 'o/r')",
+    );
+    db.owner.exec(
+      "insert into session (id, project_id, host, external_id, started_at) values ('s0', 1, 'claude-code', 's0', '2026-09-13T00:00:00.000Z')",
+    );
+    queue(spoolDir(), Date.now(), 1, owned("git:GITHUB.com/o/R", 1));
+    assert.deepEqual(await flush(db.file), { sent: 0, deferred: 1, rejected: 0 });
+    assert.deepEqual(
+      { ...db.owner.prepare("select count(*) as n from session where project_id = 2").get() },
+      { n: 0 },
+    );
+    const log = console.log;
+    console.log = () => {};
+    try {
+      migrate(db.file);
+    } finally {
+      console.log = log;
+    }
+    assert.deepEqual(await flush(db.file), { sent: 1, deferred: 0, rejected: 0 });
+    assert.deepEqual(
+      db.owner
+        .prepare("select s.project_id from source m join session s on s.id = m.session_id")
+        .all()
+        .map((r) => r.project_id),
+      [1],
+    );
+  } finally {
+    await db.done();
+  }
+});

@@ -110,6 +110,17 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - 結果: red: `node --test --test-name-pattern="says how to go on" test/migrate.test.ts` → fail
   - 結果: `cd server && node --test test/migrate.test.ts` → 40 pass
 
+- [x] T10: spool の key の正規化での検索を、正規化して一致する project が 1 つだけのときに限る
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直す検索がある）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="stays held" test/capture.test.ts` → revision 7 の `git:GitHub.com/O/R`（中身あり）と `git:github.com/o/r`（空）で、`git:GITHUB.com/o/R` の記録が空の方へ送られ `sent: 1` で fail
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass（その記録は unregistered/ に残り、移行後に中身のある project 1 に入る）
+  - コミット: `fix(capture): use the normalized key only when it names one project (T10)`
+  - 結果: red: `node --test --test-name-pattern="stays held" test/capture.test.ts` → `actual: { sent: 1, deferred: 0, rejected: 0 }`
+  - 結果: `cd server && node --test test/capture.test.ts` → 37 pass
+
 ## P3: リリースの準備
 
 npm と 3 つの manifest が 0.6.21 にそろう。
@@ -134,3 +145,4 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / T02 / Codex のタスクレビュー（73f85f0d）で F1（P2）: schema が受け付ける `git:HOST/` の key で 0008.sql の name が空になり CHECK で落ちる。手元で再現 / 採る。T07 を足して直した
 - 2026-10-02 / T04 / Codex のタスクレビュー（2075dc92）で F1（P2）: project が null の spool 記録で normalizeKey が TypeError を投げ、同じ送信の正常な記録も送れない。手元で再現 / 採る。T08 を足して直した
 - 2026-10-02 / 全差分 / Codex の全差分レビュー（8bf3ed00）は指摘なし。review-shipping は 1 件: 衝突の停止の案内が、marketplace が 0.6.21 を指すのにプラグインを 0.6.20 に留めるよう言い、doctor と MCP の案内も init へ戻るだけ / 案内の誤りを採る。T09 を足して直した。doctor と MCP が init を案内する点は、止まった init が理由を出すので変えない
+- 2026-10-02 / PR #247 / GitHub の Codex のレビューで P1: 未移行の分割に 3 つ目の書き方の記録が来ると、正規化した key で空の project に入り移行が止まる。手元で再現 / 採る。T10 を足して直した

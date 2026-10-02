@@ -57,7 +57,7 @@ approved_at: 2026-10-02
   - `0008.check.sql`: 正規化した key が同じ project のグループのうち、9 テーブルのどれかに行がある project が 2 つ以上あるグループを、`sphica_migration_stop` に project ごとに入れる（id、key、テーブルごとの行数）
   - `0008.sql` の順序: (1) 各グループで残す project を決める（中身のある 1 つ、全部空なら id が最小のもの）、(2) 残さない空の project を delete、(3) 残す project の key と name を正規化した値に update、(4) trigger を作る、(5) `pragma user_version = 8`。消したもの・直したものは `sphica_migration_note` に 1 行ずつ書く。project の id・created_at・`sqlite_sequence` はそのまま
 - **止まったときの文面**（`server/src/admin.ts`）: 今の Stop の文面は rule ごとに差し替えられるようにし、この rule では「revision 8 は当てていない。このバージョンの Sphica はこれらの project をまとめられない。まとめられる Sphica が移行するまで検索・読み取り・記録のツールは使えず、その間も capture は記録を続ける。下の一覧を issue で知らせてほしい」と出す。forget や DB の削除は勧めない。commit 済みの revision とバックアップの既存の報告（3 通りの文面）はそのまま
-- **capture**（`server/src/capture.ts`）: spool の記録の `project` には `place.legacyKey` を書く。送るときは、`write()` の `BEGIN IMMEDIATE` のトランザクションの中で、記録ごとに完全一致で project を探し、無ければ `normalizeKey(project)` で探し、決まった id を同じトランザクションで session の id の導出と message・edit の書き込みに使う。1 件ずつ送り直すときも、そのトランザクションの中で探し直す（失敗したバッチの対応表を使い回さない）。トランザクションの中で見つからない記録は今までどおり unregistered/ へ置き、rejected/ へは移さない。unregistered/ に置かれた記録も同じ規則で送る。spool の形式（`v: 2`）は変えない
+- **capture**（`server/src/capture.ts`）: spool の記録の `project` には `place.legacyKey` を書く。送るときは、`write()` の `BEGIN IMMEDIATE` のトランザクションの中で、記録ごとに完全一致で project を探し、無ければ key を正規化すると同じになる project が 1 つだけのときにそれを使い（2 つ以上なら unregistered/ に残す）、決まった id を同じトランザクションで session の id の導出と message・edit の書き込みに使う。1 件ずつ送り直すときも、そのトランザクションの中で探し直す（失敗したバッチの対応表を使い回さない）。トランザクションの中で見つからない記録は今までどおり unregistered/ へ置き、rejected/ へは移さない。unregistered/ に置かれた記録も同じ規則で送る。spool の形式（`v: 2`）は変えない
 - **ほかの key の利用者**: init の登録、両 MCP サーバーの `projectId`、`writePlace`、delivery、`localRoots`/doctor、GitHub の harvest/glean は `identify().key` を使うので、正規化した key になる。`localRoots` は 2 つのディレクトリが同じ key になったら今までどおり ambiguous として扱う
 - **リリース**: `bun run release:plan -- --base v0.6.20` が `plugin` を返したら、npm と 3 つの manifest を 0.6.21 にそろえる
 
@@ -104,3 +104,4 @@ approved_at: 2026-10-02
 ## 変更履歴
 - 2026-10-02 / A2 の test-name-pattern を "revision 8" から "revision 7" に / テストの名前が既存の「migrating revision N」に合わせて移行元の revision を名乗るため / Go 不要
 - 2026-10-02 / 衝突で止まったときの案内から「0.6.20 と同じバージョンのプラグインを使い続ける」を外し、検索などは使えず capture は続くことと issue での報告だけにした / marketplace が 0.6.21 を指すので、プラグインを 0.6.20 に留める手順が無く、守れない案内になる（review-shipping の指摘）/ Go 不要（案内を出す範囲は同じ）
+- 2026-10-02 / 正規化した key での検索を、正規化して一致する project が 1 つだけのときに限った / revision 7 の未移行の分割で、3 つ目の書き方の記録が空の project に入り、まとめられたはずの分割を止める側に変える（GitHub の Codex の P1、再現済み）/ Go 不要（送り先の規則を狭めるだけで範囲は同じ）
