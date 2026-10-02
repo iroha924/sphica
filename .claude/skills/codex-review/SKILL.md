@@ -19,12 +19,15 @@ description: Asks Codex (codex exec) to review or investigate a Sphica diff. Use
 ## How to ask
 
 ```bash
+# Before merging a PR, and for a decision primary sources cannot settle
 codex exec -s read-only --ignore-rules --ephemeral -c model_reasoning_effort="high" - < <request file> > <output file> 2>&1
+# A re-review of a small fix, and a look back at a landed change (the config's medium)
+codex exec -s read-only --ignore-rules --ephemeral - < <request file> > <output file> 2>&1
 ```
 
 - Launch it with Bash's `run_in_background` and wait for the completion notice. One run takes 10 to 15 minutes. Do not stop it midway
-- Do not pass a model (the owner's `~/.codex/config.toml` decides). Pass effort `high` for the review before merging a PR and for a decision primary sources cannot settle; a re-review of a small fix and a look back at a landed change leave it out (the config's `medium`). Without `model_reasoning_effort` in the config, Codex runs the model's own default, which is `low` for gpt-6.1-sol
-- Pass `--ignore-rules`: commands the owner always allowed in `~/.codex/rules` otherwise run outside the read-only sandbox
+- Do not pass a model (the owner's `~/.codex/config.toml` decides). Effort follows the two commands above. Without `model_reasoning_effort` in the config, Codex runs the model's own default, which is `low` for gpt-6.1-sol
+- Pass `--ignore-rules`: commands the owner always allowed in `~/.codex/rules` otherwise run outside the read-only sandbox. It drops forbid rules too, which costs nothing while the owner's rules hold only allow entries; weigh it again before adding a forbid rule
 - Write the request in the scratchpad, and include:
   - Scope: `git diff <base>..<head>`, or the uncommitted `git diff` and its base commit
   - What the change does, and what the owner decided (not open to findings)
