@@ -70,6 +70,16 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
   - 結果: `node --test test/terms-golden.test.ts` → 1 pass（server/src/terms-golden.json を split-check.ts 経由で読む）。`node --test --test-name-pattern="word splitting" test/cli.test.ts` → 1 pass（子プロセスの doctor が「Word splitting  matches the fixed samples (ICU 78.2)」、期待値を 1 件変えたデータでは warn で「1 of 54 fixed samples split differently with ICU 1.0」、reindex の語なし）
   - 結果: `bun run bundle` → exit 0。golden の文（「ｆｕｌｌｗｉｄｔｈ ＡＢＣ」）は plugin/dist/cli.js にだけ入り、mcp.js・deliver.js には入らない。`bun run check` → exit 0
 
+- [x] T06: asked と path を併せたテストに、空でない path を渡す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T03（path の `min(1)` を入れたのが T03）
+  - 変更: `server/test/plugin.test.ts`
+  - red: `cd server && node --test test/plugin.test.ts` → T03 の後で「search with asked leaves out the session…」が fail（`path: ""` が `min(1)` の入力検証に先に当たり、`asked cannot be combined with sources or path.` が返らない）
+  - 完了条件: `cd server && node --test test/plugin.test.ts` → 全件 pass
+  - コミット: `test(mcp): combine asked with a real path in the refusal test (T06)`
+  - 結果: red を上のとおり確かめた（T05 の作業中に `node --test test/plugin.test.ts` → 28 pass / 1 fail）。テストの path を `src/x.ts` にした後 → 28 pass / 0 fail
+
 - [ ] T05: 両 MCP サーバーの全ツールで知らない引数を拒む
   - 種別: 修正
   - 計画: S6
@@ -82,3 +92,4 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
 ## 記録
 2026-10-02 / - / 終わった計画 4 組の削除は .claude/plans の中だけの変更で、done の検査（.claude/plans の外の変更を見る）に掛からないのでタスクにしない / plan と tasks を入れる最初のコミットで削除する
 2026-10-02 / T04 / 変更欄の `server/src/text.ts` を `server/src/split-check.ts` に替えた / text.ts はすべてのフックと MCP が読むので、golden（約 14 KB）をそこで import すると全バンドルに入る。照合を別モジュールにして doctor（cli.js）だけに入れた
+2026-10-02 / T06 / T03 の `min(1)` で plugin.test.ts の asked と path の併用テスト（`path: ""`）が落ちていた。T03 では search.test.ts と `bun run check` だけを流し、plugin.test.ts を流していなかった / 修正タスク T06 を足し、T05 より前にコミットした

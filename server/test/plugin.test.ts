@@ -796,7 +796,7 @@ test("search with asked leaves out the session it is given and says when it cann
       /^asked cannot be combined with sources or path\.$/,
     );
     assert.match(
-      await search({ asked: true, path: "" }),
+      await search({ asked: true, path: "src/x.ts" }),
       /^asked cannot be combined with sources or path\.$/,
     );
   } finally {
