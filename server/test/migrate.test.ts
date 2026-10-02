@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16.
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16, fixtures/schema-rev6.sql at v0.6.17.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -19,6 +19,7 @@ const REV2 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV3 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev3.sql"), "utf8");
 const REV4 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev4.sql"), "utf8");
 const REV5 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev5.sql"), "utf8");
+const REV6 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev6.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -146,6 +147,7 @@ for (const [from, schema] of [
   [3, REV3],
   [4, REV4],
   [5, REV5],
+  [6, REV6],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -231,6 +233,7 @@ for (const [from, schema] of [
   [3, REV3],
   [4, REV4],
   [5, REV5],
+  [6, REV6],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -257,6 +260,7 @@ test("a fixture of every earlier revision is kept, each at its own revision", ()
     [3, REV3],
     [4, REV4],
     [5, REV5],
+    [6, REV6],
   ] as const)
     assert.match(schema, new RegExp(`pragma user_version = ${from};`));
 });
@@ -333,6 +337,32 @@ test("migrating revision 5 keeps every delivery and its units in the main conver
       { agent_id: "agent-a", unit_id: 1 },
     ],
   );
+});
+
+test("migrating revision 6 keeps every delivery unit, and capture prunes an idle session's deliveries with their units", () => {
+  const raw = create("old.db", REV6);
+  fill(raw);
+  const old = "2026-01-01T00:00:00.000Z";
+  raw
+    .prepare(
+      "insert into delivery (session_id, agent_id, event, outcome, eligible, at) values ('s1', null, 'pre_read', 'emitted', 1, ?), ('s1', 'agent-a', 'pre_read', 'emitted', 1, ?)",
+    )
+    .run(old, old);
+  raw.prepare("insert into delivery_unit (delivery_id, unit_id) values (1, 1), (2, 1)").run();
+  const units = (r: DatabaseSync) =>
+    r
+      .prepare("select delivery_id, unit_id from delivery_unit order by delivery_id")
+      .all()
+      .map((x) => ({ ...x }));
+  const before = units(raw);
+  migrate(raw);
+  assert.deepEqual(units(raw), before);
+  assert.deepEqual(raw.prepare("pragma foreign_key_check").all(), []);
+  const capture = connectWriter("capture", path.join(dir, "old.db"));
+  open.push(capture);
+  capture.prepare("insert into capture_delivery_prune (cutoff) values (?)").run(now);
+  assert.deepEqual(raw.prepare("select id from delivery").all(), []);
+  assert.deepEqual(units(raw), []);
 });
 
 test("migration keeps unit_state's id counter, so an id once used is never handed out again", () => {

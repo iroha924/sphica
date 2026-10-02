@@ -59,6 +59,7 @@ const CAPTURE_VIEWS = new Set([
   "capture_edit",
   "capture_delivery",
   "capture_delivery_scoped",
+  "capture_delivery_prune",
 ]);
 
 /** Tables that may be written inside triggers, keyed by trigger name (the authorizer's 5th argument). */
@@ -69,6 +70,12 @@ const TRIGGER_WRITES: Record<string, Set<string>> = {
   capture_delivery_insert: new Set(["delivery", "delivery_unit"]),
   capture_delivery_scoped_insert: new Set(["delivery", "delivery_unit"]),
   source_fts_ai: new Set(["source_fts"]),
+};
+
+/** Tables capture may delete from, only inside these triggers: pruning old deliveries, and a delivery's units going with it. */
+const TRIGGER_DELETES: Record<string, Set<string>> = {
+  capture_delivery_prune_insert: new Set(["delivery"]),
+  delivery_ad: new Set(["delivery_unit"]),
 };
 
 /** Functions a capture view's trigger may call (the delivery log fills defaults and expands its unit list); capture's own statements may not. */
@@ -106,6 +113,8 @@ function captureAuthorizer(
     if (triggerOrView !== null && TRIGGER_WRITES[triggerOrView]?.has(table)) return C.SQLITE_OK;
     return fts ? C.SQLITE_OK : C.SQLITE_DENY;
   }
+  if (action === C.SQLITE_DELETE && triggerOrView !== null && TRIGGER_DELETES[triggerOrView]?.has(table))
+    return C.SQLITE_OK;
   if (action === C.SQLITE_UPDATE || action === C.SQLITE_DELETE) return fts ? C.SQLITE_OK : C.SQLITE_DENY;
   if (action === C.SQLITE_READ) {
     if (triggerOrView !== null || fts) return C.SQLITE_OK;
@@ -175,6 +184,7 @@ export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
   source_fts_ad: ["delete source_fts"],
   unit_state_apply: ["update unit"],
   unit_state_restore: ["insert unit_state"],
+  delivery_ad: ["delete delivery_unit"],
   ...Object.fromEntries(
     [
       "evidence_i",

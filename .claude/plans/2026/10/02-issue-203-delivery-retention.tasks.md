@@ -22,13 +22,14 @@ base: main
 
 古い配信の行を capture が消せる仕組みが DB にでき、capture の直接の delete は拒否されたまま。
 
-- [ ] T01: revision 7（delivery_unit の FK、delivery_ad、delivery_at、capture_delivery_prune）と capture の権限を足し、0.6.18 に揃える
+- [x] T01: revision 7（delivery_unit の FK、delivery_ad、delivery_at、capture_delivery_prune）と capture の権限を足し、0.6.18 に揃える
   - 種別: 追加
   - 計画: S1, S2, S5
   - 依存: なし
   - 変更: `db/schema.sql`, `db/migrations/0007.sql`, `server/test/fixtures/schema-rev6.sql`, `server/src/db-types.ts`, `server/src/sqlite.ts`, `server/src/db-write.ts`, `server/test/migrate.test.ts`, `server/test/db.test.ts`, `server/test/schema.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/migrate.test.ts test/db.test.ts test/schema.test.ts` → pass。rev 6 から移行した DB と新しい DB の定義が一致し、rev 6 の delivery・delivery_unit の行が残り、foreign_key_check が空。capture から delivery・delivery_unit への直接の delete は拒否、capture_delivery_prune への insert で古いセッションの行と子の行が消える。`bun run release:plan -- --base v0.6.17` → plugin、4 つのファイルが 0.6.18
   - コミット: `feat(schema): let capture prune old delivery rows in revision 7 (T01)`
+  - 結果: `bun run release:plan -- --base v0.6.17`（変更を stage した後）→ plugin。4 つのファイルを 0.6.18 にした。`node --test test/db.test.ts test/schema.test.ts test/migrate.test.ts` → 87 pass / 0 fail（rev 6 から移行した DB と新しい DB の定義が一致、rev 6 の delivery_unit が残り foreign_key_check が空、移行後の capture が capture_delivery_prune で古いセッションの delivery と delivery_unit を消せる、capture から delivery・delivery_unit への直接の delete は not authorized、delivery_ad を INGEST_TRIGGER_WRITES に足してトリガー一覧の突き合わせが通る）。`bun run test`（server）→ 557 pass。`bun run check` → exit 0
 
 ## P2: 配信からの掃除
 

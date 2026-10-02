@@ -337,6 +337,54 @@ test("the capture connection logs a delivery with the subagent it ran in through
   );
 });
 
+test("the capture connection prunes old deliveries and their units only through the prune view", () => {
+  const raw = capture();
+  const old = "2026-01-01T00:00:00.000Z";
+  try {
+    raw
+      .prepare(
+        "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('dp', ?, 'claude-code', 'dp', null, ?)",
+      )
+      .run(p, now);
+    raw
+      .prepare(
+        "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, at, units) values ('dp', null, 'pre_read', 'emitted', ?, '[]')",
+      )
+      .run(old);
+    const id = Number(
+      db.owner.prepare("select max(id) as id from delivery where session_id = 'dp'").get()?.id,
+    );
+    const u = insert(db, "unit", {
+      project_id: p,
+      key: "trace:session:dp/pruned",
+      kind: "finding",
+      text: "pruned",
+      extraction: "supported",
+      run_id: run(db, p),
+      created_at: now,
+      content_hash: sha256("pruned"),
+    });
+    db.owner.prepare("insert into delivery_unit (delivery_id, unit_id) values (?, ?)").run(id, u);
+    for (const [what, text] of [
+      ["a delivery", "delete from delivery"],
+      ["a delivery's units", "delete from delivery_unit"],
+    ] as const)
+      assert.match(attempt(capture, text) ?? "", /not authorized/, what);
+    raw.prepare("insert into capture_delivery_prune (cutoff) values (?)").run(now);
+  } finally {
+    raw.close();
+  }
+  assert.equal(db.owner.prepare("select count(*) as n from delivery where session_id = 'dp'").get()?.n, 0);
+  assert.equal(
+    db.owner
+      .prepare(
+        "select count(*) as n from delivery_unit x left join delivery d on d.id = x.delivery_id where d.id is null",
+      )
+      .get()?.n,
+    0,
+  );
+});
+
 test("the capture connection cannot touch base tables, units, other sources, or FTS, and cannot read text", () => {
   session(db, p, "s-other");
   const runId = run(db, p);
