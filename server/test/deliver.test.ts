@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
@@ -1424,6 +1425,30 @@ test("retention: each logged delivery prunes up to 200 deliveries of sessions id
     assert.deepEqual(counts, [250, 50, 0]);
     assert.equal(left("busy"), 2, "a session delivered to within 90 days keeps its older rows too");
     assert.equal(left(null), 1, "a row without a session goes by its own time");
+    // A session resumed after 90 days is judged before its new delivery is logged, so its old rows go
+    const back = sessionId(p, "claude-code", "back");
+    insert(db, "session", {
+      id: back,
+      project_id: p,
+      host: "claude-code",
+      external_id: "back",
+      started_at: ago(200),
+    });
+    log(back, ago(100));
+    // A session start is logged even when it says nothing
+    await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: "back", cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select event from delivery where session_id = ?")
+        .all(back)
+        .map((r) => r.event),
+      ["session_start"],
+      "only the resumed session's new delivery is left",
+    );
     assert.equal(
       Number(
         db.owner

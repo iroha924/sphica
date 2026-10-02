@@ -71,9 +71,20 @@ base: main
   - コミット: `docs(capture): say capture prunes old deliveries, and why the older-capture test holds (T05)`
   - 結果: `node --test --test-name-pattern="older capture" test/db.test.ts` → pass。`bun run check` → exit 0
 
+- [x] T06: 90 日以上あいたセッション自身の配信でも、そのセッションの古い行を消す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T02（prune を呼ぶ write() が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="retention:" test/deliver.test.ts` → 100 日前の行を持つセッションが SessionStart で戻ると、古い pre_read の行が残って落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="retention:" test/deliver.test.ts` → pass。`node --test test/deliver.test.ts` → pass
+  - コミット: `fix(deliver): prune before logging, so a session back after 90 days drops its old rows (T06)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="retention:" test/deliver.test.ts` → 戻ったセッションの行が [pre_read, session_start] で落ちた（期待 [session_start]）。最初に Read で試したら、古い行が記録を表示済みにして配信が空になり、ログが書かれず通ってしまったので、空でもログを書く SessionStart に変えた。prune を insert の前に移した後 → 1 pass。`node --test test/deliver.test.ts` → 31 pass
+
 ## 記録
 - 2026-10-02 / T01 / Codex のタスクレビュー（ddee5a25）: 指摘なし（移行後と新規の定義の一致、delivery_unit の保存、prune の境界、0.6.17 の規則の capture からの書き込みをメモリ DB で実測。指定のテストは sandbox の EPERM で Codex 側では走らず、手元で 87 pass）
 - 2026-10-02 / T02 / Codex のタスクレビュー（06df0c22）: 指摘なし（prune の失敗はログと session 行ごと戻り本文は返る、revision 6 の DB は reader の接続で拒まれ prune に届かない、を確認）
 - 2026-10-02 / 全体 / Codex の全差分レビュー（main..84193976）F1（P2、読んで確認）: A4 の時間の検査が起動の後から測っていて、plan の「フック全体」を確かめていない / 採用。T04 を足した。ほかに指摘なし
 - 2026-10-02 / 全体 / review-shipping（84193976）: 出荷側の欠陥なし（tarball に 0007.sql、0.6.17 の hook と revision 7 の DB、0.6.18 の hook と revision 6 の DB、移行、bundle での prune を再現）。指摘 2 件（コメント）: (1) 0.6.17 の deliver は revision 7 の DB で reader に止められログを書かないので、古い capture のテストの前提の書き方が誤り、(2) capture を append only と書いたコメント 2 か所 / 両方採用。T05 を足し、plan の変更履歴に案 A の棄却理由の訂正を書いた。T04 の前の 1.5 秒の待ちの懸念は T04 で解消済み
 - 2026-10-02 / T04・T05 / Codex の修正分の再レビュー（84193976..b4fab34e）: 指摘なし（F1 の解消と T05 のコメントが実装と合うことを読んで確認）
+- 2026-10-02 / 全体 / GitHub の Codex レビュー（015133db）P2（再現済み）: 90 日以上あいたセッション自身の配信は、今の行を入れてから prune するので古い行が残り続ける / 採用。T06 を足した。plan の変更履歴に prune の順序の変更を書いた

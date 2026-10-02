@@ -656,6 +656,11 @@ async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
   const id = sessionId(e.projectId, e.host, e.external);
   const t = Date.now();
   const now = iso(t);
+  // Before this delivery is logged, so a session coming back after the retention is judged on its old rows alone
+  await trx
+    .insertInto("capture_delivery_prune")
+    .values({ cutoff: iso(t - RETAIN_MS) })
+    .execute();
   await trx
     .insertInto("capture_session")
     .values({
@@ -683,10 +688,6 @@ async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
       at: now,
       units: JSON.stringify(plan.units),
     })
-    .execute();
-  await trx
-    .insertInto("capture_delivery_prune")
-    .values({ cutoff: iso(t - RETAIN_MS) })
     .execute();
 }
 
