@@ -8,6 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
 import { backupDir, backupPath, backups } from "./backups.ts";
+import { HOLD_DAYS, HOLD_MAX } from "./capture.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION, sqliteCode } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
@@ -122,7 +123,7 @@ function listed(rows: Row[]): string {
  */
 const STOP_ADVICE: Record<string, (revision: number, rows: Row[]) => string> = {
   "projects with records whose keys become one once normalized": (revision, rows) =>
-    `Revision ${revision} was not applied: ${plural(rows.length, "project")} with records have keys that become one once normalized (listed below), and this Sphica cannot merge them. Search, read, and the record tools stay unavailable until a Sphica that can merge them migrates this database. Capture keeps recording into this database meanwhile. Report the list below at https://github.com/iroha924/sphica/issues. Forgetting sources does not resolve it`,
+    `Revision ${revision} was not applied: ${plural(rows.length, "project")} with records have keys that become one once normalized (listed below), and this Sphica cannot merge them. Search, read, and the record tools stay unavailable until a Sphica that can merge them migrates this database. Meanwhile capture keeps recording a session whose remote is written as one of the listed keys; a session whose remote is written otherwise is held, and held records are dropped after ${HOLD_DAYS} days or past ${HOLD_MAX} of them. Report the list below at https://github.com/iroha924/sphica/issues. Forgetting sources does not resolve it`,
 };
 
 /** A migration's check found rows the new revision cannot take. Nothing of that step was changed. */

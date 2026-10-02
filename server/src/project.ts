@@ -20,7 +20,8 @@ const localFile = (): string => path.join(sphicaHome(), "projects.json");
 const LOCAL_KEY = /^[a-z0-9][a-z0-9._-]*$/;
 
 /**
- * Splits a git remote across ssh / https, with or without .git, ports, and credentials, keeping the case it was written in.
+ * Splits a git remote across ssh / https, with or without .git, ports, and credentials. The path keeps the case it was written in, and so
+ * does the host of an scp-like or ssh/git remote; the URL parser lowercases an http(s) host.
  * The URL parser splits the authority. Splitting it by hand leaves pieces of a password containing `@` in the key.
  * Capture spools keys in this form so a database still at revision 7 routes them as before; drop it once capture can no longer write to one.
  */

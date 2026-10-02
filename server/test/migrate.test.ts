@@ -1408,7 +1408,9 @@ test("migrating revision 7 stops, changing nothing of revision 8, when two proje
       /project 2 git:github\.com\/O\/R \(becomes git:github\.com\/o\/r\): 1 sessions/.test(e.message) &&
       /^Revision 8 was not applied: 2 projects with records/.test(e.message) &&
       /cannot merge them/.test(e.message) &&
-      /Capture keeps recording into this database/.test(e.message) &&
+      /capture keeps recording a session whose remote is written as one of the listed keys; a session whose remote is written otherwise is held, and held records are dropped after 30 days or past 1000/.test(
+        e.message,
+      ) &&
       !/sphica@0\.6\.20|plugin of the same version/.test(e.message) &&
       /Forgetting sources does not resolve it/.test(e.message) &&
       !/Sphica writes no such row/.test(e.message) &&

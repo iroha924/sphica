@@ -43,8 +43,8 @@ export const rejectedDir = (): string => path.join(spoolDir(), "rejected");
  */
 export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered");
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
-const HOLD_DAYS = 30;
-const HOLD_MAX = 1000;
+export const HOLD_DAYS = 30;
+export const HOLD_MAX = 1000;
 /** Where each session's working tree stood when its running turn began. Turn start and end run in separate hook processes. */
 const baselineDir = (): string => path.join(sphicaHome(), "worktree");
 

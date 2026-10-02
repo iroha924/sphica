@@ -121,6 +121,26 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - 結果: red: `node --test --test-name-pattern="stays held" test/capture.test.ts` → `actual: { sent: 1, deferred: 0, rejected: 0 }`
   - 結果: `cd server && node --test test/capture.test.ts` → 37 pass
 
+- [x] T11: 大文字小文字の違う remote の clone のセッションが登録済みの project に入る受け入れケース（capture-14）と、remote を差し替える手順 `set_remote` を足す
+  - 種別: 追加
+  - 計画: S5
+  - 依存: T04（capture が正規化した key で引く）
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 --test-name-pattern="capture-14" evals/acceptance/run.ts` → pass。main の `project.ts` と `capture.ts` に戻すと fail
+  - コミット: `fix: add a mixed-case remote acceptance case and name held capture on a stop (T11, T12)`
+  - 結果: `node --test --test-timeout=60000 --test-name-pattern="capture-14" evals/acceptance/run.ts` → 1 pass。main の `project.ts` と `capture.ts` では `actual: 0, expected: 1` で fail
+
+- [x] T12: 衝突で止まったときの案内で、capture が保留する記録と保留の上限を言い、`legacyRemote` のコメントを URL の host の扱いに合わせる
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T10（保留になる条件がある）
+  - 変更: `server/src/admin.ts`, `server/src/capture.ts`, `server/src/project.ts`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-name-pattern="says how to go on" test/migrate.test.ts` → 案内に保留と上限が無く fail
+  - 完了条件: `cd server && node --test test/migrate.test.ts` → pass（案内が、key と同じ書き方の remote は記録され、別の書き方は保留されて 30 日か 1000 件で消えると言う）。`bun run verify` → 0
+  - コミット: `fix: add a mixed-case remote acceptance case and name held capture on a stop (T11, T12)`
+  - 結果: red: `node --test --test-name-pattern="says how to go on" test/migrate.test.ts` → 直前の admin.ts で fail
+  - 結果: `cd server && node --test test/migrate.test.ts` → 40 pass。`bun run verify` → 0 で終わる（acceptance 98 件）
+
 ## P3: リリースの準備
 
 npm と 3 つの manifest が 0.6.21 にそろう。
@@ -146,3 +166,4 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / T04 / Codex のタスクレビュー（2075dc92）で F1（P2）: project が null の spool 記録で normalizeKey が TypeError を投げ、同じ送信の正常な記録も送れない。手元で再現 / 採る。T08 を足して直した
 - 2026-10-02 / 全差分 / Codex の全差分レビュー（8bf3ed00）は指摘なし。review-shipping は 1 件: 衝突の停止の案内が、marketplace が 0.6.21 を指すのにプラグインを 0.6.20 に留めるよう言い、doctor と MCP の案内も init へ戻るだけ / 案内の誤りを採る。T09 を足して直した。doctor と MCP が init を案内する点は、止まった init が理由を出すので変えない
 - 2026-10-02 / PR #247 / GitHub の Codex のレビューで P1: 未移行の分割に 3 つ目の書き方の記録が来ると、正規化した key で空の project に入り移行が止まる。手元で再現 / 採る。T10 を足して直した
+- 2026-10-02 / PR #247 / GitHub の Codex の再レビュー（0146e654）で 3 件: P2 受け入れケースが無い、P2 止まったときの案内が保留される記録を書いていない、P3 legacyRemote のコメントが URL の host の扱いと違う / 3 件とも採る。T11・T12 を足して直した。保留の上限は capture.ts の定数を案内に使い、値が変わっても文面がずれないようにした
