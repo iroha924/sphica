@@ -10,6 +10,7 @@ import {
   identify,
   localRoots,
   nameLocal,
+  normalizeKey,
   normalizeRemote,
   patchPaths,
   relativeTo,
@@ -28,6 +29,37 @@ test("ssh and https remotes map to the same key", () => {
   assert.equal(normalizeRemote("https://github.com/iroha924/sphica.git"), want);
   assert.equal(normalizeRemote("https://github.com/iroha924/sphica"), want);
   assert.equal(normalizeRemote("ssh://git@github.com/iroha924/sphica.git"), want);
+});
+
+// A host differing only in case, or a github.com owner or repository differing only in case, is the same repository
+test("remotes differing only in case map to one key", () => {
+  for (const url of [
+    "git@GitHub.COM:O/R.git",
+    "ssh://git@GitHub.COM/O/R.git",
+    "git://GitHub.COM/O/R.git",
+    "https://GitHub.COM/O/R.git",
+    "https://github.com/o/r",
+  ])
+    assert.equal(normalizeRemote(url), "github.com/o/r", url);
+  // Other hosts may tell paths apart by case, so only their host is folded
+  assert.equal(normalizeRemote("git@GitLab.Example:Team/Repo.git"), "gitlab.example/Team/Repo");
+  assert.equal(normalizeRemote("ssh://git@HOST"), "host");
+});
+
+test("normalizeKey folds ASCII only, is idempotent, and leaves local keys alone", () => {
+  const cases: [string, string][] = [
+    ["git:GitHub.COM/O/R", "git:github.com/o/r"],
+    ["git:github.com/o/r", "git:github.com/o/r"],
+    ["git:GitLab.Example/Team/Repo", "git:gitlab.example/Team/Repo"],
+    ["git:HOST", "git:host"],
+    // Non-ASCII letters keep their case, as SQLite's lower() does
+    ["git:BÜCHER.example/X", "git:bÜcher.example/X"],
+    ["local:my-notes", "local:my-notes"],
+  ];
+  for (const [key, want] of cases) {
+    assert.equal(normalizeKey(key), want, key);
+    assert.equal(normalizeKey(want), want, `${want} again`);
+  }
 });
 
 // The key is stored in plain text. Cutting at the first @ leaves a fragment when the password contains @.
@@ -69,6 +101,19 @@ test("the root and key are the same from any subdirectory", () => {
       assert.equal(got?.root, r.dir, d);
       assert.equal(got?.name, "o/r");
     }
+  } finally {
+    r.done();
+  }
+});
+
+// Capture spools the key earlier releases made, so a database not yet migrated still finds its project
+test("identify returns the earlier rule's key beside the normalized one", () => {
+  const r = repo("git@GitHub.COM:O/R.git");
+  try {
+    const got = identify(r.dir);
+    assert.equal(got?.key, "git:github.com/o/r");
+    assert.equal(got?.legacyKey, "git:GitHub.COM/O/R");
+    assert.equal(got?.name, "o/r");
   } finally {
     r.done();
   }

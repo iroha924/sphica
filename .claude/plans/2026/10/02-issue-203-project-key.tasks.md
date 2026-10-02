@@ -22,14 +22,17 @@ base: main
 
 大文字小文字だけが違う remote から同じ key が出て、既存の DB は revision 8 で正規の key にそろい、正規でない key は書けなくなる。
 
-- [ ] T01: remote の host を全形式で、github.com の path も ASCII で小文字にし、`normalizeKey` と `legacyKey` を足す
+- [x] T01: remote の host を全形式で、github.com の path も ASCII で小文字にし、`normalizeKey` と `legacyKey` を足す
   - 種別: 修正
-  - 計画: S1
+  - 計画: S1, S6
   - 依存: なし
-  - 変更: `server/src/project.ts`, `server/test/project.test.ts`
+  - 変更: `server/src/project.ts`, `server/test/project.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test test/project.test.ts` → `git@GitHub.COM:O/R.git` と `ssh://git@GitHub.COM/O/R.git` が `github.com/o/r` にならず落ちる
   - 完了条件: `cd server && node --test test/project.test.ts` → pass（scp・ssh・git・https の混ざった大文字が `git:github.com/o/r`、github.com 以外の path の大文字は残る、`local:` は変わらない、host だけの key、`normalizeKey` が冪等、`identify()` が `legacyKey` に今の規則の key を返す）
   - コミット: `fix(project): lowercase remote hosts and github.com paths in project keys (T01)`
+  - 結果: red: `node --test --test-name-pattern="differing only in case|earlier rule" test/zz-red.tmp.test.ts` → （normalizeKey を恒等関数に差し替えた一時コピーで）`git@GitHub.COM:O/R.git` が `GitHub.COM/O/R`、identify の key が `git:GitHub.COM/O/R` で fail
+  - 結果: `cd server && node --test test/project.test.ts` → 13 pass。`tsc --noEmit` → エラーなし
+  - 結果: `bun run release:plan -- --base v0.6.20` → plugin。npm と 3 つの manifest を 0.6.21 にした
 
 - [ ] T02: schema revision 8（正規でない key を拒む trigger、空の重複をまとめるマイグレーション、中身のある衝突で止める check）
   - 種別: 追加
@@ -71,7 +74,7 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
 
 npm と 3 つの manifest が 0.6.21 にそろう。
 
-- [ ] T06: release:plan で区分を確かめ、npm と 3 つの manifest を 0.6.21 にする
+- [-] T06: release:plan で区分を確かめ、npm と 3 つの manifest を 0.6.21 にする
   - 種別: 変更
   - 計画: S6
   - 依存: T04（package に入る変更が全部入ってから区分を測る）
@@ -80,3 +83,5 @@ npm と 3 つの manifest が 0.6.21 にそろう。
   - コミット: `chore(release): bump to 0.6.21 (T06)`
 
 ## 記録
+
+- 2026-10-02 / T01 / pre-commit の bundle 検査が、package の入力を変えるコミットにバージョンの更新を求めて止めた / T01 の計画を S1 → S1, S6、変更に 4 つのバージョンのファイルを足した。T06 は S6 が T01 に移ったので取りやめ
