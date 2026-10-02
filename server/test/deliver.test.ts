@@ -1477,6 +1477,50 @@ test("retention: each logged delivery prunes up to 200 deliveries of sessions id
   }
 });
 
+// The 200-row cap is for other sessions: the session being logged drops all its own old rows first, or rows the cap left behind would
+// be protected by its new delivery
+test("retention: a session coming back drops its old rows even when more than 200 older rows wait", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const day = 24 * 60 * 60 * 1000;
+    const ago = (days: number) => new Date(Date.now() - days * day).toISOString();
+    const back = sessionId(p, "claude-code", "back");
+    for (const [id, external] of [
+      ["other", "other"],
+      [back, "back"],
+    ] as const)
+      insert(db, "session", {
+        id,
+        project_id: p,
+        host: "claude-code",
+        external_id: external,
+        started_at: ago(300),
+      });
+    for (let n = 0; n < 200; n++)
+      insert(db, "delivery", { session_id: "other", event: "pre_read", outcome: "emitted", at: ago(120) });
+    for (let n = 0; n < 3; n++)
+      insert(db, "delivery", { session_id: back, event: "pre_read", outcome: "emitted", at: ago(100) });
+    // A session start is logged even when it says nothing
+    await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: "back", cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    const events = (session: string) =>
+      db.owner
+        .prepare("select event from delivery where session_id = ?")
+        .all(session)
+        .map((r) => r.event);
+    assert.deepEqual(events(back), ["session_start"]);
+    assert.deepEqual(events("other"), [], "the other session's 200 rows went too");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // Pruning runs inside a hook the host kills after 5 seconds. The slow case puts 10,000 old rows of a session still in use before the
 // 10,000 rows that may go, so each prune looks past all of them first
 test("retention timing: a read that prunes behind 10,000 kept rows answers within a second", async () => {

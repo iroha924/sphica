@@ -31,6 +31,7 @@ export interface CaptureDelivery {
 
 export interface CaptureDeliveryPrune {
   cutoff: string | null;
+  session_id: string | null;
 }
 
 export interface CaptureDeliveryScoped {

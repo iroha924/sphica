@@ -81,6 +81,16 @@ base: main
   - コミット: `fix(deliver): prune before logging, so a session back after 90 days drops its old rows (T06)`
   - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="retention:" test/deliver.test.ts` → 戻ったセッションの行が [pre_read, session_start] で落ちた（期待 [session_start]）。最初に Read で試したら、古い行が記録を表示済みにして配信が空になり、ログが書かれず通ってしまったので、空でもログを書く SessionStart に変えた。prune を insert の前に移した後 → 1 pass。`node --test test/deliver.test.ts` → 31 pass
 
+- [x] T07: 戻ってきたセッションの古い行を、200 行の上限によらず先に消す
+  - 種別: 修正
+  - 計画: S1, S3
+  - 依存: T06（prune をログの前に呼ぶ write() が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0007.sql`, `server/src/db-types.ts`, `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="coming back drops" test/deliver.test.ts` → ほかのセッションの 120 日前の行が 200 行あると、戻ってきたセッションの 100 日前の行 3 つが残って落ちる
+  - 完了条件: `cd server && node --test test/migrate.test.ts test/schema.test.ts test/db.test.ts test/deliver.test.ts` → pass
+  - コミット: `fix(deliver): drop a returning session's old rows before the 200-row cap (T07)`
+  - 結果: red 実測: 直す前のコードで `node --test --test-name-pattern="coming back drops" test/deliver.test.ts` → 戻ったセッションの行が [pre_read, pre_read, pre_read, session_start] で落ちた（期待 [session_start]）。最初はテストの session の external_id を誤っていてログ自体が書かれず、それを直してから意図した理由で落ちることを確かめた。直した後 → `node --test test/migrate.test.ts test/schema.test.ts test/db.test.ts test/deliver.test.ts` → 120 pass
+
 ## 記録
 - 2026-10-02 / T01 / Codex のタスクレビュー（ddee5a25）: 指摘なし（移行後と新規の定義の一致、delivery_unit の保存、prune の境界、0.6.17 の規則の capture からの書き込みをメモリ DB で実測。指定のテストは sandbox の EPERM で Codex 側では走らず、手元で 87 pass）
 - 2026-10-02 / T02 / Codex のタスクレビュー（06df0c22）: 指摘なし（prune の失敗はログと session 行ごと戻り本文は返る、revision 6 の DB は reader の接続で拒まれ prune に届かない、を確認）
@@ -88,3 +98,4 @@ base: main
 - 2026-10-02 / 全体 / review-shipping（84193976）: 出荷側の欠陥なし（tarball に 0007.sql、0.6.17 の hook と revision 7 の DB、0.6.18 の hook と revision 6 の DB、移行、bundle での prune を再現）。指摘 2 件（コメント）: (1) 0.6.17 の deliver は revision 7 の DB で reader に止められログを書かないので、古い capture のテストの前提の書き方が誤り、(2) capture を append only と書いたコメント 2 か所 / 両方採用。T05 を足し、plan の変更履歴に案 A の棄却理由の訂正を書いた。T04 の前の 1.5 秒の待ちの懸念は T04 で解消済み
 - 2026-10-02 / T04・T05 / Codex の修正分の再レビュー（84193976..b4fab34e）: 指摘なし（F1 の解消と T05 のコメントが実装と合うことを読んで確認）
 - 2026-10-02 / 全体 / GitHub の Codex レビュー（015133db）P2（再現済み）: 90 日以上あいたセッション自身の配信は、今の行を入れてから prune するので古い行が残り続ける / 採用。T06 を足した。plan の変更履歴に prune の順序の変更を書いた
+- 2026-10-02 / T06 / Codex の T06 の再レビュー（015133db..30031aac）F1（P2、再現済み）: 90 日を過ぎた行が 200 行を超えて溜まっていると、戻ってきたセッションの古い行が上限で残り、新しい行に守られる / 持ち主に聞いて「今直す」。T07 を足した。1 回目の依頼は Codex の利用上限で返らず、上限が戻ってから同じ依頼文で 1 回やり直した

@@ -659,7 +659,7 @@ async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
   // Before this delivery is logged, so a session coming back after the retention is judged on its old rows alone
   await trx
     .insertInto("capture_delivery_prune")
-    .values({ cutoff: iso(t - RETAIN_MS) })
+    .values({ cutoff: iso(t - RETAIN_MS), session_id: id })
     .execute();
   await trx
     .insertInto("capture_session")
