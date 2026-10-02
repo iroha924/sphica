@@ -4,7 +4,7 @@
 import { sql } from "kysely";
 import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
-import { ftsQuery, queryTerms, terms } from "./text.ts";
+import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
 const UNIT_PAGE = 200;
@@ -285,10 +285,9 @@ async function judgeUnits(
     );
     const extra = new Set(alias ? terms((JSON.parse(alias.terms) as string[]).join(" ")) : []);
     const matched = wanted.filter((w) => own.has(w) || extra.has(w));
-    // Naming an anchored path or symbol exactly is a strong signal on its own, however many other words the query has
-    const ident = new Set(
-      anch.flatMap((a) => [a.path, a.symbol].flatMap((x) => (x ? [x.normalize("NFKC").toLowerCase()] : []))),
-    );
+    // Naming an anchored path or symbol exactly is a strong signal on its own, however many other words the query has.
+    // Each is compared whole, folded as the query's terms are, so getUsers meets the term getuser and src alone stays weak
+    const ident = new Set(anch.flatMap((a) => [a.path, a.symbol].flatMap((x) => (x ? [identTerm(x)] : []))));
     if (!strong(matched.length, wanted.length) && !matched.some((w) => ident.has(w))) {
       weaker++;
       continue;

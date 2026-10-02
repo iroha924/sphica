@@ -34,7 +34,7 @@ base: main
   - 結果: `node test/zz-bench.tmp.ts` → コミットしない一時スクリプトを変更の前後で 1 回ずつ流した。合成 DB（3 プロジェクト、20 語の語彙で 30 語ずつの source、big 30,000 行・other 30,000 行・small 50 行）で searchSources を測った。big: 「sqlite 検索 設計」48,595 ms → 24 ms、「キャッシュ」12,810 ms → 16 ms。small（他のプロジェクトに一致が多い場合）: 92 ms → 10 ms、27 ms → 7 ms。どちらも悪くならない
   - 結果: `bun run release:plan -- --base v0.6.18` → plugin。npm と 3 つの manifest を 0.6.19 にした
 
-- [ ] T02: 質問の "does" を外し、複数形の識別子を完全一致に数える
+- [x] T02: 質問の "does" を外し、複数形の識別子を完全一致に数える
   - 種別: 修正
   - 計画: S2, S3
   - 依存: なし
@@ -42,6 +42,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern="does|plural identifier" test/text.test.ts test/search.test.ts` → `queryTerms("what does sanitize do")` が `["doe","sanitize"]`、"getUsers retry backoff jitter" が symbol `getUsers` の記録を見つけず落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="does|plural identifier" test/text.test.ts test/search.test.ts` → pass（`["sanitize"]`、getUsers が見つかる、path `src/x.ts` だけが一致する "src retry backoff jitter" は weaker のまま）。`node --test test/terms-golden.test.ts` → pass（terms() の出力は変わらない）
   - コミット: `fix(search): drop folded question words and match plural identifiers (T02)`
+  - 結果: red: `node --test --test-name-pattern="does|plural identifier|question" test/text.test.ts test/search.test.ts` → fail 2 件（`queryTerms("what does sanitize do")` が `["doe","sanitize"]`、検索が sanitize の記録を見つけず `[]`）。QUESTION を terms() で畳んだ集合と比べるようにした後、同じコマンド → fail 1 件（"getUsers retry backoff jitter" が `[]`）で、getUsers の red を分けて確かめた。anchor の path と symbol のまるごとを NFKC・小文字化・singular() で畳んで比べるようにした後 → pass 4
+  - 結果: `node --test test/terms-golden.test.ts test/search.test.ts test/text.test.ts test/text-properties.test.ts test/asked.test.ts` → 44 pass（terms() の出力は変わらない）。"src retry backoff jitter" は hit 0・weaker 2（src/users.ts と src/x.ts の記録）
 
 - [ ] T03: search の path を repoPath() で正規化し、使えない path をエラーにする
   - 種別: 修正

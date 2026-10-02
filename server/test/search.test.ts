@@ -822,3 +822,32 @@ test("search query plan: the statements that rank candidates start from the full
     await db.done();
   }
 });
+
+test("search drops a folded question word and matches a plural identifier whole, but not a path segment alone", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Sanitize strips control characters from paths." });
+    const b = message(db, p, { id: "m2", text: "Load the reading list in one query." });
+    const c = message(db, p, { id: "m3", text: "Keep x small." });
+    await save(db, p, {
+      units: [
+        decision("sanitize", a, "Sanitize strips control characters from paths."),
+        decision("users", b, "Load the reading list in one query.", {
+          anchors: [{ path: "src/users.ts", symbol: "getUsers", role: "applies_to" }],
+        }),
+        decision("small", c, "Keep x small.", { anchors: [{ path: "src/x.ts", role: "applies_to" }] }),
+      ],
+    });
+    const keys = async (question: string) =>
+      (await searchUnits(db.reader, p, { question, limit: 10 })).hits.map((h) => h.key);
+    assert.deepEqual(await keys("what does sanitize do"), ["trace:ext-s1/sanitize"]);
+    // The anchored symbol named exactly is a strong match on its own, plural or not
+    assert.deepEqual(await keys("getUsers retry backoff jitter"), ["trace:ext-s1/users"]);
+    // One segment of an anchored path is not the identifier
+    const r = await searchUnits(db.reader, p, { question: "src retry backoff jitter", limit: 10 });
+    assert.deepEqual([r.hits.length, r.weaker], [0, 2]);
+  } finally {
+    await db.done();
+  }
+});

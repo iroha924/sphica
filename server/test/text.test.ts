@@ -97,6 +97,8 @@ test("kanji words drop trailing kana and English plurals become singular", () =>
 // A question's framing words never decide whether a record answers it
 test("query terms drop question framing and keep each subject word once", () => {
   assert.deepEqual(queryTerms("which CI provider do we use"), ["ci", "provider"]);
+  // Question words are dropped in the form terms() folds them to, so "does" is not left behind as "doe"
+  assert.deepEqual(queryTerms("what does sanitize do"), ["sanitize"]);
   assert.deepEqual(queryTerms("DB サーバーを使わない理由"), ["db", "サーバー", "使"]);
 });
 
