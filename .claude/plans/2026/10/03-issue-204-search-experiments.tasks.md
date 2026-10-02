@@ -147,3 +147,4 @@ base: main
 2026-10-03 / 全体 / review-shipping（main..4779c120）: 出してよい。packed の 0.6.23 で revision 8 の移行・起動・doctor・0.6.22 との組み合わせを確認。指摘 1 は T05 で直さないと決めた件と同じ（doctor も healthy と出すことが新しく分かった。リリースノートに `sphica doctor --reindex` を書く）。指摘 2 terms() の説明が質問の側の違いを書いていない / 2 を受けて T11 で直した
 2026-10-03 / 全体 / Codex の全差分のレビュー（bd81445c..4779c120、high）: F1 Greek の文字や結合文字の後ろの ASCII 断片（αnameReader）を名前として分ける（再現）。F2 規則で語が残らない質問を ranked に数える（再現） / 2 件とも受けて T11 を足した。語は Unicode の文字のまとまりを日本語の文字のところでだけ区切り、ASCII だけの断片を判定する。語の残らない質問は excluded
 2026-10-03 / T10 / Codex のレビュー（4779c120、high）: 指摘 0 件
+2026-10-03 / T11 / Codex のレビュー（f6808c39、high）: 指摘 0 件
