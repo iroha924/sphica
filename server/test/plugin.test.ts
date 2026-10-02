@@ -805,3 +805,53 @@ test("search with asked leaves out the session it is given and says when it cann
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+// A raw argument shape lets the SDK strip a key it does not know, so a misspelled filter (paths for path) would be ignored without a word
+test("every tool of both MCP servers refuses an unknown argument by name", async () => {
+  const valid: Record<string, Record<string, unknown>> = {
+    status: {},
+    search: { query: "x" },
+    read: { refs: ["u1"] },
+    export: { records: ["u1"], path: "docs/d.md" },
+    fields: {},
+    overview: { view: "live" },
+    review_select: { diff: "x" },
+    review_check: { diff: "x", findings: [] },
+    trace_pending: {},
+    trace_begin: {},
+    harvest_begin: { pr: 1 },
+    glean_begin: {},
+    glean_fetch: { run: "r", url: "https://example.com/" },
+    record_context: { run: "r" },
+    record_check: { run: "r", record: {} },
+    record_save: { run: "r", record: {} },
+    forget_preview: { sources: ["s1"] },
+    forget_apply: { sources: ["s1"] },
+  };
+  for (const entry of ["mcp.ts", "mcp-record.ts"]) {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(SRC, entry)],
+        env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+        stderr: "ignore",
+      }),
+    );
+    try {
+      const { tools } = await client.listTools();
+      for (const t of tools) {
+        const args = valid[t.name];
+        assert.ok(args, `${t.name} has no arguments in this test`);
+        const r = await client.callTool({
+          name: t.name,
+          arguments: { ...args, cwd: "/nonexistent", zz_unknown: 1 },
+        });
+        assert.equal(r.isError, true, t.name);
+        assert.match(JSON.stringify(r.content), /zz_unknown/, t.name);
+      }
+    } finally {
+      await client.close();
+    }
+  }
+});

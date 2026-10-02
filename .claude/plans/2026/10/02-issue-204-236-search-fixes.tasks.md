@@ -80,7 +80,7 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
   - コミット: `test(mcp): combine asked with a real path in the refusal test (T06)`
   - 結果: red を上のとおり確かめた（T05 の作業中に `node --test test/plugin.test.ts` → 28 pass / 1 fail）。テストの path を `src/x.ts` にした後 → 28 pass / 0 fail
 
-- [ ] T05: 両 MCP サーバーの全ツールで知らない引数を拒む
+- [x] T05: 両 MCP サーバーの全ツールで知らない引数を拒む
   - 種別: 修正
   - 計画: S6
   - 依存: なし
@@ -88,8 +88,11 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
   - red: `cd server && node --test --test-name-pattern="unknown argument" test/plugin.test.ts` → 全ツールで `zz_unknown` が捨てられ、エラーにならず落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="unknown argument" test/plugin.test.ts` → pass（listTools の全ツールが引数表に載り、全ツールが `isError: true` で本文に `zz_unknown` を出す）。`node --test test/plugin.test.ts` → pass
   - コミット: `fix(mcp): reject unknown tool arguments by name (T05)`
+  - 結果: red: `node --test --test-name-pattern="unknown argument" test/plugin.test.ts` → fail（最初の `status` が `zz_unknown` を捨てて isError にならない）。両サーバーの 18 個の `inputSchema` を `z.object({...}).strict()` で包んだ後 → pass（listTools の全 18 ツールが引数表に載り、全部が isError で本文に `zz_unknown` を出す）
+  - 結果: `node --test test/plugin.test.ts` → 29 pass（_meta で workspace を渡すテスト、説明が 2,048 文字以内のテストも通る）。`bun run check` → exit 0
 
 ## 記録
 2026-10-02 / - / 終わった計画 4 組の削除は .claude/plans の中だけの変更で、done の検査（.claude/plans の外の変更を見る）に掛からないのでタスクにしない / plan と tasks を入れる最初のコミットで削除する
 2026-10-02 / T04 / 変更欄の `server/src/text.ts` を `server/src/split-check.ts` に替えた / text.ts はすべてのフックと MCP が読むので、golden（約 14 KB）をそこで import すると全バンドルに入る。照合を別モジュールにして doctor（cli.js）だけに入れた
 2026-10-02 / T06 / T03 の `min(1)` で plugin.test.ts の asked と path の併用テスト（`path: ""`）が落ちていた。T03 では search.test.ts と `bun run check` だけを流し、plugin.test.ts を流していなかった / 修正タスク T06 を足し、T05 より前にコミットした
+2026-10-02 / T01 / Codex のタスクレビュー（aa6129d3）: 指摘 0 件 / なし

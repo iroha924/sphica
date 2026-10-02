@@ -95,7 +95,7 @@ server.registerTool(
     title: "Sessions not traced yet",
     description:
       "Lists this project's captured sessions with owner messages no trace has looked at, then apart those whose last owner message is over 30 days old.",
-    inputSchema: { cwd: CWD },
+    inputSchema: z.object({ cwd: CWD }).strict(),
     annotations: READ,
   },
   async (a, extra) => tool(async () => pendingText(conn(), (await projectOf(a.cwd, extra._meta)).projectId)),
@@ -107,7 +107,7 @@ server.registerTool(
     title: "Begin tracing a session",
     description:
       "Binds a run to one captured session of this project and returns its id. session is an id from trace_pending, or this session's id.",
-    inputSchema: { session: z.string().min(1).max(200).optional(), cwd: CWD },
+    inputSchema: z.object({ session: z.string().min(1).max(200).optional(), cwd: CWD }).strict(),
     annotations: WRITE,
   },
   async (a, extra) =>
@@ -123,7 +123,7 @@ server.registerTool(
     title: "Begin harvesting a pull request",
     description:
       "Reads a pull request of this repository and the issues it closes through gh (read only), keeps them as sources, and returns a run id.",
-    inputSchema: { pr: z.number().int().positive(), cwd: CWD },
+    inputSchema: z.object({ pr: z.number().int().positive(), cwd: CWD }).strict(),
     annotations: { ...WRITE, openWorldHint: true },
   },
   async (a, extra) =>
@@ -142,7 +142,7 @@ server.registerTool(
     title: "Begin gleaning",
     description:
       "Binds a run to this session, whose owner messages are the evidence glean cites, and returns its id. session is this session's id.",
-    inputSchema: { session: z.string().min(1).max(200).optional(), cwd: CWD },
+    inputSchema: z.object({ session: z.string().min(1).max(200).optional(), cwd: CWD }).strict(),
     annotations: WRITE,
   },
   async (a, extra) =>
@@ -158,7 +158,7 @@ server.registerTool(
     title: "Keep an issue or pull request the owner named",
     description:
       "Reads a GitHub issue or pull request URL of this repository through gh (read only), keeps it as sources, and lists their refs.",
-    inputSchema: { run: RUN, url: z.string().url().max(500), cwd: CWD },
+    inputSchema: z.object({ run: RUN, url: z.string().url().max(500), cwd: CWD }).strict(),
     annotations: { ...WRITE, openWorldHint: true },
   },
   async (a, extra) =>
@@ -176,15 +176,17 @@ server.registerTool(
       "Prints the run's sources with their refs (s<id>) and this project's live records, a page at a time. A page that ends with " +
       "'call record_context with after' names the after to pass for the next one. Saving counts as looked at only the sources shown " +
       "and those the record quotes.",
-    inputSchema: {
-      run: RUN,
-      after: z
-        .string()
-        .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
-        .optional()
-        .describe("The ref the previous page named, to read the next page"),
-      cwd: CWD,
-    },
+    inputSchema: z
+      .object({
+        run: RUN,
+        after: z
+          .string()
+          .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
+          .optional()
+          .describe("The ref the previous page named, to read the next page"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ,
   },
   async (a, extra) =>
@@ -199,7 +201,7 @@ server.registerTool(
   {
     title: "Check a record",
     description: "Checks a record against the run's retained text without saving it.",
-    inputSchema: { run: RUN, record: RECORD, cwd: CWD },
+    inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: READ,
   },
   async (a, extra) =>
@@ -214,7 +216,7 @@ server.registerTool(
   {
     title: "Save a record",
     description: "Checks and saves a record for the run in one transaction. A run saves once.",
-    inputSchema: { run: RUN, record: RECORD, cwd: CWD },
+    inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: WRITE,
   },
   async (a, extra) =>
@@ -239,7 +241,7 @@ server.registerTool(
     title: "What forgetting sources would do",
     description:
       "Shows which sources would be removed and which records would lose citations or leave active. Changes nothing. Never shows the text.",
-    inputSchema: { sources: SOURCES, cwd: CWD },
+    inputSchema: z.object({ sources: SOURCES, cwd: CWD }).strict(),
     annotations: READ,
   },
   async (a, extra) =>
@@ -255,7 +257,7 @@ server.registerTool(
     title: "Forget sources",
     description:
       "Asks the owner in the host to confirm by typing the number of sources, then removes them, their index entries, and the bytes left in the file, and judges the records that cited them again. Nothing is removed without that answer.",
-    inputSchema: { sources: SOURCES, cwd: CWD },
+    inputSchema: z.object({ sources: SOURCES, cwd: CWD }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   },
   async (a, extra) =>
