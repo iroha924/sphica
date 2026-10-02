@@ -22,13 +22,14 @@ base: main
 
 実験の前に、並べ替えと識別子と日本語の分割の差が数字に出るコーパスと loader を作り、Codex のレビューで固定する。
 
-- [ ] T01: loader に anchors・created_at・set を足し、set ごとに集計する
+- [x] T01: loader に anchors・created_at・set を足し、set ごとに集計する
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/retrieval/bench.ts`, `server/evals/retrieval/run.ts`, `server/test/retrieval-bench.test.ts`
   - 完了条件: `cd server && node --test test/retrieval-bench.test.ts` → pass。anchors と created_at を持つ記録が書いたとおりに保存されたことを確かめるテストと、違えば止まるテストを含む。`node evals/retrieval/run.ts` → 既存の 60 問の数値が main と同じで、`base` の行が出る
-  - コミット: `test(bench): save anchors and fixed times in the retrieval benchmark and report by question set (T01)`
+  - コミット: `test(bench): save anchors and fixed times in the retrieval benchmark and report by set (T01)`
+  - 結果: `node --test test/retrieval-bench.test.ts` → 5 pass（anchors・created_at・implementation の code 根拠が保存されて active になる、時計が戻る、set ごとに集計される、保存できない anchor で止まる）。`node evals/retrieval/run.ts` → all R@1 47.9% / MRR 0.479、言語の組ごとの値も main と同じで、`set base` の行が出る。`tsc --noEmit` → エラーなし
 
 - [ ] T02: コーパスに ident・tie・ja-split の質問と記録を足して固定する
   - 種別: 追加
@@ -95,3 +96,4 @@ base: main
   - コミット: `chore(release): ship the adopted search experiments as 0.6.23 (T08)`
 
 ## 記録
+2026-10-03 / T01 / 持ち主の指示で、済んだ #203 の plan と tasks を消す / T01 のコミットに入れた

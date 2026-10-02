@@ -19,11 +19,11 @@ async function summary(): Promise<{ lines: string[]; groups: Summary }> {
   const r = await bench();
   const lines = r.rows.map(
     (row) =>
-      `${row.id} (${row.lang}${row.overlap ? ", overlap" : ""}): ${row.overlap === null ? (row.hits ? `${row.hits} hits` : "empty") : row.rank ? `gold at ${row.rank}` : "missed"}`,
+      `${row.id} (${row.lang}${row.set === "base" ? "" : `, ${row.set}`}${row.overlap ? ", overlap" : ""}): ${row.overlap === null ? (row.hits ? `${row.hits} hits` : "empty") : row.rank ? `gold at ${row.rank}` : "missed"}`,
   );
   const groups: Summary = [
     { name: "all", scores: r.all },
-    ...[...r.byLang, ...r.byOverlap].map(([name, scores]) => ({ name, scores })),
+    ...[...r.byLang, ...r.byOverlap, ...r.bySet].map(([name, scores]) => ({ name, scores })),
   ];
   return { lines, groups };
 }

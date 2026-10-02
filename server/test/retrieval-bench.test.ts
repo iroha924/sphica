@@ -60,3 +60,40 @@ test("--compare with --json is refused, since --json prints one side only", () =
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /--json prints this tree only/);
 });
+
+/** A one-record corpus with what an experiment's question sets need: anchors, a save time, and an implementation's code evidence. */
+const record = (over: Record<string, unknown> = {}) => ({
+  key: "reader",
+  kind: "implementation",
+  stance: null,
+  message: "connectReader opens the reader connection read only.",
+  quote: "connectReader opens the reader connection read only.",
+  text: "connectReader opens the reader connection read only",
+  why: null,
+  options: [],
+  aliases: [],
+  supersedes: null,
+  anchors: [{ path: "server/src/db.ts", symbol: "connectReader" }],
+  created_at: "2026-03-04T05:06:07.000Z",
+  ...over,
+});
+
+test("a record's anchors, save time, and code evidence are stored as written, and its question is scored by set", async () => {
+  const before = Date.now;
+  const r = await bench({
+    records: [record()],
+    questions: [
+      { id: "i1", lang: "en>en", overlap: true, text: "reader connection", gold: ["reader"], set: "ident" },
+    ],
+  });
+  assert.equal(Date.now, before, "the bench puts the clock back");
+  assert.equal(r.rows[0]?.rank, 1);
+  assert.deepEqual([...r.bySet.keys()], ["set ident"]);
+});
+
+test("the bench stops when a record cannot be stored as written", async () => {
+  await assert.rejects(
+    bench({ records: [record({ anchors: [{ path: "/abs/db.ts" }] })], questions: [] }),
+    /record reader: .*not inside the repository/,
+  );
+});
