@@ -950,17 +950,12 @@ create table delivery (
   at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', at) is at)
 , agent_id text check (length(agent_id) between 1 and 200)) strict;
 create index delivery_session on delivery (session_id, at);
-create index delivery_at on delivery (at);
--- A delivery's units go by delivery_ad, not a cascade: capture prunes deliveries, and its authorizer passes a delete only from a named trigger
 create table delivery_unit (
-  delivery_id integer not null references delivery (id),
+  delivery_id integer not null references delivery (id) on delete cascade,
   unit_id integer not null references unit (id) on delete cascade,
   primary key (delivery_id, unit_id)
 ) strict;
 create index delivery_unit_unit on delivery_unit (unit_id);
-create trigger delivery_ad after delete on delivery begin
-  delete from delivery_unit where delivery_id = old.id;
-end;
 
 -- The one way the record server writes a source. It has no session columns, so it can never write a session message: those are the
 -- owner's own words, and only capture writes them. A view insert returns no id; the writer looks the row up by its item key
@@ -1044,15 +1039,5 @@ create trigger capture_delivery_scoped_insert instead of insert on capture_deliv
   insert into delivery_unit (delivery_id, unit_id)
   select last_insert_rowid(), j.value from json_each(coalesce(new.units, '[]')) j where true on conflict do nothing;
 end;
--- Deletes the deliveries of sessions whose last delivery is before cutoff: all of session_id's, then up to 200 of the oldest others (a row
--- without a session goes by its own time). Capture inserts here before each delivery it logs, naming that delivery's session
-create view capture_delivery_prune as select null as cutoff, null as session_id;
-create trigger capture_delivery_prune_insert instead of insert on capture_delivery_prune begin
-  delete from delivery where session_id = new.session_id
-    and not exists (select 1 from delivery n where n.session_id = new.session_id and n.at >= new.cutoff);
-  delete from delivery where id in (select d.id from delivery d where d.at < new.cutoff
-    and (d.session_id is null or not exists (select 1 from delivery n where n.session_id = d.session_id and n.at >= new.cutoff))
-    order by d.at, d.id limit 200);
-end;
 
-pragma user_version = 7;
+pragma user_version = 6;

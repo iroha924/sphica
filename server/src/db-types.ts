@@ -29,6 +29,11 @@ export interface CaptureDelivery {
   units: string | null;
 }
 
+export interface CaptureDeliveryPrune {
+  cutoff: string | null;
+  session_id: string | null;
+}
+
 export interface CaptureDeliveryScoped {
   agent_id: string | null;
   at: string | null;
@@ -400,6 +405,7 @@ export interface Work {
 export interface DB {
   artifact_link: ArtifactLink;
   capture_delivery: CaptureDelivery;
+  capture_delivery_prune: CaptureDeliveryPrune;
   capture_delivery_scoped: CaptureDeliveryScoped;
   capture_edit: CaptureEdit;
   capture_message: CaptureMessage;

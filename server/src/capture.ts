@@ -738,7 +738,7 @@ async function sendBatch(
 }
 
 /**
- * Sends the queue to the database. **The connection is capture (append only).** Sending the same thing twice adds no rows.
+ * Sends the queue to the database. **The connection is capture, and this only adds rows.** Sending the same thing twice adds no rows.
  * Records of unregistered projects are held (only projects registered with `sphica init` are recorded); the first lock hold looks at
  * the held records present when it starts once, so they never take the place of queued records. The queue is then sent in batches
  * until it is empty or `budgetMs` is spent, at least one batch of it per call. A send that finds the lock taken waits for it within its budget,

@@ -46,6 +46,11 @@ const LIMITS: Record<Event, { units: number; chars: number }> = {
  * soon is answered unlogged (and may be shown again) rather than lost.
  */
 const LOG_WAIT_MS = 250;
+/**
+ * How long a session's deliveries are kept after its last one. Each logged delivery prunes a few of those past it, so a session resumed
+ * later than this may be shown its records again.
+ */
+const RETAIN_MS = 90 * 24 * 60 * 60 * 1000;
 /** Reads are far more frequent than edits, so what reads deliver over one session is capped too (the request on each is not counted). */
 const READ_SESSION = { units: 8, chars: 3000 };
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -649,7 +654,13 @@ type Entry = {
 /** Writes one delivery and the session row it hangs on, inside the caller's transaction. */
 async function write(trx: Kysely<DB>, e: Entry, plan: Plan): Promise<void> {
   const id = sessionId(e.projectId, e.host, e.external);
-  const now = iso(Date.now());
+  const t = Date.now();
+  const now = iso(t);
+  // Before this delivery is logged, so a session coming back after the retention is judged on its old rows alone
+  await trx
+    .insertInto("capture_delivery_prune")
+    .values({ cutoff: iso(t - RETAIN_MS), session_id: id })
+    .execute();
   await trx
     .insertInto("capture_session")
     .values({

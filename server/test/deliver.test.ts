@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
@@ -1365,6 +1366,231 @@ test("reads and edits that deliver nothing write no rows, while empty session st
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The log keeps a session's deliveries while it is in use: only sessions whose last delivery is 90 days old go, a few at each delivery
+test("retention: each logged delivery prunes up to 200 deliveries of sessions idle for 90 days, with their units", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file.", sent: "2026-01-01T00:00:00Z" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const u = Number(db.owner.prepare("select id from unit").get()?.id);
+    const day = 24 * 60 * 60 * 1000;
+    const ago = (days: number) => new Date(Date.now() - days * day).toISOString();
+    for (const id of ["idle", "busy", "edge"])
+      insert(db, "session", {
+        id,
+        project_id: p,
+        host: "claude-code",
+        external_id: id,
+        started_at: ago(200),
+      });
+    const log = (session: string | null, at: string) => {
+      const id = insert(db, "delivery", { session_id: session, event: "pre_read", outcome: "emitted", at });
+      insert(db, "delivery_unit", { delivery_id: id, unit_id: u });
+    };
+    for (let n = 0; n < 450; n++) log("idle", ago(100));
+    log("busy", ago(120));
+    log("busy", ago(1));
+    log(null, ago(100));
+    log(null, ago(1));
+    const left = (session: string | null) =>
+      Number(db.owner.prepare("select count(*) as n from delivery where session_id is ?").get(session)?.n);
+    const read = () =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: crypto.randomUUID(),
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, "src/db.ts") },
+        },
+        "claude-code",
+        db.file,
+      );
+    const counts: number[] = [];
+    for (let n = 0; n < 3; n++) {
+      assert.match(await read(), /trace:ext-s1\/sqlite/);
+      counts.push(left("idle"));
+    }
+    assert.deepEqual(counts, [250, 50, 0]);
+    assert.equal(left("busy"), 2, "a session delivered to within 90 days keeps its older rows too");
+    assert.equal(left(null), 1, "a row without a session goes by its own time");
+    // A session resumed after 90 days is judged before its new delivery is logged, so its old rows go
+    const back = sessionId(p, "claude-code", "back");
+    insert(db, "session", {
+      id: back,
+      project_id: p,
+      host: "claude-code",
+      external_id: "back",
+      started_at: ago(200),
+    });
+    log(back, ago(100));
+    // A session start is logged even when it says nothing
+    await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: "back", cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.deepEqual(
+      db.owner
+        .prepare("select event from delivery where session_id = ?")
+        .all(back)
+        .map((r) => r.event),
+      ["session_start"],
+      "only the resumed session's new delivery is left",
+    );
+    assert.equal(
+      Number(
+        db.owner
+          .prepare(
+            "select count(*) as n from delivery_unit x left join delivery d on d.id = x.delivery_id where d.id is null",
+          )
+          .get()?.n,
+      ),
+      0,
+      "the units go with their deliveries",
+    );
+    // At the cutoff itself a session is kept; only a last delivery before it lets the session go
+    const cutoff = "2026-06-01T00:00:00.000Z";
+    log("edge", cutoff);
+    log("edge", "2026-05-31T23:59:59.999Z");
+    await db.capture.insertInto("capture_delivery_prune").values({ cutoff }).execute();
+    assert.equal(left("edge"), 2);
+    await db.capture
+      .insertInto("capture_delivery_prune")
+      .values({ cutoff: "2026-06-01T00:00:00.001Z" })
+      .execute();
+    assert.equal(left("edge"), 0);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The 200-row cap is for other sessions: the session being logged drops all its own old rows first, or rows the cap left behind would
+// be protected by its new delivery
+test("retention: a session coming back drops its old rows even when more than 200 older rows wait", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const day = 24 * 60 * 60 * 1000;
+    const ago = (days: number) => new Date(Date.now() - days * day).toISOString();
+    const back = sessionId(p, "claude-code", "back");
+    for (const [id, external] of [
+      ["other", "other"],
+      [back, "back"],
+    ] as const)
+      insert(db, "session", {
+        id,
+        project_id: p,
+        host: "claude-code",
+        external_id: external,
+        started_at: ago(300),
+      });
+    for (let n = 0; n < 200; n++)
+      insert(db, "delivery", { session_id: "other", event: "pre_read", outcome: "emitted", at: ago(120) });
+    for (let n = 0; n < 3; n++)
+      insert(db, "delivery", { session_id: back, event: "pre_read", outcome: "emitted", at: ago(100) });
+    // A session start is logged even when it says nothing
+    await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: "back", cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    const events = (session: string) =>
+      db.owner
+        .prepare("select event from delivery where session_id = ?")
+        .all(session)
+        .map((r) => r.event);
+    assert.deepEqual(events(back), ["session_start"]);
+    assert.deepEqual(events("other"), [], "the other session's 200 rows went too");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Pruning runs inside a hook the host kills after 5 seconds. The slow case puts 10,000 old rows of a session still in use before the
+// 10,000 rows that may go, so each prune looks past all of them first
+test("retention timing: a read that prunes behind 10,000 kept rows answers within a second", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file.", sent: "2026-01-01T00:00:00Z" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const u = Number(db.owner.prepare("select id from unit").get()?.id);
+    const day = 24 * 60 * 60 * 1000;
+    const ago = (days: number, n = 0) => new Date(Date.now() - days * day + n).toISOString();
+    db.owner.exec("begin");
+    const addSession = db.owner.prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values (?, ?, 'claude-code', ?, ?)",
+    );
+    const addDelivery = db.owner.prepare(
+      "insert into delivery (session_id, event, outcome, at) values (?, 'pre_read', 'emitted', ?) returning id",
+    );
+    const addUnit = db.owner.prepare("insert into delivery_unit (delivery_id, unit_id) values (?, ?)");
+    const log = (session: string, at: string) => addUnit.run(Number(addDelivery.get(session, at)?.id), u);
+    addSession.run("kept", p, "kept", ago(300));
+    for (let n = 0; n < 10_000; n++) log("kept", ago(200, n));
+    log("kept", ago(1));
+    for (let s = 0; s < 100; s++) {
+      addSession.run(`idle${s}`, p, `idle${s}`, ago(300));
+      for (let n = 0; n < 100; n++) log(`idle${s}`, ago(100, s * 100 + n));
+    }
+    db.owner.exec("commit");
+    const rows = () => Number(db.owner.prepare("select count(*) as n from delivery").get()?.n);
+    const before = rows();
+    // The whole hook is timed, from the process start on, as the host's 5 seconds are
+    const started = performance.now();
+    const kid = spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let out = "";
+    kid.stdout.on("data", (d) => {
+      out += d;
+    });
+    const closed = new Promise<number | null>((resolve, reject) => {
+      kid.on("error", reject);
+      kid.on("close", resolve);
+    });
+    kid.stdin.end(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        session_id: "timed",
+        cwd: repo,
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      }),
+    );
+    assert.equal(await closed, 0);
+    const took = performance.now() - started;
+    assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /trace:ext-s1\/sqlite/);
+    assert.equal(rows(), before + 1 - 200, "the read was logged and pruned 200 rows");
+    assert.ok(took < 1000, `the pruning read took ${Math.round(took)} ms`);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
