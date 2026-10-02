@@ -47,7 +47,9 @@
         "server/src/db-write.ts",
         "connectwriter",
         "ot-123",
-        "#201"
+        "#201",
+        "connect",
+        "writer"
       ]
     },
     {
@@ -60,21 +62,39 @@
         "name",
         "snake_case_name",
         "camelcasename",
-        "kebab-case-name"
+        "kebab-case-name",
+        "snake",
+        "case",
+        "name",
+        "camel",
+        "case",
+        "name"
       ]
     },
     {
       "text": "ｆｕｌｌｗｉｄｔｈ ＡＢＣ １２３ と ｶﾀｶﾅ",
       "terms": ["fullwidth", "abc", "123", "カタカナ", "fullwidth", "abc", "123"]
     },
-    { "text": "書きました 書きます 書く", "terms": ["書", "書", "書"] },
-    { "text": "emoji 🚀 と 絵文字 👍🏽 のあいだ", "terms": ["emoji", "絵文字", "emoji"] },
-    { "text": "é café と が（が）", "terms": ["é", "café", "caf"] },
+    {
+      "text": "書きました 書きます 書く",
+      "terms": ["書", "書", "書"]
+    },
+    {
+      "text": "emoji 🚀 と 絵文字 👍🏽 のあいだ",
+      "terms": ["emoji", "絵文字", "emoji"]
+    },
+    {
+      "text": "é café と が（が）",
+      "terms": ["é", "café", "caf"]
+    },
     {
       "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa base64 aGVsbG8gd29ybGQgaGVsbG8gd29ybGQ=",
       "terms": ["base64", "agvsbg8gd29ybgqgagvsbg8gd29ybgq", "base64", "agvsbg8gd29ybgqgagvsbg8gd29ybgq"]
     },
-    { "text": "the a an of to in is and or for on it be", "terms": [] },
+    {
+      "text": "the a an of to in is and or for on it be",
+      "terms": []
+    },
     {
       "text": "保存先は Postgres じゃなくて SQLite にしよう。各ユーザーに DB サーバーを立てさせたくない。",
       "terms": [
@@ -109,10 +129,13 @@
         "postgre"
       ]
     },
-    { "text": "WAL モードも有効にしておいて。", "terms": ["wal", "モード", "有効", "wal"] },
+    {
+      "text": "WAL モードも有効にしておいて。",
+      "terms": ["wal", "モード", "有効", "wal"]
+    },
     {
       "text": "open() で journal_mode = wal を設定しました。",
-      "terms": ["open", "journal_mode", "wal", "設定", "open", "journal_mode", "wal"]
+      "terms": ["open", "journal_mode", "wal", "設定", "open", "journal_mode", "wal", "journal", "mode"]
     },
     {
       "text": "利用状況の送信（テレメトリ）は入れない。ローカルで完結させるのがこのアプリの売りだから。",
@@ -136,15 +159,24 @@
     },
     {
       "text": "fetchCover に最大 3 回の再試行を入れました。",
-      "terms": ["fetchcover", "最大", "3", "回", "再", "試行", "入", "fetchcover"]
+      "terms": ["fetchcover", "最大", "3", "回", "再", "試行", "入", "fetchcover", "fetch", "cover"]
     },
-    { "text": "今日はここまで。お疲れさま。", "terms": ["今日", "お疲れさま"] },
-    { "text": "お疲れさまでした。", "terms": ["お疲れさま"] },
+    {
+      "text": "今日はここまで。お疲れさま。",
+      "terms": ["今日", "お疲れさま"]
+    },
+    {
+      "text": "お疲れさまでした。",
+      "terms": ["お疲れさま"]
+    },
     {
       "text": "入力の検証に zod を使うのもありかもね。まだ決めないけど。",
       "terms": ["入力", "検証", "zod", "使", "決", "zod"]
     },
-    { "text": "候補として覚えておきます。", "terms": ["候補", "覚"] },
+    {
+      "text": "候補として覚えておきます。",
+      "terms": ["候補", "覚"]
+    },
     {
       "text": "Store every timestamp in UTC. Convert to local time only when showing it.",
       "terms": [
@@ -188,7 +220,8 @@
         "write",
         "iso",
         "8601",
-        "utc"
+        "utc",
+        "stored"
       ]
     },
     {
@@ -232,7 +265,9 @@
         "there",
         "reverted",
         "main",
-        "thread"
+        "thread",
+        "offscreen",
+        "canva"
       ]
     },
     {
@@ -251,9 +286,18 @@
       "text": "検索結果のキャッシュを Redis に置きます。",
       "terms": ["検索", "結果", "キャッシュ", "redis", "置", "redis"]
     },
-    { "text": "ログその1を受け取りました。", "terms": ["ログ", "1", "受け取り"] },
-    { "text": "ログその2を受け取りました。", "terms": ["ログ", "2", "受け取り"] },
-    { "text": "ログその3を受け取りました。", "terms": ["ログ", "3", "受け取り"] },
+    {
+      "text": "ログその1を受け取りました。",
+      "terms": ["ログ", "1", "受け取り"]
+    },
+    {
+      "text": "ログその2を受け取りました。",
+      "terms": ["ログ", "2", "受け取り"]
+    },
+    {
+      "text": "ログその3を受け取りました。",
+      "terms": ["ログ", "3", "受け取り"]
+    },
     {
       "text": "CSV export leaks private notes",
       "terms": ["csv", "export", "leak", "private", "note", "csv", "export", "leak", "private", "note"]
@@ -293,7 +337,10 @@
         "csv"
       ]
     },
-    { "text": "Use pnpm for installs", "terms": ["use", "pnpm", "install", "use", "pnpm", "install"] },
+    {
+      "text": "Use pnpm for installs",
+      "terms": ["use", "pnpm", "install", "use", "pnpm", "install"]
+    },
     {
       "text": "Switch the lockfile to pnpm. npm install took minutes on CI.",
       "terms": [
@@ -371,7 +418,10 @@
       "text": "Consider synchronous = OFF for speed.",
       "terms": ["consider", "synchronous", "off", "speed", "consider", "synchronous", "off", "speed"]
     },
-    { "text": "chore: switch to pnpm", "terms": ["chore", "switch", "pnpm", "chore", "switch", "pnpm"] },
+    {
+      "text": "chore: switch to pnpm",
+      "terms": ["chore", "switch", "pnpm", "chore", "switch", "pnpm"]
+    },
     {
       "text": "Exclude notes from CSV export",
       "terms": ["exclude", "note", "from", "csv", "export", "exclude", "note", "from", "csv", "export"]
@@ -394,7 +444,8 @@
         "write",
         "title",
         "author",
-        "only"
+        "only",
+        "csv"
       ]
     },
     {
@@ -434,10 +485,14 @@
         "drop",
         "author",
         "from",
-        "export"
+        "export",
+        "csv"
       ]
     },
-    { "text": "検索は前方一致にする", "terms": ["検索", "前方", "一致"] },
+    {
+      "text": "検索は前方一致にする",
+      "terms": ["検索", "前方", "一致"]
+    },
     {
       "text": "書名の検索は前方一致にする。全文検索はデータが 1 万冊を超えるまで見送る。",
       "terms": ["書名", "検索", "前方", "一致", "全文", "検索", "データ", "1", "万", "冊", "超", "見送"]

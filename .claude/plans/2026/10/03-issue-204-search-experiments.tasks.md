@@ -53,13 +53,14 @@ base: main
   - コミット: `test(bench): classify missed Japanese questions by the cause of each missing term (T03)`
   - 結果: `node --test test/retrieval-bench.test.ts` → 6 pass。`node evals/retrieval/run.ts --misses` → ja>ja と ja>en の外れ 29 問: split 3、identifier 2、vocabulary 17、mixed 7、ranked 0。分割だけを直せば過半数に届くのは 6 問（20.7%）で、基準（20% 以上かつ 3 問以上）をぎりぎり満たす。ただし 6 問のうち 5 問は ja-split の set（分割の違いを含むように書いた質問）で、base の 60 問からは jj07（データ と データベース）の 1 問だけ。#204 への下書き: bigram 索引は別の計画の候補として書き、この内訳を添える（T08 でまとめる）
 
-- [ ] T04: E2 `terms()` で camelCase と snake_case の部分も語にして測る
+- [x] T04: E2 `terms()` で camelCase と snake_case の部分も語にして測る
   - 種別: 変更
   - 計画: S3
   - 依存: T02（判定に使う ident の質問が要る）
-  - 変更: `server/src/text.ts`, `server/src/terms-golden.json`, `server/test/text.test.ts`
+  - 変更: `server/src/text.ts`, `server/src/terms-golden.json`, `server/test/text.test.ts`, `server/test/retrieval-bench.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/text.test.ts test/terms-golden.test.ts` → pass。`node evals/retrieval/run.ts --compare <直前の採用済みのコミット>` の結果を結果行に残し、plan の基準で採否を決める。不採用なら、このタスクのチェックは実装を戻す revert のコミットで付ける
   - コミット: `feat(search): split camelCase and snake_case identifiers into search terms (T04)`
+  - 結果: 採用。（T03 のテストに残った日本語のコメントを英語に直した）`node evals/retrieval/run.ts --compare 424606b4` → all MRR 0.473 → 0.591（R@1 43.0% → 54.8%、R@10 51.6% → 63.4%）、en>en 0.596 → 0.750、en>ja 0.567 → 0.767、ja>en 0.263 → 0.368、ja>ja 0.455 → 0.515、set ident 0.083 → 1.000、base・tie・ja-split は変わらず、returned anyway はどの行も変わらない。`node --test test/terms-golden.test.ts test/text.test.ts test/text-properties.test.ts test/search.test.ts test/retrieval-bench.test.ts` → 48 pass。golden は 8 件が変わった（connectWriter・journal_mode・fetchCover・OffscreenCanvas など、部分が増えただけ）。1 MiB の英字の並びは 4 ms
 
 - [ ] T05: E2 を採用した場合、schema revision 9 で索引を作り直す
   - 種別: 追加
@@ -89,7 +90,7 @@ base: main
 
 全実験の結果と E4・E5 の不採用を #204 に残し、採用があればバージョンをそろえる。
 
-- [ ] T08: 採用があればバージョンを 0.6.23 にそろえ、#204 への記録の下書きを作る
+- [-] T08: 採用があればバージョンを 0.6.23 にそろえ、#204 への記録の下書きを作る
   - 種別: 変更
   - 計画: S6
   - 依存: T03（E1 の数値が要る）, T05（E2 の採否が要る）, T07（E3a / E3b の採否が要る）
@@ -101,3 +102,7 @@ base: main
 2026-10-03 / T01 / 持ち主の指示で、済んだ #203 の plan と tasks を消す / T01 のコミットに入れた
 2026-10-03 / T02 / 完了条件「base の 60 問の数値は main と同じ」は満たせない。追加した記録が base の質問と競合し、ej05 が 1 位から 2 位になった（MRR 0.479 → 0.469）。競合は意図したもの / 完了条件を「base の 60 問は変えない（質問と gold）」と読み替えた
 2026-10-03 / T02 / Codex の F1 の残り: kind の組では decision の方が短く、すでに上にある。finding が上の組（lazy-images）も bm25 の差が 5.7% と 6.1% で帯の外。文の長さを調整して帯に入れるのは結果に合わせた作りになるのでしない / E3a は「上がる例が観測されない」ことも測定結果として扱う
+2026-10-03 / T04 / 最初の規則では SQLite が sq と lite に割れ、base64 も細切れになった。さらに長い英字の並びで正規表現の試し直しが二乗に増え、テストが止まった / 大文字の連続の後ろは境目にしない、部分 7 つ以上は分けない、語を先に切り出して 100 文字以下だけを判定する形に直し、1 MiB の時間のテストを足した
+2026-10-03 / T04 / 変更欄に `server/test/retrieval-bench.test.ts` を足した（前: text.ts・terms-golden.json・text.test.ts） / T03 のコメントの日本語を `bun run english` が落としたため
+2026-10-03 / T04 / pre-commit の bundle の検査が、package に入る変更と同じコミットでのバージョンの更新を求めた / E2 の採用でリリースは決まったので、npm と 3 つの manifest を 0.6.23 にする作業を T04 に入れ、変更欄に 4 つのファイルを足した（`bun run release:plan -- --base v0.6.22` → plugin）
+2026-10-03 / T08 / バージョンの更新を T04 に移したので取りやめ / #204 への記録の下書きは、全タスクの後（完了の確認の段）で作って見せる

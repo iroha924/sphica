@@ -109,6 +109,35 @@ test("identifiers also become whole terms", () => {
     assert.ok(got.includes(w), `${w} is missing: ${got.join(",")}`);
 });
 
+test("camelCase and snake_case identifiers also give their parts, and names such as SQLite stay whole", () => {
+  const got = terms("connectReader と MAX_COVER_UPLOAD_BYTES と XMLHttpRequest と getUsers");
+  for (const w of [
+    "connectreader",
+    "connect",
+    "reader",
+    "max_cover_upload_bytes",
+    "upload",
+    "byte",
+    "xml",
+    "http",
+    "request",
+    "user",
+  ])
+    assert.ok(got.includes(w), `${w} is missing: ${got.join(",")}`);
+  assert.deepEqual(terms("SQLite"), ["sqlite", "sqlite"]);
+  // One letter is not a part, and a token with more than 6 parts is not a name
+  assert.ok(!terms("iPhone").includes("i"));
+  assert.deepEqual(terms("aGVsbG8gd29ybGQgaGVsbG8"), ["agvsbg8gd29ybgqgagvsbg8", "agvsbg8gd29ybgqgagvsbg8"]);
+});
+
+test("a 1 MiB run of letters is split in linear time (sources hold file excerpts that size)", () => {
+  for (const s of ["a".repeat(1 << 20), "aB".repeat(1 << 19), `x${"_a".repeat(1 << 19)}`]) {
+    const t0 = performance.now();
+    terms(s);
+    assert.ok(performance.now() - t0 < 1000, `took ${Math.round(performance.now() - t0)} ms`);
+  }
+});
+
 test("normalizes full-width and uppercase", () => {
   assert.deepEqual(terms("ＡＢＣ"), terms("abc"));
 });

@@ -14,6 +14,13 @@ const HIRAGANA_ONLY = /^[\p{Script=Hiragana}ー]+$/u;
 const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "and", "or", "for", "on", "it", "be"]);
 // Identifiers the Segmenter splits (file names, snake_case, OT-123, #27) are also kept whole as terms.
 const IDENT = /#\d+|[a-z0-9][a-z0-9_./#-]*[a-z0-9]/g;
+// A camelCase or snake_case identifier, read before lower-casing; its parts are added as terms, so "reader" finds connectReader.
+// Only a lower-case letter or digit before a capital starts a part, so names such as SQLite stay whole. Over 6 parts is not a name (base64).
+// Words are cut first and each is tested on its own, so a long run of letters costs linear time.
+const WORD = /[A-Za-z0-9_]+/g;
+const COMPOUND = /^[A-Za-z]\w*_|[a-z0-9][A-Z]/;
+const MAX_PARTS = 6;
+const PART = /[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+/g;
 // Overly long chunks are not terms (base64 or hashes).
 const MAX_TERM = 100;
 // A kanji word with trailing kana (a conjugated verb) is kept as its kanji, so its conjugated forms meet.
@@ -42,7 +49,8 @@ export const identTerm = (x: string): string => singular(x.normalize("NFKC").toL
  * the indexes as reindex() in admin.ts does (server/test/terms-golden.test.ts fails until it is decided).
  */
 export function terms(text: string): string[] {
-  const norm = text.normalize("NFKC").toLowerCase();
+  const nfkc = text.normalize("NFKC");
+  const norm = nfkc.toLowerCase();
   const out: string[] = [];
   const keep = (w: string) => {
     if (w.length > MAX_TERM || STOP.has(w) || HIRAGANA_ONLY.test(w)) return;
@@ -50,6 +58,11 @@ export function terms(text: string): string[] {
   };
   for (const s of segmenter.segment(norm)) if (s.isWordLike) keep(s.segment.trim());
   for (const m of norm.matchAll(IDENT)) if (m[0].length >= 3) keep(m[0]);
+  for (const [w] of nfkc.matchAll(WORD)) {
+    if (w.length > MAX_TERM || !COMPOUND.test(w)) continue;
+    const parts = w.match(PART) ?? [];
+    if (parts.length <= MAX_PARTS) for (const p of parts) if (p.length >= 2) keep(p.toLowerCase());
+  }
   return out.filter(Boolean);
 }
 

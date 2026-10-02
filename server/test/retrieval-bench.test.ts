@@ -112,7 +112,7 @@ test("a missed Japanese question is told apart by whether its words were cut dif
       }),
     ],
     questions: [
-      // 既読の本 is cut into 既, 読, 本; the record holds 既 and 読本
+      // The question cuts the record's compound into three words; the record holds the first and a two-character compound
       { id: "s", lang: "ja>ja", overlap: true, text: "既読の本の場所", gold: ["read-shelf"] },
     ],
   };
