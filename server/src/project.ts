@@ -20,10 +20,13 @@ const localFile = (): string => path.join(sphicaHome(), "projects.json");
 const LOCAL_KEY = /^[a-z0-9][a-z0-9._-]*$/;
 
 /**
- * Normalizes a git remote across ssh / https, with or without .git, ports, and credentials.
+ * Splits a git remote across ssh / https, with or without .git, ports, and credentials. The path keeps the case it was written in, and so
+ * does the host of an scp-like or ssh/git remote; the URL parser lowercases an http(s) host.
  * The URL parser splits the authority. Splitting it by hand leaves pieces of a password containing `@` in the key.
+ * Capture spools keys in this form so a database whose project keys are not normalized yet finds its project; drop it once capture can no
+ * longer write to such a database.
  */
-export function normalizeRemote(url: string | null | undefined): string | null {
+function legacyRemote(url: string | null | undefined): string | null {
   const raw = String(url ?? "").trim();
   if (!raw) return null;
   // scp-like remotes (git@host:path) are not URLs, so handle them first.
@@ -37,6 +40,24 @@ export function normalizeRemote(url: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+// ASCII only, like SQLite's lower(): the migration and the key triggers fold with it, and any other folding would disagree with them.
+const fold = (s: string): string => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+
+/** Folds a `git:` key's host, and the whole key on github.com (owner and repository names are case-insensitive there). Idempotent. */
+export function normalizeKey(key: string): string {
+  if (!key.startsWith("git:")) return key;
+  const rest = key.slice(4);
+  const cut = rest.indexOf("/");
+  const host = fold(cut < 0 ? rest : rest.slice(0, cut));
+  return host === "github.com" ? fold(key) : `git:${host}${cut < 0 ? "" : rest.slice(cut)}`;
+}
+
+/** The remote as it appears in a project key: the same repository gives the same text however its remote is written. */
+export function normalizeRemote(url: string | null | undefined): string | null {
+  const r = legacyRemote(url);
+  return r === null ? null : normalizeKey(`git:${r}`).slice(4);
 }
 
 const git = (dir: string, ...args: string[]): string | null => {
@@ -88,17 +109,22 @@ const rootOf = (dir: string): string =>
  * The project dir belongs to, or null (nothing is recorded).
  * **The root is the repository's top level**, so relative paths keep the same base when called from a subdirectory.
  */
-export function identify(dir: string): Place | null {
+export function identify(dir: string): (Place & { legacyKey: string }) | null {
   const given = path.resolve(dir);
   const top = git(given, "rev-parse", "--show-toplevel");
   const root = top || given;
-  const remote = top ? normalizeRemote(git(root, "remote", "get-url", "origin")) : null;
-  if (remote) return { key: `git:${remote}`, root, name: remote.split("/").slice(1).join("/") || remote };
+  const legacy = top ? legacyRemote(git(root, "remote", "get-url", "origin")) : null;
+  if (legacy) {
+    const key = normalizeKey(`git:${legacy}`);
+    const remote = key.slice(4);
+    return { key, legacyKey: `git:${legacy}`, root, name: remote.split("/").slice(1).join("/") || remote };
+  }
   // A project outside git is found by walking up to the named root, even from a subdirectory.
   const map = localMap();
   for (let d = root; ; d = path.dirname(d)) {
     const local = map[d];
-    if (local && LOCAL_KEY.test(local)) return { key: `local:${local}`, root: d, name: local };
+    if (local && LOCAL_KEY.test(local))
+      return { key: `local:${local}`, legacyKey: `local:${local}`, root: d, name: local };
     if (top || path.dirname(d) === d) return null;
   }
 }

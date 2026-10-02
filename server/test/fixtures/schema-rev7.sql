@@ -32,21 +32,6 @@ create table project (
     check (strftime('%Y-%m-%dT%H:%M:%fZ', created_at) is created_at)
 ) strict;
 
--- A git key's host is lowercase, and on github.com the whole key is (owner and repository names are case-insensitive there), so one
--- repository has one key however its remote is written. lower() folds ASCII only, as normalizeKey does.
-create trigger project_key_normal_insert before insert on project when new.key glob 'git:*' begin
-  select raise(abort, 'the project key is not normalized')
-  from (select rest, case when instr(rest, '/') = 0 then rest else substr(rest, 1, instr(rest, '/') - 1) end as host
-    from (select substr(new.key, 5) as rest))
-  where new.key is not case when lower(host) = 'github.com' then lower(new.key) else 'git:' || lower(host) || substr(rest, length(host) + 1) end;
-end;
-create trigger project_key_normal_update before update of key on project when new.key glob 'git:*' begin
-  select raise(abort, 'the project key is not normalized')
-  from (select rest, case when instr(rest, '/') = 0 then rest else substr(rest, 1, instr(rest, '/') - 1) end as host
-    from (select substr(new.key, 5) as rest))
-  where new.key is not case when lower(host) = 'github.com' then lower(new.key) else 'git:' || lower(host) || substr(rest, length(host) + 1) end;
-end;
-
 -- Identities bound to the owner of this machine (the owner's GitHub account id), set by the owner through the CLI.
 -- An external source counts as the owner's words only when its author id matches; a login name alone never does.
 create table owner_identity (
@@ -1070,4 +1055,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 8;
+pragma user_version = 7;

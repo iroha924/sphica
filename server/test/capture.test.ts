@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { after, before, mock, test } from "node:test";
+import { migrate } from "../src/admin.ts";
 import {
   answersOf,
   captureNotice,
@@ -26,7 +27,7 @@ import { dbFile } from "../src/db.ts";
 import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
 import { snapshot } from "../src/worktree.ts";
-import { project, tempDb } from "./temp-db.ts";
+import { project, statements, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
 if (process.versions.bun) throw new Error("run these tests with node --test (bun run test)");
@@ -588,7 +589,7 @@ test("drops notifications with text after the closing tag, and keeps owner quest
 
 test("writing to the database counts only new messages, records edits as observations, and translates v:1 records", async () => {
   const db = tempDb();
-  const id = project(db);
+  project(db);
   const base = {
     host: "claude-code" as const,
     session: "s1",
@@ -612,11 +613,10 @@ test("writing to the database counts only new messages, records edits as observa
     },
     { ...base, v: 2, kind: "edit", turn: "t2", event: "tool-1", path: "a.ts", via: "tool" },
   ];
-  const projects = new Map([["git:github.com/o/r", { id, name: "r" }]]);
   try {
-    assert.equal(await write(db.capture, batch, projects), 1, "number of newly inserted messages");
+    assert.equal((await write(db.capture, batch)).sent, 1, "number of newly inserted messages");
     // A resend is "already there". An insert into the view reports 0 changed rows, so count by the difference from existing ids.
-    assert.equal(await write(db.capture, batch, projects), 0);
+    assert.equal((await write(db.capture, batch)).sent, 0);
     assert.deepEqual(
       db.owner
         .prepare(
@@ -646,11 +646,12 @@ test("writing to the database counts only new messages, records edits as observa
       [[2, "message", "owner"], [2, "edit", "b.ts"], null],
     );
     assert.equal(
-      await write(
-        db.capture,
-        old.filter((r) => r !== null),
-        projects,
-      ),
+      (
+        await write(
+          db.capture,
+          old.filter((r) => r !== null),
+        )
+      ).sent,
       1,
     );
   } finally {
@@ -1080,6 +1081,147 @@ test("a send with nothing queued keeps the last send time", async () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     await flush(db.file);
     assert.equal(readState().flushedAt, sentAt);
+  } finally {
+    await db.done();
+  }
+});
+
+// Capture keeps writing into a database init has not migrated yet. Its records name the project by the key as the remote is written, so
+// an unmigrated database finds the project registered under it, and a migrated one the project that took the normalized key.
+test("a legacy key reaches the same project before and after the revision 8 migration", async () => {
+  reset();
+  const db = tempDb(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8"));
+  const mixed = path.join(home, "mixed-case");
+  execFileSync("git", ["init", "-q", mixed], { stdio: "ignore" });
+  execFileSync("git", ["-C", mixed, "remote", "add", "origin", "git@GitHub.com:O/R.git"], {
+    stdio: "ignore",
+  });
+  const said = (prompt: string, turn: string) =>
+    onHook("claude-code", {
+      session_id: "s1",
+      prompt_id: turn,
+      cwd: mixed,
+      hook_event_name: "UserPromptSubmit",
+      prompt,
+    });
+  const where = () =>
+    db.owner
+      .prepare(
+        "select s.project_id, m.text from source m join session s on s.id = m.session_id where m.kind = 'session_message' order by m.id",
+      )
+      .all()
+      .map((r) => [r.project_id, r.text]);
+  try {
+    db.owner.exec(
+      "insert into project (key, name) values ('git:github.com/o/r', 'o/r'), ('git:GitHub.com/O/R', 'O/R')",
+    );
+    said("移行の前", "p1");
+    assert.deepEqual(
+      spooled().map((r) => r.project),
+      ["git:GitHub.com/O/R"],
+    );
+    assert.deepEqual(await flush(db.file), { sent: 1, deferred: 0, rejected: 0 });
+    const log = console.log;
+    console.log = () => {};
+    try {
+      migrate(db.file);
+    } finally {
+      console.log = log;
+    }
+    assert.deepEqual(
+      db.owner
+        .prepare("select id, key from project")
+        .all()
+        .map((r) => [r.id, r.key]),
+      [[2, "git:github.com/o/r"]],
+    );
+    said("移行の後", "p2");
+    assert.deepEqual(await flush(db.file), { sent: 1, deferred: 0, rejected: 0 });
+    assert.deepEqual(where(), [
+      [2, "移行の前"],
+      [2, "移行の後"],
+    ]);
+    assert.equal(left(rejectedDir()), 0);
+    assert.equal(left(unregisteredDir()), 0);
+  } finally {
+    await db.done();
+    fs.rmSync(mixed, { recursive: true, force: true });
+  }
+});
+
+// A migration may remove or rename a project between a lookup outside the write and the write itself, sending valid records to rejected/
+test("a send looks its projects up inside the write's transaction (legacy key)", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const seen = await statements(() => flush(db.file));
+    const begin = seen.findIndex((q) => /begin immediate/i.test(q));
+    const lookup = seen.findIndex((q) => /from "project"/.test(q));
+    assert.ok(
+      begin >= 0 && lookup > begin,
+      `the project lookup (${lookup}) comes after begin immediate (${begin})`,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+// A record without a project key is set aside alone; it never keeps the valid records of its batch from being sent
+test("a queued record without a project key goes to rejected/ and the rest are sent", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    queue(unregisteredDir(), Date.now() - 60_000, 1, {
+      ...owned(registered, 1),
+      project: null,
+    } as unknown as Spooled);
+    queue(spoolDir(), Date.now(), 2, owned(registered, 2));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1);
+    assert.equal(left(rejectedDir()), 1);
+    assert.equal(left(unregisteredDir()), 0);
+  } finally {
+    fs.rmSync(rejectedDir(), { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+// Before migrating, a third spelling must not pick one of two projects its key normalizes to: writing into the empty one would leave
+// two projects with records, which revision 8 refuses to merge
+test("a legacy key held while two projects share its normalized key stays held, and the migration still merges them", async () => {
+  reset();
+  const db = tempDb(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8"));
+  try {
+    db.owner.exec(
+      "insert into project (key, name) values ('git:GitHub.com/O/R', 'O/R'), ('git:github.com/o/r', 'o/r')",
+    );
+    db.owner.exec(
+      "insert into session (id, project_id, host, external_id, started_at) values ('s0', 1, 'claude-code', 's0', '2026-09-13T00:00:00.000Z')",
+    );
+    queue(spoolDir(), Date.now(), 1, owned("git:GITHUB.com/o/R", 1));
+    assert.deepEqual(await flush(db.file), { sent: 0, deferred: 1, rejected: 0 });
+    assert.deepEqual(
+      { ...db.owner.prepare("select count(*) as n from session where project_id = 2").get() },
+      { n: 0 },
+    );
+    const log = console.log;
+    console.log = () => {};
+    try {
+      migrate(db.file);
+    } finally {
+      console.log = log;
+    }
+    assert.deepEqual(await flush(db.file), { sent: 1, deferred: 0, rejected: 0 });
+    assert.deepEqual(
+      db.owner
+        .prepare("select s.project_id from source m join session s on s.id = m.session_id")
+        .all()
+        .map((r) => r.project_id),
+      [1],
+    );
   } finally {
     await db.done();
   }

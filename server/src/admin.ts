@@ -8,6 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dbDir } from "./assets.ts";
 import { backupDir, backupPath, backups } from "./backups.ts";
+import { HOLD_DAYS, HOLD_MAX } from "./capture.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION, sqliteCode } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
@@ -116,12 +117,25 @@ function listed(rows: Row[]): string {
     .join("\n");
 }
 
+/**
+ * Advice for a stop rule whose rows a release did write, so the general advice (fix the rows or forget them) does not fit. Keyed by the
+ * rule text the check script writes.
+ */
+const STOP_ADVICE: Record<string, (revision: number, rows: Row[]) => string> = {
+  "projects with records whose keys become one once normalized": (revision, rows) =>
+    `Revision ${revision} was not applied: ${plural(rows.length, "project")} with records have keys that become one once normalized (listed below), and this Sphica cannot merge them. Search, read, and the record tools stay unavailable until a Sphica that can merge them migrates this database. Meanwhile capture keeps recording a session whose remote is written as one of the listed keys; a session whose remote is written otherwise is held, and held records are dropped after ${HOLD_DAYS} days or past ${HOLD_MAX} of them. Report the list below at https://github.com/iroha924/sphica/issues. Forgetting sources does not resolve it`,
+};
+
 /** A migration's check found rows the new revision cannot take. Nothing of that step was changed. */
 class Stop extends Error {
   list: string;
   constructor(revision: number, rows: Row[]) {
+    const rules = new Set(rows.map((r) => r.rule));
+    const advice = rules.size === 1 ? STOP_ADVICE[String(rows[0]?.rule)] : undefined;
     super(
-      `The database has ${plural(rows.length, "row")} that revision ${revision} cannot take, and Sphica writes no such row (listed below). Fix the rows, or forget a listed source with /sphica:forget on the Sphica version that still opens this database, then run \`sphica init\` again`,
+      advice
+        ? advice(revision, rows)
+        : `The database has ${plural(rows.length, "row")} that revision ${revision} cannot take, and Sphica writes no such row (listed below). Fix the rows, or forget a listed source with /sphica:forget on the Sphica version that still opens this database, then run \`sphica init\` again`,
     );
     this.list = listed(rows);
   }

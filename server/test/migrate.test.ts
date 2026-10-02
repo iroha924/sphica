@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16, fixtures/schema-rev6.sql at v0.6.17.
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16, fixtures/schema-rev6.sql at v0.6.17, fixtures/schema-rev7.sql at v0.6.20.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,6 +20,7 @@ const REV3 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV4 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev4.sql"), "utf8");
 const REV5 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev5.sql"), "utf8");
 const REV6 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev6.sql"), "utf8");
+const REV7 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -148,6 +149,7 @@ for (const [from, schema] of [
   [4, REV4],
   [5, REV5],
   [6, REV6],
+  [7, REV7],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -234,6 +236,7 @@ for (const [from, schema] of [
   [4, REV4],
   [5, REV5],
   [6, REV6],
+  [7, REV7],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -261,6 +264,7 @@ test("a fixture of every earlier revision is kept, each at its own revision", ()
     [4, REV4],
     [5, REV5],
     [6, REV6],
+    [7, REV7],
   ] as const)
     assert.match(schema, new RegExp(`pragma user_version = ${from};`));
 });
@@ -1328,4 +1332,110 @@ test("a populated revision 4 database migrates and keeps working: rows, ids, sea
     )
     .run(now, now, text, Buffer.byteLength(text), sha256(text));
   assert.deepEqual(hits("source_fts", "wal"), [id("select id from source where external_id = 'm9'")]);
+});
+
+const projects = (raw: DatabaseSync) =>
+  raw
+    .prepare("select id, key, name, created_at from project order by id")
+    .all()
+    .map((r) => ({ ...r }));
+const addProject = (raw: DatabaseSync, key: string, name: string) =>
+  raw.prepare("insert into project (key, name, created_at) values (?, ?, ?)").run(key, name, now);
+const addSession = (raw: DatabaseSync, projectId: number, id: string) =>
+  raw
+    .prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values (?, ?, 'claude-code', ?, ?)",
+    )
+    .run(id, projectId, id, now);
+const sequence = (raw: DatabaseSync) =>
+  (raw.prepare("select seq from sqlite_sequence where name = 'project'").get() as { seq: number }).seq;
+
+test("migrating revision 7 normalizes a project key and keeps its id, creation time, and the id counter", () => {
+  const raw = create("old.db", REV7);
+  addProject(raw, "git:GitHub.COM/O/R", "O/R");
+  addProject(raw, "git:GitLab.Example/Team/Repo", "Team/Repo");
+  addProject(raw, "local:notes", "notes");
+  addSession(raw, 1, "s1");
+  const said = migrate(raw);
+  assert.deepEqual(projects(raw), [
+    { id: 1, key: "git:github.com/o/r", name: "o/r", created_at: now },
+    { id: 2, key: "git:gitlab.example/Team/Repo", name: "Team/Repo", created_at: now },
+    { id: 3, key: "local:notes", name: "notes", created_at: now },
+  ]);
+  assert.equal(sequence(raw), 3);
+  assert.match(said, /a project key that was not normalized: 2 rows/);
+  assert.match(said, /project 1 git:GitHub\.COM\/O\/R → now git:github\.com\/o\/r \(o\/r\)/);
+});
+
+test("migrating revision 7 removes an empty project whose key another takes, even when it holds the normalized key", () => {
+  const raw = create("old.db", REV7);
+  addProject(raw, "git:github.com/o/r", "o/r");
+  addProject(raw, "git:github.com/O/R", "O/R");
+  addProject(raw, "git:GITHUB.com/o/R", "o/R");
+  addSession(raw, 2, "s1");
+  const said = migrate(raw);
+  assert.deepEqual(projects(raw), [{ id: 2, key: "git:github.com/o/r", name: "o/r", created_at: now }]);
+  assert.equal(sequence(raw), 3);
+  assert.deepEqual({ ...raw.prepare("select project_id from session").get() }, { project_id: 2 });
+  assert.match(said, /an empty project whose key another project takes once normalized: 2 rows/);
+  assert.match(said, /project 1 git:github\.com\/o\/r → removed; project 2 takes git:github\.com\/o\/r/);
+  assert.equal(raw.prepare("pragma foreign_key_check").all().length, 0);
+});
+
+test("migrating revision 7 keeps the oldest of empty projects whose keys become one", () => {
+  const raw = create("old.db", REV7);
+  addProject(raw, "git:github.com/O/R", "O/R");
+  addProject(raw, "git:github.com/o/r", "o/r");
+  migrate(raw);
+  assert.deepEqual(projects(raw), [{ id: 1, key: "git:github.com/o/r", name: "o/r", created_at: now }]);
+});
+
+test("migrating revision 7 stops, changing nothing of revision 8, when two projects with records become one, and says how to go on", () => {
+  const raw = create("old.db", REV7);
+  addProject(raw, "git:github.com/o/r", "o/r");
+  addProject(raw, "git:github.com/O/R", "O/R");
+  addProject(raw, "git:github.com/x/y", "x/y");
+  addSession(raw, 1, "s1");
+  addSession(raw, 2, "s2");
+  const before = projects(raw);
+  assert.throws(
+    () => migrate(raw),
+    (e: Error) =>
+      /projects with records whose keys become one once normalized: 2 rows/.test(e.message) &&
+      /project 1 git:github\.com\/o\/r \(becomes git:github\.com\/o\/r\): 1 sessions, 0 sources/.test(
+        e.message,
+      ) &&
+      /project 2 git:github\.com\/O\/R \(becomes git:github\.com\/o\/r\): 1 sessions/.test(e.message) &&
+      /^Revision 8 was not applied: 2 projects with records/.test(e.message) &&
+      /cannot merge them/.test(e.message) &&
+      /capture keeps recording a session whose remote is written as one of the listed keys; a session whose remote is written otherwise is held, and held records are dropped after 30 days or past 1000/.test(
+        e.message,
+      ) &&
+      !/sphica@0\.6\.20|plugin of the same version/.test(e.message) &&
+      /Forgetting sources does not resolve it/.test(e.message) &&
+      !/Sphica writes no such row/.test(e.message) &&
+      /No migration step was committed: the database is still at revision 7/.test(e.message),
+  );
+  assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 7);
+  assert.deepEqual(projects(raw), before);
+});
+
+// A key the schema takes but whose path is empty keeps a name, as identify names a remote with no path after its host
+test("migrating revision 7 names a project whose key has an empty path after its host by the host", () => {
+  const raw = create("old.db", REV7);
+  addProject(raw, "git:HOST/", "HOST/");
+  migrate(raw);
+  assert.deepEqual(projects(raw), [{ id: 1, key: "git:host/", name: "host/", created_at: now }]);
+});
+
+test("a canonical key trigger refuses a project key that is not normalized, on insert and on update", () => {
+  const raw = create("fresh.db", CURRENT);
+  for (const key of ["git:GitHub.com/o/r", "git:github.com/O/r", "git:Host/o/r", "git:HOST"])
+    assert.throws(() => addProject(raw, key, "x"), /the project key is not normalized/, key);
+  for (const key of ["git:github.com/o/r", "git:host/O/R", "git:host", "git:bÜcher.example/X", "local:notes"])
+    addProject(raw, key, "x");
+  assert.throws(
+    () => raw.prepare("update project set key = 'git:github.com/O/R' where key = 'git:github.com/o/r'").run(),
+    /the project key is not normalized/,
+  );
 });

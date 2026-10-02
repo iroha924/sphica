@@ -20,7 +20,8 @@
     "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
     "as_of": "export the evaluation snapshot as of a time and query it",
     "overview": "call the MCP overview tool (view live or look) in the temp repository",
-    "export": "check the save path and build the export document of the chosen decisions, as the read server's export tool does"
+    "export": "check the save path and build the export document of the chosen decisions, as the read server's export tool does",
+    "set_remote": "point the temp repository's origin at another spelling of its remote"
   },
   "cases": [
     {
@@ -2756,6 +2757,28 @@
         {
           "unit": "trace:s-ja-retire/commit-en",
           "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "capture-14",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "A session in a clone whose remote spells the host and repository in other case is captured into the registered project",
+      "given": [
+        {
+          "set_remote": "git@GitHub.COM:Example/Tsundoku.git"
+        }
+      ],
+      "when": {
+        "capture": "s-ja-storage"
+      },
+      "then": [
+        {
+          "source_search": {
+            "query": "Postgres SQLite",
+            "hits": 1
+          }
         }
       ]
     },

@@ -443,6 +443,10 @@ export async function createDriver(world: World): Promise<Driver> {
   return {
     run: async (step) => {
       if (typeof step.capture === "string") return capture(step.capture);
+      if (typeof step.set_remote === "string") {
+        git("remote", "set-url", "origin", step.set_remote);
+        return;
+      }
       if (step.edit_file && typeof step.edit_file === "object") {
         const edit = step.edit_file as {
           path: string;

@@ -26,7 +26,7 @@ import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { panel, plain } from "./panel.ts";
-import { identify, patchPaths, relativeTo } from "./project.ts";
+import { identify, normalizeKey, patchPaths, relativeTo } from "./project.ts";
 import { sphicaHome } from "./sqlite.ts";
 import { bytes, clean, head, mask, plural, reason, sha256, tail } from "./text.ts";
 import { changed, type Snapshot, snapshot } from "./worktree.ts";
@@ -43,8 +43,8 @@ export const rejectedDir = (): string => path.join(spoolDir(), "rejected");
  */
 export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered");
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
-const HOLD_DAYS = 30;
-const HOLD_MAX = 1000;
+export const HOLD_DAYS = 30;
+export const HOLD_MAX = 1000;
 /** Where each session's working tree stood when its running turn began. Turn start and end run in separate hook processes. */
 const baselineDir = (): string => path.join(sphicaHome(), "worktree");
 
@@ -97,6 +97,8 @@ type SpooledV1 =
 /** A record read from the queue in the current shape, or null when it is a v:1 record with nothing to keep (a read file). */
 export function current(raw: unknown): Spooled | null {
   const r = raw as { v?: number } & Record<string, unknown>;
+  // The send looks the project up by this key: a record without one is set aside instead of failing its whole batch
+  if (typeof r.project !== "string") throw new Error("queue record without a project key");
   if (r.v === 2) return raw as Spooled;
   if (r.v !== 1) throw new Error(`unknown queue record version ${String(r.v)}`);
   const old = raw as SpooledV1 &
@@ -369,7 +371,8 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     v: 2 as const,
     host,
     session: String(input.session_id),
-    project: place.key,
+    // The key as the remote is written: a database whose keys are not normalized yet finds its project by it, a normalized one through normalizeKey
+    project: place.legacyKey,
     branch: branchOf(place.root),
     turn,
     at,
@@ -532,30 +535,45 @@ const ROWS = 1000;
 const chunks = <T>(xs: T[], n = ROWS): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 
-type Project = { id: number; name: string };
-
 /**
- * Writes a batch of records in one transaction. **The capture connection can write only to the capture views** (db/schema.sql, db-write.ts).
- * The views' triggers accept an identical resend and refuse a resend with different content, so ids are fixed when queued.
- * **Counts do not use affected rows.** Inserting into a view affects 0 rows, so the messages present before sending are subtracted instead.
+ * The project each spooled key names: the key itself, else the only project whose key normalizes as it does. Two such projects (a split
+ * not migrated yet) leave the record held, since writing into either could keep the migration from merging them. Looked up inside the
+ * write's transaction, so a migration that removes or renames a project cannot come between the lookup and the write.
  */
+async function projectsOf(trx: Kysely<DB>, keys: string[]): Promise<Map<string, number>> {
+  if (!keys.length) return new Map();
+  const all = await trx.selectFrom("project").select(["id", "key"]).execute();
+  const exact = new Map(all.map((p) => [p.key, p.id]));
+  const normal = Map.groupBy(all, (p) => normalizeKey(p.key));
+  const found = new Map<string, number>();
+  for (const k of keys) {
+    const same = normal.get(normalizeKey(k));
+    const id = exact.get(k) ?? (same?.length === 1 ? same[0]?.id : undefined);
+    if (id !== undefined) found.set(k, id);
+  }
+  return found;
+}
+
 export async function write(
   db: Kysely<DB>,
   batch: Spooled[],
-  projects: Map<string, Project>,
-): Promise<number> {
+): Promise<{ sent: number; strayed: Set<Spooled> }> {
   return inTransaction(db, async (trx) => {
+    const projects = await projectsOf(
+      trx,
+      batch.map((r) => r.project),
+    );
     const sessions = new Map<
       string,
       { project: number; host: Host; session: string; branch: string | null; at: string }
     >();
     for (const r of batch) {
       const p = projects.get(r.project);
-      if (!p) continue;
-      const id = sessionId(p.id, r.host, r.session);
+      if (p === undefined) continue;
+      const id = sessionId(p, r.host, r.session);
       const prev = sessions.get(id);
       if (!prev || Date.parse(r.at) < Date.parse(prev.at))
-        sessions.set(id, { project: p.id, host: r.host, session: r.session, branch: r.branch, at: r.at });
+        sessions.set(id, { project: p, host: r.host, session: r.session, branch: r.branch, at: r.at });
     }
     for (const part of chunks([...sessions]))
       await trx
@@ -573,8 +591,8 @@ export async function write(
         .execute();
     const messages = batch.flatMap((m) => {
       const p = m.kind === "message" ? projects.get(m.project) : undefined;
-      if (m.kind !== "message" || !p) return [];
-      return [{ m, session: sessionId(p.id, m.host, m.session) }];
+      if (m.kind !== "message" || p === undefined) return [];
+      return [{ m, session: sessionId(p, m.host, m.session) }];
     });
     const present = async () => {
       let n = 0;
@@ -619,10 +637,10 @@ export async function write(
     const after = await present();
     const edits = batch.flatMap((r) => {
       const p = r.kind === "edit" ? projects.get(r.project) : undefined;
-      if (r.kind !== "edit" || !p) return [];
+      if (r.kind !== "edit" || p === undefined) return [];
       return [
         {
-          session_id: sessionId(p.id, r.host, r.session),
+          session_id: sessionId(p, r.host, r.session),
           turn_id: r.turn,
           tool_event_id: r.event,
           path: r.path,
@@ -632,7 +650,7 @@ export async function write(
       ];
     });
     for (const part of chunks(edits)) await trx.insertInto("capture_edit").values(part).execute();
-    return after - before;
+    return { sent: after - before, strayed: new Set(batch.filter((r) => !projects.has(r.project))) };
   });
 }
 
@@ -679,32 +697,24 @@ async function sendBatch(
     if (r) records.push({ name, from, r });
     else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are not kept
   }
-  const projects = new Map(
-    (
-      await db
-        .selectFrom("project")
-        .select(["id", "key", "name"])
-        .where("key", "in", [...new Set(records.map((x) => x.r.project))])
-        .execute()
-    ).map((p) => [p.key, { id: p.id, name: p.name }]),
-  );
-  const known = records.filter((x) => projects.has(x.r.project));
-  const strayed = records.filter((x) => !projects.has(x.r.project));
-
   let sent = 0;
-  const bad: { name: string; from: string; r: Spooled }[] = [];
+  let strayed: typeof records = [];
+  const bad: typeof records = [];
   try {
-    sent = await write(
+    const out = await write(
       db,
-      known.map((x) => x.r),
-      projects,
+      records.map((x) => x.r),
     );
+    sent = out.sent;
+    strayed = records.filter((x) => out.strayed.has(x.r));
   } catch (e) {
     if (!rejected(e)) throw e;
-    // One at a time
-    for (const x of known) {
+    // One at a time, each looking its project up again: the failed batch's lookup was rolled back with it
+    for (const x of records) {
       try {
-        sent += await write(db, [x.r], projects);
+        const out = await write(db, [x.r]);
+        sent += out.sent;
+        if (out.strayed.size) strayed.push(x);
       } catch (e2) {
         if (!rejected(e2)) throw e2;
         bad.push(x);

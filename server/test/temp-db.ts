@@ -23,12 +23,13 @@ export type TempDb = {
   done: () => Promise<void>;
 };
 
-export function tempDb(): TempDb {
+/** schema: the definitions to apply, the current db/schema.sql unless a test needs an earlier revision's */
+export function tempDb(schema = SCHEMA): TempDb {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-db-"));
   const file = path.join(dir, "sphica.db");
   const owner = connectWriter("owner", file, true);
   owner.exec("pragma journal_mode = wal");
-  owner.exec(SCHEMA);
+  owner.exec(schema);
   const reader = openReader(file);
   const ingest = openWriter("ingest", file);
   const capture = openWriter("capture", file);
