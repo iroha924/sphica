@@ -91,8 +91,20 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
   - 結果: red: `node --test --test-name-pattern="unknown argument" test/plugin.test.ts` → fail（最初の `status` が `zz_unknown` を捨てて isError にならない）。両サーバーの 18 個の `inputSchema` を `z.object({...}).strict()` で包んだ後 → pass（listTools の全 18 ツールが引数表に載り、全部が isError で本文に `zz_unknown` を出す）
   - 結果: `node --test test/plugin.test.ts` → 29 pass（_meta で workspace を渡すテスト、説明が 2,048 文字以内のテストも通る）。`bun run check` → exit 0
 
+- [x] T07: search の sources と path の併用をエラーにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T03（使えない path をエラーにする扱いを入れたのが T03）
+  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-name-pattern="asked leaves out" test/plugin.test.ts` → `{ sources: true, path: "src/x.ts" }` が拒まれず source の検索結果を返して fail
+  - 完了条件: `cd server && node --test test/plugin.test.ts` → 全件 pass
+  - コミット: `fix(mcp): refuse a path filter combined with sources (T07)`
+  - 結果: red を上のとおり確かめた。sources の分岐で path があれば `sources cannot be combined with path.` を isError で返すようにした後、`node --test test/plugin.test.ts` → 29 pass。`bun run check` → exit 0
+
 ## 記録
 2026-10-02 / - / 終わった計画 4 組の削除は .claude/plans の中だけの変更で、done の検査（.claude/plans の外の変更を見る）に掛からないのでタスクにしない / plan と tasks を入れる最初のコミットで削除する
 2026-10-02 / T04 / 変更欄の `server/src/text.ts` を `server/src/split-check.ts` に替えた / text.ts はすべてのフックと MCP が読むので、golden（約 14 KB）をそこで import すると全バンドルに入る。照合を別モジュールにして doctor（cli.js）だけに入れた
 2026-10-02 / T06 / T03 の `min(1)` で plugin.test.ts の asked と path の併用テスト（`path: ""`）が落ちていた。T03 では search.test.ts と `bun run check` だけを流し、plugin.test.ts を流していなかった / 修正タスク T06 を足し、T05 より前にコミットした
 2026-10-02 / T01 / Codex のタスクレビュー（aa6129d3）: 指摘 0 件 / なし
+2026-10-02 / T02 / Codex のタスクレビュー（96c93a09）: 指摘 0 件 / なし
+2026-10-02 / T03 / Codex のタスクレビュー（9e2c876b）: 2 件。F2（asked と path: "" のテストが min(1) で落ちる）は T06 で直していた。F1（sources: true のとき path を検査せず黙って無視する）は採用し、T07 を足した

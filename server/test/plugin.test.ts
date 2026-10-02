@@ -799,6 +799,11 @@ test("search with asked leaves out the session it is given and says when it cann
       await search({ asked: true, path: "src/x.ts" }),
       /^asked cannot be combined with sources or path\.$/,
     );
+    // path filters records only, so with sources it would be ignored without a word
+    assert.match(
+      await search({ sources: true, path: "src/x.ts" }),
+      /^sources cannot be combined with path\.$/,
+    );
   } finally {
     await client.close();
     await db.done();

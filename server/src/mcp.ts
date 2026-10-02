@@ -190,6 +190,7 @@ server.registerTool(
         return text(framed(askedText(r, known)));
       }
       if (a.sources) {
+        if (a.path !== undefined) return text("sources cannot be combined with path.", true);
         const r = await searchSources(db, p.id, a.query, limit);
         if (!r.hits.length)
           return text(
