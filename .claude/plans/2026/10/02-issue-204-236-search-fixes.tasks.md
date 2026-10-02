@@ -101,6 +101,17 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
   - コミット: `fix(mcp): refuse a path filter combined with sources (T07)`
   - 結果: red を上のとおり確かめた。sources の分岐で path があれば `sources cannot be combined with path.` を isError で返すようにした後、`node --test test/plugin.test.ts` → 29 pass。`bun run check` → exit 0
 
+- [x] T08: 並行の読む前の配信の文字数を、ログを書けた配信の合計で確かめ、0.6.20 に上げる
+  - 種別: 修正
+  - 計画: S8, S7
+  - 依存: なし
+  - 変更: `server/test/deliver.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - red: `cd server && node --test --test-name-pattern="ZZ held lock" test/zz-copy.tmp.test.ts` → 今の文字数のテストを、書き込みロックを持ったまま流す一時のコピーで `8846 characters in 6 reads` の fail（v0.6.19 の prepare と同じ数字）
+  - 完了条件: `cd server && node --test --test-name-pattern="concurrent reads|cannot take the write lock" test/deliver.test.ts` → pass（ログを書けた読む前の配信だけで、同じ記録の重複なし・8 件の上限・3000 文字の上限を見る。全部の返答を合わせると同じファイルの 2 件が欠けない。ロックを持ったままの 6 本は全部記録を返し、ログに載る記録は 0）。`bun run release:plan -- --base v0.6.18` → plugin、4 つのファイルが 0.6.20
+  - コミット: `test(deliver): hold the read budget to logged deliveries, and ship as 0.6.20 (T08)`
+  - 結果: red: `node --test --test-name-pattern="ZZ held lock" test/zz-copy.tmp.test.ts` → 書き込みロックを持ったまま元の文字数のテストを流す一時のコピーで「8846 characters in 6 reads」の fail（v0.6.19 の prepare と同じ数字）。コピーはコミットしない
+  - 結果: 直した後、`node --test --test-name-pattern="concurrent reads|cannot take the write lock" test/deliver.test.ts` → 3 回続けて 4 pass。`node --test test/deliver.test.ts` → 33 pass。`bun run check` → exit 0。`bun run release:plan -- --base v0.6.18` → plugin、4 つのファイルが 0.6.20
+
 ## 記録
 2026-10-02 / - / 終わった計画 4 組の削除は .claude/plans の中だけの変更で、done の検査（.claude/plans の外の変更を見る）に掛からないのでタスクにしない / plan と tasks を入れる最初のコミットで削除する
 2026-10-02 / T04 / 変更欄の `server/src/text.ts` を `server/src/split-check.ts` に替えた / text.ts はすべてのフックと MCP が読むので、golden（約 14 KB）をそこで import すると全バンドルに入る。照合を別モジュールにして doctor（cli.js）だけに入れた
@@ -113,3 +124,5 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
 2026-10-02 / T07 / Codex のタスクレビュー（c87bbe93）: 新しい欠陥 0 件。asked の併用拒否に isError が付かない不揃いは以前からのもの / 直さない
 2026-10-02 / T07 / 結果欄の「`bun run check` → exit 0」は、コミット前に流したときは biome の 1 件で落ちていた。pre-commit が整形して通り、コミット後に流し直して exit 0 を確かめた / 結果欄は変えずここに訂正を残す
 2026-10-02 / - / review-shipping（481020ab..b3dff7d0、T07 の前）: 出荷上の欠陥なし。パックした tarball で CLI・両 MCP サーバー・フックが 0.6.19 で起動、golden は cli.js にだけ入り doctor の行は Node 24.15・24.18・26.10・26.5 で一致、同梱の Skills の引数で strict に拒まれるものなし / なし
+2026-10-02 / T08 / 完了条件を変えた。前: 「ログを書けた読む前の配信の chars の合計が 3000 以下」。後: ログを書けた配信の返答の本文で数える / delivery.chars は前置きの文も含み、上限の数え方（記録の行）と合わないため（3,709 で落ちた）
+2026-10-02 / T08 / 同じ見落とし（ロックを取れずログなしで返る配信を上限や重複の判定に数える）を持つ「one file」と「8 records」の並行テストも同じ形に直した。ログを書けた配信が 0 本でも落ちないよう、上限の側だけを見る。「one file」は全部の返答を合わせて 2 件が欠けないことも見る / 次のリリースを同じ理由で止めないため。テストだけの直しで、範囲は持ち主が Go した「テストを直して出し直す」の内側

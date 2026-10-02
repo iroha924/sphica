@@ -80,6 +80,7 @@ approved_at: 2026-10-02
 - S5: golden を `server/src/terms-golden.json` に移し、doctor が今の Node の分割を照合する
 - S6: 両 MCP サーバーの全ツールで知らない引数を拒む
 - S7: バージョンを 0.6.19 にそろえ、終わった計画のファイルを削除する
+- S8: 並行の読む前の配信の文字数のテストを、ログを書けた配信の合計で確かめる形に直し、0.6.20 で出し直す
 
 ## 完了条件
 
@@ -90,7 +91,7 @@ approved_at: 2026-10-02
 - A5: `cd server && node --test --test-name-pattern="unknown argument" test/plugin.test.ts` → pass。両サーバーの全ツールが `zz_unknown` を名指しして拒む
 - A6: `cd server && node --test --test-name-pattern="word splitting" test/cli.test.ts` → pass（今の Node で一致の行が出る。期待値を 1 件変えたデータでは不一致の件数と ICU のバージョンが出て、reindex を案内しない）
 - A7: `npm pack` した tarball を repo の外で展開し `HOME=<temp> node <unpacked>/plugin/dist/cli.js doctor` → 「word splitting matches the fixed samples」の行が出る
-- A8: `bun run release:plan -- --base v0.6.18` → `plugin`、npm と 3 つの manifest が 0.6.19
+- A8: `bun run release:plan -- --base v0.6.18` → `plugin`、npm と 3 つの manifest が 0.6.20
 - A9: リリースの後、`bun run release:status` → `release ledger is consistent`。新しいセッションの `search` に `paths` を渡すとキー名入りのエラーになる
 
 ## リスク
@@ -105,3 +106,4 @@ approved_at: 2026-10-02
 なし
 
 ## 変更履歴
+2026-10-02 / v0.6.19 のリリースの prepare で、並行の読む前の配信の文字数のテスト（deliver.test.ts）が「8846 characters in 6 reads」で落ちた。書き込みロックを持ったまま同じテストを流すと同じ数字で落ち、ロックを 250ms で取れずログを書かなかった配信が上限の外に出る設計どおりの経路と分かった。テストをログを書けた配信の合計で確かめる形に直し（S8）、0.6.19 は npm に出ていないので 0.6.20 に上げて tag を打ち直す / prepare が落ちたら直してバージョンを上げて出し直す手順（plugin-release）と、「また落ちたら直す」決定のため / 持ち主が Go（「1」）

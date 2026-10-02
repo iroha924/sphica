@@ -1787,14 +1787,20 @@ const keysIn = (texts: string[]) =>
 test("concurrent reads of one file deliver each record once", async () => {
   const { db, repo, read } = await concurrent();
   try {
-    const same = keysIn(
-      await together(
-        db.file,
-        repo,
-        Array.from({ length: 6 }, () => read("overlap", "src/same.ts")),
-      ),
+    const texts = await together(
+      db.file,
+      repo,
+      Array.from({ length: 6 }, () => read("overlap", "src/same.ts")),
     );
-    assert.deepEqual(same.sort(), ["trace:ext-s1/same0", "trace:ext-s1/same1"]);
+    // Only logged reads see each other; one that could not take the write lock in time answers unlogged by design
+    const same = keysIn(loggedTexts(db, texts));
+    assert.equal(new Set(same).size, same.length, `delivered twice: ${same.join(", ")}`);
+    assert.ok(
+      same.every((k) => k === "trace:ext-s1/same0" || k === "trace:ext-s1/same1"),
+      same.join(", "),
+    );
+    // Logged or not, no record is lost
+    assert.deepEqual([...new Set(keysIn(texts))].sort(), ["trace:ext-s1/same0", "trace:ext-s1/same1"]);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
@@ -1805,14 +1811,13 @@ test("concurrent reads of different files stop at the read budget's 8 records", 
   const { db, repo, read } = await concurrent();
   try {
     for (let n = 0; n < 7; n++) await deliver(read("units", `src/one${n}.ts`), "claude-code", db.file);
-    const more = keysIn(
-      await together(
-        db.file,
-        repo,
-        Array.from({ length: 5 }, (_, n) => read("units", `src/one${n + 7}.ts`)),
-      ),
+    const texts = await together(
+      db.file,
+      repo,
+      Array.from({ length: 5 }, (_, n) => read("units", `src/one${n + 7}.ts`)),
     );
-    assert.equal(more.length, 1, `delivered ${more.join(", ")}`);
+    const more = keysIn(loggedTexts(db, texts));
+    assert.ok(more.length <= 1, `delivered ${more.join(", ")}`);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
@@ -1827,15 +1832,55 @@ test("concurrent reads of long records stop at the read budget's 3000 characters
       repo,
       Array.from({ length: 6 }, (_, n) => read("chars", `src/long${n}.ts`)),
     );
-    // Each read alone would carry about 1500 characters; together they carry what one conversation's reads may, besides the request
-    const shown = texts
-      .filter((t) => /^- trace:/m.test(t))
-      .map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
+    // Each read alone would carry about 1500 characters. The budget holds over the reads that were logged: a read that could not take the
+    // write lock in time answers unlogged by design, so on a busy machine the answers together may carry more
+    const shown = loggedTexts(db, texts).map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
     const records = shown.join("").length - shown.length * (CONFIRM.length + 1);
-    assert.ok(records > 1000 && records <= 3000, `${records} characters in ${shown.length} reads`);
+    assert.ok(records <= 3000, `${records} characters in ${shown.length} logged reads`);
     assert.ok(!texts.some((t) => t.includes("Sphica unavailable")), texts.join("\n"));
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("concurrent reads that cannot take the write lock still answer, unlogged and outside the budget", async () => {
+  const { db, repo, read } = await concurrent();
+  try {
+    db.owner.exec("begin immediate");
+    let texts: string[];
+    try {
+      texts = await together(
+        db.file,
+        repo,
+        Array.from({ length: 6 }, (_, n) => read("chars", `src/long${n}.ts`)),
+      );
+    } finally {
+      db.owner.exec("rollback");
+    }
+    assert.equal(texts.filter((t) => /^- trace:/m.test(t)).length, 6, texts.join("\n"));
+    assert.equal(loggedReadKeys(db).size, 0);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+/** The answers whose records were all logged as delivered by a read. */
+const loggedTexts = (db: TempDb, texts: string[]): string[] => {
+  const logged = loggedReadKeys(db);
+  return texts.filter(
+    (t) => keysIn([t]).length > 0 && keysIn([t]).every((k) => k !== undefined && logged.has(k)),
+  );
+};
+
+/** Keys of records the logged reads delivered. A read that answered without logging shows keys missing here. */
+const loggedReadKeys = (db: TempDb): Set<string> =>
+  new Set(
+    db.owner
+      .prepare(
+        "select u.key from delivery_unit x join delivery d on d.id = x.delivery_id join unit u on u.id = x.unit_id where d.event = 'pre_read'",
+      )
+      .all()
+      .map((r) => String(r.key)),
+  );
