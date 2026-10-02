@@ -99,6 +99,16 @@ base: main
   - コミット: `fix(search): count a question's identifier once and cut names only at _ and lower-to-upper (T09)`
   - 結果: red: 35fc18ab の text.ts（0b76e197 と同じ）で fail 2 を実測。直した後 pass 2。`node --test test/text.test.ts test/search.test.ts test/terms-golden.test.ts` → 36 pass、golden は 0 件変化。`--compare 0b76e197` → all MRR 0.591、set ident 1.000 で、どの行も同じ
 
+- [x] T10: Codex の T09 のレビュー F1 を直す（日本語が続く名前も部分を出す）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T09（直す対象の語の切り方）
+  - 変更: `server/src/text.ts`, `server/test/text.test.ts`
+  - red: `cd server && node --test --test-name-pattern="names such as SQLite" test/text.test.ts` → 2186b80a の text.ts で fail 1
+  - 完了条件: 同じコマンド → pass 1。`node evals/retrieval/run.ts` → all MRR 0.591、set ident 1.000
+  - コミット: `fix(search): end a name where Japanese text touches it, so its parts stay searchable (T10)`
+  - 結果: red: 2186b80a の text.ts で fail 1 を実測。直した後 `node --test test/text.test.ts test/search.test.ts test/terms-golden.test.ts test/retrieval-bench.test.ts` → 42 pass、golden は 0 件変化。`node evals/retrieval/run.ts` → all MRR 0.591、set ident 1.000
+
 ## P3: 結果を残して出す
 
 全実験の結果と E4・E5 の不採用を #204 に残し、採用があればバージョンをそろえる。
@@ -122,3 +132,5 @@ base: main
 2026-10-03 / T04 / 完了後に計画欄を S3 → S3, S6 に変えた。S6 のバージョンの更新は T04 のコミット（35fc18ab）が行い、T08 を取りやめたので S6 の担い手が無くなったため。S6 の残り（#204 への記録）は完了の確認の段で行う / 完了したタスクの欄は変えない決まりからの例外
 2026-10-03 / T05 / 変更欄に fixtures/schema-rev8.sql・schema.test.ts（revision の値を直に持っていた）・bench.ts（T03 の MissCause の不要な export を knip が落とした）を足した（前: schema.sql・0009.sql・sqlite.ts・migrate.test.ts） / `bun run verify` を通すため
 2026-10-03 / T04 / Codex のレビュー（35fc18ab、high）: F1 質問の識別子の部分が過半数の分母を増やし、全体が一致する記録を落とし、部分を共有する別の識別子を強いヒットにする（再現）。F2 naïveReader の ASCII の尾 veReader を名前として分ける（再現）。F3 先頭が _ の名前で部分が出ない（再現）。F4 SQLite_get・SQLiteVersion で SQLite が sq と lite に割れる（再現） / 4 件とも受けて T09 を足した。質問の側は部分を足さない（索引の側だけ）。語は Unicode の文字で切り、ASCII だけの語を分ける。区切りは _ と小文字か数字の後の大文字だけ。部分は英字に数字が続く形か数字だけ（base64 を除く）
+2026-10-03 / T05 / Codex のレビュー（0b76e197、high）: F1 移行の後に更新前の capture（0.6.22）が古い terms() で書いた source は識別子の部分で見つからず、revision 9 のままなので init でも作り直されない（再現） / 直さない。capture は別のプロセスからも書くので、DB の 1 つの値では索引の状態を表せない（PR #246 の判断と同じ）。取りこぼすのは更新前のフックが書いた行を部分の語で探すときだけで、まるごとの識別子とほかの語では見つかる。リリースノートに、更新の前から開いていたセッションがあれば `sphica doctor --reindex` を流すと書き、PR の Declined findings に残す
+2026-10-03 / T09 / Codex のレビュー（2186b80a、high）: F1 語を Unicode の文字で切ったため、日本語が続く名前（connectReaderを使う）が日本語ごと 1 語になり、部分が出なくなった（再現。searchUnits・searchSources・askedBefore で reader が当たらない） / 受けて T10 を足した。名前は Latin の文字・数字・_ の並びで切る

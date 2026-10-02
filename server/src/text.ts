@@ -14,12 +14,10 @@ const HIRAGANA_ONLY = /^[\p{Script=Hiragana}ー]+$/u;
 const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "and", "or", "for", "on", "it", "be"]);
 // Identifiers the Segmenter splits (file names, snake_case, OT-123, #27) are also kept whole as terms.
 const IDENT = /#\d+|[a-z0-9][a-z0-9_./#-]*[a-z0-9]/g;
-// A camelCase or snake_case identifier, read before lower-casing; its parts are added as terms, so "reader" finds connectReader.
-// Parts are cut only at "_" and where a lower-case letter or digit meets a capital, so SQLite and SQLiteVersion keep SQLite whole.
-// Words are cut at any letter or digit first, so an ASCII tail of a Unicode word (veReader in naïveReader) is never taken for a name,
-// and each word is tested on its own, so a long run of letters costs linear time. A name has at most 6 parts, each letters with a number
-// after them or a number alone; base64 and hashes mix them otherwise and are left whole.
-const WORD = /[\p{L}\p{N}_]+/gu;
+// camelCase and snake_case names also give their parts (connectReader gives reader), cut only at "_" and a lower-case letter or digit before
+// a capital, so SQLite stays whole. A name is a run of Latin letters, digits, and "_" (it ends at Japanese text and is not split if accented),
+// tested word by word in linear time, with at most 6 parts of letters then digits, or digits; base64 and hashes are left whole.
+const WORD = /[\p{Script=Latin}\p{N}_]+/gu;
 const COMPOUND = /^[A-Za-z0-9_]*(?:[A-Za-z0-9]_|_[A-Za-z0-9]|[a-z0-9][A-Z])[A-Za-z0-9_]*$/;
 const CUT = /_+|(?<=[a-z0-9])(?=[A-Z])/;
 const MAX_PARTS = 6;
