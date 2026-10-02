@@ -57,13 +57,16 @@ base: main
 
 spool の記録が、マイグレーションの前後どちらでも正しい project に入り、init・MCP・localRoots が正規の key で引く。
 
-- [ ] T04: spool に legacyKey を書き、送るときに書き込みのトランザクションの中で完全一致 → 正規化の順で project を引く
+- [x] T04: spool に legacyKey を書き、送るときに書き込みのトランザクションの中で完全一致 → 正規化の順で project を引く
   - 種別: 変更
   - 計画: S4
   - 依存: T01（`legacyKey` と `normalizeKey` が要る）, T02（マイグレーションを挟むテストに revision 8 が要る）
-  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `server/test/temp-db.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="legacy key" test/capture.test.ts` → pass（revision 7 の空の正規の project 1 と中身のある大文字の project 2 で、新しい hook の記録が 2 に入る。マイグレーション後も 2。引いた後にマイグレーションを挟んでも 2 に入り rejected/ が空。どこにも無い key は unregistered/ に残る）
   - コミット: `fix(capture): route spooled records by their legacy key inside the write transaction (T04)`
+  - 結果: `cd server && node --test test/capture.test.ts` → 35 pass（revision 7 の DB で新しい hook の記録が project 2 に入り、マイグレーション後の次の送信も 2、rejected/ と unregistered/ が空。project の検索が begin immediate の後。どこにも無い key は既存のテストで unregistered/ に残る）
+  - 結果: `node --test --test-name-pattern="legacy key reaches" test/capture.test.ts` → spool に正規の key を書く旧い producer で fail（spool の key が `git:github.com/o/r`）。`node --test --test-name-pattern="inside the write" test/capture.test.ts` → 旧い sendBatch で fail（検索 2 が begin 3 より前）
+  - 結果: `bun run verify` → 0 で終わる
 
 - [ ] T05: init・MCP の検索・localRoots を大文字小文字の混ざった remote で確かめるテストを足す
   - 種別: 追加
@@ -90,3 +93,4 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / T01 / pre-commit の bundle 検査が、package の入力を変えるコミットにバージョンの更新を求めて止めた / T01 の計画を S1 → S1, S6、変更に 4 つのバージョンのファイルを足した。T06 は S6 が T01 に移ったので取りやめ
 - 2026-10-02 / T02 / revision の値を固定で見る `server/test/schema.test.ts` と、revision 7 の fixture が要った / T02 の変更欄に `server/test/schema.test.ts`, `server/test/fixtures/schema-rev7.sql` を足した
 - 2026-10-02 / T01 / Codex のタスクレビュー（c3ae3eed）は指摘なし。sandbox で一時ディレクトリを作れずテストの一部は Codex 側で未実行 / 同じテストを手元で流し 13 pass を確認済み
+- 2026-10-02 / T04 / revision 7 の DB でテストするため `tempDb()` に schema を渡せるようにした / T04 の変更欄に `server/test/temp-db.ts` を足した

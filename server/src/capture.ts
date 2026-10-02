@@ -26,7 +26,7 @@ import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { panel, plain } from "./panel.ts";
-import { identify, patchPaths, relativeTo } from "./project.ts";
+import { identify, normalizeKey, patchPaths, relativeTo } from "./project.ts";
 import { sphicaHome } from "./sqlite.ts";
 import { bytes, clean, head, mask, plural, reason, sha256, tail } from "./text.ts";
 import { changed, type Snapshot, snapshot } from "./worktree.ts";
@@ -369,7 +369,8 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     v: 2 as const,
     host,
     session: String(input.session_id),
-    project: place.key,
+    // The earlier rule's key: a database not migrated yet still finds the project it names, and a migrated one finds it normalized
+    project: place.legacyKey,
     branch: branchOf(place.root),
     turn,
     at,
@@ -532,7 +533,26 @@ const ROWS = 1000;
 const chunks = <T>(xs: T[], n = ROWS): T[][] =>
   Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 
-type Project = { id: number; name: string };
+/**
+ * The project each spooled key names: the key itself, else its normalized form. Looked up inside the write's transaction, so a migration
+ * that removes or renames a project cannot come between the lookup and the write.
+ */
+async function projectsOf(trx: Kysely<DB>, keys: string[]): Promise<Map<string, number>> {
+  const wanted = [...new Set(keys.flatMap((k) => [k, normalizeKey(k)]))];
+  if (!wanted.length) return new Map();
+  const ids = new Map(
+    (await trx.selectFrom("project").select(["id", "key"]).where("key", "in", wanted).execute()).map((p) => [
+      p.key,
+      p.id,
+    ]),
+  );
+  const found = new Map<string, number>();
+  for (const k of keys) {
+    const id = ids.get(k) ?? ids.get(normalizeKey(k));
+    if (id !== undefined) found.set(k, id);
+  }
+  return found;
+}
 
 /**
  * Writes a batch of records in one transaction. **The capture connection can write only to the capture views** (db/schema.sql, db-write.ts).
@@ -542,20 +562,23 @@ type Project = { id: number; name: string };
 export async function write(
   db: Kysely<DB>,
   batch: Spooled[],
-  projects: Map<string, Project>,
-): Promise<number> {
+): Promise<{ sent: number; strayed: Set<Spooled> }> {
   return inTransaction(db, async (trx) => {
+    const projects = await projectsOf(
+      trx,
+      batch.map((r) => r.project),
+    );
     const sessions = new Map<
       string,
       { project: number; host: Host; session: string; branch: string | null; at: string }
     >();
     for (const r of batch) {
       const p = projects.get(r.project);
-      if (!p) continue;
-      const id = sessionId(p.id, r.host, r.session);
+      if (p === undefined) continue;
+      const id = sessionId(p, r.host, r.session);
       const prev = sessions.get(id);
       if (!prev || Date.parse(r.at) < Date.parse(prev.at))
-        sessions.set(id, { project: p.id, host: r.host, session: r.session, branch: r.branch, at: r.at });
+        sessions.set(id, { project: p, host: r.host, session: r.session, branch: r.branch, at: r.at });
     }
     for (const part of chunks([...sessions]))
       await trx
@@ -573,8 +596,8 @@ export async function write(
         .execute();
     const messages = batch.flatMap((m) => {
       const p = m.kind === "message" ? projects.get(m.project) : undefined;
-      if (m.kind !== "message" || !p) return [];
-      return [{ m, session: sessionId(p.id, m.host, m.session) }];
+      if (m.kind !== "message" || p === undefined) return [];
+      return [{ m, session: sessionId(p, m.host, m.session) }];
     });
     const present = async () => {
       let n = 0;
@@ -619,10 +642,10 @@ export async function write(
     const after = await present();
     const edits = batch.flatMap((r) => {
       const p = r.kind === "edit" ? projects.get(r.project) : undefined;
-      if (r.kind !== "edit" || !p) return [];
+      if (r.kind !== "edit" || p === undefined) return [];
       return [
         {
-          session_id: sessionId(p.id, r.host, r.session),
+          session_id: sessionId(p, r.host, r.session),
           turn_id: r.turn,
           tool_event_id: r.event,
           path: r.path,
@@ -632,7 +655,7 @@ export async function write(
       ];
     });
     for (const part of chunks(edits)) await trx.insertInto("capture_edit").values(part).execute();
-    return after - before;
+    return { sent: after - before, strayed: new Set(batch.filter((r) => !projects.has(r.project))) };
   });
 }
 
@@ -679,32 +702,24 @@ async function sendBatch(
     if (r) records.push({ name, from, r });
     else fs.rmSync(path.join(from, name), { force: true }); // a v:1 read record: reads are not kept
   }
-  const projects = new Map(
-    (
-      await db
-        .selectFrom("project")
-        .select(["id", "key", "name"])
-        .where("key", "in", [...new Set(records.map((x) => x.r.project))])
-        .execute()
-    ).map((p) => [p.key, { id: p.id, name: p.name }]),
-  );
-  const known = records.filter((x) => projects.has(x.r.project));
-  const strayed = records.filter((x) => !projects.has(x.r.project));
-
   let sent = 0;
-  const bad: { name: string; from: string; r: Spooled }[] = [];
+  let strayed: typeof records = [];
+  const bad: typeof records = [];
   try {
-    sent = await write(
+    const out = await write(
       db,
-      known.map((x) => x.r),
-      projects,
+      records.map((x) => x.r),
     );
+    sent = out.sent;
+    strayed = records.filter((x) => out.strayed.has(x.r));
   } catch (e) {
     if (!rejected(e)) throw e;
-    // One at a time
-    for (const x of known) {
+    // One at a time, each looking its project up again: the failed batch's lookup was rolled back with it
+    for (const x of records) {
       try {
-        sent += await write(db, [x.r], projects);
+        const out = await write(db, [x.r]);
+        sent += out.sent;
+        if (out.strayed.size) strayed.push(x);
       } catch (e2) {
         if (!rejected(e2)) throw e2;
         bad.push(x);
