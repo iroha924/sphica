@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { checkAnchor, locate } from "../src/anchors.ts";
+import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
 import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -781,6 +782,100 @@ test("each hit carries only its own options and anchors, the limit cuts the hits
     assert.equal(alias.find((h) => h.key.endsWith("/covers"))?.aliasOnly, true);
     const mixed = (await searchUnits(db.reader, p, { question: "cache thumbnail", limit: 10 })).hits;
     assert.equal(mixed.find((h) => h.key.endsWith("/covers"))?.aliasOnly, false);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search query plan: the statements that rank candidates start from the full-text index under every filter", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ranked: string[] = [];
+    const take = async (fn: () => unknown) =>
+      ranked.push(
+        ...(await statements(fn)).filter(
+          (s) => /from (unit|source)_fts/.test(s) && /order by "f"\."rank"/.test(s),
+        ),
+      );
+    const question = "cache covers";
+    await take(() => searchUnits(db.reader, p, { question, limit: 5 }));
+    await take(() =>
+      searchUnits(db.reader, p, { question, limit: 5, kinds: ["decision"], lifecycles: ["active"] }),
+    );
+    await take(() => searchUnits(db.reader, p, { question, limit: 5, path: "src/x.ts" }));
+    await take(() =>
+      searchUnits(db.reader, p, {
+        question,
+        limit: 5,
+        kinds: ["decision"],
+        lifecycles: ["active"],
+        path: "src/x.ts",
+      }),
+    );
+    await take(() => searchSources(db.reader, p, question, 5));
+    await take(() => askedBefore(db.reader, p, { question, limit: 5, notSessions: ["s1", "s2"] }));
+    assert.ok(ranked.length >= 6, "each search ranks candidates");
+    // Driven by the project's rows instead, MATCH runs once per row and a search slows with the project's size
+    for (const s of ranked) assert.match(plan(db, s), /^SCAN (unit|source)_fts VIRTUAL TABLE/, s);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search drops a folded question word and matches a plural identifier whole, but not a path segment alone", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Sanitize strips control characters from paths." });
+    const b = message(db, p, { id: "m2", text: "Load the reading list in one query." });
+    const c = message(db, p, { id: "m3", text: "Keep x small." });
+    await save(db, p, {
+      units: [
+        decision("sanitize", a, "Sanitize strips control characters from paths."),
+        decision("users", b, "Load the reading list in one query.", {
+          anchors: [{ path: "src/users.ts", symbol: "getUsers", role: "applies_to" }],
+        }),
+        decision("small", c, "Keep x small.", { anchors: [{ path: "src/x.ts", role: "applies_to" }] }),
+      ],
+    });
+    const keys = async (question: string) =>
+      (await searchUnits(db.reader, p, { question, limit: 10 })).hits.map((h) => h.key);
+    assert.deepEqual(await keys("what does sanitize do"), ["trace:ext-s1/sanitize"]);
+    // The anchored symbol named exactly is a strong match on its own, plural or not
+    assert.deepEqual(await keys("getUsers retry backoff jitter"), ["trace:ext-s1/users"]);
+    // One segment of an anchored path is not the identifier
+    const r = await searchUnits(db.reader, p, { question: "src retry backoff jitter", limit: 10 });
+    assert.deepEqual([r.hits.length, r.weaker], [0, 2]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search path filter takes ./ as anchors do and refuses a path that is not repository-relative", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Cache covers on disk." });
+    await save(db, p, {
+      units: [
+        decision("covers", a, "Cache covers on disk.", {
+          anchors: [{ path: "src/x.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const search = (question: string, path: string) =>
+      searchUnits(db.reader, p, { question, limit: 10, path });
+    assert.deepEqual(
+      (await search("cache covers", "./src/x.ts")).hits.map((h) => h.key),
+      ["trace:ext-s1/covers"],
+    );
+    for (const bad of ["/repo/src/x.ts", "../src/x.ts", "src\\x.ts", "", "   "]) {
+      const r = await search("cache covers", bad);
+      assert.deepEqual([r.hits.length, typeof r.refused], [0, "string"], bad);
+    }
+    // Checked before the question's words, so a question with none still hears about the path
+    assert.equal(typeof (await search("the", "/abs")).refused, "string");
   } finally {
     await db.done();
   }

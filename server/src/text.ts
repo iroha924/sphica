@@ -33,6 +33,9 @@ function singular(w: string): string {
   return w.endsWith("s") && !/(?:ss|us|is)$/.test(w) ? w.slice(0, -1) : w;
 }
 
+/** A whole identifier (an anchored path or symbol) in the form terms() gives a query word, without splitting it. */
+export const identTerm = (x: string): string => singular(x.normalize("NFKC").toLowerCase());
+
 /**
  * Returns search terms in order of appearance (with duplicates). Imports and queries use the same function.
  * **Changing the rules leaves existing indexes as they were.** A PR that changes them raises the schema revision and ships a migration that rebuilds
@@ -98,9 +101,12 @@ const QUESTION = new Set([
   ...["理由", "仕組", "何", "方", "場合", "今", "件"],
 ]);
 
+// The list compared in the form terms() folds a question to ("does" becomes "doe")
+const FOLDED_QUESTION = new Set([...QUESTION].flatMap((w) => terms(w)));
+
 /** A question's content terms: its terms without question framing, each once, in order. */
 export function queryTerms(question: string): string[] {
-  return [...new Set(terms(question).filter((w) => !QUESTION.has(w)))].slice(0, 24);
+  return [...new Set(terms(question).filter((w) => !FOLDED_QUESTION.has(w)))].slice(0, 24);
 }
 
 /**

@@ -103,7 +103,7 @@ server.registerTool(
     description:
       "Current work, and how much of this project's history is captured and extracted: sessions still waiting for trace, quarantined records, " +
       "and candidates without adoption. Use it to know whether an empty search means nothing was decided or nothing was extracted yet.",
-    inputSchema: { cwd: CWD },
+    inputSchema: z.object({ cwd: CWD }).strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -130,31 +130,38 @@ server.registerTool(
       "active ones first. Use short queries of the subject's words (identifiers, option names, the domain terms). sources: true searches the " +
       "captured conversation and pull request text instead. asked: true finds the owner's earlier messages like the query in other sessions, " +
       "with the records that quote each and whether a decision was recorded. An empty result also says how many weaker matches were left out.",
-    inputSchema: {
-      query: z.string().min(1).max(500).describe("Words for the subject, in Japanese or English"),
-      cwd: CWD,
-      kinds: z.array(z.enum(UNIT_KINDS)).optional().describe("Only these kinds"),
-      lifecycles: z
-        .array(z.enum(LIFECYCLES))
-        .optional()
-        .describe("Only these states (default: all, active first)"),
-      path: z.string().max(500).optional().describe("Only records anchored to this repository-relative path"),
-      sources: z.boolean().optional().describe("Search captured sources instead of records"),
-      asked: z
-        .boolean()
-        .optional()
-        .describe(
-          "Find the owner's earlier messages like the query, what they led to, and repeats with no recorded decision",
-        ),
-      session: z
-        .string()
-        .max(200)
-        .optional()
-        .describe(
-          "With asked: this session's id, so its own messages are left out (in Codex pass CODEX_THREAD_ID from your shell; Codex gives MCP servers none)",
-        ),
-      limit: z.number().int().min(1).max(20).optional(),
-    },
+    inputSchema: z
+      .object({
+        query: z.string().min(1).max(500).describe("Words for the subject, in Japanese or English"),
+        cwd: CWD,
+        kinds: z.array(z.enum(UNIT_KINDS)).optional().describe("Only these kinds"),
+        lifecycles: z
+          .array(z.enum(LIFECYCLES))
+          .optional()
+          .describe("Only these states (default: all, active first)"),
+        path: z
+          .string()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe("Only records anchored to this repository-relative path"),
+        sources: z.boolean().optional().describe("Search captured sources instead of records"),
+        asked: z
+          .boolean()
+          .optional()
+          .describe(
+            "Find the owner's earlier messages like the query, what they led to, and repeats with no recorded decision",
+          ),
+        session: z
+          .string()
+          .max(200)
+          .optional()
+          .describe(
+            "With asked: this session's id, so its own messages are left out (in Codex pass CODEX_THREAD_ID from your shell; Codex gives MCP servers none)",
+          ),
+        limit: z.number().int().min(1).max(20).optional(),
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -183,6 +190,7 @@ server.registerTool(
         return text(framed(askedText(r, known)));
       }
       if (a.sources) {
+        if (a.path !== undefined) return text("sources cannot be combined with path.", true);
         const r = await searchSources(db, p.id, a.query, limit);
         if (!r.hits.length)
           return text(
@@ -207,6 +215,7 @@ server.registerTool(
         path: a.path,
         limit,
       });
+      if (r.refused) return text(`Nothing was searched: ${r.refused}`, true);
       if (!r.hits.length)
         return text(
           `No record ${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +
@@ -231,14 +240,16 @@ server.registerTool(
     description:
       "The full record: its text, options, the exact words cited as evidence and adoption with who said them, links (supersedes, conflicts), " +
       "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source.",
-    inputSchema: {
-      refs: z
-        .array(z.string().min(1).max(300))
-        .min(1)
-        .max(10)
-        .describe("Record keys, u<id>, or s<id> (s<id>@<byte> reads a long source on from that byte)"),
-      cwd: CWD,
-    },
+    inputSchema: z
+      .object({
+        refs: z
+          .array(z.string().min(1).max(300))
+          .min(1)
+          .max(10)
+          .describe("Record keys, u<id>, or s<id> (s<id>@<byte> reads a long source on from that byte)"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -267,19 +278,21 @@ server.registerTool(
       "Only for the export Skill, after the owner chose the decisions and the path. Builds one Markdown document of the chosen active decisions, " +
       "with their quotes and the older decisions each replaced, and checks that the path stays inside the repository. Returns the document to write, " +
       "or why nothing can be written; it never writes a file itself.",
-    inputSchema: {
-      records: z
-        .array(z.string().min(1).max(300))
-        .min(1)
-        .max(EXPORT_LIMITS.records)
-        .describe("Keys or u<id> of the active decisions the owner chose"),
-      path: z
-        .string()
-        .min(1)
-        .max(500)
-        .describe("Where the owner wants the file, relative to the repository root"),
-      cwd: CWD,
-    },
+    inputSchema: z
+      .object({
+        records: z
+          .array(z.string().min(1).max(300))
+          .min(1)
+          .max(EXPORT_LIMITS.records)
+          .describe("Keys or u<id> of the active decisions the owner chose"),
+        path: z
+          .string()
+          .min(1)
+          .max(500)
+          .describe("Where the owner wants the file, relative to the repository root"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -304,7 +317,7 @@ server.registerTool(
     description:
       "Only for the fields Skill. The fields the owner defined for this project's records, as a Markdown table: type, allowed values, " +
       "the record kinds each applies to, how many records carry a value, and the owner's words that defined it.",
-    inputSchema: { cwd: CWD },
+    inputSchema: z.object({ cwd: CWD }).strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -339,18 +352,20 @@ server.registerTool(
       "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
       "is not found, written conditions for reconsidering an option (for you to judge, never applied), and lines in CLAUDE.md, AGENTS.md, or " +
       ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn. Read a record by its key before relying on it.",
-    inputSchema: {
-      view: z
-        .enum(["live", "look"])
-        .describe("live: every active decision and constraint; look: records that need a look"),
-      after: z
-        .number()
-        .int()
-        .min(0)
-        .optional()
-        .describe("With live: the id the previous page said to continue after"),
-      cwd: CWD,
-    },
+    inputSchema: z
+      .object({
+        view: z
+          .enum(["live", "look"])
+          .describe("live: every active decision and constraint; look: records that need a look"),
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("With live: the id the previous page said to continue after"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -377,7 +392,7 @@ server.registerTool(
     description:
       "For a code review: the active decisions, constraints, and implementation records this diff touches (records anchored to a changed path, " +
       "and records with no code location that forbid or defer an option an added line names). Judge each against the diff, then check the verdicts with review_check.",
-    inputSchema: { diff: DIFF, cwd: CWD },
+    inputSchema: z.object({ diff: DIFF, cwd: CWD }).strict(),
     annotations: READ_ONLY,
   },
   async (a) => {
@@ -411,11 +426,13 @@ server.registerTool(
     description:
       "Checks a reviewer's verdicts on the records review_select returned. Each finding: outcome (violation, complies, unrelated, undetermined), " +
       "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). Every record review_select returned needs one outcome. Returns the problems, or none.",
-    inputSchema: {
-      diff: DIFF,
-      findings: z.array(z.record(z.string(), z.unknown())).max(50),
-      cwd: CWD,
-    },
+    inputSchema: z
+      .object({
+        diff: DIFF,
+        findings: z.array(z.record(z.string(), z.unknown())).max(50),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a) => {

@@ -137,7 +137,7 @@ Both are contentless and filled by triggers calling `sphica_terms`, which is `te
 - `terms()` splits with Intl.Segmenter, drops hiragana-only words and English stop words, keeps identifiers whole, keeps a kanji word's kanji
   (conjugations meet), and makes English plurals singular. **The index and queries go through the same function**
 - **Changing `terms()` leaves existing indexes old.** Raise the revision and end its migration with the statements `reindex()` in `admin.ts` runs,
-  so `sphica init` rebuilds both indexes. `server/test/terms-golden.test.ts` pins the output for fixed inputs; it cannot stop only its expected values being updated
+  so `sphica init` rebuilds both indexes. `server/test/terms-golden.test.ts` pins the output for fixed inputs in `server/src/terms-golden.json`; it cannot stop only its expected values being updated. The file ships, and `sphica doctor` checks the running Node splits the same inputs the same way (an ICU difference)
 - `queryTerms()` drops question framing (why, which, and their Japanese counterparts) from queries only. Search keeps a candidate only when it holds **more than half** of the
   question's content terms, and reports how many weaker matches it left out, so a question with no answer returns nothing
 - Always quote query terms (`ftsQuery`); unquoted, `AND`, `NEAR`, `:`, and `-` become operators

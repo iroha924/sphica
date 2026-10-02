@@ -31,6 +31,7 @@ import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
 import { checkLocalName, identify, localRoots, nameLocal, repositoryRoot } from "./project.ts";
+import { splitLine } from "./split-check.ts";
 import { requireRuntime, sphicaHome } from "./sqlite.ts";
 import { plural, reason } from "./text.ts";
 
@@ -110,6 +111,8 @@ async function doctor(cwd: string): Promise<void> {
   try {
     requireRuntime();
     say("ok", "Node", process.version);
+    const split = splitLine();
+    say(split.mark, "Word splitting", split.text);
   } catch (e) {
     runtime = false;
     say("fail", "Node", plain(reason(e)));

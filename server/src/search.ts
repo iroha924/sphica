@@ -4,7 +4,8 @@
 import { sql } from "kysely";
 import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
-import { ftsQuery, queryTerms, terms } from "./text.ts";
+import { repoPath } from "./record.ts";
+import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
 const UNIT_PAGE = 200;
@@ -44,20 +45,35 @@ export type UnitQuery = {
 
 const strong = (matched: number, of: number) => matched * 2 > of;
 
+const PATH_REFUSED =
+  "path must be relative to the repository root, such as src/x.ts: absolute paths, .., backslashes, and empty parts are refused";
+
 export async function searchUnits(
   db: Reads,
   projectId: number,
   q: UnitQuery,
-): Promise<{ hits: UnitHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
+): Promise<{
+  hits: UnitHit[];
+  weaker: number;
+  terms: string[];
+  stopped: boolean;
+  read: number;
+  refused?: string;
+}> {
   const wanted = queryTerms(q.question);
+  // Anchors are stored by these rules, so a path written another way would match nothing and look like no record
+  const path = q.path === undefined ? undefined : repoPath(q.path);
+  if (path === null)
+    return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0, refused: PATH_REFUSED };
   const match = ftsQuery(q.question);
   if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
+  // cross join fixes the order: the index's matches drive, instead of every row of the project running MATCH once (seconds on large projects)
   let query = db
     .selectFrom(
       sql<{
         rowid: number;
         rank: number;
-      }>`(select unit_fts.rowid as rowid, bm25(unit_fts, 3, 2, 1) as rank from unit_fts join unit on unit.id = unit_fts.rowid where unit_fts match ${match} and unit.project_id = ${projectId})`.as(
+      }>`(select unit_fts.rowid as rowid, bm25(unit_fts, 3, 2, 1) as rank from unit_fts cross join unit on unit.id = unit_fts.rowid where unit_fts match ${match} and unit.project_id = ${projectId})`.as(
         "f",
       ),
     )
@@ -66,13 +82,13 @@ export async function searchUnits(
     .where("u.extraction", "=", "supported");
   if (q.kinds?.length) query = query.where("u.kind", "in", q.kinds);
   if (q.lifecycles?.length) query = query.where("u.lifecycle", "in", q.lifecycles);
-  if (q.path)
+  if (path)
     query = query.where(({ exists, selectFrom }) =>
       exists(
         selectFrom("unit_anchor as a")
           .select("a.id")
           .whereRef("a.unit_id", "=", "u.id")
-          .where("a.path", "=", q.path ?? "")
+          .where("a.path", "=", path)
           .where("a.retired_at", "is", null),
       ),
     );
@@ -284,10 +300,9 @@ async function judgeUnits(
     );
     const extra = new Set(alias ? terms((JSON.parse(alias.terms) as string[]).join(" ")) : []);
     const matched = wanted.filter((w) => own.has(w) || extra.has(w));
-    // Naming an anchored path or symbol exactly is a strong signal on its own, however many other words the query has
-    const ident = new Set(
-      anch.flatMap((a) => [a.path, a.symbol].flatMap((x) => (x ? [x.normalize("NFKC").toLowerCase()] : []))),
-    );
+    // Naming an anchored path or symbol exactly is a strong signal on its own, however many other words the query has.
+    // Each is compared whole, folded as the query's terms are, so getUsers meets the term getuser and src alone stays weak
+    const ident = new Set(anch.flatMap((a) => [a.path, a.symbol].flatMap((x) => (x ? [identTerm(x)] : []))));
     if (!strong(matched.length, wanted.length) && !matched.some((w) => ident.has(w))) {
       weaker++;
       continue;
@@ -337,12 +352,13 @@ export async function searchSources(
   const wanted = queryTerms(question);
   const match = ftsQuery(question);
   if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
+  // cross join: the index's matches drive, as in searchUnits
   const query = db
     .selectFrom(
       sql<{
         rowid: number;
         rank: number;
-      }>`(select source_fts.rowid as rowid, bm25(source_fts) as rank from source_fts join source on source.id = source_fts.rowid where source_fts match ${match} and source.project_id = ${projectId})`.as(
+      }>`(select source_fts.rowid as rowid, bm25(source_fts) as rank from source_fts cross join source on source.id = source_fts.rowid where source_fts match ${match} and source.project_id = ${projectId})`.as(
         "f",
       ),
     )
