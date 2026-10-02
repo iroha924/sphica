@@ -1417,6 +1417,14 @@ test("migrating revision 7 stops, changing nothing of revision 8, when two proje
   assert.deepEqual(projects(raw), before);
 });
 
+// A key the schema takes but whose path is empty keeps a name, as identify names a remote with no path after its host
+test("migrating revision 7 names a project whose key has an empty path after its host by the host", () => {
+  const raw = create("old.db", REV7);
+  addProject(raw, "git:HOST/", "HOST/");
+  migrate(raw);
+  assert.deepEqual(projects(raw), [{ id: 1, key: "git:host/", name: "host/", created_at: now }]);
+});
+
 test("a canonical key trigger refuses a project key that is not normalized, on insert and on update", () => {
   const raw = create("fresh.db", CURRENT);
   for (const key of ["git:GitHub.com/o/r", "git:github.com/O/r", "git:Host/o/r", "git:HOST"])

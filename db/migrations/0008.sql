@@ -7,8 +7,7 @@ create temp table sphica_migration_note (rule text, item text, action text);
 
 create temp table sphica_project_normal as
 select id, key, normal,
-  case when instr(substr(normal, 5), '/') = 0 then substr(normal, 5)
-    else substr(normal, 5 + instr(substr(normal, 5), '/')) end as name,
+  coalesce(nullif(substr(normal, 5 + instr(substr(normal, 5), '/')), ''), substr(normal, 5)) as name,
   exists (select 1 from session where project_id = p.id) or exists (select 1 from source where project_id = p.id)
     or exists (select 1 from artifact_link where project_id = p.id) or exists (select 1 from forget_batch where project_id = p.id)
     or exists (select 1 from source_forgotten where project_id = p.id) or exists (select 1 from extraction_run where project_id = p.id)

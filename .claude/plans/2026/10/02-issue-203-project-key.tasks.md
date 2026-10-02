@@ -77,6 +77,17 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - コミット: `test(project): cover init, MCP lookup, and localRoots with a mixed-case remote (T05)`
   - 結果: `cd server && node --test test/admin.test.ts test/project.test.ts` → 52 pass（`git@GitHub.com:Example/Proj.git` で init が `git:github.com/example/proj` を登録し、https の小文字の remote では already registered。`ssh://git@GitHub.COM/O/R.git` の identify の key で projectId が 1 を返す。`git@github.com:o/same.git` と `https://GitHub.com/O/Same.git` を localRoots が ambiguous にする）
 
+- [x] T07: path が空の key（`git:HOST/`）を正規化するマイグレーションで、name が空にならないよう host を名前にする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す 0008.sql がある）
+  - 変更: `db/migrations/0008.sql`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-name-pattern="empty path" test/migrate.test.ts` → `CHECK constraint failed: name <> ''` で revision 7 のまま止まる
+  - 完了条件: `cd server && node --test test/migrate.test.ts` → pass（`git:HOST/` が `git:host/`、name が `host/`）
+  - コミット: `fix(db): keep a name for a project key with an empty path in revision 8 (T07)`
+  - 結果: red: `node --test --test-name-pattern="empty path" test/migrate.test.ts` → `CHECK constraint failed: name <> ''`、revision 7 のまま
+  - 結果: `cd server && node --test test/migrate.test.ts` → 40 pass
+
 ## P3: リリースの準備
 
 npm と 3 つの manifest が 0.6.21 にそろう。
@@ -97,3 +108,5 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / T04 / revision 7 の DB でテストするため `tempDb()` に schema を渡せるようにした / T04 の変更欄に `server/test/temp-db.ts` を足した
 - 2026-10-02 / T05 / init の登録のテストは `server/test/cli.test.ts` ではなく `server/test/admin.test.ts` にある。MCP の検索は単体のテストが無いので、サーバーと同じ identify().key → projectId の経路を project.test.ts で確かめた / 変更欄と完了条件の `server/test/cli.test.ts` を `server/test/admin.test.ts` に変えた
 - 2026-10-02 / T03 / Codex のタスクレビュー（41bc271f）は指摘なし。sandbox で一時ディレクトリを作れずテストは Codex 側で未実行 / 同じテストを手元で流し pass を確認済み
+
+- 2026-10-02 / T02 / Codex のタスクレビュー（73f85f0d）で F1（P2）: schema が受け付ける `git:HOST/` の key で 0008.sql の name が空になり CHECK で落ちる。手元で再現 / 採る。T07 を足して直した
