@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { checkAnchor, locate } from "../src/anchors.ts";
+import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
 import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -781,6 +782,42 @@ test("each hit carries only its own options and anchors, the limit cuts the hits
     assert.equal(alias.find((h) => h.key.endsWith("/covers"))?.aliasOnly, true);
     const mixed = (await searchUnits(db.reader, p, { question: "cache thumbnail", limit: 10 })).hits;
     assert.equal(mixed.find((h) => h.key.endsWith("/covers"))?.aliasOnly, false);
+  } finally {
+    await db.done();
+  }
+});
+
+test("search query plan: the statements that rank candidates start from the full-text index under every filter", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ranked: string[] = [];
+    const take = async (fn: () => unknown) =>
+      ranked.push(
+        ...(await statements(fn)).filter(
+          (s) => /from (unit|source)_fts/.test(s) && /order by "f"\."rank"/.test(s),
+        ),
+      );
+    const question = "cache covers";
+    await take(() => searchUnits(db.reader, p, { question, limit: 5 }));
+    await take(() =>
+      searchUnits(db.reader, p, { question, limit: 5, kinds: ["decision"], lifecycles: ["active"] }),
+    );
+    await take(() => searchUnits(db.reader, p, { question, limit: 5, path: "src/x.ts" }));
+    await take(() =>
+      searchUnits(db.reader, p, {
+        question,
+        limit: 5,
+        kinds: ["decision"],
+        lifecycles: ["active"],
+        path: "src/x.ts",
+      }),
+    );
+    await take(() => searchSources(db.reader, p, question, 5));
+    await take(() => askedBefore(db.reader, p, { question, limit: 5, notSessions: ["s1", "s2"] }));
+    assert.ok(ranked.length >= 6, "each search ranks candidates");
+    // Driven by the project's rows instead, MATCH runs once per row and a search slows with the project's size
+    for (const s of ranked) assert.match(plan(db, s), /^SCAN (unit|source)_fts VIRTUAL TABLE/, s);
   } finally {
     await db.done();
   }

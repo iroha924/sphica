@@ -52,12 +52,13 @@ export async function searchUnits(
   const wanted = queryTerms(q.question);
   const match = ftsQuery(q.question);
   if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
+  // cross join fixes the order: the index's matches drive, instead of every row of the project running MATCH once (seconds on large projects)
   let query = db
     .selectFrom(
       sql<{
         rowid: number;
         rank: number;
-      }>`(select unit_fts.rowid as rowid, bm25(unit_fts, 3, 2, 1) as rank from unit_fts join unit on unit.id = unit_fts.rowid where unit_fts match ${match} and unit.project_id = ${projectId})`.as(
+      }>`(select unit_fts.rowid as rowid, bm25(unit_fts, 3, 2, 1) as rank from unit_fts cross join unit on unit.id = unit_fts.rowid where unit_fts match ${match} and unit.project_id = ${projectId})`.as(
         "f",
       ),
     )
@@ -337,12 +338,13 @@ export async function searchSources(
   const wanted = queryTerms(question);
   const match = ftsQuery(question);
   if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
+  // cross join: the index's matches drive, as in searchUnits
   const query = db
     .selectFrom(
       sql<{
         rowid: number;
         rank: number;
-      }>`(select source_fts.rowid as rowid, bm25(source_fts) as rank from source_fts join source on source.id = source_fts.rowid where source_fts match ${match} and source.project_id = ${projectId})`.as(
+      }>`(select source_fts.rowid as rowid, bm25(source_fts) as rank from source_fts cross join source on source.id = source_fts.rowid where source_fts match ${match} and source.project_id = ${projectId})`.as(
         "f",
       ),
     )
