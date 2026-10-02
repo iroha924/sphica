@@ -31,7 +31,7 @@ base: main
   - 完了条件: `cd server && node --test --test-name-pattern="query plan" test/search.test.ts` → pass（kind・lifecycle・path・併用・sources・asked の owner と除外 session 付きで、順位を取る SQL が `SCAN unit_fts` / `SCAN source_fts` から始まる）。合成 DB で今の SQL と比べて桁が悪くならないことを 1 回測り結果行に書く。`bun run release:plan -- --base v0.6.18` → plugin、4 つのファイルが 0.6.19
   - コミット: `fix(search): read candidates from the full-text index first (T01)`
   - 結果: red: Node 24.15.0 で `node --test --test-name-pattern="query plan" test/search.test.ts` → fail（順位を取る SQL が `SEARCH unit USING COVERING INDEX unit_content (project_id=?) | ... | SCAN unit_fts` から始まる）。両サブクエリを `cross join` にした後 → pass（unit 検索 4 条件・source 検索・askedBefore の owner と除外 session 付きで、全部 `SCAN unit_fts` / `SCAN source_fts` から始まる）。`node --test test/search.test.ts test/asked.test.ts` → 21 pass
-  - 結果: 合成 DB（3 プロジェクト、20 語の語彙で 30 語ずつの source、big 30,000 行・other 30,000 行・small 50 行）で searchSources を測った。big: 「sqlite 検索 設計」48,595 ms → 24 ms、「キャッシュ」12,810 ms → 16 ms。small（他のプロジェクトに一致が多い場合）: 92 ms → 10 ms、27 ms → 7 ms。どちらも悪くならない
+  - 結果: `node test/zz-bench.tmp.ts` → コミットしない一時スクリプトを変更の前後で 1 回ずつ流した。合成 DB（3 プロジェクト、20 語の語彙で 30 語ずつの source、big 30,000 行・other 30,000 行・small 50 行）で searchSources を測った。big: 「sqlite 検索 設計」48,595 ms → 24 ms、「キャッシュ」12,810 ms → 16 ms。small（他のプロジェクトに一致が多い場合）: 92 ms → 10 ms、27 ms → 7 ms。どちらも悪くならない
   - 結果: `bun run release:plan -- --base v0.6.18` → plugin。npm と 3 つの manifest を 0.6.19 にした
 
 - [ ] T02: 質問の "does" を外し、複数形の識別子を完全一致に数える
