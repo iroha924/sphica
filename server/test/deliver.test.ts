@@ -1490,6 +1490,8 @@ test("retention timing: a read that prunes behind 10,000 kept rows answers withi
     db.owner.exec("commit");
     const rows = () => Number(db.owner.prepare("select count(*) as n from delivery").get()?.n);
     const before = rows();
+    // The whole hook is timed, from the process start on, as the host's 5 seconds are
+    const started = performance.now();
     const kid = spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
       stdio: ["pipe", "pipe", "inherit"],
@@ -1502,9 +1504,6 @@ test("retention timing: a read that prunes behind 10,000 kept rows answers withi
       kid.on("error", reject);
       kid.on("close", resolve);
     });
-    // Measured from the input on, once the process has loaded and waits on stdin, as the host's 5 seconds cover the hook's work
-    await new Promise((r) => setTimeout(r, 1500));
-    const started = performance.now();
     kid.stdin.end(
       JSON.stringify({
         hook_event_name: "PreToolUse",
