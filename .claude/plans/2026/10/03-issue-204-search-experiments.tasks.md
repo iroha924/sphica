@@ -31,13 +31,14 @@ base: main
   - コミット: `test(bench): save anchors and fixed times in the retrieval benchmark and report by set (T01)`
   - 結果: `node --test test/retrieval-bench.test.ts` → 5 pass（anchors・created_at・implementation の code 根拠が保存されて active になる、時計が戻る、set ごとに集計される、保存できない anchor で止まる）。`node evals/retrieval/run.ts` → all R@1 47.9% / MRR 0.479、言語の組ごとの値も main と同じで、`set base` の行が出る。`tsc --noEmit` → エラーなし
 
-- [ ] T02: コーパスに ident・tie・ja-split の質問と記録を足して固定する
+- [x] T02: コーパスに ident・tie・ja-split の質問と記録を足して固定する
   - 種別: 追加
   - 計画: S1
   - 依存: T01（set・anchors・created_at を読む loader が要る）
   - 変更: `server/evals/retrieval/corpus.json`, `server/test/retrieval-bench.test.ts`
   - 完了条件: `cd server && node evals/retrieval/run.ts` → `ident` / `tie` / `ja-split` の行が出て、それぞれに gold ありと gold なしの質問がある。`base` の 60 問の数値は main と同じ。Codex のレビューで指摘を直し、残りが 0 件
-  - コミット: `test(bench): add identifier, near-tie, and Japanese splitting questions to the retrieval corpus (T02)`
+  - コミット: `test(bench): add identifier, near-tie, and Japanese split questions to the corpus (T02)`
+  - 結果: 記録 82 件、質問 113 問（gold あり 93、なし 20）。`node --test test/retrieval-bench.test.ts` → 5 pass。`node evals/retrieval/run.ts` → all MRR 0.473、set ident 0.083 / tie 0.804 / ja-split 0.200 / base 0.469。Codex のレビュー 2 回: 1 回目 F1〜F7 を全部受けて直し、2 回目で F2〜F7 は解消、F1 は E3a で上がる例が無い点だけが残った（記録節）
 
 ## P2: 実験を測って採否を決める
 
@@ -97,3 +98,5 @@ base: main
 
 ## 記録
 2026-10-03 / T01 / 持ち主の指示で、済んだ #203 の plan と tasks を消す / T01 のコミットに入れた
+2026-10-03 / T02 / 完了条件「base の 60 問の数値は main と同じ」は満たせない。追加した記録が base の質問と競合し、ej05 が 1 位から 2 位になった（MRR 0.479 → 0.469）。競合は意図したもの / 完了条件を「base の 60 問は変えない（質問と gold）」と読み替えた
+2026-10-03 / T02 / Codex の F1 の残り: kind の組では decision の方が短く、すでに上にある。finding が上の組（lazy-images）も bm25 の差が 5.7% と 6.1% で帯の外。文の長さを調整して帯に入れるのは結果に合わせた作りになるのでしない / E3a は「上がる例が観測されない」ことも測定結果として扱う

@@ -61,9 +61,19 @@ export type Result = {
 
 const keyOf = (key: string) => `trace:ext-${key}/${key}`;
 
-/** Saves each record from its own session, in file order, so a record can supersede one saved before it. */
+/** A database holding the corpus; closed again when a record cannot be saved, so a failed load leaves nothing open. */
 async function load(corpus: Corpus) {
   const db = tempDb();
+  try {
+    return { db, p: await fill(db, corpus) };
+  } catch (e) {
+    await db.done();
+    throw e;
+  }
+}
+
+/** Saves each record from its own session, in file order, so a record can supersede one saved before it. */
+async function fill(db: TempDb, corpus: Corpus): Promise<number> {
   const p = project(db);
   for (const r of corpus.records) {
     const source = message(db, p, { id: `${r.key}-1`, text: r.message, session: r.key });
@@ -136,7 +146,7 @@ async function load(corpus: Corpus) {
     });
   }
   await stored(db, p, corpus);
-  return { db, p };
+  return p;
 }
 
 /** Stops the benchmark when a record was not stored as written: a wrong time, anchor, or lifecycle would score as a search result. */
