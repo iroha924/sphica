@@ -1368,6 +1368,90 @@ test("reads and edits that deliver nothing write no rows, while empty session st
   }
 });
 
+// The log keeps a session's deliveries while it is in use: only sessions whose last delivery is 90 days old go, a few at each delivery
+test("retention: each logged delivery prunes up to 200 deliveries of sessions idle for 90 days, with their units", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file.", sent: "2026-01-01T00:00:00Z" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const u = Number(db.owner.prepare("select id from unit").get()?.id);
+    const day = 24 * 60 * 60 * 1000;
+    const ago = (days: number) => new Date(Date.now() - days * day).toISOString();
+    for (const id of ["idle", "busy", "edge"])
+      insert(db, "session", {
+        id,
+        project_id: p,
+        host: "claude-code",
+        external_id: id,
+        started_at: ago(200),
+      });
+    const log = (session: string | null, at: string) => {
+      const id = insert(db, "delivery", { session_id: session, event: "pre_read", outcome: "emitted", at });
+      insert(db, "delivery_unit", { delivery_id: id, unit_id: u });
+    };
+    for (let n = 0; n < 450; n++) log("idle", ago(100));
+    log("busy", ago(120));
+    log("busy", ago(1));
+    log(null, ago(100));
+    log(null, ago(1));
+    const left = (session: string | null) =>
+      Number(db.owner.prepare("select count(*) as n from delivery where session_id is ?").get(session)?.n);
+    const read = () =>
+      deliver(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: crypto.randomUUID(),
+          cwd: repo,
+          tool_name: "Read",
+          tool_input: { file_path: path.join(repo, "src/db.ts") },
+        },
+        "claude-code",
+        db.file,
+      );
+    const counts: number[] = [];
+    for (let n = 0; n < 3; n++) {
+      assert.match(await read(), /trace:ext-s1\/sqlite/);
+      counts.push(left("idle"));
+    }
+    assert.deepEqual(counts, [250, 50, 0]);
+    assert.equal(left("busy"), 2, "a session delivered to within 90 days keeps its older rows too");
+    assert.equal(left(null), 1, "a row without a session goes by its own time");
+    assert.equal(
+      Number(
+        db.owner
+          .prepare(
+            "select count(*) as n from delivery_unit x left join delivery d on d.id = x.delivery_id where d.id is null",
+          )
+          .get()?.n,
+      ),
+      0,
+      "the units go with their deliveries",
+    );
+    // At the cutoff itself a session is kept; only a last delivery before it lets the session go
+    const cutoff = "2026-06-01T00:00:00.000Z";
+    log("edge", cutoff);
+    log("edge", "2026-05-31T23:59:59.999Z");
+    await db.capture.insertInto("capture_delivery_prune").values({ cutoff }).execute();
+    assert.equal(left("edge"), 2);
+    await db.capture
+      .insertInto("capture_delivery_prune")
+      .values({ cutoff: "2026-06-01T00:00:00.001Z" })
+      .execute();
+    assert.equal(left("edge"), 0);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // A prompt names a path only where no ASCII letter, digit, or path character continues it: another file whose name contains the
 // anchored path is not it, while Japanese written right next to it, quotes, and either separator are
 test("a prompt names a path on its boundaries, with either separator, not as a substring", async () => {

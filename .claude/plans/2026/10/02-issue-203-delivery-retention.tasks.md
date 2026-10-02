@@ -35,13 +35,14 @@ base: main
 
 配信のログを書くたびに、最後の配信から 90 日たったセッションの行が 200 行ずつ消える。
 
-- [ ] T02: write() で cutoff を渡して capture_delivery_prune を呼ぶ
+- [x] T02: write() で cutoff を渡して capture_delivery_prune を呼ぶ
   - 種別: 追加
   - 計画: S3
   - 依存: T01（capture_delivery_prune と capture の権限が要る）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="retention" test/deliver.test.ts` → pass（古いセッションの行と子が消える / ちょうど cutoff のセッションは残る / cutoff 以降に配信があるセッションは古い行も残る / null の session は行ごと / 450 行が 3 回の配信で 250 → 50 → 0）。`node --test test/deliver.test.ts` → pass
   - コミット: `feat(deliver): prune delivery rows of sessions idle for 90 days (T02)`
+  - 結果: 実装の前に足したテストで `node --test --test-name-pattern="retention" test/deliver.test.ts` → 古いセッションの行が [450, 450, 450] のまま減らずに落ちた。write() の後に capture_delivery_prune を呼んだ後 → 1 pass（450 行が 3 回の配信で 250 → 50 → 0、90 日以内に配信のあるセッションは 120 日前の行も残る、session の無い行は行ごと、子の行が残らない、ちょうど cutoff のセッションは残り 1ms 後の cutoff で消える）。`node --test test/deliver.test.ts` → 30 pass。`bun run check` → exit 0
 
 - [ ] T03: 古い行が多い DB でのフック全体の時間と、0.6.17 の capture からの書き込みを検査する
   - 種別: 追加
