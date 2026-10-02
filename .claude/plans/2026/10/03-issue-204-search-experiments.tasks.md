@@ -89,6 +89,16 @@ base: main
   - コミット: `feat(search): order newer records first within a bm25 band (T07)`
   - 結果: 不採用。E3a を採らなかったので比べる相手は 0b76e197。実験のコミット 7687ead1 で `node evals/retrieval/run.ts --compare 0b76e197` → all MRR 0.591 → 0.586（R@1 54.8% → 53.8%）、en>en 0.750 → 0.712、ja>ja 0.515 → 0.530、set tie 0.804 → 0.783、ほかは同じ。全体と en>en が下がり、対象の tie も下がる。kind の組で後から書いた finding が decision より前に出た（t12・t22・t24）。新しさの組で上がったのは t16・t18 など。`node --test test/search.test.ts` → 19 pass（入力の順 24 通りで同じ順）。このコミットで 7687ead1 を revert した
 
+- [x] T09: Codex の T04 のレビュー F1〜F4 を直す（質問の識別子はまるごと 1 語、Unicode の語、先頭の _、SQLite の割れ、base64）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（直す対象の分割の規則）
+  - 変更: `server/src/text.ts`, `server/test/text.test.ts`, `server/test/search.test.ts`
+  - red: `cd server && node --test --test-name-pattern="counts once, whole|names such as SQLite" test/search.test.ts test/text.test.ts` → 35fc18ab の text.ts で fail 2
+  - 完了条件: 同じコマンド → pass 2。`node evals/retrieval/run.ts --compare 0b76e197` → どの行も同じ
+  - コミット: `fix(search): count a question's identifier once and cut names only at _ and lower-to-upper (T09)`
+  - 結果: red: 35fc18ab の text.ts（0b76e197 と同じ）で fail 2 を実測。直した後 pass 2。`node --test test/text.test.ts test/search.test.ts test/terms-golden.test.ts` → 36 pass、golden は 0 件変化。`--compare 0b76e197` → all MRR 0.591、set ident 1.000 で、どの行も同じ
+
 ## P3: 結果を残して出す
 
 全実験の結果と E4・E5 の不採用を #204 に残し、採用があればバージョンをそろえる。
@@ -111,3 +121,4 @@ base: main
 2026-10-03 / T08 / バージョンの更新を T04 に移したので取りやめ / #204 への記録の下書きは、全タスクの後（完了の確認の段）で作って見せる
 2026-10-03 / T04 / 完了後に計画欄を S3 → S3, S6 に変えた。S6 のバージョンの更新は T04 のコミット（35fc18ab）が行い、T08 を取りやめたので S6 の担い手が無くなったため。S6 の残り（#204 への記録）は完了の確認の段で行う / 完了したタスクの欄は変えない決まりからの例外
 2026-10-03 / T05 / 変更欄に fixtures/schema-rev8.sql・schema.test.ts（revision の値を直に持っていた）・bench.ts（T03 の MissCause の不要な export を knip が落とした）を足した（前: schema.sql・0009.sql・sqlite.ts・migrate.test.ts） / `bun run verify` を通すため
+2026-10-03 / T04 / Codex のレビュー（35fc18ab、high）: F1 質問の識別子の部分が過半数の分母を増やし、全体が一致する記録を落とし、部分を共有する別の識別子を強いヒットにする（再現）。F2 naïveReader の ASCII の尾 veReader を名前として分ける（再現）。F3 先頭が _ の名前で部分が出ない（再現）。F4 SQLite_get・SQLiteVersion で SQLite が sq と lite に割れる（再現） / 4 件とも受けて T09 を足した。質問の側は部分を足さない（索引の側だけ）。語は Unicode の文字で切り、ASCII だけの語を分ける。区切りは _ と小文字か数字の後の大文字だけ。部分は英字に数字が続く形か数字だけ（base64 を除く）

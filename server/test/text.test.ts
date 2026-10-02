@@ -110,24 +110,30 @@ test("identifiers also become whole terms", () => {
 });
 
 test("camelCase and snake_case identifiers also give their parts, and names such as SQLite stay whole", () => {
-  const got = terms("connectReader と MAX_COVER_UPLOAD_BYTES と XMLHttpRequest と getUsers");
+  const got = terms(
+    "connectReader と __MAX_COVER_UPLOAD_BYTES と XMLHttpRequest と getUsers と SQLiteVersion",
+  );
   for (const w of [
     "connectreader",
     "connect",
     "reader",
-    "max_cover_upload_bytes",
     "upload",
     "byte",
-    "xml",
-    "http",
+    "xmlhttp",
     "request",
     "user",
+    "sqlite",
+    "version",
   ])
     assert.ok(got.includes(w), `${w} is missing: ${got.join(",")}`);
+  assert.ok(!got.includes("sq") && !got.includes("lite"), got.join(","));
   assert.deepEqual(terms("SQLite"), ["sqlite", "sqlite"]);
-  // One letter is not a part, and a token with more than 6 parts is not a name
+  // A one-letter part is not a term; an ASCII tail of a Unicode word is not a name; base64 mixes letters and digits inside a part
   assert.ok(!terms("iPhone").includes("i"));
+  assert.ok(!terms("naïveReader").includes("ve"));
   assert.deepEqual(terms("aGVsbG8gd29ybGQgaGVsbG8"), ["agvsbg8gd29ybgqgagvsbg8", "agvsbg8gd29ybgqgagvsbg8"]);
+  // A question names an identifier once, whole
+  assert.deepEqual(queryTerms("connectReader"), ["connectreader"]);
 });
 
 test("a 1 MiB run of letters is split in linear time (sources hold file excerpts that size)", () => {
