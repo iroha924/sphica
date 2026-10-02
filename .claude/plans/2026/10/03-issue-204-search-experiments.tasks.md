@@ -109,6 +109,16 @@ base: main
   - コミット: `fix(search): end a name where Japanese text touches it, so its parts stay searchable (T10)`
   - 結果: red: 2186b80a の text.ts で fail 1 を実測。直した後 `node --test test/text.test.ts test/search.test.ts test/terms-golden.test.ts test/retrieval-bench.test.ts` → 42 pass、golden は 0 件変化。`node evals/retrieval/run.ts` → all MRR 0.591、set ident 1.000
 
+- [x] T11: 全差分のレビューの F1・F2 と review-shipping の説明の直し（Greek や結合文字の語を分けない、規則で語が残らない質問を excluded に数える）
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T10（直す対象の語の切り方）
+  - 変更: `server/src/text.ts`, `server/test/text.test.ts`, `server/evals/retrieval/bench.ts`, `server/evals/retrieval/run.ts`, `server/test/retrieval-bench.test.ts`
+  - red: `cd server && node --test --test-name-pattern="names such as SQLite|counted as excluded" test/text.test.ts test/retrieval-bench.test.ts` → 4779c120 の text.ts と bench.ts で fail 2
+  - 完了条件: 同じコマンド → pass。`node evals/retrieval/run.ts` → all MRR 0.591、set ident 1.000。`bun run verify` → exit 0
+  - コミット: `fix(search): split a name only from Japanese, and count questions left no term as excluded (T11)`
+  - 結果: red: 4779c120 の text.ts と bench.ts で fail 2 を実測。直した後 `node --test test/text.test.ts test/search.test.ts test/terms-golden.test.ts test/retrieval-bench.test.ts` → 43 pass、golden は 0 件変化。`node evals/retrieval/run.ts` → all MRR 0.591、set ident 1.000。`--misses` → 25 missed（split 3、vocabulary 17、mixed 5、excluded 0、ranked 0）、分割だけで届く 6 問（24.0%）。`bun run verify` → exit 0
+
 ## P3: 結果を残して出す
 
 全実験の結果と E4・E5 の不採用を #204 に残し、採用があればバージョンをそろえる。
@@ -134,3 +144,6 @@ base: main
 2026-10-03 / T04 / Codex のレビュー（35fc18ab、high）: F1 質問の識別子の部分が過半数の分母を増やし、全体が一致する記録を落とし、部分を共有する別の識別子を強いヒットにする（再現）。F2 naïveReader の ASCII の尾 veReader を名前として分ける（再現）。F3 先頭が _ の名前で部分が出ない（再現）。F4 SQLite_get・SQLiteVersion で SQLite が sq と lite に割れる（再現） / 4 件とも受けて T09 を足した。質問の側は部分を足さない（索引の側だけ）。語は Unicode の文字で切り、ASCII だけの語を分ける。区切りは _ と小文字か数字の後の大文字だけ。部分は英字に数字が続く形か数字だけ（base64 を除く）
 2026-10-03 / T05 / Codex のレビュー（0b76e197、high）: F1 移行の後に更新前の capture（0.6.22）が古い terms() で書いた source は識別子の部分で見つからず、revision 9 のままなので init でも作り直されない（再現） / 直さない。capture は別のプロセスからも書くので、DB の 1 つの値では索引の状態を表せない（PR #246 の判断と同じ）。取りこぼすのは更新前のフックが書いた行を部分の語で探すときだけで、まるごとの識別子とほかの語では見つかる。リリースノートに、更新の前から開いていたセッションがあれば `sphica doctor --reindex` を流すと書き、PR の Declined findings に残す
 2026-10-03 / T09 / Codex のレビュー（2186b80a、high）: F1 語を Unicode の文字で切ったため、日本語が続く名前（connectReaderを使う）が日本語ごと 1 語になり、部分が出なくなった（再現。searchUnits・searchSources・askedBefore で reader が当たらない） / 受けて T10 を足した。名前は Latin の文字・数字・_ の並びで切る
+2026-10-03 / 全体 / review-shipping（main..4779c120）: 出してよい。packed の 0.6.23 で revision 8 の移行・起動・doctor・0.6.22 との組み合わせを確認。指摘 1 は T05 で直さないと決めた件と同じ（doctor も healthy と出すことが新しく分かった。リリースノートに `sphica doctor --reindex` を書く）。指摘 2 terms() の説明が質問の側の違いを書いていない / 2 を受けて T11 で直した
+2026-10-03 / 全体 / Codex の全差分のレビュー（bd81445c..4779c120、high）: F1 Greek の文字や結合文字の後ろの ASCII 断片（αnameReader）を名前として分ける（再現）。F2 規則で語が残らない質問を ranked に数える（再現） / 2 件とも受けて T11 を足した。語は Unicode の文字のまとまりを日本語の文字のところでだけ区切り、ASCII だけの断片を判定する。語の残らない質問は excluded
+2026-10-03 / T10 / Codex のレビュー（4779c120、high）: 指摘 0 件

@@ -127,3 +127,22 @@ test("a missed Japanese question is told apart by whether its words were cut dif
   assert.equal(m?.cause, "mixed");
   assert.equal(m?.splitAlone, true);
 });
+
+test("a missed question the rules leave no term to search is counted as excluded, not as a ranking miss", async () => {
+  const corpus = {
+    records: [
+      record({
+        key: "make",
+        kind: "decision",
+        stance: "do",
+        message: "つくる。",
+        quote: "つくる。",
+        text: "つくる",
+        anchors: [],
+      }),
+    ],
+    questions: [{ id: "h", lang: "ja>ja", overlap: true, text: "つくる", gold: ["make"] }],
+  };
+  const [m] = misses(await bench(corpus), corpus);
+  assert.equal(m?.cause, "excluded");
+});

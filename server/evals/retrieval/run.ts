@@ -84,7 +84,7 @@ async function printMisses() {
   const count = (c: string) => ms.filter((m) => m.cause === c).length;
   const alone = ms.filter((m) => m.splitAlone).length;
   console.log(
-    `\n${ms.length} missed: split ${count("split")}, identifier ${count("identifier")}, vocabulary ${count("vocabulary")}, mixed ${count("mixed")}, ranked ${count("ranked")}`,
+    `\n${ms.length} missed: split ${count("split")}, identifier ${count("identifier")}, vocabulary ${count("vocabulary")}, mixed ${count("mixed")}, excluded ${count("excluded")}, ranked ${count("ranked")}`,
   );
   console.log(
     `split alone reaches: ${alone} (${ms.length ? ((alone / ms.length) * 100).toFixed(1) : "0.0"}%)`,

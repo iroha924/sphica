@@ -131,6 +131,7 @@ test("camelCase and snake_case identifiers also give their parts, and names such
   // A one-letter part is not a term; an ASCII tail of a Unicode word is not a name; base64 mixes letters and digits inside a part
   assert.ok(!terms("iPhone").includes("i"));
   assert.ok(!terms("naïveReader").includes("ve"));
+  assert.ok(!terms("αnameReader").includes("name") && !terms("q\u0301nameReader").includes("name"));
   // Japanese text right after a name ends it
   for (const w of ["connect", "reader", "cover", "upload"])
     assert.ok(terms("connectReaderを使う。MAX_COVER_UPLOAD_BYTESは上限").includes(w), w);

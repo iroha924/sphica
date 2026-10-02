@@ -250,8 +250,11 @@ export type Miss = {
   gold: string;
   matched: string[];
   missing: { term: string; cause: MissCause }[];
-  /** The one cause of its missing terms, or mixed; ranked when every term matched and the record was still not returned */
-  cause: MissCause | "mixed" | "ranked";
+  /**
+   * The one cause of its missing terms, or mixed; excluded when the rules left the question no term to search (hiragana only, question
+   * words); ranked when every term matched and the record was still not returned
+   */
+  cause: MissCause | "mixed" | "excluded" | "ranked";
   /** Whether the question would hold more than half of its terms if only the Japanese split misses were fixed */
   splitAlone: boolean;
 };
@@ -292,7 +295,7 @@ export function misses(result: Result, corpus: Corpus = JSON.parse(fs.readFileSy
               : "split") as MissCause,
         }));
       const fixable = matched.length + missing.filter((m) => m.cause === "split").length;
-      return { key, matched, missing, splitAlone: fixable * 2 > wanted.length };
+      return { key, matched, missing, searched: wanted.length > 0, splitAlone: fixable * 2 > wanted.length };
     });
     const best = judged.sort((a, b) => b.matched.length - a.matched.length)[0];
     if (!best) continue;
@@ -303,7 +306,13 @@ export function misses(result: Result, corpus: Corpus = JSON.parse(fs.readFileSy
       gold: best.key,
       matched: best.matched,
       missing: best.missing,
-      cause: causes.size === 0 ? "ranked" : causes.size > 1 ? "mixed" : (best.missing[0]?.cause ?? "ranked"),
+      cause: !best.searched
+        ? "excluded"
+        : causes.size === 0
+          ? "ranked"
+          : causes.size > 1
+            ? "mixed"
+            : (best.missing[0]?.cause ?? "ranked"),
       splitAlone: best.splitAlone && causes.has("split"),
     });
   }
