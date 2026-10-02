@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { SAMPLES, splitLine } from "../src/split-check.ts";
 import { fakeGhPath } from "./fake-gh.ts";
 
 const signedOut = fakeGhPath();
@@ -171,4 +172,22 @@ test("uninstall names a SPHICA_DB in a sibling of ~/.sphica as outside it", () =
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("doctor's word splitting line: this Node matches the shipped samples, and a mismatch is a warning that does not offer reindex", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-"));
+  try {
+    assert.match(runIn(home, "doctor").out, /Word splitting\s+matches the fixed samples \(ICU /);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+  const [first, ...rest] = SAMPLES;
+  assert.ok(first);
+  const off = splitLine([{ ...first, terms: [...first.terms, "zz-not-a-term"] }, ...rest], "1.0");
+  assert.equal(off.mark, "warn");
+  assert.match(
+    off.text,
+    new RegExp(`^1 of ${SAMPLES.length} fixed samples split differently with ICU 1\\.0`),
+  );
+  assert.doesNotMatch(off.text, /reindex/i);
 });

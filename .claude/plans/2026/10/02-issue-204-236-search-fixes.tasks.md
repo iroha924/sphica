@@ -60,13 +60,15 @@ base: main
 
 doctor が今の Node の分割を配った規則と照合し、両 MCP サーバーが知らない引数をキー名入りのエラーにする。
 
-- [ ] T04: golden を server/src に移し、doctor が今の Node の分割を照合する
+- [x] T04: golden を server/src に移し、doctor が今の Node の分割を照合する
   - 種別: 追加
   - 計画: S5
   - 依存: なし
-  - 変更: `server/src/terms-golden.json`, `server/test/fixtures/terms-golden.json`, `server/test/terms-golden.test.ts`, `server/src/text.ts`, `server/src/cli.ts`, `server/test/cli.test.ts`, `.agents/skills/knowledge-schema/SKILL.md`
+  - 変更: `server/src/terms-golden.json`, `server/test/fixtures/terms-golden.json`, `server/test/terms-golden.test.ts`, `server/src/split-check.ts`, `server/src/cli.ts`, `server/test/cli.test.ts`, `.agents/skills/knowledge-schema/SKILL.md`
   - 完了条件: `cd server && node --test test/terms-golden.test.ts` → pass（`server/src/terms-golden.json` を読む）。`node --test --test-name-pattern="word splitting" test/cli.test.ts` → pass（一致で ok の行、期待値を 1 件変えたデータで warn の行に不一致の件数と ICU のバージョン、reindex の案内なし）。`bun run bundle` の後 `plugin/dist/cli.js` が golden を含む
   - コミット: `feat(doctor): check this Node splits words as the shipped rules do (T04)`
+  - 結果: `node --test test/terms-golden.test.ts` → 1 pass（server/src/terms-golden.json を split-check.ts 経由で読む）。`node --test --test-name-pattern="word splitting" test/cli.test.ts` → 1 pass（子プロセスの doctor が「Word splitting  matches the fixed samples (ICU 78.2)」、期待値を 1 件変えたデータでは warn で「1 of 54 fixed samples split differently with ICU 1.0」、reindex の語なし）
+  - 結果: `bun run bundle` → exit 0。golden の文（「ｆｕｌｌｗｉｄｔｈ ＡＢＣ」）は plugin/dist/cli.js にだけ入り、mcp.js・deliver.js には入らない。`bun run check` → exit 0
 
 - [ ] T05: 両 MCP サーバーの全ツールで知らない引数を拒む
   - 種別: 修正
@@ -79,3 +81,4 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
 
 ## 記録
 2026-10-02 / - / 終わった計画 4 組の削除は .claude/plans の中だけの変更で、done の検査（.claude/plans の外の変更を見る）に掛からないのでタスクにしない / plan と tasks を入れる最初のコミットで削除する
+2026-10-02 / T04 / 変更欄の `server/src/text.ts` を `server/src/split-check.ts` に替えた / text.ts はすべてのフックと MCP が読むので、golden（約 14 KB）をそこで import すると全バンドルに入る。照合を別モジュールにして doctor（cli.js）だけに入れた
