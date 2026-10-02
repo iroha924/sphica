@@ -80,13 +80,14 @@ base: main
   - コミット: `feat(search): order decisions and constraints first within a bm25 band (T06)`
   - 結果: 不採用。実験のコミット b26045cc で `node evals/retrieval/run.ts --compare 0b76e197` → all・言語の組・set のどの行も同じ（all MRR 0.591、tie 0.804）。対象の tie が改善しないので基準に届かない。kind の組ではどれも decision がすでに帯の先頭か、帯の外にある（T02 の記録のとおり）。`node --test test/search.test.ts` → 19 pass（入力の順 24 通りで同じ順）。このコミットで b26045cc を revert した
 
-- [ ] T07: E3b 帯の中だけ新しい記録を前にして測る
+- [x] T07: E3b 帯の中だけ新しい記録を前にして測る
   - 種別: 変更
   - 計画: S5
   - 依存: T06（帯の作り方と、E3a の採否で決まる比べる相手が要る）
   - 変更: `server/src/search.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test test/search.test.ts` → pass。入力の順によらない順のテストを含む。`node evals/retrieval/run.ts --compare <直前の採用済みのコミット>` の結果を結果行に残し、plan の基準で採否を決める。不採用なら、このタスクのチェックは実装を戻す revert のコミットで付ける
   - コミット: `feat(search): order newer records first within a bm25 band (T07)`
+  - 結果: 不採用。E3a を採らなかったので比べる相手は 0b76e197。実験のコミット 7687ead1 で `node evals/retrieval/run.ts --compare 0b76e197` → all MRR 0.591 → 0.586（R@1 54.8% → 53.8%）、en>en 0.750 → 0.712、ja>ja 0.515 → 0.530、set tie 0.804 → 0.783、ほかは同じ。全体と en>en が下がり、対象の tie も下がる。kind の組で後から書いた finding が decision より前に出た（t12・t22・t24）。新しさの組で上がったのは t16・t18 など。`node --test test/search.test.ts` → 19 pass（入力の順 24 通りで同じ順）。このコミットで 7687ead1 を revert した
 
 ## P3: 結果を残して出す
 

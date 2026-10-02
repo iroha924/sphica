@@ -10,7 +10,7 @@ import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
 import { readSource, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { ordered, searchSources, searchUnits } from "../src/search.ts";
+import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import { at, hash, insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -879,30 +879,4 @@ test("search path filter takes ./ as anchors do and refuses a path that is not r
   } finally {
     await db.done();
   }
-});
-
-test("inside a near tie the newer record goes first, and the order does not depend on the order the hits came in", () => {
-  const row = (id: number, created: string, rank: number) => ({
-    id,
-    created,
-    lifecycle: "active",
-    matched: ["a"],
-    rank,
-  });
-  // 2 and 3 are within 5% of 1; 4 is outside 1's band and leads its own
-  const rows = [
-    row(1, "2026-01-01T00:00:00.000Z", -10),
-    row(2, "2026-03-01T00:00:00.000Z", -9.8),
-    row(3, "2026-02-01T00:00:00.000Z", -9.6),
-    row(4, "2026-04-01T00:00:00.000Z", -9),
-  ];
-  const permutations = (xs: typeof rows): (typeof rows)[] =>
-    xs.length <= 1
-      ? [xs]
-      : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p]));
-  for (const p of permutations(rows))
-    assert.deepEqual(
-      ordered(p).map((r) => r.id),
-      [2, 3, 1, 4],
-    );
 });
