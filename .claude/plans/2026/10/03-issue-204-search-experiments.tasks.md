@@ -71,13 +71,14 @@ base: main
   - コミット: `feat(db): rebuild the search indexes for split identifiers in schema revision 9 (T05)`
   - 結果: red: 0009.sql を `pragma user_version = 9;` だけにすると `node --test --test-name-pattern="migrating revision 8 rebuilds" test/migrate.test.ts` → fail 1、戻すと pass 1。`node --test test/migrate.test.ts` → 43 pass（revision 8 の fixture から 9 へ移行した DB と新しい DB で、connect・reader・pool・connectreader・sqlite の当たりが unit_fts と source_fts の両方で一致する）。`bun run verify` → exit 0（acceptance 98 pass）
 
-- [ ] T06: E3a 帯の中だけ decision と constraint を前にして測る
+- [x] T06: E3a 帯の中だけ decision と constraint を前にして測る
   - 種別: 変更
   - 計画: S4
   - 依存: T02（判定に使う tie の質問が要る）
   - 変更: `server/src/search.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test test/search.test.ts` → pass。3 件以上の行で入力の順をすべて並べ替えても同じ順になるテストを含む。`node evals/retrieval/run.ts --compare <直前の採用済みのコミット>` の結果を結果行に残し、plan の基準で採否を決める。不採用なら、このタスクのチェックは実装を戻す revert のコミットで付ける
   - コミット: `feat(search): order decisions and constraints first within a bm25 band (T06)`
+  - 結果: 不採用。実験のコミット b26045cc で `node evals/retrieval/run.ts --compare 0b76e197` → all・言語の組・set のどの行も同じ（all MRR 0.591、tie 0.804）。対象の tie が改善しないので基準に届かない。kind の組ではどれも decision がすでに帯の先頭か、帯の外にある（T02 の記録のとおり）。`node --test test/search.test.ts` → 19 pass（入力の順 24 通りで同じ順）。このコミットで b26045cc を revert した
 
 - [ ] T07: E3b 帯の中だけ新しい記録を前にして測る
   - 種別: 変更
