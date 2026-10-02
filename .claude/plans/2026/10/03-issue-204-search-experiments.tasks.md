@@ -119,6 +119,15 @@ base: main
   - コミット: `fix(search): split a name only from Japanese, and count questions left no term as excluded (T11)`
   - 結果: red: 4779c120 の text.ts と bench.ts で fail 2 を実測。直した後 `node --test test/text.test.ts test/search.test.ts test/terms-golden.test.ts test/retrieval-bench.test.ts` → 43 pass、golden は 0 件変化。`node evals/retrieval/run.ts` → all MRR 0.591、set ident 1.000。`--misses` → 25 missed（split 3、vocabulary 17、mixed 5、excluded 0、ranked 0）、分割だけで届く 6 問（24.0%）。`bun run verify` → exit 0
 
+- [x] T12: GitHub の Codex のレビュー（PR #249）の指摘を直す（コメントの長さと書き方、plan の区切りの規則）
+  - 種別: 変更
+  - 計画: S1, S2, S3
+  - 依存: T11（直す対象のコメント）
+  - 変更: `server/src/text.ts`, `server/evals/retrieval/bench.ts`, `db/migrations/0009.sql`, `server/test/migrate.test.ts`
+  - 完了条件: `bun run verify` → exit 0
+  - コミット: `docs(comments): keep the new comments to three lines and state constraints, not history (T12)`
+  - 結果: `bun run english` と `node scripts/check-comments.mjs` → 通る。`bun run verify` は pre-push で流す（下の記録）
+
 ## P3: 結果を残して出す
 
 全実験の結果と E4・E5 の不採用を #204 に残し、採用があればバージョンをそろえる。
@@ -148,3 +157,4 @@ base: main
 2026-10-03 / 全体 / Codex の全差分のレビュー（bd81445c..4779c120、high）: F1 Greek の文字や結合文字の後ろの ASCII 断片（αnameReader）を名前として分ける（再現）。F2 規則で語が残らない質問を ranked に数える（再現） / 2 件とも受けて T11 を足した。語は Unicode の文字のまとまりを日本語の文字のところでだけ区切り、ASCII だけの断片を判定する。語の残らない質問は excluded
 2026-10-03 / T10 / Codex のレビュー（4779c120、high）: 指摘 0 件
 2026-10-03 / T11 / Codex のレビュー（f6808c39、high）: 指摘 0 件
+2026-10-03 / 全体 / GitHub の Codex のレビュー（305307d、8 件、すべて P2）: T0 XMLHttpRequest の区切りが plan と違う / plan の変更履歴を直した（規則は SQLite を割らないために今のまま）。T1・T4・T5・T6 コメントが 3 行を超える・issue 番号を指す / 直した。T2 マイグレーションの見出しが経緯の書き方 / 今の制約の書き方に直した。T3 migrate.test.ts の見出しが fixture とリリースの台帳 / 不変条件に置き換えた。T7 短い base64（SGVsbG8）が割れる / 規則は直さない。SQLite と形が同じで見た目では区別できず、誤ヒットは無意味な断片だけで検索したときに限られる。コメントを「長い base64 と hash は分けない」に直した

@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16, fixtures/schema-rev6.sql at v0.6.17, fixtures/schema-rev7.sql at v0.6.20, fixtures/schema-rev8.sql at v0.6.22.
+// fresh db/schema.sql. fixtures/schema-revN.sql is db/schema.sql as the last release at revision N shipped it.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";

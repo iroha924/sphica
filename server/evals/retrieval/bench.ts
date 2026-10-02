@@ -1,7 +1,6 @@
-// The offline retrieval benchmark: corpus.json's records are saved through the real save path into one database, and every question
-// goes to searchUnits. Answerable questions give recall@k and MRR; questions with no gold give how often search returned anything.
-// A record may carry anchors and the time it was saved; each is checked as stored before any question runs.
-// No model is called, so two versions of search can be compared on the same corpus (run.ts --compare).
+// The offline retrieval benchmark: corpus.json's records (with their anchors and save times, checked as stored) go through the real save
+// path into one database and every question to searchUnits, giving recall@k and MRR, and for questions with no gold how often anything came
+// back. No model is called, so two versions of search can be compared on the same corpus (run.ts --compare).
 import fs from "node:fs";
 import path from "node:path";
 import { inTransaction } from "../../src/db.ts";
@@ -238,11 +237,8 @@ export async function bench(corpus: Corpus = JSON.parse(fs.readFileSync(CORPUS, 
   }
 }
 
-/**
- * Why a missing question term is not in the gold record's terms: split when the gold holds its characters inside a longer word,
- * identifier when those characters are Latin (a part of an identifier, which #204's identifier experiment covers), vocabulary otherwise.
- * The check is by characters, so a one-character term found inside an unrelated word also counts as split.
- */
+// Why a question term is missing from the gold's terms: split when the gold holds its characters inside a longer word (Latin ones are part of
+// a name, so identifier), vocabulary otherwise. Checked by characters, so one character inside an unrelated word also counts as split.
 type MissCause = "split" | "identifier" | "vocabulary";
 export type Miss = {
   id: string;
@@ -250,10 +246,7 @@ export type Miss = {
   gold: string;
   matched: string[];
   missing: { term: string; cause: MissCause }[];
-  /**
-   * The one cause of its missing terms, or mixed; excluded when the rules left the question no term to search (hiragana only, question
-   * words); ranked when every term matched and the record was still not returned
-   */
+  /** Its missing terms' one cause, or mixed; excluded when the rules left no term to search; ranked when all matched and it still missed */
   cause: MissCause | "mixed" | "excluded" | "ranked";
   /** Whether the question would hold more than half of its terms if only the Japanese split misses were fixed */
   splitAlone: boolean;

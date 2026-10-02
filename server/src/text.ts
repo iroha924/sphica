@@ -15,8 +15,8 @@ const STOP = new Set(["the", "a", "an", "of", "to", "in", "is", "and", "or", "fo
 // Identifiers the Segmenter splits (file names, snake_case, OT-123, #27) are also kept whole as terms.
 const IDENT = /#\d+|[a-z0-9][a-z0-9_./#-]*[a-z0-9]/g;
 // camelCase and snake_case names also give their parts (connectReader gives reader), cut only at "_" and a lower-case letter or digit before
-// a capital, so SQLite stays whole. A name is an ASCII piece of a word between Japanese characters (a name Japanese text touches), never a piece of
-// an accented, Greek, or other word; at most 6 parts of letters then digits, or digits, so base64 and hashes are left whole. Linear time.
+// a capital, so SQLite stays whole. A name is an ASCII piece of a word between Japanese characters, never part of an accented or Greek word,
+// with at most 6 parts of letters then digits, or digits, so long base64 and hashes stay whole (a short one can split). Linear time.
 const WORD = /[\p{L}\p{M}\p{N}_]+/gu;
 // english-exempt: the long vowel and iteration marks belong to Japanese words
 const JAPANESE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]+/u;
@@ -124,10 +124,7 @@ const QUESTION = new Set([
 // The list compared in the form terms() folds a question to ("does" becomes "doe")
 const FOLDED_QUESTION = new Set([...QUESTION].flatMap((w) => terms(w)));
 
-/**
- * A question's content terms: its terms without question framing, each once, in order. An identifier named in the question counts once,
- * whole: its parts are left out, so they neither raise the share a record must hold nor make a record with other parts look strong.
- */
+/** A question's content terms, each once, in order, without question framing; a name in it counts once, whole, so its parts never weigh in. */
 export function queryTerms(question: string): string[] {
   return [...new Set(terms(question, false).filter((w) => !FOLDED_QUESTION.has(w)))].slice(0, 24);
 }
