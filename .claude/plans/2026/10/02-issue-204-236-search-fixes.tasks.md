@@ -112,6 +112,17 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
   - 結果: red: `node --test --test-name-pattern="ZZ held lock" test/zz-copy.tmp.test.ts` → 書き込みロックを持ったまま元の文字数のテストを流す一時のコピーで「8846 characters in 6 reads」の fail（v0.6.19 の prepare と同じ数字）。コピーはコミットしない
   - 結果: 直した後、`node --test --test-name-pattern="concurrent reads|cannot take the write lock" test/deliver.test.ts` → 3 回続けて 4 pass。`node --test test/deliver.test.ts` → 33 pass。`bun run check` → exit 0。`bun run release:plan -- --base v0.6.18` → plugin、4 つのファイルが 0.6.20
 
+- [x] T09: 並行の配信のテストで、重複と件数を配信行で数え、何も返さない退行を捕まえる
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T08（直すテストが要る）
+  - 変更: `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="concurrent reads" test/deliver.test.ts` → T08 の判定は、記録の key が DB に載っているかで返答をログ済みとみなすので、ログなしの返答とログ済みの返答が同じ key を持つと重複として fail する（Codex が判定部分で再現）。全部の返答が空でも通る（同）
+  - 完了条件: `cd server && node --test --test-name-pattern="concurrent reads" test/deliver.test.ts` → 3 回続けて pass。書き込みロックを持ったままの一時のコピーでも 3 本が pass
+  - コミット: `test(deliver): judge concurrent reads by their logged rows (T09)`
+  - 結果: `node --test --test-name-pattern="long records" test/deliver.test.ts` → path だけで数えた途中の版は「3709 characters in 6 logged reads」で fail し、記録を返した返答に絞って pass。重複は pre_read の配信行で同じ unit が 2 回載らないこと、8 件の上限は配信行の unit の数で見る形にした。文字数は、読んだファイルの path がログに残り、記録を返した返答だけで数える（上限を使い切った返答も「省いた」知らせだけでログに残るので、記録の無い返答は数えない。数えると 3,709 で落ちた）。どのテストも、どれかの返答が記録を返したことを見る
+  - 結果: `node --test --test-name-pattern="concurrent reads" test/deliver.test.ts` → 3 回続けて 4 pass。書き込みロックを持ったまま 3 本を流す一時のコピー `node --test --test-name-pattern="ZZ held" test/zz-copy.tmp.test.ts` → 3 pass。`bun run check` → exit 0
+
 ## 記録
 2026-10-02 / - / 終わった計画 4 組の削除は .claude/plans の中だけの変更で、done の検査（.claude/plans の外の変更を見る）に掛からないのでタスクにしない / plan と tasks を入れる最初のコミットで削除する
 2026-10-02 / T04 / 変更欄の `server/src/text.ts` を `server/src/split-check.ts` に替えた / text.ts はすべてのフックと MCP が読むので、golden（約 14 KB）をそこで import すると全バンドルに入る。照合を別モジュールにして doctor（cli.js）だけに入れた
@@ -126,3 +137,4 @@ doctor が今の Node の分割を配った規則と照合し、両 MCP サー�
 2026-10-02 / - / review-shipping（481020ab..b3dff7d0、T07 の前）: 出荷上の欠陥なし。パックした tarball で CLI・両 MCP サーバー・フックが 0.6.19 で起動、golden は cli.js にだけ入り doctor の行は Node 24.15・24.18・26.10・26.5 で一致、同梱の Skills の引数で strict に拒まれるものなし / なし
 2026-10-02 / T08 / 完了条件を変えた。前: 「ログを書けた読む前の配信の chars の合計が 3000 以下」。後: ログを書けた配信の返答の本文で数える / delivery.chars は前置きの文も含み、上限の数え方（記録の行）と合わないため（3,709 で落ちた）
 2026-10-02 / T08 / 同じ見落とし（ロックを取れずログなしで返る配信を上限や重複の判定に数える）を持つ「one file」と「8 records」の並行テストも同じ形に直した。ログを書けた配信が 0 本でも落ちないよう、上限の側だけを見る。「one file」は全部の返答を合わせて 2 件が欠けないことも見る / 次のリリースを同じ理由で止めないため。テストだけの直しで、範囲は持ち主が Go した「テストを直して出し直す」の内側
+2026-10-02 / T08 / Codex のタスクレビュー（b05e3c59）: 3 件。F1（key だけではログ済みの返答を判別できず重複で誤って落ちる）と F2（何も返さない退行でも通る）と F3（コードの言い換えのコメント）を採用し、T09 で直した

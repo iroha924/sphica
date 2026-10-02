@@ -1784,6 +1784,8 @@ async function concurrent(): Promise<{
 const keysIn = (texts: string[]) =>
   texts.flatMap((t) => [...t.matchAll(/^- (trace:\S+)/gm)].map((x) => x[1]));
 
+// A read that cannot take the write lock in time plans without it and answers unlogged, outside the other reads' view (by design). These
+// tests judge the budget and duplicates on the logged deliveries; the held-lock test below covers the unlogged path.
 test("concurrent reads of one file deliver each record once", async () => {
   const { db, repo, read } = await concurrent();
   try {
@@ -1792,14 +1794,13 @@ test("concurrent reads of one file deliver each record once", async () => {
       repo,
       Array.from({ length: 6 }, () => read("overlap", "src/same.ts")),
     );
-    // Only logged reads see each other; one that could not take the write lock in time answers unlogged by design
-    const same = keysIn(loggedTexts(db, texts));
-    assert.equal(new Set(same).size, same.length, `delivered twice: ${same.join(", ")}`);
-    assert.ok(
-      same.every((k) => k === "trace:ext-s1/same0" || k === "trace:ext-s1/same1"),
-      same.join(", "),
-    );
-    // Logged or not, no record is lost
+    const twice = db.owner
+      .prepare(
+        "select x.unit_id from delivery_unit x join delivery d on d.id = x.delivery_id where d.event = 'pre_read' group by x.unit_id having count(*) > 1",
+      )
+      .all();
+    assert.deepEqual(twice, []);
+    // An unlogged answer still carries what it planned, so the records reach the conversation either way
     assert.deepEqual([...new Set(keysIn(texts))].sort(), ["trace:ext-s1/same0", "trace:ext-s1/same1"]);
   } finally {
     await db.done();
@@ -1816,8 +1817,13 @@ test("concurrent reads of different files stop at the read budget's 8 records", 
       repo,
       Array.from({ length: 5 }, (_, n) => read("units", `src/one${n + 7}.ts`)),
     );
-    const more = keysIn(loggedTexts(db, texts));
-    assert.ok(more.length <= 1, `delivered ${more.join(", ")}`);
+    const logged = db.owner
+      .prepare(
+        "select count(*) as n from delivery_unit x join delivery d on d.id = x.delivery_id where d.event = 'pre_read'",
+      )
+      .get()?.n;
+    assert.ok(Number(logged) <= 8, `${logged} records logged`);
+    assert.ok(keysIn(texts).length >= 1, "the one record left in the budget was delivered");
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
@@ -1827,16 +1833,25 @@ test("concurrent reads of different files stop at the read budget's 8 records", 
 test("concurrent reads of long records stop at the read budget's 3000 characters", async () => {
   const { db, repo, read } = await concurrent();
   try {
+    const files = Array.from({ length: 6 }, (_, n) => `src/long${n}.ts`);
     const texts = await together(
       db.file,
       repo,
-      Array.from({ length: 6 }, (_, n) => read("chars", `src/long${n}.ts`)),
+      files.map((f) => read("chars", f)),
     );
-    // Each read alone would carry about 1500 characters. The budget holds over the reads that were logged: a read that could not take the
-    // write lock in time answers unlogged by design, so on a busy machine the answers together may carry more
-    const shown = loggedTexts(db, texts).map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
+    // Each read alone would carry about 1500 characters; the logged ones together carry what one conversation's reads may
+    const paths = new Set(
+      db.owner
+        .prepare("select path from delivery where event = 'pre_read'")
+        .all()
+        .map((r) => String(r.path)),
+    );
+    const shown = texts
+      .filter((t, i) => paths.has(files[i] ?? "") && keysIn([t]).length > 0)
+      .map((t) => t.replace(/\n- \d+ more records? appl.*$/, ""));
     const records = shown.join("").length - shown.length * (CONFIRM.length + 1);
     assert.ok(records <= 3000, `${records} characters in ${shown.length} logged reads`);
+    assert.ok(keysIn(texts).length > 0, "records were delivered");
     assert.ok(!texts.some((t) => t.includes("Sphica unavailable")), texts.join("\n"));
   } finally {
     await db.done();
@@ -1859,28 +1874,9 @@ test("concurrent reads that cannot take the write lock still answer, unlogged an
       db.owner.exec("rollback");
     }
     assert.equal(texts.filter((t) => /^- trace:/m.test(t)).length, 6, texts.join("\n"));
-    assert.equal(loggedReadKeys(db).size, 0);
+    assert.equal(db.owner.prepare("select count(*) as n from delivery").get()?.n, 0);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
-
-/** The answers whose records were all logged as delivered by a read. */
-const loggedTexts = (db: TempDb, texts: string[]): string[] => {
-  const logged = loggedReadKeys(db);
-  return texts.filter(
-    (t) => keysIn([t]).length > 0 && keysIn([t]).every((k) => k !== undefined && logged.has(k)),
-  );
-};
-
-/** Keys of records the logged reads delivered. A read that answered without logging shows keys missing here. */
-const loggedReadKeys = (db: TempDb): Set<string> =>
-  new Set(
-    db.owner
-      .prepare(
-        "select u.key from delivery_unit x join delivery d on d.id = x.delivery_id join unit u on u.id = x.unit_id where d.event = 'pre_read'",
-      )
-      .all()
-      .map((r) => String(r.key)),
-  );
