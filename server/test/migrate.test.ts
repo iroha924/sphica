@@ -1,5 +1,5 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
-// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16, fixtures/schema-rev6.sql at v0.6.17, fixtures/schema-rev7.sql at v0.6.20.
+// fresh db/schema.sql. fixtures/schema-rev1.sql is db/schema.sql at v0.5.7 (the last revision 1 release), fixtures/schema-rev2.sql at v0.6.3, fixtures/schema-rev3.sql at v0.6.7, fixtures/schema-rev4.sql at v0.6.14, fixtures/schema-rev5.sql at v0.6.16, fixtures/schema-rev6.sql at v0.6.17, fixtures/schema-rev7.sql at v0.6.20, fixtures/schema-rev8.sql at v0.6.22.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -21,6 +21,7 @@ const REV4 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV5 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev5.sql"), "utf8");
 const REV6 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev6.sql"), "utf8");
 const REV7 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8");
+const REV8 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev8.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -150,6 +151,7 @@ for (const [from, schema] of [
   [5, REV5],
   [6, REV6],
   [7, REV7],
+  [8, REV8],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -237,6 +239,7 @@ for (const [from, schema] of [
   [5, REV5],
   [6, REV6],
   [7, REV7],
+  [8, REV8],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -1438,4 +1441,52 @@ test("a canonical key trigger refuses a project key that is not normalized, on i
     () => raw.prepare("update project set key = 'git:github.com/O/R' where key = 'git:github.com/o/r'").run(),
     /the project key is not normalized/,
   );
+});
+
+test("migrating revision 8 rebuilds both search indexes, so identifier parts find rows indexed before, as in a fresh database", () => {
+  const add = (raw: DatabaseSync) => {
+    fill(raw);
+    const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+    const text = "connectReader opens the reader_pool";
+    run(
+      "insert into source (project_id, kind, artifact, external_id, revision, session_id, author_kind, created_at, available_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'session_message', 'session:s1', 'm2', 1, 's1', 'owner', ?, ?, ?, ?, ?, ?, 1)",
+      now,
+      now,
+      now,
+      text,
+      Buffer.byteLength(text),
+      sha256(text),
+    );
+    run(
+      "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (1, 'trace:session:s1/k2', 'decision', 'do', ?, 'supported', 1, ?, ?)",
+      text,
+      now,
+      sha256(text),
+    );
+  };
+  const old = create("old.db", REV8);
+  add(old);
+  // Rows indexed by revision 8's rules held each identifier whole only
+  old.exec("insert into unit_fts (unit_fts) values ('delete-all')");
+  old.exec(
+    "insert into unit_fts (rowid, body, ident, alias) values (1, 'use sqlite postgre server', '', ''), (2, 'connectreader open reader_pool', '', '')",
+  );
+  old.exec("insert into source_fts (source_fts) values ('delete-all')");
+  old.exec(
+    "insert into source_fts (rowid, lexemes) values (1, 'use sqlite decided'), (2, 'connectreader open reader_pool')",
+  );
+  const hits = (raw: DatabaseSync, table: string, word: string) =>
+    raw
+      .prepare(`select rowid from ${table} where ${table} match ? order by rowid`)
+      .all(`"${word}"`)
+      .map((r) => Number(r.rowid));
+  assert.deepEqual(hits(old, "unit_fts", "connect"), []);
+  migrate(old);
+  const fresh = create("fresh.db", CURRENT);
+  add(fresh);
+  for (const table of ["unit_fts", "source_fts"])
+    for (const word of ["connect", "reader", "pool", "connectreader", "sqlite"]) {
+      assert.deepEqual(hits(old, table, word), hits(fresh, table, word), `${table} ${word}`);
+      assert.ok(hits(old, table, word).length > 0, `${table} ${word}`);
+    }
 });

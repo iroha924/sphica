@@ -243,7 +243,7 @@ export async function bench(corpus: Corpus = JSON.parse(fs.readFileSync(CORPUS, 
  * identifier when those characters are Latin (a part of an identifier, which #204's identifier experiment covers), vocabulary otherwise.
  * The check is by characters, so a one-character term found inside an unrelated word also counts as split.
  */
-export type MissCause = "split" | "identifier" | "vocabulary";
+type MissCause = "split" | "identifier" | "vocabulary";
 export type Miss = {
   id: string;
   lang: string;

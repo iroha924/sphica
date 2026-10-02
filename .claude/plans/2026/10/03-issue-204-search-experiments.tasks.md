@@ -55,20 +55,21 @@ base: main
 
 - [x] T04: E2 `terms()` で camelCase と snake_case の部分も語にして測る
   - 種別: 変更
-  - 計画: S3
+  - 計画: S3, S6
   - 依存: T02（判定に使う ident の質問が要る）
   - 変更: `server/src/text.ts`, `server/src/terms-golden.json`, `server/test/text.test.ts`, `server/test/retrieval-bench.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/text.test.ts test/terms-golden.test.ts` → pass。`node evals/retrieval/run.ts --compare <直前の採用済みのコミット>` の結果を結果行に残し、plan の基準で採否を決める。不採用なら、このタスクのチェックは実装を戻す revert のコミットで付ける
   - コミット: `feat(search): split camelCase and snake_case identifiers into search terms (T04)`
   - 結果: 採用。（T03 のテストに残った日本語のコメントを英語に直した）`node evals/retrieval/run.ts --compare 424606b4` → all MRR 0.473 → 0.591（R@1 43.0% → 54.8%、R@10 51.6% → 63.4%）、en>en 0.596 → 0.750、en>ja 0.567 → 0.767、ja>en 0.263 → 0.368、ja>ja 0.455 → 0.515、set ident 0.083 → 1.000、base・tie・ja-split は変わらず、returned anyway はどの行も変わらない。`node --test test/terms-golden.test.ts test/text.test.ts test/text-properties.test.ts test/search.test.ts test/retrieval-bench.test.ts` → 48 pass。golden は 8 件が変わった（connectWriter・journal_mode・fetchCover・OffscreenCanvas など、部分が増えただけ）。1 MiB の英字の並びは 4 ms
 
-- [ ] T05: E2 を採用した場合、schema revision 9 で索引を作り直す
+- [x] T05: E2 を採用した場合、schema revision 9 で索引を作り直す
   - 種別: 追加
   - 計画: S3
   - 依存: T04（新しい terms() の規則が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0009.sql`, `server/src/sqlite.ts`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0009.sql`, `server/src/sqlite.ts`, `server/test/migrate.test.ts`, `server/test/fixtures/schema-rev8.sql`, `server/test/schema.test.ts`, `server/evals/retrieval/bench.ts`
   - 完了条件: `cd server && node --test test/migrate.test.ts` → revision 8 の fixture を 9 に移行した DB と新しく作った DB で、同じ質問の検索結果が一致する。T04 が不採用なら `[-]` にする
   - コミット: `feat(db): rebuild the search indexes for split identifiers in schema revision 9 (T05)`
+  - 結果: red: 0009.sql を `pragma user_version = 9;` だけにすると `node --test --test-name-pattern="migrating revision 8 rebuilds" test/migrate.test.ts` → fail 1、戻すと pass 1。`node --test test/migrate.test.ts` → 43 pass（revision 8 の fixture から 9 へ移行した DB と新しい DB で、connect・reader・pool・connectreader・sqlite の当たりが unit_fts と source_fts の両方で一致する）。`bun run verify` → exit 0（acceptance 98 pass）
 
 - [ ] T06: E3a 帯の中だけ decision と constraint を前にして測る
   - 種別: 変更
@@ -106,3 +107,5 @@ base: main
 2026-10-03 / T04 / 変更欄に `server/test/retrieval-bench.test.ts` を足した（前: text.ts・terms-golden.json・text.test.ts） / T03 のコメントの日本語を `bun run english` が落としたため
 2026-10-03 / T04 / pre-commit の bundle の検査が、package に入る変更と同じコミットでのバージョンの更新を求めた / E2 の採用でリリースは決まったので、npm と 3 つの manifest を 0.6.23 にする作業を T04 に入れ、変更欄に 4 つのファイルを足した（`bun run release:plan -- --base v0.6.22` → plugin）
 2026-10-03 / T08 / バージョンの更新を T04 に移したので取りやめ / #204 への記録の下書きは、全タスクの後（完了の確認の段）で作って見せる
+2026-10-03 / T04 / 完了後に計画欄を S3 → S3, S6 に変えた。S6 のバージョンの更新は T04 のコミット（35fc18ab）が行い、T08 を取りやめたので S6 の担い手が無くなったため。S6 の残り（#204 への記録）は完了の確認の段で行う / 完了したタスクの欄は変えない決まりからの例外
+2026-10-03 / T05 / 変更欄に fixtures/schema-rev8.sql・schema.test.ts（revision の値を直に持っていた）・bench.ts（T03 の MissCause の不要な export を knip が落とした）を足した（前: schema.sql・0009.sql・sqlite.ts・migrate.test.ts） / `bun run verify` を通すため

@@ -1070,4 +1070,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 9;
+pragma user_version = 8;
