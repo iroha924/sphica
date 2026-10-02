@@ -110,8 +110,8 @@ test("the root and key are the same from any subdirectory", () => {
   }
 });
 
-// Capture spools the key earlier releases made, so a database not yet migrated still finds its project
-test("identify returns the earlier rule's key beside the normalized one", () => {
+// Capture spools the key as the remote is written, so a database whose keys are not normalized yet still finds its project
+test("identify returns the key as the remote is written beside the normalized one", () => {
   const r = repo("git@GitHub.COM:O/R.git");
   try {
     const got = identify(r.dir);

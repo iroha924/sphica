@@ -33,7 +33,7 @@ create table project (
 ) strict;
 
 -- A git key's host is lowercase, and on github.com the whole key is (owner and repository names are case-insensitive there), so one
--- repository has one key however its remote is written. lower() folds ASCII only, as normalizeKey in server/src/project.ts does.
+-- repository has one key however its remote is written. lower() folds ASCII only, as normalizeKey does.
 create trigger project_key_normal_insert before insert on project when new.key glob 'git:*' begin
   select raise(abort, 'the project key is not normalized')
   from (select rest, case when instr(rest, '/') = 0 then rest else substr(rest, 1, instr(rest, '/') - 1) end as host

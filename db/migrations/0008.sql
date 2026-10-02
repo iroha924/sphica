@@ -1,7 +1,6 @@
--- Revision 7 → 8 of generation 2: project keys are normalized (a git key's host in lowercase, and the whole key on github.com), and
--- triggers refuse a key that is not. Projects whose keys become one merge only when at most one holds rows (0008.check.sql stops
--- otherwise): the one with rows, or the oldest, keeps its id and takes the key; the empty others go. Runs in one transaction with foreign
--- keys off; every statement that stays matches db/schema.sql at revision 8, and server/test/migrate.test.ts compares the two.
+-- Revision 7 → 8 of generation 2: project keys are normalized, and triggers refuse a key that is not. Projects whose keys become one
+-- merge only when at most one holds rows: the one with rows, or the oldest, keeps its id and takes the key, and the empty others go.
+-- Every statement that stays is the same as in the schema at revision 8.
 
 create temp table sphica_migration_note (rule text, item text, action text);
 

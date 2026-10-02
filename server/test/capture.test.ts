@@ -1086,8 +1086,8 @@ test("a send with nothing queued keeps the last send time", async () => {
   }
 });
 
-// Capture keeps writing into a database init has not migrated yet. Its records name the project by the earlier rule's key, so a database
-// at revision 7 routes them as before, and after migrating they reach the project that took the normalized key.
+// Capture keeps writing into a database init has not migrated yet. Its records name the project by the key as the remote is written, so
+// an unmigrated database finds the project registered under it, and a migrated one the project that took the normalized key.
 test("a legacy key reaches the same project before and after the revision 8 migration", async () => {
   reset();
   const db = tempDb(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8"));

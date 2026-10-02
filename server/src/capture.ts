@@ -371,7 +371,7 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     v: 2 as const,
     host,
     session: String(input.session_id),
-    // The earlier rule's key: a database not migrated yet still finds the project it names, and a migrated one finds it normalized
+    // The key as the remote is written: a database whose keys are not normalized yet finds its project by it, a normalized one through normalizeKey
     project: place.legacyKey,
     branch: branchOf(place.root),
     turn,

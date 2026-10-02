@@ -141,6 +141,17 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - 結果: red: `node --test --test-name-pattern="says how to go on" test/migrate.test.ts` → 直前の admin.ts で fail
   - 結果: `cd server && node --test test/migrate.test.ts` → 40 pass。`bun run verify` → 0 で終わる（acceptance 98 件）
 
+- [x] T13: 足したコメントから、パスの参照と経緯の言い方を外し、0008.sql の冒頭を 3 行にする
+  - 種別: 修正
+  - 計画: S2, S4
+  - 依存: T12（直すコメントがある）
+  - 変更: `db/migrations/0008.sql`, `db/schema.sql`, `server/src/capture.ts`, `server/src/project.ts`, `server/test/capture.test.ts`, `server/test/project.test.ts`
+  - red: `git diff 2a09119a..aa9eeb45 -- server/src db | grep -E "^\+\s*(//|\*|--)" | grep -E "earlier rule|as before|server/src/project.ts|0008.check.sql"` → 4 行が出る
+  - 完了条件: 同じ grep を `2a09119a..HEAD` で流す → 0 行。`bun run verify` → 0
+  - コミット: `docs(comments): state the key constraints without paths or history (T13)`
+  - 結果: red: `git diff 2a09119a..aa9eeb45 -- server/src db | grep ... | grep -cE ...` → 4
+  - 結果: `git diff 2a09119a -- server/src db | grep ... | grep -cE ...` → 0。`bun run verify` → 0 で終わる
+
 ## P3: リリースの準備
 
 npm と 3 つの manifest が 0.6.21 にそろう。
@@ -167,3 +178,4 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / 全差分 / Codex の全差分レビュー（8bf3ed00）は指摘なし。review-shipping は 1 件: 衝突の停止の案内が、marketplace が 0.6.21 を指すのにプラグインを 0.6.20 に留めるよう言い、doctor と MCP の案内も init へ戻るだけ / 案内の誤りを採る。T09 を足して直した。doctor と MCP が init を案内する点は、止まった init が理由を出すので変えない
 - 2026-10-02 / PR #247 / GitHub の Codex のレビューで P1: 未移行の分割に 3 つ目の書き方の記録が来ると、正規化した key で空の project に入り移行が止まる。手元で再現 / 採る。T10 を足して直した
 - 2026-10-02 / PR #247 / GitHub の Codex の再レビュー（0146e654）で 3 件: P2 受け入れケースが無い、P2 止まったときの案内が保留される記録を書いていない、P3 legacyRemote のコメントが URL の host の扱いと違う / 3 件とも採る。T11・T12 を足して直した。保留の上限は capture.ts の定数を案内に使い、値が変わっても文面がずれないようにした
+- 2026-10-02 / PR #247 / GitHub の Codex のレビュー（aa9eeb45）で 2 件（P1 と表示）: 0008.sql の冒頭が 4 行でパスを指す、capture.ts のコメントが経緯を語る / 2 件とも採る。同じ規則に反する自分のコメントを差分から探し、schema.sql・project.ts・テストのコメントも T13 で直した
