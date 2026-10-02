@@ -156,19 +156,52 @@ export async function searchUnits(
           rank: h.rank,
         });
       }
-  hits.sort(
-    (a, b) =>
-      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
-      b.matched.length - a.matched.length ||
-      a.rank - b.rank,
-  );
   return {
-    hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h),
+    hits: ordered(hits)
+      .slice(0, q.limit)
+      .map(({ rank: _rank, ...h }) => h),
     weaker,
     terms: wanted,
     stopped,
     read,
   };
+}
+
+/** A rank within this share of a band's first rank counts as a near tie */
+const BAND = 0.05;
+const KIND_FIRST = new Set(["decision", "constraint"]);
+
+/**
+ * Hits by lifecycle, then by how many query terms they hold, then by bm25. Inside one such group, rows whose rank is within BAND of the
+ * first row of their band are a near tie, and decisions and constraints go first among them. Each band is measured from its own first row,
+ * never widened through neighbours, so the order does not depend on the order the hits came in.
+ */
+export function ordered<
+  T extends { id: number; kind: string; lifecycle: string; matched: string[]; rank: number },
+>(hits: T[]): T[] {
+  const group = (h: T) => `${LIFE_ORDER[h.lifecycle] ?? 9}/${h.matched.length}`;
+  const base = [...hits].sort(
+    (a, b) =>
+      (LIFE_ORDER[a.lifecycle] ?? 9) - (LIFE_ORDER[b.lifecycle] ?? 9) ||
+      b.matched.length - a.matched.length ||
+      a.rank - b.rank ||
+      a.id - b.id,
+  );
+  const out: T[] = [];
+  for (let at = 0; at < base.length; ) {
+    const lead = base[at] as T;
+    let end = at + 1;
+    while (
+      end < base.length &&
+      group(base[end] as T) === group(lead) &&
+      Math.abs((base[end] as T).rank - lead.rank) <= BAND * Math.abs(lead.rank)
+    )
+      end++;
+    const first = (h: T) => (KIND_FIRST.has(h.kind) ? 0 : 1);
+    out.push(...base.slice(at, end).sort((a, b) => first(a) - first(b) || a.rank - b.rank || a.id - b.id));
+    at = end;
+  }
+  return out;
 }
 
 export type Successor = {
