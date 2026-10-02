@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { constants, DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { type Kysely, sql } from "kysely";
 import { openReader, SCHEMA_REVISION } from "../src/db.ts";
@@ -382,6 +382,73 @@ test("the capture connection prunes old deliveries and their units only through 
       )
       .get()?.n,
     0,
+  );
+});
+
+// A 0.6.17 capture keeps logging into a database of this revision until its plugin updates. Its authorizer is this one without the
+// pruning deletes, so this one is wrapped to refuse those, and both delivery views must still take a delivery with its units
+test("an older capture, which may delete nothing, still logs deliveries with their units through both views", () => {
+  const older = () => {
+    const set = DatabaseSync.prototype.setAuthorizer;
+    DatabaseSync.prototype.setAuthorizer = function (this: DatabaseSync, cb: Parameters<typeof set>[0]) {
+      return set.call(this, (action, p1, ...rest) =>
+        action === constants.SQLITE_DELETE && (p1 === "delivery" || p1 === "delivery_unit")
+          ? constants.SQLITE_DENY
+          : (cb as NonNullable<typeof cb>)(action, p1, ...rest),
+      );
+    } as typeof set;
+    try {
+      return capture();
+    } finally {
+      DatabaseSync.prototype.setAuthorizer = set;
+    }
+  };
+  const u = insert(db, "unit", {
+    project_id: p,
+    key: "trace:session:do/older",
+    kind: "finding",
+    text: "older",
+    extraction: "supported",
+    run_id: run(db, p),
+    created_at: now,
+    content_hash: sha256("older"),
+  });
+  const raw = older();
+  try {
+    raw
+      .prepare(
+        "insert into capture_session (id, project_id, host, external_id, branch, started_at) values ('do', ?, 'claude-code', 'do', null, ?)",
+      )
+      .run(p, now);
+    raw
+      .prepare(
+        "insert into capture_delivery (session_id, event, outcome, at, units) values ('do', 'pre_read', 'emitted', ?, ?)",
+      )
+      .run(now, `[${u}]`);
+    raw
+      .prepare(
+        "insert into capture_delivery_scoped (session_id, agent_id, event, outcome, at, units) values ('do', 'agent-a', 'pre_read', 'emitted', ?, ?)",
+      )
+      .run(now, `[${u}]`);
+  } finally {
+    raw.close();
+  }
+  assert.match(
+    attempt(older, "insert into capture_delivery_prune (cutoff) values ('2026-01-01T00:00:00.000Z')") ?? "",
+    /not authorized/,
+    "the wrapper refuses what an older capture could not do",
+  );
+  assert.deepEqual(
+    db.owner
+      .prepare(
+        "select d.agent_id, x.unit_id from delivery d join delivery_unit x on x.delivery_id = d.id where d.session_id = 'do' order by d.id",
+      )
+      .all()
+      .map((r) => ({ ...r })),
+    [
+      { agent_id: null, unit_id: u },
+      { agent_id: "agent-a", unit_id: u },
+    ],
   );
 });
 

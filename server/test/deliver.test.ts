@@ -1452,6 +1452,80 @@ test("retention: each logged delivery prunes up to 200 deliveries of sessions id
   }
 });
 
+// Pruning runs inside a hook the host kills after 5 seconds. The slow case puts 10,000 old rows of a session still in use before the
+// 10,000 rows that may go, so each prune looks past all of them first
+test("retention timing: a read that prunes behind 10,000 kept rows answers within a second", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file.", sent: "2026-01-01T00:00:00Z" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const u = Number(db.owner.prepare("select id from unit").get()?.id);
+    const day = 24 * 60 * 60 * 1000;
+    const ago = (days: number, n = 0) => new Date(Date.now() - days * day + n).toISOString();
+    db.owner.exec("begin");
+    const addSession = db.owner.prepare(
+      "insert into session (id, project_id, host, external_id, started_at) values (?, ?, 'claude-code', ?, ?)",
+    );
+    const addDelivery = db.owner.prepare(
+      "insert into delivery (session_id, event, outcome, at) values (?, 'pre_read', 'emitted', ?) returning id",
+    );
+    const addUnit = db.owner.prepare("insert into delivery_unit (delivery_id, unit_id) values (?, ?)");
+    const log = (session: string, at: string) => addUnit.run(Number(addDelivery.get(session, at)?.id), u);
+    addSession.run("kept", p, "kept", ago(300));
+    for (let n = 0; n < 10_000; n++) log("kept", ago(200, n));
+    log("kept", ago(1));
+    for (let s = 0; s < 100; s++) {
+      addSession.run(`idle${s}`, p, `idle${s}`, ago(300));
+      for (let n = 0; n < 100; n++) log(`idle${s}`, ago(100, s * 100 + n));
+    }
+    db.owner.exec("commit");
+    const rows = () => Number(db.owner.prepare("select count(*) as n from delivery").get()?.n);
+    const before = rows();
+    const kid = spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
+      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let out = "";
+    kid.stdout.on("data", (d) => {
+      out += d;
+    });
+    const closed = new Promise<number | null>((resolve, reject) => {
+      kid.on("error", reject);
+      kid.on("close", resolve);
+    });
+    // Measured from the input on, once the process has loaded and waits on stdin, as the host's 5 seconds cover the hook's work
+    await new Promise((r) => setTimeout(r, 1500));
+    const started = performance.now();
+    kid.stdin.end(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        session_id: "timed",
+        cwd: repo,
+        tool_name: "Read",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      }),
+    );
+    assert.equal(await closed, 0);
+    const took = performance.now() - started;
+    assert.match(JSON.parse(out).hookSpecificOutput.additionalContext, /trace:ext-s1\/sqlite/);
+    assert.equal(rows(), before + 1 - 200, "the read was logged and pruned 200 rows");
+    assert.ok(took < 1000, `the pruning read took ${Math.round(took)} ms`);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // A prompt names a path only where no ASCII letter, digit, or path character continues it: another file whose name contains the
 // anchored path is not it, while Japanese written right next to it, quotes, and either separator are
 test("a prompt names a path on its boundaries, with either separator, not as a substring", async () => {

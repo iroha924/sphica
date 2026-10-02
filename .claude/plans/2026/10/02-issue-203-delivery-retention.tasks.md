@@ -44,12 +44,13 @@ base: main
   - コミット: `feat(deliver): prune delivery rows of sessions idle for 90 days (T02)`
   - 結果: 実装の前に足したテストで `node --test --test-name-pattern="retention" test/deliver.test.ts` → 古いセッションの行が [450, 450, 450] のまま減らずに落ちた。write() の後に capture_delivery_prune を呼んだ後 → 1 pass（450 行が 3 回の配信で 250 → 50 → 0、90 日以内に配信のあるセッションは 120 日前の行も残る、session の無い行は行ごと、子の行が残らない、ちょうど cutoff のセッションは残り 1ms 後の cutoff で消える）。`node --test test/deliver.test.ts` → 30 pass。`bun run check` → exit 0
 
-- [ ] T03: 古い行が多い DB でのフック全体の時間と、0.6.17 の capture からの書き込みを検査する
+- [x] T03: 古い行が多い DB でのフック全体の時間と、0.6.17 の capture からの書き込みを検査する
   - 種別: 追加
   - 計画: S4
   - 依存: T02（prune を呼ぶ配信が要る）
   - 変更: `server/test/deliver.test.ts`, `server/test/db.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="retention timing" test/deliver.test.ts` → pass（消す対象 10,000 行と守られる古い行 10,000 行の一時ファイル DB で、子プロセスの pre_read が 1 回で 200 行減らし 1 秒未満で終わる）。`node --test --test-name-pattern="older capture" test/db.test.ts` → pass（0.6.17 の規則の capture で revision 7 の capture_delivery・capture_delivery_scoped に unit 付きで書ける）
   - コミット: `test(deliver): time a pruning delivery and keep older captures writing (T03)`
+  - 結果: `node --test --test-name-pattern="retention timing" test/deliver.test.ts` → 3 回続けて pass（使用中のセッションの古い行 10,000 を消せる 10,000 行より前に置いた一時ファイル DB で、子プロセスの pre_read が記録を返し、delivery が 1 行増えて 200 行減った）。上限を一時的に 1ms にして実測した時間は 53ms と 51ms（入力を渡してから終了まで）。`node --test --test-name-pattern="older capture" test/db.test.ts` → pass（0.6.17 の authorizer との差は delivery・delivery_unit の delete の許可だけなので、今の authorizer でそれを拒むように包み、capture_delivery と capture_delivery_scoped に unit 付きで書けて、prune は not authorized になることを確かめた）。`node --test test/deliver.test.ts test/db.test.ts` → 53 pass。`bun run check` → exit 0
 
 ## 記録
