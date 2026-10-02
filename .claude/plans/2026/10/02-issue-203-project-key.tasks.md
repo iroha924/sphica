@@ -68,13 +68,14 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - 結果: `node --test --test-name-pattern="legacy key reaches" test/capture.test.ts` → spool に正規の key を書く旧い producer で fail（spool の key が `git:github.com/o/r`）。`node --test --test-name-pattern="inside the write" test/capture.test.ts` → 旧い sendBatch で fail（検索 2 が begin 3 より前）
   - 結果: `bun run verify` → 0 で終わる
 
-- [ ] T05: init・MCP の検索・localRoots を大文字小文字の混ざった remote で確かめるテストを足す
+- [x] T05: init・MCP の検索・localRoots を大文字小文字の混ざった remote で確かめるテストを足す
   - 種別: 追加
   - 計画: S5
   - 依存: T01（正規化した key が要る）
-  - 変更: `server/test/cli.test.ts`, `server/test/project.test.ts`
-  - 完了条件: `cd server && node --test test/cli.test.ts test/project.test.ts` → pass（`git@GitHub.com:O/R.git` の remote で init が `git:github.com/o/r` を登録し、MCP の project の検索が同じ id を返す。大文字だけが違う 2 つのディレクトリを localRoots が ambiguous にする）
+  - 変更: `server/test/admin.test.ts`, `server/test/project.test.ts`
+  - 完了条件: `cd server && node --test test/admin.test.ts test/project.test.ts` → pass（`git@GitHub.com:O/R.git` の remote で init が `git:github.com/o/r` を登録し、MCP の project の検索が同じ id を返す。大文字だけが違う 2 つのディレクトリを localRoots が ambiguous にする）
   - コミット: `test(project): cover init, MCP lookup, and localRoots with a mixed-case remote (T05)`
+  - 結果: `cd server && node --test test/admin.test.ts test/project.test.ts` → 52 pass（`git@GitHub.com:Example/Proj.git` で init が `git:github.com/example/proj` を登録し、https の小文字の remote では already registered。`ssh://git@GitHub.COM/O/R.git` の identify の key で projectId が 1 を返す。`git@github.com:o/same.git` と `https://GitHub.com/O/Same.git` を localRoots が ambiguous にする）
 
 ## P3: リリースの準備
 
@@ -94,3 +95,5 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / T02 / revision の値を固定で見る `server/test/schema.test.ts` と、revision 7 の fixture が要った / T02 の変更欄に `server/test/schema.test.ts`, `server/test/fixtures/schema-rev7.sql` を足した
 - 2026-10-02 / T01 / Codex のタスクレビュー（c3ae3eed）は指摘なし。sandbox で一時ディレクトリを作れずテストの一部は Codex 側で未実行 / 同じテストを手元で流し 13 pass を確認済み
 - 2026-10-02 / T04 / revision 7 の DB でテストするため `tempDb()` に schema を渡せるようにした / T04 の変更欄に `server/test/temp-db.ts` を足した
+- 2026-10-02 / T05 / init の登録のテストは `server/test/cli.test.ts` ではなく `server/test/admin.test.ts` にある。MCP の検索は単体のテストが無いので、サーバーと同じ identify().key → projectId の経路を project.test.ts で確かめた / 変更欄と完了条件の `server/test/cli.test.ts` を `server/test/admin.test.ts` に変えた
+- 2026-10-02 / T03 / Codex のタスクレビュー（41bc271f）は指摘なし。sandbox で一時ディレクトリを作れずテストは Codex 側で未実行 / 同じテストを手元で流し pass を確認済み

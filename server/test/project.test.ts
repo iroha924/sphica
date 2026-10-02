@@ -15,9 +15,11 @@ import {
   normalizeKey,
   normalizeRemote,
   patchPaths,
+  projectId,
   relativeTo,
   writePlace,
 } from "../src/project.ts";
+import { tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to keep the name map apart; SPHICA_HOME would win over it and point at the shell's directory
 delete process.env.SPHICA_HOME;
@@ -182,10 +184,14 @@ test("does not choose when two locations share a key", () => {
   const realHome = process.env.HOME;
   process.env.HOME = tmp;
   try {
-    for (const n of ["one", "two"]) {
+    // Remotes differing only in case are one repository, so the two places share a key
+    for (const [n, remote] of [
+      ["one", "git@github.com:o/same.git"],
+      ["two", "https://GitHub.com/O/Same.git"],
+    ] as const) {
       const d = path.join(tmp, n);
       execFileSync("git", ["init", "-q", d], { stdio: "ignore" });
-      execFileSync("git", ["-C", d, "remote", "add", "origin", "git@github.com:o/same.git"], {
+      execFileSync("git", ["-C", d, "remote", "add", "origin", remote], {
         stdio: "ignore",
       });
     }
@@ -314,5 +320,19 @@ test("normalizeKey and the database's key rules agree (parity)", () => {
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// The read and record servers look a session's project up by identify's key: a mixed-case remote finds the project init registered
+test("a mixed-case remote finds the project registered under the normalized key", async () => {
+  const r = repo("ssh://git@GitHub.COM/O/R.git");
+  const db = tempDb();
+  try {
+    db.owner.exec("insert into project (key, name) values ('git:github.com/o/r', 'o/r')");
+    const place = identify(r.dir);
+    assert.equal(await projectId(db.reader, place?.key ?? ""), 1);
+  } finally {
+    await db.done();
+    r.done();
   }
 });

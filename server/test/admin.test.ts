@@ -256,6 +256,19 @@ test("sphica init in a repository with a remote creates the database and registe
   assert.deepEqual(projectKeys(home), ["git:github.com/example/proj"]);
 });
 
+// A remote differing only in case names the same repository, so it registers one project
+test("sphica init registers the normalized key for a mixed-case remote, and the same repository written otherwise is already registered", () => {
+  const home = tmp();
+  const mixed = repoAt(tmp(), "git@GitHub.com:Example/Proj.git");
+  const first = cli(home, "init", "--cwd", mixed);
+  assert.equal(first.code, 0, first.out);
+  assert.match(first.out, /example\/proj registered \(git:github\.com\/example\/proj,/, first.out);
+  const lower = repoAt(tmp(), "https://github.com/example/proj.git");
+  const again = cli(home, "init", "--cwd", lower);
+  assert.match(again.out, /already registered/, again.out);
+  assert.deepEqual(projectKeys(home), ["git:github.com/example/proj"]);
+});
+
 // Without gh, or signed out, init still sets up; with gh it binds that account once and never adds a second one
 test("sphica init binds the account gh is signed in to, and says why when it cannot", () => {
   const home = tmp();
