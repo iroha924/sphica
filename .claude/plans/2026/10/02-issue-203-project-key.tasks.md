@@ -44,13 +44,14 @@ base: main
   - 結果: `cd server && node --test test/migrate.test.ts test/project.test.ts` → 53 pass（revision 7 の改名・空の重複の削除・最古を残す・中身のある衝突で 7 のまま止まる・trigger の拒否・parity。revision 7 の定義比較と capture view の列比較も pass）
   - 結果: `bun run verify` → 0 で終わる
 
-- [ ] T03: マイグレーションが止まったときの文面を rule ごとにし、project の衝突には前のリリースを使い続けて issue で知らせる案内を出す
+- [x] T03: マイグレーションが止まったときの文面を rule ごとにし、project の衝突には前のリリースを使い続けて issue で知らせる案内を出す
   - 種別: 変更
   - 計画: S3
   - 依存: T02（文面を出す rule が 0008.check.sql にある）
   - 変更: `server/src/admin.ts`, `server/test/migrate.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="revision 8" test/migrate.test.ts` → pass（衝突の停止で「revision 8 は当てていない」と案内が出て、forget を勧めず、commit 済みの revision とバックアップの既存の報告は変わらない。0005 の rule の文面は今のまま）
   - コミット: `feat(migrate): explain a project key collision that stops revision 8 (T03)`
+  - 結果: `cd server && node --test --test-name-pattern="revision 4 stops|revision 7|revision 8" test/migrate.test.ts` → 8 pass（衝突の停止が「Revision 8 was not applied」で始まり、0.6.20 の案内と「Forgetting sources does not resolve it」を含み、汎用の文面を含まず、「still at revision 7」の既存の報告が続く。revision 4 の停止の文面は今のまま）
 
 ## P2: capture と key の利用者
 

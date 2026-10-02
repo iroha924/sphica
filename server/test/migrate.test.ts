@@ -1390,7 +1390,7 @@ test("migrating revision 7 keeps the oldest of empty projects whose keys become 
   assert.deepEqual(projects(raw), [{ id: 1, key: "git:github.com/o/r", name: "o/r", created_at: now }]);
 });
 
-test("migrating revision 7 stops, changing nothing of revision 8, when two projects with records become one", () => {
+test("migrating revision 7 stops, changing nothing of revision 8, when two projects with records become one, and says how to go on", () => {
   const raw = create("old.db", REV7);
   addProject(raw, "git:github.com/o/r", "o/r");
   addProject(raw, "git:github.com/O/R", "O/R");
@@ -1405,7 +1405,13 @@ test("migrating revision 7 stops, changing nothing of revision 8, when two proje
       /project 1 git:github\.com\/o\/r \(becomes git:github\.com\/o\/r\): 1 sessions, 0 sources/.test(
         e.message,
       ) &&
-      /project 2 git:github\.com\/O\/R \(becomes git:github\.com\/o\/r\): 1 sessions/.test(e.message),
+      /project 2 git:github\.com\/O\/R \(becomes git:github\.com\/o\/r\): 1 sessions/.test(e.message) &&
+      /^Revision 8 was not applied: 2 projects with records/.test(e.message) &&
+      /cannot merge them/.test(e.message) &&
+      /npm i -g sphica@0\.6\.20/.test(e.message) &&
+      /Forgetting sources does not resolve it/.test(e.message) &&
+      !/Sphica writes no such row/.test(e.message) &&
+      /No migration step was committed: the database is still at revision 7/.test(e.message),
   );
   assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 7);
   assert.deepEqual(projects(raw), before);

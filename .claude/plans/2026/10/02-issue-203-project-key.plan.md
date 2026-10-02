@@ -83,7 +83,7 @@ approved_at: 2026-10-02
 ## 完了条件
 
 - A1: `cd server && node --test test/project.test.ts` → 混ざった大文字の scp・ssh・git・https の github.com の remote が `git:github.com/o/r` になり、github.com 以外の path と `local:` の key は変わらない
-- A2: `cd server && node --test --test-name-pattern="revision 8" test/migrate.test.ts` → revision 7 の DB で (a) 衝突なしの改名で id・created_at・sqlite_sequence が残る、(b) 空の重複が消えて中身のある方が正規の key になる、(c) 中身のある 2 つの衝突で revision 7 のまま止まり、一覧と案内が出る、(d) revision 8 の定義が新しく作った DB と一致する、が全部 pass
+- A2: `cd server && node --test --test-name-pattern="revision 7" test/migrate.test.ts` → revision 7 の DB で (a) 衝突なしの改名で id・created_at・sqlite_sequence が残る、(b) 空の重複が消えて中身のある方が正規の key になる、(c) 中身のある 2 つの衝突で revision 7 のまま止まり、一覧と案内が出る、(d) revision 8 の定義が新しく作った DB と一致する、が全部 pass
 - A3: `cd server && node --test --test-name-pattern="canonical key" test/migrate.test.ts` → 正規化されていない key の insert と update が trigger で拒まれ、正規の key・`local:`・host だけの key は通る
 - A4: `cd server && node --test --test-name-pattern="parity" test/project.test.ts` → JS の `normalizeKey` と SQL の式が、Unicode を含む同じ key の一覧で同じ結果を返す
 - A5: `cd server && node --test --test-name-pattern="legacy key" test/capture.test.ts` → revision 7 の DB（空の正規の project 1 と中身のある大文字の project 2）で、新しい hook の spool が 2 へ送られ、マイグレーション後の次の送信も 2 へ行く。古い位置で project を引いた後にマイグレーションを挟んでも、記録は 2 に入り rejected/ に何も無い
@@ -102,3 +102,4 @@ approved_at: 2026-10-02
 なし
 
 ## 変更履歴
+- 2026-10-02 / A2 の test-name-pattern を "revision 8" から "revision 7" に / テストの名前が既存の「migrating revision N」に合わせて移行元の revision を名乗るため / Go 不要
