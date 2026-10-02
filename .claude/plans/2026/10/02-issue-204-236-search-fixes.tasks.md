@@ -45,7 +45,7 @@ base: main
   - 結果: red: `node --test --test-name-pattern="does|plural identifier|question" test/text.test.ts test/search.test.ts` → fail 2 件（`queryTerms("what does sanitize do")` が `["doe","sanitize"]`、検索が sanitize の記録を見つけず `[]`）。QUESTION を terms() で畳んだ集合と比べるようにした後、同じコマンド → fail 1 件（"getUsers retry backoff jitter" が `[]`）で、getUsers の red を分けて確かめた。anchor の path と symbol のまるごとを NFKC・小文字化・singular() で畳んで比べるようにした後 → pass 4
   - 結果: `node --test test/terms-golden.test.ts test/search.test.ts test/text.test.ts test/text-properties.test.ts test/asked.test.ts` → 44 pass（terms() の出力は変わらない）。"src retry backoff jitter" は hit 0・weaker 2（src/users.ts と src/x.ts の記録）
 
-- [ ] T03: search の path を repoPath() で正規化し、使えない path をエラーにする
+- [x] T03: search の path を repoPath() で正規化し、使えない path をエラーにする
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -53,6 +53,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern="path" test/search.test.ts` → `./src/x.ts` で何も見つからず、絶対パスと空文字がエラーにならず落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="path" test/search.test.ts` → pass（`./src/x.ts` で `src/x.ts` の記録が見つかる。絶対パス・`..`・空白だけ・空文字が理由入りのエラー。検索語が無い質問でも path を先に確かめる）
   - コミット: `fix(search): normalize the path filter and refuse paths outside the repository (T03)`
+  - 結果: red: `node --test --test-name-pattern="path filter" test/search.test.ts` → fail（`./src/x.ts` で `[]`）。searchUnits が検索語より先に repoPath() で正規化し、null なら `refused` を返し、MCP の search がそれを `isError` で返すようにした後 → pass（`./src/x.ts` で記録が見つかる。`/repo/src/x.ts`・`../src/x.ts`・`src\x.ts`・空文字・空白だけが refused、検索語の無い "the" でも絶対パスが refused）
+  - 結果: `node --test test/search.test.ts test/asked.test.ts` → 23 pass。`bun run check` → exit 0（PATH_REFUSED の export を knip が未使用と指摘したので外した）
 
 ## P2: 単語分割の確かめと MCP の引数
 

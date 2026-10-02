@@ -138,7 +138,12 @@ server.registerTool(
         .array(z.enum(LIFECYCLES))
         .optional()
         .describe("Only these states (default: all, active first)"),
-      path: z.string().max(500).optional().describe("Only records anchored to this repository-relative path"),
+      path: z
+        .string()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Only records anchored to this repository-relative path"),
       sources: z.boolean().optional().describe("Search captured sources instead of records"),
       asked: z
         .boolean()
@@ -207,6 +212,7 @@ server.registerTool(
         path: a.path,
         limit,
       });
+      if (r.refused) return text(`Nothing was searched: ${r.refused}`, true);
       if (!r.hits.length)
         return text(
           `No record ${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out. ` +

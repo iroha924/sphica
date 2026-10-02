@@ -851,3 +851,32 @@ test("search drops a folded question word and matches a plural identifier whole,
     await db.done();
   }
 });
+
+test("search path filter takes ./ as anchors do and refuses a path that is not repository-relative", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Cache covers on disk." });
+    await save(db, p, {
+      units: [
+        decision("covers", a, "Cache covers on disk.", {
+          anchors: [{ path: "src/x.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const search = (question: string, path: string) =>
+      searchUnits(db.reader, p, { question, limit: 10, path });
+    assert.deepEqual(
+      (await search("cache covers", "./src/x.ts")).hits.map((h) => h.key),
+      ["trace:ext-s1/covers"],
+    );
+    for (const bad of ["/repo/src/x.ts", "../src/x.ts", "src\\x.ts", "", "   "]) {
+      const r = await search("cache covers", bad);
+      assert.deepEqual([r.hits.length, typeof r.refused], [0, "string"], bad);
+    }
+    // Checked before the question's words, so a question with none still hears about the path
+    assert.equal(typeof (await search("the", "/abs")).refused, "string");
+  } finally {
+    await db.done();
+  }
+});

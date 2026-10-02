@@ -4,6 +4,7 @@
 import { sql } from "kysely";
 import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
+import { repoPath } from "./record.ts";
 import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
@@ -44,12 +45,26 @@ export type UnitQuery = {
 
 const strong = (matched: number, of: number) => matched * 2 > of;
 
+const PATH_REFUSED =
+  "path must be relative to the repository root, such as src/x.ts: absolute paths, .., backslashes, and empty parts are refused";
+
 export async function searchUnits(
   db: Reads,
   projectId: number,
   q: UnitQuery,
-): Promise<{ hits: UnitHit[]; weaker: number; terms: string[]; stopped: boolean; read: number }> {
+): Promise<{
+  hits: UnitHit[];
+  weaker: number;
+  terms: string[];
+  stopped: boolean;
+  read: number;
+  refused?: string;
+}> {
   const wanted = queryTerms(q.question);
+  // Anchors are stored by these rules, so a path written another way would match nothing and look like no record
+  const path = q.path === undefined ? undefined : repoPath(q.path);
+  if (path === null)
+    return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0, refused: PATH_REFUSED };
   const match = ftsQuery(q.question);
   if (!match) return { hits: [], weaker: 0, terms: wanted, stopped: false, read: 0 };
   // cross join fixes the order: the index's matches drive, instead of every row of the project running MATCH once (seconds on large projects)
@@ -67,13 +82,13 @@ export async function searchUnits(
     .where("u.extraction", "=", "supported");
   if (q.kinds?.length) query = query.where("u.kind", "in", q.kinds);
   if (q.lifecycles?.length) query = query.where("u.lifecycle", "in", q.lifecycles);
-  if (q.path)
+  if (path)
     query = query.where(({ exists, selectFrom }) =>
       exists(
         selectFrom("unit_anchor as a")
           .select("a.id")
           .whereRef("a.unit_id", "=", "u.id")
-          .where("a.path", "=", q.path ?? "")
+          .where("a.path", "=", path)
           .where("a.retired_at", "is", null),
       ),
     );
