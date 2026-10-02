@@ -97,6 +97,8 @@ type SpooledV1 =
 /** A record read from the queue in the current shape, or null when it is a v:1 record with nothing to keep (a read file). */
 export function current(raw: unknown): Spooled | null {
   const r = raw as { v?: number } & Record<string, unknown>;
+  // The send looks the project up by this key: a record without one is set aside instead of failing its whole batch
+  if (typeof r.project !== "string") throw new Error("queue record without a project key");
   if (r.v === 2) return raw as Spooled;
   if (r.v !== 1) throw new Error(`unknown queue record version ${String(r.v)}`);
   const old = raw as SpooledV1 &

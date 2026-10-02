@@ -88,6 +88,17 @@ spool の記録が、マイグレーションの前後どちらでも正しい p
   - 結果: red: `node --test --test-name-pattern="empty path" test/migrate.test.ts` → `CHECK constraint failed: name <> ''`、revision 7 のまま
   - 結果: `cd server && node --test test/migrate.test.ts` → 40 pass
 
+- [x] T08: spool の記録の project が文字列でなければ読み込みで弾き、その 1 件だけを rejected/ へ移す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（送信が normalizeKey で project を引く）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="without a project key" test/capture.test.ts` → `TypeError: Cannot read properties of null (reading 'startsWith')` で送信全体が止まる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass（project が null の記録は rejected/ へ、同じ送信の正常な記録は送られる）
+  - コミット: `fix(capture): set aside a queued record without a project key (T08)`
+  - 結果: red: `node --test --test-name-pattern="without a project key" test/capture.test.ts` → `TypeError: Cannot read properties of null (reading 'startsWith')`
+  - 結果: `cd server && node --test test/capture.test.ts` → 36 pass
+
 ## P3: リリースの準備
 
 npm と 3 つの manifest が 0.6.21 にそろう。
@@ -110,3 +121,4 @@ npm と 3 つの manifest が 0.6.21 にそろう。
 - 2026-10-02 / T03 / Codex のタスクレビュー（41bc271f）は指摘なし。sandbox で一時ディレクトリを作れずテストは Codex 側で未実行 / 同じテストを手元で流し pass を確認済み
 
 - 2026-10-02 / T02 / Codex のタスクレビュー（73f85f0d）で F1（P2）: schema が受け付ける `git:HOST/` の key で 0008.sql の name が空になり CHECK で落ちる。手元で再現 / 採る。T07 を足して直した
+- 2026-10-02 / T04 / Codex のタスクレビュー（2075dc92）で F1（P2）: project が null の spool 記録で normalizeKey が TypeError を投げ、同じ送信の正常な記録も送れない。手元で再現 / 採る。T08 を足して直した

@@ -1167,3 +1167,24 @@ test("a send looks its projects up inside the write's transaction (legacy key)",
     await db.done();
   }
 });
+
+// A record without a project key is set aside alone; it never keeps the valid records of its batch from being sent
+test("a queued record without a project key goes to rejected/ and the rest are sent", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    queue(unregisteredDir(), Date.now() - 60_000, 1, {
+      ...owned(registered, 1),
+      project: null,
+    } as unknown as Spooled);
+    queue(spoolDir(), Date.now(), 2, owned(registered, 2));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1);
+    assert.equal(left(rejectedDir()), 1);
+    assert.equal(left(unregisteredDir()), 0);
+  } finally {
+    fs.rmSync(rejectedDir(), { recursive: true, force: true });
+    await db.done();
+  }
+});
