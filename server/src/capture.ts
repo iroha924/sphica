@@ -377,9 +377,8 @@ function newestTurn(starts: Start[] | null): string | null {
   return at.length === 1 ? (at[0]?.turn ?? null) : null;
 }
 
-function writeStart(dir: string, s: Start): void {
+function writeStart(dir: string, s: Start, file = startFile(dir, s.turn)): void {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = startFile(dir, s.turn);
   const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.tmp`);
   fs.writeFileSync(tmp, JSON.stringify(s), { mode: 0o600 });
   fs.renameSync(tmp, file);
@@ -423,19 +422,39 @@ function stopTurn(dir: string, turn: string): void {
   if (own?.running) writeStart(dir, { ...own, running: false });
 }
 
-/** Drops the starting points of sessions not seen for HOLD_DAYS (one file per session would otherwise pile up). */
+/**
+ * Drops starting points older than HOLD_DAYS. The highest-numbered start of a session is kept as a small marker instead: removing it
+ * while a turn is being numbered from it would let the next turn take a lower number than that one.
+ */
 function pruneBaselines(): void {
   const cutoff = Date.now() - HOLD_DAYS * 24 * 60 * 60 * 1000;
-  let files: string[];
+  const stale = (file: string) =>
+    (fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) < cutoff;
+  let names: string[];
   try {
-    files = fs.readdirSync(baselineDir());
+    names = fs.readdirSync(baselineDir());
   } catch {
     return; // not there yet
   }
-  for (const f of files) {
-    const file = path.join(baselineDir(), f);
-    const st = fs.statSync(file, { throwIfNoEntry: false });
-    if (st?.isFile() && st.mtimeMs < cutoff) fs.rmSync(file, { force: true });
+  for (const name of names) {
+    const dir = path.join(baselineDir(), name);
+    // A single file per session is an older layout no turn reads
+    if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+      fs.rmSync(dir, { force: true });
+      continue;
+    }
+    const files = fs.readdirSync(dir).map((f) => ({
+      file: path.join(dir, f),
+      start: f.startsWith(".") ? null : readStart(path.join(dir, f)),
+    }));
+    const top = Math.max(0, ...files.map((f) => f.start?.seq ?? 0));
+    for (const { file, start } of files) {
+      if (!stale(file)) continue;
+      if (start && start.seq === top) {
+        if (start.running || start.entries || start.head)
+          writeStart(dir, { ...start, head: null, entries: null, running: false }, file);
+      } else fs.rmSync(file, { force: true });
+    }
   }
 }
 

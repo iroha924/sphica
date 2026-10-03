@@ -32,13 +32,14 @@ base: main
   - コミット: `fix(capture): keep a working-tree starting point per turn and record status edits only for the current turn (T01)`
   - 結果: `bun run release:plan -- --base 85d09b55` → `plugin`、4 つの manifest を 0.6.28 にした。red 実測（直す前の capture.ts）: 4 件 fail（Claude Code と Codex の t2 に `agent-a.ts` `owner-b.ts`、compact で `before.ts` が出ない、遅れた Stop(t1) に `t1:t2-only.ts`）。直した後 `node --test test/capture.test.ts` → 49 pass / 0 fail（turn boundary 10 件）。消せない起点は削除の操作が無くなったので、遅れた Stop の件で代える。`bun run typecheck` エラーなし、`bun run verify` → exit 0（受け入れケース 103 pass）
 
-- [ ] T02: prune を、セッションのディレクトリごとに seq が最大のファイルを印にして残す形にする
+- [x] T02: prune を、セッションのディレクトリごとに seq が最大のファイルを印にして残す形にする
   - 種別: 変更
   - 計画: S1
   - 依存: T01（ターンごとのファイルの形が要る）
   - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="prune" test/capture.test.ts` → pass。番号を振った後・保存の前に prune が走る順（C16）で付け違えない、期限切れの最大 seq のファイルが印になり番号が下がらない、ほかの古いファイルと旧形式の 1 ファイルが消える、読めない古いファイルが消える
   - コミット: `fix(capture): keep the highest-numbered starting point when pruning so numbers never go down (T02)`
+  - 結果: `node --test --test-name-pattern="prune" test/capture.test.ts` → pass（t1 が番号を振った後・保存の前に prune、最大 seq の old2 が印になり、t2 と同点で t1 に `t2-only.ts` が付かない。期限切れの old1・読めないファイル・tmp・旧形式の 1 ファイルが消え、新しいターンが保存された後の prune で old2 も消える）。`node --test test/capture.test.ts` → 50 pass / 0 fail、`bun run typecheck` エラーなし
 
 - [ ] T03: Claude Code の capture の UserPromptSubmit と Stop を同期の hook にする
   - 種別: 変更

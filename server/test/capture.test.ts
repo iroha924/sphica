@@ -13,6 +13,7 @@ import {
   current,
   fit,
   flush,
+  HOLD_DAYS,
   isOwnerTurn,
   MAX_MESSAGE,
   onHook,
@@ -748,6 +749,47 @@ test("turn boundary: session start writes no start and passes over session direc
     fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).running),
     [true],
   );
+});
+
+test("prune keeps each session's highest-numbered start as a marker, so a turn numbered from it never ties lower", () => {
+  const { repo, edit } = boundaryRepo("prune");
+  const dir = turnDir("claude-code", "pr");
+  const old = new Date(Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000);
+  const age = (f: string) => fs.utimesSync(path.join(dir, f), old, old);
+  const write = (f: string, body: unknown) =>
+    fs.writeFileSync(path.join(dir, f), typeof body === "string" ? body : JSON.stringify(body));
+  const sessionStart = () =>
+    onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
+  fs.mkdirSync(dir, { recursive: true });
+  write("old1.json", { head: null, entries: {}, running: true, turn: "o1", seq: 1 });
+  write("old2.json", { head: "abc", entries: { "a.ts": "x" }, running: true, turn: "o2", seq: 2 });
+  write("fresh.json", { head: null, entries: null, running: false, turn: "o0", seq: 0 });
+  // t1 numbers itself from the old starts, and the prune runs before t1 saves
+  const saveT1 = openTurn(dir, "t1", repo);
+  write("broken.json", "{");
+  write(".half.tmp", "{");
+  for (const f of ["old1.json", "old2.json", "broken.json", ".half.tmp"]) age(f);
+  const older = path.join(path.dirname(dir), "0123456789abcdef.json");
+  fs.writeFileSync(older, "{}");
+  sessionStart();
+  assert.deepEqual(fs.readdirSync(dir).sort(), ["fresh.json", "old2.json"]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "old2.json"), "utf8")), {
+    head: null,
+    entries: null,
+    running: false,
+    turn: "o2",
+    seq: 2,
+  });
+  assert.equal(fs.existsSync(older), false);
+  openTurn(dir, "t2", repo)?.();
+  edit("t2-only.ts");
+  saveT1?.();
+  assert.deepEqual(closeTurn(dir, "t1", repo)?.(), []);
+  // Once newer turns are saved, the old marker is no longer the highest and goes
+  age("old2.json");
+  sessionStart();
+  assert.equal(fs.existsSync(path.join(dir, "old2.json")), false);
+  assert.equal(fs.readdirSync(dir).filter((f) => !f.startsWith(".")).length, 3);
 });
 
 test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {
