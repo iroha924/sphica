@@ -182,9 +182,14 @@ function cwdOf(pid: number): { dir: string; replaced: boolean } | null {
   }
 }
 
+/** The first Claude Code that runs exec-form hooks (`args`). */
+const CLAUDE_CODE_MIN = "2.1.139";
+
 const CACHED = /\/plugins\/cache\/[^/]+\/sphica\/[^/]+$/;
 
 export type Install = { version: string | null; packageVersion?: string | null; root: string };
+/** Something doctor could not inspect, and why. Kept apart from "not installed". */
+type Unknown = { unknown: string };
 type Running = {
   pid: number;
   started: Date;
@@ -200,19 +205,50 @@ export type Seen = {
   cli: Install;
   /**
    * The CLI installed with `npm i -g`. It can stay old apart from the running one (it updates separately from the plugin cache).
-   * null when not installed or when npm could not be run.
+   * null when not installed.
    */
-  global: Install | null;
-  /** null when not installed; "unknown" when the claude command is unavailable and nothing could be observed. */
-  claude: Install | null | "unknown";
+  global: Install | null | Unknown;
+  /** null when not installed. */
+  claude: Install | null | Unknown;
+  /** The installed Claude Code itself (`claude --version`); absent when it could not be read. */
+  claudeVersion?: string;
   codex: Install[];
   codexCache: string;
-  /** null when ps is unavailable and nothing could be observed. */
-  running: Running[] | null;
+  running: Running[] | Unknown;
 };
 
+const unknown = (i: unknown): i is Unknown => typeof i === "object" && i !== null && "unknown" in i;
+
+/**
+ * npm's own CLI script next to the running node, started through process.execPath: on Windows `npm` is a .cmd shim, which
+ * execFile cannot start. null when node's layout has none there.
+ */
+export function npmCli(execPath: string, platform: NodeJS.Platform): string | null {
+  const dir = path.dirname(execPath);
+  const at =
+    platform === "win32"
+      ? path.join(dir, "node_modules", "npm", "bin", "npm-cli.js")
+      : path.resolve(dir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  return fs.existsSync(at) ? at : null;
+}
+
+/** The first `<name>.exe` on a Windows PATH. A .cmd of the same name is skipped: execFile cannot start it. */
+export function findExe(name: string, pathEnv: string, platform: NodeJS.Platform): string | null {
+  const sep = platform === "win32" ? ";" : path.delimiter;
+  for (const dir of pathEnv.split(sep).filter(Boolean)) {
+    const at = path.join(dir, `${name}.exe`);
+    if (fs.existsSync(at)) return at;
+  }
+  return null;
+}
+
 /** Observations that run external commands live here. report() decides; tests build Seen and pass it. */
-export function observe(cwdRoot: string): Seen {
+export function observe(
+  cwdRoot: string,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  execPath: string = process.execPath,
+): Seen {
   const install = (root: string): Install => ({
     version: versionAt(root),
     packageVersion: packageVersionAt(root),
@@ -226,27 +262,43 @@ export function observe(cwdRoot: string): Seen {
       .find((r) => r.version !== null) ?? null;
 
   let claude: Seen["claude"];
-  try {
-    const list = JSON.parse(
-      execFileSync("claude", ["plugin", "list", "--json"], {
+  const claudeExe = platform === "win32" ? findExe("claude", env.PATH ?? env.Path ?? "", platform) : "claude";
+  if (!claudeExe) claude = { unknown: "no claude.exe on PATH (an npm install puts claude.cmd there)" };
+  else
+    try {
+      const list = JSON.parse(
+        execFileSync(claudeExe, ["plugin", "list", "--json"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 30_000,
+        }),
+      ) as { id: string; version?: string; installPath?: string; scope?: string }[];
+      // The same id appears per scope. Only the user install is checked, matching the README install steps and `claude plugin update`
+      // below (user scope by default). project / local installs only affect sessions elsewhere.
+      const m = list.find((p) => p.id.startsWith("sphica@") && p.scope === "user");
+      claude = m?.installPath ? { version: m.version ?? null, root: m.installPath } : null;
+    } catch {
+      claude = { unknown: "claude plugin list --json failed" };
+    }
+
+  let claudeVersion: string | undefined;
+  if (claudeExe)
+    try {
+      const out = execFileSync(claudeExe, ["--version"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
-        timeout: 30_000,
-      }),
-    ) as { id: string; version?: string; installPath?: string; scope?: string }[];
-    // The same id appears per scope. Only the user install is checked, matching the README install steps and `claude plugin update`
-    // below (user scope by default). project / local installs only affect sessions elsewhere.
-    const m = list.find((p) => p.id.startsWith("sphica@") && p.scope === "user");
-    claude = m?.installPath ? { version: m.version ?? null, root: m.installPath } : null;
-  } catch {
-    claude = "unknown";
-  }
+        timeout: 10_000,
+      });
+      claudeVersion = /^\s*(\d+\.\d+\.\d+)/.exec(out)?.[1];
+    } catch {
+      // Not shown: the plugin row above already says whether claude could be inspected
+    }
 
   // `codex plugin list --json` takes 7 seconds and cannot tell whether the version comes from the cache or the source.
   // Read the cache location directly.
   // lsof returns paths with symlinks resolved, so the side matched with the running MCP resolves them too.
   // Resolve on the CODEX_HOME side so it works even when the whole cache is gone.
-  let codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
+  let codexHome = env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
   try {
     codexHome = fs.realpathSync(codexHome);
   } catch {
@@ -261,51 +313,62 @@ export function observe(cwdRoot: string): Seen {
   }
 
   let running: Seen["running"];
-  try {
-    const out = execFileSync("ps", ["-U", String(process.getuid?.()), "-o", "pid=,lstart=,args="], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, LC_ALL: "C" },
-      timeout: 10_000,
-    });
-    running = parsePs(out).flatMap((p): Running[] => {
-      const cwd = path.isAbsolute(p.script) ? { dir: "/", replaced: false } : cwdOf(p.pid);
-      if (!cwd) return [{ pid: p.pid, started: p.started, root: null, version: null }];
-      const root = path.dirname(path.dirname(path.resolve(cwd.dir, p.script)));
-      const cached = CACHED.test(root);
-      const now = versionAt(root);
-      // Skip dist/mcp.js of other plugins. A removed cache has no readable manifest, so it is recognized by its path.
-      if (now === null && !cached) return [];
-      // Shows the version at start. For removed or recreated caches, the directory name is that version. The working tree
-      // changes after start, so when the bundle or manifest is newer than the start time, it cannot claim the current version.
-      let version = cwd.replaced || now === null ? (cached ? path.basename(root) : null) : now;
-      if (!cached && version !== null) {
-        try {
-          const touched = Math.max(
-            ...[path.join("dist", "mcp.js"), MANIFEST].map((f) => fs.statSync(path.join(root, f)).mtimeMs),
-          );
-          if (touched > p.started.getTime()) version = null;
-        } catch {
-          version = null;
+  if (platform === "win32") running = { unknown: "not checked on Windows" };
+  else
+    try {
+      const out = execFileSync("ps", ["-U", String(process.getuid?.()), "-o", "pid=,lstart=,args="], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        env: { ...process.env, LC_ALL: "C" },
+        timeout: 10_000,
+      });
+      running = parsePs(out).flatMap((p): Running[] => {
+        const cwd = path.isAbsolute(p.script) ? { dir: "/", replaced: false } : cwdOf(p.pid);
+        if (!cwd) return [{ pid: p.pid, started: p.started, root: null, version: null }];
+        const root = path.dirname(path.dirname(path.resolve(cwd.dir, p.script)));
+        const cached = CACHED.test(root);
+        const now = versionAt(root);
+        // Skip dist/mcp.js of other plugins. A removed cache has no readable manifest, so it is recognized by its path.
+        if (now === null && !cached) return [];
+        // Shows the version at start. For removed or recreated caches, the directory name is that version. The working tree
+        // changes after start, so when the bundle or manifest is newer than the start time, it cannot claim the current version.
+        let version = cwd.replaced || now === null ? (cached ? path.basename(root) : null) : now;
+        if (!cached && version !== null) {
+          try {
+            const touched = Math.max(
+              ...[path.join("dist", "mcp.js"), MANIFEST].map((f) => fs.statSync(path.join(root, f)).mtimeMs),
+            );
+            if (touched > p.started.getTime()) version = null;
+          } catch {
+            version = null;
+          }
         }
-      }
-      return [{ pid: p.pid, started: p.started, root, version, replaced: cwd.replaced }];
-    });
-  } catch {
-    running = null;
-  }
+        return [{ pid: p.pid, started: p.started, root, version, replaced: cwd.replaced }];
+      });
+    } catch {
+      running = { unknown: "ps failed" };
+    }
 
   // **This is a separate path from the plugin cache.** `claude plugin update` does not update it, and on the day the database
   // revision goes up, only the old CLI fails with "expects revision N".
-  let global: Install | null = null;
-  try {
-    const at = path.join(execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(), "sphica");
-    if (fs.existsSync(at)) global = install(at);
-  } catch {
-    global = null;
-  }
+  let global: Seen["global"] = null;
+  const cli = npmCli(execPath, platform);
+  if (!cli && platform === "win32") global = { unknown: "no npm CLI next to node" };
+  else
+    try {
+      const [cmd, args] = cli ? [execPath, [cli, "root", "-g"]] : ["npm", ["root", "-g"]];
+      const out = execFileSync(cmd, args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+      });
+      const at = path.join(out.trim(), "sphica");
+      if (fs.existsSync(at)) global = install(at);
+    } catch {
+      global = { unknown: "npm root -g failed" };
+    }
 
-  return { repository, cli: install(ROOT), global, claude, codex, codexCache, running };
+  return { repository, cli: install(ROOT), global, claude, claudeVersion, codex, codexCache, running };
 }
 
 function safeDirs(dir: string): string[] {
@@ -349,14 +412,19 @@ const RELOAD = { claude: "/reload-plugins or a new session", codex: "reopening C
  * CLI is never the baseline. Using the cached CLI on an old session's PATH as the baseline would call
  * the newer one "old".
  */
-export function report(s: Seen, now = new Date()): { lines: string[]; issues: string[]; updates: Update[] } {
+export function report(
+  s: Seen,
+  now = new Date(),
+): { lines: string[]; issues: string[]; failures: string[]; updates: Update[] } {
   const lines: string[] = [];
   const issues: string[] = [];
+  const failures: string[] = [];
   const todo = new Set<keyof typeof UPDATE>();
   const home = os.homedir();
   const short = (p: string) => (p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
   const say = (m: Mark, label: string, text: string) => {
     if (m === "warn" || m === "fail") issues.push(label);
+    if (m === "fail") failures.push(label);
     lines.push(`  ${mark(m)} ${pad(label, 19)}${text}`);
   };
   // The reason goes on the next line aligned with the path column, not after the path (with a long path it wraps off the right edge)
@@ -392,7 +460,9 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
   lines.push("npm package versions");
   if (s.repository) row("repository", packageInstall(s.repository));
   row("Running CLI", packageInstall(s.cli), packageAgainst(s.cli).note);
-  if (s.global && path.resolve(s.global.root) !== path.resolve(s.cli.root)) {
+  if (unknown(s.global)) say("none", "npm i -g CLI", `unknown (${s.global.unknown})`);
+  else if (s.global === null) say("none", "npm i -g CLI", "not installed");
+  else if (s.global && path.resolve(s.global.root) !== path.resolve(s.cli.root)) {
     const { note, update } = packageAgainst(s.global);
     if (update) todo.add("global");
     row("npm i -g CLI", packageInstall(s.global), note);
@@ -441,14 +511,23 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
 
   row("Plugin in this CLI", s.cli, against(s.cli).note);
 
-  if (s.claude === "unknown")
-    say("none", "Claude Code", "unknown (claude plugin list --json is unavailable)");
+  if (unknown(s.claude)) say("none", "Claude Code", `unknown (${s.claude.unknown})`);
   else if (s.claude === null) say("none", "Claude Code", "not installed");
   else {
     const { note, update } = against(s.claude);
     if (update) todo.add("claude");
     row("Claude Code", s.claude, note);
   }
+
+  // The hooks are exec form (args), which Claude Code before this version skips without a word
+  if (s.claudeVersion)
+    say(
+      compareVersions(s.claudeVersion, CLAUDE_CODE_MIN) < 0 ? "fail" : "ok",
+      "Claude Code app",
+      compareVersions(s.claudeVersion, CLAUDE_CODE_MIN) < 0
+        ? `${s.claudeVersion}. Sphica's hooks need ${CLAUDE_CODE_MIN} or later and do not run on this version: update Claude Code`
+        : s.claudeVersion,
+    );
 
   if (s.codex.length === 0) say("none", "Codex", `not found (looked in ${short(s.codexCache)})`);
   for (const x of s.codex) {
@@ -463,15 +542,15 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
 
   // The minimum without a visible repository: the same version with different contents on the two hosts. It does not claim which is older.
   const x = s.codex.length === 1 ? s.codex[0] : undefined;
-  if (!base && s.claude && s.claude !== "unknown" && x && s.claude.version === x.version) {
+  if (!base && s.claude && !unknown(s.claude) && x && s.claude.version === x.version) {
     if (fs.existsSync(s.claude.root) && differingFiles(s.claude.root, x.root).length) {
       say("warn", "Claude Code and Codex", "same version, different contents");
     }
   }
 
-  if (s.running === null) say("none", "Running MCP", "unknown (ps is unavailable)");
+  if (unknown(s.running)) say("none", "Running MCP", `unknown (${s.running.unknown})`);
   else if (s.running.length === 0) say("none", "Running MCP", "none");
-  for (const r of s.running ?? []) {
+  for (const r of unknown(s.running) ? [] : s.running) {
     const when = r.started
       .toLocaleString("sv-SE")
       .slice(r.started.toDateString() === now.toDateString() ? 11 : 5, 16);
@@ -494,7 +573,7 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
       note =
         "reads this location directly, not a distributed cache (a directory marketplace or --plugin-dir)";
     } else if (state === "orphaned") note = `a version Claude Code replaced on update. Fix with ${again}`;
-    else if (installed && installed !== "unknown" && installed.version && r.version) {
+    else if (installed && !unknown(installed) && installed.version && r.version) {
       if (compareVersions(r.version, installed.version) < 0)
         note = `older than the installed ${installed.version}. Fix with ${again}`;
     }
@@ -508,5 +587,5 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
       ? { ...u, command: `npm i -g sphica@${packageBase.version}` }
       : { ...u };
   });
-  return { lines, issues, updates };
+  return { lines, issues, failures, updates };
 }

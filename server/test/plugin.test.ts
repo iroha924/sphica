@@ -13,7 +13,9 @@ import { sessionId } from "../src/knowledge.ts";
 import {
   compareVersions,
   differingFiles,
+  findExe,
   type Install,
+  npmCli,
   observe,
   packageVersionAt,
   parsePs,
@@ -70,6 +72,24 @@ test("an outdated npm i -g CLI shows in both the row and the update steps", () =
     updates.find((u) => u.who === "npm CLI"),
     { who: "npm CLI", command: "npm i -g sphica@0.33.12", after: null },
   );
+});
+
+// The hooks run in exec form (args), which Claude Code before 2.1.139 skips without a word: capture and delivery would stop
+test("fails a Claude Code older than 2.1.139, whose hooks would never run", () => {
+  const old = report(seen({ claudeVersion: "2.1.138" }));
+  const out = stripVTControlCharacters(old.lines.join("\n"));
+  assert.match(out, /✗ Claude Code app\s+2\.1\.138[^\n]*2\.1\.139 or later/);
+  assert.ok(old.issues.includes("Claude Code app"), JSON.stringify(old.issues));
+  assert.deepEqual(old.failures, ["Claude Code app"], "a failure, so doctor exits 1");
+  const now = report(seen({ claudeVersion: "2.1.288" }));
+  assert.match(stripVTControlCharacters(now.lines.join("\n")), /✓ Claude Code app\s+2\.1\.288/);
+  assert.ok(!now.issues.includes("Claude Code app"));
+  assert.deepEqual(now.failures, []);
+});
+
+test("says when the npm i -g CLI is not installed", () => {
+  const out = stripVTControlCharacters(report(seen({ global: null })).lines.join("\n"));
+  assert.match(out, /○ npm i -g CLI\s+not installed/);
 });
 
 test("no npm i -g row when it is the same install as the running CLI", () => {
@@ -305,7 +325,10 @@ test("identifies the running MCP from its launch source and detects a cache recr
   const child = spawn("node", ["./dist/mcp.js"], { cwd: root, stdio: "ignore" });
   try {
     await new Promise((r) => setTimeout(r, 500));
-    const mine = () => observe(tmp).running?.find((r) => r.pid === child.pid);
+    const mine = () => {
+      const running = observe(tmp).running;
+      return Array.isArray(running) ? running.find((r) => r.pid === child.pid) : undefined;
+    };
     assert.equal(mine()?.version, "0.0.1");
     assert.equal(mine()?.replaced, false);
     // Reinstalling the same version makes Codex recreate the same path. The process still holds the deleted old directory.
@@ -330,14 +353,57 @@ test("reports a missing install even without a repository", () => {
 });
 
 test("reports unobservable things as unknown, not missing", () => {
-  const r = report(seen({ claude: "unknown", running: null }));
+  const r = report(
+    seen({
+      global: { unknown: "npm root -g failed" },
+      claude: { unknown: "claude plugin list --json failed" },
+      running: { unknown: "ps failed" },
+    }),
+  );
   // Running in-process on a terminal colors the markers. Strip them before comparing.
   const out = stripVTControlCharacters(r.lines.join("\n"));
-  assert.match(out, /○ Claude Code\s+unknown/);
-  assert.match(out, /○ Running MCP\s+unknown/);
+  assert.match(out, /○ npm i -g CLI\s+unknown \(npm root -g failed\)/);
+  assert.match(out, /○ Claude Code\s+unknown \(claude plugin list --json failed\)/);
+  assert.match(out, /○ Running MCP\s+unknown \(ps failed\)/);
   assert.match(out, /○ repository\s+not visible/);
   assert.match(out, /○ Codex\s+not found/);
   assert.deepEqual(r.issues, [], "unobservable items are not counted as fixes");
+});
+
+// npm and a claude installed by npm are .cmd shims on Windows, which execFile cannot start, and Windows has no ps or lsof
+test("on Windows, doctor says what it could not inspect instead of starting npm, claude, or ps by name", () => {
+  const empty = fs.mkdtempSync(path.join(tmp, "path-"));
+  fs.writeFileSync(path.join(empty, "claude.cmd"), "");
+  // A node with no npm beside it, so the result does not depend on how the machine running the test installed node
+  const node = path.join(fs.mkdtempSync(path.join(tmp, "bare-node-")), "node.exe");
+  const s = observe(tmp, "win32", { PATH: empty, PATHEXT: ".COM;.EXE;.BAT;.CMD" }, node);
+  assert.deepEqual(s.running, { unknown: "not checked on Windows" });
+  assert.deepEqual(s.claude, { unknown: "no claude.exe on PATH (an npm install puts claude.cmd there)" });
+  assert.deepEqual(s.global, { unknown: "no npm CLI next to node" });
+  const out = stripVTControlCharacters(report(s).lines.join("\n"));
+  assert.match(out, /○ npm i -g CLI\s+unknown \(no npm CLI next to node\)/);
+  assert.match(out, /○ Claude Code\s+unknown \(no claude\.exe on PATH/);
+  assert.match(out, /○ Running MCP\s+unknown \(not checked on Windows\)/);
+});
+
+test("doctor finds the npm CLI next to node and claude.exe on a Windows PATH", () => {
+  const bin = fs.mkdtempSync(path.join(tmp, "node-"));
+  const win = path.join(bin, "node_modules", "npm", "bin", "npm-cli.js");
+  const posix = path.join(bin, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  assert.equal(npmCli(path.join(bin, "node.exe"), "win32"), null);
+  fs.mkdirSync(path.dirname(win), { recursive: true });
+  fs.writeFileSync(win, "");
+  assert.equal(npmCli(path.join(bin, "node.exe"), "win32"), win);
+  assert.equal(npmCli(path.join(bin, "node"), "darwin"), null);
+  fs.mkdirSync(path.dirname(posix), { recursive: true });
+  fs.writeFileSync(posix, "");
+  assert.equal(npmCli(path.join(bin, "node"), "darwin"), path.resolve(posix));
+  const shims = fs.mkdtempSync(path.join(tmp, "a-"));
+  const exes = fs.mkdtempSync(path.join(tmp, "b-"));
+  fs.writeFileSync(path.join(shims, "claude.cmd"), "");
+  fs.writeFileSync(path.join(exes, "claude.exe"), "");
+  assert.equal(findExe("claude", `${shims};${exes}`, "win32"), path.join(exes, "claude.exe"));
+  assert.equal(findExe("claude", shims, "win32"), null);
 });
 
 test("sphica --version prints the npm package version", () => {

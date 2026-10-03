@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { checkBundles } from "./lib/bundle-budget.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "plugin", "dist");
@@ -18,8 +19,34 @@ const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "inherit"
 // so mangled class names fall back to stricli's default text.
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
-for (const entry of ["mcp", "mcp-record", "capture", "deliver", "cli"]) {
-  run("bun", ["build", `server/src/${entry}.ts`, "--target=node", "--outfile", `plugin/dist/${entry}.js`]);
+// Metafiles stay outside plugin/ so they never ship.
+const build = path.join(root, ".build");
+fs.rmSync(build, { recursive: true, force: true });
+fs.mkdirSync(build, { recursive: true });
+const ENTRIES = ["mcp", "mcp-record", "capture", "deliver", "cli"];
+for (const entry of ENTRIES) {
+  run("bun", [
+    "build",
+    `server/src/${entry}.ts`,
+    "--target=node",
+    "--outfile",
+    `plugin/dist/${entry}.js`,
+    `--metafile=${path.join(build, `meta-${entry}.json`)}`,
+  ]);
+}
+const metas = Object.fromEntries(
+  ENTRIES.map((entry) => {
+    try {
+      return [entry, JSON.parse(fs.readFileSync(path.join(build, `meta-${entry}.json`), "utf8"))];
+    } catch {
+      return [entry, null];
+    }
+  }),
+);
+const over = checkBundles(metas);
+if (over.length) {
+  console.error(`bundle check failed:\n${over.map((p) => `- ${p}`).join("\n")}`);
+  process.exit(1);
 }
 
 // The plugin cache has no repository, so ship the schema (and migrations, if any).

@@ -603,6 +603,59 @@ test("a Claude Code Bash command naming an anchored file delivers once, shared w
   }
 });
 
+// On Windows without Git Bash, Claude Code has no Bash tool: shell commands come through the PowerShell tool
+test("a Claude Code PowerShell command naming an anchored file delivers like Bash, shared with Read", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep the store a Map." });
+    await save(db, p, {
+      units: [
+        decided("map", m, "Keep the store a Map.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ],
+    });
+    const call = (session: string, tool: string, input: Record<string, unknown>) =>
+      deliver(
+        { hook_event_name: "PreToolUse", session_id: session, cwd: repo, tool_name: tool, tool_input: input },
+        "claude-code",
+        db.file,
+      );
+    const rows = (session: string) =>
+      db.owner
+        .prepare(
+          "select d.event, d.outcome from delivery d join session s on s.id = d.session_id where s.external_id = ? order by d.id",
+        )
+        .all(session)
+        .map((r) => `${r.event}:${r.outcome}`);
+    assert.equal(await call("p1", "PowerShell", { command: "Get-ChildItem -Recurse" }), "");
+    assert.deepEqual(rows("p1"), [], "a command naming nothing leaves no trace");
+    const named = await call("p1", "PowerShell", { command: "Get-Content .\\src\\db.ts" });
+    assert.match(named, /trace:ext-s1\/map /);
+    assert.match(named, /which this command names/);
+    assert.deepEqual(rows("p1"), ["pre_read:emitted"]);
+    assert.equal(
+      await call("p1", "Read", { file_path: path.join(repo, "src", "db.ts") }),
+      "",
+      "shown once per session",
+    );
+    assert.match(await call("p2", "PowerShell", { command: "type src\\db.ts" }), /trace:ext-s1\/map /);
+    assert.match(
+      await call("p3", "PowerShell", { command: `cat "${path.join(repo, "src", "db.ts")}"` }),
+      /trace:ext-s1\/map /,
+    );
+    // Read first, then PowerShell on the same file: the command does not repeat it
+    assert.match(
+      await call("p4", "Read", { file_path: path.join(repo, "src", "db.ts") }),
+      /trace:ext-s1\/map /,
+    );
+    assert.equal(await call("p4", "PowerShell", { command: "Get-Content src/db.ts" }), "");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("a read shows at most 5 records, and reads over a session at most 8, even when the text would fit", async () => {
   const db = tempDb();
   const repo = checkout();

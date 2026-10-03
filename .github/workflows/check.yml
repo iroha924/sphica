@@ -115,6 +115,9 @@ jobs:
           set -e
           bun run setup
           bun run bundle
+      # Prints how much a shell-form hook pays for starting PowerShell on each call; it never fails on the numbers
+      - name: Measure hook launch directly and through PowerShell
+        run: node scripts/measure-hook-launch.mjs
       - name: Does the shipped tarball start on Windows
         run: |
           set -e
@@ -147,3 +150,5 @@ jobs:
             | HOME="$home" USERPROFILE="$home" timeout 30 node "$out/package/dist/mcp.js" > mcp.out || true
           # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
           grep -q '"search"' mcp.out
+          # The packed hooks, launched as hooks/hooks.json defines them (shell form goes through PowerShell, as without Git Bash)
+          node ../scripts/check-hooks-live.mjs "$out/package"

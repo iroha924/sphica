@@ -5,7 +5,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/capture.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
+            ],
             "timeout": 10
           }
         ]
@@ -14,7 +17,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
             "timeout": 5
           }
         ]
@@ -25,7 +31,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
             "timeout": 5
           }
         ]
@@ -36,7 +45,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/capture.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
+            ],
             "async": true
           }
         ]
@@ -45,7 +57,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
             "timeout": 5
           }
         ]
@@ -57,7 +72,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/capture.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
+            ],
             "async": true
           }
         ]
@@ -68,7 +86,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/capture.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
+            ],
             "async": true
           }
         ]
@@ -76,11 +97,14 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
             "timeout": 5
           }
         ]
@@ -91,7 +115,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/deliver.js\"",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
             "timeout": 5
           }
         ]
