@@ -22,13 +22,14 @@ base: main
 
 スロットの DB・receipts・gold の印を run ごとの絶対パスで渡し、old と new を同じ fixture で組み立て、Claude をローカルで安全に回せる。
 
-- [ ] T01: スロットの DB・receipts・gold の印を env の絶対パスで渡せるようにする
+- [x] T01: スロットの DB・receipts・gold の印を env の絶対パスで渡せるようにする
   - 種別: 変更
   - 計画: S1
   - 依存: なし
-  - 変更: `server/evals/cloud/build.ts`, `server/test/eval-build.test.ts`
-  - 完了条件: `cd server && node --test test/eval-build.test.ts` → `SPHICA_DB` / `EVAL_RUN_DIR` があればそのパス、無ければ今の TMPDIR のパスを使うテストが pass
+  - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/slot-scripts.ts`, `server/test/eval-build.test.ts`
+  - 完了条件: `cd server && node --test test/eval-build.test.ts` → `EVAL_SPHICA_DB` / `EVAL_RUN_DIR` があればそのパス、無ければ今の TMPDIR のパスを使うテストが pass
   - コミット: `feat(evals): pass the slot database and receipts by absolute path (T01)`
+  - 結果: `node --test test/eval-build.test.ts` → pass 4, fail 0。`npx tsc --noEmit` → エラーなし
 
 - [ ] T02: build に `--dist` `--fixture` とタスクごとの run 数を足し、manifest に fixture のハッシュを残す
   - 種別: 追加
@@ -119,3 +120,5 @@ base: main
   - コミット: `docs(eval-loop): run Claude locally behind the canary and compare old and new builds (T11)`
 
 ## 記録
+- 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
+- 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
