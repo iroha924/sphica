@@ -19,7 +19,7 @@ import {
 } from "./record.ts";
 import {
   commitHeld,
-  kindOf,
+  listFilesIfGone,
   type Probe,
   type RepoFacts,
   refresh,
@@ -247,7 +247,7 @@ export function prepareGlean(root: string | null, raw: unknown, probe?: Probe): 
     if (op.op === "add_evidence" && op.file && !op.source) excerptOf(facts, op.file);
     const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
     const rel = pinned && repoPath(pinned.path);
-    if (rel) kindOf(facts, rel);
+    if (rel) listFilesIfGone(facts, rel);
     if (pinned?.symbol && rel && !symbolMasked(facts, rel, pinned.symbol))
       symbolAt(facts, rel, pinned.symbol);
     if (op.op === "anchor" && op.commit && rel) commitHeld(facts, op.commit, rel);

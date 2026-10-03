@@ -23,3 +23,17 @@ export function commitHolds(root: string, commit: string, rel: string): boolean 
     return false;
   }
 }
+
+/** The repository's tracked and untracked (not ignored) files, or null when git cannot list them. */
+export function repoFiles(root: string): string[] | null {
+  try {
+    const out = cleanGit(
+      root,
+      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+      32 * 1024 * 1024,
+    );
+    return [...new Set(out.toString("utf8").split("\0").filter(Boolean))];
+  } catch {
+    return null;
+  }
+}

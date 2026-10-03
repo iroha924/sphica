@@ -15,6 +15,8 @@ import {
 import {
   commitHeld,
   kindOf,
+  listFilesIfGone,
+  nearPaths,
   type Probe,
   type RepoFacts,
   refresh,
@@ -204,10 +206,12 @@ export function anchorProblem(
   if (!facts.root || a.held) return null;
   const kind = kindOf(facts, a.path);
   const fix = "fix it and check again, or keep it if you know it is right";
-  if (kind === "gone")
-    return a.role === "evidence" && a.observed
-      ? null
-      : `anchor path ${a.path} is not in the working tree; ${fix}`;
+  if (kind === "gone") {
+    if (a.role === "evidence" && a.observed) return null;
+    const near = nearPaths(facts, a.path);
+    const hint = near?.length ? ` (near: ${near.map((n) => JSON.stringify(n)).join(", ")})` : "";
+    return `anchor path ${a.path} is not in the working tree${hint}; ${fix}`;
+  }
   if (kind === "directory") return `anchor path ${a.path} is a directory; anchor a file`;
   if (kind === "file" && a.symbol && symbolMissing(facts, a.path, a.symbol))
     return `symbol ${JSON.stringify(head(a.symbol, 80))} is not found in ${a.path}; ${fix}`;
@@ -235,7 +239,7 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
   for (const a of parsed.data.units.flatMap((u) => u.anchors)) {
     const p = repoPath(a.path);
     if (!p) continue;
-    kindOf(facts, p);
+    listFilesIfGone(facts, p);
     if (a.symbol && !symbolMasked(facts, p, a.symbol)) symbolAt(facts, p, a.symbol);
     if (a.commit) commitHeld(facts, a.commit, p);
   }

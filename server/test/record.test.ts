@@ -1098,6 +1098,53 @@ test("anchor problem: a missing path, a directory, or a symbol not in the file i
   }
 });
 
+test("near paths: a missing anchor path is shown the files near it, the same file name first", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-near-")));
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    for (const rel of ["src/dates.ts", "lib/date.ts", "src/data.ts", "docs/readme.md", "src/new.ts"]) {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), "export {};\n");
+    }
+    execFileSync("git", ["-C", root, "add", "src/dates.ts", "lib/date.ts", "src/data.ts", "docs/readme.md"]);
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "日付はここで扱う。" });
+    const problem = async (t: Target, key: string, rel: string) => {
+      const { checked } = await save(db, t, {
+        units: [
+          {
+            key,
+            kind: "finding",
+            text: "日付はここで扱う",
+            evidence: [{ source: `s${m}`, quote: "日付はここで扱う。", role: "states" }],
+            anchors: [{ path: rel, role: "applies_to" }],
+          },
+        ],
+      });
+      return checked.problems.find((x) => x.includes("not in the working tree")) ?? "";
+    };
+    const t: Target = { ...target(p), root };
+    assert.match(
+      await problem(t, "date", "src/date.ts"),
+      /src\/date\.ts is not in the working tree \(near: "lib\/date\.ts", "src\/data\.ts", "src\/dates\.ts"\)/,
+    );
+    // An untracked file the session created is listed too
+    assert.match(await problem(t, "neww", "src/neww.ts"), /near: "src\/new\.ts"/);
+    assert.match(
+      await problem(t, "far", "zzz/qqqqqqqq.go"),
+      /zzz\/qqqqqqqq\.go is not in the working tree; fix/,
+    );
+
+    // git cannot list the files: the problem comes without suggestions
+    fs.rmSync(path.join(root, ".git"), { recursive: true, force: true });
+    assert.match(await problem(t, "nogit", "src/date.ts"), /src\/date\.ts is not in the working tree; fix/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an anchor path holding a NUL or other control character is refused", () => {
   assert.equal(repoPath("src/a.ts"), "src/a.ts");
   assert.equal(repoPath("x\0y"), null);

@@ -401,6 +401,10 @@ test("save: under the write lock files are only read again, and a file changed m
         calls.push({ fn: "kind", rel, locked: !lockFree(db.file) });
         return PROBE.kind(r, rel);
       },
+      files: (r) => {
+        calls.push({ fn: "files", locked: !lockFree(db.file) });
+        return PROBE.files(r);
+      },
     };
     const saveWith = async (sessionId: string) => {
       fs.writeFileSync(path.join(root, "a.ts"), "const tokenValue123abc = loadConfig();\n");
