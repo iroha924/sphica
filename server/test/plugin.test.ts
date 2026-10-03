@@ -80,9 +80,11 @@ test("fails a Claude Code older than 2.1.139, whose hooks would never run", () =
   const out = stripVTControlCharacters(old.lines.join("\n"));
   assert.match(out, /✗ Claude Code app\s+2\.1\.138[^\n]*2\.1\.139 or later/);
   assert.ok(old.issues.includes("Claude Code app"), JSON.stringify(old.issues));
+  assert.deepEqual(old.failures, ["Claude Code app"], "a failure, so doctor exits 1");
   const now = report(seen({ claudeVersion: "2.1.288" }));
   assert.match(stripVTControlCharacters(now.lines.join("\n")), /✓ Claude Code app\s+2\.1\.288/);
   assert.ok(!now.issues.includes("Claude Code app"));
+  assert.deepEqual(now.failures, []);
 });
 
 test("says when the npm i -g CLI is not installed", () => {

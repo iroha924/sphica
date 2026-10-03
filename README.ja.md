@@ -37,7 +37,7 @@ DB は手元の SQLite の 1 ファイルです。
 ## 必要なもの
 
 - Node.js 24.15 以上
-- Claude Code か Codex（両方でもよい）
+- Claude Code 2.1.139 以降か Codex（両方でもよい）。それより古い Claude Code は Sphica のフックを黙って飛ばすので、記録も配信も動きません（`sphica doctor` が知らせます）
 - `git`（登録するリポジトリを見分けるため）
 - `/sphica:harvest` と、`/sphica:glean` で GitHub の出典を取り込む場合: GitHub CLI（`gh`）。`gh auth login` でログインしておく
 
@@ -138,7 +138,6 @@ Codex にはレビューのフックがありません。`$sphica:review` を流
 
 - 構造化された記録として残せるのは、trace・harvest・glean したものだけです。それ以外の会話は、記録した原文として検索できます（`search` の `sources: true`）。
 - シェルのコマンドについては、ファイル名が含まれるかどうかまでしか見ていません。読んでいなくても判断を見せることがあり、シェルでの編集も編集としては扱えていません（Codex でシェルから `apply_patch` に渡したパッチは、編集として扱います）。
-- Claude Code の PowerShell ツール（Git Bash の無い Windows）で流したコマンドには、まだ判断を見せられません。
 - Codex の `$sphica:trace`・`$sphica:harvest`・`$sphica:glean` は、Codex がセッションのディレクトリを伝えてくれるときだけ書き込めます。今の Codex は伝えてくれます。伝わらないときは、書き込まずに理由を表示します。
 - 記録を見せても、エージェントがそれに従うとは限りません。
 - 記録にあるコードの位置は、読むときに作業ツリーと照らし合わせます。記録が指すコードの名前（関数名など）が見つかっても、その判断がまだ有効だとまでは言えません。

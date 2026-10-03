@@ -103,6 +103,7 @@ async function doctor(cwd: string): Promise<void> {
   // Print before the database. Version drift should be visible regardless of the database.
   const plugin = report(observe(identify(cwd)?.root ?? cwd));
   issues.push(...plugin.issues);
+  if (plugin.failures.length) process.exitCode = 1;
   // Lines at column 0 are section headings; indented lines are their contents (the shape plugin.ts report builds)
   for (const line of plugin.lines) console.log(/^\S/.test(line) ? section(line) : indent(line));
   if (plugin.updates.length) console.log(steps("To update", plugin.updates, UPDATE_NOTE));

@@ -145,6 +145,16 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `build: identify Claude hooks by their exact launch definition`
   - 結果: 計測が 100 ms を超えたので (a)。hooks.json の全 entry を `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/<x>.js"]` にし、timeout・async・matcher はそのまま。check-ai-config は event ごとの定義を丸ごと照合する。shell form、違う script、args 無し、PowerShell の無い matcher、timeout の変化、async の欠落、余分な引数の 7 通りに壊すと、どれも `verify:ai` が落ちた。doctor の 2.1.139 未満の ✗ は、テストを先に足して期待の不一致で落ちることを確かめてから入れた。手元の doctor は「✓ Claude Code app 2.1.288」。README の Requirements に 2.1.139 以上を書いた。`bun run verify` → exit 0（hooks:live は exec form で起動）
 
+- [x] T13: 古い Claude Code の ✗ で doctor の終了コードを 1 にし、README.ja.md を README.md にそろえる
+  - 種別: 修正
+  - 計画: S1, S7
+  - 依存: T08（直す対象の版の検査）
+  - 変更: `server/src/plugin.ts`, `server/src/cli.ts`, `server/test/plugin.test.ts`, `README.ja.md`
+  - red: `cd server && node --test --test-name-pattern "older than 2.1.139" test/plugin.test.ts` → report に failures が無く落ちる
+  - 完了条件: `bun run test` → pass、`grep -c "2.1.139" README.ja.md` → 1
+  - コミット: `fix(doctor): exit 1 for an old Claude Code and match the Japanese README`
+  - 結果: red は上のとおり。report が failures を返し、cli は 1 件でもあれば終了コードを 1 にする。plugin の行で fail を出すのはこの行だけなので、ほかの行の終了コードは変わらない。README.ja.md に 2.1.139 以降を書き、T01 で README.md から消した PowerShell の制限の行を消した。`bun run test` → 622 pass。cli の終了コードを子プロセスで確かめるテストは足していない（doctor は DB が無いと別の理由で 1 になり、版だけを切り分けられない）
+
 ## 記録
 2026-10-03 / T01 / Codex のタスクレビュー F1（Windows でパスの大文字・小文字を変えたコマンドに記録が出ない）/ 見送り。namedInCommand の照合は Bash（macOS でも同じ）と Read に共通の仕様で、PowerShell の道で入った欠陥ではない
 2026-10-03 / T02 / Codex のタスクレビュー / 指摘なし
@@ -161,5 +171,6 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T07 / Codex のタスクレビュー F1（Windows の CI のパス）は T10 で直し済み。F2（fixture の git が親の設定を引き継ぐ）は採り T11 で直した。sql:live の live-harness の makeRepo にも同じ形があるが、この PR の範囲の外なので変えない
 2026-10-03 / T09 / Codex のタスクレビュー / 指摘なし
 2026-10-03 / T04, T05 / Codex のタスクレビュー / 指摘なし
+2026-10-03 / T08 / Codex のタスクレビュー F1（✗ でも doctor が exit 0）と F2（README.ja.md に最低版が無い）/ 両方採り T13 で直した
 2026-10-03 / T10 / Codex のタスクレビュー / 指摘なし
 2026-10-03 / T06 / Windows の CI（run 37100528046）の計測の 2 回目: deliver.js 直接 121.3 ms・PowerShell 経由 355.5 ms、capture.js 直接 117.1 ms・PowerShell 経由 356.2 ms

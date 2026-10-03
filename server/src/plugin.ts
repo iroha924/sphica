@@ -412,14 +412,19 @@ const RELOAD = { claude: "/reload-plugins or a new session", codex: "reopening C
  * CLI is never the baseline. Using the cached CLI on an old session's PATH as the baseline would call
  * the newer one "old".
  */
-export function report(s: Seen, now = new Date()): { lines: string[]; issues: string[]; updates: Update[] } {
+export function report(
+  s: Seen,
+  now = new Date(),
+): { lines: string[]; issues: string[]; failures: string[]; updates: Update[] } {
   const lines: string[] = [];
   const issues: string[] = [];
+  const failures: string[] = [];
   const todo = new Set<keyof typeof UPDATE>();
   const home = os.homedir();
   const short = (p: string) => (p.startsWith(`${home}/`) ? `~${p.slice(home.length)}` : p);
   const say = (m: Mark, label: string, text: string) => {
     if (m === "warn" || m === "fail") issues.push(label);
+    if (m === "fail") failures.push(label);
     lines.push(`  ${mark(m)} ${pad(label, 19)}${text}`);
   };
   // The reason goes on the next line aligned with the path column, not after the path (with a long path it wraps off the right edge)
@@ -582,5 +587,5 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
       ? { ...u, command: `npm i -g sphica@${packageBase.version}` }
       : { ...u };
   });
-  return { lines, issues, updates };
+  return { lines, issues, failures, updates };
 }
