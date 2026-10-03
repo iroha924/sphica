@@ -209,7 +209,7 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - コミット: `fix(read): bound rename lookups per read (T19)`
   - 結果: red は直す前のコードで 6 つの commit に git が 6 回（`actual: 6, expected: 5`）。直した後 `node --test --test-name-pattern="rename probes|^rename|line separator" test/record.test.ts` → 3 pass（5 回まで、6 つ目は `rename not checked`）。`bun run verify` → exit 0（acceptance 103 pass）
 
-- [ ] T20: GitHub の Codex の P2 を直す（rename の検出が上限で飛ばされても黙って空になる）
+- [x] T20: GitHub の Codex の P2 を直す（rename の検出が上限で飛ばされても黙って空になる）
   - 種別: 修正
   - 計画: S2
   - 依存: T19（同じ rename の表示）
@@ -217,6 +217,7 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - red: `cd server && node --test --test-name-pattern="rename limit" test/record.test.ts` → 1001 ファイルの名前を変えて動かすと、移動先も `rename not checked` も出ない
   - 完了条件: `cd server && node --test --test-name-pattern="rename limit|^rename" test/record.test.ts` → 全件 pass
   - コミット: `fix(read): say a rename was not checked when git skipped detection (T20)`
+  - 結果: red は直す前のコードで、名前も中身も変えた 1001 ファイルの移動に、移動先も `rename not checked` も出なかった。直した後、D の数×A の数が上限の 2 乗を超えたら、残った D のパスを「確かめていない」にする。`node --test --test-name-pattern="rename limit|rename probes|^rename|line separator" test/record.test.ts` → 4 pass
 
 ## P5: リリース
 

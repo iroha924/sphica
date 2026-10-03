@@ -66,7 +66,7 @@ export async function readUnit(
   return describe(db, bare, root, asOf, renames);
 }
 
-type Renames = Map<string, Map<string, string> | null>;
+type Renames = Map<string, Map<string, string | null> | null>;
 
 /** Commits one read asks git about for renames. */
 const RENAME_LOOKUPS = 5;
@@ -288,6 +288,7 @@ function movedTo(
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
   const to = seen.get(a.path);
+  if (to === null) return "; rename not checked";
   return to
     ? `; may have moved to ${JSON.stringify(inline(head(to, 300)))} since ${a.commit_sha.slice(0, 12)}`
     : "";

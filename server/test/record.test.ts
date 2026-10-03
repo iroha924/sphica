@@ -1461,6 +1461,51 @@ test("rename probes: one read asks git about at most 5 commits, and says the res
   }
 });
 
+test("rename limit: when git skips rename detection for too many files, read says the rename was not checked", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-limit-")));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+        encoding: "utf8",
+      }).trim();
+    git("init", "-q");
+    fs.mkdirSync(path.join(root, "a"));
+    const body = (i: number) => `file ${i}\nline two\nline three\nline four\n`;
+    for (let i = 0; i < 1001; i++) fs.writeFileSync(path.join(root, "a", `f${i}.txt`), body(i));
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    const commit = git("rev-parse", "HEAD");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "f0 を見る。" });
+    await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "f0",
+            kind: "finding",
+            text: "f0 を見る",
+            evidence: [{ source: `s${m}`, quote: "f0 を見る。", role: "states" }],
+            anchors: [{ path: "a/f0.txt", role: "evidence", commit }],
+          },
+        ],
+      },
+    );
+    // Every file moves under a new name and changes a little: only inexact detection could pair them, and 1001 x 1001 is over the limit
+    fs.rmSync(path.join(root, "a"), { recursive: true });
+    fs.mkdirSync(path.join(root, "b"));
+    for (let i = 0; i < 1001; i++) fs.writeFileSync(path.join(root, "b", `g${i}.txt`), `${body(i)}extra\n`);
+    git("add", "-A");
+    const out = (await readUnit(db.reader, p, "trace:ext-s1/f0", root)) ?? "";
+    assert.match(out, /a\/f0\.txt \(evidence, commit [0-9a-f]{12}\): missing[^\n]*rename not checked/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("line separator: paths from outside stay on one line in check and read output", async () => {
   const db = tempDb();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-ls-")));
