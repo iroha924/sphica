@@ -506,6 +506,126 @@ test("a turn records the paths git status shows changing, including edits made o
   );
 });
 
+/** A committed repository for turn-boundary tests, and the status edits spooled so far as [path, turn]. */
+function turnRepo(name: string) {
+  const repo = path.join(home, name);
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  execFileSync("git", ["-C", repo, "remote", "add", "origin", `https://github.com/o/${name}.git`], {
+    stdio: "ignore",
+  });
+  const write = (f: string, s: string) => fs.writeFileSync(path.join(repo, f), s);
+  const seen = () => spooled().flatMap((x) => (x.kind === "edit" ? [[x.path, x.turn]] : []));
+  return { repo, write, seen };
+}
+
+test("after an interrupted turn, the owner's hand edits are not given to the next turn (Claude Code, no Stop)", () => {
+  reset();
+  const { repo, write, seen } = turnRepo("interrupt-cc");
+  const base = { session_id: "ic", cwd: repo };
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  write("agent-a.ts", "a\n"); // the agent's shell edit; the owner then interrupts, and Claude Code sends no Stop
+  write("owner-b.ts", "b\n"); // the owner's hand edit between the turns
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "今どうなってる？",
+  });
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "Stop",
+    last_assistant_message: "説明した。",
+  });
+  assert.deepEqual(seen(), []);
+});
+
+test("after a Codex interrupt, the owner's hand edits are not given to the next turn", () => {
+  reset();
+  const { repo, write, seen } = turnRepo("interrupt-codex");
+  const base = { session_id: "ix", cwd: repo };
+  onHook("codex", { ...base, turn_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  write("agent-a.ts", "a\n");
+  onHook("codex", { ...base, turn_id: "t1", hook_event_name: "Interrupt" });
+  write("owner-b.ts", "b\n");
+  onHook("codex", {
+    ...base,
+    turn_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "今どうなってる？",
+  });
+  onHook("codex", { ...base, turn_id: "t2", hook_event_name: "Stop", last_assistant_message: "説明した。" });
+  assert.deepEqual(seen(), []);
+  // A turn the interrupt ended is not running, so even a notice that follows starts from the tree as it is then
+  onHook("codex", { ...base, turn_id: "t3", hook_event_name: "UserPromptSubmit", prompt: "続けて" });
+  write("agent-c.ts", "c\n");
+  onHook("codex", { ...base, turn_id: "t3", hook_event_name: "Interrupt" });
+  write("owner-d.ts", "d\n");
+  const notice = "<task-notification>\n<status>completed</status>\n</task-notification>";
+  onHook("codex", { ...base, turn_id: "t4", hook_event_name: "UserPromptSubmit", prompt: notice });
+  onHook("codex", { ...base, turn_id: "t4", hook_event_name: "Stop", last_assistant_message: "見た。" });
+  assert.deepEqual(seen(), []);
+});
+
+test("a running starting point from an older install, without a turn id, is not carried into an interrupted turn's successor", () => {
+  reset();
+  const { repo, write, seen } = turnRepo("interrupt-legacy");
+  const base = { session_id: "il", cwd: repo };
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  const dir = path.join(home, ".sphica", "worktree");
+  for (const f of fs.readdirSync(dir)) {
+    const b = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+    delete b.turn;
+    fs.writeFileSync(path.join(dir, f), JSON.stringify(b));
+  }
+  write("owner-b.ts", "b\n");
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "追加で" });
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "Stop",
+    last_assistant_message: "終えた。",
+  });
+  assert.deepEqual(seen(), []);
+});
+
+test("without an interrupt, a notice with another id while the turn runs keeps its starting point, and a failed new snapshot records nothing", () => {
+  reset();
+  const { repo, write, seen } = turnRepo("interrupt-notice");
+  const base = { session_id: "in", cwd: repo };
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  write("x.ts", "x\n");
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "Stop",
+    last_assistant_message: "見た。",
+  });
+  assert.deepEqual(seen(), [["x.ts", "t2"]]);
+  // A new turn whose snapshot fails (git status refuses a corrupt index) leaves no starting point, so its Stop records no status edits
+  reset();
+  onHook("claude-code", { ...base, prompt_id: "t3", hook_event_name: "UserPromptSubmit", prompt: "次" });
+  write("y.ts", "y\n");
+  const index = path.join(repo, ".git", "index");
+  fs.writeFileSync(index, "not an index");
+  onHook("claude-code", { ...base, prompt_id: "t4", hook_event_name: "UserPromptSubmit", prompt: "別の話" });
+  fs.rmSync(index);
+  write("z.ts", "z\n");
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t4",
+    hook_event_name: "Stop",
+    last_assistant_message: "答えた。",
+  });
+  assert.deepEqual(seen(), []);
+});
+
 test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {
   reset();
   const base = { session_id: "s1", cwd: repoDir };

@@ -32,14 +32,15 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `fix(capture): never count an Agent SDK turn as the owner's, and bump to 0.6.24 (T01)`
   - 結果: red 実測: `node --test --test-name-pattern="sdk-" test/capture.test.ts` → `AssertionError: sdk-ts without a marker`。直した後 `node --test test/capture.test.ts` → 38 pass / 0 fail。4 つのファイルを 0.6.24 に更新（release:plan はこのコミットの後に流して plugin を確かめる）
 
-- [ ] T02: 起点にターン id を持たせ、別の id の注入でないプロンプトと Codex の Interrupt でターンを終える
+- [x] T02: 起点にターン id を持たせ、別の id の注入でないプロンプトと Codex の Interrupt でターンを終える
   - 種別: 修正
   - 計画: S2
   - 依存: なし
   - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
   - red: `cd server && node --test --test-name-pattern="interrupt" test/capture.test.ts` → #210 の t1/t2 の流れで、t2 に `agent-a.ts` と `owner-b.ts` の status の編集が出て落ちる（Claude Code の中断と Codex の Interrupt の両方）。`turn` の無い走っている起点でも同じく落ちる
   - 完了条件: `cd server && node --test test/capture.test.ts` → pass。同じ id の途中のメッセージと、走っている間の別の id の注入では起点が残り、止まっているときの完了通知はターンを始める（既存のテストも pass）。取り直しに失敗したら次の Stop が status の編集を書かない
-  - コミット: `fix(capture): end the running turn when a new prompt or a Codex interrupt arrives, so its changes are not given to the next turn (T02)`
+  - コミット: `fix(capture): end a running turn on a new typed prompt or a Codex interrupt (T02)`
+  - 結果: red 実測（直す前の capture.ts）: `--test-name-pattern="interrupt"` → 4 fail（t2 に `owner-b.ts` と `agent-a.ts`、古い起点で `owner-b.ts`、失敗した取り直しで `y.ts` `z.ts`）。Interrupt の分岐だけ戻すと Codex の後半（通知が続く場合）が `agent-c.ts` `owner-d.ts` で落ちる。直した後 `node --test test/capture.test.ts` → 42 pass / 0 fail。取り直しの失敗は壊した `.git/index` で再現（PATH を外すと identify も失敗して早く戻るため）
 
 - [ ] T03: SessionStart の compact は走っている起点を上書きしない
   - 種別: 修正

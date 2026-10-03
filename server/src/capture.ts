@@ -308,7 +308,8 @@ export function captureNotice(file: string = dbFile()): string | null {
   return null;
 }
 
-type Baseline = Snapshot & { running: boolean };
+/** `turn` is the id of the turn that took it; a running one from an older install has none. */
+type Baseline = Snapshot & { running: boolean; turn?: string };
 
 const baselineFile = (host: Host, session: string): string =>
   path.join(baselineDir(), `${digest(`${host}\0${session}`)}.json`);
@@ -364,7 +365,17 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   }
   if (!owner()) return { flush: false };
   // Interrupt is cut off after at most 3 seconds. No new records are made, so only the queue is sent without checking git or the project.
-  if (event === "Interrupt") return { flush: true };
+  if (event === "Interrupt") {
+    const file = baselineFile(host, String(input.session_id));
+    const b = readBaseline(file);
+    if (b?.running)
+      try {
+        writeBaseline(file, { ...b, running: false });
+      } catch {
+        fs.rmSync(file, { force: true });
+      }
+    return { flush: true };
+  }
   const place = identify(input.cwd ?? process.cwd());
   if (!place) return { flush: false };
   const turn = input.prompt_id ?? input.turn_id;
@@ -388,17 +399,20 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   };
 
   const baseline = baselineFile(host, base.session);
+  const prompt = input.prompt?.trimStart() ?? "";
+  const injected = INJECTED.some((r) => r.test(prompt));
   if (event === "UserPromptSubmit") {
     // A message typed while a turn runs keeps that turn's starting point. Between turns, the owner's own edits are not the turn's.
-    if (!readBaseline(baseline)?.running) {
+    // A prompt that is not injected with another turn id means the running turn ended without a Stop (an interrupt): changes since
+    // its start are given to no turn, since an owner's hand edit must not become the agent's. The old file goes first, so a failed snapshot leaves none.
+    const before = readBaseline(baseline);
+    if (!before?.running || (!injected && before.turn !== turn)) {
+      fs.rmSync(baseline, { force: true });
       const now = snapshot(place.root);
-      if (now) writeBaseline(baseline, { ...now, running: true });
+      if (now) writeBaseline(baseline, { ...now, running: true, turn });
     }
   }
-  if (event === "UserPromptSubmit" && input.prompt) {
-    const prompt = input.prompt.trimStart();
-    if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
-  }
+  if (event === "UserPromptSubmit" && prompt && !injected) say(`${turn}:owner`, "owner", prompt);
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
     const now = snapshot(place.root);
