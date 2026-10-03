@@ -41,7 +41,7 @@ base: main
   - コミット: `feat(record): suggest near paths for an anchor path that is not in the working tree (T02)`
   - 結果: `node --test --test-name-pattern="near paths|anchor problem" test/record.test.ts` → 2 pass（`src/date.ts` に `"lib/date.ts", "src/data.ts", "src/dates.ts"`。距離が同じものは名前順。未追跡の `src/new.ts` も出る。遠いパスと git の無い作業ツリーでは候補なし）。`bun run verify` → exit 0（acceptance 99 pass）
 
-- [ ] T03: ロックの中の refresh で中身が変わったら、種類と symbol を判定し直して save に problem を出す
+- [x] T03: ロックの中の refresh で中身が変わったら、種類と symbol を判定し直して save に problem を出す
   - 種別: 修正
   - 計画: S1
   - 依存: T01（判定する関数が要る）
@@ -49,6 +49,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="anchor changed after check" test/extract.test.ts` → check の後に消したファイルで save の出力に problem が無く落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="anchor changed after check|lock" test/extract.test.ts` → 全件 pass（ロックの中で git と ls-files を呼ばない）
   - コミット: `fix(record): judge anchors again when a file changed between check and save (T03)`
+  - 結果: red は直す前のコードで save の出力が `'✓ trace:ext-s1/look active\n✓ saved'`（problem なし）。直した後 `node --test test/record.test.ts test/extract.test.ts` → 55 pass。ロックの中で消えたファイルに `(near paths not checked)` 付きの problem、glean で symbol が消えたら problem。ロックの中で `holds`・`files`（git）は呼ばれない。既存のロックのテストは、変わったファイルで `kind`（stat）を呼ぶ形に期待を直した。`bun run verify` → exit 0（acceptance 99 pass）
 
 - [ ] T04: anchor の problem の受け入れケースと、trace・glean Skill の文
   - 種別: 追加

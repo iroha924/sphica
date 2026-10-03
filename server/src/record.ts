@@ -209,7 +209,12 @@ export function anchorProblem(
   if (kind === "gone") {
     if (a.role === "evidence" && a.observed) return null;
     const near = nearPaths(facts, a.path);
-    const hint = near?.length ? ` (near: ${near.map((n) => JSON.stringify(n)).join(", ")})` : "";
+    // The list is read only before the lock, so a file gone since then gets no suggestions
+    const hint = near?.length
+      ? ` (near: ${near.map((n) => JSON.stringify(n)).join(", ")})`
+      : facts.listing === undefined
+        ? " (near paths not checked)"
+        : "";
     return `anchor path ${a.path} is not in the working tree${hint}; ${fix}`;
   }
   if (kind === "directory") return `anchor path ${a.path} is a directory; anchor a file`;
@@ -766,6 +771,8 @@ export type Saved = {
   candidates: { key: string; why: string }[];
   quarantined: string[];
   superseded: string[];
+  /** Anchors judged again under the lock that may point at the wrong place */
+  anchorProblems: string[];
 };
 
 /** The hash of what a unit says: its text and options. Alias sets are bound to it, so words written for other text are never used. */
@@ -807,7 +814,7 @@ export async function saveRecord(
   if (checked.errors.length)
     throw new Error(`The record is not valid:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
   const now = iso(Date.now());
-  const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [] };
+  const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [], anchorProblems: [] };
   const cited = new Set<number>();
   for (const d of checked.fieldDefs) {
     cited.add(d.source);
@@ -922,6 +929,14 @@ export async function saveRecord(
       // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
       refresh(checked.facts, a.path);
       const symbol = a.symbol && !symbolMasked(checked.facts, a.path, a.symbol) ? a.symbol : undefined;
+      const wrong = anchorProblem(checked.facts, {
+        path: a.path,
+        symbol,
+        role: a.role,
+        held: Boolean(a.commit),
+        observed: a.observation !== null,
+      });
+      if (wrong) saved.anchorProblems.push(`${p.key}: ${wrong}`);
       const at = a.lines ? null : symbol ? symbolAt(checked.facts, a.path, symbol) : null;
       const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx

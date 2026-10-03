@@ -470,10 +470,102 @@ test("save: under the write lock files are only read again, and a file changed m
       ["a.ts", "tokenValue123abc"],
       ["b.ts", null],
     ]);
+    // Only the changed file is judged again: whether it is masked, and what kind of path it is now
     assert.deepEqual(
       calls.filter((c) => c.locked && c.fn !== "read").map((c) => c.fn),
-      ["masks"],
+      ["masks", "kind"],
     );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("save: anchor changed after check is reported by the save, without asking git under the lock", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const calls: { fn: string; locked: boolean }[] = [];
+    let remove = "";
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        // The file goes away once the save holds the lock, after everything before it was judged
+        if (rel === remove && !lockFree(db.file)) fs.rmSync(path.join(root, rel));
+        return PROBE.read(r, rel);
+      },
+      holds: (r, c, rel) => {
+        calls.push({ fn: "holds", locked: !lockFree(db.file) });
+        return PROBE.holds(r, c, rel);
+      },
+      files: (r) => {
+        calls.push({ fn: "files", locked: !lockFree(db.file) });
+        return PROBE.files(r);
+      },
+    };
+    const m = message(db, p, { id: "m1", text: "openStore を見る。" });
+    const record = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, root);
+    assert.doesNotMatch((await checkText(db.ingest, run, p, root, record)).text, /anchor path/);
+    remove = "src.ts";
+    const out = await saveText(db.ingest, run, p, root, record, probe);
+    assert.match(
+      out,
+      /△ trace:ext-s1\/look: anchor path src\.ts is not in the working tree \(near paths not checked\)/,
+    );
+    assert.deepEqual(
+      calls.filter((c) => c.locked),
+      [],
+      "git is not asked while the lock is held",
+    );
+
+    // A glean anchor whose symbol leaves the file under the lock is reported the same way
+    session(db, p, "g1");
+    fs.writeFileSync(path.join(root, "src.ts"), "export function openStore() {}\n");
+    const g = await beginGlean(db.ingest, p, "g1");
+    const rev = Number(
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/look'").get()?.revision,
+    );
+    const symbolGone: Probe = {
+      ...probe,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file))
+          fs.writeFileSync(path.join(root, rel), "export function closeStore() {}\n");
+        return PROBE.read(r, rel);
+      },
+    };
+    const gleaned = await saveText(
+      db.ingest,
+      g,
+      p,
+      root,
+      {
+        ops: [
+          {
+            op: "anchor",
+            unit: "trace:ext-s1/look",
+            revision: rev,
+            path: "src.ts",
+            symbol: "openStore",
+            role: "evidence",
+          },
+        ],
+      },
+      symbolGone,
+    );
+    assert.match(gleaned, /△ trace:ext-s1\/look: symbol "openStore" is not found in src\.ts/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

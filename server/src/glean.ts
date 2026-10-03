@@ -764,6 +764,18 @@ export async function saveGlean(
       // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
       refresh(c.units.facts, rel);
       const symbol = to.symbol && !symbolMasked(c.units.facts, rel, to.symbol) ? to.symbol : null;
+      const held = op.op === "anchor" && op.commit !== undefined;
+      const observed =
+        to.role === "evidence" && !held && target.sessionId
+          ? (await trx
+              .selectFrom("edit_observation")
+              .select("id")
+              .where("session_id", "=", target.sessionId)
+              .where("path", "=", rel)
+              .executeTakeFirst()) !== undefined
+          : false;
+      const wrong = anchorProblem(c.units.facts, { path: rel, symbol, role: to.role, held, observed });
+      if (wrong) units.anchorProblems.push(`${op.unit}: ${wrong}`);
       const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
       // When the anchor about to be retired is an active implementation's code proof, the unit goes back to candidate first (the schema
       // refuses the reverse order) and is judged again below

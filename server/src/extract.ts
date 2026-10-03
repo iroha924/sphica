@@ -488,6 +488,7 @@ export async function saveText(
       ...saved.superseded.map((k) => `✓ ${k} superseded`),
       ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
       ...saved.quarantined.map((q) => `△ ${q} quarantined`),
+      ...saved.anchorProblems.map((a) => `△ ${a}`),
       ...lines,
       "✓ saved",
     ].join("\n");
