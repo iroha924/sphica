@@ -75,6 +75,16 @@ report が bundle の分からない入力を通さず、collect → grade → r
   - コミット: `test(evals): check that --out is refused before anything is written (T05)`
   - 結果: `node --test test/eval-grade.test.ts` → pass 43, fail 0。拒否の直後に `<build>/loop.json` と `<build>/grades.json` が無いことと、stderr の `Unknown option '--out'` を確かめる
 
+- [x] T06: gold のテストの git の準備を一時 HOME で流す
+  - 種別: 変更
+  - 計画: S2
+  - 依存: T02（gold のテストが要る）
+  - 変更: `server/test/eval-grade.test.ts`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass
+  - コミット: `test(evals): set up the gold test's git repositories under a temporary home (T06)`
+  - 結果: `node --test test/eval-grade.test.ts` → pass 43, fail 0
+
 ## 記録
 2026-10-03 / T05 / T04 のタスクごとのレビュー（Codex）の P2: 拒否のテストが、拒否の後にビルド内へ書いていないことと拒否の理由を見ていない / 採用。T05 を足してテストを強めた
 2026-10-03 / T01・T02・T03 / タスクごとのレビュー（Codex）は 3 件とも指摘なし（sandbox の EPERM でテストは Codex 側では流れず、手元で pass） / そのまま
+2026-10-03 / T06 / 差分全体のレビュー（Codex、high）の P3: gold のテストの `git init` と `git clone` が持ち主の HOME を引き継ぐ / 採用。T06 で `childEnv(base)` を渡した

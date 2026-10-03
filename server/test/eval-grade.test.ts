@@ -705,8 +705,11 @@ test("collect excludes a gold run when the gold hook returned no record, and kee
     const slot = path.join(build, "eval-shelf-1");
     fs.mkdirSync(build);
     // The gold slot is fetched for cloud branches: a local bare origin with none keeps it off the network
-    execFileSync("git", ["init", "-q", "--bare", path.join(base, "origin.git")]);
-    execFileSync("git", ["clone", "-q", path.join(base, "origin.git"), slot], { stdio: "ignore" });
+    execFileSync("git", ["init", "-q", "--bare", path.join(base, "origin.git")], { env: childEnv(base) });
+    execFileSync("git", ["clone", "-q", path.join(base, "origin.git"), slot], {
+      stdio: "ignore",
+      env: childEnv(base),
+    });
     const text = "## trace:s-en-dates/utc (u1): decision do, active\nStore dates in UTC.";
     fs.mkdirSync(path.join(slot, ".tools"));
     fs.writeFileSync(path.join(slot, ".tools", "gold.json"), JSON.stringify([{ id: "pilot-dates", text }]));
