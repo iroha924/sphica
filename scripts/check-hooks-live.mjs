@@ -11,7 +11,7 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
-import { makeRepo, root, withTempDir } from "./lib/live-harness.mjs";
+import { root, withTempDir } from "./lib/live-harness.mjs";
 
 const windows = process.platform === "win32";
 const source = path.resolve(process.argv[2] ?? path.join(root, "plugin"));
@@ -40,18 +40,17 @@ await withTempDir(async (dir) => {
   const home = path.join(dir, "home");
   const ghConfig = path.join(dir, "gh-config");
   for (const d of [home, ghConfig]) fs.mkdirSync(d, { recursive: true });
-  const repo = makeRepo(dir);
-  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
-  fs.writeFileSync(path.join(repo, "src", "a.ts"), "export const store = new Map();\n");
-  spawnSync("git", ["-C", repo, "add", "-A"]);
-  spawnSync("git", ["-C", repo, "commit", "-qm", "store"]);
-
   // Built from nothing, so no SPHICA_*, token, host session, or workspace of the parent leaks in. gh is left off PATH: init
   // then reports it could not bind an account, and nothing reaches api.github.com.
   const git = onPath("git");
   if (!git) throw new Error("git is not on PATH");
   const dirs = [path.dirname(process.execPath), path.dirname(git)];
+  // git reads no system or user config, so the owner's signing or hooks never run on the fixture
+  const gitConfig = path.join(dir, "gitconfig");
+  fs.writeFileSync(gitConfig, "[user]\n\temail = t@example.com\n\tname = t\n");
   const env = { PATH: "", HOME: home, USERPROFILE: home, GH_CONFIG_DIR: ghConfig };
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_GLOBAL = gitConfig;
   env.CODEX_HOME = path.join(home, ".codex");
   env.CLAUDE_CONFIG_DIR = path.join(home, ".claude");
   for (const k of [
@@ -77,6 +76,19 @@ await withTempDir(async (dir) => {
     windows && systemRoot
       ? path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
       : null;
+
+  const repo = path.join(dir, "repo");
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "src", "a.ts"), "export const store = new Map();\n");
+  for (const args of [
+    ["init", "-q"],
+    ["remote", "add", "origin", "https://github.com/example/live.git"],
+    ["add", "-A"],
+    ["commit", "-qm", "store"],
+  ]) {
+    const r = spawnSync(git, ["-C", repo, ...args], { env, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${r.stderr}`);
+  }
 
   const node = (args, extra = {}) =>
     spawnSync(process.execPath, args, {

@@ -116,6 +116,16 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `ci: start check-hooks-live from the repository root path on Windows`
   - 結果: red は上のとおり（その手順は `cd plugin` の後に流れる）。`../scripts/check-hooks-live.mjs` にし、`actionlint .github/workflows/check.yml` → 指摘なし。windows の pass は plan の A5（push の後の CI）で確かめる
 
+- [x] T11: 起動の計測を同じ node でそろえて回数を確かめ、check-hooks-live の git を親の設定から切り離す
+  - 種別: 修正
+  - 計画: S5, S6
+  - 依存: T06（直す対象の計測）, T07（直す対象の検査）
+  - 変更: `scripts/measure-hook-launch.mjs`, `scripts/check-hooks-live.mjs`
+  - red: `node scripts/measure-hook-launch.mjs --pairs 0` → NaN を出して exit 0。親に `GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=true GIT_CONFIG_KEY_1=gpg.program GIT_CONFIG_VALUE_1=/usr/bin/false` を置いて `node scripts/check-hooks-live.mjs` → 「gpg failed to sign the data」で落ちる
+  - 完了条件: `node scripts/measure-hook-launch.mjs --pairs 0` → exit 2、同じ git の設定を置いた `node scripts/check-hooks-live.mjs` → exit 0
+  - コミット: `fix(scripts): use one node for launch timing and isolate the hooks fixture from git config`
+  - 結果: red は上のとおり。直した後 `--pairs 0` → 「--pairs must be a whole number from 1 to 1000」で exit 2、`--pairs 6` → 測れた。シェル経由も process.execPath を起動する。署名の設定を置いた親から `node scripts/check-hooks-live.mjs` → 通った（fixture の git は GIT_CONFIG_NOSYSTEM と一時の GIT_CONFIG_GLOBAL だけを読む）
+
 - [x] T08: Windows の計測で exec form を決め、hooks.json・check-ai-config・README・doctor をそろえる
   - 種別: 変更
   - 計画: S7
@@ -136,3 +146,8 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T07 / 子の PATH を node と git の場所だけにしたので sh が見つからなかった。POSIX は /bin/sh、Windows は SystemRoot の powershell.exe を絶対パスで起動する
 2026-10-03 / T06 / Windows の CI（run 37099886316）の計測: deliver.js 直接 112.3 ms・PowerShell 経由 343.7 ms（差 231.3 ms）、capture.js 直接 114.2 ms・PowerShell 経由 340.8 ms（差 226.6 ms）。基準の 100 ms を超えたので T08 は (a) exec form にする
 2026-10-03 / T08 / 完了条件を変えた（前: `bun run verify` と `gh pr checks` の全件 pass。後: `bun run verify`、CI は plan の A5）/ CI はこのコミットを push した後にしか走らず、チェックを付けるコミットの中で確かめられないため
+\n
+2026-10-03 / T06 / Codex のタスクレビュー F1（直接とシェル経由で別の node を使い得る）と F2（--pairs を確かめない）/ 両方採り T11 で直した
+2026-10-03 / T07 / Codex のタスクレビュー F1（Windows の CI のパス）は T10 で直し済み。F2（fixture の git が親の設定を引き継ぐ）は採り T11 で直した。sql:live の live-harness の makeRepo にも同じ形があるが、この PR の範囲の外なので変えない
+2026-10-03 / T09 / Codex のタスクレビュー / 指摘なし
+2026-10-03 / T04, T05 / Codex のタスクレビュー / 指摘なし

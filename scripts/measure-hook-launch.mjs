@@ -17,6 +17,10 @@ const arg = (name, fallback) => {
   return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 };
 const pairs = Number(arg("pairs", "20"));
+if (!Number.isInteger(pairs) || pairs < 1 || pairs > 1000) {
+  console.error(`--pairs must be a whole number from 1 to 1000 (got ${arg("pairs", "")})`);
+  process.exit(2);
+}
 const root = path.resolve(arg("root", path.join(repo, "plugin")));
 const windows = process.platform === "win32";
 
@@ -38,8 +42,11 @@ const launch = (mode, script) => {
     mode === "direct"
       ? [process.execPath, [script]]
       : windows
-        ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `node "${script}"`]]
-        : ["sh", ["-c", `node "${script}"`]];
+        ? [
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-Command", `& "${process.execPath}" "${script}"`],
+          ]
+        : ["/bin/sh", ["-c", `"${process.execPath}" "${script}"`]];
   const start = process.hrtime.bigint();
   const r = spawnSync(cmd, args, { input, env, cwd: home, encoding: "utf8", timeout: 30_000 });
   const ms = Number(process.hrtime.bigint() - start) / 1e6;
