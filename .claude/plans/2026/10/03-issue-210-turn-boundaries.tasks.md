@@ -22,14 +22,15 @@ base: main
 
 起点をターンごとのファイルと通し番号で持ち、どの順序でも status の編集を別のターンに付けない。
 
-- [ ] T01: 起点をターンごとのファイルと通し番号にし、Stop は snapshot の後に今のターンを確かめてから書く
+- [x] T01: 起点をターンごとのファイルと通し番号にし、Stop は snapshot の後に今のターンを確かめてから書く
   - 種別: 修正
-  - 計画: S1
+  - 計画: S1, S5
   - 依存: なし
-  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern="turn boundary" test/capture.test.ts` → #210 の t1/t2（Claude Code の中断、Codex の Interrupt）で t2 に `owner-b.ts` が出る、compaction の後の Stop に compaction の前のシェルの変更が出ない、遅れた Stop(t1) が t2 の変更を拾う、で落ちる
   - 完了条件: `cd server && node --test test/capture.test.ts` → pass。方針 11 の順序（同じ id の途中のメッセージ、走っている間の注入、遅れた保存、消せない起点、同点、seq:null、読めないファイル、tmp を比べない、entries:null・running:false を比べる、Stop と Interrupt が turn と seq を保つ、旧形式の 1 ファイルを読まない）が全部 pass。SessionStart はセッションのディレクトリがあっても例外を出さない
   - コミット: `fix(capture): keep a working-tree starting point per turn and record status edits only for the current turn (T01)`
+  - 結果: `bun run release:plan -- --base 85d09b55` → `plugin`、4 つの manifest を 0.6.28 にした。red 実測（直す前の capture.ts）: 4 件 fail（Claude Code と Codex の t2 に `agent-a.ts` `owner-b.ts`、compact で `before.ts` が出ない、遅れた Stop(t1) に `t1:t2-only.ts`）。直した後 `node --test test/capture.test.ts` → 49 pass / 0 fail（turn boundary 10 件）。消せない起点は削除の操作が無くなったので、遅れた Stop の件で代える。`bun run typecheck` エラーなし、`bun run verify` → exit 0（受け入れケース 103 pass）
 
 - [ ] T02: prune を、セッションのディレクトリごとに seq が最大のファイルを印にして残す形にする
   - 種別: 変更
@@ -70,7 +71,7 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 
 ## P3: リリース
 
-- [ ] T06: 0.6.28 にそろえる
+- [-] T06: 0.6.28 にそろえる
   - 種別: 変更
   - 計画: S5
   - 依存: T02（出す変更が揃っている必要がある）, T03（同）, T04（同）, T05（同）
@@ -79,3 +80,5 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
   - コミット: `chore(release): bump to 0.6.28 (T06)`
 
 ## 記録
+
+- 2026-10-03 / T01, T06 / pre-commit の bundle の検査が、package の入力（capture.ts）を変えたコミットにバージョンの更新が無いと止めた / 0.6.28 への更新を T01 に移し、T01 の変更欄に 4 つの manifest を足した（前: capture.ts と capture.test.ts、後: それに plugin/package.json・plugin/.claude-plugin/plugin.json・plugin/.codex-plugin/plugin.json・.claude-plugin/marketplace.json）。T01 の計画欄に S5 を足し（前: S1、後: S1, S5）、T06 は取りやめ（リリースノートは PR 本文に書く）
