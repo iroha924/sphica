@@ -63,7 +63,7 @@ base: main
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
 
-- [ ] T05: record サーバーの workspace を `_meta` → `CLAUDE_PROJECT_DIR` の順にする
+- [x] T05: record サーバーの workspace を `_meta` → `CLAUDE_PROJECT_DIR` の順にする
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -71,6 +71,7 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
   - red: `cd server && node --test --test-name-pattern="record.*_meta" test/plugin.test.ts` → `_meta` と `CLAUDE_PROJECT_DIR` が両方あるとき、環境変数のプロジェクトに書かれて落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="_meta" test/plugin.test.ts` → pass（`_meta` が勝つ、`_meta` が未登録なら環境変数に落ちない、別 project の cwd を拒否する）
   - コミット: `fix(mcp): resolve the record server's workspace from Codex's _meta before CLAUDE_PROJECT_DIR (T05)`
+  - 結果: red 実測（直す前の mcp-record.ts）: `--test-name-pattern="record.*_meta"` → `Sphica: o/b is not the workspace this session writes to (o/a)` で fail。直した後 `--test-name-pattern="_meta"` → pass、`node --test test/plugin.test.ts` → 35 pass / 0 fail、`bun run typecheck` エラーなし
 
 ## P3: リリース
 

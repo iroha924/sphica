@@ -748,6 +748,59 @@ test("the response fits the limit even with a long unregistered project name", a
   }
 });
 
+// A Codex started from a Claude Code shell inherits CLAUDE_PROJECT_DIR; the directory Codex names in the call is surer
+test("the record MCP server prefers Codex's _meta over an inherited CLAUDE_PROJECT_DIR", async () => {
+  const db = tempDb();
+  const repo = (name: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sphica-${name}-`));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: dir });
+    fs.mkdirSync(path.join(dir, "sub"));
+    return dir;
+  };
+  const inherited = repo("a");
+  const workspace = repo("b");
+  const unregistered = repo("u");
+  project(db, "git:github.com/o/a", "o/a");
+  project(db, "git:github.com/o/b", "o/b");
+  const meta = (dir: string) => ({
+    "codex/sandbox-state-meta": { sandboxCwd: pathToFileURL(path.join(dir, "sub")).href },
+  });
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp-record.ts")],
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: db.file,
+        CLAUDE_PROJECT_DIR: inherited,
+      },
+      stderr: "ignore",
+    }),
+  );
+  const call = async (args: { cwd?: string }, _meta?: Record<string, unknown>) => {
+    const r = await client.callTool({ name: "trace_pending", arguments: args, ...(_meta ? { _meta } : {}) });
+    return { error: r.isError === true, text: (r.content as { text: string }[])[0]?.text ?? "" };
+  };
+  try {
+    // A cwd in the workspace Codex names is that workspace, whatever the inherited variable says
+    const ok = await call({ cwd: workspace }, meta(workspace));
+    assert.equal(ok.error, false, ok.text);
+    const other = await call({ cwd: inherited }, meta(workspace));
+    assert.match(other.text, /o\/a is not the workspace this session writes to \(o\/b\)/);
+    // An unregistered workspace from _meta is refused, not replaced by the variable's project
+    const none = await call({}, meta(unregistered));
+    assert.match(none.text, /o\/u is not registered with Sphica/);
+    // Without _meta, Claude Code's variable still names the workspace
+    assert.equal((await call({ cwd: inherited })).error, false);
+  } finally {
+    await client.close();
+    await db.done();
+  }
+});
+
 // The model calls forget_apply, but only the person's answer in the host removes anything
 test("forget_apply removes sources only when the owner types the count in the host's confirmation", async () => {
   const db = tempDb();

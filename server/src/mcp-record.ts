@@ -45,7 +45,8 @@ const reply = (t: string, isError = false) => ({
 });
 
 async function projectOf(cwd: string | undefined, meta: unknown): Promise<Place & { projectId: number }> {
-  const workspace = process.env.CLAUDE_PROJECT_DIR || hostWorkspace(meta);
+  // Codex's _meta first: a Codex started from a Claude Code shell inherits CLAUDE_PROJECT_DIR
+  const workspace = hostWorkspace(meta) || process.env.CLAUDE_PROJECT_DIR;
   if (!workspace)
     throw new Error(
       "The host did not say which workspace this session is in, so nothing is written (update Claude Code or Codex)",
