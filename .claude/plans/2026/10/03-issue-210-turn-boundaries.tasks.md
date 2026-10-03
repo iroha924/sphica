@@ -109,6 +109,15 @@ base: main
   - コミット: `fix(capture): keep a reused turn's new start and give the synchronous hooks 30 seconds (T11)`
   - 結果: red 実測（f943ab31 の capture.ts）: actual `[ 't1:new-agent.ts', 't1:owner.ts' ]`、actual `[]`（expected `[ 't1:after-feedback.ts', 't1:first.ts' ]`）。直した後 `node --test test/capture.test.ts` → 55 pass / 0 fail。`node scripts/check-ai-config.mjs` → exit 0、HEAD の hooks.json に戻すと `must be` が 2 件
 
+- [x] T12: 起点のコメントを 3 行以内にして規則を knowledge-schema の Skill へ移し、record MCP のテストの子に一時の HOME を渡す
+  - 種別: 変更
+  - 計画: S1, S4
+  - 依存: T11（コメントの対象のコード）, T05（直すテスト）
+  - 変更: `server/src/capture.ts`, `.agents/skills/knowledge-schema/SKILL.md`, `server/test/plugin.test.ts`
+  - 完了条件: `bun run verify` → exit 0。新しい複数行コメントが 3 行以内
+  - コミット: `docs(capture): move the turn-start rules to the knowledge-schema Skill and give a test child a temp home (T12)`
+  - 結果: `node --test test/capture.test.ts` → 55 pass、`--test-name-pattern="_meta" test/plugin.test.ts` → pass、`bun run verify:ai` → exit 0。この PR で足した 4 行以上のコメントは 0（残る 3 か所は前からある INJECTED などのコメント）
+
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -146,3 +155,4 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 - 2026-10-03 / 全体 / Codex の全差分レビュー（fe6f868a、high）3 件（P2）: F1（同期の UserPromptSubmit の timeout で発言が消える）と F3（0.6.27 の hook のセッションの起点を消す）は review-shipping と同じで T09 で直した。F2（Stop hook が続けさせたターンの続きのシェルの編集が落ちる）を受理し T10 を足した
 - 2026-10-03 / 全体 / Codex の 2 回目の全差分レビュー（f943ab31、high）3 件（P2、mock で再現）を受理し T11 を足した。直しが新しい欠陥を生むのが 2 回続いた（T09 の直しが足りず、T10 から 2 件）ので持ち主に聞き、「3 件を直して区切る」を受けた。この後の全差分レビューは P1 と出荷後の安全に絞る
 - 2026-10-03 / 全体 / Codex の最終の全差分レビュー（4642ec0d、high、P1 と出荷後の安全に絞った）は指摘 0 件（メモリ上の fs・git で 18 ケース、typecheck・AI 設定検査。Windows・0.6.27 からの更新・実ホストの並行 hook は未実走）
+- 2026-10-03 / T12 / GitHub の Codex（PR #254）2 件（P1）: 起点の説明と closeTurn のコメントが 3 行を超える（規約）、足した record MCP のテストが子に `HOME: "/nonexistent"` を渡し Windows では `os.homedir()` が本物のプロファイルを指し得る、を受理 / T12 を足した。同じ形は同じファイルの既存の 9 か所にもあるが、この PR の範囲外として触らない

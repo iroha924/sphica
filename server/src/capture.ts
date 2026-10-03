@@ -310,12 +310,8 @@ export function captureNotice(file: string = dbFile()): string | null {
 }
 
 /**
- * Where the working tree stood when a turn began: one file per turn, never rewritten by another turn and never deleted to start one,
- * because hooks of different turns can run out of order. `seq` orders the turns; null when the turns before could not be read.
- * Status edits are given to a turn only when it is still the newest one after its end snapshot, and dropped when that cannot be told.
- * Gaps left open: a turn started by a notice can reuse an interrupted turn's id (nothing the hooks receive tells an interrupt apart),
- * edits made before the end snapshot runs, a starting point that could not be written, a hook that keeps running past its timeout,
- * and a session resumed after HOLD_DAYS while its old starting points are being pruned.
+ * Where the working tree stood when a turn began: one file per turn, numbered by `seq`, never touched by another turn's hooks because
+ * hooks run out of order. The rules and the gaps left open are in the knowledge-schema Skill ("Status edits and turn starts").
  */
 type Start = {
   head: string | null;
@@ -401,10 +397,8 @@ export function openTurn(dir: string, turn: string, root: string): (() => void) 
 }
 
 /**
- * Takes a turn's end snapshot and returns the step that gives the paths changed since its start, or null when the turn has nothing to
- * compare against. The step reads the starts again after the snapshot: if a newer turn began before it, its edits may be in the snapshot.
- * A Stop leaves its end snapshot as the start of what follows: another Stop with no prompt in between is the same turn kept going by a
- * Stop hook, and a prompt that reuses the id takes a new snapshot first.
+ * Takes a turn's end snapshot and returns the step that gives the paths changed since its start (null: nothing to compare against).
+ * The step reads the starts again after the snapshot, since a newer turn that began before it may have edits in the snapshot.
  */
 export function closeTurn(dir: string, turn: string, root: string): (() => string[]) | null {
   const own = readStart(startFile(dir, turn));

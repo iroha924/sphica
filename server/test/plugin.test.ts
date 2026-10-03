@@ -761,6 +761,7 @@ test("the record MCP server prefers Codex's _meta over an inherited CLAUDE_PROJE
   const inherited = repo("a");
   const workspace = repo("b");
   const unregistered = repo("u");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
   project(db, "git:github.com/o/a", "o/a");
   project(db, "git:github.com/o/b", "o/b");
   const meta = (dir: string) => ({
@@ -771,9 +772,11 @@ test("the record MCP server prefers Codex's _meta over an inherited CLAUDE_PROJE
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp-record.ts")],
+      // os.homedir() reads USERPROFILE on Windows, so both point at a temporary directory
       env: {
         PATH: process.env.PATH ?? "",
-        HOME: "/nonexistent",
+        HOME: home,
+        USERPROFILE: home,
         SPHICA_DB: db.file,
         CLAUDE_PROJECT_DIR: inherited,
       },
@@ -798,6 +801,7 @@ test("the record MCP server prefers Codex's _meta over an inherited CLAUDE_PROJE
   } finally {
     await client.close();
     await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
