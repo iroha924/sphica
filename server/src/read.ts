@@ -255,6 +255,17 @@ async function describe(
         `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
       );
   }
+  // The newest set bound to the record's words, as of the time read; search uses the same one
+  const aliases = await db
+    .selectFrom("unit_alias")
+    .select("terms")
+    .where("unit_id", "=", u.id)
+    .where("content_hash", "=", u.content_hash)
+    .where("added_at", "<=", asOf ?? "9999")
+    .orderBy("id", "desc")
+    .executeTakeFirst();
+  const terms: string[] = aliases ? JSON.parse(aliases.terms) : [];
+  if (terms.length) out.push(`Aliases (search only): ${terms.map((t) => inline(head(t, 40))).join(", ")}`);
   out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
   return out.join("\n");
 }

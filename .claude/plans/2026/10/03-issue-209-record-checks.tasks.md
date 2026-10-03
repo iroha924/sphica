@@ -83,13 +83,14 @@ read で、移動したファイルの移動先の候補と、記録の aliases�
   - コミット: `feat(read): show where a missing anchor's file may have moved since its commit (T05)`
   - 結果: 直す前のコードでは移動先が出ずに落ちる（`missing — needs review: the code it points at is gone` だけ）。直した後 `node --test --test-name-pattern="^rename" test/record.test.ts` → 1 pass（commit した移動と index だけの移動の両方に `may have moved to`、消しただけのファイルと commit の無い anchor には何も足さない、3 つの anchor が同じ commit で git は 1 回、読めない commit は `rename not checked`）。`bun run verify` → exit 0（acceptance 101 pass）
 
-- [ ] T06: read と as-of の read で aliases を出す
+- [x] T06: read と as-of の read で aliases を出す
   - 種別: 追加
   - 計画: S3
   - 依存: なし
   - 変更: `server/src/read.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="aliases in read" test/record.test.ts` → 今の組が `aliases (search only):` で出る。as-of では当時の組、空の組は行なし
   - コミット: `feat(read): show a record's search aliases, as of the time read (T06)`
+  - 結果: 直す前のコードでは read に aliases の行が無く落ちる。直した後 `node --test --test-name-pattern="aliases in read" test/record.test.ts` → 1 pass（今の組、新しい組を足すと置き換わる、as-of では当時の組、空の組で行が消える）。`bun run verify` → exit 0（acceptance 101 pass）
 
 ## P3: unsourced の案内
 

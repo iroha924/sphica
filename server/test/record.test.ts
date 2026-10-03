@@ -1313,6 +1313,45 @@ test("rename: read shows where a missing anchor's file may have moved since its 
   }
 });
 
+test("aliases in read: the current search words are shown, and an as-of read shows the set of that time", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "時刻は UTC で保存する。" });
+    await save(db, target(p), {
+      units: [
+        {
+          key: "utc",
+          kind: "finding",
+          text: "時刻は UTC で保存する",
+          evidence: [{ source: `s${m}`, quote: "時刻は UTC で保存する。", role: "states" }],
+          aliases: ["timezone", "協定世界時"],
+        },
+      ],
+    });
+    const unit = db.owner.prepare("select id, content_hash from unit where key = 'trace:ext-s1/utc'").get();
+    const run = Number(db.owner.prepare("select id from extraction_run limit 1").get()?.id);
+    const read = async (asOf?: string) =>
+      (await readUnit(db.reader, p, "trace:ext-s1/utc", null, asOf)) ?? "";
+    assert.match(await read(), /\nAliases \(search only\): timezone, 協定世界時\n/);
+    const later = (terms: string[], added: string) =>
+      insert(db, "unit_alias", {
+        unit_id: Number(unit?.id),
+        terms: JSON.stringify(terms),
+        content_hash: unit?.content_hash as Buffer,
+        run_id: run,
+        added_at: added,
+      });
+    later(["UTC", "時刻"], "2099-01-01T00:00:00.000Z");
+    assert.match(await read(), /Aliases \(search only\): UTC, 時刻\n/);
+    assert.match(await read("2098-01-01T00:00:00.000Z"), /Aliases \(search only\): timezone, 協定世界時\n/);
+    later([], "2099-02-01T00:00:00.000Z");
+    assert.doesNotMatch(await read(), /Aliases/, "an empty set clears them");
+  } finally {
+    await db.done();
+  }
+});
+
 test("an anchor path holding a NUL or other control character is refused", () => {
   assert.equal(repoPath("src/a.ts"), "src/a.ts");
   assert.equal(repoPath("x\0y"), null);
