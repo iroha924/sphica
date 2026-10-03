@@ -30,7 +30,7 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
 
 1. **Pick the session.** Without a target, it is this session: its id is `${CLAUDE_SESSION_ID}` in Claude Code; in Codex, read `CODEX_THREAD_ID`
    from your shell environment. With `pending`, call `trace_pending`, show the owner the list, and ask which to trace (AskUserQuestion in
-   Claude Code). Sessions whose last owner message is over 30 days old come last under their own heading: session start does not count
+   Claude Code). Sessions whose last owner message is over 14 days old come last under their own heading: session start does not count
    them, but they can still be traced. Trace one session at a time
 2. **Begin**: `trace_begin` with that `session`. It returns a `run` id bound to that session and this project; the record never names them
 3. **Read**: `record_context` with the run. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,

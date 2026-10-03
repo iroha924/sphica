@@ -133,7 +133,7 @@ test("trace: pending lists the session, begin binds it, and check and save take 
     const p = project(db);
     const m = message(db, p, { id: "m1", text: "SQLite にしよう。" });
     assert.match(
-      await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")),
+      await pendingText(db.ingest, p, new Date("2026-09-20T00:00:00Z")),
       /1 session to trace[\s\S]*- s1 claude-code/,
     );
     await assert.rejects(beginTrace(db.ingest, p), /Pass the session/);
@@ -190,7 +190,7 @@ test("trace: pending lists the session, begin binds it, and check and save take 
     await assert.rejects(contextText(db.ingest, run, p + 1, null), /another project/);
     await assert.rejects(contextText(db.ingest, "missing", p, null), /No run/);
     assert.match(
-      await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")),
+      await pendingText(db.ingest, p, new Date("2026-09-20T00:00:00Z")),
       /2 sessions to trace[\s\S]*- s(1|9) claude-code[\s\S]*- s(1|9) claude-code/,
     );
   } finally {
@@ -1987,7 +1987,7 @@ test("trace: context comes in pages, and saving marks as looked at only the mess
     const shown = [...page.matchAll(/^## s(\d+) /gm)].length;
     assert.ok(shown > 0 && shown < 40);
     assert.equal(untraced(), 40 - shown);
-    assert.match(await pendingText(db.ingest, p, new Date("2026-09-27T00:00:00Z")), /1 session to trace/);
+    assert.match(await pendingText(db.ingest, p, new Date("2026-09-20T00:00:00Z")), /1 session to trace/);
     // Reading every page to the end marks them all; a page starts only after a cursor the run was given
     const second = await beginTrace(db.ingest, p, "s1");
     await assert.rejects(

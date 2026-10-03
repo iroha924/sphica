@@ -66,13 +66,14 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
 
 持ち主の追加の 14 日を入れ、P1 の 3 つの挙動を受け入れケースで固定する。
 
-- [ ] T05: trace 待ちに数える期間を 14 日にする
+- [x] T05: trace 待ちに数える期間を 14 日にする
   - 種別: 変更
   - 計画: S5
   - 依存: なし
-  - 変更: `server/src/trace.ts`, `server/src/mcp-record.ts`, `plugin/skills/trace/SKILL.md`, `server/test/status.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
+  - 変更: `server/src/trace.ts`, `server/src/mcp-record.ts`, `plugin/skills/trace/SKILL.md`, `server/test/status.test.ts`, `server/test/extract.test.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`
   - 完了条件: `cd server && node --test test/status.test.ts` → pass（13 日・ちょうど 14 日は数え、14 日を少し過ぎた・20 日は別の見出し）。`rg -n "30 days|30 日" server/src/trace.ts server/src/mcp-record.ts plugin/skills/trace/SKILL.md server/evals/acceptance server/test/status.test.ts` → 一致なし
   - コミット: `feat(trace): count a session as waiting for 14 days after its last owner message (T05)`
+  - 結果: テストを先に 14 日へ直して 30 日のコードで流す → status.test.ts 2 fail。直した後 `node --test test/status.test.ts` → 5 pass。`bun run test` → 3 件（extract・record の trace のテスト）が 17 日前の fixture を今の数え方で古い側に回して落ちたので、時計を fixture の 10 日後に移し `node --test test/extract.test.ts test/record.test.ts` → 51 pass。`rg -n "30 days|30 日" …` → 一致なし
 
 - [ ] T06: 受け入れケースを 3 件足す（SDK のターン、中断の後のロールオーバー、compaction）
   - 種別: 追加
@@ -85,3 +86,5 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
 ## 記録
 
 - 2026-10-03 / T01, T02 / コミットの件名が 100 文字を超え commit-msg の検査で止まった / 件名を短くした（T01: `…never count an Agent SDK turn as the owner's, and bump to 0.6.24`、T02: `…end a running turn on a new typed prompt or a Codex interrupt`）
+- 2026-10-03 / T05 / extract.test.ts と record.test.ts の trace のテストが 2026-09-10 の fixture を 2026-09-27 の時計で数えていて、14 日で古い側に回り落ちた / 変更欄に 2 ファイルを足した（前: status.test.ts のみのテスト、後: extract.test.ts・record.test.ts も）
+- 2026-10-03 / T01 / Codex のタスクレビューは指摘 0 件（sandbox でテストは流せず、テストは自分で流した結果）

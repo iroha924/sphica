@@ -94,7 +94,7 @@ server.registerTool(
   {
     title: "Sessions not traced yet",
     description:
-      "Lists this project's captured sessions with owner messages no trace has looked at, then apart those whose last owner message is over 30 days old.",
+      "Lists this project's captured sessions with owner messages no trace has looked at, then apart those whose last owner message is over 14 days old.",
     inputSchema: z.object({ cwd: CWD }).strict(),
     annotations: READ,
   },

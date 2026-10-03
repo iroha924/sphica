@@ -28,7 +28,7 @@ test("status counts captured and extracted records and names the sessions not tr
   try {
     const p = project(db);
     const traced = message(db, p, { id: "m1", text: "決めた", session: "s1" });
-    message(db, p, { id: "m2", text: "まだ trace していない", session: "s2" });
+    message(db, p, { id: "m2", text: "まだ trace していない", session: "s2", sent: "2026-09-20T00:00:00Z" });
     message(db, p, { id: "m3", text: "AI の返事だけ", session: "s3", speaker: "assistant" });
     const r = run(db, p);
     insert(db, "source_processing", { source_id: traced, run_id: r, outcome: "units" });
@@ -88,7 +88,7 @@ test("status of an empty project says there is nothing waiting and no work", asy
   }
 });
 
-test("an untraced session whose last owner message is over 30 days old is listed apart and not counted, and is still found", async () => {
+test("an untraced session whose last owner message is over 14 days old is listed apart and not counted, and is still found", async () => {
   const db = tempDb();
   const clock = new Date(now);
   const daysAgo = (d: number) => new Date(clock.getTime() - d * 86_400_000).toISOString();
@@ -97,11 +97,17 @@ test("an untraced session whose last owner message is over 30 days old is listed
     message(db, p, {
       id: "old",
       text: "keep export retention for a year",
-      session: "s31",
-      sent: daysAgo(31),
+      session: "s20",
+      sent: daysAgo(20),
     });
-    message(db, p, { id: "recent", text: "rename the export button", session: "s29", sent: daysAgo(29) });
-    message(db, p, { id: "edge", text: "move the export menu", session: "s30", sent: daysAgo(30) });
+    message(db, p, { id: "recent", text: "rename the export button", session: "s13", sent: daysAgo(13) });
+    message(db, p, { id: "edge", text: "move the export menu", session: "s14", sent: daysAgo(14) });
+    message(db, p, {
+      id: "past",
+      text: "drop the export menu",
+      session: "s14x",
+      sent: daysAgo(14 + 1 / 1440),
+    });
     // The owner came back to s-back: its untraced message is old, but its last owner message is recent
     message(db, p, { id: "back-old", text: "export as CSV first", session: "s-back", sent: daysAgo(60) });
     const back = message(db, p, {
@@ -112,26 +118,26 @@ test("an untraced session whose last owner message is over 30 days old is listed
     });
     insert(db, "source_processing", { source_id: back, run_id: run(db, p), outcome: "no_unit" });
 
-    assert.deepEqual(await pendingCount(db.reader, p, clock), { recent: 3, older: 1 });
+    assert.deepEqual(await pendingCount(db.reader, p, clock), { recent: 3, older: 2 });
     const out = await status(db.reader, p, "o/r", clock);
     assert.match(out, /3 sessions not traced yet/);
     assert.match(
       out,
-      /1 older session \(last owner message over 30 days ago\) not traced; \/sphica:trace pending lists them\./,
+      /2 older sessions \(last owner message over 14 days ago\) not traced; \/sphica:trace pending lists them\./,
     );
     assert.doesNotMatch(out, /Every captured session has been traced/);
 
     const listed = await pendingText(db.ingest, p, clock);
-    const [recent = "", older = ""] = listed.split(/^Older than 30 days/m);
+    const [recent = "", older = ""] = listed.split(/^Older than 14 days/m);
     assert.match(recent, /^3 sessions to trace/);
     assert.deepEqual(
       [...recent.matchAll(/^- (s[\w-]+) /gm)].map((m) => m[1]),
-      ["s-back", "s29", "s30"],
+      ["s-back", "s13", "s14"],
       "the owner's latest message orders them",
     );
     assert.match(
       older,
-      /^ \(not counted at session start\), 1 session; trace_begin takes these ids too:\n- s31 /,
+      /^ \(not counted at session start\), 2 sessions; trace_begin takes these ids too:\n- s14x .*\n- s20 /,
     );
 
     // Nothing is deleted: the old message is still found in sources and among earlier questions
@@ -153,7 +159,7 @@ test("an untraced session whose last owner message is over 30 days old is listed
       assert.match(text, /1 older session/);
       assert.match(
         await pendingText(only.ingest, q, clock),
-        /^No recent session waits to be traced\.\nOlder than 30 days/,
+        /^No recent session waits to be traced\.\nOlder than 14 days/,
       );
     } finally {
       await only.done();
@@ -176,7 +182,7 @@ test("pending shows each group's total and how many it left out past 20", async 
         sent: new Date(clock.getTime() - (40 + n) * 86_400_000).toISOString(),
       });
     const listed = await pendingText(db.ingest, p, clock);
-    assert.match(listed, /Older than 30 days \(not counted at session start\), 22 sessions;/);
+    assert.match(listed, /Older than 14 days \(not counted at session start\), 22 sessions;/);
     assert.equal([...listed.matchAll(/^- s\d+ /gm)].length, 20);
     assert.match(listed, /\n- and 2 more$/);
   } finally {

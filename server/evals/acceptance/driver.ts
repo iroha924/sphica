@@ -811,7 +811,7 @@ export async function createDriver(world: World): Promise<Driver> {
             want.pending_older_includes,
           );
           const listed = await pendingText(writer(), await projectId(), now);
-          assert.match(listed.slice(listed.indexOf("Older than 30 days")), new RegExp(uuid), listed);
+          assert.match(listed.slice(listed.indexOf("Older than 14 days")), new RegExp(uuid), listed);
         }
         return;
       }

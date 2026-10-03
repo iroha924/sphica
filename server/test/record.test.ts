@@ -865,7 +865,7 @@ test("trace reads pending sessions, a draft's run, a session's messages and edit
       via: "status",
       observed_at: now,
     });
-    const pending = await pendingSessions(db.reader, p, "recent", new Date(now));
+    const pending = await pendingSessions(db.reader, p, "recent", new Date("2026-09-20T00:00:00Z"));
     assert.deepEqual(
       pending.rows.map((r) => [r.id, Number(r.waiting), Number(r.first)]),
       [["s1", 1, m]],
