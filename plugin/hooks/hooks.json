@@ -49,7 +49,7 @@
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
             ],
-            "timeout": 10
+            "timeout": 30
           }
         ]
       },
@@ -90,7 +90,7 @@
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
             ],
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

@@ -652,6 +652,42 @@ test("turn boundary: a Stop hook that keeps the turn going gets the edits made a
   assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
 });
 
+test("turn boundary: a kept-going Stop that finishes after the same id started again leaves the new start alone", () => {
+  const { repo, edit, seen } = boundaryRepo("continued-late");
+  const dir = turnDir("claude-code", "cl");
+  const base = { session_id: "cl", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  const finishLate = closeTurn(dir, "t1", repo);
+  edit("owner.ts");
+  // A notice reuses the id and starts the turn again before the late Stop writes
+  onHook("claude-code", {
+    ...base,
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  assert.deepEqual(finishLate?.(), []);
+  edit("new-agent.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  assert.deepEqual(seen(), ["t1:new-agent.ts"]);
+});
+
+test("turn boundary: a Stop whose snapshot fails leaves the start for the Stop that keeps the turn going", () => {
+  const { repo, edit, seen } = boundaryRepo("stop-fails");
+  const base = { session_id: "sf", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  edit("first.ts");
+  const index = path.join(repo, ".git", "index");
+  const saved = fs.existsSync(index) ? fs.readFileSync(index) : null;
+  fs.writeFileSync(index, "not an index");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  if (saved) fs.writeFileSync(index, saved);
+  else fs.rmSync(index);
+  edit("after-feedback.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
+});
+
 test("turn boundary: a start saved late, after a newer turn numbered itself, ties and gives neither turn the edits", () => {
   const { repo, edit } = boundaryRepo("late-save");
   const dir = turnDir("claude-code", "lv");

@@ -412,8 +412,14 @@ export function closeTurn(dir: string, turn: string, root: string): (() => strin
   const before = { head: own.head, entries: own.entries };
   const now = snapshot(root);
   return () => {
-    if (newestTurn(readStarts(dir)) !== turn) return [];
-    writeStart(dir, { ...own, head: now?.head ?? null, entries: now?.entries ?? null, running: false });
+    // A prompt that reused the id while this Stop ran saved a new start: leave it, and its turn, alone
+    if (
+      newestTurn(readStarts(dir)) !== turn ||
+      JSON.stringify(readStart(startFile(dir, turn))) !== JSON.stringify(own)
+    )
+      return [];
+    // A failed snapshot keeps the start, so a Stop that follows in the same turn still compares from it
+    writeStart(dir, { ...own, ...(now ?? {}), running: false });
     return now ? changed(root, before, now) : [];
   };
 }

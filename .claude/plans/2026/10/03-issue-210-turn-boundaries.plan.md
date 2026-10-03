@@ -56,7 +56,7 @@ approved_at: 2026-10-03
 5. Codex の Interrupt(turn): 自分のファイルがあれば、git を走らせず `running: false`（turn と seq と entries は保つ）で書き直す。無ければ何もしない
 6. SessionStart: 起点を書かない（どの source でも）。`CLAUDE_ENV_FILE` と prune は今どおり
 7. prune（SessionStart から）: セッションのディレクトリの中の全ファイル（tmp を含む）が HOLD_DAYS より古いときだけ、ディレクトリごと消す。一部だけは消さない（空のディレクトリも消さない）。旧形式の 1 ファイルは HOLD_DAYS より古いときだけ消す（更新の途中で旧い hook のセッションが使っている）。起点の読み書きと prune に失敗しても、発言の保存・flush・セッション開始の通知は止めない。UserPromptSubmit は発言を spool してから起点を取る（同期の hook が timeout で打ち切られても発言は残る）。Interrupt で終えたターンの起点は番号だけを残し（head と entries を null）、Stop で終えたターンは終わりの snapshot を残す（UserPromptSubmit を挟まない同じターンの次の Stop は、Stop hook がターンを続けさせた続きなので、そこから差分を取る）
-8. 同期化: `plugin/hooks/hooks.json` の capture の UserPromptSubmit と Stop を `{ timeout: 10 }`（async を外す）。`scripts/check-ai-config.mjs` の期待を同じにする
+8. 同期化: `plugin/hooks/hooks.json` の capture の UserPromptSubmit と Stop を `{ timeout: 30 }`（async を外す。発言を spool する前にプロジェクトを決める git の呼び出しが 2 回あり、各 5 秒まで待つので、その分を残す）。`scripts/check-ai-config.mjs` の期待を同じにする
 9. 受け入れる穴（capture.ts の先頭のコメントに書く）:
    - (a) 中断の後、前のターンの id を使い回す通知のターン（起点が running のまま残り、オーナーの手での編集がそのターンに入る）
    - (b) Stop の snapshot までの間のオーナーの編集
@@ -99,7 +99,7 @@ approved_at: 2026-10-03
 
 ## リスク
 
-- 大きなリポジトリで同期の git status がプロンプトとターンの終わりを待たせる → timeout 10 で打ち切られ、そのターンは目印を書けず (d) になる（付け違えはしない）。報告があれば測って非同期に戻すか、snapshot を軽くする
+- git が遅いリポジトリで同期の hook がプロンプトとターンの終わりを待たせる（git の呼び出しは各 5 秒までなので最悪 20 秒ほど）→ 30 秒の timeout の内側で発言は残り、起点が書けなければ (d) になる（付け違えはしない）。報告があれば測って、プロジェクトの解決を軽くするか非同期に戻すかを決める
 - 起点のファイルが続いているセッションのディレクトリにターンの数だけ、終わりの git status の entries ごと積もり、各 hook が全部を読む（review-shipping の合成の測定: 未追跡 3 万ファイルの木で 300 ターン 546 MB・1 回 1.9 秒、3 千ファイルで 800 ターン 141 MB・0.55 秒）→ セッションが HOLD_DAYS 止まれば消える。ふつうの木では小さい。報告があれば、ファイル名に seq を持たせて読む量を減らすか、続きの Stop を諦めて終えたターンを番号だけにする
 - 走っている間の別の id のプロンプト（c）で status の編集が思ったより落ちる → 取り違えはしないので出す。trace の後に `edit_observation` の via 別の件数を見る
 - 方針 7 の prune は T07 のタスクレビューで Codex に確かめさせる
@@ -112,3 +112,4 @@ approved_at: 2026-10-03
 - 2026-10-03 / 方針 7 の prune をセッション単位の削除にし、方針 9 の穴 (d) を起点の書き込みの失敗全般に、(f) を timeout を過ぎて走り続ける hook を含む形に広げ、(g) を足した。起点の失敗で発言の保存と flush を止めない / T01・T02 のタスクレビュー（Codex）: T02 の prune と hook の競合 2 件、T01 の Interrupt の書き込み失敗で flush が止まる 1 件を受理。T01 の残り 3 件は同期の UserPromptSubmit の前提か書き込みの失敗に当たる / Go 不要（範囲・公開インターフェース・データは変わらず、付け違えの起き得る場面は (g) の一瞬が増え、prune の部分削除が無くなった分だけ減る）
 - 2026-10-03 / 方針 7 に、旧形式のファイルは古いときだけ消す、prune の失敗で通知を止めない、発言を起点より先に spool する、終えたターンは番号だけ残す、を足した / review-shipping の 4 件（同期の UserPromptSubmit が 10 秒で打ち切られると発言が消える、ターンごとのファイルが entries ごと積もる、0.6.27 の hook のセッションの起点を消す、prune の例外で通知が出ない）を受理 / Go 不要（範囲・公開インターフェース・データは変わらない）
 - 2026-10-03 / 方針 4・7: Stop で終えたターンは終わりの snapshot を残し、UserPromptSubmit を挟まない同じターンの次の Stop はそこから差分を取る。番号だけにするのは Interrupt で終えたターンに限る / Codex の全差分レビュー F2（別の Stop hook がターンを続けさせると、続きのシェルの編集が記録されない。main では記録された）を受理。T09 の「終えたターンは番号だけ」と両立しないので、ファイルが積もるのはリスクに残した / Go 不要
+- 2026-10-03 / 方針 4 に「続きの Stop は自分の起点が読んだときのままのときだけ書く、snapshot に失敗したら起点を残す」、方針 8 の timeout を 30 秒に / Codex の 2 回目の全差分レビュー（f943ab31）3 件（P2）: 続きの Stop が同じ id で取り直した起点を古い番号で上書きする、発言の spool の前のプロジェクトの解決（git 2 回、各 5 秒）で 10 秒を使い切り発言が消える、最初の Stop の snapshot の失敗で続きの Stop が比べられない。直しが新しい欠陥を生むのが 2 回続いたので持ち主に聞き、「3 件を直して区切る」（この後の全差分レビューは P1 と出荷後の安全に絞る）/ 持ち主の判断あり

@@ -99,6 +99,16 @@ base: main
   - コミット: `fix(capture): record shell edits of a turn a Stop hook keeps going (T10)`
   - 結果: red 実測（af38bfd4 の capture.ts）: actual `[ 't1:first.ts' ]`、expected に `t1:after-feedback.ts`。直した後 `node --test test/capture.test.ts` → 53 pass / 0 fail、`bun run typecheck` エラーなし
 
+- [x] T11: 続きの Stop は取り直された起点を上書きせず、snapshot の失敗で起点を残し、同期の hook の timeout を 30 秒にする
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T10（続きの Stop）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `plugin/hooks/hooks.json`, `scripts/check-ai-config.mjs`, `.claude/plans/2026/10/03-issue-210-turn-boundaries.plan.md`
+  - red: `cd server && node --test --test-name-pattern="finishes after the same id|snapshot fails" test/capture.test.ts` → f943ab31 の capture.ts で、次の Stop に `t1:owner.ts` が入る、snapshot の失敗の後の続きの Stop が `[]` を返す、で落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass。`node scripts/check-ai-config.mjs` → exit 0（10 秒の hooks.json では UserPromptSubmit と Stop の 2 件で落ちる）
+  - コミット: `fix(capture): keep a reused turn's new start and give the synchronous hooks 30 seconds (T11)`
+  - 結果: red 実測（f943ab31 の capture.ts）: actual `[ 't1:new-agent.ts', 't1:owner.ts' ]`、actual `[]`（expected `[ 't1:after-feedback.ts', 't1:first.ts' ]`）。直した後 `node --test test/capture.test.ts` → 55 pass / 0 fail。`node scripts/check-ai-config.mjs` → exit 0、HEAD の hooks.json に戻すと `must be` が 2 件
+
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -134,3 +144,4 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 - 2026-10-03 / T08 / Codex のタスクレビューは指摘 0 件（fs の mock で prune と hook の 50 通りの順序を試し全部 pass。実ファイルの並行プロセスは未検証）
 - 2026-10-03 / 全体 / review-shipping（パックした tarball 48 ファイル、dist に新しいコード、hooks.json の timeout 10、新しいテストが main のコードで落ちることを確認）: 4 件を受理し T09 を足した。同期の UserPromptSubmit が 10 秒を超えると発言が spool の前に打ち切られる（遅い git で再現）、ターンごとのファイルが entries ごと積もる（合成の 300 ターン・3 万ファイルで 546 MB・1.9 秒）、0.6.27 の hook のセッションの起点を年齢によらず消す（再現）、prune の例外で通知が出ない（読んだだけ）
 - 2026-10-03 / 全体 / Codex の全差分レビュー（fe6f868a、high）3 件（P2）: F1（同期の UserPromptSubmit の timeout で発言が消える）と F3（0.6.27 の hook のセッションの起点を消す）は review-shipping と同じで T09 で直した。F2（Stop hook が続けさせたターンの続きのシェルの編集が落ちる）を受理し T10 を足した
+- 2026-10-03 / 全体 / Codex の 2 回目の全差分レビュー（f943ab31、high）3 件（P2、mock で再現）を受理し T11 を足した。直しが新しい欠陥を生むのが 2 回続いた（T09 の直しが足りず、T10 から 2 件）ので持ち主に聞き、「3 件を直して区切る」を受けた。この後の全差分レビューは P1 と出荷後の安全に絞る
