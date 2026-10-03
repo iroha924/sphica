@@ -159,6 +159,16 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - コミット: `feat(glean): replace a saved record's search aliases (T08)`
   - 結果: 直す前のコードでは `ops.0.op: Invalid discriminator value` で拒まれて落ちる。直した後 `node --test --test-name-pattern="replace_aliases" test/extract.test.ts` → pass（本文に無い alias で見つかり、外した alias で見つからない。read に今の組、as-of で前の組。古い revision・空白だけ・41 文字・13 件は check と save の両方で error、拒んだ後も aliases は変わらない。`[]` で消える）。受け入れケース glean-18 は直す前のコードで落ち、直した後に通る。`bun run verify` → exit 0（acceptance 103 pass）
 
+- [x] T15: T08 のタスクレビューの指摘を直す（制御文字を含む alias を check が通して save だけが落ちる、Skill の例の revision が食い違う）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T08（直す対象の op）
+  - 変更: `server/src/glean.ts`, `server/src/record.ts`, `server/test/extract.test.ts`, `plugin/skills/glean/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → NUL を含む alias で check が通り、save が `each alias is a non-empty string` で落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → 全件 pass
+  - コミット: `fix(glean): refuse aliases with control characters at check (T15)`
+  - 結果: red は直す前のコードで、trace の check が `'✓ 1 record can be saved'`（NUL を含む alias を通した）、replace_aliases も check を通った。直した後、trace は check で problem を出して保存の組から外し（判定と保存の絞り込みを同じ `bad` にそろえた）、replace_aliases は error。`node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → 2 pass。Skill の例は 2 つの op とも revision 2 にした。`bun run verify` → exit 0（acceptance 103 pass）
+
 ## P5: リリース
 
 npm と 3 つの manifest を 0.6.25 にそろえる。
@@ -184,3 +194,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T13 / T06 のレビュー F1（head はバイト数で切るので、DB の制約で 40 文字以内の日本語の alias が切れる）を直すと判定した。T11・T12 のレビューは指摘なし / T13 を足した
 - 2026-10-03 / T08 / record.ts は変える必要がなかった。post-glean の検索を確かめる `search_not_include` を driver に足した / 変更欄から `server/src/record.ts` を外し、`server/evals/acceptance/driver.ts` を足した
 - 2026-10-03 / T14 / T07 のレビュー F1（add_evidence と adopt を同じバッチで送るので、adopt の条件を外してもテストが通る）を直すと判定した / T14 を足した
+- 2026-10-03 / T15 / T08 のレビュー F1（NUL を含む alias は JS では 1 文字以上だが SQLite の trim が NUL で止まり、check が通って save だけが落ちる。trace の aliases も同じ判定で save が落ちる）と F2（Skill の例で同じ記録の 2 つの op に違う revision）を直すと判定した / T15 を足した

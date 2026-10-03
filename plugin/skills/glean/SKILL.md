@@ -61,7 +61,7 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
     { "op": "add_evidence", "unit": "trace:abc/storage", "revision": 4, "source": "s31", "quote": "Exported CSV files must never include notes.", "role": "states" },
     { "op": "add_evidence", "unit": "trace:abc/storage", "revision": 4, "file": { "path": "docs/ops.md", "commit": "HEAD", "lines": [3, 3] }, "quote": "Back up before a release.", "role": "explains" },
     { "op": "adopt", "unit": "glean:csv/no-notes", "revision": 2, "source": "s40", "quote": "Let's make that final." },
-    { "op": "replace_aliases", "unit": "glean:csv/no-notes", "revision": 3, "aliases": ["CSV export", "export notes", "notes field"] }
+    { "op": "replace_aliases", "unit": "glean:csv/no-notes", "revision": 2, "aliases": ["CSV export", "export notes", "notes field"] }
   ],
   "units": []
 }

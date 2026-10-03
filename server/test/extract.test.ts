@@ -2007,6 +2007,43 @@ test("glean: unsourced cannot become active, adding evidence or adoption says so
   }
 });
 
+test("control character alias: trace leaves it out at check, so the save does not fail on it", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "時刻は協定世界時で保存する。" });
+    const record = {
+      units: [
+        {
+          key: "utc",
+          kind: "finding",
+          text: "時刻は協定世界時で保存する",
+          evidence: [{ source: `s${m}`, quote: "時刻は協定世界時で保存する。", role: "states" }],
+          aliases: ["\u0000offset", "timezone"],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, root);
+    assert.match(
+      (await checkText(db.ingest, run, p, root, record)).text,
+      /aliases must be 1 to 40 characters/,
+    );
+    assert.match(await saveText(db.ingest, run, p, root, record), /✓ saved/);
+    assert.deepEqual(
+      db.owner
+        .prepare("select terms from unit_alias")
+        .all()
+        .map((r) => r.terms),
+      ['["timezone"]'],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("replace_aliases: glean replaces a saved record's search words, and clears them with an empty set", async () => {
   const db = tempDb();
   const root = repo();
@@ -2063,6 +2100,7 @@ test("replace_aliases: glean replaces a saved record's search words, and clears 
       [["timezone"], stale, /changed since you read it/],
       [[" "], undefined, /aliases must be 1 to 40 characters/],
       [["x".repeat(41)], undefined, /aliases must be 1 to 40 characters/],
+      [["\u0000offset"], undefined, /aliases must be 1 to 40 characters/],
       [Array.from({ length: 13 }, (_, i) => `a${i}`), undefined, /aliases/],
     ] as const) {
       const run = await beginGlean(db.ingest, p, "g1");

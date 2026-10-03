@@ -563,7 +563,7 @@ export async function checkGlean(
     if (op.op === "replace_aliases") {
       aliases = [...new Set(op.aliases.map((a) => a.trim()))];
       // Unlike trace, nothing is left out: dropping a bad word would write a smaller set than asked, or clear them all
-      const bad = aliases.filter((a) => !a || a.length > 40);
+      const bad = aliases.filter((a) => !a || a.length > 40 || /\p{Cc}/u.test(a));
       if (bad.length)
         errors.push(
           `${what}: aliases must be 1 to 40 characters; ${bad.map((a) => JSON.stringify(inline(head(a, 60)))).join(", ")}`,

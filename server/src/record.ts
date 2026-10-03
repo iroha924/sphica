@@ -633,7 +633,8 @@ export async function checkRecord(
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
-    const bad = aliases.filter((a) => !a || a.length > 40);
+    // SQLite's trim stops at NUL, so the schema would refuse a control character the length check here lets through
+    const bad = aliases.filter((a) => !a || a.length > 40 || /\p{Cc}/u.test(a));
     if (bad.length)
       problems.push(
         `${key}: aliases must be 1 to 40 characters; left out ${bad.map((a) => JSON.stringify(a)).join(", ")}`,
@@ -712,7 +713,7 @@ export async function checkRecord(
       options,
       adoption,
       anchors,
-      aliases: aliases.filter((a) => a && a.length <= 40),
+      aliases: aliases.filter((a) => !bad.includes(a)),
       supersedes,
       conflicts,
       fields,
