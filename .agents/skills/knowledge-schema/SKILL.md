@@ -94,6 +94,21 @@ Four boundaries (the header of schema.sql):
 
 A new ingestion source writes through the record server's run-bound tools or capture, never a bulk import.
 
+### Status edits and turn starts
+
+Capture writes `via: "status"` edits from git status at a turn's start and end (`openTurn` and `closeTurn` in `server/src/capture.ts`).
+Hooks of different turns can run out of order, so the starts follow these rules. Keep them when changing capture:
+
+- Each turn's start is its own file under `~/.sphica/worktree/<session>/`, numbered `seq`. No hook rewrites or deletes another turn's start
+- A Stop gives status edits to its turn only if, read again after its end snapshot, that turn is the single newest one and its own start is unchanged. A tie, a null `seq`, or an unreadable file drops them: a lost edit is better than one given to the wrong turn
+- A Stop leaves its end snapshot, so another Stop with no prompt in between (a Stop hook kept the turn going) compares from there. A prompt that reuses the id takes a new snapshot first. An Interrupt, or a Stop whose start has no snapshot, ends the turn and keeps only the number
+- `SessionStart` writes no start. Prune removes a session's directory only when every file in it is older than `HOLD_DAYS`, never an empty one or single files
+- The owner's prompt is queued before the start is taken, and a failed start never stops the messages, the send, or the session notice
+
+Gaps left open: a turn started by a notice can reuse an interrupted turn's id (nothing the hooks receive tells an interrupt apart); edits
+made before the end snapshot runs; a start that could not be written; a hook still running past its timeout; a session resumed after
+`HOLD_DAYS` while its old starts are being pruned.
+
 ## Connection roles
 
 Processes of the same OS user can rewrite the file directly, so this is not an OS boundary. It guards the path where Sphica's code writes by mistake.

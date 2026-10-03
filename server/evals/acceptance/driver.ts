@@ -247,6 +247,12 @@ export async function createDriver(world: World): Promise<Driver> {
         cwd: repo,
         ...input,
       });
+    const touch = (rel: string, turn: number) => {
+      const abs = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.appendFileSync(abs, `// ${s.id} turn ${turn}\n`);
+      return abs;
+    };
     const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
     if (s.entrypoint) process.env.CLAUDE_CODE_ENTRYPOINT = s.entrypoint;
     try {
@@ -255,9 +261,7 @@ export async function createDriver(world: World): Promise<Driver> {
         const turn = turnId(i + 1);
         hook(turn, { hook_event_name: "UserPromptSubmit", prompt: t.owner });
         t.edits.forEach((rel, k) => {
-          const abs = path.join(repo, rel);
-          fs.mkdirSync(path.dirname(abs), { recursive: true });
-          fs.appendFileSync(abs, `// ${s.id} turn ${i + 1}\n`);
+          const abs = touch(rel, i + 1);
           hook(turn, {
             hook_event_name: "PostToolUse",
             tool_use_id: `${turn}-edit-${k}`,
@@ -269,7 +273,12 @@ export async function createDriver(world: World): Promise<Driver> {
               : { tool_name: "Edit", tool_input: { file_path: abs } }),
           });
         });
-        hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
+        for (const rel of t.shell_edits ?? []) touch(rel, i + 1);
+        if (t.compact) hook(turn, { hook_event_name: "SessionStart", source: "compact" });
+        if (t.ends !== "interrupt")
+          hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
+        else if (host === "codex") hook(turn, { hook_event_name: "Interrupt" });
+        for (const rel of t.owner_edits_after ?? []) touch(rel, i + 1);
       });
     } finally {
       if (entrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
@@ -681,8 +690,9 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.equal(await sessionSource(e.no_source), undefined, `${e.no_source} was recorded`);
         return;
       }
-      if (e.edit_observation && typeof e.edit_observation === "object") {
-        const want = e.edit_observation as { session: string; path: string };
+      const observed = e.edit_observation ?? e.no_edit_observation;
+      if (observed && typeof observed === "object") {
+        const want = observed as { session: string; path: string };
         const got = await db()
           .selectFrom("edit_observation as o")
           .innerJoin("session as s", "s.id", "o.session_id")
@@ -690,7 +700,9 @@ export async function createDriver(world: World): Promise<Driver> {
           .where("o.path", "=", want.path)
           .select("o.id")
           .execute();
-        assert.ok(got.length > 0, `no edit observed for ${want.path} in ${want.session}`);
+        if (e.no_edit_observation)
+          assert.equal(got.length, 0, `${want.path} was observed in ${want.session}`);
+        else assert.ok(got.length > 0, `no edit observed for ${want.path} in ${want.session}`);
         return;
       }
       if (typeof e.units_for_session === "string") {

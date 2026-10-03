@@ -30,7 +30,7 @@ import { panel, plain } from "./panel.ts";
 import { identify, normalizeKey, patchPaths, relativeTo } from "./project.ts";
 import { sphicaHome } from "./sqlite.ts";
 import { bytes, clean, head, mask, plural, reason, sha256, tail } from "./text.ts";
-import { changed, type Snapshot, snapshot } from "./worktree.ts";
+import { changed, snapshot } from "./worktree.ts";
 
 // Resolve the location on every call (so tests that replace HOME never touch the real queue).
 export const spoolDir = (): string => path.join(sphicaHome(), "spool");
@@ -309,39 +309,155 @@ export function captureNotice(file: string = dbFile()): string | null {
   return null;
 }
 
-type Baseline = Snapshot & { running: boolean };
+/**
+ * Where the working tree stood when a turn began: one file per turn, numbered by `seq`, never touched by another turn's hooks because
+ * hooks run out of order. The rules and the gaps left open are in the knowledge-schema Skill ("Status edits and turn starts").
+ */
+type Start = {
+  head: string | null;
+  entries: Record<string, string> | null;
+  running: boolean;
+  turn: string;
+  seq: number | null;
+};
 
-const baselineFile = (host: Host, session: string): string =>
-  path.join(baselineDir(), `${digest(`${host}\0${session}`)}.json`);
+export const turnDir = (host: Host, session: string): string =>
+  path.join(baselineDir(), digest(`${host}\0${session}`));
+const startFile = (dir: string, turn: string): string => path.join(dir, `${digest(turn)}.json`);
 
-function readBaseline(file: string): Baseline | null {
+const isStart = (v: unknown): v is Start => {
+  const s = v as Start;
+  return (
+    !!s &&
+    typeof s === "object" &&
+    typeof s.turn === "string" &&
+    typeof s.running === "boolean" &&
+    (s.seq === null || Number.isSafeInteger(s.seq)) &&
+    (s.entries === null || (typeof s.entries === "object" && !Array.isArray(s.entries))) &&
+    (s.head === null || typeof s.head === "string")
+  );
+};
+
+function readStart(file: string): Start | null {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as Baseline;
+    const s = JSON.parse(fs.readFileSync(file, "utf8"));
+    return isStart(s) ? s : null;
   } catch {
-    return null; // none yet, or unreadable: the turn starts from here
+    return null;
   }
 }
 
-function writeBaseline(file: string, b: Baseline): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(b), { mode: 0o600 });
+/** Every starting point of a session, or null when one of them cannot be read. Temporary files start with a dot. */
+function readStarts(dir: string): Start[] | null {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ENOENT" ? [] : null;
+  }
+  const starts: Start[] = [];
+  for (const name of names) {
+    if (name.startsWith(".")) continue;
+    const s = readStart(path.join(dir, name));
+    if (!s) return null;
+    starts.push(s);
+  }
+  return starts;
+}
+
+/** The turn with the highest number, or null when that cannot be told (an unreadable or unnumbered start, or a tie). */
+function newestTurn(starts: Start[] | null): string | null {
+  if (!starts?.length || starts.some((s) => s.seq === null)) return null;
+  const top = Math.max(...starts.map((s) => s.seq as number));
+  const at = starts.filter((s) => s.seq === top);
+  return at.length === 1 ? (at[0]?.turn ?? null) : null;
+}
+
+function writeStart(dir: string, s: Start, file = startFile(dir, s.turn)): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(s), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
-/** Drops the starting points of sessions not seen for HOLD_DAYS (one file per session would otherwise pile up). */
+/**
+ * Takes a turn's starting point and returns the step that saves it, or null when the turn is already running (a message typed while
+ * it works). Split in two so tests can run another turn's hooks in between. A failed snapshot still saves the turn as the newest.
+ */
+export function openTurn(dir: string, turn: string, root: string): (() => void) | null {
+  if (readStart(startFile(dir, turn))?.running) return null;
+  const starts = readStarts(dir);
+  const seq =
+    starts && !starts.some((s) => s.seq === null)
+      ? Math.max(0, ...starts.map((s) => s.seq as number)) + 1
+      : null;
+  const now = snapshot(root);
+  return () =>
+    writeStart(dir, { head: now?.head ?? null, entries: now?.entries ?? null, running: true, turn, seq });
+}
+
+/**
+ * Takes a turn's end snapshot and returns the step that gives the paths changed since its start (null: nothing to compare against).
+ * The step reads the starts again after the snapshot, since a newer turn that began before it may have edits in the snapshot.
+ */
+export function closeTurn(dir: string, turn: string, root: string): (() => string[]) | null {
+  const own = readStart(startFile(dir, turn));
+  if (!own?.entries) return null;
+  const before = { head: own.head, entries: own.entries };
+  const now = snapshot(root);
+  return () => {
+    // A prompt that reused the id while this Stop ran saved a new start: leave it, and its turn, alone
+    if (
+      newestTurn(readStarts(dir)) !== turn ||
+      JSON.stringify(readStart(startFile(dir, turn))) !== JSON.stringify(own)
+    )
+      return [];
+    // A failed snapshot keeps the start, so a Stop that follows in the same turn still compares from it
+    writeStart(dir, { ...own, ...(now ?? {}), running: false });
+    return now ? changed(root, before, now) : [];
+  };
+}
+
+/** Ends a turn without looking at the tree (Codex's interrupt is cut off after at most 3 seconds). Nothing follows it to compare. */
+function stopTurn(dir: string, turn: string): void {
+  const own = readStart(startFile(dir, turn));
+  if (own?.entries || own?.running) writeStart(dir, { ...own, head: null, entries: null, running: false });
+}
+
+/**
+ * Drops a session's starting points once every one of them is older than HOLD_DAYS, never some of them: removing one while a hook
+ * of that session is between reading and writing could leave an older turn as the newest.
+ */
 function pruneBaselines(): void {
   const cutoff = Date.now() - HOLD_DAYS * 24 * 60 * 60 * 1000;
-  let files: string[];
+  const fresh = (file: string) =>
+    (fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) >= cutoff;
+  let names: string[];
   try {
-    files = fs.readdirSync(baselineDir());
+    names = fs.readdirSync(baselineDir());
   } catch {
     return; // not there yet
   }
-  for (const f of files) {
-    const file = path.join(baselineDir(), f);
-    if ((fs.statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) < cutoff)
-      fs.rmSync(file, { force: true });
+  for (const name of names) {
+    const at = path.join(baselineDir(), name);
+    // A single file per session is an older layout no turn reads; a session still on the older hooks may be using it
+    if (!fs.statSync(at, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!fresh(at)) fs.rmSync(at, { force: true });
+    } else {
+      // An empty directory may be a session writing its first start
+      const files = fs.readdirSync(at);
+      if (files.length && !files.some((f) => fresh(path.join(at, f))))
+        fs.rmSync(at, { recursive: true, force: true });
+    }
+  }
+}
+
+/** A starting point that cannot be read, written, or pruned costs only status edits, never the turn's messages, the send, or the notice. */
+function attempt<T>(fn: () => T): T | undefined {
+  try {
+    return fn();
+  } catch {
+    return undefined;
   }
 }
 
@@ -357,15 +473,18 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (file && input.session_id && /^[A-Za-z0-9_-]+$/.test(input.session_id)) {
       fs.appendFileSync(file, `export SPHICA_PARENT_SESSION=${input.session_id}\n`);
     }
-    const place = identify(input.cwd ?? process.cwd());
-    const now = place && snapshot(place.root);
-    if (now) writeBaseline(baselineFile(host, String(input.session_id)), { ...now, running: false });
-    pruneBaselines();
+    // No starting point here: at startup this runs in the background and may finish after the first prompt's, and after a compaction
+    // the running turn keeps its own.
+    attempt(pruneBaselines);
     return { flush: false, notice: captureNotice() };
   }
   if (!owner()) return { flush: false };
   // Interrupt is cut off after at most 3 seconds. No new records are made, so only the queue is sent without checking git or the project.
-  if (event === "Interrupt") return { flush: true };
+  if (event === "Interrupt") {
+    const turn = input.prompt_id ?? input.turn_id;
+    if (turn) attempt(() => stopTurn(turnDir(host, String(input.session_id)), turn));
+    return { flush: true };
+  }
   const place = identify(input.cwd ?? process.cwd());
   if (!place) return { flush: false };
   const turn = input.prompt_id ?? input.turn_id;
@@ -388,28 +507,24 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     spool({ ...base, at: when, kind: "message", id, speaker, ...kept });
   };
 
-  const baseline = baselineFile(host, base.session);
-  if (event === "UserPromptSubmit") {
-    // A message typed while a turn runs keeps that turn's starting point. Between turns, the owner's own edits are not the turn's.
-    if (!readBaseline(baseline)?.running) {
-      const now = snapshot(place.root);
-      if (now) writeBaseline(baseline, { ...now, running: true });
-    }
-  }
+  const dir = turnDir(host, base.session);
   if (event === "UserPromptSubmit" && input.prompt) {
     const prompt = input.prompt.trimStart();
     if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
   }
+  // Any prompt, a notice too, starts a turn unless its turn is already running. Between turns, the owner's own edits are not the turn's.
+  // After the message is queued: this hook is synchronous, and a slow git status past its timeout must not cost the owner's words.
+  if (event === "UserPromptSubmit") attempt(() => openTurn(dir, turn, place.root)?.());
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
-    const now = snapshot(place.root);
-    if (now) {
-      const before = readBaseline(baseline);
-      if (before)
-        for (const p of changed(place.root, before, now))
-          spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
-      writeBaseline(baseline, { ...now, running: false });
-    }
+    // A turn whose start snapshot failed has nothing to compare, but still ends here so a reused id snapshots again
+    const paths = attempt(() => {
+      const finish = closeTurn(dir, turn, place.root);
+      if (finish) return finish();
+      stopTurn(dir, turn);
+      return [];
+    });
+    for (const p of paths ?? []) spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
     return { flush: true };
   }
   if (event === "PostToolUse") {

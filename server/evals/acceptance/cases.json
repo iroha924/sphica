@@ -2809,6 +2809,73 @@
       ]
     },
     {
+      "id": "capture-16",
+      "layer": "capture",
+      "lang": "ja",
+      "summary": "中断したターンの後にオーナーが手で直したファイルは、次のターンの編集として記録されない",
+      "given": [],
+      "when": {
+        "session": {
+          "id": "s-ja-interrupt",
+          "at": "2026-06-02T10:00:00+09:00",
+          "turns": [
+            {
+              "owner": "日付の表示を直して",
+              "assistant": "",
+              "edits": [],
+              "shell_edits": ["src/format.ts"],
+              "ends": "interrupt",
+              "owner_edits_after": ["src/owner-fix.ts"]
+            },
+            {
+              "owner": "今どうなってる？",
+              "assistant": "途中で止まっています。",
+              "edits": []
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "no_edit_observation": {
+            "session": "s-ja-interrupt",
+            "path": "src/owner-fix.ts"
+          }
+        }
+      ]
+    },
+    {
+      "id": "capture-17",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "A shell edit made before a compaction in the middle of a Codex turn is still observed in that turn",
+      "given": [],
+      "when": {
+        "session": {
+          "id": "s-en-compact",
+          "host": "codex",
+          "at": "2026-06-03T09:00:00Z",
+          "turns": [
+            {
+              "owner": "Regenerate the lockfile.",
+              "assistant": "Regenerated it.",
+              "edits": [],
+              "shell_edits": ["src/lockfile.ts"],
+              "compact": true
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "edit_observation": {
+            "session": "s-en-compact",
+            "path": "src/lockfile.ts"
+          }
+        }
+      ]
+    },
+    {
       "id": "forget-01",
       "layer": "forget",
       "lang": "ja",

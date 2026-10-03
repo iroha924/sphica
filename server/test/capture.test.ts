@@ -9,17 +9,21 @@ import { migrate } from "../src/admin.ts";
 import {
   answersOf,
   captureNotice,
+  closeTurn,
   current,
   fit,
   flush,
+  HOLD_DAYS,
   isOwnerTurn,
   MAX_MESSAGE,
   onHook,
+  openTurn,
   readInput,
   readState,
   rejectedDir,
   type Spooled,
   spoolDir,
+  turnDir,
   unregisteredDir,
   write,
 } from "../src/capture.ts";
@@ -533,6 +537,392 @@ test("a turn records the paths git status shows changing, including edits made o
     spooled().flatMap((x) => (x.kind === "edit" ? [x.path] : [])),
     ["kept.ts"],
   );
+});
+
+/** A fresh repository with a remote, and the status edits each turn recorded since the last reset. */
+function boundaryRepo(name: string) {
+  const repo = path.join(home, name);
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  execFileSync("git", ["-C", repo, "remote", "add", "origin", `https://github.com/o/${name}.git`], {
+    stdio: "ignore",
+  });
+  reset();
+  return {
+    repo,
+    edit: (f: string) => fs.writeFileSync(path.join(repo, f), `${f} ${Math.random()}\n`),
+    seen: () =>
+      spooled()
+        .flatMap((x) => (x.kind === "edit" && x.via === "status" ? [`${x.turn}:${x.path}`] : []))
+        .sort(),
+  };
+}
+
+test("turn boundary: a file the owner edits after interrupting a turn is not the next turn's (Claude Code)", () => {
+  const { repo, edit, seen } = boundaryRepo("interrupt-claude");
+  const base = { session_id: "ic", cwd: repo };
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  edit("agent-a.ts");
+  // Interrupted: Claude Code sends no Stop. The owner fixes a file by hand, then asks a question
+  edit("owner-b.ts");
+  onHook("claude-code", { ...base, prompt_id: "t2", hook_event_name: "UserPromptSubmit", prompt: "なぜ？" });
+  edit("agent-c.ts");
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "Stop",
+    last_assistant_message: "理由は…",
+  });
+  assert.deepEqual(seen(), ["t2:agent-c.ts"]);
+});
+
+test("turn boundary: a file the owner edits after a Codex interrupt is not the next turn's", () => {
+  const { repo, edit, seen } = boundaryRepo("interrupt-codex");
+  const base = { session_id: "icx", cwd: repo };
+  onHook("codex", { ...base, turn_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  edit("agent-a.ts");
+  onHook("codex", { ...base, turn_id: "t1", hook_event_name: "Interrupt" });
+  edit("owner-b.ts");
+  // A notice starts the next turn: it is not the owner's words, but it still starts a turn
+  onHook("codex", {
+    ...base,
+    turn_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  edit("agent-c.ts");
+  onHook("codex", { ...base, turn_id: "t2", hook_event_name: "Stop", last_assistant_message: "done" });
+  assert.deepEqual(seen(), ["t2:agent-c.ts"]);
+});
+
+test("turn boundary: compaction in the middle of a turn keeps the turn's starting point", () => {
+  for (const host of ["claude-code", "codex"] as const) {
+    const { repo, edit, seen } = boundaryRepo(`compact-${host}`);
+    const base = {
+      session_id: `cp-${host}`,
+      cwd: repo,
+      ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
+    };
+    onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+    edit("before.ts");
+    // Hook input carries more fields than capture reads (source tells a compaction)
+    const compact = { ...base, hook_event_name: "SessionStart", source: "compact" };
+    onHook(host, compact);
+    edit("after.ts");
+    onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+    assert.deepEqual(seen(), ["t1:after.ts", "t1:before.ts"], host);
+  }
+});
+
+test("turn boundary: a late Stop of an interrupted turn does not take the next turn's edits", () => {
+  const { repo, edit, seen } = boundaryRepo("late-stop");
+  const base = { session_id: "ls", cwd: repo };
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "やめて、こっち",
+  });
+  edit("t2-only.ts");
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "Stop",
+    last_assistant_message: "late",
+  });
+  assert.deepEqual(seen(), []);
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "Stop",
+    last_assistant_message: "done",
+  });
+  assert.deepEqual(seen(), ["t2:t2-only.ts"]);
+});
+
+test("turn boundary: a Stop hook that keeps the turn going gets the edits made after the first Stop", () => {
+  const { repo, edit, seen } = boundaryRepo("continued");
+  const base = { session_id: "ct", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  edit("first.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  // Another plugin's Stop hook blocks the stop: the same turn goes on without a new prompt
+  edit("after-feedback.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "テストも直した。" });
+  assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
+});
+
+test("turn boundary: a kept-going Stop that finishes after the same id started again leaves the new start alone", () => {
+  const { repo, edit, seen } = boundaryRepo("continued-late");
+  const dir = turnDir("claude-code", "cl");
+  const base = { session_id: "cl", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  const finishLate = closeTurn(dir, "t1", repo);
+  edit("owner.ts");
+  // A notice reuses the id and starts the turn again before the late Stop writes
+  onHook("claude-code", {
+    ...base,
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  assert.deepEqual(finishLate?.(), []);
+  edit("new-agent.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  assert.deepEqual(seen(), ["t1:new-agent.ts"]);
+});
+
+test("turn boundary: a Stop whose snapshot fails leaves the start for the Stop that keeps the turn going", () => {
+  const { repo, edit, seen } = boundaryRepo("stop-fails");
+  const base = { session_id: "sf", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  edit("first.ts");
+  const index = path.join(repo, ".git", "index");
+  const saved = fs.existsSync(index) ? fs.readFileSync(index) : null;
+  fs.writeFileSync(index, "not an index");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  if (saved) fs.writeFileSync(index, saved);
+  else fs.rmSync(index);
+  edit("after-feedback.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
+});
+
+test("turn boundary: a turn whose start snapshot failed still ends at its Stop, so a reused id snapshots again", () => {
+  const { repo, edit, seen } = boundaryRepo("start-fails");
+  const base = { session_id: "sx", cwd: repo, prompt_id: "t1" };
+  const index = path.join(repo, ".git", "index");
+  const saved = fs.existsSync(index) ? fs.readFileSync(index) : null;
+  fs.writeFileSync(index, "not an index");
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  if (saved) fs.writeFileSync(index, saved);
+  else fs.rmSync(index);
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  onHook("claude-code", {
+    ...base,
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  edit("later.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  assert.deepEqual(seen(), ["t1:later.ts"]);
+});
+
+test("turn boundary: a start saved late, after a newer turn numbered itself, ties and gives neither turn the edits", () => {
+  const { repo, edit } = boundaryRepo("late-save");
+  const dir = turnDir("claude-code", "lv");
+  const saveT1 = openTurn(dir, "t1", repo);
+  openTurn(dir, "t2", repo)?.();
+  edit("t2-only.ts");
+  saveT1?.();
+  assert.deepEqual(closeTurn(dir, "t1", repo)?.(), []);
+  assert.deepEqual(closeTurn(dir, "t2", repo)?.(), []);
+});
+
+test("turn boundary: a turn that begins between another turn's end snapshot and its check takes the edits from that turn", () => {
+  const { repo, edit } = boundaryRepo("between");
+  const dir = turnDir("claude-code", "bt");
+  openTurn(dir, "t1", repo)?.();
+  edit("a.ts");
+  const finishT1 = closeTurn(dir, "t1", repo);
+  openTurn(dir, "t2", repo)?.();
+  assert.deepEqual(finishT1?.(), []);
+});
+
+test("turn boundary: the newest turn cannot be told with an unreadable or unnumbered start, and temporary files are not starts", () => {
+  const { repo, edit } = boundaryRepo("unknown");
+  for (const [name, body] of [
+    ["unreadable.json", "{"],
+    ["unnumbered.json", JSON.stringify({ head: null, entries: null, running: false, turn: "x", seq: null })],
+  ] as const) {
+    const dir = turnDir("claude-code", `un-${name}`);
+    openTurn(dir, "t1", repo)?.();
+    edit("a.ts");
+    fs.writeFileSync(path.join(dir, name), body);
+    assert.deepEqual(closeTurn(dir, "t1", repo)?.(), [], name);
+    // A turn numbered while a start cannot be read is unnumbered itself
+    openTurn(dir, "t2", repo)?.();
+    edit("b.ts");
+    assert.deepEqual(closeTurn(dir, "t2", repo)?.(), [], `${name} then t2`);
+  }
+  const dir = turnDir("claude-code", "un-tmp");
+  openTurn(dir, "t1", repo)?.();
+  edit("c.ts");
+  fs.writeFileSync(path.join(dir, ".half.json.1.tmp"), "{");
+  assert.deepEqual(closeTurn(dir, "t1", repo)?.(), ["c.ts"]);
+});
+
+test("turn boundary: a newer turn counts whether or not its snapshot failed or it already ended", () => {
+  const { repo, edit } = boundaryRepo("newer");
+  for (const [entries, running] of [
+    [null, true],
+    [{}, false],
+  ] as const) {
+    const dir = turnDir("claude-code", `nw-${running}`);
+    openTurn(dir, "t1", repo)?.();
+    edit("a.ts");
+    fs.writeFileSync(
+      path.join(dir, "t2.json"),
+      JSON.stringify({ head: null, entries, running, turn: "t2", seq: 2 }),
+    );
+    assert.deepEqual(closeTurn(dir, "t1", repo)?.(), [], `running ${running}`);
+  }
+});
+
+test("turn boundary: Stop and Interrupt keep a start's turn and number, and a reused id after a Stop starts again from there", () => {
+  const { repo, edit } = boundaryRepo("keep");
+  const read = (dir: string) =>
+    fs
+      .readdirSync(dir)
+      .filter((f) => !f.startsWith("."))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")))
+      .map(({ turn, seq, running }) => ({ turn, seq, running }));
+  const base = { session_id: "kp", cwd: repo };
+  const dir = turnDir("claude-code", "kp");
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "a" });
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "Stop", last_assistant_message: "b" });
+  assert.deepEqual(read(dir), [{ turn: "t1", seq: 1, running: false }]);
+  edit("owner.ts");
+  // A notice that reuses the last turn's id starts that turn again
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  edit("agent.ts");
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "Stop", last_assistant_message: "c" });
+  assert.deepEqual(seen(), ["t1:agent.ts"]);
+  assert.deepEqual(read(dir), [{ turn: "t1", seq: 2, running: false }]);
+
+  const cx = { session_id: "kpx", cwd: repo, turn_id: "t1" };
+  onHook("codex", { ...cx, hook_event_name: "UserPromptSubmit", prompt: "a" });
+  onHook("codex", { ...cx, hook_event_name: "Interrupt" });
+  assert.deepEqual(read(turnDir("codex", "kpx")), [{ turn: "t1", seq: 1, running: false }]);
+  // An interrupted turn has nothing left to compare, so it keeps only its number
+  const [cut] = fs
+    .readdirSync(turnDir("codex", "kpx"))
+    .map((f) => JSON.parse(fs.readFileSync(path.join(turnDir("codex", "kpx"), f), "utf8")));
+  assert.deepEqual([cut.head, cut.entries], [null, null]);
+  function seen() {
+    return spooled()
+      .flatMap((x) => (x.kind === "edit" && x.via === "status" ? [`${x.turn}:${x.path}`] : []))
+      .sort();
+  }
+});
+
+test("turn boundary: session start writes no start and passes over session directories and older single files", () => {
+  const { repo } = boundaryRepo("start");
+  const base = { session_id: "ss", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "a" });
+  fs.writeFileSync(path.join(path.dirname(turnDir("claude-code", "ss")), "0123456789abcdef.json"), "{}");
+  const startup = { ...base, hook_event_name: "SessionStart", source: "startup" };
+  onHook("claude-code", startup);
+  const dir = turnDir("claude-code", "ss");
+  assert.deepEqual(
+    fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).running),
+    [true],
+  );
+});
+
+test("prune drops a session's starts only when all of them are old, and removes older single files", () => {
+  const { repo } = boundaryRepo("prune");
+  const old = new Date(Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000);
+  const start = (session: string, turn: string, aged: boolean) => {
+    const dir = turnDir("claude-code", session);
+    openTurn(dir, turn, repo)?.();
+    const file = fs
+      .readdirSync(dir)
+      .map((f) => path.join(dir, f))
+      .find((f) => JSON.parse(fs.readFileSync(f, "utf8")).turn === turn);
+    if (aged && file) fs.utimesSync(file, old, old);
+    return dir;
+  };
+  const idle = start("idle", "t1", true);
+  start("idle", "t2", true);
+  const live = start("live", "t1", true);
+  start("live", "t2", false);
+  // A session whose first start is being written has an empty directory for a moment
+  const opening = turnDir("claude-code", "opening");
+  fs.mkdirSync(opening, { recursive: true });
+  const older = path.join(path.dirname(idle), "0123456789abcdef.json");
+  fs.writeFileSync(older, "{}");
+  fs.utimesSync(older, old, old);
+  // A session still running the older hooks uses its single file until it reloads
+  const current = path.join(path.dirname(idle), "fedcba9876543210.json");
+  fs.writeFileSync(current, "{}");
+  onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
+  assert.equal(fs.existsSync(idle), false);
+  assert.equal(fs.readdirSync(live).length, 2);
+  assert.equal(fs.existsSync(opening), true, "an empty session directory is left alone");
+  assert.equal(fs.existsSync(older), false);
+  assert.equal(fs.existsSync(current), true);
+});
+
+test("a starting point that cannot be written costs only the status edits, not the messages or the send", () => {
+  const { repo, edit } = boundaryRepo("unwritable");
+  for (const host of ["claude-code", "codex"] as const) {
+    const session = `uw-${host}`;
+    const base = {
+      session_id: session,
+      cwd: repo,
+      ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
+    };
+    onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "first" });
+    const dir = turnDir(host, session);
+    const [name] = fs.readdirSync(dir);
+    // The temporary file every write of this start goes through is a directory, so each write fails
+    fs.mkdirSync(path.join(dir, `.${name}.${process.pid}.tmp`));
+    edit(`${host}.ts`);
+    assert.deepEqual(onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "done" }), {
+      flush: true,
+    });
+    if (host === "codex")
+      assert.deepEqual(onHook(host, { ...base, hook_event_name: "Interrupt" }), { flush: true });
+    const next = { ...base, ...(host === "codex" ? { turn_id: "t2" } : { prompt_id: "t2" }) };
+    onHook(host, { ...next, hook_event_name: "UserPromptSubmit", prompt: "second" });
+    assert.ok(
+      spooled().some((x) => x.kind === "message" && x.session === session && x.body === "second"),
+      `${host}: the next prompt is still recorded`,
+    );
+  }
+});
+
+test("the owner's prompt is queued before the turn's start is taken, and a failing prune still shows the session notice", () => {
+  const { repo } = boundaryRepo("order");
+  const written: string[] = [];
+  const write = fs.writeFileSync;
+  const spy = mock.method(fs, "writeFileSync", (file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    written.push(String(file));
+    return (write as (...a: unknown[]) => void)(file, ...rest);
+  });
+  try {
+    onHook("claude-code", {
+      session_id: "or",
+      cwd: repo,
+      prompt_id: "t1",
+      hook_event_name: "UserPromptSubmit",
+      prompt: "直して",
+    });
+  } finally {
+    spy.mock.restore();
+  }
+  const spoolAt = written.findIndex((f) => f.startsWith(spoolDir()));
+  const startAt = written.findIndex((f) => f.startsWith(path.dirname(turnDir("claude-code", "or"))));
+  assert.ok(spoolAt >= 0 && startAt > spoolAt, `queued at ${spoolAt}, start at ${startAt}`);
+  const worktree = path.dirname(turnDir("claude-code", "or"));
+  const read = fs.readdirSync;
+  const failing = mock.method(fs, "readdirSync", (dir: fs.PathLike, ...rest: unknown[]) => {
+    // A session directory another hook holds open (Windows) or removes in between
+    if (path.dirname(String(dir)) === worktree) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    return (read as (...a: unknown[]) => unknown)(dir, ...rest);
+  });
+  try {
+    const started = onHook("claude-code", { session_id: "or", cwd: repo, hook_event_name: "SessionStart" });
+    assert.ok("notice" in started);
+  } finally {
+    failing.mock.restore();
+  }
 });
 
 test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {
