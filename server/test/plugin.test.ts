@@ -622,6 +622,85 @@ test("the record MCP server writes to the workspace the host names in the call, 
   }
 });
 
+// Codex starts the read server in the plugin root too; Claude Code passes CLAUDE_PROJECT_DIR. A call without cwd reads the session's project
+test("the read MCP server answers for the host's workspace when a call omits cwd", async () => {
+  const db = tempDb();
+  const repo = (name: string) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sphica-${name}-`));
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: dir });
+    fs.mkdirSync(path.join(dir, "sub"));
+    return dir;
+  };
+  const a = repo("a");
+  const b = repo("b");
+  const started = repo("s");
+  const unregistered = repo("u");
+  const said: Record<string, number> = {};
+  for (const name of ["a", "b", "s"]) {
+    const p = project(db, `git:github.com/o/${name}`, `o/${name}`);
+    said[name] = message(db, p, { id: `m-${name}`, text: `Word${name}marker stays.`, session: `s-${name}` });
+  }
+  const meta = (dir: string) => ({
+    "codex/sandbox-state-meta": { sandboxCwd: pathToFileURL(path.join(dir, "sub")).href },
+  });
+  const connect = async (env: Record<string, string>) => {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(SRC, "mcp.ts")],
+        cwd: started,
+        env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file, ...env },
+        stderr: "ignore",
+      }),
+    );
+    return client;
+  };
+  type Meta = Record<string, unknown>;
+  const call = async (client: Client, name: string, args: Record<string, unknown>, _meta?: Meta) => {
+    const r = await client.callTool({ name, arguments: args, ...(_meta ? { _meta } : {}) });
+    return (r.content as { text: string }[])[0]?.text ?? "";
+  };
+  /** The project status, search, and read without cwd answered for */
+  const chosen = async (client: Client, _meta?: Meta, cwd?: string) => {
+    const args = cwd ? { cwd } : {};
+    const name = (await call(client, "status", args, _meta)).split("\n")[0];
+    for (const [p, id] of Object.entries(said)) {
+      const found = await call(client, "search", { ...args, query: `Word${p}marker`, sources: true }, _meta);
+      assert.equal(
+        found.includes(`s${id}:`),
+        name === `o/${p}`,
+        `search for ${p} while status named ${name}`,
+      );
+      const read = await call(client, "read", { ...args, refs: [`s${id}`] }, _meta);
+      assert.equal(read.includes("not found in this project"), name !== `o/${p}`, `read of ${p}: ${read}`);
+    }
+    return name;
+  };
+  const env = await connect({ CLAUDE_PROJECT_DIR: a });
+  const none = await connect({ CLAUDE_PROJECT_DIR: "" });
+  try {
+    assert.equal(await chosen(env), "o/a", "CLAUDE_PROJECT_DIR without cwd");
+    assert.equal(await chosen(none, meta(b)), "o/b", "_meta without cwd");
+    // The directory Codex names in this call is surer than a variable the process may have inherited
+    assert.equal(await chosen(env, meta(b)), "o/b", "_meta over CLAUDE_PROJECT_DIR");
+    // An explicit cwd wins, and reading another project stays allowed
+    assert.equal(await chosen(env, meta(b), started), "o/s", "explicit cwd");
+    assert.equal(await chosen(none), "o/s", "no host signal falls back to where the server started");
+    assert.equal(await chosen(none, { "codex/sandbox-state-meta": { sandboxCwd: "/not-a-url" } }), "o/s");
+    // The chosen workspace is unregistered: say so, never fall through to the next signal
+    const t = await call(env, "status", {}, meta(unregistered));
+    assert.match(t, /o\/u is not registered with Sphica/);
+    // Codex sends the session directory only to a server that declares this capability
+    assert.ok(env.getServerCapabilities()?.experimental?.["codex/sandbox-state-meta"]);
+  } finally {
+    await env.close();
+    await none.close();
+    await db.done();
+  }
+});
+
 // An unregistered project name comes from the remote spelling. Copying it without a length cap goes over the limit.
 test("the response fits the limit even with a long unregistered project name", async () => {
   const db = tempDb();

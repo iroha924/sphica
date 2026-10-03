@@ -22,20 +22,21 @@ base: main
 
 cwd を省いても Claude Code と Codex で自分のプロジェクトの結果が返り、Codex が 512 文字で切っても規則が残る。
 
-- [ ] T01: cwd を省いた呼び出しで、_meta、CLAUDE_PROJECT_DIR、起動場所の順にプロジェクトを決める
+- [x] T01: cwd を省いた呼び出しで、_meta、CLAUDE_PROJECT_DIR、起動場所の順にプロジェクトを決める
   - 種別: 修正
-  - 計画: S1, S2
+  - 計画: S1, S2, S4
   - 依存: なし
-  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`
+  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern 'without cwd' test/plugin.test.ts` → env だけ・`_meta` だけ・両方の 3 件が、起動場所のプロジェクトを返して（期待の不一致で）落ちる
   - 完了条件: `cd server && node --test test/plugin.test.ts` → pass
   - コミット: `fix(mcp): resolve the read server's project from the host workspace when cwd is omitted`
+  - 結果: red `node --test --test-name-pattern 'omits cwd' test/plugin.test.ts`（src/mcp.ts を stash した状態）→ 「CLAUDE_PROJECT_DIR without cwd」で actual 'o/s'・expected 'o/a' で落ちた。直した後 `node --test test/plugin.test.ts test/project.test.ts` → 49 pass、`npx tsc --noEmit -p server` → エラーなし。`bun run release:plan -- --base v0.6.26` → release kind: plugin、4 つの manifest を 0.6.27 に。テスト名は red の欄の 'without cwd' ではなく 'omits cwd' で引く
 
 - [ ] T02: 読み取りの instructions の先頭 512 文字に cwd の規則と記録の扱いを収める
   - 種別: 修正
-  - 計画: S3
+  - 計画: S3, S4
   - 依存: なし
-  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`
+  - 変更: `server/src/mcp.ts`, `server/test/plugin.test.ts`, `.claude/plans/2026/10/03-issue-207-hook-runtime.plan.md`, `.claude/plans/2026/10/03-issue-207-hook-runtime.tasks.md`
   - red: `cd server && node --test --test-name-pattern '512' test/plugin.test.ts` → 読み取りの instructions の先頭 512 コードポイントに規則が無く落ちる
   - 完了条件: `cd server && node --test test/plugin.test.ts` → pass
   - コミット: `fix(mcp): keep the read server's rules within the first 512 characters of its instructions`
@@ -44,7 +45,7 @@ cwd を省いても Claude Code と Codex で自分のプロジェクトの結�
 
 0.6.27 にそろえ、終わった #207 の計画を消す。
 
-- [ ] T03: 0.6.27 にそろえ、終わった #207 の plan と tasks を消す
+- [-] T03: 0.6.27 にそろえ、終わった #207 の plan と tasks を消す
   - 種別: 変更
   - 計画: S4
   - 依存: T01（release:plan が plugin と判定する変更が要る）, T02（同じリリースに入れる instructions の変更が要る）
@@ -53,3 +54,5 @@ cwd を省いても Claude Code と Codex で自分のプロジェクトの結�
   - コミット: `chore(release): bump to 0.6.27`
 
 ## 記録
+
+- 2026-10-03 / T01, T02, T03 / pre-commit の bundle 検査が、plugin の入力を変えるコミットにバージョンの引き上げを同じコミットで求めた（T03 を後に回せない）/ T01 の計画に S4、変更に 4 つの manifest を足した（前: S1, S2 と mcp.ts・plugin.test.ts）。#207 の plan と tasks の削除は T02 の変更に移した（前: T03）。T03 は取りやめ。`release:plan -- --base v0.6.26` → plugin を T01 の前に確かめた
