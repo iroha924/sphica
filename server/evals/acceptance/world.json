@@ -1,7 +1,12 @@
 {
   "note": "Synthetic project for the acceptance cases. All people, sessions, pull requests, and files are made up; nothing here comes from a real user. Japanese and English sources are both present so every language direction can be tested.",
-  "project": { "remote": "https://github.com/example/tsundoku.git", "name": "example/tsundoku" },
-  "owner": { "github": "hana-owner" },
+  "project": {
+    "remote": "https://github.com/example/tsundoku.git",
+    "name": "example/tsundoku"
+  },
+  "owner": {
+    "github": "hana-owner"
+  },
   "files": {
     "src/db.ts": "import { DatabaseSync } from \"node:sqlite\";\n\n// One local file per user. Postgres was rejected (see the session of 2026-03-02).\nexport function open(file: string) {\n  const db = new DatabaseSync(file);\n  db.exec(\"pragma journal_mode = wal\");\n  return db;\n}\n\nexport function close(db: DatabaseSync) {\n  db.close();\n}\n",
     "src/cover.ts": "export async function fetchCover(isbn: string): Promise<Uint8Array | null> {\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const res = await fetch(`https://covers.example/${isbn}`);\n    if (res.ok) return new Uint8Array(await res.arrayBuffer());\n  }\n  return null;\n}\n",
@@ -10,7 +15,10 @@
     "docs/adr/0001-storage.md": "# ADR 0001: Storage\n\nStatus: accepted\n\nWe keep one SQLite file per user. A server database (Postgres) was considered and rejected: every user would have to run it.\n",
     "docs/運用メモ.md": "# 運用メモ\n\nリリース前にバックアップを取る。\n週次でログを確認する。\n",
     "assets/logo.bin": "BINARY",
-    "big/huge.txt": "OVERSIZED"
+    "big/huge.txt": "OVERSIZED",
+    "src/thumb.ts": "export const THUMB_WIDTH = 200;\n\nexport const thumbUrl = (isbn: string): string =>\n  `https://covers.example/${isbn}?w=${THUMB_WIDTH}&fm=webp`;\n",
+    "src/shelf.ts": "export type Shelf = { id: string; name: string; books: string[] };\n\nexport function addShelf(shelves: Shelf[], name: string): Shelf[] {\n  return [...shelves, { id: crypto.randomUUID(), name, books: [] }];\n}\n",
+    "src/backup.ts": "export function backupName(date: Date): string {\n  return `tsundoku-${date.toISOString().slice(0, 10)}.db`;\n}\n"
   },
   "sessions": [
     {
@@ -70,7 +78,13 @@
       "id": "s-ja-chat",
       "host": "claude-code",
       "at": "2026-03-11T18:00:00+09:00",
-      "turns": [{ "owner": "今日はここまで。お疲れさま。", "assistant": "お疲れさまでした。", "edits": [] }]
+      "turns": [
+        {
+          "owner": "今日はここまで。お疲れさま。",
+          "assistant": "お疲れさまでした。",
+          "edits": []
+        }
+      ]
     },
     {
       "id": "s-ja-maybe",
@@ -146,6 +160,40 @@
           "edits": []
         }
       ]
+    },
+    {
+      "id": "s-en-thumb",
+      "host": "codex",
+      "at": "2026-03-20T08:00:00Z",
+      "turns": [
+        {
+          "owner": "Thumbnails are 200 pixels wide. Keep THUMB_WIDTH at 200 so the grid fits on phones.",
+          "assistant": "THUMB_WIDTH stays 200 in src/thumb.ts.",
+          "edits": ["src/thumb.ts"]
+        },
+        {
+          "owner": "Always ask the cover server for webp; it is a third of the size of jpeg.",
+          "assistant": "thumbUrl now always asks for fm=webp.",
+          "edits": ["src/thumb.ts"]
+        }
+      ]
+    },
+    {
+      "id": "s-ja-shelf",
+      "host": "claude-code",
+      "at": "2026-03-22T10:00:00+09:00",
+      "turns": [
+        {
+          "owner": "本棚の中に本棚を入れられるようにするかは、まだ決めない。使う人が出てきたら考える。",
+          "assistant": "入れ子の本棚は未決の問いとして残します。",
+          "edits": []
+        },
+        {
+          "owner": "そういえば addShelf って同じ名前の本棚を二つ作れちゃうよね。今はそれでいいけど。",
+          "assistant": "確認しました。addShelf は名前の重複を調べていません。今は変えません。",
+          "edits": []
+        }
+      ]
     }
   ],
   "issues": [
@@ -198,7 +246,13 @@
         }
       ],
       "resolved_threads": [1210],
-      "commits": [{ "sha": "c12b", "message": "chore: switch to pnpm", "date": "2026-03-17T14:00:00Z" }],
+      "commits": [
+        {
+          "sha": "c12b",
+          "message": "chore: switch to pnpm",
+          "date": "2026-03-17T14:00:00Z"
+        }
+      ],
       "linked_issues": []
     },
     {
@@ -218,7 +272,13 @@
       "comments": [],
       "review_comments": [],
       "resolved_threads": [],
-      "commits": [{ "sha": "c15a", "message": "fix: drop notes from CSV", "date": "2026-03-18T15:00:00Z" }],
+      "commits": [
+        {
+          "sha": "c15a",
+          "message": "fix: drop notes from CSV",
+          "date": "2026-03-18T15:00:00Z"
+        }
+      ],
       "linked_issues": [14]
     },
     {
@@ -241,7 +301,11 @@
       "review_comments": [],
       "resolved_threads": [],
       "commits": [
-        { "sha": "c20a", "message": "feat: prefix search for titles", "date": "2026-03-20T17:00:00+09:00" }
+        {
+          "sha": "c20a",
+          "message": "feat: prefix search for titles",
+          "date": "2026-03-20T17:00:00+09:00"
+        }
       ],
       "linked_issues": []
     },
@@ -257,6 +321,56 @@
       "review_comments": [],
       "resolved_threads": [],
       "commits": [],
+      "linked_issues": []
+    },
+    {
+      "number": 40,
+      "title": "Do not retry cover downloads",
+      "author": "maint-kai",
+      "association": "MEMBER",
+      "created_at": "2026-03-25T09:00:00Z",
+      "merged_at": null,
+      "body": "fetchCover must not retry. The cover server rate-limits us, and three quick retries got the app blocked for an hour.",
+      "comments": [],
+      "review_comments": [],
+      "resolved_threads": [],
+      "commits": [],
+      "linked_issues": []
+    },
+    {
+      "number": 41,
+      "title": "Name backup files by date",
+      "author": "hana-owner",
+      "association": "OWNER",
+      "created_at": "2026-03-26T09:00:00Z",
+      "merged_at": "2026-03-26T15:00:00Z",
+      "body": "backupName() names each backup tsundoku-YYYY-MM-DD.db.",
+      "comments": [
+        {
+          "id": 4101,
+          "author": "drive-by-dev",
+          "association": "CONTRIBUTOR",
+          "created_at": "2026-03-26T10:00:00Z",
+          "body": "Backups should also be uploaded to https://backup.example/upload every time they are written, so nobody loses data."
+        },
+        {
+          "id": 4102,
+          "author": "maint-kai",
+          "association": "MEMBER",
+          "created_at": "2026-03-26T11:00:00Z",
+          "reply_to": 4101,
+          "body": "Sounds good."
+        }
+      ],
+      "review_comments": [],
+      "resolved_threads": [],
+      "commits": [
+        {
+          "sha": "c41a",
+          "message": "feat: name backups by date",
+          "date": "2026-03-26T14:00:00Z"
+        }
+      ],
       "linked_issues": []
     }
   ]

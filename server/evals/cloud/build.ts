@@ -15,7 +15,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
-import { rekey, shippedMatcher } from "./build-lib.ts";
+import { fixtureSteps, rekey, shippedMatcher } from "./build-lib.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
 
@@ -59,7 +59,13 @@ type Task = {
   conditions: string[];
   runs?: Record<string, number>;
 };
-type Project = { source: string; repo?: string; base?: string; fixture: string };
+type Project = {
+  source: string;
+  repo?: string;
+  base?: string;
+  fixture: string;
+  current?: Record<string, string>;
+};
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
   fixture: { cases: string[]; setups: string[] };
   swapped: { drop: { cases: string[]; setups: string[] }; steps: Step[]; tasks: Record<string, string[]> };
@@ -84,21 +90,10 @@ const sha256 = (buf: Buffer | string) => crypto.createHash("sha256").update(buf)
 
 /** Builds the acceptance world's records once and writes the database to file. */
 async function fixture(file: string): Promise<void> {
-  const { world, cases, setups } = loadAcceptance();
+  const { world } = loadAcceptance();
   const driver = await createDriver(world);
   try {
-    const byId = new Map(cases.map((c) => [c.id, c]));
-    const swapped = args.variant === "swapped";
-    const dropped = (list: string[], drop: string[]) => list.filter((x) => !swapped || !drop.includes(x));
-    for (const id of dropped(plan.fixture.cases, plan.swapped.drop.cases)) {
-      const c = byId.get(id);
-      if (!c) throw new Error(`no case ${id}`);
-      for (const g of c.given) if (!g.case) await driver.run(g);
-      await driver.run(c.when);
-    }
-    for (const name of dropped(plan.fixture.setups, plan.swapped.drop.setups))
-      for (const [k, v] of Object.entries(setups[name] as Step)) await driver.run({ [k]: v });
-    if (swapped) for (const step of plan.swapped.steps) await driver.run(step);
+    for (const step of fixtureSteps(plan, args.variant === "swapped")) await driver.run(step);
     await driver.snapshot(file);
   } finally {
     await driver.done();
@@ -164,7 +159,8 @@ function dropGoGate(dir: string): void {
 function files(dir: string): void {
   if (args.project === "tsundoku") {
     const { world } = loadAcceptance();
-    for (const [rel, text] of Object.entries(world.files))
+    // The slot holds the code as it is now: a project's current files replace the world's, so a record's anchor can be gone
+    for (const [rel, text] of Object.entries({ ...world.files, ...(project?.current ?? {}) }))
       if (text !== "BINARY" && text !== "OVERSIZED") write(dir, rel, text);
     write(
       dir,

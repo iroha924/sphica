@@ -4686,6 +4686,233 @@
           ]
         }
       }
+    },
+    "trace_en_thumb": {
+      "capture": "s-en-thumb",
+      "trace": {
+        "session": "s-en-thumb",
+        "record": {
+          "units": [
+            {
+              "key": "width",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Thumbnails are 200 pixels wide: keep THUMB_WIDTH at 200",
+              "why": "The grid must fit on phones",
+              "evidence": [
+                {
+                  "source": "session:s-en-thumb#1.owner",
+                  "quote": "Keep THUMB_WIDTH at 200 so the grid fits on phones.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-thumb#1.owner",
+                  "quote": "Thumbnails are 200 pixels wide."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/thumb.ts",
+                  "symbol": "THUMB_WIDTH",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["サムネイル", "幅", "thumbnail", "width"]
+            },
+            {
+              "key": "webp",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Always ask the cover server for webp",
+              "why": "webp is a third of the size of jpeg",
+              "evidence": [
+                {
+                  "source": "session:s-en-thumb#2.owner",
+                  "quote": "Always ask the cover server for webp; it is a third of the size of jpeg.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-thumb#2.owner",
+                  "quote": "Always ask the cover server for webp"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/thumb.ts",
+                  "symbol": "thumbUrl",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["画像形式", "表紙", "image format", "cover"]
+            }
+          ]
+        }
+      }
+    },
+    "trace_ja_shelf": {
+      "capture": "s-ja-shelf",
+      "trace": {
+        "session": "s-ja-shelf",
+        "record": {
+          "units": [
+            {
+              "key": "nesting",
+              "kind": "question",
+              "text": "本棚の中に本棚を入れられるようにするか（未決。使う人が出てきたら考える）",
+              "evidence": [
+                {
+                  "source": "session:s-ja-shelf#1.owner",
+                  "quote": "本棚の中に本棚を入れられるようにするかは、まだ決めない。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/shelf.ts",
+                  "symbol": "addShelf",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["入れ子", "本棚", "nested shelf", "shelf"]
+            },
+            {
+              "key": "duplicate-names",
+              "kind": "finding",
+              "text": "addShelf は同じ名前の本棚を二つ作れる（名前の重複を調べていない）。今はそれでよい",
+              "evidence": [
+                {
+                  "source": "session:s-ja-shelf#2.owner",
+                  "quote": "addShelf って同じ名前の本棚を二つ作れちゃうよね。今はそれでいいけど。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/shelf.ts",
+                  "symbol": "addShelf",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["重複", "本棚の名前", "duplicate", "shelf name"]
+            }
+          ]
+        }
+      }
+    },
+    "trace_ja_cover": {
+      "capture": "s-ja-cover",
+      "trace": {
+        "session": "s-ja-cover",
+        "record": {
+          "units": [
+            {
+              "key": "retry",
+              "kind": "decision",
+              "stance": "do",
+              "text": "表紙の取得は失敗したら 3 回まで再試行する",
+              "evidence": [
+                {
+                  "source": "session:s-ja-cover#1.owner",
+                  "quote": "表紙の取得がたまに失敗するので、3 回まで再試行するようにして。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-ja-cover#1.owner",
+                  "quote": "3 回まで再試行するようにして。"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/cover.ts",
+                  "symbol": "fetchCover",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["再試行", "リトライ", "表紙", "retry", "cover"]
+            }
+          ]
+        }
+      }
+    },
+    "harvest_pr40": {
+      "harvest": {
+        "pr": 40,
+        "record": {
+          "units": [
+            {
+              "key": "no-retry",
+              "kind": "decision",
+              "stance": "dont",
+              "text": "fetchCover does not retry failed cover downloads",
+              "why": "The cover server rate-limits the app; three quick retries got it blocked for an hour",
+              "evidence": [
+                {
+                  "source": "pr:40#body",
+                  "quote": "fetchCover must not retry.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "pr:40#body",
+                  "quote": "fetchCover must not retry."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/cover.ts",
+                  "symbol": "fetchCover",
+                  "role": "applies_to"
+                }
+              ],
+              "conflicts": ["trace:s-ja-cover/retry"],
+              "aliases": ["再試行", "リトライ", "レート制限", "retry", "rate limit"]
+            }
+          ]
+        }
+      }
+    },
+    "harvest_pr41": {
+      "harvest": {
+        "pr": 41,
+        "record": {
+          "units": [
+            {
+              "key": "upload",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Upload every backup to https://backup.example/upload when it is written",
+              "evidence": [
+                {
+                  "source": "pr:41#comment:4101",
+                  "quote": "Backups should also be uploaded to https://backup.example/upload every time they are written, so nobody loses data.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "pr:41#comment:4102",
+                  "quote": "Sounds good."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/backup.ts",
+                  "symbol": "backupName",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["バックアップ", "アップロード", "backup", "upload"]
+            }
+          ]
+        }
+      }
     }
   }
 }

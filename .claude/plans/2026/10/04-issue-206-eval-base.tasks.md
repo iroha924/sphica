@@ -119,13 +119,14 @@ base: main
   - コミット: `fix(evals): fence the local runner's environment and harden its readers (T15, T16)`
   - 結果: red 実測（同じ red.ts）: `T05-F2 missing mark: yes`、`T05-F3 broken line: threw`、`T05-F4 commit seen: false`。まとめて届いた stdout（F1）はレビュアーの再現を根拠にし、自分では再現していない。直した後 `node --test test/eval-claude.test.ts` → pass 70, fail 0（3 ファイル合計）
 
-- [ ] T06: stale・abstention・crowded・conflict・poisoned-delivered の setup とタスクを足す
+- [x] T06: stale・abstention・crowded・conflict・poisoned-delivered の setup とタスクを足す
   - 種別: 追加
   - 計画: S5
   - 依存: T02（タスクごとの run 数の欄が要る）
-  - 変更: `server/evals/cloud/tasks.json`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/world.json`, `server/test/eval-fixture.test.ts`
+  - 変更: `server/evals/cloud/tasks.json`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/world.json`, `server/evals/cloud/build.ts`, `server/evals/cloud/build-lib.ts`, `server/test/eval-fixture.test.ts`
   - 完了条件: `cd server && node --test test/eval-fixture.test.ts` → fixture を作り、今の deliver で stale・conflict 以外の対象タスクの gold が pre_read か pre_edit で届き、conflict の 2 件は今は届かず、candidate は届かないテストが pass
-  - コミット: `test(evals): add delivered stale, abstention, crowded, conflict, and poisoned fixtures (T06)`
+  - コミット: `test(evals): add delivered stale, abstention, conflict, and poisoned fixtures (T06)`
+  - 結果: `node --test --test-timeout=120000 test/eval-fixture.test.ts` → pass 2, fail 0（thumb の 2 件・shelf の 2 件・backup の 1 件が届き、cover の衝突の 2 件と candidate は届かず、7 件とも active、conflicts のリンクは未解決で 1 本、upload の evidence は CONTRIBUTOR だけ）。`node --test evals/acceptance/run.ts` → pass 105, fail 0。`node evals/cloud/build.ts --project tsundoku` → ビルドでき、スロットの src/thumb.ts は COVER_WIDTH = 320、plan.json は対象タスクの inject 5・gold 3
 
 - [ ] T07: 採点に衝突の欄と re-proposal の率を足す
   - 種別: 追加
@@ -187,3 +188,5 @@ base: main
 - 2026-10-04 / T05 / 観測と判定の置き場所 / runner 側は claude.ts ではなく claude-run.ts（T03 で run を移したため）、テストは eval-grade ではなく eval-claude（変更欄 前: claude.ts と eval-grade.test.ts、後: claude-run.ts と eval-claude.test.ts）
 - 2026-10-04 / T03 / Codex レビュー 5 件（P1 2 件: 環境変数、資格情報ファイル）を全部採った / T15
 - 2026-10-04 / T05 / Codex レビュー 4 件を全部採った / T16
+- 2026-10-04 / T06 / stale タスクは「今のコード」がレコードと違う必要がある / tasks.json の project に `current`（スロットだけに当てるファイル）を足し、build.ts の files() で当てる。fixture の手順は build-lib.ts の `fixtureSteps` に切り出し、ビルドとテストで共有（変更欄に build.ts・build-lib.ts を足した）
+- 2026-10-04 / T06 / crowded はエージェントのタスクを作らず、T09 のベンチの中で組み立てる（エージェントの fixture に混ぜると他のタスクの配信が変わる）。stale の記録は「今のコードで anchor が無い」ので、old でも pre_read で path が合えば届く（テストで確認）

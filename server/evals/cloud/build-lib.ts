@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { openWriter } from "../../src/db-write.ts";
+import { loadAcceptance, type Step } from "../acceptance/load.ts";
 
 /** The shipped delivery hook's PreToolUse matcher, so an inject slot fires on the same tools the plugin does. */
 export function deliverMatcher(hooksJson: string): string {
@@ -31,4 +32,33 @@ export async function rekey(file: string, owner: string, repo: string): Promise<
   } finally {
     await db.destroy();
   }
+}
+
+type FixturePlan = {
+  fixture: { cases: string[]; setups: string[] };
+  swapped: { drop: { cases: string[]; setups: string[] }; steps: Step[] };
+};
+
+/**
+ * The acceptance steps that build the tsundoku fixture, in order: each listed case's own steps (its given cases are not run, so the list
+ * names them in order), then each setup, then the counterfactual's steps for a swapped build.
+ */
+export function fixtureSteps(plan: FixturePlan, swapped: boolean): Step[] {
+  const { cases, setups } = loadAcceptance();
+  const byId = new Map(cases.map((c) => [c.id, c]));
+  const kept = (list: string[], drop: string[]) => list.filter((x) => !swapped || !drop.includes(x));
+  const steps: Step[] = [];
+  for (const id of kept(plan.fixture.cases, plan.swapped.drop.cases)) {
+    const c = byId.get(id);
+    if (!c) throw new Error(`no case ${id}`);
+    for (const g of c.given) if (!g.case) steps.push(g);
+    steps.push(c.when);
+  }
+  for (const name of kept(plan.fixture.setups, plan.swapped.drop.setups)) {
+    const setup = setups[name] as Step | undefined;
+    if (!setup) throw new Error(`no setup ${name}`);
+    for (const [k, v] of Object.entries(setup)) steps.push({ [k]: v });
+  }
+  if (swapped) steps.push(...plan.swapped.steps);
+  return steps;
 }
