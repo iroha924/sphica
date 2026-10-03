@@ -42,7 +42,7 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `fix(capture): end a running turn on a new typed prompt or a Codex interrupt (T02)`
   - 結果: red 実測（直す前の capture.ts）: `--test-name-pattern="interrupt"` → 4 fail（t2 に `owner-b.ts` と `agent-a.ts`、古い起点で `owner-b.ts`、失敗した取り直しで `y.ts` `z.ts`）。Interrupt の分岐だけ戻すと Codex の後半（通知が続く場合）が `agent-c.ts` `owner-d.ts` で落ちる。直した後 `node --test test/capture.test.ts` → 42 pass / 0 fail。取り直しの失敗は壊した `.git/index` で再現（PATH を外すと identify も失敗して早く戻るため）
 
-- [ ] T03: SessionStart の compact は走っている起点を上書きしない
+- [x] T03: SessionStart の compact は走っている起点を上書きしない
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -50,6 +50,7 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - red: `cd server && node --test --test-name-pattern="compact" test/capture.test.ts` → 両ホストで、t1 の途中のシェルの変更 x が compact の後の Stop で status の編集に出ず落ちる
   - 完了条件: `cd server && node --test test/capture.test.ts` → pass。startup・resume・clear では今どおり取り直すテストも pass
   - コミット: `fix(capture): keep a running turn's starting point across compaction (T03)`
+  - 結果: red 実測: `--test-name-pattern="compact"` → `AssertionError: claude-code`（`x.ts` が出ず actual: []）。直した後 `node --test test/capture.test.ts` → 43 pass / 0 fail（両ホストの compact と startup・resume・clear）。`bun run typecheck` → エラーなし
 
 - [ ] T04: `fit()` の `redacted` を残した部分だけで決める
   - 種別: 修正
@@ -81,3 +82,5 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `test(acceptance): cover SDK turns, interrupted turns, and compaction in capture (T06)`
 
 ## 記録
+
+- 2026-10-03 / T01, T02 / コミットの件名が 100 文字を超え commit-msg の検査で止まった / 件名を短くした（T01: `…never count an Agent SDK turn as the owner's, and bump to 0.6.24`、T02: `…end a running turn on a new typed prompt or a Codex interrupt`）

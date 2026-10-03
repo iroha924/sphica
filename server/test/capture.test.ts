@@ -626,6 +626,28 @@ test("without an interrupt, a notice with another id while the turn runs keeps i
   assert.deepEqual(seen(), []);
 });
 
+test("a compaction in the middle of a turn keeps its starting point on both hosts; startup, resume, and clear start again", () => {
+  for (const host of ["claude-code", "codex"] as const) {
+    reset();
+    const { repo, write, seen } = turnRepo(`compact-${host}`);
+    const base = { session_id: `cp-${host}`, cwd: repo, prompt_id: "t1", turn_id: "t1" };
+    onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+    write("x.ts", "x\n");
+    onHook(host, { ...base, hook_event_name: "SessionStart", source: "compact" });
+    onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+    assert.deepEqual(seen(), [["x.ts", "t1"]], host);
+    for (const source of ["startup", "resume", "clear"]) {
+      reset();
+      const next = { ...base, prompt_id: source, turn_id: source };
+      onHook(host, { ...next, hook_event_name: "UserPromptSubmit", prompt: "次" });
+      write(`${source}.ts`, "s\n");
+      onHook(host, { ...next, hook_event_name: "SessionStart", source });
+      onHook(host, { ...next, hook_event_name: "Stop", last_assistant_message: "終えた。" });
+      assert.deepEqual(seen(), [], `${host} ${source}`);
+    }
+  }
+});
+
 test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {
   reset();
   const base = { session_id: "s1", cwd: repoDir };

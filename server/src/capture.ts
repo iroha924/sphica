@@ -205,6 +205,8 @@ export type HookInput = {
   prompt_id?: string;
   turn_id?: string;
   agent_id?: string;
+  /** How SessionStart began: startup, resume, clear, or compact */
+  source?: string;
   cwd?: string;
   prompt?: string;
   last_assistant_message?: string | null;
@@ -357,9 +359,13 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (file && input.session_id && /^[A-Za-z0-9_-]+$/.test(input.session_id)) {
       fs.appendFileSync(file, `export SPHICA_PARENT_SESSION=${input.session_id}\n`);
     }
-    const place = identify(input.cwd ?? process.cwd());
-    const now = place && snapshot(place.root);
-    if (now) writeBaseline(baselineFile(host, String(input.session_id)), { ...now, running: false });
+    const baseline = baselineFile(host, String(input.session_id));
+    // Both hosts compact in the middle of a turn too: the running turn's changes before it stay that turn's
+    if (!(input.source === "compact" && readBaseline(baseline)?.running)) {
+      const place = identify(input.cwd ?? process.cwd());
+      const now = place && snapshot(place.root);
+      if (now) writeBaseline(baseline, { ...now, running: false });
+    }
     pruneBaselines();
     return { flush: false, notice: captureNotice() };
   }
