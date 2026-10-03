@@ -109,15 +109,6 @@ base: main
   - コミット: `fix(capture): keep a reused turn's new start and give the synchronous hooks 30 seconds (T11)`
   - 結果: red 実測（f943ab31 の capture.ts）: actual `[ 't1:new-agent.ts', 't1:owner.ts' ]`、actual `[]`（expected `[ 't1:after-feedback.ts', 't1:first.ts' ]`）。直した後 `node --test test/capture.test.ts` → 55 pass / 0 fail。`node scripts/check-ai-config.mjs` → exit 0、HEAD の hooks.json に戻すと `must be` が 2 件
 
-- [x] T12: 起点のコメントを 3 行以内にして規則を knowledge-schema の Skill へ移し、record MCP のテストの子に一時の HOME を渡す
-  - 種別: 変更
-  - 計画: S1, S4
-  - 依存: T11（コメントの対象のコード）, T05（直すテスト）
-  - 変更: `server/src/capture.ts`, `.agents/skills/knowledge-schema/SKILL.md`, `server/test/plugin.test.ts`
-  - 完了条件: `bun run verify` → exit 0。新しい複数行コメントが 3 行以内
-  - コミット: `docs(capture): move the turn-start rules to the knowledge-schema Skill and give a test child a temp home (T12)`
-  - 結果: `node --test test/capture.test.ts` → 55 pass、`--test-name-pattern="_meta" test/plugin.test.ts` → pass、`bun run verify:ai` → exit 0。この PR で足した 4 行以上のコメントは 0（残る 3 か所は前からある INJECTED などのコメント）
-
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -131,6 +122,15 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
   - 完了条件: `cd server && node --test --test-name-pattern="_meta" test/plugin.test.ts` → pass（`_meta` が勝つ、`_meta` が未登録なら環境変数に落ちない、別 project の cwd を拒否する）
   - コミット: `fix(mcp): resolve the record server's workspace from Codex's _meta before CLAUDE_PROJECT_DIR (T05)`
   - 結果: red 実測（直す前の mcp-record.ts）: `--test-name-pattern="record.*_meta"` → `Sphica: o/b is not the workspace this session writes to (o/a)` で fail。直した後 `--test-name-pattern="_meta"` → pass、`node --test test/plugin.test.ts` → 35 pass / 0 fail、`bun run typecheck` エラーなし
+
+- [x] T12: 起点のコメントを 3 行以内にして規則を knowledge-schema の Skill へ移し、record MCP のテストの子に一時の HOME を渡す
+  - 種別: 変更
+  - 計画: S1, S4
+  - 依存: T11（コメントの対象のコード）, T05（直すテスト）
+  - 変更: `server/src/capture.ts`, `.agents/skills/knowledge-schema/SKILL.md`, `server/test/plugin.test.ts`
+  - 完了条件: `bun run verify` → exit 0。新しい複数行コメントが 3 行以内
+  - コミット: `docs(capture): move the turn-start rules to the knowledge-schema Skill and give a test child a temp home (T12)`
+  - 結果: `node --test test/capture.test.ts` → 55 pass、`--test-name-pattern="_meta" test/plugin.test.ts` → pass、`bun run verify:ai` → exit 0。この PR で足した 4 行以上のコメントは 0（残る 3 か所は前からある INJECTED などのコメント）
 
 ## P3: リリース
 
