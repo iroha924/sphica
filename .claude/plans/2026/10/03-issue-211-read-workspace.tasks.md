@@ -32,7 +32,7 @@ cwd を省いても Claude Code と Codex で自分のプロジェクトの結�
   - コミット: `fix(mcp): resolve the read server's project from the host workspace when cwd is omitted`
   - 結果: red `node --test --test-name-pattern 'omits cwd' test/plugin.test.ts`（src/mcp.ts を stash した状態）→ 「CLAUDE_PROJECT_DIR without cwd」で actual 'o/s'・expected 'o/a' で落ちた。直した後 `node --test test/plugin.test.ts test/project.test.ts` → 49 pass、`npx tsc --noEmit -p server` → エラーなし。`bun run release:plan -- --base v0.6.26` → release kind: plugin、4 つの manifest を 0.6.27 に。テスト名は red の欄の 'without cwd' ではなく 'omits cwd' で引く
 
-- [ ] T02: 読み取りの instructions の先頭 512 文字に cwd の規則と記録の扱いを収める
+- [x] T02: 読み取りの instructions の先頭 512 文字に cwd の規則と記録の扱いを収める
   - 種別: 修正
   - 計画: S3, S4
   - 依存: なし
@@ -40,6 +40,7 @@ cwd を省いても Claude Code と Codex で自分のプロジェクトの結�
   - red: `cd server && node --test --test-name-pattern '512' test/plugin.test.ts` → 読み取りの instructions の先頭 512 コードポイントに規則が無く落ちる
   - 完了条件: `cd server && node --test test/plugin.test.ts` → pass
   - コミット: `fix(mcp): keep the read server's rules within the first 512 characters of its instructions`
+  - 結果: red `node --test --test-name-pattern '512' test/plugin.test.ts`（並べ替える前）→ 先頭 512 文字に cwd の規則が無く、正規表現の不一致で落ちた（文言も変えたので、位置だけの失敗とは切り分けていない。前の cwd の文は 479 文字目から始まり 512 で切れていた）。直した後 `node --test test/plugin.test.ts` → 34 pass。読み取りの先頭 4 文は 510 コードポイント。#207 の plan と tasks を消した
 
 ## P2: リリースの準備
 
