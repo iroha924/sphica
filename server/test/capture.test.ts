@@ -655,6 +655,65 @@ test("without an interrupt, a notice with another id while the turn runs keeps i
   assert.deepEqual(seen(), []);
 });
 
+test("a stale starting point (a late hook's write, or one that could not be removed) gives no status edits to another turn", () => {
+  reset();
+  const { repo, write, seen } = turnRepo("stale");
+  const base = { session_id: "sl", cwd: repo };
+  const dir = path.join(home, ".sphica", "worktree");
+  const files = () => fs.readdirSync(dir).map((f) => path.join(dir, f));
+  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  const late = files().map((f) => [f, fs.readFileSync(f, "utf8")] as const);
+  write("owner-b.ts", "b\n");
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "今どうなってる？",
+  });
+  // t1's prompt hook runs asynchronously and publishes its snapshot after t2's
+  for (const [f, text] of late) fs.writeFileSync(f, text);
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "Stop",
+    last_assistant_message: "説明した。",
+  });
+  assert.deepEqual(seen(), [], "a late write");
+
+  reset();
+  onHook("claude-code", { ...base, prompt_id: "t3", hook_event_name: "UserPromptSubmit", prompt: "次" });
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t3",
+    hook_event_name: "Stop",
+    last_assistant_message: "終えた。",
+  });
+  write("owner-c.ts", "c\n");
+  // On Windows a file another process holds open cannot be removed
+  const rm = mock.method(fs, "rmSync", () => {
+    throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+  });
+  try {
+    assert.throws(() =>
+      onHook("claude-code", {
+        ...base,
+        prompt_id: "t4",
+        hook_event_name: "UserPromptSubmit",
+        prompt: "別の話",
+      }),
+    );
+  } finally {
+    rm.mock.restore();
+  }
+  onHook("claude-code", {
+    ...base,
+    prompt_id: "t4",
+    hook_event_name: "Stop",
+    last_assistant_message: "答えた。",
+  });
+  assert.deepEqual(seen(), [], "a starting point that could not be removed");
+});
+
 test("a compaction in the middle of a turn keeps its starting point on both hosts; startup, resume, and clear start again", () => {
   for (const host of ["claude-code", "codex"] as const) {
     reset();

@@ -144,7 +144,7 @@ export function fit(body: string): {
   return {
     body: `${a}\n\n[${cut.toLocaleString("en-US")} bytes in the middle not saved]\n\n${z}`,
     truncated: true,
-    // Masking leaves the text before its first mask as it was, so a kept part equal to the unmasked cut holds no mask
+    // Masking leaves the text before its first mask as it was, so a kept part equal to the unmasked cut was not changed by masking
     redacted: a !== head(start, KEEP) || z !== tail(end, KEEP),
     originalBytes: all,
   };
@@ -206,7 +206,7 @@ export type HookInput = {
   prompt_id?: string;
   turn_id?: string;
   agent_id?: string;
-  /** How SessionStart began: startup, resume, clear, or compact */
+  /** How SessionStart began: startup, resume, clear, compact, or fork */
   source?: string;
   cwd?: string;
   prompt?: string;
@@ -409,11 +409,13 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   const prompt = input.prompt?.trimStart() ?? "";
   const injected = INJECTED.some((r) => r.test(prompt));
   if (event === "UserPromptSubmit") {
-    // A message typed while a turn runs keeps that turn's starting point. Between turns, the owner's own edits are not the turn's.
-    // A prompt that is not injected with another turn id means the running turn ended without a Stop (an interrupt): changes since
-    // its start are given to no turn, since an owner's hand edit must not become the agent's. The old file goes first, so a failed snapshot leaves none.
+    // A prompt with the running turn's id, or an injected one, keeps that turn's starting point (an injected one moves it to its own id).
+    // Any other prompt starts from the tree as it is, even when the running turn never stopped: changes since that turn's start belong
+    // to no turn rather than risk giving the owner's hand edits to the agent. The old file goes first, so a failed snapshot leaves none.
     const before = readBaseline(baseline);
-    if (!before?.running || (!injected && before.turn !== turn)) {
+    if (before?.running && before.turn !== undefined && injected && before.turn !== turn)
+      writeBaseline(baseline, { ...before, turn });
+    else if (!before?.running || (!injected && before.turn !== turn)) {
       fs.rmSync(baseline, { force: true });
       const now = snapshot(place.root);
       if (now) writeBaseline(baseline, { ...now, running: true, turn });
@@ -424,8 +426,9 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
     const now = snapshot(place.root);
     if (now) {
+      // Only a starting point this turn took: a late hook's write or a file that could not be removed belongs to another turn
       const before = readBaseline(baseline);
-      if (before)
+      if (before?.turn === turn)
         for (const p of changed(place.root, before, now))
           spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
       writeBaseline(baseline, { ...now, running: false });

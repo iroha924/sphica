@@ -62,6 +62,16 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `fix(capture): mark a cut message redacted only when a mask is in the kept text (T04)`
   - 結果: red 実測: `--test-name-pattern="redacted only"` → `AssertionError: start window`（最初の assert で止まるので end window の red は個別には見ていない）。直した後 `node --test test/capture.test.ts` → 44 pass / 0 fail（窓の先と末尾、残す部分、境目をまたぐ鍵、複数バイトの境目）
 
+- [x] T07: Stop は自分のターン id で取った起点だけを使い、走っている間の通知は起点のターン id を付け替える。境目のコメントを直す
+  - 種別: 修正
+  - 計画: S2, S3, S4
+  - 依存: T02（起点のターン id が要る）, T03（compact で残す起点のコメントを直す）, T04（redacted のコメントを直す）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="stale" test/capture.test.ts` → 遅れて書かれた t1 の起点と、消せなかった起点で、t2 の Stop に `owner-b.ts` が出て落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass（既存の通知のテストを含む）
+  - コミット: `fix(capture): record status edits only from the starting point of the same turn (T07)`
+  - 結果: red 実測: `--test-name-pattern="stale"` → `a late write` で `owner-b.ts` が t2 に出て fail。Stop の確認だけ戻し前半を外すと `a starting point that could not be removed` で `owner-c.ts` が t4 に出て fail。直した後 `node --test test/capture.test.ts` → 45 pass / 0 fail、受け入れケース 101 pass
+
 ## P2: trace 待ちを 14 日にし、受け入れケースを足す
 
 持ち主の追加の 14 日を入れ、P1 の 3 つの挙動を受け入れケースで固定する。
@@ -90,3 +100,6 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
 - 2026-10-03 / T05 / extract.test.ts と record.test.ts の trace のテストが 2026-09-10 の fixture を 2026-09-27 の時計で数えていて、14 日で古い側に回り落ちた / 変更欄に 2 ファイルを足した（前: status.test.ts のみのテスト、後: extract.test.ts・record.test.ts も）
 - 2026-10-03 / T01 / Codex のタスクレビューは指摘 0 件（sandbox でテストは流せず、テストは自分で流した結果）
 - 2026-10-03 / T06 / ターンの型（Turn・Session）が load.ts にあった / 変更欄に `server/evals/acceptance/load.ts` を足した
+- 2026-10-03 / T02 / Codex のタスクレビュー: F1（遅れた hook が新しい起点を古い起点で上書き）と F2（起点を消せないと古い起点が残る）を再現付きで受理、F3（コメントが中断と言い切る）を受理 / T07 を足した
+- 2026-10-03 / T03 / Codex のタスクレビュー: source のコメントに fork が無い（P3）を受理 / T07 で直す
+- 2026-10-03 / T04 / Codex のタスクレビュー: 伏せ字の境目の文字が元と一致すると redacted が false（P2）は棄却。残した文字列が元とバイト単位で同じなら伏せ字で何も変わっていないので false が正しい。コメントの「伏せ字を含まない」は不正確なので T07 で「伏せ字で変わっていない」に直す
