@@ -1,6 +1,6 @@
 // What a save learns from the working tree and git, gathered before it takes the write lock: capture and delivery wait on that lock,
 // and masking a large file or asking git takes far longer than reading it. Inside the lock a file is only read again and compared.
-import { locateIn, masksSymbolIn, type RepoText, readRepoText } from "./anchors.ts";
+import { locateIn, masksSymbolIn, type PathKind, pathKind, type RepoText, readRepoText } from "./anchors.ts";
 import { commitHolds } from "./git.ts";
 
 /** The reads and judgments a save makes, replaceable so a test can tell which of them run while the lock is held. */
@@ -9,6 +9,7 @@ export type Probe = {
   masks: (text: string | null | undefined, symbol: string) => boolean;
   locate: (text: string | null | undefined, symbol: string) => { line: number; excerpt: string } | null;
   holds: (root: string, commit: string, rel: string) => boolean;
+  kind: (root: string | null, rel: string) => PathKind;
 };
 
 export const PROBE: Probe = {
@@ -16,10 +17,12 @@ export const PROBE: Probe = {
   masks: masksSymbolIn,
   locate: locateIn,
   holds: commitHolds,
+  kind: pathKind,
 };
 
 type FileFacts = {
   read: RepoText;
+  kind?: PathKind;
   masks: Map<string, boolean>;
   at: Map<string, { line: number; excerpt: string } | null>;
 };
@@ -68,6 +71,18 @@ export function symbolAt(
   const got = file(f, rel);
   if (!got.at.has(symbol)) got.at.set(symbol, f.probe.locate(got.read.text, symbol));
   return got.at.get(symbol) ?? null;
+}
+
+/** What the path is in the working tree as it was read. */
+export function kindOf(f: RepoFacts, rel: string): PathKind {
+  const got = file(f, rel);
+  got.kind ??= f.probe.kind(f.root, rel);
+  return got.kind;
+}
+
+/** Whether the file was read as text and the symbol is not in it; false when it could not be checked. */
+export function symbolMissing(f: RepoFacts, rel: string, symbol: string): boolean {
+  return Boolean(f.root) && typeof file(f, rel).read.text === "string" && symbolAt(f, rel, symbol) === null;
 }
 
 /** Whether the repository has the commit and it holds the path. A commit's content never changes, so this is never asked again. */

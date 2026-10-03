@@ -14,12 +14,14 @@ import {
 } from "./knowledge.ts";
 import {
   commitHeld,
+  kindOf,
   type Probe,
   type RepoFacts,
   refresh,
   repoFacts,
   symbolAt,
   symbolMasked,
+  symbolMissing,
 } from "./repo-facts.ts";
 import { head, sha256 } from "./text.ts";
 
@@ -191,6 +193,27 @@ function locate(body: string, quote: string): [number, number] | null {
   return at < 0 ? null : [at, at + Buffer.byteLength(quote, "utf8")];
 }
 
+/**
+ * Why an anchor may point at the wrong place in the working tree, or null. Left unchecked: no working tree, a commit the repository holds
+ * (past evidence, where the file may have changed since), and evidence of a file this session deleted.
+ */
+export function anchorProblem(
+  facts: RepoFacts,
+  a: { path: string; symbol?: string | null; role: string; held: boolean; observed: boolean },
+): string | null {
+  if (!facts.root || a.held) return null;
+  const kind = kindOf(facts, a.path);
+  const fix = "fix it and check again, or keep it if you know it is right";
+  if (kind === "gone")
+    return a.role === "evidence" && a.observed
+      ? null
+      : `anchor path ${a.path} is not in the working tree; ${fix}`;
+  if (kind === "directory") return `anchor path ${a.path} is a directory; anchor a file`;
+  if (kind === "file" && a.symbol && symbolMissing(facts, a.path, a.symbol))
+    return `symbol ${JSON.stringify(head(a.symbol, 80))} is not found in ${a.path}; ${fix}`;
+  return null;
+}
+
 /** A repository-relative path with forward slashes, or null when it could leave the repository. */
 export function repoPath(p: string): string | null {
   const s = p.trim().replace(/^\.\//, "");
@@ -212,7 +235,8 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
   for (const a of parsed.data.units.flatMap((u) => u.anchors)) {
     const p = repoPath(a.path);
     if (!p) continue;
-    if (a.symbol && !symbolMasked(facts, p, a.symbol) && !a.lines) symbolAt(facts, p, a.symbol);
+    kindOf(facts, p);
+    if (a.symbol && !symbolMasked(facts, p, a.symbol)) symbolAt(facts, p, a.symbol);
     if (a.commit) commitHeld(facts, a.commit, p);
   }
   return facts;
@@ -554,6 +578,14 @@ export async function checkRecord(
       const planned = { ...a, symbol, commit, path: p, observation };
       if (a.symbol && !symbol) fallbacks.add(planned);
       anchors.push(planned);
+      const wrong = anchorProblem(facts, {
+        path: p,
+        symbol,
+        role: a.role,
+        held: Boolean(commit),
+        observed: observation !== null,
+      });
+      if (wrong) problems.push(`${key}: ${wrong}`);
     }
     // A masked symbol's fallback merges into a path-only anchor like it, in any order: identical rows could not be told apart by replace_anchor
     // Lines as saved (the end never before the start), so a reversed range meets the same place

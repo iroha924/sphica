@@ -8,9 +8,18 @@ import type { DB } from "./db-types.ts";
 import { cleanGit } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
-import { type Checked, checkRecord, prepareRecord, repoPath, saveRecord, type Target } from "./record.ts";
+import {
+  anchorProblem,
+  type Checked,
+  checkRecord,
+  prepareRecord,
+  repoPath,
+  saveRecord,
+  type Target,
+} from "./record.ts";
 import {
   commitHeld,
+  kindOf,
   type Probe,
   type RepoFacts,
   refresh,
@@ -238,6 +247,7 @@ export function prepareGlean(root: string | null, raw: unknown, probe?: Probe): 
     if (op.op === "add_evidence" && op.file && !op.source) excerptOf(facts, op.file);
     const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
     const rel = pinned && repoPath(pinned.path);
+    if (rel) kindOf(facts, rel);
     if (pinned?.symbol && rel && !symbolMasked(facts, rel, pinned.symbol))
       symbolAt(facts, rel, pinned.symbol);
     if (op.op === "anchor" && op.commit && rel) commitHeld(facts, op.commit, rel);
@@ -448,6 +458,24 @@ export async function checkGlean(
       const k = [u.id, rel, dest.symbol ?? "", dest.role, commit ?? ""].join("\0");
       if (anchored.has(k)) errors.push(`${what}: another operation in this batch already anchors ${name}`);
       anchored.add(k);
+      const held = commit !== null && commitHeld(facts, commit, rel);
+      const observed =
+        dest.role === "evidence" && !held && target.sessionId
+          ? (await db
+              .selectFrom("edit_observation")
+              .select("id")
+              .where("session_id", "=", target.sessionId)
+              .where("path", "=", rel)
+              .executeTakeFirst()) !== undefined
+          : false;
+      const wrong = anchorProblem(facts, {
+        path: rel,
+        symbol: dest.symbol && !symbolMasked(facts, rel, dest.symbol) ? dest.symbol : null,
+        role: dest.role,
+        held,
+        observed,
+      });
+      if (wrong) problems.push(`${what}: ${wrong}`);
       places.push({
         what,
         unit: u.id,

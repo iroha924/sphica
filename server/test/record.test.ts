@@ -1014,6 +1014,90 @@ test("a traced work item carries its session's branch", async () => {
 });
 
 // A path the filesystem cannot open would make every later read of the record fail
+test("anchor problem: a missing path, a directory, or a symbol not in the file is reported, and the anchor is still saved", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-anchor-")));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+        encoding: "utf8",
+      }).trim();
+    git("init", "-q");
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(
+      path.join(root, "src", "dates.ts"),
+      "export const toStored = (d: Date) => d.toISOString();\n",
+    );
+    fs.writeFileSync(path.join(root, "src", "legacy.ts"), "export const old = 1;\n");
+    fs.writeFileSync(path.join(root, "logo.bin"), Buffer.from([1, 0, 2]));
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    const commit = git("rev-parse", "HEAD");
+    // legacy.ts is deleted in this session; the commit still holds it
+    fs.rmSync(path.join(root, "src", "legacy.ts"));
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "日付の保存は toStored にまとめた。" });
+    for (const rel of ["src/legacy.ts", "src/dates.ts"])
+      insert(db, "edit_observation", {
+        session_id: "s1",
+        turn_id: "t1",
+        path: rel,
+        via: "tool",
+        observed_at: now,
+      });
+    const unit = (key: string, anchor: Record<string, string>) => ({
+      key,
+      kind: "implementation",
+      text: "日付の保存は toStored にまとめた",
+      evidence: [{ source: `s${m}`, quote: "日付の保存は toStored にまとめた。", role: "implements" }],
+      anchors: [anchor],
+    });
+    const problemsOf = async (t: Target, key: string, anchor: Record<string, string>) => {
+      const { checked } = await save(db, t, { units: [unit(key, anchor)] });
+      return checked.problems.filter((x) => x.includes("anchor") || x.includes("symbol"));
+    };
+    const t: Target = { ...target(p), root };
+
+    const missing = await problemsOf(t, "missing", { path: "src/date.ts", role: "applies_to" });
+    assert.equal(missing.length, 1, missing.join(" | "));
+    assert.match(missing[0] ?? "", /anchor path src\/date\.ts is not in the working tree/);
+    assert.match(
+      String(db.owner.prepare("select path from unit_anchor where path = 'src/date.ts'").get()?.path),
+      /src\/date\.ts/,
+      "the anchor is kept",
+    );
+    assert.match(
+      (await problemsOf(t, "folder", { path: "src", role: "applies_to" })).join(" | "),
+      /anchor path src is a directory; anchor a file/,
+    );
+    assert.match(
+      (await problemsOf(t, "typo", { path: "src/dates.ts", symbol: "toStore", role: "evidence" })).join(
+        " | ",
+      ),
+      /symbol "toStore" is not found in src\/dates\.ts/,
+      "an edited file is still checked for its symbol",
+    );
+    assert.match(
+      (await problemsOf(t, "applies", { path: "src/legacy.ts", role: "applies_to" })).join(" | "),
+      /anchor path src\/legacy\.ts is not in the working tree/,
+      "only evidence of a deleted file is exempt",
+    );
+
+    // Right, or not checkable here: no anchor problem
+    for (const [key, anchor, tt] of [
+      ["right", { path: "src/dates.ts", symbol: "toStored", role: "applies_to" }, t],
+      ["deleted", { path: "src/legacy.ts", role: "evidence" }, t],
+      ["held", { path: "src/legacy.ts", symbol: "gone", role: "applies_to", commit }, t],
+      ["binary", { path: "logo.bin", role: "applies_to" }, t],
+      ["no-root", { path: "src/date.ts", symbol: "toStore", role: "applies_to" }, target(p)],
+    ] as const)
+      assert.deepEqual(await problemsOf(tt, key, anchor), [], key);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an anchor path holding a NUL or other control character is refused", () => {
   assert.equal(repoPath("src/a.ts"), "src/a.ts");
   assert.equal(repoPath("x\0y"), null);

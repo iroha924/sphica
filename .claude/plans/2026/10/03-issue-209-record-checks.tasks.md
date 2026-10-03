@@ -22,14 +22,15 @@ base: main
 
 保存の前に、無いパス・ディレクトリ・見つからない symbol が近いパス付きで警告され、check と save の間の変化も save で警告される。
 
-- [ ] T01: パスの種類を RepoFacts に足し、trace・harvest・glean の anchor に problem を出す
+- [x] T01: パスの種類を RepoFacts に足し、trace・harvest・glean の anchor に problem を出す
   - 種別: 修正
-  - 計画: S1
+  - 計画: S1, S6
   - 依存: なし
-  - 変更: `server/src/repo-facts.ts`, `server/src/anchors.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`
+  - 変更: `server/src/repo-facts.ts`, `server/src/anchors.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern="anchor problem" test/record.test.ts test/extract.test.ts` → 無いパス・ディレクトリ・symbol 違い（`toStore`）の anchor で problem が出ず落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="anchor problem" test/record.test.ts test/extract.test.ts` → 全件 pass（セッションで消したファイルの evidence、commit 付き、root なし、unknown は problem なし）
   - コミット: `fix(record): warn about anchors on a missing path, a directory, or a symbol not in the file (T01)`
+  - 結果: red は直す前のコードで `anchor problem` が `actual: 0, expected: 1`（無いパスで problem が 0 件）、glean 側は `'✓ 0 records and 3 changes can be saved'` で落ちた。直した後は 2 件とも pass、`node --test test/record.test.ts test/extract.test.ts test/acceptance-cases.test.ts` → 57 pass、`bun run verify` → exit 0（acceptance 99 pass）。ロック中のテストの probe に `kind` を足し、ロックの中では呼ばれないことを確かめた。`bun run release:plan -- --base v0.6.24` → `release kind: plugin`、npm と 3 つの manifest を 0.6.25 にした
 
 - [ ] T02: 無いパスの problem に `git ls-files` の近いパスを最大 3 件添える
   - 種別: 追加
@@ -105,7 +106,7 @@ glean で保存済みの記録の aliases を置き換え、消せる。
 
 npm と 3 つの manifest を 0.6.25 にそろえる。
 
-- [ ] T09: release:plan を流し、version を 0.6.25 にする
+- [-] T09: release:plan を流し、version を 0.6.25 にする
   - 種別: 変更
   - 計画: S6
   - 依存: なし
@@ -114,3 +115,5 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
   - コミット: `chore(release): bump to 0.6.25 (T09)`
 
 ## 記録
+
+- 2026-10-03 / T01, T09 / pre-commit の bundle 検査が、パッケージに入る変更と version の更新を同じコミットに求めた / T01 の計画欄を S1 から S1, S6 に、変更欄に 4 つの version ファイルを足し（前: ソースとテストだけ）、release:plan と 0.6.25 への更新を T01 で行った。T09 は取りやめ

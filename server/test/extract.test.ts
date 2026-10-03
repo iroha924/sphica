@@ -397,6 +397,10 @@ test("save: under the write lock files are only read again, and a file changed m
         calls.push({ fn: "holds", locked: !lockFree(db.file) });
         return PROBE.holds(r, c, rel);
       },
+      kind: (r, rel) => {
+        calls.push({ fn: "kind", rel, locked: !lockFree(db.file) });
+        return PROBE.kind(r, rel);
+      },
     };
     const saveWith = async (sessionId: string) => {
       fs.writeFileSync(path.join(root, "a.ts"), "const tokenValue123abc = loadConfig();\n");
@@ -1701,6 +1705,81 @@ test("glean: replacing an implementation's only code proof puts it back to candi
         ["applies_to", 1],
       ],
     );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("glean: anchor problem on a missing path or a symbol not in the file, and the anchor is still added", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const m = message(db, p, { id: "o1", text: "src.ts の openStore を見る。", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "src.ts の openStore を見る。", role: "states" }],
+        },
+      ],
+    });
+    const rev = () =>
+      Number(db.owner.prepare("select revision from unit where key = 'glean:look'").get()?.revision);
+    const said = message(db, p, { id: "o2", text: "置き場所を直す。", session: "g1" });
+    const ops = () => [
+      { op: "anchor", unit: "glean:look", revision: rev(), path: "src/store.ts", role: "applies_to" },
+      {
+        op: "anchor",
+        unit: "glean:look",
+        revision: rev(),
+        path: "src.ts",
+        symbol: "openStores",
+        role: "applies_to",
+      },
+      { op: "anchor", unit: "glean:look", revision: rev(), path: "docs", role: "applies_to" },
+      // Deleted in this session: evidence of it is not a problem
+      { op: "anchor", unit: "glean:look", revision: rev(), path: "old.ts", role: "evidence" },
+    ];
+    insert(db, "edit_observation", {
+      session_id: "g1",
+      turn_id: "t1",
+      path: "old.ts",
+      via: "tool",
+      observed_at: "2026-09-01T00:00:00.000Z",
+    });
+    const checked = (
+      await checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: ops() })
+    ).text;
+    assert.match(checked, /anchor path src\/store\.ts is not in the working tree/);
+    assert.match(checked, /symbol "openStores" is not found in src\.ts/);
+    assert.match(checked, /anchor path docs is a directory/);
+    assert.doesNotMatch(checked, /old\.ts/);
+    assert.match(
+      await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: ops() }),
+      /anchor added/,
+    );
+    // replace_anchor's destination is checked the same way
+    const moved = (
+      await checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+        ops: [
+          {
+            op: "replace_anchor",
+            unit: "glean:look",
+            revision: rev(),
+            from: { path: "src/store.ts" },
+            to: { path: "src/stores.ts", role: "applies_to" },
+            source: `s${said}`,
+            quote: "置き場所を直す。",
+          },
+        ],
+      })
+    ).text;
+    assert.match(moved, /anchor path src\/stores\.ts is not in the working tree/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
