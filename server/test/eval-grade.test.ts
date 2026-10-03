@@ -1183,6 +1183,8 @@ test("collect and grade refuse --out and write beside the build's tasks.json", (
     const collectArgs = ["--build", build, "--codex", path.join(base, "none"), "--logs", base];
     const collected = cloud("collect.ts", ...collectArgs, "--out", path.join(elsewhere, "loop.json"));
     assert.notEqual(collected.status, 0, "collect refuses --out");
+    assert.match(collected.stderr, /Unknown option '--out'/);
+    assert.equal(fs.existsSync(path.join(build, "loop.json")), false, "refused before writing");
     assert.equal(cloud("collect.ts", ...collectArgs).status, 0);
     assert.ok(fs.existsSync(path.join(build, "loop.json")), "collect writes loop.json into the build");
     const graded = cloud(
@@ -1195,6 +1197,8 @@ test("collect and grade refuse --out and write beside the build's tasks.json", (
       path.join(elsewhere, "grades.json"),
     );
     assert.notEqual(graded.status, 0, "grade refuses --out");
+    assert.match(graded.stderr, /Unknown option '--out'/);
+    assert.equal(fs.existsSync(path.join(build, "grades.json")), false, "refused before writing");
     assert.equal(cloud("grade.ts", "--loop", path.join(build, "loop.json"), "--second", "none").status, 0);
     assert.ok(fs.existsSync(path.join(build, "grades.json")), "grade writes grades.json into the build");
     assert.deepEqual(fs.readdirSync(elsewhere), [], "nothing is written outside the build");

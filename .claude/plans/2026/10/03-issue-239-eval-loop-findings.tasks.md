@@ -66,4 +66,14 @@ report が bundle の分からない入力を通さず、collect → grade → r
   - コミット: `fix(evals): write loop and grades files only in the build directory (T04)`
   - 結果: red 実測（3e842e19 の collect.ts / grade.ts）: `node --test --test-name-pattern='refuse --out'` で collect が `--out` を受けて 0 で終わり `collect refuses --out` で落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 43, fail 0。`rg -n -- '--out' server/evals/cloud/collect.ts server/evals/cloud/grade.ts` → `--output-schema` と `--output-format` の 2 行だけで、出力先としての `--out` は無い。`bun run typecheck` → エラーなし
 
+- [x] T05: --out の拒否のテストで、書く前に失敗したことと拒否の理由を確かめる
+  - 種別: 変更
+  - 計画: S4
+  - 依存: T04（--out を拒否する実装とテストが要る）
+  - 変更: `server/test/eval-grade.test.ts`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass
+  - コミット: `test(evals): check that --out is refused before anything is written (T05)`
+  - 結果: `node --test test/eval-grade.test.ts` → pass 43, fail 0。拒否の直後に `<build>/loop.json` と `<build>/grades.json` が無いことと、stderr の `Unknown option '--out'` を確かめる
+
 ## 記録
+2026-10-03 / T05 / T04 のタスクごとのレビュー（Codex）の P2: 拒否のテストが、拒否の後にビルド内へ書いていないことと拒否の理由を見ていない / 採用。T05 を足してテストを強めた
