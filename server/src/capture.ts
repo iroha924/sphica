@@ -440,8 +440,12 @@ function pruneBaselines(): void {
     const at = path.join(baselineDir(), name);
     // A single file per session is an older layout no turn reads
     if (!fs.statSync(at, { throwIfNoEntry: false })?.isDirectory()) fs.rmSync(at, { force: true });
-    else if (!fs.readdirSync(at).some((f) => fresh(path.join(at, f))))
-      fs.rmSync(at, { recursive: true, force: true });
+    else {
+      // An empty directory may be a session writing its first start
+      const files = fs.readdirSync(at);
+      if (files.length && !files.some((f) => fresh(path.join(at, f))))
+        fs.rmSync(at, { recursive: true, force: true });
+    }
   }
 }
 

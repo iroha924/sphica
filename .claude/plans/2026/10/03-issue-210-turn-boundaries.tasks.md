@@ -69,6 +69,16 @@ base: main
   - コミット: `fix(capture): prune whole idle sessions only and keep recording when a start cannot be written (T07)`
   - 結果: red 実測（d7c0ed1d の capture.ts）: 2 件 fail（prune の `AssertionError`、書き込み失敗のテスト）。直した後 `node --test test/capture.test.ts` → 51 pass / 0 fail。C16 の順序のテストは、方針 7 の変更で穴 (g) に入るので外した
 
+- [x] T08: prune は空のセッションのディレクトリを消さない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T07（直す対象の prune）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="prune drops" test/capture.test.ts` → 最初の起点を書いている途中の空のディレクトリが消され `an empty session directory is left alone` で落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass
+  - コミット: `fix(capture): leave an empty session directory to the session writing its first start (T08)`
+  - 結果: red 実測（a7cf854a の capture.ts）: `AssertionError: an empty session directory is left alone`（false !== true）。直した後 `node --test test/capture.test.ts` → 51 pass / 0 fail、`bun run typecheck` エラーなし
+
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -100,3 +110,4 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 - 2026-10-03 / T02 / Codex のタスクレビュー 2 件（P1）: prune が判定の後に同じ id の起点が作り直されると上書き・削除する（F1）、seq:null を消すと遅れた Stop が古いターンを今のターンと見る（F2）を受理 / T07 を足し、prune をセッション単位の削除にした。plan の方針 7・9 と変更履歴を直した
 - 2026-10-03 / T03 / 2 行の設定の変更なのでタスクレビューは出さず、PR の全差分のレビューで見る
 - 2026-10-03 / T05 / Codex のタスクレビューは指摘 0 件（MCP の統合テストは sandbox で流せず、自分で流した結果）
+- 2026-10-03 / T07 / Codex のタスクレビュー 1 件（P1）: 新しいセッションの空のディレクトリも「全部古い」と見て消し、再帰削除の途中で新しい起点だけが先に消えると遅れた Stop が別のターンの編集を拾う（fs の mock で再現）を受理 / T08 を足した。prune の直しが新しい欠陥を生んだのは 1 回目

@@ -768,11 +768,15 @@ test("prune drops a session's starts only when all of them are old, and removes 
   start("idle", "t2", true);
   const live = start("live", "t1", true);
   start("live", "t2", false);
+  // A session whose first start is being written has an empty directory for a moment
+  const opening = turnDir("claude-code", "opening");
+  fs.mkdirSync(opening, { recursive: true });
   const older = path.join(path.dirname(idle), "0123456789abcdef.json");
   fs.writeFileSync(older, "{}");
   onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
   assert.equal(fs.existsSync(idle), false);
   assert.equal(fs.readdirSync(live).length, 2);
+  assert.equal(fs.existsSync(opening), true, "an empty session directory is left alone");
   assert.equal(fs.existsSync(older), false);
 });
 
