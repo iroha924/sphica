@@ -126,6 +126,16 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `fix(scripts): use one node for launch timing and isolate the hooks fixture from git config`
   - 結果: red は上のとおり。直した後 `--pairs 0` → 「--pairs must be a whole number from 1 to 1000」で exit 2、`--pairs 6` → 測れた。シェル経由も process.execPath を起動する。署名の設定を置いた親から `node scripts/check-hooks-live.mjs` → 通った（fixture の git は GIT_CONFIG_NOSYSTEM と一時の GIT_CONFIG_GLOBAL だけを読む）
 
+- [x] T12: check-hooks-live は record MCP サーバーが自分で終わるのを待ち、DB を書き込みもできる接続で読む
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（直す対象の検査）
+  - 変更: `scripts/check-hooks-live.mjs`
+  - red: `gh run view 37100528046 --job 111139089683 --log` → Windows で MCP サーバーを kill した直後の読み取り専用の接続が「disk I/O error」（errcode 1546）で落ちた
+  - 完了条件: `node scripts/check-hooks-live.mjs` → exit 0（Windows は plan の A5 で確かめる）
+  - コミット: `fix(scripts): let the record server exit before the hooks check reads the database`
+  - 結果: red は上のとおり（手元の macOS では再現しない）。stdin を閉じて exit を待ち、10 秒で終わらなければ kill する。検査の接続は readOnly をやめ、busy の待ちを 5 秒にした。`node scripts/check-hooks-live.mjs` → 通った
+
 - [x] T08: Windows の計測で exec form を決め、hooks.json・check-ai-config・README・doctor をそろえる
   - 種別: 変更
   - 計画: S7
@@ -151,3 +161,5 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T07 / Codex のタスクレビュー F1（Windows の CI のパス）は T10 で直し済み。F2（fixture の git が親の設定を引き継ぐ）は採り T11 で直した。sql:live の live-harness の makeRepo にも同じ形があるが、この PR の範囲の外なので変えない
 2026-10-03 / T09 / Codex のタスクレビュー / 指摘なし
 2026-10-03 / T04, T05 / Codex のタスクレビュー / 指摘なし
+2026-10-03 / T10 / Codex のタスクレビュー / 指摘なし
+2026-10-03 / T06 / Windows の CI（run 37100528046）の計測の 2 回目: deliver.js 直接 121.3 ms・PowerShell 経由 355.5 ms、capture.js 直接 117.1 ms・PowerShell 経由 356.2 ms

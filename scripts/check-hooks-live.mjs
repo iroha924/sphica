@@ -101,6 +101,15 @@ await withTempDir(async (dir) => {
   const init = node([path.join(pkg, "dist", "cli.js"), "init", "--cwd", repo]);
   if (init.status !== 0) fail("init exited non-zero", `${init.stdout}${init.stderr}`);
   const dbFile = path.join(home, ".sphica", "sphica.db");
+  // A read-only connection cannot recover a WAL another process left behind, so the checks open it as the hooks do
+  const query = (fn) => {
+    const db = new DatabaseSync(dbFile, { timeout: 5_000 });
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  };
   if (!fs.existsSync(dbFile)) throw new Error(`init made no database\n${init.stdout}${init.stderr}`);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "hooks.json"), "utf8")).hooks;
@@ -215,21 +224,18 @@ await withTempDir(async (dir) => {
     const saved = await call("record_save", { run, record });
     if (!/saved/.test(saved)) fail("record_save did not save", `${checked}\n${saved}`);
   } finally {
+    // Closing stdin ends the server on its own. Killed mid-write on Windows, it left the database unreadable to the next reader
+    const exited = new Promise((r) => mcp.once("exit", r));
     mcp.stdin.end();
-    mcp.kill();
+    const timer = setTimeout(() => mcp.kill(), 10_000);
+    await exited;
+    clearTimeout(timer);
   }
-  {
-    const db = new DatabaseSync(dbFile, { readOnly: true });
-    try {
-      const unit = db
-        .prepare("select lifecycle, extraction, unsourced from unit where key like '%/map'")
-        .get();
-      if (unit?.lifecycle !== "active" || unit.extraction !== "supported" || unit.unsourced !== 0)
-        fail("the seeded decision is not active, supported, and sourced", JSON.stringify(unit));
-    } finally {
-      db.close();
-    }
-  }
+  const unit = query((db) =>
+    db.prepare("select lifecycle, extraction, unsourced from unit where key like '%/map'").get(),
+  );
+  if (unit?.lifecycle !== "active" || unit.extraction !== "supported" || unit.unsourced !== 0)
+    fail("the seeded decision is not active, supported, and sourced", JSON.stringify(unit));
 
   // ---- The measured turn: no trace or flush runs until Stop's detached send ----
   const spool = path.join(home, ".sphica", "spool");
@@ -249,14 +255,7 @@ await withTempDir(async (dir) => {
   if (!/\/map /.test(delivered) || !/which this command names/.test(delivered))
     fail("a PowerShell command naming src/a.ts got no decision", delivered);
 
-  const inDb = () => {
-    const db = new DatabaseSync(dbFile, { readOnly: true });
-    try {
-      return Boolean(db.prepare("select 1 from source where text = ?").get(marker));
-    } finally {
-      db.close();
-    }
-  };
+  const inDb = () => query((db) => Boolean(db.prepare("select 1 from source where text = ?").get(marker)));
   // Sent only by Stop's detached process: already there would make the check below pass on its own
   if (inDb()) fail("the owner's prompt reached the database before Stop");
   fire("Stop", { last_assistant_message: "Done.", prompt_id: "t1" }, "smoke-1");
@@ -265,18 +264,15 @@ await withTempDir(async (dir) => {
   let reads = 0;
   while (Date.now() < deadline) {
     sent = inDb();
-    const db = new DatabaseSync(dbFile, { readOnly: true });
-    try {
-      reads = Number(
+    reads = query((db) =>
+      Number(
         db
           .prepare(
             "select count(*) as n from delivery d join session s on s.id = d.session_id where s.external_id = 'smoke-1' and d.event = 'pre_read' and d.outcome = 'emitted'",
           )
           .get().n,
-      );
-    } finally {
-      db.close();
-    }
+      ),
+    );
     if (sent) break;
     await new Promise((r) => setTimeout(r, 500));
   }
