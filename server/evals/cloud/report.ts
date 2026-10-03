@@ -1,6 +1,7 @@
 // The loop report over the graded builds of one bundle (an original and a swapped build of one loop), against the task definitions they
 // were built from. Every count keeps n, excluded, and ungraded beside it.
 // Run: node evals/cloud/report.ts <build dir>/grades.json [<build dir>/grades.json ...]
+//      node evals/cloud/report.ts --compare <old build>/grades.json <new build>/grades.json
 import fs from "node:fs";
 import path from "node:path";
 import { readTasks } from "./firing.ts";
@@ -10,6 +11,7 @@ import type { Grade } from "./schema-check.ts";
 
 type TaskInfo = { id: string; lang?: string; overlap?: boolean | null; gold?: string[] };
 type Graded = GradeRow & {
+  search_before_edit?: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
   tests?: string;
   gold?: string[];
   grade?: Grade;
@@ -222,7 +224,81 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   return lines;
 }
 
-if (process.argv[1] === import.meta.filename) {
+type Side = { label: string; build: Build; fixture: string | undefined; tasks: string };
+
+/**
+ * Old against new on the same records and tasks: each side's full report on its own (bundles never mixed), then one line per task, model,
+ * and condition with each side's graded runs, mean score, and the rates the experiments' bars read. Refuses two builds whose fixtures or
+ * task definitions differ, or that ran the same bundle.
+ */
+export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
+  if (!old.fixture || old.fixture !== next.fixture)
+    throw new Error(
+      `the builds were made from different fixtures (${old.fixture} / ${next.fixture}); compare only the same records`,
+    );
+  if (old.tasks !== next.tasks) throw new Error("the builds were made from different task definitions");
+  if (old.build.bundle === next.build.bundle)
+    throw new Error("both builds ran the same bundle; there is nothing to compare");
+  const lines = [
+    `# ${old.label}: ${old.build.bundle}`,
+    ...report([old.build], tasks),
+    "",
+    `# ${next.label}: ${next.build.bundle}`,
+    ...report([next.build], tasks),
+    "",
+    `# ${old.label} → ${next.label}, per task, model, and condition (graded runs only; unknown is never counted as yes)`,
+  ];
+  const key = (r: Graded) => `${r.task} ${r.model} ${r.condition}`;
+  const keys = [...new Set([...old.build.rows, ...next.build.rows].map(key))].sort();
+  const side = (rows: Graded[]) => {
+    const graded = rows.filter((r) => !r.excluded && r.grade);
+    const share = (yes: (r: Graded) => boolean, applies: (r: Graded) => boolean) => {
+      const n = graded.filter(applies);
+      return n.length ? `${n.filter(yes).length}/${n.length}` : "-";
+    };
+    return [
+      `n ${graded.length}/${rows.length}`,
+      `mean ${fmt(mean(graded.map((r) => r.grade?.score ?? 0)))}`,
+      `re-proposed ${share(
+        (r) => r.grade?.proposes_rejected === "yes",
+        (r) => r.grade?.proposes_rejected !== "not_applicable",
+      )}`,
+      `conflict handled ${share(
+        (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
+        (r) => r.grade?.named_conflict !== "not_applicable",
+      )}`,
+      `searched before editing ${share(
+        (r) => r.search_before_edit === "yes",
+        (r) => r.search_before_edit === "yes" || r.search_before_edit === "no",
+      )}`,
+    ].join(", ");
+  };
+  for (const k of keys)
+    lines.push(
+      `${k}: ${old.label} ${side(old.build.rows.filter((r) => key(r) === k))} | ${next.label} ${side(next.build.rows.filter((r) => key(r) === k))}`,
+    );
+  return lines;
+}
+
+if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare") {
+  const files = process.argv.slice(3);
+  if (files.length !== 2) throw new Error("--compare takes <old>/grades.json <new>/grades.json");
+  const sides = files.map((f, i): Side => {
+    const dir = path.dirname(f);
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")) as {
+      fixture?: string;
+    };
+    return {
+      label: i === 0 ? "old" : "new",
+      build: JSON.parse(fs.readFileSync(f, "utf8")) as Build,
+      fixture: manifest.fixture,
+      tasks: fs.readFileSync(path.join(dir, "tasks.json"), "utf8"),
+    };
+  });
+  const plan = readTasks<{ tasks: TaskInfo[] }>(path.dirname(files[0] ?? ""));
+  const [a, b] = sides as [Side, Side];
+  console.log(compare(a, b, plan.tasks).join("\n"));
+} else if (process.argv[1] === import.meta.filename) {
   const files = process.argv.slice(2);
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
   const builds = files.map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Build);

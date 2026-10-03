@@ -20,7 +20,7 @@ import {
   goldSignalsFromCodex,
   presentedText,
 } from "../evals/cloud/judge.ts";
-import { report } from "../evals/cloud/report.ts";
+import { compare, report } from "../evals/cloud/report.ts";
 import {
   checkAnswer,
   checkGrade,
@@ -1642,4 +1642,52 @@ test("a conflict task's grade must say whether both sides were named and whether
     true,
   );
   assert.equal("graded" in cut && cut.graded.implemented_one_side, "unknown");
+});
+
+test("compare puts old and new side by side only for the same fixture and tasks, and never mixes their bundles", () => {
+  const graded = (run: string, score: 0 | 1 | 2, extra: Record<string, unknown> = {}) => ({
+    ...row,
+    task: "t1",
+    run,
+    excluded: null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, score, ...extra },
+  });
+  const old = {
+    label: "old",
+    fixture: "f",
+    tasks: "{}",
+    build: {
+      build: "a",
+      variant: "original",
+      bundle: "old-bundle",
+      rows: [graded("o1", 0), graded("o2", 1)],
+    },
+  };
+  const next = {
+    label: "new",
+    fixture: "f",
+    tasks: "{}",
+    build: {
+      build: "b",
+      variant: "original",
+      bundle: "new-bundle",
+      rows: [graded("n1", 2), graded("n2", 2, { proposes_rejected: "yes" })],
+    },
+  };
+  const lines = compare(old, next, [{ id: "t1" }]).join("\n");
+  assert.match(lines, /^# old: old-bundle$/m);
+  assert.match(lines, /^# new: new-bundle$/m);
+  assert.match(
+    lines,
+    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2.* \| new n 2\/2, mean 2\.00, re-proposed 1\/2/m,
+  );
+  assert.throws(() => compare(old, { ...next, fixture: "g" }, []), /different fixtures/);
+  assert.throws(() => compare({ ...old, fixture: undefined }, next, []), /different fixtures/);
+  assert.throws(() => compare(old, { ...next, tasks: "{1}" }, []), /different task definitions/);
+  assert.throws(
+    () => compare(old, { ...next, build: { ...next.build, bundle: "old-bundle" } }, []),
+    /same bundle/,
+  );
 });

@@ -101,7 +101,7 @@ base: main
   - 計画: S3
   - 依存: T04（直す対象）
   - 変更: `server/evals/cloud/canary-check.ts`, `server/evals/cloud/canary.ts`, `server/evals/cloud/claude.ts`, `server/test/eval-claude.test.ts`
-  - red: `cd <79076e01 の worktree>/server && node --test test/eval-claude.test.ts`（新しいテストを置いて）→ look-alike のパスへの試行で fence が通る（actual [] / expected 'not attempted' 2 件）、clone に失敗しても claude.ts が 0 で終わる（actual 0 / expected 1）
+  - red: `cd <79076e01 の worktree に新しいテストを置いて>/server && node --test test/eval-claude.test.ts` → look-alike のパスへの試行で fence が通る（actual [] / expected 'not attempted' 2 件）、clone に失敗しても claude.ts が 0 で終わる（actual 0 / expected 1）
   - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 壊れた receipt・切れた stream・look-alike のパス・隣のディレクトリ・準備の失敗のテストが pass。`node evals/cloud/canary.ts --build <build>` → 全項目 ✓
   - コミット: `fix(evals): make the canary prove each check from complete evidence (T17)`
   - 結果: red は上のとおり 2 件落ちた（壊れた receipt と隣のディレクトリは、直す前は判定に入っていなかったので新しい検査として足した）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 73, fail 0。`node evals/cloud/canary.ts --build <build-c2>` → `canary passed`（MCP の status の件数が run の DB 写しと一致）
@@ -147,13 +147,14 @@ base: main
   - コミット: `feat(evals): grade conflicts and report re-proposals as a rate (T07)`
   - 結果: `node evals/cloud/schema-check.ts --write` で grade.schema.json を作り直し、`node --test test/eval-grade.test.ts` → pass 45, fail 0（衝突の欄は「Conflict のあるタスクでだけ not_applicable でない」、切れた patch の implemented_one_side は unknown、report に衝突の成功率と re-proposal の率）
 
-- [ ] T08: report に old と new を並べる `--compare` を足す
+- [x] T08: report に old と new を並べる `--compare` を足す
   - 種別: 追加
   - 計画: S7
   - 依存: T02（manifest の fixture のハッシュが要る）
   - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → fixture のハッシュかタスク定義が違えば拒否し、同じなら bundle ごとに表を分けて出すテストが pass
   - コミット: `feat(evals): compare an old and a new build without mixing their bundles (T08)`
+  - 結果: `node --test test/eval-grade.test.ts` → pass 46, fail 0（fixture 違い・fixture 無し・タスク定義違い・同じ bundle を拒否し、old と new の表を分けて出し、タスク × モデル × 条件ごとに有効 run・平均点・re-proposal・衝突・検索の率を並べる）
 
 - [ ] T09: 順番のオフラインのベンチを足す
   - 種別: 追加
