@@ -86,6 +86,16 @@ base: main
   - コミット: `feat(evals): refuse local Claude runs until the canary passes (T04)`
   - 結果: `node --test test/eval-claude.test.ts test/eval-build.test.ts test/eval-grade.test.ts` → pass 64, fail 0。`node evals/cloud/canary.ts --build <build-c1>` → 30 項目全部 ✓、`canary passed`、exit 0。fence の 5 つの試みは Write・Edit・Read が権限（"denied by your permission settings"）、Bash の書き込みと cat が sandbox（"Operation not permitted"）で止まった。canary の無いビルドで claude.ts は拒否する
 
+- [x] T15: T03 の Codex レビューの 5 件を直す（環境変数の許可リスト、資格情報ファイルの完全一致の規則、`--no-cloud`、ignore されたファイルの patch、形の違う stream）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象）
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd <32c9dc33 の worktree>/server && node red.ts` → GH_TOKEN が残る、`.npmrc` の完全一致の規則が無い、ignore された docs/i.md が patch に無い、`null` の行で foundInClaudeStream が例外
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 許可リスト、`.npmrc` の規則、ignore されたファイル、壊れた stream、`--no-cloud` のテストが pass
+  - コミット: `fix(evals): fence the local runner's environment and harden its readers (T15, T16)`
+  - 結果: red 実測（32c9dc33 の worktree で red.ts）: `F1 GH_TOKEN kept: true`、`F2 exact .npmrc rule: false`、`F4 ignored file in patch: false`、`F5 crash: true`。直した後 `node --test test/eval-claude.test.ts test/eval-build.test.ts test/eval-grade.test.ts` → pass 70, fail 0。canary を流し直して `canary passed`（環境変数を絞っても認証が通る）
+
 ## P2: 測る信号と評価セット
 
 最初の編集の前に検索したか、衝突の扱い、old が実際に届ける記録を測れる。
@@ -98,6 +108,16 @@ base: main
   - 完了条件: `cd server && node --test test/eval-claude.test.ts` → Bash 編集 → search → Write は no、search → Bash 編集は yes、Write だけ・Bash だけ・並行の呼び出し（unknown）のテストが pass
   - コミット: `feat(evals): tell whether a run searched Sphica before its first edit (T05)`
   - 結果: `node --test test/eval-claude.test.ts` → pass 13, fail 0（watcher の印、並行の呼び出しの in_flight、node_modules を編集に数えない、判定の yes / no / no_edit / unknown）。実 run（pilot-sort、inject）で edits.jsonl に 8 個の印、6 個目で changed、判定 yes
+
+- [x] T16: T05 の Codex レビューの 4 件を直す（まとめて届いた stdout の遅れ、印の欠け、壊れた印、Bash からのコミット）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象）
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd <32c9dc33 の worktree>/server && node red.ts` → 印が 1 つ欠けても `yes`、壊れた印の行で例外、Bash からのコミットで状態が変わらない
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 遅れた印・欠けた印・壊れた印は unknown、Bash からのコミットは changed のテストが pass
+  - コミット: `fix(evals): fence the local runner's environment and harden its readers (T15, T16)`
+  - 結果: red 実測（同じ red.ts）: `T05-F2 missing mark: yes`、`T05-F3 broken line: threw`、`T05-F4 commit seen: false`。まとめて届いた stdout（F1）はレビュアーの再現を根拠にし、自分では再現していない。直した後 `node --test test/eval-claude.test.ts` → pass 70, fail 0（3 ファイル合計）
 
 - [ ] T06: stale・abstention・crowded・conflict・poisoned-delivered の setup とタスクを足す
   - 種別: 追加
@@ -165,3 +185,5 @@ base: main
 - 2026-10-04 / T04 / canary は `claude.ts --canary` ではなく別の `canary.ts` にし、結果をビルドの `canary.json` に残して claude.ts が見る（変更欄 前: claude.ts と canary.ts、後: claude-run.ts・canary-check.ts・slot-scripts.ts を追加）。receipt に読み込んだファイルを残すため HOOK_SH に `file` と `memory` を足した
 - 2026-10-04 / T04 / Sphica は delivery の session_id をホストの id から作り直すので、DB の canary は「各 DB に session が 1 つ、2 つの run で違う、TMPDIR に DB が無い」で見る
 - 2026-10-04 / T05 / 観測と判定の置き場所 / runner 側は claude.ts ではなく claude-run.ts（T03 で run を移したため）、テストは eval-grade ではなく eval-claude（変更欄 前: claude.ts と eval-grade.test.ts、後: claude-run.ts と eval-claude.test.ts）
+- 2026-10-04 / T03 / Codex レビュー 5 件（P1 2 件: 環境変数、資格情報ファイル）を全部採った / T15
+- 2026-10-04 / T05 / Codex レビュー 4 件を全部採った / T16

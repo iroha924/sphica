@@ -238,11 +238,19 @@ export function claudeStreamCalls(events: string | null): { calls: StreamCall[];
       readable = false;
       continue;
     }
+    // Valid JSON that is not an event object, or a content block that is not an object, is a damaged stream, not an empty one
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      readable = false;
+      continue;
+    }
     if (e.type === "result") finished = true;
-    const content = Array.isArray(e.message?.content)
-      ? (e.message?.content as Record<string, unknown>[])
-      : [];
-    for (const c of content) {
+    const content = Array.isArray(e.message?.content) ? (e.message?.content as unknown[]) : [];
+    for (const block of content) {
+      if (typeof block !== "object" || block === null) {
+        readable = false;
+        continue;
+      }
+      const c = block as Record<string, unknown>;
       if (e.type === "assistant" && c.type === "tool_use" && typeof c.id === "string") {
         const call = { id: c.id, name: String(c.name ?? ""), input: c.input, result: null, error: false };
         calls.push(call);
@@ -320,13 +328,30 @@ export function searchedBeforeEdit(
 ): "yes" | "no" | "no_edit" | "unknown" {
   const { calls, readable } = claudeStreamCalls(events);
   if (!readable || marks === null) return "unknown";
-  const parsed = marks
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { after: string; changed: boolean; in_flight: string[] });
+  const parsed: { after: string; changed: boolean; in_flight: string[]; late: boolean }[] = [];
+  for (const line of marks.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const m = JSON.parse(line) as Record<string, unknown>;
+      if (typeof m.after !== "string" || typeof m.changed !== "boolean" || !Array.isArray(m.in_flight))
+        return "unknown";
+      parsed.push({
+        after: m.after,
+        changed: m.changed,
+        in_flight: m.in_flight as string[],
+        late: m.late === true,
+      });
+    } catch {
+      return "unknown";
+    }
+  }
+  // Every result in the stream has its mark, in order; a gap could hide the change that came first
+  const answered = calls.filter((c) => c.result !== null).map((c) => c.id);
+  if (JSON.stringify(parsed.map((m) => m.after).sort()) !== JSON.stringify([...answered].sort()))
+    return "unknown";
   const first = parsed.find((m) => m.changed);
   if (!first) return "no_edit";
-  if (first.in_flight.length) return "unknown";
+  if (first.in_flight.length || first.late) return "unknown";
   const at = calls.findIndex((c) => c.id === first.after);
   if (at < 0) return "unknown";
   return calls.slice(0, at).some((c) => c.name === "mcp__sphica__search" && c.result !== null) ? "yes" : "no";

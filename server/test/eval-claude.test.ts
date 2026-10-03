@@ -7,10 +7,12 @@ import path from "node:path";
 import { test } from "node:test";
 import { contextChecks, permissionChecks } from "../evals/cloud/canary-check.ts";
 import {
-  DENY_READ,
+  DENY_DIRS,
+  DENY_FILES,
   finalAnswer,
   patchSince,
   runArgs,
+  runEnv,
   runMcp,
   runSettings,
   treeWatcher,
@@ -53,7 +55,13 @@ test("every condition runs fenced: sandbox on with no way out, the owner's secre
     // Every condition logs the prompt, so collect can tell which task a run carried out
     assert.ok(argsOf(s, "UserPromptSubmit")?.length);
   }
-  assert.deepEqual(DENY_READ.length, new Set(DENY_READ).size);
+  // A credential file is fenced as itself; a rule ending in /** would only cover what is under it
+  const s = settingsOf("none");
+  for (const f of DENY_FILES) {
+    assert.ok(s.permissions.deny.includes(`Read(/${f})`), f);
+    assert.ok(s.sandbox.filesystem.denyRead.includes(f), f);
+  }
+  assert.ok(DENY_DIRS.every((d) => !DENY_FILES.includes(d)));
 });
 
 test("only inject delivers, only gold gives the gold record, and only search and inject have Sphica's tools", () => {
@@ -452,12 +460,29 @@ test("the tree watcher marks each tool result with whether the tree changed and 
     .split("\n")
     .map((l) => JSON.parse(l));
   assert.deepEqual(got, [
-    { after: "r", changed: false, in_flight: [] },
-    { after: "w", changed: true, in_flight: [] },
-    { after: "b1", changed: true, in_flight: ["b2"] },
-    { after: "b2", changed: false, in_flight: [] },
-    { after: "n", changed: false, in_flight: [] },
+    { after: "r", changed: false, in_flight: [], late: false },
+    { after: "w", changed: true, in_flight: [], late: false },
+    { after: "b1", changed: true, in_flight: ["b2"], late: false },
+    { after: "b2", changed: false, in_flight: [], late: false },
+    { after: "n", changed: false, in_flight: [], late: false },
   ]);
+  // A commit made from Bash leaves the status clean but still changes the tree's state
+  watch(use("c", "Bash"));
+  execFileSync("git", ["-C", work, "add", "-A"]);
+  execFileSync("git", [
+    "-C",
+    work,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "-qm",
+    "agent",
+  ]);
+  watch(result("c", "ok"), true);
+  const last = JSON.parse(fs.readFileSync(marks, "utf8").trim().split("\n").at(-1) ?? "{}");
+  assert.deepEqual(last, { after: "c", changed: true, in_flight: [], late: true });
 });
 
 test("a search counts as before the edit only when it came before the call that first changed the tree", () => {
@@ -493,4 +518,93 @@ test("a search counts as before the edit only when it came before the call that 
     "unknown",
     "a stream cut off",
   );
+  const all = [...bash, ...search, ...write, done].join("\n");
+  // A mark read late may hold a later call's edit
+  assert.equal(
+    searchedBeforeEdit(
+      [...search, ...write, done].join("\n"),
+      [mark("s", false), JSON.stringify({ after: "w", changed: true, in_flight: [], late: true })].join("\n"),
+    ),
+    "unknown",
+  );
+  // A missing mark could be the call that changed the tree first
+  assert.equal(searchedBeforeEdit(all, [mark("s", false), mark("w", true)].join("\n")), "unknown");
+  assert.equal(searchedBeforeEdit(all, [mark("b", false), mark("s", false)].join("\n")), "unknown");
+  assert.equal(searchedBeforeEdit(all, ""), "unknown");
+  assert.equal(searchedBeforeEdit(all, `${mark("b", true)}\n{"after":`), "unknown", "a broken mark line");
+});
+
+test("a run inherits only the variables claude needs, never the owner's tokens or the parent session's markers", () => {
+  const env = runEnv({
+    PATH: "/bin",
+    HOME: "/h",
+    GH_TOKEN: "t",
+    AWS_SECRET_ACCESS_KEY: "s",
+    CLAUDECODE: "1",
+    SPHICA_DB: "/db",
+  });
+  assert.deepEqual(env, { PATH: "/bin", HOME: "/h" });
+});
+
+test("files the agent wrote under ignored paths are in the patch too", (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "eval-ignored-"));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const git = (...a: string[]) => execFileSync("git", ["-C", work, ...a], { encoding: "utf8" });
+  git("init", "-q");
+  fs.writeFileSync(path.join(work, ".gitignore"), "docs/\n");
+  git("add", "-A");
+  git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "s");
+  const start = git("rev-parse", "HEAD").trim();
+  fs.mkdirSync(path.join(work, "docs"));
+  fs.writeFileSync(path.join(work, "docs", "install.md"), "npm install\n");
+  fs.mkdirSync(path.join(work, "node_modules", "x"), { recursive: true });
+  fs.writeFileSync(path.join(work, "node_modules", "x", "i.js"), "x");
+  const patch = patchSince(work, start);
+  assert.match(patch, /docs\/install\.md/);
+  assert.doesNotMatch(patch, /node_modules/);
+});
+
+test("a stream whose lines are JSON but not events is damaged, not empty, and never crashes the reader", () => {
+  const gold = ["trace:s/utc"];
+  for (const bad of ["null", "3", "[]", ev({ type: "assistant", message: { content: [null] } })]) {
+    const events = [bad, done].join("\n");
+    assert.equal(claudeStreamCalls(events).readable, false, bad);
+    assert.equal(foundInClaudeStream(events, gold), "unknown", bad);
+  }
+});
+
+test("collect with --no-cloud reads no slot repository", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  fs.mkdirSync(build);
+  // The slot repository does not exist: reading it would fail
+  fs.writeFileSync(
+    path.join(build, "manifest.json"),
+    JSON.stringify({ commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
+  );
+  fs.writeFileSync(path.join(build, "plan.json"), "[]");
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  const collect = (extra: string[]) =>
+    spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        path.join(base, "none"),
+        "--claude",
+        path.join(base, "none"),
+        "--logs",
+        base,
+        ...extra,
+      ],
+      { encoding: "utf8", env: { ...process.env, HOME: base } },
+    );
+  assert.notEqual(collect([]).status, 0, "without the flag the slots are read");
+  assert.equal(collect(["--no-cloud"]).status, 0);
 });

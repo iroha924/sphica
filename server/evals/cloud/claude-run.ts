@@ -15,18 +15,12 @@ const ROOT = path.join(import.meta.dirname, "..", "..", "..");
 type Hook = { type: "command"; command: string; args: string[]; timeout: number };
 type HookEntry = { matcher?: string; hooks: Hook[] };
 
-/** Paths a run must never read, whatever the agent tries: the owner's credentials and Sphica's own database. */
-export const DENY_READ = [
-  ".ssh",
-  ".aws",
-  ".config",
-  ".codex",
-  ".claude",
-  ".sphica",
-  ".gnupg",
-  ".npmrc",
-  ".netrc",
-].map((p) => path.join(os.homedir(), p));
+/** Directories a run must never read, whatever the agent tries: the owner's credentials and Sphica's own database. */
+export const DENY_DIRS = [".ssh", ".aws", ".config", ".codex", ".claude", ".sphica", ".gnupg"].map((p) =>
+  path.join(os.homedir(), p),
+);
+/** Single credential files: a rule ending in /** would only cover what is under them, not the file itself */
+export const DENY_FILES = [".npmrc", ".netrc"].map((p) => path.join(os.homedir(), p));
 
 export type RunPaths = {
   /** The run directory: receipts, the gold marker, the database copy live here */
@@ -54,7 +48,7 @@ export function runSettings(
   deliverMatcher: string,
   deny: string[] = [],
 ): Record<string, unknown> {
-  const fenced = [...DENY_READ, ...deny];
+  const dirs = [...DENY_DIRS, ...deny];
   const receipt = (name: string, ...command: string[]) =>
     hook([path.join(p.tools, "hook.sh"), name, ...command], 60);
   const deliver = (name: string) =>
@@ -81,7 +75,8 @@ export function runSettings(
         "PushNotification",
         "WebFetch",
         "WebSearch",
-        ...fenced.flatMap((d) => [`Read(/${d}/**)`, `Edit(/${d}/**)`]),
+        ...dirs.flatMap((d) => [`Read(/${d}/**)`, `Edit(/${d}/**)`]),
+        ...DENY_FILES.flatMap((f) => [`Read(/${f})`, `Edit(/${f})`]),
       ],
     },
     sandbox: {
@@ -89,7 +84,7 @@ export function runSettings(
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
       failIfUnavailable: true,
-      filesystem: { denyRead: fenced },
+      filesystem: { denyRead: [...dirs, ...DENY_FILES] },
     },
     env: { EVAL_RUN_DIR: p.run, EVAL_SPHICA_DB: p.db },
     hooks,
@@ -133,19 +128,40 @@ export function runArgs(p: { settings: string; mcp: string }, model: string): st
   ];
 }
 
-/** Variables of the parent Claude Code session that would make the run's hooks treat it as a nested call. */
-export const PARENT_ENV = [
-  "CLAUDECODE",
-  "CLAUDE_CODE_ENTRYPOINT",
-  "SPHICA_PARENT_SESSION",
-  "SPHICA_DB",
-  "SPHICA_HOME",
+/**
+ * The only variables a run inherits: what claude needs to start and find the owner's login. Anything else of the owner's shell (tokens,
+ * the parent session's markers, Sphica's own paths) would reach the agent's commands, which the sandbox does not fence.
+ */
+export const RUN_ENV = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "TMPDIR",
+  "__CF_USER_TEXT_ENCODING",
 ];
+
+export const runEnv = (parent: NodeJS.ProcessEnv): Record<string, string> =>
+  Object.fromEntries(RUN_ENV.flatMap((k) => (parent[k] === undefined ? [] : [[k, parent[k] as string]])));
 
 /** Tracked and untracked changes since the starting commit, without the slot's scaffolding or installed dependencies. */
 export function patchSince(work: string, start: string): string {
   const leave = [":!.tools", ":!.eval", ":(exclude,glob)**/node_modules/**"];
   execFileSync("git", ["-C", work, "add", "-A", "--", ".", ...leave]);
+  // Files the agent wrote under ignored paths (a plan, docs) are part of its answer too
+  const ignored = execFileSync(
+    "git",
+    ["-C", work, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".", ...leave],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  )
+    .split("\0")
+    .filter(Boolean);
+  if (ignored.length) execFileSync("git", ["-C", work, "add", "-f", "--", ...ignored]);
   return execFileSync("git", ["-C", work, "diff", "--cached", start, "--", ".", ...leave], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
@@ -261,7 +277,7 @@ export async function runClaude(o: {
       `${JSON.stringify(runSettings(o.condition, paths, shippedMatcher(ROOT), o.deny ?? []), null, 2)}\n`,
     );
     fs.writeFileSync(mcp, `${JSON.stringify(runMcp(o.condition, paths), null, 2)}\n`);
-    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !PARENT_ENV.includes(k)));
+    const env = runEnv(process.env);
     // After each tool result the work tree is looked at, so the first change can be tied to the call that made it; the start state is
     // taken before the agent starts
     const watch = treeWatcher(work, path.join(dir, "edits.jsonl"));
@@ -279,7 +295,8 @@ export async function runClaude(o: {
       pending += chunk.toString("utf8");
       const lines = pending.split("\n");
       pending = lines.pop() ?? "";
-      for (const line of lines) watch(line);
+      // A line with more lines already behind it was read late: the tree may already hold what the later calls did
+      for (const [i, line] of lines.entries()) watch(line, i < lines.length - 1 || pending.length > 0);
     });
     child.stdin.end(o.prompt);
     const timer = setTimeout(() => child.kill("SIGTERM"), 30 * 60_000);
@@ -362,6 +379,8 @@ export function treeState(work: string): string {
   );
   const entries = status.split("\0").filter(Boolean).sort();
   const hash = crypto.createHash("sha256");
+  // A change the agent committed leaves the status clean; the commit it made still moves HEAD
+  hash.update(execFileSync("git", ["-C", work, "rev-parse", "HEAD"], { encoding: "utf8" }));
   for (const e of entries) {
     hash.update(e);
     const file = path.join(work, e.slice(3));
@@ -379,6 +398,8 @@ export type TreeMark = {
   changed: boolean;
   /** Calls started whose results had not arrived: a change then cannot be tied to one call */
   in_flight: string[];
+  /** More of the stream had already arrived when this result was read, so the tree may hold later calls' work */
+  late: boolean;
 };
 
 /**
@@ -389,25 +410,26 @@ export function treeWatcher(
   work: string,
   file: string,
   state: (w: string) => string = treeState,
-): (line: string) => void {
+): (line: string, late?: boolean) => void {
   let last = state(work);
   const open = new Set<string>();
-  return (line: string) => {
+  return (line: string, late = false) => {
     let e: { type?: string; message?: { content?: unknown } };
     try {
       e = JSON.parse(line);
     } catch {
       return;
     }
-    const content = Array.isArray(e.message?.content)
-      ? (e.message?.content as Record<string, unknown>[])
-      : [];
-    for (const c of content) {
+    if (typeof e !== "object" || e === null) return;
+    const content = Array.isArray(e.message?.content) ? (e.message?.content as unknown[]) : [];
+    for (const block of content) {
+      if (typeof block !== "object" || block === null) continue;
+      const c = block as Record<string, unknown>;
       if (e.type === "assistant" && c.type === "tool_use" && typeof c.id === "string") open.add(c.id);
       if (e.type === "user" && c.type === "tool_result" && typeof c.tool_use_id === "string") {
         open.delete(c.tool_use_id);
         const now = state(work);
-        const mark: TreeMark = { after: c.tool_use_id, changed: now !== last, in_flight: [...open] };
+        const mark: TreeMark = { after: c.tool_use_id, changed: now !== last, in_flight: [...open], late };
         last = now;
         fs.appendFileSync(file, `${JSON.stringify(mark)}\n`);
       }

@@ -3,7 +3,7 @@
 // in the run log (searches that found nothing, reads that found nothing, tool errors, Sphica calls, turns, time), and writes one table.
 // Run logs of cloud runs are saved by hand from the routine API into <logs>/<branch session id>.log (the harness never holds the token).
 // Local Claude runs (claude.ts) are collected the same way as the Codex runs, from their run directories.
-// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--claude <dir>]
+// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--claude <dir>] [--no-cloud]
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -35,6 +35,8 @@ const { values: args } = parseArgs({
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
     claude: { type: "string", default: path.join(CACHE, "claude-runs") },
+    // A build run only locally: skip fetching result branches from the slot repositories
+    "no-cloud": { type: "boolean", default: false },
   },
 });
 
@@ -229,8 +231,7 @@ function main() {
   // The firing plan is the denominator: every fired row is one run asked for, with its task, even when it pushed no branch
   const firing = Object.keys(manifest.repositories).length ? readPlan(build) : [];
   const claude: (Row & { started: string })[] = [];
-  // A build run only locally fired no routine and pushed no branch: its Claude runs are collected below with the Codex runs
-  const cloud = firing.some((r) => r.fired_at !== null) ? Object.entries(manifest.repositories) : [];
+  const cloud = args["no-cloud"] ? [] : Object.entries(manifest.repositories);
   for (const [repo, { condition }] of cloud) {
     const dir = path.join(build, repo);
     execFileSync("git", [
