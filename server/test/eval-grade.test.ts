@@ -15,6 +15,7 @@ import {
   deliveredSignal,
   foundInClaudeLog,
   foundInCodexEvents,
+  goldNotGiven,
   goldSignalsFromClaude,
   goldSignalsFromCodex,
   presentedText,
@@ -232,7 +233,7 @@ test("collect keeps a started run without a result, and a failed run, as exclude
       "started.json": { ...head, condition: "none" },
       "result.json": { ...head, condition: "none", status: 0, reason: null, seconds: 1, deliveries: null },
     });
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -243,8 +244,6 @@ test("collect keeps a started run without a result, and a failed run, as exclude
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -501,13 +500,7 @@ printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output:
     seedTasks(base);
     const r = spawnSync(
       process.execPath,
-      [
-        path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"),
-        "--loop",
-        loop,
-        "--out",
-        path.join(base, "grades.json"),
-      ],
+      [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop],
       {
         encoding: "utf8",
         env: {
@@ -670,6 +663,132 @@ test("gold signals say unknown when the log cannot tie a result to its call or i
   assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "null")[key], unknown);
 });
 
+// A broken line leaves "no" unprovable, but a result that named the key still proves "yes", before or after the break
+test("a proven hit in a Codex log stays yes when another line is broken", () => {
+  const key = "harvest:157/keep-search";
+  const other = "trace:other/key";
+  const call = (tool: string, text: string | null) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "mcp_tool_call",
+        server: "sphica",
+        tool,
+        ...(text === null ? {} : { result: { content: [{ type: "text", text }] } }),
+      },
+    });
+  const hits = {
+    search: call("search", `## ${key} (u1): decision do, active`),
+    read: call("read", `${key} (u1, revision 3): decision do, active`),
+  };
+  const field = { search: "in_search", read: "read" } as const;
+  for (const broken of ["{bad json", "42", call("search", null)])
+    for (const tool of ["search", "read"] as const)
+      for (const lines of [
+        [hits[tool], broken],
+        [broken, hits[tool]],
+      ]) {
+        const got = goldSignalsFromCodex("search", [key, other], [], null, lines.join("\n"));
+        assert.equal(got[key]?.[field[tool]], "yes", `${tool} hit with ${broken} in ${lines.join(" | ")}`);
+        const otherTool = tool === "search" ? "read" : "search";
+        assert.equal(got[key]?.[field[otherTool]], "unknown", "an unproven tool stays unknown");
+        assert.equal(got[other]?.in_search, "unknown", "an unproven key stays unknown");
+        assert.equal(got[other]?.read, "unknown", "an unproven key stays unknown");
+      }
+});
+
+// Gold counts as given only when each gold key opens a delivery line: a longer key or a mention in a body is another record
+test("a gold record counts as given only by its own delivery line in the hook's context", () => {
+  const key = "trace:a/b";
+  const hook = (context: string) =>
+    JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
+  const lead = "Active decisions from this project's history:";
+  assert.equal(goldNotGiven("gold", [key], hook(`${lead}\n- ${key} (decision do): Keep it.`)), false);
+  assert.equal(goldNotGiven("gold", [key], `${hook(`${lead}\n- ${key} (decision do): Keep it.`)}\n`), false);
+  assert.equal(goldNotGiven("gold", [key], hook(`${lead}\n- ${key}-extra (decision do): Other.`)), true);
+  assert.equal(
+    goldNotGiven("gold", [key], hook(`${lead}\n- trace:c/d (decision do): Unlike ${key} (u1).`)),
+    true,
+  );
+  assert.equal(
+    goldNotGiven("gold", [key, "trace:c/d"], hook(`${lead}\n- ${key} (decision do): Keep it.`)),
+    true,
+  );
+  assert.equal(goldNotGiven("gold", [key], null), true);
+  assert.equal(goldNotGiven("gold", [key], ""), true);
+  assert.equal(goldNotGiven("inject", [key], null), false, "only the gold condition gives through the hook");
+});
+
+// A gold run is graded as shown the record only when its hook returned it; otherwise the gold condition never applied
+test("collect excludes a gold run when the gold hook returned no record, and keeps presented for one that did", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    const codex = path.join(base, "codex");
+    const slot = path.join(build, "eval-shelf-1");
+    fs.mkdirSync(build);
+    // The gold slot is fetched for cloud branches: a local bare origin with none keeps it off the network
+    execFileSync("git", ["init", "-q", "--bare", path.join(base, "origin.git")], { env: childEnv(base) });
+    execFileSync("git", ["clone", "-q", path.join(base, "origin.git"), slot], {
+      stdio: "ignore",
+      env: childEnv(base),
+    });
+    const text = "Active decisions:\n- trace:s-en-dates/utc (decision do): Store dates in UTC.";
+    fs.mkdirSync(path.join(slot, ".tools"));
+    fs.writeFileSync(path.join(slot, ".tools", "gold.json"), JSON.stringify([{ id: "pilot-dates", text }]));
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", repositories: { "eval-shelf-1": { condition: "gold" } } }),
+    );
+    fs.writeFileSync(path.join(build, "plan.json"), "[]");
+    seedTasks(build);
+    const head = { build: "b", task: "pilot-dates", condition: "gold" };
+    const run = (name: string, receipt: string | null) => {
+      fs.mkdirSync(path.join(codex, name, "work"), { recursive: true });
+      fs.writeFileSync(path.join(codex, name, "started.json"), JSON.stringify(head));
+      fs.writeFileSync(
+        path.join(codex, name, "result.json"),
+        JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+      );
+      if (receipt !== null) fs.writeFileSync(path.join(codex, name, "gold-receipt.txt"), receipt);
+    };
+    const hook = (context: string) =>
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context },
+      });
+    run("missing", null);
+    run("empty", "");
+    run("unrelated", hook("## trace:other/key (u2): decision do, active"));
+    run("named", hook(text));
+    execFileSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        codex,
+        "--logs",
+        base,
+      ],
+      { stdio: "ignore", env: childEnv(base) },
+    );
+    const rows = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+      run: string;
+      excluded: string | null;
+      presented: string | null;
+    }[];
+    assert.deepEqual(rows.map((r) => [r.run, r.excluded, r.presented]).sort(), [
+      ["empty", "gold hook returned no record", null],
+      ["missing", "gold hook returned no record", null],
+      ["named", null, text],
+      ["unrelated", "gold hook returned no record", null],
+    ]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // A swapped build's runs are judged against the swapped record: its gold is that record, and the original rule's hidden test is not run
 test("collect reads a swapped build's gold from the swapped record and does not run the hidden test", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
@@ -689,7 +808,11 @@ test("collect reads a swapped build's gold from the swapped record and does not 
       path.join(codex, "sw", "result.json"),
       JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
     );
-    const out = path.join(base, "loop.json");
+    fs.writeFileSync(
+      path.join(codex, "sw", "gold-receipt.txt"),
+      "- trace:s-en-dates-local/local (decision do): Keep local dates.",
+    );
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -700,8 +823,6 @@ test("collect reads a swapped build's gold from the swapped record and does not 
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -755,7 +876,7 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
         JSON.stringify({ build: id, task: "pilot-sort", condition: "none" }),
       );
     }
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -766,8 +887,6 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -1072,6 +1191,77 @@ test("the report refuses builds of different bundles or task definitions", () =>
   }
 });
 
+// The next stage reads tasks.json beside its input, so collect and grade write only into the build directory
+test("collect and grade refuse --out and write beside the build's tasks.json", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-out-"));
+  try {
+    const build = path.join(base, "build");
+    const elsewhere = path.join(base, "elsewhere");
+    fs.mkdirSync(build);
+    fs.mkdirSync(elsewhere);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", repositories: {} }),
+    );
+    seedTasks(build);
+    const cloud = (script: string, ...rest: string[]) =>
+      spawnSync(process.execPath, [path.join(import.meta.dirname, "..", "evals", "cloud", script), ...rest], {
+        encoding: "utf8",
+        env: childEnv(base),
+      });
+    const collectArgs = ["--build", build, "--codex", path.join(base, "none"), "--logs", base];
+    const collected = cloud("collect.ts", ...collectArgs, "--out", path.join(elsewhere, "loop.json"));
+    assert.notEqual(collected.status, 0, "collect refuses --out");
+    assert.match(collected.stderr, /Unknown option '--out'/);
+    assert.equal(fs.existsSync(path.join(build, "loop.json")), false, "refused before writing");
+    assert.equal(cloud("collect.ts", ...collectArgs).status, 0);
+    assert.ok(fs.existsSync(path.join(build, "loop.json")), "collect writes loop.json into the build");
+    const graded = cloud(
+      "grade.ts",
+      "--loop",
+      path.join(build, "loop.json"),
+      "--second",
+      "none",
+      "--out",
+      path.join(elsewhere, "grades.json"),
+    );
+    assert.notEqual(graded.status, 0, "grade refuses --out");
+    assert.match(graded.stderr, /Unknown option '--out'/);
+    assert.equal(fs.existsSync(path.join(build, "grades.json")), false, "refused before writing");
+    assert.equal(cloud("grade.ts", "--loop", path.join(build, "loop.json"), "--second", "none").status, 0);
+    assert.ok(fs.existsSync(path.join(build, "grades.json")), "grade writes grades.json into the build");
+    assert.deepEqual(fs.readdirSync(elsewhere), [], "nothing is written outside the build");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// Builds that all lack a bundle would compare equal, so a report could mix loops of different bundles
+test("the report refuses grades files whose bundle is missing or empty", () => {
+  for (const bundle of [undefined, ""]) {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-"));
+    try {
+      const files = ["a", "b"].map((name) => {
+        fs.mkdirSync(path.join(base, name));
+        seedTasks(path.join(base, name));
+        const file = path.join(base, name, "grades.json");
+        fs.writeFileSync(file, JSON.stringify({ build: name, variant: "original", bundle, rows: [] }));
+        return file;
+      });
+      const r = spawnSync(
+        process.execPath,
+        [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), ...files],
+        { encoding: "utf8", env: childEnv(base) },
+      );
+      assert.notEqual(r.status, 0, `bundle ${JSON.stringify(bundle)}`);
+      assert.match(r.stderr, /no bundle/);
+      assert.ok(r.stderr.includes(files[0] ?? ""), "names the file");
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  }
+});
+
 test("collect judges runs by the task definitions of their build, not the checkout's", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
   try {
@@ -1092,7 +1282,7 @@ test("collect judges runs by the task definitions of their build, not the checko
       path.join(codex, "r", "result.json"),
       JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
     );
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -1103,8 +1293,6 @@ test("collect judges runs by the task definitions of their build, not the checko
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -1153,7 +1341,7 @@ test("collect records the bundled files' hashes with the commit, so builds of on
       JSON.stringify({ build: "b", commit: "c", bundle: { "mcp.js": "h1" }, repositories: {} }),
     );
     seedTasks(build);
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -1164,8 +1352,6 @@ test("collect records the bundled files' hashes with the commit, so builds of on
         path.join(base, "none"),
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
