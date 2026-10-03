@@ -59,13 +59,23 @@ base: main
   - コミット: `feat(evals): build from a given bundle and fixture with per-task run counts (T02, T12, T13)`
   - 結果: `node --test test/eval-build.test.ts` → 新しいテストを含め pass
 
-- [ ] T03: ローカルの Claude runner と回収を足す
+- [x] T03: ローカルの Claude runner と回収を足す
   - 種別: 追加
   - 計画: S2
   - 依存: T01（hook と MCP に run の DB の絶対パスを渡す）
-  - 変更: `server/evals/cloud/claude.ts`, `server/evals/cloud/claude-settings.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - 変更: `server/evals/cloud/claude.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
   - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 条件ごとの settings / mcp.json の生成、開始 SHA からの patch（未追跡を含み `.tools` などを除く）、stream の最後の result の答え、collect が claude-runs を読むテストが pass
-  - コミット: `feat(evals): run Claude locally in a sandboxed claude -p and collect from its run directory (T03)`
+  - コミット: `feat(evals): run Claude locally in a sandboxed claude -p (T03, T14)`
+  - 結果: `node --test test/eval-claude.test.ts test/eval-build.test.ts test/eval-grade.test.ts` → 全件 pass（eval-claude 8 件）。実 run 2 回（pilot-sort、inject、claude-opus-5-5）: exit 0、17 秒前後、answer.md・patch.diff・receipts・delivery のログがそろい、init に `mcp_servers: sphica connected`。1 回目は `mcp__sphica__search` が permission_denied だったので許可を足し、2 回目で search が 2 回通った
+
+- [x] T14: run 数の検査と、matcher と rekey のテストを足す（T02 の Codex レビュー F1, F2）
+  - 種別: 追加
+  - 計画: S7
+  - 依存: なし
+  - 変更: `server/evals/cloud/build-lib.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/firing.ts`, `server/test/eval-build.test.ts`
+  - 完了条件: `cd server && node --test test/eval-build.test.ts` → 0・負・小数・文字列の run 数で止まり、exec form と command form の hooks から matcher が取れ、実際の SQLite で project が付け替わるテストが pass
+  - コミット: `feat(evals): run Claude locally in a sandboxed claude -p (T03, T14)`
+  - 結果: `node --test test/eval-build.test.ts` → pass 9, fail 0
 
 - [ ] T04: canary（権限・文脈・DB）と生成した settings の単体テストを足す
   - 種別: 追加
@@ -144,3 +154,8 @@ base: main
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
 - 2026-10-04 / T12 / build.ts が main で落ちていた（9/30 のループより後の権限と hooks.json の変更）/ 修正タスク T12 を足し、T02 の依存に入れた（前: なし、後: T12）。T02 の完了条件に実ビルドを足した（build は読み込みで走るスクリプトでテストから組み立てられないため）
 - 2026-10-04 / T01 / Codex レビュー F1（gold の印の TMPDIR への戻りのテストが無い）を採った / T13 を足した
+- 2026-10-04 / T03 / スクリプトとして読み込んだ時点で走る claude.ts からは関数をテストに出せない / 設定・patch・答えの取り出しを `claude-run.ts` に置き、stream の判定を judge.ts に足した（変更欄 前: claude-settings.ts、後: claude-run.ts と judge.ts）
+- 2026-10-04 / T03 / 実 run で、acceptEdits の -p は MCP の呼び出しを全部拒否した / search と inject の settings に `allow: ["mcp__sphica"]` を足した
+- 2026-10-04 / T03 / 実 run で、Sphica のツールは強制しなくても遅延読み込みで、モデルは ToolSearch の `select:mcp__sphica__search` で読み込んでから呼んだ / T10 はこの ToolSearch の呼び出しを遅延の証拠の候補にする
+- 2026-10-04 / T03 / Claude Code 自身の安全判定で Bash の 1 呼び出しが拒否された（brace と引用符）/ 条件によらず同じなのでそのまま
+- 2026-10-04 / T02 / Codex レビュー F1（run 数の検査）を採り T14 にした。F2 は matcher と rekey を build-lib.ts に切り出してテストし、`--dist` / `--fixture` の通しのビルドは CI に無い Linux 版 Node（31MB）が要るので自動テストにせず、手で流した結果を T02 に残した

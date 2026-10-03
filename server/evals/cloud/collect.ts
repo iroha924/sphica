@@ -2,7 +2,8 @@
 // prompt the hooks received, plus the local Codex runs. For each run it records the hidden tests, what was delivered, and the failure signals
 // in the run log (searches that found nothing, reads that found nothing, tool errors, Sphica calls, turns, time), and writes one table.
 // Run logs of cloud runs are saved by hand from the routine API into <logs>/<branch session id>.log (the harness never holds the token).
-// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>]
+// Local Claude runs (claude.ts) are collected the same way as the Codex runs, from their run directories.
+// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--claude <dir>]
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,12 +13,15 @@ import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./f
 import {
   answerFormat,
   capPatch,
+  claudeStreamCalls,
   deliveredSignal,
   foundInClaudeLog,
+  foundInClaudeStream,
   foundInCodexEvents,
   type GoldSignal,
   goldNotGiven,
   goldSignalsFromClaude,
+  goldSignalsFromClaudeStream,
   goldSignalsFromCodex,
   presentedText,
   type Tri,
@@ -29,6 +33,7 @@ const { values: args } = parseArgs({
     build: { type: "string" },
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
+    claude: { type: "string", default: path.join(CACHE, "claude-runs") },
   },
 });
 
@@ -141,6 +146,35 @@ function signals(log: string): NonNullable<Row["signals"]> {
   };
 }
 
+/** The same signals from a local Claude run's stream-json, where each call carries its own result. */
+function streamSignals(events: string): NonNullable<Row["signals"]> {
+  const { calls } = claudeStreamCalls(events);
+  const searches = calls.filter((c) => c.name === "mcp__sphica__search");
+  const turns = events
+    .split("\n")
+    .flatMap((l) => {
+      try {
+        const e = JSON.parse(l) as { type?: string; num_turns?: number };
+        return e.type === "result" && typeof e.num_turns === "number" ? [e.num_turns] : [];
+      } catch {
+        return [];
+      }
+    })
+    .at(-1);
+  return {
+    searches: searches.length,
+    empty_searches: searches.filter((c) =>
+      /No record holds most of|No source holds most of/.test(c.result ?? ""),
+    ).length,
+    reads_not_found: calls.filter(
+      (c) => c.name === "mcp__sphica__read" && /not found in this project/.test(c.result ?? ""),
+    ).length,
+    tool_errors: calls.filter((c) => c.error).length,
+    turns: turns ?? null,
+    seconds: null,
+  };
+}
+
 /**
  * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs only
  * on macOS, in sandbox-exec without network, under Node's permission model (reads only the checkout, no writes or child processes), with no inherited environment.
@@ -191,7 +225,9 @@ function main() {
   // The firing plan is the denominator: every fired row is one run asked for, with its task, even when it pushed no branch
   const firing = Object.keys(manifest.repositories).length ? readPlan(build) : [];
   const claude: (Row & { started: string })[] = [];
-  for (const [repo, { condition }] of Object.entries(manifest.repositories)) {
+  // A build run only locally fired no routine and pushed no branch: its Claude runs are collected below with the Codex runs
+  const cloud = firing.some((r) => r.fired_at !== null) ? Object.entries(manifest.repositories) : [];
+  for (const [repo, { condition }] of cloud) {
     const dir = path.join(build, repo);
     execFileSync("git", [
       "-C",
@@ -296,9 +332,13 @@ function main() {
   }
   for (const f of missing)
     rows.push(excludedRow("claude", f.task, f.condition, `${f.slot}#${f.try}`, "no result branch"));
-  if (fs.existsSync(args.codex ?? ""))
-    for (const name of fs.readdirSync(args.codex ?? "")) {
-      const dir = path.join(args.codex ?? "", name);
+  for (const [model, runs] of [
+    ["codex", args.codex ?? ""],
+    ["claude", args.claude ?? ""],
+  ] as const) {
+    if (!fs.existsSync(runs)) continue;
+    for (const name of fs.readdirSync(runs)) {
+      const dir = path.join(runs, name);
       const read = (file: string) =>
         fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), "utf8") : null;
       // started.json is the denominator: a run that started counts even when it left no result
@@ -325,7 +365,7 @@ function main() {
       if (!resultText) {
         rows.push(
           excludedRow(
-            "codex",
+            model,
             head.task,
             head.condition,
             name,
@@ -344,48 +384,51 @@ function main() {
       }>(resultText);
       // Cut off while it was written: the run started, so it stays in the denominator
       if (!result) {
-        rows.push(excludedRow("codex", head.task, head.condition, name, "unreadable result.json"));
+        rows.push(excludedRow(model, head.task, head.condition, name, "unreadable result.json"));
         continue;
       }
-      // A run whose Codex process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
+      // A run whose agent process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
       if (result.status !== 0 || result.reason) {
         rows.push(
           excludedRow(
-            "codex",
+            model,
             result.task,
             result.condition,
             name,
-            result.reason ?? `codex exited ${result.status}`,
+            result.reason ?? `${model} exited ${result.status}`,
           ),
         );
         continue;
       }
       // An inject run whose hooks logged nothing at all never had Sphica delivering
       if (result.condition === "inject" && !result.deliveries?.length) {
-        rows.push(
-          excludedRow("codex", result.task, result.condition, name, "inject run with no delivery log"),
-        );
+        rows.push(excludedRow(model, result.task, result.condition, name, "inject run with no delivery log"));
         continue;
       }
       const task = plan.tasks.find((t) => t.id === result.task);
       if (!task) {
-        rows.push(excludedRow("codex", result.task, result.condition, name, "unknown task"));
+        rows.push(excludedRow(model, result.task, result.condition, name, "unknown task"));
         continue;
       }
       const gold = goldOf(task);
       if (goldNotGiven(result.condition, gold, read("gold-receipt.txt"))) {
-        rows.push(excludedRow("codex", task.id, result.condition, name, NO_GOLD));
+        rows.push(excludedRow(model, task.id, result.condition, name, NO_GOLD));
         continue;
       }
       const events = read("events.jsonl");
-      const found = foundInCodexEvents(events, gold);
+      const found = model === "codex" ? foundInCodexEvents(events, gold) : foundInClaudeStream(events, gold);
       const emitted = (result.deliveries ?? [])
         .filter((d) => d.outcome === "emitted")
         .flatMap((d) => d.units);
-      const answer = answerFormat(read("answer.json"));
+      // Codex answers in a fixed shape; Claude's answer is its final message, as on the cloud
+      const answer =
+        model === "codex"
+          ? answerFormat(read("answer.json"))
+          : { text: read("answer.md") ?? "", format: "not_applicable" as const, reason: null };
       const cut = capPatch(read("patch.diff") ?? "");
+      const goldReceipt = read("gold-receipt.txt");
       rows.push({
-        model: "codex",
+        model,
         task: task.id,
         condition: result.condition,
         run: name,
@@ -397,15 +440,24 @@ function main() {
         patch: cut.patch,
         patch_truncated: cut.truncated,
         gold,
-        delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
+        delivered: deliveredSignal(result.condition, gold, emitted, goldReceipt),
         delivered_units: emitted,
         found,
         presented: presentedOf(task, result.condition),
-        gold_signals: goldSignalsFromCodex(result.condition, gold, emitted, read("gold-receipt.txt"), events),
+        gold_signals:
+          model === "codex"
+            ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
+            : goldSignalsFromClaudeStream(result.condition, gold, emitted, goldReceipt, events),
         // A missing or broken event log cannot say how many searches or errors there were
-        signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },
+        signals:
+          found === "unknown"
+            ? null
+            : model === "codex"
+              ? { ...signals(events ?? ""), seconds: result.seconds }
+              : { ...streamSignals(events ?? ""), seconds: result.seconds },
       });
     }
+  }
   fs.writeFileSync(
     out,
     `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify(manifest.bundle ?? {})}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,

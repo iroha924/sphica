@@ -36,6 +36,12 @@ export function planRows(
   runs: number,
   slotOf: (condition: string) => string,
 ): FiringRow[] {
+  for (const t of tasks)
+    for (const [condition, n] of Object.entries(t.runs ?? {}))
+      if (!Number.isInteger(n) || n < 1)
+        throw new Error(
+          `${t.id}: runs for ${condition} must be a whole number of at least 1, not ${JSON.stringify(n)}`,
+        );
   return tasks.flatMap((t) =>
     t.conditions
       .filter((condition) => variant !== "swapped" || condition === "gold")

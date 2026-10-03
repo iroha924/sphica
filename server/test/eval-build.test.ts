@@ -5,8 +5,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { deliverMatcher, rekey } from "../evals/cloud/build-lib.ts";
 import { planRows } from "../evals/cloud/firing.ts";
 import { GOLD_SH, HOOK_SH, NODE_SH, SPHICA_SH } from "../evals/cloud/slot-scripts.ts";
+import { tempDb } from "./temp-db.ts";
 
 /** A slot's .tools directory with its scripts and a stand-in fixture, plus a scratch TMPDIR. */
 function slot(t: { after: (fn: () => void) => void }) {
@@ -132,4 +134,59 @@ test("gold.sh keeps its marker under TMPDIR on the cloud VM, and session start c
     input: JSON.stringify({ hook_event_name: "SessionStart" }),
   });
   assert.match(gold(), /gold text/);
+});
+
+test("a run count that is not a whole number of at least 1 stops the plan instead of dropping runs", () => {
+  for (const bad of [0, -1, 1.5, "3"])
+    assert.throws(
+      () =>
+        planRows(
+          "b",
+          "original",
+          [{ id: "t", prompt: "p", conditions: ["inject"], runs: { inject: bad as number } }],
+          2,
+          (c) => c,
+        ),
+      /t: runs for inject must be a whole number of at least 1/,
+    );
+});
+
+test("the delivery matcher is read from the shipped hooks in exec form and in command form", () => {
+  const hooks = (h: unknown) =>
+    JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Read|Edit", hooks: [h] }] } });
+  assert.equal(
+    deliverMatcher(hooks({ type: "command", command: "node", args: ["$PLUGIN/dist/deliver.js"] })),
+    "Read|Edit",
+  );
+  assert.equal(
+    deliverMatcher(hooks({ type: "command", command: "node $PLUGIN/dist/deliver.js" })),
+    "Read|Edit",
+  );
+  assert.throws(
+    () => deliverMatcher(hooks({ type: "command", command: "node", args: ["other.js"] })),
+    /no PreToolUse delivery hook/,
+  );
+  assert.match(
+    deliverMatcher(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "..", "plugin", "hooks", "hooks.json"), "utf8"),
+    ),
+    /Read/,
+  );
+});
+
+test("the fixture's project is re-keyed to the slot repository", async () => {
+  const db = tempDb();
+  try {
+    db.owner.exec(
+      "insert into project (key, name) values ('git:github.com/iroha924/tsundoku', 'iroha924/tsundoku')",
+    );
+    await rekey(db.file, "iroha924", "eval-shelf-3");
+    const rows = await db.reader.selectFrom("project").select(["key", "name"]).execute();
+    assert.deepEqual(
+      rows.map((r) => ({ ...r })),
+      [{ key: "git:github.com/iroha924/eval-shelf-3", name: "iroha924/eval-shelf-3" }],
+    );
+  } finally {
+    await db.done();
+  }
 });

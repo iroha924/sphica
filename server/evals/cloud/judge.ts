@@ -216,6 +216,99 @@ export function goldSignalsFromClaude(
   );
 }
 
+/** One tool call of a local Claude run's stream-json, with its result when one came back. */
+export type StreamCall = { id: string; name: string; input: unknown; result: string | null; error: boolean };
+
+/**
+ * The tool calls of a stream-json run in the order they were made, each tied to its result by id. `readable` is false when a line is not
+ * an event or the stream has no final result event, so an absence in it cannot prove "no".
+ */
+export function claudeStreamCalls(events: string | null): { calls: StreamCall[]; readable: boolean } {
+  if (events === null || !events.trim()) return { calls: [], readable: false };
+  const calls: StreamCall[] = [];
+  const byId = new Map<string, StreamCall>();
+  let readable = true;
+  let finished = false;
+  for (const line of events.split("\n")) {
+    if (!line.trim()) continue;
+    let e: { type?: string; message?: { content?: unknown } };
+    try {
+      e = JSON.parse(line);
+    } catch {
+      readable = false;
+      continue;
+    }
+    if (e.type === "result") finished = true;
+    const content = Array.isArray(e.message?.content)
+      ? (e.message?.content as Record<string, unknown>[])
+      : [];
+    for (const c of content) {
+      if (e.type === "assistant" && c.type === "tool_use" && typeof c.id === "string") {
+        const call = { id: c.id, name: String(c.name ?? ""), input: c.input, result: null, error: false };
+        calls.push(call);
+        byId.set(c.id, call);
+      }
+      if (e.type === "user" && c.type === "tool_result" && typeof c.tool_use_id === "string") {
+        const call = byId.get(c.tool_use_id);
+        if (!call) continue;
+        const body = c.content;
+        call.result = Array.isArray(body)
+          ? body.map((b) => (typeof b === "object" && b && "text" in b ? String(b.text) : "")).join("\n")
+          : String(body ?? "");
+        call.error = c.is_error === true;
+      }
+    }
+  }
+  return { calls, readable: readable && finished };
+}
+
+const SEARCH = "mcp__sphica__search";
+const READ = "mcp__sphica__read";
+
+/** Whether a Sphica search or read result in a stream-json run named a gold record. */
+export function foundInClaudeStream(events: string | null, gold: string[]): Tri {
+  const { calls, readable } = claudeStreamCalls(events);
+  const hit = calls.some(
+    (c) =>
+      c.result !== null &&
+      ((c.name === SEARCH && gold.some((k) => inSearch(c.result ?? "", k, true))) ||
+        (c.name === READ && gold.some((k) => inRead(c.result ?? "", k, true)))),
+  );
+  if (hit) return "yes";
+  return readable && calls.every((c) => !c.name.startsWith("mcp__sphica__") || c.result !== null)
+    ? "no"
+    : "unknown";
+}
+
+/** The three signals per gold key from a stream-json run, where each call carries its own result. */
+export function goldSignalsFromClaudeStream(
+  condition: string,
+  gold: string[],
+  emittedUnits: string[],
+  goldHookOutput: string | null,
+  events: string | null,
+): Record<string, GoldSignal> {
+  const { calls, readable } = claudeStreamCalls(events);
+  // A Sphica call without its result leaves the stream unable to prove "no"
+  const complete = readable && calls.every((c) => !c.name.startsWith("mcp__sphica__") || c.result !== null);
+  const seen = (tool: string, key: string, test: typeof inSearch): Tri =>
+    calls.some((c) => c.name === tool && c.result !== null && test(c.result, key, true))
+      ? "yes"
+      : complete
+        ? "no"
+        : "unknown";
+  return Object.fromEntries(
+    gold.map((key) => [
+      key,
+      {
+        in_delivery: delivery(condition, key, emittedUnits, goldHookOutput),
+        in_search: seen(SEARCH, key, inSearch),
+        read: seen(READ, key, inRead),
+      },
+    ]),
+  );
+}
+
 /**
  * The record a counterfactual task's run was surely shown, as the gold slot rendered it: only the gold condition gives it for certain, so
  * other conditions' runs are not judged on following it (and a blind prompt carrying it would hint at the condition).

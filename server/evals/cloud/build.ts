@@ -15,6 +15,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
+import { rekey, shippedMatcher } from "./build-lib.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
 
@@ -104,20 +105,6 @@ async function fixture(file: string): Promise<void> {
   }
 }
 
-/** Re-keys the fixture's project to the bootstrap repository, so Sphica identifies the cloud checkout as the same project. */
-async function rekey(file: string, repo: string): Promise<void> {
-  // Changing a project's key is the owner's write; the record server's ingest connection may only add projects
-  const db = openWriter("owner", file);
-  try {
-    await db
-      .updateTable("project")
-      .set({ key: `git:github.com/${owner}/${repo}`, name: `${owner}/${repo}` })
-      .execute();
-  } finally {
-    await db.destroy();
-  }
-}
-
 function write(dir: string, rel: string, body: string | Buffer, mode?: number) {
   const file = path.join(dir, rel);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -192,19 +179,6 @@ function files(dir: string): void {
     maxBuffer: 512 * 1024 * 1024,
   });
   execFileSync("tar", ["-x", "-C", dir], { input: tar });
-}
-
-/** The shipped delivery hook's PreToolUse matcher, so the inject slot fires on the same tools the plugin does. */
-function deliverMatcher(): string {
-  const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, "plugin", "hooks", "hooks.json"), "utf8")) as {
-    hooks: { PreToolUse: { matcher: string; hooks: { command: string; args?: string[] }[] }[] };
-  };
-  // The shipped hooks are in exec form: the script is an argument, not part of the command
-  const entry = hooks.hooks.PreToolUse.find((e) =>
-    e.hooks.some((h) => [h.command, ...(h.args ?? [])].some((a) => a.includes("deliver.js"))),
-  );
-  if (!entry) throw new Error("plugin/hooks/hooks.json has no PreToolUse delivery hook");
-  return entry.matcher;
 }
 
 /** Runs the slot's session start hook as the host would and requires a delivery row, so a hook that never runs fails the build. */
@@ -298,7 +272,7 @@ async function main() {
       const db = path.join(dir, ".tools", "fixture.db");
       fs.mkdirSync(path.dirname(db), { recursive: true });
       fs.copyFileSync(base, db);
-      await rekey(db, repo);
+      await rekey(db, owner, repo);
       fixtureHash = sha256(fs.readFileSync(db));
       write(dir, ".tools/sphica.sh", SPHICA_SH, 0o755);
       write(dir, ".tools/fixture.id", `${fixtureHash.slice(0, 16)}\n`);
@@ -319,7 +293,7 @@ async function main() {
       hooks.UserPromptSubmit = [{ hooks: [{ type: "command", command: deliver("prompt"), timeout: 30 }] }];
       hooks.PreToolUse = [
         {
-          matcher: deliverMatcher(),
+          matcher: shippedMatcher(ROOT),
           hooks: [{ type: "command", command: deliver("edit"), timeout: 30 }],
         },
       ];
