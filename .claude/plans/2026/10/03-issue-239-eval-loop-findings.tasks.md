@@ -46,7 +46,7 @@ base: main
 
 report が bundle の分からない入力を通さず、collect → grade → report が同じビルドの tasks.json で流れる。
 
-- [ ] T03: report が bundle の無い・空の grades ファイルを拒否する
+- [x] T03: report が bundle の無い・空の grades ファイルを拒否する
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -54,6 +54,7 @@ report が bundle の分からない入力を通さず、collect → grade → r
   - red: `cd server && node --test --test-name-pattern='bundle' test/eval-grade.test.ts` → bundle が両方無い・両方空の 2 ファイルで report が 0 で終わり落ちる
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass
   - コミット: `fix(evals): refuse grades files without a bundle in the report (T03)`
+  - 結果: red 実測（3e842e19 の report.ts）: bundle の無い 2 ファイルで report が 0 で終わり `bundle undefined` で落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 42, fail 0。`bun run typecheck` → エラーなし
 
 - [ ] T04: collect と grade の --out を消し、成果物をビルドディレクトリに固定する
   - 種別: 修正

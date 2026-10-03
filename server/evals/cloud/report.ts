@@ -199,6 +199,9 @@ if (process.argv[1] === import.meta.filename) {
   const ids = builds.map((b) => b.build ?? "");
   if (ids.some((id) => !id) || new Set(ids).size < ids.length)
     throw new Error("a build is given twice, or a build has no id; each counts once");
+  const unknown = files.filter((_, i) => typeof builds[i]?.bundle !== "string" || !builds[i]?.bundle);
+  if (unknown.length)
+    throw new Error(`no bundle in ${unknown.join(", ")}; it cannot be told which loop it belongs to`);
   const bundles = new Set(builds.map((b) => b.bundle));
   if (bundles.size > 1)
     throw new Error(

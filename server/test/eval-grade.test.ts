@@ -1174,6 +1174,32 @@ test("the report refuses builds of different bundles or task definitions", () =>
   }
 });
 
+// Builds that all lack a bundle would compare equal, so a report could mix loops of different bundles
+test("the report refuses grades files whose bundle is missing or empty", () => {
+  for (const bundle of [undefined, ""]) {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-"));
+    try {
+      const files = ["a", "b"].map((name) => {
+        fs.mkdirSync(path.join(base, name));
+        seedTasks(path.join(base, name));
+        const file = path.join(base, name, "grades.json");
+        fs.writeFileSync(file, JSON.stringify({ build: name, variant: "original", bundle, rows: [] }));
+        return file;
+      });
+      const r = spawnSync(
+        process.execPath,
+        [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), ...files],
+        { encoding: "utf8", env: childEnv(base) },
+      );
+      assert.notEqual(r.status, 0, `bundle ${JSON.stringify(bundle)}`);
+      assert.match(r.stderr, /no bundle/);
+      assert.ok(r.stderr.includes(files[0] ?? ""), "names the file");
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  }
+});
+
 test("collect judges runs by the task definitions of their build, not the checkout's", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
   try {
