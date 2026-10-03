@@ -97,13 +97,14 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `ci: measure hook launch time directly and through PowerShell on Windows`
   - 結果: `node scripts/measure-hook-launch.mjs` → 手元の macOS で deliver.js 直接 47.7 ms・sh 経由 50.7 ms、capture.js 直接 39.2 ms・sh 経由 42.5 ms（20 組）で exit 0。`actionlint .github/workflows/check.yml` → 指摘なし。Windows の値は PR の CI で取る
 
-- [ ] T07: パックした hooks.json の定義どおりに capture と deliver を起動する check-hooks-live を足す
+- [x] T07: パックした hooks.json の定義どおりに capture と deliver を起動する check-hooks-live を足す
   - 種別: 追加
   - 計画: S6
   - 依存: T01（PowerShell の PreToolUse で記録が出ることを確かめる）, T02（Stop の切り離した送信を Windows で確かめる対象）
   - 変更: `scripts/check-hooks-live.mjs`, `package.json`, `.github/workflows/check.yml`
   - 完了条件: `bun run bundle && bun run hooks:live` → exit 0、`actionlint .github/workflows/check.yml` → 指摘なし
   - コミット: `test: launch packed hooks as hooks.json defines them`
+  - 結果: `bun run bundle && bun run hooks:live` → exit 0（約 1 秒）。capture.js の切り離した送信を止めた写しでは「did not put the owner's prompt in the database within 30 seconds」で落ち、戻すと通った。`actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0（acceptance 103 pass）。Windows の PowerShell の道は PR の CI で確かめる
 
 - [ ] T08: Windows の計測で exec form を決め、hooks.json・check-ai-config・README・doctor をそろえる
   - 種別: 変更
@@ -120,3 +121,5 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T05 / 変更欄と完了条件を直した（前: `scripts/lib/bundle-budget.test.mjs` と `package.json`、`node --test scripts/lib/bundle-budget.test.mjs`。後: `server/test/bundle-budget.test.ts` と `scripts/lib/bundle-budget.d.mts`、`bun run test`）/ scripts/lib のモジュールは server/test から試す慣習に合わせた
 2026-10-03 / T05 / knip が T03 で足した `Unknown` 型の export を未使用と指摘したので、T05 のコミットで export を外した（変更欄に `server/src/plugin.ts` を足した）
 2026-10-03 / T03 / Codex のタスクレビュー F1（Windows のテストが node の隣の npm-cli.js の有無に依存）と F2（npm i -g が入っていないとき行が無い）/ 両方採り、修正タスク T09 を足した
+2026-10-03 / T07 / Stop の入力に prompt_id が無いと capture は送信を始めない（ターン id が要る）。本物の Claude Code は Stop にも prompt_id を付けるので、検査の入力に付けた
+2026-10-03 / T07 / 子の PATH を node と git の場所だけにしたので sh が見つからなかった。POSIX は /bin/sh、Windows は SystemRoot の powershell.exe を絶対パスで起動する
