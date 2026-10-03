@@ -88,13 +88,14 @@ deliver.js から zod を外し、サイズの上限と zod の混入を bundle 
 
 Windows の CI で、フックの起動の上乗せを測り、パックした hooks.json から capture と deliver を最後まで動かす。
 
-- [ ] T06: フックの起動を、直接と PowerShell 経由で測る道具を足し、Windows の CI で流す
+- [x] T06: フックの起動を、直接と PowerShell 経由で測る道具を足し、Windows の CI で流す
   - 種別: 追加
   - 計画: S5
   - 依存: なし
   - 変更: `scripts/measure-hook-launch.mjs`, `.github/workflows/check.yml`
   - 完了条件: `node scripts/measure-hook-launch.mjs` → 手元で直接起動の中央値を出して exit 0、`actionlint .github/workflows/check.yml` → 指摘なし
   - コミット: `ci: measure hook launch time directly and through PowerShell on Windows`
+  - 結果: `node scripts/measure-hook-launch.mjs` → 手元の macOS で deliver.js 直接 47.7 ms・sh 経由 50.7 ms、capture.js 直接 39.2 ms・sh 経由 42.5 ms（20 組）で exit 0。`actionlint .github/workflows/check.yml` → 指摘なし。Windows の値は PR の CI で取る
 
 - [ ] T07: パックした hooks.json の定義どおりに capture と deliver を起動する check-hooks-live を足す
   - 種別: 追加

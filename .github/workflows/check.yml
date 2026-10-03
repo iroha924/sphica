@@ -115,6 +115,9 @@ jobs:
           set -e
           bun run setup
           bun run bundle
+      # Prints how much a shell-form hook pays for starting PowerShell on each call; it never fails on the numbers
+      - name: Measure hook launch directly and through PowerShell
+        run: node scripts/measure-hook-launch.mjs
       - name: Does the shipped tarball start on Windows
         run: |
           set -e
