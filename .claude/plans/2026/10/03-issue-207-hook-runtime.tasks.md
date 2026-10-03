@@ -165,6 +165,15 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `fix(scripts): require each entry's own output and keep launch paths out of the shell`
   - 結果: red は上のとおり（bundle-budget 4 pass・2 fail、計測は「shell …/x$HOME`y`/plugin/dist/deliver.js: exit 1」）。出力の名前は `<entry>.js` に一致するものだけを見て、hook の出力に inputs が無ければ落とす。シェルにはパスを LAUNCH_NODE と LAUNCH_SCRIPT の環境変数で渡す。直した後 `bun run test` → 623 pass、同じディレクトリでの計測 → exit 0
 
+- [x] T15: check-hooks-live から shell form をシェルで起動する分岐を外し、exec form 以外は落とす
+  - 種別: 変更
+  - 計画: S6
+  - 依存: T08（hooks.json が exec form だけになった）
+  - 変更: `scripts/check-hooks-live.mjs`
+  - 完了条件: `node scripts/check-hooks-live.mjs` → exit 0、Stop を shell form にした写しで → 「Stop hook is not exec form with node」で落ちる
+  - コミット: `refactor(scripts): launch only exec-form hooks in the hooks check`
+  - 結果: `node scripts/check-hooks-live.mjs` → 通った。Stop を shell form にした写しでは「Stop hook is not exec form with node」で exit 1。spawn するのは常に process.execPath で、hooks.json の文字列をコマンドにもシェルにも渡さない
+
 ## 記録
 2026-10-03 / T01 / Codex のタスクレビュー F1（Windows でパスの大文字・小文字を変えたコマンドに記録が出ない）/ 見送り。namedInCommand の照合は Bash（macOS でも同じ）と Read に共通の仕様で、PowerShell の道で入った欠陥ではない
 2026-10-03 / T02 / Codex のタスクレビュー / 指摘なし
@@ -186,3 +195,6 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T06 / Windows の CI（run 37100528046）の計測の 2 回目: deliver.js 直接 121.3 ms・PowerShell 経由 355.5 ms、capture.js 直接 117.1 ms・PowerShell 経由 356.2 ms
 2026-10-03 / 全差分 / Codex の全差分レビュー（main..edc4da25、high）F1（bundle の検査が entry ごとの出力と inputs を確かめない）と F2（計測のパスをシェルが解釈する）/ 両方採り T14 で直した
 2026-10-03 / T13 / Codex のタスクレビュー / 指摘なし
+2026-10-03 / T15 / CodeQL の「Shell command built from environment values」（check-hooks-live.mjs:151）/ shell form の分岐は T08 の後は使われないので外した（T15）
+2026-10-03 / 全体 / CodeQL の同じ指摘（measure-hook-launch.mjs:53）/ 見送り。シェル経由の起動を測るのが目的で、パスは T14 から環境変数で渡しシェルは解釈しない。PR の Declined findings に書いた
+2026-10-03 / 全体 / GitHub の Codex のレビュー（3023549、コードとセキュリティ）/ 指摘なし

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Launches a package's capture and delivery hooks the way Claude Code would from its hooks/hooks.json: the entry's own
-// command (exec form with `args`, or shell form through sh, or PowerShell on Windows), matched by the entry's matcher.
+// Launches a package's capture and delivery hooks the way Claude Code would from its hooks/hooks.json: node with the entry's
+// `args` (exec form, no shell), for the entries whose matcher matches.
 // This is a launch check of the shipped definitions, not a run inside a real host.
 //
 // Usage: node scripts/check-hooks-live.mjs [<package root>]   (default: plugin/, which `bun run bundle` builds)
@@ -20,7 +20,6 @@ const fail = (what, detail = "") => failures.push(detail ? `${what}\n${String(de
 const TIMEOUT_MS = 60_000;
 // The placeholder as hooks.json writes it, joined so the source holds no template-looking literal
 const ROOT = ["$", "{CLAUDE_PLUGIN_ROOT}"].join("");
-const PS_ROOT = ["$", "{env:CLAUDE_PLUGIN_ROOT}"].join("");
 
 /** The first executable named name on PATH. */
 function onPath(name) {
@@ -66,16 +65,8 @@ await withTempDir(async (dir) => {
   ])
     if (process.env[k]) env[k] = process.env[k];
   const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT;
-  if (windows && systemRoot)
-    dirs.push(
-      path.join(systemRoot, "System32"),
-      path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0"),
-    );
+  if (windows && systemRoot) dirs.push(path.join(systemRoot, "System32"));
   env.PATH = dirs.join(path.delimiter);
-  const powershell =
-    windows && systemRoot
-      ? path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-      : null;
 
   const repo = path.join(dir, "repo");
   fs.mkdirSync(path.join(repo, "src"), { recursive: true });
@@ -128,21 +119,13 @@ await withTempDir(async (dir) => {
     const stdin = JSON.stringify({ hook_event_name: event, session_id: session, cwd: repo, ...input });
     let out = "";
     for (const h of entries) {
-      let cmd;
-      let args;
-      if (Array.isArray(h.args)) {
-        cmd = h.command;
-        args = h.args.map((a) => a.replaceAll(ROOT, pkg));
-      } else if (windows) {
-        // Claude Code rewrites the placeholder to PowerShell's environment form, resolved after parsing
-        if (!powershell) throw new Error("SystemRoot is not set, so PowerShell cannot be found");
-        cmd = powershell;
-        args = ["-NoProfile", "-NonInteractive", "-Command", h.command.replaceAll(ROOT, PS_ROOT)];
-      } else {
-        cmd = "/bin/sh";
-        args = ["-c", h.command];
+      // Only exec form ships (verify:ai pins it): node with the script path as one argument, never a shell
+      if (h.command !== "node" || !Array.isArray(h.args)) {
+        fail(`${event} hook is not exec form with node`, JSON.stringify(h));
+        continue;
       }
-      const r = spawnSync(cmd, args, {
+      const args = h.args.map((a) => a.replaceAll(ROOT, pkg));
+      const r = spawnSync(process.execPath, args, {
         cwd: repo,
         env: hookEnv,
         input: stdin,
