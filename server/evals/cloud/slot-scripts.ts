@@ -50,7 +50,7 @@ log="$run/eval-receipts.jsonl"
 if [ "$name" = start ]; then rm -f "$log" "$run/eval-gold-given"; fi
 input=$(cat)
 if [ "$#" -gt 0 ]; then output=$(printf '%s' "$input" | "$@" 2>/dev/null); else output=""; fi
-LOG="$log" sh "$here/node.sh" -e 'const [name, input, output] = process.argv.slice(1); require("node:fs").appendFileSync(process.env.LOG, JSON.stringify({ name, at: new Date().toISOString(), node: process.version, input: JSON.parse(input || "{}").hook_event_name ?? null, prompt: String(JSON.parse(input || "{}").prompt ?? "").slice(0, 2000) || undefined, output }) + "\\n")' "$name" "$input" "$output" 2>/dev/null || true
+LOG="$log" sh "$here/node.sh" -e 'const [name, input, output] = process.argv.slice(1); require("node:fs").appendFileSync(process.env.LOG, JSON.stringify({ name, at: new Date().toISOString(), node: process.version, input: JSON.parse(input || "{}").hook_event_name ?? null, prompt: String(JSON.parse(input || "{}").prompt ?? "").slice(0, 2000) || undefined, file: JSON.parse(input || "{}").file_path, memory: JSON.parse(input || "{}").memory_type, output }) + "\\n")' "$name" "$input" "$output" 2>/dev/null || true
 printf '%s' "$output"
 `;
 

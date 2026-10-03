@@ -77,13 +77,14 @@ base: main
   - コミット: `feat(evals): run Claude locally in a sandboxed claude -p (T03, T14)`
   - 結果: `node --test test/eval-build.test.ts` → pass 9, fail 0
 
-- [ ] T04: canary（権限・文脈・DB）と生成した settings の単体テストを足す
+- [x] T04: canary（権限・文脈・DB）と生成した settings の単体テストを足す
   - 種別: 追加
   - 計画: S3
   - 依存: T03（runner の settings と起動の形が要る）
-  - 変更: `server/evals/cloud/claude.ts`, `server/evals/cloud/canary.ts`, `server/test/eval-claude.test.ts`
-  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 生成した settings に持ち主の実パスの読み取り禁止・allowUnsandboxedCommands=false・failIfUnavailable=true があり、canary の判定が「未試行」「ログ欠落」「sentinel の変化」を失敗にするテストが pass。`node evals/cloud/claude.ts --canary --build <build>` → 全項目 blocked / matched で 0
-  - コミット: `feat(evals): refuse to start Claude runs until the canary is blocked (T04)`
+  - 変更: `server/evals/cloud/claude.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/canary.ts`, `server/evals/cloud/canary-check.ts`, `server/evals/cloud/slot-scripts.ts`, `server/test/eval-claude.test.ts`
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 生成した settings に持ち主の実パスの読み取り禁止・allowUnsandboxedCommands=false・failIfUnavailable=true があり、canary の判定が「未試行」「ログ欠落」「sentinel の変化」を失敗にするテストが pass。`node evals/cloud/canary.ts --build <build>` → 全項目 ✓ で 0
+  - コミット: `feat(evals): refuse local Claude runs until the canary passes (T04)`
+  - 結果: `node --test test/eval-claude.test.ts test/eval-build.test.ts test/eval-grade.test.ts` → pass 64, fail 0。`node evals/cloud/canary.ts --build <build-c1>` → 30 項目全部 ✓、`canary passed`、exit 0。fence の 5 つの試みは Write・Edit・Read が権限（"denied by your permission settings"）、Bash の書き込みと cat が sandbox（"Operation not permitted"）で止まった。canary の無いビルドで claude.ts は拒否する
 
 ## P2: 測る信号と評価セット
 
@@ -159,3 +160,6 @@ base: main
 - 2026-10-04 / T03 / 実 run で、Sphica のツールは強制しなくても遅延読み込みで、モデルは ToolSearch の `select:mcp__sphica__search` で読み込んでから呼んだ / T10 はこの ToolSearch の呼び出しを遅延の証拠の候補にする
 - 2026-10-04 / T03 / Claude Code 自身の安全判定で Bash の 1 呼び出しが拒否された（brace と引用符）/ 条件によらず同じなのでそのまま
 - 2026-10-04 / T02 / Codex レビュー F1（run 数の検査）を採り T14 にした。F2 は matcher と rekey を build-lib.ts に切り出してテストし、`--dist` / `--fixture` の通しのビルドは CI に無い Linux 版 Node（31MB）が要るので自動テストにせず、手で流した結果を T02 に残した
+- 2026-10-04 / T04 / `--setting-sources ""` ではプロジェクトの CLAUDE.md も読み込まれず、モデルが Read で読みに行った（cloud と条件がずれる）/ `--setting-sources project` に変え、clone の `.claude/settings.json`（cloud のフック）は開始前のコミットで消し、フックは `--settings` から渡す。正の対照（CLAUDE.md を置いた run）で InstructionsLoaded の receipt に `memory_type: Project` が出て、user の CLAUDE.md は出ないことを確かめた
+- 2026-10-04 / T04 / canary は `claude.ts --canary` ではなく別の `canary.ts` にし、結果をビルドの `canary.json` に残して claude.ts が見る（変更欄 前: claude.ts と canary.ts、後: claude-run.ts・canary-check.ts・slot-scripts.ts を追加）。receipt に読み込んだファイルを残すため HOOK_SH に `file` と `memory` を足した
+- 2026-10-04 / T04 / Sphica は delivery の session_id をホストの id から作り直すので、DB の canary は「各 DB に session が 1 つ、2 つの run で違う、TMPDIR に DB が無い」で見る

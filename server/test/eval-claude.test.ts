@@ -1,10 +1,11 @@
 // The local Claude runner: what each condition is started with, how its patch and answer are taken, and how its stream is read.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { contextChecks, permissionChecks } from "../evals/cloud/canary-check.ts";
 import {
   DENY_READ,
   finalAnswer,
@@ -81,11 +82,11 @@ test("only inject delivers, only gold gives the gold record, and only search and
   }
 });
 
-test("the command line loads no settings or MCP servers of the owner's, and never bypasses permissions", () => {
+test("the command line loads only the checkout's settings and no MCP servers of the owner's, and never bypasses permissions", () => {
   const a = runArgs({ settings: "/r/settings.json", mcp: "/r/mcp.json" }, "m");
   assert.deepEqual(a.slice(a.indexOf("--setting-sources"), a.indexOf("--setting-sources") + 2), [
     "--setting-sources",
-    "",
+    "project",
   ]);
   assert.ok(a.includes("--strict-mcp-config"));
   assert.equal(a[a.indexOf("--permission-mode") + 1], "acceptEdits");
@@ -256,4 +257,148 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
     rows.find((r) => r.run === "r2")?.excluded,
     "no result.json (the run stopped before it finished)",
   );
+});
+
+const S = "/home/x/.cache/fence/sentinel.txt";
+const deniedEv = (id: string) => ev({ type: "system", subtype: "permission_denied", tool_use_id: id });
+const attempts = [
+  use("w", "Write", { file_path: S }),
+  result("w", "denied", true),
+  use("e", "Edit", { file_path: S }),
+  result("e", "denied", true),
+  use("bw", "Bash", { command: `echo x > ${S}` }),
+  result("bw", "operation not permitted", true),
+  use("r", "Read", { file_path: S }),
+  deniedEv("r"),
+  use("br", "Bash", { command: `cat ${S}` }),
+  result("br", "Operation not permitted", true),
+];
+
+test("the fence canary passes only when all five attempts were made and refused, and nothing changed or leaked", () => {
+  const ok = permissionChecks([...attempts, done].join("\n"), S, "secret-1", true);
+  assert.deepEqual(
+    ok.filter((c) => !c.ok),
+    [],
+  );
+  // A run that never tried the Bash read does not prove the sandbox blocks it
+  const skipped = permissionChecks([...attempts.slice(0, 8), done].join("\n"), S, "secret-1", true);
+  assert.deepEqual(
+    skipped.filter((c) => !c.ok).map((c) => [c.name, c.why]),
+    [["Bash reads the sentinel", "not attempted"]],
+  );
+  const through = permissionChecks(
+    [
+      ...attempts.slice(0, 8),
+      use("br", "Bash", { command: `cat ${S}` }),
+      result("br", "secret-1"),
+      done,
+    ].join("\n"),
+    S,
+    "secret-1",
+    true,
+  );
+  assert.deepEqual(
+    through.filter((c) => !c.ok).map((c) => c.name),
+    ["Bash reads the sentinel", "the sentinel's secret is not in the stream"],
+  );
+  assert.equal(
+    permissionChecks([...attempts, done].join("\n"), S, "s", false).find((c) => !c.ok)?.name,
+    "the sentinel is unchanged",
+  );
+  assert.equal(
+    permissionChecks(attempts.join("\n"), S, "s", true)[0]?.ok,
+    false,
+    "a stream without its result event is incomplete",
+  );
+  assert.equal(permissionChecks(null, S, "s", true).filter((c) => !c.ok).length >= 6, true);
+});
+
+const init = (servers: { name: string; status: string }[], tools: string[]) =>
+  ev({ type: "system", subtype: "init", mcp_servers: servers, tools });
+const receipt = (o: Record<string, unknown>) => JSON.stringify(o);
+
+test("the context canary checks the condition's servers, tools, hooks, and that only the checkout's instructions loaded", () => {
+  const work = "/r/work";
+  const searchInit = init([{ name: "sphica", status: "connected" }], ["Read", "mcp__sphica__search"]);
+  const hooks = [receipt({ name: "start" }), receipt({ name: "prompt" })].join("\n");
+  assert.deepEqual(
+    contextChecks("search", [searchInit, done].join("\n"), hooks, work, false).filter((c) => !c.ok),
+    [],
+  );
+  const failing = (condition: string, events: string, receipts: string, control = false) =>
+    contextChecks(condition, events, receipts, work, control)
+      .filter((c) => !c.ok)
+      .map((c) => c.name);
+  assert.deepEqual(failing("none", [searchInit, done].join("\n"), hooks), [
+    "MCP servers are the condition's",
+    "Sphica's tools only where the condition has them",
+  ]);
+  const owners = `${hooks}\n${receipt({ name: "instructions", file: "/home/x/.claude/CLAUDE.md", memory: "User" })}`;
+  assert.deepEqual(failing("none", [init([], ["Read"]), done].join("\n"), owners), [
+    "only the checkout's instruction files loaded",
+  ]);
+  // The positive control must show its own CLAUDE.md loading, or an absence elsewhere proves nothing
+  assert.deepEqual(failing("none", [init([], ["Read"]), done].join("\n"), hooks, true), [
+    "only the checkout's instruction files loaded",
+  ]);
+  const control = `${hooks}\n${receipt({ name: "instructions", file: "/r/work/CLAUDE.md", memory: "Project" })}`;
+  assert.deepEqual(failing("none", [init([], ["Read"]), done].join("\n"), control, true), []);
+  assert.deepEqual(failing("gold", [init([], ["Read"]), done].join("\n"), hooks), [
+    "the condition's hooks ran",
+  ]);
+  assert.deepEqual(failing("none", done, hooks), ["init event present"]);
+});
+
+test("claude.ts starts no run in a build whose canary did not pass with the same model", (t) => {
+  const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-gate-"));
+  t.after(() => fs.rmSync(build, { recursive: true, force: true }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  fs.writeFileSync(
+    path.join(build, "manifest.json"),
+    JSON.stringify({ build: "b", commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
+  );
+  fs.writeFileSync(
+    path.join(build, "plan.json"),
+    JSON.stringify([
+      {
+        build: "b",
+        variant: "original",
+        task: "pilot-sort",
+        condition: "none",
+        slot: "eval-shelf-1",
+        try: 1,
+        prompt: "p",
+        fired_at: null,
+      },
+    ]),
+  );
+  const start = (canary?: unknown) => {
+    if (canary) fs.writeFileSync(path.join(build, "canary.json"), JSON.stringify(canary));
+    return spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "claude.ts"),
+        "--build",
+        build,
+        "--repo",
+        "eval-shelf-1",
+        "--task",
+        "pilot-sort",
+        "--model",
+        "m",
+        "--out",
+        path.join(build, "runs"),
+      ],
+      { encoding: "utf8" },
+    );
+  };
+  for (const canary of [undefined, { passed: false, model: "m" }, { passed: true, model: "other" }]) {
+    const r = start(canary);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /no Claude run starts until it passes/);
+    assert.equal(fs.existsSync(path.join(build, "runs")), false, "nothing was started");
+  }
 });
