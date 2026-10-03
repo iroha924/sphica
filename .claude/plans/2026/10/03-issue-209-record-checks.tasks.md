@@ -51,10 +51,20 @@ base: main
   - コミット: `fix(record): judge anchors again when a file changed between check and save (T03)`
   - 結果: red は直す前のコードで save の出力が `'✓ trace:ext-s1/look active\n✓ saved'`（problem なし）。直した後 `node --test test/record.test.ts test/extract.test.ts` → 55 pass。ロックの中で消えたファイルに `(near paths not checked)` 付きの problem、glean で symbol が消えたら problem。ロックの中で `holds`・`files`（git）は呼ばれない。既存のロックのテストは、変わったファイルで `kind`（stat）を呼ぶ形に期待を直した。`bun run verify` → exit 0（acceptance 99 pass）
 
+- [x] T10: T01・T02 のタスクレビューの指摘を直す（ENOTDIR で止まる、近いパスの計算がロックの中、種類の判定が漏れる、同じ名前の順位、消えたパス自身）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T03（ロックの中で判定し直す経路を同じテストで確かめる）
+  - 変更: `server/src/anchors.ts`, `server/src/repo-facts.ts`, `server/src/record.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="review fixes" test/record.test.ts` → `ENOTDIR` で投げる、近いパスに消えたパス自身が出る、遠い同名ファイルが近いものより先に出る、2 つ目の anchor の種類がロックの前に判定されない
+  - 完了条件: `cd server && node --test --test-name-pattern="review fixes|near paths|anchor problem" test/record.test.ts` → 全件 pass
+  - コミット: `fix(record): keep anchor checks from throwing and compute near paths before the lock (T10)`
+  - 結果: red は直す前のコードで `Error: ENOTDIR: not a directory, lstat '.../package.json/child.ts'`。直した後 `node --test --test-name-pattern="review fixes|near paths|anchor problem" test/record.test.ts` → 3 pass（通るファイルを含むパスは gone の problem、2 つ目の anchor の種類もロックの前に判定、消えたパス自身は出ない、同じ名前は近い順、近いパスはロックの前に 1 回だけ計算）。`bun run verify` → exit 0（acceptance 99 pass）
+
 - [ ] T04: anchor の problem の受け入れケースと、trace・glean Skill の文
   - 種別: 追加
   - 計画: S1
-  - 依存: T02（ケースが近いパスを確かめる）, T03（ケースが save の出力を確かめる）
+  - 依存: T02（ケースが近いパスを確かめる）, T03（ケースが save の出力を確かめる）, T10（ケースが直した近いパスの順位を確かめる）
   - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `plugin/skills/trace/SKILL.md`, `plugin/skills/glean/SKILL.md`
   - 完了条件: `cd server && node --test test/acceptance-cases.test.ts` → pass。新しいケースが無いパスの problem と近いパスを、消したファイルの evidence で problem なしを確かめる
   - コミット: `test(acceptance): cover anchor problems and tell trace and glean how to answer them (T04)`
@@ -120,3 +130,5 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 
 - 2026-10-03 / T01, T09 / pre-commit の bundle 検査が、パッケージに入る変更と version の更新を同じコミットに求めた / T01 の計画欄を S1 から S1, S6 に、変更欄に 4 つの version ファイルを足し（前: ソースとテストだけ）、release:plan と 0.6.25 への更新を T01 で行った。T09 は取りやめ
 - 2026-10-03 / T02 / ロック中のテストの probe にも `files` が要った / 変更欄に `server/test/extract.test.ts` を足した（前: なし）。候補には未追跡で ignore されていないファイルも入れる（`--others --exclude-standard`）
+- 2026-10-03 / T10 / T01 のレビュー（P1: パスの途中が通常のファイルだと ENOTDIR で check と save が止まる）と T02 のレビュー（P2 が 4 件: 近いパスの計算がロックの中、1 つ目の gone の後は種類の判定がロックの中へずれる、同じ名前の距離を打ち切って順位が狂う、消えたパス自身を候補に出す）を全部直すと判定した / T10 を足し、T04 の依存に T10 を足した（前: T02, T03）
+- 2026-10-03 / T10 / glean.ts は変える必要がなかった（listFilesIfGone の中で直した） / 変更欄から `server/src/glean.ts` を外した

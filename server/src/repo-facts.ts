@@ -36,6 +36,7 @@ export type RepoFacts = {
   commits: Map<string, boolean>;
   /** The repository's file list, read once when some anchor path is gone; undefined until then, null when git could not list it */
   listing?: string[] | null;
+  near: Map<string, string[]>;
 };
 
 export const repoFacts = (root: string | null, probe: Probe = PROBE): RepoFacts => ({
@@ -43,6 +44,7 @@ export const repoFacts = (root: string | null, probe: Probe = PROBE): RepoFacts 
   probe,
   files: new Map(),
   commits: new Map(),
+  near: new Map(),
 });
 
 function file(f: RepoFacts, rel: string): FileFacts {
@@ -84,18 +86,29 @@ export function kindOf(f: RepoFacts, rel: string): PathKind {
   return got.kind;
 }
 
-/** Lists the repository's files for near-path suggestions, once, when the path is gone. Call before the write lock. */
+/**
+ * When the path is gone, lists the repository's files once and works out the paths near it, so the check under the write lock only looks
+ * them up. Call before the lock.
+ */
 export function listFilesIfGone(f: RepoFacts, rel: string): void {
-  if (f.root && f.listing === undefined && kindOf(f, rel) === "gone") f.listing = f.probe.files(f.root);
+  if (!f.root || kindOf(f, rel) !== "gone" || f.near.has(rel)) return;
+  if (f.listing === undefined) f.listing = f.probe.files(f.root);
+  f.near.set(rel, f.listing ? near(f.listing, rel) : []);
 }
 
-/** Up to 3 listed files near rel: the same file name first, then the smallest edit distance. Undefined when the list was not read. */
-export function nearPaths(f: RepoFacts, rel: string): string[] | undefined {
-  if (!f.listing) return undefined;
+/** The paths near a gone path worked out before the lock; undefined when they were not. */
+export const nearPaths = (f: RepoFacts, rel: string): string[] | undefined => f.near.get(rel);
+
+/** Up to 3 files near rel: the same file name first, then the smallest edit distance. */
+function near(files: readonly string[], rel: string): string[] {
   const name = (p: string) => p.slice(p.lastIndexOf("/") + 1);
   const limit = Math.max(3, Math.floor(rel.length / 2));
-  return f.listing
-    .map((p) => ({ p, same: name(p) === name(rel), d: distance(p, rel, limit) }))
+  return files
+    .filter((p) => p !== rel)
+    .map((p) => {
+      const same = name(p) === name(rel);
+      return { p, same, d: distance(p, rel, same ? Number.POSITIVE_INFINITY : limit) };
+    })
     .filter((x) => x.same || x.d <= limit)
     .sort((a, b) => Number(b.same) - Number(a.same) || a.d - b.d || a.p.localeCompare(b.p))
     .slice(0, 3)

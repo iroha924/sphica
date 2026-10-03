@@ -11,7 +11,16 @@ import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../s
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { readUnit } from "../src/read.ts";
-import { checkRecord, finishRun, repoPath, saveRecord, type Target, valueInQuote } from "../src/record.ts";
+import {
+  checkRecord,
+  finishRun,
+  prepareRecord,
+  repoPath,
+  saveRecord,
+  type Target,
+  valueInQuote,
+} from "../src/record.ts";
+import { listFilesIfGone, nearPaths, PROBE, type Probe, repoFacts } from "../src/repo-facts.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -1139,6 +1148,85 @@ test("near paths: a missing anchor path is shown the files near it, the same fil
     // git cannot list the files: the problem comes without suggestions
     fs.rmSync(path.join(root, ".git"), { recursive: true, force: true });
     assert.match(await problem(t, "nogit", "src/date.ts"), /src\/date\.ts is not in the working tree; fix/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("review fixes: anchor checks never throw, and near paths are judged before the lock", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fixes-")));
+  try {
+    execFileSync("git", ["-C", root, "init", "-q"]);
+    fs.writeFileSync(path.join(root, "package.json"), "{}\n");
+    fs.writeFileSync(path.join(root, "present.ts"), "export const here = 1;\n");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "ここを見る。" });
+    // A path through a regular file is gone, not an error that stops the save
+    const { checked } = await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "through",
+            kind: "finding",
+            text: "ここを見る",
+            evidence: [{ source: `s${m}`, quote: "ここを見る。", role: "states" }],
+            anchors: [
+              { path: "package.json/child.ts", role: "applies_to" },
+              { path: "package.json/child.ts", symbol: "child", role: "applies_to" },
+            ],
+          },
+        ],
+      },
+    );
+    assert.match(
+      checked.problems.join(" | "),
+      /anchor path package\.json\/child\.ts is not in the working tree/,
+    );
+
+    // Every anchor's kind and near paths are read before the lock, also after the first gone path
+    const asked: string[] = [];
+    const probe: Probe = {
+      ...PROBE,
+      kind: (r, rel) => {
+        asked.push(`kind ${rel}`);
+        return PROBE.kind(r, rel);
+      },
+      files: () => ["src/date.ts", "src/dates.ts", `${"a".repeat(80)}/date.ts`, `${"z".repeat(10)}/date.ts`],
+    };
+    const facts = prepareRecord(
+      root,
+      {
+        units: [
+          {
+            key: "k",
+            kind: "finding",
+            text: "t",
+            evidence: [],
+            anchors: [
+              { path: "src/date.ts", role: "applies_to" },
+              { path: "present.ts", role: "applies_to" },
+            ],
+          },
+        ],
+      },
+      probe,
+    );
+    assert.deepEqual(asked, ["kind src/date.ts", "kind present.ts"]);
+    // The gone path itself (still in the index) is not suggested, and a nearer file of the same name comes before a farther one
+    assert.deepEqual(nearPaths(facts, "src/date.ts"), [
+      `${"z".repeat(10)}/date.ts`,
+      `${"a".repeat(80)}/date.ts`,
+      "src/dates.ts",
+    ]);
+    // Near paths are worked out once, before the lock: asking again does not list or compare files
+    const listed = repoFacts(root, { ...probe, files: () => assert.fail("listed again") });
+    listed.listing = ["x.ts"];
+    listFilesIfGone(listed, "y.ts");
+    assert.deepEqual(nearPaths(listed, "y.ts"), ["x.ts"]);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

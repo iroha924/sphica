@@ -212,7 +212,7 @@ export function anchorProblem(
     // The list is read only before the lock, so a file gone since then gets no suggestions
     const hint = near?.length
       ? ` (near: ${near.map((n) => JSON.stringify(n)).join(", ")})`
-      : facts.listing === undefined
+      : near === undefined
         ? " (near paths not checked)"
         : "";
     return `anchor path ${a.path} is not in the working tree${hint}; ${fix}`;

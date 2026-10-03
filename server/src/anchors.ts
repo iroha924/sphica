@@ -20,7 +20,13 @@ const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function readBytes(root: string, rel: string): Buffer | null | undefined {
   const abs = path.join(root, rel);
   if (leaves(path.relative(root, abs))) return undefined;
-  const st = fs.lstatSync(abs, { throwIfNoEntry: false });
+  let st: fs.Stats | undefined;
+  try {
+    st = fs.lstatSync(abs, { throwIfNoEntry: false });
+  } catch (e) {
+    // A path through what is a regular file is absent; any other failure (no permission) cannot be checked
+    return (e as NodeJS.ErrnoException).code === "ENOTDIR" ? null : undefined;
+  }
   if (!st) return null;
   if (!st.isFile() || st.size > MAX_BYTES) return undefined;
   try {
