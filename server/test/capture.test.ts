@@ -726,6 +726,9 @@ test("turn boundary: Stop and Interrupt keep a start's turn and number, and a re
   onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "Stop", last_assistant_message: "c" });
   assert.deepEqual(seen(), ["t1:agent.ts"]);
   assert.deepEqual(read(dir), [{ turn: "t1", seq: 2, running: false }]);
+  // An ended turn keeps only its number, so a long session's starts stay small
+  const [kept] = fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+  assert.deepEqual([kept.head, kept.entries], [null, null]);
   const cx = { session_id: "kpx", cwd: repo, turn_id: "t1" };
   onHook("codex", { ...cx, hook_event_name: "UserPromptSubmit", prompt: "a" });
   onHook("codex", { ...cx, hook_event_name: "Interrupt" });
@@ -773,11 +776,16 @@ test("prune drops a session's starts only when all of them are old, and removes 
   fs.mkdirSync(opening, { recursive: true });
   const older = path.join(path.dirname(idle), "0123456789abcdef.json");
   fs.writeFileSync(older, "{}");
+  fs.utimesSync(older, old, old);
+  // A session still running the older hooks uses its single file until it reloads
+  const current = path.join(path.dirname(idle), "fedcba9876543210.json");
+  fs.writeFileSync(current, "{}");
   onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
   assert.equal(fs.existsSync(idle), false);
   assert.equal(fs.readdirSync(live).length, 2);
   assert.equal(fs.existsSync(opening), true, "an empty session directory is left alone");
   assert.equal(fs.existsSync(older), false);
+  assert.equal(fs.existsSync(current), true);
 });
 
 test("a starting point that cannot be written costs only the status edits, not the messages or the send", () => {
@@ -806,6 +814,43 @@ test("a starting point that cannot be written costs only the status edits, not t
       spooled().some((x) => x.kind === "message" && x.session === session && x.body === "second"),
       `${host}: the next prompt is still recorded`,
     );
+  }
+});
+
+test("the owner's prompt is queued before the turn's start is taken, and a failing prune still shows the session notice", () => {
+  const { repo } = boundaryRepo("order");
+  const written: string[] = [];
+  const write = fs.writeFileSync;
+  const spy = mock.method(fs, "writeFileSync", (file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    written.push(String(file));
+    return (write as (...a: unknown[]) => void)(file, ...rest);
+  });
+  try {
+    onHook("claude-code", {
+      session_id: "or",
+      cwd: repo,
+      prompt_id: "t1",
+      hook_event_name: "UserPromptSubmit",
+      prompt: "直して",
+    });
+  } finally {
+    spy.mock.restore();
+  }
+  const spoolAt = written.findIndex((f) => f.startsWith(spoolDir()));
+  const startAt = written.findIndex((f) => f.startsWith(path.dirname(turnDir("claude-code", "or"))));
+  assert.ok(spoolAt >= 0 && startAt > spoolAt, `queued at ${spoolAt}, start at ${startAt}`);
+  const worktree = path.dirname(turnDir("claude-code", "or"));
+  const read = fs.readdirSync;
+  const failing = mock.method(fs, "readdirSync", (dir: fs.PathLike, ...rest: unknown[]) => {
+    // A session directory another hook holds open (Windows) or removes in between
+    if (path.dirname(String(dir)) === worktree) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    return (read as (...a: unknown[]) => unknown)(dir, ...rest);
+  });
+  try {
+    const started = onHook("claude-code", { session_id: "or", cwd: repo, hook_event_name: "SessionStart" });
+    assert.ok("notice" in started);
+  } finally {
+    failing.mock.restore();
   }
 });
 

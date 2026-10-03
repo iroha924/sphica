@@ -55,7 +55,7 @@ approved_at: 2026-10-03
 4. Stop(turn): 自分のファイルを読み、running で entries があれば snapshot を取る。snapshot の後にディレクトリを読み直し、今のターンが自分と判定できたときだけ `changed` を via:"status" で書き、自分のファイルを `{ now, running: false, turn, seq }`（seq は保つ）で書き直す。それ以外は起点に何も書かない。発言の保存と flush は今どおり
 5. Codex の Interrupt(turn): 自分のファイルがあれば、git を走らせず `running: false`（turn と seq と entries は保つ）で書き直す。無ければ何もしない
 6. SessionStart: 起点を書かない（どの source でも）。`CLAUDE_ENV_FILE` と prune は今どおり
-7. prune（SessionStart から）: セッションのディレクトリの中の全ファイル（tmp を含む）が HOLD_DAYS より古いときだけ、ディレクトリごと消す。一部だけは消さない。旧形式の 1 ファイルを消す。起点の読み書きに失敗しても、発言の保存と flush は止めない
+7. prune（SessionStart から）: セッションのディレクトリの中の全ファイル（tmp を含む）が HOLD_DAYS より古いときだけ、ディレクトリごと消す。一部だけは消さない（空のディレクトリも消さない）。旧形式の 1 ファイルは HOLD_DAYS より古いときだけ消す（更新の途中で旧い hook のセッションが使っている）。起点の読み書きと prune に失敗しても、発言の保存・flush・セッション開始の通知は止めない。UserPromptSubmit は発言を spool してから起点を取る（同期の hook が timeout で打ち切られても発言は残る）。Stop と Interrupt で終えたターンの起点は番号だけを残し、head と entries を null にする
 8. 同期化: `plugin/hooks/hooks.json` の capture の UserPromptSubmit と Stop を `{ timeout: 10 }`（async を外す）。`scripts/check-ai-config.mjs` の期待を同じにする
 9. 受け入れる穴（capture.ts の先頭のコメントに書く）:
    - (a) 中断の後、前のターンの id を使い回す通知のターン（起点が running のまま残り、オーナーの手での編集がそのターンに入る）
@@ -100,7 +100,7 @@ approved_at: 2026-10-03
 ## リスク
 
 - 大きなリポジトリで同期の git status がプロンプトとターンの終わりを待たせる → timeout 10 で打ち切られ、そのターンは目印を書けず (d) になる（付け違えはしない）。報告があれば測って非同期に戻すか、snapshot を軽くする
-- 起点のファイルが続いているセッションのディレクトリにターンの数だけ積もる（ファイルは変更のあるパスだけを持つ）→ セッションが HOLD_DAYS 止まれば消える。長く続くセッションで大きくなれば、Stop が終えたターンの entries を空にするなどを考える
+- 起点のファイルが続いているセッションのディレクトリにターンの数だけ積もる → 終えたターンは番号だけの小さいファイルになり、セッションが HOLD_DAYS 止まれば消える。中断されたターン（Claude Code は Stop を送らない）の起点は entries を持ったまま残る
 - 走っている間の別の id のプロンプト（c）で status の編集が思ったより落ちる → 取り違えはしないので出す。trace の後に `edit_observation` の via 別の件数を見る
 - 方針 7 の prune は T07 のタスクレビューで Codex に確かめさせる
 
@@ -110,3 +110,4 @@ approved_at: 2026-10-03
 
 ## 変更履歴
 - 2026-10-03 / 方針 7 の prune をセッション単位の削除にし、方針 9 の穴 (d) を起点の書き込みの失敗全般に、(f) を timeout を過ぎて走り続ける hook を含む形に広げ、(g) を足した。起点の失敗で発言の保存と flush を止めない / T01・T02 のタスクレビュー（Codex）: T02 の prune と hook の競合 2 件、T01 の Interrupt の書き込み失敗で flush が止まる 1 件を受理。T01 の残り 3 件は同期の UserPromptSubmit の前提か書き込みの失敗に当たる / Go 不要（範囲・公開インターフェース・データは変わらず、付け違えの起き得る場面は (g) の一瞬が増え、prune の部分削除が無くなった分だけ減る）
+- 2026-10-03 / 方針 7 に、旧形式のファイルは古いときだけ消す、prune の失敗で通知を止めない、発言を起点より先に spool する、終えたターンは番号だけ残す、を足した / review-shipping の 4 件（同期の UserPromptSubmit が 10 秒で打ち切られると発言が消える、ターンごとのファイルが entries ごと積もる、0.6.27 の hook のセッションの起点を消す、prune の例外で通知が出ない）を受理 / Go 不要（範囲・公開インターフェース・データは変わらない）

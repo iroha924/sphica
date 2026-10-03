@@ -411,7 +411,7 @@ export function closeTurn(dir: string, turn: string, root: string): (() => strin
   return () => {
     if (newestTurn(readStarts(dir)) !== turn) return [];
     const paths = own.entries && now ? changed(root, { head: own.head, entries: own.entries }, now) : [];
-    writeStart(dir, now ? { ...own, ...now, running: false } : { ...own, running: false });
+    writeStart(dir, ended(own));
     return paths;
   };
 }
@@ -419,8 +419,11 @@ export function closeTurn(dir: string, turn: string, root: string): (() => strin
 /** Ends a turn without looking at the tree (Codex's interrupt is cut off after at most 3 seconds). */
 function stopTurn(dir: string, turn: string): void {
   const own = readStart(startFile(dir, turn));
-  if (own?.running) writeStart(dir, { ...own, running: false });
+  if (own?.running) writeStart(dir, ended(own));
 }
+
+/** An ended turn keeps only its number: a reused id takes a new snapshot, so the tree it ended on is never read. */
+const ended = (s: Start): Start => ({ ...s, head: null, entries: null, running: false });
 
 /**
  * Drops a session's starting points once every one of them is older than HOLD_DAYS, never some of them: removing one while a hook
@@ -438,9 +441,10 @@ function pruneBaselines(): void {
   }
   for (const name of names) {
     const at = path.join(baselineDir(), name);
-    // A single file per session is an older layout no turn reads
-    if (!fs.statSync(at, { throwIfNoEntry: false })?.isDirectory()) fs.rmSync(at, { force: true });
-    else {
+    // A single file per session is an older layout no turn reads; a session still on the older hooks may be using it
+    if (!fs.statSync(at, { throwIfNoEntry: false })?.isDirectory()) {
+      if (!fresh(at)) fs.rmSync(at, { force: true });
+    } else {
       // An empty directory may be a session writing its first start
       const files = fs.readdirSync(at);
       if (files.length && !files.some((f) => fresh(path.join(at, f))))
@@ -449,7 +453,7 @@ function pruneBaselines(): void {
   }
 }
 
-/** A starting point that cannot be read or written costs only its turn's status edits, never the turn's messages or the send. */
+/** A starting point that cannot be read, written, or pruned costs only status edits, never the turn's messages, the send, or the notice. */
 function attempt<T>(fn: () => T): T | undefined {
   try {
     return fn();
@@ -472,7 +476,7 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     }
     // No starting point here: at startup this runs in the background and may finish after the first prompt's, and after a compaction
     // the running turn keeps its own.
-    pruneBaselines();
+    attempt(pruneBaselines);
     return { flush: false, notice: captureNotice() };
   }
   if (!owner()) return { flush: false };
@@ -505,12 +509,13 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   };
 
   const dir = turnDir(host, base.session);
-  // Any prompt, a notice too, starts a turn unless its turn is already running. Between turns, the owner's own edits are not the turn's.
-  if (event === "UserPromptSubmit") attempt(() => openTurn(dir, turn, place.root)?.());
   if (event === "UserPromptSubmit" && input.prompt) {
     const prompt = input.prompt.trimStart();
     if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
   }
+  // Any prompt, a notice too, starts a turn unless its turn is already running. Between turns, the owner's own edits are not the turn's.
+  // After the message is queued: this hook is synchronous, and a slow git status past its timeout must not cost the owner's words.
+  if (event === "UserPromptSubmit") attempt(() => openTurn(dir, turn, place.root)?.());
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
     for (const p of attempt(() => closeTurn(dir, turn, place.root)?.()) ?? [])

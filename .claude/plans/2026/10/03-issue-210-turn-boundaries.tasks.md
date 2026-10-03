@@ -79,6 +79,16 @@ base: main
   - コミット: `fix(capture): leave an empty session directory to the session writing its first start (T08)`
   - 結果: red 実測（a7cf854a の capture.ts）: `AssertionError: an empty session directory is left alone`（false !== true）。直した後 `node --test test/capture.test.ts` → 51 pass / 0 fail、`bun run typecheck` エラーなし
 
+- [x] T09: 発言を起点より先に spool し、終えたターンは番号だけ残し、旧形式は古いときだけ消し、prune の失敗で通知を止めない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T08（直す対象の prune）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `.claude/plans/2026/10/03-issue-210-turn-boundaries.plan.md`
+  - red: `cd server && node --test --test-name-pattern="queued before|prune drops|keep a start's turn" test/capture.test.ts` → 14d10f86 の capture.ts で、起点が発言より先に書かれる、0.6.27 の形の新しいファイルが消える、終えたターンが entries を持ったまま、で落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass
+  - コミット: `fix(capture): queue the prompt before the start, keep ended starts small, and spare live older files (T09)`
+  - 結果: red 実測（14d10f86 の capture.ts）: 3 件 fail。`attempt(pruneBaselines)` だけを戻すと `Error: busy` で fail。直した後 `node --test test/capture.test.ts` → 52 pass / 0 fail、`bun run typecheck` エラーなし
+
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -112,3 +122,4 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 - 2026-10-03 / T05 / Codex のタスクレビューは指摘 0 件（MCP の統合テストは sandbox で流せず、自分で流した結果）
 - 2026-10-03 / T07 / Codex のタスクレビュー 1 件（P1）: 新しいセッションの空のディレクトリも「全部古い」と見て消し、再帰削除の途中で新しい起点だけが先に消えると遅れた Stop が別のターンの編集を拾う（fs の mock で再現）を受理 / T08 を足した。prune の直しが新しい欠陥を生んだのは 1 回目
 - 2026-10-03 / T08 / Codex のタスクレビューは指摘 0 件（fs の mock で prune と hook の 50 通りの順序を試し全部 pass。実ファイルの並行プロセスは未検証）
+- 2026-10-03 / 全体 / review-shipping（パックした tarball 48 ファイル、dist に新しいコード、hooks.json の timeout 10、新しいテストが main のコードで落ちることを確認）: 4 件を受理し T09 を足した。同期の UserPromptSubmit が 10 秒を超えると発言が spool の前に打ち切られる（遅い git で再現）、ターンごとのファイルが entries ごと積もる（合成の 300 ターン・3 万ファイルで 546 MB・1.9 秒）、0.6.27 の hook のセッションの起点を年齢によらず消す（再現）、prune の例外で通知が出ない（読んだだけ）
