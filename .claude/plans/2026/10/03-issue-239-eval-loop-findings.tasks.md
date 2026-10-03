@@ -56,7 +56,7 @@ report が bundle の分からない入力を通さず、collect → grade → r
   - コミット: `fix(evals): refuse grades files without a bundle in the report (T03)`
   - 結果: red 実測（3e842e19 の report.ts）: bundle の無い 2 ファイルで report が 0 で終わり `bundle undefined` で落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 42, fail 0。`bun run typecheck` → エラーなし
 
-- [ ] T04: collect と grade の --out を消し、成果物をビルドディレクトリに固定する
+- [x] T04: collect と grade の --out を消し、成果物をビルドディレクトリに固定する
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -64,5 +64,6 @@ report が bundle の分からない入力を通さず、collect → grade → r
   - red: `cd server && node --test --test-name-pattern='--out' test/eval-grade.test.ts` → ビルドの外を指す `--out` を collect と grade が受け付けて 0 で終わり、そこにファイルができて落ちる
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass。`rg -n -- '--out' server/evals/cloud/collect.ts server/evals/cloud/grade.ts` → 出力先としての `--out` が無い
   - コミット: `fix(evals): write loop and grades files only in the build directory (T04)`
+  - 結果: red 実測（3e842e19 の collect.ts / grade.ts）: `node --test --test-name-pattern='refuse --out'` で collect が `--out` を受けて 0 で終わり `collect refuses --out` で落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 43, fail 0。`rg -n -- '--out' server/evals/cloud/collect.ts server/evals/cloud/grade.ts` → `--output-schema` と `--output-format` の 2 行だけで、出力先としての `--out` は無い。`bun run typecheck` → エラーなし
 
 ## 記録

@@ -1,6 +1,6 @@
 // Grades one evaluation loop blind (step 5 of the eval-loop Skill): every result row of loop.json goes to Codex with only the task and the
 // run's own answer and patch, in an empty directory, and comes back through grade.schema.json; the table counts every started run.
-// Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--out <grades.json>] [--second claude|none]
+// Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none]
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -24,7 +24,6 @@ const { values: args } = parseArgs({
   options: {
     // A build's loop.json (collect writes it in the build directory); the grades go beside it
     loop: { type: "string" },
-    out: { type: "string" },
     // The second grader: Claude grades the same runs with the same prompt and schema, for agreement only; "none" skips it
     second: { type: "string", default: "claude" },
   },
@@ -33,7 +32,8 @@ const { values: args } = parseArgs({
 if (!args.loop) throw new Error("--loop <build dir>/loop.json names what to grade");
 if (args.second !== "claude" && args.second !== "none") throw new Error("--second is claude or none");
 const plan = readTasks<{ tasks: GradeTask[] }>(path.dirname(args.loop));
-const out = args.out ?? path.join(path.dirname(args.loop), "grades.json");
+// report reads tasks.json beside grades.json, so it is always written into the build
+const out = path.join(path.dirname(args.loop), "grades.json");
 const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
   build?: string | null;
   variant?: string;

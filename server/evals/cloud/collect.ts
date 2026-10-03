@@ -2,7 +2,7 @@
 // prompt the hooks received, plus the local Codex runs. For each run it records the hidden tests, what was delivered, and the failure signals
 // in the run log (searches that found nothing, reads that found nothing, tool errors, Sphica calls, turns, time), and writes one table.
 // Run logs of cloud runs are saved by hand from the routine API into <logs>/<branch session id>.log (the harness never holds the token).
-// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--out <file>]
+// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>]
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -29,7 +29,6 @@ const { values: args } = parseArgs({
     build: { type: "string" },
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
-    out: { type: "string" },
   },
 });
 
@@ -38,7 +37,8 @@ const build = args.build ?? "";
 if (!build)
   throw new Error("--build <dir> names the build to collect (~/.cache/sphica-eval/builds/<build id>)");
 const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[]> } }>(build);
-const out = args.out ?? path.join(build, "loop.json");
+// grade reads tasks.json beside loop.json, so it is always written into the build
+const out = path.join(build, "loop.json");
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;
   variant?: string;

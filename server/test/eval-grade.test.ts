@@ -232,7 +232,7 @@ test("collect keeps a started run without a result, and a failed run, as exclude
       "started.json": { ...head, condition: "none" },
       "result.json": { ...head, condition: "none", status: 0, reason: null, seconds: 1, deliveries: null },
     });
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -243,8 +243,6 @@ test("collect keeps a started run without a result, and a failed run, as exclude
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -501,13 +499,7 @@ printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output:
     seedTasks(base);
     const r = spawnSync(
       process.execPath,
-      [
-        path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"),
-        "--loop",
-        loop,
-        "--out",
-        path.join(base, "grades.json"),
-      ],
+      [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop],
       {
         encoding: "utf8",
         env: {
@@ -791,7 +783,7 @@ test("collect reads a swapped build's gold from the swapped record and does not 
       JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
     );
     fs.writeFileSync(path.join(codex, "sw", "gold-receipt.txt"), "## trace:s-en-dates-local/local (u1)");
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -802,8 +794,6 @@ test("collect reads a swapped build's gold from the swapped record and does not 
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -857,7 +847,7 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
         JSON.stringify({ build: id, task: "pilot-sort", condition: "none" }),
       );
     }
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -868,8 +858,6 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -1174,6 +1162,47 @@ test("the report refuses builds of different bundles or task definitions", () =>
   }
 });
 
+// The next stage reads tasks.json beside its input, so collect and grade write only into the build directory
+test("collect and grade refuse --out and write beside the build's tasks.json", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-out-"));
+  try {
+    const build = path.join(base, "build");
+    const elsewhere = path.join(base, "elsewhere");
+    fs.mkdirSync(build);
+    fs.mkdirSync(elsewhere);
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", repositories: {} }),
+    );
+    seedTasks(build);
+    const cloud = (script: string, ...rest: string[]) =>
+      spawnSync(process.execPath, [path.join(import.meta.dirname, "..", "evals", "cloud", script), ...rest], {
+        encoding: "utf8",
+        env: childEnv(base),
+      });
+    const collectArgs = ["--build", build, "--codex", path.join(base, "none"), "--logs", base];
+    const collected = cloud("collect.ts", ...collectArgs, "--out", path.join(elsewhere, "loop.json"));
+    assert.notEqual(collected.status, 0, "collect refuses --out");
+    assert.equal(cloud("collect.ts", ...collectArgs).status, 0);
+    assert.ok(fs.existsSync(path.join(build, "loop.json")), "collect writes loop.json into the build");
+    const graded = cloud(
+      "grade.ts",
+      "--loop",
+      path.join(build, "loop.json"),
+      "--second",
+      "none",
+      "--out",
+      path.join(elsewhere, "grades.json"),
+    );
+    assert.notEqual(graded.status, 0, "grade refuses --out");
+    assert.equal(cloud("grade.ts", "--loop", path.join(build, "loop.json"), "--second", "none").status, 0);
+    assert.ok(fs.existsSync(path.join(build, "grades.json")), "grade writes grades.json into the build");
+    assert.deepEqual(fs.readdirSync(elsewhere), [], "nothing is written outside the build");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // Builds that all lack a bundle would compare equal, so a report could mix loops of different bundles
 test("the report refuses grades files whose bundle is missing or empty", () => {
   for (const bundle of [undefined, ""]) {
@@ -1220,7 +1249,7 @@ test("collect judges runs by the task definitions of their build, not the checko
       path.join(codex, "r", "result.json"),
       JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
     );
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -1231,8 +1260,6 @@ test("collect judges runs by the task definitions of their build, not the checko
         codex,
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -1281,7 +1308,7 @@ test("collect records the bundled files' hashes with the commit, so builds of on
       JSON.stringify({ build: "b", commit: "c", bundle: { "mcp.js": "h1" }, repositories: {} }),
     );
     seedTasks(build);
-    const out = path.join(base, "loop.json");
+    const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
       [
@@ -1292,8 +1319,6 @@ test("collect records the bundled files' hashes with the commit, so builds of on
         path.join(base, "none"),
         "--logs",
         base,
-        "--out",
-        out,
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
