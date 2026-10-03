@@ -1,9 +1,10 @@
 // The full view of one record or source for MCP read: a record's text, options, the exact words cited as evidence and adoption with who
 // said them, its links and state history, and each anchor checked against the working tree now.
 import type { Selectable } from "kysely";
-import { checkAnchor } from "./anchors.ts";
+import { checkAnchor, fileState } from "./anchors.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { renamesSince } from "./git.ts";
 import { inline } from "./panel.ts";
 import { head } from "./text.ts";
 
@@ -34,6 +35,8 @@ export async function readUnit(
   root: string | null,
   /** Only what existed by this time: the record, its evidence, adoption, anchors, and links (an as-of snapshot for replaying a past task) */
   asOf?: string,
+  /** Renames per anchor commit, shared by the records of one read so git runs once per commit */
+  renames: Renames = new Map(),
 ): Promise<string | null> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
   const u = await db
@@ -60,14 +63,20 @@ export async function readUnit(
           .then((rows) => (rows.length === 1 ? rows[0] : undefined)));
   // As of a past time, a record created later does not exist yet
   if (!bare || (asOf && bare.created_at > asOf)) return null;
-  return describe(db, bare, root, asOf);
+  return describe(db, bare, root, asOf, renames);
 }
+
+type Renames = Map<string, Map<string, string | null> | null>;
+
+/** Commits one read asks git about for renames. */
+const RENAME_LOOKUPS = 5;
 
 async function describe(
   db: Reads,
   u: Selectable<DB["unit"]>,
   root: string | null,
   asOf: string | undefined,
+  renames: Renames,
 ): Promise<string> {
   const [options, evidence, adoption, anchors, links, states, fields] = await Promise.all([
     db
@@ -235,9 +244,9 @@ async function describe(
     );
     for (const a of live) {
       const c = checkAnchor(root, a);
-      const where = `${a.path}${a.symbol ? ` ${a.symbol}` : ""}`;
+      const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
       out.push(
-        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? " — needs review: the code it points at is gone" : ""}`,
+        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames)}` : ""}`,
       );
     }
   }
@@ -249,8 +258,40 @@ async function describe(
         `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
       );
   }
+  // The newest set bound to the record's words, as of the time read; search uses the same one
+  const aliases = await db
+    .selectFrom("unit_alias")
+    .select("terms")
+    .where("unit_id", "=", u.id)
+    .where("content_hash", "=", u.content_hash)
+    .where("added_at", "<=", asOf ?? "9999")
+    .orderBy("id", "desc")
+    .executeTakeFirst();
+  const terms: string[] = aliases ? JSON.parse(aliases.terms) : [];
+  if (terms.length) out.push(`Aliases (search only): ${terms.map((t) => inline(t)).join(", ")}`);
   out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
   return out.join("\n");
+}
+
+/** Where a gone file may have moved since the anchor's commit; empty when there is no commit to compare with or no rename was seen. */
+function movedTo(
+  root: string | null,
+  a: { path: string; commit_sha: string | null },
+  renames: Renames,
+): string {
+  if (!root || !a.commit_sha || fileState(root, a.path) !== "gone") return "";
+  if (!renames.has(a.commit_sha)) {
+    // Each lookup is a git run; a read of records with many anchor commits stays within the tool's time
+    if (renames.size >= RENAME_LOOKUPS) return "; rename not checked";
+    renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
+  }
+  const seen = renames.get(a.commit_sha);
+  if (!seen) return "; rename not checked";
+  const to = seen.get(a.path);
+  if (to === null) return "; rename not checked";
+  return to
+    ? `; may have moved to ${JSON.stringify(inline(head(to, 300)))} since ${a.commit_sha.slice(0, 12)}`
+    : "";
 }
 
 /** A retained source by `s<id>`, with who wrote it and where it lives; null when there is none. */

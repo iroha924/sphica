@@ -23,3 +23,56 @@ export function commitHolds(root: string, commit: string, rel: string): boolean 
     return false;
   }
 }
+
+/** The repository's tracked and untracked (not ignored) files, or null when git cannot list them. */
+export function repoFiles(root: string): string[] | null {
+  try {
+    const list = (...args: string[]) =>
+      cleanGit(root, ["ls-files", "-z", ...args], 32 * 1024 * 1024)
+        .toString("utf8")
+        .split("\0")
+        .filter(Boolean);
+    // --cached keeps a file deleted from the working tree until the deletion is staged
+    const deleted = new Set(list("--deleted"));
+    return [...new Set(list("--cached", "--others", "--exclude-standard"))].filter((p) => !deleted.has(p));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Files git sees as renamed between the commit and the working tree, old path to new; a deleted path maps to null when git skipped
+ * looking for its rename (too many files). Null when git cannot tell at all (no such commit, too slow, too much output). A move to a file
+ * git does not track is not seen.
+ */
+export function renamesSince(root: string, commit: string): Map<string, string | null> | null {
+  const limit = 1000;
+  try {
+    const out = cleanGit(
+      root,
+      ["diff", "-M", `-l${limit}`, "--name-status", "-z", commit, "--"],
+      32 * 1024 * 1024,
+    );
+    const parts = out.toString("utf8").split("\0");
+    const renames = new Map<string, string | null>();
+    const deleted: string[] = [];
+    let added = 0;
+    // "R<score>\0<old>\0<new>" for a rename or copy, "<status>\0<path>" otherwise
+    for (let i = 0; i < parts.length; ) {
+      const status = parts[i] ?? "";
+      if (/^[RC]\d*$/.test(status)) {
+        if (status.startsWith("R")) renames.set(parts[i + 1] ?? "", parts[i + 2] ?? "");
+        i += 3;
+      } else {
+        if (status === "D") deleted.push(parts[i + 1] ?? "");
+        if (status === "A") added++;
+        i += 2;
+      }
+    }
+    // git pairs what is left only while sources times destinations stays within the limit squared; beyond it, it only warns on stderr
+    if (deleted.length * added > limit * limit) for (const d of deleted) renames.set(d, null);
+    return renames;
+  } catch {
+    return null;
+  }
+}

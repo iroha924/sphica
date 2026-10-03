@@ -20,8 +20,9 @@ import {
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
-import { readSource } from "../src/read.ts";
+import { readSource, readUnit } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
+import { searchUnits } from "../src/search.ts";
 import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
@@ -397,6 +398,14 @@ test("save: under the write lock files are only read again, and a file changed m
         calls.push({ fn: "holds", locked: !lockFree(db.file) });
         return PROBE.holds(r, c, rel);
       },
+      kind: (r, rel) => {
+        calls.push({ fn: "kind", rel, locked: !lockFree(db.file) });
+        return PROBE.kind(r, rel);
+      },
+      files: (r) => {
+        calls.push({ fn: "files", locked: !lockFree(db.file) });
+        return PROBE.files(r);
+      },
     };
     const saveWith = async (sessionId: string) => {
       fs.writeFileSync(path.join(root, "a.ts"), "const tokenValue123abc = loadConfig();\n");
@@ -462,10 +471,102 @@ test("save: under the write lock files are only read again, and a file changed m
       ["a.ts", "tokenValue123abc"],
       ["b.ts", null],
     ]);
+    // Only the changed file is judged again: whether it is masked, and what kind of path it is now
     assert.deepEqual(
       calls.filter((c) => c.locked && c.fn !== "read").map((c) => c.fn),
-      ["masks"],
+      ["masks", "kind"],
     );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("save: anchor changed after check is reported by the save, without asking git under the lock", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const calls: { fn: string; locked: boolean }[] = [];
+    let remove = "";
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        // The file goes away once the save holds the lock, after everything before it was judged
+        if (rel === remove && !lockFree(db.file)) fs.rmSync(path.join(root, rel));
+        return PROBE.read(r, rel);
+      },
+      holds: (r, c, rel) => {
+        calls.push({ fn: "holds", locked: !lockFree(db.file) });
+        return PROBE.holds(r, c, rel);
+      },
+      files: (r) => {
+        calls.push({ fn: "files", locked: !lockFree(db.file) });
+        return PROBE.files(r);
+      },
+    };
+    const m = message(db, p, { id: "m1", text: "openStore を見る。" });
+    const record = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, root);
+    assert.doesNotMatch((await checkText(db.ingest, run, p, root, record)).text, /anchor path/);
+    remove = "src.ts";
+    const out = await saveText(db.ingest, run, p, root, record, probe);
+    assert.match(
+      out,
+      /△ trace:ext-s1\/look: anchor path src\.ts is not in the working tree \(near paths not checked\)/,
+    );
+    assert.deepEqual(
+      calls.filter((c) => c.locked),
+      [],
+      "git is not asked while the lock is held",
+    );
+
+    // A glean anchor whose symbol leaves the file under the lock is reported the same way
+    session(db, p, "g1");
+    fs.writeFileSync(path.join(root, "src.ts"), "export function openStore() {}\n");
+    const g = await beginGlean(db.ingest, p, "g1");
+    const rev = Number(
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/look'").get()?.revision,
+    );
+    const symbolGone: Probe = {
+      ...probe,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file))
+          fs.writeFileSync(path.join(root, rel), "export function closeStore() {}\n");
+        return PROBE.read(r, rel);
+      },
+    };
+    const gleaned = await saveText(
+      db.ingest,
+      g,
+      p,
+      root,
+      {
+        ops: [
+          {
+            op: "anchor",
+            unit: "trace:ext-s1/look",
+            revision: rev,
+            path: "src.ts",
+            symbol: "openStore",
+            role: "evidence",
+          },
+        ],
+      },
+      symbolGone,
+    );
+    assert.match(gleaned, /△ trace:ext-s1\/look: symbol "openStore" is not found in src\.ts/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
@@ -1701,6 +1802,328 @@ test("glean: replacing an implementation's only code proof puts it back to candi
         ["applies_to", 1],
       ],
     );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("glean: anchor problem on a missing path or a symbol not in the file, and the anchor is still added", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const m = message(db, p, { id: "o1", text: "src.ts の openStore を見る。", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "src.ts の openStore を見る。", role: "states" }],
+        },
+      ],
+    });
+    const rev = () =>
+      Number(db.owner.prepare("select revision from unit where key = 'glean:look'").get()?.revision);
+    const said = message(db, p, { id: "o2", text: "置き場所を直す。", session: "g1" });
+    const ops = () => [
+      { op: "anchor", unit: "glean:look", revision: rev(), path: "src/store.ts", role: "applies_to" },
+      {
+        op: "anchor",
+        unit: "glean:look",
+        revision: rev(),
+        path: "src.ts",
+        symbol: "openStores",
+        role: "applies_to",
+      },
+      { op: "anchor", unit: "glean:look", revision: rev(), path: "docs", role: "applies_to" },
+      // Deleted in this session: evidence of it is not a problem
+      { op: "anchor", unit: "glean:look", revision: rev(), path: "old.ts", role: "evidence" },
+    ];
+    insert(db, "edit_observation", {
+      session_id: "g1",
+      turn_id: "t1",
+      path: "old.ts",
+      via: "tool",
+      observed_at: "2026-09-01T00:00:00.000Z",
+    });
+    const checked = (
+      await checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: ops() })
+    ).text;
+    assert.match(checked, /anchor path src\/store\.ts is not in the working tree/);
+    assert.match(checked, /symbol "openStores" is not found in src\.ts/);
+    assert.match(checked, /anchor path docs is a directory/);
+    assert.doesNotMatch(checked, /old\.ts/);
+    assert.match(
+      await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: ops() }),
+      /anchor added/,
+    );
+    // replace_anchor's destination is checked the same way
+    const moved = (
+      await checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+        ops: [
+          {
+            op: "replace_anchor",
+            unit: "glean:look",
+            revision: rev(),
+            from: { path: "src/store.ts" },
+            to: { path: "src/stores.ts", role: "applies_to" },
+            source: `s${said}`,
+            quote: "置き場所を直す。",
+          },
+        ],
+      })
+    ).text;
+    assert.match(moved, /anchor path src\/stores\.ts is not in the working tree/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("glean: unsourced cannot become active, adding evidence or adoption says so, and a successor replaces it", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    // An older session holds the owner's words that later turn up as the source
+    const older = message(db, p, { id: "o0", text: "CSV にメモは入れない。これで決まり。", session: "s0" });
+    session(db, p, "g1");
+    const now = message(db, p, { id: "o1", text: "CSV にメモは入れないことにしたはず。", session: "g1" });
+    const glean = async (record: unknown) => {
+      const run = await beginGlean(db.ingest, p, "g1");
+      const checked = (await checkText(db.ingest, run, p, root, record)).text;
+      return { checked, saved: await saveText(db.ingest, run, p, root, record) };
+    };
+    const remembered = (key: string, kind: string) => ({
+      key,
+      kind,
+      ...(kind === "decision" ? { stance: "dont" } : {}),
+      text: "CSV にメモを入れない",
+      evidence: [{ source: `s${now}`, quote: "CSV にメモは入れないことにしたはず。", role: "states" }],
+    });
+    await glean({ units: [remembered("csv", "decision"), remembered("csv-seen", "finding")] });
+    const unit = (key: string) =>
+      db.owner.prepare("select lifecycle, revision, unsourced from unit where key = ?").get(key) as {
+        lifecycle: string;
+        revision: number;
+        unsourced: number;
+      };
+    assert.deepEqual([unit("glean:csv").unsourced, unit("glean:csv-seen").unsourced], [1, 1]);
+
+    const added = await glean({
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:csv",
+          revision: unit("glean:csv").revision,
+          source: `s${older}`,
+          quote: "CSV にメモは入れない。",
+          role: "states",
+        },
+        {
+          op: "adopt",
+          unit: "glean:csv",
+          revision: unit("glean:csv").revision,
+          source: `s${older}`,
+          quote: "これで決まり。",
+        },
+      ],
+    });
+    const said =
+      /glean:csv is unsourced and cannot become active; adding evidence or adoption does not clear the flag/;
+    assert.match(added.checked, said);
+    assert.equal(added.checked.match(new RegExp(said.source, "g"))?.length, 1, "said once per record");
+    assert.match(added.checked, /save a successor that supersedes it/);
+    assert.equal(
+      unit("glean:csv").lifecycle,
+      "candidate",
+      "the quotes are saved, the record stays a candidate",
+    );
+    assert.equal(
+      Number(db.owner.prepare("select count(*) as n from unit_adoption").get()?.n),
+      1,
+      "the adoption is kept",
+    );
+
+    // An adoption alone is told the same
+    const adopted = await glean({
+      ops: [
+        {
+          op: "adopt",
+          unit: "glean:csv",
+          revision: unit("glean:csv").revision,
+          source: `s${older}`,
+          quote: "これで決まり。",
+        },
+      ],
+    });
+    assert.match(adopted.checked, said);
+    assert.match(adopted.checked, /save a successor that supersedes it/);
+
+    // A successor citing the found source becomes active and replaces it, for a decision and for a finding
+    const successor = (key: string, kind: string, replaces: string) => ({
+      key,
+      kind,
+      ...(kind === "decision"
+        ? { stance: "dont", adoption: [{ source: `s${older}`, quote: "これで決まり。" }] }
+        : {}),
+      text: "CSV にメモを入れない",
+      evidence: [{ source: `s${older}`, quote: "CSV にメモは入れない。", role: "states" }],
+      supersedes: replaces,
+    });
+    const replaced = await glean({
+      units: [
+        successor("csv-2", "decision", "glean:csv"),
+        successor("csv-seen-2", "finding", "glean:csv-seen"),
+      ],
+    });
+    assert.match(replaced.saved, /glean:csv-2 active/);
+    assert.deepEqual(
+      [unit("glean:csv").lifecycle, unit("glean:csv-seen").lifecycle, unit("glean:csv-seen-2").lifecycle],
+      ["superseded", "superseded", "active"],
+    );
+
+    // Withdrawn or superseded: still said, but no successor is suggested
+    const late = await glean({
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:csv-seen",
+          revision: unit("glean:csv-seen").revision,
+          source: `s${older}`,
+          quote: "CSV にメモは入れない。",
+          role: "states",
+        },
+      ],
+    });
+    assert.match(late.checked, /glean:csv-seen is unsourced and cannot become active/);
+    assert.doesNotMatch(late.checked, /successor/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("control character alias: trace leaves it out at check, so the save does not fail on it", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "時刻は協定世界時で保存する。" });
+    const record = {
+      units: [
+        {
+          key: "utc",
+          kind: "finding",
+          text: "時刻は協定世界時で保存する",
+          evidence: [{ source: `s${m}`, quote: "時刻は協定世界時で保存する。", role: "states" }],
+          aliases: ["\u0000offset", "timezone"],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, root);
+    assert.match(
+      (await checkText(db.ingest, run, p, root, record)).text,
+      /aliases must be 1 to 40 characters/,
+    );
+    assert.match(await saveText(db.ingest, run, p, root, record), /✓ saved/);
+    assert.deepEqual(
+      db.owner
+        .prepare("select terms from unit_alias")
+        .all()
+        .map((r) => r.terms),
+      ['["timezone"]'],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("replace_aliases: glean replaces a saved record's search words, and clears them with an empty set", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "時刻は協定世界時で保存する。" });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, root, {
+      units: [
+        {
+          key: "utc",
+          kind: "finding",
+          text: "時刻は協定世界時で保存する",
+          evidence: [{ source: `s${m}`, quote: "時刻は協定世界時で保存する。", role: "states" }],
+          aliases: ["timezone"],
+        },
+      ],
+    });
+    session(db, p, "g1");
+    const key = "trace:ext-s1/utc";
+    const rev = () => Number(db.owner.prepare("select revision from unit where key = ?").get(key)?.revision);
+    const found = async (q: string) =>
+      (await searchUnits(db.reader, p, { question: q, limit: 5 })).hits.map((h) => h.key);
+    const replace = (aliases: unknown, revision = rev()) => ({
+      ops: [{ op: "replace_aliases", unit: key, revision, aliases }],
+    });
+    assert.deepEqual(await found("timezone"), [key]);
+    const before = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Not words from the record's text: only the alias can find it
+    const stale = rev();
+    assert.match(
+      await saveText(
+        db.ingest,
+        await beginGlean(db.ingest, p, "g1"),
+        p,
+        root,
+        replace([" offset ", "UTC offset", "offset"]),
+      ),
+      /trace:ext-s1\/utc: aliases replaced/,
+    );
+    assert.deepEqual(await found("offset"), [key]);
+    assert.deepEqual(await found("timezone"), [], "a dropped alias no longer finds it");
+    assert.match(
+      (await readUnit(db.reader, p, key, root)) ?? "",
+      /Aliases \(search only\): offset, UTC offset\n/,
+    );
+    assert.match(
+      (await readUnit(db.reader, p, key, root, before)) ?? "",
+      /Aliases \(search only\): timezone\n/,
+    );
+
+    for (const [aliases, revision, want] of [
+      [["timezone"], stale, /changed since you read it/],
+      [[" "], undefined, /aliases must be 1 to 40 characters/],
+      [["x".repeat(41)], undefined, /aliases must be 1 to 40 characters/],
+      [["\u0000offset"], undefined, /aliases must be 1 to 40 characters/],
+      [["pay\u200Bload"], undefined, /aliases must be 1 to 40 characters/],
+      [Array.from({ length: 13 }, (_, i) => `a${i}`), undefined, /aliases/],
+    ] as const) {
+      const run = await beginGlean(db.ingest, p, "g1");
+      assert.match((await checkText(db.ingest, run, p, root, replace(aliases, revision))).text, want);
+      await assert.rejects(saveText(db.ingest, run, p, root, replace(aliases, revision)), want);
+    }
+    assert.deepEqual(await found("offset"), [key], "a refused change leaves the aliases");
+    // 21 characters outside the BMP are 42 UTF-16 units; the schema counts characters
+    assert.match(
+      await saveText(
+        db.ingest,
+        await beginGlean(db.ingest, p, "g1"),
+        p,
+        root,
+        replace(["😀".repeat(21), "offset"]),
+      ),
+      /aliases replaced/,
+    );
+
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, replace([]));
+    assert.deepEqual(await found("offset"), []);
+    assert.doesNotMatch((await readUnit(db.reader, p, key, root)) ?? "", /Aliases/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

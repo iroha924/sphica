@@ -40,7 +40,8 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
    rest stay pending.
    Use `search` and `read` to look at older records this session may replace
 4. **Check**: `record_check` with the run and the record below as `record`. Errors refuse the save; fix and check again. Warnings say what will be
-   left out, quarantined, or kept as a candidate, and why
+   left out, quarantined, or kept as a candidate, and why. An anchor warning (a path not in the working tree, with near paths; a directory; a
+   symbol not in the file) means fix the anchor and check again; keep it only when you know it is right
 5. **Save**: `record_save` with the same run and record. A run saves once
 6. **Report** to the owner what was saved, copying save's lines (active, candidate with the reason, quarantined, superseded)
 

@@ -4169,6 +4169,276 @@
           }
         }
       ]
+    },
+    {
+      "id": "glean-15",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "An anchor on a file that does not exist, or on a symbol the file does not hold, is reported before saving with the near path, and the record is still saved",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-anchor1",
+            "host": "claude-code",
+            "at": "2026-03-26T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "日付の保存は src/dates.ts の toStored にまとまっている。",
+                "assistant": "",
+                "edits": ["src/dates.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "capture": "s-ja-anchor1"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-anchor1",
+          "record": {
+            "units": [
+              {
+                "key": "store-dates",
+                "kind": "finding",
+                "text": "日付の保存は toStored にまとまっている",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-anchor1#1.owner",
+                    "quote": "日付の保存は src/dates.ts の toStored にまとまっている。",
+                    "role": "states"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/date.ts",
+                    "role": "applies_to"
+                  },
+                  {
+                    "path": "src/dates.ts",
+                    "symbol": "toStore",
+                    "role": "evidence"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_problem_contains": "anchor path src/date.ts is not in the working tree (near: \"src/dates.ts\""
+        },
+        {
+          "check_problem_contains": "symbol \"toStore\" is not found in src/dates.ts"
+        },
+        {
+          "unit": "trace:s-ja-anchor1/store-dates",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "glean-16",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "Anchors on files and symbols that are there raise no anchor problem",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-anchor2",
+            "host": "claude-code",
+            "at": "2026-03-26T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Dates are stored through toStored in src/dates.ts.",
+                "assistant": "",
+                "edits": ["src/dates.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "capture": "s-en-anchor2"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-anchor2",
+          "record": {
+            "units": [
+              {
+                "key": "store-dates",
+                "kind": "finding",
+                "text": "Dates are stored through toStored",
+                "evidence": [
+                  {
+                    "source": "session:s-en-anchor2#1.owner",
+                    "quote": "Dates are stored through toStored in src/dates.ts.",
+                    "role": "states"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/dates.ts",
+                    "symbol": "toStored",
+                    "role": "evidence"
+                  },
+                  {
+                    "path": "src/export.ts",
+                    "symbol": "toCsv",
+                    "role": "applies_to"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_problem_absent": "not in the working tree"
+        },
+        {
+          "check_problem_absent": "is not found in"
+        },
+        {
+          "unit": "trace:s-en-anchor2/store-dates",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "glean-17",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "Evidence found later for an unsourced record is kept, and check says the record cannot become active and to replace it with a successor",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "session": {
+            "id": "s-ja-unsourced",
+            "host": "claude-code",
+            "at": "2026-03-27T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "CSV にメモは入れない決まりだったと思う。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "glean": {
+            "session": "s-ja-unsourced",
+            "record": {
+              "units": [
+                {
+                  "key": "csv/remembered",
+                  "kind": "finding",
+                  "text": "CSV にメモを入れない決まりがある",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-unsourced#1.owner",
+                      "quote": "CSV にメモは入れない決まりだったと思う。",
+                      "role": "states"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-unsourced",
+          "record": {
+            "ops": [
+              {
+                "op": "add_evidence",
+                "unit": "glean:csv/remembered",
+                "source": "issue:14#body",
+                "quote": "Exported CSV files must never include the private note field.",
+                "role": "states"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_notes_contain": "glean:csv/remembered is unsourced and cannot become active"
+        },
+        {
+          "check_notes_contain": "save a successor that supersedes it"
+        },
+        {
+          "unit": "glean:csv/remembered",
+          "lifecycle": "candidate"
+        }
+      ]
+    },
+    {
+      "id": "glean-18",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "The owner replaces a record's search words: a new word finds it and a dropped one no longer does",
+      "given": [
+        {
+          "trace_en_dates": true
+        },
+        {
+          "session": {
+            "id": "s-en-aliases",
+            "host": "claude-code",
+            "at": "2026-03-28T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "The UTC rule should be found by offset, not by the Japanese words.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-aliases",
+          "record": {
+            "ops": [
+              {
+                "op": "replace_aliases",
+                "unit": "trace:s-en-dates/utc",
+                "aliases": ["UTC offset", "offset", "timezone"]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "search": {
+            "query": "offset",
+            "top_active_is": "trace:s-en-dates/utc"
+          }
+        },
+        {
+          "search_not_include": {
+            "query": "協定世界時",
+            "key": "trace:s-en-dates/utc"
+          }
+        },
+        {
+          "unit": "trace:s-en-dates/utc",
+          "lifecycle": "active"
+        }
+      ]
     }
   ],
   "setups": {

@@ -12,14 +12,19 @@ import {
   UNIT_KINDS,
   WORK_STATUSES,
 } from "./knowledge.ts";
+import { inline } from "./panel.ts";
 import {
   commitHeld,
+  kindOf,
+  listFilesIfGone,
+  nearPaths,
   type Probe,
   type RepoFacts,
   refresh,
   repoFacts,
   symbolAt,
   symbolMasked,
+  symbolMissing,
 } from "./repo-facts.ts";
 import { head, sha256 } from "./text.ts";
 
@@ -191,6 +196,36 @@ function locate(body: string, quote: string): [number, number] | null {
   return at < 0 ? null : [at, at + Buffer.byteLength(quote, "utf8")];
 }
 
+/**
+ * Why an anchor may point at the wrong place in the working tree, or null. Left unchecked: no working tree, a commit the repository holds
+ * (past evidence, where the file may have changed since), and evidence of a file this session deleted.
+ */
+export function anchorProblem(
+  facts: RepoFacts,
+  a: { path: string; symbol?: string | null; role: string; held: boolean; observed: boolean },
+): string | null {
+  if (!facts.root || a.held) return null;
+  const kind = kindOf(facts, a.path);
+  const fix = "fix it and check again, or keep it if you know it is right";
+  // Paths and symbols come from the record and from git; inline keeps line separators in them from starting a line
+  const at = inline(a.path);
+  if (kind === "gone") {
+    if (a.role === "evidence" && a.observed) return null;
+    const near = nearPaths(facts, a.path);
+    // The list is read only before the lock, so a file gone since then gets no suggestions
+    const hint = near?.length
+      ? ` (near: ${near.map((n) => JSON.stringify(inline(n))).join(", ")})`
+      : near === undefined
+        ? " (near paths not checked)"
+        : "";
+    return `anchor path ${at} is not in the working tree${hint}; ${fix}`;
+  }
+  if (kind === "directory") return `anchor path ${at} is a directory; anchor a file`;
+  if (kind === "file" && a.symbol && symbolMissing(facts, a.path, a.symbol))
+    return `symbol ${JSON.stringify(inline(head(a.symbol, 80)))} is not found in ${at}; ${fix}`;
+  return null;
+}
+
 /** A repository-relative path with forward slashes, or null when it could leave the repository. */
 export function repoPath(p: string): string | null {
   const s = p.trim().replace(/^\.\//, "");
@@ -212,7 +247,8 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
   for (const a of parsed.data.units.flatMap((u) => u.anchors)) {
     const p = repoPath(a.path);
     if (!p) continue;
-    if (a.symbol && !symbolMasked(facts, p, a.symbol) && !a.lines) symbolAt(facts, p, a.symbol);
+    listFilesIfGone(facts, p);
+    if (a.symbol && !symbolMasked(facts, p, a.symbol)) symbolAt(facts, p, a.symbol);
     if (a.commit) commitHeld(facts, a.commit, p);
   }
   return facts;
@@ -554,6 +590,14 @@ export async function checkRecord(
       const planned = { ...a, symbol, commit, path: p, observation };
       if (a.symbol && !symbol) fallbacks.add(planned);
       anchors.push(planned);
+      const wrong = anchorProblem(facts, {
+        path: p,
+        symbol,
+        role: a.role,
+        held: Boolean(commit),
+        observed: observation !== null,
+      });
+      if (wrong) problems.push(`${key}: ${wrong}`);
     }
     // A masked symbol's fallback merges into a path-only anchor like it, in any order: identical rows could not be told apart by replace_anchor
     // Lines as saved (the end never before the start), so a reversed range meets the same place
@@ -589,7 +633,8 @@ export async function checkRecord(
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
-    const bad = aliases.filter((a) => !a || a.length > 40);
+    // Characters as SQLite counts them; a word read would show changed (control or invisible characters) would not match its index
+    const bad = aliases.filter((a) => !a || [...a].length > 40 || inline(a) !== a);
     if (bad.length)
       problems.push(
         `${key}: aliases must be 1 to 40 characters; left out ${bad.map((a) => JSON.stringify(a)).join(", ")}`,
@@ -668,7 +713,7 @@ export async function checkRecord(
       options,
       adoption,
       anchors,
-      aliases: aliases.filter((a) => a && a.length <= 40),
+      aliases: aliases.filter((a) => !bad.includes(a)),
       supersedes,
       conflicts,
       fields,
@@ -730,6 +775,8 @@ export type Saved = {
   candidates: { key: string; why: string }[];
   quarantined: string[];
   superseded: string[];
+  /** Anchors judged again under the lock that may point at the wrong place */
+  anchorProblems: string[];
 };
 
 /** The hash of what a unit says: its text and options. Alias sets are bound to it, so words written for other text are never used. */
@@ -771,7 +818,7 @@ export async function saveRecord(
   if (checked.errors.length)
     throw new Error(`The record is not valid:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
   const now = iso(Date.now());
-  const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [] };
+  const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [], anchorProblems: [] };
   const cited = new Set<number>();
   for (const d of checked.fieldDefs) {
     cited.add(d.source);
@@ -886,6 +933,14 @@ export async function saveRecord(
       // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
       refresh(checked.facts, a.path);
       const symbol = a.symbol && !symbolMasked(checked.facts, a.path, a.symbol) ? a.symbol : undefined;
+      const wrong = anchorProblem(checked.facts, {
+        path: a.path,
+        symbol,
+        role: a.role,
+        held: Boolean(a.commit),
+        observed: a.observation !== null,
+      });
+      if (wrong) saved.anchorProblems.push(`${p.key}: ${wrong}`);
       const at = a.lines ? null : symbol ? symbolAt(checked.facts, a.path, symbol) : null;
       const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx

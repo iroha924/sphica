@@ -10,7 +10,7 @@ const PER_LAYER = {
   retrieval: 13,
   injection: 28,
   review: 8,
-  glean: 14,
+  glean: 18,
   forget: 1,
   asked: 2,
   overview: 5,

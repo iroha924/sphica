@@ -8,9 +8,19 @@ import type { DB } from "./db-types.ts";
 import { cleanGit } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
-import { type Checked, checkRecord, prepareRecord, repoPath, saveRecord, type Target } from "./record.ts";
+import { inline } from "./panel.ts";
+import {
+  anchorProblem,
+  type Checked,
+  checkRecord,
+  prepareRecord,
+  repoPath,
+  saveRecord,
+  type Target,
+} from "./record.ts";
 import {
   commitHeld,
+  listFilesIfGone,
   type Probe,
   type RepoFacts,
   refresh,
@@ -108,6 +118,10 @@ const Op = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("withdraw"), unit, revision, reason_source: SOURCE_REF, reason_quote: quote })
     .strict(),
+  // Search words only, never evidence, so no quote; an empty list clears them
+  z
+    .object({ op: z.literal("replace_aliases"), unit, revision, aliases: z.array(z.string()).max(12) })
+    .strict(),
   // Ends an unresolved conflict between two records; until then automatic delivery holds both back
   z
     .object({
@@ -201,6 +215,8 @@ type Planned = {
   retracts: [number, number] | null;
   /** The live anchor a replacement retires */
   replaces: number | null;
+  /** The alias set a replacement writes, trimmed and without repeats */
+  aliases: string[] | null;
 };
 export type GleanChecked = { errors: string[]; problems: string[]; units: Checked; ops: Planned[] };
 
@@ -238,6 +254,7 @@ export function prepareGlean(root: string | null, raw: unknown, probe?: Probe): 
     if (op.op === "add_evidence" && op.file && !op.source) excerptOf(facts, op.file);
     const pinned = op.op === "anchor" ? op : op.op === "replace_anchor" ? op.to : null;
     const rel = pinned && repoPath(pinned.path);
+    if (rel) listFilesIfGone(facts, rel);
     if (pinned?.symbol && rel && !symbolMasked(facts, rel, pinned.symbol))
       symbolAt(facts, rel, pinned.symbol);
     if (op.op === "anchor" && op.commit && rel) commitHeld(facts, op.commit, rel);
@@ -330,17 +347,25 @@ export async function checkGlean(
     /** The operation's index, for a replacement; a plain anchor lands after every replacement of the batch */
     replacing: number | null;
   }[] = [];
+  const unsourcedSaid = new Set<number>();
   for (const [i, op] of parsed.data.ops.entries()) {
     const what = `ops.${i} ${op.op} ${op.unit}`;
     const u = await db
       .selectFrom("unit")
-      .select(["id", "kind", "lifecycle", "revision"])
+      .select(["id", "kind", "lifecycle", "revision", "unsourced"])
       .where("project_id", "=", target.projectId)
       .where("key", "=", op.unit)
       .executeTakeFirst();
     if (!u) {
       errors.push(`${what}: not a record of this project`);
       continue;
+    }
+    // The flag is frozen with what the record was saved with, so a source found later can only back a successor
+    if ((op.op === "add_evidence" || op.op === "adopt") && u.unsourced && !unsourcedSaid.has(u.id)) {
+      unsourcedSaid.add(u.id);
+      problems.push(
+        `${op.unit} is unsourced and cannot become active; adding evidence or adoption does not clear the flag${u.lifecycle === "candidate" ? ". To use this source, save a successor that supersedes it and cites the source" : ""}`,
+      );
     }
     if (u.revision !== op.revision) {
       errors.push(
@@ -448,6 +473,24 @@ export async function checkGlean(
       const k = [u.id, rel, dest.symbol ?? "", dest.role, commit ?? ""].join("\0");
       if (anchored.has(k)) errors.push(`${what}: another operation in this batch already anchors ${name}`);
       anchored.add(k);
+      const held = commit !== null && commitHeld(facts, commit, rel);
+      const observed =
+        dest.role === "evidence" && !held && target.sessionId
+          ? (await db
+              .selectFrom("edit_observation")
+              .select("id")
+              .where("session_id", "=", target.sessionId)
+              .where("path", "=", rel)
+              .executeTakeFirst()) !== undefined
+          : false;
+      const wrong = anchorProblem(facts, {
+        path: rel,
+        symbol: dest.symbol && !symbolMasked(facts, rel, dest.symbol) ? dest.symbol : null,
+        role: dest.role,
+        held,
+        observed,
+      });
+      if (wrong) problems.push(`${what}: ${wrong}`);
       places.push({
         what,
         unit: u.id,
@@ -516,7 +559,17 @@ export async function checkGlean(
       else if (spans[0]) retracts = [spans[0].span_start, spans[0].span_end];
       else errors.push(`${what}: no live ${noun} cites ${op.source}`);
     }
-    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces });
+    let aliases: string[] | null = null;
+    if (op.op === "replace_aliases") {
+      aliases = [...new Set(op.aliases.map((a) => a.trim()))];
+      // Unlike trace, nothing is left out: dropping a bad word would write a smaller set than asked, or clear them all
+      const bad = aliases.filter((a) => !a || [...a].length > 40 || inline(a) !== a);
+      if (bad.length)
+        errors.push(
+          `${what}: aliases must be 1 to 40 characters; ${bad.map((a) => JSON.stringify(inline(head(a, 60)))).join(", ")}`,
+        );
+    }
+    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces, aliases });
   }
   // Checked after every op is read. Replacements run first, in their order, each placing its new anchor before retiring the old one, and
   // plain anchors after them: an anchor retired by then no longer counts as live
@@ -736,6 +789,18 @@ export async function saveGlean(
       // The file may have changed since the check: a symbol that is now text Sphica masks is not stored
       refresh(c.units.facts, rel);
       const symbol = to.symbol && !symbolMasked(c.units.facts, rel, to.symbol) ? to.symbol : null;
+      const held = op.op === "anchor" && op.commit !== undefined;
+      const observed =
+        to.role === "evidence" && !held && target.sessionId
+          ? (await trx
+              .selectFrom("edit_observation")
+              .select("id")
+              .where("session_id", "=", target.sessionId)
+              .where("path", "=", rel)
+              .executeTakeFirst()) !== undefined
+          : false;
+      const wrong = anchorProblem(c.units.facts, { path: rel, symbol, role: to.role, held, observed });
+      if (wrong) units.anchorProblems.push(`${op.unit}: ${wrong}`);
       const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
       // When the anchor about to be retired is an active implementation's code proof, the unit goes back to candidate first (the schema
       // refuses the reverse order) and is judged again below
@@ -785,6 +850,23 @@ export async function saveGlean(
           .where("retired_at", "is", null)
           .execute();
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
+    } else if (op.op === "replace_aliases") {
+      const { content_hash } = await trx
+        .selectFrom("unit")
+        .select("content_hash")
+        .where("id", "=", p.unitId)
+        .executeTakeFirstOrThrow();
+      await trx
+        .insertInto("unit_alias")
+        .values({
+          unit_id: p.unitId,
+          terms: JSON.stringify(p.aliases ?? []),
+          content_hash,
+          run_id: runId,
+          added_at: now,
+        })
+        .execute();
+      changed.push(`${op.unit}: aliases ${p.aliases?.length ? "replaced" : "cleared"}`);
     } else {
       const reason = await spanOf(op.reason_source, op.reason_quote);
       const retraction = {

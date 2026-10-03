@@ -257,10 +257,11 @@ server.registerTool(
       const p = await projectOf(a.cwd);
       if (typeof p === "string") return text(p);
       const parts: string[] = [];
+      const renames = new Map();
       for (const ref of a.refs) {
         const got = /^s\d/.test(ref)
           ? await readSource(db, p.id, ref)
-          : await readUnit(db, p.id, ref, p.root);
+          : await readUnit(db, p.id, ref, p.root, undefined, renames);
         parts.push(got ?? `${head(inline(ref), 200)}: not found in this project`);
       }
       return text(framed(parts.join("\n\n")));
