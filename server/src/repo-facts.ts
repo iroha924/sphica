@@ -86,12 +86,15 @@ export function kindOf(f: RepoFacts, rel: string): PathKind {
   return got.kind;
 }
 
+/** How many gone paths of one check get near paths; the rest say they were not checked, so a check stays quick in a large repository. */
+const NEAR_FOR = 5;
+
 /**
  * When the path is gone, lists the repository's files once and works out the paths near it, so the check under the write lock only looks
  * them up. Call before the lock.
  */
 export function listFilesIfGone(f: RepoFacts, rel: string): void {
-  if (!f.root || kindOf(f, rel) !== "gone" || f.near.has(rel)) return;
+  if (!f.root || f.near.has(rel) || f.near.size >= NEAR_FOR || kindOf(f, rel) !== "gone") return;
   if (f.listing === undefined) f.listing = f.probe.files(f.root);
   f.near.set(rel, f.listing ? near(f.listing, rel) : []);
 }
@@ -99,18 +102,25 @@ export function listFilesIfGone(f: RepoFacts, rel: string): void {
 /** The paths near a gone path worked out before the lock; undefined when they were not. */
 export const nearPaths = (f: RepoFacts, rel: string): string[] | undefined => f.near.get(rel);
 
-/** Up to 3 files near rel: the same file name first, then the smallest edit distance. */
+/**
+ * Up to 3 files near rel. Only file names are compared by edit distance (short, so a large listing stays cheap): the same name first,
+ * then the nearest name, then the longest shared start of the path and the closest length.
+ */
 function near(files: readonly string[], rel: string): string[] {
   const name = (p: string) => p.slice(p.lastIndexOf("/") + 1);
-  const limit = Math.max(3, Math.floor(rel.length / 2));
+  const own = name(rel);
+  const limit = Math.max(1, Math.floor(own.length / 3));
+  const shared = (p: string) => {
+    let i = 0;
+    while (i < p.length && p[i] === rel[i]) i++;
+    return i;
+  };
   return files
     .filter((p) => p !== rel)
-    .map((p) => {
-      const same = name(p) === name(rel);
-      return { p, same, d: distance(p, rel, same ? Number.POSITIVE_INFINITY : limit) };
-    })
-    .filter((x) => x.same || x.d <= limit)
-    .sort((a, b) => Number(b.same) - Number(a.same) || a.d - b.d || a.p.localeCompare(b.p))
+    .map((p) => ({ p, d: distance(name(p), own, limit) }))
+    .filter((x) => x.d <= limit)
+    .map((x) => ({ ...x, s: shared(x.p), l: Math.abs(x.p.length - rel.length) }))
+    .sort((a, b) => a.d - b.d || b.s - a.s || a.l - b.l || a.p.localeCompare(b.p))
     .slice(0, 3)
     .map((x) => x.p);
 }

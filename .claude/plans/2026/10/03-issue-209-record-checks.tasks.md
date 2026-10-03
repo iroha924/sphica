@@ -179,6 +179,43 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - コミット: `test(read): keep an anchor path with a line separator on one line in read (T16)`
   - 結果: read.ts の `where` から `inline` を外すと `node --test --test-name-pattern="line separator" test/record.test.ts` → fail 1、戻すと pass 1（read.ts は差分なしに戻したことを git diff で確かめた）。`bun run verify` → exit 0
 
+- [x] T17: GitHub の Codex の P1 を直す（無いパスが多いと近いパスの計算が全ファイルとの編集距離になり、MCP の時間切れを超えうる）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T10（直す対象の近いパスの計算）
+  - 変更: `server/src/repo-facts.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="near paths budget" test/record.test.ts` → 100 文字の無いパス 20 個と 2 万ファイルで数十秒かかる
+  - 完了条件: `cd server && node --test --test-name-pattern="near paths|review fixes" test/record.test.ts` → 全件 pass（候補はファイル名の距離で絞り、近いパスを出すのは 1 回の check で 5 パスまで、残りは `(near paths not checked)`）
+  - コミット: `fix(record): bound the work of finding near paths (T17)`
+  - 結果: red は直す前のコードで 100 文字近い無いパス 20 個と 2 万ファイルに 18937 ms。直した後 `node --test --test-name-pattern="near paths|review fixes|anchor problem|line separator" test/record.test.ts` → 5 pass（3 秒未満、候補を出すのは 5 パスまで）。順位は「同じ名前 → 名前の距離 → パスの共通の先頭が長い → 長さが近い」に変え、`src/date.ts` の候補は `lib/date.ts`, `src/dates.ts`, `src/data.ts` の順になった（テストの期待を直した）。`bun run verify` → exit 0（acceptance 103 pass）
+
+- [ ] T18: GitHub の Codex の P2 を直す（作業ツリーで消したが index に残るファイルを近いパスに出す）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T17（同じ候補の一覧を直す）
+  - 変更: `server/src/git.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="near paths:" test/record.test.ts` → index に残る消したファイルが候補に出る
+  - 完了条件: `cd server && node --test --test-name-pattern="near paths:" test/record.test.ts` → pass
+  - コミット: `fix(record): leave files deleted from the working tree out of near paths (T18)`
+
+- [ ] T19: GitHub の Codex の P2 を直す（read が anchor の commit の数だけ git を流す）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T12（直す対象の rename の表示）
+  - 変更: `server/src/read.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="rename probes" test/record.test.ts` → 6 つの commit で git が 6 回走る
+  - 完了条件: `cd server && node --test --test-name-pattern="rename probes|^rename" test/record.test.ts` → 全件 pass（1 回の read で git は 5 回まで、残りは `rename not checked`）
+  - コミット: `fix(read): bound rename lookups per read (T19)`
+
+- [ ] T20: GitHub の Codex の P2 を直す（rename の検出が上限で飛ばされても黙って空になる）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T19（同じ rename の表示）
+  - 変更: `server/src/git.ts`, `server/src/read.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="rename limit" test/record.test.ts` → 1001 ファイルの名前を変えて動かすと、移動先も `rename not checked` も出ない
+  - 完了条件: `cd server && node --test --test-name-pattern="rename limit|^rename" test/record.test.ts` → 全件 pass
+  - コミット: `fix(read): say a rename was not checked when git skipped detection (T20)`
+
 ## P5: リリース
 
 npm と 3 つの manifest を 0.6.25 にそろえる。
@@ -206,3 +243,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T14 / T07 のレビュー F1（add_evidence と adopt を同じバッチで送るので、adopt の条件を外してもテストが通る）を直すと判定した / T14 を足した
 - 2026-10-03 / T15 / T08 のレビュー F1（NUL を含む alias は JS では 1 文字以上だが SQLite の trim が NUL で止まり、check が通って save だけが落ちる。trace の aliases も同じ判定で save が落ちる）と F2（Skill の例で同じ記録の 2 つの op に違う revision）を直すと判定した / T15 を足した
 - 2026-10-03 / T16 / Codex の全差分レビュー（high）は指摘 0 件。review-shipping は 2 件: read の場所の行のテストの穴は直す（T16）。20 万ファイルで無いパス 1 つにつき近いパスの計算が約 1.4 秒かかる件は、ロックの前で、無いパスがあるときだけ動くので見送り、PR の Declined findings に書く / T16 を足した
+- 2026-10-03 / T17〜T20 / PR #251 への GitHub の Codex のレビュー 4 件（P1 1、P2 3）を全部直すと判定した。P1 は review-shipping のコストの指摘と同じ論点で、前は見送ったが、1 記録に anchor が 20 個まで付くので MCP の時間切れを超えうるという再現（20 パス×2 万ファイルで 47 秒）を受けて直す。-l の上限は手元で再現した（名前を変えて内容も変えた 1001 ファイルで R が 0 件、A と D が 1001 件ずつ、標準エラーに警告） / T17〜T20 を足した

@@ -1145,7 +1145,7 @@ test("near paths: a missing anchor path is shown the files near it, the same fil
     const t: Target = { ...target(p), root };
     assert.match(
       await problem(t, "date", "src/date.ts"),
-      /src\/date\.ts is not in the working tree \(near: "lib\/date\.ts", "src\/data\.ts", "src\/dates\.ts"\)/,
+      /src\/date\.ts is not in the working tree \(near: "lib\/date\.ts", "src\/dates\.ts", "src\/data\.ts"\)/,
     );
     // An untracked file the session created is listed too
     assert.match(await problem(t, "neww", "src/neww.ts"), /near: "src\/new\.ts"/);
@@ -1159,6 +1159,22 @@ test("near paths: a missing anchor path is shown the files near it, the same fil
     assert.match(await problem(t, "nogit", "src/date.ts"), /src\/date\.ts is not in the working tree; fix/);
   } finally {
     await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("near paths budget: many long missing paths in a large repository stay quick, and only the first few get suggestions", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-budget-")));
+  try {
+    const dir = `packages/${"long-directory-name/".repeat(4)}`;
+    const files = Array.from({ length: 20_000 }, (_, i) => `${dir}${String(i).padStart(6, "0")}.ts`);
+    const facts = repoFacts(root, { ...PROBE, files: () => files });
+    const gone = Array.from({ length: 20 }, (_, i) => `${dir}missing-${i}-${"x".repeat(20)}.ts`);
+    const started = performance.now();
+    for (const rel of gone) listFilesIfGone(facts, rel);
+    assert.ok(performance.now() - started < 3000, `${Math.round(performance.now() - started)} ms`);
+    assert.equal(gone.filter((rel) => nearPaths(facts, rel) !== undefined).length, 5);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
