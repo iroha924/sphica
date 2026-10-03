@@ -688,6 +688,26 @@ test("turn boundary: a Stop whose snapshot fails leaves the start for the Stop t
   assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
 });
 
+test("turn boundary: a turn whose start snapshot failed still ends at its Stop, so a reused id snapshots again", () => {
+  const { repo, edit, seen } = boundaryRepo("start-fails");
+  const base = { session_id: "sx", cwd: repo, prompt_id: "t1" };
+  const index = path.join(repo, ".git", "index");
+  const saved = fs.existsSync(index) ? fs.readFileSync(index) : null;
+  fs.writeFileSync(index, "not an index");
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  if (saved) fs.writeFileSync(index, saved);
+  else fs.rmSync(index);
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  onHook("claude-code", {
+    ...base,
+    hook_event_name: "UserPromptSubmit",
+    prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
+  });
+  edit("later.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  assert.deepEqual(seen(), ["t1:later.ts"]);
+});
+
 test("turn boundary: a start saved late, after a newer turn numbered itself, ties and gives neither turn the edits", () => {
   const { repo, edit } = boundaryRepo("late-save");
   const dir = turnDir("claude-code", "lv");

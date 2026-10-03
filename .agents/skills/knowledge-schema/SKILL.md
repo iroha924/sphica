@@ -101,7 +101,7 @@ Hooks of different turns can run out of order, so the starts follow these rules.
 
 - Each turn's start is its own file under `~/.sphica/worktree/<session>/`, numbered `seq`. No hook rewrites or deletes another turn's start
 - A Stop gives status edits to its turn only if, read again after its end snapshot, that turn is the single newest one and its own start is unchanged. A tie, a null `seq`, or an unreadable file drops them: a lost edit is better than one given to the wrong turn
-- A Stop leaves its end snapshot, so another Stop with no prompt in between (a Stop hook kept the turn going) compares from there. A prompt that reuses the id takes a new snapshot first. An Interrupt keeps only the number
+- A Stop leaves its end snapshot, so another Stop with no prompt in between (a Stop hook kept the turn going) compares from there. A prompt that reuses the id takes a new snapshot first. An Interrupt, or a Stop whose start has no snapshot, ends the turn and keeps only the number
 - `SessionStart` writes no start. Prune removes a session's directory only when every file in it is older than `HOLD_DAYS`, never an empty one or single files
 - The owner's prompt is queued before the start is taken, and a failed start never stops the messages, the send, or the session notice
 

@@ -132,6 +132,16 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
   - コミット: `docs(capture): move the turn-start rules to the knowledge-schema Skill and give a test child a temp home (T12)`
   - 結果: `node --test test/capture.test.ts` → 55 pass、`--test-name-pattern="_meta" test/plugin.test.ts` → pass、`bun run verify:ai` → exit 0。この PR で足した 4 行以上のコメントは 0（残る 3 か所は前からある INJECTED などのコメント）
 
+- [x] T13: 起点の snapshot に失敗したターンも Stop で終え、使い回された id が取り直せるようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T11（Stop の起点の扱い）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `.agents/skills/knowledge-schema/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="start snapshot failed" test/capture.test.ts` → edd7560b の capture.ts で、id を使い回したターンの `later.ts` が記録されず落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass
+  - コミット: `fix(capture): end a turn at Stop even when its start had no snapshot (T13)`
+  - 結果: red 実測（edd7560b の capture.ts）: `start snapshot failed` が fail。直した後 `node --test test/capture.test.ts` → 56 pass / 0 fail、`bun run typecheck` エラーなし
+
 ## P3: リリース
 
 - [-] T06: 0.6.28 にそろえる
@@ -156,3 +166,4 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 - 2026-10-03 / 全体 / Codex の 2 回目の全差分レビュー（f943ab31、high）3 件（P2、mock で再現）を受理し T11 を足した。直しが新しい欠陥を生むのが 2 回続いた（T09 の直しが足りず、T10 から 2 件）ので持ち主に聞き、「3 件を直して区切る」を受けた。この後の全差分レビューは P1 と出荷後の安全に絞る
 - 2026-10-03 / 全体 / Codex の最終の全差分レビュー（4642ec0d、high、P1 と出荷後の安全に絞った）は指摘 0 件（メモリ上の fs・git で 18 ケース、typecheck・AI 設定検査。Windows・0.6.27 からの更新・実ホストの並行 hook は未実走）
 - 2026-10-03 / T12 / GitHub の Codex（PR #254）2 件（P1）: 起点の説明と closeTurn のコメントが 3 行を超える（規約）、足した record MCP のテストが子に `HOME: "/nonexistent"` を渡し Windows では `os.homedir()` が本物のプロファイルを指し得る、を受理 / T12 を足した。同じ形は同じファイルの既存の 9 か所にもあるが、この PR の範囲外として触らない
+- 2026-10-03 / T13 / GitHub の Codex（`@codex review`、edd7560b）1 件（P2）: UserPromptSubmit の snapshot が失敗した起点は Stop で running が外れず、id を使い回したターンが取り直さずに status の編集を落とし続ける、を受理 / T13 を足した

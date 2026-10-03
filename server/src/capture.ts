@@ -517,8 +517,14 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   if (event === "UserPromptSubmit") attempt(() => openTurn(dir, turn, place.root)?.());
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
-    for (const p of attempt(() => closeTurn(dir, turn, place.root)?.()) ?? [])
-      spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
+    // A turn whose start snapshot failed has nothing to compare, but still ends here so a reused id snapshots again
+    const paths = attempt(() => {
+      const finish = closeTurn(dir, turn, place.root);
+      if (finish) return finish();
+      stopTurn(dir, turn);
+      return [];
+    });
+    for (const p of paths ?? []) spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
     return { flush: true };
   }
   if (event === "PostToolUse") {
