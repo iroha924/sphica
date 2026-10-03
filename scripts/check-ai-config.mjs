@@ -310,16 +310,17 @@ try {
       )
     )
       fail(`plugin/hooks/hooks.json: ${event} is not wired to delivery`);
-  // Claude Code reads with the Read tool and, often, with shell commands (Bash): the delivery hook must see both
+  // Claude Code reads with the Read tool and, often, with shell commands (Bash, or PowerShell on Windows without Git Bash):
+  // the delivery hook must see all three
   const claudeDeliver = (claudeHooks?.PreToolUse ?? []).filter((group) =>
     (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
   );
   if (
     !claudeDeliver.some((group) =>
-      ["Read", "Bash"].every((t) => new RegExp(`^(?:${group.matcher ?? ""})$`).test(t)),
+      ["Read", "Bash", "PowerShell"].every((t) => new RegExp(`^(?:${group.matcher ?? ""})$`).test(t)),
     )
   ) {
-    fail("plugin/hooks/hooks.json: the PreToolUse delivery matcher must cover Read and Bash");
+    fail("plugin/hooks/hooks.json: the PreToolUse delivery matcher must cover Read, Bash, and PowerShell");
   }
   const marketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
   const entry = marketplace.plugins?.[0];

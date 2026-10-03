@@ -342,6 +342,9 @@ function patchPaths(patch: string): string[] {
   return [...out];
 }
 
+// Claude Code on Windows without Git Bash registers no Bash tool and runs shell commands through PowerShell
+const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
+
 /** A patch the shell runs (`apply_patch <<'EOF'`), which Codex may report as Bash: it is an edit, not a read. */
 function shellPatch(input: HookInput): string | null {
   const c = input.tool_name === "Bash" ? input.tool_input?.command : null;
@@ -744,7 +747,7 @@ export async function deliver(
         ? "prompt"
         : name === "PreToolUse"
           ? input.tool_name === "Read" ||
-            (input.tool_name === "Bash" && !(host === "codex" && shellPatch(input)))
+            (SHELL_TOOLS.has(input.tool_name ?? "") && !(host === "codex" && shellPatch(input)))
             ? "pre_read"
             : "pre_edit"
           : null;
@@ -764,7 +767,8 @@ export async function deliver(
       : host === "codex"
         ? shellPatch(input)
         : null;
-  const shell = input.tool_name === "Bash" && !patch && typeof ti.command === "string" ? ti.command : null;
+  const shell =
+    SHELL_TOOLS.has(input.tool_name ?? "") && !patch && typeof ti.command === "string" ? ti.command : null;
   const targets = patch
     ? patchPaths(patch)
     : [ti.file_path, ti.notebook_path].filter((p): p is string => typeof p === "string").slice(0, 1);

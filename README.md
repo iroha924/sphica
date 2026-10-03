@@ -139,7 +139,6 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 
 - Only what you traced, harvested, or gleaned becomes a structured record. The rest of a conversation is searchable as captured text (`search` with `sources: true`).
 - For shell commands, Sphica only sees whether a command names a file. It may show decisions for a file the command never reads, and a shell command that edits a file is not treated as an edit (in Codex, a patch passed to `apply_patch` through the shell is treated as an edit).
-- Commands run through Claude Code's PowerShell tool (Windows without Git Bash) do not get decisions yet.
 - In Codex, `$sphica:trace`, `$sphica:harvest`, and `$sphica:glean` can write only when Codex tells Sphica which directory the session is in. Current Codex does. When it does not, they write nothing and tell you why.
 - Showing a record does not make the agent follow it.
 - A code location in a record is checked against your working tree when it is read. Finding the code name (a function name, say) the record points to does not mean the decision still holds.

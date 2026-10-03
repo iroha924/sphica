@@ -22,7 +22,7 @@ base: main
 
 PowerShell のコマンドにも記録が出て、doctor が Windows で黙らずに理由を出し、切り離した送信がコンソールを開かない。
 
-- [ ] T01: PowerShell ツールのコマンドにも配信し、終わった計画を消して 0.6.26 にそろえる
+- [x] T01: PowerShell ツールのコマンドにも配信し、終わった計画を消して 0.6.26 にそろえる
   - 種別: 修正
   - 計画: S1, S8, S9
   - 依存: なし
@@ -30,6 +30,7 @@ PowerShell のコマンドにも記録が出て、doctor が Windows で黙ら�
   - red: `cd server && node --test --test-name-pattern PowerShell test/deliver.test.ts` → 足した PowerShell のテストが、記録が出ない（期待の不一致）で落ちる
   - 完了条件: `bun run test` → pass、`bun run verify:ai` → exit 0
   - コミット: `fix(deliver): deliver records for PowerShell tool commands`
+  - 結果: red `node --test --test-name-pattern PowerShell test/deliver.test.ts` → 空文字が返り `/trace:ext-s1\/map /` に一致せず落ちた。直した後 `bun run test` → 613 pass、`bun run verify:ai` → exit 0。matcher から PowerShell を外すと verify:ai が「must cover Read, Bash, and PowerShell」で落ちるのを確かめた
 
 - [ ] T02: capture の切り離した送信に windowsHide を付ける
   - 種別: 修正
