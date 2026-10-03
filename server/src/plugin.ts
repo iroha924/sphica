@@ -186,7 +186,7 @@ const CACHED = /\/plugins\/cache\/[^/]+\/sphica\/[^/]+$/;
 
 export type Install = { version: string | null; packageVersion?: string | null; root: string };
 /** Something doctor could not inspect, and why. Kept apart from "not installed". */
-export type Unknown = { unknown: string };
+type Unknown = { unknown: string };
 type Running = {
   pid: number;
   started: Date;

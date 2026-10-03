@@ -65,13 +65,14 @@ deliver.js から zod を外し、サイズの上限と zod の混入を bundle 
   - コミット: `perf(deliver): keep zod out of the delivery hook bundle`
   - 結果: `bun run bundle && grep -c ZodError plugin/dist/deliver.js` → 0。deliver.js は 1,066,559 → 389,999 バイト。`bun run test` → 615 pass、`bun run architecture` と `bun run sql:reach`（203 / 203）も通った
 
-- [ ] T05: bun の metafile から bundle ごとの上限と zod の混入を検査する
+- [x] T05: bun の metafile から bundle ごとの上限と zod の混入を検査する
   - 種別: 追加
   - 計画: S2
   - 依存: T04（上限の定数は zod を外した後のサイズから決める。外す前は zod の検査が落ちる）
-  - 変更: `scripts/bundle.mjs`, `scripts/lib/bundle-budget.mjs`, `scripts/lib/bundle-budget.test.mjs`, `.gitignore`, `package.json`
-  - 完了条件: `node --test scripts/lib/bundle-budget.test.mjs` → 落ちる例を含め全件 pass、`bun run bundle` → exit 0
+  - 変更: `scripts/bundle.mjs`, `scripts/lib/bundle-budget.mjs`, `scripts/lib/bundle-budget.d.mts`, `server/test/bundle-budget.test.ts`, `.gitignore`, `server/src/plugin.ts`
+  - 完了条件: `bun run test` → bundle-budget の落ちる例を含め全件 pass、`bun run bundle` → exit 0
   - コミット: `build: check bundle size budgets and keep zod out of hook bundles`
+  - 結果: `bun run test` → 620 pass（bundle-budget 5 件を含む）、`bun run bundle` → exit 0、`bun run knip` → 指摘なし。deliver.ts に `export const probe = z.string()` を一時的に足すと `bun run bundle` が「1066228 bytes, over its budget of 429000」と「bundles zod」で exit 1 になり、戻すと通った
 
 ## P3: パックしたフックを定義どおりに動かして測る
 
@@ -105,3 +106,5 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T01 / Codex のタスクレビュー F1（Windows でパスの大文字・小文字を変えたコマンドに記録が出ない）/ 見送り。namedInCommand の照合は Bash（macOS でも同じ）と Read に共通の仕様で、PowerShell の道で入った欠陥ではない
 2026-10-03 / T02 / Codex のタスクレビュー / 指摘なし
 2026-10-03 / T04 / 変更欄に `server/test/review.test.ts` を足した（前: 4 ファイル、後: 5 ファイル）/ checkFindings の import 元が変わるため
+2026-10-03 / T05 / 変更欄と完了条件を直した（前: `scripts/lib/bundle-budget.test.mjs` と `package.json`、`node --test scripts/lib/bundle-budget.test.mjs`。後: `server/test/bundle-budget.test.ts` と `scripts/lib/bundle-budget.d.mts`、`bun run test`）/ scripts/lib のモジュールは server/test から試す慣習に合わせた
+2026-10-03 / T05 / knip が T03 で足した `Unknown` 型の export を未使用と指摘したので、T05 のコミットで export を外した（変更欄に `server/src/plugin.ts` を足した）

@@ -87,7 +87,7 @@ approved_at: 2026-10-03
    - 種まき: 別の fixture のセッションで capture にオーナーの発言を入れ、パッケージの `mcp-record.js` で trace_begin → record_context → record_check → record_save。オーナーの明示の決定を引用して adopt し、`src/a.ts` に anchor。active で出典ありになったことを確かめ、MCP のクライアントを閉じる。`CLAUDE_PROJECT_DIR` とセッションを明示で渡す
    - 計る回: 新しいセッションと一意のオーナーの発言で UserPromptSubmit → spool にある。PreToolUse の PowerShell `Get-Content .\src\a.ts` → 配信の文に記録があり、pre_read の行がある。Stop → 上限時間の中で DB にその発言が入るまで待つ。この回の間は trace_begin・glean_begin・runFlush を呼ばない（送信待ちを先に流すと、切り離した送信が空でも通ってしまう）
    - `bun run verify` に足し（`plugin/` に対して）、Windows の CI の job ではパックして展開した tarball に対して流す
-   - bundle-budget のテスト（`node --test scripts/lib/bundle-budget.test.mjs`）も `bun run verify` に足す
+   - bundle-budget のテストは `server/test/bundle-budget.test.ts` に置く（scripts/lib の他のモジュールと同じ形。`bun run test` と、verify の `sql:reach` が流す）
 7. 終わった #209・#210 の plan と tasks の 4 ファイルを消す
 8. `bun run release:plan -- --base v0.6.25` を流し、npm と 3 つの manifest を 0.6.26 にする（pre-commit の bundle の検査が package に入る変更と同じコミットでの更新を求めるので、最初の package に入るコミットで上げる）
 
@@ -119,7 +119,7 @@ approved_at: 2026-10-03
 
 - A1: `bun run verify` → exit 0（hooks:live を含む）
 - A2: `git worktree add <一時ディレクトリ> main` に新しいテスト（deliver と plugin の）だけを写して `bun run test` → PowerShell の配信と doctor の Windows の行のテストが、意図した理由（import の失敗でなく期待の不一致）で落ちる
-- A3: `bun run bundle` → exit 0（checkBundles が deliver と capture に zod が無いことと上限を見る）。`node --test scripts/lib/bundle-budget.test.mjs` → 落ちる例を含め全件 pass
+- A3: `bun run bundle` → exit 0（checkBundles が deliver と capture に zod が無いことと上限を見る）。`bun run test` → bundle-budget の落ちる例を含め全件 pass
 - A4: `node scripts/measure-hook-launch.mjs` → 変更前の bundle と後の bundle で流し、deliver.js と capture.js の中央値が両方 PR 本文にあり、deliver.js は後の方が小さい
 - A5: `gh pr checks <PR>` → `windows` を含む全件 pass。`gh run view --log` の windows job に計測の中央値と hooks:live の成功の行がある
 - A6: `npm pack` の tarball を repository の外で展開して `node scripts/check-hooks-live.mjs <展開先>/package` → exit 0。同じ展開先で `grep -c ZodError package/dist/deliver.js` → 0、`hooks/hooks.json` が S7 で決めた形
@@ -138,3 +138,4 @@ approved_at: 2026-10-03
 なし
 
 ## 変更履歴
+2026-10-03 / bundle-budget のテストの置き場所を scripts/lib から server/test に変えた / scripts/lib のモジュールは server/test から試す慣習で、verify の sql:reach がそれを流すので verify に別の手を足さずに済む / Go 不要（範囲は同じ）

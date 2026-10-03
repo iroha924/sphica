@@ -15,6 +15,8 @@ server/migrate-*.ts
 # scripts/bundle.mjs builds these at publish time.
 plugin/dist/
 plugin/db/
+# Its bun metafiles, for the bundle size check.
+.build/
 
 # scripts/bundle.mjs copies this from the root README.md.
 plugin/README.md
