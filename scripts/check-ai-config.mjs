@@ -313,8 +313,9 @@ try {
     ],
     // A subagent starts without the main conversation's context, so it gets the session-start records too
     SubagentStart: [{ hooks: [hook("deliver", { timeout: 5 })] }],
+    // Turn start and end are synchronous so the working tree is read before the model works and right as the turn ends
     UserPromptSubmit: [
-      { hooks: [hook("capture", { async: true })] },
+      { hooks: [hook("capture", { timeout: 10 })] },
       { hooks: [hook("deliver", { timeout: 5 })] },
     ],
     PostToolUse: [
@@ -323,7 +324,7 @@ try {
         hooks: [hook("capture", { async: true })],
       },
     ],
-    Stop: [{ hooks: [hook("capture", { async: true })] }],
+    Stop: [{ hooks: [hook("capture", { timeout: 10 })] }],
     // Claude Code reads with Read and, often, shell commands: Bash, or PowerShell on Windows without Git Bash
     PreToolUse: [
       {

@@ -41,13 +41,14 @@ base: main
   - コミット: `fix(capture): keep the highest-numbered starting point when pruning so numbers never go down (T02)`
   - 結果: `node --test --test-name-pattern="prune" test/capture.test.ts` → pass（t1 が番号を振った後・保存の前に prune、最大 seq の old2 が印になり、t2 と同点で t1 に `t2-only.ts` が付かない。期限切れの old1・読めないファイル・tmp・旧形式の 1 ファイルが消え、新しいターンが保存された後の prune で old2 も消える）。`node --test test/capture.test.ts` → 50 pass / 0 fail、`bun run typecheck` エラーなし
 
-- [ ] T03: Claude Code の capture の UserPromptSubmit と Stop を同期の hook にする
+- [x] T03: Claude Code の capture の UserPromptSubmit と Stop を同期の hook にする
   - 種別: 変更
   - 計画: S2
   - 依存: なし
   - 変更: `plugin/hooks/hooks.json`, `scripts/check-ai-config.mjs`
   - 完了条件: `node scripts/check-ai-config.mjs` → 終了コード 0。`rg -n '"async": true' plugin/hooks/hooks.json` → PostToolUse の 1 件だけ
   - コミット: `fix(hooks): run capture synchronously on prompt submit and stop in Claude Code (T03)`
+  - 結果: `node scripts/check-ai-config.mjs` → exit 0。`rg -n '"async": true' plugin/hooks/hooks.json` → 79 行目（PostToolUse）の 1 件だけ
 
 - [ ] T04: 中断の後のロールオーバーと compaction の受け入れケースを足す
   - 種別: 追加
