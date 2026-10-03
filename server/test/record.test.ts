@@ -1233,6 +1233,86 @@ test("review fixes: anchor checks never throw, and near paths are judged before 
   }
 });
 
+test("rename: read shows where a missing anchor's file may have moved since its commit, asking git once per commit", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-rename-")));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+        encoding: "utf8",
+      }).trim();
+    git("init", "-q");
+    const body = (name: string) =>
+      `export function ${name}(d: Date): string {\n  return d.toISOString();\n}\n${"// keep the content alike\n".repeat(5)}`;
+    fs.writeFileSync(path.join(root, "dates.ts"), body("toStored"));
+    fs.writeFileSync(path.join(root, "cover.ts"), body("loadCover"));
+    fs.writeFileSync(path.join(root, "gone.ts"), body("dropped"));
+    git("add", "-A");
+    git("commit", "-qm", "first");
+    const commit = git("rev-parse", "HEAD");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "日付と表紙の扱いを決めた。" });
+    const t: Target = { ...target(p), root };
+    await save(db, t, {
+      units: [
+        {
+          key: "files",
+          kind: "finding",
+          text: "日付と表紙の扱いを決めた",
+          evidence: [{ source: `s${m}`, quote: "日付と表紙の扱いを決めた。", role: "states" }],
+          anchors: [
+            { path: "dates.ts", symbol: "toStored", role: "evidence", commit },
+            { path: "cover.ts", role: "evidence", commit },
+            { path: "gone.ts", role: "evidence", commit },
+            { path: "cover.ts", role: "applies_to" },
+          ],
+        },
+      ],
+    });
+    git("mv", "dates.ts", "lib-dates.ts");
+    git("commit", "-qm", "move dates");
+    git("mv", "cover.ts", "cover-store.ts");
+    fs.rmSync(path.join(root, "gone.ts"));
+    const renames = new Map<string, Map<string, string> | null>();
+    const out = (await readUnit(db.reader, p, "trace:ext-s1/files", root, undefined, renames)) ?? "";
+    assert.match(
+      out,
+      /dates\.ts toStored \(evidence, commit [0-9a-f]{12}\): missing[^\n]*may have moved to "lib-dates\.ts" since/,
+    );
+    assert.match(
+      out,
+      /cover\.ts \(evidence, commit [0-9a-f]{12}\): missing[^\n]*may have moved to "cover-store\.ts"/,
+    );
+    assert.match(
+      out,
+      /gone\.ts \(evidence, commit [0-9a-f]{12}\): missing — needs review: the code it points at is gone\n/,
+    );
+    assert.match(
+      out,
+      /cover\.ts \(applies_to\): missing — needs review: the code it points at is gone\n/,
+      "no commit, nothing to compare",
+    );
+    assert.equal(renames.size, 1, "one git diff for the commit three anchors share");
+
+    // A commit git cannot read: the rename is not checked
+    insert(db, "unit_anchor", {
+      unit_id: Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/files'").get()?.id),
+      path: "old.ts",
+      commit_sha: "f".repeat(40),
+      role: "evidence",
+      run_id: Number(db.owner.prepare("select id from extraction_run limit 1").get()?.id),
+      added_at: now,
+    });
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/files", root)) ?? "",
+      /old\.ts \(evidence, commit f{12}\): missing[^\n]*rename not checked/,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("an anchor path holding a NUL or other control character is refused", () => {
   assert.equal(repoPath("src/a.ts"), "src/a.ts");
   assert.equal(repoPath("x\0y"), null);

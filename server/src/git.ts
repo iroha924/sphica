@@ -37,3 +37,30 @@ export function repoFiles(root: string): string[] | null {
     return null;
   }
 }
+
+/**
+ * Files git sees as renamed between the commit and the working tree, old path to new; null when git cannot tell (no such commit, too slow,
+ * too much output). A move to a file git does not track is not seen.
+ */
+export function renamesSince(root: string, commit: string): Map<string, string> | null {
+  try {
+    const out = cleanGit(
+      root,
+      ["diff", "-M", "-l1000", "--name-status", "-z", commit, "--"],
+      32 * 1024 * 1024,
+    );
+    const parts = out.toString("utf8").split("\0");
+    const renames = new Map<string, string>();
+    // "R<score>\0<old>\0<new>" for a rename or copy, "<status>\0<path>" otherwise
+    for (let i = 0; i < parts.length; ) {
+      const status = parts[i] ?? "";
+      if (/^[RC]\d*$/.test(status)) {
+        if (status.startsWith("R")) renames.set(parts[i + 1] ?? "", parts[i + 2] ?? "");
+        i += 3;
+      } else i += 2;
+    }
+    return renames;
+  } catch {
+    return null;
+  }
+}

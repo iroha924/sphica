@@ -74,13 +74,14 @@ base: main
 
 read で、移動したファイルの移動先の候補と、記録の aliases（as-of では当時の組）が見える。
 
-- [ ] T05: missing の anchor に commit があれば、`git diff -M` で移動先の候補を出す
+- [x] T05: missing の anchor に commit があれば、`git diff -M` で移動先の候補を出す
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/src/read.ts`, `server/src/git.ts`, `server/test/record.test.ts`
+  - 変更: `server/src/read.ts`, `server/src/git.ts`, `server/src/mcp.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="rename" test/record.test.ts` → git mv した anchor に `may have moved to`、見つからなければ候補なし、commit が無いかタイムアウトでは `rename not checked`。同じ commit の anchor 2 つで git は 1 回
   - コミット: `feat(read): show where a missing anchor's file may have moved since its commit (T05)`
+  - 結果: 直す前のコードでは移動先が出ずに落ちる（`missing — needs review: the code it points at is gone` だけ）。直した後 `node --test --test-name-pattern="^rename" test/record.test.ts` → 1 pass（commit した移動と index だけの移動の両方に `may have moved to`、消しただけのファイルと commit の無い anchor には何も足さない、3 つの anchor が同じ commit で git は 1 回、読めない commit は `rename not checked`）。`bun run verify` → exit 0（acceptance 101 pass）
 
 - [ ] T06: read と as-of の read で aliases を出す
   - 種別: 追加
@@ -134,3 +135,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T10 / T01 のレビュー（P1: パスの途中が通常のファイルだと ENOTDIR で check と save が止まる）と T02 のレビュー（P2 が 4 件: 近いパスの計算がロックの中、1 つ目の gone の後は種類の判定がロックの中へずれる、同じ名前の距離を打ち切って順位が狂う、消えたパス自身を候補に出す）を全部直すと判定した / T10 を足し、T04 の依存に T10 を足した（前: T02, T03）
 - 2026-10-03 / T10 / glean.ts は変える必要がなかった（listFilesIfGone の中で直した） / 変更欄から `server/src/glean.ts` を外した
 - 2026-10-03 / T04 / harvest Skill も anchor の警告への答え方が要った（古い PR のファイルは動いていることがある） / 変更欄に `plugin/skills/harvest/SKILL.md` を足した
+- 2026-10-03 / T05 / read の MCP ツールで 1 回の read の中の記録どうしにも rename の結果を使い回すため、mcp.ts から Map を渡した / 変更欄に `server/src/mcp.ts` を足した
