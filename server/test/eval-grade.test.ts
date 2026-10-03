@@ -1645,14 +1645,18 @@ test("a conflict task's grade must say whether both sides were named and whether
 });
 
 test("compare puts old and new side by side only for the same fixture and tasks, and never mixes their bundles", () => {
-  const graded = (run: string, score: 0 | 1 | 2, extra: Record<string, unknown> = {}) => ({
+  const graded = (run: string, score: 0 | 1 | 2, extra: Record<string, unknown> = {}, task = "t1") => ({
     ...row,
-    task: "t1",
+    task,
     run,
-    excluded: null,
+    excluded: null as string | null,
     patch: "",
     patch_truncated: false,
     grade: { ...grade, score, ...extra },
+  });
+  const conflictGrade = (handled: "yes" | "no" | "unknown", named: "yes" | "no" = "yes") => ({
+    named_conflict: named,
+    implemented_one_side: handled,
   });
   const old = {
     label: "old",
@@ -1661,8 +1665,15 @@ test("compare puts old and new side by side only for the same fixture and tasks,
     build: {
       build: "a",
       variant: "original",
-      bundle: "old-bundle",
-      rows: [graded("o1", 0), graded("o2", 1)],
+      bundle: 'c1 {"deliver.js":"old"}',
+      rows: [
+        graded("o1", 0),
+        graded("o2", 1),
+        // Unknown never counts as handled, and excluded runs are left out
+        graded("oc1", 1, conflictGrade("yes"), "t2"),
+        graded("oc2", 1, conflictGrade("unknown"), "t2"),
+        { ...graded("oc3", 2, conflictGrade("no"), "t2"), excluded: "timed out" },
+      ],
     },
   };
   const next = {
@@ -1672,22 +1683,33 @@ test("compare puts old and new side by side only for the same fixture and tasks,
     build: {
       build: "b",
       variant: "original",
-      bundle: "new-bundle",
-      rows: [graded("n1", 2), graded("n2", 2, { proposes_rejected: "yes" })],
+      bundle: 'c2 {"deliver.js":"new"}',
+      rows: [
+        { ...graded("n1", 2), search_before_edit: "yes" as const },
+        { ...graded("n2", 2, { proposes_rejected: "yes" }), search_before_edit: "unknown" as const },
+        graded("nc1", 2, conflictGrade("no"), "t2"),
+        graded("nc2", 2, conflictGrade("no", "no"), "t2"),
+        { ...graded("nc3", 2, {}, "t2"), grade: undefined, ungraded: "empty output" },
+      ],
     },
   };
-  const lines = compare(old, next, [{ id: "t1" }]).join("\n");
-  assert.match(lines, /^# old: old-bundle$/m);
-  assert.match(lines, /^# new: new-bundle$/m);
+  const lines = compare(old, next, [{ id: "t1" }, { id: "t2" }]).join("\n");
+  assert.match(lines, /^# old: c1 \{"deliver\.js":"old"\}$/m);
+  assert.match(lines, /^# new: c2 \{"deliver\.js":"new"\}$/m);
   assert.match(
     lines,
-    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2.* \| new n 2\/2, mean 2\.00, re-proposed 1\/2/m,
+    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2, conflict handled -, searched before editing - \| new n 2\/2, mean 2\.00, re-proposed 1\/2, conflict handled -, searched before editing 1\/1$/m,
+  );
+  assert.match(
+    lines,
+    /^t2 codex inject: old n 2\/3, mean 1\.00, re-proposed 0\/2, conflict handled 0\/2, searched before editing - \| new n 2\/3, mean 2\.00, re-proposed 0\/2, conflict handled 1\/2, searched before editing -$/m,
   );
   assert.throws(() => compare(old, { ...next, fixture: "g" }, []), /different fixtures/);
   assert.throws(() => compare({ ...old, fixture: undefined }, next, []), /different fixtures/);
   assert.throws(() => compare(old, { ...next, tasks: "{1}" }, []), /different task definitions/);
-  assert.throws(
-    () => compare(old, { ...next, build: { ...next.build, bundle: "old-bundle" } }, []),
-    /same bundle/,
-  );
+  // Another commit that shipped the same artifacts ran the same bundle
+  const same = { ...next, build: { ...next.build, bundle: 'c9 {"deliver.js":"old"}' } };
+  assert.throws(() => compare(old, same, []), /same bundle/);
+  for (const bundle of [undefined, "", "c3 {}"])
+    assert.throws(() => compare({ ...old, build: { ...old.build, bundle } }, next, []), /names no bundle/);
 });

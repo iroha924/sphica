@@ -237,7 +237,15 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
       `the builds were made from different fixtures (${old.fixture} / ${next.fixture}); compare only the same records`,
     );
   if (old.tasks !== next.tasks) throw new Error("the builds were made from different task definitions");
-  if (old.build.bundle === next.build.bundle)
+  // A bundle is "<commit> {artifact hashes}"; two commits can ship the same artifacts, so only the hashes tell the bundles apart
+  const artifacts = (b: Build) => {
+    const at = b.bundle?.indexOf(" ") ?? -1;
+    return b.bundle && at > 0 ? b.bundle.slice(at + 1) : "";
+  };
+  for (const side of [old, next])
+    if (!artifacts(side.build) || artifacts(side.build) === "{}")
+      throw new Error(`the ${side.label} build names no bundle; it cannot be told which code ran`);
+  if (artifacts(old.build) === artifacts(next.build))
     throw new Error("both builds ran the same bundle; there is nothing to compare");
   const lines = [
     `# ${old.label}: ${old.build.bundle}`,

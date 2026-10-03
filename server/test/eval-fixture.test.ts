@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { createDriver } from "../evals/acceptance/driver.ts";
 import { loadAcceptance } from "../evals/acceptance/load.ts";
 import { fixtureSteps } from "../evals/cloud/build-lib.ts";
+import { checkAnchor } from "../src/anchors.ts";
 import { openReader } from "../src/db.ts";
 
 const plan = JSON.parse(
@@ -50,6 +51,23 @@ test("the fixture's target records are delivered as each task needs, and the con
         "harvest:41/upload",
       ])
         assert.equal(state(key), "active", key);
+      // Against the slot's current code: the stale record's symbol is gone, the control's symbol moved but is there
+      const slot = path.join(dir, "slot");
+      for (const [rel, text] of Object.entries(plan.projects.tsundoku.current as Record<string, string>)) {
+        fs.mkdirSync(path.dirname(path.join(slot, rel)), { recursive: true });
+        fs.writeFileSync(path.join(slot, rel), text);
+      }
+      const anchors = await db
+        .selectFrom("unit_anchor as a")
+        .innerJoin("unit as u", "u.id", "a.unit_id")
+        .select(["u.key", "a.path", "a.symbol", "a.line_start"])
+        .where("a.role", "=", "applies_to")
+        .where("u.key", "in", ["trace:s-en-thumb/width", "trace:s-en-thumb/webp"])
+        .execute();
+      assert.deepEqual(Object.fromEntries(anchors.map((a) => [a.key, checkAnchor(slot, a).state])), {
+        "trace:s-en-thumb/width": "missing",
+        "trace:s-en-thumb/webp": "moved",
+      });
       // The pair is held back by its unresolved link, not by a failed save
       const links = await db
         .selectFrom("unit_link as l")

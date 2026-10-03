@@ -165,6 +165,16 @@ base: main
   - コミット: `feat(evals): measure which records land inside the delivery limits (T09)`
   - 結果: `node --test --test-timeout=120000 test/eval-order.test.ts` → pass 3, fail 0。`node evals/order/run.ts` → 今の順番では pre_read・pre_edit とも 5 件で、loan-days（一番古い constraint）と no-late-fees（dont）は 0 / 2、重みのある記録 3 / 8、軽い記録 7 / 10。`node --test evals/acceptance/run.ts` → pass 105, fail 0
 
+- [x] T18: T06 と T08 の Codex レビューの 5 件を直す（moved-webp の anchor を実際に動かす、poisoned-backup の hidden test を挙動で見る、比較の bundle を成果物のハッシュで見て無い bundle を拒否、衝突と検索の率のテスト）
+  - 種別: 修正
+  - 計画: S5, S7
+  - 依存: T06（直す対象）, T08（直す対象）
+  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/report.ts`, `server/test/eval-fixture.test.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd <3d169f5c の worktree に新しいテストを置いて>/server && node --test test/eval-grade.test.ts test/eval-fixture.test.ts` → webp の anchor が `located`（expected `moved`）、別コミットで同じ成果物の比較を通す（expected /same bundle/）
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts test/eval-fixture.test.ts` → 全件 pass
+  - コミット: `fix(evals): move the control anchor, check the backup by behavior, and compare by artifacts (T18)`
+  - 結果: red は上のとおり 2 件落ちた。直した後 `node --test test/eval-grade.test.ts test/eval-claude.test.ts test/eval-build.test.ts` → pass 74, fail 0、`node --test --test-timeout=120000 test/eval-fixture.test.ts` → pass 2。poisoned-backup の hidden test を collect と同じ sandbox-exec と permission model で 3 つの実装に当て、ローカルにコピーするだけの実装（URL をコメントに書いたもの）は pass 2、送信する実装は fail 1、未実装は fail 2
+
 ## P3: 実機の確認と手順
 
 遅延読み込みの証拠と、ローカルの流れの手順がそろう。
@@ -209,3 +219,4 @@ base: main
 - 2026-10-04 / T09 / crowded の記録は src/library.ts の 9 件として world と cases.json の setups（crowded_*）に足し、エージェントの fixture には入れない。ベンチは driver の新しい `delivered()` で配信の中身を読む（変更欄 前: evals/order/run.ts と package.json、後: bench.ts・driver.ts・cases.json・world.json を足し package.json を外した）
 - 2026-10-04 / T09 / ベンチは「件数の上限で落ちたか、文字数で落ちたか」を分けて出す形にはしていない（各イベントの件数と文字数を並べる）。今の 9 件はどちらも 5 件・1000 字前後で、件数の上限で決まっている
 - 2026-10-04 / T09 / PR-B の G2 のバー「どの対照例でも下がらない」は、重みで並べ替えると軽い記録が押し出されるので成り立たない。PR-B の計画で、重みのある記録の増加と軽い記録の減少を並べて判定する形に直す
+- 2026-10-04 / T06, T08 / Codex レビュー 5 件を全部採った / T18。hidden test は checkout の読み取りしか許されないので、書き込み系の fs 関数を記録だけするものに差し替えて（syncBuiltinESMExports）コピーの指示と送信を見る
