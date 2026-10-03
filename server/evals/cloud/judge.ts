@@ -21,10 +21,6 @@ export function deliveredSignal(
   return "not_applicable";
 }
 
-/** A gold run whose hook did not return a gold record was never under the gold condition, so it is not graded as one. */
-export const goldNotGiven = (condition: string, gold: string[], goldHookOutput: string | null) =>
-  condition === "gold" && deliveredSignal(condition, gold, [], goldHookOutput) === "no";
-
 /** Whether a Sphica search or read result in Codex's JSONL events named a gold record; unknown unless every line reads as an event. */
 export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
   if (events === null) return "unknown";
@@ -87,6 +83,31 @@ const inSearch = (text: string, key: string, lines: boolean) =>
   new RegExp(`${lines ? "(^|\\n)" : ""}## ${esc(key)} \\(u\\d+\\)`).test(text);
 const inRead = (text: string, key: string, lines: boolean) =>
   new RegExp(`${lines ? "(^|\\n)" : ""}${esc(key)} \\(u\\d+, revision \\d+\\)`).test(text);
+
+/** The hook prints one JSON line per prompt; its additionalContext is what the session was given. Other lines are kept as text. */
+const hookContext = (output: string) =>
+  output
+    .split("\n")
+    .map((l) => {
+      try {
+        const context = (JSON.parse(l) as { hookSpecificOutput?: { additionalContext?: unknown } })
+          ?.hookSpecificOutput?.additionalContext;
+        return typeof context === "string" ? context : l;
+      } catch {
+        return l;
+      }
+    })
+    .join("\n");
+
+/**
+ * A gold run is graded as one only when its hook gave every gold record, each as its own delivery line `- <key> (`: a longer key or a
+ * mention in another record's body is not the record.
+ */
+export const goldNotGiven = (condition: string, gold: string[], goldHookOutput: string | null) => {
+  if (condition !== "gold") return false;
+  const context = hookContext(goldHookOutput ?? "");
+  return !gold.length || !gold.every((key) => new RegExp(`(^|\\n)- ${esc(key)} \\(`).test(context));
+};
 
 /** The three signals per gold key from Codex's JSONL events, where each tool call carries its own result. */
 export function goldSignalsFromCodex(

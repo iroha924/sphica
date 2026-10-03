@@ -15,6 +15,7 @@ import {
   deliveredSignal,
   foundInClaudeLog,
   foundInCodexEvents,
+  goldNotGiven,
   goldSignalsFromClaude,
   goldSignalsFromCodex,
   presentedText,
@@ -696,6 +697,28 @@ test("a proven hit in a Codex log stays yes when another line is broken", () => 
       }
 });
 
+// Gold counts as given only when each gold key opens a delivery line: a longer key or a mention in a body is another record
+test("a gold record counts as given only by its own delivery line in the hook's context", () => {
+  const key = "trace:a/b";
+  const hook = (context: string) =>
+    JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } });
+  const lead = "Active decisions from this project's history:";
+  assert.equal(goldNotGiven("gold", [key], hook(`${lead}\n- ${key} (decision do): Keep it.`)), false);
+  assert.equal(goldNotGiven("gold", [key], `${hook(`${lead}\n- ${key} (decision do): Keep it.`)}\n`), false);
+  assert.equal(goldNotGiven("gold", [key], hook(`${lead}\n- ${key}-extra (decision do): Other.`)), true);
+  assert.equal(
+    goldNotGiven("gold", [key], hook(`${lead}\n- trace:c/d (decision do): Unlike ${key} (u1).`)),
+    true,
+  );
+  assert.equal(
+    goldNotGiven("gold", [key, "trace:c/d"], hook(`${lead}\n- ${key} (decision do): Keep it.`)),
+    true,
+  );
+  assert.equal(goldNotGiven("gold", [key], null), true);
+  assert.equal(goldNotGiven("gold", [key], ""), true);
+  assert.equal(goldNotGiven("inject", [key], null), false, "only the gold condition gives through the hook");
+});
+
 // A gold run is graded as shown the record only when its hook returned it; otherwise the gold condition never applied
 test("collect excludes a gold run when the gold hook returned no record, and keeps presented for one that did", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
@@ -710,7 +733,7 @@ test("collect excludes a gold run when the gold hook returned no record, and kee
       stdio: "ignore",
       env: childEnv(base),
     });
-    const text = "## trace:s-en-dates/utc (u1): decision do, active\nStore dates in UTC.";
+    const text = "Active decisions:\n- trace:s-en-dates/utc (decision do): Store dates in UTC.";
     fs.mkdirSync(path.join(slot, ".tools"));
     fs.writeFileSync(path.join(slot, ".tools", "gold.json"), JSON.stringify([{ id: "pilot-dates", text }]));
     fs.writeFileSync(
@@ -785,7 +808,10 @@ test("collect reads a swapped build's gold from the swapped record and does not 
       path.join(codex, "sw", "result.json"),
       JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
     );
-    fs.writeFileSync(path.join(codex, "sw", "gold-receipt.txt"), "## trace:s-en-dates-local/local (u1)");
+    fs.writeFileSync(
+      path.join(codex, "sw", "gold-receipt.txt"),
+      "- trace:s-en-dates-local/local (decision do): Keep local dates.",
+    );
     const out = path.join(build, "loop.json");
     execFileSync(
       process.execPath,
