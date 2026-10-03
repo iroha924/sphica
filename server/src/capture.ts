@@ -841,9 +841,14 @@ async function main(): Promise<void> {
   // systemMessage is a warning you see; it does not enter the model's context.
   if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice }));
   // Sending happens in a process detached from the session. As the hook's own process, the host would kill it at session end
-  // (officially so with `-p`), and the last turn would not arrive until the next send.
+  // (officially so with `-p`), and the last turn would not arrive until the next send. On Windows a detached child opens its own
+  // console window unless hidden.
   if (send)
-    spawn(process.execPath, [process.argv[1] ?? "", "--flush"], { detached: true, stdio: "ignore" }).unref();
+    spawn(process.execPath, [process.argv[1] ?? "", "--flush"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
 }
 
 // Runs only when started as a hook (tests and the CLI use only the functions).

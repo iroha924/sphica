@@ -32,7 +32,7 @@ PowerShell のコマンドにも記録が出て、doctor が Windows で黙ら�
   - コミット: `fix(deliver): deliver records for PowerShell tool commands`
   - 結果: red `node --test --test-name-pattern PowerShell test/deliver.test.ts` → 空文字が返り `/trace:ext-s1\/map /` に一致せず落ちた。直した後 `bun run test` → 613 pass、`bun run verify:ai` → exit 0。matcher から PowerShell を外すと verify:ai が「must cover Read, Bash, and PowerShell」で落ちるのを確かめた
 
-- [ ] T02: capture の切り離した送信に windowsHide を付ける
+- [x] T02: capture の切り離した送信に windowsHide を付ける
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -40,6 +40,7 @@ PowerShell のコマンドにも記録が出て、doctor が Windows で黙ら�
   - red: `grep -c windowsHide server/src/capture.ts` → 0（Windows で送信のたびにコンソールが開き得る）
   - 完了条件: `grep -c windowsHide server/src/capture.ts` → 1、`bun run test` → pass
   - コミット: `fix(capture): hide the console window of the detached flush on Windows`
+  - 結果: red `grep -c windowsHide server/src/capture.ts` → 0。直した後 → 1、`bun run test` → 613 pass。コンソールが出ないことは Windows の実機が無く確かめていない（T07 の Stop の送信で起動の成否だけ見る）
 
 - [ ] T03: doctor が Windows で npm・claude・動いている MCP を、調べられなかった理由付きで出す
   - 種別: 修正
