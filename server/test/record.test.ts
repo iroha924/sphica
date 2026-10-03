@@ -1417,6 +1417,50 @@ test("unreadable kind: a path whose content cannot be read is judged again when 
   }
 });
 
+test("rename probes: one read asks git about at most 5 commits, and says the rest were not checked", async () => {
+  const db = tempDb();
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-probes-")));
+  try {
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+        encoding: "utf8",
+      }).trim();
+    git("init", "-q");
+    const commits: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      fs.writeFileSync(path.join(root, `f${i}.ts`), `export const f${i} = ${i};\n`);
+      git("add", "-A");
+      git("commit", "-qm", `f${i}`);
+      commits.push(git("rev-parse", "HEAD"));
+    }
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "f を足した。" });
+    await save(
+      db,
+      { ...target(p), root },
+      {
+        units: [
+          {
+            key: "fs",
+            kind: "finding",
+            text: "f を足した",
+            evidence: [{ source: `s${m}`, quote: "f を足した。", role: "states" }],
+            anchors: commits.map((commit, i) => ({ path: `f${i}.ts`, role: "evidence", commit })),
+          },
+        ],
+      },
+    );
+    for (let i = 0; i < 6; i++) fs.rmSync(path.join(root, `f${i}.ts`));
+    const renames = new Map<string, Map<string, string> | null>();
+    const out = (await readUnit(db.reader, p, "trace:ext-s1/fs", root, undefined, renames)) ?? "";
+    assert.equal(renames.size, 5);
+    assert.equal(out.match(/rename not checked/g)?.length, 1, out);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("line separator: paths from outside stay on one line in check and read output", async () => {
   const db = tempDb();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-ls-")));

@@ -68,6 +68,9 @@ export async function readUnit(
 
 type Renames = Map<string, Map<string, string> | null>;
 
+/** Commits one read asks git about for renames. */
+const RENAME_LOOKUPS = 5;
+
 async function describe(
   db: Reads,
   u: Selectable<DB["unit"]>,
@@ -277,7 +280,11 @@ function movedTo(
   renames: Renames,
 ): string {
   if (!root || !a.commit_sha || fileState(root, a.path) !== "gone") return "";
-  if (!renames.has(a.commit_sha)) renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
+  if (!renames.has(a.commit_sha)) {
+    // Each lookup is a git run; a read of records with many anchor commits stays within the tool's time
+    if (renames.size >= RENAME_LOOKUPS) return "; rename not checked";
+    renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
+  }
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
   const to = seen.get(a.path);
