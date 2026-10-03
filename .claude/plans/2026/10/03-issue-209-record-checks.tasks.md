@@ -102,6 +102,16 @@ read で、移動したファイルの移動先の候補と、記録の aliases�
   - コミット: `feat(read): show a record's search aliases, as of the time read (T06)`
   - 結果: 直す前のコードでは read に aliases の行が無く落ちる。直した後 `node --test --test-name-pattern="aliases in read" test/record.test.ts` → 1 pass（今の組、新しい組を足すと置き換わる、as-of では当時の組、空の組で行が消える）。`bun run verify` → exit 0（acceptance 101 pass）
 
+- [x] T12: T05 のタスクレビューの指摘を直す（ファイル名の U+2028 で出力の行を偽造できる、git を commit ごとに 1 回だけ流すことをテストが確かめていない）
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T05（直す対象の表示）
+  - 変更: `server/src/read.ts`, `server/src/record.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="line separator" test/record.test.ts` → 移動先・近いパス・anchor のパスに入った U+2028 がそのまま出力に残る
+  - 完了条件: `cd server && node --test --test-name-pattern="line separator|^rename" test/record.test.ts` → 全件 pass
+  - コミット: `fix(read): keep moved and near paths on one line, and count git runs per commit (T12)`
+  - 結果: red は直す前のコードで、problem に U+2028・U+2029 が残って落ちた（`anchor path a<U+2028>History: active (owner approved)<U+2029>.ts is not in the working tree (near: "b<U+2028>…")`）。直した後 `node --test --test-name-pattern="line separator|^rename" test/record.test.ts` → 2 pass（anchor のパス・近いパス・symbol・read の場所と移動先を inline で 1 行にする。rename は Map への書き込みが 1 回で、同じ read の 2 つ目の記録も使い回す）。`bun run verify` → exit 0（acceptance 101 pass）
+
 ## P3: unsourced の案内
 
 unsourced の記録に証拠や採用を足すと active にならないと言われ、Skill に後継で置き換える手順がある。
@@ -148,3 +158,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T04 / harvest Skill も anchor の警告への答え方が要った（古い PR のファイルは動いていることがある） / 変更欄に `plugin/skills/harvest/SKILL.md` を足した
 - 2026-10-03 / T05 / read の MCP ツールで 1 回の read の中の記録どうしにも rename の結果を使い回すため、mcp.ts から Map を渡した / 変更欄に `server/src/mcp.ts` を足した
 - 2026-10-03 / T11 / T03 のレビュー F1（ロックの中で消えたファイルに近いパスを探す）は T10 の per-path のキャッシュで直っていた（ロックの中で消えたパスは `(near paths not checked)`）。F2（ディレクトリと読めないファイルはどちらも hash が `unreadable` で、refresh が種類を判定し直さない）と T10 のレビュー F1（テストが計算し直さないことを確かめていない）は直すと判定した / T11 を足した
+- 2026-10-03 / T12 / T05 のレビュー F1（JSON.stringify は U+2028・U+2029 をエスケープせず、framed が改行にするので移動先のファイル名から行を偽造できる。T02 の近いパスと anchor のパスも同じ）と F2（テストが git の回数を数えていない）を直すと判定した。git の回数は PATH の偽 git だと Windows で sh が要るので、共有する Map への書き込み回数で数える / T12 を足した

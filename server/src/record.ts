@@ -12,6 +12,7 @@ import {
   UNIT_KINDS,
   WORK_STATUSES,
 } from "./knowledge.ts";
+import { inline } from "./panel.ts";
 import {
   commitHeld,
   kindOf,
@@ -206,20 +207,22 @@ export function anchorProblem(
   if (!facts.root || a.held) return null;
   const kind = kindOf(facts, a.path);
   const fix = "fix it and check again, or keep it if you know it is right";
+  // Paths and symbols come from the record and from git; inline keeps line separators in them from starting a line
+  const at = inline(a.path);
   if (kind === "gone") {
     if (a.role === "evidence" && a.observed) return null;
     const near = nearPaths(facts, a.path);
     // The list is read only before the lock, so a file gone since then gets no suggestions
     const hint = near?.length
-      ? ` (near: ${near.map((n) => JSON.stringify(n)).join(", ")})`
+      ? ` (near: ${near.map((n) => JSON.stringify(inline(n))).join(", ")})`
       : near === undefined
         ? " (near paths not checked)"
         : "";
-    return `anchor path ${a.path} is not in the working tree${hint}; ${fix}`;
+    return `anchor path ${at} is not in the working tree${hint}; ${fix}`;
   }
-  if (kind === "directory") return `anchor path ${a.path} is a directory; anchor a file`;
+  if (kind === "directory") return `anchor path ${at} is a directory; anchor a file`;
   if (kind === "file" && a.symbol && symbolMissing(facts, a.path, a.symbol))
-    return `symbol ${JSON.stringify(head(a.symbol, 80))} is not found in ${a.path}; ${fix}`;
+    return `symbol ${JSON.stringify(inline(head(a.symbol, 80)))} is not found in ${at}; ${fix}`;
   return null;
 }
 

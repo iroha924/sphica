@@ -241,7 +241,7 @@ async function describe(
     );
     for (const a of live) {
       const c = checkAnchor(root, a);
-      const where = `${a.path}${a.symbol ? ` ${a.symbol}` : ""}`;
+      const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
       out.push(
         `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames)}` : ""}`,
       );
@@ -281,7 +281,9 @@ function movedTo(
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
   const to = seen.get(a.path);
-  return to ? `; may have moved to ${JSON.stringify(head(to, 300))} since ${a.commit_sha.slice(0, 12)}` : "";
+  return to
+    ? `; may have moved to ${JSON.stringify(inline(head(to, 300)))} since ${a.commit_sha.slice(0, 12)}`
+    : "";
 }
 
 /** A retained source by `s<id>`, with who wrote it and where it lives; null when there is none. */
