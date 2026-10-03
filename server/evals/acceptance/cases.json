@@ -4913,6 +4913,275 @@
           ]
         }
       }
+    },
+    "crowded_lib_1": {
+      "capture": "s-lib-1",
+      "trace": {
+        "session": "s-lib-1",
+        "record": {
+          "units": [
+            {
+              "key": "loan-days",
+              "kind": "constraint",
+              "text": "Loans last 14 days",
+              "evidence": [
+                {
+                  "source": "session:s-lib-1#1.owner",
+                  "quote": "貸し出しの期間は 14 日に固定して。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "session:s-lib-1#1.owner",
+                  "quote": "貸し出しの期間は 14 日に固定して。"
+                }
+              ]
+            },
+            {
+              "key": "no-late-fees",
+              "kind": "decision",
+              "text": "延滞料は取らない",
+              "evidence": [
+                {
+                  "source": "session:s-lib-1#2.owner",
+                  "quote": "延滞料は取らない。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "dont",
+              "adoption": [
+                {
+                  "source": "session:s-lib-1#2.owner",
+                  "quote": "延滞料は取らない。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_2": {
+      "capture": "s-lib-2",
+      "trace": {
+        "session": "s-lib-2",
+        "record": {
+          "units": [
+            {
+              "key": "members-only",
+              "kind": "decision",
+              "text": "貸すのはメンバーにだけ",
+              "evidence": [
+                {
+                  "source": "session:s-lib-2#1.owner",
+                  "quote": "貸すのはメンバーにだけ。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "session:s-lib-2#1.owner",
+                  "quote": "貸すのはメンバーにだけ。"
+                }
+              ]
+            },
+            {
+              "key": "holds-later",
+              "kind": "decision",
+              "text": "予約（ホールド）は v2 まで入れない",
+              "evidence": [
+                {
+                  "source": "session:s-lib-2#2.owner",
+                  "quote": "予約（ホールド）は v2 まで入れない。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "defer",
+              "adoption": [
+                {
+                  "source": "session:s-lib-2#2.owner",
+                  "quote": "予約（ホールド）は v2 まで入れない。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_3": {
+      "capture": "s-lib-3",
+      "trace": {
+        "session": "s-lib-3",
+        "record": {
+          "units": [
+            {
+              "key": "linear-scan",
+              "kind": "finding",
+              "text": "lend scans every loan to check the member, so it is linear in the number of loans",
+              "evidence": [
+                {
+                  "source": "session:s-lib-3#1.assistant",
+                  "quote": "lend scans every loan to check the member, so it is linear in the number of loans.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ]
+            },
+            {
+              "key": "map-by-member",
+              "kind": "dead_end",
+              "text": "Keeping loans in a Map keyed by member broke the order the export needs",
+              "evidence": [
+                {
+                  "source": "session:s-lib-3#2.assistant",
+                  "quote": "A Map keyed by member broke the order the export needs, so I went back to the array.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_pr50": {
+      "harvest": {
+        "pr": 50,
+        "record": {
+          "units": [
+            {
+              "key": "local-due",
+              "kind": "decision",
+              "text": "Due dates are shown in the member's local time",
+              "evidence": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "Due dates are shown in the member's local time.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "Due dates are shown in the member's local time."
+                }
+              ]
+            },
+            {
+              "key": "loan-log",
+              "kind": "decision",
+              "text": "lend() logs each loan to the console",
+              "evidence": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "lend() logs each loan to the console.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "lend() logs each loan to the console."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_4": {
+      "capture": "s-lib-4",
+      "trace": {
+        "session": "s-lib-4",
+        "record": {
+          "units": [
+            {
+              "key": "renew-once",
+              "kind": "decision",
+              "text": "貸し出しの更新（延長）は 1 回だけ",
+              "evidence": [
+                {
+                  "source": "session:s-lib-4#1.owner",
+                  "quote": "更新（延長）は 1 回だけできるようにして。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "session:s-lib-4#1.owner",
+                  "quote": "更新（延長）は 1 回だけできるようにして。"
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   }
 }

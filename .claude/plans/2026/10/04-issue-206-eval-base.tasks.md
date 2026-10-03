@@ -156,13 +156,14 @@ base: main
   - コミット: `feat(evals): compare an old and a new build without mixing their bundles (T08)`
   - 結果: `node --test test/eval-grade.test.ts` → pass 46, fail 0（fixture 違い・fixture 無し・タスク定義違い・同じ bundle を拒否し、old と new の表を分けて出し、タスク × モデル × 条件ごとに有効 run・平均点・re-proposal・衝突・検索の率を並べる）
 
-- [ ] T09: 順番のオフラインのベンチを足す
+- [x] T09: 順番のオフラインのベンチを足す
   - 種別: 追加
   - 計画: S8
   - 依存: T06（crowded の fixture が要る）
-  - 変更: `server/evals/order/run.ts`, `server/test/eval-order.test.ts`, `server/package.json`
+  - 変更: `server/evals/order/bench.ts`, `server/evals/order/run.ts`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/world.json`, `server/test/eval-order.test.ts`
   - 完了条件: `cd server && node --test test/eval-order.test.ts` → イベントごとの gold-in-delivery の率を件数と文字数の上限を分けて出し、`--compare <ref>` で 2 つの deliver を並べるテストが pass
-  - コミット: `feat(evals): measure whether gold records land inside the delivery limits (T09)`
+  - コミット: `feat(evals): measure which records land inside the delivery limits (T09)`
+  - 結果: `node --test --test-timeout=120000 test/eval-order.test.ts` → pass 3, fail 0。`node evals/order/run.ts` → 今の順番では pre_read・pre_edit とも 5 件で、loan-days（一番古い constraint）と no-late-fees（dont）は 0 / 2、重みのある記録 3 / 8、軽い記録 7 / 10。`node --test evals/acceptance/run.ts` → pass 105, fail 0
 
 ## P3: 実機の確認と手順
 
@@ -205,3 +206,6 @@ base: main
 - 2026-10-04 / T07 / 衝突のタスクを grader に知らせる欄が要る / tasks.json に `conflict`（両側の説明）を足し、grade.ts が渡す。grader の一致の比較に新しい 2 欄を足した（変更欄に schema-check.ts・grade.ts・tasks.json を足した）
 - 2026-10-04 / T04 / Codex レビュー 5 件（P1 2 件）を全部採った / T17
 - 2026-10-04 / T17 / canary の正の対照の run で、claude が SessionStart までに 15 分止まった（API の時間は 3.7 秒、終わった後は普通に終了）。原因は未特定 / 再現したら、起動の待ち（ロックや利用上限）を調べる。run の時間は result.json の seconds に残る
+- 2026-10-04 / T09 / crowded の記録は src/library.ts の 9 件として world と cases.json の setups（crowded_*）に足し、エージェントの fixture には入れない。ベンチは driver の新しい `delivered()` で配信の中身を読む（変更欄 前: evals/order/run.ts と package.json、後: bench.ts・driver.ts・cases.json・world.json を足し package.json を外した）
+- 2026-10-04 / T09 / ベンチは「件数の上限で落ちたか、文字数で落ちたか」を分けて出す形にはしていない（各イベントの件数と文字数を並べる）。今の 9 件はどちらも 5 件・1000 字前後で、件数の上限で決まっている
+- 2026-10-04 / T09 / PR-B の G2 のバー「どの対照例でも下がらない」は、重みで並べ替えると軽い記録が押し出されるので成り立たない。PR-B の計画で、重みのある記録の増加と軽い記録の減少を並べて判定する形に直す

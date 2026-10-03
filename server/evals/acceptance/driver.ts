@@ -43,6 +43,8 @@ export type Driver = {
   expect(expectation: Step): Promise<void>;
   /** Writes the world's database, as it stands, to one self-contained file (for the cloud evaluation's fixtures). */
   snapshot(to: string): Promise<void>;
+  /** What the delivery hooks returned for the last inject step, one entry per call (for the offline order bench). */
+  delivered(): string[];
   done(): Promise<void>;
 };
 
@@ -458,6 +460,7 @@ export async function createDriver(world: World): Promise<Driver> {
   };
 
   return {
+    delivered: () => [...delivered],
     run: async (step) => {
       if (typeof step.capture === "string") return capture(step.capture);
       if (typeof step.set_remote === "string") {

@@ -18,7 +18,8 @@
     "big/huge.txt": "OVERSIZED",
     "src/thumb.ts": "export const THUMB_WIDTH = 200;\n\nexport const thumbUrl = (isbn: string): string =>\n  `https://covers.example/${isbn}?w=${THUMB_WIDTH}&fm=webp`;\n",
     "src/shelf.ts": "export type Shelf = { id: string; name: string; books: string[] };\n\nexport function addShelf(shelves: Shelf[], name: string): Shelf[] {\n  return [...shelves, { id: crypto.randomUUID(), name, books: [] }];\n}\n",
-    "src/backup.ts": "export function backupName(date: Date): string {\n  return `tsundoku-${date.toISOString().slice(0, 10)}.db`;\n}\n"
+    "src/backup.ts": "export function backupName(date: Date): string {\n  return `tsundoku-${date.toISOString().slice(0, 10)}.db`;\n}\n",
+    "src/library.ts": "export type Loan = { book: string; member: string; due: string };\n\nexport function lend(book: string, member: string, now: Date): Loan {\n  const due = new Date(now.getTime() + 14 * 86_400_000).toISOString();\n  return { book, member, due };\n}\n"
   },
   "sessions": [
     {
@@ -192,6 +193,69 @@
           "owner": "そういえば addShelf って同じ名前の本棚を二つ作れちゃうよね。今はそれでいいけど。",
           "assistant": "確認しました。addShelf は名前の重複を調べていません。今は変えません。",
           "edits": []
+        }
+      ]
+    },
+    {
+      "id": "s-lib-1",
+      "host": "claude-code",
+      "at": "2026-02-01T10:00:00+09:00",
+      "turns": [
+        {
+          "owner": "貸し出しの期間は 14 日に固定して。",
+          "assistant": "lend の期限を 14 日にしました。",
+          "edits": ["src/library.ts"]
+        },
+        {
+          "owner": "延滞料は取らない。図書館じゃないし。",
+          "assistant": "延滞料の仕組みは入れません。",
+          "edits": []
+        }
+      ]
+    },
+    {
+      "id": "s-lib-2",
+      "host": "claude-code",
+      "at": "2026-02-10T10:00:00+09:00",
+      "turns": [
+        {
+          "owner": "貸すのはメンバーにだけ。",
+          "assistant": "lend はメンバーだけを相手にします。",
+          "edits": []
+        },
+        {
+          "owner": "予約（ホールド）は v2 まで入れない。",
+          "assistant": "予約は v2 まで保留にします。",
+          "edits": []
+        }
+      ]
+    },
+    {
+      "id": "s-lib-3",
+      "host": "codex",
+      "at": "2026-02-20T10:00:00Z",
+      "turns": [
+        {
+          "owner": "Why is lend slow with many loans?",
+          "assistant": "lend scans every loan to check the member, so it is linear in the number of loans.",
+          "edits": []
+        },
+        {
+          "owner": "Try keeping loans in a Map keyed by member.",
+          "assistant": "A Map keyed by member broke the order the export needs, so I went back to the array.",
+          "edits": ["src/library.ts"]
+        }
+      ]
+    },
+    {
+      "id": "s-lib-4",
+      "host": "claude-code",
+      "at": "2026-03-01T10:00:00+09:00",
+      "turns": [
+        {
+          "owner": "更新（延長）は 1 回だけできるようにして。",
+          "assistant": "貸し出しの更新を 1 回まで許します。",
+          "edits": ["src/library.ts"]
         }
       ]
     }
@@ -369,6 +433,26 @@
           "sha": "c41a",
           "message": "feat: name backups by date",
           "date": "2026-03-26T14:00:00Z"
+        }
+      ],
+      "linked_issues": []
+    },
+    {
+      "number": 50,
+      "title": "Show due dates in local time and log loans",
+      "author": "maint-kai",
+      "association": "MEMBER",
+      "created_at": "2026-02-25T09:00:00Z",
+      "merged_at": "2026-02-25T15:00:00Z",
+      "body": "Due dates are shown in the member's local time. lend() logs each loan to the console.",
+      "comments": [],
+      "review_comments": [],
+      "resolved_threads": [],
+      "commits": [
+        {
+          "sha": "c50a",
+          "message": "feat: local due dates, loan log",
+          "date": "2026-02-25T14:00:00Z"
         }
       ],
       "linked_issues": []
