@@ -2101,6 +2101,7 @@ test("replace_aliases: glean replaces a saved record's search words, and clears 
       [[" "], undefined, /aliases must be 1 to 40 characters/],
       [["x".repeat(41)], undefined, /aliases must be 1 to 40 characters/],
       [["\u0000offset"], undefined, /aliases must be 1 to 40 characters/],
+      [["pay\u200Bload"], undefined, /aliases must be 1 to 40 characters/],
       [Array.from({ length: 13 }, (_, i) => `a${i}`), undefined, /aliases/],
     ] as const) {
       const run = await beginGlean(db.ingest, p, "g1");
@@ -2108,6 +2109,17 @@ test("replace_aliases: glean replaces a saved record's search words, and clears 
       await assert.rejects(saveText(db.ingest, run, p, root, replace(aliases, revision)), want);
     }
     assert.deepEqual(await found("offset"), [key], "a refused change leaves the aliases");
+    // 21 characters outside the BMP are 42 UTF-16 units; the schema counts characters
+    assert.match(
+      await saveText(
+        db.ingest,
+        await beginGlean(db.ingest, p, "g1"),
+        p,
+        root,
+        replace(["😀".repeat(21), "offset"]),
+      ),
+      /aliases replaced/,
+    );
 
     await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, replace([]));
     assert.deepEqual(await found("offset"), []);

@@ -219,6 +219,16 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - コミット: `fix(read): say a rename was not checked when git skipped detection (T20)`
   - 結果: red は直す前のコードで、名前も中身も変えた 1001 ファイルの移動に、移動先も `rename not checked` も出なかった。直した後、D の数×A の数が上限の 2 乗を超えたら、残った D のパスを「確かめていない」にする。`node --test --test-name-pattern="rename limit|rename probes|^rename|line separator" test/record.test.ts` → 4 pass
 
+- [x] T21: GitHub の Codex の 2 回目の P2 を直す（alias の長さを UTF-16 で数える、表示で消える見えない文字を受け付ける）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T15（同じ alias の判定）
+  - 変更: `server/src/glean.ts`, `server/src/record.ts`, `server/test/extract.test.ts`
+  - red: `cd server && node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → 絵文字 21 個の alias が拒まれる、ゼロ幅スペースを含む alias が通る
+  - 完了条件: `cd server && node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → 全件 pass
+  - コミット: `fix(glean): count alias length by characters and refuse invisible characters (T21)`
+  - 結果: red は直す前のコードで、ゼロ幅スペースを含む `pay\u200Bload` が check を通った。直した後、長さはコードポイントで数え（絵文字 21 個を受け付ける）、表示で変わる alias（`inline(a) !== a`、制御文字を含む）は trace では外し、replace_aliases では error。`node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → 2 pass。`bun run verify` → exit 0
+
 ## P5: リリース
 
 npm と 3 つの manifest を 0.6.25 にそろえる。
@@ -247,3 +257,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T15 / T08 のレビュー F1（NUL を含む alias は JS では 1 文字以上だが SQLite の trim が NUL で止まり、check が通って save だけが落ちる。trace の aliases も同じ判定で save が落ちる）と F2（Skill の例で同じ記録の 2 つの op に違う revision）を直すと判定した / T15 を足した
 - 2026-10-03 / T16 / Codex の全差分レビュー（high）は指摘 0 件。review-shipping は 2 件: read の場所の行のテストの穴は直す（T16）。20 万ファイルで無いパス 1 つにつき近いパスの計算が約 1.4 秒かかる件は、ロックの前で、無いパスがあるときだけ動くので見送り、PR の Declined findings に書く / T16 を足した
 - 2026-10-03 / T17〜T20 / PR #251 への GitHub の Codex のレビュー 4 件（P1 1、P2 3）を全部直すと判定した。P1 は review-shipping のコストの指摘と同じ論点で、前は見送ったが、1 記録に anchor が 20 個まで付くので MCP の時間切れを超えうるという再現（20 パス×2 万ファイルで 47 秒）を受けて直す。-l の上限は手元で再現した（名前を変えて内容も変えた 1001 ファイルで R が 0 件、A と D が 1001 件ずつ、標準エラーに警告） / T17〜T20 を足した
+- 2026-10-03 / T21 / b570955 への GitHub の Codex のレビュー 2 件（P2: 長さを UTF-16 で数えて schema の文字数と食い違う、ゼロ幅の文字が read の表示で消えて検索の語と食い違う）を直すと判定した。どちらも入力の端だが、判定を 1 つにそろえるだけで済む / T21 を足した

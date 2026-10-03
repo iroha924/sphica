@@ -633,8 +633,8 @@ export async function checkRecord(
     }
 
     const aliases = [...new Set(u.aliases.map((a) => a.trim()))];
-    // SQLite's trim stops at NUL, so the schema would refuse a control character the length check here lets through
-    const bad = aliases.filter((a) => !a || a.length > 40 || /\p{Cc}/u.test(a));
+    // Characters as SQLite counts them; a word read would show changed (control or invisible characters) would not match its index
+    const bad = aliases.filter((a) => !a || [...a].length > 40 || inline(a) !== a);
     if (bad.length)
       problems.push(
         `${key}: aliases must be 1 to 40 characters; left out ${bad.map((a) => JSON.stringify(a)).join(", ")}`,
