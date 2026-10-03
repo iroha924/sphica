@@ -52,7 +52,7 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `fix(capture): keep a running turn's starting point across compaction (T03)`
   - 結果: red 実測: `--test-name-pattern="compact"` → `AssertionError: claude-code`（`x.ts` が出ず actual: []）。直した後 `node --test test/capture.test.ts` → 43 pass / 0 fail（両ホストの compact と startup・resume・clear）。`bun run typecheck` → エラーなし
 
-- [ ] T04: `fit()` の `redacted` を残した部分だけで決める
+- [x] T04: `fit()` の `redacted` を残した部分だけで決める
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -60,6 +60,7 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - red: `cd server && node --test --test-name-pattern="redacted" test/capture.test.ts` → 捨てた部分にだけ鍵がある切り詰めの発言で `redacted` が true になり落ちる（先頭と末尾の窓それぞれ）
   - 完了条件: `cd server && node --test test/capture.test.ts` → pass。境目をまたぐ鍵と、境目が複数バイト文字の場合は true のまま
   - コミット: `fix(capture): mark a cut message redacted only when a mask is in the kept text (T04)`
+  - 結果: red 実測: `--test-name-pattern="redacted only"` → `AssertionError: start window`（最初の assert で止まるので end window の red は個別には見ていない）。直した後 `node --test test/capture.test.ts` → 44 pass / 0 fail（窓の先と末尾、残す部分、境目をまたぐ鍵、複数バイトの境目）
 
 ## P2: trace 待ちを 14 日にし、受け入れケースを足す
 

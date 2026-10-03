@@ -87,6 +87,35 @@ test("a message over 128 KiB keeps only its start and end and records the origin
   assert.ok(bytes(big) > MAX_MESSAGE);
 });
 
+test("a cut message is marked redacted only when a mask is in the text it keeps", () => {
+  const key = "sk-proj-abcdefghijklmnopqrstuvwxyz0123";
+  const KEEP = 8 * 1024;
+  const fill = (n: number) => "x".repeat(n);
+  const middle = "中".repeat(50_000);
+  // A key in the masked window but past the kept part, at the start and at the end
+  assert.equal(fit(`${fill(KEEP + 100)} ${key} ${middle}${fill(KEEP * 2)}`).redacted, false, "start window");
+  assert.equal(fit(`${fill(KEEP * 2)}${middle} ${key} ${fill(KEEP + 100)}`).redacted, false, "end window");
+  // A key inside the kept part, and one across the cut
+  assert.equal(fit(`${key} ${middle}${fill(KEEP * 2)}`).redacted, true, "kept start");
+  assert.equal(fit(`${fill(KEEP * 2)}${middle} ${key}`).redacted, true, "kept end");
+  assert.equal(
+    fit(`${fill(KEEP - 10)} ${key} ${middle}${fill(KEEP * 2)}`).redacted,
+    true,
+    "across the start cut",
+  );
+  assert.equal(
+    fit(`${fill(KEEP * 2)}${middle} ${key} ${fill(KEEP - 10)}`).redacted,
+    true,
+    "across the end cut",
+  );
+  // Multibyte text at the cut, with the key past it
+  assert.equal(
+    fit(`${"頭".repeat(KEEP)} ${key} ${middle}${"尾".repeat(KEEP)}`).redacted,
+    false,
+    "multibyte cut",
+  );
+});
+
 // [input, fragment that must not remain]. Add each shape that reviews showed slipping through.
 const LEAKS: [string, string][] = [
   ["OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz0123", "sk-proj-abc"],

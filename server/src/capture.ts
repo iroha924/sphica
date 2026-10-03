@@ -144,7 +144,8 @@ export function fit(body: string): {
   return {
     body: `${a}\n\n[${cut.toLocaleString("en-US")} bytes in the middle not saved]\n\n${z}`,
     truncated: true,
-    redacted: mask(start) !== start || mask(end) !== end,
+    // Masking leaves the text before its first mask as it was, so a kept part equal to the unmasked cut holds no mask
+    redacted: a !== head(start, KEEP) || z !== tail(end, KEEP),
     originalBytes: all,
   };
 }
