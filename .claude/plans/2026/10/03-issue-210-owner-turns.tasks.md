@@ -22,14 +22,15 @@ base: main
 
 SDK のターンをオーナーの発言にせず、中断と compaction をまたいで作業ツリーの変更を別のターンに付けない。
 
-- [ ] T01: `sdk-` で始まる entrypoint をオーナーのターンにせず、0.6.24 にそろえる
+- [x] T01: `sdk-` で始まる entrypoint をオーナーのターンにせず、0.6.24 にそろえる
   - 種別: 修正
   - 計画: S1, S7
   - 依存: なし
   - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern="sdk-" test/capture.test.ts` → `sdk-ts` と `sdk-py`、親の目印が一致する `sdk-ts` の assert が true を返して落ちる
   - 完了条件: `cd server && node --test test/capture.test.ts` → pass。`cli`・`claude-desktop`・`remote_desktop`・未設定は true のまま。`bun run release:plan -- --base ea92016e` → `plugin`。4 つのファイルが 0.6.24
-  - コミット: `fix(capture): never count a turn from an Agent SDK entrypoint as the owner's, and bump to 0.6.24 (T01)`
+  - コミット: `fix(capture): never count an Agent SDK turn as the owner's, and bump to 0.6.24 (T01)`
+  - 結果: red 実測: `node --test --test-name-pattern="sdk-" test/capture.test.ts` → `AssertionError: sdk-ts without a marker`。直した後 `node --test test/capture.test.ts` → 38 pass / 0 fail。4 つのファイルを 0.6.24 に更新（release:plan はこのコミットの後に流して plugin を確かめる）
 
 - [ ] T02: 起点にターン id を持たせ、別の id の注入でないプロンプトと Codex の Interrupt でターンを終える
   - 種別: 修正

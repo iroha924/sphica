@@ -12,8 +12,9 @@
 //     (to keep a launch from being recorded, set a value that matches no session. The value is that session's id so that, if this
 //     variable ever reaches the hook's own environment, it matches your own session id and recording does not stop)
 //   - another Codex started from a Codex shell inherits the parent's CODEX_THREAD_ID. If it differs from the hook input's session id, it is a child
-//   - headless runs that inherit no marker (claude -p from launchd or Codex) have CLAUDE_CODE_ENTRYPOINT set to sdk-cli in the
-//     hook's environment (measured in 2.1.269; undocumented). Sessions people type in are cli
+//   - headless runs (claude -p) and Agent SDK runs have a CLAUDE_CODE_ENTRYPOINT starting with sdk- (sdk-cli, sdk-ts, sdk-py), checked
+//     before the marker. Attended hosts set other values (cli, claude-desktop), so only sdk- values are excluded. An SDK agent started
+//     outside the Bash tool that inherits cli and no marker cannot be told apart
 //   - even within your session, background task completion and stop notices, and messages from channels, subagents, teammates,
 //     or other sessions arrive at UserPromptSubmit (notices measured in 2.1.269). They are dropped by fixed shapes (INJECTED)
 
@@ -213,7 +214,7 @@ export type HookInput = {
   tool_response?: unknown;
 };
 
-/** Whether this is your turn. Drops subagents, children started by agents, and headless runs that inherit no marker. */
+/** Whether this is your turn. Drops subagents, children started by agents, and headless and Agent SDK runs. */
 export function isOwnerTurn(
   input: HookInput,
   parent = process.env.SPHICA_PARENT_SESSION,
@@ -223,8 +224,10 @@ export function isOwnerTurn(
   if (!input.session_id || input.agent_id) return false;
   // A child started from a Codex shell inherits the parent's CODEX_THREAD_ID, while the hook input carries the child's own session id.
   if (codexParent && codexParent !== input.session_id) return false;
+  // The SDK sets sdk-* only when the entrypoint is unset, so a matching marker with it is an SDK process that inherited the env file.
+  if (entrypoint?.startsWith("sdk-")) return false;
   if (parent) return parent === input.session_id;
-  return entrypoint !== "sdk-cli";
+  return true;
 }
 
 /**

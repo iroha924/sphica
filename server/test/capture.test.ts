@@ -61,6 +61,15 @@ test("subagents, children started by an agent, and headless turns without the ma
   assert.equal(isOwnerTurn({}, undefined, "cli"), false, "input without a session");
 });
 
+test("sdk- entrypoints are never the owner's turn, even with a matching parent marker; attended hosts still are", () => {
+  for (const sdk of ["sdk-ts", "sdk-py", "sdk-cli"]) {
+    assert.equal(isOwnerTurn({ session_id: "s1" }, undefined, sdk), false, `${sdk} without a marker`);
+    assert.equal(isOwnerTurn({ session_id: "s1" }, "s1", sdk), false, `${sdk} with a matching marker`);
+  }
+  for (const attended of ["cli", "claude-desktop", "claude-vscode", "remote_desktop", undefined])
+    assert.equal(isOwnerTurn({ session_id: "s1" }, undefined, attended), true, String(attended));
+});
+
 test("a message over 128 KiB keeps only its start and end and records the original size", () => {
   const small = fit("短い");
   assert.deepEqual(small, { body: "短い", truncated: false, redacted: false, originalBytes: bytes("短い") });
