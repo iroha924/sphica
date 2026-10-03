@@ -265,7 +265,7 @@ async function describe(
     .orderBy("id", "desc")
     .executeTakeFirst();
   const terms: string[] = aliases ? JSON.parse(aliases.terms) : [];
-  if (terms.length) out.push(`Aliases (search only): ${terms.map((t) => inline(head(t, 40))).join(", ")}`);
+  if (terms.length) out.push(`Aliases (search only): ${terms.map((t) => inline(t)).join(", ")}`);
   out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
   return out.join("\n");
 }

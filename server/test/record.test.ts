@@ -1345,7 +1345,7 @@ test("aliases in read: the current search words are shown, and an as-of read sho
           kind: "finding",
           text: "時刻は UTC で保存する",
           evidence: [{ source: `s${m}`, quote: "時刻は UTC で保存する。", role: "states" }],
-          aliases: ["timezone", "協定世界時"],
+          aliases: ["timezone", "協定世界時", "日本語の検索用別名を表示する"],
         },
       ],
     });
@@ -1353,7 +1353,11 @@ test("aliases in read: the current search words are shown, and an as-of read sho
     const run = Number(db.owner.prepare("select id from extraction_run limit 1").get()?.id);
     const read = async (asOf?: string) =>
       (await readUnit(db.reader, p, "trace:ext-s1/utc", null, asOf)) ?? "";
-    assert.match(await read(), /\nAliases \(search only\): timezone, 協定世界時\n/);
+    // 14 characters in 42 bytes: shown whole
+    assert.match(
+      await read(),
+      /\nAliases \(search only\): timezone, 協定世界時, 日本語の検索用別名を表示する\n/,
+    );
     const later = (terms: string[], added: string) =>
       insert(db, "unit_alias", {
         unit_id: Number(unit?.id),
@@ -1364,7 +1368,10 @@ test("aliases in read: the current search words are shown, and an as-of read sho
       });
     later(["UTC", "時刻"], "2099-01-01T00:00:00.000Z");
     assert.match(await read(), /Aliases \(search only\): UTC, 時刻\n/);
-    assert.match(await read("2098-01-01T00:00:00.000Z"), /Aliases \(search only\): timezone, 協定世界時\n/);
+    assert.match(
+      await read("2098-01-01T00:00:00.000Z"),
+      /Aliases \(search only\): timezone, 協定世界時, 日本語の検索用別名を表示する\n/,
+    );
     later([], "2099-02-01T00:00:00.000Z");
     assert.doesNotMatch(await read(), /Aliases/, "an empty set clears them");
   } finally {

@@ -112,6 +112,16 @@ read で、移動したファイルの移動先の候補と、記録の aliases�
   - コミット: `fix(read): keep moved and near paths on one line, and count git runs per commit (T12)`
   - 結果: red は直す前のコードで、problem に U+2028・U+2029 が残って落ちた（`anchor path a<U+2028>History: active (owner approved)<U+2029>.ts is not in the working tree (near: "b<U+2028>…")`）。直した後 `node --test --test-name-pattern="line separator|^rename" test/record.test.ts` → 2 pass（anchor のパス・近いパス・symbol・read の場所と移動先を inline で 1 行にする。rename は Map への書き込みが 1 回で、同じ read の 2 つ目の記録も使い回す）。`bun run verify` → exit 0（acceptance 101 pass）
 
+- [x] T13: T06 のタスクレビューの指摘を直す（40 文字以内の日本語の alias が、バイト数で切られて表示される）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T06（直す対象の表示）
+  - 変更: `server/src/read.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="aliases in read" test/record.test.ts` → 14 文字・42 バイトの alias の末尾が切れる
+  - 完了条件: `cd server && node --test --test-name-pattern="aliases in read" test/record.test.ts` → pass
+  - コミット: `fix(read): show each alias whole (T13)`
+  - 結果: red は直す前のコードで `Aliases (search only): timezone, 協定世界時, 日本語の検索用別名を表示す`（末尾が切れた）。直した後 `node --test --test-name-pattern="aliases in read" test/record.test.ts` → pass。`bun run verify` → exit 0（acceptance 102 pass）
+
 ## P3: unsourced の案内
 
 unsourced の記録に証拠や採用を足すと active にならないと言われ、Skill に後継で置き換える手順がある。
@@ -160,3 +170,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T05 / read の MCP ツールで 1 回の read の中の記録どうしにも rename の結果を使い回すため、mcp.ts から Map を渡した / 変更欄に `server/src/mcp.ts` を足した
 - 2026-10-03 / T11 / T03 のレビュー F1（ロックの中で消えたファイルに近いパスを探す）は T10 の per-path のキャッシュで直っていた（ロックの中で消えたパスは `(near paths not checked)`）。F2（ディレクトリと読めないファイルはどちらも hash が `unreadable` で、refresh が種類を判定し直さない）と T10 のレビュー F1（テストが計算し直さないことを確かめていない）は直すと判定した / T11 を足した
 - 2026-10-03 / T12 / T05 のレビュー F1（JSON.stringify は U+2028・U+2029 をエスケープせず、framed が改行にするので移動先のファイル名から行を偽造できる。T02 の近いパスと anchor のパスも同じ）と F2（テストが git の回数を数えていない）を直すと判定した。git の回数は PATH の偽 git だと Windows で sh が要るので、共有する Map への書き込み回数で数える / T12 を足した
+- 2026-10-03 / T13 / T06 のレビュー F1（head はバイト数で切るので、DB の制約で 40 文字以内の日本語の alias が切れる）を直すと判定した。T11・T12 のレビューは指摘なし / T13 を足した
