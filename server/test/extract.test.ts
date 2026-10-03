@@ -1948,6 +1948,21 @@ test("glean: unsourced cannot become active, adding evidence or adoption says so
       "the adoption is kept",
     );
 
+    // An adoption alone is told the same
+    const adopted = await glean({
+      ops: [
+        {
+          op: "adopt",
+          unit: "glean:csv",
+          revision: unit("glean:csv").revision,
+          source: `s${older}`,
+          quote: "これで決まり。",
+        },
+      ],
+    });
+    assert.match(adopted.checked, said);
+    assert.match(adopted.checked, /save a successor that supersedes it/);
+
     // A successor citing the found source becomes active and replaces it, for a decision and for a finding
     const successor = (key: string, kind: string, replaces: string) => ({
       key,

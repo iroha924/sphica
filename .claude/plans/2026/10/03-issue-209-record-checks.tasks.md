@@ -136,6 +136,16 @@ unsourced の記録に証拠や採用を足すと active にならないと言�
   - コミット: `fix(glean): say an unsourced record cannot become active when evidence or adoption is added (T07)`
   - 結果: red は直す前のコードで check が `'✓ 0 records and 2 changes can be saved'`（problem なし）。直した後 `node --test --test-name-pattern="unsourced cannot become active" test/extract.test.ts` → 1 pass（add_evidence と adopt で 1 記録につき 1 回、candidate には後継の案内、引用と採用は保存して candidate のまま、unsourced の decision と finding を後継で置き換えて superseded、superseded には後継の案内なし）。受け入れケース glean-17 は直す前のコードで落ち、直した後に通る。`bun run verify` → exit 0（acceptance 102 pass）
 
+- [x] T14: T07 のタスクレビューの指摘を直す（adopt だけを送ったときの警告をテストが確かめていない）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T07（直す対象のテスト）
+  - 変更: `server/test/extract.test.ts`
+  - red: glean.ts の条件から `op.op === "adopt"` を一時的に外して `cd server && node --test --test-name-pattern="unsourced cannot become active" test/extract.test.ts` → 足したケースが落ちる（今のテストは通ってしまう）
+  - 完了条件: `cd server && node --test --test-name-pattern="unsourced cannot become active" test/extract.test.ts` → pass
+  - コミット: `test(glean): check the unsourced warning for an adoption alone (T14)`
+  - 結果: glean.ts の条件から `op.op === "adopt"` を外すと、足したケースが `The input did not match the regular expression /glean:csv is unsourced and cannot become active…/` で落ちた。戻すと `node --test --test-name-pattern="unsourced cannot become active" test/extract.test.ts` → pass（glean.ts は差分なしに戻したことを git diff で確かめた）。`bun run verify` → exit 0
+
 ## P4: replace_aliases
 
 glean で保存済みの記録の aliases を置き換え、消せる。
@@ -173,3 +183,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T12 / T05 のレビュー F1（JSON.stringify は U+2028・U+2029 をエスケープせず、framed が改行にするので移動先のファイル名から行を偽造できる。T02 の近いパスと anchor のパスも同じ）と F2（テストが git の回数を数えていない）を直すと判定した。git の回数は PATH の偽 git だと Windows で sh が要るので、共有する Map への書き込み回数で数える / T12 を足した
 - 2026-10-03 / T13 / T06 のレビュー F1（head はバイト数で切るので、DB の制約で 40 文字以内の日本語の alias が切れる）を直すと判定した。T11・T12 のレビューは指摘なし / T13 を足した
 - 2026-10-03 / T08 / record.ts は変える必要がなかった。post-glean の検索を確かめる `search_not_include` を driver に足した / 変更欄から `server/src/record.ts` を外し、`server/evals/acceptance/driver.ts` を足した
+- 2026-10-03 / T14 / T07 のレビュー F1（add_evidence と adopt を同じバッチで送るので、adopt の条件を外してもテストが通る）を直すと判定した / T14 を足した
