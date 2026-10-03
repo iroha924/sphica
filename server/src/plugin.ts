@@ -242,6 +242,7 @@ export function observe(
   cwdRoot: string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  execPath: string = process.execPath,
 ): Seen {
   const install = (root: string): Install => ({
     version: versionAt(root),
@@ -333,11 +334,11 @@ export function observe(
   // **This is a separate path from the plugin cache.** `claude plugin update` does not update it, and on the day the database
   // revision goes up, only the old CLI fails with "expects revision N".
   let global: Seen["global"] = null;
-  const cli = npmCli(process.execPath, platform);
+  const cli = npmCli(execPath, platform);
   if (!cli && platform === "win32") global = { unknown: "no npm CLI next to node" };
   else
     try {
-      const [cmd, args] = cli ? [process.execPath, [cli, "root", "-g"]] : ["npm", ["root", "-g"]];
+      const [cmd, args] = cli ? [execPath, [cli, "root", "-g"]] : ["npm", ["root", "-g"]];
       const out = execFileSync(cmd, args, {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -437,6 +438,7 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
   if (s.repository) row("repository", packageInstall(s.repository));
   row("Running CLI", packageInstall(s.cli), packageAgainst(s.cli).note);
   if (unknown(s.global)) say("none", "npm i -g CLI", `unknown (${s.global.unknown})`);
+  else if (s.global === null) say("none", "npm i -g CLI", "not installed");
   else if (s.global && path.resolve(s.global.root) !== path.resolve(s.cli.root)) {
     const { note, update } = packageAgainst(s.global);
     if (update) todo.add("global");

@@ -74,6 +74,16 @@ deliver.js から zod を外し、サイズの上限と zod の混入を bundle 
   - コミット: `build: check bundle size budgets and keep zod out of hook bundles`
   - 結果: `bun run test` → 620 pass（bundle-budget 5 件を含む）、`bun run bundle` → exit 0、`bun run knip` → 指摘なし。deliver.ts に `export const probe = z.string()` を一時的に足すと `bun run bundle` が「1066228 bytes, over its budget of 429000」と「bundles zod」で exit 1 になり、戻すと通った
 
+- [x] T09: doctor の Windows のテストを手元の node の配置から切り離し、npm i -g が入っていないときも行を出す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T03（直す対象の doctor の観察）
+  - 変更: `server/src/plugin.ts`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-name-pattern "not installed" test/plugin.test.ts` → 「npm i -g CLI  not installed」の行が無く落ちる
+  - 完了条件: `bun run test` → pass
+  - コミット: `fix(doctor): show a missing npm i -g CLI and test Windows apart from the local node`
+  - 結果: red は上のとおり落ちた（Input に npm i -g の行が無い）。テストの環境依存（node の隣に npm-cli.js がある Windows で別の結果になる）は手元の macOS では再現しない（Codex がメモリ上で再現）。observe に execPath を引数で渡せるようにし、テストは npm の無い一時ディレクトリの node.exe を渡す。`bun run test` → 621 pass
+
 ## P3: パックしたフックを定義どおりに動かして測る
 
 Windows の CI で、フックの起動の上乗せを測り、パックした hooks.json から capture と deliver を最後まで動かす。
@@ -108,3 +118,4 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T04 / 変更欄に `server/test/review.test.ts` を足した（前: 4 ファイル、後: 5 ファイル）/ checkFindings の import 元が変わるため
 2026-10-03 / T05 / 変更欄と完了条件を直した（前: `scripts/lib/bundle-budget.test.mjs` と `package.json`、`node --test scripts/lib/bundle-budget.test.mjs`。後: `server/test/bundle-budget.test.ts` と `scripts/lib/bundle-budget.d.mts`、`bun run test`）/ scripts/lib のモジュールは server/test から試す慣習に合わせた
 2026-10-03 / T05 / knip が T03 で足した `Unknown` 型の export を未使用と指摘したので、T05 のコミットで export を外した（変更欄に `server/src/plugin.ts` を足した）
+2026-10-03 / T03 / Codex のタスクレビュー F1（Windows のテストが node の隣の npm-cli.js の有無に依存）と F2（npm i -g が入っていないとき行が無い）/ 両方採り、修正タスク T09 を足した

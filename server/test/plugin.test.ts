@@ -74,6 +74,11 @@ test("an outdated npm i -g CLI shows in both the row and the update steps", () =
   );
 });
 
+test("says when the npm i -g CLI is not installed", () => {
+  const out = stripVTControlCharacters(report(seen({ global: null })).lines.join("\n"));
+  assert.match(out, /○ npm i -g CLI\s+not installed/);
+});
+
 test("no npm i -g row when it is the same install as the running CLI", () => {
   const same = plugin("one", "0.33.12");
   const { lines } = report(seen({ cli: same, global: same }));
@@ -356,7 +361,9 @@ test("reports unobservable things as unknown, not missing", () => {
 test("on Windows, doctor says what it could not inspect instead of starting npm, claude, or ps by name", () => {
   const empty = fs.mkdtempSync(path.join(tmp, "path-"));
   fs.writeFileSync(path.join(empty, "claude.cmd"), "");
-  const s = observe(tmp, "win32", { PATH: empty, PATHEXT: ".COM;.EXE;.BAT;.CMD" });
+  // A node with no npm beside it, so the result does not depend on how the machine running the test installed node
+  const node = path.join(fs.mkdtempSync(path.join(tmp, "bare-node-")), "node.exe");
+  const s = observe(tmp, "win32", { PATH: empty, PATHEXT: ".COM;.EXE;.BAT;.CMD" }, node);
   assert.deepEqual(s.running, { unknown: "not checked on Windows" });
   assert.deepEqual(s.claude, { unknown: "no claude.exe on PATH (an npm install puts claude.cmd there)" });
   assert.deepEqual(s.global, { unknown: "no npm CLI next to node" });
