@@ -22,6 +22,13 @@ export type Build = { build?: string | null; variant: string; bundle?: string; r
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
 
+/** A count as a rate over its denominator, with the unknowns shown beside it (never counted either way). */
+export const rate = <T>(rows: T[], yes: (r: T) => boolean, unknown: (r: T) => boolean) => {
+  const n = rows.length;
+  const y = rows.filter(yes).length;
+  return `${y} / ${n} (${n ? fmt(y / n) : "n/a"}, unknown ${rows.filter(unknown).length})`;
+};
+
 /** Scores of graded runs in a group, with how many runs were started, excluded, and left ungraded. */
 function summary(rows: Graded[]) {
   const graded = rows.filter((r) => r.grade);
@@ -113,7 +120,28 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
     (r) => `${r.model} ${r.condition}`,
   ))
     lines.push(
-      `${k}: ${rows.filter((r) => r.grade?.proposes_rejected === "yes").length} / ${rows.length} (unknown ${rows.filter((r) => r.grade?.proposes_rejected === "unknown").length})`,
+      `${k}: ${rate(
+        rows,
+        (r) => r.grade?.proposes_rejected === "yes",
+        (r) => r.grade?.proposes_rejected === "unknown",
+      )}`,
+    );
+
+  // A conflict is handled when the answer names both sides and the patch settles neither; unknown is never counted as handled
+  lines.push(
+    "",
+    "## Conflicts handled (named both sides, implemented neither), over graded runs of tasks with a Conflict",
+  );
+  for (const [k, rows] of groupBy(
+    original.filter((r) => r.grade && r.grade.named_conflict !== "not_applicable"),
+    (r) => `${r.model} ${r.condition}`,
+  ))
+    lines.push(
+      `${k}: ${rate(
+        rows,
+        (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
+        (r) => r.grade?.implemented_one_side === "unknown",
+      )}`,
     );
 
   // Every gold run of a counterfactual task counts, graded or not, so a side whose runs all failed to grade still shows it was run
@@ -145,6 +173,8 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
       "implements_rejected",
       "proposes_rejected",
       "followed",
+      "named_conflict",
+      "implemented_one_side",
       "flags",
     ] as const;
     const shown = (g: Grade | undefined, f: (typeof fields)[number]) =>

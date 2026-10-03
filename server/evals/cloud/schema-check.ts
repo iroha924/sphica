@@ -12,6 +12,8 @@ const gradeSchema = z.strictObject({
   implements_rejected: z.enum(["yes", "no", "not_applicable", "unknown"]),
   proposes_rejected: z.enum(["yes", "no", "not_applicable", "unknown"]),
   followed: z.enum(["presented", "other", "neither", "not_applicable"]),
+  named_conflict: z.enum(["yes", "no", "not_applicable"]),
+  implemented_one_side: z.enum(["yes", "no", "not_applicable", "unknown"]),
   flags: z.array(z.enum(["stopped_at_plan", "read_scaffolding", "off_task"])),
 });
 

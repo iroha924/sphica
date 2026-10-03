@@ -48,6 +48,8 @@ const grade: Grade = {
   implements_rejected: "no",
   proposes_rejected: "no",
   followed: "not_applicable",
+  named_conflict: "not_applicable",
+  implemented_one_side: "not_applicable",
   flags: [],
 };
 
@@ -996,7 +998,7 @@ test("the report splits by group, lists gold minus inject per task with every ru
     out,
     /t1 codex: gold n 2 \(g1 2, g2 1\) inject n 3 \(i1 0, i2 excluded, i3 1\), difference of mean scores 1\.00 \(preliminary/,
   );
-  assert.match(out, /codex inject: 1 \/ 2 \(unknown 0\)\n/);
+  assert.match(out, /codex inject: 1 \/ 2 \(0\.50, unknown 0\)\n/);
   assert.match(out, /t1 codex gold original: n 2, presented 2, other 0/);
   assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 1/);
   assert.match(out, /runs by codex: 0 \/ 5 agree on every graded field \(Claude.s grade missing 3\)/);
@@ -1594,4 +1596,50 @@ test("grader agreement compares flags as a set, so a repeated flag is not a disa
     [{ id: "t1" }],
   ).join("\n");
   assert.match(out, /runs by codex: 1 \/ 1 agree/);
+});
+
+test("a conflict task's grade must say whether both sides were named and whether one was implemented", () => {
+  const conflictTask = { id: "c", prompt: "p", expect: "e", conflict: "retry 3 times against no retries" };
+  const r = {
+    ...row,
+    answer: "a",
+    patch: "",
+    patch_truncated: false,
+    delivered: "yes" as const,
+    found: "yes" as const,
+    excluded: null,
+  };
+  assert.match(blindPrompt(conflictTask, r), /## Conflict[^\n]*\nretry 3 times against no retries/);
+  assert.match(blindPrompt({ ...conflictTask, conflict: undefined }, r), /## Conflict[^\n]*\n\(none\)/);
+  const out = (g: Partial<Grade>) => ({
+    status: 0,
+    output: JSON.stringify({
+      ...grade,
+      implements_rejected: "not_applicable",
+      proposes_rejected: "not_applicable",
+      ...g,
+    }),
+  });
+  assert.deepEqual(receiveGrade(out({}), false, false, false, true), {
+    ungraded: "named_conflict: not_applicable exactly when the task has no Conflict",
+  });
+  assert.ok(
+    "graded" in
+      receiveGrade(out({ named_conflict: "yes", implemented_one_side: "no" }), false, false, false, true),
+  );
+  assert.deepEqual(
+    receiveGrade(out({ named_conflict: "yes", implemented_one_side: "no" }), false, false, false, false),
+    {
+      ungraded: "named_conflict: not_applicable exactly when the task has no Conflict",
+    },
+  );
+  // A cut patch cannot prove that neither side was implemented
+  const cut = receiveGrade(
+    out({ named_conflict: "yes", implemented_one_side: "no" }),
+    true,
+    false,
+    false,
+    true,
+  );
+  assert.equal("graded" in cut && cut.graded.implemented_one_side, "unknown");
 });

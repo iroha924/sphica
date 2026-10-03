@@ -128,13 +128,14 @@ base: main
   - コミット: `test(evals): add delivered stale, abstention, conflict, and poisoned fixtures (T06)`
   - 結果: `node --test --test-timeout=120000 test/eval-fixture.test.ts` → pass 2, fail 0（thumb の 2 件・shelf の 2 件・backup の 1 件が届き、cover の衝突の 2 件と candidate は届かず、7 件とも active、conflicts のリンクは未解決で 1 本、upload の evidence は CONTRIBUTOR だけ）。`node --test evals/acceptance/run.ts` → pass 105, fail 0。`node evals/cloud/build.ts --project tsundoku` → ビルドでき、スロットの src/thumb.ts は COVER_WIDTH = 320、plan.json は対象タスクの inject 5・gold 3
 
-- [ ] T07: 採点に衝突の欄と re-proposal の率を足す
+- [x] T07: 採点に衝突の欄と re-proposal の率を足す
   - 種別: 追加
   - 計画: S6
   - 依存: なし
-  - 変更: `server/evals/cloud/grading.ts`, `server/evals/cloud/grade.schema.json`, `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/grading.ts`, `server/evals/cloud/schema-check.ts`, `server/evals/cloud/grade.schema.json`, `server/evals/cloud/grade.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/tasks.json`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts && node evals/cloud/schema-check.ts` → `named_conflict` と `implemented_one_side` の検査と、re-proposal を分母と unknown つきの率で出すテストが pass し、schema が zod と一致
   - コミット: `feat(evals): grade conflicts and report re-proposals as a rate (T07)`
+  - 結果: `node evals/cloud/schema-check.ts --write` で grade.schema.json を作り直し、`node --test test/eval-grade.test.ts` → pass 45, fail 0（衝突の欄は「Conflict のあるタスクでだけ not_applicable でない」、切れた patch の implemented_one_side は unknown、report に衝突の成功率と re-proposal の率）
 
 - [ ] T08: report に old と new を並べる `--compare` を足す
   - 種別: 追加
@@ -190,3 +191,4 @@ base: main
 - 2026-10-04 / T05 / Codex レビュー 4 件を全部採った / T16
 - 2026-10-04 / T06 / stale タスクは「今のコード」がレコードと違う必要がある / tasks.json の project に `current`（スロットだけに当てるファイル）を足し、build.ts の files() で当てる。fixture の手順は build-lib.ts の `fixtureSteps` に切り出し、ビルドとテストで共有（変更欄に build.ts・build-lib.ts を足した）
 - 2026-10-04 / T06 / crowded はエージェントのタスクを作らず、T09 のベンチの中で組み立てる（エージェントの fixture に混ぜると他のタスクの配信が変わる）。stale の記録は「今のコードで anchor が無い」ので、old でも pre_read で path が合えば届く（テストで確認）
+- 2026-10-04 / T07 / 衝突のタスクを grader に知らせる欄が要る / tasks.json に `conflict`（両側の説明）を足し、grade.ts が渡す。grader の一致の比較に新しい 2 欄を足した（変更欄に schema-check.ts・grade.ts・tasks.json を足した）
