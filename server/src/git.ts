@@ -27,12 +27,14 @@ export function commitHolds(root: string, commit: string, rel: string): boolean 
 /** The repository's tracked and untracked (not ignored) files, or null when git cannot list them. */
 export function repoFiles(root: string): string[] | null {
   try {
-    const out = cleanGit(
-      root,
-      ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-      32 * 1024 * 1024,
-    );
-    return [...new Set(out.toString("utf8").split("\0").filter(Boolean))];
+    const list = (...args: string[]) =>
+      cleanGit(root, ["ls-files", "-z", ...args], 32 * 1024 * 1024)
+        .toString("utf8")
+        .split("\0")
+        .filter(Boolean);
+    // --cached keeps a file deleted from the working tree until the deletion is staged
+    const deleted = new Set(list("--deleted"));
+    return [...new Set(list("--cached", "--others", "--exclude-standard"))].filter((p) => !deleted.has(p));
   } catch {
     return null;
   }

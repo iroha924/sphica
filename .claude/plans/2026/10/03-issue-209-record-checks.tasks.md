@@ -189,7 +189,7 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - コミット: `fix(record): bound the work of finding near paths (T17)`
   - 結果: red は直す前のコードで 100 文字近い無いパス 20 個と 2 万ファイルに 18937 ms。直した後 `node --test --test-name-pattern="near paths|review fixes|anchor problem|line separator" test/record.test.ts` → 5 pass（3 秒未満、候補を出すのは 5 パスまで）。順位は「同じ名前 → 名前の距離 → パスの共通の先頭が長い → 長さが近い」に変え、`src/date.ts` の候補は `lib/date.ts`, `src/dates.ts`, `src/data.ts` の順になった（テストの期待を直した）。`bun run verify` → exit 0（acceptance 103 pass）
 
-- [ ] T18: GitHub の Codex の P2 を直す（作業ツリーで消したが index に残るファイルを近いパスに出す）
+- [x] T18: GitHub の Codex の P2 を直す（作業ツリーで消したが index に残るファイルを近いパスに出す）
   - 種別: 修正
   - 計画: S1
   - 依存: T17（同じ候補の一覧を直す）
@@ -197,6 +197,7 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - red: `cd server && node --test --test-name-pattern="near paths:" test/record.test.ts` → index に残る消したファイルが候補に出る
   - 完了条件: `cd server && node --test --test-name-pattern="near paths:" test/record.test.ts` → pass
   - コミット: `fix(record): leave files deleted from the working tree out of near paths (T18)`
+  - 結果: red は直す前のコードで、消した `src/data.ts` が候補の先頭に出た（`(near: "src/data.ts", "lib/date.ts", "src/dates.ts")`）。直した後 `node --test --test-name-pattern="near paths:" test/record.test.ts` → pass（`git ls-files --deleted` の分を除く）。`bun run verify` → exit 0（acceptance 103 pass）
 
 - [ ] T19: GitHub の Codex の P2 を直す（read が anchor の commit の数だけ git を流す）
   - 種別: 修正

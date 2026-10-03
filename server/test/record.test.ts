@@ -1154,6 +1154,12 @@ test("near paths: a missing anchor path is shown the files near it, the same fil
       /zzz\/qqqqqqqq\.go is not in the working tree; fix/,
     );
 
+    // A tracked file deleted from the working tree (not staged) is not suggested
+    fs.rmSync(path.join(root, "src/data.ts"));
+    const gone = await problem(t, "data-gone", "src/datx.ts");
+    assert.match(gone, /\(near: "lib\/date\.ts", "src\/dates\.ts"\)/);
+    assert.doesNotMatch(gone, /src\/data\.ts/);
+
     // git cannot list the files: the problem comes without suggestions
     fs.rmSync(path.join(root, ".git"), { recursive: true, force: true });
     assert.match(await problem(t, "nogit", "src/date.ts"), /src\/date\.ts is not in the working tree; fix/);
