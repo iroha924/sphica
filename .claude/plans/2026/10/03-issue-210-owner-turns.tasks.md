@@ -94,6 +94,15 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `test(acceptance): cover SDK turns, interrupted turns, and compaction in capture (T06)`
   - 結果: capture-15〜17 を足し、driver に session の entrypoint・ターンの shell_edits・compact・ends: interrupt・owner_edits_after と、期待の no_source・no_edit_observation を足した。main の capture.ts に差し替えて流す → 3 件とも fail（`session:s-en-sdk#1.owner was recorded`、`src/owner-fix.ts was observed`、compact の後の `src/lockfile.ts` が無い）。今の capture.ts で受け入れケース 101 pass。`bun run verify` → exit 0
 
+- [x] T08: ターンの境目の直し（T02・T03・T07）と、中断と compaction の受け入れケースを外す
+  - 種別: 削除
+  - 計画: S2, S3, S6
+  - 依存: T07（外す対象）, T06（外す受け入れケースと driver の欄）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/load.ts`, `server/test/acceptance-cases.test.ts`
+  - 完了条件: `git diff main -- server/src/capture.ts` → `isOwnerTurn` の sdk-* と `fit()` の redacted とそのコメントだけ。`bun run verify` → exit 0（capture-15 を含む受け入れケース 99 件）
+  - コミット: `revert(capture): take the turn-boundary changes out of this release (T08)`
+  - 結果: capture.ts と capture.test.ts を main の版に T01・T04 の変更だけを当て直して作り、`git diff main -- server/src/capture.ts` → isOwnerTurn の sdk-* と fit() の redacted とコメントだけ（9 行追加・5 行削除）。capture-16・17 と driver の shell_edits・compact・ends・owner_edits_after・no_edit_observation を外し、entrypoint と no_source は capture-15 のために残した。`node --test test/capture.test.ts` → 39 pass。`bun run verify` → exit 0（受け入れケース 99 pass）
+
 ## 記録
 
 - 2026-10-03 / T01, T02 / コミットの件名が 100 文字を超え commit-msg の検査で止まった / 件名を短くした（T01: `…never count an Agent SDK turn as the owner's, and bump to 0.6.24`、T02: `…end a running turn on a new typed prompt or a Codex interrupt`）
@@ -103,3 +112,6 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
 - 2026-10-03 / T02 / Codex のタスクレビュー: F1（遅れた hook が新しい起点を古い起点で上書き）と F2（起点を消せないと古い起点が残る）を再現付きで受理、F3（コメントが中断と言い切る）を受理 / T07 を足した
 - 2026-10-03 / T03 / Codex のタスクレビュー: source のコメントに fork が無い（P3）を受理 / T07 で直す
 - 2026-10-03 / T04 / Codex のタスクレビュー: 伏せ字の境目の文字が元と一致すると redacted が false（P2）は棄却。残した文字列が元とバイト単位で同じなら伏せ字で何も変わっていないので false が正しい。コメントの「伏せ字を含まない」は不正確なので T07 で「伏せ字で変わっていない」に直す
+- 2026-10-03 / T05 / Codex のタスクレビューは指摘 0 件（sandbox でテストは流せず、テストは自分で流した結果）
+- 2026-10-03 / T07 / Codex のタスクレビュー: F1（注入の通知が遅れた古い起点を付け替え、オーナーの編集が t2 に付く、T07 が持ち込んだ）と F2（遅れた Stop(t1) が t2 の起点を上書きし編集が落ちる）を再現付きで受理、F3（コメント）を受理。直しが新しい欠陥を生むのが 2 回続いたので止め、起点をターンごとのファイルにする案を新しい会話で Codex と議論
+- 2026-10-03 / T02, T03, T07 / 持ち主がターンの境目を別の計画に分けると決めた（「分けて後で」） / T08 を足して戻す。plan の要点・対象外・完了条件 A2・変更履歴を直した

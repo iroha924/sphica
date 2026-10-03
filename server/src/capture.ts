@@ -206,8 +206,6 @@ export type HookInput = {
   prompt_id?: string;
   turn_id?: string;
   agent_id?: string;
-  /** How SessionStart began: startup, resume, clear, compact, or fork */
-  source?: string;
   cwd?: string;
   prompt?: string;
   last_assistant_message?: string | null;
@@ -311,8 +309,7 @@ export function captureNotice(file: string = dbFile()): string | null {
   return null;
 }
 
-/** `turn` is the id of the turn that took it; a running one from an older install has none. */
-type Baseline = Snapshot & { running: boolean; turn?: string };
+type Baseline = Snapshot & { running: boolean };
 
 const baselineFile = (host: Host, session: string): string =>
   path.join(baselineDir(), `${digest(`${host}\0${session}`)}.json`);
@@ -360,29 +357,15 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (file && input.session_id && /^[A-Za-z0-9_-]+$/.test(input.session_id)) {
       fs.appendFileSync(file, `export SPHICA_PARENT_SESSION=${input.session_id}\n`);
     }
-    const baseline = baselineFile(host, String(input.session_id));
-    // Both hosts compact in the middle of a turn too: the running turn's changes before it stay that turn's
-    if (!(input.source === "compact" && readBaseline(baseline)?.running)) {
-      const place = identify(input.cwd ?? process.cwd());
-      const now = place && snapshot(place.root);
-      if (now) writeBaseline(baseline, { ...now, running: false });
-    }
+    const place = identify(input.cwd ?? process.cwd());
+    const now = place && snapshot(place.root);
+    if (now) writeBaseline(baselineFile(host, String(input.session_id)), { ...now, running: false });
     pruneBaselines();
     return { flush: false, notice: captureNotice() };
   }
   if (!owner()) return { flush: false };
   // Interrupt is cut off after at most 3 seconds. No new records are made, so only the queue is sent without checking git or the project.
-  if (event === "Interrupt") {
-    const file = baselineFile(host, String(input.session_id));
-    const b = readBaseline(file);
-    if (b?.running)
-      try {
-        writeBaseline(file, { ...b, running: false });
-      } catch {
-        fs.rmSync(file, { force: true });
-      }
-    return { flush: true };
-  }
+  if (event === "Interrupt") return { flush: true };
   const place = identify(input.cwd ?? process.cwd());
   if (!place) return { flush: false };
   const turn = input.prompt_id ?? input.turn_id;
@@ -406,29 +389,23 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   };
 
   const baseline = baselineFile(host, base.session);
-  const prompt = input.prompt?.trimStart() ?? "";
-  const injected = INJECTED.some((r) => r.test(prompt));
   if (event === "UserPromptSubmit") {
-    // A prompt with the running turn's id, or an injected one, keeps that turn's starting point (an injected one moves it to its own id).
-    // Any other prompt starts from the tree as it is, even when the running turn never stopped: changes since that turn's start belong
-    // to no turn rather than risk giving the owner's hand edits to the agent. The old file goes first, so a failed snapshot leaves none.
-    const before = readBaseline(baseline);
-    if (before?.running && before.turn !== undefined && injected && before.turn !== turn)
-      writeBaseline(baseline, { ...before, turn });
-    else if (!before?.running || (!injected && before.turn !== turn)) {
-      fs.rmSync(baseline, { force: true });
+    // A message typed while a turn runs keeps that turn's starting point. Between turns, the owner's own edits are not the turn's.
+    if (!readBaseline(baseline)?.running) {
       const now = snapshot(place.root);
-      if (now) writeBaseline(baseline, { ...now, running: true, turn });
+      if (now) writeBaseline(baseline, { ...now, running: true });
     }
   }
-  if (event === "UserPromptSubmit" && prompt && !injected) say(`${turn}:owner`, "owner", prompt);
+  if (event === "UserPromptSubmit" && input.prompt) {
+    const prompt = input.prompt.trimStart();
+    if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
+  }
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
     const now = snapshot(place.root);
     if (now) {
-      // Only a starting point this turn took: a late hook's write or a file that could not be removed belongs to another turn
       const before = readBaseline(baseline);
-      if (before?.turn === turn)
+      if (before)
         for (const p of changed(place.root, before, now))
           spool({ ...base, kind: "edit", event: null, path: p, via: "status" });
       writeBaseline(baseline, { ...now, running: false });

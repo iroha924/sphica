@@ -6,13 +6,12 @@ codex_rounds: 2
 approved_at: 2026-10-03
 ---
 
-# Capture stops counting SDK turns as the owner's and stops giving one turn's working-tree changes to another, and pending traces count for 14 days
+# Capture stops counting SDK turns as the owner's, and pending traces count for 14 days
 
 ## 要点
 
 - `CLAUDE_CODE_ENTRYPOINT` が `sdk-` で始まるターンは、親の目印と一致してもオーナーのターンにしない（`sdk-ts`・`sdk-py` が今は素通り）
-- 作業ツリーの起点にターン id を持たせ、走っている間に別の id の注入でないプロンプトが来たら前のターンを終わったものとして起点を捨てて取り直す。Codex の Interrupt でも起点を止める。迷うときは status の編集を記録しない側に倒す
-- 両ホストで、SessionStart の `source: "compact"` は走っている起点を上書きしない
+- ターンの境目（中断と compaction をまたぐ status の編集）は、実装とレビューで非同期の hook の取り合いが続いたので、この PR から外して別の計画にする（T02・T03・T07 は T08 で戻す）
 - `fit()` の `redacted` は、残した部分に伏せ字があるときだけ立てる
 - trace 待ちに数える期間を 30 日から 14 日にする（過ぎても消さず別の見出しで出す）
 - 0.6.24 で出す。`plugin/hooks/codex.json`、schema、`HOLD_DAYS` は変えない
@@ -22,6 +21,7 @@ approved_at: 2026-10-03
 - epic #200 の次は #210、その後 #209 の Fix 部分、#207 の順（「OK、その順番で進めるか。」）
 - trace 待ちを 14 日にし、この PR に入れる（議論の途中で持ち主が追加:「今回のPRで待ちを14日に変更しよう。30日は長い。」「一緒にPR混ぜて」）
 - `codex.json` の変更は #207 で 1 回のリリースにまとめる（#207 の項目）
+- ターンの境目はこの PR から外し、別の計画で設計し直す（T07 のレビューの後に持ち主が選んだ:「分けて後で」）
 
 ## 目的
 
@@ -33,6 +33,7 @@ approved_at: 2026-10-03
 
 ## 対象外
 
+- ターンの境目（方針 2・3、S2・S3）: 持ち主の決定で別の計画へ。残る穴は変更履歴を参照
 - #188: #222（0.6.1）で閉じている
 - `CLAUDE_AGENT_SDK_VERSION` を判定に使うこと: Claude デスクトップアプリが同梱の SDK で Claude Code を起動し、この変数を付ける（前提を参照）。使うとデスクトップの Code タブのオーナーのターンが全部落ちる
 - `CLAUDE_CODE_SESSION_ATTENDED`: 文書が見つからない
@@ -89,7 +90,7 @@ approved_at: 2026-10-03
 ## 完了条件
 
 - A1: `bun run verify` → 終了コード 0（sql:live と受け入れケースを含む）
-- A2: `cd server && node --test --test-name-pattern="sdk-|interrupt|compact|redacted|14 days" test/capture.test.ts test/status.test.ts` → 全部通る
+- A2: `cd server && node --test --test-name-pattern="sdk-|redacted only|14 days" test/capture.test.ts test/status.test.ts` → 全部通る
 - A3: `rg -n "30 days|30 日" server/src/trace.ts server/src/mcp-record.ts plugin/skills/trace/SKILL.md server/evals/acceptance server/test/status.test.ts` → 一致なし
 - A4: `bun run release:plan -- --base <0.6.23 のリリースコミット>` → `plugin`。`plugin/package.json` と 3 つの manifest が 0.6.24
 - A5: `gh pr checks <PR 番号> --watch` → 全ジョブ pass
@@ -106,3 +107,4 @@ approved_at: 2026-10-03
 
 ## 変更履歴
 - 2026-10-03 / 方針 2 に「Stop は同じターンの起点だけを使う」「注入のプロンプトは起点の turn を付け替える」を足した / T02 のタスクレビューで、非同期の hook の遅れた書き込みと、起点を消せないときに古い起点が残る経路が再現されたため / Go 不要（合意した「迷うときは記録しない」の内側で、範囲・公開インターフェース・データは変わらない）
+- 2026-10-03 / ターンの境目（方針 2・3、S2・S3、受け入れケースのうち中断と compaction の 2 件）をこの PR から外し、T08 で戻す / 起点を 1 つのファイルで持つ形は非同期の hook どうしの取り合いで直しが 2 回続けて新しい欠陥を生み、ターンごとのファイルにしても、Claude Code が通知で始まるターンに id を使い回す場合（中断の後のオーナーの編集がそのターンに付く）と、非同期の Stop の直後の編集（main にもある）が残ると Codex と確かめた / 持ち主の Go あり（「分けて後で」）
