@@ -89,6 +89,16 @@ base: main
   - コミット: `fix(capture): queue the prompt before the start, keep ended starts small, and spare live older files (T09)`
   - 結果: red 実測（14d10f86 の capture.ts）: 3 件 fail。`attempt(pruneBaselines)` だけを戻すと `Error: busy` で fail。直した後 `node --test test/capture.test.ts` → 52 pass / 0 fail、`bun run typecheck` エラーなし
 
+- [x] T10: Stop hook がターンを続けさせたときの続きの Stop も、前の Stop の終わりから差分を取る
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（終えたターンの起点の形）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `.claude/plans/2026/10/03-issue-210-turn-boundaries.plan.md`
+  - red: `cd server && node --test --test-name-pattern="keeps the turn going" test/capture.test.ts` → 続きの `after-feedback.ts` が記録されず `[ 't1:first.ts' ]` で落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass
+  - コミット: `fix(capture): record shell edits of a turn a Stop hook keeps going (T10)`
+  - 結果: red 実測（af38bfd4 の capture.ts）: actual `[ 't1:first.ts' ]`、expected に `t1:after-feedback.ts`。直した後 `node --test test/capture.test.ts` → 53 pass / 0 fail、`bun run typecheck` エラーなし
+
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -123,3 +133,4 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 - 2026-10-03 / T07 / Codex のタスクレビュー 1 件（P1）: 新しいセッションの空のディレクトリも「全部古い」と見て消し、再帰削除の途中で新しい起点だけが先に消えると遅れた Stop が別のターンの編集を拾う（fs の mock で再現）を受理 / T08 を足した。prune の直しが新しい欠陥を生んだのは 1 回目
 - 2026-10-03 / T08 / Codex のタスクレビューは指摘 0 件（fs の mock で prune と hook の 50 通りの順序を試し全部 pass。実ファイルの並行プロセスは未検証）
 - 2026-10-03 / 全体 / review-shipping（パックした tarball 48 ファイル、dist に新しいコード、hooks.json の timeout 10、新しいテストが main のコードで落ちることを確認）: 4 件を受理し T09 を足した。同期の UserPromptSubmit が 10 秒を超えると発言が spool の前に打ち切られる（遅い git で再現）、ターンごとのファイルが entries ごと積もる（合成の 300 ターン・3 万ファイルで 546 MB・1.9 秒）、0.6.27 の hook のセッションの起点を年齢によらず消す（再現）、prune の例外で通知が出ない（読んだだけ）
+- 2026-10-03 / 全体 / Codex の全差分レビュー（fe6f868a、high）3 件（P2）: F1（同期の UserPromptSubmit の timeout で発言が消える）と F3（0.6.27 の hook のセッションの起点を消す）は review-shipping と同じで T09 で直した。F2（Stop hook が続けさせたターンの続きのシェルの編集が落ちる）を受理し T10 を足した

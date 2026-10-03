@@ -401,29 +401,28 @@ export function openTurn(dir: string, turn: string, root: string): (() => void) 
 }
 
 /**
- * Takes a running turn's end snapshot and returns the step that gives the paths changed since its start, or null when the turn has no
- * running start. The step reads the starts again after the snapshot: if a newer turn began before it, its edits may be in the snapshot.
+ * Takes a turn's end snapshot and returns the step that gives the paths changed since its start, or null when the turn has nothing to
+ * compare against. The step reads the starts again after the snapshot: if a newer turn began before it, its edits may be in the snapshot.
+ * A Stop leaves its end snapshot as the start of what follows: another Stop with no prompt in between is the same turn kept going by a
+ * Stop hook, and a prompt that reuses the id takes a new snapshot first.
  */
 export function closeTurn(dir: string, turn: string, root: string): (() => string[]) | null {
   const own = readStart(startFile(dir, turn));
-  if (!own?.running) return null;
+  if (!own?.entries) return null;
+  const before = { head: own.head, entries: own.entries };
   const now = snapshot(root);
   return () => {
     if (newestTurn(readStarts(dir)) !== turn) return [];
-    const paths = own.entries && now ? changed(root, { head: own.head, entries: own.entries }, now) : [];
-    writeStart(dir, ended(own));
-    return paths;
+    writeStart(dir, { ...own, head: now?.head ?? null, entries: now?.entries ?? null, running: false });
+    return now ? changed(root, before, now) : [];
   };
 }
 
-/** Ends a turn without looking at the tree (Codex's interrupt is cut off after at most 3 seconds). */
+/** Ends a turn without looking at the tree (Codex's interrupt is cut off after at most 3 seconds). Nothing follows it to compare. */
 function stopTurn(dir: string, turn: string): void {
   const own = readStart(startFile(dir, turn));
-  if (own?.running) writeStart(dir, ended(own));
+  if (own?.entries || own?.running) writeStart(dir, { ...own, head: null, entries: null, running: false });
 }
-
-/** An ended turn keeps only its number: a reused id takes a new snapshot, so the tree it ended on is never read. */
-const ended = (s: Start): Start => ({ ...s, head: null, entries: null, running: false });
 
 /**
  * Drops a session's starting points once every one of them is older than HOLD_DAYS, never some of them: removing one while a hook

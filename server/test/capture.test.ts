@@ -640,6 +640,18 @@ test("turn boundary: a late Stop of an interrupted turn does not take the next t
   assert.deepEqual(seen(), ["t2:t2-only.ts"]);
 });
 
+test("turn boundary: a Stop hook that keeps the turn going gets the edits made after the first Stop", () => {
+  const { repo, edit, seen } = boundaryRepo("continued");
+  const base = { session_id: "ct", cwd: repo, prompt_id: "t1" };
+  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  edit("first.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  // Another plugin's Stop hook blocks the stop: the same turn goes on without a new prompt
+  edit("after-feedback.ts");
+  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "テストも直した。" });
+  assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
+});
+
 test("turn boundary: a start saved late, after a newer turn numbered itself, ties and gives neither turn the edits", () => {
   const { repo, edit } = boundaryRepo("late-save");
   const dir = turnDir("claude-code", "lv");
@@ -726,13 +738,16 @@ test("turn boundary: Stop and Interrupt keep a start's turn and number, and a re
   onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "Stop", last_assistant_message: "c" });
   assert.deepEqual(seen(), ["t1:agent.ts"]);
   assert.deepEqual(read(dir), [{ turn: "t1", seq: 2, running: false }]);
-  // An ended turn keeps only its number, so a long session's starts stay small
-  const [kept] = fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
-  assert.deepEqual([kept.head, kept.entries], [null, null]);
+
   const cx = { session_id: "kpx", cwd: repo, turn_id: "t1" };
   onHook("codex", { ...cx, hook_event_name: "UserPromptSubmit", prompt: "a" });
   onHook("codex", { ...cx, hook_event_name: "Interrupt" });
   assert.deepEqual(read(turnDir("codex", "kpx")), [{ turn: "t1", seq: 1, running: false }]);
+  // An interrupted turn has nothing left to compare, so it keeps only its number
+  const [cut] = fs
+    .readdirSync(turnDir("codex", "kpx"))
+    .map((f) => JSON.parse(fs.readFileSync(path.join(turnDir("codex", "kpx"), f), "utf8")));
+  assert.deepEqual([cut.head, cut.entries], [null, null]);
   function seen() {
     return spooled()
       .flatMap((x) => (x.kind === "edit" && x.via === "status" ? [`${x.turn}:${x.path}`] : []))
