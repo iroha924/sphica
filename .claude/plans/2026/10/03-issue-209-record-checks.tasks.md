@@ -169,6 +169,16 @@ glean で保存済みの記録の aliases を置き換え、消せる。
   - コミット: `fix(glean): refuse aliases with control characters at check (T15)`
   - 結果: red は直す前のコードで、trace の check が `'✓ 1 record can be saved'`（NUL を含む alias を通した）、replace_aliases も check を通った。直した後、trace は check で problem を出して保存の組から外し（判定と保存の絞り込みを同じ `bad` にそろえた）、replace_aliases は error。`node --test --test-name-pattern="replace_aliases|control character alias" test/extract.test.ts` → 2 pass。Skill の例は 2 つの op とも revision 2 にした。`bun run verify` → exit 0（acceptance 103 pass）
 
+- [x] T16: review-shipping の指摘を直す（read の場所の行に U+2028 を含む anchor のパスを通すテストが無い）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T12（直す対象のテスト）
+  - 変更: `server/test/record.test.ts`
+  - red: read.ts の `where` から `inline` を一時的に外して `cd server && node --test --test-name-pattern="line separator" test/record.test.ts` → 足した確認で落ちる（今のテストは通ってしまう）
+  - 完了条件: `cd server && node --test --test-name-pattern="line separator" test/record.test.ts` → pass
+  - コミット: `test(read): keep an anchor path with a line separator on one line in read (T16)`
+  - 結果: read.ts の `where` から `inline` を外すと `node --test --test-name-pattern="line separator" test/record.test.ts` → fail 1、戻すと pass 1（read.ts は差分なしに戻したことを git diff で確かめた）。`bun run verify` → exit 0
+
 ## P5: リリース
 
 npm と 3 つの manifest を 0.6.25 にそろえる。
@@ -195,3 +205,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T08 / record.ts は変える必要がなかった。post-glean の検索を確かめる `search_not_include` を driver に足した / 変更欄から `server/src/record.ts` を外し、`server/evals/acceptance/driver.ts` を足した
 - 2026-10-03 / T14 / T07 のレビュー F1（add_evidence と adopt を同じバッチで送るので、adopt の条件を外してもテストが通る）を直すと判定した / T14 を足した
 - 2026-10-03 / T15 / T08 のレビュー F1（NUL を含む alias は JS では 1 文字以上だが SQLite の trim が NUL で止まり、check が通って save だけが落ちる。trace の aliases も同じ判定で save が落ちる）と F2（Skill の例で同じ記録の 2 つの op に違う revision）を直すと判定した / T15 を足した
+- 2026-10-03 / T16 / Codex の全差分レビュー（high）は指摘 0 件。review-shipping は 2 件: read の場所の行のテストの穴は直す（T16）。20 万ファイルで無いパス 1 つにつき近いパスの計算が約 1.4 秒かかる件は、ロックの前で、無いパスがあるときだけ動くので見送り、PR の Declined findings に書く / T16 を足した

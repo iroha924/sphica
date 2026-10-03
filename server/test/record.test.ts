@@ -1427,7 +1427,11 @@ test("line separator: paths from outside stay on one line in check and read outp
           kind: "finding",
           text: "a を足した",
           evidence: [{ source: `s${m}`, quote: "a を足した。", role: "states" }],
-          anchors: [{ path: "a.ts", role: "evidence", commit }],
+          anchors: [
+            { path: "a.ts", role: "evidence", commit },
+            // The record's own path is not a control character, so it is saved; read must still keep it on one line
+            { path: `d${forged}.ts`, role: "applies_to" },
+          ],
         },
       ],
     });
