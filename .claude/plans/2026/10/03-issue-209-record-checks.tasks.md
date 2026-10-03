@@ -70,6 +70,16 @@ base: main
   - コミット: `test(acceptance): cover anchor problems and tell trace and glean how to answer them (T04)`
   - 結果: glean-15（無いパスに近いパス、symbol 違い、記録は active で保存）と glean-16（正しい anchor で problem なし）を足し、driver に `check_problem_absent` を足した。T01 より前（98117c9f）の worktree では glean-15 が `check did not report "anchor path src/date.ts is not in the working tree (near: "src/dates.ts""` で落ち、glean-16 は通る。ブランチでは `node --test --test-timeout=60000 --test-name-pattern="glean-1[56]" evals/acceptance/run.ts` → 2 pass。セッションで消したファイルは driver で作れないので、単体テスト（T01）で確かめている
 
+- [x] T11: T03・T10 のタスクレビューの指摘を直す（中身が読めないまま種類が変わったパスを判定し直さない、近いパスを計算し直さないことをテストが確かめていない）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T10（直す対象の近いパスのキャッシュ）
+  - 変更: `server/src/repo-facts.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="unreadable kind" test/record.test.ts` → ディレクトリがロックの中でバイナリファイルに変わっても `is a directory` が残る
+  - 完了条件: `cd server && node --test --test-name-pattern="unreadable kind|review fixes" test/record.test.ts` → 全件 pass
+  - コミット: `fix(record): judge a path's kind again when its unreadable content changed kind (T11)`
+  - 結果: red は直す前のコードで `actual: 'directory', expected: 'file'`。直した後 `node --test --test-name-pattern="unreadable kind|review fixes" test/record.test.ts` → 2 pass（review fixes は一覧を空にし files を呼ぶと落ちる probe に替えても、ロックの前に計算した 3 件を返し、準備していないパスは候補なし）。`bun run verify` → exit 0（acceptance 101 pass）
+
 ## P2: read の表示
 
 read で、移動したファイルの移動先の候補と、記録の aliases（as-of では当時の組）が見える。
@@ -137,3 +147,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T10 / glean.ts は変える必要がなかった（listFilesIfGone の中で直した） / 変更欄から `server/src/glean.ts` を外した
 - 2026-10-03 / T04 / harvest Skill も anchor の警告への答え方が要った（古い PR のファイルは動いていることがある） / 変更欄に `plugin/skills/harvest/SKILL.md` を足した
 - 2026-10-03 / T05 / read の MCP ツールで 1 回の read の中の記録どうしにも rename の結果を使い回すため、mcp.ts から Map を渡した / 変更欄に `server/src/mcp.ts` を足した
+- 2026-10-03 / T11 / T03 のレビュー F1（ロックの中で消えたファイルに近いパスを探す）は T10 の per-path のキャッシュで直っていた（ロックの中で消えたパスは `(near paths not checked)`）。F2（ディレクトリと読めないファイルはどちらも hash が `unreadable` で、refresh が種類を判定し直さない）と T10 のレビュー F1（テストが計算し直さないことを確かめていない）は直すと判定した / T11 を足した

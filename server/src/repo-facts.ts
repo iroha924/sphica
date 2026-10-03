@@ -157,5 +157,8 @@ export function commitHeld(f: RepoFacts, commit: string, rel: string): boolean {
 /** Reads the file again and forgets what was judged on it when its content changed, so the next judgment sees the file as it is now. */
 export function refresh(f: RepoFacts, rel: string): void {
   const read = f.probe.read(f.root, rel);
-  if (f.files.get(rel)?.read.hash !== read.hash) f.files.set(rel, { read, masks: new Map(), at: new Map() });
+  const got = f.files.get(rel);
+  if (got?.read.hash !== read.hash) f.files.set(rel, { read, masks: new Map(), at: new Map() });
+  // A directory and a binary file both read as unreadable, so the hash cannot tell that the path changed kind
+  else if (read.hash === "unreadable") got.kind = undefined;
 }

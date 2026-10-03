@@ -20,7 +20,15 @@ import {
   type Target,
   valueInQuote,
 } from "../src/record.ts";
-import { listFilesIfGone, nearPaths, PROBE, type Probe, repoFacts } from "../src/repo-facts.ts";
+import {
+  kindOf,
+  listFilesIfGone,
+  nearPaths,
+  PROBE,
+  type Probe,
+  refresh,
+  repoFacts,
+} from "../src/repo-facts.ts";
 import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -1222,11 +1230,12 @@ test("review fixes: anchor checks never throw, and near paths are judged before 
       `${"a".repeat(80)}/date.ts`,
       "src/dates.ts",
     ]);
-    // Near paths are worked out once, before the lock: asking again does not list or compare files
-    const listed = repoFacts(root, { ...probe, files: () => assert.fail("listed again") });
-    listed.listing = ["x.ts"];
-    listFilesIfGone(listed, "y.ts");
-    assert.deepEqual(nearPaths(listed, "y.ts"), ["x.ts"]);
+    // Near paths are worked out before the lock: the check under it only looks them up, never listing or comparing files again
+    facts.listing = [];
+    facts.probe = { ...probe, files: () => assert.fail("listed again") };
+    listFilesIfGone(facts, "src/date.ts");
+    assert.equal(nearPaths(facts, "src/date.ts")?.length, 3);
+    assert.equal(nearPaths(facts, "never-prepared.ts"), undefined, "a path not prepared gets no suggestions");
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
@@ -1349,6 +1358,22 @@ test("aliases in read: the current search words are shown, and an as-of read sho
     assert.doesNotMatch(await read(), /Aliases/, "an empty set clears them");
   } finally {
     await db.done();
+  }
+});
+
+test("unreadable kind: a path whose content cannot be read is judged again when it changes kind", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-kind-")));
+  try {
+    fs.mkdirSync(path.join(root, "asset"));
+    const facts = repoFacts(root);
+    assert.equal(kindOf(facts, "asset"), "directory");
+    // Both read as "unreadable": the content hash cannot tell them apart
+    fs.rmSync(path.join(root, "asset"), { recursive: true });
+    fs.writeFileSync(path.join(root, "asset"), Buffer.from([1, 0, 2]));
+    refresh(facts, "asset");
+    assert.equal(kindOf(facts, "asset"), "file");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
