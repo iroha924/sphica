@@ -44,11 +44,13 @@ const launch = (mode, script) => {
       : windows
         ? [
             "powershell.exe",
-            ["-NoProfile", "-NonInteractive", "-Command", `& "${process.execPath}" "${script}"`],
+            ["-NoProfile", "-NonInteractive", "-Command", "& $env:LAUNCH_NODE $env:LAUNCH_SCRIPT"],
           ]
-        : ["/bin/sh", ["-c", `"${process.execPath}" "${script}"`]];
+        : ["/bin/sh", ["-c", '"$LAUNCH_NODE" "$LAUNCH_SCRIPT"']];
+  // The paths go through the environment, so a shell never reinterprets a $ or a backtick in them
+  const launchEnv = { ...env, LAUNCH_NODE: process.execPath, LAUNCH_SCRIPT: script };
   const start = process.hrtime.bigint();
-  const r = spawnSync(cmd, args, { input, env, cwd: home, encoding: "utf8", timeout: 30_000 });
+  const r = spawnSync(cmd, args, { input, env: launchEnv, cwd: home, encoding: "utf8", timeout: 30_000 });
   const ms = Number(process.hrtime.bigint() - start) / 1e6;
   if (r.error || r.status !== 0)
     throw new Error(`${mode} ${script}: ${r.error?.message ?? `exit ${r.status}`}`);

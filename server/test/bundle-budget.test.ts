@@ -49,10 +49,10 @@ test("a missing or empty metafile, a missing .js output, or a bad byte count fai
   assert.deepEqual(checkBundles({ mcp: ok }, budgets), ["deliver: no metafile with outputs"]);
   assert.deepEqual(checkBundles({ deliver: null, mcp: ok }, budgets), ["deliver: no metafile with outputs"]);
   assert.deepEqual(checkBundles({ deliver: { outputs: {} }, mcp: ok }, budgets), [
-    "deliver: the metafile lists no .js output",
+    "deliver: the metafile lists no deliver.js output",
   ]);
   assert.deepEqual(checkBundles({ deliver: meta(10, [], "plugin/dist/deliver.js.map"), mcp: ok }, budgets), [
-    "deliver: the metafile lists no .js output",
+    "deliver: the metafile lists no deliver.js output",
   ]);
   for (const bytes of [undefined, Number.NaN, Number.POSITIVE_INFINITY, "10"])
     assert.deepEqual(checkBundles({ deliver: meta(bytes), mcp: ok }, budgets), [
@@ -64,5 +64,16 @@ test("an entry built without a budget fails", () => {
   assert.deepEqual(
     checkBundles({ deliver: meta(10), mcp: meta(10, [], "plugin/dist/mcp.js"), extra: meta(10) }, budgets),
     ["extra: built but has no budget"],
+  );
+});
+
+test("a metafile without the entry's own .js output, or a hook output without inputs, fails", () => {
+  const ok = meta(10, [], "plugin/dist/mcp.js");
+  assert.deepEqual(checkBundles({ deliver: meta(10, [], "plugin/dist/other.js"), mcp: ok }, budgets), [
+    "deliver: the metafile lists no deliver.js output",
+  ]);
+  assert.deepEqual(
+    checkBundles({ deliver: { outputs: { "plugin/dist/deliver.js": { bytes: 10 } } }, mcp: ok }, budgets),
+    ["deliver: plugin/dist/deliver.js lists no inputs, so zod cannot be ruled out"],
   );
 });

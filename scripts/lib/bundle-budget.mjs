@@ -27,9 +27,11 @@ export function checkBundles(metas, budgets = BUDGETS) {
       problems.push(`${entry}: no metafile with outputs`);
       continue;
     }
-    const js = Object.entries(outputs).filter(([name]) => name.endsWith(".js"));
+    const js = Object.entries(outputs).filter(
+      ([name]) => name.replaceAll("\\", "/").split("/").pop() === `${entry}.js`,
+    );
     if (!js.length) {
-      problems.push(`${entry}: the metafile lists no .js output`);
+      problems.push(`${entry}: the metafile lists no ${entry}.js output`);
       continue;
     }
     for (const [name, out] of js) {
@@ -38,8 +40,10 @@ export function checkBundles(metas, budgets = BUDGETS) {
         problems.push(`${entry}: ${name} has no byte count`);
       else if (bytes > budget)
         problems.push(`${entry}: ${name} is ${bytes} bytes, over its budget of ${budget}`);
-      if (HOOKS.has(entry)) {
-        const zod = Object.keys(out?.inputs ?? {}).find((p) =>
+      if (HOOKS.has(entry) && (!out?.inputs || typeof out.inputs !== "object"))
+        problems.push(`${entry}: ${name} lists no inputs, so zod cannot be ruled out`);
+      else if (HOOKS.has(entry)) {
+        const zod = Object.keys(out.inputs).find((p) =>
           p.replaceAll("\\", "/").includes("node_modules/zod/"),
         );
         if (zod)

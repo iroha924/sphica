@@ -155,6 +155,16 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `fix(doctor): exit 1 for an old Claude Code and match the Japanese README`
   - 結果: red は上のとおり。report が failures を返し、cli は 1 件でもあれば終了コードを 1 にする。plugin の行で fail を出すのはこの行だけなので、ほかの行の終了コードは変わらない。README.ja.md に 2.1.139 以降を書き、T01 で README.md から消した PowerShell の制限の行を消した。`bun run test` → 622 pass。cli の終了コードを子プロセスで確かめるテストは足していない（doctor は DB が無いと別の理由で 1 になり、版だけを切り分けられない）
 
+- [x] T14: bundle の検査で entry ごとの出力と inputs を確かめ、計測のパスをシェルに解釈させない
+  - 種別: 修正
+  - 計画: S2, S5
+  - 依存: T05（直す対象の bundle の検査）, T11（直す対象の計測の起動）
+  - 変更: `scripts/lib/bundle-budget.mjs`, `server/test/bundle-budget.test.ts`, `scripts/measure-hook-launch.mjs`
+  - red: `cd server && node --test test/bundle-budget.test.ts` → 足した 2 件（deliver.js の無い metafile、inputs の無い hook の出力）が通ってしまい落ちる。`$HOME` とバッククォートを含むディレクトリに置いた plugin で `node scripts/measure-hook-launch.mjs --pairs 2 --root <そこ>/plugin` → sh 経由が exit 1
+  - 完了条件: `bun run test` → pass、同じディレクトリで `node scripts/measure-hook-launch.mjs --pairs 2 --root <そこ>/plugin` → exit 0
+  - コミット: `fix(scripts): require each entry's own output and keep launch paths out of the shell`
+  - 結果: red は上のとおり（bundle-budget 4 pass・2 fail、計測は「shell …/x$HOME`y`/plugin/dist/deliver.js: exit 1」）。出力の名前は `<entry>.js` に一致するものだけを見て、hook の出力に inputs が無ければ落とす。シェルにはパスを LAUNCH_NODE と LAUNCH_SCRIPT の環境変数で渡す。直した後 `bun run test` → 623 pass、同じディレクトリでの計測 → exit 0
+
 ## 記録
 2026-10-03 / T01 / Codex のタスクレビュー F1（Windows でパスの大文字・小文字を変えたコマンドに記録が出ない）/ 見送り。namedInCommand の照合は Bash（macOS でも同じ）と Read に共通の仕様で、PowerShell の道で入った欠陥ではない
 2026-10-03 / T02 / Codex のタスクレビュー / 指摘なし
@@ -174,3 +184,5 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T08 / Codex のタスクレビュー F1（✗ でも doctor が exit 0）と F2（README.ja.md に最低版が無い）/ 両方採り T13 で直した
 2026-10-03 / T10 / Codex のタスクレビュー / 指摘なし
 2026-10-03 / T06 / Windows の CI（run 37100528046）の計測の 2 回目: deliver.js 直接 121.3 ms・PowerShell 経由 355.5 ms、capture.js 直接 117.1 ms・PowerShell 経由 356.2 ms
+2026-10-03 / 全差分 / Codex の全差分レビュー（main..edc4da25、high）F1（bundle の検査が entry ごとの出力と inputs を確かめない）と F2（計測のパスをシェルが解釈する）/ 両方採り T14 で直した
+2026-10-03 / T13 / Codex のタスクレビュー / 指摘なし
