@@ -106,6 +106,16 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `test: launch packed hooks as hooks.json defines them`
   - 結果: `bun run bundle && bun run hooks:live` → exit 0（約 1 秒）。capture.js の切り離した送信を止めた写しでは「did not put the owner's prompt in the database within 30 seconds」で落ち、戻すと通った。`actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0（acceptance 103 pass）。Windows の PowerShell の道は PR の CI で確かめる
 
+- [x] T10: Windows の CI で check-hooks-live を plugin/ の中から正しいパスで起動する
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（直す対象の CI の手順）
+  - 変更: `.github/workflows/check.yml`
+  - red: `gh run view 37099886316 --job 111137193065 --log` → 「Cannot find module 'D:\a\sphica\sphica\plugin\scripts\check-hooks-live.mjs'」で windows が落ちた
+  - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし（windows の pass は plan の A5 で確かめる）
+  - コミット: `ci: start check-hooks-live from the repository root path on Windows`
+  - 結果: red は上のとおり（その手順は `cd plugin` の後に流れる）。`../scripts/check-hooks-live.mjs` にし、`actionlint .github/workflows/check.yml` → 指摘なし。windows の pass は plan の A5（push の後の CI）で確かめる
+
 - [ ] T08: Windows の計測で exec form を決め、hooks.json・check-ai-config・README・doctor をそろえる
   - 種別: 変更
   - 計画: S7
@@ -123,3 +133,4 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T03 / Codex のタスクレビュー F1（Windows のテストが node の隣の npm-cli.js の有無に依存）と F2（npm i -g が入っていないとき行が無い）/ 両方採り、修正タスク T09 を足した
 2026-10-03 / T07 / Stop の入力に prompt_id が無いと capture は送信を始めない（ターン id が要る）。本物の Claude Code は Stop にも prompt_id を付けるので、検査の入力に付けた
 2026-10-03 / T07 / 子の PATH を node と git の場所だけにしたので sh が見つからなかった。POSIX は /bin/sh、Windows は SystemRoot の powershell.exe を絶対パスで起動する
+2026-10-03 / T06 / Windows の CI（run 37099886316）の計測: deliver.js 直接 112.3 ms・PowerShell 経由 343.7 ms（差 231.3 ms）、capture.js 直接 114.2 ms・PowerShell 経由 340.8 ms（差 226.6 ms）。基準の 100 ms を超えたので T08 は (a) exec form にする

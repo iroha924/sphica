@@ -151,4 +151,4 @@ jobs:
           # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
           grep -q '"search"' mcp.out
           # The packed hooks, launched as hooks/hooks.json defines them (shell form goes through PowerShell, as without Git Bash)
-          node scripts/check-hooks-live.mjs "$out/package"
+          node ../scripts/check-hooks-live.mjs "$out/package"
