@@ -10,6 +10,7 @@ import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { type Check, contextChecks, permissionChecks } from "./canary-check.ts";
 import { runClaude } from "./claude-run.ts";
+import { claudeStreamCalls } from "./judge.ts";
 
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
 const { values: args } = parseArgs({
@@ -113,9 +114,16 @@ for (const condition of ["none", "search", "inject", "gold"]) {
   });
 }
 
-// Databases: two inject runs at once, each logging only to its own copy
+// Databases: two inject runs at once, each logging only to its own copy. Each calls Sphica's status, so the MCP server opens the database
+// too: its counts must be those of the run's own copy
 const pair = await Promise.all(
-  [1, 2].map((n) => run("inject", `canary-db-${n}`, "Reply with the single word OK. Do not use any tool.")),
+  [1, 2].map((n) =>
+    run(
+      "inject",
+      `canary-db-${n}`,
+      "Call the mcp__sphica__status tool once with the current directory as cwd, then reply with its first line. Use no other tool.",
+    ),
+  ),
 );
 const dbChecks: Check[] = [];
 // Sphica stores its own session id derived from the host's, so each copy must hold exactly one session, and the two must differ
@@ -136,6 +144,25 @@ for (const r of pair) {
       name: `${r.result.run}: deliveries of one session only`,
       ok: sessions.length === 1,
       why: `sessions in its log: ${sessions.join(", ") || "none"}`,
+    });
+    const active = Number(
+      (
+        await db
+          .selectFrom("unit")
+          .select((eb) => eb.fn.countAll<number>().as("n"))
+          .where("lifecycle", "=", "active")
+          .executeTakeFirst()
+      )?.n ?? 0,
+    );
+    const status = claudeStreamCalls(read(path.join(r.dir, "events.jsonl"))).calls.find(
+      (c) => c.name === "mcp__sphica__status" && c.result !== null,
+    );
+    dbChecks.push({
+      name: `${r.result.run}: the MCP server reads the same copy`,
+      ok: Boolean(status?.result?.includes(`${active} active records`)),
+      why: status
+        ? `status said: ${status.result?.split("\n").slice(0, 3).join(" / ")}; the copy has ${active} active records`
+        : "status was not called",
     });
   } finally {
     await db.destroy();

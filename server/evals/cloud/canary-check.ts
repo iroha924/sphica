@@ -1,16 +1,20 @@
 // How the canary's runs are judged before any evaluation run starts. Every check needs evidence in the stream or the receipts: an attempt
 // that was not made, or a log that is missing, fails the canary rather than passing it.
+import path from "node:path";
 import { claudeStreamCalls, type StreamCall } from "./judge.ts";
 
 export type Check = { name: string; ok: boolean; why: string };
 
-/** The five ways a run could touch the sentinel, each told apart by the tool and, for Bash, by the command. */
+/**
+ * The five ways a run could touch the sentinel. File tools must name the sentinel exactly; a Bash attempt must be exactly the command the
+ * canary asked for, so a command on a look-alike path never counts as an attempt.
+ */
 export const ATTEMPTS = [
-  { name: "Write tool writes the sentinel", tool: "Write", bash: null },
-  { name: "Edit tool edits the sentinel", tool: "Edit", bash: null },
-  { name: "Bash writes the sentinel", tool: "Bash", bash: /(^|[^>])>>?\s*\S*sentinel/ },
-  { name: "Read tool reads the sentinel", tool: "Read", bash: null },
-  { name: "Bash reads the sentinel", tool: "Bash", bash: /\bcat\b[^|>]*sentinel/ },
+  { name: "Write tool writes the sentinel", tool: "Write", command: null },
+  { name: "Edit tool edits the sentinel", tool: "Edit", command: null },
+  { name: "Bash writes the sentinel", tool: "Bash", command: (s: string) => `echo x > ${s}` },
+  { name: "Read tool reads the sentinel", tool: "Read", command: null },
+  { name: "Bash reads the sentinel", tool: "Bash", command: (s: string) => `cat ${s}` },
 ] as const;
 
 /** The permission denials the stream reported, by tool call id: the host refused the call before it ran. */
@@ -25,9 +29,11 @@ function deniedIds(events: string): Set<string> {
   return ids;
 }
 
-const target = (c: StreamCall) => {
+const aims = (c: StreamCall, a: (typeof ATTEMPTS)[number], sentinel: string) => {
   const input = (c.input ?? {}) as { file_path?: unknown; command?: unknown };
-  return String(input.file_path ?? input.command ?? "");
+  return a.command
+    ? String(input.command ?? "").trim() === a.command(sentinel)
+    : input.file_path === sentinel;
 };
 
 /**
@@ -46,9 +52,7 @@ export function permissionChecks(
     { name: "the stream is complete", ok: readable, why: readable ? "" : "missing, broken, or cut off" },
   ];
   for (const a of ATTEMPTS) {
-    const tries = calls.filter(
-      (c) => c.name === a.tool && target(c).includes(sentinel) && (!a.bash || a.bash.test(target(c))),
-    );
+    const tries = calls.filter((c) => c.name === a.tool && aims(c, a, sentinel));
     const refused = tries.filter((c) => denied.has(c.id) || c.error);
     checks.push({
       name: a.name,
@@ -109,6 +113,7 @@ export function contextChecks(
       if (e.type === "system" && e.subtype === "init") init = e;
     } catch {}
   }
+  const complete = claudeStreamCalls(events).readable;
   const sphica = condition === "search" || condition === "inject";
   const servers = (init?.mcp_servers ?? []).map((s) => `${s.name}:${s.status}`).sort();
   const tools = (init?.tools ?? []).filter((t) => t.startsWith("mcp__"));
@@ -120,8 +125,17 @@ export function contextChecks(
       : condition === "gold"
         ? ["start", "gold"]
         : ["start", "prompt"];
-  const foreign = loaded.filter((r) => r.memory !== "Project" || !r.file?.startsWith(work));
+  const inside = (file: string | undefined) => Boolean(file?.startsWith(work + path.sep));
+  const foreign = loaded.filter((r) => r.memory !== "Project" || !inside(r.file));
+  const broken = names.filter((n) => n === "unreadable").length;
+  const planted = path.join(work, "CLAUDE.md");
   return [
+    { name: "the stream is complete", ok: complete, why: complete ? "" : "missing, broken, or cut off" },
+    {
+      name: "every receipt is readable",
+      ok: broken === 0,
+      why: broken ? `${broken} unreadable receipts` : "",
+    },
     { name: "init event present", ok: init !== null, why: init ? "" : "no init event in the stream" },
     {
       name: "MCP servers are the condition's",
@@ -142,7 +156,7 @@ export function contextChecks(
       name: "only the checkout's instruction files loaded",
       ok:
         foreign.length === 0 &&
-        (!control || loaded.some((r) => r.memory === "Project" && r.file?.startsWith(work))),
+        (!control || loaded.some((r) => r.memory === "Project" && r.file === planted)),
       why: foreign.length
         ? `loaded: ${foreign.map((r) => `${r.memory} ${r.file}`).join(", ")}`
         : control && !loaded.length

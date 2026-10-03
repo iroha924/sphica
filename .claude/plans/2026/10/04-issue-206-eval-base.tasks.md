@@ -96,6 +96,16 @@ base: main
   - コミット: `fix(evals): fence the local runner's environment and harden its readers (T15, T16)`
   - 結果: red 実測（32c9dc33 の worktree で red.ts）: `F1 GH_TOKEN kept: true`、`F2 exact .npmrc rule: false`、`F4 ignored file in patch: false`、`F5 crash: true`。直した後 `node --test test/eval-claude.test.ts test/eval-build.test.ts test/eval-grade.test.ts` → pass 70, fail 0。canary を流し直して `canary passed`（環境変数を絞っても認証が通る）
 
+- [x] T17: T04 の Codex レビューの 5 件を直す（壊れた receipt と切れた stream、look-alike のパス、MCP と hook の同じ DB、隣のディレクトリ、準備の失敗の終了コード）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（直す対象）
+  - 変更: `server/evals/cloud/canary-check.ts`, `server/evals/cloud/canary.ts`, `server/evals/cloud/claude.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd <79076e01 の worktree>/server && node --test test/eval-claude.test.ts`（新しいテストを置いて）→ look-alike のパスへの試行で fence が通る（actual [] / expected 'not attempted' 2 件）、clone に失敗しても claude.ts が 0 で終わる（actual 0 / expected 1）
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 壊れた receipt・切れた stream・look-alike のパス・隣のディレクトリ・準備の失敗のテストが pass。`node evals/cloud/canary.ts --build <build>` → 全項目 ✓
+  - コミット: `fix(evals): make the canary prove each check from complete evidence (T17)`
+  - 結果: red は上のとおり 2 件落ちた（壊れた receipt と隣のディレクトリは、直す前は判定に入っていなかったので新しい検査として足した）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 73, fail 0。`node evals/cloud/canary.ts --build <build-c2>` → `canary passed`（MCP の status の件数が run の DB 写しと一致）
+
 ## P2: 測る信号と評価セット
 
 最初の編集の前に検索したか、衝突の扱い、old が実際に届ける記録を測れる。
@@ -192,3 +202,5 @@ base: main
 - 2026-10-04 / T06 / stale タスクは「今のコード」がレコードと違う必要がある / tasks.json の project に `current`（スロットだけに当てるファイル）を足し、build.ts の files() で当てる。fixture の手順は build-lib.ts の `fixtureSteps` に切り出し、ビルドとテストで共有（変更欄に build.ts・build-lib.ts を足した）
 - 2026-10-04 / T06 / crowded はエージェントのタスクを作らず、T09 のベンチの中で組み立てる（エージェントの fixture に混ぜると他のタスクの配信が変わる）。stale の記録は「今のコードで anchor が無い」ので、old でも pre_read で path が合えば届く（テストで確認）
 - 2026-10-04 / T07 / 衝突のタスクを grader に知らせる欄が要る / tasks.json に `conflict`（両側の説明）を足し、grade.ts が渡す。grader の一致の比較に新しい 2 欄を足した（変更欄に schema-check.ts・grade.ts・tasks.json を足した）
+- 2026-10-04 / T04 / Codex レビュー 5 件（P1 2 件）を全部採った / T17
+- 2026-10-04 / T17 / canary の正の対照の run で、claude が SessionStart までに 15 分止まった（API の時間は 3.7 秒、終わった後は普通に終了）。原因は未特定 / 再現したら、起動の待ち（ロックや利用上限）を調べる。run の時間は result.json の seconds に残る

@@ -60,3 +60,5 @@ const { dir, result } = await runClaude({
   model: args.model ?? "",
 });
 console.log(`${result.run}: exit ${result.status}${result.reason ? ` (${result.reason})` : ""} → ${dir}`);
+// The run is recorded either way; a caller still learns it did not finish cleanly
+if (result.reason) process.exitCode = 1;

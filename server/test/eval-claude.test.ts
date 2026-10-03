@@ -608,3 +608,89 @@ test("collect with --no-cloud reads no slot repository", (t) => {
   assert.notEqual(collect([]).status, 0, "without the flag the slots are read");
   assert.equal(collect(["--no-cloud"]).status, 0);
 });
+
+test("the canary counts only attempts on the sentinel itself, and only complete logs with readable receipts", () => {
+  // Reads aimed at a look-alike path are not attempts on the sentinel
+  const lookAlike = [
+    ...attempts.slice(0, 6),
+    use("r", "Read", { file_path: `${S}.missing` }),
+    result("r", "No such file", true),
+    use("br", "Bash", { command: `cat ${S}.missing` }),
+    result("br", "No such file", true),
+    done,
+  ].join("\n");
+  assert.deepEqual(
+    permissionChecks(lookAlike, S, "secret-1", true)
+      .filter((c) => !c.ok)
+      .map((c) => c.why),
+    ["not attempted", "not attempted"],
+  );
+  const work = "/r/work";
+  const fine = [init([], ["Read"]), done].join("\n");
+  const hooks = [receipt({ name: "start" }), receipt({ name: "prompt" })].join("\n");
+  const failing = (events: string, receipts: string, control = false) =>
+    contextChecks("none", events, receipts, work, control)
+      .filter((c) => !c.ok)
+      .map((c) => c.name);
+  assert.deepEqual(failing(fine, `${hooks}\n{"name":"instructions","file":`), ["every receipt is readable"]);
+  assert.deepEqual(failing(init([], ["Read"]), hooks), ["the stream is complete"]);
+  // A neighbouring directory is not the checkout, and only the planted file proves the control
+  const neighbour = `${hooks}\n${receipt({ name: "instructions", file: "/r/work-other/CLAUDE.md", memory: "Project" })}`;
+  assert.deepEqual(failing(fine, neighbour, true), ["only the checkout's instruction files loaded"]);
+  const nested = `${hooks}\n${receipt({ name: "instructions", file: "/r/work/docs/CLAUDE.md", memory: "Project" })}`;
+  assert.deepEqual(failing(fine, nested, true), ["only the checkout's instruction files loaded"]);
+  assert.deepEqual(failing(fine, nested, false), []);
+});
+
+test("claude.ts exits non-zero when the run could not be set up, after recording it", (t) => {
+  const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-setup-"));
+  t.after(() => fs.rmSync(build, { recursive: true, force: true }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  fs.writeFileSync(
+    path.join(build, "manifest.json"),
+    JSON.stringify({ build: "b", commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
+  );
+  fs.writeFileSync(
+    path.join(build, "plan.json"),
+    JSON.stringify([
+      {
+        build: "b",
+        variant: "original",
+        task: "pilot-sort",
+        condition: "none",
+        slot: "eval-shelf-1",
+        try: 1,
+        prompt: "p",
+        fired_at: null,
+      },
+    ]),
+  );
+  fs.writeFileSync(path.join(build, "canary.json"), JSON.stringify({ passed: true, model: "m" }));
+  // No slot repository exists, so the clone fails before claude starts
+  const out = path.join(build, "runs");
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "claude.ts"),
+      "--build",
+      build,
+      "--repo",
+      "eval-shelf-1",
+      "--task",
+      "pilot-sort",
+      "--model",
+      "m",
+      "--out",
+      out,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(r.status, 1);
+  const [run] = fs.readdirSync(out);
+  const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
+  assert.equal(recorded.status, null);
+  assert.match(recorded.reason, /clone/);
+});
