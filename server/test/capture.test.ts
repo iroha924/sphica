@@ -751,45 +751,58 @@ test("turn boundary: session start writes no start and passes over session direc
   );
 });
 
-test("prune keeps each session's highest-numbered start as a marker, so a turn numbered from it never ties lower", () => {
-  const { repo, edit } = boundaryRepo("prune");
-  const dir = turnDir("claude-code", "pr");
+test("prune drops a session's starts only when all of them are old, and removes older single files", () => {
+  const { repo } = boundaryRepo("prune");
   const old = new Date(Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000);
-  const age = (f: string) => fs.utimesSync(path.join(dir, f), old, old);
-  const write = (f: string, body: unknown) =>
-    fs.writeFileSync(path.join(dir, f), typeof body === "string" ? body : JSON.stringify(body));
-  const sessionStart = () =>
-    onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
-  fs.mkdirSync(dir, { recursive: true });
-  write("old1.json", { head: null, entries: {}, running: true, turn: "o1", seq: 1 });
-  write("old2.json", { head: "abc", entries: { "a.ts": "x" }, running: true, turn: "o2", seq: 2 });
-  write("fresh.json", { head: null, entries: null, running: false, turn: "o0", seq: 0 });
-  // t1 numbers itself from the old starts, and the prune runs before t1 saves
-  const saveT1 = openTurn(dir, "t1", repo);
-  write("broken.json", "{");
-  write(".half.tmp", "{");
-  for (const f of ["old1.json", "old2.json", "broken.json", ".half.tmp"]) age(f);
-  const older = path.join(path.dirname(dir), "0123456789abcdef.json");
+  const start = (session: string, turn: string, aged: boolean) => {
+    const dir = turnDir("claude-code", session);
+    openTurn(dir, turn, repo)?.();
+    const file = fs
+      .readdirSync(dir)
+      .map((f) => path.join(dir, f))
+      .find((f) => JSON.parse(fs.readFileSync(f, "utf8")).turn === turn);
+    if (aged && file) fs.utimesSync(file, old, old);
+    return dir;
+  };
+  const idle = start("idle", "t1", true);
+  start("idle", "t2", true);
+  const live = start("live", "t1", true);
+  start("live", "t2", false);
+  const older = path.join(path.dirname(idle), "0123456789abcdef.json");
   fs.writeFileSync(older, "{}");
-  sessionStart();
-  assert.deepEqual(fs.readdirSync(dir).sort(), ["fresh.json", "old2.json"]);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "old2.json"), "utf8")), {
-    head: null,
-    entries: null,
-    running: false,
-    turn: "o2",
-    seq: 2,
-  });
+  onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
+  assert.equal(fs.existsSync(idle), false);
+  assert.equal(fs.readdirSync(live).length, 2);
   assert.equal(fs.existsSync(older), false);
-  openTurn(dir, "t2", repo)?.();
-  edit("t2-only.ts");
-  saveT1?.();
-  assert.deepEqual(closeTurn(dir, "t1", repo)?.(), []);
-  // Once newer turns are saved, the old marker is no longer the highest and goes
-  age("old2.json");
-  sessionStart();
-  assert.equal(fs.existsSync(path.join(dir, "old2.json")), false);
-  assert.equal(fs.readdirSync(dir).filter((f) => !f.startsWith(".")).length, 3);
+});
+
+test("a starting point that cannot be written costs only the status edits, not the messages or the send", () => {
+  const { repo, edit } = boundaryRepo("unwritable");
+  for (const host of ["claude-code", "codex"] as const) {
+    const session = `uw-${host}`;
+    const base = {
+      session_id: session,
+      cwd: repo,
+      ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
+    };
+    onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "first" });
+    const dir = turnDir(host, session);
+    const [name] = fs.readdirSync(dir);
+    // The temporary file every write of this start goes through is a directory, so each write fails
+    fs.mkdirSync(path.join(dir, `.${name}.${process.pid}.tmp`));
+    edit(`${host}.ts`);
+    assert.deepEqual(onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "done" }), {
+      flush: true,
+    });
+    if (host === "codex")
+      assert.deepEqual(onHook(host, { ...base, hook_event_name: "Interrupt" }), { flush: true });
+    const next = { ...base, ...(host === "codex" ? { turn_id: "t2" } : { prompt_id: "t2" }) };
+    onHook(host, { ...next, hook_event_name: "UserPromptSubmit", prompt: "second" });
+    assert.ok(
+      spooled().some((x) => x.kind === "message" && x.session === session && x.body === "second"),
+      `${host}: the next prompt is still recorded`,
+    );
+  }
 });
 
 test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {

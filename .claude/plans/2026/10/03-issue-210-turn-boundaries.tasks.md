@@ -59,6 +59,16 @@ base: main
   - コミット: `test(acceptance): cover interrupted turns and compaction in capture (T04)`
   - 結果: 前回取り下げた 03fc2d7c の capture-16（Claude Code の中断の後の `src/owner-fix.ts`）・capture-17（Codex の compaction の前の `src/lockfile.ts`）と driver の shell_edits・compact・ends・owner_edits_after・no_edit_observation を当て直した。`--test-name-pattern="capture-1[67]"` → 2 pass。main の `capture.ts` に差し替えると 2 件とも fail（`src/owner-fix.ts was observed in s-ja-interrupt`、`no edit observed for src/lockfile.ts in s-en-compact`）。`bun run verify` → exit 0（受け入れケース 105 pass）
 
+- [x] T07: prune をセッション単位の削除にし、起点の読み書きの失敗で発言の保存と送信を止めない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の prune）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `.claude/plans/2026/10/03-issue-210-turn-boundaries.plan.md`
+  - red: `cd server && node --test --test-name-pattern="cannot be written|prune drops" test/capture.test.ts` → T02 の capture.ts で、続いているセッションの古い起点が消される、Codex の Interrupt の書き込み失敗で例外になり `{ flush: true }` が返らない、で落ちる
+  - 完了条件: `cd server && node --test test/capture.test.ts` → pass
+  - コミット: `fix(capture): prune whole idle sessions only and keep recording when a start cannot be written (T07)`
+  - 結果: red 実測（d7c0ed1d の capture.ts）: 2 件 fail（prune の `AssertionError`、書き込み失敗のテスト）。直した後 `node --test test/capture.test.ts` → 51 pass / 0 fail。C16 の順序のテストは、方針 7 の変更で穴 (g) に入るので外した
+
 ## P2: record サーバーの workspace
 
 Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ環境変数で別のプロジェクトに書かない。
@@ -86,3 +96,7 @@ Codex の `_meta` を `CLAUDE_PROJECT_DIR` より先に見て、引き継いだ�
 ## 記録
 
 - 2026-10-03 / T01, T06 / pre-commit の bundle の検査が、package の入力（capture.ts）を変えたコミットにバージョンの更新が無いと止めた / 0.6.28 への更新を T01 に移し、T01 の変更欄に 4 つの manifest を足した（前: capture.ts と capture.test.ts、後: それに plugin/package.json・plugin/.claude-plugin/plugin.json・plugin/.codex-plugin/plugin.json・.claude-plugin/marketplace.json）。T01 の計画欄に S5 を足し（前: S1、後: S1, S5）、T06 は取りやめ（リリースノートは PR 本文に書く）
+- 2026-10-03 / T01 / Codex のタスクレビュー 4 件: F4（Codex の Interrupt の書き込み失敗で flush が止まる、P2）を受理し T07 で直す。F1（保存待ちの間の B の編集を A の Stop が拾う）は棄却: T03 で UserPromptSubmit を同期にし、B のモデルは B の hook の保存の後に動く（崩れるのは timeout で、穴 (d)）。F2（同じ id の古い保存が新しい起点を巻き戻す）は棄却: 1 つの hook が何ターンも保存を待つ必要があり、穴 (f) を timeout を過ぎて走り続ける hook に広げて明記した。F3（Stop の書き直しの失敗の後の id の使い回し）は棄却: 起点を書けない場合で、穴 (d) に含めて明記した
+- 2026-10-03 / T02 / Codex のタスクレビュー 2 件（P1）: prune が判定の後に同じ id の起点が作り直されると上書き・削除する（F1）、seq:null を消すと遅れた Stop が古いターンを今のターンと見る（F2）を受理 / T07 を足し、prune をセッション単位の削除にした。plan の方針 7・9 と変更履歴を直した
+- 2026-10-03 / T03 / 2 行の設定の変更なのでタスクレビューは出さず、PR の全差分のレビューで見る
+- 2026-10-03 / T05 / Codex のタスクレビューは指摘 0 件（MCP の統合テストは sandbox で流せず、自分で流した結果）

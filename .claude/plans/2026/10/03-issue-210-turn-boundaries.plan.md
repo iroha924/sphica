@@ -55,14 +55,15 @@ approved_at: 2026-10-03
 4. Stop(turn): 自分のファイルを読み、running で entries があれば snapshot を取る。snapshot の後にディレクトリを読み直し、今のターンが自分と判定できたときだけ `changed` を via:"status" で書き、自分のファイルを `{ now, running: false, turn, seq }`（seq は保つ）で書き直す。それ以外は起点に何も書かない。発言の保存と flush は今どおり
 5. Codex の Interrupt(turn): 自分のファイルがあれば、git を走らせず `running: false`（turn と seq と entries は保つ）で書き直す。無ければ何もしない
 6. SessionStart: 起点を書かない（どの source でも）。`CLAUDE_ENV_FILE` と prune は今どおり
-7. prune（SessionStart から）: 各セッションのディレクトリで、seq が最大のファイル以外の、HOLD_DAYS より古いファイルを消す。seq が最大のファイルは消さず、HOLD_DAYS より古ければ `{ head: null, entries: null, running: false, turn, seq }` の小さい印に書き換える（番号を下げないため。Codex の C16 への代案。この形は Codex の確認を経ていない）。読めないファイルは HOLD_DAYS を過ぎたら消す。旧形式の 1 ファイルを消す
+7. prune（SessionStart から）: セッションのディレクトリの中の全ファイル（tmp を含む）が HOLD_DAYS より古いときだけ、ディレクトリごと消す。一部だけは消さない。旧形式の 1 ファイルを消す。起点の読み書きに失敗しても、発言の保存と flush は止めない
 8. 同期化: `plugin/hooks/hooks.json` の capture の UserPromptSubmit と Stop を `{ timeout: 10 }`（async を外す）。`scripts/check-ai-config.mjs` の期待を同じにする
 9. 受け入れる穴（capture.ts の先頭のコメントに書く）:
    - (a) 中断の後、前のターンの id を使い回す通知のターン（起点が running のまま残り、オーナーの手での編集がそのターンに入る）
    - (b) Stop の snapshot までの間のオーナーの編集
    - (c) 走っている間に別の id のプロンプトが来ると、それまでのシェルの変更が status に残らない（取りこぼし。tool の編集は残る）
-   - (d) UserPromptSubmit が目印を書けない（ディスクの障害、目印を書く前の timeout）
-   - (f) 古いターンの UserPromptSubmit の hook が、新しいターンの目印の保存を見てから番号を振る順序（ホストの hook の起動順は保証が確かめられない）
+   - (d) 起点を書けない（ディスクの障害、目印を書く前の timeout、Stop・Interrupt の書き直しの失敗）
+   - (f) timeout を過ぎても走り続ける hook、または古いターンの hook が新しいターンの目印の保存を見てから番号を振る順序（ホストの hook の起動順は保証が確かめられない）
+   - (g) HOLD_DAYS 止まっていたセッションが再開した瞬間に、そのセッションの古い起点の prune が重なる
 10. record サーバー: `projectOf` を `hostWorkspace(meta) || process.env.CLAUDE_PROJECT_DIR`。workspace が無ければ今どおり拒否し、cwd で代えない。選んだ workspace が未登録なら次の候補に進まない。コメントに理由（Claude Code のシェルから起動した Codex が環境変数を引き継ぐ）
 11. テスト: 起点の処理を「読む・番号を振る・snapshot・読み直す・書く」の段に分けた関数にし、`server/test/capture.test.ts` で一時ディレクトリの実ファイルに、別のターンの段を間に挟む順を並べる（子プロセスは使わない）。入れる順序: #210 の t1/t2（Claude Code と Codex の Interrupt）、compaction、同じ id の途中のメッセージ、走っている間の注入、遅れた Stop(t1)、保存の手前で止まった UserPromptSubmit(t1) の遅れた保存、消せない起点、同点、seq:null、読めないファイル、tmp を比べない、entries:null・running:false を比べる対象に入れる、Stop と Interrupt が turn と seq を保つ、prune が番号を振った後・保存の前に走る順（C16）、旧形式の 1 ファイル
 12. 受け入れケース: `server/evals/acceptance/` に中断の後のロールオーバーと compaction の 2 件を足す（`driver.ts`・`load.ts` の Turn に中断・シェルの編集・compaction の欄、`acceptance-cases.test.ts` の capture の件数）
@@ -74,7 +75,7 @@ approved_at: 2026-10-03
 - 採用: ターンごとのファイル + 通し番号 + snapshot の後の読み直し。棄却: 1 ファイルに turn を持たせて書き換える（途中の割り込みで遅れた保存が新しい起点を上書きし、消せない起点に遅れた Stop が来ると付け違える。Codex が C2・C3 で反例）
 - 採用: 通し番号 seq。棄却: プロセスの開始時刻 startedAt（同値で付け違え（C13）、hook の起動の遅れで大小が逆になる（C14）、時計の戻り）
 - 採用: 判定できない（同点・読めない・seq:null）なら捨てる。棄却: 列挙順やファイル名で決める（時間順の根拠にならない）
-- 採用: prune は seq が最大のファイルを印に置き換えて残す。棄却: 期限切れなら全部消す（番号を振った後・保存の前に消すと番号の大小が逆になる、C16）
+- 採用: prune はセッションの全ファイルが古いときだけディレクトリごと消す。棄却: 最大 seq を印にして残し、ほかの古いファイルを消す（T02 のタスクレビューで、prune が判定した後に同じ id の起点が作り直されると上書き・削除し、seq:null を消すと遅れた Stop が古いターンを今のターンと見ることが再現された）。棄却: 期限切れなら個別に全部消す（C16）
 - 採用: SessionStart は起点を書かない。棄却: compact だけ残し、ほかは取り直す（startup の裏の SessionStart が最初のプロンプトの起点を潰す）
 - 採用: UserPromptSubmit と Stop の同期化。棄却: 非同期のまま（遅れた Stop の窓が広く、u185 で見送った理由の待ち時間は実測 30〜40ms）
 - 採用: status の観測は今どおり implementation の根拠にする。棄却: 根拠から外す（対象外を参照）
@@ -99,12 +100,13 @@ approved_at: 2026-10-03
 ## リスク
 
 - 大きなリポジトリで同期の git status がプロンプトとターンの終わりを待たせる → timeout 10 で打ち切られ、そのターンは目印を書けず (d) になる（付け違えはしない）。報告があれば測って非同期に戻すか、snapshot を軽くする
-- 起点のファイルがセッションごとのディレクトリに積もる → prune で seq が最大以外の古いファイルを消す。セッションごとに小さい印が 1 つ残る
+- 起点のファイルが続いているセッションのディレクトリにターンの数だけ積もる（ファイルは変更のあるパスだけを持つ）→ セッションが HOLD_DAYS 止まれば消える。長く続くセッションで大きくなれば、Stop が終えたターンの entries を空にするなどを考える
 - 走っている間の別の id のプロンプト（c）で status の編集が思ったより落ちる → 取り違えはしないので出す。trace の後に `edit_observation` の via 別の件数を見る
-- C16 の代案（方針 7）は Codex の確認を経ていない → 実装のタスクレビューで、番号を振った後・保存の前の prune の順を Codex に確かめさせる
+- 方針 7 の prune は T07 のタスクレビューで Codex に確かめさせる
 
 ## 未解決
 
 なし
 
 ## 変更履歴
+- 2026-10-03 / 方針 7 の prune をセッション単位の削除にし、方針 9 の穴 (d) を起点の書き込みの失敗全般に、(f) を timeout を過ぎて走り続ける hook を含む形に広げ、(g) を足した。起点の失敗で発言の保存と flush を止めない / T01・T02 のタスクレビュー（Codex）: T02 の prune と hook の競合 2 件、T01 の Interrupt の書き込み失敗で flush が止まる 1 件を受理。T01 の残り 3 件は同期の UserPromptSubmit の前提か書き込みの失敗に当たる / Go 不要（範囲・公開インターフェース・データは変わらず、付け違えの起き得る場面は (g) の一瞬が増え、prune の部分削除が無くなった分だけ減る）
