@@ -20,8 +20,9 @@ import {
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
-import { readSource } from "../src/read.ts";
+import { readSource, readUnit } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
+import { searchUnits } from "../src/search.ts";
 import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
@@ -1985,6 +1986,79 @@ test("glean: unsourced cannot become active, adding evidence or adoption says so
     });
     assert.match(late.checked, /glean:csv-seen is unsourced and cannot become active/);
     assert.doesNotMatch(late.checked, /successor/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("replace_aliases: glean replaces a saved record's search words, and clears them with an empty set", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "時刻は協定世界時で保存する。" });
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, root, {
+      units: [
+        {
+          key: "utc",
+          kind: "finding",
+          text: "時刻は協定世界時で保存する",
+          evidence: [{ source: `s${m}`, quote: "時刻は協定世界時で保存する。", role: "states" }],
+          aliases: ["timezone"],
+        },
+      ],
+    });
+    session(db, p, "g1");
+    const key = "trace:ext-s1/utc";
+    const rev = () => Number(db.owner.prepare("select revision from unit where key = ?").get(key)?.revision);
+    const found = async (q: string) =>
+      (await searchUnits(db.reader, p, { question: q, limit: 5 })).hits.map((h) => h.key);
+    const replace = (aliases: unknown, revision = rev()) => ({
+      ops: [{ op: "replace_aliases", unit: key, revision, aliases }],
+    });
+    assert.deepEqual(await found("timezone"), [key]);
+    const before = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Not words from the record's text: only the alias can find it
+    const stale = rev();
+    assert.match(
+      await saveText(
+        db.ingest,
+        await beginGlean(db.ingest, p, "g1"),
+        p,
+        root,
+        replace([" offset ", "UTC offset", "offset"]),
+      ),
+      /trace:ext-s1\/utc: aliases replaced/,
+    );
+    assert.deepEqual(await found("offset"), [key]);
+    assert.deepEqual(await found("timezone"), [], "a dropped alias no longer finds it");
+    assert.match(
+      (await readUnit(db.reader, p, key, root)) ?? "",
+      /Aliases \(search only\): offset, UTC offset\n/,
+    );
+    assert.match(
+      (await readUnit(db.reader, p, key, root, before)) ?? "",
+      /Aliases \(search only\): timezone\n/,
+    );
+
+    for (const [aliases, revision, want] of [
+      [["timezone"], stale, /changed since you read it/],
+      [[" "], undefined, /aliases must be 1 to 40 characters/],
+      [["x".repeat(41)], undefined, /aliases must be 1 to 40 characters/],
+      [Array.from({ length: 13 }, (_, i) => `a${i}`), undefined, /aliases/],
+    ] as const) {
+      const run = await beginGlean(db.ingest, p, "g1");
+      assert.match((await checkText(db.ingest, run, p, root, replace(aliases, revision))).text, want);
+      await assert.rejects(saveText(db.ingest, run, p, root, replace(aliases, revision)), want);
+    }
+    assert.deepEqual(await found("offset"), [key], "a refused change leaves the aliases");
+
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, replace([]));
+    assert.deepEqual(await found("offset"), []);
+    assert.doesNotMatch((await readUnit(db.reader, p, key, root)) ?? "", /Aliases/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

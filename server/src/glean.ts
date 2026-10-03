@@ -8,6 +8,7 @@ import type { DB } from "./db-types.ts";
 import { cleanGit } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
+import { inline } from "./panel.ts";
 import {
   anchorProblem,
   type Checked,
@@ -117,6 +118,10 @@ const Op = z.discriminatedUnion("op", [
   z
     .object({ op: z.literal("withdraw"), unit, revision, reason_source: SOURCE_REF, reason_quote: quote })
     .strict(),
+  // Search words only, never evidence, so no quote; an empty list clears them
+  z
+    .object({ op: z.literal("replace_aliases"), unit, revision, aliases: z.array(z.string()).max(12) })
+    .strict(),
   // Ends an unresolved conflict between two records; until then automatic delivery holds both back
   z
     .object({
@@ -210,6 +215,8 @@ type Planned = {
   retracts: [number, number] | null;
   /** The live anchor a replacement retires */
   replaces: number | null;
+  /** The alias set a replacement writes, trimmed and without repeats */
+  aliases: string[] | null;
 };
 export type GleanChecked = { errors: string[]; problems: string[]; units: Checked; ops: Planned[] };
 
@@ -552,7 +559,17 @@ export async function checkGlean(
       else if (spans[0]) retracts = [spans[0].span_start, spans[0].span_end];
       else errors.push(`${what}: no live ${noun} cites ${op.source}`);
     }
-    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces });
+    let aliases: string[] | null = null;
+    if (op.op === "replace_aliases") {
+      aliases = [...new Set(op.aliases.map((a) => a.trim()))];
+      // Unlike trace, nothing is left out: dropping a bad word would write a smaller set than asked, or clear them all
+      const bad = aliases.filter((a) => !a || a.length > 40);
+      if (bad.length)
+        errors.push(
+          `${what}: aliases must be 1 to 40 characters; ${bad.map((a) => JSON.stringify(inline(head(a, 60)))).join(", ")}`,
+        );
+    }
+    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces, aliases });
   }
   // Checked after every op is read. Replacements run first, in their order, each placing its new anchor before retiring the old one, and
   // plain anchors after them: an anchor retired by then no longer counts as live
@@ -833,6 +850,23 @@ export async function saveGlean(
           .where("retired_at", "is", null)
           .execute();
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
+    } else if (op.op === "replace_aliases") {
+      const { content_hash } = await trx
+        .selectFrom("unit")
+        .select("content_hash")
+        .where("id", "=", p.unitId)
+        .executeTakeFirstOrThrow();
+      await trx
+        .insertInto("unit_alias")
+        .values({
+          unit_id: p.unitId,
+          terms: JSON.stringify(p.aliases ?? []),
+          content_hash,
+          run_id: runId,
+          added_at: now,
+        })
+        .execute();
+      changed.push(`${op.unit}: aliases ${p.aliases?.length ? "replaced" : "cleared"}`);
     } else {
       const reason = await spanOf(op.reason_source, op.reason_quote);
       const retraction = {

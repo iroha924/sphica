@@ -140,13 +140,14 @@ unsourced の記録に証拠や採用を足すと active にならないと言�
 
 glean で保存済みの記録の aliases を置き換え、消せる。
 
-- [ ] T08: glean に replace_aliases op を足す
+- [x] T08: glean に replace_aliases op を足す
   - 種別: 追加
   - 計画: S5
   - 依存: T06（as-of の read で前の組を確かめる）
-  - 変更: `server/src/glean.ts`, `server/src/record.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `plugin/skills/glean/SKILL.md`
+  - 変更: `server/src/glean.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `plugin/skills/glean/SKILL.md`
   - 完了条件: `cd server && node --test --test-name-pattern="replace_aliases" test/extract.test.ts test/acceptance-cases.test.ts` → 新しい alias で見つかり、外した alias で見つからない。as-of で前の組、`[]` で消える、古い revision・空白だけ・41 文字・13 件は error
   - コミット: `feat(glean): replace a saved record's search aliases (T08)`
+  - 結果: 直す前のコードでは `ops.0.op: Invalid discriminator value` で拒まれて落ちる。直した後 `node --test --test-name-pattern="replace_aliases" test/extract.test.ts` → pass（本文に無い alias で見つかり、外した alias で見つからない。read に今の組、as-of で前の組。古い revision・空白だけ・41 文字・13 件は check と save の両方で error、拒んだ後も aliases は変わらない。`[]` で消える）。受け入れケース glean-18 は直す前のコードで落ち、直した後に通る。`bun run verify` → exit 0（acceptance 103 pass）
 
 ## P5: リリース
 
@@ -171,3 +172,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T11 / T03 のレビュー F1（ロックの中で消えたファイルに近いパスを探す）は T10 の per-path のキャッシュで直っていた（ロックの中で消えたパスは `(near paths not checked)`）。F2（ディレクトリと読めないファイルはどちらも hash が `unreadable` で、refresh が種類を判定し直さない）と T10 のレビュー F1（テストが計算し直さないことを確かめていない）は直すと判定した / T11 を足した
 - 2026-10-03 / T12 / T05 のレビュー F1（JSON.stringify は U+2028・U+2029 をエスケープせず、framed が改行にするので移動先のファイル名から行を偽造できる。T02 の近いパスと anchor のパスも同じ）と F2（テストが git の回数を数えていない）を直すと判定した。git の回数は PATH の偽 git だと Windows で sh が要るので、共有する Map への書き込み回数で数える / T12 を足した
 - 2026-10-03 / T13 / T06 のレビュー F1（head はバイト数で切るので、DB の制約で 40 文字以内の日本語の alias が切れる）を直すと判定した。T11・T12 のレビューは指摘なし / T13 を足した
+- 2026-10-03 / T08 / record.ts は変える必要がなかった。post-glean の検索を確かめる `search_not_include` を driver に足した / 変更欄から `server/src/record.ts` を外し、`server/evals/acceptance/driver.ts` を足した

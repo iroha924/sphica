@@ -938,6 +938,12 @@ export async function createDriver(world: World): Promise<Driver> {
         assert.equal(hits[0]?.key, want.top_active_is, hits.map((h) => h.key).join(", "));
         return;
       }
+      if (e.search_not_include && typeof e.search_not_include === "object") {
+        const want = e.search_not_include as { query: string; key: string };
+        const hits = await search(want.query);
+        assert.ok(!hits.some((h) => h.key === want.key), hits.map((h) => h.key).join(", "));
+        return;
+      }
       if (e.anchor && typeof e.anchor === "object") {
         const want = e.anchor as { of: string; symbol: string; state: string };
         const u = await unitOf(want.of);

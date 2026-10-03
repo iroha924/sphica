@@ -60,7 +60,8 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
   "ops": [
     { "op": "add_evidence", "unit": "trace:abc/storage", "revision": 4, "source": "s31", "quote": "Exported CSV files must never include notes.", "role": "states" },
     { "op": "add_evidence", "unit": "trace:abc/storage", "revision": 4, "file": { "path": "docs/ops.md", "commit": "HEAD", "lines": [3, 3] }, "quote": "Back up before a release.", "role": "explains" },
-    { "op": "adopt", "unit": "glean:csv/no-notes", "revision": 2, "source": "s40", "quote": "Let's make that final." }
+    { "op": "adopt", "unit": "glean:csv/no-notes", "revision": 2, "source": "s40", "quote": "Let's make that final." },
+    { "op": "replace_aliases", "unit": "glean:csv/no-notes", "revision": 3, "aliases": ["CSV export", "export notes", "notes field"] }
   ],
   "units": []
 }
@@ -71,6 +72,7 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 | `add_evidence` | Cites a `source` ref or a committed `file` (path, commit, lines). `role` as in trace. When the owner reports what someone else said, add `reported_speaker`: it stays the owner's report, never that person's statement or an adoption. A file excerpt is stored with keys masked, so quote words around a key, never the key, and cite whole lines around it: a range that cuts through a private key, or leaves a key's name outside, is refused |
 | `adopt` | The owner's (or a maintainer's) words that settle a decision or constraint. "Kimura said it was agreed" is not adoption; the owner saying "let's make it final" is |
 | `anchor` / `replace_anchor` | Adds a code location, or replaces one whose code moved (`from` and `to`, citing the owner's words); the old one is kept as history. A replacement carries no commit, so an implementation whose proof was the replaced anchor goes back to candidate: add an `anchor` op with `commit` in the same batch to keep it active. A `symbol` that is a key or a value Sphica masks is refused: anchor a name, or the path alone. A warning that the path is not in the working tree (with near paths), is a directory, or does not hold the symbol means fix it and check again |
+| `replace_aliases` | Replaces the record's search words (`aliases`, up to 12, each 1 to 40 characters) when search needs a word it lacks (the other language, a common term) or an alias is so broad it floods results. Search only, never evidence, so no quote; read prints the current ones, and `[]` clears them |
 | `retract_evidence` / `retract_adoption` | Marks a link mistaken, citing the owner's words (`reason_source`, `reason_quote`). When the record cites the same source more than once, add `quote` to say which one. It is kept as history, and the record is judged again |
 | `resolve_conflict` | Ends an unresolved conflict between `unit` and `with`, citing the owner's words (`reason_source`, `reason_quote`). Until then neither record is shown on its own |
 | `withdraw` | Withdraws a record the owner says no longer holds, citing the owner's words. A superseded record is refused: withdraw the record that replaced it |

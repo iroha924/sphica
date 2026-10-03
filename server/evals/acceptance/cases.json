@@ -4382,6 +4382,63 @@
           "lifecycle": "candidate"
         }
       ]
+    },
+    {
+      "id": "glean-18",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "The owner replaces a record's search words: a new word finds it and a dropped one no longer does",
+      "given": [
+        {
+          "trace_en_dates": true
+        },
+        {
+          "session": {
+            "id": "s-en-aliases",
+            "host": "claude-code",
+            "at": "2026-03-28T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "The UTC rule should be found by offset, not by the Japanese words.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-aliases",
+          "record": {
+            "ops": [
+              {
+                "op": "replace_aliases",
+                "unit": "trace:s-en-dates/utc",
+                "aliases": ["UTC offset", "offset", "timezone"]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "search": {
+            "query": "offset",
+            "top_active_is": "trace:s-en-dates/utc"
+          }
+        },
+        {
+          "search_not_include": {
+            "query": "協定世界時",
+            "key": "trace:s-en-dates/utc"
+          }
+        },
+        {
+          "unit": "trace:s-en-dates/utc",
+          "lifecycle": "active"
+        }
+      ]
     }
   ],
   "setups": {
