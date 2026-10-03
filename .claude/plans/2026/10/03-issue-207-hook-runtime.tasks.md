@@ -42,7 +42,7 @@ PowerShell のコマンドにも記録が出て、doctor が Windows で黙ら�
   - コミット: `fix(capture): hide the console window of the detached flush on Windows`
   - 結果: red `grep -c windowsHide server/src/capture.ts` → 0。直した後 → 1、`bun run test` → 613 pass。コンソールが出ないことは Windows の実機が無く確かめていない（T07 の Stop の送信で起動の成否だけ見る）
 
-- [ ] T03: doctor が Windows で npm・claude・動いている MCP を、調べられなかった理由付きで出す
+- [x] T03: doctor が Windows で npm・claude・動いている MCP を、調べられなかった理由付きで出す
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -50,6 +50,7 @@ PowerShell のコマンドにも記録が出て、doctor が Windows で黙ら�
   - red: `cd server && node --test --test-name-pattern Windows test/plugin.test.ts` → 足したテストが、win32 で `ps`・`npm` を名前で起動する・調べられなかった行が無い（期待の不一致）で落ちる
   - 完了条件: `bun run test` → pass、`bun run sql:live` → exit 0
   - コミット: `fix(doctor): report what could not be inspected on Windows`
+  - 結果: red 新しいテストを今のコードに当てると、Windows のテストが `running` が配列のまま（期待の不一致）で落ちた（findExe・npmCli の import を外した写しで実行）。直した後 `bun run test` → 615 pass、`bun run sql:live` → exit 0。手元の `sphica doctor` は node の隣の npm-cli.js で global の 0.6.25 を見つけた
 
 ## P2: bundle を小さく保つ
 
