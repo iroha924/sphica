@@ -13,8 +13,14 @@ import {
   runArgs,
   runMcp,
   runSettings,
+  treeWatcher,
 } from "../evals/cloud/claude-run.ts";
-import { claudeStreamCalls, foundInClaudeStream, goldSignalsFromClaudeStream } from "../evals/cloud/judge.ts";
+import {
+  claudeStreamCalls,
+  foundInClaudeStream,
+  goldSignalsFromClaudeStream,
+  searchedBeforeEdit,
+} from "../evals/cloud/judge.ts";
 
 const paths = { run: "/r", work: "/r/work", tools: "/r/tools", db: "/r/db/sphica.db" };
 const MATCHER = "Edit|Write|Read|Bash";
@@ -401,4 +407,90 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
     assert.match(r.stderr, /no Claude run starts until it passes/);
     assert.equal(fs.existsSync(path.join(build, "runs")), false, "nothing was started");
   }
+});
+
+test("the tree watcher marks each tool result with whether the tree changed and which calls were still open", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eval-watch-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const work = path.join(dir, "work");
+  fs.mkdirSync(work);
+  execFileSync("git", ["-C", work, "init", "-q"]);
+  fs.writeFileSync(path.join(work, "a.ts"), "1");
+  execFileSync("git", ["-C", work, "add", "-A"]);
+  execFileSync("git", [
+    "-C",
+    work,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "-qm",
+    "s",
+  ]);
+  const marks = path.join(dir, "edits.jsonl");
+  const watch = treeWatcher(work, marks);
+  watch(use("r", "Read"));
+  watch(result("r", "1"));
+  watch(use("w", "Write"));
+  fs.writeFileSync(path.join(work, "a.ts"), "2");
+  watch(result("w", "ok"));
+  // Two calls at once: the change after the first result cannot be tied to it
+  watch(use("b1", "Bash"));
+  watch(use("b2", "Bash"));
+  fs.writeFileSync(path.join(work, "new.ts"), "x");
+  watch(result("b1", "ok"));
+  watch(result("b2", "ok"));
+  // Installed dependencies are not edits
+  fs.mkdirSync(path.join(work, "node_modules", "d"), { recursive: true });
+  fs.writeFileSync(path.join(work, "node_modules", "d", "i.js"), "x");
+  watch(use("n", "Bash"));
+  watch(result("n", "ok"));
+  const got = fs
+    .readFileSync(marks, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  assert.deepEqual(got, [
+    { after: "r", changed: false, in_flight: [] },
+    { after: "w", changed: true, in_flight: [] },
+    { after: "b1", changed: true, in_flight: ["b2"] },
+    { after: "b2", changed: false, in_flight: [] },
+    { after: "n", changed: false, in_flight: [] },
+  ]);
+});
+
+test("a search counts as before the edit only when it came before the call that first changed the tree", () => {
+  const mark = (after: string, changed: boolean, inFlight: string[] = []) =>
+    JSON.stringify({ after, changed, in_flight: inFlight });
+  const search = [use("s", "mcp__sphica__search"), result("s", "No record holds most of")];
+  const bash = [use("b", "Bash", { command: "sed -i s/1/2/ a.ts" }), result("b", "")];
+  const write = [use("w", "Write", { file_path: "a.ts" }), result("w", "ok")];
+  // Bash edit, then search, then Write: the Bash call was the first edit
+  assert.equal(
+    searchedBeforeEdit(
+      [...bash, ...search, ...write, done].join("\n"),
+      [mark("b", true), mark("s", false), mark("w", true)].join("\n"),
+    ),
+    "no",
+  );
+  assert.equal(
+    searchedBeforeEdit([...search, ...bash, done].join("\n"), [mark("s", false), mark("b", true)].join("\n")),
+    "yes",
+  );
+  assert.equal(searchedBeforeEdit([...write, done].join("\n"), mark("w", true)), "no");
+  assert.equal(searchedBeforeEdit([...search, done].join("\n"), mark("s", false)), "no_edit");
+  assert.equal(
+    searchedBeforeEdit(
+      [...search, ...bash, done].join("\n"),
+      [mark("s", false), mark("b", true, ["x"])].join("\n"),
+    ),
+    "unknown",
+  );
+  assert.equal(searchedBeforeEdit([...search, ...bash, done].join("\n"), null), "unknown");
+  assert.equal(
+    searchedBeforeEdit([...search, ...bash].join("\n"), mark("b", true)),
+    "unknown",
+    "a stream cut off",
+  );
 });

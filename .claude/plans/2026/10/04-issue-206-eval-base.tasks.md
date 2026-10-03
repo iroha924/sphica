@@ -90,13 +90,14 @@ base: main
 
 最初の編集の前に検索したか、衝突の扱い、old が実際に届ける記録を測れる。
 
-- [ ] T05: 呼び出しごとの作業ツリーの観測と、Sphica の search が最初の編集より前かの判定を足す
+- [x] T05: 呼び出しごとの作業ツリーの観測と、Sphica の search が最初の編集より前かの判定を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T03（stream-json の回収が要る）
-  - 変更: `server/evals/cloud/claude.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`
-  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → Bash 編集 → search → Write は no、search → Bash 編集は yes、Write だけ・Bash だけ・並行の呼び出し（unknown）のテストが pass
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → Bash 編集 → search → Write は no、search → Bash 編集は yes、Write だけ・Bash だけ・並行の呼び出し（unknown）のテストが pass
   - コミット: `feat(evals): tell whether a run searched Sphica before its first edit (T05)`
+  - 結果: `node --test test/eval-claude.test.ts` → pass 13, fail 0（watcher の印、並行の呼び出しの in_flight、node_modules を編集に数えない、判定の yes / no / no_edit / unknown）。実 run（pilot-sort、inject）で edits.jsonl に 8 個の印、6 個目で changed、判定 yes
 
 - [ ] T06: stale・abstention・crowded・conflict・poisoned-delivered の setup とタスクを足す
   - 種別: 追加
@@ -163,3 +164,4 @@ base: main
 - 2026-10-04 / T04 / `--setting-sources ""` ではプロジェクトの CLAUDE.md も読み込まれず、モデルが Read で読みに行った（cloud と条件がずれる）/ `--setting-sources project` に変え、clone の `.claude/settings.json`（cloud のフック）は開始前のコミットで消し、フックは `--settings` から渡す。正の対照（CLAUDE.md を置いた run）で InstructionsLoaded の receipt に `memory_type: Project` が出て、user の CLAUDE.md は出ないことを確かめた
 - 2026-10-04 / T04 / canary は `claude.ts --canary` ではなく別の `canary.ts` にし、結果をビルドの `canary.json` に残して claude.ts が見る（変更欄 前: claude.ts と canary.ts、後: claude-run.ts・canary-check.ts・slot-scripts.ts を追加）。receipt に読み込んだファイルを残すため HOOK_SH に `file` と `memory` を足した
 - 2026-10-04 / T04 / Sphica は delivery の session_id をホストの id から作り直すので、DB の canary は「各 DB に session が 1 つ、2 つの run で違う、TMPDIR に DB が無い」で見る
+- 2026-10-04 / T05 / 観測と判定の置き場所 / runner 側は claude.ts ではなく claude-run.ts（T03 で run を移したため）、テストは eval-grade ではなく eval-claude（変更欄 前: claude.ts と eval-grade.test.ts、後: claude-run.ts と eval-claude.test.ts）

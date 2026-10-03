@@ -2,6 +2,7 @@
 // uses the owner's login, so everything else of the owner's (settings, CLAUDE.md, plugins, MCP servers) is kept out by the command line
 // (project sources only, strict MCP config) and what is left is fenced by the sandbox and acceptEdits.
 import { execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -261,6 +262,9 @@ export async function runClaude(o: {
     );
     fs.writeFileSync(mcp, `${JSON.stringify(runMcp(o.condition, paths), null, 2)}\n`);
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !PARENT_ENV.includes(k)));
+    // After each tool result the work tree is looked at, so the first change can be tied to the call that made it; the start state is
+    // taken before the agent starts
+    const watch = treeWatcher(work, path.join(dir, "edits.jsonl"));
     const child = spawn("claude", runArgs({ settings, mcp }, o.model), {
       cwd: work,
       env: { ...env, EVAL_RUN_DIR: dir, EVAL_SPHICA_DB: db },
@@ -270,6 +274,13 @@ export async function runClaude(o: {
     const stderr = fs.createWriteStream(path.join(dir, "stderr.log"));
     child.stdout.pipe(events);
     child.stderr.pipe(stderr);
+    let pending = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      pending += chunk.toString("utf8");
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) watch(line);
+    });
     child.stdin.end(o.prompt);
     const timer = setTimeout(() => child.kill("SIGTERM"), 30 * 60_000);
     const status = await new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
@@ -334,4 +345,72 @@ export async function runClaude(o: {
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
   return { dir, result };
+}
+
+/**
+ * The work tree's state: each changed or untracked path (installed dependencies aside) with a hash of its content, so two states differ
+ * exactly when a file changed between them.
+ */
+export function treeState(work: string): string {
+  const status = execFileSync(
+    "git",
+    ["-C", work, "status", "--porcelain=v1", "-z", "-uall", "--", ".", ":(exclude,glob)**/node_modules/**"],
+    {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
+  const entries = status.split("\0").filter(Boolean).sort();
+  const hash = crypto.createHash("sha256");
+  for (const e of entries) {
+    hash.update(e);
+    const file = path.join(work, e.slice(3));
+    try {
+      if (fs.statSync(file).isFile()) hash.update(fs.readFileSync(file));
+    } catch {}
+  }
+  return hash.digest("hex");
+}
+
+export type TreeMark = {
+  /** The tool call whose result had just arrived */
+  after: string;
+  /** Whether the tree differs from the previous mark (or from the start, for the first) */
+  changed: boolean;
+  /** Calls started whose results had not arrived: a change then cannot be tied to one call */
+  in_flight: string[];
+};
+
+/**
+ * Reads the stream line by line and writes one mark per tool result to `file`. The start state is taken when the watcher is made, before
+ * the agent can act.
+ */
+export function treeWatcher(
+  work: string,
+  file: string,
+  state: (w: string) => string = treeState,
+): (line: string) => void {
+  let last = state(work);
+  const open = new Set<string>();
+  return (line: string) => {
+    let e: { type?: string; message?: { content?: unknown } };
+    try {
+      e = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const content = Array.isArray(e.message?.content)
+      ? (e.message?.content as Record<string, unknown>[])
+      : [];
+    for (const c of content) {
+      if (e.type === "assistant" && c.type === "tool_use" && typeof c.id === "string") open.add(c.id);
+      if (e.type === "user" && c.type === "tool_result" && typeof c.tool_use_id === "string") {
+        open.delete(c.tool_use_id);
+        const now = state(work);
+        const mark: TreeMark = { after: c.tool_use_id, changed: now !== last, in_flight: [...open] };
+        last = now;
+        fs.appendFileSync(file, `${JSON.stringify(mark)}\n`);
+      }
+    }
+  };
 }

@@ -24,6 +24,7 @@ import {
   goldSignalsFromClaudeStream,
   goldSignalsFromCodex,
   presentedText,
+  searchedBeforeEdit,
   type Tri,
 } from "./judge.ts";
 
@@ -87,6 +88,8 @@ type Row = {
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
   presented: string | null;
+  /** Local Claude runs only: whether a Sphica search came before the first change to the work tree */
+  search_before_edit: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
   signals: {
     searches: number;
     empty_searches: number;
@@ -122,6 +125,7 @@ const excludedRow = (
   found: "unknown",
   gold_signals: {},
   presented: null,
+  search_before_edit: "not_applicable",
   signals: null,
 });
 
@@ -317,6 +321,8 @@ function main() {
           found: foundInClaudeLog(log, gold),
           gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
           presented: presentedOf(task, condition),
+          // A routine log has no record of the work tree between calls
+          search_before_edit: "unknown",
           signals: log === null ? null : signals(log),
         });
       } finally {
@@ -444,6 +450,8 @@ function main() {
         delivered_units: emitted,
         found,
         presented: presentedOf(task, result.condition),
+        search_before_edit:
+          model === "claude" ? searchedBeforeEdit(events, read("edits.jsonl")) : "not_applicable",
         gold_signals:
           model === "codex"
             ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)

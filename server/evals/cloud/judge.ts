@@ -310,6 +310,29 @@ export function goldSignalsFromClaudeStream(
 }
 
 /**
+ * Whether a local Claude run searched Sphica before its first edit. The first edit is the call after whose result the work tree first
+ * changed; when that change cannot be tied to one call (another call was in flight) the answer is unknown. A run that never changed the tree
+ * is "no_edit", kept apart from yes and no. A missing stream or mark log is unknown.
+ */
+export function searchedBeforeEdit(
+  events: string | null,
+  marks: string | null,
+): "yes" | "no" | "no_edit" | "unknown" {
+  const { calls, readable } = claudeStreamCalls(events);
+  if (!readable || marks === null) return "unknown";
+  const parsed = marks
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as { after: string; changed: boolean; in_flight: string[] });
+  const first = parsed.find((m) => m.changed);
+  if (!first) return "no_edit";
+  if (first.in_flight.length) return "unknown";
+  const at = calls.findIndex((c) => c.id === first.after);
+  if (at < 0) return "unknown";
+  return calls.slice(0, at).some((c) => c.name === "mcp__sphica__search" && c.result !== null) ? "yes" : "no";
+}
+
+/**
  * The record a counterfactual task's run was surely shown, as the gold slot rendered it: only the gold condition gives it for certain, so
  * other conditions' runs are not judged on following it (and a blind prompt carrying it would hint at the condition).
  */
