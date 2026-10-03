@@ -5,7 +5,7 @@ import type { DB, Session } from "./db-types.ts";
 import type { BeginOrigin } from "./knowledge.ts";
 
 /** Days after its last owner message that an untraced session stops counting as waiting. Its messages stay and are still found. */
-export const PENDING_DAYS = 30;
+export const PENDING_DAYS = 14;
 
 /** The oldest last-owner-message time that still counts as recent, as stored (ISO 8601 UTC). */
 export const pendingCutoff = (now: Date): string =>

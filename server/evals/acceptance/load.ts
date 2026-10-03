@@ -16,7 +16,8 @@ export type Case = {
   then: Step[];
 };
 type Turn = { owner: string; assistant: string; edits: string[] };
-type Session = { id: string; host?: string; at: string; turns: Turn[] };
+/** `entrypoint` is the CLAUDE_CODE_ENTRYPOINT the hooks see */
+type Session = { id: string; host?: string; at: string; entrypoint?: string; turns: Turn[] };
 type Comment = { id: number; body: string };
 type Pull = {
   number: number;

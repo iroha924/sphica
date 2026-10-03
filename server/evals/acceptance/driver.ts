@@ -246,27 +246,34 @@ export async function createDriver(world: World): Promise<Driver> {
         cwd: repo,
         ...input,
       });
-    hook("start", { hook_event_name: "SessionStart" });
-    s.turns.forEach((t, i) => {
-      const turn = turnId(i + 1);
-      hook(turn, { hook_event_name: "UserPromptSubmit", prompt: t.owner });
-      t.edits.forEach((rel, k) => {
-        const abs = path.join(repo, rel);
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.appendFileSync(abs, `// ${s.id} turn ${i + 1}\n`);
-        hook(turn, {
-          hook_event_name: "PostToolUse",
-          tool_use_id: `${turn}-edit-${k}`,
-          ...(host === "codex"
-            ? {
-                tool_name: "apply_patch",
-                tool_input: { command: `*** Begin Patch\n*** Update File: ${rel}\n*** End Patch` },
-              }
-            : { tool_name: "Edit", tool_input: { file_path: abs } }),
+    const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
+    if (s.entrypoint) process.env.CLAUDE_CODE_ENTRYPOINT = s.entrypoint;
+    try {
+      hook("start", { hook_event_name: "SessionStart" });
+      s.turns.forEach((t, i) => {
+        const turn = turnId(i + 1);
+        hook(turn, { hook_event_name: "UserPromptSubmit", prompt: t.owner });
+        t.edits.forEach((rel, k) => {
+          const abs = path.join(repo, rel);
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.appendFileSync(abs, `// ${s.id} turn ${i + 1}\n`);
+          hook(turn, {
+            hook_event_name: "PostToolUse",
+            tool_use_id: `${turn}-edit-${k}`,
+            ...(host === "codex"
+              ? {
+                  tool_name: "apply_patch",
+                  tool_input: { command: `*** Begin Patch\n*** Update File: ${rel}\n*** End Patch` },
+                }
+              : { tool_name: "Edit", tool_input: { file_path: abs } }),
+          });
         });
+        hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
       });
-      hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
-    });
+    } finally {
+      if (entrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      else process.env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
+    }
     const sent = await flush(file);
     assert.equal(sent.rejected, 0, `the database rejected records of ${id}`);
   }
@@ -669,6 +676,10 @@ export async function createDriver(world: World): Promise<Driver> {
         if (e.host !== undefined) assert.equal(got.host, e.host);
         return;
       }
+      if (typeof e.no_source === "string") {
+        assert.equal(await sessionSource(e.no_source), undefined, `${e.no_source} was recorded`);
+        return;
+      }
       if (e.edit_observation && typeof e.edit_observation === "object") {
         const want = e.edit_observation as { session: string; path: string };
         const got = await db()
@@ -811,7 +822,7 @@ export async function createDriver(world: World): Promise<Driver> {
             want.pending_older_includes,
           );
           const listed = await pendingText(writer(), await projectId(), now);
-          assert.match(listed.slice(listed.indexOf("Older than 30 days")), new RegExp(uuid), listed);
+          assert.match(listed.slice(listed.indexOf("Older than 14 days")), new RegExp(uuid), listed);
         }
         return;
       }

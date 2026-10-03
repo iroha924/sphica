@@ -782,7 +782,7 @@
       "id": "status-07",
       "layer": "status",
       "lang": "en",
-      "summary": "A session whose last owner message is over 30 days old stops counting as waiting, is listed apart as older, and its message is still found",
+      "summary": "A session whose last owner message is over 14 days old stops counting as waiting, is listed apart as older, and its message is still found",
       "given": [],
       "when": {
         "capture": "s-en-dates"
@@ -790,7 +790,7 @@
       "then": [
         {
           "status": {
-            "after_days": 31,
+            "after_days": 15,
             "pending_recent": 0,
             "pending_older": 1,
             "pending_older_includes": "s-en-dates"
@@ -798,7 +798,7 @@
         },
         {
           "status": {
-            "after_days": 29,
+            "after_days": 13,
             "pending_recent": 1,
             "pending_older": 0
           }
@@ -2779,6 +2779,32 @@
             "query": "Postgres SQLite",
             "hits": 1
           }
+        }
+      ]
+    },
+    {
+      "id": "capture-15",
+      "layer": "capture",
+      "lang": "en",
+      "summary": "A turn from an Agent SDK agent is not the owner's: nothing it says is recorded as an owner message",
+      "given": [],
+      "when": {
+        "session": {
+          "id": "s-en-sdk",
+          "at": "2026-06-01T09:00:00Z",
+          "entrypoint": "sdk-ts",
+          "turns": [
+            {
+              "owner": "Switch the cache to Redis and drop SQLite.",
+              "assistant": "Switched the cache to Redis.",
+              "edits": []
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "no_source": "session:s-en-sdk#1.owner"
         }
       ]
     },
