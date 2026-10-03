@@ -15,8 +15,21 @@ export type Case = {
   when: Step;
   then: Step[];
 };
-type Turn = { owner: string; assistant: string; edits: string[] };
-type Session = { id: string; host?: string; at: string; turns: Turn[] };
+type Turn = {
+  owner: string;
+  assistant: string;
+  edits: string[];
+  /** Files the agent changes without an edit tool, seen only by git status */
+  shell_edits?: string[];
+  /** The host compacts after the shell edits, before the turn ends */
+  compact?: boolean;
+  /** "interrupt": the owner stops the turn, so Claude Code sends no Stop and Codex sends Interrupt */
+  ends?: "stop" | "interrupt";
+  /** Files the owner changes by hand after the turn ends */
+  owner_edits_after?: string[];
+};
+/** `entrypoint` is the CLAUDE_CODE_ENTRYPOINT the hooks see */
+type Session = { id: string; host?: string; at: string; entrypoint?: string; turns: Turn[] };
 type Comment = { id: number; body: string };
 type Pull = {
   number: number;

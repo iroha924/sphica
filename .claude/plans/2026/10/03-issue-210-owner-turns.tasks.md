@@ -75,16 +75,18 @@ SDK のターンをオーナーの発言にせず、中断と compaction をま�
   - コミット: `feat(trace): count a session as waiting for 14 days after its last owner message (T05)`
   - 結果: テストを先に 14 日へ直して 30 日のコードで流す → status.test.ts 2 fail。直した後 `node --test test/status.test.ts` → 5 pass。`bun run test` → 3 件（extract・record の trace のテスト）が 17 日前の fixture を今の数え方で古い側に回して落ちたので、時計を fixture の 10 日後に移し `node --test test/extract.test.ts test/record.test.ts` → 51 pass。`rg -n "30 days|30 日" …` → 一致なし
 
-- [ ] T06: 受け入れケースを 3 件足す（SDK のターン、中断の後のロールオーバー、compaction）
+- [x] T06: 受け入れケースを 3 件足す（SDK のターン、中断の後のロールオーバー、compaction）
   - 種別: 追加
   - 計画: S6
   - 依存: T01（sdk-* の判定が要る）, T02（ロールオーバーが要る）, T03（compact で起点を残す挙動が要る）
-  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/load.ts`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0。受け入れケースの件数が 3 件増える
   - コミット: `test(acceptance): cover SDK turns, interrupted turns, and compaction in capture (T06)`
+  - 結果: capture-15〜17 を足し、driver に session の entrypoint・ターンの shell_edits・compact・ends: interrupt・owner_edits_after と、期待の no_source・no_edit_observation を足した。main の capture.ts に差し替えて流す → 3 件とも fail（`session:s-en-sdk#1.owner was recorded`、`src/owner-fix.ts was observed`、compact の後の `src/lockfile.ts` が無い）。今の capture.ts で受け入れケース 101 pass。`bun run verify` → exit 0
 
 ## 記録
 
 - 2026-10-03 / T01, T02 / コミットの件名が 100 文字を超え commit-msg の検査で止まった / 件名を短くした（T01: `…never count an Agent SDK turn as the owner's, and bump to 0.6.24`、T02: `…end a running turn on a new typed prompt or a Codex interrupt`）
 - 2026-10-03 / T05 / extract.test.ts と record.test.ts の trace のテストが 2026-09-10 の fixture を 2026-09-27 の時計で数えていて、14 日で古い側に回り落ちた / 変更欄に 2 ファイルを足した（前: status.test.ts のみのテスト、後: extract.test.ts・record.test.ts も）
 - 2026-10-03 / T01 / Codex のタスクレビューは指摘 0 件（sandbox でテストは流せず、テストは自分で流した結果）
+- 2026-10-03 / T06 / ターンの型（Turn・Session）が load.ts にあった / 変更欄に `server/evals/acceptance/load.ts` を足した
