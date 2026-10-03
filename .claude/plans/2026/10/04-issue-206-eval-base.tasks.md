@@ -31,13 +31,33 @@ base: main
   - コミット: `feat(evals): pass the slot database and receipts by absolute path (T01)`
   - 結果: `node --test test/eval-build.test.ts` → pass 4, fail 0。`npx tsc --noEmit` → エラーなし
 
-- [ ] T02: build に `--dist` `--fixture` とタスクごとの run 数を足し、manifest に fixture のハッシュを残す
-  - 種別: 追加
+- [x] T12: 今の main で build.ts が落ちる 2 か所を直す（fixture の付け替えが ingest の権限で拒否される、exec form の hooks.json から matcher が取れない）
+  - 種別: 修正
   - 計画: S7
   - 依存: なし
+  - 変更: `server/evals/cloud/build.ts`
+  - red: `cd server && node evals/cloud/build.ts --project tsundoku --out <tmp>` → `rekey` で `not authorized`、直した後に `plugin/hooks/hooks.json has no PreToolUse delivery hook`
+  - 完了条件: `cd server && node evals/cloud/build.ts --project tsundoku --out <tmp>` → `built 4 repositories`
+  - コミット: `feat(evals): build from a given bundle and fixture with per-task run counts (T02, T12, T13)`
+  - 結果: red 実測: main の worktree（c042ada2）で `node evals/cloud/build.ts --project tsundoku` → `Error: not authorized`（`rekey`）。owner の接続にした後 `plugin/hooks/hooks.json has no PreToolUse delivery hook`。両方直して `built 4 repositories`
+
+- [x] T02: build に `--dist` `--fixture` とタスクごとの run 数を足し、manifest に fixture のハッシュを残す
+  - 種別: 追加
+  - 計画: S7
+  - 依存: T12（今の main では build が最後まで通らない）
   - 変更: `server/evals/cloud/build.ts`, `server/evals/cloud/firing.ts`, `server/test/eval-build.test.ts`
-  - 完了条件: `cd server && node --test test/eval-build.test.ts` → 渡した dist の bundle と fixture がスロットに入り、manifest に fixture の sha256 があり、tasks.json の `runs` が plan.json の行数になるテストが pass
-  - コミット: `feat(evals): build from a given bundle and fixture with per-task run counts (T02)`
+  - 完了条件: `cd server && node --test test/eval-build.test.ts` → tasks.json の `runs` が plan.json の行数になるテストが pass。`node evals/cloud/build.ts --project tsundoku --dist <dir> --fixture <db> --out <tmp>` → 渡した dist の bundle と fixture がスロットに入り、manifest に fixture の sha256 がある
+  - コミット: `feat(evals): build from a given bundle and fixture with per-task run counts (T02, T12, T13)`
+  - 結果: `node --test test/eval-build.test.ts test/eval-grade.test.ts` → pass 50, fail 0。build を 2 回（素のビルドと、その fixture.db と印を付けた deliver.js を渡すビルド）→ 両 manifest の fixture が 8d3065c1… で一致、bundle の deliver.js のハッシュは違い、スロットの deliver.js の末尾に印がある
+
+- [x] T13: gold の印が TMPDIR に戻る場合と、session start で消えることのテストを足す（T01 の Codex レビュー F1）
+  - 種別: 追加
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/test/eval-build.test.ts`
+  - 完了条件: `cd server && node --test test/eval-build.test.ts` → EVAL_RUN_DIR なしで gold が 1 度だけ返り、印が TMPDIR にあり、start の後にまた返るテストが pass
+  - コミット: `feat(evals): build from a given bundle and fixture with per-task run counts (T02, T12, T13)`
+  - 結果: `node --test test/eval-build.test.ts` → 新しいテストを含め pass
 
 - [ ] T03: ローカルの Claude runner と回収を足す
   - 種別: 追加
@@ -122,3 +142,5 @@ base: main
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
+- 2026-10-04 / T12 / build.ts が main で落ちていた（9/30 のループより後の権限と hooks.json の変更）/ 修正タスク T12 を足し、T02 の依存に入れた（前: なし、後: T12）。T02 の完了条件に実ビルドを足した（build は読み込みで走るスクリプトでテストから組み立てられないため）
+- 2026-10-04 / T01 / Codex レビュー F1（gold の印の TMPDIR への戻りのテストが無い）を採った / T13 を足した

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { planRows } from "../evals/cloud/firing.ts";
 import { GOLD_SH, HOOK_SH, NODE_SH, SPHICA_SH } from "../evals/cloud/slot-scripts.ts";
 
 /** A slot's .tools directory with its scripts and a stand-in fixture, plus a scratch TMPDIR. */
@@ -99,4 +100,36 @@ test("hook.sh falls back to TMPDIR for receipts on the cloud VM", (t) => {
     input: JSON.stringify({ hook_event_name: "SessionStart" }),
   });
   assert.equal(fs.existsSync(path.join(s.tmp, "eval-receipts.jsonl")), true);
+});
+
+test("a task's runs set its tries per condition, and the build's runs cover the rest", () => {
+  const rows = planRows(
+    "b",
+    "original",
+    [{ id: "t", prompt: "p", conditions: ["none", "inject", "gold"], runs: { inject: 5, gold: 3 } }],
+    2,
+    (c) => c,
+  );
+  assert.deepEqual(
+    ["none", "inject", "gold"].map((c) => rows.filter((r) => r.condition === c).length),
+    [2, 5, 3],
+  );
+});
+
+test("gold.sh keeps its marker under TMPDIR on the cloud VM, and session start clears it", (t) => {
+  const s = slot(t);
+  const gold = () =>
+    execFileSync("sh", [path.join(s.tools, "hook.sh"), "gold", "sh", path.join(s.tools, "gold.sh")], {
+      env: s.env,
+      input: JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt: "please do it now" }),
+      encoding: "utf8",
+    });
+  assert.match(gold(), /gold text/);
+  assert.equal(fs.existsSync(path.join(s.tmp, "eval-gold-given")), true);
+  assert.equal(gold(), "");
+  execFileSync("sh", [path.join(s.tools, "hook.sh"), "start"], {
+    env: s.env,
+    input: JSON.stringify({ hook_event_name: "SessionStart" }),
+  });
+  assert.match(gold(), /gold text/);
 });

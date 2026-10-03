@@ -1,6 +1,7 @@
 // Builds the bootstrap repositories of the cloud evaluation (plan step 9): one per condition (none, search, inject, gold), each holding the same
 // project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
 // Run: node evals/cloud/build.ts --project tsundoku|sphica [--variant original|swapped] [--runs <n>] [--out <dir>] [--owner <github owner>]
+//      [--dist <dir with mcp.js and deliver.js>] [--fixture <fixture.db>]  (old and new builds of one comparison share the fixture)
 // Repository names hide the condition; the mapping stays in <out>/manifest.json on this machine.
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -30,8 +31,13 @@ const { values: args } = parseArgs({
     owner: { type: "string", default: "iroha924" },
     node: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", NODE.file) },
     project: { type: "string", default: "tsundoku" },
+    // The bundles under test, when they are not this checkout's (the other side of a comparison is built in a worktree)
+    dist: { type: "string" },
+    // A fixture database to use as is instead of building one, so both sides of a comparison read the same records and dates
+    fixture: { type: "string" },
   },
 });
+const dist = path.resolve(args.dist ?? path.join(ROOT, "plugin", "dist"));
 const variant = args.variant ?? "original";
 if (variant !== "original" && variant !== "swapped") throw new Error("--variant is original or swapped");
 const runs = Number(args.runs);
@@ -44,7 +50,14 @@ if (fs.existsSync(out))
   throw new Error(`${out} already exists; give a new --out, or leave it out for a new build id`);
 const owner = args.owner ?? "";
 
-type Task = { id: string; project: string; prompt: string; gold: string[]; conditions: string[] };
+type Task = {
+  id: string;
+  project: string;
+  prompt: string;
+  gold: string[];
+  conditions: string[];
+  runs?: Record<string, number>;
+};
 type Project = { source: string; repo?: string; base?: string; fixture: string };
 const plan = JSON.parse(fs.readFileSync(path.join(HERE, "tasks.json"), "utf8")) as {
   fixture: { cases: string[]; setups: string[] };
@@ -93,7 +106,8 @@ async function fixture(file: string): Promise<void> {
 
 /** Re-keys the fixture's project to the bootstrap repository, so Sphica identifies the cloud checkout as the same project. */
 async function rekey(file: string, repo: string): Promise<void> {
-  const db = openWriter("ingest", file);
+  // Changing a project's key is the owner's write; the record server's ingest connection may only add projects
+  const db = openWriter("owner", file);
   try {
     await db
       .updateTable("project")
@@ -183,9 +197,12 @@ function files(dir: string): void {
 /** The shipped delivery hook's PreToolUse matcher, so the inject slot fires on the same tools the plugin does. */
 function deliverMatcher(): string {
   const hooks = JSON.parse(fs.readFileSync(path.join(ROOT, "plugin", "hooks", "hooks.json"), "utf8")) as {
-    hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
+    hooks: { PreToolUse: { matcher: string; hooks: { command: string; args?: string[] }[] }[] };
   };
-  const entry = hooks.hooks.PreToolUse.find((e) => e.hooks.some((h) => h.command.includes("deliver.js")));
+  // The shipped hooks are in exec form: the script is an argument, not part of the command
+  const entry = hooks.hooks.PreToolUse.find((e) =>
+    e.hooks.some((h) => [h.command, ...(h.args ?? [])].some((a) => a.includes("deliver.js"))),
+  );
   if (!entry) throw new Error("plugin/hooks/hooks.json has no PreToolUse delivery hook");
   return entry.matcher;
 }
@@ -224,10 +241,11 @@ async function main() {
   const tarball = fs.readFileSync(args.node ?? "");
   if (sha256(tarball) !== NODE.sha256)
     throw new Error(`${args.node} does not match the Node ${NODE.version} sha256`);
-  execFileSync("bun", ["run", "bundle"], { cwd: ROOT, stdio: "ignore" });
+  if (!args.dist) execFileSync("bun", ["run", "bundle"], { cwd: ROOT, stdio: "ignore" });
   fs.mkdirSync(out, { recursive: true });
   const base = path.join(out, "fixture.db");
-  if (args.project === "tsundoku") await fixture(base);
+  if (args.fixture) fs.copyFileSync(path.resolve(args.fixture), base);
+  else if (args.project === "tsundoku") await fixture(base);
   else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
   const manifest: Record<string, unknown> = {
     build: buildId,
@@ -235,9 +253,11 @@ async function main() {
     built: new Date().toISOString(),
     commit: execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
     bundle: Object.fromEntries(
-      ["mcp.js", "deliver.js"].map((f) => [f, sha256(fs.readFileSync(path.join(ROOT, "plugin", "dist", f)))]),
+      ["mcp.js", "deliver.js"].map((f) => [f, sha256(fs.readFileSync(path.join(dist, f)))]),
     ),
     node: NODE,
+    // The records every slot was built from, before re-keying; a comparison refuses two builds whose fixtures differ
+    fixture: sha256(fs.readFileSync(base)),
     project: args.project,
     owner,
     tasks: tasks.map((t) => t.id),
@@ -284,7 +304,7 @@ async function main() {
       write(dir, ".tools/fixture.id", `${fixtureHash.slice(0, 16)}\n`);
       // The bundles are ESM; keeping the .js names keeps deliver's entry check (deliver.(ts|js)) true, which .mjs silently broke
       write(dir, ".tools/dist/package.json", `${JSON.stringify({ type: "module" })}\n`);
-      write(dir, ".tools/dist/mcp.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "mcp.js")));
+      write(dir, ".tools/dist/mcp.js", fs.readFileSync(path.join(dist, "mcp.js")));
       write(
         dir,
         ".mcp.json",
@@ -292,7 +312,7 @@ async function main() {
       );
     }
     if (condition === "inject") {
-      write(dir, ".tools/dist/deliver.js", fs.readFileSync(path.join(ROOT, "plugin", "dist", "deliver.js")));
+      write(dir, ".tools/dist/deliver.js", fs.readFileSync(path.join(dist, "deliver.js")));
       const deliver = (name: string) =>
         `sh "$CLAUDE_PROJECT_DIR/.tools/hook.sh" ${name} sh "$CLAUDE_PROJECT_DIR/.tools/sphica.sh" "$CLAUDE_PROJECT_DIR/.tools/dist/deliver.js"`;
       hooks.SessionStart = [{ hooks: [{ type: "command", command: deliver("start"), timeout: 60 }] }];
