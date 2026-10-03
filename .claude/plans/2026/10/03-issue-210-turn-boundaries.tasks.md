@@ -50,13 +50,14 @@ base: main
   - コミット: `fix(hooks): run capture synchronously on prompt submit and stop in Claude Code (T03)`
   - 結果: `node scripts/check-ai-config.mjs` → exit 0。`rg -n '"async": true' plugin/hooks/hooks.json` → 79 行目（PostToolUse）の 1 件だけ
 
-- [ ] T04: 中断の後のロールオーバーと compaction の受け入れケースを足す
+- [x] T04: 中断の後のロールオーバーと compaction の受け入れケースを足す
   - 種別: 追加
   - 計画: S3
   - 依存: T01（受け入れケースが通る挙動が要る）
   - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/load.ts`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0。capture の受け入れケースが 2 件増え、main の `capture.ts` に差し替えると 2 件とも落ちる
   - コミット: `test(acceptance): cover interrupted turns and compaction in capture (T04)`
+  - 結果: 前回取り下げた 03fc2d7c の capture-16（Claude Code の中断の後の `src/owner-fix.ts`）・capture-17（Codex の compaction の前の `src/lockfile.ts`）と driver の shell_edits・compact・ends・owner_edits_after・no_edit_observation を当て直した。`--test-name-pattern="capture-1[67]"` → 2 pass。main の `capture.ts` に差し替えると 2 件とも fail（`src/owner-fix.ts was observed in s-ja-interrupt`、`no edit observed for src/lockfile.ts in s-en-compact`）。`bun run verify` → exit 0（受け入れケース 105 pass）
 
 ## P2: record サーバーの workspace
 

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { loadAcceptance, quoteSources } from "../evals/acceptance/load.ts";
 
 const PER_LAYER = {
-  capture: 15,
+  capture: 17,
   status: 7,
   retrieval: 13,
   injection: 28,
