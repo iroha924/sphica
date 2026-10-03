@@ -38,7 +38,7 @@ The agent is told to treat records as history, not instructions, and to trust th
 ## Requirements
 
 - Node.js 24.15 or later
-- Claude Code or Codex, or both
+- Claude Code 2.1.139 or later, or Codex, or both. Older Claude Code skips Sphica's hooks without a word, so nothing is captured or delivered (`sphica doctor` flags it)
 - `git`, to identify the repositories you register
 - For `/sphica:harvest` and fetching GitHub sources in `/sphica:glean`: the GitHub CLI (`gh`), signed in with `gh auth login`
 

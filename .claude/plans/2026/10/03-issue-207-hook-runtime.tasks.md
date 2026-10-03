@@ -116,13 +116,14 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `ci: start check-hooks-live from the repository root path on Windows`
   - 結果: red は上のとおり（その手順は `cd plugin` の後に流れる）。`../scripts/check-hooks-live.mjs` にし、`actionlint .github/workflows/check.yml` → 指摘なし。windows の pass は plan の A5（push の後の CI）で確かめる
 
-- [ ] T08: Windows の計測で exec form を決め、hooks.json・check-ai-config・README・doctor をそろえる
+- [x] T08: Windows の計測で exec form を決め、hooks.json・check-ai-config・README・doctor をそろえる
   - 種別: 変更
   - 計画: S7
   - 依存: T06（判定に使う計測値が要る）, T07（決めた形で起動して確かめる）, T03（(a) のとき doctor が claude を見つけて版を読む）
   - 変更: `scripts/check-ai-config.mjs`, `plugin/hooks/hooks.json`, `README.md`, `server/src/plugin.ts`, `server/test/plugin.test.ts`
-  - 完了条件: `bun run verify` → exit 0、`gh pr checks` → windows を含め全件 pass
+  - 完了条件: `bun run verify` → exit 0（windows を含む CI の全件 pass は plan の A5 で確かめる）
   - コミット: `build: identify Claude hooks by their exact launch definition`
+  - 結果: 計測が 100 ms を超えたので (a)。hooks.json の全 entry を `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/<x>.js"]` にし、timeout・async・matcher はそのまま。check-ai-config は event ごとの定義を丸ごと照合する。shell form、違う script、args 無し、PowerShell の無い matcher、timeout の変化、async の欠落、余分な引数の 7 通りに壊すと、どれも `verify:ai` が落ちた。doctor の 2.1.139 未満の ✗ は、テストを先に足して期待の不一致で落ちることを確かめてから入れた。手元の doctor は「✓ Claude Code app 2.1.288」。README の Requirements に 2.1.139 以上を書いた。`bun run verify` → exit 0（hooks:live は exec form で起動）
 
 ## 記録
 2026-10-03 / T01 / Codex のタスクレビュー F1（Windows でパスの大文字・小文字を変えたコマンドに記録が出ない）/ 見送り。namedInCommand の照合は Bash（macOS でも同じ）と Read に共通の仕様で、PowerShell の道で入った欠陥ではない
@@ -134,3 +135,4 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
 2026-10-03 / T07 / Stop の入力に prompt_id が無いと capture は送信を始めない（ターン id が要る）。本物の Claude Code は Stop にも prompt_id を付けるので、検査の入力に付けた
 2026-10-03 / T07 / 子の PATH を node と git の場所だけにしたので sh が見つからなかった。POSIX は /bin/sh、Windows は SystemRoot の powershell.exe を絶対パスで起動する
 2026-10-03 / T06 / Windows の CI（run 37099886316）の計測: deliver.js 直接 112.3 ms・PowerShell 経由 343.7 ms（差 231.3 ms）、capture.js 直接 114.2 ms・PowerShell 経由 340.8 ms（差 226.6 ms）。基準の 100 ms を超えたので T08 は (a) exec form にする
+2026-10-03 / T08 / 完了条件を変えた（前: `bun run verify` と `gh pr checks` の全件 pass。後: `bun run verify`、CI は plan の A5）/ CI はこのコミットを push した後にしか走らず、チェックを付けるコミットの中で確かめられないため

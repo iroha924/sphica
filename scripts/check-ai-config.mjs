@@ -301,26 +301,52 @@ try {
       fail("plugin/hooks/codex.json: the PreToolUse delivery matcher must cover apply_patch and Bash");
     }
   }
-  const claudeHooks = JSON.parse(read("plugin/hooks/hooks.json")).hooks;
-  // A subagent starts without the main conversation's context, so both hosts give it the session-start records
-  for (const event of ["SessionStart", "SubagentStart"])
-    if (
-      !(claudeHooks?.[event] ?? []).some((group) =>
-        (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
-      )
-    )
-      fail(`plugin/hooks/hooks.json: ${event} is not wired to delivery`);
-  // Claude Code reads with the Read tool and, often, with shell commands (Bash, or PowerShell on Windows without Git Bash):
-  // the delivery hook must see all three
-  const claudeDeliver = (claudeHooks?.PreToolUse ?? []).filter((group) =>
-    (group.hooks ?? []).some((hook) => hook.command?.includes("/dist/deliver.js")),
-  );
-  if (
-    !claudeDeliver.some((group) =>
-      ["Read", "Bash", "PowerShell"].every((t) => new RegExp(`^(?:${group.matcher ?? ""})$`).test(t)),
-    )
-  ) {
-    fail("plugin/hooks/hooks.json: the PreToolUse delivery matcher must cover Read, Bash, and PowerShell");
+  const claudeHooks = JSON.parse(read("plugin/hooks/hooks.json")).hooks ?? {};
+  // Exec form: Claude Code starts node with the script path as one argument, with no shell (PowerShell on Windows without Git Bash
+  // adds about 230 ms per launch). Each event's hooks are pinned, so a lost timeout, async, or matcher fails here too.
+  const script = (name) => [["$", "{CLAUDE_PLUGIN_ROOT}"].join(""), "dist", `${name}.js`].join("/");
+  const hook = (name, extra) => ({ type: "command", command: "node", args: [script(name)], ...extra });
+  const claudeExpected = {
+    SessionStart: [
+      { hooks: [hook("capture", { timeout: 10 })] },
+      { hooks: [hook("deliver", { timeout: 5 })] },
+    ],
+    // A subagent starts without the main conversation's context, so it gets the session-start records too
+    SubagentStart: [{ hooks: [hook("deliver", { timeout: 5 })] }],
+    UserPromptSubmit: [
+      { hooks: [hook("capture", { async: true })] },
+      { hooks: [hook("deliver", { timeout: 5 })] },
+    ],
+    PostToolUse: [
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion",
+        hooks: [hook("capture", { async: true })],
+      },
+    ],
+    Stop: [{ hooks: [hook("capture", { async: true })] }],
+    // Claude Code reads with Read and, often, shell commands: Bash, or PowerShell on Windows without Git Bash
+    PreToolUse: [
+      {
+        matcher: "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash|PowerShell",
+        hooks: [hook("deliver", { timeout: 5 })],
+      },
+    ],
+    UserPromptExpansion: [{ hooks: [hook("deliver", { timeout: 5 })] }],
+  };
+  const sorted = (v) =>
+    Array.isArray(v)
+      ? v.map(sorted)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, sorted(v[k])]),
+          )
+        : v;
+  for (const event of new Set([...Object.keys(claudeExpected), ...Object.keys(claudeHooks)])) {
+    const want = JSON.stringify(sorted(claudeExpected[event] ?? null));
+    const got = JSON.stringify(sorted(claudeHooks[event] ?? null));
+    if (want !== got) fail(`plugin/hooks/hooks.json: ${event} must be ${want} (got ${got})`);
   }
   const marketplace = JSON.parse(read(".claude-plugin/marketplace.json"));
   const entry = marketplace.plugins?.[0];

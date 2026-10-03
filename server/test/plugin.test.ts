@@ -74,6 +74,17 @@ test("an outdated npm i -g CLI shows in both the row and the update steps", () =
   );
 });
 
+// The hooks run in exec form (args), which Claude Code before 2.1.139 skips without a word: capture and delivery would stop
+test("fails a Claude Code older than 2.1.139, whose hooks would never run", () => {
+  const old = report(seen({ claudeVersion: "2.1.138" }));
+  const out = stripVTControlCharacters(old.lines.join("\n"));
+  assert.match(out, /✗ Claude Code app\s+2\.1\.138[^\n]*2\.1\.139 or later/);
+  assert.ok(old.issues.includes("Claude Code app"), JSON.stringify(old.issues));
+  const now = report(seen({ claudeVersion: "2.1.288" }));
+  assert.match(stripVTControlCharacters(now.lines.join("\n")), /✓ Claude Code app\s+2\.1\.288/);
+  assert.ok(!now.issues.includes("Claude Code app"));
+});
+
 test("says when the npm i -g CLI is not installed", () => {
   const out = stripVTControlCharacters(report(seen({ global: null })).lines.join("\n"));
   assert.match(out, /○ npm i -g CLI\s+not installed/);

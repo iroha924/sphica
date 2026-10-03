@@ -182,6 +182,9 @@ function cwdOf(pid: number): { dir: string; replaced: boolean } | null {
   }
 }
 
+/** The first Claude Code that runs exec-form hooks (`args`). */
+const CLAUDE_CODE_MIN = "2.1.139";
+
 const CACHED = /\/plugins\/cache\/[^/]+\/sphica\/[^/]+$/;
 
 export type Install = { version: string | null; packageVersion?: string | null; root: string };
@@ -207,6 +210,8 @@ export type Seen = {
   global: Install | null | Unknown;
   /** null when not installed. */
   claude: Install | null | Unknown;
+  /** The installed Claude Code itself (`claude --version`); absent when it could not be read. */
+  claudeVersion?: string;
   codex: Install[];
   codexCache: string;
   running: Running[] | Unknown;
@@ -274,6 +279,19 @@ export function observe(
       claude = m?.installPath ? { version: m.version ?? null, root: m.installPath } : null;
     } catch {
       claude = { unknown: "claude plugin list --json failed" };
+    }
+
+  let claudeVersion: string | undefined;
+  if (claudeExe)
+    try {
+      const out = execFileSync(claudeExe, ["--version"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 10_000,
+      });
+      claudeVersion = /^\s*(\d+\.\d+\.\d+)/.exec(out)?.[1];
+    } catch {
+      // Not shown: the plugin row above already says whether claude could be inspected
     }
 
   // `codex plugin list --json` takes 7 seconds and cannot tell whether the version comes from the cache or the source.
@@ -350,7 +368,7 @@ export function observe(
       global = { unknown: "npm root -g failed" };
     }
 
-  return { repository, cli: install(ROOT), global, claude, codex, codexCache, running };
+  return { repository, cli: install(ROOT), global, claude, claudeVersion, codex, codexCache, running };
 }
 
 function safeDirs(dir: string): string[] {
@@ -495,6 +513,16 @@ export function report(s: Seen, now = new Date()): { lines: string[]; issues: st
     if (update) todo.add("claude");
     row("Claude Code", s.claude, note);
   }
+
+  // The hooks are exec form (args), which Claude Code before this version skips without a word
+  if (s.claudeVersion)
+    say(
+      compareVersions(s.claudeVersion, CLAUDE_CODE_MIN) < 0 ? "fail" : "ok",
+      "Claude Code app",
+      compareVersions(s.claudeVersion, CLAUDE_CODE_MIN) < 0
+        ? `${s.claudeVersion}. Sphica's hooks need ${CLAUDE_CODE_MIN} or later and do not run on this version: update Claude Code`
+        : s.claudeVersion,
+    );
 
   if (s.codex.length === 0) say("none", "Codex", `not found (looked in ${short(s.codexCache)})`);
   for (const x of s.codex) {
