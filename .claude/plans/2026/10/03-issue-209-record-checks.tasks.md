@@ -61,13 +61,14 @@ base: main
   - コミット: `fix(record): keep anchor checks from throwing and compute near paths before the lock (T10)`
   - 結果: red は直す前のコードで `Error: ENOTDIR: not a directory, lstat '.../package.json/child.ts'`。直した後 `node --test --test-name-pattern="review fixes|near paths|anchor problem" test/record.test.ts` → 3 pass（通るファイルを含むパスは gone の problem、2 つ目の anchor の種類もロックの前に判定、消えたパス自身は出ない、同じ名前は近い順、近いパスはロックの前に 1 回だけ計算）。`bun run verify` → exit 0（acceptance 99 pass）
 
-- [ ] T04: anchor の problem の受け入れケースと、trace・glean Skill の文
+- [x] T04: anchor の problem の受け入れケースと、trace・glean Skill の文
   - 種別: 追加
   - 計画: S1
   - 依存: T02（ケースが近いパスを確かめる）, T03（ケースが save の出力を確かめる）, T10（ケースが直した近いパスの順位を確かめる）
-  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `plugin/skills/trace/SKILL.md`, `plugin/skills/glean/SKILL.md`
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `plugin/skills/trace/SKILL.md`, `plugin/skills/glean/SKILL.md`, `plugin/skills/harvest/SKILL.md`
   - 完了条件: `cd server && node --test test/acceptance-cases.test.ts` → pass。新しいケースが無いパスの problem と近いパスを、消したファイルの evidence で problem なしを確かめる
   - コミット: `test(acceptance): cover anchor problems and tell trace and glean how to answer them (T04)`
+  - 結果: glean-15（無いパスに近いパス、symbol 違い、記録は active で保存）と glean-16（正しい anchor で problem なし）を足し、driver に `check_problem_absent` を足した。T01 より前（98117c9f）の worktree では glean-15 が `check did not report "anchor path src/date.ts is not in the working tree (near: "src/dates.ts""` で落ち、glean-16 は通る。ブランチでは `node --test --test-timeout=60000 --test-name-pattern="glean-1[56]" evals/acceptance/run.ts` → 2 pass。セッションで消したファイルは driver で作れないので、単体テスト（T01）で確かめている
 
 ## P2: read の表示
 
@@ -132,3 +133,4 @@ npm と 3 つの manifest を 0.6.25 にそろえる。
 - 2026-10-03 / T02 / ロック中のテストの probe にも `files` が要った / 変更欄に `server/test/extract.test.ts` を足した（前: なし）。候補には未追跡で ignore されていないファイルも入れる（`--others --exclude-standard`）
 - 2026-10-03 / T10 / T01 のレビュー（P1: パスの途中が通常のファイルだと ENOTDIR で check と save が止まる）と T02 のレビュー（P2 が 4 件: 近いパスの計算がロックの中、1 つ目の gone の後は種類の判定がロックの中へずれる、同じ名前の距離を打ち切って順位が狂う、消えたパス自身を候補に出す）を全部直すと判定した / T10 を足し、T04 の依存に T10 を足した（前: T02, T03）
 - 2026-10-03 / T10 / glean.ts は変える必要がなかった（listFilesIfGone の中で直した） / 変更欄から `server/src/glean.ts` を外した
+- 2026-10-03 / T04 / harvest Skill も anchor の警告への答え方が要った（古い PR のファイルは動いていることがある） / 変更欄に `plugin/skills/harvest/SKILL.md` を足した

@@ -4169,6 +4169,145 @@
           }
         }
       ]
+    },
+    {
+      "id": "glean-15",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "An anchor on a file that does not exist, or on a symbol the file does not hold, is reported before saving with the near path, and the record is still saved",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-anchor1",
+            "host": "claude-code",
+            "at": "2026-03-26T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "日付の保存は src/dates.ts の toStored にまとまっている。",
+                "assistant": "",
+                "edits": ["src/dates.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "capture": "s-ja-anchor1"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-anchor1",
+          "record": {
+            "units": [
+              {
+                "key": "store-dates",
+                "kind": "finding",
+                "text": "日付の保存は toStored にまとまっている",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-anchor1#1.owner",
+                    "quote": "日付の保存は src/dates.ts の toStored にまとまっている。",
+                    "role": "states"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/date.ts",
+                    "role": "applies_to"
+                  },
+                  {
+                    "path": "src/dates.ts",
+                    "symbol": "toStore",
+                    "role": "evidence"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_problem_contains": "anchor path src/date.ts is not in the working tree (near: \"src/dates.ts\""
+        },
+        {
+          "check_problem_contains": "symbol \"toStore\" is not found in src/dates.ts"
+        },
+        {
+          "unit": "trace:s-ja-anchor1/store-dates",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "glean-16",
+      "layer": "glean",
+      "lang": "en",
+      "summary": "Anchors on files and symbols that are there raise no anchor problem",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-anchor2",
+            "host": "claude-code",
+            "at": "2026-03-26T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Dates are stored through toStored in src/dates.ts.",
+                "assistant": "",
+                "edits": ["src/dates.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "capture": "s-en-anchor2"
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-anchor2",
+          "record": {
+            "units": [
+              {
+                "key": "store-dates",
+                "kind": "finding",
+                "text": "Dates are stored through toStored",
+                "evidence": [
+                  {
+                    "source": "session:s-en-anchor2#1.owner",
+                    "quote": "Dates are stored through toStored in src/dates.ts.",
+                    "role": "states"
+                  }
+                ],
+                "anchors": [
+                  {
+                    "path": "src/dates.ts",
+                    "symbol": "toStored",
+                    "role": "evidence"
+                  },
+                  {
+                    "path": "src/export.ts",
+                    "symbol": "toCsv",
+                    "role": "applies_to"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_problem_absent": "not in the working tree"
+        },
+        {
+          "check_problem_absent": "is not found in"
+        },
+        {
+          "unit": "trace:s-en-anchor2/store-dates",
+          "lifecycle": "active"
+        }
+      ]
     }
   ],
   "setups": {

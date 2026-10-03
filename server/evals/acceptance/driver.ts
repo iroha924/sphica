@@ -1227,6 +1227,14 @@ export async function createDriver(world: World): Promise<Driver> {
           );
         return;
       }
+      if (typeof e.check_problem_absent === "string") {
+        assert.ok(
+          !checked.includes(e.check_problem_absent),
+          `check reported "${e.check_problem_absent}"\n${checked}`,
+        );
+        assert.ok(checked.length > 0, "nothing was checked");
+        return;
+      }
       if (typeof e.check_problem_contains === "string") {
         assert.ok(
           checked.includes(e.check_problem_contains),
