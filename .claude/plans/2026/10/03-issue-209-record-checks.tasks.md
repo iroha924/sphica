@@ -116,7 +116,7 @@ read で、移動したファイルの移動先の候補と、記録の aliases�
 
 unsourced の記録に証拠や採用を足すと active にならないと言われ、Skill に後継で置き換える手順がある。
 
-- [ ] T07: unsourced への add_evidence と adopt に problem を出し、glean Skill に後継の手順を書く
+- [x] T07: unsourced への add_evidence と adopt に problem を出し、glean Skill に後継の手順を書く
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -124,6 +124,7 @@ unsourced の記録に証拠や採用を足すと active にならないと言�
   - red: `cd server && node --test --test-name-pattern="unsourced cannot become active" test/extract.test.ts` → add_evidence で problem が出ず落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="unsourced" test/extract.test.ts test/acceptance-cases.test.ts` → 全件 pass（candidate には後継の案内、withdrawn には無い。unsourced の decision と finding を後継で置き換えられる）
   - コミット: `fix(glean): say an unsourced record cannot become active when evidence or adoption is added (T07)`
+  - 結果: red は直す前のコードで check が `'✓ 0 records and 2 changes can be saved'`（problem なし）。直した後 `node --test --test-name-pattern="unsourced cannot become active" test/extract.test.ts` → 1 pass（add_evidence と adopt で 1 記録につき 1 回、candidate には後継の案内、引用と採用は保存して candidate のまま、unsourced の decision と finding を後継で置き換えて superseded、superseded には後継の案内なし）。受け入れケース glean-17 は直す前のコードで落ち、直した後に通る。`bun run verify` → exit 0（acceptance 102 pass）
 
 ## P4: replace_aliases
 

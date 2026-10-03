@@ -340,17 +340,25 @@ export async function checkGlean(
     /** The operation's index, for a replacement; a plain anchor lands after every replacement of the batch */
     replacing: number | null;
   }[] = [];
+  const unsourcedSaid = new Set<number>();
   for (const [i, op] of parsed.data.ops.entries()) {
     const what = `ops.${i} ${op.op} ${op.unit}`;
     const u = await db
       .selectFrom("unit")
-      .select(["id", "kind", "lifecycle", "revision"])
+      .select(["id", "kind", "lifecycle", "revision", "unsourced"])
       .where("project_id", "=", target.projectId)
       .where("key", "=", op.unit)
       .executeTakeFirst();
     if (!u) {
       errors.push(`${what}: not a record of this project`);
       continue;
+    }
+    // The flag is frozen with what the record was saved with, so a source found later can only back a successor
+    if ((op.op === "add_evidence" || op.op === "adopt") && u.unsourced && !unsourcedSaid.has(u.id)) {
+      unsourcedSaid.add(u.id);
+      problems.push(
+        `${op.unit} is unsourced and cannot become active; adding evidence or adoption does not clear the flag${u.lifecycle === "candidate" ? ". To use this source, save a successor that supersedes it and cites the source" : ""}`,
+      );
     }
     if (u.revision !== op.revision) {
       errors.push(

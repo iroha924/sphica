@@ -4308,6 +4308,80 @@
           "lifecycle": "active"
         }
       ]
+    },
+    {
+      "id": "glean-17",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "Evidence found later for an unsourced record is kept, and check says the record cannot become active and to replace it with a successor",
+      "given": [
+        {
+          "case": "capture-07"
+        },
+        {
+          "session": {
+            "id": "s-ja-unsourced",
+            "host": "claude-code",
+            "at": "2026-03-27T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "CSV にメモは入れない決まりだったと思う。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "glean": {
+            "session": "s-ja-unsourced",
+            "record": {
+              "units": [
+                {
+                  "key": "csv/remembered",
+                  "kind": "finding",
+                  "text": "CSV にメモを入れない決まりがある",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-unsourced#1.owner",
+                      "quote": "CSV にメモは入れない決まりだったと思う。",
+                      "role": "states"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-unsourced",
+          "record": {
+            "ops": [
+              {
+                "op": "add_evidence",
+                "unit": "glean:csv/remembered",
+                "source": "issue:14#body",
+                "quote": "Exported CSV files must never include the private note field.",
+                "role": "states"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_notes_contain": "glean:csv/remembered is unsourced and cannot become active"
+        },
+        {
+          "check_notes_contain": "save a successor that supersedes it"
+        },
+        {
+          "unit": "glean:csv/remembered",
+          "lifecycle": "candidate"
+        }
+      ]
     }
   ],
   "setups": {

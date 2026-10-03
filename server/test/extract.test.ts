@@ -1882,6 +1882,115 @@ test("glean: anchor problem on a missing path or a symbol not in the file, and t
   }
 });
 
+test("glean: unsourced cannot become active, adding evidence or adoption says so, and a successor replaces it", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    // An older session holds the owner's words that later turn up as the source
+    const older = message(db, p, { id: "o0", text: "CSV にメモは入れない。これで決まり。", session: "s0" });
+    session(db, p, "g1");
+    const now = message(db, p, { id: "o1", text: "CSV にメモは入れないことにしたはず。", session: "g1" });
+    const glean = async (record: unknown) => {
+      const run = await beginGlean(db.ingest, p, "g1");
+      const checked = (await checkText(db.ingest, run, p, root, record)).text;
+      return { checked, saved: await saveText(db.ingest, run, p, root, record) };
+    };
+    const remembered = (key: string, kind: string) => ({
+      key,
+      kind,
+      ...(kind === "decision" ? { stance: "dont" } : {}),
+      text: "CSV にメモを入れない",
+      evidence: [{ source: `s${now}`, quote: "CSV にメモは入れないことにしたはず。", role: "states" }],
+    });
+    await glean({ units: [remembered("csv", "decision"), remembered("csv-seen", "finding")] });
+    const unit = (key: string) =>
+      db.owner.prepare("select lifecycle, revision, unsourced from unit where key = ?").get(key) as {
+        lifecycle: string;
+        revision: number;
+        unsourced: number;
+      };
+    assert.deepEqual([unit("glean:csv").unsourced, unit("glean:csv-seen").unsourced], [1, 1]);
+
+    const added = await glean({
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:csv",
+          revision: unit("glean:csv").revision,
+          source: `s${older}`,
+          quote: "CSV にメモは入れない。",
+          role: "states",
+        },
+        {
+          op: "adopt",
+          unit: "glean:csv",
+          revision: unit("glean:csv").revision,
+          source: `s${older}`,
+          quote: "これで決まり。",
+        },
+      ],
+    });
+    const said =
+      /glean:csv is unsourced and cannot become active; adding evidence or adoption does not clear the flag/;
+    assert.match(added.checked, said);
+    assert.equal(added.checked.match(new RegExp(said.source, "g"))?.length, 1, "said once per record");
+    assert.match(added.checked, /save a successor that supersedes it/);
+    assert.equal(
+      unit("glean:csv").lifecycle,
+      "candidate",
+      "the quotes are saved, the record stays a candidate",
+    );
+    assert.equal(
+      Number(db.owner.prepare("select count(*) as n from unit_adoption").get()?.n),
+      1,
+      "the adoption is kept",
+    );
+
+    // A successor citing the found source becomes active and replaces it, for a decision and for a finding
+    const successor = (key: string, kind: string, replaces: string) => ({
+      key,
+      kind,
+      ...(kind === "decision"
+        ? { stance: "dont", adoption: [{ source: `s${older}`, quote: "これで決まり。" }] }
+        : {}),
+      text: "CSV にメモを入れない",
+      evidence: [{ source: `s${older}`, quote: "CSV にメモは入れない。", role: "states" }],
+      supersedes: replaces,
+    });
+    const replaced = await glean({
+      units: [
+        successor("csv-2", "decision", "glean:csv"),
+        successor("csv-seen-2", "finding", "glean:csv-seen"),
+      ],
+    });
+    assert.match(replaced.saved, /glean:csv-2 active/);
+    assert.deepEqual(
+      [unit("glean:csv").lifecycle, unit("glean:csv-seen").lifecycle, unit("glean:csv-seen-2").lifecycle],
+      ["superseded", "superseded", "active"],
+    );
+
+    // Withdrawn or superseded: still said, but no successor is suggested
+    const late = await glean({
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:csv-seen",
+          revision: unit("glean:csv-seen").revision,
+          source: `s${older}`,
+          quote: "CSV にメモは入れない。",
+          role: "states",
+        },
+      ],
+    });
+    assert.match(late.checked, /glean:csv-seen is unsourced and cannot become active/);
+    assert.doesNotMatch(late.checked, /successor/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // A record is active on its own evidence: an option's citation does not keep a decision whose own words were retracted active
 test("glean: a decision whose own evidence is retracted stays a candidate even with option evidence", async () => {
   const db = tempDb();
