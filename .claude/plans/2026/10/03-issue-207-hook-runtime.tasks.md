@@ -56,13 +56,14 @@ PowerShell のコマンドにも記録が出て、doctor が Windows で黙ら�
 
 deliver.js から zod を外し、サイズの上限と zod の混入を bundle のたびに落とす。
 
-- [ ] T04: findings の schema を review-findings.ts に移し、deliver.js から zod を外す
+- [x] T04: findings の schema を review-findings.ts に移し、deliver.js から zod を外す
   - 種別: 変更
   - 計画: S2
   - 依存: なし
-  - 変更: `server/src/review.ts`, `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/evals/acceptance/driver.ts`
+  - 変更: `server/src/review.ts`, `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/evals/acceptance/driver.ts`, `server/test/review.test.ts`
   - 完了条件: `bun run bundle && grep -c ZodError plugin/dist/deliver.js` → 0、`bun run test` → pass
   - コミット: `perf(deliver): keep zod out of the delivery hook bundle`
+  - 結果: `bun run bundle && grep -c ZodError plugin/dist/deliver.js` → 0。deliver.js は 1,066,559 → 389,999 バイト。`bun run test` → 615 pass、`bun run architecture` と `bun run sql:reach`（203 / 203）も通った
 
 - [ ] T05: bun の metafile から bundle ごとの上限と zod の混入を検査する
   - 種別: 追加
@@ -101,3 +102,6 @@ Windows の CI で、フックの起動の上乗せを測り、パックした h
   - コミット: `build: identify Claude hooks by their exact launch definition`
 
 ## 記録
+2026-10-03 / T01 / Codex のタスクレビュー F1（Windows でパスの大文字・小文字を変えたコマンドに記録が出ない）/ 見送り。namedInCommand の照合は Bash（macOS でも同じ）と Read に共通の仕様で、PowerShell の道で入った欠陥ではない
+2026-10-03 / T02 / Codex のタスクレビュー / 指摘なし
+2026-10-03 / T04 / 変更欄に `server/test/review.test.ts` を足した（前: 4 ファイル、後: 5 ファイル）/ checkFindings の import 元が変わるため

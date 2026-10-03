@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { checkFindings, parseDiff, selectForReview } from "../src/review.ts";
+import { parseDiff, selectForReview } from "../src/review.ts";
+import { checkFindings } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
 
