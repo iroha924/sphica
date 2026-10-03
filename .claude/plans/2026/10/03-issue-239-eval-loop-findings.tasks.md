@@ -32,7 +32,7 @@ base: main
   - コミット: `fix(evals): keep a proven hit when a Codex log has a broken line (T01)`
   - 結果: red 実測（3e842e19 の judge.ts）: `search hit with {bad json ...` で actual 'unknown' / expected 'yes' で落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 40, fail 0
 
-- [ ] T02: gold フックが gold を返さなかった gold の run を excluded にする
+- [x] T02: gold フックが gold を返さなかった gold の run を excluded にする
   - 種別: 修正
   - 計画: S2
   - 依存: なし
@@ -40,6 +40,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern='gold hook returned no record' test/eval-grade.test.ts` → receipt が無い・空・無関係の gold の run が excluded にならず落ちる
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass（swapped の gold のテストを含む）
   - コミット: `fix(evals): exclude a gold run whose hook returned no gold record (T02)`
+  - 結果: red 実測（3e842e19 の collect.ts / judge.ts）: missing・empty・unrelated の 3 run が excluded null のまま presented に gold の本文が付いて落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 41, fail 0（swapped の gold のテストは receipt を足して pass）。`bun run typecheck` → エラーなし
 
 ## P2: 段のつなぎ目を正す
 

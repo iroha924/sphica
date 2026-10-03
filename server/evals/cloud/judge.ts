@@ -21,6 +21,10 @@ export function deliveredSignal(
   return "not_applicable";
 }
 
+/** A gold run whose hook did not return a gold record was never under the gold condition, so it is not graded as one. */
+export const goldNotGiven = (condition: string, gold: string[], goldHookOutput: string | null) =>
+  condition === "gold" && deliveredSignal(condition, gold, [], goldHookOutput) === "no";
+
 /** Whether a Sphica search or read result in Codex's JSONL events named a gold record; unknown unless every line reads as an event. */
 export function foundInCodexEvents(events: string | null, gold: string[]): Tri {
   if (events === null) return "unknown";

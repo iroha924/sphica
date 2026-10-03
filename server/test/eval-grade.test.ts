@@ -704,6 +704,73 @@ test("a proven hit in a Codex log stays yes when another line is broken", () => 
       }
 });
 
+// A gold run is graded as shown the record only when its hook returned it; otherwise the gold condition never applied
+test("collect excludes a gold run when the gold hook returned no record, and keeps presented for one that did", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  try {
+    const build = path.join(base, "build");
+    const codex = path.join(base, "codex");
+    const slot = path.join(build, "eval-shelf-1");
+    fs.mkdirSync(build);
+    // The gold slot is fetched for cloud branches: a local bare origin with none keeps it off the network
+    execFileSync("git", ["init", "-q", "--bare", path.join(base, "origin.git")]);
+    execFileSync("git", ["clone", "-q", path.join(base, "origin.git"), slot], { stdio: "ignore" });
+    const text = "## trace:s-en-dates/utc (u1): decision do, active\nStore dates in UTC.";
+    fs.mkdirSync(path.join(slot, ".tools"));
+    fs.writeFileSync(path.join(slot, ".tools", "gold.json"), JSON.stringify([{ id: "pilot-dates", text }]));
+    fs.writeFileSync(
+      path.join(build, "manifest.json"),
+      JSON.stringify({ build: "b", commit: "c", repositories: { "eval-shelf-1": { condition: "gold" } } }),
+    );
+    fs.writeFileSync(path.join(build, "plan.json"), "[]");
+    seedTasks(build);
+    const head = { build: "b", task: "pilot-dates", condition: "gold" };
+    const run = (name: string, receipt: string | null) => {
+      fs.mkdirSync(path.join(codex, name, "work"), { recursive: true });
+      fs.writeFileSync(path.join(codex, name, "started.json"), JSON.stringify(head));
+      fs.writeFileSync(
+        path.join(codex, name, "result.json"),
+        JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+      );
+      if (receipt !== null) fs.writeFileSync(path.join(codex, name, "gold-receipt.txt"), receipt);
+    };
+    const hook = (context: string) =>
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context },
+      });
+    run("missing", null);
+    run("empty", "");
+    run("unrelated", hook("## trace:other/key (u2): decision do, active"));
+    run("named", hook(text));
+    execFileSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+        "--build",
+        build,
+        "--codex",
+        codex,
+        "--logs",
+        base,
+      ],
+      { stdio: "ignore", env: childEnv(base) },
+    );
+    const rows = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+      run: string;
+      excluded: string | null;
+      presented: string | null;
+    }[];
+    assert.deepEqual(rows.map((r) => [r.run, r.excluded, r.presented]).sort(), [
+      ["empty", "gold hook returned no record", null],
+      ["missing", "gold hook returned no record", null],
+      ["named", null, text],
+      ["unrelated", "gold hook returned no record", null],
+    ]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // A swapped build's runs are judged against the swapped record: its gold is that record, and the original rule's hidden test is not run
 test("collect reads a swapped build's gold from the swapped record and does not run the hidden test", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
@@ -723,6 +790,7 @@ test("collect reads a swapped build's gold from the swapped record and does not 
       path.join(codex, "sw", "result.json"),
       JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
     );
+    fs.writeFileSync(path.join(codex, "sw", "gold-receipt.txt"), "## trace:s-en-dates-local/local (u1)");
     const out = path.join(base, "loop.json");
     execFileSync(
       process.execPath,

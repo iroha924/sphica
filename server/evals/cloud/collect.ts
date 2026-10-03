@@ -16,6 +16,7 @@ import {
   foundInClaudeLog,
   foundInCodexEvents,
   type GoldSignal,
+  goldNotGiven,
   goldSignalsFromClaude,
   goldSignalsFromCodex,
   presentedText,
@@ -118,6 +119,8 @@ const excludedRow = (
   presented: null,
   signals: null,
 });
+
+const NO_GOLD = "gold hook returned no record";
 
 const withoutStart = ({ started: _started, ...r }: Row & { started: string }): Row => r;
 
@@ -246,6 +249,10 @@ function main() {
           .filter((r) => r.name === "gold")
           .map((r) => r.output ?? "")
           .join("\n");
+        if (goldNotGiven(condition, gold, goldOut || null)) {
+          claude.push({ ...excludedRow("claude", task.id, condition, session, NO_GOLD), started });
+          continue;
+        }
         const diff = execFileSync(
           "git",
           ["-C", dir, "diff", "main", branch, "--", ".", ":!.tools", ":!.eval"],
@@ -366,6 +373,10 @@ function main() {
         continue;
       }
       const gold = goldOf(task);
+      if (goldNotGiven(result.condition, gold, read("gold-receipt.txt"))) {
+        rows.push(excludedRow("codex", task.id, result.condition, name, NO_GOLD));
+        continue;
+      }
       const events = read("events.jsonl");
       const found = foundInCodexEvents(events, gold);
       const emitted = (result.deliveries ?? [])
