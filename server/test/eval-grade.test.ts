@@ -670,6 +670,40 @@ test("gold signals say unknown when the log cannot tie a result to its call or i
   assert.deepEqual(goldSignalsFromCodex("search", [key], [], null, "null")[key], unknown);
 });
 
+// A broken line leaves "no" unprovable, but a result that named the key still proves "yes", before or after the break
+test("a proven hit in a Codex log stays yes when another line is broken", () => {
+  const key = "harvest:157/keep-search";
+  const other = "trace:other/key";
+  const call = (tool: string, text: string | null) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "mcp_tool_call",
+        server: "sphica",
+        tool,
+        ...(text === null ? {} : { result: { content: [{ type: "text", text }] } }),
+      },
+    });
+  const hits = {
+    search: call("search", `## ${key} (u1): decision do, active`),
+    read: call("read", `${key} (u1, revision 3): decision do, active`),
+  };
+  const field = { search: "in_search", read: "read" } as const;
+  for (const broken of ["{bad json", "42", call("search", null)])
+    for (const tool of ["search", "read"] as const)
+      for (const lines of [
+        [hits[tool], broken],
+        [broken, hits[tool]],
+      ]) {
+        const got = goldSignalsFromCodex("search", [key, other], [], null, lines.join("\n"));
+        assert.equal(got[key]?.[field[tool]], "yes", `${tool} hit with ${broken} in ${lines.join(" | ")}`);
+        const otherTool = tool === "search" ? "read" : "search";
+        assert.equal(got[key]?.[field[otherTool]], "unknown", "an unproven tool stays unknown");
+        assert.equal(got[other]?.in_search, "unknown", "an unproven key stays unknown");
+        assert.equal(got[other]?.read, "unknown", "an unproven key stays unknown");
+      }
+});
+
 // A swapped build's runs are judged against the swapped record: its gold is that record, and the original rule's hidden test is not run
 test("collect reads a swapped build's gold from the swapped record and does not run the hidden test", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));

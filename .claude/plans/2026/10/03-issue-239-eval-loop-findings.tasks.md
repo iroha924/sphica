@@ -22,7 +22,7 @@ base: main
 
 壊れたログでもヒットを失わず、gold が届かなかった run を gold の結果に数えない。
 
-- [ ] T01: Codex のログに壊れた行があっても確かなヒットを yes に残す
+- [x] T01: Codex のログに壊れた行があっても確かなヒットを yes に残す
   - 種別: 修正
   - 計画: S1
   - 依存: なし
@@ -30,6 +30,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern='proven hit' test/eval-grade.test.ts` → ヒットと壊れた行の両方の順で `in_search` / `read` が `unknown` になり落ちる
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 全件 pass
   - コミット: `fix(evals): keep a proven hit when a Codex log has a broken line (T01)`
+  - 結果: red 実測（3e842e19 の judge.ts）: `search hit with {bad json ...` で actual 'unknown' / expected 'yes' で落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 40, fail 0
 
 - [ ] T02: gold フックが gold を返さなかった gold の run を excluded にする
   - 種別: 修正

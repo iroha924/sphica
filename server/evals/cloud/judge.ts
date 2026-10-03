@@ -92,7 +92,7 @@ export function goldSignalsFromCodex(
   goldHookOutput: string | null,
   events: string | null,
 ): Record<string, GoldSignal> {
-  // Any line that is not an event object, or a Sphica call without a result, leaves the log unable to prove "no"
+  // Any line that is not an event object, or a Sphica call without a result, leaves the log unable to prove "no"; a result elsewhere still proves "yes"
   let readable = events !== null && events.trim() !== "";
   const results: { tool: string; text: string }[] = [];
   for (const line of readable ? (events ?? "").split("\n") : []) {
@@ -102,11 +102,11 @@ export function goldSignalsFromCodex(
       e = JSON.parse(line);
     } catch {
       readable = false;
-      break;
+      continue;
     }
     if (typeof e !== "object" || e === null) {
       readable = false;
-      break;
+      continue;
     }
     const { type, item: it } = e as {
       type?: string;
@@ -121,12 +121,12 @@ export function goldSignalsFromCodex(
       continue;
     if (!it.result || !Array.isArray(it.result.content)) {
       readable = false;
-      break;
+      continue;
     }
     results.push({ tool: it.tool, text: it.result.content.map((c) => c.text ?? "").join("\n") });
   }
   const seen = (tool: string, key: string, test: typeof inSearch): Tri =>
-    !readable ? "unknown" : results.some((r) => r.tool === tool && test(r.text, key, true)) ? "yes" : "no";
+    results.some((r) => r.tool === tool && test(r.text, key, true)) ? "yes" : readable ? "no" : "unknown";
   return Object.fromEntries(
     gold.map((key) => [
       key,
