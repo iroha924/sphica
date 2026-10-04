@@ -422,6 +422,11 @@ export interface UnitState {
   unit_id: number;
 }
 
+export interface UnitSuccessorPlace {
+  from_unit: number | null;
+  to_unit: number | null;
+}
+
 export interface UnitSupport {
   missing: string | null;
   unit_id: number | null;
@@ -477,6 +482,7 @@ export interface DB {
   unit_option: UnitOption;
   unit_search_text: UnitSearchText;
   unit_state: UnitState;
+  unit_successor_place: UnitSuccessorPlace;
   unit_support: UnitSupport;
   work: Work;
 }

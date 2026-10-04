@@ -1661,3 +1661,32 @@ test("an unadopted candidate never holds the owner's decision's successor place,
   adoption(proposal, owner, { span_start: 0, span_end: 3 });
   refuses(() => state(proposal, "candidate", "active"), /already has an active successor/);
 });
+
+test("withdrawing the owner's successor brings the owner's decision back, whatever proposal waits beside it", () => {
+  const owner = message(db, p, { id: "o2", text: "Use SQLite." });
+  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
+  const link = (from: number, to: number) =>
+    insert(db, "unit_link", {
+      from_unit: from,
+      to_unit: to,
+      kind: "supersedes",
+      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
+      added_at: now,
+    });
+  const decided = (key: string, adopt: boolean) => {
+    const u = unit({ key, kind: "decision" });
+    evidence(u, adopt ? owner : said, { role: "states" });
+    if (adopt) adoption(u, owner);
+    state(u, null, "candidate");
+    return u;
+  };
+  const o = decided("sqlite-2", true);
+  state(o, "candidate", "active");
+  link(decided("postgres-2", false), o);
+  const own = decided("duckdb-2", true);
+  link(own, o);
+  state(own, "candidate", "active");
+  state(o, "active", "superseded");
+  state(own, "active", "withdrawn");
+  assert.equal(one("select lifecycle from unit where id = ?", o).lifecycle, "candidate");
+});

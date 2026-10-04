@@ -394,38 +394,25 @@ export async function checkRecord(
   const others = new Map(
     (linked.length
       ? await db
-          .selectFrom("unit")
-          .select(["id", "key", "kind", "lifecycle"])
-          .where("project_id", "=", target.projectId)
-          .where("key", "in", linked)
+          .selectFrom("unit as o")
+          .select(["o.id", "o.key", "o.kind", "o.lifecycle", ownerAdopted("o.id").as("owners")])
+          .where("o.project_id", "=", target.projectId)
+          .where("o.key", "in", linked)
           .execute()
       : []
     ).map((u) => [u.key, u]),
   );
-  // A record has at most one successor that is not withdrawn: the one already there holds the place
+  // A record has one successor place; who holds it is the schema's unit_successor_place, which the link trigger also reads
   const holders = new Map(
     (others.size
       ? await db
-          .selectFrom("unit_link as l")
-          .innerJoin("unit as n", "n.id", "l.from_unit")
-          .select(["l.to_unit", "n.key", "n.lifecycle"])
-          .where("l.kind", "=", "supersedes")
+          .selectFrom("unit_successor_place as h")
+          .innerJoin("unit as n", "n.id", "h.from_unit")
+          .select(["h.to_unit", "n.key", "n.lifecycle"])
           .where(
-            "l.to_unit",
+            "h.to_unit",
             "in",
             [...others.values()].map((o) => o.id),
-          )
-          .where("n.lifecycle", "<>", "withdrawn")
-          // Quarantined or unsourced, a successor can never become active, so it holds no place
-          .where("n.extraction", "=", "supported")
-          .where("n.unsourced", "=", 0)
-          // Of the owner's decision, only an active successor or one the owner adopted holds it (as the link trigger counts)
-          .where((eb) =>
-            eb.or([
-              eb.not(ownerAdopted("l.to_unit")),
-              eb("n.lifecycle", "in", ["active", "superseded"]),
-              ownerAdopted("l.from_unit"),
-            ]),
           )
           .execute()
       : []
@@ -656,7 +643,9 @@ export async function checkRecord(
           `${key}: ${u.supersedes} already has a successor, ${h?.key} (${h?.lifecycle}); withdraw it first, or supersede it instead`,
         );
       } else supersedes = old.id;
-      if (supersedes !== null && !quarantine.length) claimed.add(supersedes);
+      // Of the owner's decision, a successor the owner does not adopt in this save waits beside the place rather than taking it
+      if (supersedes !== null && !quarantine.length && (!Number(old?.owners) || adoption.length))
+        claimed.add(supersedes);
     }
     const conflicts = u.conflicts.flatMap((k) => {
       const other = others.get(k);

@@ -285,11 +285,11 @@ async function successor(db: Reads, id: number): Promise<{ key: string; lifecycl
   let end: { key: string; lifecycle: string } | null = null;
   let at = id;
   for (;;) {
+    // The successor holding the place: a superseded record always has one, and a proposal waiting beside it is not it
     const next = await db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as u", "u.id", "l.from_unit")
-      .where("l.to_unit", "=", at)
-      .where("l.kind", "=", "supersedes")
+      .selectFrom("unit_successor_place as h")
+      .innerJoin("unit as u", "u.id", "h.from_unit")
+      .where("h.to_unit", "=", at)
       .select(["u.id", "u.key", "u.lifecycle"])
       .executeTakeFirst();
     if (!next) break;

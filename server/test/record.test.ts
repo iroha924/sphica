@@ -1878,3 +1878,32 @@ test("record call: a save from another session than the one that began the run i
     await db.done();
   }
 });
+
+test("owner decision protected: in one save, a proposal waiting as a candidate does not take the place the owner's successor takes", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const ai = message(db, p, { id: "m2", text: "Postgres のほうが良さそうです。", speaker: "assistant" });
+    const b = message(db, p, { id: "m3", text: "DuckDB に移す。" });
+    const decided = (key: string, source: number, quote: string, adopt: boolean, extra = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...(adopt ? { adoption: [{ source: `s${source}`, quote }] } : {}),
+      ...extra,
+    });
+    await save(db, target(p), { units: [decided("sqlite", a, "SQLite にする", true)] });
+    const { saved } = await save(db, target(p), {
+      units: [
+        decided("postgres", ai, "Postgres のほうが良さそう", false, { supersedes: "trace:ext-s1/sqlite" }),
+        decided("duckdb", b, "DuckDB に移す", true, { supersedes: "trace:ext-s1/sqlite" }),
+      ],
+    });
+    assert.deepEqual(saved.superseded, ["trace:ext-s1/sqlite"]);
+  } finally {
+    await db.done();
+  }
+});

@@ -83,6 +83,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): stop unadopted links from hiding or displacing the owner's decision (T04)`
   - 結果: red を実測（配信は `actual: ''`、schema は「the record already has a successor that is not withdrawn」）。直した後、上の 2 件 pass。`bun run verify` → 終了コード 0（テスト 734 件、SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）。Codex の C7〜C10 どおり、後採用の流れの 3 件は期待を保ち、候補が枠をふさぐ期待（extract）と、採用を持てない question で持ち主の判断を隠すデータ（deliver・review-bridge）と、rev4 の移行テストの最後の確認を C′ に合わせた
 
+- [x] T18: T04 のレビュー指摘を直す（後継の枠を view 1 つで決め、取り下げからの復帰・同じ保存の予約・overview の案内をそろえる）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直す対象の後継の枠の規則）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/db-types.ts`, `server/src/record.ts`, `server/src/overview.ts`, `server/test/schema.test.ts`, `server/test/record.test.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-name-pattern="whatever proposal waits|does not take the place the owner's successor takes|look names the successor that took" test/schema.test.ts test/record.test.ts test/overview.test.ts` → 持ち主の後継を取り下げても元の判断が superseded のまま、同じ保存で持ち主の後継が「another record in this save already supersedes」で拒まれ、overview が待っている候補を後継と案内して落ちる
+  - 完了条件: 同じコマンド → pass。`bun run verify` → 終了コード 0。枠を使う後継の定義が `unit_successor_place` の 1 か所にあり、link の trigger・復帰の規則・復帰の trigger・record.ts・overview がそれを読む
+  - コミット: `fix(record): judge the successor place in one view and follow it everywhere (T18)`
+  - 結果: red を実測（3 件とも上の理由で fail）。直した後 3 件 pass。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）。overview に一度足した予備の問い合わせは、superseded の記録には必ず枠を使う後継があり届かないので消した
+
 - [ ] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
   - 種別: 追加
   - 計画: S4
@@ -188,3 +198,5 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T16 / T02 の Codex のレビュー（F1 P1: 結べなかった呼び出しで最初の返事のターンしか外さず、plan の方針 2 の「結べるまで止める」より緩かった。F2 P2: `begin_call_id` が別プロジェクトの呼び出しを指せ、その対話の判定を借りられた）を両方受け、修正タスク T16 を足して直した。T06 の依存に T16 を足した（前: T03, T05 → 後: T03, T05, T16）
 - 2026-10-04 / T17 / T03 の Codex のレビュー（F1: T02 の F1 と同じで T16 で直し済み。F2 P2: MCP の SDK が入力の形で拒んだ呼び出しは `record_call` に残らない）。F2 を受けて修正タスク T17 を足した。Codex の拒まれた呼び出しは記録できないので plan のリスクに足した
 - 2026-10-04 / T04 / 保存時に拒む形が glean の後採用の流れを壊した（既存テスト 3 件の退行）。Codex と比べ、持ち主が C′ を選んだ。T04 の題名・変更欄・red・完了条件・コミットを C′ に書き直した（前: record.ts で同じ保存の持ち主の採用を求める → 後: 配信と後継の枠で効き目を止める）
+
+- 2026-10-04 / T18 / T04 の Codex のレビュー（F1 P1: 取り下げからの復帰が待っている候補を後継と数えた。F2 P2: 同じ保存で待っている候補が枠を予約した。F3 P2: overview が待っている候補を後継と案内した）を 3 件とも受け、修正タスク T18 を足した

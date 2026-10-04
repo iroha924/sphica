@@ -446,3 +446,28 @@ test("look follows a replaced record's chain once, however many lines mark it", 
     await db.done();
   }
 });
+
+test("look names the successor that took the owner's decision's place, not a proposal still waiting beside it", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [record(m, "old-rule", "constraint")], root);
+    await save(
+      db,
+      p,
+      [record(m, "waiting", "constraint", { adoption: [], supersedes: "trace:ext-s1/old-rule" })],
+      root,
+    );
+    await save(db, p, [record(m, "new-rule", "constraint", { supersedes: "trace:ext-s1/old-rule" })], root);
+    fs.writeFileSync(path.join(root, "CLAUDE.md"), "- An old rule <!-- sphica: trace:ext-s1/old-rule -->\n");
+    assert.match(
+      await lookOverview(db.reader, p, root),
+      /CLAUDE\.md:1: trace:ext-s1\/old-rule was superseded by trace:ext-s1\/new-rule\n/,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

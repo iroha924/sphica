@@ -494,6 +494,20 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
     select 1 from chain where id = new.from_unit);
 end;
 
+-- Successors that hold a record's one place: sound (a quarantined or unsourced one can never become active, nor be withdrawn) and not
+-- withdrawn. Of the owner's decision, only one that is active (or replaced since) or that the owner adopted holds it, so a proposal waiting
+-- as a candidate never blocks the owner's own successor nor keeps the decision replaced. States are read from history: a row written in
+-- the same statement may not be applied to the lifecycle column yet
+create view unit_successor_place as
+select l.to_unit, l.from_unit from unit_link l join unit s on s.id = l.from_unit
+where l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
+  and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn'
+  and (not exists (select 1 from unit_adoption a where a.unit_id = l.to_unit and a.route in ('owner_statement', 'explicit')
+      and a.retracted_at is null)
+    or (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) in ('active', 'superseded')
+    or exists (select 1 from unit_adoption a where a.unit_id = l.from_unit and a.route in ('owner_statement', 'explicit')
+      and a.retracted_at is null));
+
 -- Lifecycle history and the only route for lifecycle changes. The trigger checks the rules and then sets unit.lifecycle.
 -- A change comes from an extraction run, or from the owner forgetting sources (forget_id). source_id becomes null when its source is forgotten.
 create table unit_state (
@@ -524,10 +538,8 @@ create trigger unit_state_rules before insert on unit_state begin
   where exists (select 1 from unit_state where unit_id = new.unit_id) and not (
     (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
     or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
-    or (new.from_state = 'superseded' and new.to_state = 'candidate' and not exists (
-      select 1 from unit_link l join unit s on s.id = l.from_unit where l.to_unit = new.unit_id and l.kind = 'supersedes'
-        and s.extraction = 'supported' and s.unsourced = 0
-        and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
+    or (new.from_state = 'superseded' and new.to_state = 'candidate'
+      and not exists (select 1 from unit_successor_place where to_unit = new.unit_id)));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
   select raise(abort, (select missing from unit_support where unit_id = new.unit_id))
@@ -568,9 +580,7 @@ create trigger unit_state_restore after insert on unit_state when new.to_state =
   select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
   from unit_link l join unit o on o.id = l.to_unit
   where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
-    and not exists (select 1 from unit_link k join unit s on s.id = k.from_unit where k.to_unit = o.id and k.kind = 'supersedes'
-      and k.from_unit <> new.unit_id and s.extraction = 'supported' and s.unsourced = 0
-      and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
+    and not exists (select 1 from unit_successor_place k where k.to_unit = o.id and k.from_unit <> new.unit_id);
 end;
 
 -- Where a unit applies in code, or code cited as evidence. Validated against the working tree when served, never cached here.
@@ -890,20 +900,11 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
   where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
     and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
-  -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
-  -- become active, nor be withdrawn. Of the owner's decision, only an active successor or one the owner adopted holds the place, so a
-  -- proposal waiting as a candidate never blocks the owner's own. States are read from history, as in unit_state_rules
+  -- One live successor at a time (unit_successor_place says which successors hold it)
   select raise(abort, 'the record already has a successor that is not withdrawn')
   where new.kind = 'supersedes'
     and exists (select 1 from unit n where n.id = new.from_unit and n.extraction = 'supported' and n.unsourced = 0)
-    and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
-    where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
-      and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn'
-      and (not exists (select 1 from unit_adoption a where a.unit_id = new.to_unit and a.route in ('owner_statement', 'explicit')
-          and a.retracted_at is null)
-        or (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) in ('active', 'superseded')
-        or exists (select 1 from unit_adoption a where a.unit_id = l.from_unit and a.route in ('owner_statement', 'explicit')
-          and a.retracted_at is null)));
+    and exists (select 1 from unit_successor_place where to_unit = new.to_unit);
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'a state comes after its unit was created')
