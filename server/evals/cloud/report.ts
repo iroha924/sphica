@@ -1,9 +1,10 @@
 // The loop report over the graded builds of one bundle (an original and a swapped build of one loop), against the task definitions they
 // were built from. Every count keeps n, excluded, and ungraded beside it.
 // Run: node evals/cloud/report.ts <build dir>/grades.json [<build dir>/grades.json ...]
-//      node evals/cloud/report.ts --compare <old build>/grades.json <new build>/grades.json
+//      node evals/cloud/report.ts --compare <old build>/grades.json <new build>/grades.json [--bar <names>|all] [--aa]
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { readTasks } from "./firing.ts";
 import type { GradeRow } from "./grading.ts";
 import type { GoldSignal } from "./judge.ts";
@@ -233,7 +234,11 @@ type Side = { label: string; build: Build; fixture: string | undefined; tasks: s
  * and condition with each side's graded runs, mean score, and the rates the experiments' bars read. Refuses two builds whose fixtures or
  * task definitions differ, or that ran the same bundle.
  */
-export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
+/**
+ * With `same` (an A/A run: one build run twice), the two sides must have run the same bundle, and the differences show how far the bars
+ * move on run-to-run variation alone.
+ */
+export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false): string[] {
   if (!old.fixture || old.fixture !== next.fixture)
     throw new Error(
       `the builds were made from different fixtures (${old.fixture} / ${next.fixture}); compare only the same records`,
@@ -247,8 +252,10 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
   for (const side of [old, next])
     if (!artifacts(side.build) || artifacts(side.build) === "{}")
       throw new Error(`the ${side.label} build names no bundle; it cannot be told which code ran`);
-  if (artifacts(old.build) === artifacts(next.build))
+  if (!same && artifacts(old.build) === artifacts(next.build))
     throw new Error("both builds ran the same bundle; there is nothing to compare");
+  if (same && artifacts(old.build) !== artifacts(next.build))
+    throw new Error("an A/A comparison needs the same bundle on both sides");
   const lines = [
     `# ${old.label}: ${old.build.bundle}`,
     ...report([old.build], tasks),
@@ -438,18 +445,22 @@ export function bars(old: Build, next: Build, which: string[]): string[] {
 }
 
 if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare") {
-  const files = process.argv.slice(3);
-  if (files.length !== 2 && !(files.length === 4 && files[2] === "--bar"))
+  const { values: opts, positionals: files } = parseArgs({
+    args: process.argv.slice(3),
+    allowPositionals: true,
+    options: { bar: { type: "string" }, aa: { type: "boolean", default: false } },
+  });
+  if (files.length !== 2)
     throw new Error(
-      "--compare takes <old>/grades.json <new>/grades.json [--bar g1a,g3,g4,g6,regression|all]",
+      "--compare takes <old>/grades.json <new>/grades.json [--bar g1a,g3,g4,g6,regression|all] [--aa]",
     );
-  const sides = files.slice(0, 2).map((f, i): Side => {
+  const sides = files.map((f, i): Side => {
     const dir = path.dirname(f);
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")) as {
       fixture?: string;
     };
     return {
-      label: i === 0 ? "old" : "new",
+      label: opts.aa ? (i === 0 ? "first" : "second") : i === 0 ? "old" : "new",
       build: JSON.parse(fs.readFileSync(f, "utf8")) as Build,
       fixture: manifest.fixture,
       tasks: fs.readFileSync(path.join(dir, "tasks.json"), "utf8"),
@@ -457,15 +468,14 @@ if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare")
   });
   const plan = readTasks<{ tasks: TaskInfo[] }>(path.dirname(files[0] ?? ""));
   const [a, b] = sides as [Side, Side];
-  const at = process.argv.indexOf("--bar");
-  const asked = at > 0 ? (process.argv[at + 1] ?? "").split(",") : [];
+  const asked = opts.bar ? opts.bar.split(",") : [];
   const which = asked.includes("all") ? ["g1a", "g3", "g4", "g6", "regression"] : asked;
   const unknownBar = which.filter((w) => !["g1a", "g3", "g4", "g6", "regression"].includes(w));
   if (unknownBar.length)
     throw new Error(`unknown bar ${unknownBar.join(", ")}; use g1a, g3, g4, g6, regression, or all`);
   console.log(
     [
-      ...compare(a, b, plan.tasks),
+      ...compare(a, b, plan.tasks, opts.aa),
       ...(which.length ? ["", "# bars", ...bars(a.build, b.build, which)] : []),
     ].join("\n"),
   );

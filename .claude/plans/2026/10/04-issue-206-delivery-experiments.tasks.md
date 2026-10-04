@@ -124,6 +124,15 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - コミット: `fix(evals): make the bars count every model and prove what they pass (T11)`
   - 結果: red はレビュアーの再現（F1〜F5）を根拠にした。直した後 `node --test test/eval-grade.test.ts` → pass 48, fail 0。保存した採点に `--bar all` → G1a 未達、G3 未達、G4 未達、G6 判定不能（最終の組み合わせに G6 は入っていない）、回帰 未達（直す前と同じ結論）。F6 は run を足して確かめ、記録を直した
 
+- [x] T12: 同じビルドを 2 回回したものを比べる A/A の指定を report の比較に足す
+  - 種別: 追加
+  - 計画: S8
+  - 依存: T08（比較とバーが要る）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → `--aa` は同じ bundle どうしだけを受け、違う bundle を拒否し、`--aa` なしでは同じ bundle を今までどおり拒否するテストが pass
+  - コミット: `feat(evals): compare one build run twice to measure run-to-run variation (T12)`
+  - 結果: `node --test test/eval-grade.test.ts` → pass 49, fail 0。保存した採点への `--compare <base> <final> --bar all` の判定は変わらない
+
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
@@ -136,3 +145,4 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T04, T06 / G2（T04）はオフラインのバーを通過（重みのある記録 3 / 8 → 8 / 8）、G4（T06）は通過（baseline は汚染の記録を 10 run に届け、G4 で汚染に乗った run は 0）。ただし baseline でも汚染に乗った run は 0 で、差は示せていない。exp/206-g2 と exp/206-g4 を PR-B のブランチに merge した
 - 2026-10-04 / T09 / 最終の組み合わせで下がったセルの多くは、変更が届かないセルだった（conflict-cover は G3 を入れておらず衝突の 2 件はどちらの側でも配信されない、stale-thumb は記録が 2 件で順番が効かず 2 件ともオーナーの記録なので G4 でも同じ）。3〜5 run の差は run ごとのばらつきの方が大きく、0.3 のバーを見分けられていない。次に測るなら、同じビルドを 2 回回してばらつきを先に測り、バーと run 数をそれに合わせて決める
 - 2026-10-04 / T09 / バージョンは 0.6.29 のまま残した。pre-commit の検査（scripts/check-mcp-version.mjs）は、公開していない版でも下げるのを止める。パッケージの中身は v0.6.28 と同じで release:plan は none。次に出すときは 0.6.29 以上にする（変更欄 前: バージョンの 4 ファイル、後: 外して、戻したソースとテストにした）
+- 2026-10-04 / T12 / 持ち主の指示で、run ごとのばらつきを測る: baseline と同じビルド（build-base の写し、同じ bundle と fixture、canary を通した）を同じ計画で 92 run 回し、採点して、1 回目と A/A で比べる

@@ -1899,3 +1899,28 @@ test("bars count every model the old side ran, treat unknown as unproven, take a
     /^G6 .*: inconclusive/m,
   );
 });
+
+test("an A/A comparison takes one bundle run twice and refuses two different ones", () => {
+  const side = (label: string, bundle: string) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: { build: label, variant: "original", bundle, rows: [] },
+  });
+  const lines = compare(
+    side("first", 'c1 {"deliver.js":"a"}'),
+    side("second", 'c1 {"deliver.js":"a"}'),
+    [],
+    true,
+  ).join("\n");
+  assert.match(lines, /^# first: /m);
+  assert.match(lines, /^# second: /m);
+  assert.throws(
+    () => compare(side("first", 'c1 {"deliver.js":"a"}'), side("second", 'c2 {"deliver.js":"b"}'), [], true),
+    /needs the same bundle/,
+  );
+  assert.throws(
+    () => compare(side("old", 'c1 {"deliver.js":"a"}'), side("new", 'c9 {"deliver.js":"a"}'), []),
+    /same bundle/,
+  );
+});
