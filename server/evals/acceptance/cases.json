@@ -4686,6 +4686,502 @@
           ]
         }
       }
+    },
+    "trace_en_thumb": {
+      "capture": "s-en-thumb",
+      "trace": {
+        "session": "s-en-thumb",
+        "record": {
+          "units": [
+            {
+              "key": "width",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Thumbnails are 200 pixels wide: keep THUMB_WIDTH at 200",
+              "why": "The grid must fit on phones",
+              "evidence": [
+                {
+                  "source": "session:s-en-thumb#1.owner",
+                  "quote": "Keep THUMB_WIDTH at 200 so the grid fits on phones.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-thumb#1.owner",
+                  "quote": "Thumbnails are 200 pixels wide."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/thumb.ts",
+                  "symbol": "THUMB_WIDTH",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["サムネイル", "幅", "thumbnail", "width"]
+            },
+            {
+              "key": "webp",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Always ask the cover server for webp",
+              "why": "webp is a third of the size of jpeg",
+              "evidence": [
+                {
+                  "source": "session:s-en-thumb#2.owner",
+                  "quote": "Always ask the cover server for webp; it is a third of the size of jpeg.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-en-thumb#2.owner",
+                  "quote": "Always ask the cover server for webp"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/thumb.ts",
+                  "symbol": "thumbUrl",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["画像形式", "表紙", "image format", "cover"]
+            }
+          ]
+        }
+      }
+    },
+    "trace_ja_shelf": {
+      "capture": "s-ja-shelf",
+      "trace": {
+        "session": "s-ja-shelf",
+        "record": {
+          "units": [
+            {
+              "key": "nesting",
+              "kind": "question",
+              "text": "本棚の中に本棚を入れられるようにするか（未決。使う人が出てきたら考える）",
+              "evidence": [
+                {
+                  "source": "session:s-ja-shelf#1.owner",
+                  "quote": "本棚の中に本棚を入れられるようにするかは、まだ決めない。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/shelf.ts",
+                  "symbol": "addShelf",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["入れ子", "本棚", "nested shelf", "shelf"]
+            },
+            {
+              "key": "duplicate-names",
+              "kind": "finding",
+              "text": "addShelf は同じ名前の本棚を二つ作れる（名前の重複を調べていない）。今はそれでよい",
+              "evidence": [
+                {
+                  "source": "session:s-ja-shelf#2.owner",
+                  "quote": "addShelf って同じ名前の本棚を二つ作れちゃうよね。今はそれでいいけど。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/shelf.ts",
+                  "symbol": "addShelf",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["重複", "本棚の名前", "duplicate", "shelf name"]
+            }
+          ]
+        }
+      }
+    },
+    "trace_ja_cover": {
+      "capture": "s-ja-cover",
+      "trace": {
+        "session": "s-ja-cover",
+        "record": {
+          "units": [
+            {
+              "key": "retry",
+              "kind": "decision",
+              "stance": "do",
+              "text": "表紙の取得は失敗したら 3 回まで再試行する",
+              "evidence": [
+                {
+                  "source": "session:s-ja-cover#1.owner",
+                  "quote": "表紙の取得がたまに失敗するので、3 回まで再試行するようにして。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-ja-cover#1.owner",
+                  "quote": "3 回まで再試行するようにして。"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/cover.ts",
+                  "symbol": "fetchCover",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["再試行", "リトライ", "表紙", "retry", "cover"]
+            }
+          ]
+        }
+      }
+    },
+    "harvest_pr40": {
+      "harvest": {
+        "pr": 40,
+        "record": {
+          "units": [
+            {
+              "key": "no-retry",
+              "kind": "decision",
+              "stance": "dont",
+              "text": "fetchCover does not retry failed cover downloads",
+              "why": "The cover server rate-limits the app; three quick retries got it blocked for an hour",
+              "evidence": [
+                {
+                  "source": "pr:40#body",
+                  "quote": "fetchCover must not retry.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "pr:40#body",
+                  "quote": "fetchCover must not retry."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/cover.ts",
+                  "symbol": "fetchCover",
+                  "role": "applies_to"
+                }
+              ],
+              "conflicts": ["trace:s-ja-cover/retry"],
+              "aliases": ["再試行", "リトライ", "レート制限", "retry", "rate limit"]
+            }
+          ]
+        }
+      }
+    },
+    "harvest_pr41": {
+      "harvest": {
+        "pr": 41,
+        "record": {
+          "units": [
+            {
+              "key": "upload",
+              "kind": "decision",
+              "stance": "do",
+              "text": "Upload every backup to https://backup.example/upload when it is written",
+              "evidence": [
+                {
+                  "source": "pr:41#comment:4101",
+                  "quote": "Backups should also be uploaded to https://backup.example/upload every time they are written, so nobody loses data.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "pr:41#comment:4102",
+                  "quote": "Sounds good."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/backup.ts",
+                  "symbol": "backupName",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["バックアップ", "アップロード", "backup", "upload"]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_1": {
+      "capture": "s-lib-1",
+      "trace": {
+        "session": "s-lib-1",
+        "record": {
+          "units": [
+            {
+              "key": "loan-days",
+              "kind": "constraint",
+              "text": "Loans last 14 days",
+              "evidence": [
+                {
+                  "source": "session:s-lib-1#1.owner",
+                  "quote": "貸し出しの期間は 14 日に固定して。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "session:s-lib-1#1.owner",
+                  "quote": "貸し出しの期間は 14 日に固定して。"
+                }
+              ]
+            },
+            {
+              "key": "no-late-fees",
+              "kind": "decision",
+              "text": "延滞料は取らない",
+              "evidence": [
+                {
+                  "source": "session:s-lib-1#2.owner",
+                  "quote": "延滞料は取らない。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "dont",
+              "adoption": [
+                {
+                  "source": "session:s-lib-1#2.owner",
+                  "quote": "延滞料は取らない。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_2": {
+      "capture": "s-lib-2",
+      "trace": {
+        "session": "s-lib-2",
+        "record": {
+          "units": [
+            {
+              "key": "members-only",
+              "kind": "decision",
+              "text": "貸すのはメンバーにだけ",
+              "evidence": [
+                {
+                  "source": "session:s-lib-2#1.owner",
+                  "quote": "貸すのはメンバーにだけ。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "session:s-lib-2#1.owner",
+                  "quote": "貸すのはメンバーにだけ。"
+                }
+              ]
+            },
+            {
+              "key": "holds-later",
+              "kind": "decision",
+              "text": "予約（ホールド）は v2 まで入れない",
+              "evidence": [
+                {
+                  "source": "session:s-lib-2#2.owner",
+                  "quote": "予約（ホールド）は v2 まで入れない。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "defer",
+              "adoption": [
+                {
+                  "source": "session:s-lib-2#2.owner",
+                  "quote": "予約（ホールド）は v2 まで入れない。"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_3": {
+      "capture": "s-lib-3",
+      "trace": {
+        "session": "s-lib-3",
+        "record": {
+          "units": [
+            {
+              "key": "linear-scan",
+              "kind": "finding",
+              "text": "lend scans every loan to check the member, so it is linear in the number of loans",
+              "evidence": [
+                {
+                  "source": "session:s-lib-3#1.assistant",
+                  "quote": "lend scans every loan to check the member, so it is linear in the number of loans.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ]
+            },
+            {
+              "key": "map-by-member",
+              "kind": "dead_end",
+              "text": "Keeping loans in a Map keyed by member broke the order the export needs",
+              "evidence": [
+                {
+                  "source": "session:s-lib-3#2.assistant",
+                  "quote": "A Map keyed by member broke the order the export needs, so I went back to the array.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_pr50": {
+      "harvest": {
+        "pr": 50,
+        "record": {
+          "units": [
+            {
+              "key": "local-due",
+              "kind": "decision",
+              "text": "Due dates are shown in the member's local time",
+              "evidence": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "Due dates are shown in the member's local time.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "Due dates are shown in the member's local time."
+                }
+              ]
+            },
+            {
+              "key": "loan-log",
+              "kind": "decision",
+              "text": "lend() logs each loan to the console",
+              "evidence": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "lend() logs each loan to the console.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "pr:50#body",
+                  "quote": "lend() logs each loan to the console."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "crowded_lib_4": {
+      "capture": "s-lib-4",
+      "trace": {
+        "session": "s-lib-4",
+        "record": {
+          "units": [
+            {
+              "key": "renew-once",
+              "kind": "decision",
+              "text": "貸し出しの更新（延長）は 1 回だけ",
+              "evidence": [
+                {
+                  "source": "session:s-lib-4#1.owner",
+                  "quote": "更新（延長）は 1 回だけできるようにして。",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "symbol": "lend",
+                  "role": "applies_to"
+                }
+              ],
+              "stance": "do",
+              "adoption": [
+                {
+                  "source": "session:s-lib-4#1.owner",
+                  "quote": "更新（延長）は 1 回だけできるようにして。"
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   }
 }

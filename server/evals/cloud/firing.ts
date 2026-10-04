@@ -26,21 +26,27 @@ export const writePlan = (build: string, rows: FiringRow[]) =>
   fs.writeFileSync(planFile(build), `${JSON.stringify(rows, null, 2)}\n`);
 
 /**
- * The firing plan: each task's conditions times the tries. A swapped build plans only its gold rows, the only runs shown the swapped
- * record and the only ones the counterfactual reads.
+ * The firing plan: each task's conditions times the tries. A task's `runs` sets the tries per condition, and `runs` is the default for the
+ * rest. A swapped build plans only its gold rows, the only runs shown the swapped record and the only ones the counterfactual reads.
  */
 export function planRows(
   build: string,
   variant: string,
-  tasks: { id: string; prompt: string; conditions: string[] }[],
+  tasks: { id: string; prompt: string; conditions: string[]; runs?: Record<string, number> }[],
   runs: number,
   slotOf: (condition: string) => string,
 ): FiringRow[] {
+  for (const t of tasks)
+    for (const [condition, n] of Object.entries(t.runs ?? {}))
+      if (!Number.isInteger(n) || n < 1)
+        throw new Error(
+          `${t.id}: runs for ${condition} must be a whole number of at least 1, not ${JSON.stringify(n)}`,
+        );
   return tasks.flatMap((t) =>
     t.conditions
       .filter((condition) => variant !== "swapped" || condition === "gold")
       .flatMap((condition) =>
-        Array.from({ length: runs }, (_, i) => ({
+        Array.from({ length: t.runs?.[condition] ?? runs }, (_, i) => ({
           build,
           variant,
           task: t.id,

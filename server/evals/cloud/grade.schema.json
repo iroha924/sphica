@@ -24,6 +24,14 @@
       "type": "string",
       "enum": ["presented", "other", "neither", "not_applicable"]
     },
+    "named_conflict": {
+      "type": "string",
+      "enum": ["yes", "no", "not_applicable"]
+    },
+    "implemented_one_side": {
+      "type": "string",
+      "enum": ["yes", "no", "not_applicable", "unknown"]
+    },
     "flags": {
       "type": "array",
       "items": {
@@ -39,6 +47,8 @@
     "implements_rejected",
     "proposes_rejected",
     "followed",
+    "named_conflict",
+    "implemented_one_side",
     "flags"
   ],
   "additionalProperties": false

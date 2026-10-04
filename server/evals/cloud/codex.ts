@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
-import { claimRunDir, isolatedCodexHome } from "./codex-home.ts";
+import { checkoutGit, claimRunDir, codexModelOf, isolatedCodexHome, pinCheckout } from "./codex-home.ts";
 import { readPlan, readTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
@@ -30,7 +30,14 @@ const plan = readTasks<{ tasks: Task[] }>(args.build);
 const manifest = JSON.parse(fs.readFileSync(path.join(args.build, "manifest.json"), "utf8")) as {
   build?: string;
   owner?: string;
+  matchers?: { codex?: string };
   repositories: Record<string, { condition: string }>;
+};
+// The matcher the build was made with, so old and new builds deliver on the tools each was built with
+const codexMatcher = () => {
+  if (!manifest.matchers?.codex)
+    throw new Error(`${args.build} records no Codex delivery matcher; build it again`);
+  return manifest.matchers.codex;
 };
 const repo = args.repo ?? "";
 const task = plan.tasks.find((t) => t.id === args.task);
@@ -76,11 +83,15 @@ try {
   // Hooks run without a trust prompt, so they run from a copy outside the checkout the agent can write (it could rewrite .tools)
   const tools = path.join(dir, "tools");
   fs.cpSync(path.join(work, ".tools"), tools, { recursive: true });
+  // The patch is read through a git directory Codex cannot write, so the checkout's own .git config never runs here
+  const checkout = pinCheckout(work, path.join(dir, "git"));
   const mcp =
     condition === "search" || condition === "inject"
       ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
       : "";
   isolatedCodexHome(codexHome, mcp);
+  // Recorded so a comparison can refuse two builds run by different Codex models
+  result.codex_model = codexModelOf(codexHome);
 
   // Inject runs the shipped delivery hooks against the slot's database copy; gold goes through a prompt hook too, so both arrive as the
   // developer context a plugin hook gives (plugin/hooks/codex.json), not as part of the prompt
@@ -93,7 +104,7 @@ try {
       ? {
           SessionStart: [hook(deliver, 10)],
           UserPromptSubmit: [hook(deliver, 10)],
-          PreToolUse: [{ matcher: "^apply_patch$|^Bash$", ...hook(deliver, 10) }],
+          PreToolUse: [{ matcher: codexMatcher(), ...hook(deliver, 10) }],
         }
       : condition === "gold"
         ? { UserPromptSubmit: [hook(["sh", path.join(dir, "gold-hook.sh")], 10)] }
@@ -144,12 +155,8 @@ try {
   result.status = r.status;
   fs.writeFileSync(path.join(dir, "events.jsonl"), r.stdout ?? "");
   fs.writeFileSync(path.join(dir, "stderr.log"), r.stderr ?? "");
-  execFileSync("git", ["-C", work, "add", "-A"]);
-  const patch = execFileSync(
-    "git",
-    ["-C", work, "diff", "--cached", "HEAD", "--", ".", ":!.tools", ":!.eval"],
-    { encoding: "utf8" },
-  );
+  checkoutGit(checkout, ["add", "-A"]);
+  const patch = checkoutGit(checkout, ["diff", "--cached", "HEAD", "--", ".", ":!.tools", ":!.eval"]);
   fs.writeFileSync(path.join(dir, "patch.diff"), patch);
   const calls = (r.stdout ?? "").split("\n").flatMap((l) => {
     try {

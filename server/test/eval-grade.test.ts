@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { claimRunDir } from "../evals/cloud/codex-home.ts";
+import { claimRunDir, codexModelOf } from "../evals/cloud/codex-home.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
 import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
@@ -20,7 +20,7 @@ import {
   goldSignalsFromCodex,
   presentedText,
 } from "../evals/cloud/judge.ts";
-import { report } from "../evals/cloud/report.ts";
+import { compare, report } from "../evals/cloud/report.ts";
 import {
   checkAnswer,
   checkGrade,
@@ -48,6 +48,8 @@ const grade: Grade = {
   implements_rejected: "no",
   proposes_rejected: "no",
   followed: "not_applicable",
+  named_conflict: "not_applicable",
+  implemented_one_side: "not_applicable",
   flags: [],
 };
 
@@ -770,6 +772,7 @@ test("collect excludes a gold run when the gold hook returned no record, and kee
         codex,
         "--logs",
         base,
+        "--skip-hidden-tests",
       ],
       { stdio: "ignore", env: childEnv(base) },
     );
@@ -996,7 +999,7 @@ test("the report splits by group, lists gold minus inject per task with every ru
     out,
     /t1 codex: gold n 2 \(g1 2, g2 1\) inject n 3 \(i1 0, i2 excluded, i3 1\), difference of mean scores 1\.00 \(preliminary/,
   );
-  assert.match(out, /codex inject: 1 \/ 2 \(unknown 0\)\n/);
+  assert.match(out, /codex inject: 1 \/ 2 \(0\.50, unknown 0\)\n/);
   assert.match(out, /t1 codex gold original: n 2, presented 2, other 0/);
   assert.match(out, /t1 codex gold swapped: n 1, presented 0, other 1/);
   assert.match(out, /runs by codex: 0 \/ 5 agree on every graded field \(Claude.s grade missing 3\)/);
@@ -1594,4 +1597,202 @@ test("grader agreement compares flags as a set, so a repeated flag is not a disa
     [{ id: "t1" }],
   ).join("\n");
   assert.match(out, /runs by codex: 1 \/ 1 agree/);
+});
+
+test("a conflict task's grade must say whether both sides were named and whether one was implemented", () => {
+  const conflictTask = { id: "c", prompt: "p", expect: "e", conflict: "retry 3 times against no retries" };
+  const r = {
+    ...row,
+    answer: "a",
+    patch: "",
+    patch_truncated: false,
+    delivered: "yes" as const,
+    found: "yes" as const,
+    excluded: null,
+  };
+  assert.match(blindPrompt(conflictTask, r), /## Conflict[^\n]*\nretry 3 times against no retries/);
+  assert.match(blindPrompt({ ...conflictTask, conflict: undefined }, r), /## Conflict[^\n]*\n\(none\)/);
+  const out = (g: Partial<Grade>) => ({
+    status: 0,
+    output: JSON.stringify({
+      ...grade,
+      implements_rejected: "not_applicable",
+      proposes_rejected: "not_applicable",
+      ...g,
+    }),
+  });
+  assert.deepEqual(receiveGrade(out({}), false, false, false, true), {
+    ungraded: "named_conflict: not_applicable exactly when the task has no Conflict",
+  });
+  assert.ok(
+    "graded" in
+      receiveGrade(out({ named_conflict: "yes", implemented_one_side: "no" }), false, false, false, true),
+  );
+  assert.deepEqual(
+    receiveGrade(out({ named_conflict: "yes", implemented_one_side: "no" }), false, false, false, false),
+    {
+      ungraded: "named_conflict: not_applicable exactly when the task has no Conflict",
+    },
+  );
+  // A cut patch cannot prove that neither side was implemented
+  const cut = receiveGrade(
+    out({ named_conflict: "yes", implemented_one_side: "no" }),
+    true,
+    false,
+    false,
+    true,
+  );
+  assert.equal("graded" in cut && cut.graded.implemented_one_side, "unknown");
+});
+
+test("compare puts old and new side by side only for the same fixture and tasks, and never mixes their bundles", () => {
+  const graded = (run: string, score: 0 | 1 | 2, extra: Record<string, unknown> = {}, task = "t1") => ({
+    ...row,
+    task,
+    run,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, score, ...extra },
+  });
+  const conflictGrade = (handled: "yes" | "no" | "unknown", named: "yes" | "no" = "yes") => ({
+    named_conflict: named,
+    implemented_one_side: handled,
+  });
+  const old = {
+    label: "old",
+    fixture: "f",
+    tasks: "{}",
+    build: {
+      build: "a",
+      variant: "original",
+      bundle: 'c1 {"deliver.js":"old"}',
+      rows: [
+        graded("o1", 0),
+        graded("o2", 1),
+        // Unknown never counts as handled, and excluded runs are left out
+        graded("oc1", 1, conflictGrade("yes"), "t2"),
+        graded("oc2", 1, conflictGrade("unknown"), "t2"),
+        { ...graded("oc3", 2, conflictGrade("no"), "t2"), excluded: "timed out" },
+      ],
+    },
+  };
+  const next = {
+    label: "new",
+    fixture: "f",
+    tasks: "{}",
+    build: {
+      build: "b",
+      variant: "original",
+      bundle: 'c2 {"deliver.js":"new"}',
+      rows: [
+        { ...graded("n1", 2), search_before_edit: "yes" as const },
+        { ...graded("n2", 2, { proposes_rejected: "yes" }), search_before_edit: "unknown" as const },
+        graded("nc1", 2, conflictGrade("no"), "t2"),
+        graded("nc2", 2, conflictGrade("no", "no"), "t2"),
+        { ...graded("nc3", 2, {}, "t2"), grade: undefined, ungraded: "empty output" },
+      ],
+    },
+  };
+  const lines = compare(old, next, [{ id: "t1" }, { id: "t2" }]).join("\n");
+  assert.match(lines, /^# old: c1 \{"deliver\.js":"old"\}$/m);
+  assert.match(lines, /^# new: c2 \{"deliver\.js":"new"\}$/m);
+  assert.match(
+    lines,
+    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2, conflict handled -, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\) \| new n 2\/2, mean 2\.00, re-proposed 1\/2, conflict handled -, searched before editing 1\/1 told \(unknown 1, no edit 0, of 2\)$/m,
+  );
+  assert.match(
+    lines,
+    /^t2 codex inject: old n 2\/3, mean 1\.00, re-proposed 0\/2, conflict handled 0\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\) \| new n 2\/3, mean 2\.00, re-proposed 0\/2, conflict handled 1\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\)$/m,
+  );
+  assert.throws(() => compare(old, { ...next, fixture: "g" }, []), /different fixtures/);
+  assert.throws(() => compare({ ...old, fixture: undefined }, next, []), /different fixtures/);
+  assert.throws(() => compare(old, { ...next, tasks: "{1}" }, []), /different task definitions/);
+  // Another commit that shipped the same artifacts ran the same bundle
+  const same = { ...next, build: { ...next.build, bundle: 'c9 {"deliver.js":"old"}' } };
+  assert.throws(() => compare(old, same, []), /same bundle/);
+  for (const bundle of [undefined, "", "c3 {}"])
+    assert.throws(() => compare({ ...old, build: { ...old.build, bundle } }, next, []), /names no bundle/);
+});
+
+test("compare refuses two builds run by different models of the same family", () => {
+  const side = (label: string, bundle: string, model: string | null) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: {
+      build: label,
+      variant: "original",
+      bundle,
+      rows: [
+        {
+          ...row,
+          model: "claude" as const,
+          run: label,
+          excluded: null,
+          patch: "",
+          patch_truncated: false,
+          agent_model: model,
+          grade,
+        },
+      ],
+    },
+  });
+  assert.throws(
+    () =>
+      compare(
+        side("old", 'c1 {"deliver.js":"a"}', "claude-opus-5-5"),
+        side("new", 'c2 {"deliver.js":"b"}', "claude-sonnet-5-5"),
+        [{ id: "t1" }],
+      ),
+    /different models/,
+  );
+  assert.doesNotThrow(() =>
+    compare(
+      side("old", 'c1 {"deliver.js":"a"}', "claude-opus-5-5"),
+      side("new", 'c2 {"deliver.js":"b"}', "claude-opus-5-5"),
+      [{ id: "t1" }],
+    ),
+  );
+});
+
+test("a Codex run's model is read from its own CODEX_HOME", (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-home-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.writeFileSync(
+    path.join(home, "config.toml"),
+    'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "medium"\n',
+  );
+  assert.equal(codexModelOf(home), "gpt-6.1-sol, medium");
+  fs.writeFileSync(path.join(home, "config.toml"), "\n");
+  assert.equal(codexModelOf(home), null);
+});
+
+test("compare checks the models task by task, so swapping which model ran which task is refused", () => {
+  const r = (task: string, model: string) => ({
+    ...row,
+    model: "claude" as const,
+    task,
+    run: `${task}-${model}`,
+    excluded: null,
+    patch: "",
+    patch_truncated: false,
+    agent_model: model,
+    grade,
+  });
+  const side = (label: string, bundle: string, rows: ReturnType<typeof r>[]) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: { build: label, variant: "original", bundle, rows },
+  });
+  assert.throws(
+    () =>
+      compare(
+        side("old", 'c1 {"deliver.js":"a"}', [r("t1", "x"), r("t2", "y")]),
+        side("new", 'c2 {"deliver.js":"b"}', [r("t1", "y"), r("t2", "x")]),
+        [{ id: "t1" }, { id: "t2" }],
+      ),
+    /ran t1 claude inject with different models/,
+  );
 });

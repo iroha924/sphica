@@ -1,6 +1,7 @@
 // The loop report over the graded builds of one bundle (an original and a swapped build of one loop), against the task definitions they
 // were built from. Every count keeps n, excluded, and ungraded beside it.
 // Run: node evals/cloud/report.ts <build dir>/grades.json [<build dir>/grades.json ...]
+//      node evals/cloud/report.ts --compare <old build>/grades.json <new build>/grades.json
 import fs from "node:fs";
 import path from "node:path";
 import { readTasks } from "./firing.ts";
@@ -10,6 +11,8 @@ import type { Grade } from "./schema-check.ts";
 
 type TaskInfo = { id: string; lang?: string; overlap?: boolean | null; gold?: string[] };
 type Graded = GradeRow & {
+  agent_model?: string | null;
+  search_before_edit?: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
   tests?: string;
   gold?: string[];
   grade?: Grade;
@@ -21,6 +24,13 @@ export type Build = { build?: string | null; variant: string; bundle?: string; r
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
+
+/** A count as a rate over its denominator, with the unknowns shown beside it (never counted either way). */
+const rate = <T>(rows: T[], yes: (r: T) => boolean, unknown: (r: T) => boolean) => {
+  const n = rows.length;
+  const y = rows.filter(yes).length;
+  return `${y} / ${n} (${n ? fmt(y / n) : "n/a"}, unknown ${rows.filter(unknown).length})`;
+};
 
 /** Scores of graded runs in a group, with how many runs were started, excluded, and left ungraded. */
 function summary(rows: Graded[]) {
@@ -113,7 +123,28 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
     (r) => `${r.model} ${r.condition}`,
   ))
     lines.push(
-      `${k}: ${rows.filter((r) => r.grade?.proposes_rejected === "yes").length} / ${rows.length} (unknown ${rows.filter((r) => r.grade?.proposes_rejected === "unknown").length})`,
+      `${k}: ${rate(
+        rows,
+        (r) => r.grade?.proposes_rejected === "yes",
+        (r) => r.grade?.proposes_rejected === "unknown",
+      )}`,
+    );
+
+  // A conflict is handled when the answer names both sides and the patch settles neither; unknown is never counted as handled
+  lines.push(
+    "",
+    "## Conflicts handled (named both sides, implemented neither), over graded runs of tasks with a Conflict",
+  );
+  for (const [k, rows] of groupBy(
+    original.filter((r) => r.grade && r.grade.named_conflict !== "not_applicable"),
+    (r) => `${r.model} ${r.condition}`,
+  ))
+    lines.push(
+      `${k}: ${rate(
+        rows,
+        (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
+        (r) => r.grade?.implemented_one_side === "unknown",
+      )}`,
     );
 
   // Every gold run of a counterfactual task counts, graded or not, so a side whose runs all failed to grade still shows it was run
@@ -145,6 +176,8 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
       "implements_rejected",
       "proposes_rejected",
       "followed",
+      "named_conflict",
+      "implemented_one_side",
       "flags",
     ] as const;
     const shown = (g: Grade | undefined, f: (typeof fields)[number]) =>
@@ -192,7 +225,109 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   return lines;
 }
 
-if (process.argv[1] === import.meta.filename) {
+type Side = { label: string; build: Build; fixture: string | undefined; tasks: string };
+
+/**
+ * Old against new on the same records and tasks: each side's full report on its own (bundles never mixed), then one line per task, model,
+ * and condition with each side's graded runs, mean score, and the rates the experiments' bars read. Refuses two builds whose fixtures or
+ * task definitions differ, or that ran the same bundle.
+ */
+export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
+  if (!old.fixture || old.fixture !== next.fixture)
+    throw new Error(
+      `the builds were made from different fixtures (${old.fixture} / ${next.fixture}); compare only the same records`,
+    );
+  if (old.tasks !== next.tasks) throw new Error("the builds were made from different task definitions");
+  // A bundle is "<commit> {artifact hashes, delivery matchers}"; two commits can ship the same artifacts, so only those tell the bundles apart
+  const artifacts = (b: Build) => {
+    const at = b.bundle?.indexOf(" ") ?? -1;
+    return b.bundle && at > 0 ? b.bundle.slice(at + 1) : "";
+  };
+  for (const side of [old, next])
+    if (!artifacts(side.build) || artifacts(side.build) === "{}")
+      throw new Error(`the ${side.label} build names no bundle; it cannot be told which code ran`);
+  if (artifacts(old.build) === artifacts(next.build))
+    throw new Error("both builds ran the same bundle; there is nothing to compare");
+  // A different model behind "claude" or "codex" in any task and condition would read as a difference in the bundle, so each group the
+  // report compares must have run the same models on both sides
+  const modelsOf = (b: Build, group: string) =>
+    JSON.stringify(
+      [
+        ...new Set(
+          b.rows
+            .filter((r) => !r.excluded && `${r.task} ${r.model} ${r.condition}` === group)
+            .map((r) => r.agent_model ?? null),
+        ),
+      ].sort(),
+    );
+  const groups = new Set(
+    [...old.build.rows, ...next.build.rows].map((r) => `${r.task} ${r.model} ${r.condition}`),
+  );
+  for (const group of groups) {
+    const [a, b] = [modelsOf(old.build, group), modelsOf(next.build, group)];
+    if (a !== "[]" && b !== "[]" && a !== b)
+      throw new Error(
+        `the builds ran ${group} with different models (${a} / ${b}); compare runs of the same model`,
+      );
+  }
+  const lines = [
+    `# ${old.label}: ${old.build.bundle}`,
+    ...report([old.build], tasks),
+    "",
+    `# ${next.label}: ${next.build.bundle}`,
+    ...report([next.build], tasks),
+    "",
+    `# ${old.label} → ${next.label}, per task, model, and condition (graded runs only; unknown is never counted as yes)`,
+  ];
+  const key = (r: Graded) => `${r.task} ${r.model} ${r.condition}`;
+  const keys = [...new Set([...old.build.rows, ...next.build.rows].map(key))].sort();
+  const side = (rows: Graded[]) => {
+    const graded = rows.filter((r) => !r.excluded && r.grade);
+    const share = (yes: (r: Graded) => boolean, applies: (r: Graded) => boolean) => {
+      const n = graded.filter(applies);
+      return n.length ? `${n.filter(yes).length}/${n.length}` : "-";
+    };
+    return [
+      `n ${graded.length}/${rows.length}`,
+      `mean ${fmt(mean(graded.map((r) => r.grade?.score ?? 0)))}`,
+      `re-proposed ${share(
+        (r) => r.grade?.proposes_rejected === "yes",
+        (r) => r.grade?.proposes_rejected !== "not_applicable",
+      )}`,
+      `conflict handled ${share(
+        (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
+        (r) => r.grade?.named_conflict !== "not_applicable",
+      )}`,
+      // Over every graded run: a run whose order cannot be told is counted apart, never dropped from the denominator
+      `searched before editing ${graded.filter((r) => r.search_before_edit === "yes").length}/${graded.filter((r) => r.search_before_edit === "yes" || r.search_before_edit === "no").length} told (unknown ${graded.filter((r) => r.search_before_edit === "unknown").length}, no edit ${graded.filter((r) => r.search_before_edit === "no_edit").length}, of ${graded.length})`,
+    ].join(", ");
+  };
+  for (const k of keys)
+    lines.push(
+      `${k}: ${old.label} ${side(old.build.rows.filter((r) => key(r) === k))} | ${next.label} ${side(next.build.rows.filter((r) => key(r) === k))}`,
+    );
+  return lines;
+}
+
+if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare") {
+  const files = process.argv.slice(3);
+  if (files.length !== 2) throw new Error("--compare takes <old>/grades.json <new>/grades.json");
+  const sides = files.map((f, i): Side => {
+    const dir = path.dirname(f);
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")) as {
+      fixture?: string;
+    };
+    return {
+      label: i === 0 ? "old" : "new",
+      build: JSON.parse(fs.readFileSync(f, "utf8")) as Build,
+      fixture: manifest.fixture,
+      tasks: fs.readFileSync(path.join(dir, "tasks.json"), "utf8"),
+    };
+  });
+  const plan = readTasks<{ tasks: TaskInfo[] }>(path.dirname(files[0] ?? ""));
+  const [a, b] = sides as [Side, Side];
+  console.log(compare(a, b, plan.tasks).join("\n"));
+} else if (process.argv[1] === import.meta.filename) {
   const files = process.argv.slice(2);
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
   const builds = files.map((f) => JSON.parse(fs.readFileSync(f, "utf8")) as Build);

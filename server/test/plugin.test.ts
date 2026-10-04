@@ -9,6 +9,7 @@ import { stripVTControlCharacters } from "node:util";
 import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { SPHICA_TOOLS } from "../evals/cloud/canary-check.ts";
 import { sessionId } from "../src/knowledge.ts";
 import {
   compareVersions,
@@ -525,6 +526,8 @@ test("MCP server instructions keep their rules in the first 512 characters and f
       /would overturn a past decision[^\n]*check the current code and the record's full text; if it still conflicts, tell the user the decision and reason, and ask before making the change\./,
     );
     const { tools } = await client.listTools();
+    // The evaluation's canary holds the same list: a run whose host shows fewer or other Sphica tools does not start
+    assert.deepEqual(tools.map((t) => `mcp__sphica__${t.name}`).sort(), SPHICA_TOOLS);
     assert.deepEqual(tools.map((t) => t.name).sort(), [
       "export",
       "fields",

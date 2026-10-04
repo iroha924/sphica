@@ -146,6 +146,7 @@ for (const row of loop.rows) {
       row.patch_truncated,
       gradedTask(task, loop.variant ?? "original").against !== undefined,
       Boolean(row.presented),
+      task.conflict !== undefined,
     );
   const got = accept(gradeOne(prompt));
   // The second grade is kept beside the first for agreement; the table's values stay Codex's

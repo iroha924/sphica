@@ -22,7 +22,9 @@ description: Runs one turn of Sphica's evaluation loop on real agents. Builds th
 |---|---|
 | Tasks, prompts, gold keys, hidden tests | `server/evals/cloud/tasks.json` |
 | Slot builder, firing plan, collector, Codex replay, grader, report, fixture writer | `server/evals/cloud/build.ts`, `fire.ts`, `collect.ts`, `codex.ts`, `grade.ts`, `report.ts`, `fixture.ts` |
-| Builds (slots, `plan.json`, `loop.json`, `grades.json`), fixtures, Codex runs, run logs, old results | `~/.cache/sphica-eval/` (`builds/<build id>/`, `fixtures/`, `codex-runs/`, `logs/`, `archive/`) |
+| Local Claude runner, its fence, the canary | `server/evals/cloud/claude.ts`, `claude-run.ts`, `canary.ts`, `canary-check.ts` |
+| Order benchmark (what lands inside the delivery limits) | `server/evals/order/run.ts` |
+| Builds (slots, `plan.json`, `loop.json`, `grades.json`, `canary.json`), fixtures, Codex and Claude runs, run logs, old results | `~/.cache/sphica-eval/` (`builds/<build id>/`, `fixtures/`, `codex-runs/`, `claude-runs/`, `canary-runs/`, `logs/`, `archive/`) |
 | Routine ids per slot | `~/.cache/sphica-eval/routines.json` |
 | Routine token | `~/.config/sphica-eval`. Never print it; fire with the RemoteTrigger tool instead |
 
@@ -84,6 +86,45 @@ Loop progress:
 For search changes alone, use the offline benchmark first: `node evals/retrieval/run.ts --compare <ref>` builds each side's index with that
 side's `terms()` and search, and prints recall@k and MRR (questions with gold) and how often a question with no gold returned anything, overall
 and by language pair and overlap. The experiment's issue names the main measure and the drop it allows before the numbers are taken.
+
+## A local loop
+
+Claude runs on this machine instead of the cloud routines (the owner's subscription; no cloud credits). Run from `server/`.
+
+```text
+Local loop progress:
+- [ ] 1. Build (for old/new, the same fixture: build old in a worktree of the base commit, then new with --fixture <old>/fixture.db)
+- [ ] 2. node evals/cloud/canary.ts --build <dir> [--model <m>]  (every check ✓; claude.ts refuses a build without it)
+- [ ] 3. Write the local plan: [{ "model": "claude"|"codex", "task": <id>, "condition": <slot condition>, "n": <runs> }, ...], one entry per
+        task, condition, and model measured (a subset of plan.json's rows)
+- [ ] 4. Run it: node evals/cloud/claude.ts and node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>, n times per entry, into
+        run directories used by this build only
+- [ ] 5. node evals/cloud/collect.ts --build <dir> --no-cloud --local-plan <plan> (on macOS: hidden tests run only there)
+- [ ] 6. node evals/cloud/grade.ts --loop <dir>/loop.json
+- [ ] 7. node evals/cloud/report.ts --compare <old>/grades.json <new>/grades.json
+```
+
+- The runner fences each run: project setting sources only (the slot's cloud settings file is removed in the clone; hooks come from
+  `--settings`), strict MCP config, acceptEdits, the sandbox with no unsandboxed fallback, the owner's credential paths unreadable, an
+  allowlisted environment. The canary proves each of these on the build before any run, and its inject run must fire the delivery hook
+  before a tool. canary.json records the model and a hash of the runner's code; claude.ts refuses either changing until the canary runs
+  again
+- The build records both delivery matchers (`matchers` in manifest.json): Claude's goes into the inject slot, codex.ts reads Codex's, and
+  the bundle identity a comparison checks includes them. A build made before that has no matchers; build it again
+- Tool search is pinned on (`ENABLE_TOOL_SEARCH=true`), so Sphica's tools start deferred on both sides; `search_loading` in loop.json says
+  whether search was handed over by ToolSearch (deferred) or there from the start (loaded), and `search_before_edit` whether a search came
+  before the first change to the work tree. unknown is never counted as yes or no
+- Tasks set their own run counts (`runs` per condition in tasks.json); plan.json has one row per run asked for. The local plan says which of
+  them were run: collect keeps the first n runs of each entry, and keeps a missing run, a run past n, and a run the plan did not ask for
+  as excluded, so the denominator is the plan and not what happens to be in the run directories
+- Hidden tests run only on macOS, under sandbox-exec with no network and no file contents under the home directory but the checkout's and
+  Node's; a checkout holding a link that points outside it fails its hidden test unrun. Elsewhere collect stops unless
+  `--skip-hidden-tests` records them as not run
+- A Codex run has no read fence: a run whose commands or output name another run, the build, or the evaluation cache, or whose commands
+  climb two steps out of the checkout, is excluded as having looked outside
+- `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two
+- Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
+  delivers. No agent run is needed
 
 ## Traps seen in earlier loops
 

@@ -2,7 +2,8 @@
 // prompt the hooks received, plus the local Codex runs. For each run it records the hidden tests, what was delivered, and the failure signals
 // in the run log (searches that found nothing, reads that found nothing, tool errors, Sphica calls, turns, time), and writes one table.
 // Run logs of cloud runs are saved by hand from the routine API into <logs>/<branch session id>.log (the harness never holds the token).
-// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>]
+// Local Claude runs (claude.ts) are collected the same way as the Codex runs, from their run directories.
+// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--claude <dir>] [--no-cloud [--local-plan <json>]]
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,14 +13,20 @@ import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./f
 import {
   answerFormat,
   capPatch,
+  claudeStreamCalls,
   deliveredSignal,
   foundInClaudeLog,
+  foundInClaudeStream,
   foundInCodexEvents,
   type GoldSignal,
   goldNotGiven,
   goldSignalsFromClaude,
+  goldSignalsFromClaudeStream,
   goldSignalsFromCodex,
+  lookedOutside,
   presentedText,
+  searchedBeforeEdit,
+  searchLoading,
   type Tri,
 } from "./judge.ts";
 
@@ -29,6 +36,13 @@ const { values: args } = parseArgs({
     build: { type: "string" },
     logs: { type: "string", default: path.join(CACHE, "logs") },
     codex: { type: "string", default: path.join(CACHE, "codex-runs") },
+    claude: { type: "string", default: path.join(CACHE, "claude-runs") },
+    // A build run only locally: skip fetching result branches from the slot repositories
+    "no-cloud": { type: "boolean", default: false },
+    // Record hidden tests as not run instead of stopping where they cannot be sandboxed (not macOS)
+    "skip-hidden-tests": { type: "boolean", default: false },
+    // The local runs asked for, as [{ model, task, condition, n }]: what was not run, ran past n, or was not asked for stays as excluded
+    "local-plan": { type: "string" },
   },
 });
 
@@ -44,6 +58,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "
   variant?: string;
   commit: string;
   bundle?: Record<string, string>;
+  matchers?: Record<string, string>;
   project?: string;
   repositories: Record<string, { condition: string }>;
 };
@@ -82,6 +97,12 @@ type Row = {
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
   presented: string | null;
+  /** The concrete model a local run used (Claude's --model, Codex's configured model and effort); null when it was not recorded */
+  agent_model: string | null;
+  /** Local Claude runs only: whether a Sphica search came before the first change to the work tree */
+  search_before_edit: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
+  /** Local Claude runs only: whether Sphica's search was held back for ToolSearch or there from the start */
+  search_loading: "deferred" | "loaded" | "unknown" | "not_applicable";
   signals: {
     searches: number;
     empty_searches: number;
@@ -117,6 +138,9 @@ const excludedRow = (
   found: "unknown",
   gold_signals: {},
   presented: null,
+  search_before_edit: "not_applicable",
+  search_loading: "not_applicable",
+  agent_model: null,
   signals: null,
 });
 
@@ -141,6 +165,102 @@ function signals(log: string): NonNullable<Row["signals"]> {
   };
 }
 
+/** The same signals from a local Claude run's stream-json, where each call carries its own result. */
+function streamSignals(events: string): NonNullable<Row["signals"]> {
+  const { calls } = claudeStreamCalls(events);
+  const searches = calls.filter((c) => c.name === "mcp__sphica__search");
+  const turns = events
+    .split("\n")
+    .flatMap((l) => {
+      try {
+        const e = JSON.parse(l) as { type?: string; num_turns?: number };
+        return e.type === "result" && typeof e.num_turns === "number" ? [e.num_turns] : [];
+      } catch {
+        return [];
+      }
+    })
+    .at(-1);
+  return {
+    searches: searches.length,
+    empty_searches: searches.filter((c) =>
+      /No record holds most of|No source holds most of/.test(c.result ?? ""),
+    ).length,
+    reads_not_found: calls.filter(
+      (c) => c.name === "mcp__sphica__read" && /not found in this project/.test(c.result ?? ""),
+    ).length,
+    tool_errors: calls.filter((c) => c.error).length,
+    turns: turns ?? null,
+    seconds: null,
+  };
+}
+
+type LocalPlan = { model: "claude" | "codex"; task: string; condition: string; n: number }[];
+
+/**
+ * Local runs against the runs asked for: each planned task, condition, and model keeps its first n runs by start, a run past n or one
+ * the plan did not ask for is kept as excluded, and a planned run that never started is added as excluded, so the denominator is the plan.
+ */
+function reconcileLocal<
+  R extends { model: string; task: string; condition: string; run: string; excluded: string | null },
+>(
+  rows: R[],
+  plan: LocalPlan,
+  startedOf: (r: R) => string,
+  missing: (model: "claude" | "codex", task: string, condition: string, n: number) => R = (
+    model,
+    task,
+    condition,
+    n,
+  ) => excludedRow(model, task, condition, `planned#${n}`, "planned but not run") as unknown as R,
+): R[] {
+  const out: R[] = [];
+  const key = (x: { model: string; task: string; condition: string }) =>
+    `${x.model}\0${x.task}\0${x.condition}`;
+  const wanted = new Map(plan.map((p) => [key(p), p]));
+  const groups = new Map<string, R[]>();
+  for (const r of rows) groups.set(key(r), [...(groups.get(key(r)) ?? []), r]);
+  for (const [k, group] of groups) {
+    const p = wanted.get(k);
+    const ordered = [...group].sort((a, b) => startedOf(a).localeCompare(startedOf(b)));
+    for (const [i, r] of ordered.entries())
+      out.push(
+        !p
+          ? { ...r, excluded: "not in the local plan" }
+          : i < p.n
+            ? r
+            : { ...r, excluded: "beyond the planned runs" },
+      );
+  }
+  for (const p of plan) {
+    const ran = Math.min(groups.get(key(p))?.length ?? 0, p.n);
+    for (let i = ran; i < p.n; i++) out.push(missing(p.model, p.task, p.condition, i + 1));
+  }
+  return out;
+}
+
+/** A path as an SBPL string literal. */
+const sbpl = (p: string) => JSON.stringify(p);
+
+/** Whether any link in the checkout (outside .git) resolves outside it, or cannot be resolved. */
+function linksOutside(work: string): boolean {
+  const inside = fs.realpathSync(work);
+  const walk = (dir: string): boolean =>
+    fs.readdirSync(dir, { withFileTypes: true }).some((e) => {
+      const full = path.join(dir, e.name);
+      if (e.name === ".git" && dir === work) return false;
+      if (e.isSymbolicLink()) {
+        try {
+          const target = fs.realpathSync(full);
+          return target !== inside && !target.startsWith(inside + path.sep);
+        } catch {
+          return true;
+        }
+      }
+      return e.isDirectory() ? walk(full) : false;
+    });
+  return walk(work);
+}
+
 /**
  * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs only
  * on macOS, in sandbox-exec without network, under Node's permission model (reads only the checkout, no writes or child processes), with no inherited environment.
@@ -149,8 +269,15 @@ function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
   // The hidden test checks the original record's rule, which a swapped run is not given
   if (swapped) return "not run (swapped variant)";
+  if (args["skip-hidden-tests"]) return "not run (--skip-hidden-tests)";
+  // Scores without the hidden tests would read as a complete comparison, so a collector that cannot sandbox them stops
   if (process.platform !== "darwin")
-    return "not run (hidden tests run only on macOS, where sandbox-exec denies network)";
+    throw new Error(
+      "hidden tests run only on macOS, where sandbox-exec denies network; collect there, or pass --skip-hidden-tests to record them as not run",
+    );
+  if (!fs.existsSync(work)) return "not run (no checkout)";
+  // A link the patch made can point the task module at a file outside the checkout: such a run fails its hidden test without running it
+  if (linksOutside(work)) return "0 passed, 1 failed (a link in the checkout points outside it)";
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
   const testDir = path.join(work, "test");
   const dirStat = fs.lstatSync(testDir, { throwIfNoEntry: false });
@@ -164,7 +291,9 @@ function hiddenTest(work: string, task: Task): string {
     "/usr/bin/sandbox-exec",
     [
       "-p",
-      "(version 1)(allow default)(deny network*)",
+      // No network, and no file contents under the home directory but the checkout's and the Node's that runs the test (metadata stays
+      // readable: Node stats the checkout's parents)
+      `(version 1)(allow default)(deny network*)(deny file-read-data (subpath ${sbpl(os.homedir())}))(allow file-read-data (subpath ${sbpl(inside)}) (subpath ${sbpl(path.dirname(path.dirname(fs.realpathSync(process.execPath))))}))`,
       process.execPath,
       "--permission",
       `--allow-fs-read=${inside}`,
@@ -188,10 +317,12 @@ const taskOf = (text: string, firing: FiringRow[]) => {
 
 function main() {
   const rows: Row[] = [];
-  // The firing plan is the denominator: every fired row is one run asked for, with its task, even when it pushed no branch
-  const firing = Object.keys(manifest.repositories).length ? readPlan(build) : [];
+  // The firing plan is the denominator of cloud runs: every fired row is one run asked for, with its task, even when it pushed no branch.
+  // Without cloud runs the local plan is the denominator, and the build's cloud rows would only stand in for runs never looked for
+  const firing = !args["no-cloud"] && Object.keys(manifest.repositories).length ? readPlan(build) : [];
   const claude: (Row & { started: string })[] = [];
-  for (const [repo, { condition }] of Object.entries(manifest.repositories)) {
+  const cloud = args["no-cloud"] ? [] : Object.entries(manifest.repositories);
+  for (const [repo, { condition }] of cloud) {
     const dir = path.join(build, repo);
     execFileSync("git", [
       "-C",
@@ -281,6 +412,10 @@ function main() {
           found: foundInClaudeLog(log, gold),
           gold_signals: goldSignalsFromClaude(condition, gold, emitted, goldOut || null, log),
           presented: presentedOf(task, condition),
+          // A routine log has no record of the work tree between calls
+          search_before_edit: "unknown",
+          search_loading: "unknown",
+          agent_model: null,
           signals: log === null ? null : signals(log),
         });
       } finally {
@@ -296,9 +431,13 @@ function main() {
   }
   for (const f of missing)
     rows.push(excludedRow("claude", f.task, f.condition, `${f.slot}#${f.try}`, "no result branch"));
-  if (fs.existsSync(args.codex ?? ""))
-    for (const name of fs.readdirSync(args.codex ?? "")) {
-      const dir = path.join(args.codex ?? "", name);
+  for (const [model, runs] of [
+    ["codex", args.codex ?? ""],
+    ["claude", args.claude ?? ""],
+  ] as const) {
+    if (!fs.existsSync(runs)) continue;
+    for (const name of fs.readdirSync(runs)) {
+      const dir = path.join(runs, name);
       const read = (file: string) =>
         fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), "utf8") : null;
       // started.json is the denominator: a run that started counts even when it left no result
@@ -325,7 +464,7 @@ function main() {
       if (!resultText) {
         rows.push(
           excludedRow(
-            "codex",
+            model,
             head.task,
             head.condition,
             name,
@@ -341,51 +480,74 @@ function main() {
         status: number | null;
         reason?: string | null;
         deliveries?: { outcome: string; units: string[] }[] | null;
+        claude_model?: string;
+        codex_model?: string | null;
       }>(resultText);
       // Cut off while it was written: the run started, so it stays in the denominator
       if (!result) {
-        rows.push(excludedRow("codex", head.task, head.condition, name, "unreadable result.json"));
+        rows.push(excludedRow(model, head.task, head.condition, name, "unreadable result.json"));
         continue;
       }
-      // A run whose Codex process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
+      // A run whose agent process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
       if (result.status !== 0 || result.reason) {
         rows.push(
           excludedRow(
-            "codex",
+            model,
             result.task,
             result.condition,
             name,
-            result.reason ?? `codex exited ${result.status}`,
+            result.reason ?? `${model} exited ${result.status}`,
           ),
         );
         continue;
       }
       // An inject run whose hooks logged nothing at all never had Sphica delivering
       if (result.condition === "inject" && !result.deliveries?.length) {
+        rows.push(excludedRow(model, result.task, result.condition, name, "inject run with no delivery log"));
+        continue;
+      }
+      // A run that reached another run, the build, or the evaluation cache may have read answers or gold records it was not given
+      const own = [dir, fs.realpathSync(dir)];
+      // Both models' run places: a Codex run must not read a Claude run's answer, nor the other way round
+      const places = [build, path.resolve(args.codex ?? ""), path.resolve(args.claude ?? ""), CACHE].flatMap(
+        (p) => [p, fs.existsSync(p) ? fs.realpathSync(p) : p],
+      );
+      if (lookedOutside(read("events.jsonl"), own, places)) {
         rows.push(
-          excludedRow("codex", result.task, result.condition, name, "inject run with no delivery log"),
+          excludedRow(
+            model,
+            result.task,
+            result.condition,
+            name,
+            "looked outside its checkout (other runs, the build, or the evaluation cache)",
+          ),
         );
         continue;
       }
       const task = plan.tasks.find((t) => t.id === result.task);
       if (!task) {
-        rows.push(excludedRow("codex", result.task, result.condition, name, "unknown task"));
+        rows.push(excludedRow(model, result.task, result.condition, name, "unknown task"));
         continue;
       }
       const gold = goldOf(task);
       if (goldNotGiven(result.condition, gold, read("gold-receipt.txt"))) {
-        rows.push(excludedRow("codex", task.id, result.condition, name, NO_GOLD));
+        rows.push(excludedRow(model, task.id, result.condition, name, NO_GOLD));
         continue;
       }
       const events = read("events.jsonl");
-      const found = foundInCodexEvents(events, gold);
+      const found = model === "codex" ? foundInCodexEvents(events, gold) : foundInClaudeStream(events, gold);
       const emitted = (result.deliveries ?? [])
         .filter((d) => d.outcome === "emitted")
         .flatMap((d) => d.units);
-      const answer = answerFormat(read("answer.json"));
+      // Codex answers in a fixed shape; Claude's answer is its final message, as on the cloud
+      const answer =
+        model === "codex"
+          ? answerFormat(read("answer.json"))
+          : { text: read("answer.md") ?? "", format: "not_applicable" as const, reason: null };
       const cut = capPatch(read("patch.diff") ?? "");
+      const goldReceipt = read("gold-receipt.txt");
       rows.push({
-        model: "codex",
+        model,
         task: task.id,
         condition: result.condition,
         run: name,
@@ -397,18 +559,51 @@ function main() {
         patch: cut.patch,
         patch_truncated: cut.truncated,
         gold,
-        delivered: deliveredSignal(result.condition, gold, emitted, read("gold-receipt.txt")),
+        delivered: deliveredSignal(result.condition, gold, emitted, goldReceipt),
         delivered_units: emitted,
         found,
         presented: presentedOf(task, result.condition),
-        gold_signals: goldSignalsFromCodex(result.condition, gold, emitted, read("gold-receipt.txt"), events),
+        search_before_edit:
+          model === "claude" ? searchedBeforeEdit(events, read("edits.jsonl")) : "not_applicable",
+        search_loading: model === "claude" ? searchLoading(events) : "not_applicable",
+        agent_model: result.claude_model ?? result.codex_model ?? null,
+        gold_signals:
+          model === "codex"
+            ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
+            : goldSignalsFromClaudeStream(result.condition, gold, emitted, goldReceipt, events),
         // A missing or broken event log cannot say how many searches or errors there were
-        signals: found === "unknown" ? null : { ...signals(events ?? ""), seconds: result.seconds },
+        signals:
+          found === "unknown"
+            ? null
+            : model === "codex"
+              ? { ...signals(events ?? ""), seconds: result.seconds }
+              : { ...streamSignals(events ?? ""), seconds: result.seconds },
       });
     }
+  }
+  if (args["local-plan"]) {
+    if (!args["no-cloud"])
+      throw new Error("--local-plan reconciles local runs only; pass --no-cloud with it");
+    const asked = JSON.parse(fs.readFileSync(args["local-plan"], "utf8")) as LocalPlan;
+    const startedOf = (r: Row) => {
+      const file = path.join(
+        r.model === "codex" ? (args.codex ?? "") : (args.claude ?? ""),
+        r.run,
+        "started.json",
+      );
+      try {
+        return String((JSON.parse(fs.readFileSync(file, "utf8")) as { at?: string }).at ?? "");
+      } catch {
+        return "";
+      }
+    };
+    const reconciled = reconcileLocal(rows, asked, startedOf);
+    rows.length = 0;
+    rows.push(...reconciled);
+  }
   fs.writeFileSync(
     out,
-    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify(manifest.bundle ?? {})}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify({ ...manifest.bundle, ...(manifest.matchers ? { matchers: manifest.matchers } : {}) })}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(
