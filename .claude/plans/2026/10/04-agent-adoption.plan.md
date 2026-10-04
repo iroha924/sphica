@@ -143,10 +143,10 @@ approved_at: 2026-10-04
 ## 完了条件
 
 - A1: `bun run verify` → 終了コード 0
-- A2: `cd server && node --test --test-name-pattern="authority" test/record.test.ts test/deliver.test.ts` → pass。次がすべて通る: 候補・`agent` の記録から持ち主の判断を指す supersedes / conflicts が拒まれ、持ち主の判断が配信に残る / `agent` の記録が supersedes を持てない / AskUserQuestion の質問・`reported_speaker` のある引用・`decides` でない引用・record ツールを呼んだターンの返事・呼び出し元が不明の run からの `agent` の採用が候補に残る / `do` で anchor のある判断は、同じターンにその path の編集が無ければ候補に残る / 持ち主の採用は今までどおり active になる。持ち主の判断を守るテストは main のコードでは落ちる
+- A2: `cd server && node --test --test-name-pattern="agent adoption|owner decision protected|authority" test/record.test.ts test/deliver.test.ts test/authority.test.ts test/schema.test.ts` → pass。次がすべて通る: 候補・`agent` の記録から持ち主の判断を指す supersedes / conflicts が拒まれ、持ち主の判断が配信に残る / `agent` の記録が supersedes を持てない / AskUserQuestion の質問・`reported_speaker` のある引用・`decides` でない引用・record ツールを呼んだターンの返事・呼び出し元が不明の run からの `agent` の採用が候補に残る / `do` で anchor のある判断は、同じターンにその path の編集が無ければ候補に残る / 持ち主の採用は今までどおり active になる。持ち主の判断を守るテストは main のコードでは落ちる
 - A3: `bun run acceptance` → pass。S10 で足した伝聞の平文・取得したページの注入文・無関係な編集・質問・trace の報告の各ケースで、`agent` の採用が active にならない
-- A4: `cd server && node --test --test-name-pattern="migrat" test/schema.test.ts` → pass。移行の前後で既存の持ち主の採用が変わらず、run の呼び出し元が不明として移り、新しく作った DB と移行した DB の schema が一致する
-- A5: `cd server && node --test --test-name-pattern="agent history" test/record.test.ts` → pass。持ち主が後から採用した記録と AI の採用が撤回された記録が一覧に残り、最初に active になった時刻と当時の content hash が返る
+- A4: `cd server && node --test --test-name-pattern="migrat" test/migrate.test.ts` → pass。移行の前後で既存の持ち主の採用が変わらず、run の呼び出し元が不明として移り、新しく作った DB と移行した DB の schema が一致する
+- A5: `cd server && node --test --test-name-pattern="agent history" test/authority.test.ts` → pass。持ち主が後から採用した記録と AI の採用が撤回された記録が一覧に残り、最初に active になった時刻と当時の content hash が返る
 - A6: `node scripts/check-ai-config.mjs` → 終了コード 0。trace の Skill の両ホストの起動の設定がそろっている
 - A7: `bun run hooks:live` → pass。対話の持ち主のセッションの開始で自動の trace の通知が 1 回だけ出て、resume と headless・SDK の形では出ない
 - A8: `bun run release:plan -- --base <前のリリースのコミット>` → `plugin`。`plugin/package.json` と 3 つの manifest が同じ新しいバージョン
@@ -188,3 +188,4 @@ approved_at: 2026-10-04
 - 2026-10-04 / 方針 2 を、Claude Code のターンを record ツール用の同期の PreToolUse hook と capture の新しい view で取る形に直し、実測を前提に足した / 実測で Claude Code の MCP 呼び出しにターンが無いと分かり、Codex（session 01a1065d-a782-77f2-bcea-beccec0ace30）と比べた / 持ち主が A を選んだ（Go 済み）
 
 - 2026-10-04 / 方針 11・12 と S11・S12・A10 を足した（配布する Skill の追従と、README などの文書の更新） / 持ち主が文書の徹底した更新を求めた / Go が要る（tasks の確認で取る）
+- 2026-10-04 / 完了条件 A2・A4・A5 のコマンドを、テストを置いた場所と名前に合わせた（A2 は record・deliver・authority・schema の各テストの「agent adoption」「owner decision protected」「authority」、A4 は migrate.test.ts、A5 は authority.test.ts） / 実装でテストの置き場所と名前が計画を書いた時点の想定と変わった / Go は要らない（確かめる中身は変えていない）
