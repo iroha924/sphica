@@ -141,8 +141,16 @@ const TABLES = [
   "unit_adoption",
   "unit_state",
 ];
+// Rows a migration writes itself (its runs, and the states its judging writes) are left out: the rows compared are the owner's
+const OWN: Record<string, string> = {
+  extraction_run: "where origin <> 'migration'",
+  unit_state:
+    "where run_id is null or run_id not in (select id from extraction_run where origin = 'migration')",
+};
 const counts = (raw: DatabaseSync) =>
-  TABLES.map((t) => Number((raw.prepare(`select count(*) as n from ${t}`).get() as { n: number }).n));
+  TABLES.map((t) =>
+    Number((raw.prepare(`select count(*) as n from ${t} ${OWN[t] ?? ""}`).get() as { n: number }).n),
+  );
 
 for (const [from, schema] of [
   [1, REV1],
@@ -423,7 +431,7 @@ test("migrating revision 4 keeps every column of every row", () => {
         .map((t) => [
           t,
           raw
-            .prepare(`select * from ${t} order by rowid`)
+            .prepare(`select * from ${t} ${OWN[t] ?? ""} order by rowid`)
             .all()
             .map((r) => ({ ...r })),
         ]),
@@ -518,6 +526,7 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
     [
       [1, "trace"],
       [9, "migration"],
+      [10, "migration"],
     ],
   );
   assert.deepEqual(
@@ -525,11 +534,13 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
       .prepare("select id, lifecycle from unit order by id")
       .all()
       .map((u) => [u.id, u.lifecycle]),
+    // Revision 5 left 4 replaced by 5, still a candidate; revision 10 replaces a record only with a successor that stands, so 4 is
+    // judged again on its own facts (no evidence: a candidate), and the note says so
     [
       [1, "active"],
       [2, "candidate"],
       [3, "withdrawn"],
-      [4, "superseded"],
+      [4, "candidate"],
       [5, "candidate"],
       [6, "candidate"],
       [7, "candidate"],
@@ -562,11 +573,16 @@ test("migrating revision 4 puts a superseded unit whose successor is withdrawn b
         }
       ).n,
     ),
-    1,
+    2,
+    "one run for revision 5's repairs, one for revision 10's judging",
   );
   assert.match(
     said,
     /Changed while migrating to revision 5: 2 rows[^\n]*\n\s*a superseded record whose successors are all withdrawn, or that has none: 2 rows\n\s*unit 2 left \(superseded\) → back to candidate\n\s*unit 6 alone \(superseded\) → back to candidate/,
+  );
+  assert.match(
+    said,
+    /judged again by revision 10: 1 row\n\s*kept → superseded → candidate: its successor no longer replaces it/,
   );
   // The unit is judged again like any candidate, and the rules of revision 5 apply to it
   move(2, "candidate", "withdrawn");
@@ -1070,16 +1086,20 @@ test("migrating revision 4 keeps the id counter of every table, so an id once us
       (t) => t.name,
     ),
   );
+  // Revision 10 adds a run to judge every record, which takes the next id
+  const had = new Set(before.map(([name]) => name));
   assert.deepEqual(
-    counters(),
-    before.filter(([name]) => kept.has(String(name))),
+    counters().filter(([name]) => had.has(name)),
+    before
+      .filter(([name]) => kept.has(String(name)))
+      .map(([name, seq]) => [name, name === "extraction_run" ? Number(seq) + 1 : seq]),
   );
   const run = raw
     .prepare(
       "insert into extraction_run (project_id, origin, target, status, started_at) values (1, 'trace', 'session:s1', 'running', ?) returning id",
     )
     .get(now) as { id: number };
-  assert.equal(run.id, 9, "the run made before was 1, and the counter stood at 8");
+  assert.equal(run.id, 10, "the run made before was 1, the counter stood at 8, and revision 10's run took 9");
 });
 
 test("migrating revision 2 keeps options and evidence with their ids, and a rejected option then takes a reconsider condition", () => {
@@ -1266,8 +1286,9 @@ test("a populated revision 4 database migrates and keeps working: rows, ids, sea
   assert.match(said, /a superseded record whose successors are all withdrawn, or that has none: 1 row/);
   const after = new Map(tables.map((t) => [t, count(t)]));
   const grew = [...after].filter(([t, n]) => n !== before.get(t));
+  // Revision 5's repair run, and revision 10's run for judging every record
   assert.deepEqual(grew, [
-    ["extraction_run", (before.get("extraction_run") ?? 0) + 1],
+    ["extraction_run", (before.get("extraction_run") ?? 0) + 2],
     ["unit_state", (before.get("unit_state") ?? 0) + 1],
   ]);
   for (const [name, seq] of counters)
@@ -1497,4 +1518,141 @@ test("migrating revision 8 rebuilds both search indexes, so identifier parts fin
       assert.deepEqual(hits(old, table, word), hits(fresh, table, word), `${table} ${word}`);
       assert.ok(hits(old, table, word).length > 0, `${table} ${word}`);
     }
+});
+
+// Revision 9 history built through its own triggers: owner decisions on the first source, moved through states at given times
+const rev9 = () => {
+  const raw = create("old.db", REV9);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  const decided = (key: string) => {
+    run(
+      "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (1, ?, 'decision', 'do', ?, 'supported', 1, ?, ?)",
+      key,
+      key,
+      now,
+      sha256(key),
+    );
+    const id = Number((raw.prepare("select id from unit where key = ?").get(key) as { id: number }).id);
+    run(
+      "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (?, 1, 0, 3, 'states', 1, ?)",
+      id,
+      now,
+    );
+    run(
+      "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (?, 'owner_statement', 1, 0, 3, 1, ?)",
+      id,
+      now,
+    );
+    run(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'r', 1)",
+      id,
+      now,
+    );
+    return id;
+  };
+  const move = (unit: number, from: string, to: string, at: string) =>
+    run(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', 1)",
+      unit,
+      from,
+      to,
+      at,
+    );
+  const link = (from: number, to: number) =>
+    run(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'supersedes', 1, ?)",
+      from,
+      to,
+      now,
+    );
+  return { raw, decided, move, link };
+};
+const T1 = new Date("2026-09-21T00:00:00Z").toISOString();
+const T2 = new Date("2026-09-22T00:00:00Z").toISOString();
+const T3 = new Date("2026-09-23T00:00:00Z").toISOString();
+
+test("migrating revision 9 restores the replacements history proves, dates them, marks what it cannot date, and judges every record", () => {
+  const { raw, decided, move, link } = rev9();
+  // In effect, through a chain: v3 replaced v2 at T2, which had replaced v1 at T1
+  const v1 = decided("v1");
+  const v2 = decided("v2");
+  const v3 = decided("v3");
+  move(v1, "candidate", "active", now);
+  link(v2, v1);
+  move(v2, "candidate", "active", T1);
+  move(v1, "active", "superseded", T1);
+  link(v3, v2);
+  move(v3, "candidate", "active", T2);
+  move(v2, "active", "superseded", T2);
+  // Ended in the past: s replaced o at T1 and was withdrawn at T3, which brought o back at that moment (judged active again: its
+  // evidence and the owner's adoption still stand)
+  const o = decided("o");
+  const s = decided("s");
+  move(o, "candidate", "active", now);
+  link(s, o);
+  move(s, "candidate", "active", T1);
+  move(o, "active", "superseded", T1);
+  move(s, "active", "withdrawn", T3);
+  // Undated: q was active before it meant to replace p, so no history says when its replacement took effect
+  const p = decided("p");
+  const q = decided("q");
+  move(p, "candidate", "active", now);
+  move(q, "candidate", "active", now);
+  link(q, p);
+  const said = migrate(raw);
+  const rows = raw
+    .prepare("select from_unit, to_unit, started_at, ended_at from unit_replacement order by from_unit")
+    .all()
+    .map((r) => ({ ...r }));
+  const at = (id: number) => rows.find((r) => r.from_unit === id) as Record<string, unknown>;
+  assert.deepEqual([at(v2).to_unit, at(v2).started_at, at(v2).ended_at], [v1, T1, null]);
+  assert.deepEqual([at(v3).to_unit, at(v3).started_at, at(v3).ended_at], [v2, T2, null]);
+  assert.deepEqual([at(s).to_unit, at(s).started_at, at(s).ended_at], [o, T1, T3]);
+  // q now holds p's place, from this update; and its earlier history is marked as not recorded
+  assert.equal(at(q).to_unit, p);
+  assert.ok(String(at(q).started_at) > T3);
+  assert.deepEqual(
+    raw
+      .prepare("select from_unit, to_unit from unit_replacement_gap")
+      .all()
+      .map((r) => [r.from_unit, r.to_unit]),
+    [[q, p]],
+  );
+  const life = (id: number) =>
+    (raw.prepare("select lifecycle from unit where id = ?").get(id) as { lifecycle: string }).lifecycle;
+  assert.deepEqual([v1, v2, v3, o, s, p, q].map(life), [
+    "superseded",
+    "superseded",
+    "active",
+    "active",
+    "withdrawn",
+    "superseded",
+    "active",
+  ]);
+  assert.match(said, /a replacement in effect, dated from when the record was last superseded: 2 rows/);
+  assert.match(said, /a past replacement, proven by the withdrawal that ended it: 1 row/);
+  assert.match(said, /an intent whose earlier effect is not recorded: 1 row/);
+  assert.match(
+    said,
+    /judged again by revision 10: [^\n]*\n[\s\S]*q → p[^\n]*in effect from this update \(earlier history not recorded\)/,
+  );
+  assert.match(said, /p[^\n]*active → superseded: superseded by q/);
+});
+
+test("migrating revision 9 stops, changing nothing, when a record means to replace more than one other", () => {
+  const { raw, decided, link } = rev9();
+  const a = decided("a");
+  const b = decided("b");
+  const c = decided("both");
+  link(c, a);
+  link(c, b);
+  assert.throws(
+    () => migrate(raw),
+    (e: Error) =>
+      /a record that means to replace more than one other: 1 row/.test(e.message) &&
+      /both supersedes a, b|both supersedes b, a/.test(e.message) &&
+      /still at revision 9/.test(e.message),
+  );
+  assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 9);
 });

@@ -138,6 +138,12 @@ create table unit_replacement (
   check (ended_at >= started_at),
   check (from_unit <> to_unit)
 ) strict;
+create table unit_replacement_gap (
+  from_unit integer not null references unit (id) on delete cascade,
+  to_unit integer not null references unit (id) on delete cascade,
+  run_id integer not null references extraction_run (id),
+  primary key (from_unit, to_unit)
+) strict;
 
 create table extraction_run_new (
   id integer primary key autoincrement not null,
@@ -222,6 +228,54 @@ update sqlite_sequence set seq = max(seq, (select seq from temp.sphica_migration
 insert into sqlite_sequence (name, seq) select name, seq from temp.sphica_migration_seq m where not exists (select 1 from sqlite_sequence s where s.name = m.name);
 drop table temp.sphica_migration_seq;
 
+-- Replacements from what revision-9 history proves. Every project with records gets a migration run for the rows and states written
+-- here and when the step judges every record afterwards (server/src/reconcile.ts settleForMigration).
+create temp table sphica_migration_note (rule text, item text, action text);
+insert into extraction_run (project_id, origin, target, status, started_at, finished_at)
+select distinct project_id, 'migration', 'revision:10', 'saved', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+from unit;
+create temp table sphica_migration_run as
+select project_id, max(id) as id from extraction_run where origin = 'migration' and target = 'revision:10' group by project_id;
+
+-- In effect now: a superseded record and the live successor revision 9 let hold its one place, from when it was last superseded
+insert into unit_replacement (from_unit, to_unit, run_id, started_at)
+select l.from_unit, l.to_unit, r.id,
+  coalesce((select max(t.at) from unit_state t where t.unit_id = o.id and t.to_state = 'superseded'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+from unit_link l join unit o on o.id = l.to_unit join unit s on s.id = l.from_unit join temp.sphica_migration_run r on r.project_id = o.project_id
+where l.kind = 'supersedes' and o.lifecycle = 'superseded' and s.lifecycle in ('active', 'superseded')
+  and s.extraction = 'supported' and s.unsourced = 0
+  and l.from_unit = (select min(k.from_unit) from unit_link k join unit ks on ks.id = k.from_unit where k.to_unit = o.id
+    and k.kind = 'supersedes' and ks.lifecycle in ('active', 'superseded') and ks.extraction = 'supported' and ks.unsourced = 0);
+insert into sphica_migration_note
+select 'a replacement in effect, dated from when the record was last superseded', s.key || ' → ' || o.key, 'in effect since ' || x.started_at
+from unit_replacement x join unit s on s.id = x.from_unit join unit o on o.id = x.to_unit where x.ended_at is null;
+
+-- Ended in the past: the successor's withdrawal brought the record back at that very moment (revision 9 wrote both together)
+insert into unit_replacement (from_unit, to_unit, run_id, started_at, ended_at, end_reason, end_run_id)
+select l.from_unit, l.to_unit, r.id, b.started, w.at, s.key || ' was withdrawn', r.id
+from unit_link l join unit s on s.id = l.from_unit join unit o on o.id = l.to_unit
+join temp.sphica_migration_run r on r.project_id = o.project_id
+join unit_state w on w.unit_id = s.id and w.to_state = 'withdrawn'
+join (select t.unit_id, t.at, (select max(p.at) from unit_state p where p.unit_id = t.unit_id and p.to_state = 'superseded' and p.at <= t.at) as started
+  from unit_state t where t.from_state = 'superseded' and t.to_state = 'candidate' and t.reason = 'its successor was withdrawn') b
+  on b.unit_id = o.id and b.at = w.at
+where l.kind = 'supersedes' and b.started is not null;
+insert into sphica_migration_note
+select 'a past replacement, proven by the withdrawal that ended it', s.key || ' → ' || o.key, 'from ' || x.started_at || ' to ' || x.ended_at
+from unit_replacement x join unit s on s.id = x.from_unit join unit o on o.id = x.to_unit where x.ended_at is not null;
+
+-- An intent whose successor was once active but whose effect no history dates: marked, so read never calls it a mere proposal
+insert into unit_replacement_gap (from_unit, to_unit, run_id)
+select l.from_unit, l.to_unit, r.id
+from unit_link l join unit o on o.id = l.to_unit join temp.sphica_migration_run r on r.project_id = o.project_id
+where l.kind = 'supersedes'
+  and not exists (select 1 from unit_replacement x where x.from_unit = l.from_unit and x.to_unit = l.to_unit)
+  and exists (select 1 from unit_state t where t.unit_id = l.from_unit and t.to_state = 'active');
+insert into sphica_migration_note
+select 'an intent whose earlier effect is not recorded', s.key || ' → ' || o.key, 'marked: read says its history was not recorded'
+from unit_replacement_gap g join unit s on s.id = g.from_unit join unit o on o.id = g.to_unit;
+drop table temp.sphica_migration_run;
+
 create index record_call_project on record_call (project_id, host, called_at);
 create index record_call_caller on record_call (host, caller_session, caller_turn);
 create index record_call_tool_use on record_call (tool_use_id) where tool_use_id is not null;
@@ -245,6 +299,8 @@ create index unit_replacement_run on unit_replacement (run_id) where run_id is n
 create index unit_replacement_forget on unit_replacement (forget_id) where forget_id is not null;
 create index unit_replacement_end_run on unit_replacement (end_run_id) where end_run_id is not null;
 create index unit_replacement_end_forget on unit_replacement (end_forget_id) where end_forget_id is not null;
+create index unit_replacement_gap_to on unit_replacement_gap (to_unit);
+create index unit_replacement_gap_run on unit_replacement_gap (run_id);
 create trigger project_key_normal_insert before insert on project when new.key glob 'git:*' begin
   select raise(abort, 'the project key is not normalized')
   from (select rest, case when instr(rest, '/') = 0 then rest else substr(rest, 1, instr(rest, '/') - 1) end as host
@@ -396,6 +452,9 @@ create trigger unit_rev_replacement_i after insert on unit_replacement begin
 end;
 create trigger unit_rev_replacement_u after update on unit_replacement begin
   update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
+end;
+create trigger unit_replacement_gap_frozen before update on unit_replacement_gap begin
+  select raise(abort, 'a gap in replacement history is never changed');
 end;
 create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'the first state of a unit is candidate, from no state')

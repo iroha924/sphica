@@ -131,13 +131,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `refactor(record): keep facts apart from judged lifecycles and replacements (T22)`
   - 結果: `unit_replacement`（開いた行が後継の枠、1 回だけ終わる、消せない）と、1 記録 1 つのつもりの index を足し、推し量る view・連鎖を戻す trigger・根拠の撤回を拒む 3 つの trigger を外した。状態の規則に superseded から active への遷移と「superseded には開いた行」「置き換えのある記録は active にならない」を入れた。record・glean・forget は事実だけを書き、最後に `reconcile`（つながる範囲 → judge → 閉じる行・開く行・状態の行 → もう一度判定して差分なし）を 1 回だけ通す。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state and unit_replacement`。`bun run verify` → 終了コード 0（SQL 到達 197/197、実 DB 10/10、受け入れ 105 pass）
 
-- [ ] T23: revision 9 からの移行で、証明できる期間を戻し、移行の時点の行と「履歴が記録されていない」印を作り、複数のつもりで止め、固定した judge を同期で通してメモに出す
+- [x] T23: revision 9 からの移行で、証明できる期間を戻し、移行の時点の行と「履歴が記録されていない」印を作り、複数のつもりで止め、固定した judge を同期で通してメモに出す
   - 種別: 変更
   - 計画: S16
   - 依存: T22（新しい schema と judge の adapter が要る）
-  - 変更: `db/migrations/0010.sql`, `db/migrations/0010.check.sql`, `server/src/admin.ts`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `db/migrations/0010.check.sql`, `server/src/db-types.ts`, `server/src/admin.ts`, `server/src/reconcile.ts`, `server/test/migrate.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="revision 9" test/migrate.test.ts` → pass。後採用・全員が候補の後継・連鎖・中間の記録の権限喪失・再採用の fixture で、移行した DB の状態と行が新しい DB で同じ事実を保存した結果と一致し、複数のつもりを持つ DB は何も変えずに止まって一覧を出す
   - コミット: `feat(schema): rebuild replacements and repair lifecycles when moving to revision 10 (T23)`
+  - 結果: 移行の SQL が、今効いている置き換え（最後に superseded になった時刻から）と、取り下げで終わった過去の期間（取り下げと復帰が同じ時刻のものだけ）を行として戻し、日付の分からないつもりに `unit_replacement_gap` の印を付ける。そのあと同期版の `settleForMigration`（reconcile.ts。計画づくりは保存と同じ）が、状態の行を持つ記録をプロジェクトごとに判定し、差分を書いてメモに出す。複数のつもりを持つ記録があれば 0010.check.sql で止める。`cd server && node --test test/migrate.test.ts` → 47 pass / 0 fail（revision 9 の連鎖・過去の期間・印・判断し直し、複数のつもりで何も変えずに止まる、を含む）。`bun run verify` → 終了コード 0（SQL 到達 199/199、実 DB 10/10、受け入れ 105 pass）
 
 - [ ] T24: 読み手（search・overview・read・export・review・rules・record_context）を `unit_replacement` に合わせ、つもり・今の効き目・閉じた期間・印・待つ理由を分けて出す
   - 種別: 変更
@@ -268,3 +269,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T21 / 変更欄に `server/src/record.ts` を足した（`replaceable` を judge.ts へ寄せたため）。snapshot を DB から取る adapter は `unit_replacement` の表が要るので T22 で作る（T21 は純粋な本体だけ）
 - 2026-10-04 / T22 / 変更欄（`server/src/extract.ts`・`search.ts`・`read.ts`・`db.test.ts`・`migrate.test.ts` は変えずに済み外した。judge の条件を直したので `judge.ts`・`judge.test.ts` を足した）。出典が無くなった記録は後継で置き換えて直せる（schema の CHECK どおり、置き換えられないのは隔離だけ）と分かり、judge の条件を「相手が sound」から「相手が隔離でない」に直した。根拠のそろった candidate を forget が判断し直すと active になる（状態を事実から決めるため。forget のテストの期待を直した）。保存の最後の「採用付きの後継が枠を待ったら拒む」は check が同じ transaction で先に拒むので届かず、置かなかった（glean の adopt では残す）
 - 2026-10-04 / T09 / 変更欄（前: `server/test/record.test.ts` → 後: 新しい `server/test/auto-pending.test.ts` と、省略できる `auto` を足す `server/src/mcp-record.ts`）と完了条件のテストファイルを直した。record.test.ts は begin が送る記録の待ち行列を一時の HOME に向けていないので、begin を呼ぶテストを別のファイルに分けた
+- 2026-10-04 / T23 / 変更欄に `db/schema.sql`（印の表 `unit_replacement_gap`）、`server/src/db-types.ts`、`server/src/reconcile.ts`（同期版の adapter）を足した。reconcile を純粋な計画づくりと非同期・同期の読み書きに分け、移行の SQL は reconcile.ts に置いて admin.ts から実行の関数だけを渡す（生の SQL の置き場所と lifecycle の書き手の両方の検査を満たすため）。状態の行を 1 行も持たない記録（どのリリースも作らない）は移行で判定しない。移行は自分の run を足すので、件数・id を前提にした既存の移行テストを合わせた。revision 10 の移行は、このリリースの judge で判定する（規則を変えるときは新しい revision にする）

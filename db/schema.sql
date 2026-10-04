@@ -555,6 +555,20 @@ create trigger unit_rev_replacement_u after update on unit_replacement begin
   update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
 end;
 
+-- An intent whose earlier effect the update to revision 10 could not date: read says the history was not recorded, rather than calling it
+-- a proposal that never took effect. Written only by that migration.
+create table unit_replacement_gap (
+  from_unit integer not null references unit (id) on delete cascade,
+  to_unit integer not null references unit (id) on delete cascade,
+  run_id integer not null references extraction_run (id),
+  primary key (from_unit, to_unit)
+) strict;
+create index unit_replacement_gap_to on unit_replacement_gap (to_unit);
+create index unit_replacement_gap_run on unit_replacement_gap (run_id);
+create trigger unit_replacement_gap_frozen before update on unit_replacement_gap begin
+  select raise(abort, 'a gap in replacement history is never changed');
+end;
+
 -- Lifecycle history and the only route for lifecycle changes. The trigger checks the rules and then sets unit.lifecycle.
 -- A change comes from an extraction run, or from the owner forgetting sources (forget_id). source_id becomes null when its source is forgotten.
 create table unit_state (

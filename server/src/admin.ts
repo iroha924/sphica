@@ -14,6 +14,7 @@ import { dbFile, iso, SCHEMA_REVISION, sqliteCode } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
 import { inline } from "./panel.ts";
 import { packageVersionAt, ROOT } from "./plugin.ts";
+import { settleForMigration } from "./reconcile.ts";
 import { generationOf } from "./sqlite.ts";
 import { plural } from "./text.ts";
 
@@ -189,6 +190,30 @@ function withOwner<T>(file: string, fn: (raw: DatabaseSync) => T, create = false
  * foreign_key_check empty before each commit; the revision is read under the write lock, so a concurrent init does nothing more.
  * **A backup comes first**: a later step can fail after earlier ones committed, and a committed step can be wrong.
  */
+/**
+ * Revision 10 judges every record by the rules saves now follow, after its SQL restored what history proves; each change becomes a note.
+ * It runs the judge of this release: a later change to the rules comes with its own revision.
+ */
+function judgeEveryRecord(raw: DatabaseSync): void {
+  const runs = new Map(
+    (
+      raw
+        .prepare(
+          "select project_id, max(id) as id from extraction_run where origin = 'migration' and target = 'revision:10' group by project_id",
+        )
+        .all() as { project_id: number; id: number }[]
+    ).map((r) => [r.project_id, r.id]),
+  );
+  const io = {
+    all: (sql: string, ...p: (string | number | null)[]) => raw.prepare(sql).all(...p),
+    run: (sql: string, ...p: (string | number | null)[]) => void raw.prepare(sql).run(...p),
+  };
+  for (const [item, action] of settleForMigration(io, runs, iso(Date.now())))
+    raw
+      .prepare(`insert into temp.${NOTE} (rule, item, action) values ('judged again by revision 10', ?, ?)`)
+      .run(item, action);
+}
+
 export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): number {
   return withOwner(file, (raw) => {
     const from = versionOf(raw);
@@ -212,6 +237,7 @@ export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): nu
               if (stops.length) throw new Stop(r, stops);
             }
             raw.exec(fs.readFileSync(script, "utf8"));
+            if (r === 10) judgeEveryRecord(raw);
             const broken = raw.prepare("pragma foreign_key_check").all().length;
             if (broken)
               throw new Error(

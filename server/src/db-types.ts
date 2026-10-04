@@ -416,6 +416,12 @@ export interface UnitReplacement {
   to_unit: number;
 }
 
+export interface UnitReplacementGap {
+  from_unit: number;
+  run_id: number;
+  to_unit: number;
+}
+
 export interface UnitSearchText {
   alias: string | null;
   body: string | null;
@@ -489,6 +495,7 @@ export interface DB {
   unit_link: UnitLink;
   unit_option: UnitOption;
   unit_replacement: UnitReplacement;
+  unit_replacement_gap: UnitReplacementGap;
   unit_search_text: UnitSearchText;
   unit_state: UnitState;
   unit_support: UnitSupport;

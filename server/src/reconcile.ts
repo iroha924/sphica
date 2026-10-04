@@ -4,7 +4,7 @@
 import { type Kysely, sql } from "kysely";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
-import { difference, type Judged, judge, type Lifecycle, type OpenRow, type Snapshot } from "./judge.ts";
+import { difference, type Judged, judge, type Lifecycle, type Plan, type Snapshot } from "./judge.ts";
 
 /** What made this change: a record server run, or the owner forgetting sources */
 export type Cause = { runId: number } | { forgetId: number };
@@ -33,6 +33,173 @@ export type Reconciled = {
   redundant: number[];
   keys: Map<number, string>;
 };
+
+/** A unit's stored facts as both readers fetch them */
+type UnitRow = {
+  id: number;
+  key: string;
+  kind: string;
+  lifecycle: string;
+  extraction: string;
+  unsourced: number;
+  missing: string | null;
+  stated: number;
+  owned: number;
+  unquoted: number;
+};
+type Rows = {
+  units: UnitRow[];
+  intents: { from_unit: number; to_unit: number; added_at: string }[];
+  open: { from_unit: number; to_unit: number }[];
+};
+type Loaded = { snapshot: Snapshot; keys: Map<number, string>; missing: Map<number, string> };
+
+function snapshotOf(rows: Rows, withdraw: Set<number>): Loaded {
+  const keys = new Map(rows.units.map((u) => [u.id, u.key]));
+  const missing = new Map<number, string>();
+  const snapshot: Snapshot = {
+    units: rows.units.map((u) => {
+      // A unit with no state yet starts as a candidate, written before anything else
+      const lifecycle = Number(u.stated) === 1 ? (u.lifecycle as Lifecycle) : null;
+      // Kept active without it (a quote forgotten later leaves the record as it was); never activated without it
+      const unquoted = Number(u.unquoted) === 1 && lifecycle !== "active";
+      if (u.missing) missing.set(u.id, u.missing);
+      else if (unquoted) missing.set(u.id, "a reconsider condition needs a quote of the owner");
+      return {
+        id: u.id,
+        kind: u.kind,
+        lifecycle,
+        withdrawn: lifecycle === "withdrawn" || withdraw.has(u.id),
+        sound: u.extraction === "supported" && Number(u.unsourced) === 0,
+        quarantined: u.extraction !== "supported",
+        supported: u.missing === null && !unquoted,
+        ownerAdopted: Number(u.owned) === 1,
+      };
+    }),
+    intents: rows.intents.map((i) => ({ from: i.from_unit, to: i.to_unit, addedAt: i.added_at })),
+    open: rows.open.map((r) => ({ from: r.from_unit, to: r.to_unit })),
+  };
+  return { snapshot, keys, missing };
+}
+
+function waitText(j: Judged, id: number, l: Loaded, target?: number): string {
+  const w = j.waits.get(id);
+  const name = (u: number | undefined) => (u === undefined ? "its target" : (l.keys.get(u) ?? `u${u}`));
+  switch (w?.why) {
+    case "unsound":
+      return "its quote was not found or its source is gone, so it can never become active";
+    case "no owner adoption":
+      return "replacing another record needs the owner's or a maintainer's adoption";
+    case "place held":
+      return `waits: ${name(w.holder)} is in effect as the successor of ${name(target)}`;
+    case "target withdrawn":
+      return `${name(target)} is withdrawn, so there is nothing to replace`;
+    case "target quarantined":
+      return `${name(target)} is quarantined (its quote was never found), so it cannot be replaced`;
+    case "kinds":
+      return `${name(target)} is of a kind this record cannot replace`;
+    default:
+      return l.missing.get(id) ?? "its support is not complete";
+  }
+}
+
+/** One write, worded: replacements that end, those that start, then lifecycle changes, in that order */
+type Write =
+  | { op: "close"; from: number; to: number; reason: string }
+  | { op: "open"; from: number; to: number }
+  | {
+      op: "state";
+      unit: number;
+      from: Lifecycle | null;
+      to: Lifecycle;
+      reason: string;
+      source: number | null;
+    };
+
+type Planned = {
+  judged: Judged;
+  loaded: Loaded;
+  writes: Write[];
+  redundant: number[];
+  intentOf: Map<number, number>;
+};
+
+/** What to write, decided from one snapshot before anything is written. A withdrawal of a record this batch replaces is dropped */
+function planOf(rows: Rows, asked: Asked): Planned {
+  const withdraw = new Map(asked.withdraw ?? []);
+  const redundant = [...withdraw.keys()].filter(
+    (id) => judge(snapshotOf(rows, new Set()).snapshot).lifecycle.get(id) === "superseded",
+  );
+  for (const id of redundant) withdraw.delete(id);
+  const loaded = snapshotOf(rows, new Set(withdraw.keys()));
+  const judged = judge(loaded.snapshot);
+  const plan: Plan = difference(loaded.snapshot, judged);
+  const { keys } = loaded;
+  const intentOf = new Map(loaded.snapshot.intents.map((i) => [i.from, i.to]));
+  const writes: Write[] = [];
+  const ended = new Map<number, number>();
+  for (const r of plan.close) {
+    const reason =
+      judged.lifecycle.get(r.from) === "withdrawn"
+        ? `${keys.get(r.from)} was withdrawn`
+        : judged.holders.has(r.to)
+          ? `${keys.get(judged.holders.get(r.to) as number)} took its place`
+          : `${keys.get(r.from)} no longer stands: ${waitText(judged, r.from, loaded, r.to)}`;
+    writes.push({ op: "close", from: r.from, to: r.to, reason });
+    ended.set(r.to, r.from);
+  }
+  for (const r of plan.open) writes.push({ op: "open", from: r.from, to: r.to });
+  for (const t of plan.transitions) {
+    const hint = asked.hints?.get(t.unit);
+    const holder = judged.holders.get(t.unit);
+    const gone = ended.get(t.unit);
+    const reason =
+      t.from === null
+        ? "first judged"
+        : t.to === "withdrawn"
+          ? (withdraw.get(t.unit)?.reason ?? "withdrawn")
+          : t.to === "superseded"
+            ? `superseded by ${keys.get(holder as number)}`
+            : t.from === "superseded"
+              ? `${gone !== undefined ? keys.get(gone) : "its successor"} no longer replaces it`
+              : t.to === "active"
+                ? (hint?.reason ?? "support complete")
+                : `${asked.because ?? "support lost"}: ${waitText(judged, t.unit, loaded, intentOf.get(t.unit))}`;
+    const source =
+      t.to === "withdrawn"
+        ? (withdraw.get(t.unit)?.source ?? null)
+        : t.to === "superseded"
+          ? (asked.hints?.get(holder as number)?.source ?? null)
+          : (hint?.source ?? null);
+    writes.push({ op: "state", unit: t.unit, from: t.from, to: t.to, reason, source });
+  }
+  return { judged, loaded, writes, redundant, intentOf };
+}
+
+function settled(p: Planned): Reconciled {
+  const changes: Change[] = p.writes.flatMap((w) =>
+    w.op === "state" && w.from !== null
+      ? [{ id: w.unit, key: p.loaded.keys.get(w.unit) ?? `u${w.unit}`, before: w.from, after: w.to }]
+      : [],
+  );
+  const waits = new Map<number, string>();
+  const held = new Map<number, [number, number]>();
+  for (const [id, l] of p.judged.lifecycle) {
+    if (l !== "candidate") continue;
+    waits.set(id, waitText(p.judged, id, p.loaded, p.intentOf.get(id)));
+    const w = p.judged.waits.get(id);
+    if (w?.why === "place held") held.set(id, [p.intentOf.get(id) as number, w.holder]);
+  }
+  return { changes, waits, held, redundant: p.redundant, keys: p.loaded.keys };
+}
+
+/** What was written must judge to itself: anything left over is a rule the writes broke, so the whole batch goes back */
+function proveSettled(rows: Rows): void {
+  const after = snapshotOf(rows, new Set()).snapshot;
+  const left = difference(after, judge(after));
+  if (left.close.length || left.open.length || left.transitions.length)
+    throw new Error(`records did not settle after judging: ${JSON.stringify(left)}`);
+}
 
 /** A new unit's first state, written with it before anything is judged: every unit starts a candidate */
 export async function firstState(
@@ -69,132 +236,80 @@ async function closure(db: Reads, seeds: number[]): Promise<number[]> {
   return [...seen];
 }
 
-type Loaded = { snapshot: Snapshot; keys: Map<number, string>; missing: Map<number, string> };
-
-async function load(db: Reads, ids: number[], withdraw: Set<number>): Promise<Loaded> {
-  const units = ids.length
-    ? await db
-        .selectFrom("unit as u")
-        .leftJoin("unit_support as s", "s.unit_id", "u.id")
-        .select((eb) => [
-          "u.id",
-          "u.key",
-          "u.kind",
-          "u.lifecycle",
-          "u.extraction",
-          "u.unsourced",
-          "s.missing",
+async function rowsOf(db: Reads, ids: number[]): Promise<Rows> {
+  if (!ids.length) return { units: [], intents: [], open: [] };
+  const units = await db
+    .selectFrom("unit as u")
+    .leftJoin("unit_support as s", "s.unit_id", "u.id")
+    .select((eb) => [
+      "u.id",
+      "u.key",
+      "u.kind",
+      "u.lifecycle",
+      "u.extraction",
+      "u.unsourced",
+      "s.missing",
+      eb
+        .exists(eb.selectFrom("unit_state as t").whereRef("t.unit_id", "=", "u.id").select(sql`1`.as("x")))
+        .as("stated"),
+      eb
+        .exists(
           eb
-            .exists(
-              eb.selectFrom("unit_state as t").whereRef("t.unit_id", "=", "u.id").select(sql`1`.as("x")),
-            )
-            .as("stated"),
+            .selectFrom("unit_adoption as a")
+            .whereRef("a.unit_id", "=", "u.id")
+            .where("a.route", "in", ["owner_statement", "explicit"])
+            .where("a.retracted_at", "is", null)
+            .select(sql`1`.as("x")),
+        )
+        .as("owned"),
+      // The owner's quote a reconsider condition needs before its record first becomes active (the state rules check the same)
+      eb
+        .exists(
           eb
-            .exists(
-              eb
-                .selectFrom("unit_adoption as a")
-                .whereRef("a.unit_id", "=", "u.id")
-                .where("a.route", "in", ["owner_statement", "explicit"])
-                .where("a.retracted_at", "is", null)
-                .select(sql`1`.as("x")),
+            .selectFrom("unit_option as o")
+            .whereRef("o.unit_id", "=", "u.id")
+            .where("o.reconsider_when", "is not", null)
+            .where(({ not, exists, selectFrom }) =>
+              not(
+                exists(
+                  selectFrom("unit_evidence as e")
+                    .innerJoin("source as src", "src.id", "e.source_id")
+                    .whereRef("e.option_id", "=", "o.id")
+                    .where("e.role", "=", "reconsiders")
+                    .where("src.author_kind", "=", "owner")
+                    .select(sql`1`.as("x")),
+                ),
+              ),
             )
-            .as("owned"),
-          // The owner's quote a reconsider condition needs before its record first becomes active (the state rules check the same)
-          eb
-            .exists(
-              eb
-                .selectFrom("unit_option as o")
-                .whereRef("o.unit_id", "=", "u.id")
-                .where("o.reconsider_when", "is not", null)
-                .where(({ not, exists, selectFrom }) =>
-                  not(
-                    exists(
-                      selectFrom("unit_evidence as e")
-                        .innerJoin("source as src", "src.id", "e.source_id")
-                        .whereRef("e.option_id", "=", "o.id")
-                        .where("e.role", "=", "reconsiders")
-                        .where("src.author_kind", "=", "owner")
-                        .select(sql`1`.as("x")),
-                    ),
-                  ),
-                )
-                .select(sql`1`.as("x")),
-            )
-            .as("unquoted"),
-        ])
-        .where("u.id", "in", ids)
-        .execute()
-    : [];
-  const intents = ids.length
-    ? await db
-        .selectFrom("unit_link")
-        .select(["from_unit", "to_unit", "added_at"])
-        .where("kind", "=", "supersedes")
-        .where("from_unit", "in", ids)
-        .execute()
-    : [];
-  const open = ids.length
-    ? await db
-        .selectFrom("unit_replacement")
-        .select(["from_unit", "to_unit"])
-        .where("ended_at", "is", null)
-        .where("to_unit", "in", ids)
-        .execute()
-    : [];
-  const keys = new Map(units.map((u) => [u.id, u.key]));
-  const missing = new Map<number, string>();
-  const snapshot: Snapshot = {
-    units: units.map((u) => {
-      // A unit with no state yet starts as a candidate, written before anything else
-      const lifecycle = Number(u.stated) === 1 ? (u.lifecycle as Lifecycle) : null;
-      // Kept active without it (a quote forgotten later leaves the record as it was); never activated without it
-      const unquoted = Number(u.unquoted) === 1 && lifecycle !== "active";
-      if (u.missing) missing.set(u.id, u.missing);
-      else if (unquoted) missing.set(u.id, "a reconsider condition needs a quote of the owner");
-      return {
-        id: u.id,
-        kind: u.kind,
-        lifecycle,
-        withdrawn: lifecycle === "withdrawn" || withdraw.has(u.id),
-        sound: u.extraction === "supported" && u.unsourced === 0,
-        quarantined: u.extraction !== "supported",
-        supported: u.missing === null && !unquoted,
-        ownerAdopted: Number(u.owned) === 1,
-      };
-    }),
-    intents: intents.map((i) => ({ from: i.from_unit, to: i.to_unit, addedAt: i.added_at })),
-    open: open.map((r) => ({ from: r.from_unit, to: r.to_unit })),
+            .select(sql`1`.as("x")),
+        )
+        .as("unquoted"),
+    ])
+    .where("u.id", "in", ids)
+    .execute();
+  const intents = await db
+    .selectFrom("unit_link")
+    .select(["from_unit", "to_unit", "added_at"])
+    .where("kind", "=", "supersedes")
+    .where("from_unit", "in", ids)
+    .execute();
+  const open = await db
+    .selectFrom("unit_replacement")
+    .select(["from_unit", "to_unit"])
+    .where("ended_at", "is", null)
+    .where("to_unit", "in", ids)
+    .execute();
+  return {
+    units: units.map((u) => ({
+      ...u,
+      unsourced: Number(u.unsourced),
+      stated: Number(u.stated),
+      owned: Number(u.owned),
+      unquoted: Number(u.unquoted),
+    })),
+    intents,
+    open,
   };
-  return { snapshot, keys, missing };
-}
-
-function waitText(
-  j: Judged,
-  id: number,
-  keys: Map<number, string>,
-  missing: Map<number, string>,
-  target?: number,
-): string {
-  const w = j.waits.get(id);
-  const name = (u: number | undefined) => (u === undefined ? "its target" : (keys.get(u) ?? `u${u}`));
-  switch (w?.why) {
-    case "unsound":
-      return "its quote was not found or its source is gone, so it can never become active";
-    case "unsupported":
-      return missing.get(id) ?? "its support is not complete";
-    case "no owner adoption":
-      return "replacing another record needs the owner's or a maintainer's adoption";
-    case "place held":
-      return `waits: ${name(w.holder)} is in effect as the successor of ${name(target)}`;
-    case "target withdrawn":
-      return `${name(target)} is withdrawn, so there is nothing to replace`;
-    case "target quarantined":
-      return `${name(target)} is quarantined (its quote was never found), so it cannot be replaced`;
-    case "kinds":
-      return `${name(target)} is of a kind this record cannot replace`;
-    default:
-      return "its support is not complete";
-  }
 }
 
 /**
@@ -209,104 +324,125 @@ export async function reconcile(
 ): Promise<Reconciled> {
   const at = iso(Date.now());
   const ids = await closure(trx, seeds);
-  const withdraw = new Map(asked.withdraw ?? []);
-  // A record this batch replaces needs no withdrawal: judge without the asked ones first, and drop those that end up superseded
-  const first = await load(trx, ids, new Set());
-  const without = judge(first.snapshot);
-  const redundant = [...withdraw.keys()].filter((id) => without.lifecycle.get(id) === "superseded");
-  for (const id of redundant) withdraw.delete(id);
-  const { snapshot, keys, missing } = withdraw.size ? await load(trx, ids, new Set(withdraw.keys())) : first;
-  const judged = judge(snapshot);
-  const plan = difference(snapshot, judged);
-  const intentOf = new Map(snapshot.intents.map((i) => [i.from, i.to]));
-  const by = "runId" in cause ? { run: cause.runId, forget: null } : { run: null, forget: cause.forgetId };
-  const ended = new Map<number, OpenRow>();
-
-  for (const r of plan.close) {
-    const now = judged.lifecycle.get(r.from);
-    const reason =
-      now === "withdrawn"
-        ? `${keys.get(r.from)} was withdrawn`
-        : judged.holders.has(r.to)
-          ? `${keys.get(judged.holders.get(r.to) as number)} took its place`
-          : `${keys.get(r.from)} no longer stands: ${waitText(judged, r.from, keys, missing, r.to)}`;
-    await trx
-      .updateTable("unit_replacement")
-      .set({
-        ended_at: at,
-        end_reason: reason,
-        ...(by.run !== null ? { end_run_id: by.run } : { end_forget_id: by.forget }),
-      })
-      .where("from_unit", "=", r.from)
-      .where("to_unit", "=", r.to)
-      .where("ended_at", "is", null)
-      .execute();
-    ended.set(r.to, r);
+  const planned = planOf(await rowsOf(trx, ids), asked);
+  const by = "runId" in cause ? { run_id: cause.runId } : { forget_id: cause.forgetId };
+  const endBy = "runId" in cause ? { end_run_id: cause.runId } : { end_forget_id: cause.forgetId };
+  for (const w of planned.writes) {
+    if (w.op === "close")
+      await trx
+        .updateTable("unit_replacement")
+        .set({ ended_at: at, end_reason: w.reason, ...endBy })
+        .where("from_unit", "=", w.from)
+        .where("to_unit", "=", w.to)
+        .where("ended_at", "is", null)
+        .execute();
+    else if (w.op === "open")
+      await trx
+        .insertInto("unit_replacement")
+        .values({ from_unit: w.from, to_unit: w.to, ...by, started_at: at })
+        .execute();
+    else
+      await trx
+        .insertInto("unit_state")
+        .values({
+          unit_id: w.unit,
+          from_state: w.from,
+          to_state: w.to,
+          at,
+          reason: w.reason,
+          source_id: w.source,
+          ...by,
+        })
+        .execute();
   }
-  for (const r of plan.open)
-    await trx
-      .insertInto("unit_replacement")
-      .values({
-        from_unit: r.from,
-        to_unit: r.to,
-        ...(by.run !== null ? { run_id: by.run } : { forget_id: by.forget }),
-        started_at: at,
-      })
-      .execute();
+  proveSettled(await rowsOf(trx, ids));
+  return settled(planned);
+}
 
-  const changes: Change[] = [];
-  for (const t of plan.transitions) {
-    const hint = asked.hints?.get(t.unit);
-    const holder = judged.holders.get(t.unit);
-    const gone = ended.get(t.unit);
-    const reason =
-      t.from === null
-        ? "first judged"
-        : t.to === "withdrawn"
-          ? (withdraw.get(t.unit)?.reason ?? "withdrawn")
-          : t.to === "superseded"
-            ? `superseded by ${keys.get(holder as number)}`
-            : t.from === "superseded"
-              ? `${gone ? keys.get(gone.from) : "its successor"} no longer replaces it`
-              : t.to === "active"
-                ? (hint?.reason ?? "support complete")
-                : `${asked.because ?? "support lost"}: ${waitText(judged, t.unit, keys, missing, intentOf.get(t.unit))}`;
-    const source =
-      t.to === "withdrawn"
-        ? (withdraw.get(t.unit)?.source ?? null)
-        : t.to === "superseded"
-          ? (asked.hints?.get(holder as number)?.source ?? null)
-          : (hint?.source ?? null);
-    await trx
-      .insertInto("unit_state")
-      .values({
-        unit_id: t.unit,
-        from_state: t.from,
-        to_state: t.to,
-        at,
-        reason,
-        source_id: source,
-        run_id: by.run,
-        forget_id: by.forget,
-      })
-      .execute();
-    if (t.from !== null)
-      changes.push({ id: t.unit, key: keys.get(t.unit) ?? `u${t.unit}`, before: t.from, after: t.to });
+/** The statements the migration runs on its own connection: what it reads, and what it writes */
+export type MigrationIO = {
+  all: (sql: string, ...params: (string | number | null)[]) => unknown[];
+  run: (sql: string, ...params: (string | number | null)[]) => void;
+};
+
+const UNITS_SQL = `select u.id, u.key, u.kind, u.lifecycle, u.extraction, u.unsourced, s.missing,
+  exists (select 1 from unit_state t where t.unit_id = u.id) as stated,
+  exists (select 1 from unit_adoption a where a.unit_id = u.id and a.route in ('owner_statement', 'explicit')
+    and a.retracted_at is null) as owned,
+  exists (select 1 from unit_option o where o.unit_id = u.id and o.reconsider_when is not null and not exists (
+    select 1 from unit_evidence e join source src on src.id = e.source_id
+    where e.option_id = o.id and e.role = 'reconsiders' and src.author_kind = 'owner')) as unquoted
+from unit u left join unit_support s on s.unit_id = u.id where u.project_id = ? order by u.id`;
+const INTENTS_SQL = `select l.from_unit, l.to_unit, l.added_at from unit_link l join unit u on u.id = l.from_unit
+where l.kind = 'supersedes' and u.project_id = ?`;
+const OPEN_SQL = `select r.from_unit, r.to_unit from unit_replacement r join unit u on u.id = r.to_unit
+where r.ended_at is null and u.project_id = ?`;
+
+/**
+ * The migration to revision 10 judges every record of each project the same way saves do, on the migration's own connection, and returns
+ * one line per change for the migration notes. runs names the migration run of each project.
+ */
+export function settleForMigration(
+  io: MigrationIO,
+  runs: Map<number, number>,
+  at: string,
+): [string, string][] {
+  const notes: [string, string][] = [];
+  for (const [project, run] of runs) {
+    // A record no release saved (one with no state at all) is left as it is: no save would ever judge it
+    const rowsNow = (): Rows => {
+      const units = (io.all(UNITS_SQL, project) as UnitRow[]).filter((u) => Number(u.stated) === 1);
+      const ids = new Set(units.map((u) => u.id));
+      return {
+        units,
+        intents: (io.all(INTENTS_SQL, project) as Rows["intents"]).filter(
+          (i) => ids.has(i.from_unit) && ids.has(i.to_unit),
+        ),
+        open: (io.all(OPEN_SQL, project) as Rows["open"]).filter(
+          (r) => ids.has(r.from_unit) && ids.has(r.to_unit),
+        ),
+      };
+    };
+    const planned = planOf(rowsNow(), {});
+    const key = (id: number) => planned.loaded.keys.get(id) ?? `u${id}`;
+    for (const w of planned.writes) {
+      if (w.op === "close") {
+        io.run(
+          "update unit_replacement set ended_at = ?, end_reason = ?, end_run_id = ? where from_unit = ? and to_unit = ? and ended_at is null",
+          at,
+          w.reason,
+          run,
+          w.from,
+          w.to,
+        );
+        notes.push([`${key(w.from)} → ${key(w.to)}`, `replacement ended: ${w.reason}`]);
+      } else if (w.op === "open") {
+        io.run(
+          "insert into unit_replacement (from_unit, to_unit, run_id, started_at) values (?, ?, ?, ?)",
+          w.from,
+          w.to,
+          run,
+          at,
+        );
+        notes.push([
+          `${key(w.from)} → ${key(w.to)}`,
+          "in effect from this update (earlier history not recorded)",
+        ]);
+      } else {
+        io.run(
+          "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, ?, ?, ?, ?, ?, ?)",
+          w.unit,
+          w.from,
+          w.to,
+          at,
+          `revision 10: ${w.reason}`,
+          w.source,
+          run,
+        );
+        notes.push([key(w.unit), `${w.from ?? "no state"} → ${w.to}: ${w.reason}`]);
+      }
+    }
+    proveSettled(rowsNow());
   }
-
-  // What was written must judge to itself: anything left over is a rule the writes broke, so the whole save goes back
-  const after = await load(trx, ids, new Set());
-  const left = difference(after.snapshot, judge(after.snapshot));
-  if (left.close.length || left.open.length || left.transitions.length)
-    throw new Error(`records did not settle after judging: ${JSON.stringify(left)}`);
-
-  const waits = new Map<number, string>();
-  const held = new Map<number, [number, number]>();
-  for (const [id, l] of judged.lifecycle) {
-    if (l !== "candidate") continue;
-    waits.set(id, waitText(judged, id, keys, missing, intentOf.get(id)));
-    const w = judged.waits.get(id);
-    if (w?.why === "place held") held.set(id, [intentOf.get(id) as number, w.holder]);
-  }
-  return { changes, waits, held, redundant, keys };
+  return notes;
 }
