@@ -306,6 +306,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `docs: describe AI decisions and automatic tracing in the READMEs and agent instructions (T14)`
   - 結果: 両言語の README に方針 12 の項目を入れた（採用の 2 通りと AI の判断の扱い、Claude Code での頼まなくても走る trace、配信の印と離れてよい旨、使い始めの案内、ほかの人の文章は採用にならない、まだできないことの 4 件）。実装に合わせて、自動の trace と AI の採用は Claude Code の対話のセッションだけで Codex は知らせるだけと書き、衝突は持ち主の判断を止めないことに合わせた。CLAUDE.md と AGENTS.md の record-writes に「エージェントも session start の頼みで trace を流す」を足し、新しい invariant `agent-adoption`（AI の採用は対話の呼び出しと確かめた trace から decides と組で、持ち主の判断を置き換える・止める link は持ち主が採用した記録からだけ）を足した。knowledge-schema に、事実から状態を判定する judge と reconcile、`unit_replacement` と印の表、`agent` の採用と `authorityOf`、record ツールの呼び出しの記録、書き手と forget の権限を書いた。plugin-release に description の検査を足した。rg の確認で、glean と trace の Skill に残っていた「衝突は両方を止める」を今の挙動に直した。eval-loop と `.claude/rules` に変わる記述は無かった。`node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`rg -n "end of a session|セッションの終わりに" README.md README.ja.md` → 0 件。`bun run verify` → 終了コード 0（受け入れ 113 pass）
 
+- [x] T31: T13・T14 のレビュー指摘を直す（README の除外の説明を実装どおりに、precedent が見られる理由だけを認める、rules の下書きに AI の判断の印、自動の trace は直近 14 日）
+  - 種別: 修正
+  - 計画: S11, S12
+  - 依存: T14（直す対象の文書）
+  - 変更: `README.md`, `README.ja.md`, `plugin/skills/review/reviewers/precedent.md`, `plugin/skills/rules/SKILL.md`
+  - red: `rg -n "wherever Sphica cannot tell which session called|見分けられないときは、候補|the commit message, or the PR body you were given" README.md README.ja.md plugin/skills/review/reviewers/precedent.md` → 直す前は 3 行が見つかる（実装より強い除外の説明と、レビュアーに渡らないコミットメッセージを理由の場所に挙げる行）
+  - 完了条件: `node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0
+  - コミット: `docs: match the READMEs and review and rules Skills to what the code does (T31)`
+  - 結果: README（英日）の「呼び出し元が分からないときは候補に残る」を、実装どおり「headless・SDK・Codex では候補」と「記録ツールのターンを見分けられなかったとき（hook の時間切れ・無効）は、そのプロジェクトでそれ以後に Claude Code のエージェントが書いた応答がずっと候補」に分けた。永久に止まる点は Codex と議論し、env・時間の窓・後の hook の成功ではどのターンの呼び出しかを証明できないので、plan の方針 2 どおり止めたままにした（同じ tool use id で観測を送り直す経路は plan の変更になるので入れていない）。precedent.md は、レビュアーに見える理由（差分で足したコメント、起動側が渡したときのコミットメッセージや PR 本文）だけを認める。rules の下書きの AI の判断の行に `(decided by an AI)` を付ける。README に自動の trace は直近 14 日のセッションだけと足した。`node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`bun run verify` → 終了コード 0（受け入れ 127 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -347,3 +357,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T14 / 変更欄（前: README の 2 つ・CLAUDE.md・AGENTS.md・knowledge-schema → 後: rg の確認で見つかった古い衝突の説明を直すため glean と trace の Skill、description の検査を書くため plugin-release を足した）。README は方針 12 の文面のうち「新しいセッションの開始時にエージェントが trace する」を、実装どおり Claude Code だけと書いた（Codex の対話の値は未実測で、通知は手動の案内のまま）
 - 2026-10-04 / T12 / 変更欄に `server/test/acceptance-cases.test.ts` を足した（層ごとの件数を固定しているので、新しい層 agent の 14 件を数えに足す）。伝聞の平文は意味に頼るので Sphica は見分けられず、受け入れでは機械で守る部分（decides でない引用は AI の採用にならない）だけを確かめた。コミットの件名（前: `…, and the auto trace notice (T12)` → 後: `…, auto trace notice (T12)`）。commit-msg の検査が 100 文字を超える件名（106 文字）を拒んだため
 - 2026-10-04 / T30 / T28・T10・T11・T29 の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T30 を足した
+- 2026-10-04 / T31 / T13・T14 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T31 を足した。review-shipping の指摘 2（hook の取りこぼし 1 回で AI の採用がプロジェクトごとずっと止まる）は Codex と議論し、plan どおり止めたままにして README に書いた

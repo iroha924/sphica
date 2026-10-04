@@ -36,7 +36,8 @@ Pass the repository root as `cwd` to every tool.
 3. **Read each** with `read` and draft from its text, reason, and scope, never from the conversation or a guess. When the record does not say
    enough for a rule (who it applies to, what to do instead), say so and leave it out rather than fill the gap
 4. **Print the draft** in one fenced block, grouped by where the owner said it goes. One line per record, in the file's language, ending with
-   the marker exactly: `<!-- sphica: <record key> -->`. Put the reason after the rule when the record gives one
+   the marker exactly: `<!-- sphica: <record key> -->`. Put the reason after the rule when the record gives one. Put `(decided by an AI)`
+   before the marker of a line drafted from an AI's decision, so the draft shows where it came from; the owner may drop it when pasting
 5. **Stop.** The owner pastes the lines where they want them. Do not create or edit CLAUDE.md, AGENTS.md, or rules files
 
 ```markdown
