@@ -145,10 +145,30 @@ const RUN_ENV = [
 export const runEnv = (parent: NodeJS.ProcessEnv): Record<string, string> =>
   Object.fromEntries(RUN_ENV.flatMap((k) => (parent[k] === undefined ? [] : [[k, parent[k] as string]])));
 
-/** Tracked and untracked changes since the starting commit, without the slot's scaffolding or installed dependencies. */
+/**
+ * The runner's own code, as one hash: a canary vouches for the code that ran it, so a change to how runs are fenced or set up needs a new
+ * canary before more runs start.
+ */
+export function runnerDigest(): string {
+  const hash = crypto.createHash("sha256");
+  for (const file of [
+    "claude-run.ts",
+    "claude.ts",
+    "canary.ts",
+    "canary-check.ts",
+    "codex-home.ts",
+    "slot-scripts.ts",
+  ])
+    hash.update(`${file}\0`).update(fs.readFileSync(path.join(import.meta.dirname, file)));
+  return hash.digest("hex");
+}
+
+/** Tracked and untracked changes since the starting commit, without the slot's scaffolding, built package output, or installed dependencies,
+ * the same set the cloud finish hook leaves out. */
 export function patchSince(c: Checkout, start: string): string {
-  const leave = [":!.tools", ":!.eval", ":(exclude,glob)**/node_modules/**"];
-  checkoutGit(c, ["add", "-A", "--", ".", ...leave]);
+  const leave = [":!.tools", ":!.eval", ":!plugin/dist", ":!plugin/db", ":(exclude,glob)**/node_modules/**"];
+  // add -A never adds ignored files, and naming an ignored path in its pathspec (built output) fails it: what is left out is left out below
+  checkoutGit(c, ["add", "-A"]);
   // Files the agent wrote under ignored paths (a plan, docs) are part of its answer too
   const ignored = checkoutGit(c, [
     "ls-files",
@@ -387,7 +407,7 @@ export async function runClaude(o: {
  */
 export function treeState(c: Checkout): string {
   // Ignored files count too (an answer written under an ignored docs/ is part of the patch), but not the slot's scaffolding or installed
-  // dependencies, the same set patchSince leaves out. The pinned index stays at the start, so a change the agent committed still shows
+  // dependencies or built package output, the same set patchSince leaves out. The pinned index stays at the start, so a change the agent committed still shows
   const status = checkoutGit(c, [
     "status",
     "--porcelain=v1",
@@ -398,6 +418,8 @@ export function treeState(c: Checkout): string {
     ".",
     ":!.tools",
     ":!.eval",
+    ":!plugin/dist",
+    ":!plugin/db",
     ":(exclude,glob)**/node_modules/**",
   ]);
   const entries = status.split("\0").filter(Boolean).sort();

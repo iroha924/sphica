@@ -146,7 +146,7 @@ export function contextChecks(
   const names = receiptsOf(receipts).map((r) => r.name);
   const hooksWanted =
     condition === "inject"
-      ? ["start", "prompt"]
+      ? ["start", "prompt", "edit"]
       : condition === "gold"
         ? ["start", "gold"]
         : ["start", "prompt"];

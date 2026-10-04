@@ -15,7 +15,7 @@ import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
-import { fixtureSteps, rekey, shippedMatcher } from "./build-lib.ts";
+import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher } from "./build-lib.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
 
@@ -225,6 +225,8 @@ async function main() {
     bundle: Object.fromEntries(
       ["mcp.js", "deliver.js"].map((f) => [f, sha256(fs.readFileSync(path.join(dist, f)))]),
     ),
+    // The delivery hooks' matchers are part of what is under test: Claude's goes into the inject slot, Codex's is read by codex.ts
+    matchers: { claude: shippedMatcher(ROOT), codex: shippedCodexMatcher(ROOT) },
     node: NODE,
     // The records every slot was built from, before re-keying; a comparison refuses two builds whose fixtures differ
     fixture: sha256(fs.readFileSync(base)),
