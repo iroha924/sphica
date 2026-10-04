@@ -78,7 +78,11 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
   return { text: note ? `${text || lead}${note}` : text, note };
 };
 
-/** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
+/**
+ * Units that may be delivered: active, supported, sourced, in no unresolved conflict, and resting on the owner's or a maintainer's own
+ * words. A record whose live evidence is only a third party's or an agent's (or the owner repeating someone else) is left to search, so
+ * text anyone can post never reaches the agent unasked.
+ */
 const deliverable = (db: Reads, projectId: number) =>
   db
     .selectFrom("unit as u")
@@ -86,6 +90,22 @@ const deliverable = (db: Reads, projectId: number) =>
     .where("u.lifecycle", "=", "active")
     .where("u.extraction", "=", "supported")
     .where("u.unsourced", "=", 0)
+    .where(({ exists, selectFrom }) =>
+      exists(
+        selectFrom("unit_evidence as e")
+          .innerJoin("source as s", "s.id", "e.source_id")
+          .select("e.id")
+          .whereRef("e.unit_id", "=", "u.id")
+          .where("e.retracted_at", "is", null)
+          .where("e.reported_speaker", "is", null)
+          .where((eb) =>
+            eb.or([
+              eb("s.author_kind", "=", "owner"),
+              eb("s.author_association", "in", ["OWNER", "MEMBER", "COLLABORATOR"]),
+            ]),
+          ),
+      ),
+    )
     .where(({ not, exists, selectFrom }) =>
       not(
         exists(

@@ -63,13 +63,14 @@ base: feat/issue-206-eval-base
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 未解決の衝突の 2 件が 1 行で出て delivery_unit に 2 件とも入り、読み込みの予算を 2 件と数え、同じ窓で 2 度出ず、解決済みは今と同じのテストが pass
   - コミット: `feat(deliver): show an unresolved conflict as one line naming both records (T05)`
 
-- [ ] T06: G4 第三者かエージェントの言葉だけの記録を hook で押し込まず、引用を話者の種類で囲む
+- [x] T06: G4 第三者かエージェントの言葉だけの記録を hook で押し込まず、引用を話者の種類で囲む
   - 種別: 変更
   - 計画: S6
   - 依存: T01（出どころの読み取りが要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/eval-fixture.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 第三者だけは押し込まず search では見つかる、伝聞は第三者、混ざった evidence と owner / maintainer は押し込む、取り消された evidence は数えない、のテストが pass
   - コミット: `feat(deliver): keep records resting only on others' words out of hooks (T06)`
+  - 結果: ブランチ exp/206-g4（T01 から分けた）。`node --test test/deliver.test.ts` → pass 35, fail 0。`node --test test/eval-fixture.test.ts` → pass 2（backup の upload の記録は届かない）。acceptance → pass 105, fail 0。引用の囲いは入れていない（下の記録）
 
 - [ ] T07: G6 読み取り MCP の search に alwaysLoad を付ける
   - 種別: 変更
@@ -102,3 +103,4 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
+- 2026-10-04 / T06 / G4 単独では行に引用が出ないので、囲う対象が無い / 引用の囲い（spotlighting）は G1b と G4 を合わせるときに足す。G4 単独は「出どころでの絞り込み」だけを測る。エージェントだけの言葉の finding や dead end もフックで出なくなる（記録の汚染の経路を塞ぐ代わりに、配信が減る）ので、回帰のセルで見る
