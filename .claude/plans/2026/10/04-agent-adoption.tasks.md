@@ -140,13 +140,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(schema): rebuild replacements and repair lifecycles when moving to revision 10 (T23)`
   - 結果: 移行の SQL が、今効いている置き換え（最後に superseded になった時刻から）と、取り下げで終わった過去の期間（取り下げと復帰が同じ時刻のものだけ）を行として戻し、日付の分からないつもりに `unit_replacement_gap` の印を付ける。そのあと同期版の `settleForMigration`（reconcile.ts。計画づくりは保存と同じ）が、状態の行を持つ記録をプロジェクトごとに判定し、差分を書いてメモに出す。複数のつもりを持つ記録があれば 0010.check.sql で止める。`cd server && node --test test/migrate.test.ts` → 47 pass / 0 fail（revision 9 の連鎖・過去の期間・印・判断し直し、複数のつもりで何も変えずに止まる、を含む）。`bun run verify` → 終了コード 0（SQL 到達 199/199、実 DB 10/10、受け入れ 105 pass）
 
-- [ ] T24: 読み手（search・overview・read・export・review・rules・record_context）を `unit_replacement` に合わせ、つもり・今の効き目・閉じた期間・印・待つ理由を分けて出す
+- [x] T24: 読み手（search・overview・read・export・review・rules・record_context）を `unit_replacement` に合わせ、つもり・今の効き目・閉じた期間・印・待つ理由を分けて出す
   - 種別: 変更
   - 計画: S17
   - 依存: T22（新しい表が要る）
-  - 変更: `server/src/search.ts`, `server/src/overview.ts`, `server/src/read.ts`, `server/src/export.ts`, `server/src/review.ts`, `server/src/extract.ts`, `server/test/search.test.ts`, `server/test/overview.test.ts`, `server/test/export.test.ts`, `server/test/review.test.ts`
+  - 変更: `server/src/search.ts`, `server/src/read.ts`, `server/src/export.ts`, `server/test/search.test.ts`, `server/test/overview.test.ts`, `server/test/export.test.ts`, `server/test/review.test.ts`
   - 完了条件: `cd server && node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts` → pass。過去の時点の read も、その時点で開いていた行だけを置き換えとして出す
   - コミット: `feat(read): show replacements, waiting proposals, and unrecorded history apart (T24)`
+  - 結果: search の後継（`liveSuccessors`）と export の連なりは開いている `unit_replacement` の行だけをたどる。read は「Supersedes X (in effect since … / not in effect[: Y is in effect as its successor])」「Replaced X from … to …: 理由」「Superseded by X (since …)」「Was superseded by X from … to …: 理由」「Replacement proposed by X (状態)」を分けて出し、過去の時点では [started_at, ended_at) に入る行だけを効いている置き換えとする。overview・review・extract は保存された状態と開いた行だけを読んでいて変更なし（保存の出力は reconcile の待つ理由を `△ key candidate: 理由` で出す）。「履歴が記録されていない」印は保存先がまだ無いので出していない（T23 で印を作るときに read へ足す）。`cd server && node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts` → 52 pass / 0 fail（足したケースのうち search の 3 件は変更前の読み手で落ちることを確かめた）。`bun run verify` → 終了コード 0（SQL 到達 198/198、実 DB 10/10、受け入れ 105 pass）
 
 - [ ] T25: 役割ごとの実接続、全 rollback、操作の順番、再採用・同じ保存の取り下げ・隔離・出典なしの受け入れケースと、保存 1 回のロック時間の測定を足す
   - 種別: 追加
@@ -281,3 +282,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T09 / 変更欄（前: `server/test/record.test.ts` → 後: 新しい `server/test/auto-pending.test.ts` と、省略できる `auto` を足す `server/src/mcp-record.ts`）と完了条件のテストファイルを直した。record.test.ts は begin が送る記録の待ち行列を一時の HOME に向けていないので、begin を呼ぶテストを別のファイルに分けた
 - 2026-10-04 / T23 / 変更欄に `db/schema.sql`（印の表 `unit_replacement_gap`）、`server/src/db-types.ts`、`server/src/reconcile.ts`（同期版の adapter）を足した。reconcile を純粋な計画づくりと非同期・同期の読み書きに分け、移行の SQL は reconcile.ts に置いて admin.ts から実行の関数だけを渡す（生の SQL の置き場所と lifecycle の書き手の両方の検査を満たすため）。状態の行を 1 行も持たない記録（どのリリースも作らない）は移行で判定しない。移行は自分の run を足すので、件数・id を前提にした既存の移行テストを合わせた。revision 10 の移行は、このリリースの judge で判定する（規則を変えるときは新しい revision にする）
 - 2026-10-04 / T26 / T21・T22 の Codex のレビュー（F1 P1: 同じ保存で元の記録と後継の両方の取り下げで、元の取り下げが消える。F2 P2: 見直し条件の引用を forget した後継の置き換えが最後の再判定で失敗。F3 P2: glean で新しい採用付きの記録と adopt が枠を取り合っても拒まない）と T09 のレビュー（F1 P2: 呼び出し元が分からないと自動 pending が今のセッションを含める）を受け、T24 のサブエージェントが気づいた点（置き換え済みの記録が採用を失ったときの終わりの理由が一般的な文になる）も合わせて、修正タスク T26 を足した
+- 2026-10-04 / T24 / 変更欄（前: `server/src/overview.ts`・`review.ts`・`extract.ts` を含む → 後: 3 つを外した）。overview は開いた行だけをたどり済み、review は active だけを選び、extract は後継を語らず保存の出力が reconcile の待つ理由をそのまま出すので、変える所が無かった。「履歴が記録されていない」印は schema にまだ保存先が無く、read は推し量らずに出さない。印を作る T23 で read の表示も足す必要がある

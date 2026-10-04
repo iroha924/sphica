@@ -132,8 +132,9 @@ function fenced(body: string[]): string {
 }
 
 /**
- * The records a decision replaced, newest first, walked back through `supersedes`, each once. The walk stops at EXPORT_LIMITS.depth;
- * a record there that still replaced another makes the chain incomplete, so that is an error, not a shorter chain.
+ * The records a decision replaces now, newest first, walked back through open replacement rows, each once: an intent that never took
+ * effect, or a period that ended, is not a replacement. The walk stops at EXPORT_LIMITS.depth; a record there that still replaces
+ * another makes the chain incomplete, so that is an error, not a shorter chain.
  */
 async function replaced(db: Reads, from: Unit): Promise<{ newer: string; unit: Unit }[] | string> {
   const seen = new Set([from.id]);
@@ -141,17 +142,17 @@ async function replaced(db: Reads, from: Unit): Promise<{ newer: string; unit: U
   let frontier = [from];
   for (let depth = 0; frontier.length; depth++) {
     const older = await db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as u", "u.id", "l.to_unit")
+      .selectFrom("unit_replacement as h")
+      .innerJoin("unit as u", "u.id", "h.to_unit")
       .where(
-        "l.from_unit",
+        "h.from_unit",
         "in",
         frontier.map((u) => u.id),
       )
-      .where("l.kind", "=", "supersedes")
+      .where("h.ended_at", "is", null)
       .selectAll("u")
-      .select("l.from_unit")
-      .orderBy("l.from_unit")
+      .select("h.from_unit")
+      .orderBy("h.from_unit")
       .orderBy("u.id")
       .execute();
     if (!older.some((u) => !seen.has(u.id))) break;

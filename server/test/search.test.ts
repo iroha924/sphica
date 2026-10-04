@@ -9,10 +9,11 @@ import { checkAnchor, locate } from "../src/anchors.ts";
 import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
 import { readSource, readUnit } from "../src/read.ts";
+import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { at, hash, insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, plan, project, run, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown, root: string | null = null, sessionId = "s1") {
   const t: Target = {
@@ -90,10 +91,10 @@ test("search keeps records holding most of the question's words, filters them, a
     const found = await statements(async () => {
       assert.deepEqual(await keys("pnpm", { lifecycles: ["superseded"] }), ["trace:ext-s1/pnpm"]);
     });
-    // A superseded hit's successors are found through the index on the unit a link points at
-    const successors = found.filter((s) => s.includes('"unit_link"'));
+    // A superseded hit's successor is found through the index of open replacement rows by the record they replace
+    const successors = found.filter((s) => s.includes('"unit_replacement"'));
     assert.ok(successors.length > 0);
-    for (const s of successors) assert.match(plan(db, s), /SEARCH l USING (COVERING )?INDEX unit_link_to/, s);
+    for (const s of successors) assert.match(plan(db, s), /SEARCH h USING INDEX unit_replacement_place/, s);
     assert.deepEqual(
       await keys("pnpm", { kinds: ["finding", "decision"], lifecycles: ["superseded", "active"] }),
       ["trace:ext-s1/npm", "trace:ext-s1/pnpm"],
@@ -583,6 +584,161 @@ test("a hit replaced twice brings the live record at the end of the chain", asyn
         ["trace:ext-s1/bun", "trace:ext-s1/pnpm"],
         ["trace:ext-s1/pnpm", null],
       ],
+    );
+    const middle = (await readUnit(db.reader, p, "trace:ext-s1/npm", null)) ?? "";
+    assert.match(middle, /decision do, superseded/);
+    assert.match(middle, /Supersedes trace:ext-s1\/pnpm \(in effect since \S+Z\)/);
+    assert.match(middle, /Superseded by trace:ext-s1\/bun \(since \S+Z\)/);
+
+    // The middle record loses the owner's adoption: bun still replaces it, but its own replacement of pnpm ends and pnpm comes back
+    const npm = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/npm'").get()?.id);
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'taken back', retraction_source_id = source_id, retraction_span_start = span_start, retraction_span_end = span_end where unit_id = ?",
+      )
+      .run(new Date().toISOString(), npm);
+    await settle(db, p, [npm]);
+    const after = await searchUnits(db.reader, p, { question: "pnpm installs", limit: 10 });
+    assert.deepEqual(
+      after.hits.map((h) => [h.key, h.lifecycle, h.successorOf ?? null]),
+      [["trace:ext-s1/pnpm", "active", null]],
+    );
+    const now = (await readUnit(db.reader, p, "trace:ext-s1/npm", null)) ?? "";
+    assert.match(now, /Supersedes trace:ext-s1\/pnpm \(not in effect\)/);
+    assert.match(now, /Replaced trace:ext-s1\/pnpm from \S+Z to \S+Z: trace:ext-s1\/npm no longer stands: /);
+    assert.match(now, /Superseded by trace:ext-s1\/bun \(since/);
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/pnpm", null)) ?? "",
+      /decision do, active[\s\S]*Was superseded by trace:ext-s1\/npm from \S+Z to \S+Z: /,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+/** Judges the given records again after facts changed under them, the way a save ends; withdraw names records to withdraw. */
+const settle = (db: TempDb, p: number, ids: number[], withdraw: number[] = []) => {
+  const runId = run(db, p);
+  return inTransaction(db.ingest, (trx) =>
+    reconcile(
+      trx,
+      ids,
+      { runId },
+      { withdraw: new Map(withdraw.map((id) => [id, { reason: "the owner withdrew it", source: null }])) },
+    ),
+  );
+};
+const tick = async () => {
+  await new Promise((r) => setTimeout(r, 5));
+  const t = new Date().toISOString();
+  await new Promise((r) => setTimeout(r, 5));
+  return t;
+};
+
+test("read tells a replacement in effect, a period that ended, and a waiting proposal apart, now and as of a past time", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "Use SQLite." });
+    const b = message(db, p, { id: "m2", text: "Maybe Postgres." });
+    const c = message(db, p, { id: "m3", text: "Move to DuckDB." });
+    await save(db, p, { units: [decision("sqlite", a, "Use SQLite.")] });
+    // Nobody adopted it: it waits, and the save says why
+    const proposed = await save(db, p, {
+      units: [
+        {
+          key: "postgres",
+          kind: "decision",
+          stance: "do",
+          text: "Maybe Postgres.",
+          evidence: [{ source: `s${b}`, quote: "Maybe Postgres.", role: "proposes" }],
+          supersedes: "trace:ext-s1/sqlite",
+        },
+      ],
+    });
+    assert.deepEqual(proposed.candidates, [
+      {
+        key: "trace:ext-s1/postgres",
+        why: "an active decision or constraint needs unretracted evidence and adoption",
+      },
+    ]);
+    const before = await tick();
+    await save(db, p, {
+      units: [decision("duckdb", c, "Move to DuckDB.", { supersedes: "trace:ext-s1/sqlite" })],
+    });
+    const during = await tick();
+    assert.deepEqual(
+      (await searchUnits(db.reader, p, { question: "SQLite", limit: 10 })).hits.map((h) => [
+        h.key,
+        h.successorOf ?? null,
+      ]),
+      [
+        ["trace:ext-s1/duckdb", "trace:ext-s1/sqlite"],
+        ["trace:ext-s1/sqlite", null],
+      ],
+    );
+    const duckdb = Number(
+      db.owner.prepare("select id from unit where key = 'trace:ext-s1/duckdb'").get()?.id,
+    );
+    await settle(db, p, [duckdb], [duckdb]);
+    const after = await tick();
+    const row = db.owner.prepare("select started_at, ended_at, end_reason from unit_replacement").all();
+    assert.equal(row.length, 1);
+    const { started_at: from, ended_at: to } = row[0] as { started_at: string; ended_at: string };
+    assert.ok(
+      before < from && from < during && during < to && to < after,
+      JSON.stringify({ before, from, during, to, after }),
+    );
+
+    const read = async (key: string, asOf?: string) => (await readUnit(db.reader, p, key, null, asOf)) ?? "";
+    const proposal = /Replacement proposed by trace:ext-s1\/postgres \(candidate\)/;
+    const sqlite = {
+      before: await read("trace:ext-s1/sqlite", before),
+      during: await read("trace:ext-s1/sqlite", during),
+      after: await read("trace:ext-s1/sqlite", after),
+      now: await read("trace:ext-s1/sqlite"),
+    };
+    // Before: the later successor's intent did not exist yet, and only the waiting proposal shows
+    assert.match(sqlite.before, /decision do, active/);
+    assert.match(sqlite.before, proposal);
+    assert.doesNotMatch(sqlite.before, /duckdb/);
+    // During: the open row is the replacement in effect; the proposal still waits beside it
+    assert.match(sqlite.during, /decision do, superseded/);
+    assert.match(sqlite.during, new RegExp(`Superseded by trace:ext-s1/duckdb \\(since ${from}\\)`));
+    assert.match(sqlite.during, proposal);
+    assert.doesNotMatch(sqlite.during, /Was superseded/);
+    // After, and now: the period ended with its reason, and the record came back
+    for (const text of [sqlite.after, sqlite.now]) {
+      assert.match(text, /decision do, active/);
+      assert.match(
+        text,
+        new RegExp(
+          `Was superseded by trace:ext-s1/duckdb from ${from} to ${to}: trace:ext-s1/duckdb was withdrawn`,
+        ),
+      );
+      assert.doesNotMatch(text, /Superseded by/);
+      assert.match(text, proposal);
+    }
+    // Each successor's own intent, and whether it is in effect at the time read
+    assert.match(
+      await read("trace:ext-s1/duckdb", during),
+      new RegExp(`Supersedes trace:ext-s1/sqlite \\(in effect since ${from}\\)`),
+    );
+    const gone = await read("trace:ext-s1/duckdb");
+    assert.match(gone, /Supersedes trace:ext-s1\/sqlite \(not in effect\)/);
+    assert.match(gone, new RegExp(`Replaced trace:ext-s1/sqlite from ${from} to ${to}: `));
+    assert.match(
+      await read("trace:ext-s1/postgres", during),
+      /Supersedes trace:ext-s1\/sqlite \(not in effect: trace:ext-s1\/duckdb is in effect as its successor\)/,
+    );
+    assert.match(await read("trace:ext-s1/postgres"), /Supersedes trace:ext-s1\/sqlite \(not in effect\)\n/);
+    // The withdrawn successor no longer stands for the record, and the waiting proposal never did
+    assert.deepEqual(
+      (await searchUnits(db.reader, p, { question: "SQLite", limit: 10 })).hits.map((h) => [
+        h.key,
+        h.successorOf ?? null,
+      ]),
+      [["trace:ext-s1/sqlite", null]],
     );
   } finally {
     await db.done();

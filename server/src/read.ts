@@ -147,9 +147,10 @@ async function describe(
         "l.kind",
         "l.resolved_at",
         "a.id as from_id",
+        "b.id as to_id",
         "a.key as from_key",
         "b.key as to_key",
-        // The successor's state as of the time read: only one that became active replaced this record
+        // A proposer's lifecycle as of the time read, shown beside a proposal that never took effect
         eb
           .selectFrom("unit_state as t")
           .whereRef("t.unit_id", "=", "a.id")
@@ -157,7 +158,7 @@ async function describe(
           .select("t.to_state")
           .orderBy("t.id", "desc")
           .limit(1)
-          .as("from_state"),
+          .as("from_lifecycle"),
       ])
       .execute(),
     db
@@ -265,20 +266,12 @@ async function describe(
       );
     }
   }
-  for (const l of links) {
-    if (l.kind === "supersedes")
-      out.push(
-        l.from_id === u.id
-          ? `Supersedes ${l.to_key}`
-          : l.from_state === "active" || l.from_state === "superseded"
-            ? `Superseded by ${l.from_key}`
-            : `Replacement proposed by ${l.from_key} (${l.from_state ?? "no state"})`,
-      );
-    else
+  out.push(...(await replacements(db, u.id, links, asOf)));
+  for (const l of links)
+    if (l.kind === "conflicts")
       out.push(
         `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
       );
-  }
   // The newest set bound to the record's words, as of the time read; search uses the same one
   const aliases = await db
     .selectFrom("unit_alias")
@@ -292,6 +285,69 @@ async function describe(
   if (terms.length) out.push(`Aliases (search only): ${terms.map((t) => inline(t)).join(", ")}`);
   out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
   return out.join("\n");
+}
+
+type Link = {
+  kind: string;
+  from_id: number;
+  to_id: number;
+  from_key: string;
+  to_key: string;
+  from_lifecycle: string | null;
+};
+
+/**
+ * A record's replacements told apart from stored rows alone: its own intent and whether it is in effect, periods that ended with why,
+ * and proposals into it that never took effect. As of a past time, a row is in effect when that time falls in [started_at, ended_at).
+ */
+async function replacements(
+  db: Reads,
+  id: number,
+  links: Link[],
+  asOf: string | undefined,
+): Promise<string[]> {
+  const intents = links.filter((l) => l.kind === "supersedes");
+  if (!intents.length) return [];
+  const own = intents.find((l) => l.from_id === id);
+  const rows = await db
+    .selectFrom("unit_replacement as h")
+    .innerJoin("unit as a", "a.id", "h.from_unit")
+    .where((eb) =>
+      eb.or([
+        eb("h.from_unit", "=", id),
+        eb("h.to_unit", "=", id),
+        // Who holds the place this record means to take
+        ...(own ? [eb("h.to_unit", "=", own.to_id)] : []),
+      ]),
+    )
+    .where("h.started_at", "<=", asOf ?? "9999")
+    .select(["h.from_unit", "h.to_unit", "h.started_at", "h.ended_at", "h.end_reason", "a.key as from_key"])
+    .orderBy("h.id")
+    .execute();
+  const open = (r: (typeof rows)[number]) => r.ended_at === null || (asOf !== undefined && r.ended_at > asOf);
+  const period = (r: (typeof rows)[number]) =>
+    `from ${r.started_at} to ${r.ended_at}: ${inline(r.end_reason ?? "")}`;
+  const out: string[] = [];
+  if (own) {
+    const mine = rows.filter((r) => r.from_unit === id && r.to_unit === own.to_id);
+    const now = mine.find(open);
+    const holder = rows.find((r) => r.to_unit === own.to_id && r.from_unit !== id && open(r));
+    out.push(
+      `Supersedes ${own.to_key} (${now ? `in effect since ${now.started_at}` : holder ? `not in effect: ${holder.from_key} is in effect as its successor` : "not in effect"})`,
+    );
+    for (const r of mine) if (!open(r)) out.push(`Replaced ${own.to_key} ${period(r)}`);
+  }
+  const into = rows.filter((r) => r.to_unit === id);
+  for (const r of into)
+    out.push(
+      open(r)
+        ? `Superseded by ${r.from_key} (since ${r.started_at})`
+        : `Was superseded by ${r.from_key} ${period(r)}`,
+    );
+  for (const l of intents)
+    if (l.to_id === id && !into.some((r) => r.from_unit === l.from_id))
+      out.push(`Replacement proposed by ${l.from_key} (${l.from_lifecycle ?? "candidate"})`);
+  return out;
 }
 
 /** Where a gone file may have moved since the anchor's commit; empty when there is no commit to compare with or no rename was seen. */
