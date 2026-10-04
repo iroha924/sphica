@@ -846,7 +846,8 @@ async function agentRefusal(
   )
     return "quote the same words as decides evidence: the AI choosing, not reporting, proposing, or asking";
   const governs = anchors.filter((a) => a.role === "applies_to").map((a) => a.path);
-  const bound = governs.find((path) => instructionFile(path) || ciPath(path));
+  // Any anchor counts here, not only where it applies: the record is about that file either way
+  const bound = anchors.map((a) => a.path).find((path) => instructionFile(path) || ciPath(path));
   if (bound) return `${bound} holds rules or CI agents follow; only the owner adopts decisions about it`;
   if (
     await db

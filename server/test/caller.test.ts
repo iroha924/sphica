@@ -80,3 +80,17 @@ test("a call with neither host's signals is unknown", () => {
   assert.equal(callerOf({ "x-codex-turn-metadata": "x" }, {}).mode, "unknown");
   assert.equal(callerOf({ "claudecode/toolUseId": 3 }, { CLAUDE_CODE_SESSION_ID: "s1" }).host, null);
 });
+
+test("caller metadata out of bounds is kept as unknown, never stored as sent", () => {
+  const long = "x".repeat(10_000);
+  const codex = callerOf(
+    { "x-codex-turn-metadata": { session_id: long, turn_id: "t\u0000", turn_trigger: long } },
+    {},
+  );
+  assert.deepEqual([codex.session, codex.turn, codex.raw], [null, null, null]);
+  const claude = callerOf(
+    { "claudecode/toolUseId": long },
+    { CLAUDE_CODE_ENTRYPOINT: long, CLAUDE_CODE_SESSION_ID: "s1" },
+  );
+  assert.deepEqual([claude.toolUseId, claude.raw, claude.mode], [null, null, "unknown"]);
+});

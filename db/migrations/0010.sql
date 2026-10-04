@@ -402,6 +402,8 @@ create trigger unit_adoption_route before insert on unit_adoption begin
   where new.route = 'agent' and not exists (select 1 from unit_evidence e where e.unit_id = new.unit_id and e.option_id is null
     and e.role = 'decides' and e.source_id = new.source_id and e.span_start = new.span_start and e.span_end = new.span_end
     and e.retracted_at is null);
+  select raise(abort, 'agent adoption needs a trace run')
+  where new.route = 'agent' and not exists (select 1 from extraction_run where id = new.run_id and origin = 'trace');
   select raise(abort, 'agent adoption needs a run begun by an interactive session')
   where new.route = 'agent' and not exists (select 1 from extraction_run r join record_call c on c.id = r.begin_call_id
     where r.id = new.run_id and c.mode = 'interactive');
@@ -425,6 +427,11 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
     select 1 from chain where id = new.from_unit);
 end;
 create trigger unit_replacement_check before insert on unit_replacement begin
+  select raise(abort, 'a replacement''s cause belongs to the project of the records it joins')
+  where exists (select 1 from extraction_run where id = new.run_id
+      and project_id is not (select project_id from unit where id = new.to_unit))
+    or exists (select 1 from forget_batch where id = new.forget_id
+      and project_id is not (select project_id from unit where id = new.to_unit));
   select raise(abort, 'a replacement takes effect only from the record''s own intent to replace that one')
   where not exists (select 1 from unit_link where from_unit = new.from_unit and to_unit = new.to_unit and kind = 'supersedes');
   select raise(abort, 'a replacement starts open')
@@ -439,6 +446,11 @@ create trigger unit_replacement_check before insert on unit_replacement begin
     and not exists (select 1 from unit_adoption where unit_id = new.from_unit and route in ('owner_statement', 'explicit') and retracted_at is null);
 end;
 create trigger unit_replacement_end before update on unit_replacement begin
+  select raise(abort, 'a replacement''s cause belongs to the project of the records it joins')
+  where exists (select 1 from extraction_run where id = new.end_run_id
+      and project_id is not (select project_id from unit where id = new.to_unit))
+    or exists (select 1 from forget_batch where id = new.end_forget_id
+      and project_id is not (select project_id from unit where id = new.to_unit));
   select raise(abort, 'a replacement only ever ends, once')
   where old.ended_at is not null or new.ended_at is null or new.id is not old.id or new.from_unit is not old.from_unit
     or new.to_unit is not old.to_unit or new.run_id is not old.run_id or new.forget_id is not old.forget_id

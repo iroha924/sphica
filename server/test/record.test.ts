@@ -2604,3 +2604,23 @@ test("agent adoption: a save whose caller's session is unknown never adopts for 
     await db.done();
   }
 });
+
+test("agent adoption: an anchor of any role on a rule or CI file keeps the AI's decision a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const paths = ["CLAUDE.md", ".github/workflows/check.yml"];
+    await save({
+      units: paths.map((path, n) => {
+        const r = reply(`e${n}:assistant`, `e${n}`, `I keep rule ${n} as it is.`);
+        return aiDecision(`evidence-${n}`, r, `I keep rule ${n} as it is.`, {
+          anchors: [{ path, role: "evidence" }],
+        });
+      }),
+    });
+    for (const n of [0, 1]) assert.equal(lifeOf(db, `evidence-${n}`), "candidate", paths[n]);
+  } finally {
+    await db.done();
+  }
+});

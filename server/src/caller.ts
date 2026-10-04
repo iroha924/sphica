@@ -17,7 +17,9 @@ export type Caller = {
   raw: string | null;
 };
 
-const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+// Hosts send ids and short names here; anything else (too long, spaces, control characters) is kept as unknown, never stored as sent
+const text = (v: unknown): string | null =>
+  typeof v === "string" && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null;
 const record = (v: unknown): Record<string, unknown> | null =>
   v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 

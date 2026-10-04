@@ -1644,3 +1644,76 @@ test("a record tool's hook row alone rules out its turn, even when the call neve
   });
   assert.deepEqual(ineligible(), [k1]);
 });
+
+test("agent adoption comes only from a trace run", () => {
+  const said = reply("g1:assistant", "g1", "2026-09-10T00:00:01Z");
+  const c = call({
+    host: "claude-code",
+    caller_session: "ext-s9",
+    tool_use_id: "toolu_glean",
+    mode: "interactive",
+  });
+  const gleaned = insert(db, "extraction_run", {
+    project_id: p,
+    origin: "glean",
+    target: "session:s1",
+    status: "running",
+    begin_call_id: c,
+    started_at: now,
+  });
+  const u = unit({ key: "gleaned", kind: "decision" }, p, gleaned);
+  evidence(u, said, { role: "decides", run_id: gleaned });
+  refuses(() => adoption(u, said, { route: "agent", run_id: gleaned }), /agent adoption needs a trace run/);
+});
+
+test("a replacement's start and end causes belong to the project of the records it joins", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const old = unit({ key: "old-x", kind: "finding" });
+  const next = unit({ key: "next-x", kind: "finding" });
+  for (const u of [old, next]) evidence(u, src);
+  const run = Number(one("select run_id from unit where id = ?", next).run_id);
+  insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: run, added_at: now });
+  const theirs = insert(db, "extraction_run", {
+    project_id: other,
+    origin: "trace",
+    target: "session:z",
+    status: "running",
+    started_at: now,
+  });
+  const theirForget = insert(db, "forget_batch", { project_id: other, at: now });
+  refuses(
+    () => insert(db, "unit_replacement", { from_unit: next, to_unit: old, run_id: theirs, started_at: now }),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+  refuses(
+    () =>
+      insert(db, "unit_replacement", {
+        from_unit: next,
+        to_unit: old,
+        forget_id: theirForget,
+        started_at: now,
+      }),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+  const row = insert(db, "unit_replacement", { from_unit: next, to_unit: old, run_id: run, started_at: now });
+  refuses(
+    () =>
+      sql(
+        "update unit_replacement set ended_at = ?, end_reason = 'x', end_run_id = ? where id = ?",
+        now,
+        theirs,
+        row,
+      ),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+  refuses(
+    () =>
+      sql(
+        "update unit_replacement set ended_at = ?, end_reason = 'x', end_forget_id = ? where id = ?",
+        now,
+        theirForget,
+        row,
+      ),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+});
