@@ -419,21 +419,6 @@ export async function checkRecord(
     ).map((h) => [h.to_unit, h]),
   );
 
-  // Logins that speak as a maintainer somewhere in this project: their commits and events carry no association of their own
-  const maintainers = new Set(
-    record.units.some((u) => u.supersedes || u.conflicts.length)
-      ? (
-          await db
-            .selectFrom("source")
-            .select("author_login")
-            .distinct()
-            .where("project_id", "=", target.projectId)
-            .where("author_association", "in", [...MAINTAINERS])
-            .execute()
-        ).flatMap((r) => (r.author_login ? [r.author_login] : []))
-      : [],
-  );
-
   const units: Planned[] = [];
   // Records this save supersedes: one record has one successor
   const claimed = new Set<number>();
@@ -499,8 +484,8 @@ export async function checkRecord(
       reconsider: reconsider(o),
     }));
     if (u.evidence.length === 0) quarantine.push("no evidence cited");
-    // Retiring or disputing a record changes what is delivered: outside trace, third-party text alone cannot do it
-    // (the owner's own sessions, a maintainer, or the owner count; pull request and issue text from others does not)
+    // Retiring or disputing a record changes what is delivered: outside trace, third-party text alone cannot do it (the owner's own
+    // sessions, the owner, or a maintainer's own association count; a commit's login comes from its git author email, which a fork can forge)
     if (target.origin !== "trace" && (u.supersedes || u.conflicts.length)) {
       const trusted = [...u.evidence, ...u.adoption].some((q) => {
         const s = sources.get(Number(q.source.slice(1)));
@@ -508,8 +493,7 @@ export async function checkRecord(
           s &&
           (s.kind === "session_message" ||
             s.author_kind === "owner" ||
-            MAINTAINERS.has(s.author_association ?? "") ||
-            (s.author_login !== null && maintainers.has(s.author_login)))
+            MAINTAINERS.has(s.author_association ?? ""))
         );
       });
       if (!trusted)
