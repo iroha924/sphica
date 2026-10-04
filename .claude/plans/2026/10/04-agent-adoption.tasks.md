@@ -250,13 +250,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 
 段階 2 が AI の判断を取り出せるようにし、受け入れケースをそろえて出す。
 
-- [ ] T11: 一度でも AI の判断として active になった記録を、その時点の採用元と content hash、今の状態つきで返す関数を足す
+- [x] T11: 一度でも AI の判断として active になった記録を、その時点の採用元と content hash、今の状態つきで返す関数を足す
   - 種別: 追加
   - 計画: S9
   - 依存: T05（その時点の権限の判定が要る）
-  - 変更: `server/src/authority.ts`, `server/test/record.test.ts`
-  - 完了条件: `cd server && node --test --test-name-pattern="agent history" test/record.test.ts` → pass。持ち主が後から採用した記録と AI の採用が撤回された記録が一覧に残り、最初に active になった時刻と当時の content hash が返る
+  - 変更: `server/src/authority.ts`, `server/test/authority.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="agent history" test/authority.test.ts` → pass。持ち主が後から採用した記録と AI の採用が撤回された記録が一覧に残り、最初に active になった時刻と当時の content hash が返る
   - コミット: `feat(record): list records that were ever active as AI decisions for evaluation (T11)`
+  - 結果: `agentHistory` は、active になった状態の行ごとにその時点の権限を `authorityOf` で出し、AI の判断として active になった最初の時刻・その時点で効いていた AI の採用（source と範囲）・content hash（記録の本文は書き換えないので今の値が当時の値）・今の状態と権限を返す。今の履歴だけで作れたので、新しく保存する項目は無い。`cd server && node --test --test-name-pattern="agent history" test/authority.test.ts` → pass（持ち主が後から採用した記録と、AI の採用が撤回された記録が残る。active になる前から持ち主の判断だった記録と、active にならなかった記録は入らない）。`bun run verify` → 終了コード 0（SQL 到達 207/207、受け入れ 113 pass）
 
 - [ ] T12: 受け入れケースを足す（伝聞の平文、取得したページの注入文、無関係な編集、質問、trace の報告、持ち主の判断の保護、自動の trace の通知）
   - 種別: 追加
@@ -318,3 +319,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 
 - 2026-10-04 / T28 / T05・T06 の Codex のセキュリティレビュー（F1 P2: turn の無い返事が record ツールのターンの除外をすり抜ける。F2 P2: 質問への decides を check が通し save が保存全体を戻す）を受け、修正タスク T28 を足した。同じずれが glean の evidence にもあったので同じタスクで直した
 - 2026-10-04 / T10 / 変更欄（前: deliver-codex.test.ts を含む → 後: Codex で出ないことは deliver.test.ts の同じテストで、Claude Code の環境を引き継いだ Codex として確かめたので外した）
+- 2026-10-04 / T11 / 変更欄とテストの置き場所（前: record.test.ts → 後: AI の採用の行を作る helper がある authority.test.ts）

@@ -30,3 +30,67 @@ export async function authorityOf(db: Reads, ids: number[], asOf?: string): Prom
   }
   return out;
 }
+
+export type AgentHistory = {
+  id: number;
+  key: string;
+  /** When it first became active as an AI's decision, with the AI's adoptions in effect then */
+  activeAt: string;
+  adoptions: { sourceId: number; spanStart: number; spanEnd: number }[];
+  /** A unit's text never changes, so its hash now is its hash then */
+  contentHash: Buffer;
+  lifecycle: string;
+  authority: Authority;
+};
+
+/**
+ * Records of the project that were ever active as an AI's decision, for evaluating how those decisions held up. A later owner adoption,
+ * replacement, or withdrawal keeps a record here: those are what the evaluation looks for. Read from state and adoption history alone.
+ */
+export async function agentHistory(db: Reads, projectId: number): Promise<AgentHistory[]> {
+  const activations = await db
+    .selectFrom("unit_state as s")
+    .innerJoin("unit as u", "u.id", "s.unit_id")
+    .where("u.project_id", "=", projectId)
+    .where("s.to_state", "=", "active")
+    .where(({ exists, selectFrom }) =>
+      exists(
+        selectFrom("unit_adoption as a")
+          .select("a.id")
+          .whereRef("a.unit_id", "=", "u.id")
+          .where("a.route", "=", "agent"),
+      ),
+    )
+    .select(["u.id", "u.key", "u.content_hash", "u.lifecycle", "s.at"])
+    .orderBy("s.at")
+    .orderBy("s.id")
+    .execute();
+  const out = new Map<number, AgentHistory>();
+  for (const a of activations) {
+    if (out.has(a.id) || (await authorityOf(db, [a.id], a.at)).get(a.id) !== "agent") continue;
+    const adoptions = await db
+      .selectFrom("unit_adoption")
+      .where("unit_id", "=", a.id)
+      .where("route", "=", "agent")
+      .where("added_at", "<=", a.at)
+      .where((eb) => eb.or([eb("retracted_at", "is", null), eb("retracted_at", ">", a.at)]))
+      .select(["source_id", "span_start", "span_end"])
+      .orderBy("id")
+      .execute();
+    out.set(a.id, {
+      id: a.id,
+      key: a.key,
+      activeAt: a.at,
+      adoptions: adoptions.map((x) => ({
+        sourceId: x.source_id,
+        spanStart: x.span_start,
+        spanEnd: x.span_end,
+      })),
+      contentHash: a.content_hash,
+      lifecycle: a.lifecycle,
+      authority: "none",
+    });
+  }
+  const now = await authorityOf(db, [...out.keys()]);
+  return [...out.values()].map((h) => ({ ...h, authority: now.get(h.id) ?? "none" }));
+}

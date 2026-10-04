@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { authorityOf } from "../src/authority.ts";
+import { agentHistory, authorityOf } from "../src/authority.ts";
 import { readUnit } from "../src/read.ts";
 import { sha256 } from "../src/text.ts";
 import { at, insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
@@ -126,6 +126,67 @@ test("authority: the owner outranks an AI, both read from adoption history as of
     assert.equal((await authorityOf(db.reader, [unit], T2)).get(unit), "owner");
     assert.equal((await authorityOf(db.reader, [unit])).get(unit), "agent");
     assert.deepEqual(await authorityOf(db.reader, []), new Map());
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent history: records ever active as an AI's decision stay listed after the owner adopts or the AI's adoption is taken back", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const owner = message(db, p, { id: "o1", text: "Keep it as is.", sent: "2026-09-19T00:00:00Z" });
+    const move = (unit: number, run: number, from: string | null, to: string, when: string) =>
+      insert(db, "unit_state", {
+        unit_id: unit,
+        from_state: from,
+        to_state: to,
+        at: when,
+        reason: "r",
+        run_id: run,
+      });
+    const adoptByOwner = (unit: number, run: number, when: string) =>
+      insert(db, "unit_adoption", {
+        unit_id: unit,
+        route: "owner_statement",
+        source_id: owner,
+        span_start: 0,
+        span_end: 4,
+        run_id: run,
+        added_at: when,
+      });
+    // Active as the AI's, adopted by the owner later
+    const kept = agentAdopted(db, p, "kept");
+    move(kept.unit, kept.run, null, "candidate", T0);
+    move(kept.unit, kept.run, "candidate", "active", T1);
+    adoptByOwner(kept.unit, kept.run, T2);
+    // Active as the AI's, then the AI's adoption taken back
+    const dropped = agentAdopted(db, p, "dropped");
+    move(dropped.unit, dropped.run, null, "candidate", T0);
+    move(dropped.unit, dropped.run, "candidate", "active", T1);
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'no', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ? and route = 'agent'",
+      )
+      .run(T3, owner, dropped.unit);
+    move(dropped.unit, dropped.run, "active", "candidate", T3);
+    // The owner's before it was ever active: never an AI's decision in effect
+    const owners = agentAdopted(db, p, "owners");
+    adoptByOwner(owners.unit, owners.run, T0);
+    move(owners.unit, owners.run, null, "candidate", T0);
+    move(owners.unit, owners.run, "candidate", "active", T1);
+    // Never active
+    agentAdopted(db, p, "waiting");
+    const listed = await agentHistory(db.reader, p);
+    assert.deepEqual(
+      listed.map((h) => [h.key, h.activeAt, h.lifecycle, h.authority, h.adoptions.length]),
+      [
+        ["kept", T1, "active", "owner", 1],
+        ["dropped", T1, "candidate", "none", 1],
+      ],
+    );
+    assert.ok(listed[0]?.contentHash.equals(sha256("kept-text")));
+    assert.deepEqual(await agentHistory(db.reader, p + 1), []);
   } finally {
     await db.done();
   }
