@@ -186,11 +186,6 @@ function withOwner<T>(file: string, fn: (raw: DatabaseSync) => T, create = false
 }
 
 /**
- * Moves the database up to SCHEMA_REVISION, one migration per transaction with foreign keys off (the pragma is ignored inside one) and
- * foreign_key_check empty before each commit; the revision is read under the write lock, so a concurrent init does nothing more.
- * **A backup comes first**: a later step can fail after earlier ones committed, and a committed step can be wrong.
- */
-/**
  * Revision 10 judges every record by the rules saves now follow, after its SQL restored what history proves; each change becomes a note.
  * It runs the judge of this release: a later change to the rules comes with its own revision.
  */
@@ -214,6 +209,11 @@ function judgeEveryRecord(raw: DatabaseSync): void {
       .run(item, action);
 }
 
+/**
+ * Moves the database up to SCHEMA_REVISION, one migration per transaction with foreign keys off (the pragma is ignored inside one) and
+ * foreign_key_check empty before each commit; the revision is read under the write lock, so a concurrent init does nothing more.
+ * **A backup comes first**: a later step can fail after earlier ones committed, and a committed step can be wrong.
+ */
 export function migrate(file: string = dbFile(), dir: string = MIGRATIONS()): number {
   return withOwner(file, (raw) => {
     const from = versionOf(raw);
