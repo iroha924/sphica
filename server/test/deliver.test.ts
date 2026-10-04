@@ -8,12 +8,23 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { AI_DECIDED, CONFIRM, deliver, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
+import {
+  at,
+  hash,
+  insert,
+  message,
+  plan,
+  project,
+  session,
+  statements,
+  type TempDb,
+  tempDb,
+} from "./temp-db.ts";
 
 const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
 before(() => {
@@ -1974,6 +1985,127 @@ test("owner decision protected: an unadopted record in conflict never holds the 
       units: [decided("local", m, "Store every timestamp in UTC.", { conflicts: ["trace:ext-s1/utc"] })],
     });
     assert.equal(await edit("src/dates.ts"), "");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a record an AI decided is delivered marked, with Sphica's words for it; the owner's is not", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    // The AI's own decision, adopted the way the schema allows: its reply deciding, an interactive run
+    session(db, p, "s1");
+    const now = at("2026-09-27T00:00:00Z");
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text: "I keep dates in UTC.",
+      original_bytes: 20,
+      content_hash: hash(3),
+      indexed: 0,
+    });
+    const call = insert(db, "record_call", {
+      project_id: p,
+      tool: "trace_begin",
+      host: "codex",
+      caller_session: "x",
+      caller_turn: "y",
+      mode: "interactive",
+      called_at: now,
+    });
+    const run = insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "session:s1",
+      status: "running",
+      begin_call_id: call,
+      started_at: now,
+    });
+    const unit = insert(db, "unit", {
+      project_id: p,
+      key: "trace:ext-s1/utc",
+      kind: "decision",
+      stance: "do",
+      text: "Keep dates in UTC",
+      extraction: "supported",
+      run_id: run,
+      created_at: now,
+      content_hash: hash(4),
+    });
+    insert(db, "unit_evidence", {
+      unit_id: unit,
+      source_id: reply,
+      span_start: 0,
+      span_end: 6,
+      role: "decides",
+      run_id: run,
+      added_at: now,
+    });
+    insert(db, "unit_adoption", {
+      unit_id: unit,
+      route: "agent",
+      source_id: reply,
+      span_start: 0,
+      span_end: 6,
+      run_id: run,
+      added_at: now,
+    });
+    insert(db, "unit_anchor", {
+      unit_id: unit,
+      path: "src/dates.ts",
+      role: "applies_to",
+      run_id: run,
+      added_at: now,
+    });
+    for (const [from, to] of [
+      [null, "candidate"],
+      ["candidate", "active"],
+    ] as const)
+      insert(db, "unit_state", {
+        unit_id: unit,
+        from_state: from,
+        to_state: to,
+        at: now,
+        reason: "r",
+        run_id: run,
+      });
+    const edit = (file: string) =>
+      deliver(
+        {
+          session_id: `sess-${file}`,
+          cwd: repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Edit",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const ai = await edit("src/dates.ts");
+    assert.match(ai, /trace:ext-s1\/utc \(decision do, decided by an AI\)/);
+    assert.ok(ai.includes(AI_DECIDED));
+    const owners = await edit("src/db.ts");
+    assert.match(owners, /trace:ext-s1\/sqlite \(constraint do\)/);
+    assert.ok(!owners.includes(AI_DECIDED));
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

@@ -278,11 +278,21 @@ async function describe(
     }
   }
   out.push(...(await replacements(db, u.id, links, asOf)));
-  for (const l of links)
-    if (l.kind === "conflicts")
-      out.push(
-        `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
-      );
+  // An unresolved conflict holds a record back from automatic delivery, except that the owner's decision is held back only by the owner's
+  const conflicting = links.filter((l) => l.kind === "conflicts");
+  const sides = await authorityOf(
+    db,
+    conflicting.map((l) => (l.from_id === u.id ? l.to_id : l.from_id)),
+    asOf,
+  );
+  const mine = (await authorityOf(db, [u.id], asOf)).get(u.id);
+  for (const l of conflicting) {
+    const other = l.from_id === u.id ? l.to_id : l.from_id;
+    const held = mine !== "owner" || sides.get(other) === "owner";
+    out.push(
+      `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : held ? " (unresolved: held back from automatic delivery until resolved, not withdrawn)" : " (unresolved: still delivered, since only the owner's words hold the owner's decision back)"}`,
+    );
+  }
   // The newest set bound to the record's words, as of the time read; search uses the same one
   const aliases = await db
     .selectFrom("unit_alias")

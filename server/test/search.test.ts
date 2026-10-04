@@ -185,7 +185,7 @@ test("read shows cited words and who said them, links, history, and each anchor 
       /\(owner_statement\): "SQLite にしよう。"/,
       /src\/db\.ts open \(applies_to\): located at line 2/,
       /src\/gone\.ts \(applies_to\): missing — needs review/,
-      /Conflicts with trace:ext-s1\/q \(unresolved\)/,
+      /Conflicts with trace:ext-s1\/q \(unresolved: still delivered, since only the owner's words hold the owner's decision back\)/,
       /History: candidate .*; active/,
     ])
       assert.match(text, want);
@@ -1091,6 +1091,39 @@ test("read says when a replacement's history before revision 10 was not recorded
     assert.match(
       successor,
       /Supersedes trace:ext-s1\/sqlite: its history before the update to revision 10 was not recorded/,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("read says whether an unresolved conflict holds the record back from delivery, apart from withdrawing it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Use SQLite. Use UTC. Use local time." });
+    const ai = message(db, p, { id: "m2", text: "Postgres would scale better.", speaker: "assistant" });
+    await save(db, p, { units: [decision("sqlite", m, "Use SQLite."), decision("utc", m, "Use UTC.")] });
+    await save(db, p, {
+      units: [
+        {
+          key: "pg",
+          kind: "decision",
+          stance: "do",
+          text: "Postgres",
+          evidence: [{ source: `s${ai}`, quote: "Postgres would scale better.", role: "proposes" }],
+          conflicts: ["trace:ext-s1/sqlite"],
+        },
+        decision("local", m, "Use local time.", { conflicts: ["trace:ext-s1/utc"] }),
+      ],
+    });
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/sqlite", null)) ?? "",
+      /Conflicts with trace:ext-s1\/pg \(unresolved: still delivered, since only the owner's words hold the owner's decision back\)/,
+    );
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/utc", null)) ?? "",
+      /Conflicts with trace:ext-s1\/local \(unresolved: held back from automatic delivery until resolved, not withdrawn\)/,
     );
   } finally {
     await db.done();

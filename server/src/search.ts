@@ -1,7 +1,9 @@
 // Search over records (units) and retained sources. Ranked word search (FTS5 bm25) finds candidates; a candidate counts as a hit only
 // when it holds more than half of the question's content terms (text.ts queryTerms). Weaker matches are counted, not shown, so a question
 // with no answer comes back empty instead of returning whatever shares one word with it.
+
 import { sql } from "kysely";
+import { type Authority, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { repoPath } from "./record.ts";
@@ -32,6 +34,8 @@ export type UnitHit = {
   aliasOnly: boolean;
   /** Set when the unit is here because it replaced a hit */
   successorOf?: string;
+  /** Whose decision a decision or constraint is now */
+  authority?: Authority;
 };
 
 export type UnitQuery = {
@@ -162,8 +166,13 @@ export async function searchUnits(
       b.matched.length - a.matched.length ||
       a.rank - b.rank,
   );
+  const top = hits.slice(0, q.limit);
+  const whose = await authorityOf(
+    db,
+    top.filter((h) => ["decision", "constraint"].includes(h.kind)).map((h) => h.id),
+  );
   return {
-    hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h),
+    hits: top.map(({ rank: _rank, ...h }) => ({ ...h, authority: whose.get(h.id) })),
     weaker,
     terms: wanted,
     stopped,

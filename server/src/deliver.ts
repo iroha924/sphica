@@ -10,7 +10,7 @@ import path from "node:path";
 import type { ExpressionBuilder, Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
-import { ownerAdopted } from "./authority.ts";
+import { authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
@@ -35,6 +35,10 @@ export const CONFIRM =
 export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "the record text given here");
 // The limits add the request's length, so it takes no room from the records
 const ASK = CONFIRM.length + 1;
+/** Sphica's own words for records an AI decided, never taken from a record: added, with the room it takes, only when one is shown */
+export const AI_DECIDED =
+  "A record marked decided by an AI was decided by an AI in an earlier session, not by the owner: with a concrete reason you may depart from it, saying in your reply which record and why. It never relaxes the owner's rules, public contracts, or approval gates.";
+const AI_ROOM = AI_DECIDED.length + 1;
 const LIMITS: Record<Event, { units: number; chars: number }> = {
   session_start: { units: 6, chars: 1000 + ASK },
   pre_edit: { units: 5, chars: 1500 + ASK },
@@ -113,8 +117,21 @@ const deliverable = (db: Reads, projectId: number) =>
       ),
     );
 
-const line = (u: { key: string; kind: string; stance: string | null; text: string }, extra = "") =>
-  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 240)}${extra}`;
+const line = (
+  u: { key: string; kind: string; stance: string | null; text: string },
+  extra = "",
+  ai = false,
+) =>
+  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${ai ? ", decided by an AI" : ""}): ${head(inline(u.text), 240)}${extra}`;
+
+/** The shown records an AI decided (only its own adoption): marked so a reader weighs them below the owner's */
+async function aiDecided(db: Reads, ids: number[]): Promise<Set<number>> {
+  const whose = await authorityOf(db, ids);
+  return new Set(ids.filter((id) => whose.get(id) === "agent"));
+}
+/** The lead with the words for records an AI decided, and the room they take, when any is shown */
+const withAi = (lead: string, chars: number, ai: Set<number>) =>
+  ai.size ? { lead: `${lead} ${AI_DECIDED}`, chars: chars + AI_ROOM } : { lead, chars };
 
 /** Cuts to n characters (not bytes), marking the cut. */
 const clip = (text: string, n: number) => {
@@ -237,10 +254,22 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
     db,
     shown.map((u) => u.id),
   );
-  const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`;
-  const f = fit(
-    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const { lead, chars } = withAi(
+    `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
     LIMITS.pre_edit.chars,
+    ai,
+  );
+  const f = fit(
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
+        : line(u, "", ai.has(u.id)),
+    ),
+    chars,
     lead,
   );
   const omitted = rows.length - shown.length + f.omitted;
@@ -325,13 +354,25 @@ async function beforeRead(
     shown.map((u) => u.id),
   );
   // A shell command that names a path is not proof it was read, so the wording says only that it was named
-  const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`;
-  const f = fit(
-    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const { lead, chars } = withAi(
+    `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
     Math.min(
       LIMITS.pre_read.chars,
       READ_SESSION.chars + ASK - spent.reduce((n, r) => n + Math.max(r.chars - ASK, 0), 0),
     ),
+    ai,
+  );
+  const f = fit(
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
+        : line(u, "", ai.has(u.id)),
+    ),
+    chars,
     lead,
   );
   const omitted = rows.length - shown.length + f.omitted;
@@ -466,17 +507,22 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
   }
   const shown = hits.slice(0, LIMITS.prompt.units);
+  const ai = await aiDecided(
+    db,
+    shown.map((h) => h.u.id),
+  );
+  const { lead: ask, chars } = withAi(CONFIRM, LIMITS.prompt.chars, ai);
   // The request, then one line per record with the note on each
-  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why).slice(2)}`);
+  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why, ai.has(h.u.id)).slice(2)}`);
   const kept: string[] = [];
-  let used = ASK;
+  let used = ask.length + 1;
   for (const l of lines) {
-    if (used + l.length + 1 > LIMITS.prompt.chars) break;
+    if (used + l.length + 1 > chars) break;
     kept.push(l);
     used += l.length + 1;
   }
   return {
-    ...noted(kept.length ? [CONFIRM, ...kept].join("\n") : "", CONFIRM, [leftOut(hits.length - kept.length)]),
+    ...noted(kept.length ? [ask, ...kept].join("\n") : "", ask, [leftOut(hits.length - kept.length)]),
     units: shown.slice(0, kept.length).map((h) => h.u.id),
     eligible: hits.length,
     omitted: hits.length - kept.length,
@@ -544,16 +590,24 @@ async function atStart(
     current.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
     standing.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
   ]).then((r) => r.map((x) => Number(x?.n ?? 0)));
+  const ai = await aiDecided(
+    db,
+    broad.map((u) => u.id),
+  );
   const lines = [
     ...work.map((w) => {
       // The reader connection already turns next back into an array (db.ts JSON_COLUMNS)
       const next = (w.next as unknown as string[])[0];
       return `- Work: ${head(inline(w.title), 120)} (${w.status}${w.branch && w.branch === branch ? ", this branch" : ""}): ${head(inline(w.current), 200)}${next ? `; next: ${head(inline(next), 120)}` : ""}`;
     }),
-    ...broad.map((u) => line(u)),
+    ...broad.map((u) => line(u, "", ai.has(u.id))),
   ];
-  const lead = `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`;
-  const f = fit(lines, LIMITS.session_start.chars, lead);
+  const { lead, chars } = withAi(
+    `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`,
+    LIMITS.session_start.chars,
+    ai,
+  );
+  const f = fit(lines, chars, lead);
   // Lines after the work items are the constraints; a key merely written inside a work item is not a shown constraint
   const shownUnits = f.kept.flatMap((i) => (i >= work.length ? (broad[i - work.length]?.id ?? []) : []));
   // The lists and the totals are separate reads, so a change between them never makes a count negative
@@ -607,10 +661,18 @@ async function beforeReview(
   const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
   if (!rows.length) return { ...said(`Sphica ${checked}: no active recorded decision applies.`, null), once };
   const shown = rows.slice(0, LIMITS.review.units);
-  const lead = `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`;
-  const f = fit(
-    shown.map((u) => line(u, ` [${inline(u.because)}]`)),
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const { lead, chars } = withAi(
+    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
     LIMITS.review.chars,
+    ai,
+  );
+  const f = fit(
+    shown.map((u) => line(u, ` [${inline(u.because)}]`, ai.has(u.id))),
+    chars,
     lead,
   );
   const omitted = rows.length - shown.length + f.omitted;

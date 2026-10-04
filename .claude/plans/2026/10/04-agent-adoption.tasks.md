@@ -189,13 +189,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 
 次のセッションが持ち主の判断と AI の判断を見分け、AI が持ち主に聞かずに trace を回す。
 
-- [ ] T07: 配信・read・search・record_context・review の表示に記録ごとの権限を出し、AI の判断に専用の固定文を付ける
+- [x] T07: 配信・read・search・record_context・review の表示に記録ごとの権限を出し、AI の判断に専用の固定文を付ける
   - 種別: 変更
   - 計画: S6
   - 依存: T05（権限の判定が要る）, T24（読み手が新しい表を読む）
-  - 変更: `server/src/deliver.ts`, `server/src/read.ts`, `server/src/search.ts`, `server/src/extract.ts`, `server/src/review.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/src/read.ts`, `server/src/search.ts`, `server/src/mcp.ts`, `server/src/extract.ts`, `server/src/trace.ts`, `server/test/deliver.test.ts`, `server/test/search.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass。持ち主の判断には今の CONFIRM、AI の判断には専用の文が付き、どちらの文も記録の本文から取らない。read の履歴の権限はその時点のもの。conflicts で止めていることが撤回と分けて出る
   - コミット: `feat(deliver): show whether the owner or an AI made each decision (T07)`
+  - 結果: 配信の 5 か所（編集の前・読む前・発言・セッションの開始・レビュー）で AI の判断に「decided by an AI」を付け、AI の判断を含むときだけ固定文 `AI_DECIDED` とその長さぶんの枠を足す（持ち主の判断は今の CONFIRM のまま）。search の結果・record_context の生きている記録・read の見出しに誰の判断かを出す。read の未解決の衝突に、配信から外れているか（撤回ではない）を出す。`cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts test/search.test.ts` → pass（AI の印と固定文、持ち主の判断には付かない、衝突の 2 通り）。`bun run verify` → 終了コード 0（SQL 到達 205/205、受け入れ 105 pass）。途中で record.test の rename limit のテストが 1 回だけ時間切れで落ち、単独とまとめての再実行で通った（別の作業ツリーのテストと重なった負荷）
 
 - [ ] T08: trace の Skill を両ホストで自動で起動できるようにし、自動のときの手順と `decides`・`agent` の採用の規則を書く
   - 種別: 変更
@@ -299,3 +300,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T05 / 保存・glean の操作の前後の確認は、T22 の reconcile（最後にもう一度判定して差分なし）がすべての操作で担うので、T05 では判定関数と共有する SQL に絞った。変更欄と完了条件を直し（前: record.ts・extract.ts・glean.ts の前後の確認 → 後: authority.ts・deliver.ts・read.ts と authority.test.ts）、`authorityOf` が未使用にならないよう、T07 の表示のうち read の見出しの 1 行を前倒しした
 - 2026-10-04 / T06 / 変更欄（前: record.ts と record.test.ts → 後: run の判定の extract.ts・record_check の呼び出しの mcp-record.ts・規約のファイルの判定を共有する rule-files.ts と export.ts・plan を足す）。止めるパスの一覧を、どのリポジトリにもある規約のファイルと CI の定義に直した（plan の方針 7 と変更履歴）。AI の採用が外れた理由が保存の出力に出ないと分かり、save でも check の注意を出すようにした
 - 2026-10-04 / T27 / T23・T26・T24 の Codex のレビュー（F1 P2: 取り下げと復帰が同じ時刻というだけで、一緒に取り下げた候補まで過去に効いていた後継として戻す）を受け、修正タスク T27 を足した。指摘はこの 1 件だけだった
+- 2026-10-04 / T07 / 変更欄（前: deliver.ts・read.ts・search.ts・extract.ts・review.ts と deliver の 2 つのテスト → 後: review.ts は配信のレビューの経路が deliver.ts にあるので変えず、search の表示の mcp.ts、生きている記録の trace.ts、search.test.ts を足し、deliver-codex.test.ts は変えずに済んだ）

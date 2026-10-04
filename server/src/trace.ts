@@ -228,7 +228,7 @@ export async function liveUnits(db: Reads, projectId: number, limit = 40) {
     .where("project_id", "=", projectId)
     .where("lifecycle", "in", ["active", "candidate"])
     .where("extraction", "=", "supported")
-    .select(["key", "kind", "stance", "lifecycle", "text"])
+    .select(["id", "key", "kind", "stance", "lifecycle", "text"])
     .orderBy("id", "desc")
     .limit(limit)
     .execute();

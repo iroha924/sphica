@@ -60,7 +60,7 @@ const stoppedAfter = (r: { stopped: boolean; read: number }) =>
 
 const hitText = (h: UnitHit) =>
   [
-    `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}`,
+    `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority === "agent" ? ", decided by an AI" : h.authority === "owner" ? ", the owner's decision" : ""}`,
     head(h.text, 600),
     ...(h.why ? [`Why: ${head(h.why, 400)}`] : []),
     ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, 200)}`] : []),
