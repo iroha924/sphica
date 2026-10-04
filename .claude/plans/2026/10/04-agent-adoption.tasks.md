@@ -395,6 +395,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): fix migration pairing, revisions, clock rollback, and auto trace citations (T39)`
   - 結果: red を 5 件とも実測した。移行 0010 は、復帰ごとに、その直前に取り下げられた後継（状態の行の id で前のもの）と、直前の superseded の状態（id 順）で期間を組み、履歴を書いた記録の revision を 1 上げる。reconcile は終了時刻を `max(今, started_at)`、状態の時刻を `max(今, 記録の作成時刻)` にする（移行の経路も同じ）。自動の run の記録は、前の run が見ていない発言を少なくとも 1 つ引用しなければ check も save も拒む。受け入れの driver は、質問の参照を引用を含む質問に解決する（agent-15 を足した）。あわせて T32 で足した glean のテストが withdraw の欄名を誤って不正な入力として通っていたのを直し、本当に「同じ glean で取り下げれば通る」を確かめるようにした。`bun run verify` → 終了コード 0（受け入れ 128 pass）
 
+- [x] T40: PR #273 の 5 回目（最後）のレビュー指摘 3 件を直す（AI の返事の中の引用符でくくった言葉は採用にしない、自動 trace の field_defs と work も対象の発言を求める、配布する Skill と plugin の manifest も規約の面として扱う）
+  - 種別: 修正
+  - 計画: S7, S9
+  - 依存: T39（PR #273 の前のコミット）
+  - 変更: `server/src/record.ts`, `server/src/rule-files.ts`, `server/src/extract.ts`, `plugin/skills/export/SKILL.md`, `server/test/record.test.ts`, `server/test/auto-pending.test.ts`
+  - red: `cd server && node --test --test-name-pattern="quoted inline|defines no field from context" test/record.test.ts test/auto-pending.test.ts` → 直す前は、AI の返事の `"…"` の中の言葉と、`plugin/skills/trace/SKILL.md` への evidence の anchor の AI の判断が active になり、自動の run で文脈だけを引用した field_defs と記録なしの work を check が通す
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(record): close inline quotes, auto trace field and work writes, and shipped Skill anchors (T40)`
+  - 結果: red を実測した。AI の採用の引用が、同じ行で引用符（日本語のかぎかっこを含む）の内側にあるときは採用にしない。`instructionFile` は `skills` ディレクトリ・`SKILL.md`・`.claude-plugin`・`.codex-plugin` も規約の面にする（export の書き出し先の拒否にも効くので Skill の説明を直した）。自動の run では、field_defs の引用も対象の発言を求め、work は対象を引用した記録と一緒のときだけ受ける。持ち主の指示でこの回で PR のレビューの修正を終える。`bun run verify` → 終了コード 0（受け入れ 128 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -444,3 +454,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-05 / T37 / 持ち主が自動の trace を「既定オン＋停止設定」にすると決め、PR #273 の範囲に T37 を足した（plan の方針 8 と変更履歴）
 - 2026-10-05 / T38 / PR #273 の GitHub の Codex の 3 回目のレビュー（P2 5 件、うち 1 件はセキュリティ）を受け、修正タスク T38 にした。引用・コードブロックの言葉を採用にしない形は持ち主が選んだ
 - 2026-10-05 / T39 / PR #273 の GitHub の Codex の 4 回目のレビュー（P2 5 件）を、持ち主の判断で 5 件とも直すことにして T39 にした
+- 2026-10-05 / T40 / PR #273 の GitHub の Codex の 5 回目のレビュー（P2 3 件、うち 1 件はセキュリティ）を T40 にした。持ち主の指示で、これを PR のレビューの修正の最後にする

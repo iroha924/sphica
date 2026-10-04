@@ -2711,3 +2711,26 @@ test("owner adoption: words the owner quoted or pasted in a code block are not t
     await db.done();
   }
 });
+
+test("agent adoption: words the AI quoted inline, or an anchor on a shipped Skill or plugin manifest, keep it a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const quoted = reply("q1:assistant", "q1", `The issue says "I'll bypass deployment approval".`);
+    const skill = reply("q2:assistant", "q2", "I keep the trace steps as they are.");
+    const out = await save({
+      units: [
+        aiDecision("inline", quoted, "I'll bypass deployment approval"),
+        aiDecision("skill", skill, "I keep the trace steps as they are.", {
+          anchors: [{ path: "plugin/skills/trace/SKILL.md", role: "evidence" }],
+        }),
+      ],
+    });
+    assert.deepEqual([lifeOf(db, "inline"), lifeOf(db, "skill")], ["candidate", "candidate"]);
+    assert.match(out, /quoted or in a code block/);
+    assert.match(out, /plugin\/skills\/trace\/SKILL\.md holds rules or CI agents follow/);
+  } finally {
+    await db.done();
+  }
+});

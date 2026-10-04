@@ -22,7 +22,7 @@ import { checkGlean, prepareGlean, saveGlean } from "./glean.ts";
 import { HOSTS, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import type { Place } from "./project.ts";
-import { checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "./record.ts";
+import { type Checked, checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "./record.ts";
 import type { Probe } from "./repo-facts.ts";
 import { plural } from "./text.ts";
 import {
@@ -542,23 +542,29 @@ export async function contextText(
 function contextOnly(
   id: string,
   items: { id: number; looked?: boolean }[],
-  units: {
-    key: string;
-    evidence: { source: number }[];
-    options: { evidence: { source: number }[] }[];
-    adoption: { source: number }[];
-  }[],
+  c: Pick<Checked, "units" | "fieldDefs" | "work">,
 ): string[] {
   if (!shownTo.get(id)?.auto) return [];
   const old = new Set(items.filter((it) => it.looked).map((it) => it.id));
-  return units
-    .filter((u) =>
-      [...u.evidence, ...u.options.flatMap((o) => o.evidence), ...u.adoption].every((x) => old.has(x.source)),
-    )
-    .map(
-      (u) =>
-        `${u.key}: quotes only messages earlier runs already looked at; an automatic run's record quotes at least one message it traces`,
-    );
+  return [
+    ...c.units
+      .filter((u) =>
+        [...u.evidence, ...u.options.flatMap((o) => o.evidence), ...u.adoption].every((x) =>
+          old.has(x.source),
+        ),
+      )
+      .map(
+        (u) =>
+          `${u.key}: quotes only messages earlier runs already looked at; an automatic run's record quotes at least one message it traces`,
+      ),
+    ...c.fieldDefs
+      .filter((d) => old.has(d.source))
+      .map((d) => `field_defs ${d.name}: an automatic run defines a field only from a message it traces`),
+    // Work cites nothing, so an automatic run updates it only beside a record of what it traced
+    ...(c.work && !c.units.length
+      ? ["work: an automatic run updates work only beside a record of the messages it traces"]
+      : []),
+  ];
 }
 
 /** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
@@ -575,7 +581,7 @@ export async function checkText(
   target.agent = await agentRun(db, run, call);
   const c =
     run.origin === "glean" ? await checkGlean(db, target, record) : await checkRecord(db, target, record);
-  if (!("ops" in c)) c.errors.push(...contextOnly(id, items, c.units));
+  if (!("ops" in c)) c.errors.push(...contextOnly(id, items, c));
   const units = "ops" in c ? c.units.units : c.units;
   const lines = [
     ...c.errors.map((e) => `✗ ${e}`),
@@ -624,7 +630,7 @@ export async function saveText(
             return g.units;
           })
         : await checkRecord(trx, scope.target, record, facts).then((checked) => {
-            checked.errors.push(...contextOnly(id, scope.items, checked.units));
+            checked.errors.push(...contextOnly(id, scope.items, checked));
             // What check would warn about is said at save too: what was left out, and why a record stays a candidate
             notes.push(...checked.problems);
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)

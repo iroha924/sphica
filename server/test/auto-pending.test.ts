@@ -323,3 +323,42 @@ test("auto pending: an automatic run's record must quote a message it traces, no
     await db.done();
   }
 });
+
+test("auto pending: an automatic run defines no field from context, and updates work only beside a record of its targets", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "Track severity on every finding." });
+    const first = await beginTrace(db.ingest, p, "s1");
+    await pages(db, first, p, false);
+    await saveText(db.ingest, first, p, null, { units: [] });
+    message(db, p, { id: "m2", text: "Okay.", speaker: "assistant", sent: "2026-09-10T00:05:00Z" });
+    const second = await beginTrace(db.ingest, p, "s1");
+    const read = await pages(db, second, p, true);
+    const old = refs(read[0] ?? "")[0];
+    const fields = {
+      units: [],
+      field_defs: [
+        {
+          name: "severity",
+          type: "text",
+          label: "Severity",
+          description: "How bad",
+          kinds: ["finding"],
+          quote: { source: `s${old}`, quote: "Track severity on every finding." },
+        },
+      ],
+    };
+    const work = {
+      units: [],
+      work: { key: "w", title: "Severity", goal: "g", current: "c", next: [], status: "active" },
+    };
+    for (const record of [fields, work]) {
+      const checked = await checkText(db.ingest, second, p, null, record);
+      assert.equal(checked.ok, false, JSON.stringify(record).slice(0, 40));
+      assert.match(checked.text, /automatic run/);
+    }
+  } finally {
+    await db.done();
+  }
+});

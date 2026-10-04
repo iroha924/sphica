@@ -218,6 +218,15 @@ function quotedSpan(body: string, start: number, end: number): boolean {
   return touched;
 }
 
+/** Whether the byte span [start, end) sits right inside quotation marks on its line: words the writer reports, not words they chose */
+function inlineQuoted(body: string, start: number, end: number): boolean {
+  const bytes = Buffer.from(body, "utf8");
+  const before = bytes.subarray(0, start).toString("utf8").trimEnd().at(-1) ?? "";
+  const after = bytes.subarray(end).toString("utf8").trimStart()[0] ?? "";
+  // english-exempt: Japanese quotation brackets are quotation marks too
+  return /["“'‘`「『]/.test(before) && /["”'’`」』]/.test(after);
+}
+
 /** The byte span of quote in text, or null. The first occurrence is taken. */
 function locate(body: string, quote: string): [number, number] | null {
   if (!quote.trim()) return null;
@@ -586,7 +595,11 @@ export async function checkRecord(
         quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
         continue;
       }
-      if (quotedSpan(s.text, span[0], span[1])) {
+      // The AI often repeats others' words in quotation marks; its own choice is never quoted that way
+      if (
+        quotedSpan(s.text, span[0], span[1]) ||
+        (route === "agent" && inlineQuoted(s.text, span[0], span[1]))
+      ) {
         problems.push(
           `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
         );

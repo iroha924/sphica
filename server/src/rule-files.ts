@@ -129,12 +129,20 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
 
 /**
  * Where coding agents load standing instructions, Skills, and settings from (the same places the review Skill treats as binding rules),
- * compared without case.
+ * and the Skills and manifests a plugin ships for them, compared without case.
  */
-const INSTRUCTION_DIRS = new Set([".claude", ".agents", ".codex", ".cursor"]);
+const INSTRUCTION_DIRS = new Set([
+  ".claude",
+  ".agents",
+  ".codex",
+  ".cursor",
+  "skills",
+  ".claude-plugin",
+  ".codex-plugin",
+]);
 export const instructionFile = (relative: string) => {
   const parts = relative.toLowerCase().split(/[\\/]/);
-  const names = [...RULE_NAMES].map((n) => n.toLowerCase());
+  const names = [...RULE_NAMES, "SKILL.md"].map((n) => n.toLowerCase());
   return (
     parts.some((p) => INSTRUCTION_DIRS.has(p)) ||
     names.includes(parts.at(-1) ?? "") ||
