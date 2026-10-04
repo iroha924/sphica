@@ -111,7 +111,7 @@ function write(dir: string, rel: string, body: string | Buffer, mode?: number) {
  * The gold records as a file-bound delivery renders them (the record, its reason, its rejected options). The gold slot has no Sphica tools,
  * so the lead points to no read.
  */
-async function goldText(file: string, keys: string[]): Promise<string> {
+async function goldText(file: string, keys: string[], root: string): Promise<string> {
   if (!keys.length) return "";
   const db = openWriter("ingest", file);
   try {
@@ -125,7 +125,8 @@ async function goldText(file: string, keys: string[]): Promise<string> {
     if (missing.length) throw new Error(`gold records missing from the fixture: ${missing.join(", ")}`);
     // Gold claims the record as a delivery gives it; a body or reason the renderer would cut stops the build (rejected options show up to
     // three with a count, as in every delivery)
-    const lines = await recordLines(db, rows);
+    // Against the slot's own files, so a record's anchor state is the one a delivery in the slot would show
+    const lines = await recordLines(db, rows, root);
     rows.forEach((r, i) => {
       const shown = lines[i] ?? "";
       if (!shown.includes(inline(r.text)) || (r.why && !shown.includes(`Why: ${inline(r.why)}`)))
@@ -297,7 +298,8 @@ async function main() {
     if (condition === "gold") {
       write(dir, ".tools/gold.sh", GOLD_SH, 0o755);
       const gold = [];
-      for (const t of tasks) gold.push({ id: t.id, prompt: t.prompt, text: await goldText(base, t.gold) });
+      for (const t of tasks)
+        gold.push({ id: t.id, prompt: t.prompt, text: await goldText(base, t.gold, dir) });
       write(dir, ".tools/gold.json", `${JSON.stringify(gold, null, 2)}\n`);
       hooks.UserPromptSubmit = [
         {

@@ -31,13 +31,14 @@ base: feat/issue-206-eval-base
   - コミット: `feat(deliver): read a record's saved month, adopter, speakers, and anchor state (T01)`
   - 結果: `node --test test/provenance.test.ts` → pass 2, fail 0。`bun run sql:reach` → 207 / 207。`npx tsc --noEmit` → エラーなし
 
-- [ ] T02: G1a 配信の行に保存した月・採用者・anchor の状態を載せる
+- [x] T02: G1a 配信の行に保存した月・採用者・anchor の状態を載せる
   - 種別: 変更
   - 計画: S2
   - 依存: T01（定義の読み取りが要る）
-  - 変更: `server/src/deliver.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/judge.ts`, `server/test/deliver.test.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/evals/cloud/build.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts test/eval-grade.test.ts` → 行が `- <key> (<kind> <stance>; saved YYYY-MM; adopted by <who>; anchor <state>): …` になり、gold の描画と受け取りの検査が新しい形で通るテストが pass
   - コミット: `feat(deliver): show when a record was saved, who adopted it, and its anchor state (T02)`
+  - 結果: `node --test test/deliver.test.ts` → pass 35, fail 0（located・moved・missing と、採用の無い finding の行）。`node --test test/eval-fixture.test.ts test/eval-grade.test.ts test/eval-order.test.ts` → pass 51, fail 0（judge の `- <key> (` の境界はそのまま）。上限ちょうどに作っていた既存テストの本文を、ラベルの分（1 行 60 字ほど）短くした
 
 - [ ] T03: G1b 引用を先に置き、長い Why を配信から外す
   - 種別: 変更
@@ -102,3 +103,4 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
+- 2026-10-04 / T02 / ラベルで 1 行が 60 字ほど長くなり、上限ちょうどの配信では入る件数が減る（既存テストで 5 件が 4 件に）/ G1a の代償として、測定の回帰のセルで見る。gold も同じ形で、スロットのファイルに対して描く（build.ts の goldText に root を渡す）。judge.ts と eval-grade は変えずに済んだ（変更欄 前: judge.ts・eval-grade.test.ts を含む、後: 外した）

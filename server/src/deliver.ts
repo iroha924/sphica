@@ -17,6 +17,7 @@ import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
+import { provenance, type Speaker } from "./provenance.ts";
 import { selectForReview } from "./review.ts";
 import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
 import { RevisionMismatch } from "./sqlite.ts";
@@ -100,8 +101,41 @@ const deliverable = (db: Reads, projectId: number) =>
       ),
     );
 
-const line = (u: { key: string; kind: string; stance: string | null; text: string }, extra = "") =>
-  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 240)}${extra}`;
+const line = (
+  u: { key: string; kind: string; stance: string | null; text: string },
+  extra = "",
+  about = "",
+) =>
+  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${about}): ${head(inline(u.text), 240)}${extra}`;
+
+const ADOPTED: Record<Speaker, string> = {
+  owner: "adopted by the owner",
+  maintainer: "adopted by a maintainer",
+  third_party: "adopted by a third party",
+  assistant: "adopted by an agent",
+};
+
+/**
+ * What each line says about its record beside the kind: the month it was saved, who adopted it (or that nobody did), and where its anchors
+ * stand in the code now. A located anchor only says the code is there, never that the decision holds.
+ */
+async function about(db: Reads, root: string | null, ids: number[]): Promise<Map<number, string>> {
+  const [facts, kinds] = await Promise.all([
+    provenance(db, ids, root),
+    ids.length ? db.selectFrom("unit").select(["id", "kind"]).where("id", "in", ids).execute() : [],
+  ]);
+  const out = new Map<number, string>();
+  for (const [id, f] of facts) {
+    const adoptable = kinds.some((k) => k.id === id && (k.kind === "decision" || k.kind === "constraint"));
+    const parts = [
+      `saved ${f.saved}`,
+      f.adopter ? ADOPTED[f.adopter] : adoptable ? "not adopted" : "",
+      f.anchor ? `anchor ${f.anchor}` : "",
+    ].filter(Boolean);
+    out.set(id, `; ${parts.join("; ")}`);
+  }
+  return out;
+}
 
 /** Cuts to n characters (not bytes), marking the cut. */
 const clip = (text: string, n: number) => {
@@ -147,12 +181,11 @@ async function reasons(db: Reads, ids: number[]): Promise<Map<number, string>> {
 export async function recordLines(
   db: Reads,
   units: { id: number; key: string; kind: string; stance: string | null; text: string }[],
+  root: string | null = null,
 ): Promise<string[]> {
-  const why = await reasons(
-    db,
-    units.map((u) => u.id),
-  );
-  return units.map((u) => line(u, why.get(u.id)));
+  const ids = units.map((u) => u.id);
+  const [why, facts] = await Promise.all([reasons(db, ids), about(db, root, ids)]);
+  return units.map((u) => line(u, why.get(u.id), facts.get(u.id)));
 }
 
 /**
@@ -217,16 +250,18 @@ const named = (rels: string[]) =>
     : `${rels.slice(0, 3).map(inline).join(", ")} and ${rels.length - 3} more`;
 
 /** Before an edit: the records anchored to any of the edited paths (a Codex patch can touch several), chosen together within one limit. */
-async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise<Plan> {
+async function beforeEdit(db: Reads, projectId: number, root: string, rels: string[]): Promise<Plan> {
   const rows = await anchoredTo(db, projectId, rels).execute();
   const shown = rows.slice(0, LIMITS.pre_edit.units);
-  const why = await reasons(
-    db,
-    shown.map((u) => u.id),
-  );
+  const ids = shown.map((u) => u.id);
+  const [why, facts] = await Promise.all([reasons(db, ids), about(db, root, ids)]);
   const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`;
   const f = fit(
-    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), facts.get(u.id)), line(u, "", facts.get(u.id))]
+        : line(u, "", facts.get(u.id)),
+    ),
     LIMITS.pre_edit.chars,
     lead,
   );
@@ -264,6 +299,7 @@ const RESTARTS = ["compact", "clear"];
 async function beforeRead(
   db: Reads,
   projectId: number,
+  root: string,
   rels: string[],
   session: string,
   agent: string | null,
@@ -307,14 +343,16 @@ async function beforeRead(
   ).filter((u) => !seen.has(u.id));
   const room = Math.min(LIMITS.pre_read.units, READ_SESSION.units - readUnits);
   const shown = rows.slice(0, Math.max(room, 0));
-  const why = await reasons(
-    db,
-    shown.map((u) => u.id),
-  );
+  const ids = shown.map((u) => u.id);
+  const [why, facts] = await Promise.all([reasons(db, ids), about(db, root, ids)]);
   // A shell command that names a path is not proof it was read, so the wording says only that it was named
   const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`;
   const f = fit(
-    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), facts.get(u.id)), line(u, "", facts.get(u.id))]
+        : line(u, "", facts.get(u.id)),
+    ),
     Math.min(
       LIMITS.pre_read.chars,
       READ_SESSION.chars + ASK - spent.reduce((n, r) => n + Math.max(r.chars - ASK, 0), 0),
@@ -453,8 +491,13 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
   }
   const shown = hits.slice(0, LIMITS.prompt.units);
+  const facts = await about(
+    db,
+    root,
+    shown.map((h) => h.u.id),
+  );
   // The request, then one line per record with the note on each
-  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why).slice(2)}`);
+  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why, facts.get(h.u.id)).slice(2)}`);
   const kept: string[] = [];
   let used = ASK;
   for (const l of lines) {
@@ -531,13 +574,19 @@ async function atStart(
     current.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
     standing.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
   ]).then((r) => r.map((x) => Number(x?.n ?? 0)));
+  // Broad constraints have no applies_to anchor, so there is no code to check them against
+  const facts = await about(
+    db,
+    null,
+    broad.map((u) => u.id),
+  );
   const lines = [
     ...work.map((w) => {
       // The reader connection already turns next back into an array (db.ts JSON_COLUMNS)
       const next = (w.next as unknown as string[])[0];
       return `- Work: ${head(inline(w.title), 120)} (${w.status}${w.branch && w.branch === branch ? ", this branch" : ""}): ${head(inline(w.current), 200)}${next ? `; next: ${head(inline(next), 120)}` : ""}`;
     }),
-    ...broad.map((u) => line(u)),
+    ...broad.map((u) => line(u, "", facts.get(u.id))),
   ];
   const lead = `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`;
   const f = fit(lines, LIMITS.session_start.chars, lead);
@@ -594,9 +643,14 @@ async function beforeReview(
   const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
   if (!rows.length) return { ...said(`Sphica ${checked}: no active recorded decision applies.`, null), once };
   const shown = rows.slice(0, LIMITS.review.units);
+  const facts = await about(
+    db,
+    root,
+    shown.map((u) => u.id),
+  );
   const lead = `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`;
   const f = fit(
-    shown.map((u) => line(u, ` [${inline(u.because)}]`)),
+    shown.map((u) => line(u, ` [${inline(u.because)}]`, facts.get(u.id))),
     LIMITS.review.chars,
     lead,
   );
@@ -813,11 +867,12 @@ export async function deliver(
     const session = input.session_id;
     const make = async (): Promise<Plan> =>
       event === "pre_edit"
-        ? await beforeEdit(reader, pid, rels)
+        ? await beforeEdit(reader, pid, place.root, rels)
         : event === "pre_read"
           ? await beforeRead(
               reader,
               pid,
+              place.root,
               rels,
               sessionId(pid, host, session),
               agentOf(input),
