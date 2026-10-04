@@ -691,7 +691,8 @@ test("a merge or a contributor cannot adopt; the unit is kept as a candidate and
       ),
       retire.errors.join("\n"),
     );
-    // A commit by someone who speaks as a maintainer elsewhere in the project (hana merged as OWNER) counts as their words
+    // A commit's login comes from its git author email, which a fork can forge: a commit under a maintainer's login (hana merged
+    // as OWNER) is not their words
     const commit = prSource(db, p, {
       id: "c1",
       kind: "commit_message",
@@ -699,20 +700,36 @@ test("a merge or a contributor cannot adopt; the unit is kept as a candidate and
       login: "hana",
       assoc: "NONE",
     });
-    const byOwner = await inTransaction(db.ingest, (trx) =>
-      checkRecord(trx, t, {
-        units: [
-          {
-            key: "cache",
-            kind: "finding",
-            text: "SQLite cache",
-            evidence: [{ source: `s${commit}`, quote: "Replace the JSON cache", role: "states" }],
-            supersedes: "harvest:12/kept",
-          },
-        ],
-      }),
+    const retireBy = (source: number, quote: string) =>
+      inTransaction(db.ingest, (trx) =>
+        checkRecord(trx, t, {
+          units: [
+            {
+              key: "cache",
+              kind: "finding",
+              text: "SQLite cache",
+              evidence: [{ source: `s${source}`, quote, role: "states" }],
+              supersedes: "harvest:12/kept",
+            },
+          ],
+        }),
+      );
+    const byCommit = await retireBy(commit, "Replace the JSON cache");
+    assert.ok(
+      byCommit.errors.some((e) =>
+        /cache: supersedes and conflicts from harvest need the owner's or a maintainer's words/.test(e),
+      ),
+      byCommit.errors.join("\n"),
     );
-    assert.deepEqual(byOwner.errors, []);
+    // The same maintainer writing under their own login does count
+    const comment = prSource(db, p, {
+      id: "pc1",
+      kind: "pr_comment",
+      text: "Replace the JSON cache with SQLite.",
+      login: "hana",
+      assoc: "OWNER",
+    });
+    assert.deepEqual((await retireBy(comment, "Replace the JSON cache")).errors, []);
   } finally {
     await db.done();
   }
