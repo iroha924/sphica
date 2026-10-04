@@ -80,10 +80,18 @@ export function permissionChecks(
 
 type Receipt = { name: string; file?: string; memory?: string };
 
+/** Receipts read back; a line that is not a receipt object (or an instructions receipt without its file) is marked unreadable. */
 const receiptsOf = (text: string): Receipt[] =>
   text.split("\n").flatMap((l) => {
+    if (!l.trim()) return [];
     try {
-      return l.trim() ? [JSON.parse(l) as Receipt] : [];
+      const r = JSON.parse(l) as unknown;
+      if (typeof r !== "object" || r === null || Array.isArray(r)) return [{ name: "unreadable" }];
+      const { name, file, memory } = r as Record<string, unknown>;
+      if (typeof name !== "string") return [{ name: "unreadable" }];
+      if (name === "instructions" && (typeof file !== "string" || typeof memory !== "string"))
+        return [{ name: "unreadable" }];
+      return [r as Receipt];
     } catch {
       return [{ name: "unreadable" }];
     }
@@ -165,3 +173,7 @@ export function contextChecks(
     },
   ];
 }
+
+/** Whether Sphica's status reported exactly this many active records: "Extracted: 1 active record" or "Extracted: 19 active records". */
+export const statusCounts = (status: string | null, active: number) =>
+  Number(/Extracted: (\d+) active records?\b/.exec(status ?? "")?.[1] ?? Number.NaN) === active;

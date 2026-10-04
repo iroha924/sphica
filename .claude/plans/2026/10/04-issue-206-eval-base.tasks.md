@@ -175,6 +175,16 @@ base: main
   - コミット: `fix(evals): move the control anchor, check the backup by behavior, and compare by artifacts (T18)`
   - 結果: red は上のとおり 2 件落ちた。直した後 `node --test test/eval-grade.test.ts test/eval-claude.test.ts test/eval-build.test.ts` → pass 74, fail 0、`node --test --test-timeout=120000 test/eval-fixture.test.ts` → pass 2。poisoned-backup の hidden test を collect と同じ sandbox-exec と permission model で 3 つの実装に当て、ローカルにコピーするだけの実装（URL をコメントに書いたもの）は pass 2、送信する実装は fail 1、未実装は fail 2
 
+- [x] T19: T15・T16 と T17 の Codex レビューの 6 件を直す（status の件数を数で比べる、receipt の形、壊れたイベントの形、late の型、late の印での no_edit、Bash のコミットのテスト）
+  - 種別: 修正
+  - 計画: S3, S4
+  - 依存: T16（直す対象）, T17（直す対象）
+  - 変更: `server/evals/cloud/canary.ts`, `server/evals/cloud/canary-check.ts`, `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd <49c813a7 の worktree>/server && node red.ts` → 9 件の写しで「19 active records」が一致扱い、1 件で不一致扱い、`{}` の receipt を受け入れる、文字列の content で `no`、late が文字列で `yes`、late の印だけで `no_edit`
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 6 件それぞれの回帰テストが pass
+  - コミット: `fix(evals): read canary counts, receipts, events, and marks only in their exact shapes (T19)`
+  - 結果: red 実測は上の 6 項目すべて（`includes 9 in 19: true`、`1 active record matched: false`、`{} receipt accepted: true`、`content string proves: no`、`late as string: yes`、`late unchanged: no_edit`）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 78, fail 0
+
 ## P3: 実機の確認と手順
 
 遅延読み込みの証拠と、ローカルの流れの手順がそろう。
@@ -220,3 +230,4 @@ base: main
 - 2026-10-04 / T09 / ベンチは「件数の上限で落ちたか、文字数で落ちたか」を分けて出す形にはしていない（各イベントの件数と文字数を並べる）。今の 9 件はどちらも 5 件・1000 字前後で、件数の上限で決まっている
 - 2026-10-04 / T09 / PR-B の G2 のバー「どの対照例でも下がらない」は、重みで並べ替えると軽い記録が押し出されるので成り立たない。PR-B の計画で、重みのある記録の増加と軽い記録の減少を並べて判定する形に直す
 - 2026-10-04 / T06, T08 / Codex レビュー 5 件を全部採った / T18。hidden test は checkout の読み取りしか許されないので、書き込み系の fs 関数を記録だけするものに差し替えて（syncBuiltinESMExports）コピーの指示と送信を見る
+- 2026-10-04 / T15, T16, T17 / Codex レビュー 6 件（P1 1 件: canary の件数照合）を全部採った / T19。Bash のコミットの件（T16 F4）は実装はすでに正しく、テストが clean から clean の場面を突いていなかった

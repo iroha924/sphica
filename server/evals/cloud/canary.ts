@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
-import { type Check, contextChecks, permissionChecks } from "./canary-check.ts";
+import { type Check, contextChecks, permissionChecks, statusCounts } from "./canary-check.ts";
 import { runClaude } from "./claude-run.ts";
 import { claudeStreamCalls } from "./judge.ts";
 
@@ -159,7 +159,7 @@ for (const r of pair) {
     );
     dbChecks.push({
       name: `${r.result.run}: the MCP server reads the same copy`,
-      ok: Boolean(status?.result?.includes(`${active} active records`)),
+      ok: statusCounts(status?.result ?? null, active),
       why: status
         ? `status said: ${status.result?.split("\n").slice(0, 3).join(" / ")}; the copy has ${active} active records`
         : "status was not called",

@@ -244,13 +244,25 @@ export function claudeStreamCalls(events: string | null): { calls: StreamCall[];
       continue;
     }
     if (e.type === "result") finished = true;
-    const content = Array.isArray(e.message?.content) ? (e.message?.content as unknown[]) : [];
+    // An assistant message is always a list of blocks; a user message may also be plain text. Anything else damages the stream
+    const body = e.message?.content;
+    if (
+      (e.type === "assistant" && body !== undefined && !Array.isArray(body)) ||
+      (e.type === "user" && body !== undefined && typeof body !== "string" && !Array.isArray(body))
+    )
+      readable = false;
+    const content = Array.isArray(body) ? (body as unknown[]) : [];
     for (const block of content) {
-      if (typeof block !== "object" || block === null) {
+      if (typeof block !== "object" || block === null || Array.isArray(block)) {
         readable = false;
         continue;
       }
       const c = block as Record<string, unknown>;
+      if (
+        (c.type === "tool_use" && typeof c.id !== "string") ||
+        (c.type === "tool_result" && typeof c.tool_use_id !== "string")
+      )
+        readable = false;
       if (e.type === "assistant" && c.type === "tool_use" && typeof c.id === "string") {
         const call = { id: c.id, name: String(c.name ?? ""), input: c.input, result: null, error: false };
         calls.push(call);
@@ -333,14 +345,15 @@ export function searchedBeforeEdit(
     if (!line.trim()) continue;
     try {
       const m = JSON.parse(line) as Record<string, unknown>;
-      if (typeof m.after !== "string" || typeof m.changed !== "boolean" || !Array.isArray(m.in_flight))
+      if (
+        typeof m.after !== "string" ||
+        typeof m.changed !== "boolean" ||
+        typeof m.late !== "boolean" ||
+        !Array.isArray(m.in_flight) ||
+        !m.in_flight.every((id) => typeof id === "string")
+      )
         return "unknown";
-      parsed.push({
-        after: m.after,
-        changed: m.changed,
-        in_flight: m.in_flight as string[],
-        late: m.late === true,
-      });
+      parsed.push({ after: m.after, changed: m.changed, in_flight: m.in_flight as string[], late: m.late });
     } catch {
       return "unknown";
     }
@@ -349,9 +362,12 @@ export function searchedBeforeEdit(
   const answered = calls.filter((c) => c.result !== null).map((c) => c.id);
   if (JSON.stringify(parsed.map((m) => m.after).sort()) !== JSON.stringify([...answered].sort()))
     return "unknown";
-  const first = parsed.find((m) => m.changed);
+  const at0 = parsed.findIndex((m) => m.changed);
+  // A mark read late may have missed a change a later call undid, so no late mark up to the first change can be trusted
+  if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late)) return "unknown";
+  const first = parsed[at0];
   if (!first) return "no_edit";
-  if (first.in_flight.length || first.late) return "unknown";
+  if (first.in_flight.length) return "unknown";
   const at = calls.findIndex((c) => c.id === first.after);
   if (at < 0) return "unknown";
   return calls.slice(0, at).some((c) => c.name === "mcp__sphica__search" && c.result !== null) ? "yes" : "no";

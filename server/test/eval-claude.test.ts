@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { contextChecks, permissionChecks } from "../evals/cloud/canary-check.ts";
+import { contextChecks, permissionChecks, statusCounts } from "../evals/cloud/canary-check.ts";
 import {
   DENY_DIRS,
   DENY_FILES,
@@ -15,6 +15,7 @@ import {
   runEnv,
   runMcp,
   runSettings,
+  treeState,
   treeWatcher,
 } from "../evals/cloud/claude-run.ts";
 import {
@@ -487,7 +488,7 @@ test("the tree watcher marks each tool result with whether the tree changed and 
 
 test("a search counts as before the edit only when it came before the call that first changed the tree", () => {
   const mark = (after: string, changed: boolean, inFlight: string[] = []) =>
-    JSON.stringify({ after, changed, in_flight: inFlight });
+    JSON.stringify({ after, changed, in_flight: inFlight, late: false });
   const search = [use("s", "mcp__sphica__search"), result("s", "No record holds most of")];
   const bash = [use("b", "Bash", { command: "sed -i s/1/2/ a.ts" }), result("b", "")];
   const write = [use("w", "Write", { file_path: "a.ts" }), result("w", "ok")];
@@ -693,4 +694,91 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
   assert.equal(recorded.status, null);
   assert.match(recorded.reason, /clone/);
+});
+
+test("damaged event shapes, damaged marks, and late marks never prove an answer", () => {
+  const gold = ["trace:s/utc"];
+  for (const bad of [
+    ev({ type: "assistant", message: { content: "damaged" } }),
+    ev({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read" }] } }),
+    ev({ type: "user", message: { content: [{ type: "tool_result" }] } }),
+    ev({ type: "assistant", message: { content: [["tool_use"]] } }),
+  ])
+    assert.equal(foundInClaudeStream([bad, done].join("\n"), gold), "unknown", bad);
+  const search = [use("s", "mcp__sphica__search"), result("s", "No record holds most of")];
+  const write = [use("w", "Write"), result("w", "ok")];
+  const mark = (o: Record<string, unknown>) => JSON.stringify({ in_flight: [], late: false, ...o });
+  const events = [...search, ...write, done].join("\n");
+  assert.equal(
+    searchedBeforeEdit(
+      events,
+      [mark({ after: "s", changed: false }), mark({ after: "w", changed: true, late: "true" })].join("\n"),
+    ),
+    "unknown",
+  );
+  assert.equal(
+    searchedBeforeEdit(
+      events,
+      [mark({ after: "s", changed: false }), mark({ after: "w", changed: true, in_flight: [1] })].join("\n"),
+    ),
+    "unknown",
+  );
+  // A late mark that saw no change may have missed one a later call undid
+  assert.equal(
+    searchedBeforeEdit(
+      events,
+      [mark({ after: "s", changed: false }), mark({ after: "w", changed: false, late: true })].join("\n"),
+    ),
+    "unknown",
+  );
+  assert.equal(
+    searchedBeforeEdit(
+      events,
+      [mark({ after: "s", changed: false, late: true }), mark({ after: "w", changed: true })].join("\n"),
+    ),
+    "unknown",
+  );
+  assert.equal(
+    searchedBeforeEdit(
+      events,
+      [mark({ after: "s", changed: false }), mark({ after: "w", changed: true })].join("\n"),
+    ),
+    "yes",
+  );
+});
+
+test("one Bash call that edits and commits between two clean looks still changes the tree's state", (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "eval-commit-"));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const git = (...a: string[]) =>
+    execFileSync("git", ["-C", work, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a]);
+  git("init", "-q");
+  fs.writeFileSync(path.join(work, "a.ts"), "1");
+  git("add", "-A");
+  git("commit", "-qm", "s");
+  const clean = treeState(work);
+  fs.writeFileSync(path.join(work, "a.ts"), "2");
+  git("commit", "-qam", "agent");
+  assert.equal(execFileSync("git", ["-C", work, "status", "--porcelain"], { encoding: "utf8" }), "");
+  assert.notEqual(treeState(work), clean);
+});
+
+test("the context canary reads only receipt objects, and an instructions receipt must name its file", () => {
+  const fine = [init([], ["Read"]), done].join("\n");
+  const hooks = [receipt({ name: "start" }), receipt({ name: "prompt" })].join("\n");
+  for (const bad of ["{}", "[]", "null", "3", receipt({ name: "instructions", memory: "User" })])
+    assert.deepEqual(
+      contextChecks("none", fine, `${hooks}\n${bad}`, "/r/work", false)
+        .filter((c) => !c.ok)
+        .map((c) => c.name),
+      ["every receipt is readable"],
+      bad,
+    );
+});
+
+test("the database canary compares status's count as a number, in its singular form too", () => {
+  assert.equal(statusCounts("Captured: 3 sessions.\nExtracted: 9 active records, 1 candidate", 9), true);
+  assert.equal(statusCounts("Extracted: 19 active records", 9), false);
+  assert.equal(statusCounts("Extracted: 1 active record, 0 candidates", 1), true);
+  assert.equal(statusCounts(null, 0), false);
 });
