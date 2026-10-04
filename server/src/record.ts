@@ -817,6 +817,12 @@ export type Saved = {
   written: { id: number; key: string; hint: Hint; adopted: boolean }[];
 };
 
+/** CI's definitions, or a directory holding them, in any letter case */
+const ciPath = (path: string) => {
+  const p = path.toLowerCase().replace(/\/+$/, "");
+  return p === ".github" || p === ".github/workflows" || p.startsWith(".github/workflows/");
+};
+
 /**
  * Why a quote of the AI's reply cannot adopt for the AI, or null: it must be the AI choosing (decides on the same words), outside a turn
  * that ran a record tool, not about instruction or CI files, and for a "do" on code, after that code changed in the same turn.
@@ -840,9 +846,7 @@ async function agentRefusal(
   )
     return "quote the same words as decides evidence: the AI choosing, not reporting, proposing, or asking";
   const governs = anchors.filter((a) => a.role === "applies_to").map((a) => a.path);
-  const bound = governs.find(
-    (path) => instructionFile(path) || path.toLowerCase().startsWith(".github/workflows/"),
-  );
+  const bound = governs.find((path) => instructionFile(path) || ciPath(path));
   if (bound) return `${bound} holds rules or CI agents follow; only the owner adopts decisions about it`;
   if (
     await db

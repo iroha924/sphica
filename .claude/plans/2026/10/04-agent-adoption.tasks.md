@@ -326,6 +326,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): close the CI case, unsupported claims, and glean adopt check gaps (T32)`
   - 結果: red を 3 件とも実測した（active、「another record in this save already supersedes」で保存全体を拒む、check のエラーなし）。CI のパスは小文字にして比べる。後継が枠を取るかは、decision と constraint は持ち主か maintainer の採用、implementation は `unit_support` と同じコードかコミットの根拠で決める。glean の check の adopt は、その記録のつもりの相手の枠をほかの後継が持っていれば、同じ glean でその後継を取り下げない限り save と同じ文で拒む。`bun run verify` → 終了コード 0（SQL 到達 210/210、受け入れ 127 pass）
 
+- [x] T33: T32 のレビュー指摘のうち CI のディレクトリそのものを指す anchor を直す
+  - 種別: 修正
+  - 計画: S7
+  - 依存: T32（直す対象の CI のパスの判定）
+  - 変更: `server/src/record.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="CI's directory itself" test/record.test.ts` → 直す前は `.github/workflows` と `.github` を指す AI の採用が active になる
+  - 完了条件: `cd server && node --test --test-name-pattern="agent adoption|successor place" test/record.test.ts` → pass
+  - コミット: `fix(record): treat CI's directories as CI paths for the AI's adoption (T33)`
+  - 結果: red を実測した。`ciPath` で、大文字小文字と末尾の `/` によらず `.github`・`.github/workflows` とその下を CI のパスとする。`node --test --test-name-pattern="agent adoption|successor place" test/record.test.ts` → 15 pass。`bun run verify` → 終了コード 0（受け入れ 127 pass）。同じレビューの F2〜F5（check の予測と save の結果がずれる境界）は、レビューの回が収束しないので持ち主に相談し、直さずに出すと決まった（PR の Declined findings に残す）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -369,3 +379,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T30 / T28・T10・T11・T29 の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T30 を足した
 - 2026-10-04 / T31 / T13・T14 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T31 を足した。review-shipping の指摘 2（hook の取りこぼし 1 回で AI の採用がプロジェクトごとずっと止まる）は Codex と議論し、plan どおり止めたままにして README に書いた
 - 2026-10-04 / T32 / ブランチ全体の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T32 を足した
+- 2026-10-05 / T33 / T32 の Codex のレビュー（F1〜F5 すべて P2）を受け、F1 だけを修正タスク T33 にした。F2〜F5 は持ち主の判断で直さずに出す

@@ -2418,20 +2418,21 @@ test("agent adoption: glean takes no decides evidence, since only a trace pairs 
   }
 });
 
-test("agent adoption: a CI path written in other letter case is still a CI path", async () => {
+test("agent adoption: a CI path written in other letter case, or CI's directory itself, is still a CI path", async () => {
   const db = tempDb();
   try {
     const p = project(db);
     const { reply, save } = await agentBench(db, p);
-    const r = reply("t1:assistant", "t1", "I keep the CI check disabled.");
+    const paths = [".github/WORKFLOWS/check.yml", ".github/workflows", ".github"];
     const out = await save({
-      units: [
-        aiDecision("ci", r, "I keep the CI check disabled.", {
-          anchors: [{ path: ".github/WORKFLOWS/check.yml", role: "applies_to" }],
-        }),
-      ],
+      units: paths.map((path, n) => {
+        const r = reply(`t${n}:assistant`, `t${n}`, `I keep the CI check ${n} disabled.`);
+        return aiDecision(`ci-${n}`, r, `I keep the CI check ${n} disabled.`, {
+          anchors: [{ path, role: "applies_to" }],
+        });
+      }),
     });
-    assert.equal(lifeOf(db, "ci"), "candidate");
+    for (const n of [0, 1, 2]) assert.equal(lifeOf(db, `ci-${n}`), "candidate", paths[n]);
     assert.match(out, /holds rules or CI agents follow/);
   } finally {
     await db.done();
