@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { contextChecks, permissionChecks, statusCounts } from "../evals/cloud/canary-check.ts";
+import { contextChecks, permissionChecks, SPHICA_TOOLS, statusCounts } from "../evals/cloud/canary-check.ts";
 import {
   DENY_DIRS,
   DENY_FILES,
@@ -15,6 +15,7 @@ import {
   runEnv,
   runMcp,
   runSettings,
+  slotMatcher,
   treeState,
   treeWatcher,
 } from "../evals/cloud/claude-run.ts";
@@ -343,7 +344,7 @@ const receipt = (o: Record<string, unknown>) => JSON.stringify(o);
 
 test("the context canary checks the condition's servers, tools, hooks, and that only the checkout's instructions loaded", () => {
   const work = "/r/work";
-  const searchInit = init([{ name: "sphica", status: "connected" }], ["Read", "mcp__sphica__search"]);
+  const searchInit = init([{ name: "sphica", status: "connected" }], ["Read", ...SPHICA_TOOLS]);
   const hooks = [receipt({ name: "start" }), receipt({ name: "prompt" })].join("\n");
   assert.deepEqual(
     contextChecks("search", [searchInit, done].join("\n"), hooks, work, false).filter((c) => !c.ok),
@@ -909,4 +910,126 @@ test("a mark taken while another call was in flight, before the first change, le
     searchedBeforeEdit(noChange, [mark("w", false, ["b"]), mark("b", false)].join("\n")),
     "unknown",
   );
+});
+
+test("the tree state sees ignored files and never reads through a link the agent made", (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "eval-state-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "eval-outside-"));
+  t.after(() => {
+    fs.rmSync(work, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+  const git = (...a: string[]) =>
+    execFileSync("git", ["-C", work, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a]);
+  git("init", "-q");
+  fs.writeFileSync(path.join(work, ".gitignore"), "docs/\n");
+  git("add", "-A");
+  git("commit", "-qm", "s");
+  const clean = treeState(work);
+  fs.mkdirSync(path.join(work, "docs"));
+  fs.writeFileSync(path.join(work, "docs", "install.md"), "npm install\n");
+  const ignored = treeState(work);
+  assert.notEqual(ignored, clean, "a file written under an ignored path changes the state");
+  // A link to a file outside: changing the target must not change the state, since the target is never read
+  const secret = path.join(outside, "secret.txt");
+  fs.writeFileSync(secret, "one");
+  fs.symlinkSync(secret, path.join(work, "link"));
+  const linked = treeState(work);
+  assert.notEqual(linked, ignored, "the link itself is seen");
+  fs.writeFileSync(secret, "two");
+  assert.equal(treeState(work), linked, "the link's target is not read");
+});
+
+test("the context canary wants every Sphica tool where the condition has them, not just search", () => {
+  const hooks = [JSON.stringify({ name: "start" }), JSON.stringify({ name: "prompt" })].join("\n");
+  const only = [init([{ name: "sphica", status: "connected" }], ["Read", "mcp__sphica__search"]), done].join(
+    "\n",
+  );
+  assert.deepEqual(
+    contextChecks("search", only, hooks, "/r/work", false)
+      .filter((c) => !c.ok)
+      .map((c) => c.name),
+    ["Sphica's tools only where the condition has them"],
+  );
+});
+
+test("a local run takes the delivery matcher from its slot, not from the checkout running it", (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "eval-matcher-"));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  assert.equal(slotMatcher(work), "", "a slot without settings delivers nothing");
+  fs.mkdirSync(path.join(work, ".claude"));
+  fs.writeFileSync(
+    path.join(work, ".claude", "settings.json"),
+    JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Edit|Read|OldTool", hooks: [] }] } }),
+  );
+  assert.equal(slotMatcher(work), "Edit|Read|OldTool");
+});
+
+test("collect with a local plan keeps the planned runs, and keeps runs past the plan, unplanned runs, and missing runs as excluded", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  const claude = path.join(base, "claude");
+  fs.mkdirSync(build);
+  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  const run = (name: string, task: string, at: string) => {
+    const dir = path.join(claude, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const head = { task, condition: "search", at };
+    fs.writeFileSync(path.join(dir, "started.json"), JSON.stringify(head));
+    fs.writeFileSync(
+      path.join(dir, "result.json"),
+      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+    );
+    fs.writeFileSync(path.join(dir, "events.jsonl"), [use("a", "Read"), result("a", "x"), done].join("\n"));
+    fs.writeFileSync(path.join(dir, "answer.md"), "a");
+    fs.writeFileSync(path.join(dir, "patch.diff"), "");
+  };
+  run("r1", "pilot-sort", "2026-10-04T00:00:01.000Z");
+  run("r2", "pilot-sort", "2026-10-04T00:00:02.000Z");
+  run("r3", "pilot-sort", "2026-10-04T00:00:03.000Z");
+  run("x1", "pilot-dates", "2026-10-04T00:00:04.000Z");
+  const plan = path.join(base, "plan.json");
+  fs.writeFileSync(
+    plan,
+    JSON.stringify([
+      { model: "claude", task: "pilot-sort", condition: "search", n: 2 },
+      { model: "claude", task: "superseded-install", condition: "search", n: 1 },
+    ]),
+  );
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+      "--build",
+      build,
+      "--codex",
+      path.join(base, "none"),
+      "--claude",
+      claude,
+      "--logs",
+      base,
+      "--no-cloud",
+      "--local-plan",
+      plan,
+    ],
+    { encoding: "utf8", env: { ...process.env, HOME: base } },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const rows = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+    run: string;
+    task: string;
+    excluded: string | null;
+  }[];
+  assert.deepEqual(rows.map((x) => [x.run, x.task, x.excluded]).sort(), [
+    ["planned#1", "superseded-install", "planned but not run"],
+    ["r1", "pilot-sort", null],
+    ["r2", "pilot-sort", null],
+    ["r3", "pilot-sort", "beyond the planned runs"],
+    ["x1", "pilot-dates", "not in the local plan"],
+  ]);
 });

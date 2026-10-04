@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
-import { claimRunDir, isolatedCodexHome } from "./codex-home.ts";
+import { claimRunDir, codexModelOf, isolatedCodexHome } from "./codex-home.ts";
 import { readPlan, readTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
@@ -81,6 +81,8 @@ try {
       ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
       : "";
   isolatedCodexHome(codexHome, mcp);
+  // Recorded so a comparison can refuse two builds run by different Codex models
+  result.codex_model = codexModelOf(codexHome);
 
   // Inject runs the shipped delivery hooks against the slot's database copy; gold goes through a prompt hook too, so both arrive as the
   // developer context a plugin hook gives (plugin/hooks/codex.json), not as part of the prompt

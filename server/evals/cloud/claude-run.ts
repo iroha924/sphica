@@ -7,10 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openReader } from "../../src/db.ts";
-import { shippedMatcher } from "./build-lib.ts";
 import { claimRunDir } from "./codex-home.ts";
-
-const ROOT = path.join(import.meta.dirname, "..", "..", "..");
 
 type Hook = { type: "command"; command: string; args: string[]; timeout: number };
 type HookEntry = { matcher?: string; hooks: Hook[] };
@@ -182,6 +179,18 @@ export function finalAnswer(events: string): { result: string; is_error: boolean
     .at(-1);
 }
 
+/** The delivery hook's matcher in the slot's own settings, as the build wrote it; empty when the slot delivers nothing. */
+export function slotMatcher(work: string): string {
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(work, ".claude", "settings.json"), "utf8")) as {
+      hooks?: { PreToolUse?: { matcher?: string }[] };
+    };
+    return settings.hooks?.PreToolUse?.[0]?.matcher ?? "";
+  } catch {
+    return "";
+  }
+}
+
 type RunResult = {
   run: string;
   build: string | undefined;
@@ -246,6 +255,8 @@ export async function runClaude(o: {
     ]);
     // The slot's own settings carry the cloud's hooks (one commits and pushes); the run's settings come from --settings instead, while
     // project sources stay on so the checkout's CLAUDE.md loads as it does in the cloud
+    // The delivery matcher is the one the build wrote into its slot, so old and new builds fire on the tools each was built with
+    const matcher = slotMatcher(work);
     for (const [rel, body] of Object.entries(o.plant ?? {})) fs.writeFileSync(path.join(work, rel), body);
     if (fs.existsSync(path.join(work, ".claude", "settings.json")))
       execFileSync("git", ["-C", work, "rm", "-q", ".claude/settings.json"]);
@@ -269,10 +280,7 @@ export async function runClaude(o: {
     const paths = { run: dir, work, tools, db };
     const settings = path.join(dir, "settings.json");
     const mcp = path.join(dir, "mcp.json");
-    fs.writeFileSync(
-      settings,
-      `${JSON.stringify(runSettings(o.condition, paths, shippedMatcher(ROOT)), null, 2)}\n`,
-    );
+    fs.writeFileSync(settings, `${JSON.stringify(runSettings(o.condition, paths, matcher), null, 2)}\n`);
     fs.writeFileSync(mcp, `${JSON.stringify(runMcp(o.condition, paths), null, 2)}\n`);
     const env = runEnv(process.env);
     // After each tool result the work tree is looked at, so the first change can be tied to the call that made it; the start state is
@@ -366,13 +374,25 @@ export async function runClaude(o: {
  * exactly when a file changed between them.
  */
 export function treeState(work: string): string {
+  // Ignored files count too (an answer written under an ignored docs/ is part of the patch), but not the slot's scaffolding or installed
+  // dependencies, the same set patchSince leaves out
   const status = execFileSync(
     "git",
-    ["-C", work, "status", "--porcelain=v1", "-z", "-uall", "--", ".", ":(exclude,glob)**/node_modules/**"],
-    {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    },
+    [
+      "-C",
+      work,
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "-uall",
+      "--ignored=traditional",
+      "--",
+      ".",
+      ":!.tools",
+      ":!.eval",
+      ":(exclude,glob)**/node_modules/**",
+    ],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
   const entries = status.split("\0").filter(Boolean).sort();
   const hash = crypto.createHash("sha256");
@@ -382,7 +402,10 @@ export function treeState(work: string): string {
     hash.update(e);
     const file = path.join(work, e.slice(3));
     try {
-      if (fs.statSync(file).isFile()) hash.update(fs.readFileSync(file));
+      // Never follow a link: the agent may point one at a file outside the checkout, which this unsandboxed process could read
+      const st = fs.lstatSync(file);
+      if (st.isSymbolicLink()) hash.update(`link:${fs.readlinkSync(file)}`);
+      else if (st.isFile()) hash.update(fs.readFileSync(file));
     } catch {}
   }
   return hash.digest("hex");
