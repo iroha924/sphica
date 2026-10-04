@@ -84,13 +84,14 @@ base: feat/issue-206-eval-base
 
 baseline と各 variant をローカルで回して各 G を判定し、通った G の組み合わせを測り直して、出すものを決める。
 
-- [ ] T08: report の比較に各 G のバーと共通の回帰の判定を足す
+- [x] T08: report の比較に各 G のバーと共通の回帰の判定を足す
   - 種別: 追加
   - 計画: S8
   - 依存: なし
   - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → `--compare --bar <g1a|g3|g4|g6>` が plan のバーどおりに「通過 / 未達 / 判定不能」を出し、共通の回帰を全回帰セルで判定するテストが pass
   - コミット: `feat(evals): judge each experiment's bar and the shared regression rule (T08)`
+  - 結果: `node --test test/eval-grade.test.ts` → pass 47, fail 0（G3 の通過・逆向きのモデルで未達・有効 run 不足で判定不能、G4 は old が汚染の記録を届けたときだけ判定、回帰は 0.3 を超える低下で未達）
 
 - [ ] T09: baseline と各 variant を回し、通った G の組み合わせを測り直して、通らなかった G を戻し、バージョンを揃える
   - 種別: 変更
@@ -104,3 +105,5 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
 - 2026-10-04 / T02 / ラベルで 1 行が 60 字ほど長くなり、上限ちょうどの配信では入る件数が減る（既存テストで 5 件が 4 件に）/ G1a の代償として、測定の回帰のセルで見る。gold も同じ形で、スロットのファイルに対して描く（build.ts の goldText に root を渡す）。judge.ts と eval-grade は変えずに済んだ（変更欄 前: judge.ts・eval-grade.test.ts を含む、後: 外した）
+- 2026-10-04 / T08 / 判定の数え方: G1a は stale-thumb と abstention-shelf をモデルごとにまとめて有効 8 以上 / 10、失敗は score 0 か Against をした run。G6 は search スロットの Claude を 2 タスクまとめて、順の分かる run 8 以上 / 10。回帰は inject の各セル（タスク × モデル）で有効 2 以上
+- 2026-10-04 / T09 / run 数を絞った: 回帰タスク（tsundoku の既存 7 件、inject 3 run）は baseline と最終の組み合わせだけで回し、各 G の variant では対象タスクだけを回す。G1b と G2 はオフラインで判定し、エージェントでの影響は最終の組み合わせの回帰で見る（plan の「各 G で共通の回帰」から変更。出すのは最終の組み合わせなので、それを回帰で確かめれば足りる）
