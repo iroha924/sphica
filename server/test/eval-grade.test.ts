@@ -1698,11 +1698,11 @@ test("compare puts old and new side by side only for the same fixture and tasks,
   assert.match(lines, /^# new: c2 \{"deliver\.js":"new"\}$/m);
   assert.match(
     lines,
-    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2, conflict handled -, searched before editing - \| new n 2\/2, mean 2\.00, re-proposed 1\/2, conflict handled -, searched before editing 1\/1$/m,
+    /^t1 codex inject: old n 2\/2, mean 0\.50, re-proposed 0\/2, conflict handled -, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\) \| new n 2\/2, mean 2\.00, re-proposed 1\/2, conflict handled -, searched before editing 1\/1 told \(unknown 1, no edit 0, of 2\)$/m,
   );
   assert.match(
     lines,
-    /^t2 codex inject: old n 2\/3, mean 1\.00, re-proposed 0\/2, conflict handled 0\/2, searched before editing - \| new n 2\/3, mean 2\.00, re-proposed 0\/2, conflict handled 1\/2, searched before editing -$/m,
+    /^t2 codex inject: old n 2\/3, mean 1\.00, re-proposed 0\/2, conflict handled 0\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\) \| new n 2\/3, mean 2\.00, re-proposed 0\/2, conflict handled 1\/2, searched before editing 0\/0 told \(unknown 0, no edit 0, of 2\)$/m,
   );
   assert.throws(() => compare(old, { ...next, fixture: "g" }, []), /different fixtures/);
   assert.throws(() => compare({ ...old, fixture: undefined }, next, []), /different fixtures/);

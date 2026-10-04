@@ -275,10 +275,8 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
         (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
         (r) => r.grade?.named_conflict !== "not_applicable",
       )}`,
-      `searched before editing ${share(
-        (r) => r.search_before_edit === "yes",
-        (r) => r.search_before_edit === "yes" || r.search_before_edit === "no",
-      )}`,
+      // Over every graded run: a run whose order cannot be told is counted apart, never dropped from the denominator
+      `searched before editing ${graded.filter((r) => r.search_before_edit === "yes").length}/${graded.filter((r) => r.search_before_edit === "yes" || r.search_before_edit === "no").length} told (unknown ${graded.filter((r) => r.search_before_edit === "unknown").length}, no edit ${graded.filter((r) => r.search_before_edit === "no_edit").length}, of ${graded.length})`,
     ].join(", ");
   };
   for (const k of keys)

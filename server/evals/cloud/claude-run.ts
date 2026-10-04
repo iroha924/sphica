@@ -42,13 +42,8 @@ const hook = (args: string[], timeout: number): Hook => ({
 });
 
 /** The settings file of one run. The shipped delivery matcher is passed in so inject fires on the tools the plugin does. */
-export function runSettings(
-  condition: string,
-  p: RunPaths,
-  deliverMatcher: string,
-  deny: string[] = [],
-): Record<string, unknown> {
-  const dirs = [...DENY_DIRS, ...deny];
+export function runSettings(condition: string, p: RunPaths, deliverMatcher: string): Record<string, unknown> {
+  const dirs = DENY_DIRS;
   const receipt = (name: string, ...command: string[]) =>
     hook([path.join(p.tools, "hook.sh"), name, ...command], 60);
   const deliver = (name: string) =>
@@ -69,6 +64,9 @@ export function runSettings(
     hooks.UserPromptSubmit = [{ hooks: [receipt("gold", "sh", path.join(p.tools, "gold.sh"))] }];
   return {
     permissions: {
+      // Nothing outside the checkout is readable by the file tools or the sandboxed shell: not other runs, not the build's gold, not files
+      // of the owner's that no list below names
+      blockReadsOutsideWorkingDirectories: true,
       // acceptEdits asks before any MCP call, and a run has no one to answer: Sphica's tools are allowed where the condition has them
       allow: condition === "search" || condition === "inject" ? ["mcp__sphica"] : [],
       deny: [
@@ -200,8 +198,7 @@ type RunResult = {
 
 /**
  * One local Claude run: a fresh clone of the slot, its own database copy and receipts, and claude -p fenced by the sandbox and acceptEdits.
- * Nothing is committed to the slot or pushed: the patch is the diff from the clone's starting commit. `deny` adds paths the run may not
- * read or write (the canary's sentinel).
+ * Nothing is committed to the slot or pushed: the patch is the diff from the clone's starting commit.
  */
 export async function runClaude(o: {
   build: string;
@@ -213,7 +210,6 @@ export async function runClaude(o: {
   prompt: string;
   out: string;
   model: string;
-  deny?: string[];
   /** Files committed into the clone before the run starts (the canary's positive control) */
   plant?: Record<string, string>;
 }): Promise<{ dir: string; result: RunResult }> {
@@ -275,7 +271,7 @@ export async function runClaude(o: {
     const mcp = path.join(dir, "mcp.json");
     fs.writeFileSync(
       settings,
-      `${JSON.stringify(runSettings(o.condition, paths, shippedMatcher(ROOT), o.deny ?? []), null, 2)}\n`,
+      `${JSON.stringify(runSettings(o.condition, paths, shippedMatcher(ROOT)), null, 2)}\n`,
     );
     fs.writeFileSync(mcp, `${JSON.stringify(runMcp(o.condition, paths), null, 2)}\n`);
     const env = runEnv(process.env);

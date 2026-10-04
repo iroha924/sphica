@@ -23,6 +23,7 @@ import {
   goldSignalsFromClaude,
   goldSignalsFromClaudeStream,
   goldSignalsFromCodex,
+  lookedOutside,
   presentedText,
   searchedBeforeEdit,
   searchLoading,
@@ -415,6 +416,24 @@ function main() {
       // An inject run whose hooks logged nothing at all never had Sphica delivering
       if (result.condition === "inject" && !result.deliveries?.length) {
         rows.push(excludedRow(model, result.task, result.condition, name, "inject run with no delivery log"));
+        continue;
+      }
+      // A run that reached another run, the build, or the evaluation cache may have read answers or gold records it was not given
+      const own = [dir, fs.realpathSync(dir)];
+      const places = [build, path.resolve(runs), CACHE].flatMap((p) => [
+        p,
+        fs.existsSync(p) ? fs.realpathSync(p) : p,
+      ]);
+      if (lookedOutside(read("events.jsonl"), own, places)) {
+        rows.push(
+          excludedRow(
+            model,
+            result.task,
+            result.condition,
+            name,
+            "looked outside its checkout (other runs, the build, or the evaluation cache)",
+          ),
+        );
         continue;
       }
       const task = plan.tasks.find((t) => t.id === result.task);

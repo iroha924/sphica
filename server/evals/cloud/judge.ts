@@ -380,7 +380,9 @@ export function searchedBeforeEdit(
   if (JSON.stringify(parsed.map((m) => m.after)) !== JSON.stringify(answered)) return "unknown";
   const at0 = parsed.findIndex((m) => m.changed);
   // A mark read late may have missed a change a later call undid, so no late mark up to the first change can be trusted
-  if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late)) return "unknown";
+  // Likewise a mark taken while another call was in flight: a change and its undoing may both have happened unseen
+  if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late || m.in_flight.length))
+    return "unknown";
   const first = parsed[at0];
   if (!first) return "no_edit";
   if (first.in_flight.length) return "unknown";
@@ -403,6 +405,20 @@ export function searchLoading(events: string | null): "deferred" | "loaded" | "u
     .slice(0, first)
     .some((c) => c.name === "ToolSearch" && c.result !== null && c.result.includes("mcp__sphica__search"));
   return handed ? "deferred" : "loaded";
+}
+
+/**
+ * Whether a run's stream shows it reached outside its own run directory into the evaluation's other places: another run, the build (its
+ * gold records), or the evaluation cache. The run's own paths are taken out first; any of the places still named in a command, a tool's
+ * input, or what came back means the run saw them. Codex has no read fence, so this is how a run that looked is kept out of the results.
+ */
+export function lookedOutside(events: string | null, own: string[], places: string[]): boolean {
+  if (events === null) return false;
+  let text = events;
+  // JSON escapes the slashes of a path only in some writers; match both spellings
+  const spellings = (p: string) => [p, p.replaceAll("/", "\\/")];
+  for (const o of own.flatMap(spellings).sort((a, b) => b.length - a.length)) text = text.replaceAll(o, "");
+  return places.flatMap(spellings).some((p) => p && text.includes(p));
 }
 
 /**

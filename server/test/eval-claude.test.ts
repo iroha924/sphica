@@ -22,6 +22,7 @@ import {
   claudeStreamCalls,
   foundInClaudeStream,
   goldSignalsFromClaudeStream,
+  lookedOutside,
   searchedBeforeEdit,
   searchLoading,
 } from "../evals/cloud/judge.ts";
@@ -45,6 +46,8 @@ test("every condition runs fenced: sandbox on with no way out, the owner's secre
     assert.equal(s.sandbox.enabled, true);
     assert.equal(s.sandbox.allowUnsandboxedCommands, false);
     assert.equal(s.sandbox.failIfUnavailable, true);
+    // Reads stop at the checkout for the file tools and the shell alike, not only at the listed credential paths
+    assert.equal((s.permissions as Record<string, unknown>).blockReadsOutsideWorkingDirectories, true);
     assert.equal(s.sandbox.excludedCommands, undefined);
     for (const secret of [".ssh", ".claude", ".codex", ".sphica"]) {
       const full = path.join(os.homedir(), secret);
@@ -851,6 +854,57 @@ test("events without their message, results of the wrong shape, and marks out of
   );
   assert.equal(
     searchedBeforeEdit(calls, [mark("w", true), mark("s", false), mark("b", true)].join("\n")),
+    "unknown",
+  );
+});
+
+test("a run that named another run, the build, or the evaluation cache is caught, while its own paths are not", () => {
+  const own = ["/c/claude-runs/r1"];
+  const places = ["/c/builds/b", "/c/claude-runs", "/c"];
+  const cmd = (c: string) => ev({ type: "item.started", item: { type: "command_execution", command: c } });
+  assert.equal(
+    lookedOutside([cmd("cat /c/claude-runs/r1/work/src/a.ts"), done].join("\n"), own, places),
+    false,
+  );
+  assert.equal(lookedOutside([cmd("rg --files /c/claude-runs -g answer.md")].join("\n"), own, places), true);
+  assert.equal(
+    lookedOutside([cmd("cat /c/builds/b/eval-shelf-4/.tools/gold.json")].join("\n"), own, places),
+    true,
+  );
+  // A result that lists another run's files counts too, in either slash spelling
+  assert.equal(
+    lookedOutside(ev({ out: "/c/claude-runs/r2/answer.md" }).replaceAll("/", "\\/"), own, places),
+    true,
+  );
+  assert.equal(lookedOutside(null, own, places), false);
+});
+
+test("a mark taken while another call was in flight, before the first change, leaves the order unknown", () => {
+  const mark = (after: string, changed: boolean, inFlight: string[] = []) =>
+    JSON.stringify({ after, changed, in_flight: inFlight, late: false });
+  const events = [
+    use("w", "Write"),
+    use("b", "Bash"),
+    result("w", "ok"),
+    result("b", "restored"),
+    use("s", "mcp__sphica__search"),
+    result("s", "No record holds most of"),
+    use("w2", "Write"),
+    result("w2", "ok"),
+    done,
+  ].join("\n");
+  assert.equal(
+    searchedBeforeEdit(
+      events,
+      [mark("w", false, ["b"]), mark("b", false), mark("s", false), mark("w2", true)].join("\n"),
+    ),
+    "unknown",
+  );
+  const noChange = [use("w", "Write"), use("b", "Bash"), result("w", "ok"), result("b", "x"), done].join(
+    "\n",
+  );
+  assert.equal(
+    searchedBeforeEdit(noChange, [mark("w", false, ["b"]), mark("b", false)].join("\n")),
     "unknown",
   );
 });

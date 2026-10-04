@@ -131,7 +131,7 @@ approved_at: 2026-10-04
 - A1: `bun run verify` → 0 で終わる
 - A2: `cd server && node --test test/eval-*.test.ts` → 全件 pass（canary の settings、編集の判定、衝突の採点、compare の拒否を含む）
 - A3: `node evals/cloud/claude.ts --canary --build <build>` → 権限・文脈・DB の全項目が blocked / matched と出て 0 で終わる
-- A4: `node evals/cloud/claude.ts --build <build> --repo eval-shelf-3 --task <stale|conflict|poisoned-delivered の各 id>` と `node evals/cloud/codex.ts` を同じ 3 タスクで 1 run ずつ流してから `node evals/cloud/collect.ts --build <build>` → loop.json の各 run の deliveries にそのタスクの gold の記録が入っている
+- A4: `node evals/cloud/claude.ts --build <build> --repo <inject のスロット> --task <stale-thumb|conflict-cover|poisoned-backup>` と `node evals/cloud/codex.ts` を同じ 3 タスクで 1 run ずつ流してから `node evals/cloud/collect.ts --build <build> --no-cloud` → stale-thumb と poisoned-backup の run は配信にその記録（width、upload）が入り、conflict-cover の run には retry・no-retry のどちらも入らない
 - A5: `node evals/cloud/report.ts --compare <a>/grades.json <b>/grades.json` → fixture のハッシュが違う 2 つなら 0 以外で拒否し、同じなら old と new の表を別々に出す
 - A6: `bun run release:plan -- --base <最新のリリースのコミット>` → none
 
@@ -147,3 +147,5 @@ approved_at: 2026-10-04
 なし
 
 ## 変更履歴
+- 2026-10-04 / A4 の期待を「stale と poisoned-delivered は gold が配信に入り、conflict の 2 件は入らない」に直した / 今の配信は未解決の衝突の 2 件を外す設計で、conflict の gold が old で届かないのが G3 の前提のため / Go 不要（測る対象と範囲は変わらない）
+- 2026-10-04 / 評価用のスクリプトなので、タスクごとの再レビューは T20 までで打ち切り、差分全体のレビューを P1・セキュリティ・測定を歪める欠陥に絞った / 指摘が P2 の作り込みの入力に移り、収束しなかったため / Go 不要
