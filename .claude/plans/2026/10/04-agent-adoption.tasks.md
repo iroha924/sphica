@@ -93,6 +93,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): judge the successor place in one view and follow it everywhere (T18)`
   - 結果: red を実測（3 件とも上の理由で fail）。直した後 3 件 pass。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）。overview に一度足した予備の問い合わせは、superseded の記録には必ず枠を使う後継があり届かないので消した
 
+- [x] T19: T18 のレビュー指摘を直す（持ち主の判断の後継の枠を active になった後継だけにし、採用の撤回でも元の判断を戻す。search と read を合わせる）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T18（直す対象の view）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/record.ts`, `server/src/search.ts`, `server/src/read.ts`, `server/test/record.test.ts`, `.claude/plans/2026/10/04-agent-adoption.plan.md`
+  - red: `cd server && node --test --test-name-pattern="adoption is taken back|search and read name only|order of a waiting proposal" test/record.test.ts` → 採用の撤回で元の判断が superseded のまま、取り下げた後継が `liveSuccessors` に残り、[持ち主の後継, 提案] の順で持ち主の後継が拒まれて落ちる
+  - 完了条件: 同じコマンド → pass。`bun run verify` → 終了コード 0
+  - コミット: `fix(record): let only an active successor hold the owner's decision's place (T19)`
+  - 結果: red を実測（3 件とも上の理由で fail）。直した後 3 件 pass、T04・T18 の後継の枠のテストも pass。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）。read は待っている提案を「Replacement proposed by ...」と分けて出す
+
 - [ ] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
   - 種別: 追加
   - 計画: S4
@@ -198,5 +208,5 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T16 / T02 の Codex のレビュー（F1 P1: 結べなかった呼び出しで最初の返事のターンしか外さず、plan の方針 2 の「結べるまで止める」より緩かった。F2 P2: `begin_call_id` が別プロジェクトの呼び出しを指せ、その対話の判定を借りられた）を両方受け、修正タスク T16 を足して直した。T06 の依存に T16 を足した（前: T03, T05 → 後: T03, T05, T16）
 - 2026-10-04 / T17 / T03 の Codex のレビュー（F1: T02 の F1 と同じで T16 で直し済み。F2 P2: MCP の SDK が入力の形で拒んだ呼び出しは `record_call` に残らない）。F2 を受けて修正タスク T17 を足した。Codex の拒まれた呼び出しは記録できないので plan のリスクに足した
 - 2026-10-04 / T04 / 保存時に拒む形が glean の後採用の流れを壊した（既存テスト 3 件の退行）。Codex と比べ、持ち主が C′ を選んだ。T04 の題名・変更欄・red・完了条件・コミットを C′ に書き直した（前: record.ts で同じ保存の持ち主の採用を求める → 後: 配信と後継の枠で効き目を止める）
-
 - 2026-10-04 / T18 / T04 の Codex のレビュー（F1 P1: 取り下げからの復帰が待っている候補を後継と数えた。F2 P2: 同じ保存で待っている候補が枠を予約した。F3 P2: overview が待っている候補を後継と案内した）を 3 件とも受け、修正タスク T18 を足した
+- 2026-10-04 / T19 / T18 の Codex のレビュー（F1 P1: 採用済みの候補を active 化の確認が見落とし後継が 2 つ並ぶ。F2 P1: 採用の撤回で元の判断が戻らない。F3 P2: 同じ保存で順番に依存。F4 P2: liveSuccessors が取り下げた後継を返す。F5 P2: read が待っている提案も Superseded by と出す）を 5 件とも受けた。場当たりに直さず、枠を「active になった後継だけ」に単純にした（plan の方針 5 を更新）

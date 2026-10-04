@@ -30,6 +30,7 @@ import {
   refresh,
   repoFacts,
 } from "../src/repo-facts.ts";
+import { liveSuccessors } from "../src/search.ts";
 import {
   callSession,
   liveUnits,
@@ -1900,6 +1901,155 @@ test("owner decision protected: in one save, a proposal waiting as a candidate d
       units: [
         decided("postgres", ai, "Postgres のほうが良さそう", false, { supersedes: "trace:ext-s1/sqlite" }),
         decided("duckdb", b, "DuckDB に移す", true, { supersedes: "trace:ext-s1/sqlite" }),
+      ],
+    });
+    assert.deepEqual(saved.superseded, ["trace:ext-s1/sqlite"]);
+  } finally {
+    await db.done();
+  }
+});
+
+// The owner's decision O, with successors written straight to the database: each line is one state the unit goes through
+const successors = (db: TempDb, p: number) => {
+  const owner = message(db, p, { id: "o9", text: "Use SQLite." });
+  const ai = message(db, p, { id: "a9", text: "Use Postgres.", speaker: "assistant" });
+  const runId = Number(
+    (
+      db.owner
+        .prepare(
+          "insert into extraction_run (project_id, origin, target, status, started_at) values (?, 'trace', 'session:s1', 'running', ?) returning id",
+        )
+        .get(p, now) as { id: number }
+    ).id,
+  );
+  const exec = (sql: string, ...a: (string | number | null)[]) => db.owner.prepare(sql).run(...a);
+  const state = (u: number, from: string | null, to: string) =>
+    exec(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', ?)",
+      u,
+      from,
+      to,
+      now,
+      runId,
+    );
+  const decided = (key: string, adopt: boolean) => {
+    const u = Number(
+      (
+        db.owner
+          .prepare(
+            "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (?, ?, 'decision', 'do', ?, 'supported', ?, ?, ?) returning id",
+          )
+          .get(p, `trace:ext-s1/${key}`, key, runId, now, hash(key.length)) as { id: number }
+      ).id,
+    );
+    exec(
+      "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (?, ?, 0, 3, 'states', ?, ?)",
+      u,
+      adopt ? owner : ai,
+      runId,
+      now,
+    );
+    if (adopt)
+      exec(
+        "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (?, 'owner_statement', ?, 0, 3, ?, ?)",
+        u,
+        owner,
+        runId,
+        now,
+      );
+    state(u, null, "candidate");
+    return u;
+  };
+  const link = (from: number, to: number) =>
+    exec(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'supersedes', ?, ?)",
+      from,
+      to,
+      runId,
+      now,
+    );
+  const life = (u: number) =>
+    (db.owner.prepare("select lifecycle from unit where id = ?").get(u) as { lifecycle: string }).lifecycle;
+  return { owner, decided, link, state, life, exec };
+};
+
+test("successor place: the owner's decision comes back when its successor's adoption is taken back", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { owner, decided, link, state, life, exec } = successors(db, p);
+    const o = decided("sqlite", true);
+    state(o, "candidate", "active");
+    const s = decided("duckdb", true);
+    link(s, o);
+    state(s, "candidate", "active");
+    state(o, "active", "superseded");
+    // Taking back its only adoption moves the successor back to candidate; the place it held is free again
+    state(s, "active", "candidate");
+    exec(
+      "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?",
+      now,
+      owner,
+      s,
+    );
+    assert.equal(life(o), "candidate");
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: search and read name only the successor that replaced the owner's decision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, state } = successors(db, p);
+    const o = decided("sqlite", true);
+    state(o, "candidate", "active");
+    link(decided("postgres", false), o);
+    const gone = decided("mysql", true);
+    link(gone, o);
+    state(gone, "candidate", "active");
+    state(o, "active", "superseded");
+    state(gone, "active", "withdrawn");
+    state(o, "candidate", "active");
+    const now2 = decided("duckdb", true);
+    link(now2, o);
+    state(now2, "candidate", "active");
+    state(o, "active", "superseded");
+    assert.deepEqual(
+      (await liveSuccessors(db.reader, o)).map((n) => n.key),
+      ["trace:ext-s1/duckdb"],
+    );
+    const text = (await readUnit(db.reader, p, `u${o}`, null)) ?? "";
+    assert.match(text, /Superseded by trace:ext-s1\/duckdb/);
+    assert.doesNotMatch(text, /Superseded by trace:ext-s1\/(postgres|mysql)/);
+    assert.match(text, /Replacement proposed by trace:ext-s1\/postgres \(candidate\)/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("owner decision protected: in one save, the order of a waiting proposal and the owner's successor does not matter", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const ai = message(db, p, { id: "m2", text: "Postgres のほうが良さそうです。", speaker: "assistant" });
+    const b = message(db, p, { id: "m3", text: "DuckDB に移す。" });
+    const decided = (key: string, source: number, quote: string, adopt: boolean, extra = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...(adopt ? { adoption: [{ source: `s${source}`, quote }] } : {}),
+      ...extra,
+    });
+    await save(db, target(p), { units: [decided("sqlite", a, "SQLite にする", true)] });
+    const { saved } = await save(db, target(p), {
+      units: [
+        decided("duckdb", b, "DuckDB に移す", true, { supersedes: "trace:ext-s1/sqlite" }),
+        decided("postgres", ai, "Postgres のほうが良さそう", false, { supersedes: "trace:ext-s1/sqlite" }),
       ],
     });
     assert.deepEqual(saved.superseded, ["trace:ext-s1/sqlite"]);

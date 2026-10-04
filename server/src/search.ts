@@ -197,8 +197,8 @@ export async function liveSuccessors(db: Reads, id: number): Promise<Successor[]
       .where("l.to_unit", "in", frontier)
       .where("l.kind", "=", "supersedes")
       .where("n.extraction", "=", "supported")
-      // A replacement never adopted (still a candidate) is not what holds now
-      .where("n.lifecycle", "<>", "candidate")
+      // Only a replacement that became active is what holds now: one never adopted, or withdrawn, is not
+      .where("n.lifecycle", "in", ["active", "superseded"])
       .select([
         "l.to_unit",
         "n.id",

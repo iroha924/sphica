@@ -143,7 +143,22 @@ async function describe(
       .innerJoin("unit as b", "b.id", "l.to_unit")
       .where((eb) => eb.or([eb("l.from_unit", "=", u.id), eb("l.to_unit", "=", u.id)]))
       .where("l.added_at", "<=", asOf ?? "9999")
-      .select(["l.kind", "l.resolved_at", "a.id as from_id", "a.key as from_key", "b.key as to_key"])
+      .select((eb) => [
+        "l.kind",
+        "l.resolved_at",
+        "a.id as from_id",
+        "a.key as from_key",
+        "b.key as to_key",
+        // The successor's state as of the time read: only one that became active replaced this record
+        eb
+          .selectFrom("unit_state as t")
+          .whereRef("t.unit_id", "=", "a.id")
+          .where("t.at", "<=", asOf ?? "9999")
+          .select("t.to_state")
+          .orderBy("t.id", "desc")
+          .limit(1)
+          .as("from_state"),
+      ])
       .execute(),
     db
       .selectFrom("unit_state")
@@ -252,7 +267,13 @@ async function describe(
   }
   for (const l of links) {
     if (l.kind === "supersedes")
-      out.push(l.from_id === u.id ? `Supersedes ${l.to_key}` : `Superseded by ${l.from_key}`);
+      out.push(
+        l.from_id === u.id
+          ? `Supersedes ${l.to_key}`
+          : l.from_state === "active" || l.from_state === "superseded"
+            ? `Superseded by ${l.from_key}`
+            : `Replacement proposed by ${l.from_key} (${l.from_state ?? "no state"})`,
+      );
     else
       out.push(
         `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
