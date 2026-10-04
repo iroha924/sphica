@@ -19,11 +19,12 @@ The database is a single SQLite file on your machine.
 ## Features
 
 - **Automatic recording.** Sphica keeps your prompts, the agent's final reply for each turn, and the paths of the files a turn changed (by the edit tools, or seen in `git status` at the turn's end).
-- **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from, and a decision counts as adopted only when you said so.
+- **Records with their sources.** `/sphica:trace` turns a session into records: decisions with the options rejected and why, constraints, implementations, findings, dead ends, and open questions. Every record quotes the exact words it came from. A decision counts as adopted in two ways: you said so (your decision), or the agent decided it itself in that session and its reply says so (an AI's decision). An AI's decision is shown as one, never replaces yours, and is never used for public interfaces, security and permissions, releases, or forgetting.
+- **Traced without asking (Claude Code).** When you start a new session and earlier sessions wait to be traced, the agent is asked to trace up to two of them, oldest first, after your request is done. You can still run `/sphica:trace` yourself to keep something right away.
 - **Pull requests too.** `/sphica:harvest <number>` keeps a GitHub pull request (body, comments, reviews, review comments, commits, and up to five issues the body says it closes) and records what it decided. A reviewer's suggestion stays a proposal unless the owner or a maintainer adopted it; a merge alone adopts nothing.
 - **Evidence found later.** `/sphica:glean` adds evidence and corrections to existing records. It asks you for the source (an issue URL, the file and line, meeting notes) before saving; a claim without one is kept only as unsourced and never used as fact.
 - **Forget what should not have been kept.** `/sphica:forget` removes the messages, pull request items, or file excerpts you pick, with their search entries and the bytes left in the database file, after you confirm in a dialog (if another session is reading the database, it asks you to run it again to finish clearing the bytes). Records that cited them are judged again and leave active when nothing else supports them; a record's own text stays as it was.
-- **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. Works in both Claude Code and Codex.
+- **Shown when it matters.** At session start, the current work; before the agent reads or edits a file, or runs a shell command that names it, the decisions tied to that file; when your prompt names a recorded option or code symbol, that record. An AI's decision is marked as one, with a note that the agent may depart from it for a stated reason. Works in both Claude Code and Codex.
 - **Search in Japanese and English.** Records are made with search words in both languages, so a question in either language is more likely to find them.
 - **Find what you asked before.** Ask the agent whether you asked something like this before: `search` with `asked: true` shows your earlier messages in other sessions, the records that quote them (with what replaced them), and says "no recorded decision" when none was recorded, including a matter you raised in several sessions.
 - **See what is live, and what needs a look.** Ask for the overview: `view: "live"` lists every active decision and constraint by the directory it applies to; `view: "look"` lists records whose file is gone or whose symbol is not found, conditions you said would bring a rejected option back, and lines in your instruction files whose record was replaced. Nothing is expired or changed on its own.
@@ -93,7 +94,7 @@ sphica doctor
 
 Only sessions in repositories you register (projects) go into Sphica's database; run `sphica init` in each one.
 
-Work as usual. At the end of a session with something worth keeping, run `/sphica:trace` (`$sphica:trace` in Codex).
+Work as usual. In Claude Code, a new session asks the agent to trace earlier sessions on its own. To keep something right away, or in Codex, run `/sphica:trace` (`$sphica:trace` in Codex).
 `/sphica:trace pending` lists earlier sessions not traced yet. To keep what a pull request decided, run `/sphica:harvest 123`.
 When you find evidence later ("the ops notes say…", "Kimura said the team agreed"), run `/sphica:glean` with what you found.
 
@@ -107,7 +108,7 @@ To bring back earlier decisions, ask the agent:
 
 Without being asked, Sphica adds a few past records to what the agent sees, each marked as a past record rather than an instruction:
 
-- At session start: the current work and project-wide constraints.
+- At session start: the current work and project-wide constraints, and in Claude Code, when earlier sessions wait to be traced, a request to trace them after your request is done.
 - On a prompt that names a recorded code symbol, file path, or option.
 - Before the agent reads or edits a file a decision applies to, and before a shell command that names such a file (naming it is not proof the command reads it). A read shows each record once per session.
 - Before a review (Claude Code only). When you run your own review command (any name containing `review`, or a name listed in the `SPHICA_REVIEW_COMMANDS`
@@ -133,7 +134,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 
   **Anything else is stored as typed, so do not paste secrets into a session.** If one got in, remove the source holding it with `/sphica:forget` (Claude Code; the confirmation dialog it needs may not appear in Codex). A record that repeated it keeps its own text.
 - **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, `sphica init` runs `gh api user` to read which GitHub account is yours, and `sphica doctor` runs `npm` and `claude` to check installed versions. `gh api` is always sent to github.com.
-- **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions, and only your words, or those of the repository's owner or a maintainer, can adopt a decision.
+- **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions. A decision is adopted by your words, those of the repository's owner or a maintainer, or what the agent decided itself; what the agent quotes or sums up from someone else's text is not adopted.
 
 ## What Sphica can't do yet
 
@@ -141,6 +142,10 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
 - For shell commands, Sphica only sees whether a command names a file. It may show decisions for a file the command never reads, and a shell command that edits a file is not treated as an edit (in Codex, a patch passed to `apply_patch` through the shell is treated as an edit).
 - In Codex, `$sphica:trace`, `$sphica:harvest`, and `$sphica:glean` can write only when Codex tells Sphica which directory the session is in. Current Codex does. When it does not, they write nothing and tell you why.
 - Showing a record does not make the agent follow it.
+- Whether the agent decided something itself is judged from what its reply says, so it can be wrong.
+- An AI's decision is adopted only when the trace runs in an interactive Claude Code session. In headless and SDK runs, in Codex, and wherever Sphica cannot tell which session called, it stays a candidate. The automatic trace also runs only in Claude Code; Codex tells you when sessions wait.
+- The automatic trace uses your subscription's usage.
+- The agent never withdraws an AI's decision. When a later record contradicts it, the AI's decision is held back from being shown until you settle it, and so is the later record unless it is your decision.
 - A code location in a record is checked against your working tree when it is read. Finding the code name (a function name, say) the record points to does not mean the decision still holds.
 
 ## Updating

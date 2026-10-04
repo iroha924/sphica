@@ -286,13 +286,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(skills): weigh owner and AI decisions differently in review, export, and rules (T13)`
   - 結果: review_select の出力の組み立てを review.ts の `selectedText` に移し、AI の判断に「decided by an AI」を付け、そのときだけ「AI の判断から外れる差分は理由が無いときだけ違反」の固定文（`AI_DEPARTURE`）を足す。precedent.md は、持ち主の判断から外れる差分は今どおり指摘し、AI の判断から外れる差分は理由（追加したコメント・コミットメッセージ・渡された PR 本文）が無いときだけ指摘し、あれば `undetermined` で理由と場所を書いて注記にする。export の文書の各判断に `authority:` の行を足し、Skill は選ぶときに誰の判断かを見せる。rules は選ぶときに誰の判断かを見せ、AI の判断を選んだら規約の行にすると規範になることを 1 行で知らせる（下書きするのは持ち主が選んだ記録だけのまま）。AI の判断の行を作るテストの helper を temp-db.ts の `aiDecided` に移した。`bun run verify:ai` → pass。`cd server && node --test test/review.test.ts` → 9 pass。`node --test test/export.test.ts` → 15 pass。`bun run verify` → 終了コード 0（SQL 到達 208/208、受け入れ 113 pass）
 
-- [ ] T14: README.md・README.ja.md・CLAUDE.md・AGENTS.md・knowledge-schema の Skill を今の挙動に合わせ、ほかの開発の文書を確かめる
+- [x] T14: README.md・README.ja.md・CLAUDE.md・AGENTS.md・knowledge-schema の Skill を今の挙動に合わせ、ほかの開発の文書を確かめる
   - 種別: 変更
   - 計画: S12
   - 依存: T10（自動の trace の挙動が決まる）, T13（配布する Skill の挙動が決まる）
-  - 変更: `README.md`, `README.ja.md`, `CLAUDE.md`, `AGENTS.md`, `.agents/skills/knowledge-schema/SKILL.md`
+  - 変更: `README.md`, `README.ja.md`, `CLAUDE.md`, `AGENTS.md`, `.agents/skills/knowledge-schema/SKILL.md`, `.agents/skills/plugin-release/SKILL.md`, `plugin/skills/glean/SKILL.md`, `plugin/skills/trace/SKILL.md`
   - 完了条件: `node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`rg -n "end of a session|セッションの終わりに" README.md README.ja.md` → 手で trace を流すことだけを前提にした案内が残っていない。plan の方針 12 の項目が両言語の README にそろって入っている。`rg -n -i "only the owner|owner's words|explicitly asks|持ち主の言葉" .claude .agents plugin/skills README.md README.ja.md CLAUDE.md AGENTS.md` → 残った行が、持ち主の判断についての記述として今の挙動と合っている
   - コミット: `docs: describe AI decisions and automatic tracing in the READMEs and agent instructions (T14)`
+  - 結果: 両言語の README に方針 12 の項目を入れた（採用の 2 通りと AI の判断の扱い、Claude Code での頼まなくても走る trace、配信の印と離れてよい旨、使い始めの案内、ほかの人の文章は採用にならない、まだできないことの 4 件）。実装に合わせて、自動の trace と AI の採用は Claude Code の対話のセッションだけで Codex は知らせるだけと書き、衝突は持ち主の判断を止めないことに合わせた。CLAUDE.md と AGENTS.md の record-writes に「エージェントも session start の頼みで trace を流す」を足し、新しい invariant `agent-adoption`（AI の採用は対話の呼び出しと確かめた trace から decides と組で、持ち主の判断を置き換える・止める link は持ち主が採用した記録からだけ）を足した。knowledge-schema に、事実から状態を判定する judge と reconcile、`unit_replacement` と印の表、`agent` の採用と `authorityOf`、record ツールの呼び出しの記録、書き手と forget の権限を書いた。plugin-release に description の検査を足した。rg の確認で、glean と trace の Skill に残っていた「衝突は両方を止める」を今の挙動に直した。eval-loop と `.claude/rules` に変わる記述は無かった。`node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`rg -n "end of a session|セッションの終わりに" README.md README.ja.md` → 0 件。`bun run verify` → 終了コード 0（受け入れ 113 pass）
 
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
@@ -333,3 +334,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T11 / 変更欄とテストの置き場所（前: record.test.ts → 後: AI の採用の行を作る helper がある authority.test.ts）
 - 2026-10-04 / T29 / T27・T07・T08・T25 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T29 を足した。F1 は search と read に固定文を付け、record_context には付けない（trace が key を選ぶための一覧で、離れてよいという案内は当てはまらない）。F3 は search に「adopted by no one」を出し、配信は行ごとの印を足さずに固定文で印の無い判断が持ち主のものと伝える（配信に載る判断は必ず採用済み）
 - 2026-10-04 / T13 / 変更欄（前: precedent.md・export と rules の Skill・review.ts・export.ts・review.test.ts → 後: review_select の文を review.ts へ移すための mcp.ts、export のテスト、AI の判断の行を作る helper を共有するための temp-db.ts と deliver.test.ts を足した）
+- 2026-10-04 / T14 / 変更欄（前: README の 2 つ・CLAUDE.md・AGENTS.md・knowledge-schema → 後: rg の確認で見つかった古い衝突の説明を直すため glean と trace の Skill、description の検査を書くため plugin-release を足した）。README は方針 12 の文面のうち「新しいセッションの開始時にエージェントが trace する」を、実装どおり Claude Code だけと書いた（Codex の対話の値は未実測で、通知は手動の案内のまま）
