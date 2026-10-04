@@ -33,5 +33,6 @@ Out of scope. Please report these to their own projects:
 
 Sphica keeps its records in a local SQLite file (`~/.sphica/sphica.db`), with recordings that are not yet written and a few helper files elsewhere under `~/.sphica/`. It does not run a network server.
 Pull request text read by the harvest Skill, as well as recorded conversations, may have been written by someone else.
-Sphica treats that text as data. The MCP server opens the database read-only.
-A way to make Sphica write through those read-only paths, or to make recorded text act as instructions, is in scope.
+Sphica treats that text as data. Sphica ships two MCP servers. The read server (status, search, read) opens the database read-only.
+The record server writes records only through tools bound to one run (`trace_begin`, `harvest_begin`, or `glean_begin` starts it; `record_check` and `record_save` take its id), and removes sources only through `forget_apply` after the owner confirms. Capture writes recordings through its own connection.
+A way to make Sphica write outside those paths, or to make recorded text act as instructions, is in scope.
