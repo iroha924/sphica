@@ -877,6 +877,8 @@ test("a run that named another run, the build, or the evaluation cache is caught
     true,
   );
   assert.equal(lookedOutside(null, own, places), false);
+  // Climbing out through the run's own directory still leaves it
+  assert.equal(lookedOutside(cmd("cat /c/claude-runs/r1/../r2/answer.md"), own, places), true);
 });
 
 test("a mark taken while another call was in flight, before the first change, leaves the order unknown", () => {

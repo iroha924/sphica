@@ -420,10 +420,10 @@ function main() {
       }
       // A run that reached another run, the build, or the evaluation cache may have read answers or gold records it was not given
       const own = [dir, fs.realpathSync(dir)];
-      const places = [build, path.resolve(runs), CACHE].flatMap((p) => [
-        p,
-        fs.existsSync(p) ? fs.realpathSync(p) : p,
-      ]);
+      // Both models' run places: a Codex run must not read a Claude run's answer, nor the other way round
+      const places = [build, path.resolve(args.codex ?? ""), path.resolve(args.claude ?? ""), CACHE].flatMap(
+        (p) => [p, fs.existsSync(p) ? fs.realpathSync(p) : p],
+      );
       if (lookedOutside(read("events.jsonl"), own, places)) {
         rows.push(
           excludedRow(

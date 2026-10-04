@@ -227,6 +227,16 @@ base: main
   - コミット: `fix(evals): keep runs inside their checkout and drop the ones that looked outside (T21)`
   - 結果: red は A4 の回収（86d6784f）で、外を見た Codex の run が結果に残っていた。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 82, fail 0。canary（sentinel を評価のキャッシュの下に、拒否の指定なしで置く）→ fence 8 項目すべて ✓、`canary passed`。回収し直すと、その Codex の run だけが `looked outside its checkout` で外れた
 
+- [x] T22: T21 の再レビューの 2 件を直す（もう片方のモデルの run 置き場、自分の run を経由して外へ出るパス）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T21（直す対象）
+  - 変更: `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd <27d1a49f の worktree に新しいテストを置いて>/server && node --test test/eval-claude.test.ts` → `own/../r2` のパスを外と見なさず 1 件落ちる
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → pass
+  - コミット: `fix(evals): catch runs that reach the other model's runs or climb out of their own (T22)`
+  - 結果: red は上のとおり 1 件落ちた（もう片方の置き場の件はレビュアーの再現を根拠にした）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 82, fail 0。A4 を回収し直して、外れるのは同じ Codex の 1 run だけ
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
@@ -257,3 +267,5 @@ base: main
 - 2026-10-04 / T09, T18, T19 / Codex レビュー 6 件。5 件を T20 で直した。T09 F2（crowded の記録の保存日時が実行時刻になる）は採らない: 新しい順は保存の順（id）で決まり、setup の順＝宣言した日付の順と一致するので、順番の比較は歪まない。評価用のスクリプトで出荷しないので、ここからはタスクごとの再レビューをやめ、差分全体のレビューで P1 とセキュリティに絞る
 - 2026-10-04 / 全差分レビュー / P1 1 件（読み取りが一覧の場所でしか止まらない）と測定の 2 件（検索の率が unknown を分母から外す、最初の変化より前の並行の区間）を採った / T21。Claude は `permissions.blockReadsOutsideWorkingDirectories` で checkout の外を読めなくし（公式ドキュメント: denyRead は Bash だけ、Read ツールには効かない）、canary の sentinel を拒否の指定の無い場所に移して一般の境界を確かめる
 - 2026-10-04 / A4 / Codex の run が `rg --files <一時ディレクトリの根>` で他の run を一覧していた。Codex には読み取りの囲いが無いので、stream から自分の run の場所を除いて、ビルド・run 置き場・評価のキャッシュが残る run を excluded にする。文字列に場所が含まれるかだけを見るので、`rg /` のように根から探すものは捕まえられない（限界として PR に書く）
+
+- 2026-10-04 / T21 / 再レビュー 2 件（測定）を採った / T22。指摘が作り込みのパスへ移ってきたので、レビューの往復はここで打ち切る

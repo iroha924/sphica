@@ -417,6 +417,8 @@ export function lookedOutside(events: string | null, own: string[], places: stri
   let text = events;
   // JSON escapes the slashes of a path only in some writers; match both spellings
   const spellings = (p: string) => [p, p.replaceAll("/", "\\/")];
+  // A path that climbs out of the run's own directory (own/../other) leaves it, whatever it names next
+  if (own.flatMap(spellings).some((o) => text.includes(`${o}/..`) || text.includes(`${o}\\/..`))) return true;
   for (const o of own.flatMap(spellings).sort((a, b) => b.length - a.length)) text = text.replaceAll(o, "");
   return places.flatMap(spellings).some((p) => p && text.includes(p));
 }
