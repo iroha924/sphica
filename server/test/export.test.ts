@@ -10,7 +10,18 @@ import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "../src/
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
+import {
+  aiDecided,
+  at,
+  hash,
+  insert,
+  message,
+  project,
+  run,
+  session,
+  type TempDb,
+  tempDb,
+} from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], session = "s1") {
   const t: Target = {
@@ -547,4 +558,22 @@ test("the reply is one line saying where to write, then the document and nothing
     exportReply({ relative: "d.md", exists: true }, doc),
     /^Write to d\.md, replacing an existing file/,
   );
+});
+
+test("each exported decision says whose it is, so a reader without Sphica weighs an AI's below the owner's", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.");
+    const m = message(db, p, { id: "m1", text: "Use SQLite." });
+    await save(db, p, [decision(m, "Use SQLite.", "sqlite")]);
+    const doc = await exported(db, p, ["trace:ext-s1/sqlite", "trace:ext-s1/pool"]);
+    assert.match(
+      doc,
+      /key: trace:ext-s1\/sqlite \(u\d+\)\nkind: decision do\nauthority: the owner's decision\n/,
+    );
+    assert.match(doc, /key: trace:ext-s1\/pool \(u\d+\)\nkind: decision do\nauthority: decided by an AI\n/);
+  } finally {
+    await db.done();
+  }
 });

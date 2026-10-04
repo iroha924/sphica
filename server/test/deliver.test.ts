@@ -17,6 +17,7 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { hitsText, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import {
+  aiDecided,
   at,
   hash,
   insert,
@@ -2177,85 +2178,12 @@ test("auto trace notice: a new interactive Claude Code session asks the agent to
   }
 });
 
-// An active decision adopted by the AI alone, written the way the schema allows: its own reply deciding, an interactive run
-function aiRecord(db: TempDb, p: number, key: string, text: string, anchor: string) {
-  session(db, p, "s1");
-  const now = at("2026-09-27T00:00:00Z");
-  const reply = insert(db, "source", {
-    project_id: p,
-    kind: "session_message",
-    artifact: "session:s1",
-    external_id: `${key}:assistant`,
-    revision: 1,
-    session_id: "s1",
-    turn_id: `${key}-turn`,
-    author_kind: "assistant",
-    created_at: now,
-    captured_at: now,
-    text,
-    original_bytes: Buffer.byteLength(text),
-    content_hash: hash(key.length * 7 + text.length),
-    indexed: 0,
-  });
-  const call = insert(db, "record_call", {
-    project_id: p,
-    tool: "trace_begin",
-    host: "codex",
-    caller_session: "x",
-    caller_turn: "y",
-    mode: "interactive",
-    called_at: now,
-  });
-  const run = insert(db, "extraction_run", {
-    project_id: p,
-    origin: "trace",
-    target: "session:s1",
-    status: "running",
-    begin_call_id: call,
-    started_at: now,
-  });
-  const unit = insert(db, "unit", {
-    project_id: p,
-    key: `trace:ext-s1/${key}`,
-    kind: "decision",
-    stance: "do",
-    text,
-    extraction: "supported",
-    run_id: run,
-    created_at: now,
-    content_hash: hash(key.length * 13 + text.length),
-  });
-  const span = {
-    source_id: reply,
-    span_start: 0,
-    span_end: Buffer.byteLength(text),
-    run_id: run,
-    added_at: now,
-  };
-  insert(db, "unit_evidence", { unit_id: unit, role: "decides", ...span });
-  insert(db, "unit_adoption", { unit_id: unit, route: "agent", ...span });
-  insert(db, "unit_anchor", { unit_id: unit, path: anchor, role: "applies_to", run_id: run, added_at: now });
-  for (const [from, to] of [
-    [null, "candidate"],
-    ["candidate", "active"],
-  ] as const)
-    insert(db, "unit_state", {
-      unit_id: unit,
-      from_state: from,
-      to_state: to,
-      at: now,
-      reason: "r",
-      run_id: run,
-    });
-  return unit;
-}
-
 test("decided by an AI: the AI words come only when an AI's decision is kept within the budget", async () => {
   const db = tempDb();
   const repo = checkout();
   try {
     const p = project(db);
-    aiRecord(db, p, "ai-long", `I keep the pool small. ${"x".repeat(230)}`, "src/db.ts");
+    aiDecided(db, p, "ai-long", `I keep the pool small. ${"x".repeat(230)}`, "src/db.ts");
     const words = Array.from({ length: 4 }, (_, n) => `Keep rule ${n}. ${"y".repeat(230)}`);
     const m = message(db, p, { id: "m1", text: words.join(" ") });
     await save(db, p, {
@@ -2289,7 +2217,7 @@ test("decided by an AI: the AI words spend none of a session's read budget", asy
   try {
     const p = project(db);
     for (let n = 0; n < 8; n++)
-      aiRecord(db, p, `ai-${n}`, `I keep file ${n} as one module.`, `src/file${n}.ts`);
+      aiDecided(db, p, `ai-${n}`, `I keep file ${n} as one module.`, `src/file${n}.ts`);
     const outs: string[] = [];
     for (let n = 0; n < 8; n++)
       outs.push(
@@ -2319,7 +2247,7 @@ test("decided by an AI: search and read say whose each decision is, with the AI 
   const db = tempDb();
   try {
     const p = project(db);
-    aiRecord(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
     const m = message(db, p, { id: "m1", text: "Maybe a bigger connection pool." });
     await save(db, p, {
       units: [

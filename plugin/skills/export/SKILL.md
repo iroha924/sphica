@@ -32,7 +32,8 @@ Pass the repository root as `cwd` to every tool.
    owner described some, `search` for them. Otherwise call `overview` with `view: "live"` (and `after` for the next page) and let the owner
    choose. Only active decisions qualify: a constraint, a candidate, or a superseded or withdrawn record cannot be exported on its own; a
    superseded one appears under the decision that replaced it
-2. **Confirm the choice** with the owner, at most 50 decisions
+2. **Confirm the choice** with the owner, at most 50 decisions, showing whose decision each is (`read`'s first line: the owner's decision
+   or decided by an AI). The document says it on each decision too (`authority:`)
 3. **Ask where to write it**, as a Markdown file (`.md`) relative to the repository root. There is no default. Instruction files
    (CLAUDE.md, AGENTS.md, `.github/copilot-instructions.md`, anything under `.claude`, `.agents`, `.codex`, `.cursor`) and Git's
    own folder are refused

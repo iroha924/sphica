@@ -277,13 +277,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - 完了条件: `bun run acceptance` → pass。足したケースのうち持ち主の判断の保護は main のコードで落ちる
   - コミット: `test(acceptance): cover AI adoption exclusions, owner decision protection, and the auto trace notice (T12)`
 
-- [ ] T13: 配布する Skill を権限に合わせる（review の過去の判断の観点、export、rules）
+- [x] T13: 配布する Skill を権限に合わせる（review の過去の判断の観点、export、rules）
   - 種別: 変更
   - 計画: S11
   - 依存: T07（権限が表示に出る）
-  - 変更: `plugin/skills/review/reviewers/precedent.md`, `plugin/skills/export/SKILL.md`, `plugin/skills/rules/SKILL.md`, `server/src/review.ts`, `server/src/export.ts`, `server/test/review.test.ts`
+  - 変更: `plugin/skills/review/reviewers/precedent.md`, `plugin/skills/export/SKILL.md`, `plugin/skills/rules/SKILL.md`, `server/src/review.ts`, `server/src/export.ts`, `server/src/mcp.ts`, `server/test/review.test.ts`, `server/test/export.test.ts`, `server/test/deliver.test.ts`, `server/test/temp-db.ts`
   - 完了条件: `bun run verify:ai` → pass。`cd server && node --test test/review.test.ts` → pass。review の観点が持ち主の判断から外れる差分を今どおり指摘し、AI の判断から外れる差分は理由が書かれていないときだけ指摘する。export と rules の一覧と下書きに権限が出て、rules は AI の判断を選ぶときに規範に格上げされることを 1 行で知らせる
   - コミット: `feat(skills): weigh owner and AI decisions differently in review, export, and rules (T13)`
+  - 結果: review_select の出力の組み立てを review.ts の `selectedText` に移し、AI の判断に「decided by an AI」を付け、そのときだけ「AI の判断から外れる差分は理由が無いときだけ違反」の固定文（`AI_DEPARTURE`）を足す。precedent.md は、持ち主の判断から外れる差分は今どおり指摘し、AI の判断から外れる差分は理由（追加したコメント・コミットメッセージ・渡された PR 本文）が無いときだけ指摘し、あれば `undetermined` で理由と場所を書いて注記にする。export の文書の各判断に `authority:` の行を足し、Skill は選ぶときに誰の判断かを見せる。rules は選ぶときに誰の判断かを見せ、AI の判断を選んだら規約の行にすると規範になることを 1 行で知らせる（下書きするのは持ち主が選んだ記録だけのまま）。AI の判断の行を作るテストの helper を temp-db.ts の `aiDecided` に移した。`bun run verify:ai` → pass。`cd server && node --test test/review.test.ts` → 9 pass。`node --test test/export.test.ts` → 15 pass。`bun run verify` → 終了コード 0（SQL 到達 208/208、受け入れ 113 pass）
 
 - [ ] T14: README.md・README.ja.md・CLAUDE.md・AGENTS.md・knowledge-schema の Skill を今の挙動に合わせ、ほかの開発の文書を確かめる
   - 種別: 変更
@@ -331,3 +332,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T10 / 変更欄（前: deliver-codex.test.ts を含む → 後: Codex で出ないことは deliver.test.ts の同じテストで、Claude Code の環境を引き継いだ Codex として確かめたので外した）
 - 2026-10-04 / T11 / 変更欄とテストの置き場所（前: record.test.ts → 後: AI の採用の行を作る helper がある authority.test.ts）
 - 2026-10-04 / T29 / T27・T07・T08・T25 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T29 を足した。F1 は search と read に固定文を付け、record_context には付けない（trace が key を選ぶための一覧で、離れてよいという案内は当てはまらない）。F3 は search に「adopted by no one」を出し、配信は行ごとの印を足さずに固定文で印の無い判断が持ち主のものと伝える（配信に載る判断は必ず採用済み）
+- 2026-10-04 / T13 / 変更欄（前: precedent.md・export と rules の Skill・review.ts・export.ts・review.test.ts → 後: review_select の文を review.ts へ移すための mcp.ts、export のテスト、AI の判断の行を作る helper を共有するための temp-db.ts と deliver.test.ts を足した）

@@ -30,7 +30,9 @@ Pass the repository root as `cwd` to every tool.
 1. **Find the records.** A key or `u<id>` the owner gave goes straight to `read` (search matches a record's words, not its key). When the
    owner described some, `search` for them. Otherwise call `overview` with `view: "live"` (and `after` for the next page) and let the owner
    choose. Only active decisions and constraints qualify; a candidate, superseded, or withdrawn record does not
-2. **Confirm the choice** with the owner. Draft only the records the owner picks
+2. **Confirm the choice** with the owner, showing whose decision each is (`read`'s first line: the owner's decision or decided by an
+   AI). When the owner picks an AI's decision, say in one line that a rule line makes it a norm every later session follows, above where an
+   AI's decision stands now. Draft only the records the owner picks
 3. **Read each** with `read` and draft from its text, reason, and scope, never from the conversation or a guess. When the record does not say
    enough for a rule (who it applies to, what to do instead), say so and leave it out rather than fill the gap
 4. **Print the draft** in one fenced block, grouped by where the owner said it goes. One line per record, in the file's language, ending with

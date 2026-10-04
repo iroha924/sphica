@@ -32,7 +32,7 @@ Pass the diff under review and the root of the repository under review (`cwd`) t
 |---|---|---|
 | The tool call fails, or it says "Decision lane: not checked" | MCP does not connect, the database is unreachable, or the project is not registered | **`blocked_unknown`** + the reason it gave |
 | "Decision lane: checked" with no record | No active record applies | Continue to Step 3; 0 records may be treated as a **grounded negative** |
-| "Decision lane: checked" with records | Each record and why it applies (anchored to a changed path, or an added line names an option it rejected) | Continue |
+| "Decision lane: checked" with records | Each record and why it applies (anchored to a changed path, or an added line names an option it rejected); an AI's decision is marked `decided by an AI` | Continue |
 
 **When returning `blocked_unknown`, state concretely what was missing.** Silently returning 0 results makes the caller read it as "no findings".
 **This step is deterministic and can claim coverage.** It selects only active records; candidates and superseded records never apply.
@@ -65,6 +65,10 @@ Then always check the following.
   from the title alone is the failure specific to this reviewer
 - **When a record and the implementation disagree, do not take the implementation as right.** Present both as a Conflict.
   **Do not pick which is right**: the maintainers decide
+- **Weigh whose decision it is.** The owner's decision binds: a diff that goes against it is a finding, whatever reason the change gives.
+  A record marked `decided by an AI` was an AI's own choice in an earlier session: a diff that departs from it is a finding only when the
+  change gives no reason (an added comment, the commit message, or the PR body you were given). When it gives one, give the record
+  `undetermined` with the reason quoted and where it is written, and list it as a note, not a finding
 
 ## What becomes a finding
 
@@ -73,6 +77,7 @@ Then always check the following.
 | **Reintroducing a rejected option** | "That dependency was rejected in `trace:…/storage`. The owner's reason was ..." |
 | **Revisiting a dead end** | "That method was tried and failed in `trace:…/offscreen`. The reason was ..." |
 | **Changing code under a constraint** | "`review_select` returned `glean:csv/no-notes`, anchored to this file. The constraint says ..." |
+| **Departing from an AI's decision without a reason** | "`trace:…/pool` (decided by an AI) keeps the pool small; the diff raises it and says nothing about why" |
 | **Relying on an overturned decision** | "The assumed record was superseded by ..., which says ..." |
 
 **These are not findings.**

@@ -4,10 +4,10 @@ import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { parseDiff, selectForReview } from "../src/review.ts";
+import { AI_DEPARTURE, parseDiff, selectedText, selectForReview } from "../src/review.ts";
 import { checkFindings } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, run, type TempDb, tempDb } from "./temp-db.ts";
+import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown) {
   const t: Target = {
@@ -343,6 +343,46 @@ test("only the record in effect applies: a replaced one does not until its succe
       ),
     );
     assert.deepEqual(await keys(), ["trace:ext-s1/sqlite"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("review_select marks an AI's decision and says a departure from it needs only a reason", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const files = parseDiff(DIFF);
+    const text = await selectedText(db.reader, await selectForReview(db.reader, p, files));
+    assert.match(
+      text,
+      /^- trace:ext-s1\/pool \(decision do, decided by an AI\): I keep the connection pool small\. \[anchored to src\/db\.ts\]$/m,
+    );
+    assert.ok(text.endsWith(AI_DEPARTURE));
+    const owner = tempDb();
+    try {
+      const q = project(owner);
+      const m = message(owner, q, { id: "m1", text: "Keep one SQLite file." });
+      await save(owner, q, {
+        units: [
+          {
+            key: "sqlite",
+            kind: "constraint",
+            stance: "do",
+            text: "Keep one SQLite file.",
+            evidence: [{ source: `s${m}`, quote: "Keep one SQLite file.", role: "states" }],
+            adoption: [{ source: `s${m}`, quote: "Keep one SQLite file." }],
+            anchors: [{ path: "src/db.ts", role: "applies_to" }],
+          },
+        ],
+      });
+      const plain = await selectedText(owner.reader, await selectForReview(owner.reader, q, files));
+      assert.match(plain, /^- trace:ext-s1\/sqlite \(constraint do\): Keep one SQLite file\./);
+      assert.ok(!plain.includes(AI_DEPARTURE));
+    } finally {
+      await owner.done();
+    }
   } finally {
     await db.done();
   }

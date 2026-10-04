@@ -18,7 +18,7 @@ import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
 import { readSource, readUnit } from "./read.ts";
-import { parseDiff, selectForReview } from "./review.ts";
+import { parseDiff, selectedText, selectForReview } from "./review.ts";
 import { checkFindings } from "./review-findings.ts";
 import { hitsText, searchSources, searchUnits } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
@@ -390,14 +390,7 @@ server.registerTool(
       if (!hits.length)
         return text(`Decision lane: checked. No active record applies to the ${files.length} changed files.`);
       return text(
-        `Decision lane: checked. ${hits.length} records apply; read each before judging it.\n${framed(
-          hits
-            .map(
-              (u) =>
-                `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 300)} [${u.because}]`,
-            )
-            .join("\n"),
-        )}`,
+        `Decision lane: checked. ${hits.length} records apply; read each before judging it.\n${framed(await selectedText(db, hits))}`,
       );
     } catch (e) {
       return notChecked(e);

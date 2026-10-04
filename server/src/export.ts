@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Selectable } from "kysely";
+import { AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
@@ -91,9 +92,14 @@ async function lines(db: Reads, u: Unit): Promise<string[]> {
   // A field keeps its own line breaks. The block's own lines use indents 0 and 2, so each later line of a field goes to 4
   // (and of a quote to 6): no line of a field can pass for a label, an option, or a quote
   const kept = (t: string) => plain(t).split("\n").join("\n    ");
+  // Whose decision it is as of the export: a reader without Sphica weighs an AI's below the owner's
+  const whose = ["decision", "constraint"].includes(u.kind)
+    ? (await authorityOf(db, [u.id])).get(u.id)
+    : undefined;
   const out = [
     `key: ${inline(u.key)} (u${u.id})`,
     `kind: ${u.kind}${u.stance ? ` ${u.stance}` : ""}`,
+    ...(whose ? [`authority: ${AUTHORITY[whose]}`] : []),
     `text: ${kept(u.text)}`,
   ];
   if (u.why) out.push(`why: ${kept(u.why)}`);
