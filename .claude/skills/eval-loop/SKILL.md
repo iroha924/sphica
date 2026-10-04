@@ -22,7 +22,9 @@ description: Runs one turn of Sphica's evaluation loop on real agents. Builds th
 |---|---|
 | Tasks, prompts, gold keys, hidden tests | `server/evals/cloud/tasks.json` |
 | Slot builder, firing plan, collector, Codex replay, grader, report, fixture writer | `server/evals/cloud/build.ts`, `fire.ts`, `collect.ts`, `codex.ts`, `grade.ts`, `report.ts`, `fixture.ts` |
-| Builds (slots, `plan.json`, `loop.json`, `grades.json`), fixtures, Codex runs, run logs, old results | `~/.cache/sphica-eval/` (`builds/<build id>/`, `fixtures/`, `codex-runs/`, `logs/`, `archive/`) |
+| Local Claude runner, its fence, the canary | `server/evals/cloud/claude.ts`, `claude-run.ts`, `canary.ts`, `canary-check.ts` |
+| Order benchmark (what lands inside the delivery limits) | `server/evals/order/run.ts` |
+| Builds (slots, `plan.json`, `loop.json`, `grades.json`, `canary.json`), fixtures, Codex and Claude runs, run logs, old results | `~/.cache/sphica-eval/` (`builds/<build id>/`, `fixtures/`, `codex-runs/`, `claude-runs/`, `canary-runs/`, `logs/`, `archive/`) |
 | Routine ids per slot | `~/.cache/sphica-eval/routines.json` |
 | Routine token | `~/.config/sphica-eval`. Never print it; fire with the RemoteTrigger tool instead |
 
@@ -84,6 +86,32 @@ Loop progress:
 For search changes alone, use the offline benchmark first: `node evals/retrieval/run.ts --compare <ref>` builds each side's index with that
 side's `terms()` and search, and prints recall@k and MRR (questions with gold) and how often a question with no gold returned anything, overall
 and by language pair and overlap. The experiment's issue names the main measure and the drop it allows before the numbers are taken.
+
+## A local loop
+
+Claude runs on this machine instead of the cloud routines (the owner's subscription; no cloud credits). Run from `server/`.
+
+```text
+Local loop progress:
+- [ ] 1. Build (for old/new, the same fixture: build old in a worktree of the base commit, then new with --fixture <old>/fixture.db)
+- [ ] 2. node evals/cloud/canary.ts --build <dir> [--model <m>]  (every check ✓; claude.ts refuses a build without it)
+- [ ] 3. node evals/cloud/claude.ts --build <dir> --repo <slot> --task <id>, once per plan.json row of the conditions measured
+- [ ] 4. node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>, the same rows
+- [ ] 5. node evals/cloud/collect.ts --build <dir> --no-cloud
+- [ ] 6. node evals/cloud/grade.ts --loop <dir>/loop.json
+- [ ] 7. node evals/cloud/report.ts --compare <old>/grades.json <new>/grades.json
+```
+
+- The runner fences each run: project setting sources only (the slot's cloud settings file is removed in the clone; hooks come from
+  `--settings`), strict MCP config, acceptEdits, the sandbox with no unsandboxed fallback, the owner's credential paths unreadable, an
+  allowlisted environment. The canary proves each of these on the build before any run; rerun it after changing the runner or the model
+- Tool search is pinned on (`ENABLE_TOOL_SEARCH=true`), so Sphica's tools start deferred on both sides; `search_loading` in loop.json says
+  whether search was handed over by ToolSearch (deferred) or there from the start (loaded), and `search_before_edit` whether a search came
+  before the first change to the work tree. unknown is never counted as yes or no
+- Tasks set their own run counts (`runs` per condition in tasks.json); plan.json has one row per run asked for
+- `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two
+- Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
+  delivers. No agent run is needed
 
 ## Traps seen in earlier loops
 

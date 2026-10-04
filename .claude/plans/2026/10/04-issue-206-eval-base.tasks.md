@@ -198,13 +198,14 @@ base: main
   - コミット: `feat(evals): pin deferred tool loading and detect it from the stream (T10)`
   - 結果: init の tools には遅延でも mcp__sphica__search が載るので、init では見分けられない。代わりに「最初の search より前に ToolSearch の結果が search を渡したか」で判定する（deferred / loaded / unknown）。正の対照: 同じスロットで `ENABLE_TOOL_SEARCH=false` → `loaded`、`true` → `deferred`。これまでの実 run 3 回はすべて `deferred`。`node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 79, fail 0
 
-- [ ] T11: eval-loop Skill をローカルの流れに合わせて直す
+- [x] T11: eval-loop Skill をローカルの流れに合わせて直す
   - 種別: 変更
   - 計画: S10
   - 依存: T04（canary の手順）, T08（compare の手順）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる
   - コミット: `docs(eval-loop): run Claude locally behind the canary and compare old and new builds (T11)`
+  - 結果: `bun run verify:ai` → 0 で終わり `AI config: ... 3 development Skills ...`
 
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
