@@ -356,7 +356,7 @@ export async function createDriver(world: World): Promise<Driver> {
   }
 
   /** The source a case names as `session:<id>#<turn>.<owner|assistant|question>`; question is what the agent asked with AskUserQuestion. */
-  async function sessionSource(ref: string) {
+  async function sessionSource(ref: string, quote?: string) {
     const m = /^session:([^#]+)#(\d+)\.(owner|assistant|question)$/.exec(ref);
     if (!m) return undefined;
     const rows = await db()
@@ -367,8 +367,10 @@ export async function createDriver(world: World): Promise<Driver> {
       .where("m.author_kind", "=", m[3] === "owner" ? "owner" : "assistant")
       .select(["m.id", "m.kind", "m.text", "m.external_id", "s.host"])
       .execute();
-    // The reader may not call like; an AskUserQuestion turn holds the question and the answers beside the turn's own messages
-    return rows.find((r) => r.external_id.includes(":ask:") === (m[3] === "question"));
+    // The reader may not call like; an AskUserQuestion turn holds the question and the answers beside the turn's own messages. A turn
+    // can ask more than once: the one holding the quoted words is the one meant
+    const kind = rows.filter((r) => r.external_id.includes(":ask:") === (m[3] === "question"));
+    return (quote ? kind.find((r) => r.text.includes(quote)) : undefined) ?? kind[0];
   }
 
   /** The source id behind a case's reference, as the `s<id>` ref context prints. */
@@ -396,8 +398,8 @@ export async function createDriver(world: World): Promise<Driver> {
       .executeTakeFirst();
   }
 
-  async function ref(r: string): Promise<string> {
-    const got = (await sessionSource(r)) ?? (await githubSource(r));
+  async function ref(r: string, quote?: string): Promise<string> {
+    const got = (await sessionSource(r, quote)) ?? (await githubSource(r));
     if (!got) throw new Error(`no source for ${r}`);
     return `s${got.id}`;
   }
@@ -471,10 +473,11 @@ export async function createDriver(world: World): Promise<Driver> {
     if (Array.isArray(v)) return Promise.all(v.map(translate));
     if (!v || typeof v !== "object") return v;
     const out: Record<string, unknown> = {};
+    const said = v as Record<string, unknown>;
     for (const [k, x] of Object.entries(v))
       out[k] =
         (k === "source" || k === "reason_source") && typeof x === "string"
-          ? await ref(x)
+          ? await ref(x, String((k === "source" ? said.quote : said.reason_quote) ?? "") || undefined)
           : await translate(x);
     return out;
   }

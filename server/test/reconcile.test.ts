@@ -426,3 +426,53 @@ test("judge budget: one save into a place with a long chain and many waiting pro
     await db.done();
   }
 });
+
+test("a replacement that ends after the clock went back ends no earlier than it started", async (t) => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const said = message(db, p, { id: "m1", text: "Use SQLite. Use Postgres. That was wrong." });
+    await save(db, p, { units: [decided("old", said, "Use SQLite.", true)] });
+    // The successor takes effect while the clock is an hour ahead
+    const ahead = Date.now() + 3_600_000;
+    const clock = t.mock.method(Date, "now", () => ahead);
+    await save(db, p, { units: [decided("next", said, "Use Postgres.", true, "old")] });
+    clock.mock.restore();
+    const revision = Number(
+      db.owner.prepare("select revision from unit where key = ?").get(`${PREFIX}next`)?.revision,
+    );
+    const gleaned: Target = { ...target(p), origin: "glean", prefix: "glean:" };
+    const runId = await openRun(db.ingest, {
+      projectId: p,
+      origin: "glean",
+      target: "session:s1",
+      sessionId: "s1",
+      draftId: "g1",
+    });
+    const record = {
+      ops: [
+        {
+          op: "withdraw",
+          unit: `${PREFIX}next`,
+          revision,
+          reason_source: `s${said}`,
+          reason_quote: "That was wrong.",
+        },
+      ],
+    };
+    await inTransaction(db.ingest, async (trx) =>
+      saveGlean(trx, gleaned, runId, await checkGlean(trx, gleaned, record)),
+    );
+    const row = db.owner.prepare("select started_at, ended_at from unit_replacement").get() as {
+      started_at: string;
+      ended_at: string;
+    };
+    assert.equal(row.ended_at, row.started_at);
+    assert.equal(
+      db.owner.prepare("select lifecycle from unit where key = ?").get(`${PREFIX}old`)?.lifecycle,
+      "active",
+    );
+  } finally {
+    await db.done();
+  }
+});

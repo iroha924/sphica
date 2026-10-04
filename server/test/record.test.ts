@@ -2548,13 +2548,13 @@ test("successor place: glean's check refuses adopting a successor into a place a
           op: "withdraw",
           unit: "trace:ext-s1/holder",
           revision: holderRevision,
-          source: `s${m}`,
-          quote: "Adopt both.",
+          reason_source: `s${m}`,
+          reason_quote: "Adopt both.",
         },
         adopt,
       ],
     });
-    assert.doesNotMatch(freed.errors.join("\n"), /already has a successor/);
+    assert.deepEqual(freed.errors, []);
   } finally {
     await db.done();
   }

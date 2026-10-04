@@ -6304,6 +6304,65 @@
           ]
         }
       ]
+    },
+    {
+      "id": "agent-15",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "A turn that asked twice: a record quoting the second question cites that question, not the first",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-two-asks",
+            "host": "claude-code",
+            "at": "2026-05-06T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Review the cover fetching.",
+                "assistant": "I have not changed anything yet.",
+                "edits": [],
+                "asks": [
+                  {
+                    "question": "Should fetchCover keep three retries?",
+                    "answer": "later"
+                  },
+                  {
+                    "question": "Should the cover cache last a week?",
+                    "answer": "yes, a week"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-two-asks",
+          "record": {
+            "units": [
+              {
+                "key": "cache-asked",
+                "kind": "question",
+                "text": "Whether the cover cache should last a week",
+                "evidence": [
+                  {
+                    "source": "session:s-en-two-asks#1.question",
+                    "quote": "Should the cover cache last a week?",
+                    "role": "explains"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-two-asks/cache-asked",
+          "lifecycle": "active"
+        }
+      ]
     }
   ],
   "setups": {

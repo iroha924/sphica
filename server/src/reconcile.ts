@@ -348,7 +348,8 @@ export async function reconcile(
     if (w.op === "close")
       await trx
         .updateTable("unit_replacement")
-        .set({ ended_at: at, end_reason: w.reason, ...endBy })
+        // A clock set back since the row started would end it before it began: it ends when it started at the earliest
+        .set({ ended_at: sql<string>`max(${at}, started_at)`, end_reason: w.reason, ...endBy })
         .where("from_unit", "=", w.from)
         .where("to_unit", "=", w.to)
         .where("ended_at", "is", null)
@@ -365,7 +366,8 @@ export async function reconcile(
           unit_id: w.unit,
           from_state: w.from,
           to_state: w.to,
-          at,
+          // Likewise no earlier than the record was created
+          at: sql<string>`max(${at}, (select created_at from unit where id = ${w.unit}))`,
           reason: w.reason,
           source_id: w.source,
           ...by,
@@ -426,7 +428,7 @@ export function settleForMigration(
     for (const w of planned.writes) {
       if (w.op === "close") {
         io.run(
-          "update unit_replacement set ended_at = ?, end_reason = ?, end_run_id = ? where from_unit = ? and to_unit = ? and ended_at is null",
+          "update unit_replacement set ended_at = max(?, started_at), end_reason = ?, end_run_id = ? where from_unit = ? and to_unit = ? and ended_at is null",
           at,
           w.reason,
           run,
@@ -448,11 +450,12 @@ export function settleForMigration(
         ]);
       } else {
         io.run(
-          "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, ?, ?, ?, ?, ?, ?)",
+          "insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id) values (?, ?, ?, max(?, (select created_at from unit where id = ?)), ?, ?, ?)",
           w.unit,
           w.from,
           w.to,
           at,
+          w.unit,
           `revision 10: ${w.reason}`,
           w.source,
           run,

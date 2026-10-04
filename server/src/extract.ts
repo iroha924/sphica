@@ -535,6 +535,32 @@ export async function contextText(
   ].join("\n");
 }
 
+/**
+ * In an automatic run, the errors for records quoting only messages earlier runs already looked at: context is shown so the targets read
+ * right, and a record resting on it alone says nothing of what this run traces, while saving it marks the targets as done.
+ */
+function contextOnly(
+  id: string,
+  items: { id: number; looked?: boolean }[],
+  units: {
+    key: string;
+    evidence: { source: number }[];
+    options: { evidence: { source: number }[] }[];
+    adoption: { source: number }[];
+  }[],
+): string[] {
+  if (!shownTo.get(id)?.auto) return [];
+  const old = new Set(items.filter((it) => it.looked).map((it) => it.id));
+  return units
+    .filter((u) =>
+      [...u.evidence, ...u.options.flatMap((o) => o.evidence), ...u.adoption].every((x) => old.has(x.source)),
+    )
+    .map(
+      (u) =>
+        `${u.key}: quotes only messages earlier runs already looked at; an automatic run's record quotes at least one message it traces`,
+    );
+}
+
 /** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
 export async function checkText(
   db: Reads,
@@ -545,10 +571,11 @@ export async function checkText(
   call?: number,
 ): Promise<{ ok: boolean; text: string }> {
   const run = await bound(db, id, projectId);
-  const { target } = await scopeOf(db, run, root);
+  const { target, items } = await scopeOf(db, run, root);
   target.agent = await agentRun(db, run, call);
   const c =
     run.origin === "glean" ? await checkGlean(db, target, record) : await checkRecord(db, target, record);
+  if (!("ops" in c)) c.errors.push(...contextOnly(id, items, c.units));
   const units = "ops" in c ? c.units.units : c.units;
   const lines = [
     ...c.errors.map((e) => `✗ ${e}`),
@@ -597,6 +624,7 @@ export async function saveText(
             return g.units;
           })
         : await checkRecord(trx, scope.target, record, facts).then((checked) => {
+            checked.errors.push(...contextOnly(id, scope.items, checked.units));
             // What check would warn about is said at save too: what was left out, and why a record stays a candidate
             notes.push(...checked.problems);
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)

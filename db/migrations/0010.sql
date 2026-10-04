@@ -251,16 +251,21 @@ select 'a replacement in effect, dated from when the record was last superseded'
 from unit_replacement x join unit s on s.id = x.from_unit join unit o on o.id = x.to_unit where x.ended_at is null;
 
 -- Ended in the past: the successor in effect (active until then) was withdrawn, which brought the record back at that very moment
--- (revision 9 wrote both together). A proposal withdrawn in the same save was never in effect, so it proves nothing
+-- (revision 9 wrote both together, the withdrawal first). Each restoration pairs with the last such withdrawal before it, and starts at
+-- the record's last superseded state before it, by state order: times alone repeat within one millisecond. A proposal withdrawn in the
+-- same save was never in effect, so it proves nothing
 insert into unit_replacement (from_unit, to_unit, run_id, started_at, ended_at, end_reason, end_run_id)
 select l.from_unit, l.to_unit, r.id, b.started, w.at, s.key || ' was withdrawn', r.id
-from unit_link l join unit s on s.id = l.from_unit join unit o on o.id = l.to_unit
-join temp.sphica_migration_run r on r.project_id = o.project_id
-join unit_state w on w.unit_id = s.id and w.to_state = 'withdrawn' and w.from_state = 'active'
-join (select t.unit_id, t.at, (select max(p.at) from unit_state p where p.unit_id = t.unit_id and p.to_state = 'superseded' and p.at <= t.at) as started
+from (select t.id, t.unit_id, t.at,
+    (select p.at from unit_state p where p.unit_id = t.unit_id and p.to_state = 'superseded' and p.id < t.id order by p.id desc limit 1) as started,
+    (select max(w2.id) from unit_state w2 join unit_link l2 on l2.from_unit = w2.unit_id and l2.to_unit = t.unit_id and l2.kind = 'supersedes'
+      where w2.to_state = 'withdrawn' and w2.from_state = 'active' and w2.at = t.at and w2.id < t.id) as cause
   from unit_state t where t.from_state = 'superseded' and t.to_state = 'candidate' and t.reason = 'its successor was withdrawn') b
-  on b.unit_id = o.id and b.at = w.at
-where l.kind = 'supersedes' and b.started is not null;
+join unit_state w on w.id = b.cause
+join unit_link l on l.from_unit = w.unit_id and l.to_unit = b.unit_id and l.kind = 'supersedes'
+join unit s on s.id = l.from_unit join unit o on o.id = l.to_unit
+join temp.sphica_migration_run r on r.project_id = o.project_id
+where b.started is not null;
 insert into sphica_migration_note
 select 'a past replacement, proven by the withdrawal that ended it', s.key || ' → ' || o.key, 'from ' || x.started_at || ' to ' || x.ended_at
 from unit_replacement x join unit s on s.id = x.from_unit join unit o on o.id = x.to_unit where x.ended_at is not null;
@@ -275,6 +280,10 @@ where l.kind = 'supersedes'
 insert into sphica_migration_note
 select 'an intent whose earlier effect is not recorded', s.key || ' → ' || o.key, 'marked: read says its history was not recorded'
 from unit_replacement_gap g join unit s on s.id = g.from_unit join unit o on o.id = g.to_unit;
+-- Reads now show history these records did not have: a change made against their earlier revision is stale
+update unit set revision = revision + 1 where id in (
+  select from_unit from unit_replacement union select to_unit from unit_replacement
+  union select from_unit from unit_replacement_gap union select to_unit from unit_replacement_gap);
 drop table temp.sphica_migration_run;
 
 create index record_call_project on record_call (project_id, host, called_at);

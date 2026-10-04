@@ -1691,3 +1691,48 @@ test("migrating revision 9 dates a past replacement only from the successor that
     [[s, T1, T2]],
   );
 });
+
+test("migrating revision 9 pairs each restoration with the successor whose withdrawal caused it, even within one millisecond", () => {
+  const { raw, decided, move, link } = rev9();
+  const a = decided("a");
+  const b = decided("b");
+  const c = decided("c");
+  move(a, "candidate", "active", now);
+  link(b, a);
+  move(b, "candidate", "active", T1);
+  move(a, "active", "superseded", T1);
+  // At one millisecond: b is withdrawn (bringing a back), then c replaces a and is withdrawn too
+  move(b, "active", "withdrawn", T2);
+  link(c, a);
+  move(c, "candidate", "active", T2);
+  move(a, "candidate", "superseded", T2);
+  move(c, "active", "withdrawn", T2);
+  migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare(
+        "select from_unit, started_at, ended_at from unit_replacement where to_unit = ? order by from_unit",
+      )
+      .all(a)
+      .map((r) => [r.from_unit, r.started_at, r.ended_at]),
+    [
+      [b, T1, T2],
+      [c, T2, T2],
+    ],
+  );
+});
+
+test("migrating revision 9 raises the revision of records whose replacement history it writes", () => {
+  const { raw, decided, move, link } = rev9();
+  const a = decided("ra");
+  const b = decided("rb");
+  move(a, "candidate", "active", now);
+  link(b, a);
+  move(b, "candidate", "active", T1);
+  move(a, "active", "superseded", T1);
+  const before = (id: number) =>
+    Number((raw.prepare("select revision from unit where id = ?").get(id) as { revision: number }).revision);
+  const [ra, rb] = [before(a), before(b)];
+  migrate(raw);
+  assert.ok(before(a) > ra && before(b) > rb, `${ra}→${before(a)}, ${rb}→${before(b)}`);
+});

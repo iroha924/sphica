@@ -385,6 +385,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): keep subagents and pasted words from adopting, and mark AI decisions in gold (T38)`
   - 結果: red を実測した（サブエージェントと引用・コードブロックは active、gold は印なし）。`callSession` は Claude Code の hook の `owner_turn` を返し、`agentRun` は両方の呼び出しが持ち主のターンのときだけ AI の採用を許す。採用の引用が、どの行も `>` の引用かコードブロックの中にあるときは採用にせず理由を出す（持ち主の選択、2026-10-05。手で流す trace にも効く）。`recordLines` は AI の印を付け、`leadFor` で gold の先頭に AI の固定文を足す。trace の Skill の active の条件と adoption の欄、precedent の理由（差分に足したコメントだけ）を直した。`bun run verify` → 終了コード 0（受け入れ 127 pass）
 
+- [x] T39: PR #273 の 4 回目のレビュー指摘 5 件を直す（移行の復帰を後継と状態の順で組む、移行で書いた履歴の revision を上げる、時計の巻き戻しでも終了と状態の時刻を始まりより前にしない、自動 trace の記録は対象の発言を引用する、受け入れの質問の参照は引用を含む質問を選ぶ）
+  - 種別: 修正
+  - 計画: S5, S9, S10
+  - 依存: T38（PR #273 の前のコミット）
+  - 変更: `db/migrations/0010.sql`, `server/src/reconcile.ts`, `server/src/extract.ts`, `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `server/test/migrate.test.ts`, `server/test/reconcile.test.ts`, `server/test/auto-pending.test.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="pairs each restoration|raises the revision of records|clock went back|must quote a message it traces" test/migrate.test.ts test/reconcile.test.ts test/auto-pending.test.ts && cd .. && bun run acceptance` → 直す前は、同じミリ秒の 2 つの復帰で履歴が 2×2 に重なり、移行の前後で revision が変わらず、時計が戻ると CHECK で保存全体が落ち、文脈だけを引用した自動の記録が通り、2 つ目の質問の引用が 1 つ目の質問を指す
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(record): fix migration pairing, revisions, clock rollback, and auto trace citations (T39)`
+  - 結果: red を 5 件とも実測した。移行 0010 は、復帰ごとに、その直前に取り下げられた後継（状態の行の id で前のもの）と、直前の superseded の状態（id 順）で期間を組み、履歴を書いた記録の revision を 1 上げる。reconcile は終了時刻を `max(今, started_at)`、状態の時刻を `max(今, 記録の作成時刻)` にする（移行の経路も同じ）。自動の run の記録は、前の run が見ていない発言を少なくとも 1 つ引用しなければ check も save も拒む。受け入れの driver は、質問の参照を引用を含む質問に解決する（agent-15 を足した）。あわせて T32 で足した glean のテストが withdraw の欄名を誤って不正な入力として通っていたのを直し、本当に「同じ glean で取り下げれば通る」を確かめるようにした。`bun run verify` → 終了コード 0（受け入れ 128 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -433,3 +443,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-05 / T35 / PR #273 の GitHub の Codex の 2 回目のレビュー（P2 7 件・P3 1 件）のうち、記録と DB の 4 件を修正タスク T35 にした。表示と配信の 4 件は T36
 - 2026-10-05 / T37 / 持ち主が自動の trace を「既定オン＋停止設定」にすると決め、PR #273 の範囲に T37 を足した（plan の方針 8 と変更履歴）
 - 2026-10-05 / T38 / PR #273 の GitHub の Codex の 3 回目のレビュー（P2 5 件、うち 1 件はセキュリティ）を受け、修正タスク T38 にした。引用・コードブロックの言葉を採用にしない形は持ち主が選んだ
+- 2026-10-05 / T39 / PR #273 の GitHub の Codex の 4 回目のレビュー（P2 5 件）を、持ち主の判断で 5 件とも直すことにして T39 にした
