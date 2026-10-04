@@ -153,6 +153,15 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - コミット: `fix(evals): leave unknown outcomes and missing models unproven in the bars (T14)`
   - 結果: red は上のとおり 2 件落ちた。直した後 `node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass 86, fail 0。保存した採点で、G1a 未達・G3 未達・G4 通過（単独）、最終の組み合わせは全部未達・G6 判定不能、A/A も前と同じ
 
+- [x] T15: GitHub の Codex の再レビュー（#261）の 5 件を直す（回帰で証明済みの低下が判定不能に負ける・0 セルで通る、G4 で両モデルを求めない、G3 で他のモデルの逆向きを見ずに判定不能を返す、別の項目で失敗が決まった行を分母から落とす、`--aa` が variant の違いを通す）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T14（直す対象のブランチの先頭。#256 の T24 を取り込んだ 80e67b1e）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd <80e67b1e の worktree に新しいテストを置いて>/server && node --test test/eval-grade.test.ts` → 新しい 2 件が落ちる。1 件目の 6 つの assert は 1 つずつ数えて 6 つとも落ちた
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → pass。保存した採点で各 G・最終の組み合わせ・A/A の判定が変わらない
+  - コミット: `fix(evals): let a proven failure decide each bar before a short population (T15)`
+  - 結果: red は上のとおり。G4 も同じ順に揃え、毒の入った run があれば数が足りなくても未達にした。直した後 `node --test test/eval-grade.test.ts` → pass 57, fail 0。保存した採点で G1a 未達・G3 未達・G4 通過（単独）・G6 判定不能（採点済みの run だけの場合）、最終の組み合わせは G4 と回帰が未達、A/A は G1a・G3・G4・回帰が未達で、前と同じ
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
@@ -169,3 +178,4 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T12 / Codex レビュー 2 件を採った / T13
 - 2026-10-04 / T12 / A/A の結果（baseline と同じビルドを同じ計画で 92 run、採点 92、excluded 0、ungraded 0、`report.ts --compare <base> <base2> --aa --bar g1a,g3,g4,regression`）: 変更が無いのに G4 は未達（2 回目の baseline で Claude の 2 run が upload を提案）、回帰は未達（override-postgres codex -0.33、poisoned-backup claude の re-proposal 0 → 0.40）、G3 の率は claude 0.80 → 0.60、codex 0.80 → 0.60 と動いた。今の run 数（3〜5）とバー（率 0.3、平均 0.3）は、同じコードでも外れるので、最終の組み合わせの「未達」は G2 と G4 が悪くした証拠にならない。どの G も良くしたと示せていないので、出さない結論は変わらない。次に測るときは、この A/A の動き（率で 0.2 前後、平均で 0.33）より十分大きい差だけを拾える run 数とバーを先に決める
 - 2026-10-04 / T14 / GitHub の Codex レビュー（#261）6 件（P1 2 件: G1a と回帰で unknown を「良い」と数えていた）を全部採った。判定は厳しくなったが、保存した採点での結論は変わらない
+- 2026-10-04 / T15 / どのバーも「証明された失敗 → 未達、足りない → 判定不能、残りで通過か未達」の順に揃えた。G1a は score 0 の行を、G3 は衝突を名指ししなかった行を、もう一方の項目が unknown でも分母に残す
