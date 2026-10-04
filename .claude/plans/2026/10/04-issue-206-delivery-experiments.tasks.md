@@ -40,7 +40,7 @@ base: feat/issue-206-eval-base
   - コミット: `feat(deliver): show when a record was saved, who adopted it, and its anchor state (T02)`
   - 結果: `node --test test/deliver.test.ts` → pass 35, fail 0（located・moved・missing と、採用の無い finding の行）。`node --test test/eval-fixture.test.ts test/eval-grade.test.ts test/eval-order.test.ts` → pass 51, fail 0（judge の `- <key> (` の境界はそのまま）。上限ちょうどに作っていた既存テストの本文を、ラベルの分（1 行 60 字ほど）短くした
 
-- [ ] T03: G1b 引用を先に置き、長い Why を配信から外す
+- [-] T03: G1b 引用を先に置き、長い Why を配信から外す
   - 種別: 変更
   - 計画: S3
   - 依存: T01（evidence の引用の読み取りが要る）
@@ -57,7 +57,7 @@ base: feat/issue-206-eval-base
   - コミット: `feat(deliver): choose records by weight before age (T04)`
   - 結果: ブランチ exp/206-g2（T01 から分けた）。`node --test test/deliver.test.ts` → pass 35, fail 0。`node evals/order/run.ts --compare feat/issue-206-eval-base` → 重みのある記録 3 / 8 → 8 / 8、軽い記録 7 / 10 → 2 / 10（maintainer の決定 2 件と finding・dead end は読む前・編集の前のどちらでも外れた）。G2 のバー（重みのある記録が 2 件以上増える）は通過
 
-- [ ] T05: G3 未解決の衝突を 1 行で見せる
+- [-] T05: G3 未解決の衝突を 1 行で見せる
   - 種別: 変更
   - 計画: S5
   - 依存: なし
@@ -65,15 +65,16 @@ base: feat/issue-206-eval-base
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 未解決の衝突の 2 件が 1 行で出て delivery_unit に 2 件とも入り、読み込みの予算を 2 件と数え、同じ窓で 2 度出ず、解決済みは今と同じのテストが pass
   - コミット: `feat(deliver): show an unresolved conflict as one line naming both records (T05)`
 
-- [ ] T06: G4 第三者かエージェントの言葉だけの記録を hook で押し込まず、引用を話者の種類で囲む
+- [x] T06: G4 第三者かエージェントの言葉だけの記録を hook で押し込まず、引用を話者の種類で囲む
   - 種別: 変更
   - 計画: S6
   - 依存: T01（出どころの読み取りが要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/eval-fixture.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 第三者だけは押し込まず search では見つかる、伝聞は第三者、混ざった evidence と owner / maintainer は押し込む、取り消された evidence は数えない、のテストが pass
   - コミット: `feat(deliver): keep records resting only on others' words out of hooks (T06)`
+  - 結果: ブランチ exp/206-g4（T01 から分けた）。`node --test test/deliver.test.ts` → pass 35, fail 0。`node --test test/eval-fixture.test.ts` → pass 2（backup の upload の記録は届かない）。acceptance → pass 105, fail 0。引用の囲いは入れていない（下の記録）
 
-- [ ] T07: G6 読み取り MCP の search に alwaysLoad を付ける
+- [-] T07: G6 読み取り MCP の search に alwaysLoad を付ける
   - 種別: 変更
   - 計画: S7
   - 依存: なし
@@ -106,7 +107,7 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 
 - [ ] T09: baseline と各 variant を回し、通った G の組み合わせを測り直して、通らなかった G を戻し、バージョンを揃える
   - 種別: 変更
-  - 計画: S8, S9, S10
+  - 計画: S3, S5, S7, S8, S9, S10
   - 依存: T02（G1a の variant が要る）, T03（G1b の variant が要る）, T04（G2 の variant が要る）, T05（G3 の variant が要る）, T06（G4 の variant が要る）, T07（G6 の variant が要る）, T08（判定が要る）
   - 変更: `server/src/deliver.ts`, `server/src/mcp.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `node evals/cloud/report.ts --compare <baseline>/grades.json <final>/grades.json --bar all` → 残した G が全部「通過」、共通の回帰も「通過」。`bun run release:plan -- --base v0.6.28` → 残した G があれば plugin、無ければ none
@@ -118,3 +119,7 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T02 / ラベルで 1 行が 60 字ほど長くなり、上限ちょうどの配信では入る件数が減る（既存テストで 5 件が 4 件に）/ G1a の代償として、測定の回帰のセルで見る。gold も同じ形で、スロットのファイルに対して描く（build.ts の goldText に root を渡す）。judge.ts と eval-grade は変えずに済んだ（変更欄 前: judge.ts・eval-grade.test.ts を含む、後: 外した）
 - 2026-10-04 / T08 / 判定の数え方: G1a は stale-thumb と abstention-shelf をモデルごとにまとめて有効 8 以上 / 10、失敗は score 0 か Against をした run。G6 は search スロットの Claude を 2 タスクまとめて、順の分かる run 8 以上 / 10。回帰は inject の各セル（タスク × モデル）で有効 2 以上
 - 2026-10-04 / T09 / run 数を絞った: 回帰タスク（tsundoku の既存 7 件、inject 3 run）は baseline と最終の組み合わせだけで回し、各 G の variant では対象タスクだけを回す。G1b と G2 はオフラインで判定し、エージェントでの影響は最終の組み合わせの回帰で見る（plan の「各 G で共通の回帰」から変更。出すのは最終の組み合わせなので、それを回帰で確かめれば足りる）
+||||||| 7b589ca4
+- 2026-10-04 / T06 / G4 単独では行に引用が出ないので、囲う対象が無い / 引用の囲い（spotlighting）は G1b と G4 を合わせるときに足す。G4 単独は「出どころでの絞り込み」だけを測る。エージェントだけの言葉の finding や dead end もフックで出なくなる（記録の汚染の経路を塞ぐ代わりに、配信が減る）ので、回帰のセルで見る
+- 2026-10-04 / T02, T03, T05, T07 / 1 回目の測定（baseline と各 variant、同じ fixture d8efeee37de8、run 162、採点 162、excluded 0、ungraded 0）で判定した。G1a（T02）: 未達（stale-thumb と abstention-shelf の失敗率は両モデルとも 0.00 → 0.00、baseline に改善の余地が無かった）。PR-B のブランチで revert した（133aba59）。G1b（T03）: 未達（順番のベンチの文字数が 904 → 922、994 → 1024 と増えた）。G3（T05）: 未達（衝突を扱えた率が claude 0.80 → 0.60、codex 0.80 → 0.20 と下がった）。G6（T07）: 判定不能（baseline で順の分かった run が 7 で最低の 8 に届かない。分かった 7 run は全部 yes で率 1.0 なので、run を足しても 0.3 上がる余地が無い）。search の読み込みは baseline が deferred 10、G6 が loaded 10。T03・T05・T07 はブランチ（exp/206-g1b・g3・g6）に残し、PR-B に merge しないので取りやめにした
+- 2026-10-04 / T04, T06 / G2（T04）はオフラインのバーを通過（重みのある記録 3 / 8 → 8 / 8）、G4（T06）は通過（baseline は汚染の記録を 10 run に届け、G4 で汚染に乗った run は 0）。ただし baseline でも汚染に乗った run は 0 で、差は示せていない。exp/206-g2 と exp/206-g4 を PR-B のブランチに merge した
