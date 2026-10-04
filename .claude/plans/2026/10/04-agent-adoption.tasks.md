@@ -375,6 +375,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(deliver): let SPHICA_AUTO_TRACE=off turn off only the automatic trace (T37)`
   - 結果: 持ち主が「既定オン＋停止設定」を選んだ（2026-10-05）。仕組みは researcher と Codex に同じ問いを出し、`userConfig` は 2.1.139 での読み込みと真偽値の環境変数の形が両方とも未確認、settings.json の `env` はどのバージョンでも hook に届くという点で一致したので、環境変数にした（`userConfig` は #280）。`SPHICA_AUTO_TRACE` が off・0・false・no のとき自動の通知を出さず、1 日 1 回の手動の案内に戻る。直す前は止まらないことを、追加したテストが落ちることで確かめた。README（英日）に止め方を書いた。`node --test --test-name-pattern="auto trace notice" test/deliver.test.ts` → 2 pass。`bun run verify` → 終了コード 0（受け入れ 127 pass）
 
+- [x] T38: PR #273 の 3 回目のレビュー指摘を直す（サブエージェントの呼び出しは AI の採用に使わない、評価の gold にも AI の印、trace の Skill の active の条件、precedent が見る理由、引用・コードブロックの言葉は採用にしない）
+  - 種別: 修正
+  - 計画: S1, S6, S7, S11
+  - 依存: T37（PR #273 の前のコミット）
+  - 変更: `server/src/trace.ts`, `server/src/extract.ts`, `server/src/record.ts`, `server/src/deliver.ts`, `server/evals/cloud/build.ts`, `plugin/skills/trace/SKILL.md`, `plugin/skills/review/reviewers/precedent.md`, `server/test/record.test.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="came from a subagent|quoted or pasted in a code block|gold lines carry" test/record.test.ts test/deliver.test.ts` → 直す前は、サブエージェントの呼び出しによる trace で AI の採用が active になり、持ち主の発言の引用（`>`）とコードブロックの中の言葉が持ち主の採用で active になり、評価の gold に AI の印が無い
+  - 完了条件: `cd server && node --test test/record.test.ts test/deliver.test.ts` → pass
+  - コミット: `fix(record): keep subagents and pasted words from adopting, and mark AI decisions in gold (T38)`
+  - 結果: red を実測した（サブエージェントと引用・コードブロックは active、gold は印なし）。`callSession` は Claude Code の hook の `owner_turn` を返し、`agentRun` は両方の呼び出しが持ち主のターンのときだけ AI の採用を許す。採用の引用が、どの行も `>` の引用かコードブロックの中にあるときは採用にせず理由を出す（持ち主の選択、2026-10-05。手で流す trace にも効く）。`recordLines` は AI の印を付け、`leadFor` で gold の先頭に AI の固定文を足す。trace の Skill の active の条件と adoption の欄、precedent の理由（差分に足したコメントだけ）を直した。`bun run verify` → 終了コード 0（受け入れ 127 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -422,3 +432,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-05 / T34 / PR #273 の GitHub の Codex のレビュー（P2 1 件: 呼び出し元のセッションが分からない save でも AI の採用を受ける）を受け、修正タスク T34 を足した
 - 2026-10-05 / T35 / PR #273 の GitHub の Codex の 2 回目のレビュー（P2 7 件・P3 1 件）のうち、記録と DB の 4 件を修正タスク T35 にした。表示と配信の 4 件は T36
 - 2026-10-05 / T37 / 持ち主が自動の trace を「既定オン＋停止設定」にすると決め、PR #273 の範囲に T37 を足した（plan の方針 8 と変更履歴）
+- 2026-10-05 / T38 / PR #273 の GitHub の Codex の 3 回目のレビュー（P2 5 件、うち 1 件はセキュリティ）を受け、修正タスク T38 にした。引用・コードブロックの言葉を採用にしない形は持ち主が選んだ

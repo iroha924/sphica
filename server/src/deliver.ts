@@ -200,11 +200,14 @@ export async function recordLines(
   db: Reads,
   units: { id: number; key: string; kind: string; stance: string | null; text: string }[],
 ): Promise<string[]> {
-  const why = await reasons(
-    db,
-    units.map((u) => u.id),
-  );
-  return units.map((u) => line(u, why.get(u.id)));
+  const ids = units.map((u) => u.id);
+  const [why, ai] = await Promise.all([reasons(db, ids), aiDecided(db, ids)]);
+  return units.map((u) => line(u, why.get(u.id), ai.has(u.id)));
+}
+
+/** A lead for records rendered as deliveries render them: with the AI words when any of them is an AI's decision */
+export async function leadFor(db: Reads, ids: number[], lead: string): Promise<string> {
+  return (await aiDecided(db, ids)).size ? `${lead} ${AI_DECIDED}` : lead;
 }
 
 /**

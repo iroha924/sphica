@@ -67,8 +67,8 @@ Then always check the following.
   **Do not pick which is right**: the maintainers decide
 - **Weigh whose decision it is.** The owner's decision binds: a diff that goes against it is a finding, whatever reason the change gives.
   A record marked `decided by an AI` was an AI's own choice in an earlier session: a diff that departs from it is a finding only when the
-  change gives no reason you can see (an added comment in the diff, or a commit message or PR body only when the launcher passed it to you).
-  When it gives one, give the record `undetermined` with the reason quoted and where it is written, and list it as a note, not a finding
+  diff gives no reason for it in an added comment (you are given the diff only, so a reason written elsewhere cannot be seen here).
+  When it gives one, give the record `undetermined` with the reason quoted and the line it is on, and list it as a note, not a finding
 
 ## What becomes a finding
 

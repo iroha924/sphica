@@ -194,6 +194,30 @@ export type Checked = {
   facts: RepoFacts;
 };
 
+/**
+ * Whether every line the byte span [start, end) touches is quoted (starts with ">") or inside a fenced code block: words someone pasted, not
+ * words their writer chose. A heuristic: a paste with no quote marks is not caught.
+ */
+function quotedSpan(body: string, start: number, end: number): boolean {
+  const bytes = Buffer.from(body, "utf8");
+  let fenced = false;
+  let touched = false;
+  for (let at = 0; at <= bytes.length; ) {
+    const nl = bytes.indexOf(0x0a, at);
+    const stop = nl < 0 ? bytes.length : nl;
+    const line = bytes.subarray(at, stop).toString("utf8").trimStart();
+    const fence = /^(```|~~~)/.test(line);
+    if (stop >= start && at < end) {
+      touched = true;
+      if (!(fenced || fence || line.startsWith(">"))) return false;
+    }
+    if (fence) fenced = !fenced;
+    if (nl < 0) break;
+    at = nl + 1;
+  }
+  return touched;
+}
+
 /** The byte span of quote in text, or null. The first occurrence is taken. */
 function locate(body: string, quote: string): [number, number] | null {
   if (!quote.trim()) return null;
@@ -560,6 +584,12 @@ export async function checkRecord(
       const span = locate(s.text, a.quote);
       if (!span) {
         quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
+        continue;
+      }
+      if (quotedSpan(s.text, span[0], span[1])) {
+        problems.push(
+          `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
+        );
         continue;
       }
       adoption.push({ source: s.id, start: span[0], end: span[1], route });

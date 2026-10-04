@@ -266,7 +266,7 @@ async function agentRun(db: Reads, run: Run, call: number | undefined): Promise<
   const modes = await db.selectFrom("record_call").select("mode").where("id", "in", calls).execute();
   if (modes.length !== calls.length || !modes.every((m) => m.mode === "interactive")) return false;
   const [a, b] = await Promise.all([callSession(db, run.begin_call_id), callSession(db, call)]);
-  return a !== null && b !== null && a.host === b.host && a.session === b.session;
+  return a !== null && b !== null && a.owner && b.owner && a.host === b.host && a.session === b.session;
 }
 
 /** The key namespace, the sources the run may mark as looked at, and what context prints: a heading, one entry per source, and a tail. */

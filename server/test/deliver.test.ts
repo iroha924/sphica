@@ -9,7 +9,7 @@ import { after, before, test } from "node:test";
 import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { AUTO_TRACE, CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { AUTO_TRACE, CONFIRM, deliver, leadFor, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { readUnit } from "../src/read.ts";
@@ -2349,5 +2349,28 @@ test("auto trace notice: SPHICA_AUTO_TRACE=off turns only the automatic trace of
     else process.env.SPHICA_AUTO_TRACE = saved;
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: the evaluation's gold lines carry the mark and the AI words, as a delivery does", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const u = aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const rows = [
+      {
+        id: u,
+        key: "trace:ext-s1/pool",
+        kind: "decision",
+        stance: "do",
+        text: "I keep the connection pool small.",
+      },
+    ];
+    const [line] = await recordLines(db.reader, rows);
+    assert.match(line ?? "", /^- trace:ext-s1\/pool \(decision do, decided by an AI\): /);
+    assert.equal(await leadFor(db.reader, [u], "Lead."), `Lead. ${AI_DECIDED}`);
+    assert.equal(await leadFor(db.reader, [], "Lead."), "Lead.");
+  } finally {
+    await db.done();
   }
 });

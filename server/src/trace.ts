@@ -173,18 +173,19 @@ export async function logCall(db: Kysely<DB>, projectId: number, tool: string, c
 export async function callSession(
   db: Reads,
   callId: number,
-): Promise<{ host: string; session: string } | null> {
+): Promise<{ host: string; session: string; owner: boolean } | null> {
   const c = await db
     .selectFrom("record_call as c")
     .leftJoin("tool_call_observation as o", (j) =>
       j.on("o.host", "=", "claude-code").onRef("o.tool_use_id", "=", "c.tool_use_id"),
     )
-    .select(["c.host", "c.caller_session", "o.session_external"])
+    .select(["c.host", "c.caller_session", "o.session_external", "o.owner_turn"])
     .where("c.id", "=", callId)
     .executeTakeFirst();
   if (!c?.host) return null;
   const session = c.host === "codex" ? c.caller_session : c.session_external;
-  return session ? { host: c.host, session } : null;
+  // Codex names a child its own thread, so a session there is the caller's; Claude Code's hook says whether a subagent made the call
+  return session ? { host: c.host, session, owner: c.host === "codex" || c.owner_turn === 1 } : null;
 }
 
 /** A session's messages in order, with whether an earlier run already looked at each. */

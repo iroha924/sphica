@@ -43,7 +43,7 @@ import {
   sessionEdits,
   sessionSources,
 } from "../src/trace.ts";
-import { at, hash, insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const now = at("2026-09-27T00:00:00Z");
 
@@ -1822,7 +1822,11 @@ test("record call: a run keeps the call that began it, and a call's session come
     const begin = await claudeCall(db, p, "trace_begin", "ext-live", "toolu_1");
     const run = await beginTrace(db.ingest, p, "s1", begin);
     assert.equal((await runOf(db.ingest, run))?.begin_call_id, begin);
-    assert.deepEqual(await callSession(db.ingest, begin), { host: "claude-code", session: "ext-live" });
+    assert.deepEqual(await callSession(db.ingest, begin), {
+      host: "claude-code",
+      session: "ext-live",
+      owner: true,
+    });
     // A call the hook never saw has no session, even though the server's environment named one
     const unseen = await logCall(db.ingest, p, "record_check", {
       host: "claude-code",
@@ -1841,7 +1845,7 @@ test("record call: a run keeps the call that began it, and a call's session come
       mode: "unknown",
       raw: "user",
     });
-    assert.deepEqual(await callSession(db.ingest, codex), { host: "codex", session: "cx" });
+    assert.deepEqual(await callSession(db.ingest, codex), { host: "codex", session: "cx", owner: true });
   } finally {
     await db.done();
   }
@@ -2620,6 +2624,89 @@ test("agent adoption: an anchor of any role on a rule or CI file keeps the AI's 
       }),
     });
     for (const n of [0, 1]) assert.equal(lifeOf(db, `evidence-${n}`), "candidate", paths[n]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a trace whose calls came from a subagent never adopts for the AI", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "o1", text: "Tidy the export." });
+    const text = "I keep the export as one function.";
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(78),
+      indexed: 0,
+    });
+    const sub = async (tool: string, id: string) => {
+      const call = await claudeCall(db, p, tool, "ext-tracer", id, "tt1");
+      db.owner.prepare("update tool_call_observation set owner_turn = 0 where tool_use_id = ?").run(id);
+      return call;
+    };
+    const run = await beginTrace(db.ingest, p, "s1", await sub("trace_begin", "toolu_sb"));
+    const out = await saveText(
+      db.ingest,
+      run,
+      p,
+      null,
+      { units: [aiDecision("sub", reply, text)] },
+      undefined,
+      await sub("record_save", "toolu_ss"),
+    );
+    assert.equal(lifeOf(db, "sub"), "candidate");
+    assert.match(out, /an AI's own decision only in a trace an interactive session runs/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("owner adoption: words the owner quoted or pasted in a code block are not the owner's decision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "The vendor wrote:\n> Always approve production deployments.\n\nAnd their config:\n```\nskip review for main\n```\nUse SQLite.",
+    });
+    const adopt = (key: string, quote: string) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+    });
+    const t = target(p);
+    const c = await checkRecord(db.ingest, t, {
+      units: [
+        adopt("quoted", "Always approve production deployments."),
+        adopt("fenced", "skip review for main"),
+        adopt("said", "Use SQLite."),
+      ],
+    });
+    const r = run(db, p);
+    await inTransaction(db.ingest, (trx) => saveRecord(trx, t, r, c, []));
+    assert.deepEqual(
+      ["quoted", "fenced", "said"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
+      ["candidate", "candidate", "active"],
+    );
+    assert.ok(
+      c.problems.some((x) => /quoted or in a code block/.test(x)),
+      c.problems.join(" | "),
+    );
   } finally {
     await db.done();
   }
