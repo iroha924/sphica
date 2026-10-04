@@ -19,6 +19,7 @@ import {
   treeState,
   treeWatcher,
 } from "../evals/cloud/claude-run.ts";
+import { type Checkout, pinCheckout } from "../evals/cloud/codex-home.ts";
 import {
   claudeStreamCalls,
   foundInClaudeStream,
@@ -27,6 +28,13 @@ import {
   searchedBeforeEdit,
   searchLoading,
 } from "../evals/cloud/judge.ts";
+
+/** Pins a test checkout's git directory beside it, as the runners do before the agent starts. */
+function pinned(t: { after: (f: () => void) => void }, work: string): Checkout {
+  const git = `${work}-git`;
+  t.after(() => fs.rmSync(git, { recursive: true, force: true }));
+  return pinCheckout(work, git);
+}
 
 /** A child process's environment: a temporary home and none of the owner's Sphica paths. */
 function childEnv(home: string): NodeJS.ProcessEnv {
@@ -138,6 +146,7 @@ test("the patch is everything since the starting commit, committed or not, witho
   git("add", "-A");
   git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "start");
   const start = git("rev-parse", "HEAD").trim();
+  const c = pinned(t, work);
   // The agent commits one change and leaves another untracked
   fs.writeFileSync(path.join(work, "a.ts"), "export const a = 2;\n");
   git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qam", "agent");
@@ -145,7 +154,7 @@ test("the patch is everything since the starting commit, committed or not, witho
   fs.writeFileSync(path.join(work, ".tools", "x"), "rewritten");
   fs.mkdirSync(path.join(work, "node_modules", "dep"), { recursive: true });
   fs.writeFileSync(path.join(work, "node_modules", "dep", "i.js"), "x");
-  const patch = patchSince(work, start);
+  const patch = patchSince(c, start);
   assert.match(patch, /a\.ts/);
   assert.match(patch, /export const a = 2/);
   assert.match(patch, /b\.ts/);
@@ -465,7 +474,7 @@ test("the tree watcher marks each tool result with whether the tree changed and 
     "s",
   ]);
   const marks = path.join(dir, "edits.jsonl");
-  const watch = treeWatcher(work, marks);
+  const watch = treeWatcher(pinned(t, work), marks);
   watch(use("r", "Read"));
   watch(result("r", "1"));
   watch(use("w", "Write"));
@@ -494,7 +503,7 @@ test("the tree watcher marks each tool result with whether the tree changed and 
     { after: "b2", changed: false, in_flight: [], late: false },
     { after: "n", changed: false, in_flight: [], late: false },
   ]);
-  // A commit made from Bash leaves the status clean but still changes the tree's state
+  // A commit alone changes no file: against the pinned start the tree is the same, whatever the checkout's own HEAD says
   watch(use("c", "Bash"));
   execFileSync("git", ["-C", work, "add", "-A"]);
   execFileSync("git", [
@@ -510,7 +519,7 @@ test("the tree watcher marks each tool result with whether the tree changed and 
   ]);
   watch(result("c", "ok"), true);
   const last = JSON.parse(fs.readFileSync(marks, "utf8").trim().split("\n").at(-1) ?? "{}");
-  assert.deepEqual(last, { after: "c", changed: true, in_flight: [], late: true });
+  assert.deepEqual(last, { after: "c", changed: false, in_flight: [], late: true });
 });
 
 test("a search counts as before the edit only when it came before the call that first changed the tree", () => {
@@ -583,11 +592,12 @@ test("files the agent wrote under ignored paths are in the patch too", (t) => {
   git("add", "-A");
   git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "s");
   const start = git("rev-parse", "HEAD").trim();
+  const c = pinned(t, work);
   fs.mkdirSync(path.join(work, "docs"));
   fs.writeFileSync(path.join(work, "docs", "install.md"), "npm install\n");
   fs.mkdirSync(path.join(work, "node_modules", "x"), { recursive: true });
   fs.writeFileSync(path.join(work, "node_modules", "x", "i.js"), "x");
-  const patch = patchSince(work, start);
+  const patch = patchSince(c, start);
   assert.match(patch, /docs\/install\.md/);
   assert.doesNotMatch(patch, /node_modules/);
 });
@@ -783,11 +793,12 @@ test("one Bash call that edits and commits between two clean looks still changes
   fs.writeFileSync(path.join(work, "a.ts"), "1");
   git("add", "-A");
   git("commit", "-qm", "s");
-  const clean = treeState(work);
+  const c = pinned(t, work);
+  const clean = treeState(c);
   fs.writeFileSync(path.join(work, "a.ts"), "2");
   git("commit", "-qam", "agent");
   assert.equal(execFileSync("git", ["-C", work, "status", "--porcelain"], { encoding: "utf8" }), "");
-  assert.notEqual(treeState(work), clean);
+  assert.notEqual(treeState(c), clean);
 });
 
 test("the context canary reads only receipt objects, and an instructions receipt must name its file", () => {
@@ -965,19 +976,20 @@ test("the tree state sees ignored files and never reads through a link the agent
   fs.writeFileSync(path.join(work, ".gitignore"), "docs/\n");
   git("add", "-A");
   git("commit", "-qm", "s");
-  const clean = treeState(work);
+  const c = pinned(t, work);
+  const clean = treeState(c);
   fs.mkdirSync(path.join(work, "docs"));
   fs.writeFileSync(path.join(work, "docs", "install.md"), "npm install\n");
-  const ignored = treeState(work);
+  const ignored = treeState(c);
   assert.notEqual(ignored, clean, "a file written under an ignored path changes the state");
   // A link to a file outside: changing the target must not change the state, since the target is never read
   const secret = path.join(outside, "secret.txt");
   fs.writeFileSync(secret, "one");
   fs.symlinkSync(secret, path.join(work, "link"));
-  const linked = treeState(work);
+  const linked = treeState(c);
   assert.notEqual(linked, ignored, "the link itself is seen");
   fs.writeFileSync(secret, "two");
-  assert.equal(treeState(work), linked, "the link's target is not read");
+  assert.equal(treeState(c), linked, "the link's target is not read");
 });
 
 test("the context canary wants every Sphica tool where the condition has them, not just search", () => {
@@ -1250,4 +1262,38 @@ test("a run whose claude cannot start is still recorded with the reason, and the
   const [run] = fs.readdirSync(out);
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
   assert.match(recorded.reason, /claude could not start/);
+});
+
+test("the runner reads a checkout through its pinned git directory, so config the agent wrote there runs nothing", (t) => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "eval-fsmonitor-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "eval-fsmonitor-out-"));
+  t.after(() => {
+    fs.rmSync(work, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+  const git = (...a: string[]) =>
+    execFileSync("git", ["-C", work, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
+      encoding: "utf8",
+    });
+  git("init", "-q");
+  fs.writeFileSync(path.join(work, "a.ts"), "1");
+  git("add", "-A");
+  git("commit", "-qm", "s");
+  const start = git("rev-parse", "HEAD").trim();
+  const c = pinned(t, work);
+  // The agent sets a command for git to run in its checkout's config, and a filter every file goes through
+  const hook = path.join(outside, "hook.sh");
+  fs.writeFileSync(hook, `#!/bin/sh\ntouch "${path.join(outside, "ran")}"\n`, { mode: 0o755 });
+  git("config", "core.fsmonitor", hook);
+  git("config", "filter.x.clean", hook);
+  fs.writeFileSync(path.join(work, ".gitattributes"), "* filter=x\n");
+  fs.writeFileSync(path.join(work, "a.ts"), "2");
+  // It also commits, which no longer hides the change from the patch
+  git("commit", "-qam", "agent");
+  // The agent's own git ran its config; only what the runner does from here counts
+  fs.rmSync(path.join(outside, "ran"), { force: true });
+  treeState(c);
+  const patch = patchSince(c, start);
+  assert.equal(fs.existsSync(path.join(outside, "ran")), false, "nothing the agent configured ran");
+  assert.match(patch, /^\+2$/m);
 });
