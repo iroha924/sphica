@@ -32,8 +32,7 @@ test("the fixture's target records are delivered as each task needs, and the con
     };
     await shows("pre_read", "src/thumb.ts", ["trace:s-en-thumb/width", "trace:s-en-thumb/webp"]);
     await shows("pre_edit", "src/shelf.ts", ["trace:s-ja-shelf/nesting", "trace:s-ja-shelf/duplicate-names"]);
-    // The upload record rests only on a contributor's words, so hooks never push it
-    await shows("pre_read", "src/backup.ts", [], ["harvest:41/upload"]);
+    await shows("pre_read", "src/backup.ts", ["harvest:41/upload"]);
     await shows("pre_read", "src/cover.ts", [], ["trace:s-ja-cover/retry", "harvest:40/no-retry"]);
     await shows("pre_edit", "src/export.ts", [], ["glean:csv/no-notes"]);
     const file = path.join(dir, "fixture.db");

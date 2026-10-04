@@ -6,11 +6,15 @@ import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { renamesSince } from "./git.ts";
 import { inline } from "./panel.ts";
-import { cut, head } from "./text.ts";
+import { head } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
 export const UNSUPPORTED =
   "unsupported: its owner quote was retracted or forgotten, so it is not the owner's condition";
+
+/** The bytes of a source a span points at. */
+export const cut = (text: string, start: number, end: number) =>
+  Buffer.from(text, "utf8").subarray(start, end).toString("utf8");
 
 export const speaker = (s: {
   author_kind: string;

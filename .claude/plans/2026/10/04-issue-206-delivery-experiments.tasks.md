@@ -105,13 +105,14 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - コミット: `fix(evals): let read-only calls run beside the first edit without hiding the order (T10)`
   - 結果: red は上のとおり baseline の 5 run がすべて unknown（G6 が判定不能になる）。直した後 `node --test test/eval-claude.test.ts` → pass 28, fail 0。数え直すと baseline 7 run のうち 3 run が yes、G6 は 5 run とも yes（loaded）
 
-- [ ] T09: baseline と各 variant を回し、通った G の組み合わせを測り直して、通らなかった G を戻し、バージョンを揃える
+- [x] T09: baseline と各 variant を回し、通った G の組み合わせを測り直して、通らなかった G を戻し、バージョンを揃える
   - 種別: 変更
   - 計画: S3, S5, S7, S8, S9, S10
   - 依存: T02（G1a の variant が要る）, T03（G1b の variant が要る）, T04（G2 の variant が要る）, T05（G3 の variant が要る）, T06（G4 の variant が要る）, T07（G6 の variant が要る）, T08（判定が要る）
-  - 変更: `server/src/deliver.ts`, `server/src/mcp.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/src/deliver.ts`, `server/src/provenance.ts`, `server/src/text.ts`, `server/src/read.ts`, `server/src/export.ts`, `server/test/deliver.test.ts`, `server/test/provenance.test.ts`, `server/test/eval-fixture.test.ts`
   - 完了条件: `node evals/cloud/report.ts --compare <baseline>/grades.json <final>/grades.json --bar all` → 残した G が全部「通過」、共通の回帰も「通過」。`bun run release:plan -- --base v0.6.28` → 残した G があれば plugin、無ければ none
   - コミット: `feat(deliver): ship the delivery changes that passed their measurement (T09)`
+  - 結果: 2 回目の測定（最終の組み合わせ T01＋G2＋G4、c2046212、run 92、採点 92、excluded 0、ungraded 0）。`node evals/cloud/report.ts --compare <base>/grades.json <final>/grades.json --bar g4,regression` → G4 は未達（new で 1 run が upload を提案）、回帰は未達（conflict-cover claude 平均 -0.40、override-postgres codex -0.33、poisoned-backup claude re-proposal 0 → 0.20、stale-thumb claude re-proposal 0 → 0.60）。plan どおり何も出さない: G2 と G4 の merge と T01（定義の読み取り）を戻し、`server/src` は PR-A の HEAD と同じになった。`bun run release:plan -- --base v0.6.28` → none
 
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
@@ -123,3 +124,5 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T06 / G4 単独では行に引用が出ないので、囲う対象が無い / 引用の囲い（spotlighting）は G1b と G4 を合わせるときに足す。G4 単独は「出どころでの絞り込み」だけを測る。エージェントだけの言葉の finding や dead end もフックで出なくなる（記録の汚染の経路を塞ぐ代わりに、配信が減る）ので、回帰のセルで見る
 - 2026-10-04 / T02, T03, T05, T07 / 1 回目の測定（baseline と各 variant、同じ fixture d8efeee37de8、run 162、採点 162、excluded 0、ungraded 0）で判定した。G1a（T02）: 未達（stale-thumb と abstention-shelf の失敗率は両モデルとも 0.00 → 0.00、baseline に改善の余地が無かった）。PR-B のブランチで revert した（133aba59）。G1b（T03）: 未達（順番のベンチの文字数が 904 → 922、994 → 1024 と増えた）。G3（T05）: 未達（衝突を扱えた率が claude 0.80 → 0.60、codex 0.80 → 0.20 と下がった）。G6（T07）: 判定不能（baseline で順の分かった run が 7 で最低の 8 に届かない。分かった 7 run は全部 yes で率 1.0 なので、run を足しても 0.3 上がる余地が無い）。search の読み込みは baseline が deferred 10、G6 が loaded 10。T03・T05・T07 はブランチ（exp/206-g1b・g3・g6）に残し、PR-B に merge しないので取りやめにした
 - 2026-10-04 / T04, T06 / G2（T04）はオフラインのバーを通過（重みのある記録 3 / 8 → 8 / 8）、G4（T06）は通過（baseline は汚染の記録を 10 run に届け、G4 で汚染に乗った run は 0）。ただし baseline でも汚染に乗った run は 0 で、差は示せていない。exp/206-g2 と exp/206-g4 を PR-B のブランチに merge した
+- 2026-10-04 / T09 / 最終の組み合わせで下がったセルの多くは、変更が届かないセルだった（conflict-cover は G3 を入れておらず衝突の 2 件はどちらの側でも配信されない、stale-thumb は記録が 2 件で順番が効かず 2 件ともオーナーの記録なので G4 でも同じ）。3〜5 run の差は run ごとのばらつきの方が大きく、0.3 のバーを見分けられていない。次に測るなら、同じビルドを 2 回回してばらつきを先に測り、バーと run 数をそれに合わせて決める
+- 2026-10-04 / T09 / バージョンは 0.6.29 のまま残した。pre-commit の検査（scripts/check-mcp-version.mjs）は、公開していない版でも下げるのを止める。パッケージの中身は v0.6.28 と同じで release:plan は none。次に出すときは 0.6.29 以上にする（変更欄 前: バージョンの 4 ファイル、後: 外して、戻したソースとテストにした）

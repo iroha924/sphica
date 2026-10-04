@@ -449,7 +449,3 @@ function explain(e: unknown, depth: number): string {
     .join(" / ");
   return own && inner ? `${own} (${inner})` : own || inner;
 }
-
-/** The bytes of a source a span points at. */
-export const cut = (text: string, start: number, end: number) =>
-  Buffer.from(text, "utf8").subarray(start, end).toString("utf8");

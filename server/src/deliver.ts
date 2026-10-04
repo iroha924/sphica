@@ -78,11 +78,7 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
   return { text: note ? `${text || lead}${note}` : text, note };
 };
 
-/**
- * Units that may be delivered: active, supported, sourced, in no unresolved conflict, and resting on the owner's or a maintainer's own
- * words. A record whose live evidence is only a third party's or an agent's (or the owner repeating someone else) is left to search, so
- * text anyone can post never reaches the agent unasked.
- */
+/** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
 const deliverable = (db: Reads, projectId: number) =>
   db
     .selectFrom("unit as u")
@@ -90,22 +86,6 @@ const deliverable = (db: Reads, projectId: number) =>
     .where("u.lifecycle", "=", "active")
     .where("u.extraction", "=", "supported")
     .where("u.unsourced", "=", 0)
-    .where(({ exists, selectFrom }) =>
-      exists(
-        selectFrom("unit_evidence as e")
-          .innerJoin("source as s", "s.id", "e.source_id")
-          .select("e.id")
-          .whereRef("e.unit_id", "=", "u.id")
-          .where("e.retracted_at", "is", null)
-          .where("e.reported_speaker", "is", null)
-          .where((eb) =>
-            eb.or([
-              eb("s.author_kind", "=", "owner"),
-              eb("s.author_association", "in", ["OWNER", "MEMBER", "COLLABORATOR"]),
-            ]),
-          ),
-      ),
-    )
     .where(({ not, exists, selectFrom }) =>
       not(
         exists(
@@ -220,41 +200,6 @@ type Plan = {
   once?: string;
 };
 
-/**
- * How much a record weighs when more apply than one delivery shows: a constraint, then a decision against something, then what the owner
- * adopted, then what a maintainer adopted, then the rest; newer first within each.
- */
-const weight = (eb: ExpressionBuilder<DB & { u: DB["unit"] }, "u">) => {
-  const adoptedBy = (
-    who: (s: ExpressionBuilder<DB & { s: DB["source"] }, "s">) => ReturnType<typeof eb.and>,
-  ) =>
-    eb.exists(
-      eb
-        .selectFrom("unit_adoption as ad")
-        .innerJoin("source as s", "s.id", "ad.source_id")
-        .select("ad.id")
-        .whereRef("ad.unit_id", "=", "u.id")
-        .where("ad.retracted_at", "is", null)
-        .where((s) => who(s as never)),
-    );
-  return eb
-    .case()
-    .when("u.kind", "=", "constraint")
-    .then(0)
-    .when("u.stance", "=", "dont")
-    .then(1)
-    .when(adoptedBy((s) => s.or([s("s.author_kind", "=", "owner"), s("s.author_association", "=", "OWNER")])))
-    .then(2)
-    .when(
-      adoptedBy((s) =>
-        s.or([s("s.author_association", "=", "MEMBER"), s("s.author_association", "=", "COLLABORATOR")]),
-      ),
-    )
-    .then(3)
-    .else(4)
-    .end();
-};
-
 const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
   deliverable(db, projectId)
     .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
@@ -263,7 +208,6 @@ const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
     .where("a.retired_at", "is", null)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .groupBy("u.id")
-    .orderBy(weight)
     .orderBy("u.id", "desc");
 
 /** The paths a delivery names in its lead: all of them up to three, then a count. */
@@ -579,7 +523,6 @@ async function atStart(
     );
   const broad = await standing
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
-    .orderBy(weight)
     .orderBy("u.id", "desc")
     .limit(3)
     .execute();

@@ -6,9 +6,8 @@ import type { Selectable } from "kysely";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
-import { speaker } from "./read.ts";
+import { cut, speaker } from "./read.ts";
 import { RULE_NAMES } from "./rule-files.ts";
-import { cut } from "./text.ts";
 
 export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as const;
 

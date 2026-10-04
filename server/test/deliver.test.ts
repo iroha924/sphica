@@ -2,7 +2,6 @@
 // start, which never do, and that each delivery is logged by unit id without its text.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +12,6 @@ import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import { insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -1930,169 +1928,6 @@ test("concurrent reads that cannot take the write lock still answer, unlogged an
     }
     assert.equal(texts.filter((t) => /^- trace:/m.test(t)).length, 6, texts.join("\n"));
     assert.equal(db.owner.prepare("select count(*) as n from delivery").get()?.n, 0);
-  } finally {
-    await db.done();
-    fs.rmSync(repo, { recursive: true, force: true });
-  }
-});
-
-test("more records than one delivery shows are chosen by weight before age: constraints, decisions against, then the owner's", async () => {
-  const db = tempDb();
-  const repo = checkout();
-  try {
-    const p = project(db);
-    const m = message(db, p, { id: "m1", text: "A. B. C. D. E. F. G." });
-    const anchor = { anchors: [{ path: "src/x.ts", role: "applies_to" }] };
-    // Saved oldest first, so newest-first would show the last five
-    await save(db, p, {
-      units: [
-        decided("old-constraint", m, "A.", anchor),
-        decided("old-dont", m, "B.", { kind: "decision", stance: "dont", ...anchor }),
-        decided("owner-1", m, "C.", { kind: "decision", ...anchor }),
-        ...["D.", "E.", "F.", "G."].map((q, i) => ({
-          key: `finding-${i}`,
-          kind: "finding",
-          text: q,
-          evidence: [{ source: `s${m}`, quote: q, role: "states" }],
-          ...anchor,
-        })),
-      ],
-    });
-    const edit = await deliver(
-      {
-        session_id: "s",
-        cwd: repo,
-        hook_event_name: "PreToolUse",
-        tool_name: "Edit",
-        tool_input: { file_path: path.join(repo, "src/x.ts") },
-      },
-      "claude-code",
-      db.file,
-    );
-    const keys = [...edit.matchAll(/^- (\S+) \(/gm)].map((x) => x[1]);
-    assert.deepEqual(keys.slice(0, 3), [
-      "trace:ext-s1/old-constraint",
-      "trace:ext-s1/old-dont",
-      "trace:ext-s1/owner-1",
-    ]);
-    // The remaining room goes to the newest of the rest
-    assert.deepEqual(keys.slice(3), ["trace:ext-s1/finding-3", "trace:ext-s1/finding-2"]);
-  } finally {
-    await db.done();
-    fs.rmSync(repo, { recursive: true, force: true });
-  }
-});
-
-test("hooks push only records resting on the owner's or a maintainer's own words; search still finds the others", async () => {
-  const db = tempDb();
-  const repo = checkout();
-  try {
-    const p = project(db);
-    const owner = message(db, p, {
-      id: "m1",
-      text: "Keep the cache. Kai said drop the cache. Both: keep tests fast.",
-    });
-    const agent = message(db, p, { id: "m2", text: "The cache misses on cold start.", speaker: "assistant" });
-    const anchor = { anchors: [{ path: "src/cache.ts", role: "applies_to" }] };
-    await save(db, p, {
-      units: [
-        decided("own", owner, "Keep the cache.", { kind: "decision", ...anchor }),
-        {
-          key: "hearsay",
-          kind: "finding",
-          text: "Kai says drop the cache",
-          evidence: [
-            {
-              source: `s${owner}`,
-              quote: "Kai said drop the cache.",
-              role: "states",
-              reported_speaker: "Kai",
-            },
-          ],
-          ...anchor,
-        },
-        {
-          key: "agent-only",
-          kind: "finding",
-          text: "The cache misses on cold start",
-          evidence: [{ source: `s${agent}`, quote: "The cache misses on cold start.", role: "states" }],
-          ...anchor,
-        },
-        {
-          key: "mixed",
-          kind: "finding",
-          text: "Keep tests fast",
-          evidence: [
-            { source: `s${owner}`, quote: "Both: keep tests fast.", role: "states" },
-            { source: `s${agent}`, quote: "The cache misses on cold start.", role: "explains" },
-          ],
-          ...anchor,
-        },
-      ],
-    });
-    const keys = async () =>
-      [
-        ...(
-          await deliver(
-            {
-              session_id: crypto.randomUUID(),
-              cwd: repo,
-              hook_event_name: "PreToolUse",
-              tool_name: "Edit",
-              tool_input: { file_path: path.join(repo, "src/cache.ts") },
-            },
-            "claude-code",
-            db.file,
-          )
-        ).matchAll(/^- (\S+) \(/gm),
-      ].map((x) => x[1]);
-    assert.deepEqual((await keys()).sort(), ["trace:ext-s1/mixed", "trace:ext-s1/own"]);
-    // Search is asked for, so it still finds what hooks leave out
-    const found = (await searchUnits(db.reader, p, { question: "cache cold start", limit: 10 })).hits.map(
-      (h) => h.key,
-    );
-    assert.ok(found.includes("trace:ext-s1/agent-only"), found.join(", "));
-    // A maintainer's own words make a record pushable; retracting the owner's words makes it not
-    const ids = Object.fromEntries(
-      db.owner
-        .prepare("select key, id from unit")
-        .all()
-        .map((r) => [String(r.key), Number(r.id)]),
-    );
-    const runId = Number(db.owner.prepare("select run_id from unit_evidence limit 1").get()?.run_id);
-    const now = new Date().toISOString();
-    const member = insert(db, "source", {
-      project_id: p,
-      kind: "pr_comment",
-      artifact: "pr:9",
-      external_id: "c9",
-      revision: 1,
-      author_kind: "person",
-      author_login: "kai",
-      author_association: "MEMBER",
-      created_at: now,
-      available_at: now,
-      captured_at: now,
-      text: "Cold start misses are expected.",
-      original_bytes: 31,
-      content_hash: Buffer.alloc(32, 9),
-      indexed: 1,
-    });
-    insert(db, "unit_evidence", {
-      unit_id: ids["trace:ext-s1/agent-only"] ?? 0,
-      source_id: member,
-      span_start: 0,
-      span_end: 31,
-      role: "explains",
-      run_id: runId,
-      added_at: now,
-    });
-    db.owner
-      .prepare(
-        "update unit_evidence set retracted_at = ?, retraction_reason = 'misheard', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ? and source_id = ?",
-      )
-      .run(now, owner, ids["trace:ext-s1/mixed"] ?? 0, owner);
-    assert.deepEqual((await keys()).sort(), ["trace:ext-s1/agent-only", "trace:ext-s1/own"]);
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
