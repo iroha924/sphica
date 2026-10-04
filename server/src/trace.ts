@@ -1,4 +1,4 @@
-// What trace reads: sessions not traced yet, the run a draft is bound to, and a session's sources, edits, and the project's live records.
+// What trace reads: sessions not traced yet (the owner's messages for an explicit trace, every speaker's for an automatic one), the run a draft is bound to, and a session's sources, edits, and the project's live records.
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import type { Caller } from "./caller.ts";
 import { iso, type Reads } from "./db.ts";
@@ -14,30 +14,41 @@ export const pendingCutoff = (now: Date): string =>
 
 type InSession = ExpressionBuilder<DB & { s: Session }, "s">;
 
-/** Owner messages of session `s` that no extraction has looked at. */
-const untracedOwner = (eb: InSession) =>
-  eb
-    .selectFrom("source as m")
-    .whereRef("m.session_id", "=", "s.id")
-    .where("m.author_kind", "=", "owner")
-    .where(({ not, exists, selectFrom }) =>
-      not(
-        exists(
-          selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
-        ),
+/**
+ * Which sessions wait. An explicit trace waits on the owner's messages only. An automatic one waits on every speaker's, so a reply
+ * captured after a run began is traced by the next run, and `skip` names the caller's own session, which is still being written.
+ */
+export type PendingOptions = { auto?: boolean; skip?: { host: string; session: string } | null };
+
+/** Messages of session `s` that no extraction has looked at: the owner's, or with `auto` every speaker's. */
+const untraced = (eb: InSession, auto: boolean) => {
+  const q = eb.selectFrom("source as m").whereRef("m.session_id", "=", "s.id");
+  return (auto ? q : q.where("m.author_kind", "=", "owner")).where(({ not, exists, selectFrom }) =>
+    not(
+      exists(
+        selectFrom("source_processing as p").whereRef("p.source_id", "=", "m.id").select(sql`1`.as("x")),
       ),
-    );
+    ),
+  );
+};
 
 /**
- * Sessions of the project with an owner message no extraction has looked at, with the time of their last owner message, traced
- * or not: a session the owner came back to stays recent even when its untraced messages are old. Session start runs this, so each
- * session is read through its own messages (the source_session index), never by grouping the whole project.
+ * Sessions of the project with a message no extraction has looked at, with the time of their last owner message, traced or not: a
+ * session the owner came back to stays recent even when its untraced messages are old. Session start runs this, so each session is
+ * read through its own messages (the source_session index), never by grouping the whole project.
  */
-export const untracedSessions = (db: Reads, projectId: number) =>
-  db
+export const untracedSessions = (db: Reads, projectId: number, o: PendingOptions = {}) => {
+  const auto = o.auto ?? false;
+  const skip = o.skip;
+  return db
     .selectFrom("session as s")
     .where("s.project_id", "=", projectId)
-    .where((eb) => eb.exists(untracedOwner(eb).select(sql`1`.as("x"))))
+    .$if(Boolean(skip), (q) =>
+      q.where((eb) =>
+        eb.not(eb.and([eb("s.host", "=", skip?.host ?? ""), eb("s.external_id", "=", skip?.session ?? "")])),
+      ),
+    )
+    .where((eb) => eb.exists(untraced(eb, auto).select(sql`1`.as("x"))))
     .select((eb) => [
       "s.id",
       "s.host",
@@ -49,17 +60,19 @@ export const untracedSessions = (db: Reads, projectId: number) =>
         .where("o.author_kind", "=", "owner")
         .select((o) => o.fn.max("o.created_at").as("last"))
         .as("last"),
-      untracedOwner(eb)
+      untraced(eb, auto)
         .select((m) => m.fn.countAll<number>().as("waiting"))
         .as("waiting"),
-      untracedOwner(eb)
+      untraced(eb, auto)
         .select((m) => m.fn.min("m.id").as("first"))
         .as("first"),
     ]);
+};
 
 /**
- * Untraced sessions of one group, the one whose owner came back most recently first, with how many owner messages wait and the
- * first of them. `total` counts the whole group, beyond the limit.
+ * Untraced sessions of one group, with how many messages wait and the first of them. An explicit trace lists first the session whose
+ * owner came back most recently; an automatic one the session that started first, ordered before the limit so the oldest is never
+ * left out. `total` counts the whole group, beyond the limit.
  */
 export async function pendingSessions(
   db: Reads,
@@ -67,13 +80,17 @@ export async function pendingSessions(
   group: "recent" | "older",
   now: Date = new Date(),
   limit = 20,
+  o: PendingOptions = {},
 ) {
   const cutoff = pendingCutoff(now);
   const base = db
-    .selectFrom(untracedSessions(db, projectId).as("w"))
+    .selectFrom(untracedSessions(db, projectId, o).as("w"))
     .where("w.last", group === "recent" ? ">=" : "<", cutoff);
+  const ordered = o.auto
+    ? base.selectAll("w").orderBy("w.started_at").orderBy("w.id")
+    : base.selectAll("w").orderBy("w.last", "desc");
   const [rows, total] = await Promise.all([
-    base.selectAll("w").orderBy("w.last", "desc").limit(limit).execute(),
+    ordered.limit(limit).execute(),
     base.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
   ]);
   return { rows, total: Number(total?.n ?? 0) };

@@ -191,13 +191,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - 完了条件: `node scripts/check-ai-config.mjs` → 終了コード 0。`bun run verify:ai` → pass。両ホストの起動の設定がそろい、description に「明示の依頼のときだけ」が残っていない
   - コミット: `feat(trace): let the agent run trace on its own and adopt its own decisions under fixed rules (T08)`
 
-- [ ] T09: 自動のときの未処理と再開（assistant source を数える、古い順に SQL で選ぶ、前の文脈を決まった数だけ添える、上限で読んだ範囲を保存する）
+- [x] T09: 自動のときの未処理と再開（assistant source を数える、古い順に SQL で選ぶ、前の文脈を決まった数だけ添える、上限で読んだ範囲を保存する）
   - 種別: 変更
   - 計画: S8
   - 依存: なし
-  - 変更: `server/src/trace.ts`, `server/src/extract.ts`, `server/src/status.ts`, `server/test/record.test.ts`
-  - 完了条件: `cd server && node --test --test-name-pattern="auto pending" test/record.test.ts` → pass。後から届いた assistant source が次の回で未処理になり、上限で止めた run の後の run が続きから始まり、文脈と対象が分けて出る。明示の trace の挙動は変わらない
+  - 変更: `server/src/trace.ts`, `server/src/extract.ts`, `server/src/status.ts`, `server/src/mcp-record.ts`, `server/test/auto-pending.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="auto pending" test/auto-pending.test.ts` → pass。後から届いた assistant source が次の回で未処理になり、上限で止めた run の後の run が続きから始まり、文脈と対象が分けて出る。明示の trace の挙動は変わらない
   - コミット: `feat(trace): resume automatic traces from unprocessed messages, oldest sessions first (T09)`
+  - 結果: `pendingSessions`・`pendingCount`・`pendingText` と `contextText` に既定 false の auto を足し、record サーバーの `trace_pending` と `record_context` に省略できる `auto` を足した（`trace_pending` は auto のとき呼び出し元のセッションを外す）。auto の record_context は最初の未処理の発言から始め、前の 6 件を 1 件 2,000 文字までの文脈として見出しで分け、2 ページで止めて残りの件数を出す。保存で見た扱いになるのは示した対象と引用した発言だけ。`cd server && node --test --test-name-pattern="auto pending" test/auto-pending.test.ts` → 4 pass / 0 fail。`cd server && node --test test/extract.test.ts test/status.test.ts test/record.test.ts test/deliver.test.ts test/auto-pending.test.ts` → 118 pass / 0 fail（明示の trace のページ送りのテストは変えずに通る）。`cd server && bun run test` → 746 pass / 0 fail。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）
 
 - [ ] T10: 新しい持ち主のセッションの開始時に、自動の trace の通知をセッションごとに 1 回出す
   - 種別: 変更
@@ -266,3 +267,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T21〜T25 / T20 のレビュー（P1 1 件・P2 1 件、4 回目）を受け、持ち主の「妥協せずに最高のもの」で、Codex と 4 往復して後継の枠の作りを「つもりと効いている期間を分け、状態を事実から計算する」に変えた（plan の方針 5）。T18〜T20 の推し量る仕組みは T22 で外す。T05・T06・T07 の依存に T22・T24 を足した。持ち主の Go を受けた
 - 2026-10-04 / T21 / 変更欄に `server/src/record.ts` を足した（`replaceable` を judge.ts へ寄せたため）。snapshot を DB から取る adapter は `unit_replacement` の表が要るので T22 で作る（T21 は純粋な本体だけ）
 - 2026-10-04 / T22 / 変更欄（`server/src/extract.ts`・`search.ts`・`read.ts`・`db.test.ts`・`migrate.test.ts` は変えずに済み外した。judge の条件を直したので `judge.ts`・`judge.test.ts` を足した）。出典が無くなった記録は後継で置き換えて直せる（schema の CHECK どおり、置き換えられないのは隔離だけ）と分かり、judge の条件を「相手が sound」から「相手が隔離でない」に直した。根拠のそろった candidate を forget が判断し直すと active になる（状態を事実から決めるため。forget のテストの期待を直した）。保存の最後の「採用付きの後継が枠を待ったら拒む」は check が同じ transaction で先に拒むので届かず、置かなかった（glean の adopt では残す）
+- 2026-10-04 / T09 / 変更欄（前: `server/test/record.test.ts` → 後: 新しい `server/test/auto-pending.test.ts` と、省略できる `auto` を足す `server/src/mcp-record.ts`）と完了条件のテストファイルを直した。record.test.ts は begin が送る記録の待ち行列を一時の HOME に向けていないので、begin を呼ぶテストを別のファイルに分けた

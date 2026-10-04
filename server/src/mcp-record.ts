@@ -31,7 +31,7 @@ import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, type Place, projectId, writePlace } from "./project.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { head, plural, reason } from "./text.ts";
-import { logCall } from "./trace.ts";
+import { callSession, logCall } from "./trace.ts";
 
 requireRuntime();
 let db: Kysely<DB> | null = null;
@@ -100,6 +100,12 @@ const RUN = z.string().min(1).max(40).describe("The run id begin returned");
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const RECORD = z.record(z.string(), z.unknown()).describe("The record, as the Skill describes");
+const AUTO = z
+  .boolean()
+  .optional()
+  .describe(
+    "true when tracing without the owner's request: pending lists recent sessions with any message not traced yet, oldest first, and context starts at the first such message after a few earlier ones and stops after a page limit",
+  );
 
 server.registerTool(
   "trace_pending",
@@ -107,11 +113,16 @@ server.registerTool(
     title: "Sessions not traced yet",
     description:
       "Lists this project's captured sessions with owner messages no trace has looked at, then apart those whose last owner message is over 14 days old.",
-    inputSchema: z.object({ cwd: CWD }).strict(),
+    inputSchema: z.object({ auto: AUTO, cwd: CWD }).strict(),
     annotations: READ,
   },
   async (a, extra) =>
-    tool(async () => pendingText(conn(), (await called("trace_pending", a.cwd, extra._meta)).p.projectId)),
+    tool(async () => {
+      const { p, call } = await called("trace_pending", a.cwd, extra._meta);
+      // The caller's own session is still being written, so an automatic trace leaves it out
+      const skip = a.auto ? await callSession(conn(), call) : null;
+      return pendingText(conn(), p.projectId, undefined, { auto: a.auto, skip });
+    }),
 );
 
 server.registerTool(
@@ -197,6 +208,7 @@ server.registerTool(
           .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
           .optional()
           .describe("The ref the previous page named, to read the next page"),
+        auto: AUTO,
         cwd: CWD,
       })
       .strict(),
@@ -205,7 +217,7 @@ server.registerTool(
   async (a, extra) =>
     tool(async () => {
       const { p } = await called("record_context", a.cwd, extra._meta);
-      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after));
+      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto));
     }),
 );
 

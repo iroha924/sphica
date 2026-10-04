@@ -28,6 +28,7 @@ import {
   liveUnits,
   openRun,
   PENDING_DAYS,
+  type PendingOptions,
   pendingSessions,
   type Run,
   runOf,
@@ -43,23 +44,65 @@ const newRunId = () => crypto.randomBytes(9).toString("base64url");
  */
 const PAGE_CHARS = 20_000;
 /**
- * The sources each run was shown and the page cursors it was given, by run id. Saving marks only these sources (and what the record
- * cites) as looked at, and a page starts only after a cursor this run was given, so no source is skipped. It lives in the record
- * server's process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
+ * The sources each run was shown, the page cursors it was given (with the number of the page each opens), and whether it reads as an
+ * automatic trace, by run id. Saving marks only these sources (and what the record cites) as looked at, and a page starts only after a
+ * cursor this run was given, so no source is skipped. It lives in the record server's process: after a restart nothing counts as
+ * shown, so unread messages stay pending rather than being marked traced.
  */
-const shownTo = new Map<string, { sources: Set<number>; cursors: Set<string> }>();
+const shownTo = new Map<string, { sources: Set<number>; cursors: Map<string, number>; auto: boolean }>();
+/**
+ * Message pages one automatic run reads. It runs in the owner's session after their request, so it stops here, saves what it read,
+ * and the next automatic run starts at the first message still waiting.
+ */
+const AUTO_PAGES = 2;
+/** Messages shown before the first waiting one in an automatic run, so it does not start mid-conversation. */
+const AUTO_CONTEXT = 6;
+/** Characters of each context message shown: they were traced already and only orient the run. */
+const CONTEXT_CHARS = 2_000;
 /** Runs remembered at once: a run read but never saved is forgotten after this many newer ones, and its sources then stay pending. */
 const SHOWN_RUNS = 100;
 
-/** Sessions of the project with owner messages not traced yet, as text: recent ones first, then the older ones apart. */
-export async function pendingText(db: Reads, projectId: number, now: Date = new Date()): Promise<string> {
+/**
+ * Sessions of the project with owner messages not traced yet, as text: recent ones first, then the older ones apart. With `auto`,
+ * the recent sessions with any message not traced yet, the one that started first first, at most `limit` of them.
+ */
+export async function pendingText(
+  db: Reads,
+  projectId: number,
+  now: Date = new Date(),
+  o: PendingOptions & { limit?: number } = {},
+): Promise<string> {
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
+  if (o.auto) {
+    const auto = await pendingSessions(db, projectId, "recent", now, o.limit ?? 20, o);
+    if (!auto.total) return "No recent session waits to be traced.";
+    return [
+      `${plural(auto.total, "session")} to trace, oldest first (pass the id to trace_begin, then read it with record_context and auto: true):`,
+      ...(await pendingLines(db, auto)),
+    ].join("\n");
+  }
   const [recent, older] = await Promise.all([
     pendingSessions(db, projectId, "recent", now),
     pendingSessions(db, projectId, "older", now),
   ]);
   if (!recent.total && !older.total) return "Every captured session has been traced.";
-  const ids = [...recent.rows, ...older.rows].map((r) => Number(r.first));
+  return [
+    recent.total
+      ? `${plural(recent.total, "session")} to trace (pass the id to trace_begin):`
+      : "No recent session waits to be traced.",
+    ...(await pendingLines(db, recent)),
+    ...(older.total
+      ? [
+          `Older than ${PENDING_DAYS} days (not counted at session start), ${plural(older.total, "session")}; trace_begin takes these ids too:`,
+          ...(await pendingLines(db, older)),
+        ]
+      : []),
+  ].join("\n");
+}
+
+/** One line per listed session, with the start of its first waiting message, and how many more the limit left out. */
+async function pendingLines(db: Reads, g: Awaited<ReturnType<typeof pendingSessions>>): Promise<string[]> {
+  const ids = g.rows.map((r) => Number(r.first));
   const firsts = new Map(
     ids.length
       ? (await db.selectFrom("source").select(["id", "text"]).where("id", "in", ids).execute()).map((m) => [
@@ -68,25 +111,13 @@ export async function pendingText(db: Reads, projectId: number, now: Date = new 
         ])
       : [],
   );
-  const group = (g: typeof recent) => [
+  return [
     ...g.rows.map(
       (r) =>
         `- ${r.id} ${r.host} ${r.started_at}: ${plural(Number(r.waiting), "message")} waiting, starting "${inline(firsts.get(Number(r.first)) ?? "").slice(0, 100)}"`,
     ),
     ...(g.total > g.rows.length ? [`- and ${g.total - g.rows.length} more`] : []),
   ];
-  return [
-    recent.total
-      ? `${plural(recent.total, "session")} to trace (pass the id to trace_begin):`
-      : "No recent session waits to be traced.",
-    ...group(recent),
-    ...(older.total
-      ? [
-          `Older than ${PENDING_DAYS} days (not counted at session start), ${plural(older.total, "session")}; trace_begin takes these ids too:`,
-          ...group(older),
-        ]
-      : []),
-  ].join("\n");
 }
 
 /**
@@ -229,7 +260,7 @@ async function scopeOf(
   target: Target;
   looked: number[];
   head: string;
-  items: { id: number; text: string }[];
+  items: { id: number; text: string; looked?: boolean }[];
   tail: string[];
 }> {
   if (run.origin === "harvest") {
@@ -306,6 +337,7 @@ async function scopeOf(
     head: `Session ${s.external_id}; keys are saved as trace:${s.external_id}/<key>. Messages (cite a source by its ref; quote it exactly):`,
     items: shown.map((m) => ({
       id: m.id,
+      looked: Boolean(m.looked),
       text: `## s${m.id} ${m.author_kind === "owner" ? "owner" : "assistant"} ${m.turn_id ?? ""} ${m.created_at}${m.looked ? " (traced before)" : ""}${m.truncated ? " (middle not saved)" : ""}\n${m.text}`,
     })),
     tail: edits.length
@@ -319,7 +351,8 @@ async function scopeOf(
 
 /**
  * One page of what the run may cite, starting after the source `after` names (`s<id>`, from the previous page). Pages end at PAGE_CHARS,
- * and only the last carries the edits, fields, and live records, so an agent has to read to the end to have them.
+ * and only the last carries the edits, fields, and live records, so an agent has to read to the end to have them. With `auto` (trace
+ * runs only), the messages start at the first one waiting, after a few earlier ones as context, and end after AUTO_PAGES pages.
  */
 export async function contextText(
   db: Reads,
@@ -327,16 +360,36 @@ export async function contextText(
   projectId: number,
   root: string | null,
   after?: string,
+  auto = false,
 ): Promise<string> {
+  const before = shownTo.get(id);
+  if (before && before.auto !== auto)
+    throw new Error(
+      before.auto
+        ? "This run is read as an automatic trace; pass auto: true"
+        : "This run is read as an explicit trace; call record_context without auto",
+    );
   const run = await bound(db, id, projectId);
+  if (auto && run.origin !== "trace") throw new Error("auto is for trace runs");
   const scope = await scopeOf(db, run, root);
+  let items = scope.items;
+  let contextCount = 0;
+  if (auto) {
+    const first = scope.items.findIndex((it) => !it.looked);
+    if (first < 0)
+      return "Nothing in this session waits to be traced: earlier runs looked at every message. Pick another session from trace_pending.";
+    const from = Math.max(0, first - AUTO_CONTEXT);
+    items = scope.items.slice(from);
+    contextCount = first - from;
+  }
   let start = 0;
-  if (after !== undefined && !shownTo.get(id)?.cursors.has(after))
+  if (after !== undefined && !before?.cursors.has(after))
     throw new Error(
       `${after.slice(0, 40)} is not a page this run was given; call record_context without after to start again from the first page`,
     );
+  const pageNo = after === undefined ? 0 : (before?.cursors.get(after) ?? 0);
   if (after !== undefined) {
-    const at = scope.items.findIndex((it) => `s${it.id}` === after);
+    const at = items.findIndex((it) => `s${it.id}` === after);
     if (at < 0)
       throw new Error(
         `${after.slice(0, 40)} is not a source of this run's context; pass the ref the previous page named`,
@@ -389,34 +442,48 @@ export async function contextText(
     fitted.push(line);
     tailSize += line.length + 1;
   }
-  // A source longer than a page is cut: its heading line stays, and the rest is read with read s<id>@<byte>
-  const entry = (it: { id: number; text: string }) => {
-    if (it.text.length <= PAGE_CHARS) return it.text;
+  // A source longer than its share is cut: its heading line stays, and the rest is read with read s<id>@<byte>
+  const entry = (it: { id: number; text: string }, max: number) => {
+    if (it.text.length <= max) return it.text;
     const body = it.text.indexOf("\n") + 1;
     // Cut by UTF-16 units, as the page is measured, without splitting a surrogate pair
-    let kept = it.text.slice(body, PAGE_CHARS);
+    let kept = it.text.slice(body, max);
     if (/[\uD800-\uDBFF]$/.test(kept)) kept = kept.slice(0, -1);
     return `${it.text.slice(0, body)}${kept}\n(cut here; read s${it.id}@${Buffer.byteLength(kept, "utf8")} for the rest)`;
   };
-  const page: { id: number; text: string }[] = [];
+  const label = (i: number) =>
+    !auto
+      ? undefined
+      : i === 0 && contextCount
+        ? `Context: the ${plural(contextCount, "message")} before the first one waiting (traced before; not this run's targets, quote them only to support a target):`
+        : i === contextCount
+          ? "Targets: the messages this run traces, in order:"
+          : undefined;
+  const page: { id: number; text: string; context: boolean }[] = [];
   let used = 0;
   let end = start;
-  for (; end < scope.items.length; end++) {
-    const it = scope.items[end];
+  // An automatic run past its page limit shows no more messages, only what is left of the tail
+  const stop = auto && pageNo >= AUTO_PAGES ? start : items.length;
+  for (; end < stop; end++) {
+    const it = items[end];
     if (!it) break;
-    const text = entry(it);
+    const context = end < contextCount;
+    const heading = label(end);
+    const body = entry(it, context ? CONTEXT_CHARS : PAGE_CHARS);
+    const text = heading ? `${heading}\n${body}` : body;
     if (page.length && used + text.length > PAGE_CHARS) break;
-    page.push({ id: it.id, text });
+    page.push({ id: it.id, text, context });
     used += text.length;
   }
-  const left = scope.items.length - end;
+  const left = items.length - end;
+  const capped = auto && pageNo + 1 >= AUTO_PAGES;
   // The tail goes on a page of its own when it does not fit beside the last sources
   const last = page.at(-1);
-  const more = left > 0 || (last !== undefined && used + tailSize > PAGE_CHARS);
+  const more = (left > 0 && !capped) || (last !== undefined && used + tailSize > PAGE_CHARS);
   // Recorded only now, after every await: a save running meanwhile never counts a source this reply has not returned yet
-  const shown = shownTo.get(id) ?? { sources: new Set<number>(), cursors: new Set<string>() };
-  for (const it of page) shown.sources.add(it.id);
-  if (more && last) shown.cursors.add(`s${last.id}`);
+  const shown = before ?? { sources: new Set<number>(), cursors: new Map<string, number>(), auto };
+  for (const it of page) if (!it.context) shown.sources.add(it.id);
+  if (more && last) shown.cursors.set(`s${last.id}`, pageNo + 1);
   shownTo.delete(id);
   shownTo.set(id, shown);
   for (const old of shownTo.keys()) {
@@ -424,12 +491,23 @@ export async function contextText(
     shownTo.delete(old);
   }
   const lines = [scope.head, ...page.map((it) => it.text)];
+  const next = `${left > 0 && !capped ? `${left} more ${left === 1 ? "source follows" : "sources follow"}` : "The live records follow"}: call record_context with after: "s${last?.id}"`;
   if (more && last)
     return [
       ...lines,
-      `${left > 0 ? `${left} more ${left === 1 ? "source follows" : "sources follow"}` : "The live records follow"}: call record_context with after: "s${last.id}" and read every page before saving. Only the sources you were shown, and those your record quotes, count as looked at.`,
+      auto
+        ? `${next} and auto: true, and read every page before saving. Only the targets you were shown, and the messages your record quotes, count as looked at.`
+        : `${next} and read every page before saving. Only the sources you were shown, and those your record quotes, count as looked at.`,
     ].join("\n");
-  return [...lines, ...fitted].join("\n");
+  return [
+    ...lines,
+    ...fitted,
+    ...(auto && left > 0
+      ? [
+          `This automatic run stops here: ${left} later ${left === 1 ? "message is" : "messages are"} not shown and still wait. Save what you read; the next automatic run starts at them.`,
+        ]
+      : []),
+  ].join("\n");
 }
 
 /** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
