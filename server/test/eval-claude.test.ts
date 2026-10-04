@@ -910,3 +910,26 @@ test("a mark taken while another call was in flight, before the first change, le
     "unknown",
   );
 });
+
+test("a reader running beside the first calls leaves the order known; two writers at once do not", () => {
+  const mark = (after: string, changed: boolean, inFlight: string[] = []) =>
+    JSON.stringify({ after, changed, in_flight: inFlight, late: false });
+  // Bash and ToolSearch together, as a run with deferred tools starts, then a search and a write
+  const events = (second: string) =>
+    [
+      use("b", "Bash"),
+      use("t", second),
+      result("b", ""),
+      result("t", "mcp__sphica__search"),
+      use("s", "mcp__sphica__search"),
+      result("s", "No record holds most of"),
+      use("w", "Write"),
+      result("w", "ok"),
+      done,
+    ].join("\n");
+  const marks = [mark("b", false, ["t"]), mark("t", false), mark("s", false), mark("w", true)].join("\n");
+  assert.equal(searchedBeforeEdit(events("ToolSearch"), marks), "yes");
+  assert.equal(searchedBeforeEdit(events("Bash"), marks), "unknown", "two shell calls at once");
+  // A tool this judge does not know counts as one that may write
+  assert.equal(searchedBeforeEdit(events("SomeNewTool"), marks), "unknown");
+});

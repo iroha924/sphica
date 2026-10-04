@@ -93,6 +93,16 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - コミット: `feat(evals): judge each experiment's bar and the shared regression rule (T08)`
   - 結果: `node --test test/eval-grade.test.ts` → pass 47, fail 0（G3 の通過・逆向きのモデルで未達・有効 run 不足で判定不能、G4 は old が汚染の記録を届けたときだけ判定、回帰は 0.3 を超える低下で未達）
 
+- [x] T10: 「検索してから編集」の判定で、読み取りだけの呼び出しが並んでいても順を決められるようにする
+  - 種別: 修正
+  - 計画: S8
+  - 依存: なし
+  - 変更: `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node -e '<searchedBeforeEdit を baseline の search スロットの run に当てる>'`（f45b66b2）→ 遅延読み込みの run は最初に Bash と ToolSearch を並べるので、5 run とも unknown
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → Bash と ToolSearch の並行は順が決まり、Bash 2 つの並行と知らないツールは unknown のテストが pass
+  - コミット: `fix(evals): let read-only calls run beside the first edit without hiding the order (T10)`
+  - 結果: red は上のとおり baseline の 5 run がすべて unknown（G6 が判定不能になる）。直した後 `node --test test/eval-claude.test.ts` → pass 28, fail 0。数え直すと baseline 7 run のうち 3 run が yes、G6 は 5 run とも yes（loaded）
+
 - [ ] T09: baseline と各 variant を回し、通った G の組み合わせを測り直して、通らなかった G を戻し、バージョンを揃える
   - 種別: 変更
   - 計画: S8, S9, S10
