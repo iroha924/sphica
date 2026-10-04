@@ -98,7 +98,7 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - 計画: S8
   - 依存: なし
   - 変更: `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
-  - red: `cd server && node -e '<searchedBeforeEdit を baseline の search スロットの run に当てる>'`（f45b66b2）→ 遅延読み込みの run は最初に Bash と ToolSearch を並べるので、5 run とも unknown
+  - red: `cd <f45b66b2 の worktree>/server && node judge-base-runs.ts` → 遅延読み込みの run は最初に Bash と ToolSearch を並べるので、baseline の search スロットの 5 run がすべて unknown
   - 完了条件: `cd server && node --test test/eval-claude.test.ts` → Bash と ToolSearch の並行は順が決まり、Bash 2 つの並行と知らないツールは unknown のテストが pass
   - コミット: `fix(evals): let read-only calls run beside the first edit without hiding the order (T10)`
   - 結果: red は上のとおり baseline の 5 run がすべて unknown（G6 が判定不能になる）。直した後 `node --test test/eval-claude.test.ts` → pass 28, fail 0。数え直すと baseline 7 run のうち 3 run が yes、G6 は 5 run とも yes（loaded）
