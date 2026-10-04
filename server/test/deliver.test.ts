@@ -1933,3 +1933,50 @@ test("concurrent reads that cannot take the write lock still answer, unlogged an
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("more records than one delivery shows are chosen by weight before age: constraints, decisions against, then the owner's", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "A. B. C. D. E. F. G." });
+    const anchor = { anchors: [{ path: "src/x.ts", role: "applies_to" }] };
+    // Saved oldest first, so newest-first would show the last five
+    await save(db, p, {
+      units: [
+        decided("old-constraint", m, "A.", anchor),
+        decided("old-dont", m, "B.", { kind: "decision", stance: "dont", ...anchor }),
+        decided("owner-1", m, "C.", { kind: "decision", ...anchor }),
+        ...["D.", "E.", "F.", "G."].map((q, i) => ({
+          key: `finding-${i}`,
+          kind: "finding",
+          text: q,
+          evidence: [{ source: `s${m}`, quote: q, role: "states" }],
+          ...anchor,
+        })),
+      ],
+    });
+    const edit = await deliver(
+      {
+        session_id: "s",
+        cwd: repo,
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/x.ts") },
+      },
+      "claude-code",
+      db.file,
+    );
+    const keys = [...edit.matchAll(/^- (\S+) \(/gm)].map((x) => x[1]);
+    assert.deepEqual(keys.slice(0, 3), [
+      "trace:ext-s1/old-constraint",
+      "trace:ext-s1/old-dont",
+      "trace:ext-s1/owner-1",
+    ]);
+    // The remaining room goes to the newest of the rest
+    assert.deepEqual(keys.slice(3), ["trace:ext-s1/finding-3", "trace:ext-s1/finding-2"]);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

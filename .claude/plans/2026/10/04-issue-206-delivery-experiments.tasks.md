@@ -48,13 +48,14 @@ base: feat/issue-206-eval-base
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 引用が先に出て `Why:` が出ず、Rejected は残り、同じ記録の文字数が減るテストが pass
   - コミット: `feat(deliver): lead with the quoted words and drop the long reason (T03)`
 
-- [ ] T04: G2 読む前・編集の前・セッション開始の broad constraints を重みの順に選ぶ
+- [x] T04: G2 読む前・編集の前・セッション開始の broad constraints を重みの順に選ぶ
   - 種別: 変更
   - 計画: S4
   - 依存: T01（採用者の読み取りが要る）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts` → constraint → dont → オーナーの採用 → maintainer の採用 → 新しい順に選ぶテストが pass
   - コミット: `feat(deliver): choose records by weight before age (T04)`
+  - 結果: ブランチ exp/206-g2（T01 から分けた）。`node --test test/deliver.test.ts` → pass 35, fail 0。`node evals/order/run.ts --compare feat/issue-206-eval-base` → 重みのある記録 3 / 8 → 8 / 8、軽い記録 7 / 10 → 2 / 10（maintainer の決定 2 件と finding・dead end は読む前・編集の前のどちらでも外れた）。G2 のバー（重みのある記録が 2 件以上増える）は通過
 
 - [ ] T05: G3 未解決の衝突を 1 行で見せる
   - 種別: 変更
