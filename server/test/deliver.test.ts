@@ -101,16 +101,9 @@ test("delivery brings anchored, named, and broad records, never candidates or co
         },
       ],
     });
+    // The owner's own words against it hold the owner's decision back until resolved
     await save(db, p, {
-      units: [
-        {
-          key: "q",
-          kind: "question",
-          text: "q",
-          evidence: [{ source: `s${m}`, quote: "SQLite", role: "states" }],
-          conflicts: ["trace:ext-s1/sqlite"],
-        },
-      ],
+      units: [decided("q", m, "Maybe Postgres.", { conflicts: ["trace:ext-s1/sqlite"] })],
     });
     insert(db, "work", {
       project_id: p,
@@ -1928,6 +1921,59 @@ test("concurrent reads that cannot take the write lock still answer, unlogged an
     }
     assert.equal(texts.filter((t) => /^- trace:/m.test(t)).length, 6, texts.join("\n"));
     assert.equal(db.owner.prepare("select count(*) as n from delivery").get()?.n, 0);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("owner decision protected: an unadopted record in conflict never holds the owner's decision back, an adopted one does", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file. Store every timestamp in UTC." });
+    const ai = message(db, p, { id: "m2", text: "Postgres would scale better.", speaker: "assistant" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    await save(db, p, {
+      units: [
+        {
+          key: "pg",
+          kind: "decision",
+          stance: "do",
+          text: "Postgres",
+          evidence: [{ source: `s${ai}`, quote: "Postgres would scale better.", role: "proposes" }],
+          conflicts: ["trace:ext-s1/sqlite"],
+        },
+      ],
+    });
+    const edit = (file: string) =>
+      deliver(
+        {
+          session_id: `sess-${file}`,
+          cwd: repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Edit",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    assert.match(await edit("src/db.ts"), /trace:ext-s1\/sqlite/);
+    // The owner's own words against it do hold it back until resolved
+    await save(db, p, {
+      units: [decided("local", m, "Store every timestamp in UTC.", { conflicts: ["trace:ext-s1/utc"] })],
+    });
+    assert.equal(await edit("src/dates.ts"), "");
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

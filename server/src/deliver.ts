@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExpressionBuilder, Kysely } from "kysely";
+import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
@@ -78,7 +78,15 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
   return { text: note ? `${text || lead}${note}` : text, note };
 };
 
-/** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
+/** Whether a unit is the owner's decision: one the owner or a maintainer adopted and has not taken back */
+const ownerAdopted = (unit: string) =>
+  sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
+    and a.route in ('owner_statement', 'explicit') and a.retracted_at is null)`;
+
+/**
+ * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. The owner's decision is held back
+ * only by a conflict with another record the owner adopted: a proposal nobody adopted, or the AI's own decision, never hides it.
+ */
 const deliverable = (db: Reads, projectId: number) =>
   db
     .selectFrom("unit as u")
@@ -94,7 +102,16 @@ const deliverable = (db: Reads, projectId: number) =>
             .where("l.kind", "=", "conflicts")
             .where("l.resolved_at", "is", null)
             .where((eb) =>
-              eb.or([eb("l.from_unit", "=", eb.ref("u.id")), eb("l.to_unit", "=", eb.ref("u.id"))]),
+              eb.or([
+                eb.and([
+                  eb("l.from_unit", "=", eb.ref("u.id")),
+                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.to_unit")]),
+                ]),
+                eb.and([
+                  eb("l.to_unit", "=", eb.ref("u.id")),
+                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.from_unit")]),
+                ]),
+              ]),
             ),
         ),
       ),

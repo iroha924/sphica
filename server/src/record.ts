@@ -1,6 +1,6 @@
 // Checks and saves the record an agent wrote for one extraction run (trace or harvest). Every quote is located in retained source text,
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
-import type { Kysely } from "kysely";
+import { type Kysely, type SqlBool, sql } from "kysely";
 import { z } from "zod";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
@@ -254,6 +254,11 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
   return facts;
 }
 
+/** Whether a unit is the owner's decision: one the owner or a maintainer adopted and has not taken back */
+const ownerAdopted = (unit: string) =>
+  sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
+    and a.route in ('owner_statement', 'explicit') and a.retracted_at is null)`;
+
 export async function checkRecord(
   db: Reads,
   target: Target,
@@ -414,6 +419,14 @@ export async function checkRecord(
           // Quarantined or unsourced, a successor can never become active, so it holds no place
           .where("n.extraction", "=", "supported")
           .where("n.unsourced", "=", 0)
+          // Of the owner's decision, only an active successor or one the owner adopted holds it (as the link trigger counts)
+          .where((eb) =>
+            eb.or([
+              eb.not(ownerAdopted("l.to_unit")),
+              eb("n.lifecycle", "in", ["active", "superseded"]),
+              ownerAdopted("l.from_unit"),
+            ]),
+          )
           .execute()
       : []
     ).map((h) => [h.to_unit, h]),

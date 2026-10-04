@@ -1367,17 +1367,34 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
       units: [decided("storage-4", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
     });
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-4")], ["superseded", "active"]);
-    // A successor still waiting for adoption holds the place too, and the refusal names it
+    // A successor still waiting for adoption holds no place of the owner's decision: the owner's own successor goes ahead,
+    // and the waiting one can no longer become active beside it
     // Quoting the earlier session keeps it sourced, and without adoption it waits as a candidate
     const { adoption: _, ...unadopted } = decided("storage-5", old, "SQLite にしよう。", {
       supersedes: "glean:storage-4",
     });
     await glean({ units: [unadopted] });
     assert.equal(state("glean:storage-5"), "candidate");
+    await glean({
+      units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })],
+    });
+    assert.deepEqual([state("glean:storage-4"), state("glean:storage-6")], ["superseded", "active"]);
     await assert.rejects(
-      glean({ units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })] }),
-      /glean:storage-4 already has a successor, glean:storage-5 \(candidate\); withdraw it first, or supersede it instead/,
+      glean({
+        ops: [
+          {
+            op: "adopt",
+            unit: "glean:storage-5",
+            revision: db.owner.prepare("select revision from unit where key = 'glean:storage-5'").get()
+              ?.revision,
+            source: `s${said}`,
+            quote: "Postgres にする。",
+          },
+        ],
+      }),
+      /already has an active successor/,
     );
+    assert.equal(state("glean:storage-5"), "candidate");
     // A successor whose quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place
     await glean({
       units: [decided("cache-q", said, "引用に無い言葉。", { supersedes: "trace:ext-s1/cache" })],

@@ -989,9 +989,11 @@ test("migrating revision 4 keeps one live successor of a record and removes link
     said,
     /a second successor of a record whose first successor is not withdrawn: 1 row\n\s*unit \d+ older supersedes unit 1 [^\n]* → link removed/,
   );
-  // The rule holds from here on: the live successor keeps its place
+  // Unit 1 is the owner's decision, so an unadopted candidate successor holds no place: another proposal may wait beside it, and
+  // whichever becomes active first takes it
+  assert.ok(raw.prepare("select 1 from unit_adoption where unit_id = 1 and retracted_at is null").get());
   const another = made("another", "decision", [null, "candidate"]);
-  assert.throws(() => supersedes(another, 1), /already has a successor that is not withdrawn/);
+  supersedes(another, 1);
 });
 
 // Revision 4 kept a decision active on an option's evidence alone. Revision 5 counts only the unit's own, and the migration applies that once

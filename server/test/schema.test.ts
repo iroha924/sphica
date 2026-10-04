@@ -1628,3 +1628,36 @@ test("a record tool's hook row alone rules out its turn, even when the call neve
   });
   assert.deepEqual(ineligible(), [k1]);
 });
+
+test("an unadopted candidate never holds the owner's decision's successor place, and cannot take it later", () => {
+  const owner = message(db, p, { id: "o1", text: "Use SQLite." });
+  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
+  const link = (from: number, to: number) =>
+    insert(db, "unit_link", {
+      from_unit: from,
+      to_unit: to,
+      kind: "supersedes",
+      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
+      added_at: now,
+    });
+  const decided = (key: string, adopt: boolean) => {
+    const u = unit({ key, kind: "decision" });
+    evidence(u, adopt ? owner : said, { role: "states" });
+    if (adopt) adoption(u, owner);
+    state(u, null, "candidate");
+    return u;
+  };
+  const o = decided("sqlite", true);
+  state(o, "candidate", "active");
+  // The AI's proposal waits for the owner as a candidate successor
+  const proposal = decided("postgres", false);
+  link(proposal, o);
+  // The owner's own successor is not blocked by it
+  const own = decided("duckdb", true);
+  link(own, o);
+  state(own, "candidate", "active");
+  state(o, "active", "superseded");
+  // Adopted later, the proposal would be a second successor of a record already replaced
+  adoption(proposal, owner, { span_start: 0, span_end: 3 });
+  refuses(() => state(proposal, "candidate", "active"), /already has an active successor/);
+});
