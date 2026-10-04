@@ -16,7 +16,7 @@ approved_at: 2026-10-04
 - trace は AI が自分で起動できる。新しい持ち主のセッションの開始時の通知で、今のセッション以外の未処理を古い順に最大 2 セッション、上限つきで処理する。Stop からは起動しない
 - 呼び出し元（対話 / headless / SDK とターン）を record サーバーが判別できるかを最初に両ホストで測り、判別できないところでは AI の採用を止める。段階 2 の評価に使う「AI の判断として active になったことのある記録」の一覧を読み取り専用で出す
 - README（両言語）・CLAUDE.md・AGENTS.md・knowledge-schema の Skill と、配布する review・export・rules の Skill を今の挙動に合わせる
-- 変えないもの: 持ち主と maintainer の採用、承認の関門（npm-release、forget の件数確認）、接続の役割、Stop の capture。observation / assessment・新しい link・場面による想起・AI による撤回と衝突の自動解決はこの計画に入れない
+- 変えないもの: 持ち主と maintainer の採用、承認の関門（npm-release、forget の件数確認）、接続の役割（capture に書き込みの口を 1 つ足すだけ）、Stop の capture。observation / assessment・新しい link・場面による想起・AI による撤回と衝突の自動解決はこの計画に入れない
 
 ## 持ち主の決定
 
@@ -53,12 +53,22 @@ approved_at: 2026-10-04
 - Codex の Stop で処理を続けさせると、reason が新しい user prompt になる（https://learn.chatgpt.com/docs/hooks 、Codex が 2026-10-04 に確認）。capture は既知の形以外を持ち主の発言として保存する（`server/src/capture.ts:244`）
 - record サーバーが今知っているのは作業場所だけで、呼び出し元のセッション・ターン・起動の形は持っていない（`server/src/project.ts:136`、`server/src/mcp-record.ts:47`、`db/schema.sql:221`）
 - 関係する過去の判断: u26（持ち主の発言から覆しの承認を自動で判定しない）、u184（自動で動く SDK のエージェントに決定を成立させない）。どちらもこの計画と矛盾しない（持ち主の判断は AI の経路で覆らず、SDK は AI の採用からも外す）
-- 未検証: 両ホストの対話・headless・SDK で、record サーバーのプロセスが呼び出し元の形とターンを、モデルの入力に頼らずに知れるか（S1 で測る）
+- 実測（2026-10-04、probe の MCP サーバーで環境変数と各呼び出しの `_meta` を記録）:
+  - Claude Code 2.1.289 の対話（動いている Sphica の record サーバー）: 環境変数に `CLAUDE_CODE_ENTRYPOINT=cli`・`CLAUDE_CODE_SESSION_ID`（今のセッション）
+  - Claude Code の `claude -p`: 環境変数に `CLAUDE_CODE_ENTRYPOINT=sdk-cli`・`CLAUDE_CODE_SESSION_ID`。各呼び出しの `_meta` は `progressToken` と `claudecode/toolUseId` だけで、ターンは無い。親のプロセスから無関係な変数（親の `CLAUDE_PID`、ほかのプラグインのセッション id）も引き継ぐので、ホスト自身が置く変数以外は根拠にしない
+  - 同じ `claude -p` に PreToolUse の hook（matcher `mcp__probe__.*`）を付けると、hook の入力に `session_id`・`prompt_id`・`tool_use_id`・`mcp_server` が入り、`tool_use_id` が MCP 側の `claudecode/toolUseId` と 3 回とも一致した（うち 2 回は並列）
+  - Codex 0.160.0 の `codex exec`: サーバーの環境変数に CLAUDE / CODEX の変数は無い。各呼び出しの `_meta` の `x-codex-turn-metadata` に `session_id`・`turn_id`・`turn_trigger: "exec"`・`thread_source: "user"`・`turn_started_at_unix_ms` がある
+- 未検証: 対話の Codex（TUI・デスクトップアプリ）の `turn_trigger` などの値、Agent SDK（`sdk-ts`・`sdk-py`）を実際に走らせた値、Claude Code の `/clear`・`/resume` の後にサーバーの環境変数のセッション id が古いまま残るか（A の方式では hook の入力を正とするので結果を左右しない）、Windows
 
 ## 方針
 
 1. 呼び出し元の実測（最初に行う）。Claude Code と Codex の対話・headless（`claude -p` / `codex exec`）・SDK で、record サーバーのプロセスから呼び出し元のセッション id・ターン・起動の形（`CLAUDE_CODE_ENTRYPOINT` など）が見えるかを測り、結果を plan の「前提」に足す。見える値は run に保存し、begin でも save でも確かめる。判別できないホストや形では、AI の採用を候補のまま残す（閉じる側に倒す）
-2. record-tool の呼び出しの記録。record サーバーは、呼び出し元を確かめた直後で、対象の検証と外部取得より前に、record の全ツール（begin・context・check・save・pending）の呼び出しを、呼び出し元のセッションとターンつきで同期して DB に書く。同じセッション・ターンの assistant source は、AI の採用の根拠にならない。ターンが取れずセッションだけ取れるホストでは、record ツールを呼んだセッションの assistant source をすべて採用の対象から外す（正しい判断も候補に残るという不利を受け入れる）
+2. record-tool の呼び出しの記録
+   - 起動の形: Claude Code はサーバーの `CLAUDE_CODE_ENTRYPOINT` が `cli` なら対話、`sdk-cli` なら headless、`sdk-` で始まるものは SDK、無い・見たことのない値は不明。Codex は `x-codex-turn-metadata` の `turn_trigger` が `exec` なら headless、それ以外は対話と実測できるまで不明。Codex の値がある呼び出しを、引き継いだ Claude の環境変数で分け直さない。生の値も残す
+   - Claude Code: record ツールだけに当たる同期の PreToolUse hook（両ホストの hooks のうち Claude 側だけ）が、ツールが動く前に、hook の入力の `session_id`・`prompt_id`・`tool_use_id`・ツール名・時刻を、capture の接続の新しい insert 用の view から同期で書く（spool と flush は通さない）。新しい接続の役割は作らない
+   - record サーバー: 呼び出し元を確かめた直後で、対象の検証と外部取得より前に、全 record ツール（begin・context・check・save・pending）の呼び出しを ingest の接続で独立して commit する（save の rollback で消えない。書けなければ処理を進めない）。Claude Code は `claudecode/toolUseId`、Codex は `x-codex-turn-metadata` のセッションとターンを書く。サーバーの環境変数のセッション id は補助として残すだけで、hook の値と食い違っても環境変数を優先しない
+   - 除外: hook の観測と一意に結べた呼び出しは、そのセッション・ターンの assistant source を AI の採用の対象から外す。セッションだけ分かる呼び出しはそのセッション全体を外す。hook の行が無い呼び出し（hook の失敗・時間切れ・未登録の古いホスト）は不明として残し、結べるまで同じホスト・作業場所の assistant source の AI の採用を止める
+   - 対話の Codex は実測できるまで AI の採用と自動の trace の通知を止める（呼び出しの記録と持ち主の採用は続ける）
 3. schema（次の revision、移行あり）
    - `unit_adoption.route` に `agent` を足す。トリガーは、source が assistant の `session_message` で、AskUserQuestion の質問ではなく、2 の除外に当たらないことを確かめる
    - evidence の役に `decides` を足す。`agent` の adoption は、同じ記録の、同じ source と範囲にある撤回されていない `decides` evidence と組でなければならず、`reported_speaker` のある evidence は対象にならない。`unit_support` がこの組を見る
@@ -91,6 +101,7 @@ approved_at: 2026-10-04
 - 採用: `decides` の引用と capture 由来の除外を組み合わせ、`do` で anchor のある判断だけに同じターンの編集を求める。棄却: 構文の除外と `states` と同じセッションの編集だけで見分ける（伝聞を平文で書き、無関係な編集を根拠にすれば通る）。棄却: すべての判断に編集を求める（`dont`・`defer`・調べものの判断が採用されなくなる）
 - 採用: 段階 1 の AI は supersedes しない。棄却: AI の判断どうしの置き換えを許す（評価の前に古い AI の判断を退かせてしまう）
 - 採用: 開始時の通知で前のセッションを trace する。棄却: Stop で処理を続けさせて今のセッションを trace する（Codex では続けさせた文が持ち主の発言として入るおそれがあり、遅れて届く source と、trace の報告を次の trace が拾う循環がある）
+- 採用: Claude Code のターンは、record ツールにだけ当たる同期の PreToolUse hook が capture の新しい view から書き、record サーバーが `claudecode/toolUseId` で結ぶ。棄却: 記録済みのターンの区切りと時刻から推し量る（別のターンの返事が挟まると呼び出しを見落とし、`/clear` 後の古いセッション id で別のセッションを外す）。棄却: hook が取れなかったときだけ時刻から推し量る（安全が一番要る場面で弱い方法に落ちる）。棄却: record ツールを呼んだセッションを丸ごと外すだけ（自動の trace は毎回新しいセッションで走るので、ほとんどの AI の判断が採用されなくなる）
 - 採用: record-tool の呼び出しを、record サーバーが呼び出し元のセッション・ターンつきで同期して書く。棄却: hook の PostToolUse で観測する（非同期で遅れて届き、失敗や中断を拾えない）。棄却: run の開始時刻と、その後の最初の返事で推し量る（同じ run を別のターンで使う場合や、begin の前の失敗を外せない）
 - 採用: 呼び出し元を測ってから、判別できないところでは AI の採用を止める。棄却: Skill の禁止だけで headless・SDK を外す（サーバーが拒む保証にならない）
 - 採用: 評価用の一覧は「一度でも AI の判断として active になった記録」。棄却: 今 AI の判断である記録だけ（持ち主が採用したり撤回したりすると、評価したい元の記録が一覧から消える）
@@ -99,7 +110,7 @@ approved_at: 2026-10-04
 
 - S1: 呼び出し元の実測（両ホスト × 対話・headless・SDK、Windows を含む）と、結果の「前提」への追記
 - S2: schema の revision を上げる（`agent` の経路、`decides` の役、run の呼び出し元、record-tool の呼び出しの記録、トリガーと `unit_support`）と移行。生成する型
-- S3: record サーバーが呼び出し元を確かめ、record-tool の呼び出しを同期で書き、begin と save で照合する
+- S3: record ツール用の同期の PreToolUse hook（Claude Code）と、record サーバーが呼び出し元を確かめ、record-tool の呼び出しを同期で書き、hook の観測と結び、begin と save で照合する
 - S4: 権限の判定関数と、保存・glean のすべての操作での前後の検査。link の規則（持ち主の判断の保護、AI の supersedes の禁止、AI どうしの conflicts）
 - S5: record.ts の `agent` の採用（`decides` との組、除外、同じターンの編集、パスの一覧の警告）
 - S6: 配信・read・search・record_context・review の権限の表示と、AI の判断用の固定文
@@ -139,5 +150,7 @@ approved_at: 2026-10-04
 なし
 
 ## 変更履歴
+
+- 2026-10-04 / 方針 2 を、Claude Code のターンを record ツール用の同期の PreToolUse hook と capture の新しい view で取る形に直し、実測を前提に足した / 実測で Claude Code の MCP 呼び出しにターンが無いと分かり、Codex（session 01a1065d-a782-77f2-bcea-beccec0ace30）と比べた / 持ち主が A を選んだ（Go 済み）
 
 - 2026-10-04 / 方針 11・12 と S11・S12・A10 を足した（配布する Skill の追従と、README などの文書の更新） / 持ち主が文書の徹底した更新を求めた / Go が要る（tasks の確認で取る）

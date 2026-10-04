@@ -22,28 +22,29 @@ base: main
 
 record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`・呼び出しの記録を DB が持てるようにする。
 
-- [ ] T01: 呼び出し元を両ホストで実測し、record サーバーが呼び出し元のセッション・ターン・起動の形を読む関数を作る
+- [x] T01: 呼び出し元を実測し、record サーバーが呼び出しの `_meta` と環境変数から、ホスト・セッション・ターン・tool_use_id・起動の形を読む関数を作る
   - 種別: 追加
-  - 計画: S1
+  - 計画: S1, S13
   - 依存: なし
-  - 変更: `server/src/caller.ts`, `server/test/caller.test.ts`, `.claude/plans/2026/10/04-agent-adoption.plan.md`
-  - 完了条件: `cd server && node --test test/caller.test.ts` → pass。対話・headless・SDK の実測で見えた値ごとに判別が返り、値が無い・見たことのない値は「不明」になる。実測の結果（ホスト × 形ごとに、見えた値と判別できたか）を plan の「前提」に追記し、変更履歴に 1 行足す
+  - 変更: `server/src/caller.ts`, `server/test/caller.test.ts`, `.claude/plans/2026/10/04-agent-adoption.plan.md`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `cd server && node --test test/caller.test.ts` → pass。実測した値（Claude Code の `cli`・`sdk-cli` と `claudecode/toolUseId`、Codex の `x-codex-turn-metadata` の `exec`）ごとに判別が返り、`sdk-` で始まる値は SDK、値が無い・見たことのない値・Codex の `exec` 以外は不明になる。Codex の値がある呼び出しは Claude の環境変数で分け直さない
   - コミット: `feat(record): identify the calling session, turn, and mode from what the host passes (T01)`
+  - 結果: probe の MCP サーバーで実測（Claude Code 2.1.289 の対話は動いている record サーバーの環境変数、`claude -p`、`codex exec`、`claude -p` に PreToolUse の hook）。値は plan の前提に追記。`claude -p` の hook の `tool_use_id` は MCP の `claudecode/toolUseId` と 3 回とも一致（並列 2 回を含む）。`cd server && node --test test/caller.test.ts` → 5 pass / 0 fail。`bun run typecheck` エラーなし、`bun run english` → 終了コード 0、biome は整形後に指摘なし。pre-commit の bundle の検査が package に入るファイルの変更でバージョンの更新を求めたので、`bun run release:plan -- --base 1043f18c` → `plugin` を確かめ、4 つのファイルを 0.6.29（v0.6.29 はタグ済み）から 0.6.30 に上げた
 
-- [ ] T02: schema の revision を上げ、`agent` の経路・`decides` の役・run の呼び出し元・record-tool の呼び出しの表・トリガーと `unit_support` を足し、移行を書く
+- [ ] T02: schema の revision を上げ、`agent` の経路・`decides` の役・run の呼び出し元・record-tool の呼び出しの表・hook の観測の表と capture の insert 用の view・トリガーと `unit_support` を足し、移行を書く
   - 種別: 追加
   - 計画: S2
   - 依存: T01（保存する呼び出し元の項目が決まる）
-  - 変更: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/test/schema.test.ts`
+  - 変更: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts`
   - 完了条件: `cd server && node --test test/schema.test.ts` → pass。新しく作った DB と移行した DB の schema が一致し、既存の持ち主の採用は変わらず、run の呼び出し元は不明として移る。`agent` の adoption は assistant の source・組になる `decides` evidence が無いと拒まれ、`reported_speaker` のある evidence とは組めない
   - コミット: `feat(schema): add agent adoption, the decides role, run callers, and record tool calls (T02)`
 
-- [ ] T03: record サーバーが呼び出し元を run に結び、全 record ツールの呼び出しを検証と外部取得の前に同期で書き、begin と save で照合する
+- [ ] T03: record ツール用の同期の PreToolUse hook（Claude Code）を足し、record サーバーが呼び出し元を run に結び、全 record ツールの呼び出しを検証と外部取得の前に同期で書き、hook の観測と結び、begin と save で照合する
   - 種別: 追加
   - 計画: S3
   - 依存: T02（呼び出しの表と run の呼び出し元の列が要る）
-  - 変更: `server/src/mcp-record.ts`, `server/src/extract.ts`, `server/src/db-write.ts`, `server/test/record.test.ts`
-  - 完了条件: `cd server && node --test --test-name-pattern="record call" test/record.test.ts` → pass。begin の前で失敗した呼び出し、同じ run を別のターンで使う呼び出しも行が残り、save の呼び出し元が begin と違うと拒まれる。`bun run architecture` → 書き込みの接続が `server/src/db-write.ts` の外に無い
+  - 変更: `server/src/mcp-record.ts`, `server/src/extract.ts`, `server/src/db-write.ts`, `server/src/capture.ts`, `plugin/hooks/hooks.json`, `scripts/check-ai-config.mjs`, `server/test/record.test.ts`, `server/test/capture.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="record call" test/record.test.ts test/capture.test.ts` → pass。hook が spool を通さず同期で観測を書き、サーバーの呼び出しと `tool_use_id` で結ばれる。hook の行が無い呼び出しは不明として残る。`bun run hooks:live` → pass。begin の前で失敗した呼び出し、同じ run を別のターンで使う呼び出しも行が残り、save の呼び出し元が begin と違うと拒まれる。`bun run architecture` → 書き込みの接続が `server/src/db-write.ts` の外に無い
   - コミット: `feat(record): bind the caller to each run and log every record tool call before it runs (T03)`
 
 ## P2: 権限と持ち主の判断の保護
@@ -147,7 +148,7 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - 完了条件: `node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`rg -n "end of a session|セッションの終わりに" README.md README.ja.md` → 手で trace を流すことだけを前提にした案内が残っていない。plan の方針 12 の項目が両言語の README にそろって入っている。`rg -n -i "only the owner|owner's words|explicitly asks|持ち主の言葉" .claude .agents plugin/skills README.md README.ja.md CLAUDE.md AGENTS.md` → 残った行が、持ち主の判断についての記述として今の挙動と合っている
   - コミット: `docs: describe AI decisions and automatic tracing in the READMEs and agent instructions (T14)`
 
-- [ ] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
+- [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
   - 依存: T14（出す中身と文書がそろう）
@@ -156,3 +157,6 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `chore(release): bump the plugin version for AI adoption (T15)`
 
 ## 記録
+
+- 2026-10-04 / T01・T02・T03 / 実測で Claude Code の MCP 呼び出しにターンが無いと分かり、持ち主が record ツール用の同期の PreToolUse hook（案 A）を選んだ / T01 の題名と完了条件（前: 両ホストの全形の実測と plan への追記 → 後: 実測した値の判別。実測は plan の前提に追記済み、対話の Codex・SDK・Windows は未検証として plan に残す）、T02 の題名と変更欄（`server/src/db-write.ts` を足す）、T03 の題名・変更欄・完了条件（hook と capture を足す）を直した
+- 2026-10-04 / T01・T15 / pre-commit の bundle の検査が、package に入る最初の変更（`server/src/caller.ts`）のコミットでバージョンの更新を求めた / T15 を取りやめ、バージョンの更新（S13 の一部）を T01 に移した。T01 の計画欄（前: S1 → 後: S1, S13）と変更欄（4 つのファイルを足す）を直した。main が先に新しいバージョンを出したら、マージのときに次のバージョンへ上げ直す
