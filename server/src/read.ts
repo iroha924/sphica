@@ -324,6 +324,14 @@ async function replacements(
     .select(["h.from_unit", "h.to_unit", "h.started_at", "h.ended_at", "h.end_reason", "a.key as from_key"])
     .orderBy("h.id")
     .execute();
+  // Intents whose earlier effect the update to revision 10 could not date: never shown as proposals that never took effect
+  const gaps = await db
+    .selectFrom("unit_replacement_gap")
+    .select(["from_unit", "to_unit"])
+    .where((eb) => eb.or([eb("from_unit", "=", id), eb("to_unit", "=", id)]))
+    .execute();
+  const gap = (from: number, to: number) => gaps.some((g) => g.from_unit === from && g.to_unit === to);
+  const unrecorded = "its history before the update to revision 10 was not recorded";
   const open = (r: (typeof rows)[number]) => r.ended_at === null || (asOf !== undefined && r.ended_at > asOf);
   const period = (r: (typeof rows)[number]) =>
     `from ${r.started_at} to ${r.ended_at}: ${inline(r.end_reason ?? "")}`;
@@ -336,6 +344,7 @@ async function replacements(
       `Supersedes ${own.to_key} (${now ? `in effect since ${now.started_at}` : holder ? `not in effect: ${holder.from_key} is in effect as its successor` : "not in effect"})`,
     );
     for (const r of mine) if (!open(r)) out.push(`Replaced ${own.to_key} ${period(r)}`);
+    if (gap(id, own.to_id)) out.push(`Supersedes ${own.to_key}: ${unrecorded}`);
   }
   const into = rows.filter((r) => r.to_unit === id);
   for (const r of into)
@@ -344,9 +353,12 @@ async function replacements(
         ? `Superseded by ${r.from_key} (since ${r.started_at})`
         : `Was superseded by ${r.from_key} ${period(r)}`,
     );
-  for (const l of intents)
-    if (l.to_id === id && !into.some((r) => r.from_unit === l.from_id))
+  for (const l of intents) {
+    if (l.to_id !== id) continue;
+    if (gap(l.from_id, id)) out.push(`Superseded by ${l.from_key} at some time: ${unrecorded}`);
+    else if (!into.some((r) => r.from_unit === l.from_id))
       out.push(`Replacement proposed by ${l.from_key} (${l.from_lifecycle ?? "candidate"})`);
+  }
   return out;
 }
 

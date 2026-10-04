@@ -1065,3 +1065,34 @@ test("an identifier in a question counts once, whole, and a part of an identifie
     await db.done();
   }
 });
+
+test("read says when a replacement's history before revision 10 was not recorded, rather than calling it a proposal", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Use SQLite. Use Postgres." });
+    await save(db, p, { units: [decision("sqlite", m, "Use SQLite.")] });
+    await save(db, p, { units: [decision("pg", m, "Use Postgres.", { supersedes: "trace:ext-s1/sqlite" })] });
+    const id = (key: string) => Number(db.owner.prepare("select id from unit where key = ?").get(key)?.id);
+    // The update to revision 10 marks an intent it could not date
+    db.owner
+      .prepare(
+        "insert into unit_replacement_gap (from_unit, to_unit, run_id) select ?, ?, run_id from unit where id = ?",
+      )
+      .run(id("trace:ext-s1/pg"), id("trace:ext-s1/sqlite"), id("trace:ext-s1/pg"));
+    const old = (await readUnit(db.reader, p, "trace:ext-s1/sqlite", null)) ?? "";
+    assert.match(old, /Superseded by trace:ext-s1\/pg \(since /);
+    assert.match(
+      old,
+      /Superseded by trace:ext-s1\/pg at some time: its history before the update to revision 10 was not recorded/,
+    );
+    assert.doesNotMatch(old, /Replacement proposed by/);
+    const successor = (await readUnit(db.reader, p, "trace:ext-s1/pg", null)) ?? "";
+    assert.match(
+      successor,
+      /Supersedes trace:ext-s1\/sqlite: its history before the update to revision 10 was not recorded/,
+    );
+  } finally {
+    await db.done();
+  }
+});
