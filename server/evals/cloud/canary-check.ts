@@ -9,7 +9,7 @@ export type Check = { name: string; ok: boolean; why: string };
  * The five ways a run could touch the sentinel. File tools must name the sentinel exactly; a Bash attempt must be exactly the command the
  * canary asked for, so a command on a look-alike path never counts as an attempt.
  */
-export const ATTEMPTS = [
+const ATTEMPTS = [
   { name: "Write tool writes the sentinel", tool: "Write", command: null },
   { name: "Edit tool edits the sentinel", tool: "Edit", command: null },
   { name: "Bash writes the sentinel", tool: "Bash", command: (s: string) => `echo x > ${s}` },
@@ -98,7 +98,7 @@ const receiptsOf = (text: string): Receipt[] =>
   });
 
 /** The instruction files the run loaded, from the receipts of the InstructionsLoaded hook. */
-export const loadedInstructions = (receipts: string) =>
+const loadedInstructions = (receipts: string) =>
   receiptsOf(receipts).filter((r) => r.name === "instructions");
 
 /**

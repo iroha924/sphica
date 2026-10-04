@@ -33,6 +33,15 @@ function other(ref: string): OrderResult {
       fs.mkdirSync(path.dirname(path.join(tree, "server", rel)), { recursive: true });
       fs.copyFileSync(path.join(server, rel), path.join(tree, "server", rel));
     }
+    // The bench reads what the hooks returned through the driver, which older refs do not expose
+    if (
+      !fs
+        .readFileSync(path.join(tree, "server", "evals", "acceptance", "driver.ts"), "utf8")
+        .includes("delivered: ()")
+    )
+      throw new Error(
+        `${ref} predates the order bench (its acceptance driver has no delivered()); compare with a ref that has it`,
+      );
     execFileSync("bun", ["install", "--cwd", "server", "--frozen-lockfile", "--ignore-scripts"], {
       cwd: tree,
       stdio: "ignore",

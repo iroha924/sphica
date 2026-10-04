@@ -245,10 +245,14 @@ export function claudeStreamCalls(events: string | null): { calls: StreamCall[];
     }
     if (e.type === "result") finished = true;
     // An assistant message is always a list of blocks; a user message may also be plain text. Anything else damages the stream
-    const body = e.message?.content;
+    const message = e.message as { content?: unknown } | undefined;
+    const body = message?.content;
     if (
-      (e.type === "assistant" && body !== undefined && !Array.isArray(body)) ||
-      (e.type === "user" && body !== undefined && typeof body !== "string" && !Array.isArray(body))
+      (e.type === "assistant" && (typeof message !== "object" || message === null || !Array.isArray(body))) ||
+      (e.type === "user" &&
+        (typeof message !== "object" ||
+          message === null ||
+          (typeof body !== "string" && !Array.isArray(body))))
     )
       readable = false;
     const content = Array.isArray(body) ? (body as unknown[]) : [];
@@ -283,7 +287,10 @@ export function claudeStreamCalls(events: string | null): { calls: StreamCall[];
                     : "",
               )
               .join("\n")
-          : String(body ?? "");
+          : typeof body === "string"
+            ? body
+            : "";
+        if (body !== undefined && typeof body !== "string" && !Array.isArray(body)) readable = false;
         call.error = c.is_error === true;
       }
     }
@@ -369,8 +376,8 @@ export function searchedBeforeEdit(
   }
   // Every result in the stream has its mark, in order; a gap could hide the change that came first
   const answered = calls.filter((c) => c.result !== null).map((c) => c.id);
-  if (JSON.stringify(parsed.map((m) => m.after).sort()) !== JSON.stringify([...answered].sort()))
-    return "unknown";
+  // The watcher writes one mark per result as the results arrive, so marks out of that order are damaged too
+  if (JSON.stringify(parsed.map((m) => m.after)) !== JSON.stringify(answered)) return "unknown";
   const at0 = parsed.findIndex((m) => m.changed);
   // A mark read late may have missed a change a later call undid, so no late mark up to the first change can be trusted
   if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late)) return "unknown";

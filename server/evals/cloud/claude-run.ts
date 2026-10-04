@@ -133,7 +133,7 @@ export function runArgs(p: { settings: string; mcp: string }, model: string): st
  * The only variables a run inherits: what claude needs to start and find the owner's login. Anything else of the owner's shell (tokens,
  * the parent session's markers, Sphica's own paths) would reach the agent's commands, which the sandbox does not fence.
  */
-export const RUN_ENV = [
+const RUN_ENV = [
   "PATH",
   "HOME",
   "USER",
@@ -184,7 +184,7 @@ export function finalAnswer(events: string): { result: string; is_error: boolean
     .at(-1);
 }
 
-export type RunResult = {
+type RunResult = {
   run: string;
   build: string | undefined;
   model: "claude";
@@ -392,7 +392,7 @@ export function treeState(work: string): string {
   return hash.digest("hex");
 }
 
-export type TreeMark = {
+type TreeMark = {
   /** The tool call whose result had just arrived */
   after: string;
   /** Whether the tree differs from the previous mark (or from the start, for the first) */

@@ -26,7 +26,7 @@ export const LIGHT = [
   "harvest:50/loan-log",
 ];
 
-export type EventResult = { event: string; shown: string[]; chars: number };
+type EventResult = { event: string; shown: string[]; chars: number };
 export type OrderResult = {
   events: EventResult[];
   /** Per record: in how many of the events it was shown */

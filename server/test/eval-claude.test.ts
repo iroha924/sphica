@@ -817,3 +817,40 @@ test("search counts as deferred only when a ToolSearch result handed it over bef
   );
   assert.equal(searchLoading(search.join("\n")), "unknown", "a stream cut off");
 });
+
+test("events without their message, results of the wrong shape, and marks out of order never prove an answer", () => {
+  const gold = ["trace:s/utc"];
+  for (const bad of [
+    ev({ type: "assistant", message: "damaged" }),
+    ev({ type: "assistant" }),
+    ev({ type: "assistant", message: {} }),
+  ])
+    assert.equal(foundInClaudeStream([bad, done].join("\n"), gold), "unknown", bad);
+  const objectResult = ev({
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: "s", content: { unexpected: "damaged" } }] },
+  });
+  assert.equal(
+    foundInClaudeStream([use("s", "mcp__sphica__search"), objectResult, done].join("\n"), gold),
+    "unknown",
+  );
+  const calls = [
+    use("b", "Bash"),
+    result("b", ""),
+    use("s", "mcp__sphica__search"),
+    result("s", "No record holds most of"),
+    use("w", "Write"),
+    result("w", "ok"),
+    done,
+  ].join("\n");
+  const mark = (after: string, changed: boolean) =>
+    JSON.stringify({ after, changed, in_flight: [], late: false });
+  assert.equal(
+    searchedBeforeEdit(calls, [mark("b", true), mark("s", false), mark("w", true)].join("\n")),
+    "no",
+  );
+  assert.equal(
+    searchedBeforeEdit(calls, [mark("w", true), mark("s", false), mark("b", true)].join("\n")),
+    "unknown",
+  );
+});

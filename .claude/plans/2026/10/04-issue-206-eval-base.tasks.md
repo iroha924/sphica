@@ -207,6 +207,16 @@ base: main
   - コミット: `docs(eval-loop): run Claude locally behind the canary and compare old and new builds (T11)`
   - 結果: `bun run verify:ai` → 0 で終わり `AI config: ... 3 development Skills ...`
 
+- [x] T20: T09・T18・T19 の Codex レビューの直しと、verify の knip を通す（比べる ref の driver の確認、backup の hidden test の書き込み経路と内容、壊れたイベントと結果の形、印の順番、新しい入口の登録）
+  - 種別: 修正
+  - 計画: S3, S4, S5, S8
+  - 依存: T09（直す対象）, T18（直す対象）, T19（直す対象）
+  - 変更: `server/evals/cloud/judge.ts`, `server/evals/cloud/tasks.json`, `server/evals/order/run.ts`, `server/evals/cloud/canary-check.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/report.ts`, `server/evals/order/bench.ts`, `knip.json`, `server/test/eval-claude.test.ts`
+  - red: `cd <23843d19 の worktree>/server && bun run knip` → canary.ts・claude.ts・order/run.ts が未使用のファイル、8 個の export が未使用（verify の check で exit 1）
+  - 完了条件: `bun run knip` → 0 で終わる。`cd server && node --test test/eval-claude.test.ts` → 壊れたイベント・結果の形と並べ替えた印が unknown になるテストが pass
+  - コミット: `fix(evals): close the last review findings and register the new entry scripts (T20)`
+  - 結果: red は 23843d19 での `bun run verify` の knip の失敗（未使用のファイル 3、export 5、型 3）。直した後 `bun run knip` → 指摘なし。`node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 80, fail 0。backup の hidden test を collect と同じ sandbox と permission model で 6 つの実装に当て、同期・callback・stream のコピーは pass 2、空ファイル・送信は fail 1、未実装は fail 2
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
@@ -234,3 +244,4 @@ base: main
 - 2026-10-04 / T06, T08 / Codex レビュー 5 件を全部採った / T18。hidden test は checkout の読み取りしか許されないので、書き込み系の fs 関数を記録だけするものに差し替えて（syncBuiltinESMExports）コピーの指示と送信を見る
 - 2026-10-04 / T15, T16, T17 / Codex レビュー 6 件（P1 1 件: canary の件数照合）を全部採った / T19。Bash のコミットの件（T16 F4）は実装はすでに正しく、テストが clean から clean の場面を突いていなかった
 - 2026-10-04 / T10 / init の欄では遅延かどうかが分からなかった / stream の ToolSearch の結果（tool_reference の tool_name）で判定し、stream の読み取りで tool_reference の名前も結果に含めるようにした。G6 は測れる
+- 2026-10-04 / T09, T18, T19 / Codex レビュー 6 件。5 件を T20 で直した。T09 F2（crowded の記録の保存日時が実行時刻になる）は採らない: 新しい順は保存の順（id）で決まり、setup の順＝宣言した日付の順と一致するので、順番の比較は歪まない。評価用のスクリプトで出荷しないので、ここからはタスクごとの再レビューをやめ、差分全体のレビューで P1 とセキュリティに絞る

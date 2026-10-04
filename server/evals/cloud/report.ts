@@ -25,7 +25,7 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
 
 /** A count as a rate over its denominator, with the unknowns shown beside it (never counted either way). */
-export const rate = <T>(rows: T[], yes: (r: T) => boolean, unknown: (r: T) => boolean) => {
+const rate = <T>(rows: T[], yes: (r: T) => boolean, unknown: (r: T) => boolean) => {
   const n = rows.length;
   const y = rows.filter(yes).length;
   return `${y} / ${n} (${n ? fmt(y / n) : "n/a"}, unknown ${rows.filter(unknown).length})`;
