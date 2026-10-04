@@ -301,9 +301,11 @@ function forgetAuthorizer(action: number, p1: string | null, p2: string | null):
       p1 === "wal_checkpoint"
       ? C.SQLITE_OK
       : C.SQLITE_DENY;
+  // Recursive reads: judging records again walks supersedes chains (unit_successor_place, unit_state_restore)
   if (
     action === C.SQLITE_READ ||
     action === C.SQLITE_SELECT ||
+    action === C.SQLITE_RECURSIVE ||
     action === C.SQLITE_FUNCTION ||
     action === C.SQLITE_TRANSACTION ||
     action === C.SQLITE_SAVEPOINT

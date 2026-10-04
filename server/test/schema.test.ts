@@ -629,12 +629,8 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
   refuses(() => state(old, "superseded", "active"), /not a lifecycle change/);
   refuses(() => state(old, "superseded", "withdrawn"), /not a lifecycle change/);
   refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
+  // Its successor no longer active, the old record is a candidate again, by a state the schema writes
   state(next, "active", "candidate");
-  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
-  state(next, "candidate", "withdrawn");
-  for (const to of ["candidate", "active", "superseded"])
-    refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
-  // Its last live successor withdrawn, the old record is a candidate again, by a state the schema writes
   assert.deepEqual(
     {
       ...one(
@@ -642,8 +638,11 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
         old,
       ),
     },
-    { from_state: "superseded", to_state: "candidate", reason: "its successor was withdrawn" },
+    { from_state: "superseded", to_state: "candidate", reason: "its successor is no longer active" },
   );
+  state(next, "candidate", "withdrawn");
+  for (const to of ["candidate", "active", "superseded"])
+    refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
   state(old, "candidate", "active");
   state(old, "active", "withdrawn");
   assert.deepEqual(
@@ -672,11 +671,15 @@ test("a record has one live successor at a time, of a kind that can replace it",
   refuses(() => link(made("finding", "finding"), old), /supersedes one of its own kind/);
   const first = made("first", "constraint");
   link(first, old);
-  // A candidate successor holds the place: a second one would make two answers once both are adopted
+  // Proposals wait beside the place as candidates: the first to become active takes it, and another cannot become active beside it
   const second = made("second", "decision");
-  refuses(() => link(second, old), /already has a successor that is not withdrawn/);
-  state(first, "candidate", "withdrawn");
   link(second, old);
+  adoption(first, src);
+  adoption(second, src);
+  state(first, "candidate", "active");
+  refuses(() => state(second, "candidate", "active"), /already has an active successor/);
+  state(first, "active", "withdrawn");
+  state(second, "candidate", "active");
   // A quarantined or unsourced successor can never become active or be withdrawn, so it takes no place
   const other = made("other", "finding");
   const quarantined = unit({

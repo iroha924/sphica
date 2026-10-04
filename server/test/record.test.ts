@@ -2057,3 +2057,47 @@ test("owner decision protected: in one save, the order of a waiting proposal and
     await db.done();
   }
 });
+
+test("successor place: when the end of a chain leaves active, every record it replaced comes back", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, state, life } = successors(db, p);
+    const o = decided("v1", true);
+    state(o, "candidate", "active");
+    const a = decided("v2", true);
+    link(a, o);
+    state(a, "candidate", "active");
+    state(o, "active", "superseded");
+    const b = decided("v3", true);
+    link(b, a);
+    state(b, "candidate", "active");
+    state(a, "active", "superseded");
+    state(b, "active", "candidate");
+    assert.deepEqual([life(o), life(a), life(b)], ["candidate", "candidate", "candidate"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: the same rule holds whether or not the replaced record was adopted, so adding or taking back its adoption frees nothing", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, state, life } = successors(db, p);
+    // Unadopted O: proposals wait beside it too, and the first to become active takes the place
+    const o = decided("plain", false);
+    const a = decided("first", true);
+    const b = decided("second", true);
+    link(a, o);
+    link(b, o);
+    state(a, "candidate", "active");
+    state(o, "candidate", "superseded");
+    assert.throws(() => state(b, "candidate", "active"), /already has an active successor/);
+    state(a, "active", "candidate");
+    assert.equal(life(o), "candidate");
+    state(b, "candidate", "active");
+  } finally {
+    await db.done();
+  }
+});

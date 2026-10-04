@@ -1,6 +1,6 @@
 // Checks and saves the record an agent wrote for one extraction run (trace or harvest). Every quote is located in retained source text,
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
-import { type Kysely, type SqlBool, sql } from "kysely";
+import type { Kysely } from "kysely";
 import { z } from "zod";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
@@ -254,11 +254,6 @@ export function prepareRecord(root: string | null, raw: unknown, probe?: Probe):
   return facts;
 }
 
-/** Whether a unit is the owner's decision: one the owner or a maintainer adopted and has not taken back */
-const ownerAdopted = (unit: string) =>
-  sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
-    and a.route in ('owner_statement', 'explicit') and a.retracted_at is null)`;
-
 export async function checkRecord(
   db: Reads,
   target: Target,
@@ -395,7 +390,7 @@ export async function checkRecord(
     (linked.length
       ? await db
           .selectFrom("unit as o")
-          .select(["o.id", "o.key", "o.kind", "o.lifecycle", ownerAdopted("o.id").as("owners")])
+          .select(["o.id", "o.key", "o.kind", "o.lifecycle"])
           .where("o.project_id", "=", target.projectId)
           .where("o.key", "in", linked)
           .execute()
@@ -627,8 +622,8 @@ export async function checkRecord(
     let supersedes: number | null = null;
     if (u.supersedes) {
       const old = others.get(u.supersedes);
-      // Of the owner's decision, a successor the owner does not adopt in this save waits beside the place rather than taking it
-      const takes = !Number(old?.owners) || adoption.length > 0;
+      // Only a successor that becomes active takes the place; a decision or constraint nobody adopts in this save waits beside it
+      const takes = !["decision", "constraint"].includes(u.kind) || adoption.length > 0;
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);

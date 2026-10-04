@@ -103,6 +103,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): let only an active successor hold the owner's decision's place (T19)`
   - 結果: red を実測（3 件とも上の理由で fail）。直した後 3 件 pass、T04・T18 の後継の枠のテストも pass。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）。read は待っている提案を「Replacement proposed by ...」と分けて出す
 
+- [x] T20: 後継の枠をどの記録でも同じ規則にし、連鎖をまとめて戻す（T19 のレビュー指摘）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T19（直す対象の枠の規則）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/db-write.ts`, `server/src/record.ts`, `server/test/schema.test.ts`, `server/test/record.test.ts`, `.claude/plans/2026/10/04-agent-adoption.plan.md`
+  - red: `cd server && node --test --test-name-pattern="end of a chain leaves active|same rule holds whether or not" test/record.test.ts` → 連鎖の末尾が active から外れても先頭が superseded のまま残り、持ち主の判断でない記録への 2 つ目の提案の link が「already has a successor that is not withdrawn」で拒まれて落ちる
+  - 完了条件: 同じコマンド → pass。`bun run verify` → 終了コード 0
+  - コミット: `fix(record): hold a successor place the same way for every record and free whole chains (T20)`
+  - 結果: red を実測（2 件とも上の理由で fail）。直した後 pass、T04・T18・T19 の後継の枠のテストも pass。forget の接続が再帰の読み取りを拒んだので許した（他の役割と同じ）。旧い規則を前提にした schema のテスト 2 件を新しい規則に書き換えた。`bun run verify` → 終了コード 0（テスト 742 件、SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）
+
 - [ ] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
   - 種別: 追加
   - 計画: S4
@@ -210,3 +220,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T04 / 保存時に拒む形が glean の後採用の流れを壊した（既存テスト 3 件の退行）。Codex と比べ、持ち主が C′ を選んだ。T04 の題名・変更欄・red・完了条件・コミットを C′ に書き直した（前: record.ts で同じ保存の持ち主の採用を求める → 後: 配信と後継の枠で効き目を止める）
 - 2026-10-04 / T18 / T04 の Codex のレビュー（F1 P1: 取り下げからの復帰が待っている候補を後継と数えた。F2 P2: 同じ保存で待っている候補が枠を予約した。F3 P2: overview が待っている候補を後継と案内した）を 3 件とも受け、修正タスク T18 を足した
 - 2026-10-04 / T19 / T18 の Codex のレビュー（F1 P1: 採用済みの候補を active 化の確認が見落とし後継が 2 つ並ぶ。F2 P1: 採用の撤回で元の判断が戻らない。F3 P2: 同じ保存で順番に依存。F4 P2: liveSuccessors が取り下げた後継を返す。F5 P2: read が待っている提案も Superseded by と出す）を 5 件とも受けた。場当たりに直さず、枠を「active になった後継だけ」に単純にした（plan の方針 5 を更新）
+- 2026-10-04 / T20 / T19 の Codex のレビュー（F1 P1: 連鎖の末尾の採用撤回で先頭が戻らない。F2 P1: 前の判断に採用が付くと枠が空いても戻らない。F3 P2: 前の判断の採用撤回で待っている提案が 2 つとも枠を持つ）。3 回目のレビューでも P1 が出たので止めて持ち主に相談し、規則を全記録で同じにする選択肢 1 を受けて修正タスク T20 を足した

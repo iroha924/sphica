@@ -342,12 +342,14 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
     select 1 from chain where id = new.from_unit);
 end;
 create view unit_successor_place as
-select l.to_unit, l.from_unit from unit_link l join unit s on s.id = l.from_unit
-where l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
-  and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn'
-  and (not exists (select 1 from unit_adoption a where a.unit_id = l.to_unit and a.route in ('owner_statement', 'explicit')
-      and a.retracted_at is null)
-    or (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) in ('active', 'superseded'));
+with recursive live(id) as (
+  select u.id from unit u where u.extraction = 'supported' and u.unsourced = 0
+    and (select to_state from unit_state where unit_id = u.id order by id desc limit 1) = 'active'
+  union
+  select l.to_unit from unit_link l join live on live.id = l.from_unit
+  where l.kind = 'supersedes' and (select to_state from unit_state where unit_id = l.to_unit order by id desc limit 1) = 'superseded'
+)
+select l.to_unit, l.from_unit from unit_link l join live on live.id = l.from_unit where l.kind = 'supersedes';
 create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'the first state of a unit is candidate, from no state')
   where not exists (select 1 from unit_state where unit_id = new.unit_id)
@@ -394,13 +396,18 @@ create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
 end;
 create trigger unit_state_restore after insert on unit_state
-when new.to_state = 'withdrawn' or (new.to_state = 'candidate' and new.from_state = 'active') begin
+when new.to_state = 'withdrawn' or (new.to_state = 'candidate' and new.from_state in ('active', 'superseded')) begin
   insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id)
+  with recursive up(id) as (
+    select l.to_unit from unit_link l where l.from_unit = new.unit_id and l.kind = 'supersedes'
+    union
+    select l.to_unit from unit_link l join up on up.id = l.from_unit where l.kind = 'supersedes'
+  )
   select o.id, 'superseded', 'candidate', new.at,
     case new.to_state when 'withdrawn' then 'its successor was withdrawn' else 'its successor is no longer active' end,
     new.source_id, new.run_id, new.forget_id
-  from unit_link l join unit o on o.id = l.to_unit
-  where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
+  from up join unit o on o.id = up.id
+  where (select to_state from unit_state where unit_id = o.id order by id desc limit 1) = 'superseded'
     and not exists (select 1 from unit_successor_place k where k.to_unit = o.id);
 end;
 create trigger unit_anchor_frozen before update on unit_anchor begin
@@ -621,14 +628,6 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
   where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
     and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
-  -- One live successor at a time (unit_successor_place says which successors hold it). The owner's decision takes waiting proposals;
-  -- its place is taken when one becomes active
-  select raise(abort, 'the record already has a successor that is not withdrawn')
-  where new.kind = 'supersedes'
-    and exists (select 1 from unit n where n.id = new.from_unit and n.extraction = 'supported' and n.unsourced = 0)
-    and exists (select 1 from unit_successor_place where to_unit = new.to_unit)
-    and not exists (select 1 from unit_adoption a where a.unit_id = new.to_unit and a.route in ('owner_statement', 'explicit')
-      and a.retracted_at is null);
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'a state comes after its unit was created')
