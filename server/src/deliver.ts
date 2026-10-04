@@ -23,6 +23,7 @@ import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
 import { RevisionMismatch } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
+import { pendingSessions } from "./trace.ts";
 
 type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
 /**
@@ -531,16 +532,32 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
+/** Sphica's own words asking the agent to trace on its own, never taken from a record */
+export const AUTO_TRACE = (n: number) =>
+  `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, run the trace Skill on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
+
 /**
- * Records grow only when the owner traces, so session start says when sessions wait: in the owner's own sessions only (a headless run
- * would use up the notice), at most once a local day per database and project (a mark that cannot be written shows it again).
+ * Records grow only when sessions are traced, so session start says when sessions wait, in the owner's own sessions only (a headless run
+ * would use up the notice). A new interactive Claude Code session asks the agent to trace on its own, once per session; anywhere else
+ * (Codex, whose interactive turns are not measured yet, a resumed session, an unknown start) it asks the owner to, at most once a local
+ * day per database and project. A mark that cannot be written shows it again.
  */
 async function waiting(
   db: Reads,
   projectId: number,
-  place: { file: string; key: string; host: Host; owner: boolean },
+  place: { file: string; key: string; host: Host; owner: boolean; auto: string | null },
 ): Promise<string> {
   if (!place.owner) return "";
+  if (place.auto !== null) {
+    const { total } = await pendingSessions(db, projectId, "recent", new Date(), 1, {
+      auto: true,
+      skip: { host: place.host, session: place.auto },
+    });
+    if (!total) return "";
+    if (!markOnce("auto-trace", `${path.resolve(place.file)}\0${place.key}\0${place.host}\0${place.auto}`))
+      return "";
+    return AUTO_TRACE(total);
+  }
   const n = (await pendingCount(db, projectId)).recent;
   if (!n) return "";
   const day = new Date().toLocaleDateString("sv-SE");
@@ -554,7 +571,7 @@ async function atStart(
   db: Reads,
   projectId: number,
   branch: string | null,
-  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean },
+  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean; auto: string | null },
 ): Promise<Plan> {
   const current = db
     .selectFrom("work")
@@ -908,6 +925,14 @@ export async function deliver(
                     key: place.key,
                     host,
                     subagent: name === "SubagentStart",
+                    // Only a new interactive Claude Code session: a resume, headless, SDK, or unknown start never traces on its own
+                    auto:
+                      host === "claude-code" &&
+                      name === "SessionStart" &&
+                      input.source !== "resume" &&
+                      process.env.CLAUDE_CODE_ENTRYPOINT === "cli"
+                        ? session
+                        : null,
                     // A subagent's start is never the owner's, even when the host leaves out its agent id
                     owner:
                       name !== "SubagentStart" &&

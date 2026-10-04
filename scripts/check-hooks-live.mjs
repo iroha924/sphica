@@ -105,7 +105,7 @@ await withTempDir(async (dir) => {
 
   const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "hooks.json"), "utf8")).hooks;
   /** Runs every entry Claude Code would run for this event (and tool), as the entry defines it. */
-  const fire = (event, input, session) => {
+  const fire = (event, input, session, extra = {}) => {
     const entries = (manifest[event] ?? [])
       .filter((g) => !g.matcher || new RegExp(`^(?:${g.matcher})$`).test(input.tool_name ?? ""))
       .flatMap((g) => g.hooks ?? []);
@@ -115,6 +115,7 @@ await withTempDir(async (dir) => {
       CLAUDE_PLUGIN_ROOT: pkg,
       CLAUDE_PROJECT_DIR: repo,
       CLAUDE_CODE_SESSION_ID: session,
+      ...extra,
     };
     const stdin = JSON.stringify({ hook_event_name: event, session_id: session, cwd: repo, ...input });
     let out = "";
@@ -264,6 +265,14 @@ await withTempDir(async (dir) => {
   for (let i = 0; i < 20 && fs.readdirSync(spool).some((f) => f.endsWith(".json")); i++)
     await new Promise((r) => setTimeout(r, 250));
   if (reads !== 1) fail(`expected one emitted pre_read delivery for the smoke session, found ${reads}`);
+
+  // ---- A new interactive session is asked once to trace the smoke session, which now waits ----
+  const interactive = { CLAUDE_CODE_ENTRYPOINT: "cli" };
+  const asked = fire("SessionStart", { source: "startup" }, "smoke-2", interactive);
+  if (!/1 earlier session of this project waits to be traced/.test(asked))
+    fail("a new interactive session was not asked to trace the waiting session", asked);
+  if (/wait(s)? to be traced/.test(fire("SessionStart", { source: "compact" }, "smoke-2", interactive)))
+    fail("the automatic trace notice came twice in one session");
 });
 
 if (failures.length) {

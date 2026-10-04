@@ -237,13 +237,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): keep turnless replies from adopting and refuse misplaced decides at check (T28)`
   - 結果: red を 3 件とも実測した（active になる、check が ok: true、glean の検査が role を拒まない）。`agent_ineligible_source` に turn の無い返事を入れ、`agentRefusal` でも理由を出す。check は `decides` を AI の返事（質問でない）の本体の evidence にだけ受け、ほかはエラーにする。glean の evidence の役から `decides` を外した。`node --test --test-name-pattern="agent adoption" test/record.test.ts` → 7 pass。`bun run verify` → 終了コード 0（SQL 到達 205/205、受け入れ 113 pass）
 
-- [ ] T10: 新しい持ち主のセッションの開始時に、自動の trace の通知をセッションごとに 1 回出す
+- [x] T10: 新しい持ち主のセッションの開始時に、自動の trace の通知をセッションごとに 1 回出す
   - 種別: 変更
   - 計画: S8
   - 依存: T01（対話と headless・SDK を見分ける）, T08（Skill が自動で起動できる）, T09（自動の未処理の数え方が要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`, `scripts/check-hooks-live.mjs`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `scripts/check-hooks-live.mjs`
   - 完了条件: `cd server && node --test --test-name-pattern="auto trace notice" test/deliver.test.ts test/deliver-codex.test.ts` → pass。対話の持ち主のセッションで 1 回だけ出て、resume・headless・SDK・判別できない形では出ない。`bun run hooks:live` → pass
   - コミット: `feat(deliver): ask the agent to trace waiting sessions at the start of each new owner session (T10)`
+  - 結果: 対話の Claude Code（hook の `CLAUDE_CODE_ENTRYPOINT=cli`）の新しいセッション（resume でない SessionStart、サブエージェントでない、持ち主のセッション）でだけ、自動の数え方で自分以外の未処理を数え、`AUTO_TRACE` の固定文（依頼を片づけた後、古い順に最大 2 セッションを Skill の「On your own」どおりに trace する。持ち主に聞かない）をセッションごとに 1 回出す。それ以外（Codex、resume、判別できない形）は今の 1 日 1 回の手動の案内のまま。`cd server && node --test --test-name-pattern="auto trace notice" test/deliver.test.ts` → pass（1 回だけ、自分のセッションを数えない、resume・sdk-cli・sdk-ts・不明・サブエージェント・cli を引き継いだ Codex では出ない）。`bun run hooks:live` → pass。通知を外した bundle では「a new interactive session was not asked to trace」で落ちることを確かめた。`bun run verify` → 終了コード 0（受け入れ 113 pass）
 
 ## P4: 評価への備えと出荷
 
@@ -316,3 +317,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T25 / 変更欄に `server/test/acceptance-cases.test.ts` を足した（層ごとの件数を固定しているので、新しい層 reconcile の 8 件を数えに足す）。reconcile の最後の再判定（`records did not settle`）は、judge が読む事実を保存の書き込みが変えないので正しい書き込みからは届かず、ingest の authorizer が事実を書き換えるトリガーを差し込ませないので、rollback は「保存の途中で schema が書き込みを拒むと、それまでの書き込みがすべて戻る」で確かめた。保存をまたぐ順番のテストは、置き換え済みの記録への提案を check が拒む（順番で受け付けが変わるのは check の規則で、reconcile ではない）ので、どの順番でも受け付けられる保存だけで組んだ
 
 - 2026-10-04 / T28 / T05・T06 の Codex のセキュリティレビュー（F1 P2: turn の無い返事が record ツールのターンの除外をすり抜ける。F2 P2: 質問への decides を check が通し save が保存全体を戻す）を受け、修正タスク T28 を足した。同じずれが glean の evidence にもあったので同じタスクで直した
+- 2026-10-04 / T10 / 変更欄（前: deliver-codex.test.ts を含む → 後: Codex で出ないことは deliver.test.ts の同じテストで、Claude Code の環境を引き継いだ Codex として確かめたので外した）

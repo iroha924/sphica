@@ -8,7 +8,7 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { AI_DECIDED, CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { AI_DECIDED, AUTO_TRACE, CONFIRM, deliver, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -2106,6 +2106,68 @@ test("a record an AI decided is delivered marked, with Sphica's words for it; th
     const owners = await edit("src/db.ts");
     assert.match(owners, /trace:ext-s1\/sqlite \(constraint do\)/);
     assert.ok(!owners.includes(AI_DECIDED));
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("auto trace notice: a new interactive Claude Code session asks the agent to trace, once, and nothing else does", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const today = new Date().toISOString();
+    message(db, p, { id: "m1", text: "untraced", session: "s1", sent: today });
+    message(db, p, { id: "m2", text: "untraced too", session: "s2", sent: today });
+    const start = (session: string, source = "startup", host: "claude-code" | "codex" = "claude-code") =>
+      deliver({ hook_event_name: "SessionStart", source, session_id: session, cwd: repo }, host, db.file);
+    const as = async (entry: string | undefined, run: () => Promise<string>) => {
+      if (entry === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      else process.env.CLAUDE_CODE_ENTRYPOINT = entry;
+      try {
+        return await run();
+      } finally {
+        delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      }
+    };
+    const fresh = crypto.randomUUID();
+    const first = await as("cli", () => start(fresh));
+    assert.equal(first.split("\n").at(-1), AUTO_TRACE(2));
+    assert.doesNotMatch(
+      await as("cli", () => start(fresh, "compact")),
+      /earlier session/,
+      "once per session",
+    );
+    // The caller's own session is never one to trace
+    assert.equal((await as("cli", () => start("ext-s1"))).split("\n").at(-1), AUTO_TRACE(1));
+    for (const [entry, source] of [
+      ["cli", "resume"],
+      ["sdk-cli", "startup"],
+      ["sdk-ts", "startup"],
+      [undefined, "startup"],
+    ] as const)
+      assert.doesNotMatch(
+        await as(entry, () => start(crypto.randomUUID(), source)),
+        /earlier session/,
+        `${entry} ${source}`,
+      );
+    // A Codex started from a Claude Code shell inherits cli, and its interactive turns are not measured yet
+    assert.doesNotMatch(
+      await as("cli", () => start(crypto.randomUUID(), "startup", "codex")),
+      /earlier session/,
+    );
+    assert.doesNotMatch(
+      await as("cli", () =>
+        deliver(
+          { hook_event_name: "SubagentStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+          "claude-code",
+          db.file,
+        ),
+      ),
+      /earlier session/,
+      "a subagent",
+    );
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
