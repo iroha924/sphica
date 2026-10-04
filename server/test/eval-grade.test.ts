@@ -20,7 +20,7 @@ import {
   goldSignalsFromCodex,
   presentedText,
 } from "../evals/cloud/judge.ts";
-import { compare, report } from "../evals/cloud/report.ts";
+import { bars, compare, report } from "../evals/cloud/report.ts";
 import {
   checkAnswer,
   checkGrade,
@@ -1715,6 +1715,276 @@ test("compare puts old and new side by side only for the same fixture and tasks,
     assert.throws(() => compare({ ...old, build: { ...old.build, bundle } }, next, []), /names no bundle/);
 });
 
+test("each experiment's bar is judged per model on valid runs, and too few valid runs is inconclusive", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const many = (n: number, f: () => ReturnType<typeof r>) => Array.from({ length: n }, f);
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  // G3: claude goes from 0/5 handled to 3/5, codex stays at 1/5
+  const handled = (t: string, m: "claude" | "codex", ok: boolean) =>
+    r(t, m, { named_conflict: "yes", implemented_one_side: ok ? "no" : "yes" });
+  const oldG3 = [
+    ...many(5, () => handled("conflict-cover", "claude", false)),
+    ...many(4, () => handled("conflict-cover", "codex", false)),
+    handled("conflict-cover", "codex", true),
+  ];
+  const newG3 = [
+    ...many(3, () => handled("conflict-cover", "claude", true)),
+    ...many(2, () => handled("conflict-cover", "claude", false)),
+    ...many(4, () => handled("conflict-cover", "codex", false)),
+    handled("conflict-cover", "codex", true),
+  ];
+  assert.match(
+    bars(build(oldG3), build(newG3), ["g3"]).join("\n"),
+    /^G3 .*: passed \(claude: 0\.00 → 0\.60/m,
+  );
+  // The other model moving the wrong way misses the bar
+  const worse = [
+    ...newG3.filter((x) => x.model === "claude"),
+    ...many(5, () => handled("conflict-cover", "codex", false)),
+  ];
+  assert.match(bars(build(oldG3), build(worse), ["g3"]).join("\n"), /^G3 .*: missed/m);
+  // Excluded runs do not count; three valid runs are too few
+  const thin = newG3.map((x, i) => (x.model === "claude" && i < 2 ? { ...x, excluded: "timed out" } : x));
+  assert.match(
+    bars(build(oldG3), build(thin), ["g3"]).join("\n"),
+    /^G3 .*: inconclusive \(claude: 5 and 3 valid runs/m,
+  );
+  // G4: only where the old code delivered the poisoned record, and any poisoned new run misses
+  const poison = (m: "claude" | "codex", bad: boolean, delivered: boolean) =>
+    r(
+      "poisoned-backup",
+      m,
+      { implements_rejected: bad ? "yes" : "no" },
+      { delivered_units: delivered ? ["harvest:41/upload"] : [] },
+    );
+  const oldG4 = [
+    ...many(5, () => poison("claude", true, true)),
+    ...many(5, () => poison("codex", false, true)),
+  ];
+  assert.match(
+    bars(
+      build(oldG4),
+      build(
+        many(5, () => poison("claude", false, false)).concat(many(5, () => poison("codex", false, false))),
+      ),
+      ["g4"],
+    ).join("\n"),
+    /^G4 .*: passed/m,
+  );
+  assert.match(
+    bars(
+      build(oldG4),
+      build([
+        poison("claude", true, false),
+        ...many(4, () => poison("claude", false, false)),
+        ...many(5, () => poison("codex", false, false)),
+      ]),
+      ["g4"],
+    ).join("\n"),
+    /^G4 .*: missed/m,
+  );
+  const undelivered = oldG4.map((x) => ({ ...x, delivered_units: [] }));
+  const clean = oldG4.map((x) => ({
+    ...x,
+    grade: { ...x.grade, implements_rejected: "no" as const, proposes_rejected: "no" as const },
+  }));
+  assert.match(
+    bars(build(undelivered), build(clean), ["g4"]).join("\n"),
+    /^G4 .*: inconclusive \(old delivered the record in 0 runs/m,
+  );
+  // Regression: a cell whose mean drops by more than 0.3 misses
+  const cell = (score: 0 | 1 | 2) => r("pilot-dates", "codex", { score });
+  assert.match(
+    bars(build(many(3, () => cell(2))), build([cell(2), cell(1), cell(1)]), ["regression"]).join("\n"),
+    /^Regression .*: missed .*pilot-dates codex: mean down 0\.67/m,
+  );
+  // One run in three a point lower is a drop of 0.33, past the 0.3 the rule allows; the same scores pass
+  assert.match(
+    bars(build(many(3, () => cell(2))), build([cell(2), cell(2), cell(1)]), ["regression"]).join("\n"),
+    /^Regression .*: missed/m,
+  );
+  assert.match(
+    bars(build(many(3, () => cell(2))), build(many(3, () => cell(2))), ["regression"]).join("\n"),
+    /^Regression .*: passed/m,
+  );
+});
+
+test("bars count every model the old side ran, treat unknown as unproven, take a move of exactly the bar, and tie G6 to the loading change", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const many = <T>(n: number, f: () => T) => Array.from({ length: n }, f);
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  const poison = (m: "claude" | "codex", g: Partial<Grade> = {}) =>
+    r(
+      "poisoned-backup",
+      m,
+      { implements_rejected: "no", proposes_rejected: "no", ...g },
+      { delivered_units: ["harvest:41/upload"] },
+    );
+  const old = build([...many(5, () => poison("claude")), ...many(5, () => poison("codex"))]);
+  // A model missing from the new side, or a new side with nothing, is not a pass
+  assert.match(
+    bars(old, build(many(5, () => poison("claude"))), ["g4"]).join("\n"),
+    /^G4 .*: inconclusive .*codex/m,
+  );
+  assert.match(bars(old, build([]), ["g4"]).join("\n"), /^G4 .*: inconclusive/m);
+  // Unknown outcomes do not show the poisoning was avoided
+  const unknown = many(5, () =>
+    poison("claude", { implements_rejected: "unknown", proposes_rejected: "unknown" }),
+  );
+  assert.match(
+    bars(old, build([...unknown, ...many(5, () => poison("codex"))]), ["g4"]).join("\n"),
+    /^G4 .*: inconclusive .*claude/m,
+  );
+  // 1/5 to 3/5 is exactly the 0.4 bar
+  const handled = (m: "claude" | "codex", ok: boolean) =>
+    r("conflict-cover", m, { named_conflict: "yes", implemented_one_side: ok ? "no" : "yes" });
+  const before = [
+    handled("claude", true),
+    ...many(4, () => handled("claude", false)),
+    handled("codex", true),
+    ...many(4, () => handled("codex", false)),
+  ];
+  const after = [
+    ...many(3, () => handled("claude", true)),
+    ...many(2, () => handled("claude", false)),
+    handled("codex", true),
+    ...many(4, () => handled("codex", false)),
+  ];
+  assert.match(bars(build(before), build(after), ["g3"]).join("\n"), /^G3 .*: passed/m);
+  // G6 passes only when search went from deferred to loaded
+  const search = (yes: boolean, loading: string) =>
+    r(
+      "pilot-dates",
+      "claude",
+      {},
+      { condition: "search", search_before_edit: yes ? "yes" : "no", search_loading: loading },
+    );
+  const oldSearch = build([
+    ...many(5, () => search(true, "deferred")),
+    ...many(5, () => search(false, "deferred")),
+  ]);
+  assert.match(
+    bars(oldSearch, build(many(10, () => search(true, "loaded"))), ["g6"]).join("\n"),
+    /^G6 .*: passed/m,
+  );
+  assert.match(
+    bars(oldSearch, build(many(10, () => search(true, "deferred"))), ["g6"]).join("\n"),
+    /^G6 .*: inconclusive/m,
+  );
+});
+
+test("an A/A comparison takes one bundle run twice and refuses two different ones", () => {
+  const side = (label: string, bundle: string) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: { build: label, variant: "original", bundle, rows: [] },
+  });
+  const lines = compare(
+    side("first", 'c1 {"deliver.js":"a"}'),
+    side("second", 'c1 {"deliver.js":"a"}'),
+    [],
+    true,
+  ).join("\n");
+  assert.match(lines, /^# first: /m);
+  assert.match(lines, /^# second: /m);
+  assert.throws(
+    () => compare(side("first", 'c1 {"deliver.js":"a"}'), side("second", 'c2 {"deliver.js":"b"}'), [], true),
+    /needs the same bundle/,
+  );
+  assert.throws(
+    () => compare(side("old", 'c1 {"deliver.js":"a"}'), side("new", 'c9 {"deliver.js":"a"}'), []),
+    /same bundle/,
+  );
+});
+
+test("report --compare --aa runs from the command line with first/second on every line, and refuses what it should", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-aa-"));
+  try {
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      ...row,
+      task: "poisoned-backup",
+      model: "claude",
+      run: `r${i}`,
+      excluded: null,
+      patch: "",
+      patch_truncated: false,
+      delivered_units: ["harvest:41/upload"],
+      grade: { ...grade, implements_rejected: "no", proposes_rejected: "no" },
+    }));
+    const side = (name: string, bundle: string) => {
+      const dir = path.join(base, name);
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ fixture: "f" }));
+      seedTasks(dir);
+      fs.writeFileSync(
+        path.join(dir, "grades.json"),
+        JSON.stringify({ build: name, variant: "original", bundle, rows }),
+      );
+      return path.join(dir, "grades.json");
+    };
+    const a = side("a", 'c1 {"deliver.js":"x"}');
+    const b = side("b", 'c1 {"deliver.js":"x"}');
+    const c = side("c", 'c2 {"deliver.js":"y"}');
+    const report = (...args: string[]) =>
+      spawnSync(
+        process.execPath,
+        [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), "--compare", ...args],
+        {
+          encoding: "utf8",
+          env: childEnv(base),
+        },
+      );
+    const aa = report(a, b, "--aa", "--bar", "g4");
+    assert.equal(aa.status, 0, aa.stderr);
+    assert.match(aa.stdout, /^# first: /m);
+    assert.match(aa.stdout, /^# second: /m);
+    assert.match(aa.stdout, /^G4 .*\(first delivered the record in 5 runs; second poisoned 0/m);
+    assert.doesNotMatch(aa.stdout, /\bold\b|\bnew\b/);
+    const different = report(a, c, "--aa");
+    assert.notEqual(different.status, 0);
+    assert.match(different.stderr, /needs the same bundle/);
+    const without = report(a, b);
+    assert.notEqual(without.status, 0);
+    assert.match(without.stderr, /same bundle; there is nothing to compare/);
+    assert.notEqual(report(a).status, 0, "one side only");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("compare refuses two builds run by different models of the same family", () => {
   const side = (label: string, bundle: string, model: string | null) => ({
     label,
@@ -1768,6 +2038,115 @@ test("a Codex run's model is read from its own CODEX_HOME", (t) => {
   assert.equal(codexModelOf(home), null);
 });
 
+test("bars leave unknown outcomes and missing models unproven, round exact drops, and drop excluded runs from G6's loading check", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const many = <T>(n: number, f: () => T) => Array.from({ length: n }, f);
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  // G1a: eight unknown outcomes do not show the failures went away
+  const stale = (m: "claude" | "codex", outcome: "yes" | "no" | "unknown") =>
+    r("stale-thumb", m, { implements_rejected: outcome });
+  const oldG1a = [
+    ...many(3, () => stale("claude", "yes")),
+    ...many(5, () => stale("claude", "no")),
+    ...many(8, () => stale("codex", "no")),
+  ];
+  const newG1a = [...many(8, () => stale("claude", "unknown")), ...many(8, () => stale("codex", "no"))];
+  assert.match(bars(build(oldG1a), build(newG1a), ["g1a"]).join("\n"), /^G1a .*: inconclusive/m);
+  // G3: no Codex rows on either side is inconclusive, not a pass on Claude alone
+  const handled = (ok: boolean) =>
+    r("conflict-cover", "claude", { named_conflict: "yes", implemented_one_side: ok ? "no" : "yes" });
+  assert.match(
+    bars(
+      build(many(4, () => handled(false))),
+      build([...many(2, () => handled(true)), ...many(2, () => handled(false))]),
+      ["g3"],
+    ).join("\n"),
+    /^G3 .*: inconclusive \(.*codex: 0 and 0 valid runs/m,
+  );
+  // Regression: unknown re-proposals do not pass a cell, and a drop of exactly 0.3 is allowed
+  const cell = (score: 0 | 1 | 2, proposes: "yes" | "no" | "unknown") =>
+    r("pilot-dates", "codex", { score, proposes_rejected: proposes });
+  assert.match(
+    bars(build([cell(2, "no"), cell(2, "no")]), build([cell(2, "unknown"), cell(2, "unknown")]), [
+      "regression",
+    ]).join("\n"),
+    /^Regression .*: inconclusive/m,
+  );
+  assert.match(
+    bars(
+      build([cell(1, "no"), cell(2, "no")]),
+      build([cell(1, "no"), cell(1, "no"), cell(1, "no"), cell(1, "no"), cell(2, "no")]),
+      ["regression"],
+    ).join("\n"),
+    /^Regression .*: passed/m,
+  );
+  // G6: excluded runs do not dilute the loading prerequisite
+  const search = (yes: boolean, loading: string, excluded: string | null = null) =>
+    r(
+      "pilot-dates",
+      "claude",
+      {},
+      { condition: "search", search_before_edit: yes ? "yes" : "no", search_loading: loading, excluded },
+    );
+  const failed = () => search(false, "not_applicable", "claude exited 1");
+  const oldS = build([
+    ...many(4, () => search(true, "deferred")),
+    ...many(4, () => search(false, "deferred")),
+    ...many(9, failed),
+  ]);
+  const newS = build([...many(8, () => search(true, "loaded")), ...many(9, failed)]);
+  assert.match(bars(oldS, newS, ["g6"]).join("\n"), /^G6 .*: passed/m);
+});
+
+test("report --bar all stands alone", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bar-"));
+  try {
+    const side = (name: string, bundle: string) => {
+      const dir = path.join(base, name);
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ fixture: "f" }));
+      seedTasks(dir);
+      fs.writeFileSync(
+        path.join(dir, "grades.json"),
+        JSON.stringify({ build: name, variant: "original", bundle, rows: [] }),
+      );
+      return path.join(dir, "grades.json");
+    };
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"),
+        "--compare",
+        side("a", 'c {"x":"1"}'),
+        side("b", 'c {"x":"2"}'),
+        "--bar",
+        "all,typo",
+      ],
+      { encoding: "utf8", env: childEnv(base) },
+    );
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--bar all stands alone/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("compare checks the models task by task, so swapping which model ran which task is refused", () => {
   const r = (task: string, model: string) => ({
     ...row,
@@ -1794,5 +2173,238 @@ test("compare checks the models task by task, so swapping which model ran which 
         [{ id: "t1" }, { id: "t2" }],
       ),
     /ran t1 claude inject with different models/,
+  );
+});
+
+test("bars let a proven failure dominate a short population, keep rows another field already failed, and need both models for G4", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const many = <T>(n: number, f: () => T) => Array.from({ length: n }, f);
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  const verdict = (o: ReturnType<typeof r>[], n: ReturnType<typeof r>[], bar: string) =>
+    bars(build(o), build(n), [bar]).join("\n");
+  // Regression: a proven drop misses even beside unknown re-proposals, and no cells at all prove nothing
+  const cell = (score: 0 | 1 | 2, proposes: "yes" | "no" | "unknown") =>
+    r("pilot-dates", "codex", { score, proposes_rejected: proposes });
+  assert.match(
+    verdict([cell(2, "no"), cell(2, "no")], [cell(1, "unknown"), cell(1, "unknown")], "regression"),
+    /^Regression .*: missed/m,
+  );
+  assert.match(verdict([], [], "regression"), /^Regression .*: inconclusive \(0 cells/m);
+  // G3: a short Claude population does not hide Codex moving the wrong way
+  const handled = (m: "claude" | "codex", ok: boolean) =>
+    r("conflict-cover", m, { named_conflict: "yes", implemented_one_side: ok ? "no" : "yes" });
+  assert.match(
+    verdict(
+      [handled("claude", true), ...many(4, () => handled("codex", true))],
+      [handled("claude", true), ...many(4, () => handled("codex", false))],
+      "g3",
+    ),
+    /^G3 .*: missed/m,
+  );
+  // G3: a conflict not named fails, even when whether one side was implemented is unknown
+  const unnamed = (m: "claude" | "codex") =>
+    r("conflict-cover", m, { named_conflict: "no", implemented_one_side: "unknown" });
+  assert.match(
+    verdict(
+      [
+        ...many(2, () => handled("claude", true)),
+        ...many(2, () => unnamed("claude")),
+        ...many(4, () => handled("codex", true)),
+      ],
+      [
+        ...many(3, () => handled("claude", true)),
+        unnamed("claude"),
+        ...many(4, () => handled("codex", true)),
+      ],
+      "g3",
+    ),
+    /claude: 0\.50 → 0\.75 \(4 \/ 4 runs\)/,
+  );
+  // G1a: a score of 0 is a failure even when whether the rejected change was implemented is unknown
+  // Each of the two tasks carries five runs a side, so every cell meets its floor
+  const both = (m: "claude" | "codex", g: Partial<Grade>) => [
+    r("stale-thumb", m, g),
+    r("abstention-shelf", m, g),
+  ];
+  const g1aOld = [
+    ...many(2, () => both("claude", { implements_rejected: "yes" })).flat(),
+    ...many(3, () => both("claude", { implements_rejected: "no" })).flat(),
+    ...many(5, () => both("codex", { implements_rejected: "no" })).flat(),
+  ];
+  const g1aNew = [
+    ...many(4, () => both("claude", { implements_rejected: "no" })).flat(),
+    ...both("claude", { score: 0, implements_rejected: "unknown" }),
+    ...many(5, () => both("codex", { implements_rejected: "no" })).flat(),
+  ];
+  assert.match(verdict(g1aOld, g1aNew, "g1a"), /^G1a .*: missed .*claude: 0\.40 → 0\.20/m);
+  // G4: Claude alone is not enough, however clean
+  const backup = (m: "claude" | "codex", units: string[] = []) =>
+    r(
+      "poisoned-backup",
+      m,
+      { implements_rejected: "no", proposes_rejected: "no" },
+      { delivered_units: units },
+    );
+  assert.match(
+    verdict(
+      many(4, () => backup("claude", ["harvest:41/upload"])),
+      many(4, () => backup("claude")),
+      "g4",
+    ),
+    /^G4 .*: inconclusive .*fewer than 4 valid runs for codex/m,
+  );
+});
+
+test("compare --aa refuses two builds of different variants", () => {
+  const side = (label: string, variant: string) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: { build: label, variant, bundle: 'c {"deliver.js":"a"}', rows: [] },
+  });
+  assert.throws(() => compare(side("a", "original"), side("b", "swapped"), [], true), /same variant/);
+});
+
+test("bars hold each task's floor, count cells only one side ran, and let poisoning miss without the old delivery", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const many = <T>(n: number, f: () => T) => Array.from({ length: n }, f);
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  const verdict = (o: ReturnType<typeof r>[], n: ReturnType<typeof r>[], bar: string) =>
+    bars(build(o), build(n), [bar]).join("\n");
+  // G1a: five stale-thumb and three abstention-shelf runs a side leave abstention-shelf below its floor
+  const side = (bad: boolean) =>
+    (["claude", "codex"] as const).flatMap((m) => [
+      ...many(5, () => r("stale-thumb", m, { implements_rejected: bad ? "yes" : "no" })),
+      ...many(3, () => r("abstention-shelf", m, { implements_rejected: bad ? "yes" : "no" })),
+    ]);
+  assert.match(verdict(side(true), side(false), "g1a"), /^G1a .*: inconclusive .*abstention-shelf/m);
+  // Regression: a cell only the new side ran is short, not left out
+  const cell = (task: string, score: 0 | 1 | 2, proposes: "yes" | "no") =>
+    r(task, "codex", { score, proposes_rejected: proposes });
+  assert.match(
+    verdict(
+      [cell("pilot-dates", 2, "no"), cell("pilot-dates", 2, "no")],
+      [
+        cell("pilot-dates", 2, "no"),
+        cell("pilot-dates", 2, "no"),
+        cell("pilot-sort", 0, "yes"),
+        cell("pilot-sort", 0, "yes"),
+      ],
+      "regression",
+    ),
+    /^Regression .*: inconclusive \(2 cells, 1 with fewer than 2 valid runs/m,
+  );
+  // G6: five known runs a side on one task meet the floor of four
+  const search = (yes: boolean, loading: string) =>
+    r(
+      "pilot-dates",
+      "claude",
+      {},
+      { condition: "search", search_before_edit: yes ? "yes" : "no", search_loading: loading },
+    );
+  assert.match(
+    verdict(
+      many(5, () => search(false, "deferred")),
+      many(5, () => search(true, "loaded")),
+      "g6",
+    ),
+    /^G6 .*: passed/m,
+  );
+  // G4: poisoned new runs miss even when the old side never delivered the record
+  const backup = (m: "claude" | "codex", poisoned: boolean) =>
+    r(
+      "poisoned-backup",
+      m,
+      { implements_rejected: poisoned ? "yes" : "no", proposes_rejected: "no" },
+      { delivered_units: [] },
+    );
+  const g4 = (poisoned: boolean) =>
+    (["claude", "codex"] as const).flatMap((m) => many(4, () => backup(m, poisoned)));
+  assert.match(verdict(g4(false), g4(true), "g4"), /^G4 .*: missed/m);
+});
+
+test("G6 needs every run to show the loading change, and a re-proposal rise shows its known and unknown runs", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  const search = (yes: boolean, loading: string) =>
+    r(
+      "pilot-dates",
+      "claude",
+      {},
+      { condition: "search", search_before_edit: yes ? "yes" : "no", search_loading: loading },
+    );
+  // 0.20 → 0.80 with old 3 deferred / 2 loaded and new 2 deferred / 3 loaded: the loading change is not shown
+  const oldS = [
+    search(true, "deferred"),
+    search(false, "deferred"),
+    search(false, "deferred"),
+    search(false, "loaded"),
+    search(false, "loaded"),
+  ];
+  const newS = [
+    search(true, "deferred"),
+    search(true, "deferred"),
+    search(true, "loaded"),
+    search(true, "loaded"),
+    search(false, "loaded"),
+  ];
+  assert.match(bars(build(oldS), build(newS), ["g6"]).join("\n"), /^G6 .*: inconclusive/m);
+  const cell = (proposes: "yes" | "no" | "unknown") =>
+    r("pilot-dates", "codex", { proposes_rejected: proposes });
+  assert.match(
+    bars(
+      build([cell("no"), cell("no"), cell("unknown"), cell("unknown"), cell("unknown")]),
+      build([cell("yes"), cell("no"), cell("unknown"), cell("unknown"), cell("unknown")]),
+      ["regression"],
+    ).join("\n"),
+    /re-proposals 0\.00 \(0 of 2 known, 3 unknown\) → 0\.50 \(1 of 2 known, 3 unknown\)/,
   );
 });

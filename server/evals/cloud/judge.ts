@@ -345,6 +345,9 @@ export function goldSignalsFromClaudeStream(
   );
 }
 
+/** Tools that never change the work tree; any other tool, including one this list does not know, is taken as one that may. */
+const READ_ONLY = new Set(["Read", "Grep", "Glob", "LS", "ToolSearch", "TodoWrite", "WebFetch", "WebSearch"]);
+
 /**
  * Whether a local Claude run searched Sphica before its first edit. The first edit is the call after whose result the work tree first
  * changed; when that change cannot be tied to one call (another call was in flight) the answer is unknown. A run that never changed the tree
@@ -379,13 +382,20 @@ export function searchedBeforeEdit(
   // The watcher writes one mark per result as the results arrive, so marks out of that order are damaged too
   if (JSON.stringify(parsed.map((m) => m.after)) !== JSON.stringify(answered)) return "unknown";
   const at0 = parsed.findIndex((m) => m.changed);
+  // A mark is tied to its call only when no other call that could write was running beside it: two writers at once can each hide or
+  // undo the other's change. Calls that only read (ToolSearch, Read, Sphica's tools) never make a mark ambiguous
+  const name = new Map(calls.map((c) => [c.id, c.name]));
+  const writes = (id: string) =>
+    !READ_ONLY.has(name.get(id) ?? "") && !(name.get(id) ?? "").startsWith("mcp__sphica__");
+  const tangled = (m: (typeof parsed)[number]) =>
+    m.in_flight.some(writes) && (writes(m.after) || m.in_flight.filter(writes).length > 1);
   // A mark read late may have missed a change a later call undid, so no late mark up to the first change can be trusted
-  // Likewise a mark taken while another call was in flight: a change and its undoing may both have happened unseen
-  if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late || m.in_flight.length))
-    return "unknown";
+  if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late || tangled(m))) return "unknown";
   const first = parsed[at0];
-  if (!first) return "no_edit";
-  if (first.in_flight.length) return "unknown";
+  // A writer whose result never came may have changed the tree after the last mark
+  if (!first) return calls.some((c) => c.result === null && writes(c.id)) ? "unknown" : "no_edit";
+  // A change seen while a writer was still running may be that writer's
+  if (first.in_flight.some(writes)) return "unknown";
   const at = calls.findIndex((c) => c.id === first.after);
   if (at < 0) return "unknown";
   return calls.slice(0, at).some((c) => c.name === "mcp__sphica__search" && c.result !== null) ? "yes" : "no";

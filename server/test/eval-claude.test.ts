@@ -958,6 +958,29 @@ test("a mark taken while another call was in flight, before the first change, le
   );
 });
 
+test("a reader running beside the first calls leaves the order known; two writers at once do not", () => {
+  const mark = (after: string, changed: boolean, inFlight: string[] = []) =>
+    JSON.stringify({ after, changed, in_flight: inFlight, late: false });
+  // Bash and ToolSearch together, as a run with deferred tools starts, then a search and a write
+  const events = (second: string) =>
+    [
+      use("b", "Bash"),
+      use("t", second),
+      result("b", ""),
+      result("t", "mcp__sphica__search"),
+      use("s", "mcp__sphica__search"),
+      result("s", "No record holds most of"),
+      use("w", "Write"),
+      result("w", "ok"),
+      done,
+    ].join("\n");
+  const marks = [mark("b", false, ["t"]), mark("t", false), mark("s", false), mark("w", true)].join("\n");
+  assert.equal(searchedBeforeEdit(events("ToolSearch"), marks), "yes");
+  assert.equal(searchedBeforeEdit(events("Bash"), marks), "unknown", "two shell calls at once");
+  // A tool this judge does not know counts as one that may write
+  assert.equal(searchedBeforeEdit(events("SomeNewTool"), marks), "unknown");
+});
+
 test("the tree state sees ignored files and never reads through a link the agent made", (t) => {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "eval-state-"));
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), "eval-outside-"));
@@ -1321,6 +1344,20 @@ test("the runner reads a checkout through its pinned git directory, so config th
   const patch = patchSince(c, start);
   assert.equal(fs.existsSync(path.join(outside, "ran")), false, "nothing the agent configured ran");
   assert.match(patch, /^\+2$/m);
+});
+
+test("a writer whose result never came leaves the edit order unknown, not no_edit", () => {
+  const events = [use("w", "Write", { file_path: "a.ts" }), use("r", "Read"), result("r", "1"), done].join(
+    "\n",
+  );
+  const marks = JSON.stringify({ after: "r", changed: false, in_flight: ["w"], late: false });
+  assert.equal(searchedBeforeEdit(events, marks), "unknown");
+  // With every writer answered and nothing changed, there was no edit
+  const answered = [use("r", "Read"), result("r", "1"), done].join("\n");
+  assert.equal(
+    searchedBeforeEdit(answered, JSON.stringify({ after: "r", changed: false, in_flight: [], late: false })),
+    "no_edit",
+  );
 });
 
 test("the inject canary needs the delivery hook before a tool to have fired, and the build names Codex's shipped matcher", () => {

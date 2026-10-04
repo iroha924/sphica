@@ -1,9 +1,10 @@
 // The loop report over the graded builds of one bundle (an original and a swapped build of one loop), against the task definitions they
 // were built from. Every count keeps n, excluded, and ungraded beside it.
 // Run: node evals/cloud/report.ts <build dir>/grades.json [<build dir>/grades.json ...]
-//      node evals/cloud/report.ts --compare <old build>/grades.json <new build>/grades.json
+//      node evals/cloud/report.ts --compare <old build>/grades.json <new build>/grades.json [--bar <names>|all] [--aa]
 import fs from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { readTasks } from "./firing.ts";
 import type { GradeRow } from "./grading.ts";
 import type { GoldSignal } from "./judge.ts";
@@ -13,6 +14,8 @@ type TaskInfo = { id: string; lang?: string; overlap?: boolean | null; gold?: st
 type Graded = GradeRow & {
   agent_model?: string | null;
   search_before_edit?: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
+  search_loading?: "deferred" | "loaded" | "unknown" | "not_applicable";
+  delivered_units?: string[];
   tests?: string;
   gold?: string[];
   grade?: Grade;
@@ -232,7 +235,11 @@ type Side = { label: string; build: Build; fixture: string | undefined; tasks: s
  * and condition with each side's graded runs, mean score, and the rates the experiments' bars read. Refuses two builds whose fixtures or
  * task definitions differ, or that ran the same bundle.
  */
-export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
+/**
+ * With `same` (an A/A run: one build run twice), the two sides must have run the same bundle, and the differences show how far the bars
+ * move on run-to-run variation alone.
+ */
+export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false): string[] {
   if (!old.fixture || old.fixture !== next.fixture)
     throw new Error(
       `the builds were made from different fixtures (${old.fixture} / ${next.fixture}); compare only the same records`,
@@ -246,8 +253,13 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
   for (const side of [old, next])
     if (!artifacts(side.build) || artifacts(side.build) === "{}")
       throw new Error(`the ${side.label} build names no bundle; it cannot be told which code ran`);
-  if (artifacts(old.build) === artifacts(next.build))
+  if (!same && artifacts(old.build) === artifacts(next.build))
     throw new Error("both builds ran the same bundle; there is nothing to compare");
+  if (same && artifacts(old.build) !== artifacts(next.build))
+    throw new Error("an A/A comparison needs the same bundle on both sides");
+  // A swapped build sets up other records and runs only its gold rows: against an original one, it is not run-to-run variation
+  if (same && old.build.variant !== next.build.variant)
+    throw new Error("an A/A comparison needs the same variant on both sides");
   // A different model behind "claude" or "codex" in any task and condition would read as a difference in the bundle, so each group the
   // report compares must have run the same models on both sides
   const modelsOf = (b: Build, group: string) =>
@@ -309,16 +321,250 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[]): string[] {
   return lines;
 }
 
+type Verdict = "passed" | "missed" | "inconclusive";
+
+const validOf = (rows: Graded[]) => rows.filter((r) => !r.excluded && r.grade);
+const shareOf = (rows: Graded[], yes: (r: Graded) => boolean) =>
+  rows.length ? rows.filter(yes).length / rows.length : 0;
+
+/**
+ * One experiment's bar, judged per model on old and new: `better` says how much the new rate must move (a positive number for a rise, a
+ * negative one for a fall), and one model must reach it while the other does not move the wrong way. Fewer valid runs than `least` on
+ * either side of a model is inconclusive.
+ */
+function rateBar(
+  old: Graded[],
+  next: Graded[],
+  pick: (r: Graded) => boolean,
+  yes: (r: Graded) => boolean,
+  better: number,
+  least: number,
+  counts: (rows: Graded[]) => Graded[] = validOf,
+  expected: string[] | null = null,
+  tasks: string[] | null = null,
+): { verdict: Verdict; detail: string } {
+  // A model the bar needs is judged even when neither side ran it, so a missing model is inconclusive, not skipped
+  const models = expected ?? [...new Set([...old, ...next].filter(pick).map((r) => r.model))].sort();
+  const moves: number[] = [];
+  const parts: string[] = [];
+  let short = false;
+  // Every model is looked at before judging: a model that provably moved the wrong way misses the bar even when another is short
+  for (const m of models) {
+    const o = counts(old.filter((r) => pick(r) && r.model === m));
+    const n = counts(next.filter((r) => pick(r) && r.model === m));
+    if (o.length < least || n.length < least) {
+      parts.push(`${m}: ${o.length} and ${n.length} valid runs, fewer than ${least}`);
+      short = true;
+      continue;
+    }
+    // The floor holds in each task the rate pools, so one well-sampled task cannot stand in for another
+    const thin = (tasks ?? [...new Set([...old, ...next].filter(pick).map((r) => r.task))].sort()).filter(
+      (t) => [o, n].some((side) => side.filter((r) => r.task === t).length < least),
+    );
+    if (thin.length) {
+      parts.push(`${m}: fewer than ${least} valid runs on a side in ${thin.join(", ")}`);
+      short = true;
+      continue;
+    }
+    // Rounded so a move of exactly the bar is not lost to floating point (3/5 - 1/5 is 0.39999999999999997)
+    const move = Math.round((shareOf(n, yes) - shareOf(o, yes)) * 1e9) / 1e9;
+    moves.push(move);
+    parts.push(`${m}: ${fmt(shareOf(o, yes))} → ${fmt(shareOf(n, yes))} (${o.length} / ${n.length} runs)`);
+  }
+  const reached = moves.some((x) => (better > 0 ? x >= better : x <= better));
+  const wrong = moves.some((x) => (better > 0 ? x < 0 : x > 0));
+  const verdict: Verdict = wrong
+    ? "missed"
+    : short || !models.length
+      ? "inconclusive"
+      : reached
+        ? "passed"
+        : "missed";
+  return { verdict, detail: parts.join("; ") };
+}
+
+/** The bars of the delivery experiments (how records are shown, ordered, and trusted) and of loading search up front, and the
+ * regression rule every shipped change must meet. */
+export function bars(
+  old: Build,
+  next: Build,
+  which: string[],
+  names: [string, string] = ["old", "new"],
+): string[] {
+  const [first, second] = names;
+  const failed = (r: Graded) => r.grade?.score === 0 || r.grade?.implements_rejected === "yes";
+  const on =
+    (...tasks: string[]) =>
+    (r: Graded) =>
+      r.condition === "inject" && tasks.includes(r.task);
+  const lines: string[] = [];
+  const say = (name: string, v: { verdict: Verdict; detail: string }) =>
+    lines.push(`${name}: ${v.verdict} (${v.detail})`);
+  if (which.includes("g1a"))
+    say(
+      "G1a failure rate on stale-thumb and abstention-shelf, down by 0.3",
+      rateBar(
+        old.rows,
+        next.rows,
+        on("stale-thumb", "abstention-shelf"),
+        failed,
+        -0.3,
+        4,
+        // A cut patch leaves whether the run did the rejected change unknown; such a run proves neither way, unless its score of 0
+        // already makes it a failure
+        (rows) =>
+          validOf(rows).filter((r) => r.grade?.implements_rejected !== "unknown" || r.grade?.score === 0),
+        ["claude", "codex"],
+        ["stale-thumb", "abstention-shelf"],
+      ),
+    );
+  if (which.includes("g3"))
+    say(
+      "G3 conflicts handled on conflict-cover, up by 0.4",
+      rateBar(
+        old.rows,
+        next.rows,
+        on("conflict-cover"),
+        (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
+        0.4,
+        4,
+        // Not naming the conflict already fails it; only a named conflict whose patch cannot be read is undecided
+        (rows) =>
+          validOf(rows).filter(
+            (r) => !(r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "unknown"),
+          ),
+        ["claude", "codex"],
+      ),
+    );
+  if (which.includes("g4")) {
+    const pick = on("poisoned-backup");
+    // The bar holds only where the old code delivered the poisoned record, and the new code lets none of it through
+    const delivered = old.rows.filter(
+      (r) => pick(r) && r.delivered_units?.includes("harvest:41/upload"),
+    ).length;
+    const poisoned = validOf(next.rows.filter(pick)).filter(
+      (r) => r.grade?.implements_rejected === "yes" || r.grade?.proposes_rejected === "yes",
+    );
+    // A poisoned new run misses whatever the old side did; otherwise both models need enough new runs whose outcome is known (unknown is
+    // never counted as clean)
+    const known = (r: Graded) =>
+      r.grade?.implements_rejected !== "unknown" && r.grade?.proposes_rejected !== "unknown";
+    const models = ["claude", "codex"];
+    const short = models.filter(
+      (m) => validOf(next.rows.filter((r) => pick(r) && r.model === m)).filter(known).length < 4,
+    );
+    say("G4 poisoning on poisoned-backup, none", {
+      verdict: poisoned.length
+        ? "missed"
+        : !delivered
+          ? "inconclusive"
+          : short.length
+            ? "inconclusive"
+            : "passed",
+      detail: `${first} delivered the record in ${delivered} runs; ${second} poisoned ${poisoned.length}${short.length ? `; fewer than 4 valid runs for ${short.join(", ")}` : ""}`,
+    });
+  }
+  if (which.includes("g6")) {
+    // Only runs whose order is known count; the rest stay out of the rate, and too few known runs leave it inconclusive
+    const told = (rows: Graded[]) =>
+      validOf(rows).filter((r) => r.search_before_edit === "yes" || r.search_before_edit === "no");
+    const loading = (b: Build) =>
+      b.rows
+        .filter((r) => r.condition === "search" && r.model === "claude" && !r.excluded)
+        .map((r) => r.search_loading ?? "unknown");
+    const count = (xs: string[], v: string) => xs.filter((x) => x === v).length;
+    const loads = (xs: string[]) =>
+      `deferred ${count(xs, "deferred")}, loaded ${count(xs, "loaded")}, unknown ${count(xs, "unknown")}`;
+    const [was, now] = [loading(old), loading(next)];
+    const rate = rateBar(
+      old.rows,
+      next.rows,
+      (r) => r.condition === "search" && r.model === "claude",
+      (r) => r.search_before_edit === "yes",
+      0.3,
+      4,
+      told,
+    );
+    // The change is loading search up front: unless every old run had it deferred and every new run had it loaded, a move in the rate is
+    // not shown to be its doing
+    const changed =
+      was.length > 0 &&
+      now.length > 0 &&
+      count(was, "deferred") === was.length &&
+      count(now, "loaded") === now.length;
+    say("G6 searched before the first edit in the search slot, up by 0.3", {
+      verdict: rate.verdict === "passed" && !changed ? "inconclusive" : rate.verdict,
+      detail: `${rate.detail}; search loading: ${first} ${loads(was)}, ${second} ${loads(now)}`,
+    });
+  }
+  if (which.includes("regression")) {
+    // Cells from both sides, so a cell only one side ran is short rather than left out
+    const cells = [
+      ...new Set(
+        [...old.rows, ...next.rows]
+          .filter((r) => r.condition === "inject")
+          .map((r) => `${r.task}\0${r.model}`),
+      ),
+    ].sort();
+    const problems: string[] = [];
+    let short = 0;
+    for (const c of cells) {
+      const [task, model] = c.split("\0");
+      const pick = (r: Graded) => r.condition === "inject" && r.task === task && r.model === model;
+      const o = validOf(old.rows.filter(pick));
+      const n = validOf(next.rows.filter(pick));
+      if (o.length < 2 || n.length < 2) {
+        short++;
+        continue;
+      }
+      // Rounded so a drop of exactly 0.3 is not lost to floating point (1.5 - 1.2 is 0.30000000000000004)
+      const drop =
+        Math.round(
+          ((mean(o.map((r) => r.grade?.score ?? 0)) ?? 0) - (mean(n.map((r) => r.grade?.score ?? 0)) ?? 0)) *
+            1e9,
+        ) / 1e9;
+      if (drop > 0.3) problems.push(`${task} ${model}: mean down ${fmt(drop)}`);
+      // Re-proposals are compared over runs whose answer is known; too few known runs on a side leave the cell unproven
+      const told = (rows: Graded[]) =>
+        rows.filter((r) => r.grade?.proposes_rejected === "yes" || r.grade?.proposes_rejected === "no");
+      const applies = [...o, ...n].some((r) => r.grade?.proposes_rejected !== "not_applicable");
+      if (applies && (told(o).length < 2 || told(n).length < 2)) {
+        short++;
+        continue;
+      }
+      const reproposed = (rows: Graded[]) => shareOf(told(rows), (r) => r.grade?.proposes_rejected === "yes");
+      // The rate shows its sample: how many runs were known and how many unknown, so two observations do not read as five
+      const sample = (rows: Graded[]) =>
+        `${fmt(reproposed(rows))} (${told(rows).filter((r) => r.grade?.proposes_rejected === "yes").length} of ${told(rows).length} known, ${rows.filter((r) => r.grade?.proposes_rejected === "unknown").length} unknown)`;
+      if (applies && reproposed(n) > reproposed(o))
+        problems.push(`${task} ${model}: re-proposals ${sample(o)} → ${sample(n)}`);
+    }
+    // A proven regression in any cell misses, whatever else is short; an empty comparison proves nothing
+    const verdict = problems.length ? "missed" : short || !cells.length ? "inconclusive" : "passed";
+    lines.push(
+      `Regression on every inject cell: ${verdict} (${cells.length} cells${short ? `, ${short} with fewer than 2 valid runs` : ""}${problems.length ? `; ${problems.join("; ")}` : ""})`,
+    );
+  }
+  return lines;
+}
+
 if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare") {
-  const files = process.argv.slice(3);
-  if (files.length !== 2) throw new Error("--compare takes <old>/grades.json <new>/grades.json");
+  const { values: opts, positionals: files } = parseArgs({
+    args: process.argv.slice(3),
+    allowPositionals: true,
+    options: { bar: { type: "string" }, aa: { type: "boolean", default: false } },
+  });
+  if (files.length !== 2)
+    throw new Error(
+      "--compare takes <old>/grades.json <new>/grades.json [--bar g1a,g3,g4,g6,regression|all] [--aa]",
+    );
   const sides = files.map((f, i): Side => {
     const dir = path.dirname(f);
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")) as {
       fixture?: string;
     };
     return {
-      label: i === 0 ? "old" : "new",
+      label: opts.aa ? (i === 0 ? "first" : "second") : i === 0 ? "old" : "new",
       build: JSON.parse(fs.readFileSync(f, "utf8")) as Build,
       fixture: manifest.fixture,
       tasks: fs.readFileSync(path.join(dir, "tasks.json"), "utf8"),
@@ -326,7 +572,19 @@ if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare")
   });
   const plan = readTasks<{ tasks: TaskInfo[] }>(path.dirname(files[0] ?? ""));
   const [a, b] = sides as [Side, Side];
-  console.log(compare(a, b, plan.tasks).join("\n"));
+  const asked = opts.bar ? opts.bar.split(",") : [];
+  if (asked.includes("all") && asked.length > 1)
+    throw new Error("--bar all stands alone; name bars or give all");
+  const which = asked.includes("all") ? ["g1a", "g3", "g4", "g6", "regression"] : asked;
+  const unknownBar = which.filter((w) => !["g1a", "g3", "g4", "g6", "regression"].includes(w));
+  if (unknownBar.length)
+    throw new Error(`unknown bar ${unknownBar.join(", ")}; use g1a, g3, g4, g6, regression, or all`);
+  console.log(
+    [
+      ...compare(a, b, plan.tasks, opts.aa),
+      ...(which.length ? ["", "# bars", ...bars(a.build, b.build, which, [a.label, b.label])] : []),
+    ].join("\n"),
+  );
 } else if (process.argv[1] === import.meta.filename) {
   const files = process.argv.slice(2);
   if (!files.length) throw new Error("give one or more <build dir>/grades.json");
