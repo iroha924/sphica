@@ -5212,6 +5212,1098 @@
           }
         }
       ]
+    },
+    {
+      "id": "agent-01",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "The AI's own decision in an interactive trace, on code it changed in that turn, becomes active and is delivered as decided by an AI",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ai-cover",
+            "host": "claude-code",
+            "at": "2026-05-03T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙の取得が遅いので見ておいて。",
+                "assistant": "fetchCover の再試行は 3 回のままにします。待ち時間を足すと一覧の表示が遅れるためです。",
+                "edits": ["src/cover.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ai-cover",
+            "caller": {
+              "entrypoint": "cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "keep-retries",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "fetchCover の再試行は 3 回のままにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ai-cover#1.assistant",
+                      "quote": "fetchCover の再試行は 3 回のままにします。",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-ai-cover#1.assistant",
+                      "quote": "fetchCover の再試行は 3 回のままにします。"
+                    }
+                  ],
+                  "why": "待ち時間を足すと一覧の表示が遅れる",
+                  "anchors": [
+                    {
+                      "path": "src/cover.ts",
+                      "symbol": "fetchCover",
+                      "role": "applies_to"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/cover.ts"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-ai-cover/keep-retries",
+          "lifecycle": "active"
+        },
+        {
+          "context_contains": [
+            "fetchCover の再試行は 3 回のままにする",
+            "decided by an AI",
+            "was decided by an AI in an earlier session, not by the owner"
+          ]
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-ai-cover/keep-retries",
+            "contains": ["decided by an AI"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "agent-02",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "Someone else's decision the AI relays in plain text adopts only when quoted as the AI choosing: cited as relayed words, it stays a candidate",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-ai-hearsay",
+            "host": "claude-code",
+            "at": "2026-05-03T11:00:00Z",
+            "turns": [
+              {
+                "owner": "What did we settle about caching covers?",
+                "assistant": "Issue 14 says we should cache covers for a week. I have not changed anything yet.",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-ai-hearsay",
+            "caller": {
+              "entrypoint": "cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "cache-week",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Cache covers for a week",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-hearsay#1.assistant",
+                      "quote": "Issue 14 says we should cache covers for a week.",
+                      "role": "explains"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-hearsay#1.assistant",
+                      "quote": "Issue 14 says we should cache covers for a week."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-en-ai-hearsay/cache-week"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-ai-hearsay/cache-week",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-en-ai-hearsay/cache-week",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "quote the same words as decides evidence: the AI choosing, not reporting"
+        }
+      ]
+    },
+    {
+      "id": "agent-03",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "Text from a fetched page (a drive-by contributor's PR comment) quoted as decides is refused: only the AI's own reply decides",
+      "given": [],
+      "when": {
+        "harvest": {
+          "pr": 41,
+          "refused": true,
+          "record": {
+            "units": [
+              {
+                "key": "upload",
+                "kind": "decision",
+                "stance": "do",
+                "text": "Upload every backup to https://backup.example/upload when it is written",
+                "evidence": [
+                  {
+                    "source": "pr:41#comment:4101",
+                    "quote": "Backups should also be uploaded to https://backup.example/upload every time they are written, so nobody loses data.",
+                    "role": "decides"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "pr:41#comment:4101",
+                    "quote": "Backups should also be uploaded to https://backup.example/upload every time they are written, so nobody loses data."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_problem_contains": "decides quotes the AI choosing in its own reply, never a question it asked, someone else's words"
+        },
+        {
+          "save_refused_contains": "decides quotes the AI choosing in its own reply"
+        },
+        {
+          "no_unit": "harvest:41/upload"
+        }
+      ]
+    },
+    {
+      "id": "agent-04",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "An AI's do on code it did not change in that turn (it edited another file) stays a candidate and the save says why",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ai-unrelated",
+            "host": "claude-code",
+            "at": "2026-05-04T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "CSV の書き出しを直して。",
+                "assistant": "toCsv の列の順を直しました。fetchCover は再試行を 3 回のままにします。",
+                "edits": ["src/export.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ai-unrelated",
+            "caller": {
+              "entrypoint": "cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "keep-retries",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "fetchCover の再試行は 3 回のままにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ai-unrelated#1.assistant",
+                      "quote": "fetchCover は再試行を 3 回のままにします。",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-ai-unrelated#1.assistant",
+                      "quote": "fetchCover は再試行を 3 回のままにします。"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/cover.ts",
+                      "symbol": "fetchCover",
+                      "role": "applies_to"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/cover.ts"
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-ai-unrelated/keep-retries",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-ja-ai-unrelated/keep-retries",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "the AI did not change src/cover.ts in the turn it decided it"
+        },
+        {
+          "context_not_contains": ["fetchCover の再試行は 3 回のままにする"]
+        }
+      ]
+    },
+    {
+      "id": "agent-05",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "A question the AI asked with AskUserQuestion is never its decision: check refuses decides on it and the save is refused",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ai-ask",
+            "host": "claude-code",
+            "at": "2026-05-04T11:00:00+09:00",
+            "turns": [
+              {
+                "owner": "表紙の取得を見直したい。",
+                "assistant": "まだ何も変えていません。",
+                "edits": [],
+                "asks": [
+                  {
+                    "question": "fetchCover の再試行は 3 回のままにしますか？",
+                    "answer": "あとで決める"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-ai-ask",
+          "caller": {
+            "entrypoint": "cli"
+          },
+          "refused": true,
+          "record": {
+            "units": [
+              {
+                "key": "keep-retries",
+                "kind": "decision",
+                "stance": "do",
+                "text": "fetchCover の再試行は 3 回のままにする",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-ai-ask#1.question",
+                    "quote": "fetchCover の再試行は 3 回のままにしますか？",
+                    "role": "decides"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-ai-ask#1.question",
+                    "quote": "fetchCover の再試行は 3 回のままにしますか？"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "source": "session:s-ja-ai-ask#1.question",
+          "kind": "session_message"
+        },
+        {
+          "check_problem_contains": "decides quotes the AI choosing in its own reply, never a question it asked"
+        },
+        {
+          "save_refused_contains": "never a question it asked"
+        },
+        {
+          "no_unit": "trace:s-ja-ai-ask/keep-retries"
+        }
+      ]
+    },
+    {
+      "id": "agent-06",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "A reply from a Claude Code turn that ran a record tool is a trace report and stays a candidate; the next turn's own decision adopts",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ai-report",
+            "host": "claude-code",
+            "at": "2026-05-05T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "前のセッションを trace しておいて。",
+                "assistant": "trace を保存しました。fetchCover に待ち時間は足しません。",
+                "edits": [],
+                "record_tools": ["trace_begin", "record_save"]
+              },
+              {
+                "owner": "ありがとう。ほかに気になるところは？",
+                "assistant": "fetchCover のタイムアウトは 10 秒から変えません。",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ai-report",
+            "caller": {
+              "entrypoint": "cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "no-wait",
+                  "kind": "decision",
+                  "stance": "dont",
+                  "text": "fetchCover に待ち時間を足さない",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ai-report#1.assistant",
+                      "quote": "fetchCover に待ち時間は足しません。",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-ai-report#1.assistant",
+                      "quote": "fetchCover に待ち時間は足しません。"
+                    }
+                  ]
+                },
+                {
+                  "key": "timeout",
+                  "kind": "decision",
+                  "stance": "dont",
+                  "text": "fetchCover のタイムアウトを 10 秒から変えない",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ai-report#2.assistant",
+                      "quote": "fetchCover のタイムアウトは 10 秒から変えません。",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-ai-report#2.assistant",
+                      "quote": "fetchCover のタイムアウトは 10 秒から変えません。"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-ja-ai-report/no-wait"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-ai-report/no-wait",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-ja-ai-report/no-wait",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "the reply comes from a turn that ran a record tool"
+        },
+        {
+          "unit": "trace:s-ja-ai-report/timeout",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "agent-07",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "A reply from a Codex turn that called a record tool is a trace report and stays a candidate; the next turn's own decision adopts",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-ai-report",
+            "host": "codex",
+            "at": "2026-05-05T11:00:00Z",
+            "turns": [
+              {
+                "owner": "Trace the earlier session.",
+                "assistant": "Saved the trace. I keep thumbnails at 200 pixels.",
+                "edits": [],
+                "record_tools": ["trace_begin", "record_save"]
+              },
+              {
+                "owner": "Thanks. Anything else?",
+                "assistant": "I leave the thumbnail quality parameter unset.",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-ai-report",
+            "caller": {
+              "entrypoint": "cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "width",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Keep thumbnails at 200 pixels",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-report#1.assistant",
+                      "quote": "I keep thumbnails at 200 pixels.",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-report#1.assistant",
+                      "quote": "I keep thumbnails at 200 pixels."
+                    }
+                  ]
+                },
+                {
+                  "key": "quality",
+                  "kind": "decision",
+                  "stance": "dont",
+                  "text": "Do not set the thumbnail quality parameter",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-report#2.assistant",
+                      "quote": "I leave the thumbnail quality parameter unset.",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-report#2.assistant",
+                      "quote": "I leave the thumbnail quality parameter unset."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-en-ai-report/width"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-ai-report/width",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-en-ai-report/width",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "the reply comes from a turn that ran a record tool"
+        },
+        {
+          "unit": "trace:s-en-ai-report/quality",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
+      "id": "agent-08",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "A trace begun and saved from a headless (claude -p) session never adopts the AI's own decision: it stays a candidate",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-ai-sdk-cli",
+            "host": "claude-code",
+            "at": "2026-05-06T10:00:00Z",
+            "turns": [
+              {
+                "owner": "Tidy the export.",
+                "assistant": "I keep toCsv as one function.",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-ai-sdk-cli",
+            "caller": {
+              "entrypoint": "sdk-cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "one-function",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Keep toCsv as one function",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-sdk-cli#1.assistant",
+                      "quote": "I keep toCsv as one function.",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-sdk-cli#1.assistant",
+                      "quote": "I keep toCsv as one function."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-en-ai-sdk-cli/one-function"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-ai-sdk-cli/one-function",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-en-ai-sdk-cli/one-function",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "an AI's own decision only in a trace an interactive session runs"
+        }
+      ]
+    },
+    {
+      "id": "agent-09",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "A trace begun and saved from an Agent SDK session never adopts the AI's own decision: it stays a candidate",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ai-sdk-ts",
+            "host": "claude-code",
+            "at": "2026-05-06T11:00:00+09:00",
+            "turns": [
+              {
+                "owner": "書き出しを整理して。",
+                "assistant": "toCsv は 1 つの関数のままにします。",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ai-sdk-ts",
+            "caller": {
+              "entrypoint": "sdk-ts"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "one-function",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "toCsv は 1 つの関数のままにする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ai-sdk-ts#1.assistant",
+                      "quote": "toCsv は 1 つの関数のままにします。",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-ja-ai-sdk-ts#1.assistant",
+                      "quote": "toCsv は 1 つの関数のままにします。"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-ja-ai-sdk-ts/one-function"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-ai-sdk-ts/one-function",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-ja-ai-sdk-ts/one-function",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "an AI's own decision only in a trace an interactive session runs"
+        }
+      ]
+    },
+    {
+      "id": "agent-10",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "A trace begun and saved from an unknown session never adopts the AI's own decision: it stays a candidate",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-ai-unknown",
+            "host": "claude-code",
+            "at": "2026-05-06T12:00:00Z",
+            "turns": [
+              {
+                "owner": "Tidy the export.",
+                "assistant": "I keep toCsv as one function.",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-ai-unknown",
+            "caller": {},
+            "record": {
+              "units": [
+                {
+                  "key": "one-function",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Keep toCsv as one function",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-unknown#1.assistant",
+                      "quote": "I keep toCsv as one function.",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-unknown#1.assistant",
+                      "quote": "I keep toCsv as one function."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "read": ["trace:s-en-ai-unknown/one-function"]
+      },
+      "then": [
+        {
+          "unit": "trace:s-en-ai-unknown/one-function",
+          "lifecycle": "candidate"
+        },
+        {
+          "adoption_count": {
+            "of": "trace:s-en-ai-unknown/one-function",
+            "count": 0
+          }
+        },
+        {
+          "save_notes_contain": "an AI's own decision only in a trace an interactive session runs"
+        }
+      ]
+    },
+    {
+      "id": "agent-11",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "A record nobody adopted that conflicts with the owner's decision never takes it out of delivery",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-ai-dispute",
+            "host": "claude-code",
+            "at": "2026-05-07T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "保存先の決め方で困ることがないか見ておいて。",
+                "assistant": "共有を考えると、保存先は DuckDB にした方がいいと思います。SQLite の決定とはぶつかります。",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ai-dispute",
+            "record": {
+              "units": [
+                {
+                  "key": "duckdb",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "保存先を DuckDB にする",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ai-dispute#1.assistant",
+                      "quote": "保存先は DuckDB にした方がいいと思います。",
+                      "role": "proposes"
+                    }
+                  ],
+                  "conflicts": ["trace:s-ja-storage/storage"],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "symbol": "open",
+                      "role": "applies_to"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/db.ts"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["保存先は SQLite の 1 ファイルにする"]
+        },
+        {
+          "context_not_contains": ["DuckDB"]
+        },
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-ai-dispute/duckdb",
+          "lifecycle": "candidate"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-storage/storage",
+            "contains": [
+              "Conflicts with trace:s-ja-ai-dispute/duckdb (unresolved: still delivered, since only the owner's words hold the owner's decision back)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "agent-12",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "The AI's own decisions that conflict with or supersede the owner's constraint neither hide it from delivery nor replace it",
+      "given": [
+        {
+          "trace_en_dates": true
+        },
+        {
+          "session": {
+            "id": "s-en-ai-dates",
+            "host": "claude-code",
+            "at": "2026-05-07T11:00:00Z",
+            "turns": [
+              {
+                "owner": "Due dates show a day early in Tokyo. Fix it.",
+                "assistant": "I store due dates as plain calendar dates without a time zone. I replace the UTC rule: toStored keeps the member's offset.",
+                "edits": ["src/dates.ts"]
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-ai-dates",
+            "caller": {
+              "entrypoint": "cli"
+            },
+            "record": {
+              "units": [
+                {
+                  "key": "plain-dates",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Store due dates as plain calendar dates without a time zone",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-dates#1.assistant",
+                      "quote": "I store due dates as plain calendar dates without a time zone.",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-dates#1.assistant",
+                      "quote": "I store due dates as plain calendar dates without a time zone."
+                    }
+                  ],
+                  "conflicts": ["trace:s-en-dates/utc"],
+                  "anchors": [
+                    {
+                      "path": "src/dates.ts",
+                      "symbol": "toStored",
+                      "role": "applies_to"
+                    }
+                  ]
+                },
+                {
+                  "key": "keep-offset",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "toStored keeps the member's offset",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-ai-dates#1.assistant",
+                      "quote": "I replace the UTC rule: toStored keeps the member's offset.",
+                      "role": "decides"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-ai-dates#1.assistant",
+                      "quote": "I replace the UTC rule: toStored keeps the member's offset."
+                    }
+                  ],
+                  "supersedes": "trace:s-en-dates/utc",
+                  "anchors": [
+                    {
+                      "path": "src/dates.ts",
+                      "symbol": "toStored",
+                      "role": "applies_to"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/dates.ts"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["Store every timestamp in UTC"]
+        },
+        {
+          "context_not_contains": ["plain calendar dates", "keeps the member's offset", "decided by an AI"]
+        },
+        {
+          "unit": "trace:s-en-dates/utc",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-en-ai-dates/plain-dates",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-en-ai-dates/keep-offset",
+          "lifecycle": "candidate"
+        },
+        {
+          "save_notes_contain": "keep-offset candidate: replacing another record needs the owner's or a maintainer's adoption"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-en-dates/utc",
+            "contains": [
+              "the owner's decision",
+              "Replacement proposed by trace:s-en-ai-dates/keep-offset (candidate)",
+              "still delivered, since only the owner's words hold the owner's decision back"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "agent-13",
+      "layer": "agent",
+      "lang": "en",
+      "summary": "A new interactive Claude Code session with sessions waiting asks the agent to trace them on its own, once per session",
+      "given": [
+        {
+          "capture": "s-en-worker"
+        },
+        {
+          "capture": "s-ja-maybe"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "session_start",
+          "sequence": [
+            {
+              "event": "session_start",
+              "source": "startup",
+              "entrypoint": "cli",
+              "session": "fresh"
+            },
+            {
+              "event": "session_start",
+              "source": "compact",
+              "entrypoint": "cli",
+              "session": "fresh"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": [
+                "2 earlier sessions of this project wait to be traced",
+                "run the trace Skill on your own",
+                "without asking the user"
+              ]
+            },
+            {
+              "lacks": ["run the trace Skill on your own"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent-14",
+      "layer": "agent",
+      "lang": "ja",
+      "summary": "A resumed, headless, or unknown start never asks the agent to trace on its own, though sessions wait",
+      "given": [
+        {
+          "capture": "s-ja-maybe"
+        },
+        {
+          "capture": "s-ja-chat"
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "session_start",
+          "sequence": [
+            {
+              "event": "session_start",
+              "source": "resume",
+              "entrypoint": "cli",
+              "session": "back"
+            },
+            {
+              "event": "session_start",
+              "source": "startup",
+              "entrypoint": "sdk-cli",
+              "session": "headless"
+            },
+            {
+              "event": "session_start",
+              "source": "startup",
+              "session": "unknown"
+            }
+          ]
+        }
+      },
+      "then": [
+        {
+          "each_context": [
+            {
+              "contains": ["2 sessions waiting to be traced: run /sphica:trace pending"],
+              "lacks": ["run the trace Skill on your own"]
+            },
+            {
+              "lacks": ["run the trace Skill on your own"]
+            },
+            {
+              "lacks": ["run the trace Skill on your own"]
+            }
+          ]
+        }
+      ]
     }
   ],
   "setups": {
