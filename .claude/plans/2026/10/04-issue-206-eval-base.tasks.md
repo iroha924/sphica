@@ -237,6 +237,16 @@ base: main
   - コミット: `fix(evals): catch runs that reach the other model's runs or climb out of their own (T22)`
   - 結果: red は上のとおり 1 件落ちた（もう片方の置き場の件はレビュアーの再現を根拠にした）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 82, fail 0。A4 を回収し直して、外れるのは同じ Codex の 1 run だけ
 
+- [x] T23: GitHub の Codex レビュー（#256）の 6 件を直す（作業ツリーの観測が symlink をたどる・ignore されたファイルを見逃す、canary が Sphica のツールを 1 つしか見ない、matcher を今の checkout から取る、比較がモデルの違いを見ない、ローカルの run を計画と突き合わせない）
+  - 種別: 修正
+  - 計画: S2, S3, S4, S7
+  - 依存: T22（直す対象のブランチの先頭）
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/canary-check.ts`, `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-grade.test.ts`, `server/test/plugin.test.ts`
+  - red: `cd <7e63e3c8 の worktree>/server && node red.ts` → `ignoredSeen: false`、`targetRead: true`（symlink の行き先を読む）、`oneToolPasses: true`、`differentModelsAccepted: true`
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/plugin.test.ts` → 6 件それぞれのテストが pass
+  - コミット: `fix(evals): close the GitHub Codex review findings on the local runner (T23)`
+  - 結果: red は上の 4 項目（matcher と計画の突き合わせはレビュアーの確認を根拠にした）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/plugin.test.ts` → 全件 pass（eval-claude 31、eval-grade 48）
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
@@ -269,3 +279,4 @@ base: main
 - 2026-10-04 / A4 / Codex の run が `rg --files <一時ディレクトリの根>` で他の run を一覧していた。Codex には読み取りの囲いが無いので、stream から自分の run の場所を除いて、ビルド・run 置き場・評価のキャッシュが残る run を excluded にする。文字列に場所が含まれるかだけを見るので、`rg /` のように根から探すものは捕まえられない（限界として PR に書く）
 
 - 2026-10-04 / T21 / 再レビュー 2 件（測定）を採った / T22。指摘が作り込みのパスへ移ってきたので、レビューの往復はここで打ち切る
+- 2026-10-04 / T23 / GitHub の Codex レビュー（#256）6 件（P1 5 件、うち 1 件はセキュリティ: 作業ツリーの観測が agent の作った symlink をたどり、run の外のファイルを読めた）を全部採った。Codex のモデルは run の CODEX_HOME の設定から記録し、比較は同じ系列のモデルの組が両側で違えば拒否する。ローカルの run の計画は collect の `--local-plan` で渡す

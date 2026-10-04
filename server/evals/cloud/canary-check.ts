@@ -101,6 +101,18 @@ const receiptsOf = (text: string): Receipt[] =>
 const loadedInstructions = (receipts: string) =>
   receiptsOf(receipts).filter((r) => r.name === "instructions");
 
+/** Every tool the read MCP server lists; plugin.test.ts checks this against the built server, so a new tool makes the list fail there. */
+export const SPHICA_TOOLS = [
+  "export",
+  "fields",
+  "overview",
+  "read",
+  "review_check",
+  "review_select",
+  "search",
+  "status",
+].map((t) => `mcp__sphica__${t}`);
+
 /**
  * The context canary of one condition: the init event names exactly the MCP servers the condition has, Sphica's tools appear only where
  * they should, the hooks of the condition ran, and every instruction file loaded is the checkout's own. `control` is true for the positive
@@ -152,7 +164,7 @@ export function contextChecks(
     },
     {
       name: "Sphica's tools only where the condition has them",
-      ok: sphica ? tools.includes("mcp__sphica__search") : tools.length === 0,
+      ok: sphica ? JSON.stringify([...tools].sort()) === JSON.stringify(SPHICA_TOOLS) : tools.length === 0,
       why: `MCP tools: ${tools.join(", ") || "none"}`,
     },
     {

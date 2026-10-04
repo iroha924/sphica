@@ -3,7 +3,7 @@
 // in the run log (searches that found nothing, reads that found nothing, tool errors, Sphica calls, turns, time), and writes one table.
 // Run logs of cloud runs are saved by hand from the routine API into <logs>/<branch session id>.log (the harness never holds the token).
 // Local Claude runs (claude.ts) are collected the same way as the Codex runs, from their run directories.
-// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--claude <dir>] [--no-cloud]
+// Run: node evals/cloud/collect.ts [--build <dir>] [--logs <dir>] [--codex <dir>] [--claude <dir>] [--no-cloud [--local-plan <json>]]
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -39,6 +39,8 @@ const { values: args } = parseArgs({
     claude: { type: "string", default: path.join(CACHE, "claude-runs") },
     // A build run only locally: skip fetching result branches from the slot repositories
     "no-cloud": { type: "boolean", default: false },
+    // The local runs asked for, as [{ model, task, condition, n }]: what was not run, ran past n, or was not asked for stays as excluded
+    "local-plan": { type: "string" },
   },
 });
 
@@ -92,6 +94,8 @@ type Row = {
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
   presented: string | null;
+  /** The concrete model a local run used (Claude's --model, Codex's configured model and effort); null when it was not recorded */
+  agent_model: string | null;
   /** Local Claude runs only: whether a Sphica search came before the first change to the work tree */
   search_before_edit: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
   /** Local Claude runs only: whether Sphica's search was held back for ToolSearch or there from the start */
@@ -133,6 +137,7 @@ const excludedRow = (
   presented: null,
   search_before_edit: "not_applicable",
   search_loading: "not_applicable",
+  agent_model: null,
   signals: null,
 });
 
@@ -184,6 +189,50 @@ function streamSignals(events: string): NonNullable<Row["signals"]> {
     turns: turns ?? null,
     seconds: null,
   };
+}
+
+type LocalPlan = { model: "claude" | "codex"; task: string; condition: string; n: number }[];
+
+/**
+ * Local runs against the runs asked for: each planned task, condition, and model keeps its first n runs by start, a run past n or one
+ * the plan did not ask for is kept as excluded, and a planned run that never started is added as excluded, so the denominator is the plan.
+ */
+function reconcileLocal<
+  R extends { model: string; task: string; condition: string; run: string; excluded: string | null },
+>(
+  rows: R[],
+  plan: LocalPlan,
+  startedOf: (r: R) => string,
+  missing: (model: "claude" | "codex", task: string, condition: string, n: number) => R = (
+    model,
+    task,
+    condition,
+    n,
+  ) => excludedRow(model, task, condition, `planned#${n}`, "planned but not run") as unknown as R,
+): R[] {
+  const out: R[] = [];
+  const key = (x: { model: string; task: string; condition: string }) =>
+    `${x.model}\0${x.task}\0${x.condition}`;
+  const wanted = new Map(plan.map((p) => [key(p), p]));
+  const groups = new Map<string, R[]>();
+  for (const r of rows) groups.set(key(r), [...(groups.get(key(r)) ?? []), r]);
+  for (const [k, group] of groups) {
+    const p = wanted.get(k);
+    const ordered = [...group].sort((a, b) => startedOf(a).localeCompare(startedOf(b)));
+    for (const [i, r] of ordered.entries())
+      out.push(
+        !p
+          ? { ...r, excluded: "not in the local plan" }
+          : i < p.n
+            ? r
+            : { ...r, excluded: "beyond the planned runs" },
+      );
+  }
+  for (const p of plan) {
+    const ran = Math.min(groups.get(key(p))?.length ?? 0, p.n);
+    for (let i = ran; i < p.n; i++) out.push(missing(p.model, p.task, p.condition, i + 1));
+  }
+  return out;
 }
 
 /**
@@ -330,6 +379,7 @@ function main() {
           // A routine log has no record of the work tree between calls
           search_before_edit: "unknown",
           search_loading: "unknown",
+          agent_model: null,
           signals: log === null ? null : signals(log),
         });
       } finally {
@@ -394,6 +444,8 @@ function main() {
         status: number | null;
         reason?: string | null;
         deliveries?: { outcome: string; units: string[] }[] | null;
+        claude_model?: string;
+        codex_model?: string | null;
       }>(resultText);
       // Cut off while it was written: the run started, so it stays in the denominator
       if (!result) {
@@ -478,6 +530,7 @@ function main() {
         search_before_edit:
           model === "claude" ? searchedBeforeEdit(events, read("edits.jsonl")) : "not_applicable",
         search_loading: model === "claude" ? searchLoading(events) : "not_applicable",
+        agent_model: result.claude_model ?? result.codex_model ?? null,
         gold_signals:
           model === "codex"
             ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
@@ -491,6 +544,26 @@ function main() {
               : { ...streamSignals(events ?? ""), seconds: result.seconds },
       });
     }
+  }
+  if (args["local-plan"]) {
+    if (!args["no-cloud"])
+      throw new Error("--local-plan reconciles local runs only; pass --no-cloud with it");
+    const asked = JSON.parse(fs.readFileSync(args["local-plan"], "utf8")) as LocalPlan;
+    const startedOf = (r: Row) => {
+      const file = path.join(
+        r.model === "codex" ? (args.codex ?? "") : (args.claude ?? ""),
+        r.run,
+        "started.json",
+      );
+      try {
+        return String((JSON.parse(fs.readFileSync(file, "utf8")) as { at?: string }).at ?? "");
+      } catch {
+        return "";
+      }
+    };
+    const reconciled = reconcileLocal(rows, asked, startedOf);
+    rows.length = 0;
+    rows.push(...reconciled);
   }
   fs.writeFileSync(
     out,

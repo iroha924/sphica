@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { claimRunDir } from "../evals/cloud/codex-home.ts";
+import { claimRunDir, codexModelOf } from "../evals/cloud/codex-home.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
 import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
 import {
@@ -1978,4 +1978,57 @@ test("report --compare --aa runs from the command line with first/second on ever
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+test("compare refuses two builds run by different models of the same family", () => {
+  const side = (label: string, bundle: string, model: string | null) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: {
+      build: label,
+      variant: "original",
+      bundle,
+      rows: [
+        {
+          ...row,
+          model: "claude" as const,
+          run: label,
+          excluded: null,
+          patch: "",
+          patch_truncated: false,
+          agent_model: model,
+          grade,
+        },
+      ],
+    },
+  });
+  assert.throws(
+    () =>
+      compare(
+        side("old", 'c1 {"deliver.js":"a"}', "claude-opus-5-5"),
+        side("new", 'c2 {"deliver.js":"b"}', "claude-sonnet-5-5"),
+        [{ id: "t1" }],
+      ),
+    /different claude models/,
+  );
+  assert.doesNotThrow(() =>
+    compare(
+      side("old", 'c1 {"deliver.js":"a"}', "claude-opus-5-5"),
+      side("new", 'c2 {"deliver.js":"b"}', "claude-opus-5-5"),
+      [{ id: "t1" }],
+    ),
+  );
+});
+
+test("a Codex run's model is read from its own CODEX_HOME", (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-home-"));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  fs.writeFileSync(
+    path.join(home, "config.toml"),
+    'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "medium"\n',
+  );
+  assert.equal(codexModelOf(home), "gpt-6.1-sol, medium");
+  fs.writeFileSync(path.join(home, "config.toml"), "\n");
+  assert.equal(codexModelOf(home), null);
 });

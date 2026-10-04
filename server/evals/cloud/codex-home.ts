@@ -17,6 +17,14 @@ export function isolatedCodexHome(codexHome: string, extraConfig = ""): void {
   fs.writeFileSync(path.join(codexHome, "config.toml"), `${settings}\n${extraConfig}`);
 }
 
+/** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */
+export function codexModelOf(codexHome: string): string | null {
+  const config = fs.readFileSync(path.join(codexHome, "config.toml"), "utf8");
+  const value = (key: string) => new RegExp(`^${key}\\s*=\\s*"([^"]*)"`, "m").exec(config)?.[1];
+  const model = value("model");
+  return model ? [model, value("model_reasoning_effort")].filter(Boolean).join(", ") : null;
+}
+
 // Parallel runs of one task and condition can start in the same millisecond: a random suffix tells them apart, and the directory is
 // created without recursive so a collision fails instead of two runs sharing one directory
 export function claimRunDir(out: string, prefix: string, now = new Date()): { run: string; dir: string } {

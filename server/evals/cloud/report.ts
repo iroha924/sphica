@@ -12,6 +12,7 @@ import type { Grade } from "./schema-check.ts";
 
 type TaskInfo = { id: string; lang?: string; overlap?: boolean | null; gold?: string[] };
 type Graded = GradeRow & {
+  agent_model?: string | null;
   search_before_edit?: "yes" | "no" | "no_edit" | "unknown" | "not_applicable";
   search_loading?: "deferred" | "loaded" | "unknown" | "not_applicable";
   delivered_units?: string[];
@@ -256,6 +257,20 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
     throw new Error("both builds ran the same bundle; there is nothing to compare");
   if (same && artifacts(old.build) !== artifacts(next.build))
     throw new Error("an A/A comparison needs the same bundle on both sides");
+  // A different model behind "claude" or "codex" on one side would read as a difference in the bundle
+  const modelsOf = (b: Build, family: string) =>
+    JSON.stringify(
+      [
+        ...new Set(b.rows.filter((r) => r.model === family && !r.excluded).map((r) => r.agent_model ?? null)),
+      ].sort(),
+    );
+  for (const family of ["claude", "codex"]) {
+    const [a, b] = [modelsOf(old.build, family), modelsOf(next.build, family)];
+    if (a !== "[]" && b !== "[]" && a !== b)
+      throw new Error(
+        `the builds were run by different ${family} models (${a} / ${b}); compare runs of the same model`,
+      );
+  }
   const lines = [
     `# ${old.label}: ${old.build.bundle}`,
     ...report([old.build], tasks),
