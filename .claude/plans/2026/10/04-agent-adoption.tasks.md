@@ -227,6 +227,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): settle same-save withdrawals and races; skip auto tracing for an unknown caller (T26)`
   - 結果: red を実測（4 件とも上の理由で fail。自動 pending はコミット済みの extract.ts に戻して確認）。直した後 4 件 pass、`node --test test/judge.test.ts` → 17 pass。`bun run verify` → 終了コード 0（SQL 到達 199/199、実 DB 10/10、受け入れ 105 pass）。見直し条件の引用の規則は schema の trigger も「一度も active になっていない記録の初めての active 化」にそろえた
 
+- [x] T29: T07 のレビュー指摘を直す（AI の固定文は残った記録に AI の判断があるときだけ、読み取りの予算から引かない、search と read にも付ける、未採用を search に出す）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（直す対象の表示）
+  - 変更: `server/src/authority.ts`, `server/src/deliver.ts`, `server/src/search.ts`, `server/src/mcp.ts`, `server/src/read.ts`, `server/src/extract.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="AI words come only|AI words spend none" test/deliver.test.ts` → 直す前の配信は、枠から AI の判断が外れても固定文を残し、読み取りの予算から固定文の分まで引いて 7・8 件目を出さない
+  - 完了条件: `cd server && node --test --test-name-pattern="decided by an AI" test/deliver.test.ts` → pass
+  - コミット: `fix(deliver): show the AI words only beside a kept AI decision, off the read budget (T29)`
+  - 結果: red を 2 件とも実測した。`fitMarked` で、AI の文の枠をとって並べたあと、残った行に AI の判断が無ければ文を外す（短くなるだけなので枠を超えない）。読む前の予算は、過去の配信の記録の、その配信の時刻の権限で AI の判断を含んでいたかを判定して固定文の分を引かない（ログの文字数の意味は eval が使うので変えない）。権限の言葉と固定文は authority.ts に 1 つにまとめ、固定文に「印の無い配信の判断は持ち主のもの」を足した。search の結果（`hitsText` を search.ts に移した）と read にも、AI の判断があるときだけ固定文を付け、search の未採用の判断に「adopted by no one」を出す。`node --test test/deliver.test.ts test/deliver-codex.test.ts test/search.test.ts test/extract.test.ts` → 99 pass。`bun run verify` → 終了コード 0（SQL 到達 208/208、受け入れ 113 pass）
+
 - [x] T28: T05・T06 のレビュー指摘を直す（turn の無い返事は AI の採用に使えない。置き場所の違う `decides` は check でも拒む）
   - 種別: 修正
   - 計画: S3, S7
@@ -320,3 +330,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T28 / T05・T06 の Codex のセキュリティレビュー（F1 P2: turn の無い返事が record ツールのターンの除外をすり抜ける。F2 P2: 質問への decides を check が通し save が保存全体を戻す）を受け、修正タスク T28 を足した。同じずれが glean の evidence にもあったので同じタスクで直した
 - 2026-10-04 / T10 / 変更欄（前: deliver-codex.test.ts を含む → 後: Codex で出ないことは deliver.test.ts の同じテストで、Claude Code の環境を引き継いだ Codex として確かめたので外した）
 - 2026-10-04 / T11 / 変更欄とテストの置き場所（前: record.test.ts → 後: AI の採用の行を作る helper がある authority.test.ts）
+- 2026-10-04 / T29 / T27・T07・T08・T25 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T29 を足した。F1 は search と read に固定文を付け、record_context には付けない（trace が key を選ぶための一覧で、離れてよいという案内は当てはまらない）。F3 は search に「adopted by no one」を出し、配信は行ごとの印を足さずに固定文で印の無い判断が持ち主のものと伝える（配信に載る判断は必ず採用済み）

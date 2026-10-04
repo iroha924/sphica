@@ -10,7 +10,7 @@ import path from "node:path";
 import type { ExpressionBuilder, Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
-import { authorityOf, ownerAdopted } from "./authority.ts";
+import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
@@ -36,9 +36,6 @@ export const CONFIRM =
 export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "the record text given here");
 // The limits add the request's length, so it takes no room from the records
 const ASK = CONFIRM.length + 1;
-/** Sphica's own words for records an AI decided, never taken from a record: added, with the room it takes, only when one is shown */
-export const AI_DECIDED =
-  "A record marked decided by an AI was decided by an AI in an earlier session, not by the owner: with a concrete reason you may depart from it, saying in your reply which record and why. It never relaxes the owner's rules, public contracts, or approval gates.";
 const AI_ROOM = AI_DECIDED.length + 1;
 const LIMITS: Record<Event, { units: number; chars: number }> = {
   session_start: { units: 6, chars: 1000 + ASK },
@@ -130,9 +127,26 @@ async function aiDecided(db: Reads, ids: number[]): Promise<Set<number>> {
   const whose = await authorityOf(db, ids);
   return new Set(ids.filter((id) => whose.get(id) === "agent"));
 }
-/** The lead with the words for records an AI decided, and the room they take, when any is shown */
+/** The lead with the words for records an AI decided, and the room they take, when any may be shown */
 const withAi = (lead: string, chars: number, ai: Set<number>) =>
   ai.size ? { lead: `${lead} ${AI_DECIDED}`, chars: chars + AI_ROOM } : { lead, chars };
+
+/**
+ * Fits the lines with room for the AI words, then keeps the words only when a kept line is an AI's decision. ids[i] is line i's unit
+ * (null for a line that is no record): dropping the words only shortens the text, so it still fits.
+ */
+function fitMarked(
+  lines: (string | string[])[],
+  chars: number,
+  lead: string,
+  ai: Set<number>,
+  ids: (number | null)[],
+): { text: string; kept: number[]; omitted: number; lead: string } {
+  const wide = withAi(lead, chars, ai);
+  const f = fit(lines, wide.chars, wide.lead);
+  if (wide.lead === lead || f.kept.some((i) => ai.has(ids[i] ?? -1))) return { ...f, lead: wide.lead };
+  return { ...f, text: f.text && `${lead}${f.text.slice(wide.lead.length)}`, lead };
+}
 
 /** Cuts to n characters (not bytes), marking the cut. */
 const clip = (text: string, n: number) => {
@@ -259,23 +273,20 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
     db,
     shown.map((u) => u.id),
   );
-  const { lead, chars } = withAi(
-    `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
-    LIMITS.pre_edit.chars,
-    ai,
-  );
-  const f = fit(
+  const f = fitMarked(
     shown.map((u) =>
       why.has(u.id)
         ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
         : line(u, "", ai.has(u.id)),
     ),
-    chars,
-    lead,
+    LIMITS.pre_edit.chars,
+    `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
+    ai,
+    shown.map((u) => u.id),
   );
   const omitted = rows.length - shown.length + f.omitted;
   return {
-    ...noted(f.text, lead, [leftOut(omitted)]),
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted,
@@ -341,8 +352,26 @@ async function beforeRead(
     .where(({ exists, selectFrom }) =>
       exists(selectFrom("delivery_unit as x").select("x.unit_id").whereRef("x.delivery_id", "=", "d.id")),
     )
-    .select("d.chars")
+    .select(["d.id", "d.at", "d.chars"])
     .execute();
+  // A read that showed an AI's decision also carried the AI words, which spend no budget, like the request: told from its records'
+  // authority as of when it was delivered
+  const shownBy = spent.length
+    ? await db
+        .selectFrom("delivery_unit")
+        .select(["delivery_id", "unit_id"])
+        .where(
+          "delivery_id",
+          "in",
+          spent.map((r) => r.id),
+        )
+        .execute()
+    : [];
+  const marked = new Set<number>();
+  for (const r of spent) {
+    const ids = shownBy.filter((x) => x.delivery_id === r.id).map((x) => x.unit_id);
+    if ([...(await authorityOf(db, ids, r.at)).values()].includes("agent")) marked.add(r.id);
+  }
   const seen = new Set(sent.map((r) => r.unit_id));
   const readUnits = sent.filter((r) => r.event === "pre_read").length;
   const rows = (
@@ -359,26 +388,25 @@ async function beforeRead(
     db,
     shown.map((u) => u.id),
   );
-  const { lead, chars } = withAi(
-    `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
-    Math.min(
-      LIMITS.pre_read.chars,
-      READ_SESSION.chars + ASK - spent.reduce((n, r) => n + Math.max(r.chars - ASK, 0), 0),
-    ),
-    ai,
-  );
-  const f = fit(
+  const f = fitMarked(
     shown.map((u) =>
       why.has(u.id)
         ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
         : line(u, "", ai.has(u.id)),
     ),
-    chars,
-    lead,
+    Math.min(
+      LIMITS.pre_read.chars,
+      READ_SESSION.chars +
+        ASK -
+        spent.reduce((n, r) => n + Math.max(r.chars - ASK - (marked.has(r.id) ? AI_ROOM : 0), 0), 0),
+    ),
+    `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
+    ai,
+    shown.map((u) => u.id),
   );
   const omitted = rows.length - shown.length + f.omitted;
   return {
-    ...noted(f.text, lead, [leftOut(omitted)]),
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted,
@@ -512,16 +540,17 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     db,
     shown.map((h) => h.u.id),
   );
-  const { lead: ask, chars } = withAi(CONFIRM, LIMITS.prompt.chars, ai);
+  const wide = withAi(CONFIRM, LIMITS.prompt.chars, ai);
   // The request, then one line per record with the note on each
   const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why, ai.has(h.u.id)).slice(2)}`);
   const kept: string[] = [];
-  let used = ask.length + 1;
+  let used = wide.lead.length + 1;
   for (const l of lines) {
-    if (used + l.length + 1 > chars) break;
+    if (used + l.length + 1 > wide.chars) break;
     kept.push(l);
     used += l.length + 1;
   }
+  const ask = shown.slice(0, kept.length).some((h) => ai.has(h.u.id)) ? wide.lead : CONFIRM;
   return {
     ...noted(kept.length ? [ask, ...kept].join("\n") : "", ask, [leftOut(hits.length - kept.length)]),
     units: shown.slice(0, kept.length).map((h) => h.u.id),
@@ -619,19 +648,20 @@ async function atStart(
     }),
     ...broad.map((u) => line(u, "", ai.has(u.id))),
   ];
-  const { lead, chars } = withAi(
-    `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`,
+  const f = fitMarked(
+    lines,
     LIMITS.session_start.chars,
+    `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`,
     ai,
+    [...work.map(() => null), ...broad.map((u) => u.id)],
   );
-  const f = fit(lines, chars, lead);
   // Lines after the work items are the constraints; a key merely written inside a work item is not a shown constraint
   const shownUnits = f.kept.flatMap((i) => (i >= work.length ? (broad[i - work.length]?.id ?? []) : []));
   // The lists and the totals are separate reads, so a change between them never makes a count negative
   const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
   const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    ...noted(f.text, lead, [
+    ...noted(f.text, f.lead, [
       leftOut(broadLeft),
       workLeftOut(workLeft),
       await waiting(db, projectId, place),
@@ -682,19 +712,16 @@ async function beforeReview(
     db,
     shown.map((u) => u.id),
   );
-  const { lead, chars } = withAi(
-    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
-    LIMITS.review.chars,
-    ai,
-  );
-  const f = fit(
+  const f = fitMarked(
     shown.map((u) => line(u, ` [${inline(u.because)}]`, ai.has(u.id))),
-    chars,
-    lead,
+    LIMITS.review.chars,
+    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
+    ai,
+    shown.map((u) => u.id),
   );
   const omitted = rows.length - shown.length + f.omitted;
   return {
-    ...noted(f.text, lead, [leftOut(omitted)]),
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted,

@@ -6,12 +6,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { AI_DECIDED, AUTO_TRACE, CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { AUTO_TRACE, CONFIRM, deliver, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
+import { readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
+import { hitsText, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import {
   at,
@@ -2171,5 +2174,172 @@ test("auto trace notice: a new interactive Claude Code session asks the agent to
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// An active decision adopted by the AI alone, written the way the schema allows: its own reply deciding, an interactive run
+function aiRecord(db: TempDb, p: number, key: string, text: string, anchor: string) {
+  session(db, p, "s1");
+  const now = at("2026-09-27T00:00:00Z");
+  const reply = insert(db, "source", {
+    project_id: p,
+    kind: "session_message",
+    artifact: "session:s1",
+    external_id: `${key}:assistant`,
+    revision: 1,
+    session_id: "s1",
+    turn_id: `${key}-turn`,
+    author_kind: "assistant",
+    created_at: now,
+    captured_at: now,
+    text,
+    original_bytes: Buffer.byteLength(text),
+    content_hash: hash(key.length * 7 + text.length),
+    indexed: 0,
+  });
+  const call = insert(db, "record_call", {
+    project_id: p,
+    tool: "trace_begin",
+    host: "codex",
+    caller_session: "x",
+    caller_turn: "y",
+    mode: "interactive",
+    called_at: now,
+  });
+  const run = insert(db, "extraction_run", {
+    project_id: p,
+    origin: "trace",
+    target: "session:s1",
+    status: "running",
+    begin_call_id: call,
+    started_at: now,
+  });
+  const unit = insert(db, "unit", {
+    project_id: p,
+    key: `trace:ext-s1/${key}`,
+    kind: "decision",
+    stance: "do",
+    text,
+    extraction: "supported",
+    run_id: run,
+    created_at: now,
+    content_hash: hash(key.length * 13 + text.length),
+  });
+  const span = {
+    source_id: reply,
+    span_start: 0,
+    span_end: Buffer.byteLength(text),
+    run_id: run,
+    added_at: now,
+  };
+  insert(db, "unit_evidence", { unit_id: unit, role: "decides", ...span });
+  insert(db, "unit_adoption", { unit_id: unit, route: "agent", ...span });
+  insert(db, "unit_anchor", { unit_id: unit, path: anchor, role: "applies_to", run_id: run, added_at: now });
+  for (const [from, to] of [
+    [null, "candidate"],
+    ["candidate", "active"],
+  ] as const)
+    insert(db, "unit_state", {
+      unit_id: unit,
+      from_state: from,
+      to_state: to,
+      at: now,
+      reason: "r",
+      run_id: run,
+    });
+  return unit;
+}
+
+test("decided by an AI: the AI words come only when an AI's decision is kept within the budget", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    aiRecord(db, p, "ai-long", `I keep the pool small. ${"x".repeat(230)}`, "src/db.ts");
+    const words = Array.from({ length: 4 }, (_, n) => `Keep rule ${n}. ${"y".repeat(230)}`);
+    const m = message(db, p, { id: "m1", text: words.join(" ") });
+    await save(db, p, {
+      units: words.map((w, n) =>
+        decided(`owner-long-${n}`, m, w, { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ),
+    });
+    const out = await deliver(
+      {
+        session_id: "e1",
+        cwd: repo,
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      },
+      "claude-code",
+      db.file,
+    );
+    assert.match(out, /owner-long-3/);
+    assert.doesNotMatch(out, /ai-long/);
+    assert.doesNotMatch(out, /decided by an AI/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: the AI words spend none of a session's read budget", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    for (let n = 0; n < 8; n++)
+      aiRecord(db, p, `ai-${n}`, `I keep file ${n} as one module.`, `src/file${n}.ts`);
+    const outs: string[] = [];
+    for (let n = 0; n < 8; n++)
+      outs.push(
+        await deliver(
+          {
+            session_id: "r1",
+            cwd: repo,
+            hook_event_name: "PreToolUse",
+            tool_name: "Read",
+            tool_input: { file_path: path.join(repo, `src/file${n}.ts`) },
+          },
+          "claude-code",
+          db.file,
+        ),
+      );
+    assert.deepEqual(
+      outs.map((o, n) => o.includes(`ai-${n}`)),
+      Array(8).fill(true),
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: search and read say whose each decision is, with the AI words beside an AI's", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiRecord(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const m = message(db, p, { id: "m1", text: "Maybe a bigger connection pool." });
+    await save(db, p, {
+      units: [
+        {
+          key: "bigger",
+          kind: "decision",
+          stance: "do",
+          text: "A bigger connection pool",
+          evidence: [{ source: `s${m}`, quote: "Maybe a bigger connection pool.", role: "proposes" }],
+        },
+      ],
+    });
+    const r = await searchUnits(db.reader, p, { question: "connection pool", limit: 10 });
+    const text = hitsText(r.hits);
+    assert.match(text, /trace:ext-s1\/pool \(u\d+\): decision do, active, decided by an AI/);
+    assert.match(text, /trace:ext-s1\/bigger \(u\d+\): decision do, candidate, adopted by no one/);
+    assert.ok(text.includes(AI_DECIDED));
+    assert.ok((await readUnit(db.reader, p, "trace:ext-s1/pool", null))?.includes(AI_DECIDED));
+    assert.ok(!(await readUnit(db.reader, p, "trace:ext-s1/bigger", null))?.includes(AI_DECIDED));
+  } finally {
+    await db.done();
   }
 });

@@ -4,7 +4,7 @@
 
 import crypto from "node:crypto";
 import type { Kysely } from "kysely";
-import { authorityOf } from "./authority.ts";
+import { AUTHORITY, authorityOf } from "./authority.ts";
 import { flush, TOOL_FLUSH_BUDGET_MS } from "./capture.ts";
 import { inTransaction, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
@@ -257,12 +257,6 @@ export async function gleanFetch(
 }
 
 /** The key namespace, the sources the run may mark as looked at, and what context prints: a heading, one entry per source, and a tail. */
-const WHOSE = {
-  owner: "the owner's decision",
-  agent: "decided by an AI",
-  none: "adopted by no one",
-} as const;
-
 /** Whether a trace may adopt the AI's own decisions: one an interactive session began, and checks or saves now */
 async function agentRun(db: Reads, run: Run, call: number | undefined): Promise<boolean> {
   if (run.origin !== "trace" || run.begin_call_id === null || call === undefined) return false;
@@ -449,7 +443,7 @@ export async function contextText(
     ...(live.length
       ? live.map(
           (u) =>
-            `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}${["decision", "constraint"].includes(u.kind) ? `, ${WHOSE[whose.get(u.id) ?? "none"]}` : ""}) ${inline(u.text).slice(0, 160)}`,
+            `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${u.lifecycle}${["decision", "constraint"].includes(u.kind) ? `, ${AUTHORITY[whose.get(u.id) ?? "none"]}` : ""}) ${inline(u.text).slice(0, 160)}`,
         )
       : ["None."]),
   ];

@@ -20,7 +20,7 @@ import { hostWorkspace, identify, projectId } from "./project.ts";
 import { readSource, readUnit } from "./read.ts";
 import { parseDiff, selectForReview } from "./review.ts";
 import { checkFindings } from "./review-findings.ts";
-import { searchSources, searchUnits, type UnitHit } from "./search.ts";
+import { hitsText, searchSources, searchUnits } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
 import { head, reason } from "./text.ts";
@@ -57,25 +57,6 @@ const among = (r: { stopped: boolean; read: number }) =>
   r.stopped ? `among the first ${r.read} candidates by rank ` : "";
 const stoppedAfter = (r: { stopped: boolean; read: number }) =>
   r.stopped ? `\n\nStopped after ${r.read} candidates by rank; more may match.` : "";
-
-const hitText = (h: UnitHit) =>
-  [
-    `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority === "agent" ? ", decided by an AI" : h.authority === "owner" ? ", the owner's decision" : ""}`,
-    head(h.text, 600),
-    ...(h.why ? [`Why: ${head(h.why, 400)}`] : []),
-    ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, 200)}`] : []),
-    ...(h.options.length
-      ? [
-          `Options: ${h.options.map((o) => `${o.text} (${o.outcome}${o.why ? `: ${head(o.why, 160)}` : ""})`).join(" / ")}`,
-        ]
-      : []),
-    ...(h.anchors.length
-      ? [`Code: ${h.anchors.map((a) => `${a.path}${a.symbol ? ` ${a.symbol}` : ""} (${a.role})`).join(", ")}`]
-      : []),
-    h.successorOf
-      ? `Replaces ${h.successorOf}, which matched`
-      : `Matched: ${h.matched.join(", ")}${h.aliasOnly ? " (search aliases only)" : ""}`,
-  ].join("\n");
 
 const server = new McpServer(
   { name: "sphica", version: VERSION ?? "unknown" },
@@ -229,9 +210,7 @@ server.registerTool(
             "Search again with other words or the other language, or search sources; status says whether sessions are still untraced.",
         );
       return text(
-        framed(
-          `${r.hits.map(hitText).join("\n\n")}${stoppedAfter(r)}\n\nRead a record by its key before relying on it.`,
-        ),
+        framed(`${hitsText(r.hits)}${stoppedAfter(r)}\n\nRead a record by its key before relying on it.`),
       );
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);

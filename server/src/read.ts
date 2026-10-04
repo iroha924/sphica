@@ -2,7 +2,7 @@
 // said them, its links and state history, and each anchor checked against the working tree now.
 import type { Selectable } from "kysely";
 import { checkAnchor, fileState } from "./anchors.ts";
-import { authorityOf } from "./authority.ts";
+import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { renamesSince } from "./git.ts";
@@ -27,12 +27,6 @@ export const speaker = (s: {
     : s.author_kind === "assistant"
       ? "the assistant"
       : `${s.author_login ?? "someone"} (${s.author_association ?? s.author_kind})`;
-
-const AUTHORITY = {
-  owner: "the owner's decision",
-  agent: "decided by an AI",
-  none: "adopted by no one",
-} as const;
 
 /** A record by key (`trace:<session>/<key>`, `harvest:<n>/<key>`, `glean:<key>`) or by `u<id>`, as text; null when there is none. */
 export async function readUnit(
@@ -221,6 +215,7 @@ async function describe(
     `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${lifecycle}${whose ? `, ${AUTHORITY[whose]}` : ""}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
     u.text,
   ];
+  if (whose === "agent") out.push(AI_DECIDED);
   if (u.why) out.push(`Why: ${u.why}`);
   if (u.scope_note) out.push(`Scope: ${u.scope_note}`);
   if (u.revisit_when) out.push(`Revisit when: ${u.revisit_when}`);

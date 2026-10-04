@@ -3,11 +3,11 @@
 // with no answer comes back empty instead of returning whatever shares one word with it.
 
 import { sql } from "kysely";
-import { type Authority, authorityOf } from "./authority.ts";
+import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { repoPath } from "./record.ts";
-import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
+import { ftsQuery, head, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
 const UNIT_PAGE = 200;
@@ -432,3 +432,26 @@ export async function searchSources(
   if (!stopped && hits.length < limit && ranked.length > SOURCE_SCAN_MAX) stopped = true;
   return { hits, weaker, terms: wanted, stopped, read };
 }
+
+const hitText = (h: UnitHit) =>
+  [
+    `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    head(h.text, 600),
+    ...(h.why ? [`Why: ${head(h.why, 400)}`] : []),
+    ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, 200)}`] : []),
+    ...(h.options.length
+      ? [
+          `Options: ${h.options.map((o) => `${o.text} (${o.outcome}${o.why ? `: ${head(o.why, 160)}` : ""})`).join(" / ")}`,
+        ]
+      : []),
+    ...(h.anchors.length
+      ? [`Code: ${h.anchors.map((a) => `${a.path}${a.symbol ? ` ${a.symbol}` : ""} (${a.role})`).join(", ")}`]
+      : []),
+    h.successorOf
+      ? `Replaces ${h.successorOf}, which matched`
+      : `Matched: ${h.matched.join(", ")}${h.aliasOnly ? " (search aliases only)" : ""}`,
+  ].join("\n");
+
+/** Hits as the search tool prints them, with Sphica's words for an AI's decision when one is among them */
+export const hitsText = (hits: UnitHit[]) =>
+  [...hits.map(hitText), ...(hits.some((h) => h.authority === "agent") ? [AI_DECIDED] : [])].join("\n\n");
