@@ -655,8 +655,23 @@ export async function checkRecord(
     let supersedes: number | null = null;
     if (u.supersedes) {
       const old = others.get(u.supersedes);
-      // Only a successor that can take effect takes the place; a decision or constraint the owner does not adopt waits beside it
-      const takes = !["decision", "constraint"].includes(u.kind) || adoption.some((x) => x.route !== "agent");
+      // Only a successor that can take effect takes the place: a decision or constraint the owner does not adopt, or an implementation
+      // without code or commit evidence (unit_support's rule), waits beside it
+      const implemented = () =>
+        evidence.some(
+          (e) =>
+            e.role === "implements" &&
+            (["commit_message", "file_excerpt"].includes(sources.get(e.source)?.kind ?? "") ||
+              anchors.some(
+                (a) =>
+                  a.role === "evidence" &&
+                  (a.commit ||
+                    (a.observation !== null && sources.get(e.source)?.session_id === target.sessionId)),
+              )),
+        ) || anchors.some((a) => a.role === "evidence" && a.commit);
+      const takes = ["decision", "constraint"].includes(u.kind)
+        ? adoption.some((x) => x.route !== "agent")
+        : u.kind !== "implementation" || implemented();
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
@@ -825,7 +840,9 @@ async function agentRefusal(
   )
     return "quote the same words as decides evidence: the AI choosing, not reporting, proposing, or asking";
   const governs = anchors.filter((a) => a.role === "applies_to").map((a) => a.path);
-  const bound = governs.find((path) => instructionFile(path) || path.startsWith(".github/workflows/"));
+  const bound = governs.find(
+    (path) => instructionFile(path) || path.toLowerCase().startsWith(".github/workflows/"),
+  );
   if (bound) return `${bound} holds rules or CI agents follow; only the owner adopts decisions about it`;
   if (
     await db

@@ -2417,3 +2417,140 @@ test("agent adoption: glean takes no decides evidence, since only a trace pairs 
     await db.done();
   }
 });
+
+test("agent adoption: a CI path written in other letter case is still a CI path", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const r = reply("t1:assistant", "t1", "I keep the CI check disabled.");
+    const out = await save({
+      units: [
+        aiDecision("ci", r, "I keep the CI check disabled.", {
+          anchors: [{ path: ".github/WORKFLOWS/check.yml", role: "applies_to" }],
+        }),
+      ],
+    });
+    assert.equal(lifeOf(db, "ci"), "candidate");
+    assert.match(out, /holds rules or CI agents follow/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: an implementation that cannot become active takes no place from another in the same save", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "toCsv を直した。 toCsv を分けた。 toCsv をまた直した。" });
+    insert(db, "edit_observation", {
+      session_id: "s1",
+      turn_id: "t1",
+      path: "src/export.ts",
+      via: "tool",
+      observed_at: now,
+    });
+    const done = (key: string, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "implementation",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "implements" }],
+      anchors: [{ path: "src/export.ts", symbol: "toCsv", role: "evidence" }],
+      ...extra,
+    });
+    await save(db, target(p), { units: [done("old", "toCsv を直した。")] });
+    await save(db, target(p), {
+      units: [
+        {
+          key: "proposal",
+          kind: "implementation",
+          text: "toCsv を分けた",
+          evidence: [{ source: `s${m}`, quote: "toCsv を分けた。", role: "states" }],
+          supersedes: "trace:ext-s1/old",
+        },
+        done("good", "toCsv をまた直した。", { supersedes: "trace:ext-s1/old" }),
+      ],
+    });
+    assert.deepEqual(
+      ["old", "proposal", "good"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
+      ["superseded", "candidate", "active"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: glean's check refuses adopting a successor into a place another holds, as its save does", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Use SQLite. Maybe DuckDB. Use Postgres. Adopt both." });
+    const said = (key: string, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+      ...extra,
+    });
+    await save(db, target(p), { units: [said("old", "Use SQLite.")] });
+    await save(db, target(p), {
+      units: [
+        {
+          key: "waiting",
+          kind: "decision",
+          stance: "do",
+          text: "Maybe DuckDB.",
+          evidence: [{ source: `s${m}`, quote: "Maybe DuckDB.", role: "proposes" }],
+          supersedes: "trace:ext-s1/old",
+        },
+      ],
+    });
+    await save(db, target(p), {
+      units: [said("holder", "Use Postgres.", { supersedes: "trace:ext-s1/old" })],
+    });
+    const revision = Number(
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/waiting'").get()?.revision,
+    );
+    const gleaned: Target = {
+      projectId: p,
+      origin: "glean",
+      prefix: "glean:",
+      sessionId: "s1",
+      root: null,
+      sources: null,
+    };
+    const adopt = {
+      op: "adopt",
+      unit: "trace:ext-s1/waiting",
+      revision,
+      source: `s${m}`,
+      quote: "Adopt both.",
+    };
+    const refused = await checkGlean(db.ingest, gleaned, { units: [], ops: [adopt] });
+    assert.match(
+      refused.errors.join("\n"),
+      /trace:ext-s1\/old already has a successor, trace:ext-s1\/holder \(in effect\)/,
+    );
+    const holderRevision = Number(
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/holder'").get()?.revision,
+    );
+    const freed = await checkGlean(db.ingest, gleaned, {
+      units: [],
+      ops: [
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/holder",
+          revision: holderRevision,
+          source: `s${m}`,
+          quote: "Adopt both.",
+        },
+        adopt,
+      ],
+    });
+    assert.doesNotMatch(freed.errors.join("\n"), /already has a successor/);
+  } finally {
+    await db.done();
+  }
+});

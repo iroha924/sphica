@@ -316,6 +316,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `docs: match the READMEs and review and rules Skills to what the code does (T31)`
   - 結果: README（英日）の「呼び出し元が分からないときは候補に残る」を、実装どおり「headless・SDK・Codex では候補」と「記録ツールのターンを見分けられなかったとき（hook の時間切れ・無効）は、そのプロジェクトでそれ以後に Claude Code のエージェントが書いた応答がずっと候補」に分けた。永久に止まる点は Codex と議論し、env・時間の窓・後の hook の成功ではどのターンの呼び出しかを証明できないので、plan の方針 2 どおり止めたままにした（同じ tool use id で観測を送り直す経路は plan の変更になるので入れていない）。precedent.md は、レビュアーに見える理由（差分で足したコメント、起動側が渡したときのコミットメッセージや PR 本文）だけを認める。rules の下書きの AI の判断の行に `(decided by an AI)` を付ける。README に自動の trace は直近 14 日のセッションだけと足した。`node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`bun run verify` → 終了コード 0（受け入れ 127 pass）
 
+- [x] T32: ブランチ全体のレビュー指摘を直す（CI のパスは大文字小文字によらず、active になれない implementation は後継の枠を取らない、glean の check も埋まった枠への adopt を拒む）
+  - 種別: 修正
+  - 計画: S5, S7
+  - 依存: T31（全体のレビューの対象の最後のコミット）
+  - 変更: `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="other letter case|cannot become active takes no place|glean's check refuses adopting" test/record.test.ts` → 直す前は、`.github/WORKFLOWS/` に当たる AI の採用が active になり、コードの根拠の無い implementation の候補が同じ保存の後継を拒ませ、枠が埋まった候補への adopt を glean の check が通す
+  - 完了条件: `cd server && node --test --test-name-pattern="agent adoption|successor place" test/record.test.ts` → pass
+  - コミット: `fix(record): close the CI case, unsupported claims, and glean adopt check gaps (T32)`
+  - 結果: red を 3 件とも実測した（active、「another record in this save already supersedes」で保存全体を拒む、check のエラーなし）。CI のパスは小文字にして比べる。後継が枠を取るかは、decision と constraint は持ち主か maintainer の採用、implementation は `unit_support` と同じコードかコミットの根拠で決める。glean の check の adopt は、その記録のつもりの相手の枠をほかの後継が持っていれば、同じ glean でその後継を取り下げない限り save と同じ文で拒む。`bun run verify` → 終了コード 0（SQL 到達 210/210、受け入れ 127 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -358,3 +368,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T12 / 変更欄に `server/test/acceptance-cases.test.ts` を足した（層ごとの件数を固定しているので、新しい層 agent の 14 件を数えに足す）。伝聞の平文は意味に頼るので Sphica は見分けられず、受け入れでは機械で守る部分（decides でない引用は AI の採用にならない）だけを確かめた。コミットの件名（前: `…, and the auto trace notice (T12)` → 後: `…, auto trace notice (T12)`）。commit-msg の検査が 100 文字を超える件名（106 文字）を拒んだため
 - 2026-10-04 / T30 / T28・T10・T11・T29 の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T30 を足した
 - 2026-10-04 / T31 / T13・T14 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T31 を足した。review-shipping の指摘 2（hook の取りこぼし 1 回で AI の採用がプロジェクトごとずっと止まる）は Codex と議論し、plan どおり止めたままにして README に書いた
+- 2026-10-04 / T32 / ブランチ全体の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T32 を足した
