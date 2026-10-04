@@ -250,12 +250,13 @@ insert into sphica_migration_note
 select 'a replacement in effect, dated from when the record was last superseded', s.key || ' → ' || o.key, 'in effect since ' || x.started_at
 from unit_replacement x join unit s on s.id = x.from_unit join unit o on o.id = x.to_unit where x.ended_at is null;
 
--- Ended in the past: the successor's withdrawal brought the record back at that very moment (revision 9 wrote both together)
+-- Ended in the past: the successor in effect (active until then) was withdrawn, which brought the record back at that very moment
+-- (revision 9 wrote both together). A proposal withdrawn in the same save was never in effect, so it proves nothing
 insert into unit_replacement (from_unit, to_unit, run_id, started_at, ended_at, end_reason, end_run_id)
 select l.from_unit, l.to_unit, r.id, b.started, w.at, s.key || ' was withdrawn', r.id
 from unit_link l join unit s on s.id = l.from_unit join unit o on o.id = l.to_unit
 join temp.sphica_migration_run r on r.project_id = o.project_id
-join unit_state w on w.unit_id = s.id and w.to_state = 'withdrawn'
+join unit_state w on w.unit_id = s.id and w.to_state = 'withdrawn' and w.from_state = 'active'
 join (select t.unit_id, t.at, (select max(p.at) from unit_state p where p.unit_id = t.unit_id and p.to_state = 'superseded' and p.at <= t.at) as started
   from unit_state t where t.from_state = 'superseded' and t.to_state = 'candidate' and t.reason = 'its successor was withdrawn') b
   on b.unit_id = o.id and b.at = w.at

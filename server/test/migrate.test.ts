@@ -1656,3 +1656,38 @@ test("migrating revision 9 stops, changing nothing, when a record means to repla
   );
   assert.equal((raw.prepare("pragma user_version").get() as { user_version: number }).user_version, 9);
 });
+
+test("migrating revision 9 dates a past replacement only from the successor that was in effect, not one withdrawn with it", () => {
+  const { raw, decided, move, link } = rev9();
+  const o = decided("o");
+  const s = decided("s");
+  raw
+    .prepare(
+      "insert into unit (project_id, key, kind, stance, text, extraction, unsourced, run_id, created_at, content_hash) values (1, 'q', 'decision', 'do', 'q', 'supported', 1, 1, ?, ?)",
+    )
+    .run(now, sha256("q"));
+  const q = Number((raw.prepare("select id from unit where key = 'q'").get() as { id: number }).id);
+  raw
+    .prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'r', 1)",
+    )
+    .run(q, now);
+  move(o, "candidate", "active", now);
+  link(q, o);
+  link(s, o);
+  move(s, "candidate", "active", T1);
+  move(o, "active", "superseded", T1);
+  // One save withdraws both: q, never active, waited beside the place s held
+  move(q, "candidate", "withdrawn", T2);
+  move(s, "active", "withdrawn", T2);
+  migrate(raw);
+  assert.deepEqual(
+    raw
+      .prepare(
+        "select from_unit, started_at, ended_at from unit_replacement where to_unit = ? order by from_unit",
+      )
+      .all(o)
+      .map((r) => [r.from_unit, r.started_at, r.ended_at]),
+    [[s, T1, T2]],
+  );
+});

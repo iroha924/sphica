@@ -140,6 +140,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(schema): rebuild replacements and repair lifecycles when moving to revision 10 (T23)`
   - 結果: 移行の SQL が、今効いている置き換え（最後に superseded になった時刻から）と、取り下げで終わった過去の期間（取り下げと復帰が同じ時刻のものだけ）を行として戻し、日付の分からないつもりに `unit_replacement_gap` の印を付ける。そのあと同期版の `settleForMigration`（reconcile.ts。計画づくりは保存と同じ）が、状態の行を持つ記録をプロジェクトごとに判定し、差分を書いてメモに出す。複数のつもりを持つ記録があれば 0010.check.sql で止める。`cd server && node --test test/migrate.test.ts` → 47 pass / 0 fail（revision 9 の連鎖・過去の期間・印・判断し直し、複数のつもりで何も変えずに止まる、を含む）。`bun run verify` → 終了コード 0（SQL 到達 199/199、実 DB 10/10、受け入れ 105 pass）
 
+- [x] T27: T23 のレビュー指摘を直す（過去の期間は、取り下げの直前まで active だった後継からだけ戻す）
+  - 種別: 修正
+  - 計画: S16
+  - 依存: T23（直す対象の移行）
+  - 変更: `db/migrations/0010.sql`, `server/test/migrate.test.ts`
+  - red: `cd server && node --test --test-name-pattern="not one withdrawn with it" test/migrate.test.ts` → 直す前の移行は、同じ保存で一緒に取り下げた一度も active でない出典なしの候補にも、同じ過去の期間を作って落ちる
+  - 完了条件: `cd server && node --test test/migrate.test.ts` → pass
+  - コミット: `fix(schema): date a past replacement only from the successor that was in effect (T27)`
+  - 結果: red を実測（候補 q にも 9/21〜9/22 の期間ができて fail）。取り下げの行が active からのものだけを証拠にした。`node --test test/migrate.test.ts` → 48 pass / 0 fail
+
 - [x] T24: 読み手（search・overview・read・export・review・rules・record_context）を `unit_replacement` に合わせ、つもり・今の効き目・閉じた期間・印・待つ理由を分けて出す
   - 種別: 変更
   - 計画: S17
@@ -288,3 +298,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T24 / サブエージェントが別の作業ツリーで実装した T24（f826fda1）を取り込み、T26 まで入った状態で `node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts test/record.test.ts` → 97 pass を私が流して確かめた。T23 で作った `unit_replacement_gap` の印を read に出す 1 行を足した（T24 の時点では表が無かった）。`bun run verify` → 終了コード 0（SQL 到達 201/201）
 - 2026-10-04 / T05 / 保存・glean の操作の前後の確認は、T22 の reconcile（最後にもう一度判定して差分なし）がすべての操作で担うので、T05 では判定関数と共有する SQL に絞った。変更欄と完了条件を直し（前: record.ts・extract.ts・glean.ts の前後の確認 → 後: authority.ts・deliver.ts・read.ts と authority.test.ts）、`authorityOf` が未使用にならないよう、T07 の表示のうち read の見出しの 1 行を前倒しした
 - 2026-10-04 / T06 / 変更欄（前: record.ts と record.test.ts → 後: run の判定の extract.ts・record_check の呼び出しの mcp-record.ts・規約のファイルの判定を共有する rule-files.ts と export.ts・plan を足す）。止めるパスの一覧を、どのリポジトリにもある規約のファイルと CI の定義に直した（plan の方針 7 と変更履歴）。AI の採用が外れた理由が保存の出力に出ないと分かり、save でも check の注意を出すようにした
+- 2026-10-04 / T27 / T23・T26・T24 の Codex のレビュー（F1 P2: 取り下げと復帰が同じ時刻というだけで、一緒に取り下げた候補まで過去に効いていた後継として戻す）を受け、修正タスク T27 を足した。指摘はこの 1 件だけだった
