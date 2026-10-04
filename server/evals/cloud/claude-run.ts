@@ -305,7 +305,15 @@ export async function runClaude(o: {
     });
     child.stdin.end(o.prompt);
     const timer = setTimeout(() => child.kill("SIGTERM"), 30 * 60_000);
-    const status = await new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
+    // A claude that cannot start (not on the allowlisted PATH) emits error, not close: the run is still recorded below
+    let failedToStart: string | null = null;
+    const status = await new Promise<number | null>((resolve) => {
+      child.on("close", (code) => resolve(code));
+      child.on("error", (e) => {
+        failedToStart = e.message;
+        resolve(null);
+      });
+    });
     clearTimeout(timer);
     await Promise.all([new Promise((r) => events.end(r)), new Promise((r) => stderr.end(r))]);
     result.status = status;
@@ -350,8 +358,9 @@ export async function runClaude(o: {
       }
     }
     Object.assign(result, {
-      reason:
-        status !== 0
+      reason: failedToStart
+        ? `claude could not start: ${failedToStart}`
+        : status !== 0
           ? `claude exited ${status}`
           : !final
             ? "no result event"

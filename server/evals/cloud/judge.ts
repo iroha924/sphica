@@ -407,6 +407,26 @@ export function searchLoading(events: string | null): "deferred" | "loaded" | "u
   return handed ? "deferred" : "loaded";
 }
 
+/** What the agent sent in a run's stream: Claude's tool inputs and Codex's commands and tool arguments, one per line. */
+function agentInputs(events: string): string {
+  const out: string[] = [];
+  for (const line of events.split("\n")) {
+    try {
+      const e = JSON.parse(line) as {
+        type?: string;
+        message?: { content?: unknown };
+        item?: { type?: string; command?: unknown; arguments?: unknown };
+      };
+      if (e.type === "assistant" && Array.isArray(e.message?.content))
+        for (const c of e.message.content as { type?: string; input?: unknown }[])
+          if (c?.type === "tool_use") out.push(JSON.stringify(c.input ?? null));
+      if (e.type === "item.started" && e.item)
+        out.push(JSON.stringify([e.item.command ?? null, e.item.arguments ?? null]));
+    } catch {}
+  }
+  return out.join("\n");
+}
+
 /**
  * Whether a run's stream shows it reached outside its own run directory into the evaluation's other places: another run, the build (its
  * gold records), or the evaluation cache. The run's own paths are taken out first; any of the places still named in a command, a tool's
@@ -419,6 +439,9 @@ export function lookedOutside(events: string | null, own: string[], places: stri
   const spellings = (p: string) => [p, p.replaceAll("/", "\\/")];
   // A path that climbs out of the run's own directory (own/../other) leaves it, whatever it names next
   if (own.flatMap(spellings).some((o) => text.includes(`${o}/..`) || text.includes(`${o}\\/..`))) return true;
+  // From the checkout two steps up is the place every run is kept: a command or tool input that climbs that far may reach another
+  // run. Only what the agent sent counts here; file contents it read (import paths) often hold ../.. harmlessly
+  if (/(^|[^.\w])\.\.[\\/]+\.\.([\\/]|$)/.test(agentInputs(events))) return true;
   for (const o of own.flatMap(spellings).sort((a, b) => b.length - a.length)) text = text.replaceAll(o, "");
   return places.flatMap(spellings).some((p) => p && text.includes(p));
 }

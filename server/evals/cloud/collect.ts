@@ -39,6 +39,8 @@ const { values: args } = parseArgs({
     claude: { type: "string", default: path.join(CACHE, "claude-runs") },
     // A build run only locally: skip fetching result branches from the slot repositories
     "no-cloud": { type: "boolean", default: false },
+    // Record hidden tests as not run instead of stopping where they cannot be sandboxed (not macOS)
+    "skip-hidden-tests": { type: "boolean", default: false },
     // The local runs asked for, as [{ model, task, condition, n }]: what was not run, ran past n, or was not asked for stays as excluded
     "local-plan": { type: "string" },
   },
@@ -235,6 +237,29 @@ function reconcileLocal<
   return out;
 }
 
+/** A path as an SBPL string literal. */
+const sbpl = (p: string) => JSON.stringify(p);
+
+/** Whether any link in the checkout (outside .git) resolves outside it, or cannot be resolved. */
+function linksOutside(work: string): boolean {
+  const inside = fs.realpathSync(work);
+  const walk = (dir: string): boolean =>
+    fs.readdirSync(dir, { withFileTypes: true }).some((e) => {
+      const full = path.join(dir, e.name);
+      if (e.name === ".git" && dir === work) return false;
+      if (e.isSymbolicLink()) {
+        try {
+          const target = fs.realpathSync(full);
+          return target !== inside && !target.startsWith(inside + path.sep);
+        } catch {
+          return true;
+        }
+      }
+      return e.isDirectory() ? walk(full) : false;
+    });
+  return walk(work);
+}
+
 /**
  * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs only
  * on macOS, in sandbox-exec without network, under Node's permission model (reads only the checkout, no writes or child processes), with no inherited environment.
@@ -243,8 +268,15 @@ function hiddenTest(work: string, task: Task): string {
   if (!task.test) return "none";
   // The hidden test checks the original record's rule, which a swapped run is not given
   if (swapped) return "not run (swapped variant)";
+  if (args["skip-hidden-tests"]) return "not run (--skip-hidden-tests)";
+  // Scores without the hidden tests would read as a complete comparison, so a collector that cannot sandbox them stops
   if (process.platform !== "darwin")
-    return "not run (hidden tests run only on macOS, where sandbox-exec denies network)";
+    throw new Error(
+      "hidden tests run only on macOS, where sandbox-exec denies network; collect there, or pass --skip-hidden-tests to record them as not run",
+    );
+  if (!fs.existsSync(work)) return "not run (no checkout)";
+  // A link the patch made can point the task module at a file outside the checkout: such a run fails its hidden test without running it
+  if (linksOutside(work)) return "0 passed, 1 failed (a link in the checkout points outside it)";
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
   const testDir = path.join(work, "test");
   const dirStat = fs.lstatSync(testDir, { throwIfNoEntry: false });
@@ -258,7 +290,9 @@ function hiddenTest(work: string, task: Task): string {
     "/usr/bin/sandbox-exec",
     [
       "-p",
-      "(version 1)(allow default)(deny network*)",
+      // No network, and no file contents under the home directory but the checkout's and the Node's that runs the test (metadata stays
+      // readable: Node stats the checkout's parents)
+      `(version 1)(allow default)(deny network*)(deny file-read-data (subpath ${sbpl(os.homedir())}))(allow file-read-data (subpath ${sbpl(inside)}) (subpath ${sbpl(path.dirname(path.dirname(fs.realpathSync(process.execPath))))}))`,
       process.execPath,
       "--permission",
       `--allow-fs-read=${inside}`,

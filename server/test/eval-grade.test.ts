@@ -1744,7 +1744,7 @@ test("compare refuses two builds run by different models of the same family", ()
         side("new", 'c2 {"deliver.js":"b"}', "claude-sonnet-5-5"),
         [{ id: "t1" }],
       ),
-    /different claude models/,
+    /different models/,
   );
   assert.doesNotThrow(() =>
     compare(
@@ -1765,4 +1765,33 @@ test("a Codex run's model is read from its own CODEX_HOME", (t) => {
   assert.equal(codexModelOf(home), "gpt-6.1-sol, medium");
   fs.writeFileSync(path.join(home, "config.toml"), "\n");
   assert.equal(codexModelOf(home), null);
+});
+
+test("compare checks the models task by task, so swapping which model ran which task is refused", () => {
+  const r = (task: string, model: string) => ({
+    ...row,
+    model: "claude" as const,
+    task,
+    run: `${task}-${model}`,
+    excluded: null,
+    patch: "",
+    patch_truncated: false,
+    agent_model: model,
+    grade,
+  });
+  const side = (label: string, bundle: string, rows: ReturnType<typeof r>[]) => ({
+    label,
+    fixture: "f",
+    tasks: "{}",
+    build: { build: label, variant: "original", bundle, rows },
+  });
+  assert.throws(
+    () =>
+      compare(
+        side("old", 'c1 {"deliver.js":"a"}', [r("t1", "x"), r("t2", "y")]),
+        side("new", 'c2 {"deliver.js":"b"}', [r("t1", "y"), r("t2", "x")]),
+        [{ id: "t1" }, { id: "t2" }],
+      ),
+    /ran t1 claude inject with different models/,
+  );
 });

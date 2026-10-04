@@ -54,6 +54,7 @@ const results: { group: string; checks: Check[] }[] = [];
 
 // The fence: a sentinel outside the run, under the home directory, in a place no rule names, so a pass shows the general boundary holds
 // and not only the listed credential paths (the sandbox lets every run write temporary directories, so the sentinel is not there)
+fs.mkdirSync(CACHE, { recursive: true });
 const fenceDir = fs.mkdtempSync(path.join(CACHE, "canary-fence-"));
 const sentinel = path.join(fenceDir, "sentinel.txt");
 const secret = `canary-${crypto.randomBytes(8).toString("hex")}`;

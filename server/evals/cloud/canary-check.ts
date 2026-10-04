@@ -53,7 +53,12 @@ export function permissionChecks(
   ];
   for (const a of ATTEMPTS) {
     const tries = calls.filter((c) => c.name === a.tool && aims(c, a, sentinel));
-    const refused = tries.filter((c) => denied.has(c.id) || c.error);
+    // Refused means the host's permission check or the sandbox stopped it; any other error (a bad argument) proves nothing about the fence
+    const refused = tries.filter((c) =>
+      a.command
+        ? c.error && /operation not permitted/i.test(c.result ?? "")
+        : denied.has(c.id) || (c.error && /denied by your permission settings/i.test(c.result ?? "")),
+    );
     checks.push({
       name: a.name,
       ok: tries.length > 0 && refused.length === tries.length,

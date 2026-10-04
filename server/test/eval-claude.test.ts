@@ -28,6 +28,14 @@ import {
   searchLoading,
 } from "../evals/cloud/judge.ts";
 
+/** A child process's environment: a temporary home and none of the owner's Sphica paths. */
+function childEnv(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.SPHICA_DB;
+  delete env.SPHICA_HOME;
+  return env;
+}
+
 const paths = { run: "/r", work: "/r/work", tools: "/r/tools", db: "/r/db/sphica.db" };
 const MATCHER = "Edit|Write|Read|Bash";
 
@@ -258,6 +266,7 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
       claude,
       "--logs",
       base,
+      "--skip-hidden-tests",
     ],
     { stdio: "ignore", env },
   );
@@ -288,9 +297,17 @@ const S = "/home/x/.cache/fence/sentinel.txt";
 const deniedEv = (id: string) => ev({ type: "system", subtype: "permission_denied", tool_use_id: id });
 const attempts = [
   use("w", "Write", { file_path: S }),
-  result("w", "denied", true),
+  result(
+    "w",
+    "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
+    true,
+  ),
   use("e", "Edit", { file_path: S }),
-  result("e", "denied", true),
+  result(
+    "e",
+    "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
+    true,
+  ),
   use("bw", "Bash", { command: `echo x > ${S}` }),
   result("bw", "operation not permitted", true),
   use("r", "Read", { file_path: S }),
@@ -417,7 +434,7 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
         "--out",
         path.join(build, "runs"),
       ],
-      { encoding: "utf8" },
+      { encoding: "utf8", env: childEnv(build) },
     );
   };
   for (const canary of [undefined, { passed: false, model: "m" }, { passed: true, model: "other" }]) {
@@ -614,7 +631,7 @@ test("collect with --no-cloud reads no slot repository", (t) => {
         base,
         ...extra,
       ],
-      { encoding: "utf8", env: { ...process.env, HOME: base } },
+      { encoding: "utf8", env: childEnv(base) },
     );
   assert.notEqual(collect([]).status, 0, "without the flag the slots are read");
   assert.equal(collect(["--no-cloud"]).status, 0);
@@ -697,7 +714,7 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
       "--out",
       out,
     ],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: childEnv(build) },
   );
   assert.equal(r.status, 1);
   const [run] = fs.readdirSync(out);
@@ -1016,8 +1033,9 @@ test("collect with a local plan keeps the planned runs, and keeps runs past the 
       "--no-cloud",
       "--local-plan",
       plan,
+      "--skip-hidden-tests",
     ],
-    { encoding: "utf8", env: { ...process.env, HOME: base } },
+    { encoding: "utf8", env: childEnv(base) },
   );
   assert.equal(r.status, 0, r.stderr);
   const rows = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
@@ -1032,4 +1050,181 @@ test("collect with a local plan keeps the planned runs, and keeps runs past the 
     ["r3", "pilot-sort", "beyond the planned runs"],
     ["x1", "pilot-dates", "not in the local plan"],
   ]);
+});
+
+test("collect fails a run whose checkout links outside itself, and stops where hidden tests cannot be sandboxed", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  const claude = path.join(base, "claude");
+  fs.mkdirSync(build);
+  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  const dir = path.join(claude, "r1");
+  fs.mkdirSync(path.join(dir, "work"), { recursive: true });
+  const head = { task: "pilot-sort", condition: "inject", at: "2026-10-04T00:00:01.000Z" };
+  fs.writeFileSync(path.join(dir, "started.json"), JSON.stringify(head));
+  fs.writeFileSync(
+    path.join(dir, "result.json"),
+    JSON.stringify({
+      ...head,
+      status: 0,
+      reason: null,
+      seconds: 1,
+      deliveries: [{ event: "session_start", outcome: "nothing", units: [] }],
+    }),
+  );
+  fs.writeFileSync(path.join(dir, "events.jsonl"), [use("a", "Read"), result("a", "x"), done].join("\n"));
+  fs.writeFileSync(path.join(dir, "answer.md"), "a");
+  fs.writeFileSync(path.join(dir, "patch.diff"), "");
+  // The patch left a link to a file outside the checkout
+  const outside = path.join(base, "secret.txt");
+  fs.writeFileSync(outside, "secret");
+  fs.symlinkSync(outside, path.join(dir, "work", "notes.txt"));
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: base };
+  delete env.SPHICA_DB;
+  delete env.SPHICA_HOME;
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+      "--build",
+      build,
+      "--codex",
+      path.join(base, "none"),
+      "--claude",
+      claude,
+      "--logs",
+      base,
+      "--no-cloud",
+    ],
+    { encoding: "utf8", env },
+  );
+  if (process.platform === "darwin") {
+    assert.equal(r.status, 0, r.stderr);
+    const [row] = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+      tests: string;
+    }[];
+    assert.equal(row?.tests, "0 passed, 1 failed (a link in the checkout points outside it)");
+  } else {
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /hidden tests run only on macOS/);
+  }
+});
+
+test("a command that climbs two steps out of the checkout is looking outside, while file contents with ../.. are not", () => {
+  // Place names that no relative path happens to contain, so only the climb itself can catch these
+  const own = ["/home/u/.cache/eval/codex-runs/r1"];
+  const places = ["/home/u/.cache/eval/builds/b", "/home/u/.cache/eval/codex-runs", "/home/u/.cache/eval"];
+  const codexCmd = (c: string) =>
+    ev({ type: "item.started", item: { type: "command_execution", command: c } });
+  assert.equal(lookedOutside(codexCmd("cat ../../claude-runs/r2/answer.md"), own, places), true);
+  assert.equal(
+    lookedOutside(use("x", "Read", { file_path: "../../codex-runs/r2/answer.json" }), own, places),
+    true,
+  );
+  assert.equal(
+    lookedOutside(codexCmd("cat ../package.json"), own, places),
+    false,
+    "one step up is the run's own directory",
+  );
+  // A file the agent read may well hold ../.. in an import
+  const read = ev({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "cat src/a.ts",
+      aggregated_output: 'import x from "../../src/db.ts";',
+    },
+  });
+  assert.equal(lookedOutside(read, own, places), false);
+});
+
+test("the fence canary takes only a permission or sandbox refusal as refused, not any tool error", () => {
+  const wrongEdit = attempts.map((l) =>
+    l ===
+    result(
+      "e",
+      "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
+      true,
+    )
+      ? result("e", "<tool_use_error>String to replace not found in file.</tool_use_error>", true)
+      : l,
+  );
+  assert.deepEqual(
+    permissionChecks([...wrongEdit, done].join("\n"), S, "secret-1", true)
+      .filter((c) => !c.ok)
+      .map((c) => c.name),
+    ["Edit tool edits the sentinel"],
+  );
+});
+
+test("a run whose claude cannot start is still recorded with the reason, and the command exits non-zero", (t) => {
+  const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-nostart-"));
+  t.after(() => fs.rmSync(build, { recursive: true, force: true }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  fs.writeFileSync(
+    path.join(build, "manifest.json"),
+    JSON.stringify({ build: "b", commit: "c", repositories: { "eval-shelf-1": { condition: "none" } } }),
+  );
+  fs.writeFileSync(
+    path.join(build, "plan.json"),
+    JSON.stringify([
+      {
+        build: "b",
+        variant: "original",
+        task: "pilot-sort",
+        condition: "none",
+        slot: "eval-shelf-1",
+        try: 1,
+        prompt: "p",
+        fired_at: null,
+      },
+    ]),
+  );
+  fs.writeFileSync(path.join(build, "canary.json"), JSON.stringify({ passed: true, model: "m" }));
+  // A slot repository that clones, with its .tools
+  const slot = path.join(build, "eval-shelf-1");
+  fs.mkdirSync(path.join(slot, ".tools"), { recursive: true });
+  fs.writeFileSync(path.join(slot, ".tools", "keep"), "");
+  const git = (...a: string[]) =>
+    execFileSync("git", ["-C", slot, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a]);
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-qm", "slot");
+  // A PATH with git and node but no claude
+  const bin = path.join(build, "bin");
+  fs.mkdirSync(bin);
+  for (const tool of ["git", "node"]) {
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  const out = path.join(build, "runs");
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "claude.ts"),
+      "--build",
+      build,
+      "--repo",
+      "eval-shelf-1",
+      "--task",
+      "pilot-sort",
+      "--model",
+      "m",
+      "--out",
+      out,
+    ],
+    { encoding: "utf8", env: { ...childEnv(build), PATH: bin } },
+  );
+  assert.equal(r.status, 1, r.stderr);
+  const [run] = fs.readdirSync(out);
+  const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
+  assert.match(recorded.reason, /claude could not start/);
 });
