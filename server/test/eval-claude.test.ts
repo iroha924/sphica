@@ -1297,3 +1297,17 @@ test("the runner reads a checkout through its pinned git directory, so config th
   assert.equal(fs.existsSync(path.join(outside, "ran")), false, "nothing the agent configured ran");
   assert.match(patch, /^\+2$/m);
 });
+
+test("a writer whose result never came leaves the edit order unknown, not no_edit", () => {
+  const events = [use("w", "Write", { file_path: "a.ts" }), use("r", "Read"), result("r", "1"), done].join(
+    "\n",
+  );
+  const marks = JSON.stringify({ after: "r", changed: false, in_flight: ["w"], late: false });
+  assert.equal(searchedBeforeEdit(events, marks), "unknown");
+  // With every writer answered and nothing changed, there was no edit
+  const answered = [use("r", "Read"), result("r", "1"), done].join("\n");
+  assert.equal(
+    searchedBeforeEdit(answered, JSON.stringify({ after: "r", changed: false, in_flight: [], late: false })),
+    "no_edit",
+  );
+});

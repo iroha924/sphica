@@ -392,7 +392,8 @@ export function searchedBeforeEdit(
   // A mark read late may have missed a change a later call undid, so no late mark up to the first change can be trusted
   if (parsed.slice(0, at0 < 0 ? parsed.length : at0 + 1).some((m) => m.late || tangled(m))) return "unknown";
   const first = parsed[at0];
-  if (!first) return "no_edit";
+  // A writer whose result never came may have changed the tree after the last mark
+  if (!first) return calls.some((c) => c.result === null && writes(c.id)) ? "unknown" : "no_edit";
   // A change seen while a writer was still running may be that writer's
   if (first.in_flight.some(writes)) return "unknown";
   const at = calls.findIndex((c) => c.id === first.after);
