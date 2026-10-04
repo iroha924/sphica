@@ -57,6 +57,7 @@ const CAPTURE_VIEWS = new Set([
   "capture_session",
   "capture_message",
   "capture_edit",
+  "capture_tool_call",
   "capture_delivery",
   "capture_delivery_scoped",
   "capture_delivery_prune",
@@ -67,6 +68,7 @@ const TRIGGER_WRITES: Record<string, Set<string>> = {
   capture_session_insert: new Set(["session"]),
   capture_message_insert: new Set(["source"]),
   capture_edit_insert: new Set(["edit_observation"]),
+  capture_tool_call_insert: new Set(["tool_call_observation"]),
   capture_delivery_insert: new Set(["delivery", "delivery_unit"]),
   capture_delivery_scoped_insert: new Set(["delivery", "delivery_unit"]),
   source_fts_ai: new Set(["source_fts"]),
@@ -138,6 +140,7 @@ const writes = (action: number) =>
 /** The statements the record server writes itself: its tables, and for an update the columns it sets. Everything else is refused. */
 const INGEST_INSERTS = new Set([
   "project",
+  "record_call",
   "ingest_source",
   "extraction_run",
   "source_processing",

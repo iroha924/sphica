@@ -411,7 +411,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 9);
+  assert.equal(one("pragma user_version").user_version, 10);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -1433,4 +1433,155 @@ test("a field value is sealed with its unit, fits its field's kinds and type, an
   assert.equal(Number(one("select count(*) as n from field_def").n), 0);
   assert.ok(revision() > after);
   assert.deepEqual(hits("acme"), []);
+});
+
+// An AI reply in a session, with its turn; a question it asked through AskUserQuestion carries `:ask:...:q:` in its id
+const reply = (id: string, turn: string, sent: string, sessionId = "s1", host = "claude-code") => {
+  session(db, p, sessionId, host);
+  return insert(db, "source", {
+    project_id: p,
+    kind: "session_message",
+    artifact: `session:${sessionId}`,
+    external_id: id,
+    revision: 1,
+    session_id: sessionId,
+    turn_id: turn,
+    author_kind: "assistant",
+    created_at: at(sent),
+    captured_at: at(sent),
+    text: "I keep it as is.",
+    original_bytes: 16,
+    content_hash: sha256(id),
+    indexed: 0,
+  });
+};
+const call = (v: Values) =>
+  insert(db, "record_call", {
+    project_id: p,
+    tool: "trace_begin",
+    mode: "interactive",
+    called_at: now,
+    ...v,
+  });
+// A run begun by a call in the given mode
+const runBy = (mode: string) => {
+  const c = call({ host: "claude-code", caller_session: "ext-s9", tool_use_id: `toolu_${mode}`, mode });
+  return insert(db, "extraction_run", {
+    project_id: p,
+    origin: "trace",
+    target: "session:s1",
+    status: "running",
+    begin_call_id: c,
+    started_at: now,
+  });
+};
+
+test("decides quotes the AI's own reply, never the owner, a question it asked, or an option", () => {
+  const u = unit({ key: "keep", kind: "decision" });
+  const owner = message(db, p, { id: "o1", text: "Keep it as is." });
+  refuses(() => evidence(u, owner, { role: "decides" }), /decides quotes the AI choosing in its own reply/);
+  const asked = reply("t1:ask:toolu_1:q:abc", "t1", "2026-09-10T00:00:00Z");
+  refuses(() => evidence(u, asked, { role: "decides" }), /decides quotes the AI choosing in its own reply/);
+  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
+  const o = insert(db, "unit_option", { unit_id: u, position: 1, text: "keep", outcome: "chosen" });
+  refuses(
+    () => evidence(u, said, { role: "decides", option_id: o }),
+    /decides quotes the AI choosing in its own reply/,
+  );
+  evidence(u, said, { role: "decides" });
+});
+
+test("agent adoption pairs with live decides evidence and needs a run an interactive session began", () => {
+  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
+  const live = (mode: string) => {
+    const r = runBy(mode);
+    const u = unit({ key: `keep-${mode}`, kind: "decision" }, p, r);
+    return { u, r };
+  };
+  const { u } = live("interactive");
+  refuses(() => adoption(u, said, { route: "agent" }), /agent adoption pairs with live decides evidence/);
+  evidence(u, said, { role: "states" });
+  refuses(() => adoption(u, said, { route: "agent" }), /agent adoption pairs with live decides evidence/);
+  evidence(u, said, { role: "decides" });
+  adoption(u, said, { route: "agent" });
+  state(u, null, "candidate");
+  state(u, "candidate", "active");
+  assert.equal(one("select lifecycle from unit where id = ?", u).lifecycle, "active");
+  for (const mode of ["headless", "sdk", "unknown"]) {
+    const { u: v } = live(mode);
+    evidence(v, said, { role: "decides" });
+    refuses(
+      () => adoption(v, said, { route: "agent" }),
+      /agent adoption needs a run begun by an interactive session/,
+    );
+  }
+  // A run with no begin call (written before calls were logged) never adopts for the AI
+  const old = unit({ key: "old", kind: "decision" });
+  evidence(old, said, { role: "decides" });
+  refuses(
+    () => adoption(old, said, { route: "agent" }),
+    /agent adoption needs a run begun by an interactive session/,
+  );
+});
+
+test("replies from a turn that ran a record tool, or that no call can be placed away from, never carry agent adoption", () => {
+  const ineligible = () =>
+    (
+      db.owner.prepare("select source_id from agent_ineligible_source order by source_id").all() as {
+        source_id: number;
+      }[]
+    ).map((r) => r.source_id);
+  // Codex names its session and turn in the call
+  const cx1 = reply("c1:assistant", "c1", "2026-09-10T00:00:01Z", "cx", "codex");
+  const cx2 = reply("c2:assistant", "c2", "2026-09-10T00:00:02Z", "cx", "codex");
+  call({ host: "codex", caller_session: "ext-cx", caller_turn: "c1" });
+  assert.deepEqual(ineligible(), [cx1]);
+  // Claude Code's turn comes from the PreToolUse hook, joined by the tool use id
+  const cl1 = reply("k1:assistant", "k1", "2026-09-10T00:00:01Z", "cl");
+  const cl2 = reply("k2:assistant", "k2", "2026-09-10T00:00:02Z", "cl");
+  call({ host: "claude-code", caller_session: "ext-cl", tool_use_id: "toolu_k2" });
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: "ext-cl",
+    turn_id: "k2",
+    tool_use_id: "toolu_k2",
+    tool_name: "mcp__plugin_sphica_record__trace_begin",
+    owner_turn: 1,
+    observed_at: now,
+  });
+  assert.deepEqual(ineligible(), [cx1, cl2]);
+  // A Codex call naming no turn rules out its whole session
+  call({ host: "codex", caller_session: "ext-cx" });
+  assert.deepEqual(ineligible(), [cx1, cx2, cl2]);
+  // A Claude Code call the hook never saw rules out, in every session of its host, the first reply turn at or after it
+  const late = reply("k3:assistant", "k3", "2026-09-27T00:00:05Z", "cl");
+  const later = reply("k4:assistant", "k4", "2026-09-27T00:00:09Z", "cl");
+  const elsewhere = reply("m1:assistant", "m1", "2026-09-27T00:00:07Z", "cl2");
+  call({ host: "claude-code", caller_session: "ext-cl", tool_use_id: "toolu_unseen" });
+  assert.deepEqual(ineligible(), [cx1, cx2, cl2, late, elsewhere]);
+  assert.ok(!ineligible().includes(cl1) && !ineligible().includes(later));
+  const said = cl2;
+  const r = runBy("interactive");
+  const u = unit({ key: "report", kind: "decision" }, p, r);
+  evidence(u, said, { role: "decides" });
+  refuses(
+    () => adoption(u, said, { route: "agent" }),
+    /cannot cite a reply from a turn that ran a record tool/,
+  );
+});
+
+test("record tool calls are never changed, and capture writes a hook's observation once through its view", () => {
+  const c = call({ host: "codex", caller_session: "ext-cx", caller_turn: "c1" });
+  refuses(
+    () => sql("update record_call set mode = 'headless' where id = ?", c),
+    /record tool calls are never changed/,
+  );
+  const observe = () =>
+    sql(
+      "insert into capture_tool_call (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 'ext-s1', 't1', 'toolu_1', 'mcp__plugin_sphica_record__trace_begin', 1, ?)",
+      now,
+    );
+  observe();
+  observe();
+  assert.equal(one("select count(*) as n from tool_call_observation").n, 1);
 });

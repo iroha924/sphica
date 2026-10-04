@@ -686,3 +686,44 @@ test("the forget connection keeps secure_delete on and changes only the unit and
   ])
     assert.equal(attempt(forget, allowed), null, allowed);
 });
+
+test("the record server logs record tool calls, and only the hook's capture view writes an observation", () => {
+  assert.equal(
+    attempt(
+      ingest,
+      "insert into record_call (project_id, tool, host, caller_session, mode, called_at) values (?, 'trace_begin', 'codex', 'cx', 'interactive', ?)",
+      p,
+      now,
+    ),
+    null,
+  );
+  assert.match(attempt(ingest, "update record_call set mode = 'headless'") ?? "", /not authorized/);
+  assert.match(
+    attempt(
+      ingest,
+      "insert into tool_call_observation (host, session_external, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 's', 'toolu_1', 't', 1, ?)",
+      now,
+    ) ?? "",
+    /not authorized/,
+  );
+  const observe =
+    "insert into capture_tool_call (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 's', 't1', 'toolu_1', 'mcp__plugin_sphica_record__trace_begin', 1, ?)";
+  assert.equal(attempt(capture, observe, now), null);
+  assert.match(
+    attempt(
+      capture,
+      "insert into tool_call_observation (host, session_external, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 's', 'toolu_2', 't', 1, ?)",
+      now,
+    ) ?? "",
+    /not authorized/,
+  );
+  assert.match(
+    attempt(
+      capture,
+      "insert into record_call (project_id, tool, mode, called_at) values (?, 't', 'unknown', ?)",
+      p,
+      now,
+    ) ?? "",
+    /not authorized/,
+  );
+});

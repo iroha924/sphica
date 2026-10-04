@@ -9,6 +9,10 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export interface AgentIneligibleSource {
+  source_id: number | null;
+}
+
 export interface ArtifactLink {
   from_artifact: string;
   kind: string;
@@ -80,6 +84,16 @@ export interface CaptureSession {
   started_at: string | null;
 }
 
+export interface CaptureToolCall {
+  host: string | null;
+  observed_at: string | null;
+  owner_turn: number | null;
+  session_external: string | null;
+  tool_name: string | null;
+  tool_use_id: string | null;
+  turn_id: string | null;
+}
+
 export interface Delivery {
   agent_id: string | null;
   at: string;
@@ -110,6 +124,7 @@ export interface EditObservation {
 }
 
 export interface ExtractionRun {
+  begin_call_id: number | null;
   draft_id: string | null;
   finished_at: string | null;
   id: Generated<number>;
@@ -188,6 +203,19 @@ export interface Project {
   name: string;
 }
 
+export interface RecordCall {
+  called_at: string;
+  caller_session: string | null;
+  caller_turn: string | null;
+  host: string | null;
+  id: Generated<number>;
+  mode: string;
+  mode_raw: string | null;
+  project_id: number;
+  tool: string;
+  tool_use_id: string | null;
+}
+
 export interface Session {
   branch: string | null;
   external_id: string;
@@ -249,6 +277,17 @@ export interface SourceProcessing {
 
 export interface SphicaGeneration {
   generation: number;
+}
+
+export interface ToolCallObservation {
+  host: string;
+  id: Generated<number>;
+  observed_at: string;
+  owner_turn: number;
+  session_external: string;
+  tool_name: string;
+  tool_use_id: string;
+  turn_id: string | null;
 }
 
 export interface Unit {
@@ -403,6 +442,7 @@ export interface Work {
 }
 
 export interface DB {
+  agent_ineligible_source: AgentIneligibleSource;
   artifact_link: ArtifactLink;
   capture_delivery: CaptureDelivery;
   capture_delivery_prune: CaptureDeliveryPrune;
@@ -410,6 +450,7 @@ export interface DB {
   capture_edit: CaptureEdit;
   capture_message: CaptureMessage;
   capture_session: CaptureSession;
+  capture_tool_call: CaptureToolCall;
   delivery: Delivery;
   delivery_unit: DeliveryUnit;
   edit_observation: EditObservation;
@@ -419,11 +460,13 @@ export interface DB {
   ingest_source: IngestSource;
   owner_identity: OwnerIdentity;
   project: Project;
+  record_call: RecordCall;
   session: Session;
   source: Source;
   source_forgotten: SourceForgotten;
   source_processing: SourceProcessing;
   sphica_generation: SphicaGeneration;
+  tool_call_observation: ToolCallObservation;
   unit: Unit;
   unit_adoption: UnitAdoption;
   unit_alias: UnitAlias;

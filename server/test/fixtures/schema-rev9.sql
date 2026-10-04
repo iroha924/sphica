@@ -213,42 +213,6 @@ create index edit_observation_path on edit_observation (path);
 
 -- One extraction by trace, harvest, or glean. target names what it read: `session:<uuid>`, `pr:<n>`, or `glean`.
 -- A migration that changes lifecycles records itself as a run too (origin migration, target `revision:<n>`), so each change names where it came from.
--- Each record tool call as the record server saw it, written and committed before the call does anything, so a failed call keeps its row.
--- Who called comes from what the host passes (caller.ts): Codex's session and turn, or Claude Code's tool use id, which the PreToolUse
--- hook's tool_call_observation joins to a session and turn.
-create table record_call (
-  id integer primary key autoincrement not null,
-  project_id integer not null references project (id) on delete cascade,
-  tool text not null check (tool <> ''),
-  host text check (host in ('claude-code', 'codex')),
-  caller_session text,
-  caller_turn text,
-  tool_use_id text,
-  mode text not null check (mode in ('interactive', 'headless', 'sdk', 'unknown')),
-  mode_raw text,
-  called_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', called_at) is called_at)
-) strict;
-create index record_call_project on record_call (project_id, host, called_at);
-create index record_call_caller on record_call (host, caller_session, caller_turn);
-create index record_call_tool_use on record_call (tool_use_id) where tool_use_id is not null;
-create trigger record_call_frozen before update on record_call begin
-  select raise(abort, 'record tool calls are never changed');
-end;
-
--- Record tool calls as Claude Code's PreToolUse hook saw them, written before the tool runs: the hook input names the session and turn
--- the MCP call itself does not carry.
-create table tool_call_observation (
-  id integer primary key autoincrement not null,
-  host text not null check (host in ('claude-code', 'codex')),
-  session_external text not null check (session_external <> ''),
-  turn_id text,
-  tool_use_id text not null check (tool_use_id <> ''),
-  tool_name text not null check (tool_name <> ''),
-  owner_turn integer not null check (owner_turn in (0, 1)),
-  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at),
-  unique (host, tool_use_id)
-) strict;
-
 create table extraction_run (
   id integer primary key autoincrement not null,
   project_id integer not null references project (id) on delete cascade,
@@ -259,21 +223,18 @@ create table extraction_run (
   input_bytes integer check (input_bytes >= 0),
   -- The CLI-issued draft this run saves. A saved run's draft saves nothing again; the draft is bound to this run's project and target
   draft_id text unique,
-  -- The record tool call that began this run; save compares its own caller with it
-  begin_call_id integer references record_call (id),
   started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
   finished_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', finished_at) is finished_at),
   check (finished_at >= started_at)
 ) strict;
 create index extraction_run_project on extraction_run (project_id);
 create index extraction_run_session on extraction_run (session_id) where session_id is not null;
-create index extraction_run_begin_call on extraction_run (begin_call_id) where begin_call_id is not null;
 
 -- A run changes once, when it finishes: only a running run takes a status and a finish time. The one other update is the foreign key
 -- action clearing session_id after its session was deleted
 create trigger extraction_run_frozen before update on extraction_run
 when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
-  or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id or new.begin_call_id is not old.begin_call_id
+  or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
   or new.started_at is not old.started_at
   or (new.session_id is not old.session_id and (new.session_id is not null or exists (select 1 from session where id = old.session_id)))
   or ((new.status is not old.status or new.finished_at is not old.finished_at) and old.status <> 'running') begin
@@ -380,7 +341,7 @@ create table unit_evidence (
   source_id integer not null references source (id) on delete cascade,
   span_start integer not null check (span_start >= 0),
   span_end integer not null check (span_end > span_start),
-  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements', 'reconsiders', 'decides')),
+  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements', 'reconsiders')),
   -- A third party the owner reported ("X said ..."): hearsay by the owner, never X's own statement
   reported_speaker text,
   run_id integer not null references extraction_run (id),
@@ -406,13 +367,12 @@ create index unit_evidence_option on unit_evidence (unit_id, option_id);
 create index unit_evidence_retraction on unit_evidence (retraction_source_id) where retraction_source_id is not null;
 create index unit_evidence_run on unit_evidence (run_id);
 
--- Evidence that the project adopted a decision or constraint. route: owner_statement (an owner-kind source span),
--- explicit (an explicit disposition in a source, such as a maintainer's reply saying it is adopted), or agent (the AI deciding in its own
--- reply, paired with the same span's decides evidence, saved by an interactive session's run). A merge or a resolved thread is never adoption.
+-- Evidence that the project adopted a decision or constraint. route: owner_statement (an owner-kind source span) or
+-- explicit (an explicit disposition in a source, such as a maintainer's reply saying it is adopted). A merge or a resolved thread is never adoption.
 create table unit_adoption (
   id integer primary key autoincrement not null,
   unit_id integer not null references unit (id) on delete cascade,
-  route text not null check (route in ('owner_statement', 'explicit', 'agent')),
+  route text not null check (route in ('owner_statement', 'explicit')),
   source_id integer not null references source (id) on delete cascade,
   span_start integer not null check (span_start >= 0),
   span_end integer not null check (span_end > span_start),
@@ -445,15 +405,6 @@ create trigger unit_adoption_route before insert on unit_adoption begin
   where exists (select 1 from source where id = new.source_id and kind = 'pr_event');
   select raise(abort, 'adoption applies to decisions and constraints')
   where not exists (select 1 from unit where id = new.unit_id and kind in ('decision', 'constraint'));
-  select raise(abort, 'agent adoption pairs with live decides evidence on the same span of the unit')
-  where new.route = 'agent' and not exists (select 1 from unit_evidence e where e.unit_id = new.unit_id and e.option_id is null
-    and e.role = 'decides' and e.source_id = new.source_id and e.span_start = new.span_start and e.span_end = new.span_end
-    and e.retracted_at is null);
-  select raise(abort, 'agent adoption needs a run begun by an interactive session')
-  where new.route = 'agent' and not exists (select 1 from extraction_run r join record_call c on c.id = r.begin_call_id
-    where r.id = new.run_id and c.mode = 'interactive');
-  select raise(abort, 'agent adoption cannot cite a reply from a turn that ran a record tool, or one no record tool call can be placed away from')
-  where new.route = 'agent' and exists (select 1 from agent_ineligible_source where source_id = new.source_id);
 end;
 
 create table unit_link (
@@ -610,28 +561,11 @@ end;
 -- What an active unit must have, in one place: missing says what it lacks, and is null when it lacks nothing. Activating reads it, and so
 -- does every change that can take support away (a retraction, retiring an anchor), so the two never disagree.
 -- Evidence on an option supports the option, never the unit.
--- Assistant replies that never carry agent adoption: from a turn that ran a record tool (a trace report must not become a decision), from a
--- session whose call named no turn, and, for a call no hook or host placed, the first reply turn at or after it in every session of the project.
-create view agent_ineligible_source as
-select s.id as source_id from source s join session se on se.id = s.session_id
-where s.kind = 'session_message' and s.author_kind = 'assistant' and (
-  exists (select 1 from record_call c where c.host = 'codex' and se.host = 'codex' and c.caller_session = se.external_id
-    and (c.caller_turn is null or c.caller_turn = s.turn_id))
-  or exists (select 1 from record_call c join tool_call_observation o on o.host = 'claude-code' and o.tool_use_id = c.tool_use_id
-    where se.host = 'claude-code' and o.session_external = se.external_id and (o.turn_id is null or o.turn_id = s.turn_id))
-  or exists (select 1 from record_call c where c.project_id = se.project_id and (c.host is null or c.host = se.host)
-    and (c.host is null or (c.host = 'codex' and c.caller_session is null)
-      or (c.host = 'claude-code' and not exists (select 1 from tool_call_observation o where o.host = 'claude-code' and o.tool_use_id = c.tool_use_id)))
-    and s.turn_id is (select f.turn_id from source f where f.session_id = se.id and f.kind = 'session_message' and f.author_kind = 'assistant'
-      and f.created_at >= c.called_at order by f.created_at, f.id limit 1)));
-
 create view unit_support as
 select u.id as unit_id, case
   when u.kind in ('decision', 'constraint') and (
     not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
-    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null
-      and (a.route <> 'agent' or exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.role = 'decides'
-        and e.source_id = a.source_id and e.span_start = a.span_start and e.span_end = a.span_end and e.retracted_at is null))))
+    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null))
     then 'an active decision or constraint needs unretracted evidence and adoption'
   when u.kind = 'implementation' and not (
     exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
@@ -801,10 +735,6 @@ create trigger unit_evidence_check before insert on unit_evidence begin
   where new.role = 'reconsiders' and (new.option_id is null
     or not exists (select 1 from unit_option where id = new.option_id and reconsider_when is not null)
     or not exists (select 1 from source where id = new.source_id and author_kind = 'owner'));
-  -- The AI stating its own choice in a reply: never a question it asked (AskUserQuestion's questions are recorded as its message)
-  select raise(abort, 'decides quotes the AI choosing in its own reply, never a question it asked or an option')
-  where new.role = 'decides' and (new.option_id is not null or not exists (select 1 from source where id = new.source_id
-    and kind = 'session_message' and author_kind = 'assistant' and external_id not glob '*:ask:*:q:*'));
 end;
 create trigger unit_evidence_retract before update on unit_evidence begin
   select raise(abort, 'evidence is only ever retracted, once')
@@ -1102,13 +1032,6 @@ create trigger capture_edit_insert instead of insert on capture_edit begin
   select new.session_id, new.turn_id, new.tool_event_id, new.path, new.via, new.observed_at
   where exists (select 1 from session where id = new.session_id) on conflict do nothing;
 end;
-create view capture_tool_call as
-select host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at from tool_call_observation;
-create trigger capture_tool_call_insert instead of insert on capture_tool_call begin
-  insert into tool_call_observation (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at)
-  values (new.host, new.session_external, new.turn_id, new.tool_use_id, new.tool_name, new.owner_turn, new.observed_at)
-  on conflict do nothing;
-end;
 -- units is a JSON array of the unit ids delivered; each must belong to the delivered session's project
 create view capture_delivery as
   select session_id, event, outcome, reason, path, eligible, omitted, chars, at, null as units from delivery;
@@ -1147,4 +1070,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 10;
+pragma user_version = 9;

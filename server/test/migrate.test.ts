@@ -22,6 +22,7 @@ const REV5 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV6 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev6.sql"), "utf8");
 const REV7 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8");
 const REV8 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev8.sql"), "utf8");
+const REV9 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev9.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -152,6 +153,7 @@ for (const [from, schema] of [
   [6, REV6],
   [7, REV7],
   [8, REV8],
+  [9, REV9],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -240,6 +242,7 @@ for (const [from, schema] of [
   [6, REV6],
   [7, REV7],
   [8, REV8],
+  [9, REV9],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -432,13 +435,16 @@ test("migrating revision 4 keeps every column of every row", () => {
   );
   migrate(raw);
   const after = rows();
-  // Columns revision 5 drops are left out of the comparison, and so are tables it drops
+  // Columns revision 5 drops are left out of the comparison, and so are tables it drops. Columns later revisions add start null
   for (const [table, list] of before) {
     const now = after.get(table);
     if (!now) continue;
     const columns = new Set(Object.keys(now[0] ?? list[0] ?? {}));
+    const had = new Set(Object.keys(list[0] ?? {}));
+    for (const r of now)
+      for (const [k, v] of Object.entries(r)) if (!had.has(k)) assert.equal(v, null, `${table}.${k}`);
     assert.deepEqual(
-      now,
+      now.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => had.has(k)))),
       list.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => columns.has(k)))),
       table,
     );

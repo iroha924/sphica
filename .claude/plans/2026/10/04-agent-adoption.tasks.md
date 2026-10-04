@@ -31,13 +31,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(record): identify the calling session, turn, and mode from what the host passes (T01)`
   - 結果: probe の MCP サーバーで実測（Claude Code 2.1.289 の対話は動いている record サーバーの環境変数、`claude -p`、`codex exec`、`claude -p` に PreToolUse の hook）。値は plan の前提に追記。`claude -p` の hook の `tool_use_id` は MCP の `claudecode/toolUseId` と 3 回とも一致（並列 2 回を含む）。`cd server && node --test test/caller.test.ts` → 5 pass / 0 fail。`bun run typecheck` エラーなし、`bun run english` → 終了コード 0、biome は整形後に指摘なし。pre-commit の bundle の検査が package に入るファイルの変更でバージョンの更新を求めたので、`bun run release:plan -- --base 1043f18c` → `plugin` を確かめ、4 つのファイルを 0.6.29（v0.6.29 はタグ済み）から 0.6.30 に上げた
 
-- [ ] T02: schema の revision を上げ、`agent` の経路・`decides` の役・run の呼び出し元・record-tool の呼び出しの表・hook の観測の表と capture の insert 用の view・トリガーと `unit_support` を足し、移行を書く
+- [x] T02: schema の revision を上げ、`agent` の経路・`decides` の役・run の呼び出し元・record-tool の呼び出しの表・hook の観測の表と capture の insert 用の view・トリガーと `unit_support` を足し、移行を書く
   - 種別: 追加
   - 計画: S2
   - 依存: T01（保存する呼び出し元の項目が決まる）
-  - 変更: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/src/knowledge.ts`, `server/test/schema.test.ts`, `server/test/db.test.ts`, `server/test/migrate.test.ts`, `server/test/fixtures/schema-rev9.sql`
   - 完了条件: `cd server && node --test test/schema.test.ts` → pass。新しく作った DB と移行した DB の schema が一致し、既存の持ち主の採用は変わらず、run の呼び出し元は不明として移る。`agent` の adoption は assistant の source・組になる `decides` evidence が無いと拒まれ、`reported_speaker` のある evidence とは組めない
   - コミット: `feat(schema): add agent adoption, the decides role, run callers, and record tool calls (T02)`
+  - 結果: revision 10。`record_call`・`tool_call_observation`・`capture_tool_call`・`agent_ineligible_source` を足し、`extraction_run.begin_call_id`、evidence の `decides`、adoption の `agent`、`unit_support` の組の条件を入れた。run の呼び出し元は列ではなく begin の呼び出し（`begin_call_id`）で持つ。`cd server && node --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → 106 pass / 0 fail（revision 1〜9 の移行が新しい DB と同じ定義、`decides`・`agent`・除外の view・役割の拒否を含む）。`bun run test` → 727 pass / 0 fail、`bun run typecheck` エラーなし、`bun run codegen:check` 一致、`node scripts/check-pairs.mjs` → 0
 
 - [ ] T03: record ツール用の同期の PreToolUse hook（Claude Code）を足し、record サーバーが呼び出し元を run に結び、全 record ツールの呼び出しを検証と外部取得の前に同期で書き、hook の観測と結び、begin と save で照合する
   - 種別: 追加
@@ -160,3 +161,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 
 - 2026-10-04 / T01・T02・T03 / 実測で Claude Code の MCP 呼び出しにターンが無いと分かり、持ち主が record ツール用の同期の PreToolUse hook（案 A）を選んだ / T01 の題名と完了条件（前: 両ホストの全形の実測と plan への追記 → 後: 実測した値の判別。実測は plan の前提に追記済み、対話の Codex・SDK・Windows は未検証として plan に残す）、T02 の題名と変更欄（`server/src/db-write.ts` を足す）、T03 の題名・変更欄・完了条件（hook と capture を足す）を直した
 - 2026-10-04 / T01・T15 / pre-commit の bundle の検査が、package に入る最初の変更（`server/src/caller.ts`）のコミットでバージョンの更新を求めた / T15 を取りやめ、バージョンの更新（S13 の一部）を T01 に移した。T01 の計画欄（前: S1 → 後: S1, S13）と変更欄（4 つのファイルを足す）を直した。main が先に新しいバージョンを出したら、マージのときに次のバージョンへ上げ直す
+- 2026-10-04 / T02 / 変更欄（前: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts` → 後: `server/src/db.ts` を外し、移行・語彙・fixture・役割と移行のテストを足す）。run の呼び出し元を列でなく `begin_call_id` で持つことにした（save の照合は begin の呼び出しと比べるだけで足りるため）
