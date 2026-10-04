@@ -157,13 +157,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - 完了条件: `bun run acceptance` → pass。`cd server && node --test --test-name-pattern="judge budget" test/reconcile.test.ts` → pass（保存 1 回のロックが 200 ms 以内）
   - コミット: `test(record): cover reconciling saves end to end and keep their lock time in budget (T25)`
 
-- [ ] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
+- [x] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
   - 種別: 追加
   - 計画: S4
   - 依存: T02（`agent` の経路が要る）, T04（link の規則をこの関数へ移す）, T22（権限の条件を judge の eligible とそろえる）
-  - 変更: `server/src/authority.ts`, `server/src/record.ts`, `server/src/extract.ts`, `server/src/glean.ts`, `server/test/record.test.ts`
-  - 完了条件: `cd server && node --test --test-name-pattern="authority" test/record.test.ts` → pass。持ち主 > AI > なしの判定が、その時点の採用と撤回から出る。`decides` evidence の撤回・後からの持ち主の採用・anchor の変更・衝突の解決の前後で判定が変わる場合を確かめる。glean の撤回と衝突の解決は今までどおり持ち主の根拠を求める
+  - 変更: `server/src/authority.ts`, `server/src/deliver.ts`, `server/src/read.ts`, `server/test/authority.test.ts`
+  - 完了条件: `cd server && node --test test/authority.test.ts` → pass。持ち主 > AI > なしの判定が、その時点の採用と撤回から出る（AI の採用の前・後、持ち主の採用の後、持ち主の撤回の後）。read の見出しにその時点の判定が出る
   - コミット: `feat(record): judge authority from adoption history and check it on every write (T05)`
+  - 結果: `server/src/authority.ts` に `authorityOf`（その時点の採用と撤回から持ち主・AI・なし）と、配信と共有する `ownerAdopted` を置いた。`cd server && node --test test/authority.test.ts` → 1 pass（AI の採用は本物の trigger の条件をそろえて作った）。read の見出しに「the owner's decision」「decided by an AI」「adopted by no one」を出す。`bun run verify` → 終了コード 0（SQL 到達 202/202、受け入れ 105 pass）
 
 - [ ] T06: record.ts で `agent` の採用を受ける（`decides` との組、質問・record ツールのターン・不明な呼び出し元の除外、`do` で anchor のある判断の同じターンの編集、パスの一覧の警告）
   - 種別: 追加
@@ -284,3 +285,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T26 / T21・T22 の Codex のレビュー（F1 P1: 同じ保存で元の記録と後継の両方の取り下げで、元の取り下げが消える。F2 P2: 見直し条件の引用を forget した後継の置き換えが最後の再判定で失敗。F3 P2: glean で新しい採用付きの記録と adopt が枠を取り合っても拒まない）と T09 のレビュー（F1 P2: 呼び出し元が分からないと自動 pending が今のセッションを含める）を受け、T24 のサブエージェントが気づいた点（置き換え済みの記録が採用を失ったときの終わりの理由が一般的な文になる）も合わせて、修正タスク T26 を足した
 - 2026-10-04 / T24 / 変更欄（前: `server/src/overview.ts`・`review.ts`・`extract.ts` を含む → 後: 3 つを外した）。overview は開いた行だけをたどり済み、review は active だけを選び、extract は後継を語らず保存の出力が reconcile の待つ理由をそのまま出すので、変える所が無かった。「履歴が記録されていない」印は schema にまだ保存先が無く、read は推し量らずに出さない。印を作る T23 で read の表示も足す必要がある
 - 2026-10-04 / T24 / サブエージェントが別の作業ツリーで実装した T24（f826fda1）を取り込み、T26 まで入った状態で `node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts test/record.test.ts` → 97 pass を私が流して確かめた。T23 で作った `unit_replacement_gap` の印を read に出す 1 行を足した（T24 の時点では表が無かった）。`bun run verify` → 終了コード 0（SQL 到達 201/201）
+- 2026-10-04 / T05 / 保存・glean の操作の前後の確認は、T22 の reconcile（最後にもう一度判定して差分なし）がすべての操作で担うので、T05 では判定関数と共有する SQL に絞った。変更欄と完了条件を直し（前: record.ts・extract.ts・glean.ts の前後の確認 → 後: authority.ts・deliver.ts・read.ts と authority.test.ts）、`authorityOf` が未使用にならないよう、T07 の表示のうち read の見出しの 1 行を前倒しした

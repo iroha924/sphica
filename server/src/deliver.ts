@@ -7,9 +7,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
+import type { ExpressionBuilder, Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
+import { ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
@@ -77,11 +78,6 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
     .join("");
   return { text: note ? `${text || lead}${note}` : text, note };
 };
-
-/** Whether a unit is the owner's decision: one the owner or a maintainer adopted and has not taken back */
-const ownerAdopted = (unit: string) =>
-  sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
-    and a.route in ('owner_statement', 'explicit') and a.retracted_at is null)`;
 
 /**
  * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. The owner's decision is held back
