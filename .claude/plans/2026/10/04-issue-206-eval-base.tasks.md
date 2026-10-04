@@ -222,7 +222,7 @@ base: main
   - 計画: S2, S3, S4, S7
   - 依存: T20（直す対象のブランチの先頭）
   - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/canary.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-grade.test.ts`
-  - red: `cd server && node evals/cloud/collect.ts --build <build-final> --no-cloud`（86d6784f のコード）→ `rg --files /private/tmp/claude-501 ...` で他の run の一覧を読んだ Codex の conflict-cover の run が結果として残る
+  - red: `cd <86d6784f の worktree>/server && node evals/cloud/collect.ts --build <build-final> --no-cloud` → `rg --files /private/tmp/claude-501 ...` で他の run の一覧を読んだ Codex の conflict-cover の run が結果として残る
   - 完了条件: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts` → pass。`node evals/cloud/canary.ts --build <build>` → 拒否の指定の無い外の sentinel への 5 つの試行が全部止まり `canary passed`
   - コミット: `fix(evals): keep runs inside their checkout and drop the ones that looked outside (T21)`
   - 結果: red は A4 の回収（86d6784f）で、外を見た Codex の run が結果に残っていた。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 82, fail 0。canary（sentinel を評価のキャッシュの下に、拒否の指定なしで置く）→ fence 8 項目すべて ✓、`canary passed`。回収し直すと、その Codex の run だけが `looked outside its checkout` で外れた
