@@ -265,7 +265,7 @@ base: main
   - red: `cd server && NODE_OPTIONS="--import <process.platform を linux にするファイル>" node --test test/eval-grade.test.ts` → 72b34c76 で 1 件落ちる（CI と同じ「collect excludes a gold run ...」）
   - 完了条件: 同じコマンドと macOS のままの `node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass。CI の check が通る
   - コミット: `fix(evals): skip hidden tests in the collect test that runs on Linux CI (T25)`
-  - 結果: red は上のとおり 1 件落ちた。直した後 Linux に見せた状態と macOS の両方で pass 84, fail 0
+  - 結果: red は上のとおり 1 件落ちた。直した後 `cd server && NODE_OPTIONS="--import <linux にするファイル>" node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass 84, fail 0。macOS のままでも pass 84, fail 0
 
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
