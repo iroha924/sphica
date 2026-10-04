@@ -621,29 +621,30 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
     run_id: Number(one("select run_id from unit where id = ?", next).run_id),
     added_at: now,
   });
-  // A successor that is not active yet replaces nothing
-  refuses(() => state(old, "active", "superseded"), /needs a supersedes link from an active successor/);
+  // An intent alone replaces nothing: superseded needs the replacement in effect
+  refuses(() => state(old, "active", "superseded"), /needs a replacement in effect into it/);
+  const replacement = insert(db, "unit_replacement", {
+    from_unit: next,
+    to_unit: old,
+    run_id: Number(one("select run_id from unit where id = ?", next).run_id),
+    started_at: now,
+  });
   state(next, "candidate", "active");
   state(old, "active", "superseded");
-  // Two live answers: the old one cannot come back beside its successor
+  // While it is replaced, it cannot come back nor be withdrawn
   refuses(() => state(old, "superseded", "active"), /not a lifecycle change/);
-  refuses(() => state(old, "superseded", "withdrawn"), /not a lifecycle change/);
   refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
-  // Its successor no longer active, the old record is a candidate again, by a state the schema writes
-  state(next, "active", "candidate");
-  assert.deepEqual(
-    {
-      ...one(
-        "select from_state, to_state, reason from unit_state where unit_id = ? order by id desc limit 1",
-        old,
-      ),
-    },
-    { from_state: "superseded", to_state: "candidate", reason: "its successor is no longer active" },
+  refuses(() => state(old, "superseded", "withdrawn"), /not a lifecycle change/);
+  sql(
+    "update unit_replacement set ended_at = ?, end_reason = 'next withdrawn', end_run_id = run_id where id = ?",
+    now,
+    replacement,
   );
-  state(next, "candidate", "withdrawn");
+  state(next, "active", "withdrawn");
   for (const to of ["candidate", "active", "superseded"])
     refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
-  state(old, "candidate", "active");
+  // Once nothing replaces it, it comes straight back
+  state(old, "superseded", "active");
   state(old, "active", "withdrawn");
   assert.deepEqual(
     [old, next].map((u) => one("select lifecycle from unit where id = ?", u).lifecycle),
@@ -651,7 +652,7 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
   );
 });
 
-test("a record has one live successor at a time, of a kind that can replace it", () => {
+test("a record has one replacement in effect at a time, from its successor's one intent, of a kind that can replace it", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const link = (from: number, to: number) =>
     insert(db, "unit_link", {
@@ -661,27 +662,38 @@ test("a record has one live successor at a time, of a kind that can replace it",
       run_id: Number(one("select run_id from unit where id = ?", from).run_id),
       added_at: now,
     });
-  const made = (key: string, kind: string) => {
+  const replace = (from: number, to: number) =>
+    insert(db, "unit_replacement", {
+      from_unit: from,
+      to_unit: to,
+      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
+      started_at: now,
+    });
+  const made = (key: string, kind: string, adopt = true) => {
     const u = unit({ key, kind });
     evidence(u, src);
+    if (adopt && ["decision", "constraint"].includes(kind)) adoption(u, src);
     state(u, null, "candidate");
     return u;
   };
   const old = made("old", "decision");
   refuses(() => link(made("finding", "finding"), old), /supersedes one of its own kind/);
   const first = made("first", "constraint");
-  link(first, old);
-  // Proposals wait beside the place as candidates: the first to become active takes it, and another cannot become active beside it
   const second = made("second", "decision");
+  // Proposals wait beside the place in any number; a record means to replace only one
+  link(first, old);
   link(second, old);
-  adoption(first, src);
-  adoption(second, src);
-  state(first, "candidate", "active");
-  refuses(() => state(second, "candidate", "active"), /already has an active successor/);
-  state(first, "active", "withdrawn");
-  state(second, "candidate", "active");
-  // A quarantined or unsourced successor can never become active or be withdrawn, so it takes no place
-  const other = made("other", "finding");
+  refuses(() => link(second, made("elsewhere", "decision")), /UNIQUE/);
+  // A replacement takes effect only from an intent, and the place takes one
+  refuses(() => replace(made("stranger", "decision"), old), /own intent to replace that one/);
+  replace(first, old);
+  refuses(() => replace(second, old), /UNIQUE/);
+  // A decision or constraint replaces another only with the owner's or a maintainer's adoption
+  const proposal = made("proposal", "decision", false);
+  const target = made("target", "decision");
+  link(proposal, target);
+  refuses(() => replace(proposal, target), /owner's or a maintainer's adoption/);
+  // A quarantined record never becomes active, so nothing replaces it; one whose source is gone can be
   const quarantined = unit({
     key: "q",
     kind: "finding",
@@ -689,31 +701,34 @@ test("a record has one live successor at a time, of a kind that can replace it",
     extraction_reason: "quote not found",
   });
   state(quarantined, null, "candidate");
-  link(quarantined, other);
+  const fixer = made("fixer", "finding");
+  link(fixer, quarantined);
+  refuses(() => replace(fixer, quarantined), /not quarantined nor withdrawn/);
   const unsourced = unit({ key: "n", kind: "finding", unsourced: 1 });
   state(unsourced, null, "candidate");
-  link(unsourced, other);
-  const sourced = made("sourced", "finding");
-  link(sourced, other);
-  // Its only live successor withdrawn, the record comes back, though the quarantined and unsourced ones still point at it
-  state(other, "candidate", "active");
-  state(sourced, "candidate", "active");
-  state(other, "active", "superseded");
-  state(sourced, "active", "withdrawn");
-  assert.equal(one("select lifecycle from unit where id = ?", other).lifecycle, "candidate");
-  // And from there a superseded record with only quarantined or unsourced successors left may be moved back by hand too
-  state(other, "candidate", "withdrawn");
-  assert.deepEqual(
-    db.owner
-      .prepare("select from_unit from unit_link where to_unit = ? order by from_unit")
-      .all(old)
-      .map((r) => r.from_unit),
-    [first, second],
-    "the withdrawn successor's link stays",
+  const mender = made("mender", "finding");
+  link(mender, unsourced);
+  replace(mender, unsourced);
+  // A replacement only ever ends, once, and is never removed
+  const row = Number(one("select id from unit_replacement where from_unit = ?", first).id);
+  refuses(
+    () => sql("update unit_replacement set started_at = ? where id = ?", now, row),
+    /only ever ends, once/,
   );
+  sql(
+    "update unit_replacement set ended_at = ?, end_reason = 'r', end_run_id = run_id where id = ?",
+    now,
+    row,
+  );
+  refuses(
+    () => sql("update unit_replacement set end_reason = 'again' where id = ?", row),
+    /only ever ends, once/,
+  );
+  refuses(() => sql("delete from unit_replacement where id = ?", row), /never removed/);
+  replace(second, old);
 });
 
-test("support is judged by one rule: a retraction or a retired anchor that takes it away is refused while the unit is active", () => {
+test("support is judged by one rule: a retraction or a retired anchor that takes it away leaves the unit unable to become active", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const retract = (id: number) =>
     sql(
@@ -730,9 +745,8 @@ test("support is judged by one rule: a retraction or a retired anchor that takes
   adoption(d, src);
   state(d, null, "candidate");
   state(d, "candidate", "active");
-  refuses(() => retract(own), /back to candidate before retracting its last evidence/);
-  state(d, "active", "candidate");
   retract(own);
+  state(d, "active", "candidate");
   refuses(() => state(d, "candidate", "active"), /needs unretracted evidence and adoption/);
   // An implementation's proof can be a commit-pinned anchor: retiring it is the same loss
   const i = unit({ key: "i1", kind: "implementation" });
@@ -753,9 +767,8 @@ test("support is judged by one rule: a retraction or a retired anchor that takes
   state(i, "candidate", "active");
   const retire = (id: number) => sql("update unit_anchor set retired_at = ? where id = ?", now, id);
   retire(plain);
-  refuses(() => retire(proof), /back to candidate before retiring its last code anchor/);
-  state(i, "active", "candidate");
   retire(proof);
+  state(i, "active", "candidate");
   refuses(() => state(i, "candidate", "active"), /needs code or commit evidence/);
   assert.deepEqual(
     db.owner
@@ -798,9 +811,9 @@ test("evidence and adoption stay in their project, inside the text, once, and ar
       src,
       u,
     );
-  refuses(() => retract("unit_adoption"), /back to candidate/);
-  state(u, "active", "candidate");
+  // Taking support away is a fact; what follows for the unit is judged by the save that wrote it (server/src/reconcile.ts)
   retract("unit_adoption");
+  state(u, "active", "candidate");
   refuses(() => retract("unit_adoption"), /retracted, once/);
 });
 
@@ -1630,66 +1643,4 @@ test("a record tool's hook row alone rules out its turn, even when the call neve
     observed_at: now,
   });
   assert.deepEqual(ineligible(), [k1]);
-});
-
-test("an unadopted candidate never holds the owner's decision's successor place, and cannot take it later", () => {
-  const owner = message(db, p, { id: "o1", text: "Use SQLite." });
-  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
-  const link = (from: number, to: number) =>
-    insert(db, "unit_link", {
-      from_unit: from,
-      to_unit: to,
-      kind: "supersedes",
-      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
-      added_at: now,
-    });
-  const decided = (key: string, adopt: boolean) => {
-    const u = unit({ key, kind: "decision" });
-    evidence(u, adopt ? owner : said, { role: "states" });
-    if (adopt) adoption(u, owner);
-    state(u, null, "candidate");
-    return u;
-  };
-  const o = decided("sqlite", true);
-  state(o, "candidate", "active");
-  // The AI's proposal waits for the owner as a candidate successor
-  const proposal = decided("postgres", false);
-  link(proposal, o);
-  // The owner's own successor is not blocked by it
-  const own = decided("duckdb", true);
-  link(own, o);
-  state(own, "candidate", "active");
-  state(o, "active", "superseded");
-  // Adopted later, the proposal would be a second successor of a record already replaced
-  adoption(proposal, owner, { span_start: 0, span_end: 3 });
-  refuses(() => state(proposal, "candidate", "active"), /already has an active successor/);
-});
-
-test("withdrawing the owner's successor brings the owner's decision back, whatever proposal waits beside it", () => {
-  const owner = message(db, p, { id: "o2", text: "Use SQLite." });
-  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
-  const link = (from: number, to: number) =>
-    insert(db, "unit_link", {
-      from_unit: from,
-      to_unit: to,
-      kind: "supersedes",
-      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
-      added_at: now,
-    });
-  const decided = (key: string, adopt: boolean) => {
-    const u = unit({ key, kind: "decision" });
-    evidence(u, adopt ? owner : said, { role: "states" });
-    if (adopt) adoption(u, owner);
-    state(u, null, "candidate");
-    return u;
-  };
-  const o = decided("sqlite-2", true);
-  state(o, "candidate", "active");
-  link(decided("postgres-2", false), o);
-  const own = decided("duckdb-2", true);
-  link(own, o);
-  state(own, "candidate", "active");
-  state(o, "active", "superseded");
-  state(own, "active", "withdrawn");
-  assert.equal(one("select lifecycle from unit where id = ?", o).lifecycle, "candidate");
 });

@@ -14,6 +14,8 @@ export type UnitFacts = {
   withdrawn: boolean;
   /** extraction = 'supported' and unsourced = 0: a unit that can ever become active */
   sound: boolean;
+  /** extraction = 'quarantined': its quote was never found, so it stays a candidate and nothing replaces it */
+  quarantined: boolean;
   /** unit_support finds nothing missing */
   supported: boolean;
   /** An unretracted owner_statement or explicit adoption */
@@ -35,7 +37,7 @@ type Wait =
   | { why: "no owner adoption" }
   | { why: "place held"; holder: number }
   | { why: "target withdrawn" }
-  | { why: "target unsound" }
+  | { why: "target quarantined" }
   | { why: "kinds" };
 
 export type Judged = {
@@ -81,8 +83,8 @@ export function judge(s: Snapshot): Judged {
         ? { why: "kinds" }
         : to.withdrawn
           ? { why: "target withdrawn" }
-          : !to.sound
-            ? { why: "target unsound" }
+          : to.quarantined
+            ? { why: "target quarantined" }
             : null);
     if (why) {
       waits.set(from.id, why);

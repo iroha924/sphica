@@ -9,6 +9,7 @@ import { cleanGit } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { inline } from "./panel.ts";
+import type { Hint } from "./reconcile.ts";
 import {
   anchorProblem,
   type Checked,
@@ -16,6 +17,7 @@ import {
   prepareRecord,
   repoPath,
   saveRecord,
+  settleSaved,
   type Target,
 } from "./record.ts";
 import {
@@ -670,41 +672,6 @@ async function excerptSource(trx: Kysely<DB>, projectId: number, x: Excerpt): Pr
   return itemId(trx, projectId, "file_excerpt", external, revision);
 }
 
-/** Moves a unit to a state, or leaves it when the schema's rules refuse (returns the refusal). */
-async function move(
-  trx: Kysely<DB>,
-  unitId: number,
-  to: string,
-  reason: string,
-  sourceId: number | null,
-  runId: number,
-): Promise<string | null> {
-  const u = await trx
-    .selectFrom("unit")
-    .select("lifecycle")
-    .where("id", "=", unitId)
-    .executeTakeFirstOrThrow();
-  if (u.lifecycle === to) return null;
-  try {
-    await trx
-      .insertInto("unit_state")
-      .values({
-        unit_id: unitId,
-        from_state: u.lifecycle,
-        to_state: to as "active",
-        at: iso(Date.now()),
-        reason,
-        source_id: sourceId,
-        run_id: runId,
-      })
-      .execute();
-    return null;
-  } catch (e) {
-    if (!/needs|cannot become active/.test((e as Error).message)) throw e;
-    return (e as Error).message;
-  }
-}
-
 export type GleanSaved = { units: Awaited<ReturnType<typeof saveRecord>>; changed: string[] };
 
 export async function saveGlean(
@@ -715,7 +682,7 @@ export async function saveGlean(
 ): Promise<GleanSaved> {
   if (c.errors.length)
     throw new Error(`The record is not valid:\n${c.errors.map((e) => `  ${e}`).join("\n")}`);
-  const units = await saveRecord(trx, target, runId, c.units, []);
+  const units = await saveRecord(trx, target, runId, c.units, [], { settle: false });
   const now = iso(Date.now());
   const changed: string[] = [];
   const spanOf = async (ref: string, q: string) => {
@@ -728,6 +695,9 @@ export async function saveGlean(
     return { id: s.id, start: at[0], end: at[1] };
   };
   const touched = new Map<number, string>();
+  const withdraw = new Map<number, Hint>();
+  // Units the owner adopts in this batch
+  const adopted = new Set<number>();
   // Replacements retire before new anchors land, so a batch that anchors a place another op moves off never holds two live anchors on it
   const ordered = [
     ...c.ops.filter((p) => p.input.op === "replace_anchor"),
@@ -782,6 +752,7 @@ export async function saveGlean(
         })
         .onConflict((oc) => oc.doNothing())
         .execute();
+      adopted.add(p.unitId);
       changed.push(`${op.unit}: adopted`);
     } else if (op.op === "anchor" || op.op === "replace_anchor") {
       const to = op.op === "anchor" ? op : op.to;
@@ -802,30 +773,6 @@ export async function saveGlean(
       const wrong = anchorProblem(c.units.facts, { path: rel, symbol, role: to.role, held, observed });
       if (wrong) units.anchorProblems.push(`${op.unit}: ${wrong}`);
       const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
-      // When the anchor about to be retired is an active implementation's code proof, the unit goes back to candidate first (the schema
-      // refuses the reverse order) and is judged again below
-      if (op.op === "replace_anchor") {
-        const held = await trx
-          .selectFrom("unit_anchor as a")
-          .innerJoin("unit as u", "u.id", "a.unit_id")
-          .select(["u.kind", "u.lifecycle", "a.role", "a.commit_sha", "a.edit_observation_id"])
-          .where("a.id", "=", p.replaces ?? -1)
-          .executeTakeFirst();
-        if (
-          held?.kind === "implementation" &&
-          held.lifecycle === "active" &&
-          held.role === "evidence" &&
-          (held.commit_sha !== null || held.edit_observation_id !== null)
-        )
-          await move(
-            trx,
-            p.unitId,
-            "candidate",
-            "glean: code anchor replaced, support checked again",
-            null,
-            runId,
-          );
-      }
       const added = await trx
         .insertInto("unit_anchor")
         .values({
@@ -899,57 +846,10 @@ export async function saveGlean(
         continue;
       }
       if (op.op === "withdraw") {
-        touched.delete(p.unitId);
-        // A record of this save may have become active and superseded it just above: then nothing live is left to withdraw
-        const held = await trx
-          .selectFrom("unit")
-          .select("lifecycle")
-          .where("id", "=", p.unitId)
-          .executeTakeFirstOrThrow();
-        if (held.lifecycle === "superseded") {
-          changed.push(`${op.unit}: superseded by a record of this save, so not withdrawn`);
-          continue;
-        }
-        const replaced = await trx
-          .selectFrom("unit_link as l")
-          .innerJoin("unit as o", "o.id", "l.to_unit")
-          .select(["o.id", "o.key"])
-          .where("l.from_unit", "=", p.unitId)
-          .where("l.kind", "=", "supersedes")
-          .where("o.lifecycle", "=", "superseded")
-          .execute();
-        await move(trx, p.unitId, "withdrawn", `withdrawn: ${head(op.reason_quote, 200)}`, reason.id, runId);
-        changed.push(`${op.unit}: withdrawn`);
-        // The schema brings back what this record replaced; it is judged again below like any candidate
-        for (const o of replaced) {
-          const now = await trx
-            .selectFrom("unit")
-            .select("lifecycle")
-            .where("id", "=", o.id)
-            .executeTakeFirstOrThrow();
-          if (now.lifecycle !== "candidate") continue;
-          changed.push(`${o.key}: no longer superseded`);
-          touched.set(o.id, o.key);
-        }
+        // Written by reconcile with the batch's other changes: one a record of this save replaces needs no withdrawal
+        withdraw.set(p.unitId, { reason: `withdrawn: ${head(op.reason_quote, 200)}`, source: reason.id });
         continue;
       }
-      // A retraction that removes an active unit's support first moves it back to candidate (the schema refuses the reverse order).
-      // A superseded or withdrawn unit keeps its state: it must not come back through a later activation
-      const current = await trx
-        .selectFrom("unit")
-        .select("lifecycle")
-        .where("id", "=", p.unitId)
-        .executeTakeFirstOrThrow();
-      if (current.lifecycle === "active")
-        await move(
-          trx,
-          p.unitId,
-          "candidate",
-          `support retracted: ${head(op.reason_quote, 200)}`,
-          reason.id,
-          runId,
-        );
-      else if (current.lifecycle !== "candidate") touched.delete(p.unitId);
       const table = op.op === "retract_evidence" ? "unit_evidence" : "unit_adoption";
       // Every citation of the retracted words goes, the record's and its options'; the reply says how many
       const done = await trx
@@ -967,26 +867,35 @@ export async function saveGlean(
       );
     }
   }
-  // Every touched unit is judged again: a candidate that now has what it needs becomes active
-  for (const [id, key] of touched) {
-    const u = await trx.selectFrom("unit").select("lifecycle").where("id", "=", id).executeTakeFirstOrThrow();
-    if (u.lifecycle !== "candidate") continue;
-    const refused = await move(trx, id, "active", "glean: support complete", null, runId);
-    changed.push(refused ? `${key}: candidate (${refused})` : `${key}: active`);
-    if (refused) continue;
-    // A successor that becomes active now replaces what it supersedes, as saveRecord does for one active at once
-    const replaced = await trx
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as o", "o.id", "l.to_unit")
-      .select(["o.id", "o.key"])
-      .where("l.from_unit", "=", id)
-      .where("l.kind", "=", "supersedes")
-      .where("o.lifecycle", "in", ["active", "candidate"])
-      .execute();
-    for (const o of replaced) {
-      await move(trx, o.id, "superseded", `superseded by ${key}`, null, runId);
-      changed.push(`${o.key}: superseded`);
-    }
+  // Judged once, with the records this save wrote and everything their replacements reach, from the facts as the whole batch left them
+  const settled = await settleSaved(trx, runId, units, {
+    seeds: [...touched.keys(), ...withdraw.keys()],
+    withdraw,
+  });
+  for (const id of settled.redundant)
+    changed.push(`${settled.keys.get(id)}: superseded by a record of this save, so not withdrawn`);
+  // An owner's adoption added here into a place another successor holds is refused by name, as a save with it would be
+  for (const [id, [to, holder]] of settled.held)
+    if (adopted.has(id))
+      throw new Error(
+        `${settled.keys.get(id)}: ${settled.keys.get(to)} already has a successor, ${settled.keys.get(holder)} (in effect); withdraw it first, or supersede it instead`,
+      );
+  const written = new Set(units.written.map((w) => w.id));
+  for (const ch of settled.changes) {
+    if (written.has(ch.id)) continue;
+    if (ch.before === "superseded") changed.push(`${ch.key}: no longer superseded`);
+    if (ch.after === "candidate") {
+      if (ch.before !== "superseded")
+        changed.push(`${ch.key}: candidate (${settled.waits.get(ch.id) ?? "its support is not complete"})`);
+    } else changed.push(`${ch.key}: ${ch.after}`);
   }
+  for (const [id, key] of touched)
+    if (
+      !written.has(id) &&
+      !settled.changes.some((ch) => ch.id === id) &&
+      settled.waits.has(id) &&
+      !withdraw.has(id)
+    )
+      changed.push(`${key}: candidate (${settled.waits.get(id)})`);
   return { units, changed };
 }

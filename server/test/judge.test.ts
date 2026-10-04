@@ -20,6 +20,7 @@ const unit = (id: number, lifecycle: Lifecycle | null, v: Partial<UnitFacts> = {
   lifecycle,
   withdrawn: lifecycle === "withdrawn",
   sound: true,
+  quarantined: false,
   supported: true,
   ownerAdopted: true,
   ...v,
@@ -245,11 +246,11 @@ test("judge: a superseded middle record that loses its support stops replacing t
   assert.deepEqual(holders(j), { [A]: B });
 });
 
-test("judge: unsound units never become active nor are replaced, and kinds that cannot replace each other wait (C26)", () => {
+test("judge: unsound units never become active, quarantined ones are never replaced, and kinds that cannot replace each other wait (C26)", () => {
   const j = judge(
     snap(
       [
-        unit(O, "candidate", { sound: false }),
+        unit(O, "candidate", { sound: false, quarantined: true }),
         unit(A, null),
         unit(B, "active", { kind: "finding", ownerAdopted: false }),
         unit(P, null, { kind: "finding", ownerAdopted: false }),
@@ -259,7 +260,7 @@ test("judge: unsound units never become active nor are replaced, and kinds that 
   );
   assert.deepEqual(states(j), { [O]: "candidate", [A]: "candidate", [B]: "active", [P]: "candidate" });
   assert.deepEqual(j.waits.get(O), { why: "unsound" });
-  assert.deepEqual(j.waits.get(A), { why: "target unsound" });
+  assert.deepEqual(j.waits.get(A), { why: "target quarantined" });
   assert.deepEqual(j.waits.get(P), { why: "kinds" });
 });
 
@@ -295,4 +296,9 @@ test("judge: a new unit starts as a candidate, and a proposal into a withdrawn r
     { unit: O, from: null, to: "candidate" },
     { unit: O, from: "candidate", to: "active" },
   ]);
+});
+
+test("judge: a record whose source is gone can still be replaced, which is how it is fixed", () => {
+  const j = judge(snap([unit(O, "candidate", { sound: false }), unit(A, null)], [intent(A, O)]));
+  assert.deepEqual(states(j), { [O]: "superseded", [A]: "active" });
 });

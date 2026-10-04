@@ -403,6 +403,19 @@ export interface UnitOption {
   why: string | null;
 }
 
+export interface UnitReplacement {
+  end_forget_id: number | null;
+  end_reason: string | null;
+  end_run_id: number | null;
+  ended_at: string | null;
+  forget_id: number | null;
+  from_unit: number;
+  id: Generated<number>;
+  run_id: number | null;
+  started_at: string;
+  to_unit: number;
+}
+
 export interface UnitSearchText {
   alias: string | null;
   body: string | null;
@@ -420,11 +433,6 @@ export interface UnitState {
   source_id: number | null;
   to_state: string;
   unit_id: number;
-}
-
-export interface UnitSuccessorPlace {
-  from_unit: number | null;
-  to_unit: number | null;
 }
 
 export interface UnitSupport {
@@ -480,9 +488,9 @@ export interface DB {
   unit_field: UnitField;
   unit_link: UnitLink;
   unit_option: UnitOption;
+  unit_replacement: UnitReplacement;
   unit_search_text: UnitSearchText;
   unit_state: UnitState;
-  unit_successor_place: UnitSuccessorPlace;
   unit_support: UnitSupport;
   work: Work;
 }

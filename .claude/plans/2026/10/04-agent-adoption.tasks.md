@@ -122,13 +122,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(record): judge lifecycles and replacements from facts in one pure function (T21)`
   - 結果: `cd server && node --test test/judge.test.ts` → 15 pass / 0 fail（T04 F1・F2、T18 F1〜F4、T19 F1〜F3、T20 F1・F2、C2・C18・C20・C22・C23・C25・C26・C28・C29 の入力。順番を入れ替えても同じ結果、判定済みの事実は差分なし）。依存が 1 つのつもりだけなので、枠の持ち主は相手ごとに独立して決まり、再帰も繰り返しも要らない。種類の互換 `replaceable` を record.ts から judge.ts に寄せた。`bun run verify` → 終了コード 0、knip で未使用の export なし
 
-- [ ] T22: schema を事実と結果に分け（`unit_replacement`、1 記録 1 つのつもり、印、superseded から active への遷移、trigger を確かめだけにする）、record・glean・forget の保存を「事実 → 正規化 → judge → 差分 → 最後の整合の確認」に集める。view と再帰の復帰と `takes` を外す
+- [x] T22: schema を事実と結果に分け（`unit_replacement`、1 記録 1 つのつもり、印、superseded から active への遷移、trigger を確かめだけにする）、record・glean・forget の保存を「事実 → 正規化 → judge → 差分 → 最後の整合の確認」に集める。view と再帰の復帰と `takes` を外す
   - 種別: 変更
   - 計画: S15
   - 依存: T21（判定の本体が要る）
-  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/src/reconcile.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/src/extract.ts`, `server/src/forget.ts`, `server/src/overview.ts`, `server/src/search.ts`, `server/src/read.ts`, `scripts/check-architecture.mjs`, `server/test/schema.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/test/forget.test.ts`, `server/test/db.test.ts`, `server/test/migrate.test.ts`
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/src/judge.ts`, `server/src/reconcile.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/src/forget.ts`, `server/src/overview.ts`, `scripts/check-architecture.mjs`, `server/test/judge.test.ts`, `server/test/schema.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/test/forget.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="successor place|owner decision protected" test/*.test.ts` → pass（13 件の回帰を含む）。`bun run architecture` → `unit_state` と `unit_replacement` を書くのが reconcile のモジュールだけ。`bun run verify` → 終了コード 0
   - コミット: `refactor(record): keep facts apart from judged lifecycles and replacements (T22)`
+  - 結果: `unit_replacement`（開いた行が後継の枠、1 回だけ終わる、消せない）と、1 記録 1 つのつもりの index を足し、推し量る view・連鎖を戻す trigger・根拠の撤回を拒む 3 つの trigger を外した。状態の規則に superseded から active への遷移と「superseded には開いた行」「置き換えのある記録は active にならない」を入れた。record・glean・forget は事実だけを書き、最後に `reconcile`（つながる範囲 → judge → 閉じる行・開く行・状態の行 → もう一度判定して差分なし）を 1 回だけ通す。`bun run architecture` → `lifecycle writers: only server/src/reconcile.ts writes unit_state and unit_replacement`。`bun run verify` → 終了コード 0（SQL 到達 197/197、実 DB 10/10、受け入れ 105 pass）
 
 - [ ] T23: revision 9 からの移行で、証明できる期間を戻し、移行の時点の行と「履歴が記録されていない」印を作り、複数のつもりで止め、固定した judge を同期で通してメモに出す
   - 種別: 変更
@@ -264,3 +265,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T20 / T19 の Codex のレビュー（F1 P1: 連鎖の末尾の採用撤回で先頭が戻らない。F2 P1: 前の判断に採用が付くと枠が空いても戻らない。F3 P2: 前の判断の採用撤回で待っている提案が 2 つとも枠を持つ）。3 回目のレビューでも P1 が出たので止めて持ち主に相談し、規則を全記録で同じにする選択肢 1 を受けて修正タスク T20 を足した
 - 2026-10-04 / T21〜T25 / T20 のレビュー（P1 1 件・P2 1 件、4 回目）を受け、持ち主の「妥協せずに最高のもの」で、Codex と 4 往復して後継の枠の作りを「つもりと効いている期間を分け、状態を事実から計算する」に変えた（plan の方針 5）。T18〜T20 の推し量る仕組みは T22 で外す。T05・T06・T07 の依存に T22・T24 を足した。持ち主の Go を受けた
 - 2026-10-04 / T21 / 変更欄に `server/src/record.ts` を足した（`replaceable` を judge.ts へ寄せたため）。snapshot を DB から取る adapter は `unit_replacement` の表が要るので T22 で作る（T21 は純粋な本体だけ）
+- 2026-10-04 / T22 / 変更欄（`server/src/extract.ts`・`search.ts`・`read.ts`・`db.test.ts`・`migrate.test.ts` は変えずに済み外した。judge の条件を直したので `judge.ts`・`judge.test.ts` を足した）。出典が無くなった記録は後継で置き換えて直せる（schema の CHECK どおり、置き換えられないのは隔離だけ）と分かり、judge の条件を「相手が sound」から「相手が隔離でない」に直した。根拠のそろった candidate を forget が判断し直すと active になる（状態を事実から決めるため。forget のテストの期待を直した）。保存の最後の「採用付きの後継が枠を待ったら拒む」は check が同じ transaction で先に拒むので届かず、置かなかった（glean の adopt では残す）

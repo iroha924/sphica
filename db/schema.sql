@@ -476,6 +476,8 @@ create table unit_link (
 ) strict;
 -- Lookups by the unit a link points at: its successors, and its conflicts from either side
 create index unit_link_to on unit_link (to_unit, kind);
+-- A record means to replace at most one other (the record input has one supersedes)
+create unique index unit_link_one_intent on unit_link (from_unit) where kind = 'supersedes';
 create index unit_link_run on unit_link (run_id);
 create trigger unit_link_frozen before update on unit_link begin
   select raise(abort, 'links are frozen; only an unresolved conflict can be resolved, once')
@@ -494,19 +496,64 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
     select 1 from chain where id = new.from_unit);
 end;
 
--- Successors that hold a record's one place: one that is active, or one replaced since whose own place is still held, so a chain holds
--- only while it ends in an active record. Proposals wait beside the place as candidates (any number), and the first to become active takes
--- it. A quarantined or unsourced unit never becomes active, so it never holds. States are read from history: a row written in the same
--- statement may not be applied to the lifecycle column yet
-create view unit_successor_place as
-with recursive live(id) as (
-  select u.id from unit u where u.extraction = 'supported' and u.unsourced = 0
-    and (select to_state from unit_state where unit_id = u.id order by id desc limit 1) = 'active'
-  union
-  select l.to_unit from unit_link l join live on live.id = l.from_unit
-  where l.kind = 'supersedes' and (select to_state from unit_state where unit_id = l.to_unit order by id desc limit 1) = 'superseded'
-)
-select l.to_unit, l.from_unit from unit_link l join live on live.id = l.from_unit where l.kind = 'supersedes';
+-- When a replacement is in effect: a supersedes link is the intent, and a row here says it took effect, from when, and until when. One open
+-- row per replaced record is its successor place. Saves write rows only as judge decides (server/src/judge.ts); a row ends once and is
+-- never rewritten, and a replacement that takes effect again is a new row.
+create table unit_replacement (
+  id integer primary key autoincrement not null,
+  from_unit integer not null references unit (id) on delete cascade,
+  to_unit integer not null references unit (id) on delete cascade,
+  run_id integer references extraction_run (id),
+  forget_id integer references forget_batch (id),
+  started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
+  ended_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', ended_at) is ended_at),
+  end_reason text,
+  end_run_id integer references extraction_run (id),
+  end_forget_id integer references forget_batch (id),
+  check ((run_id is null) <> (forget_id is null)),
+  check ((ended_at is null) = (end_reason is null)),
+  check (ended_at is null or (end_run_id is null) <> (end_forget_id is null)),
+  check (ended_at is not null or (end_run_id is null and end_forget_id is null)),
+  check (ended_at >= started_at),
+  check (from_unit <> to_unit)
+) strict;
+create unique index unit_replacement_place on unit_replacement (to_unit) where ended_at is null;
+create index unit_replacement_from on unit_replacement (from_unit);
+create index unit_replacement_to on unit_replacement (to_unit);
+create index unit_replacement_run on unit_replacement (run_id) where run_id is not null;
+create index unit_replacement_forget on unit_replacement (forget_id) where forget_id is not null;
+create index unit_replacement_end_run on unit_replacement (end_run_id) where end_run_id is not null;
+create index unit_replacement_end_forget on unit_replacement (end_forget_id) where end_forget_id is not null;
+create trigger unit_replacement_check before insert on unit_replacement begin
+  select raise(abort, 'a replacement takes effect only from the record''s own intent to replace that one')
+  where not exists (select 1 from unit_link where from_unit = new.from_unit and to_unit = new.to_unit and kind = 'supersedes');
+  select raise(abort, 'a replacement starts open')
+  where new.ended_at is not null;
+  -- A record whose source is gone can be replaced (that is how it is fixed); a quarantined one, never active, cannot
+  select raise(abort, 'a replacement takes effect only from a sound successor into a record not quarantined nor withdrawn')
+  where exists (select 1 from unit where id = new.from_unit and (extraction <> 'supported' or unsourced = 1 or lifecycle = 'withdrawn'))
+    or exists (select 1 from unit where id = new.to_unit and (extraction <> 'supported' or lifecycle = 'withdrawn'));
+  -- Of a decision or constraint, only the owner's or a maintainer's adoption lets a replacement take effect, whatever it replaces
+  select raise(abort, 'a decision or constraint replaces another only with the owner''s or a maintainer''s adoption')
+  where exists (select 1 from unit where id = new.from_unit and kind in ('decision', 'constraint'))
+    and not exists (select 1 from unit_adoption where unit_id = new.from_unit and route in ('owner_statement', 'explicit') and retracted_at is null);
+end;
+create trigger unit_replacement_end before update on unit_replacement begin
+  select raise(abort, 'a replacement only ever ends, once')
+  where old.ended_at is not null or new.ended_at is null or new.id is not old.id or new.from_unit is not old.from_unit
+    or new.to_unit is not old.to_unit or new.run_id is not old.run_id or new.forget_id is not old.forget_id
+    or new.started_at is not old.started_at;
+end;
+create trigger unit_replacement_no_delete before delete on unit_replacement
+when exists (select 1 from unit where id = old.from_unit) and exists (select 1 from unit where id = old.to_unit) begin
+  select raise(abort, 'replacements are history and are never removed');
+end;
+create trigger unit_rev_replacement_i after insert on unit_replacement begin
+  update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
+end;
+create trigger unit_rev_replacement_u after update on unit_replacement begin
+  update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
+end;
 
 -- Lifecycle history and the only route for lifecycle changes. The trigger checks the rules and then sets unit.lifecycle.
 -- A change comes from an extraction run, or from the owner forgetting sources (forget_id). source_id becomes null when its source is forgotten.
@@ -533,13 +580,12 @@ create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'from_state must be the current lifecycle')
   where new.from_state is not (select lifecycle from unit where id = new.unit_id)
     and exists (select 1 from unit_state where unit_id = new.unit_id);
-  -- A successor's state is read from its history, not its lifecycle column: a row written in the same statement may not be applied yet
-  select raise(abort, 'not a lifecycle change a unit can make: withdrawn is final, and a superseded unit only returns to candidate once every successor is withdrawn')
+  select raise(abort, 'not a lifecycle change a unit can make: withdrawn is final, and a superseded unit comes back only once nothing replaces it')
   where exists (select 1 from unit_state where unit_id = new.unit_id) and not (
     (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
     or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
-    or (new.from_state = 'superseded' and new.to_state = 'candidate'
-      and not exists (select 1 from unit_successor_place where to_unit = new.unit_id)));
+    or (new.from_state = 'superseded' and new.to_state in ('candidate', 'active')
+      and not exists (select 1 from unit_replacement where to_unit = new.unit_id and ended_at is null)));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
   select raise(abort, (select missing from unit_support where unit_id = new.unit_id))
@@ -550,14 +596,10 @@ create trigger unit_state_rules before insert on unit_state begin
   where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
     and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
       where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
-  -- A waiting successor takes the place only while no other successor of that record holds it
-  select raise(abort, 'the record it replaces already has an active successor')
-  where new.to_state = 'active' and exists (select 1 from unit_link l join unit_successor_place h on h.to_unit = l.to_unit
-    and h.from_unit <> new.unit_id
-    where l.from_unit = new.unit_id and l.kind = 'supersedes');
-  select raise(abort, 'superseded needs a supersedes link from an active successor')
-  where new.to_state = 'superseded' and not exists (select 1 from unit_link l join unit s on s.id = l.from_unit
-    where l.to_unit = new.unit_id and l.kind = 'supersedes' and s.lifecycle = 'active');
+  select raise(abort, 'superseded needs a replacement in effect into it')
+  where new.to_state = 'superseded' and not exists (select 1 from unit_replacement where to_unit = new.unit_id and ended_at is null);
+  select raise(abort, 'a unit something replaces is superseded, not active')
+  where new.to_state = 'active' and exists (select 1 from unit_replacement where to_unit = new.unit_id and ended_at is null);
 end;
 -- The one update allowed is the foreign key action clearing source_id after its source was forgotten
 create trigger unit_state_append_only before update on unit_state
@@ -571,24 +613,6 @@ create trigger unit_state_no_delete before delete on unit_state when exists (sel
 end;
 create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
-end;
--- When a successor leaves the place (withdrawn, or no longer active once its adoption is taken back), every record up its chain whose
--- place no successor holds any more comes back to candidate, to be judged again. Triggers do not fire their own inserts, so the whole chain
--- is walked here, in one statement whose rows are all chosen before any is written
-create trigger unit_state_restore after insert on unit_state
-when new.to_state = 'withdrawn' or (new.to_state = 'candidate' and new.from_state in ('active', 'superseded')) begin
-  insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id)
-  with recursive up(id) as (
-    select l.to_unit from unit_link l where l.from_unit = new.unit_id and l.kind = 'supersedes'
-    union
-    select l.to_unit from unit_link l join up on up.id = l.from_unit where l.kind = 'supersedes'
-  )
-  select o.id, 'superseded', 'candidate', new.at,
-    case new.to_state when 'withdrawn' then 'its successor was withdrawn' else 'its successor is no longer active' end,
-    new.source_id, new.run_id, new.forget_id
-  from up join unit o on o.id = up.id
-  where (select to_state from unit_state where unit_id = o.id order by id desc limit 1) = 'superseded'
-    and not exists (select 1 from unit_successor_place k where k.to_unit = o.id);
 end;
 
 -- Where a unit applies in code, or code cited as evidence. Validated against the working tree when served, never cached here.
@@ -859,22 +883,6 @@ create trigger unit_adoption_no_delete before delete on unit_adoption
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
   and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
   select raise(abort, 'adoption is retracted, never deleted');
-end;
--- A retraction, or retiring an anchor, that would leave an active unit without its required support must first move it back to candidate
-create trigger unit_evidence_retract_support after update of retracted_at on unit_evidence
-when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
-  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
-  select raise(abort, 'move the unit back to candidate before retracting its last evidence');
-end;
-create trigger unit_adoption_retract_support after update of retracted_at on unit_adoption
-when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
-  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
-  select raise(abort, 'move the unit back to candidate before retracting its last adoption');
-end;
-create trigger unit_anchor_retire_support after update of retired_at on unit_anchor
-when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
-  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
-  select raise(abort, 'move the unit back to candidate before retiring its last code anchor');
 end;
 create trigger unit_adoption_check before insert on unit_adoption begin
   select raise(abort, 'adoption and unit belong to different projects')

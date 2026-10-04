@@ -1392,7 +1392,7 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
           },
         ],
       }),
-      /already has an active successor/,
+      /glean:storage-4 already has a successor, glean:storage-6 \(in effect\); withdraw it first, or supersede it instead/,
     );
     assert.equal(state("glean:storage-5"), "candidate");
     // A successor whose quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place

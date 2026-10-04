@@ -11,6 +11,7 @@ import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../s
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { readUnit } from "../src/read.ts";
+import { reconcile } from "../src/reconcile.ts";
 import {
   anchorProblem,
   checkRecord,
@@ -1909,7 +1910,7 @@ test("owner decision protected: in one save, a proposal waiting as a candidate d
   }
 });
 
-// The owner's decision O, with successors written straight to the database: each line is one state the unit goes through
+// Records written as facts (units, evidence, adoption, intents) and settled the way saves settle them
 const successors = (db: TempDb, p: number) => {
   const owner = message(db, p, { id: "o9", text: "Use SQLite." });
   const ai = message(db, p, { id: "a9", text: "Use Postgres.", speaker: "assistant" });
@@ -1923,15 +1924,6 @@ const successors = (db: TempDb, p: number) => {
     ).id,
   );
   const exec = (sql: string, ...a: (string | number | null)[]) => db.owner.prepare(sql).run(...a);
-  const state = (u: number, from: string | null, to: string) =>
-    exec(
-      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', ?)",
-      u,
-      from,
-      to,
-      now,
-      runId,
-    );
   const decided = (key: string, adopt: boolean) => {
     const u = Number(
       (
@@ -1957,7 +1949,6 @@ const successors = (db: TempDb, p: number) => {
         runId,
         now,
       );
-    state(u, null, "candidate");
     return u;
   };
   const link = (from: number, to: number) =>
@@ -1968,31 +1959,40 @@ const successors = (db: TempDb, p: number) => {
       runId,
       now,
     );
+  const unadopt = (u: number) =>
+    exec(
+      "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?",
+      now,
+      owner,
+      u,
+    );
+  const settle = (ids: number[], withdraw: number[] = []) =>
+    inTransaction(db.ingest, (trx) =>
+      reconcile(
+        trx,
+        ids,
+        { runId },
+        { withdraw: new Map(withdraw.map((id) => [id, { reason: "withdrawn", source: owner }])) },
+      ),
+    );
   const life = (u: number) =>
     (db.owner.prepare("select lifecycle from unit where id = ?").get(u) as { lifecycle: string }).lifecycle;
-  return { owner, decided, link, state, life, exec };
+  return { decided, link, unadopt, settle, life };
 };
 
 test("successor place: the owner's decision comes back when its successor's adoption is taken back", async () => {
   const db = tempDb();
   try {
     const p = project(db);
-    const { owner, decided, link, state, life, exec } = successors(db, p);
+    const { decided, link, unadopt, settle, life } = successors(db, p);
     const o = decided("sqlite", true);
-    state(o, "candidate", "active");
     const s = decided("duckdb", true);
     link(s, o);
-    state(s, "candidate", "active");
-    state(o, "active", "superseded");
-    // Taking back its only adoption moves the successor back to candidate; the place it held is free again
-    state(s, "active", "candidate");
-    exec(
-      "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?",
-      now,
-      owner,
-      s,
-    );
-    assert.equal(life(o), "candidate");
+    await settle([o, s]);
+    assert.deepEqual([life(o), life(s)], ["superseded", "active"]);
+    unadopt(s);
+    await settle([s]);
+    assert.deepEqual([life(o), life(s)], ["active", "candidate"]);
   } finally {
     await db.done();
   }
@@ -2002,20 +2002,16 @@ test("successor place: search and read name only the successor that replaced the
   const db = tempDb();
   try {
     const p = project(db);
-    const { decided, link, state } = successors(db, p);
+    const { decided, link, settle } = successors(db, p);
     const o = decided("sqlite", true);
-    state(o, "candidate", "active");
     link(decided("postgres", false), o);
     const gone = decided("mysql", true);
     link(gone, o);
-    state(gone, "candidate", "active");
-    state(o, "active", "superseded");
-    state(gone, "active", "withdrawn");
-    state(o, "candidate", "active");
+    await settle([o]);
+    await settle([gone], [gone]);
     const now2 = decided("duckdb", true);
     link(now2, o);
-    state(now2, "candidate", "active");
-    state(o, "active", "superseded");
+    await settle([now2]);
     assert.deepEqual(
       (await liveSuccessors(db.reader, o)).map((n) => n.key),
       ["trace:ext-s1/duckdb"],
@@ -2023,7 +2019,6 @@ test("successor place: search and read name only the successor that replaced the
     const text = (await readUnit(db.reader, p, `u${o}`, null)) ?? "";
     assert.match(text, /Superseded by trace:ext-s1\/duckdb/);
     assert.doesNotMatch(text, /Superseded by trace:ext-s1\/(postgres|mysql)/);
-    assert.match(text, /Replacement proposed by trace:ext-s1\/postgres \(candidate\)/);
   } finally {
     await db.done();
   }
@@ -2058,45 +2053,49 @@ test("owner decision protected: in one save, the order of a waiting proposal and
   }
 });
 
-test("successor place: when the end of a chain leaves active, every record it replaced comes back", async () => {
+test("successor place: when the end of a chain loses its adoption, the middle comes back and still replaces the head (C18)", async () => {
   const db = tempDb();
   try {
     const p = project(db);
-    const { decided, link, state, life } = successors(db, p);
+    const { decided, link, unadopt, settle, life } = successors(db, p);
     const o = decided("v1", true);
-    state(o, "candidate", "active");
     const a = decided("v2", true);
-    link(a, o);
-    state(a, "candidate", "active");
-    state(o, "active", "superseded");
     const b = decided("v3", true);
+    link(a, o);
     link(b, a);
-    state(b, "candidate", "active");
-    state(a, "active", "superseded");
-    state(b, "active", "candidate");
-    assert.deepEqual([life(o), life(a), life(b)], ["candidate", "candidate", "candidate"]);
+    await settle([o, a, b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "superseded", "active"]);
+    unadopt(b);
+    await settle([b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "active", "candidate"]);
+    // Adopted again (other words of the owner), the end replaces the whole chain again: never two answers
+    db.owner
+      .prepare(
+        "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) select ?, 'owner_statement', source_id, 4, 10, run_id, ? from unit_evidence where unit_id = ?",
+      )
+      .run(b, at("2026-09-28T00:00:00Z"), o);
+    await settle([b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "superseded", "active"]);
   } finally {
     await db.done();
   }
 });
 
-test("successor place: the same rule holds whether or not the replaced record was adopted, so adding or taking back its adoption frees nothing", async () => {
+test("successor place: proposals wait beside the place, the first standing one takes it, and the next takes it when it falls", async () => {
   const db = tempDb();
   try {
     const p = project(db);
-    const { decided, link, state, life } = successors(db, p);
-    // Unadopted O: proposals wait beside it too, and the first to become active takes the place
+    const { decided, link, unadopt, settle, life } = successors(db, p);
     const o = decided("plain", false);
     const a = decided("first", true);
     const b = decided("second", true);
     link(a, o);
     link(b, o);
-    state(a, "candidate", "active");
-    state(o, "candidate", "superseded");
-    assert.throws(() => state(b, "candidate", "active"), /already has an active successor/);
-    state(a, "active", "candidate");
-    assert.equal(life(o), "candidate");
-    state(b, "candidate", "active");
+    await settle([o]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "active", "candidate"]);
+    unadopt(a);
+    await settle([a]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "candidate", "active"]);
   } finally {
     await db.done();
   }

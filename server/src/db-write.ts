@@ -150,6 +150,7 @@ const INGEST_INSERTS = new Set([
   "unit_adoption",
   "unit_link",
   "unit_state",
+  "unit_replacement",
   "unit_anchor",
   "unit_alias",
   "field_def",
@@ -170,6 +171,8 @@ const INGEST_UPDATES: Record<string, Set<string>> = {
   unit_link: new Set(["resolved_at", "resolution"]),
   unit_evidence: new Set(RETRACTION),
   unit_adoption: new Set(RETRACTION),
+  // A replacement only ever ends; what started it is never rewritten
+  unit_replacement: new Set(["ended_at", "end_reason", "end_run_id"]),
   // The upsert of the current work
   work: new Set(["title", "goal", "current", "next", "status", "branch", "run_id", "updated_at"]),
 };
@@ -186,7 +189,6 @@ export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
   source_fts_ai: ["insert source_fts"],
   source_fts_ad: ["delete source_fts"],
   unit_state_apply: ["update unit"],
-  unit_state_restore: ["insert unit_state"],
   delivery_ad: ["delete delivery_unit"],
   ...Object.fromEntries(
     [
@@ -198,6 +200,8 @@ export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
       "adoption_d",
       "link_i",
       "link_u",
+      "replacement_i",
+      "replacement_u",
       "anchor_i",
       "anchor_u",
       "alias_i",
@@ -270,7 +274,14 @@ function ingestAuthorizer(
  * lose a field value; the authorizer sees those as plain writes.
  */
 const FORGET_WRITES: Record<number, Set<string>> = {
-  [C.SQLITE_INSERT]: new Set(["forget_batch", "source_forgotten", "unit_state", "source_fts", "unit_fts"]),
+  [C.SQLITE_INSERT]: new Set([
+    "forget_batch",
+    "source_forgotten",
+    "unit_state",
+    "unit_replacement",
+    "source_fts",
+    "unit_fts",
+  ]),
   [C.SQLITE_DELETE]: new Set([
     "source",
     "unit_evidence",
@@ -282,10 +293,14 @@ const FORGET_WRITES: Record<number, Set<string>> = {
     "unit_fts",
   ]),
 };
-/** Columns forget changes: the state and revision triggers set on unit, and the foreign key action clearing unit_state.source_id. */
+/**
+ * Columns forget changes: the state and revision triggers set on unit, the foreign key action clearing unit_state.source_id, and the end of
+ * a replacement that no longer stands once its support is forgotten.
+ */
 const FORGET_UPDATES: Record<string, Set<string>> = {
   unit: new Set(["lifecycle", "revision"]),
   unit_state: new Set(["source_id"]),
+  unit_replacement: new Set(["ended_at", "end_reason", "end_forget_id"]),
 };
 
 function forgetAuthorizer(action: number, p1: string | null, p2: string | null): number {
@@ -301,11 +316,9 @@ function forgetAuthorizer(action: number, p1: string | null, p2: string | null):
       p1 === "wal_checkpoint"
       ? C.SQLITE_OK
       : C.SQLITE_DENY;
-  // Recursive reads: judging records again walks supersedes chains (unit_successor_place, unit_state_restore)
   if (
     action === C.SQLITE_READ ||
     action === C.SQLITE_SELECT ||
-    action === C.SQLITE_RECURSIVE ||
     action === C.SQLITE_FUNCTION ||
     action === C.SQLITE_TRANSACTION ||
     action === C.SQLITE_SAVEPOINT

@@ -14,6 +14,7 @@ import {
   WORK_STATUSES,
 } from "./knowledge.ts";
 import { inline } from "./panel.ts";
+import { firstState, type Hint, type Reconciled, reconcile } from "./reconcile.ts";
 import {
   commitHeld,
   kindOf,
@@ -398,13 +399,14 @@ export async function checkRecord(
       : []
     ).map((u) => [u.key, u]),
   );
-  // A record has one successor place; who holds it is the schema's unit_successor_place, which the link trigger also reads
+  // The successor in effect now, if any: its replacement holds the record's one place until it ends
   const holders = new Map(
     (others.size
       ? await db
-          .selectFrom("unit_successor_place as h")
+          .selectFrom("unit_replacement as h")
           .innerJoin("unit as n", "n.id", "h.from_unit")
           .select(["h.to_unit", "n.key", "n.lifecycle"])
+          .where("h.ended_at", "is", null)
           .where(
             "h.to_unit",
             "in",
@@ -623,7 +625,7 @@ export async function checkRecord(
     let supersedes: number | null = null;
     if (u.supersedes) {
       const old = others.get(u.supersedes);
-      // Only a successor that becomes active takes the place; a decision or constraint nobody adopts in this save waits beside it
+      // Only a successor that can take effect takes the place; a decision or constraint the owner does not adopt waits beside it
       const takes = !["decision", "constraint"].includes(u.kind) || adoption.length > 0;
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
@@ -759,6 +761,8 @@ export type Saved = {
   superseded: string[];
   /** Anchors judged again under the lock that may point at the wrong place */
   anchorProblems: string[];
+  /** The units this save wrote, for a caller that reconciles them with its own changes */
+  written: { id: number; key: string; hint: Hint }[];
 };
 
 /** The hash of what a unit says: its text and options. Alias sets are bound to it, so words written for other text are never used. */
@@ -778,8 +782,35 @@ const contentHash = (u: UnitInput): Buffer =>
     ]),
   );
 
-/** Messages the schema's activation rules raise; anything else is a real failure. */
-export const ACTIVATION = /needs|cannot become active/;
+/**
+ * Judges what a save wrote, with everything its intents reach, and reports it. A successor the owner adopted into a place another holds
+ * never gets here: check refuses it by name. One nobody adopted waits as a candidate, with the reason.
+ */
+export async function settleSaved(
+  trx: Kysely<DB>,
+  runId: number,
+  saved: Saved,
+  more: { seeds?: number[]; withdraw?: Map<number, Hint> } = {},
+): Promise<Reconciled> {
+  const written = new Map(saved.written.map((w) => [w.id, w]));
+  const settled = await reconcile(
+    trx,
+    [...written.keys(), ...(more.seeds ?? [])],
+    { runId },
+    {
+      hints: new Map(saved.written.map((w) => [w.id, w.hint])),
+      withdraw: more.withdraw,
+    },
+  );
+  const now = new Map(settled.changes.map((c) => [c.id, c.after]));
+  for (const w of saved.written) {
+    if (saved.quarantined.some((q) => q.startsWith(`${w.key} (`))) continue;
+    if (now.get(w.id) === "active") saved.active.push(w.key);
+    else saved.candidates.push({ key: w.key, why: settled.waits.get(w.id) ?? "its support is not complete" });
+  }
+  for (const c of settled.changes) if (c.after === "superseded") saved.superseded.push(c.key);
+  return settled;
+}
 
 /**
  * Writes a checked record inside the caller's transaction. looked lists the sources the run read: each gets a processing outcome, so
@@ -791,11 +822,19 @@ export async function saveRecord(
   runId: number,
   checked: Checked,
   looked: number[],
+  { settle = true }: { settle?: boolean } = {},
 ): Promise<Saved> {
   if (checked.errors.length)
     throw new Error(`The record is not valid:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
   const now = iso(Date.now());
-  const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [], anchorProblems: [] };
+  const saved: Saved = {
+    active: [],
+    candidates: [],
+    quarantined: [],
+    superseded: [],
+    anchorProblems: [],
+    written: [],
+  };
   const cited = new Set<number>();
   for (const d of checked.fieldDefs) {
     cited.add(d.source);
@@ -955,17 +994,7 @@ export async function saveRecord(
         })
         .execute();
     }
-    await trx
-      .insertInto("unit_state")
-      .values({
-        unit_id: id,
-        from_state: null,
-        to_state: "candidate",
-        at: now,
-        reason: `${target.origin} extracted`,
-        run_id: runId,
-      })
-      .execute();
+    await firstState(trx, id, `${target.origin} extracted`, runId, now);
     if (p.aliases.length)
       await trx
         .insertInto("unit_alias")
@@ -988,52 +1017,17 @@ export async function saveRecord(
         .values({ from_unit: id, to_unit: c, kind: "conflicts", run_id: runId, added_at: now })
         .execute();
 
-    if (p.quarantine.length) {
-      saved.quarantined.push(`${p.key} (${p.quarantine.join("; ")})`);
-      continue;
-    }
-    const first = p.evidence[0]?.source ?? null;
-    try {
-      await trx
-        .insertInto("unit_state")
-        .values({
-          unit_id: id,
-          from_state: "candidate",
-          to_state: "active",
-          at: now,
-          reason: p.adoption.length ? "evidence and adoption found" : "evidence found",
-          source_id: p.adoption[0]?.source ?? first,
-          run_id: runId,
-        })
-        .execute();
-    } catch (e) {
-      const why = (e as Error).message;
-      if (!ACTIVATION.test(why)) throw e;
-      saved.candidates.push({ key: p.key, why });
-      continue;
-    }
-    saved.active.push(p.key);
-    if (p.supersedes !== null) {
-      const old = await trx
-        .selectFrom("unit")
-        .select(["key", "lifecycle"])
-        .where("id", "=", p.supersedes)
-        .executeTakeFirstOrThrow();
-      await trx
-        .insertInto("unit_state")
-        .values({
-          unit_id: p.supersedes,
-          from_state: old.lifecycle,
-          to_state: "superseded",
-          at: now,
-          reason: `superseded by ${p.key}`,
-          source_id: first,
-          run_id: runId,
-        })
-        .execute();
-      saved.superseded.push(old.key);
-    }
+    if (p.quarantine.length) saved.quarantined.push(`${p.key} (${p.quarantine.join("; ")})`);
+    saved.written.push({
+      id,
+      key: p.key,
+      hint: {
+        reason: p.adoption.length ? "evidence and adoption found" : "evidence found",
+        source: p.adoption[0]?.source ?? p.evidence[0]?.source ?? null,
+      },
+    });
   }
+  if (settle) await settleSaved(trx, runId, saved);
   if (checked.work) {
     const w = checked.work;
     const traced = target.sessionId

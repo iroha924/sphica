@@ -201,6 +201,12 @@ test("superseded, withdrawn, and candidate units keep their state and lose only 
     run_id: runOf(successor),
     added_at: now,
   });
+  insert(db, "unit_replacement", {
+    from_unit: successor,
+    to_unit: old,
+    run_id: runOf(successor),
+    started_at: now,
+  });
   move(old, "active", "superseded");
   const gone = unit("gone", "finding");
   evidence(gone, src);
@@ -234,7 +240,8 @@ test("forgetting a retraction's reason removes the retracted row it explained", 
     u,
   );
   const { outcome } = await forget(reason);
-  assert.deepEqual(outcome.units, [{ key: "u1", before: "candidate", after: "candidate", removed: 1 }]);
+  // Judged from what is left, as a save would: its live evidence makes the finding active
+  assert.deepEqual(outcome.units, [{ key: "u1", before: "candidate", after: "active", removed: 1 }]);
   assert.deepEqual(
     db.owner
       .prepare("select role from unit_evidence where unit_id = ?")

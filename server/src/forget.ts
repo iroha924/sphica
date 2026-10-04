@@ -8,7 +8,7 @@ import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { inline } from "./panel.ts";
-import { ACTIVATION } from "./record.ts";
+import { reconcile } from "./reconcile.ts";
 import { plural } from "./text.ts";
 
 export type ForgetOutcome = {
@@ -173,36 +173,26 @@ async function forgetIn(
     .execute();
   await trx.deleteFrom("source").where("id", "in", targets).execute();
 
-  // Judge active units again with the rules saving uses: back to candidate, then try active. Other lifecycles keep their state
-  // (a superseded or withdrawn unit never comes back through a later activation).
-  const reason = `sources ${targets.map((id) => `s${id}`).join(", ")} forgotten by the owner`;
-  for (const u of touched) {
-    let after = u.lifecycle;
-    if (u.lifecycle === "active") {
-      await trx
-        .insertInto("unit_state")
-        .values({ unit_id: u.id, from_state: "active", to_state: "candidate", at, reason, forget_id: batch })
-        .execute();
-      after = "candidate";
-      try {
-        await trx
-          .insertInto("unit_state")
-          .values({
-            unit_id: u.id,
-            from_state: "candidate",
-            to_state: "active",
-            at,
-            reason: "support checked again after forgetting sources",
-            forget_id: batch,
-          })
-          .execute();
-        after = "active";
-      } catch (e) {
-        if (!ACTIVATION.test((e as Error).message)) throw e;
-      }
-    }
-    outcome.units.push({ key: u.key, before: u.lifecycle, after, removed: removed.get(u.id) ?? 0 });
-  }
+  // Judged again with the rules saving uses, along with every record their replacements reach: a unit that keeps its support keeps its state
+  const settled = await reconcile(
+    trx,
+    touched.map((u) => u.id),
+    { forgetId: batch },
+    {
+      because: `sources ${targets.map((id) => `s${id}`).join(", ")} forgotten by the owner`,
+    },
+  );
+  const after = new Map(settled.changes.map((c) => [c.id, c.after]));
+  for (const u of touched)
+    outcome.units.push({
+      key: u.key,
+      before: u.lifecycle,
+      after: after.get(u.id) ?? u.lifecycle,
+      removed: removed.get(u.id) ?? 0,
+    });
+  for (const c of settled.changes)
+    if (!touched.some((u) => u.id === c.id))
+      outcome.units.push({ key: c.key, before: c.before, after: c.after, removed: 0 });
   return outcome;
 }
 
