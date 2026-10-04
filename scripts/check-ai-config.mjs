@@ -447,6 +447,15 @@ for (const name of pluginSkills) {
       `${relative}: disable-model-invocation: true and allow_implicit_invocation: false in agents/openai.yaml do not match`,
     );
   }
+  // The description is what an agent reads to decide whether to invoke it, so it must say what the settings allow
+  if (
+    (fields["disable-model-invocation"] === "true") !==
+    /\bUse only when the user explicitly asks\b/.test(fields.description ?? "")
+  ) {
+    fail(
+      `${relative}: the description says "Use only when the user explicitly asks" exactly when disable-model-invocation is true`,
+    );
+  }
 
   // Sphica is not on Codex's PATH (exit 127 observed). **Start the JS in the package directly, without a shell script.**
   // npm `bin` has no contract to be on PATH inside a plugin, and POSIX shells do not run on Windows.

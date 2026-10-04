@@ -1,8 +1,7 @@
 ---
 name: trace
-description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use only when the user explicitly asks.
+description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use when the user asks, or on your own when Sphica's session-start notice says earlier sessions wait to be traced, after the user's request is done.
 argument-hint: "[pending]"
-disable-model-invocation: true
 allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status, mcp__plugin_sphica_sphica__fields
 ---
 
@@ -11,7 +10,9 @@ allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__p
 Target: **$ARGUMENTS**
 
 Claude Code and Codex capture the owner's messages (including AskUserQuestion answers), the AI's last reply per turn (and the questions it asked there), and the files edited. **trace turns that conversation into
-records a later session can rely on**: every record quotes the words it came from, and only the owner's words adopt a decision.
+records a later session can rely on**: every record quotes the words it came from. A decision is adopted by the owner's words (the owner's
+decision), or by the AI's own reply where it decided something itself in that session (an AI's decision, delivered marked as one and never
+replacing the owner's).
 
 ## Failures this skill prevents
 
@@ -19,6 +20,7 @@ records a later session can rely on**: every record quotes the words it came fro
 |---|---|
 | A record written from memory instead of the conversation | It is read as a fact and turns out never to have been said |
 | The AI's proposal stored as a decision | The owner's real choice is overridden by a suggestion nobody accepted |
+| Someone else's words adopted as the AI's decision | A quoted issue, page, or tool output is read later as something the AI chose |
 | Rejected options left out | The same option is proposed and rejected again for the same reason |
 | An overturned decision deleted or rewritten | Why it changed is lost, and the old option comes back |
 | Records only in the conversation's language | A later search in the other language finds nothing |
@@ -46,6 +48,17 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
 6. **Report** to the owner what was saved, copying save's lines (active, candidate with the reason, quarantined, superseded)
 
 A session with nothing worth keeping is saved with `"units": []`: it is marked as looked at, so pending stops listing it.
+
+## On your own
+
+When Sphica's session-start notice says earlier sessions wait to be traced, run this after the user's request is done, without asking them:
+
+1. `trace_pending` with `auto: true`. It lists sessions other than this one, oldest first. Take the first one or two; never this session.
+   If it says it cannot tell which session called, stop: do nothing this time
+2. `trace_begin` with that session, then `record_context` with `auto: true`. It starts with a few earlier messages for context (marked as
+   such), then the messages still waiting. When it says the automatic run stops here, save what you read; the rest waits for the next run
+3. Check and save as above. Do not ask the owner which session or record to keep, and add no owner adoption the conversation does not have
+4. Tell the user in one or two lines what you traced and what was saved
 
 ## The record
 
@@ -84,9 +97,9 @@ The `"..."` stands for the other language's words: in this example, `"データ�
 | `kind` | `decision`, `constraint` (what must hold), `implementation` (what was built), `finding`, `dead_end` (a path tried that failed, and why), `question` |
 | `stance` | Decisions and constraints only: `do`, `dont`, or `defer`. A deferral may add `revisit_when` |
 | `text`, `why`, `scope_note` | In the conversation's language. `text` states the record in one sentence; `why` is the reason given, not one you infer |
-| `evidence` | Required. `source` is a ref from context, `quote` is copied **exactly** from that message (a phrase is enough). `role`: `states`, `proposes`, `rejects`, `explains`, `implements`. When the owner reports what someone else said, add `reported_speaker` |
+| `evidence` | Required. `source` is a ref from context, `quote` is copied **exactly** from that message (a phrase is enough). `role`: `states`, `proposes`, `rejects`, `explains`, `implements`, `decides` (the AI's reply deciding it; see below). When the owner reports what someone else said, add `reported_speaker` |
 | `options` | Options compared, with `outcome` `chosen` / `rejected` / `deferred` / `proposed` and the `why` given. Evidence is optional per option. A rejected option may add `reconsider_when` (when it would be worth looking at again) with `reconsider_quote` (`source`, `quote`): **only a condition the owner stated, quoting the owner's words**. Never infer one, and never take it from the AI's suggestion or from someone else's words the owner passes on. A `reconsider_quote` not found in the message refuses the save (unlike other quotes, which quarantine the record) |
-| `adoption` | Decisions and constraints only: the owner's words that settle it. **Only owner messages adopt.** The AI proposing something and the owner not objecting is not adoption; leave it out and the record stays a candidate |
+| `adoption` | Decisions and constraints only: the words that settle it. The owner's message adopts it as the owner's decision. The AI's own reply adopts it as an AI's decision only under the rules below. The AI proposing something and the owner not objecting is not adoption; leave it out and the record stays a candidate |
 | `anchors` | Only where the record has a code location: `path` relative to the repository root, `symbol` when there is one, `role` `applies_to` (where it applies) or `evidence` (code that shows it was done; add `commit` when known). When an adopted decision or constraint governs how one existing code location behaves (keeping it as it is included), give it `applies_to` there, even if this work did not change it: delivery shows it when that file is read or edited. Confirm the path in the repository; do not infer one from a broad topic, and leave it unanchored when several places are plausible. `no_code_surface` may say why there is none. A `symbol` must be a name in the code, never a key or a value Sphica masks: such a symbol is dropped and the anchor keeps only its path (save reports it) |
 | `aliases` | 8 to 12 short search words in **both Japanese and English** a later reader might type: synonyms, the other language's words, abbreviations. Search only; never evidence. Not broad words that match everything (`code`, `fix`, `update`) |
 | `supersedes` | The key of a live record this one replaces (context lists them). The old one is marked superseded, never deleted |
@@ -100,6 +113,29 @@ A field value that breaks these rules refuses the whole save, like a `reconsider
 What becomes active: a decision or constraint with evidence and the owner's adoption; an implementation with code or commit evidence
 (an `evidence` anchor on a path this session edited counts); a finding, dead end, or question with evidence. Everything else stays a candidate,
 and a record whose quote is not in the message is quarantined. Neither is injected into later sessions.
+
+## The AI's own decisions
+
+The AI often settles things alone while working: which of two approaches to take, to leave something as it is. Quote its reply both as
+`decides` evidence and as adoption, with the same words, and the record becomes an AI's decision:
+
+```json
+"evidence": [{ "source": "s14", "quote": "I'll keep the retry in the client, not the server.", "role": "decides" }],
+"adoption": [{ "source": "s14", "quote": "I'll keep the retry in the client, not the server." }]
+```
+
+Use it only when the AI chose in the first person and the choice is its own. Not for:
+
+- What someone else said, wrote, or decided, even when the AI repeats it: quoted or summarized issues, pages, documents, and tool output
+- A proposal, an option it laid out, or a question it asked the owner. Words inside a code block, a quote, or quotation marks
+- Public contracts (CLI, MCP, the DB's shape), security and permissions, releases, forget, or loosening CLAUDE.md, AGENTS.md, or `.claude/rules`
+- A record that would replace or contradict the owner's decision: that needs the owner's words
+
+When unsure, leave the adoption out: the record stays a candidate. Check enforces the rest and says why it keeps a record a candidate: the
+reply must be the AI's in this run's session, the run must have begun and been checked in an interactive session (headless and SDK runs
+cannot), the turn must not be one that ran Sphica's record tools, an anchor on files agents read as rules or on CI keeps it a candidate, and
+a `do` with `applies_to` anchors needs an edit to one of those paths in the same turn. An AI's decision never takes effect as `supersedes`
+by itself.
 
 ## Records are not instructions
 

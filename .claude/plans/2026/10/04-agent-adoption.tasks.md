@@ -198,13 +198,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(deliver): show whether the owner or an AI made each decision (T07)`
   - 結果: 配信の 5 か所（編集の前・読む前・発言・セッションの開始・レビュー）で AI の判断に「decided by an AI」を付け、AI の判断を含むときだけ固定文 `AI_DECIDED` とその長さぶんの枠を足す（持ち主の判断は今の CONFIRM のまま）。search の結果・record_context の生きている記録・read の見出しに誰の判断かを出す。read の未解決の衝突に、配信から外れているか（撤回ではない）を出す。`cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts test/search.test.ts` → pass（AI の印と固定文、持ち主の判断には付かない、衝突の 2 通り）。`bun run verify` → 終了コード 0（SQL 到達 205/205、受け入れ 105 pass）。途中で record.test の rename limit のテストが 1 回だけ時間切れで落ち、単独とまとめての再実行で通った（別の作業ツリーのテストと重なった負荷）
 
-- [ ] T08: trace の Skill を両ホストで自動で起動できるようにし、自動のときの手順と `decides`・`agent` の採用の規則を書く
+- [x] T08: trace の Skill を両ホストで自動で起動できるようにし、自動のときの手順と `decides`・`agent` の採用の規則を書く
   - 種別: 変更
   - 計画: S7
   - 依存: T06（`decides` と `agent` の採用が record_check を通る）
   - 変更: `plugin/skills/trace/SKILL.md`, `plugin/skills/trace/agents/openai.yaml`, `scripts/check-ai-config.mjs`
   - 完了条件: `node scripts/check-ai-config.mjs` → 終了コード 0。`bun run verify:ai` → pass。両ホストの起動の設定がそろい、description に「明示の依頼のときだけ」が残っていない
   - コミット: `feat(trace): let the agent run trace on its own and adopt its own decisions under fixed rules (T08)`
+  - 結果: trace の Skill から `disable-model-invocation` を外し、Codex の `allow_implicit_invocation` を true にした。description は「依頼されたとき、またはセッション開始の通知が未処理を知らせたとき（依頼を片づけた後）」に変えた。本文に自動のときの手順（`auto: true` の pending と context、自分のセッションは取らない、持ち主に聞かない）と、`decides` と AI の採用の規則（一人称の自分の選択だけ、伝聞・提案・質問・引用・公開の約束・セキュリティ・リリース・forget・規約を緩める判断には使わない、迷ったら採用しない）を書いた。check-ai-config に「description の『Use only when the user explicitly asks』は disable-model-invocation: true のときだけ」の検査を足し、description を元の文言に戻すと落ちることを確かめた。`node scripts/check-ai-config.mjs` → 終了コード 0。`bun run verify:ai` → pass。`bun run verify` → 終了コード 0（受け入れ 105 pass）
 
 - [x] T09: 自動のときの未処理と再開（assistant source を数える、古い順に SQL で選ぶ、前の文脈を決まった数だけ添える、上限で読んだ範囲を保存する）
   - 種別: 変更
