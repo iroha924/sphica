@@ -772,6 +772,7 @@ test("collect excludes a gold run when the gold hook returned no record, and kee
         codex,
         "--logs",
         base,
+        "--skip-hidden-tests",
       ],
       { stdio: "ignore", env: childEnv(base) },
     );

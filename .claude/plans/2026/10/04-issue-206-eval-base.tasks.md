@@ -257,6 +257,16 @@ base: main
   - コミット: `fix(evals): fence hidden tests and close the second GitHub Codex review on the runner (T24)`
   - 結果: red は上のとおり落ちた（`../../` のテストは最初、場所の名前が相対パスの一部に一致して直す前でも通っていたので、名前を直して落ちることを確かめた）。hidden test の sandbox は手で確かめた: `file-read-data` を home の下で禁止し checkout と Node だけを許すと、checkout が home の下でも一時ディレクトリでも、checkout は読め、home のファイルは symlink 経由でも絶対パスでも読めない（`file-read*` まで禁止すると親の stat が止まり Node が動かない）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts` → pass 87（35＋52）, fail 0
 
+- [x] T25: T24 で macOS 以外の collect を止めたのに、hidden test のあるタスクで collect を起動するテストに `--skip-hidden-tests` を付け忘れ、Linux の CI が落ちたのを直す
+  - 種別: 修正
+  - 計画: S10
+  - 依存: T24（CI を落とした変更）
+  - 変更: `server/test/eval-grade.test.ts`
+  - red: `cd server && NODE_OPTIONS="--import <process.platform を linux にするファイル>" node --test test/eval-grade.test.ts` → 72b34c76 で 1 件落ちる（CI と同じ「collect excludes a gold run ...」）
+  - 完了条件: 同じコマンドと macOS のままの `node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass。CI の check が通る
+  - コミット: `fix(evals): skip hidden tests in the collect test that runs on Linux CI (T25)`
+  - 結果: red は上のとおり 1 件落ちた。直した後 Linux に見せた状態と macOS の両方で pass 84, fail 0
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
