@@ -329,8 +329,10 @@ function rateBar(
   better: number,
   least: number,
   counts: (rows: Graded[]) => Graded[] = validOf,
+  expected: string[] | null = null,
 ): { verdict: Verdict; detail: string } {
-  const models = [...new Set([...old, ...next].filter(pick).map((r) => r.model))].sort();
+  // A model the bar needs is judged even when neither side ran it, so a missing model is inconclusive, not skipped
+  const models = expected ?? [...new Set([...old, ...next].filter(pick).map((r) => r.model))].sort();
   const moves: number[] = [];
   const parts: string[] = [];
   for (const m of models) {
@@ -369,7 +371,17 @@ export function bars(
   if (which.includes("g1a"))
     say(
       "G1a failure rate on stale-thumb and abstention-shelf, down by 0.3",
-      rateBar(old.rows, next.rows, on("stale-thumb", "abstention-shelf"), failed, -0.3, 8),
+      rateBar(
+        old.rows,
+        next.rows,
+        on("stale-thumb", "abstention-shelf"),
+        failed,
+        -0.3,
+        8,
+        // A cut patch leaves whether the run did the rejected change unknown: such a run proves neither way
+        (rows) => validOf(rows).filter((r) => r.grade?.implements_rejected !== "unknown"),
+        ["claude", "codex"],
+      ),
     );
   if (which.includes("g3"))
     say(
@@ -381,6 +393,8 @@ export function bars(
         (r) => r.grade?.named_conflict === "yes" && r.grade?.implemented_one_side === "no",
         0.4,
         4,
+        (rows) => validOf(rows).filter((r) => r.grade?.implemented_one_side !== "unknown"),
+        ["claude", "codex"],
       ),
     );
   if (which.includes("g4")) {
@@ -410,7 +424,7 @@ export function bars(
       validOf(rows).filter((r) => r.search_before_edit === "yes" || r.search_before_edit === "no");
     const loading = (b: Build) =>
       b.rows
-        .filter((r) => r.condition === "search" && r.model === "claude")
+        .filter((r) => r.condition === "search" && r.model === "claude" && !r.excluded)
         .map((r) => r.search_loading ?? "unknown");
     const count = (xs: string[], v: string) => xs.filter((x) => x === v).length;
     const loads = (xs: string[]) =>
@@ -451,11 +465,23 @@ export function bars(
         short++;
         continue;
       }
+      // Rounded so a drop of exactly 0.3 is not lost to floating point (1.5 - 1.2 is 0.30000000000000004)
       const drop =
-        (mean(o.map((r) => r.grade?.score ?? 0)) ?? 0) - (mean(n.map((r) => r.grade?.score ?? 0)) ?? 0);
-      const reproposed = (rows: Graded[]) => shareOf(rows, (r) => r.grade?.proposes_rejected === "yes");
+        Math.round(
+          ((mean(o.map((r) => r.grade?.score ?? 0)) ?? 0) - (mean(n.map((r) => r.grade?.score ?? 0)) ?? 0)) *
+            1e9,
+        ) / 1e9;
       if (drop > 0.3) problems.push(`${task} ${model}: mean down ${fmt(drop)}`);
-      if (reproposed(n) > reproposed(o))
+      // Re-proposals are compared over runs whose answer is known; too few known runs on a side leave the cell unproven
+      const told = (rows: Graded[]) =>
+        rows.filter((r) => r.grade?.proposes_rejected === "yes" || r.grade?.proposes_rejected === "no");
+      const applies = [...o, ...n].some((r) => r.grade?.proposes_rejected !== "not_applicable");
+      if (applies && (told(o).length < 2 || told(n).length < 2)) {
+        short++;
+        continue;
+      }
+      const reproposed = (rows: Graded[]) => shareOf(told(rows), (r) => r.grade?.proposes_rejected === "yes");
+      if (applies && reproposed(n) > reproposed(o))
         problems.push(`${task} ${model}: re-proposals ${fmt(reproposed(o))} → ${fmt(reproposed(n))}`);
     }
     lines.push(
@@ -490,6 +516,8 @@ if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare")
   const plan = readTasks<{ tasks: TaskInfo[] }>(path.dirname(files[0] ?? ""));
   const [a, b] = sides as [Side, Side];
   const asked = opts.bar ? opts.bar.split(",") : [];
+  if (asked.includes("all") && asked.length > 1)
+    throw new Error("--bar all stands alone; name bars or give all");
   const which = asked.includes("all") ? ["g1a", "g3", "g4", "g6", "regression"] : asked;
   const unknownBar = which.filter((w) => !["g1a", "g3", "g4", "g6", "regression"].includes(w));
   if (unknownBar.length)

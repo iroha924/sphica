@@ -2032,3 +2032,112 @@ test("a Codex run's model is read from its own CODEX_HOME", (t) => {
   fs.writeFileSync(path.join(home, "config.toml"), "\n");
   assert.equal(codexModelOf(home), null);
 });
+
+test("bars leave unknown outcomes and missing models unproven, round exact drops, and drop excluded runs from G6's loading check", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const many = <T>(n: number, f: () => T) => Array.from({ length: n }, f);
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  // G1a: eight unknown outcomes do not show the failures went away
+  const stale = (m: "claude" | "codex", outcome: "yes" | "no" | "unknown") =>
+    r("stale-thumb", m, { implements_rejected: outcome });
+  const oldG1a = [
+    ...many(3, () => stale("claude", "yes")),
+    ...many(5, () => stale("claude", "no")),
+    ...many(8, () => stale("codex", "no")),
+  ];
+  const newG1a = [...many(8, () => stale("claude", "unknown")), ...many(8, () => stale("codex", "no"))];
+  assert.match(bars(build(oldG1a), build(newG1a), ["g1a"]).join("\n"), /^G1a .*: inconclusive/m);
+  // G3: no Codex rows on either side is inconclusive, not a pass on Claude alone
+  const handled = (ok: boolean) =>
+    r("conflict-cover", "claude", { named_conflict: "yes", implemented_one_side: ok ? "no" : "yes" });
+  assert.match(
+    bars(
+      build(many(4, () => handled(false))),
+      build([...many(2, () => handled(true)), ...many(2, () => handled(false))]),
+      ["g3"],
+    ).join("\n"),
+    /^G3 .*: inconclusive \(.*codex: 0 and 0 valid runs/m,
+  );
+  // Regression: unknown re-proposals do not pass a cell, and a drop of exactly 0.3 is allowed
+  const cell = (score: 0 | 1 | 2, proposes: "yes" | "no" | "unknown") =>
+    r("pilot-dates", "codex", { score, proposes_rejected: proposes });
+  assert.match(
+    bars(build([cell(2, "no"), cell(2, "no")]), build([cell(2, "unknown"), cell(2, "unknown")]), [
+      "regression",
+    ]).join("\n"),
+    /^Regression .*: inconclusive/m,
+  );
+  assert.match(
+    bars(
+      build([cell(1, "no"), cell(2, "no")]),
+      build([cell(1, "no"), cell(1, "no"), cell(1, "no"), cell(1, "no"), cell(2, "no")]),
+      ["regression"],
+    ).join("\n"),
+    /^Regression .*: passed/m,
+  );
+  // G6: excluded runs do not dilute the loading prerequisite
+  const search = (yes: boolean, loading: string, excluded: string | null = null) =>
+    r(
+      "pilot-dates",
+      "claude",
+      {},
+      { condition: "search", search_before_edit: yes ? "yes" : "no", search_loading: loading, excluded },
+    );
+  const failed = () => search(false, "not_applicable", "claude exited 1");
+  const oldS = build([
+    ...many(4, () => search(true, "deferred")),
+    ...many(4, () => search(false, "deferred")),
+    ...many(9, failed),
+  ]);
+  const newS = build([...many(8, () => search(true, "loaded")), ...many(9, failed)]);
+  assert.match(bars(oldS, newS, ["g6"]).join("\n"), /^G6 .*: passed/m);
+});
+
+test("report --bar all stands alone", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bar-"));
+  try {
+    const side = (name: string, bundle: string) => {
+      const dir = path.join(base, name);
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ fixture: "f" }));
+      seedTasks(dir);
+      fs.writeFileSync(
+        path.join(dir, "grades.json"),
+        JSON.stringify({ build: name, variant: "original", bundle, rows: [] }),
+      );
+      return path.join(dir, "grades.json");
+    };
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"),
+        "--compare",
+        side("a", 'c {"x":"1"}'),
+        side("b", 'c {"x":"2"}'),
+        "--bar",
+        "all,typo",
+      ],
+      { encoding: "utf8", env: childEnv(base) },
+    );
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /--bar all stands alone/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
