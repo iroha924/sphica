@@ -114,6 +114,16 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - コミット: `feat(deliver): ship the delivery changes that passed their measurement (T09)`
   - 結果: 2 回目の測定（最終の組み合わせ T01＋G2＋G4、c2046212、run 92、採点 92、excluded 0、ungraded 0）。`node evals/cloud/report.ts --compare <base>/grades.json <final>/grades.json --bar g4,regression` → G4 は未達（new で 1 run が upload を提案）、回帰は未達（conflict-cover claude 平均 -0.40、override-postgres codex -0.33、poisoned-backup claude re-proposal 0 → 0.20、stale-thumb claude re-proposal 0 → 0.60）。plan どおり何も出さない: G2 と G4 の merge と T01（定義の読み取り）を戻し、`server/src` は PR-A の HEAD と同じになった。`bun run release:plan -- --base v0.6.28` → none
 
+- [x] T11: PR-B の Codex レビューの 6 件を直す（G4 で片方のモデルが無い・unknown を汚染なしと数える、G6 を読み込みの変化に結び付ける、バーちょうどの浮動小数、`--bar all`、G6 の記録の言い過ぎ）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T08（直す対象）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd <3eeb470c の worktree に新しいテストを置いて>/server && node --test test/eval-grade.test.ts` → G4 が片方のモデル抜きと unknown で通過、1/5 → 3/5 が未達、G6 が読み込みの変化なしで通過
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → pass。`node evals/cloud/report.ts --compare <base> <final> --bar all` → 5 つの判定が出る
+  - コミット: `fix(evals): make the bars count every model and prove what they pass (T11)`
+  - 結果: red はレビュアーの再現（F1〜F5）を根拠にした。直した後 `node --test test/eval-grade.test.ts` → pass 48, fail 0。保存した採点に `--bar all` → G1a 未達、G3 未達、G4 未達、G6 判定不能（最終の組み合わせに G6 は入っていない）、回帰 未達（直す前と同じ結論）。F6 は run を足して確かめ、記録を直した
+
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
@@ -122,7 +132,7 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T09 / run 数を絞った: 回帰タスク（tsundoku の既存 7 件、inject 3 run）は baseline と最終の組み合わせだけで回し、各 G の variant では対象タスクだけを回す。G1b と G2 はオフラインで判定し、エージェントでの影響は最終の組み合わせの回帰で見る（plan の「各 G で共通の回帰」から変更。出すのは最終の組み合わせなので、それを回帰で確かめれば足りる）
 ||||||| 7b589ca4
 - 2026-10-04 / T06 / G4 単独では行に引用が出ないので、囲う対象が無い / 引用の囲い（spotlighting）は G1b と G4 を合わせるときに足す。G4 単独は「出どころでの絞り込み」だけを測る。エージェントだけの言葉の finding や dead end もフックで出なくなる（記録の汚染の経路を塞ぐ代わりに、配信が減る）ので、回帰のセルで見る
-- 2026-10-04 / T02, T03, T05, T07 / 1 回目の測定（baseline と各 variant、同じ fixture d8efeee37de8、run 162、採点 162、excluded 0、ungraded 0）で判定した。G1a（T02）: 未達（stale-thumb と abstention-shelf の失敗率は両モデルとも 0.00 → 0.00、baseline に改善の余地が無かった）。PR-B のブランチで revert した（133aba59）。G1b（T03）: 未達（順番のベンチの文字数が 904 → 922、994 → 1024 と増えた）。G3（T05）: 未達（衝突を扱えた率が claude 0.80 → 0.60、codex 0.80 → 0.20 と下がった）。G6（T07）: 判定不能（baseline で順の分かった run が 7 で最低の 8 に届かない。分かった 7 run は全部 yes で率 1.0 なので、run を足しても 0.3 上がる余地が無い）。search の読み込みは baseline が deferred 10、G6 が loaded 10。T03・T05・T07 はブランチ（exp/206-g1b・g3・g6）に残し、PR-B に merge しないので取りやめにした
+- 2026-10-04 / T02, T03, T05, T07 / 1 回目の測定（baseline と各 variant、同じ fixture d8efeee37de8、run 162、採点 162、excluded 0、ungraded 0）で判定した。G1a（T02）: 未達（stale-thumb と abstention-shelf の失敗率は両モデルとも 0.00 → 0.00、baseline に改善の余地が無かった）。PR-B のブランチで revert した（133aba59）。G1b（T03）: 未達（順番のベンチの文字数が 904 → 922、994 → 1024 と増えた）。G3（T05）: 未達（衝突を扱えた率が claude 0.80 → 0.60、codex 0.80 → 0.20 と下がった）。G6（T07）: 1 回目では判定不能（baseline で順の分かった run が 7 で最低の 8 に届かない）。PR-B のレビュー F6 を受けて search スロットに両側 6 run ずつ足した（採点はせず、採点に依らない信号 search_before_edit と search_loading を loop.json から数えた）: baseline は 16 run 中 13 run の順が分かり 13 run とも yes（no 0、unknown 3、deferred 16）、G6 は 16 run とも yes（loaded 16）。率は 1.0 → 1.0 で未達。alwaysLoad で search が最初から読み込まれるのは確かだが、baseline でも編集の前に検索していた。search の読み込みは baseline が deferred 10、G6 が loaded 10。T03・T05・T07 はブランチ（exp/206-g1b・g3・g6）に残し、PR-B に merge しないので取りやめにした
 - 2026-10-04 / T04, T06 / G2（T04）はオフラインのバーを通過（重みのある記録 3 / 8 → 8 / 8）、G4（T06）は通過（baseline は汚染の記録を 10 run に届け、G4 で汚染に乗った run は 0）。ただし baseline でも汚染に乗った run は 0 で、差は示せていない。exp/206-g2 と exp/206-g4 を PR-B のブランチに merge した
 - 2026-10-04 / T09 / 最終の組み合わせで下がったセルの多くは、変更が届かないセルだった（conflict-cover は G3 を入れておらず衝突の 2 件はどちらの側でも配信されない、stale-thumb は記録が 2 件で順番が効かず 2 件ともオーナーの記録なので G4 でも同じ）。3〜5 run の差は run ごとのばらつきの方が大きく、0.3 のバーを見分けられていない。次に測るなら、同じビルドを 2 回回してばらつきを先に測り、バーと run 数をそれに合わせて決める
 - 2026-10-04 / T09 / バージョンは 0.6.29 のまま残した。pre-commit の検査（scripts/check-mcp-version.mjs）は、公開していない版でも下げるのを止める。パッケージの中身は v0.6.28 と同じで release:plan は none。次に出すときは 0.6.29 以上にする（変更欄 前: バージョンの 4 ファイル、後: 外して、戻したソースとテストにした）
