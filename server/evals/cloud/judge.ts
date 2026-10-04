@@ -273,7 +273,16 @@ export function claudeStreamCalls(events: string | null): { calls: StreamCall[];
         if (!call) continue;
         const body = c.content;
         call.result = Array.isArray(body)
-          ? body.map((b) => (typeof b === "object" && b && "text" in b ? String(b.text) : "")).join("\n")
+          ? body
+              .map((b) =>
+                // ToolSearch answers with tool references, which name a tool rather than carry text
+                typeof b === "object" && b && "text" in b
+                  ? String(b.text)
+                  : typeof b === "object" && b && "tool_name" in b
+                    ? String(b.tool_name)
+                    : "",
+              )
+              .join("\n")
           : String(body ?? "");
         call.error = c.is_error === true;
       }
@@ -371,6 +380,22 @@ export function searchedBeforeEdit(
   const at = calls.findIndex((c) => c.id === first.after);
   if (at < 0) return "unknown";
   return calls.slice(0, at).some((c) => c.name === "mcp__sphica__search" && c.result !== null) ? "yes" : "no";
+}
+
+/**
+ * How Sphica's search reached the run before its first call: "deferred" when a ToolSearch result handed it over first (the host had held
+ * it back), "loaded" when it was called with no ToolSearch having handed it over (it was there from the start). Without a search call, or
+ * from a damaged stream, it cannot be told.
+ */
+export function searchLoading(events: string | null): "deferred" | "loaded" | "unknown" {
+  const { calls, readable } = claudeStreamCalls(events);
+  if (!readable) return "unknown";
+  const first = calls.findIndex((c) => c.name === "mcp__sphica__search");
+  if (first < 0) return "unknown";
+  const handed = calls
+    .slice(0, first)
+    .some((c) => c.name === "ToolSearch" && c.result !== null && c.result.includes("mcp__sphica__search"));
+  return handed ? "deferred" : "loaded";
 }
 
 /**

@@ -86,7 +86,8 @@ export function runSettings(
       failIfUnavailable: true,
       filesystem: { denyRead: [...dirs, ...DENY_FILES] },
     },
-    env: { EVAL_RUN_DIR: p.run, EVAL_SPHICA_DB: p.db },
+    // MCP tools load through tool search on every run, so old and new start from the same loading and only alwaysLoad can change it
+    env: { EVAL_RUN_DIR: p.run, EVAL_SPHICA_DB: p.db, ENABLE_TOOL_SEARCH: "true" },
     hooks,
   };
 }

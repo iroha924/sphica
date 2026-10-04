@@ -23,6 +23,7 @@ import {
   foundInClaudeStream,
   goldSignalsFromClaudeStream,
   searchedBeforeEdit,
+  searchLoading,
 } from "../evals/cloud/judge.ts";
 
 const paths = { run: "/r", work: "/r/work", tools: "/r/tools", db: "/r/db/sphica.db" };
@@ -52,7 +53,12 @@ test("every condition runs fenced: sandbox on with no way out, the owner's secre
       assert.ok(s.permissions.deny.includes(`Edit(/${full}/**)`), `${condition}: Edit tool writes ${secret}`);
     }
     assert.ok(s.permissions.deny.includes("PushNotification"));
-    assert.deepEqual(s.env, { EVAL_RUN_DIR: "/r", EVAL_SPHICA_DB: "/r/db/sphica.db" });
+    // Tool search is pinned on, so Sphica's tools start held back on every side of a comparison
+    assert.deepEqual(s.env, {
+      EVAL_RUN_DIR: "/r",
+      EVAL_SPHICA_DB: "/r/db/sphica.db",
+      ENABLE_TOOL_SEARCH: "true",
+    });
     // Every condition logs the prompt, so collect can tell which task a run carried out
     assert.ok(argsOf(s, "UserPromptSubmit")?.length);
   }
@@ -781,4 +787,33 @@ test("the database canary compares status's count as a number, in its singular f
   assert.equal(statusCounts("Extracted: 19 active records", 9), false);
   assert.equal(statusCounts("Extracted: 1 active record, 0 candidates", 1), true);
   assert.equal(statusCounts(null, 0), false);
+});
+
+test("search counts as deferred only when a ToolSearch result handed it over before its first call", () => {
+  const handed = ev({
+    type: "user",
+    message: {
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "t",
+          content: [{ type: "tool_reference", tool_name: "mcp__sphica__search" }],
+        },
+      ],
+    },
+  });
+  const search = [use("s", "mcp__sphica__search"), result("s", "No record holds most of")];
+  assert.equal(searchLoading([use("t", "ToolSearch"), handed, ...search, done].join("\n")), "deferred");
+  assert.equal(searchLoading([...search, done].join("\n")), "loaded");
+  // A ToolSearch that loaded something else does not make search deferred
+  assert.equal(
+    searchLoading([use("t", "ToolSearch"), result("t", "mcp__sphica__read"), ...search, done].join("\n")),
+    "loaded",
+  );
+  assert.equal(
+    searchLoading([use("r", "Read"), result("r", "x"), done].join("\n")),
+    "unknown",
+    "no search call",
+  );
+  assert.equal(searchLoading(search.join("\n")), "unknown", "a stream cut off");
 });

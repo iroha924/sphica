@@ -189,13 +189,14 @@ base: main
 
 遅延読み込みの証拠と、ローカルの流れの手順がそろう。
 
-- [ ] T10: tool search の遅延読み込みの証拠を実 run で確かめ、runner の settings に固定する
+- [x] T10: tool search の遅延読み込みの証拠を実 run で確かめ、runner の settings に固定する
   - 種別: 追加
   - 計画: S9
   - 依存: T04（canary を通った runner で実 run する）
-  - 変更: `server/evals/cloud/claude-settings.ts`, `server/evals/cloud/judge.ts`, `server/test/eval-claude.test.ts`
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
   - 完了条件: `cd server && node --test test/eval-claude.test.ts` → 実 run で取った init の形から、search が遅延か最初から読み込まれたかを判定するテストが pass。証拠の欄が無ければ判定は unknown を返し、記録節に「G6 は測れない」と書く
   - コミット: `feat(evals): pin deferred tool loading and detect it from the stream (T10)`
+  - 結果: init の tools には遅延でも mcp__sphica__search が載るので、init では見分けられない。代わりに「最初の search より前に ToolSearch の結果が search を渡したか」で判定する（deferred / loaded / unknown）。正の対照: 同じスロットで `ENABLE_TOOL_SEARCH=false` → `loaded`、`true` → `deferred`。これまでの実 run 3 回はすべて `deferred`。`node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 79, fail 0
 
 - [ ] T11: eval-loop Skill をローカルの流れに合わせて直す
   - 種別: 変更
@@ -231,3 +232,4 @@ base: main
 - 2026-10-04 / T09 / PR-B の G2 のバー「どの対照例でも下がらない」は、重みで並べ替えると軽い記録が押し出されるので成り立たない。PR-B の計画で、重みのある記録の増加と軽い記録の減少を並べて判定する形に直す
 - 2026-10-04 / T06, T08 / Codex レビュー 5 件を全部採った / T18。hidden test は checkout の読み取りしか許されないので、書き込み系の fs 関数を記録だけするものに差し替えて（syncBuiltinESMExports）コピーの指示と送信を見る
 - 2026-10-04 / T15, T16, T17 / Codex レビュー 6 件（P1 1 件: canary の件数照合）を全部採った / T19。Bash のコミットの件（T16 F4）は実装はすでに正しく、テストが clean から clean の場面を突いていなかった
+- 2026-10-04 / T10 / init の欄では遅延かどうかが分からなかった / stream の ToolSearch の結果（tool_reference の tool_name）で判定し、stream の読み取りで tool_reference の名前も結果に含めるようにした。G6 は測れる
