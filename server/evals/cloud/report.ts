@@ -245,7 +245,7 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
       `the builds were made from different fixtures (${old.fixture} / ${next.fixture}); compare only the same records`,
     );
   if (old.tasks !== next.tasks) throw new Error("the builds were made from different task definitions");
-  // A bundle is "<commit> {artifact hashes}"; two commits can ship the same artifacts, so only the hashes tell the bundles apart
+  // A bundle is "<commit> {artifact hashes, delivery matchers}"; two commits can ship the same artifacts, so only those tell the bundles apart
   const artifacts = (b: Build) => {
     const at = b.bundle?.indexOf(" ") ?? -1;
     return b.bundle && at > 0 ? b.bundle.slice(at + 1) : "";

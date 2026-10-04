@@ -20,6 +20,19 @@ export function deliverMatcher(hooksJson: string): string {
 export const shippedMatcher = (root: string) =>
   deliverMatcher(fs.readFileSync(path.join(root, "plugin", "hooks", "hooks.json"), "utf8"));
 
+/** The matcher of Codex's delivery hook before a tool, as plugin/hooks/codex.json ships it. */
+function codexDeliverMatcher(hooksJson: string): string {
+  const hooks = JSON.parse(hooksJson) as {
+    hooks: { PreToolUse?: { matcher: string; hooks: { command: string }[] }[] };
+  };
+  const entry = hooks.hooks.PreToolUse?.find((e) => e.hooks.some((h) => h.command.includes("deliver.js")));
+  if (!entry) throw new Error("plugin/hooks/codex.json has no PreToolUse delivery hook");
+  return entry.matcher;
+}
+
+export const shippedCodexMatcher = (root: string) =>
+  codexDeliverMatcher(fs.readFileSync(path.join(root, "plugin", "hooks", "codex.json"), "utf8"));
+
 /** Re-keys the fixture's project to a slot repository, so Sphica identifies the slot's checkout as the same project. */
 export async function rekey(file: string, owner: string, repo: string): Promise<void> {
   // Changing a project's key is the owner's write; the record server's ingest connection may only add projects

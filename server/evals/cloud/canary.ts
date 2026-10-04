@@ -9,7 +9,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { type Check, contextChecks, permissionChecks, statusCounts } from "./canary-check.ts";
-import { runClaude } from "./claude-run.ts";
+import { runClaude, runnerDigest } from "./claude-run.ts";
 import { claudeStreamCalls } from "./judge.ts";
 
 const CACHE = path.join(os.homedir(), ".cache", "sphica-eval");
@@ -98,11 +98,20 @@ results.push({
   ),
 });
 for (const condition of ["none", "search", "inject", "gold"]) {
-  const r = await run(
-    condition,
-    `canary-context-${condition}`,
-    "Reply with the single word OK. Do not use any tool.",
-  );
+  // Inject reads one file, so the delivery hook before a tool is seen to fire on the build's matcher
+  const r =
+    condition === "inject"
+      ? await run(
+          condition,
+          `canary-context-${condition}`,
+          "Use the Read tool once to read canary.txt, then reply with the single word OK. Use no other tool.",
+          { plant: { "canary.txt": "canary\n" } },
+        )
+      : await run(
+          condition,
+          `canary-context-${condition}`,
+          "Reply with the single word OK. Do not use any tool.",
+        );
   results.push({
     group: `context: ${condition}`,
     checks: contextChecks(
@@ -188,9 +197,9 @@ for (const { group, checks } of results)
     console.log(`${c.ok ? "✓" : "✗"} ${group}: ${c.name}${c.ok || !c.why ? "" : ` (${c.why})`}`);
   }
 console.log(failed ? `canary failed: ${failed} checks` : "canary passed");
-// claude.ts starts a build's runs only after this file says the canary passed with the same model
+// claude.ts starts a build's runs only after this file says the canary passed with the same model and the same runner code
 fs.writeFileSync(
   path.join(build, "canary.json"),
-  `${JSON.stringify({ passed: failed === 0, failed, model: args.model, at: new Date().toISOString(), results }, null, 2)}\n`,
+  `${JSON.stringify({ passed: failed === 0, failed, model: args.model, runner: runnerDigest(), at: new Date().toISOString(), results }, null, 2)}\n`,
 );
 process.exitCode = failed ? 1 : 0;

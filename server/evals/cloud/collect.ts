@@ -58,6 +58,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "
   variant?: string;
   commit: string;
   bundle?: Record<string, string>;
+  matchers?: Record<string, string>;
   project?: string;
   repositories: Record<string, { condition: string }>;
 };
@@ -316,8 +317,9 @@ const taskOf = (text: string, firing: FiringRow[]) => {
 
 function main() {
   const rows: Row[] = [];
-  // The firing plan is the denominator: every fired row is one run asked for, with its task, even when it pushed no branch
-  const firing = Object.keys(manifest.repositories).length ? readPlan(build) : [];
+  // The firing plan is the denominator of cloud runs: every fired row is one run asked for, with its task, even when it pushed no branch.
+  // Without cloud runs the local plan is the denominator, and the build's cloud rows would only stand in for runs never looked for
+  const firing = !args["no-cloud"] && Object.keys(manifest.repositories).length ? readPlan(build) : [];
   const claude: (Row & { started: string })[] = [];
   const cloud = args["no-cloud"] ? [] : Object.entries(manifest.repositories);
   for (const [repo, { condition }] of cloud) {
@@ -601,7 +603,7 @@ function main() {
   }
   fs.writeFileSync(
     out,
-    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify(manifest.bundle ?? {})}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify({ ...manifest.bundle, ...(manifest.matchers ? { matchers: manifest.matchers } : {}) })}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(

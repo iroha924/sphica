@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { shippedCodexMatcher } from "../evals/cloud/build-lib.ts";
 import { contextChecks, permissionChecks, SPHICA_TOOLS, statusCounts } from "../evals/cloud/canary-check.ts";
 import {
   DENY_DIRS,
@@ -14,6 +15,7 @@ import {
   runArgs,
   runEnv,
   runMcp,
+  runnerDigest,
   runSettings,
   slotMatcher,
   treeState,
@@ -154,7 +156,14 @@ test("the patch is everything since the starting commit, committed or not, witho
   fs.writeFileSync(path.join(work, ".tools", "x"), "rewritten");
   fs.mkdirSync(path.join(work, "node_modules", "dep"), { recursive: true });
   fs.writeFileSync(path.join(work, "node_modules", "dep", "i.js"), "x");
+  // A bundle the agent built is output, not part of its answer, even where it is ignored
+  fs.writeFileSync(path.join(work, ".gitignore"), "plugin/dist/\nplugin/db/\n");
+  fs.mkdirSync(path.join(work, "plugin", "dist"), { recursive: true });
+  fs.writeFileSync(path.join(work, "plugin", "dist", "mcp.js"), "bundled");
+  fs.mkdirSync(path.join(work, "plugin", "db"), { recursive: true });
+  fs.writeFileSync(path.join(work, "plugin", "db", "schema.sql"), "copied");
   const patch = patchSince(c, start);
+  assert.doesNotMatch(patch, /^diff --git a\/plugin\//m);
   assert.match(patch, /a\.ts/);
   assert.match(patch, /export const a = 2/);
   assert.match(patch, /b\.ts/);
@@ -446,7 +455,13 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
       { encoding: "utf8", env: childEnv(build) },
     );
   };
-  for (const canary of [undefined, { passed: false, model: "m" }, { passed: true, model: "other" }]) {
+  for (const canary of [
+    undefined,
+    { passed: false, model: "m", runner: runnerDigest() },
+    { passed: true, model: "other", runner: runnerDigest() },
+    // A canary run on other runner code vouches for nothing here
+    { passed: true, model: "m", runner: "an older runner" },
+  ]) {
     const r = start(canary);
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /no Claude run starts until it passes/);
@@ -706,7 +721,10 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
       },
     ]),
   );
-  fs.writeFileSync(path.join(build, "canary.json"), JSON.stringify({ passed: true, model: "m" }));
+  fs.writeFileSync(
+    path.join(build, "canary.json"),
+    JSON.stringify({ passed: true, model: "m", runner: runnerDigest() }),
+  );
   // No slot repository exists, so the clone fails before claude starts
   const out = path.join(build, "runs");
   const r = spawnSync(
@@ -1023,7 +1041,32 @@ test("collect with a local plan keeps the planned runs, and keeps runs past the 
   const build = path.join(base, "build");
   const claude = path.join(base, "claude");
   fs.mkdirSync(build);
-  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  // A build reused from the cloud: its firing plan holds a fired row of the same task and condition, which a local-only collection must
+  // not count, and its manifest records the delivery matchers the bundle identity carries
+  fs.writeFileSync(
+    path.join(build, "manifest.json"),
+    JSON.stringify({
+      commit: "c",
+      bundle: { "deliver.js": "d" },
+      matchers: { claude: "Read", codex: "^Bash$" },
+      repositories: { "eval-shelf-2": { condition: "search" } },
+    }),
+  );
+  fs.writeFileSync(
+    path.join(build, "plan.json"),
+    JSON.stringify([
+      {
+        build: "b",
+        variant: "original",
+        task: "pilot-sort",
+        condition: "search",
+        slot: "eval-shelf-2",
+        try: 1,
+        prompt: "p",
+        fired_at: "2026-10-03T00:00:00.000Z",
+      },
+    ]),
+  );
   fs.copyFileSync(
     path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
     path.join(build, "tasks.json"),
@@ -1085,6 +1128,8 @@ test("collect with a local plan keeps the planned runs, and keeps runs past the 
     ["r3", "pilot-sort", "beyond the planned runs"],
     ["x1", "pilot-dates", "not in the local plan"],
   ]);
+  const { bundle } = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")) as { bundle: string };
+  assert.match(bundle, /"matchers":\{"claude":"Read","codex":"\^Bash\$"\}/);
 });
 
 test("collect fails a run whose checkout links outside itself, and stops where hidden tests cannot be sandboxed", (t) => {
@@ -1223,7 +1268,10 @@ test("a run whose claude cannot start is still recorded with the reason, and the
       },
     ]),
   );
-  fs.writeFileSync(path.join(build, "canary.json"), JSON.stringify({ passed: true, model: "m" }));
+  fs.writeFileSync(
+    path.join(build, "canary.json"),
+    JSON.stringify({ passed: true, model: "m", runner: runnerDigest() }),
+  );
   // A slot repository that clones, with its .tools
   const slot = path.join(build, "eval-shelf-1");
   fs.mkdirSync(path.join(slot, ".tools"), { recursive: true });
@@ -1309,5 +1357,22 @@ test("a writer whose result never came leaves the edit order unknown, not no_edi
   assert.equal(
     searchedBeforeEdit(answered, JSON.stringify({ after: "r", changed: false, in_flight: [], late: false })),
     "no_edit",
+  );
+});
+
+test("the inject canary needs the delivery hook before a tool to have fired, and the build names Codex's shipped matcher", () => {
+  const receipts = (...names: string[]) =>
+    names.map((name) => JSON.stringify({ name, output: "" })).join("\n");
+  const hooksRan = (r: string) =>
+    contextChecks("inject", null, r, "/w", false).find((c) => c.name === "the condition's hooks ran")?.ok;
+  assert.equal(hooksRan(receipts("start", "prompt")), false);
+  assert.equal(hooksRan(receipts("start", "prompt", "edit")), true);
+  assert.equal(
+    shippedCodexMatcher(path.join(import.meta.dirname, "..", "..")),
+    JSON.parse(
+      fs.readFileSync(path.join(import.meta.dirname, "..", "..", "plugin", "hooks", "codex.json"), "utf8"),
+    ).hooks.PreToolUse.find((e: { hooks: { command: string }[] }) =>
+      e.hooks.some((h) => h.command.includes("deliver.js")),
+    ).matcher,
   );
 });

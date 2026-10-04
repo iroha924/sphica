@@ -30,7 +30,14 @@ const plan = readTasks<{ tasks: Task[] }>(args.build);
 const manifest = JSON.parse(fs.readFileSync(path.join(args.build, "manifest.json"), "utf8")) as {
   build?: string;
   owner?: string;
+  matchers?: { codex?: string };
   repositories: Record<string, { condition: string }>;
+};
+// The matcher the build was made with, so old and new builds deliver on the tools each was built with
+const codexMatcher = () => {
+  if (!manifest.matchers?.codex)
+    throw new Error(`${args.build} records no Codex delivery matcher; build it again`);
+  return manifest.matchers.codex;
 };
 const repo = args.repo ?? "";
 const task = plan.tasks.find((t) => t.id === args.task);
@@ -97,7 +104,7 @@ try {
       ? {
           SessionStart: [hook(deliver, 10)],
           UserPromptSubmit: [hook(deliver, 10)],
-          PreToolUse: [{ matcher: "^apply_patch$|^Bash$", ...hook(deliver, 10) }],
+          PreToolUse: [{ matcher: codexMatcher(), ...hook(deliver, 10) }],
         }
       : condition === "gold"
         ? { UserPromptSubmit: [hook(["sh", path.join(dir, "gold-hook.sh")], 10)] }

@@ -106,7 +106,11 @@ Local loop progress:
 
 - The runner fences each run: project setting sources only (the slot's cloud settings file is removed in the clone; hooks come from
   `--settings`), strict MCP config, acceptEdits, the sandbox with no unsandboxed fallback, the owner's credential paths unreadable, an
-  allowlisted environment. The canary proves each of these on the build before any run; rerun it after changing the runner or the model
+  allowlisted environment. The canary proves each of these on the build before any run, and its inject run must fire the delivery hook
+  before a tool. canary.json records the model and a hash of the runner's code; claude.ts refuses either changing until the canary runs
+  again
+- The build records both delivery matchers (`matchers` in manifest.json): Claude's goes into the inject slot, codex.ts reads Codex's, and
+  the bundle identity a comparison checks includes them. A build made before that has no matchers; build it again
 - Tool search is pinned on (`ENABLE_TOOL_SEARCH=true`), so Sphica's tools start deferred on both sides; `search_loading` in loop.json says
   whether search was handed over by ToolSearch (deferred) or there from the start (loaded), and `search_before_edit` whether a search came
   before the first change to the work tree. unknown is never counted as yes or no

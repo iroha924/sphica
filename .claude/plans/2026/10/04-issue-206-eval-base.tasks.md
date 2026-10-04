@@ -277,6 +277,16 @@ base: main
   - コミット: `fix(evals): read agent checkouts through a pinned git directory (T26)`
   - 結果: red は上のとおり落ちた。agent が起動する前に checkout の git ディレクトリを run ディレクトリへ `--no-local` で複製し、以後の runner の git は `--git-dir` と `--work-tree` でそれを通し、system と global の設定も切る。直した後 `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 94, fail 0。`node evals/cloud/claude.ts`・`node evals/cloud/codex.ts --build <build-base> --repo <inject の slot> --task stale-thumb` → 両方 exit 0、reason null、patch を残し（10 行・12 行）、run ディレクトリに複製の git がある。Claude の watcher は 4 件の印のうち 1 件で変化を記録
 
+- [x] T27: GitHub の Codex の 3 回目のレビュー（#256）の 5 件を直す（inject の canary が PreToolUse の hook を確かめない、Codex の matcher がビルドに無く現在の checkout のものを使う、`--no-cloud` でもクラウドの発火の行を分母に入れる、canary の合格が runner のコードに結び付かない、Claude の patch に `plugin/dist`・`plugin/db` が入る）
+  - 種別: 修正
+  - 計画: S3, S7, S10
+  - 依存: T26（直す対象のブランチの先頭）
+  - 変更: `server/evals/cloud/canary.ts`, `server/evals/cloud/canary-check.ts`, `server/evals/cloud/claude.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/build-lib.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`, `.claude/skills/eval-loop/SKILL.md`, `server/test/eval-claude.test.ts`
+  - red: `cd <d2a710d6 の worktree に新しいテストを置いて>/server && node --test test/zz-red.test.ts` → 3 件落ちる（patch に plugin/dist が入る、local plan の run が発火の行に押し出されて beyond the planned runs になる、inject の canary が start と prompt だけで通る）。runner の digest と Codex の matcher の記録は直す前のコードに無い
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass。CI の check が通る
+  - コミット: `fix(evals): bind the canary to the runner and record both delivery matchers (T27)`
+  - 結果: red は上のとおり 3 件落ちた。直した後 `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 95, fail 0
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
@@ -312,3 +322,4 @@ base: main
 - 2026-10-04 / T23 / GitHub の Codex レビュー（#256）6 件（P1 5 件、うち 1 件はセキュリティ: 作業ツリーの観測が agent の作った symlink をたどり、run の外のファイルを読めた）を全部採った。Codex のモデルは run の CODEX_HOME の設定から記録し、比較は同じ系列のモデルの組が両側で違えば拒否する。ローカルの run の計画は collect の `--local-plan` で渡す
 - 2026-10-04 / T24 / GitHub の Codex の再レビュー（#256）9 件（P1 5 件、うち hidden test の symlink はセキュリティで以前からあるコード）を全部採った。`../..` の判定はエージェントの入力（Claude のツール入力、Codex のコマンド）だけに当て、読んだファイルの中身には当てない（import 文によく出るため）。checkout の深い場所から `../../` で checkout の中を指す run も外す側に倒れる
 - 2026-10-04 / T26 / 基準の index が複製の側で動かないので、agent の commit は tree の変化として数えない（ファイルが変わらないため）。watcher のテストの期待を changed: false に直した。Codex の patch は以前、agent が commit すると HEAD が動いてその分を落としていたが、複製の HEAD は動かないのでこれも直る
+- 2026-10-04 / T27 / `git add -A` の pathspec に ignored の `plugin/dist` を除外として書くと、git が「ignored のパスを名指しした」と失敗する。add は除外なしで流し（ignored は add -A に入らない）、ignored の一覧と diff の側で外す。今あるビルドは matchers を持たず、canary.json も runner の hash を持たないので、次に測るときはビルドと canary を作り直す

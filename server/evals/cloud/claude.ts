@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { runClaude } from "./claude-run.ts";
+import { runClaude, runnerDigest } from "./claude-run.ts";
 import { readPlan, readTasks } from "./firing.ts";
 
 const { values: args } = parseArgs({
@@ -38,14 +38,15 @@ const canary = (() => {
     return JSON.parse(fs.readFileSync(path.join(args.build, "canary.json"), "utf8")) as {
       passed?: boolean;
       model?: string;
+      runner?: string;
     };
   } catch {
     return null;
   }
 })();
-if (!canary?.passed || canary.model !== args.model)
+if (!canary?.passed || canary.model !== args.model || canary.runner !== runnerDigest())
   throw new Error(
-    `run node evals/cloud/canary.ts --build ${args.build} --model ${args.model} first; no Claude run starts until it passes`,
+    `run node evals/cloud/canary.ts --build ${args.build} --model ${args.model} first (again after any change to the runner); no Claude run starts until it passes`,
   );
 
 const { dir, result } = await runClaude({
