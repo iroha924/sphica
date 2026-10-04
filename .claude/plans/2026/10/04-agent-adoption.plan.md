@@ -1,9 +1,9 @@
 ---
 kind: plan
-status: approved
+status: draft
 codex_session: 01a105a3-d907-7280-9456-28cb1386932c
 codex_rounds: 4
-approved_at: 2026-10-04
+approved_at:
 ---
 
 # AI が自分で決めた判断を「AI の判断」として採用・配信し、trace を持ち主の依頼なしに AI が回す（段階 1）
@@ -79,8 +79,15 @@ approved_at: 2026-10-04
 4. 権限の判定を 1 つの関数にする: 記録 →「持ち主（撤回されていない owner_statement / explicit がある）/ AI（agent だけ）/ なし」。read の履歴では、その時点の adoption と撤回から出す。保存のトランザクションの中で、記録を active にする・link を足す・adoption を足す・撤回する・衝突を解決する・anchor を変える、のすべての操作で変更の前後を確かめる。glean の経路（`server/src/glean.ts:63`、`:505`、`:972`）も同じ関数を通す。check は報告し、save で確かめ直す
 5. link の規則（C′）: 候補の supersedes / conflicts は今どおり保存できる。効き目は権限で決める
    - 配信: 未解決の conflicts で配信から外れるのは、持ち主の判断でない記録と、持ち主が採用した相手と衝突している持ち主の判断。持ち主の判断は、採用されていない記録や AI の判断との衝突では外れない。AI の判断どうしの衝突は両方を止める
-   - 後継の枠（u121 の見直し）: どの記録でも、枠を使うのは active な後継と、その先が active な後継で終わる置き換え済みの後継だけ（view `unit_successor_place`）。提案は候補のまま何本でも横で待て、最初に active になったものが枠を取り、2 つ目は active になれない。後継が取り下げや採用の撤回で枠から外れたら、連鎖の上の記録のうち枠を使う後継がいなくなったものを、まとめて candidate に戻す。link の trigger・状態の規則・復帰の trigger・record.ts・overview・search・read は、すべてこの定義に従う
-   - `agent` だけの記録は supersedes を持てない。配信を止めていることと撤回とは表示で分ける
+   - 置き換えは「つもり」と「効いている期間」に分ける。`unit_link` の `supersedes` は置き換えるつもり（記録の入力はそのまま。1 つの記録が持てるのは 1 つまでで、DB でも縛る）。効いている期間は新しい表 `unit_replacement`（開始・終了・その原因の run か forget、終了は 1 回だけ、書き換えない）。開いている行は 1 つの記録につき 1 つまで（partial unique index）で、それが後継の枠
+   - 状態は事実から計算する。書き込み（record・glean の保存、forget、移行）は事実（つもり、根拠、採用、明示の取り下げ）だけを変え、最後に 1 回、純粋な関数 `judge(snapshot)` が、影響を受けた記録と `supersedes` でつながる範囲の最終の状態を決め、差分だけを書く（閉じる行 → 開く行 → 状態の行の順）。一時的な下げはしない。trigger は書かれた結果が規則を満たすかを確かめるだけで、連鎖を戻す処理はしない
+   - 条件（どの種類でも同じ）: eligible = 取り下げられていない・`extraction = 'supported'`・`unsourced = 0`・`unit_support` に不足なし。判断と制約がつもりを持つなら、持ち主か maintainer の採用も要る（相手が誰でも。AI の採用だけでは置き換えを効かせない）。置き換えが効くのは、eligible な後継で、相手が sound で取り下げられておらず、後継が枠の持ち主のとき。枠の持ち主は、今開いている行の後継がまだ条件を満たすならそのまま、空いていれば、つもりを先に保存したもの（`unit_link.added_at`、次に id）
+   - active は、eligible で、つもりがあればそれが効いているとき。superseded は、効いている置き換えが入ってきているとき。それ以外は candidate で、待っている理由（どの記録が枠を持っているか）を状態とは別に持ち、check・save・read が出す。superseded から active へ直接戻る遷移を正しい遷移として足す
+   - 採用付きで保存した後継と glean の `adopt` は、相手の枠が埋まっていれば今どおり名前を挙げて拒む。待つのは採用されていない候補だけ（後採用の流れ）。同じ保存で同じ相手に 2 つの後継を active にしようとしたら、名前を挙げて拒む。同じ保存で、新しい後継が置き換える前の記録を取り下げる操作は冗長として書かない（今どおり）
+   - 移行（revision 10）: 証明できる過去の期間だけを行として戻し、今効いているが始まりが分からないものは移行の時点を始まりとする行（`origin = 'migration'`）にする。今は効いていなくて過去も証明できないつもりには「以前の履歴は記録されていない」の印を残し、read で未実行の提案と取り違えない。複数のつもりを持つ記録があれば、勝手に選ばずに移行を止めて一覧にする。そのあと同じ `judge`（revision 10 に固定した版）を同期で通して状態を直し、すべて `sphica_migration_note` に出す
+   - 読み手（search の後継、overview、read、export、review、rules）は、保存された状態と `unit_replacement` の行だけを読み、推し量らない。read は、つもり・今の効き目・閉じた期間・履歴が記録されていない印を分けて出す
+   - ingest と forget は `unit_replacement` に行を足し、終了の列だけを書ける。根拠の最後の 1 つを撤回するのを拒む今の trigger はゆるめる（同じ transaction の judge が整合をとる）。`unit_state` と `unit_replacement` を書くのは reconcile のモジュールだけで、architecture の検査で固定する
+   - `agent` だけの記録は置き換えを効かせられない。配信を止めていることと撤回とは表示で分ける
 6. 表示: 配信・read・search・record_context・review の表示で、記録ごとに権限を出す。AI の判断には CONFIRM とは別の固定文を付ける（「前のセッションで AI が決めた。具体的な理由があれば離れてよい。返事でどの記録からなぜ離れたかを書く。持ち主の規則・公開の約束・承認の関門を越える許可ではない」の趣旨、英語）。どちらの文も記録からは取らない
 7. trace の Skill（両ホスト）: 自動での起動を許す（`disable-model-invocation` と `allow_implicit_invocation` を一緒に変え、description から「明示の依頼のときだけ」を外す）。自動のときは対象を自分で選び、持ち主に聞かない。`agent` の採用を使ってよいのは AI が一人称で選んだ判断だけで、伝聞・引用・提案・質問・文書やツール出力の要約には使わない。公開の約束・セキュリティと権限・リリース・forget、CLAUDE.md / AGENTS.md / `.claude/rules` を緩める判断には使わない。迷ったら採用しない。コードブロック・引用・かぎかっこの中の引用は警告にとどめる。パスの一覧（`db/schema.sql`、`server/src/db-write.ts`、`server/src/sqlite.ts`、`server/src/mcp*.ts`、`server/src/cli/`、`server/src/forget.ts`、`.github/workflows/release.yml`、`plugin/hooks/*.json`、プラグインの manifest）に `applies_to` が当たる `agent` の採用は警告を出して候補に残す（補助の検査で、境界ではない）
 8. 自動の trace の起動: 新しい持ち主のセッション（対話で SDK ではない）の開始時の通知で、AI に、持ち主の依頼を片づけた後で、今のセッション以外の未処理を古い順に最大 2 セッション trace するよう伝える。通知は今のセッションごとに 1 回で、resume では出さない。遅れは「次の新しい持ち主のセッション」で、ちょうど 1 セッション後とは限らない
@@ -101,7 +108,8 @@ approved_at: 2026-10-04
 ## 採った案と棄却した案
 
 - 採用: 採用の経路 `agent` と、採用の履歴から都度出す権限。棄却: unit に書き換えられる authority 列を持つ（採用・撤回の履歴とずれる）
-- 採用: 候補の link は保存できるまま、配信と後継の枠で権限を見て持ち主の判断への効き目を止める（C′）。棄却: 新しい記録を候補に残すだけで守る（候補の conflicts でも持ち主の判断が配信から消え、候補の supersedes が後継の枠をふさぐ。再現済み）。棄却: 持ち主の判断への link を同じ保存で持ち主が採用した記録からだけ通す（glean の「候補の後継をあとで採用する」流れを壊し、後から採用された判断に付いていた候補の conflicts も防げない）。棄却: link を採用のときに初めて付ける（glean の入力の決まりごとが増える）
+- 採用: 置き換えの「つもり」（`supersedes`）と「効いている期間」（`unit_replacement`）を分け、状態は書き込みの最後に事実から計算して差分を書く。棄却: 後継の枠を状態や採用から推し量る（T04・T18・T19・T20 の Codex のレビューで 13 件の穴が出た）。棄却: link の種類（proposes）を足し、active になったときに置き換えへ変える（採用の撤回と一時的な下げを見分けられず、権限の喪失や中間の記録の根拠喪失で出来事を取りこぼす）。棄却: 出来事ごとに期間を開け閉めする（状態の行が書かれない権限の変化、複数の操作の保存、連鎖の末尾の再採用で取りこぼす）。棄却: 後継の枠を u121 の元の規則に戻す（AI の提案が待っていると持ち主の後継が保存できない制約が残る）
+- 採用: 候補の link は保存できるまま、配信では権限を見て持ち主の判断への効き目を止める（C′ の配信の部分）。棄却: 新しい記録を候補に残すだけで守る（候補の conflicts でも持ち主の判断が配信から消え、候補の supersedes が後継の枠をふさぐ。再現済み）。棄却: 持ち主の判断への link を同じ保存で持ち主が採用した記録からだけ通す（glean の「候補の後継をあとで採用する」流れを壊し、後から採用された判断に付いていた候補の conflicts も防げない）。棄却: link を採用のときに初めて付ける（glean の入力の決まりごとが増える）
 - 採用: 対象外の領域は Skill の規則と「迷ったら候補」で守り、パスの一覧は補助の警告にする。棄却: `applies_to` のパスの一覧を境界にする（anchor を省けば素通りし、判断の中身を分類できない）
 - 採用: `decides` の引用と capture 由来の除外を組み合わせ、`do` で anchor のある判断だけに同じターンの編集を求める。棄却: 構文の除外と `states` と同じセッションの編集だけで見分ける（伝聞を平文で書き、無関係な編集を根拠にすれば通る）。棄却: すべての判断に編集を求める（`dont`・`defer`・調べものの判断が採用されなくなる）
 - 採用: 段階 1 の AI は supersedes しない。棄却: AI の判断どうしの置き換えを許す（評価の前に古い AI の判断を退かせてしまう）
@@ -126,6 +134,11 @@ approved_at: 2026-10-04
 - S11: 配布する Skill（review の過去の判断の観点、export、rules）が権限を扱う
 - S12: README.md・README.ja.md・CLAUDE.md・AGENTS.md・knowledge-schema の Skill の更新と、ほかの開発の文書の確かめ
 - S13: バージョンを上げて出荷し、両ホストで実際に届くことを確かめる
+- S14: 純粋な `judge(snapshot)` と、つながる範囲の取得（同期。保存用と移行用の adapter に分ける）
+- S15: schema（`unit_replacement`、1 記録 1 つのつもり、履歴が記録されていない印、superseded から active への遷移、trigger を確かめだけにする、ゆるめる撤回の trigger、view と再帰の復帰を外す）と、record・glean・forget の保存を「事実 → 正規化 → judge → 差分を書く → 最後の整合の確認」に集める
+- S16: revision 9 からの移行（証明できる期間、移行の時点の行、印、複数のつもりで止める、judge を通す、メモ）
+- S17: 読み手（search・overview・read・export・review・rules・record_context）を `unit_replacement` に合わせる
+- S18: 役割ごとの実接続、全 rollback、操作の順番に依存しないこと、再採用・同じ保存の取り下げ・隔離・出典なしの受け入れケース
 
 ## 完了条件
 
@@ -140,6 +153,8 @@ approved_at: 2026-10-04
 - A9: `bun run release:status` → 出荷の後、npm・global CLI・Claude と Codex のプラグインのバージョンがそろう。そのうえで両ホストの対話セッションで、未処理のセッションがある状態で新しいセッションを始めると、AI が持ち主に聞かずに最大 2 セッションを trace し、`agent` の採用を含む記録が保存される（Windows を含む、手で確かめる）
 - A10: `node scripts/check-pairs.mjs && bun run english && bun run verify:ai` → 終了コード 0。`rg -n "end of a session|セッションの終わりに" README.md README.ja.md` → trace を手で流すことだけを前提にした案内が残っていない
 - A11: `gh pr checks <PR 番号> --watch` → 全ジョブ pass
+- A12: `cd server && node --test --test-name-pattern="successor place|owner decision protected|judge" test/*.test.ts` → pass。T04・T18・T19・T20 のレビューの 13 件と、設計の議論の C18・C20・C22・C23・C25〜C29・C33 の入力が、それぞれ回帰のテストとして通る
+- A13: `cd server && node --test --test-name-pattern="judge budget" test/reconcile.test.ts` → pass。記録数千件・長い連鎖・1 つの相手に多数の待っている提案を持つ一時 DB で、1 回の保存のロックが 200 ms 以内
 
 ## リスク
 
@@ -157,6 +172,8 @@ approved_at: 2026-10-04
 なし
 
 ## 変更履歴
+
+- 2026-10-04 / 方針 5 の後継の枠を、「つもり」と「効いている期間」を分けて状態を事実から計算する作りに直し、S14〜S18 と A12・A13 を足した / 推し量る形は 4 回のレビューで 13 件の穴が出続けた。持ち主が「妥協せずに最高のもの」を求め、Codex（session 01a106b6-fb1d-7b92-bd56-1ce63211bc02）と 4 往復して合意した（最後の 2 点 C24・C33 は Codex の代案を入れて閉じた） / Go が要る（データの形と保存の挙動が変わる。承認待ち）
 
 - 2026-10-04 / 方針 5 の後継の枠を、持ち主の判断かどうかで分けない規則にし、連鎖をまとめて戻すようにした / 持ち主の判断のときだけ規則を変える形は、前の判断の採用の付け外しで規則が切り替わり、穴が開き続けた（T19 の Codex のレビューで P1 2 件・P2 1 件） / 持ち主が選択肢 1 を選んだ（Go 済み）
 

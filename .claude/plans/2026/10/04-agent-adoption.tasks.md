@@ -113,10 +113,50 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): hold a successor place the same way for every record and free whole chains (T20)`
   - 結果: red を実測（2 件とも上の理由で fail）。直した後 pass、T04・T18・T19 の後継の枠のテストも pass。forget の接続が再帰の読み取りを拒んだので許した（他の役割と同じ）。旧い規則を前提にした schema のテスト 2 件を新しい規則に書き換えた。`bun run verify` → 終了コード 0（テスト 742 件、SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）
 
+- [ ] T21: 純粋な `judge(snapshot)` と、`supersedes` でつながる範囲の取得を作る（同期。保存用と移行用の adapter に分ける）
+  - 種別: 追加
+  - 計画: S14
+  - 依存: なし
+  - 変更: `server/src/judge.ts`, `server/test/judge.test.ts`
+  - 完了条件: `cd server && node --test test/judge.test.ts` → pass。plan の方針 5 の条件を snapshot ごとに確かめ、T04・T18・T19・T20 のレビューの 13 件と C18・C20・C22・C23・C25〜C29・C33 の入力が期待どおりの状態・開く行・閉じる行・待つ理由になる。同じ事実を操作の順番を変えて与えても結果が同じで、結果をもう一度 judge に通しても差分が出ない
+  - コミット: `feat(record): judge lifecycles and replacements from facts in one pure function (T21)`
+
+- [ ] T22: schema を事実と結果に分け（`unit_replacement`、1 記録 1 つのつもり、印、superseded から active への遷移、trigger を確かめだけにする）、record・glean・forget の保存を「事実 → 正規化 → judge → 差分 → 最後の整合の確認」に集める。view と再帰の復帰と `takes` を外す
+  - 種別: 変更
+  - 計画: S15
+  - 依存: T21（判定の本体が要る）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/src/reconcile.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/src/extract.ts`, `server/src/forget.ts`, `server/src/overview.ts`, `server/src/search.ts`, `server/src/read.ts`, `scripts/check-architecture.mjs`, `server/test/schema.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/test/forget.test.ts`, `server/test/db.test.ts`, `server/test/migrate.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="successor place|owner decision protected" test/*.test.ts` → pass（13 件の回帰を含む）。`bun run architecture` → `unit_state` と `unit_replacement` を書くのが reconcile のモジュールだけ。`bun run verify` → 終了コード 0
+  - コミット: `refactor(record): keep facts apart from judged lifecycles and replacements (T22)`
+
+- [ ] T23: revision 9 からの移行で、証明できる期間を戻し、移行の時点の行と「履歴が記録されていない」印を作り、複数のつもりで止め、固定した judge を同期で通してメモに出す
+  - 種別: 変更
+  - 計画: S16
+  - 依存: T22（新しい schema と judge の adapter が要る）
+  - 変更: `db/migrations/0010.sql`, `db/migrations/0010.check.sql`, `server/src/admin.ts`, `server/test/migrate.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="revision 9" test/migrate.test.ts` → pass。後採用・全員が候補の後継・連鎖・中間の記録の権限喪失・再採用の fixture で、移行した DB の状態と行が新しい DB で同じ事実を保存した結果と一致し、複数のつもりを持つ DB は何も変えずに止まって一覧を出す
+  - コミット: `feat(schema): rebuild replacements and repair lifecycles when moving to revision 10 (T23)`
+
+- [ ] T24: 読み手（search・overview・read・export・review・rules・record_context）を `unit_replacement` に合わせ、つもり・今の効き目・閉じた期間・印・待つ理由を分けて出す
+  - 種別: 変更
+  - 計画: S17
+  - 依存: T22（新しい表が要る）
+  - 変更: `server/src/search.ts`, `server/src/overview.ts`, `server/src/read.ts`, `server/src/export.ts`, `server/src/review.ts`, `server/src/extract.ts`, `server/test/search.test.ts`, `server/test/overview.test.ts`, `server/test/export.test.ts`, `server/test/review.test.ts`
+  - 完了条件: `cd server && node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts` → pass。過去の時点の read も、その時点で開いていた行だけを置き換えとして出す
+  - コミット: `feat(read): show replacements, waiting proposals, and unrecorded history apart (T24)`
+
+- [ ] T25: 役割ごとの実接続、全 rollback、操作の順番、再採用・同じ保存の取り下げ・隔離・出典なしの受け入れケースと、保存 1 回のロック時間の測定を足す
+  - 種別: 追加
+  - 計画: S18
+  - 依存: T22（保存の経路が要る）, T23（移行が要る）
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/reconcile.test.ts`, `server/test/db.test.ts`
+  - 完了条件: `bun run acceptance` → pass。`cd server && node --test --test-name-pattern="judge budget" test/reconcile.test.ts` → pass（保存 1 回のロックが 200 ms 以内）
+  - コミット: `test(record): cover reconciling saves end to end and keep their lock time in budget (T25)`
+
 - [ ] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
   - 種別: 追加
   - 計画: S4
-  - 依存: T02（`agent` の経路が要る）, T04（link の規則をこの関数へ移す）
+  - 依存: T02（`agent` の経路が要る）, T04（link の規則をこの関数へ移す）, T22（権限の条件を judge の eligible とそろえる）
   - 変更: `server/src/authority.ts`, `server/src/record.ts`, `server/src/extract.ts`, `server/src/glean.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="authority" test/record.test.ts` → pass。持ち主 > AI > なしの判定が、その時点の採用と撤回から出る。`decides` evidence の撤回・後からの持ち主の採用・anchor の変更・衝突の解決の前後で判定が変わる場合を確かめる。glean の撤回と衝突の解決は今までどおり持ち主の根拠を求める
   - コミット: `feat(record): judge authority from adoption history and check it on every write (T05)`
@@ -124,7 +164,7 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - [ ] T06: record.ts で `agent` の採用を受ける（`decides` との組、質問・record ツールのターン・不明な呼び出し元の除外、`do` で anchor のある判断の同じターンの編集、パスの一覧の警告）
   - 種別: 追加
   - 計画: S5
-  - 依存: T03（record-tool の呼び出しの行で除外する）, T05（権限の判定が要る）, T16（除外の view と begin の呼び出しの規則が直っている）
+  - 依存: T03（record-tool の呼び出しの行で除外する）, T05（権限の判定が要る）, T16（除外の view と begin の呼び出しの規則が直っている）, T22（AI の採用を judge の条件に入れる）
   - 変更: `server/src/record.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="agent adoption" test/record.test.ts` → pass。条件をすべて満たす AI の判断が active になり、AskUserQuestion の質問・`reported_speaker`・`decides` でない引用・record ツールを呼んだターンの返事・呼び出し元が不明の run・同じターンに anchor の path の編集が無い `do` は候補に残る。パスの一覧に当たる `applies_to` は警告を出して候補に残る
   - コミット: `feat(record): adopt an AI's own decision when it quotes the AI deciding and passes the exclusions (T06)`
@@ -136,7 +176,7 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - [ ] T07: 配信・read・search・record_context・review の表示に記録ごとの権限を出し、AI の判断に専用の固定文を付ける
   - 種別: 変更
   - 計画: S6
-  - 依存: T05（権限の判定が要る）
+  - 依存: T05（権限の判定が要る）, T24（読み手が新しい表を読む）
   - 変更: `server/src/deliver.ts`, `server/src/read.ts`, `server/src/search.ts`, `server/src/extract.ts`, `server/src/review.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass。持ち主の判断には今の CONFIRM、AI の判断には専用の文が付き、どちらの文も記録の本文から取らない。read の履歴の権限はその時点のもの。conflicts で止めていることが撤回と分けて出る
   - コミット: `feat(deliver): show whether the owner or an AI made each decision (T07)`
@@ -221,3 +261,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T18 / T04 の Codex のレビュー（F1 P1: 取り下げからの復帰が待っている候補を後継と数えた。F2 P2: 同じ保存で待っている候補が枠を予約した。F3 P2: overview が待っている候補を後継と案内した）を 3 件とも受け、修正タスク T18 を足した
 - 2026-10-04 / T19 / T18 の Codex のレビュー（F1 P1: 採用済みの候補を active 化の確認が見落とし後継が 2 つ並ぶ。F2 P1: 採用の撤回で元の判断が戻らない。F3 P2: 同じ保存で順番に依存。F4 P2: liveSuccessors が取り下げた後継を返す。F5 P2: read が待っている提案も Superseded by と出す）を 5 件とも受けた。場当たりに直さず、枠を「active になった後継だけ」に単純にした（plan の方針 5 を更新）
 - 2026-10-04 / T20 / T19 の Codex のレビュー（F1 P1: 連鎖の末尾の採用撤回で先頭が戻らない。F2 P1: 前の判断に採用が付くと枠が空いても戻らない。F3 P2: 前の判断の採用撤回で待っている提案が 2 つとも枠を持つ）。3 回目のレビューでも P1 が出たので止めて持ち主に相談し、規則を全記録で同じにする選択肢 1 を受けて修正タスク T20 を足した
+- 2026-10-04 / T21〜T25 / T20 のレビュー（P1 1 件・P2 1 件、4 回目）を受け、持ち主の「妥協せずに最高のもの」で、Codex と 4 往復して後継の枠の作りを「つもりと効いている期間を分け、状態を事実から計算する」に変えた（plan の方針 5）。T18〜T20 の推し量る仕組みは T22 で外す。T05・T06・T07 の依存に T22・T24 を足した。Go 待ち
