@@ -2140,3 +2140,156 @@ test("successor place: a successor whose reconsider quote was forgotten keeps re
     await db.done();
   }
 });
+
+// A trace of session s1 begun and saved by an interactive session other than s1, so its replies may adopt for the AI
+const agentBench = async (db: TempDb, p: number, mode = "interactive", first = true) => {
+  if (first) message(db, p, { id: "o1", text: "Tidy the export." });
+  const reply = (id: string, turn: string, text: string) =>
+    insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: id,
+      revision: 1,
+      session_id: "s1",
+      turn_id: turn,
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(id.length),
+      indexed: 0,
+    });
+  const caller = () =>
+    logCall(db.ingest, p, "trace_begin", {
+      host: "codex",
+      session: "tracer",
+      turn: "tt",
+      toolUseId: null,
+      mode: mode as "interactive",
+      raw: "x",
+    });
+  const run = await beginTrace(db.ingest, p, "s1", await caller());
+  const save = async (record: unknown) =>
+    saveText(db.ingest, run, p, null, record, undefined, await caller());
+  return { reply, save };
+};
+const aiDecision = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  kind: "decision",
+  stance: "dont",
+  text: quote,
+  evidence: [{ source: `s${source}`, quote, role: "decides" }],
+  adoption: [{ source: `s${source}`, quote }],
+  ...extra,
+});
+const lifeOf = (db: TempDb, key: string) =>
+  db.owner.prepare("select lifecycle from unit where key = ?").get(`trace:ext-s1/${key}`)?.lifecycle;
+
+test("agent adoption: the AI's own decision in an interactive trace becomes active as the AI's", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const r = reply("t1:assistant", "t1", "I keep the export as one function.");
+    const out = await save({ units: [aiDecision("one-function", r, "I keep the export as one function.")] });
+    assert.match(out, /one-function/);
+    assert.equal(lifeOf(db, "one-function"), "active");
+    assert.equal(db.owner.prepare("select route from unit_adoption").get()?.route, "agent");
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a question it asked, words that are not decides, a trace's own turn, and rule files stay candidates", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const asked = reply("t2:ask:toolu_1:q:abc", "t2", "Shall I keep one function?");
+    const said = reply("t3:assistant", "t3", "I keep the export as one function.");
+    const traced = reply("t4:assistant", "t4", "I keep the cache as it is.");
+    // The turn that ran a record tool (the hook saw it): its reply is a trace report, never a decision
+    insert(db, "tool_call_observation", {
+      host: "claude-code",
+      session_external: "ext-s1",
+      turn_id: "t4",
+      tool_use_id: "toolu_t4",
+      tool_name: "mcp__plugin_sphica_record__trace_save",
+      owner_turn: 1,
+      observed_at: now,
+    });
+    const rules = reply("t5:assistant", "t5", "I keep CLAUDE.md short.");
+    const out = await save({
+      units: [
+        {
+          ...aiDecision("asked", asked, "Shall I keep one function?"),
+          evidence: [{ source: `s${asked}`, quote: "Shall I keep one function?", role: "states" }],
+        },
+        {
+          ...aiDecision("states", said, "I keep the export as one function."),
+          evidence: [{ source: `s${said}`, quote: "I keep the export as one function.", role: "states" }],
+        },
+        aiDecision("traced", traced, "I keep the cache as it is."),
+        aiDecision("rules", rules, "I keep CLAUDE.md short.", {
+          anchors: [{ path: "CLAUDE.md", role: "applies_to" }],
+        }),
+      ],
+    });
+    for (const key of ["asked", "states", "traced", "rules"]) assert.equal(lifeOf(db, key), "candidate", key);
+    assert.match(out, /a question the AI asked is not its decision|decides quotes the AI choosing/);
+    assert.match(out, /quote the same words as decides evidence/);
+    assert.match(out, /comes from a turn that ran a record tool/);
+    assert.match(out, /CLAUDE\.md holds rules or CI agents follow/);
+    assert.equal(db.owner.prepare("select count(*) as n from unit_adoption").get()?.n, 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a do on code needs the AI to have changed that code in the same turn", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const r = reply("t6:assistant", "t6", "I split the parser.");
+    const decision = (key: string) => ({
+      ...aiDecision(key, r, "I split the parser."),
+      stance: "do",
+      anchors: [{ path: "src/parse.ts", role: "applies_to" }],
+    });
+    await save({ units: [decision("unchanged")] });
+    assert.equal(lifeOf(db, "unchanged"), "candidate");
+    insert(db, "edit_observation", {
+      session_id: "s1",
+      turn_id: "t6",
+      tool_event_id: "e1",
+      path: "src/parse.ts",
+      via: "tool",
+      observed_at: now,
+    });
+    const second = await agentBench(db, p, "interactive", false);
+    await second.save({ units: [decision("changed")] });
+    assert.equal(lifeOf(db, "changed"), "active");
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a headless run never adopts for the AI", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p, "headless");
+    const r = reply("t7:assistant", "t7", "I keep the export as one function.");
+    const out = await save({ units: [aiDecision("headless", r, "I keep the export as one function.")] });
+    assert.equal(lifeOf(db, "headless"), "candidate");
+    assert.match(
+      out,
+      /only the owner or a maintainer can adopt, and an AI's own decision only in a trace an interactive session runs/,
+    );
+  } finally {
+    await db.done();
+  }
+});

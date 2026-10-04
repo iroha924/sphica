@@ -89,7 +89,7 @@ approved_at: 2026-10-04
    - ingest と forget は `unit_replacement` に行を足し、終了の列だけを書ける。根拠の最後の 1 つを撤回するのを拒む今の trigger はゆるめる（同じ transaction の judge が整合をとる）。`unit_state` と `unit_replacement` を書くのは reconcile のモジュールだけで、architecture の検査で固定する
    - `agent` だけの記録は置き換えを効かせられない。配信を止めていることと撤回とは表示で分ける
 6. 表示: 配信・read・search・record_context・review の表示で、記録ごとに権限を出す。AI の判断には CONFIRM とは別の固定文を付ける（「前のセッションで AI が決めた。具体的な理由があれば離れてよい。返事でどの記録からなぜ離れたかを書く。持ち主の規則・公開の約束・承認の関門を越える許可ではない」の趣旨、英語）。どちらの文も記録からは取らない
-7. trace の Skill（両ホスト）: 自動での起動を許す（`disable-model-invocation` と `allow_implicit_invocation` を一緒に変え、description から「明示の依頼のときだけ」を外す）。自動のときは対象を自分で選び、持ち主に聞かない。`agent` の採用を使ってよいのは AI が一人称で選んだ判断だけで、伝聞・引用・提案・質問・文書やツール出力の要約には使わない。公開の約束・セキュリティと権限・リリース・forget、CLAUDE.md / AGENTS.md / `.claude/rules` を緩める判断には使わない。迷ったら採用しない。コードブロック・引用・かぎかっこの中の引用は警告にとどめる。パスの一覧（`db/schema.sql`、`server/src/db-write.ts`、`server/src/sqlite.ts`、`server/src/mcp*.ts`、`server/src/cli/`、`server/src/forget.ts`、`.github/workflows/release.yml`、`plugin/hooks/*.json`、プラグインの manifest）に `applies_to` が当たる `agent` の採用は警告を出して候補に残す（補助の検査で、境界ではない）
+7. trace の Skill（両ホスト）: 自動での起動を許す（`disable-model-invocation` と `allow_implicit_invocation` を一緒に変え、description から「明示の依頼のときだけ」を外す）。自動のときは対象を自分で選び、持ち主に聞かない。`agent` の採用を使ってよいのは AI が一人称で選んだ判断だけで、伝聞・引用・提案・質問・文書やツール出力の要約には使わない。公開の約束・セキュリティと権限・リリース・forget、CLAUDE.md / AGENTS.md / `.claude/rules` を緩める判断には使わない。迷ったら採用しない。コードブロック・引用・かぎかっこの中の引用は警告にとどめる。エージェントが規約として読むファイル（CLAUDE.md・AGENTS.md・`.claude`・`.agents`・`.codex`・`.cursor` の下・`.github/copilot-instructions.md`。export が書き出しを拒む一覧と同じ）と CI の定義（`.github/workflows/`）に `applies_to` が当たる `agent` の採用は理由を出して候補に残す（補助の検査で、境界ではない）
 8. 自動の trace の起動: 新しい持ち主のセッション（対話で SDK ではない）の開始時の通知で、AI に、持ち主の依頼を片づけた後で、今のセッション以外の未処理を古い順に最大 2 セッション trace するよう伝える。通知は今のセッションごとに 1 回で、resume では出さない。遅れは「次の新しい持ち主のセッション」で、ちょうど 1 セッション後とは限らない
 9. 未処理と再開: 自動のときの未処理には、処理していない assistant source も数える（source_processing を使う）。後から届いた source は次の回で未処理になる。セッションは古い順に SQL で limit の前に選ぶ。record_context は自動のとき、未処理の source から始め、前の文脈を決まった数だけ添える（文脈と今回の対象を分けて見せる）。ページの上限に達したら、読んだ範囲だけを保存して進みを残す。全ページを読み切る今の約束は、自動のときに限って変える
 10. 段階 2 のための一覧: 「一度でも AI の判断として active になった記録」を、最初に active になった時刻、その時の採用元と content hash、今の状態つきで返す読み取りの関数を足す（新しい MCP ツールにはしない。評価側から呼ぶ）。今の履歴から作れるかを acceptance で確かめ、足りない項目だけを保存する。持ち主による置き換えと撤回は評価の候補を拾う手がかりで、変化の無いことを成功とは数えない
@@ -172,6 +172,8 @@ approved_at: 2026-10-04
 なし
 
 ## 変更履歴
+
+- 2026-10-04 / 方針 7 の AI の採用を止めるパスの一覧を、Sphica 自身のパスから、どのリポジトリにもある規約のファイルと CI の定義に直した / 判定は利用者のリポジトリで動くので、Sphica のパスを決め打ちしても意味がない。方針 7 の意図（規約・承認・CI を緩める判断に AI の採用を使わない）どおり / 範囲は変わらないので Go は不要
 
 - 2026-10-04 / 方針 5 の後継の枠を、「つもり」と「効いている期間」を分けて状態を事実から計算する作りに直し、S14〜S18 と A12・A13 を足した / 推し量る形は 4 回のレビューで 13 件の穴が出続けた。持ち主が「妥協せずに最高のもの」を求め、Codex（session 01a106b6-fb1d-7b92-bd56-1ce63211bc02）と 4 往復して合意した（最後の 2 点 C24・C33 は Codex の代案を入れて閉じた） / Go が要る（データの形と保存の挙動が変わる）。2026-10-04 に持ち主の Go
 

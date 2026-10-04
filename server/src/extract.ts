@@ -255,6 +255,14 @@ export async function gleanFetch(
 }
 
 /** The key namespace, the sources the run may mark as looked at, and what context prints: a heading, one entry per source, and a tail. */
+/** Whether a trace may adopt the AI's own decisions: one an interactive session began, and checks or saves now */
+async function agentRun(db: Reads, run: Run, call: number | undefined): Promise<boolean> {
+  if (run.origin !== "trace" || run.begin_call_id === null || call === undefined) return false;
+  const calls = [...new Set([run.begin_call_id, call])];
+  const modes = await db.selectFrom("record_call").select("mode").where("id", "in", calls).execute();
+  return modes.length === calls.length && modes.every((m) => m.mode === "interactive");
+}
+
 async function scopeOf(
   db: Reads,
   run: Run,
@@ -520,9 +528,11 @@ export async function checkText(
   projectId: number,
   root: string | null,
   record: unknown,
+  call?: number,
 ): Promise<{ ok: boolean; text: string }> {
   const run = await bound(db, id, projectId);
   const { target } = await scopeOf(db, run, root);
+  target.agent = await agentRun(db, run, call);
   const c =
     run.origin === "glean" ? await checkGlean(db, target, record) : await checkRecord(db, target, record);
   const units = "ops" in c ? c.units.units : c.units;
@@ -558,7 +568,9 @@ export async function saveText(
   const text = await inTransaction(db, async (trx) => {
     const run = await bound(trx, id, projectId);
     const scope = await scopeOf(trx, run, root);
+    scope.target.agent = await agentRun(trx, run, call);
     const lines: string[] = [];
+    const notes: string[] = [];
     const saved =
       run.origin === "glean"
         ? await saveGlean(
@@ -571,6 +583,8 @@ export async function saveText(
             return g.units;
           })
         : await checkRecord(trx, scope.target, record, facts).then((checked) => {
+            // What check would warn about is said at save too: what was left out, and why a record stays a candidate
+            notes.push(...checked.problems);
             // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
             const shown = shownTo.get(id)?.sources ?? new Set<number>();
             // Only a quote found in the source counts: citing a message with words it does not hold proves nothing was read
@@ -600,6 +614,7 @@ export async function saveText(
       ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
       ...saved.quarantined.map((q) => `△ ${q} quarantined`),
       ...saved.anchorProblems.map((a) => `△ ${a}`),
+      ...notes.map((n) => `△ ${n}`),
       ...lines,
       "✓ saved",
     ].join("\n");

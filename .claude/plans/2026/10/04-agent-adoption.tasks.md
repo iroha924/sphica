@@ -166,13 +166,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(record): judge authority from adoption history and check it on every write (T05)`
   - 結果: `server/src/authority.ts` に `authorityOf`（その時点の採用と撤回から持ち主・AI・なし）と、配信と共有する `ownerAdopted` を置いた。`cd server && node --test test/authority.test.ts` → 1 pass（AI の採用は本物の trigger の条件をそろえて作った）。read の見出しに「the owner's decision」「decided by an AI」「adopted by no one」を出す。`bun run verify` → 終了コード 0（SQL 到達 202/202、受け入れ 105 pass）
 
-- [ ] T06: record.ts で `agent` の採用を受ける（`decides` との組、質問・record ツールのターン・不明な呼び出し元の除外、`do` で anchor のある判断の同じターンの編集、パスの一覧の警告）
+- [x] T06: record.ts で `agent` の採用を受ける（`decides` との組、質問・record ツールのターン・不明な呼び出し元の除外、`do` で anchor のある判断の同じターンの編集、パスの一覧の警告）
   - 種別: 追加
   - 計画: S5
   - 依存: T03（record-tool の呼び出しの行で除外する）, T05（権限の判定が要る）, T16（除外の view と begin の呼び出しの規則が直っている）, T22（AI の採用を judge の条件に入れる）
-  - 変更: `server/src/record.ts`, `server/test/record.test.ts`
+  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/src/mcp-record.ts`, `server/src/rule-files.ts`, `server/src/export.ts`, `server/test/record.test.ts`, `.claude/plans/2026/10/04-agent-adoption.plan.md`
   - 完了条件: `cd server && node --test --test-name-pattern="agent adoption" test/record.test.ts` → pass。条件をすべて満たす AI の判断が active になり、AskUserQuestion の質問・`reported_speaker`・`decides` でない引用・record ツールを呼んだターンの返事・呼び出し元が不明の run・同じターンに anchor の path の編集が無い `do` は候補に残る。パスの一覧に当たる `applies_to` は警告を出して候補に残る
-  - コミット: `feat(record): adopt an AI's own decision when it quotes the AI deciding and passes the exclusions (T06)`
+  - コミット: `feat(record): adopt an AI's own decision when its reply decided it and passes the checks (T06)`
+  - 結果: check と save は、run を始めた呼び出しと今の呼び出しの両方が対話のとき（`agentRun`）だけ、AI の返事の引用を `agent` の採用として受け、anchor を見たあとで `agentRefusal` が条件（同じ言葉の decides、質問でない、record ツールのターンでない、規約・CI のファイルでない、do でコードを決めるなら同じターンの編集）を確かめ、満たさないものは理由つきで外す。save の出力にも check の注意を出すようにした。`cd server && node --test --test-name-pattern="agent adoption" test/record.test.ts` → 4 pass（受ける例、質問・states・trace のターン・CLAUDE.md、編集の有無、headless）。`bun run verify` → 終了コード 0（SQL 到達 205/205、受け入れ 105 pass）
 
 ## P3: 表示と自動の trace
 
@@ -286,3 +287,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T24 / 変更欄（前: `server/src/overview.ts`・`review.ts`・`extract.ts` を含む → 後: 3 つを外した）。overview は開いた行だけをたどり済み、review は active だけを選び、extract は後継を語らず保存の出力が reconcile の待つ理由をそのまま出すので、変える所が無かった。「履歴が記録されていない」印は schema にまだ保存先が無く、read は推し量らずに出さない。印を作る T23 で read の表示も足す必要がある
 - 2026-10-04 / T24 / サブエージェントが別の作業ツリーで実装した T24（f826fda1）を取り込み、T26 まで入った状態で `node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts test/record.test.ts` → 97 pass を私が流して確かめた。T23 で作った `unit_replacement_gap` の印を read に出す 1 行を足した（T24 の時点では表が無かった）。`bun run verify` → 終了コード 0（SQL 到達 201/201）
 - 2026-10-04 / T05 / 保存・glean の操作の前後の確認は、T22 の reconcile（最後にもう一度判定して差分なし）がすべての操作で担うので、T05 では判定関数と共有する SQL に絞った。変更欄と完了条件を直し（前: record.ts・extract.ts・glean.ts の前後の確認 → 後: authority.ts・deliver.ts・read.ts と authority.test.ts）、`authorityOf` が未使用にならないよう、T07 の表示のうち read の見出しの 1 行を前倒しした
+- 2026-10-04 / T06 / 変更欄（前: record.ts と record.test.ts → 後: run の判定の extract.ts・record_check の呼び出しの mcp-record.ts・規約のファイルの判定を共有する rule-files.ts と export.ts・plan を足す）。止めるパスの一覧を、どのリポジトリにもある規約のファイルと CI の定義に直した（plan の方針 7 と変更履歴）。AI の採用が外れた理由が保存の出力に出ないと分かり、save でも check の注意を出すようにした

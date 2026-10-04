@@ -7,7 +7,7 @@ import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
 import { cut, speaker } from "./read.ts";
-import { RULE_NAMES } from "./rule-files.ts";
+import { instructionFile } from "./rule-files.ts";
 
 export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as const;
 
@@ -243,21 +243,6 @@ export async function exportDecisions(
   if (Buffer.byteLength(document) > EXPORT_LIMITS.bytes) return tooBig;
   return { document };
 }
-
-/**
- * Where coding agents load standing instructions, Skills, and settings from (the same places the review Skill treats as binding rules),
- * compared without case.
- */
-const INSTRUCTION_DIRS = new Set([".claude", ".agents", ".codex", ".cursor"]);
-const instructionFile = (relative: string) => {
-  const parts = relative.toLowerCase().split(/[\\/]/);
-  const names = [...RULE_NAMES].map((n) => n.toLowerCase());
-  return (
-    parts.some((p) => INSTRUCTION_DIRS.has(p)) ||
-    names.includes(parts.at(-1) ?? "") ||
-    parts.slice(-2).join("/") === ".github/copilot-instructions.md"
-  );
-};
 
 /**
  * Where the owner asked the export to be written, checked against where the write really lands: a path relative to the repository

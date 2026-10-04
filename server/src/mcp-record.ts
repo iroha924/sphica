@@ -231,8 +231,8 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const { p } = await called("record_check", a.cwd, extra._meta);
-      return (await checkText(conn(), a.run, p.projectId, p.root, a.record)).text;
+      const { p, call } = await called("record_check", a.cwd, extra._meta);
+      return (await checkText(conn(), a.run, p.projectId, p.root, a.record, call)).text;
     }),
 );
 

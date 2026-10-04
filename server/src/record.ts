@@ -28,6 +28,7 @@ import {
   symbolMasked,
   symbolMissing,
 } from "./repo-facts.ts";
+import { instructionFile } from "./rule-files.ts";
 import { head, sha256 } from "./text.ts";
 
 const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
@@ -156,6 +157,8 @@ export type Target = {
   root: string | null;
   /** The sources the run may cite (a trace's session, a harvest's pull request); null for glean, which cites any source of the project */
   sources: readonly number[] | null;
+  /** Whether this run may adopt an AI's own decision: a trace begun and saved by an interactive session */
+  agent?: boolean;
 };
 
 type Planned = {
@@ -168,7 +171,7 @@ type Planned = {
   unsourced?: boolean;
   evidence: EvidenceSpan[];
   options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[]; reconsider: Span | null }[];
-  adoption: (Span & { route: "owner_statement" | "explicit" })[];
+  adoption: (Span & { route: "owner_statement" | "explicit" | "agent" })[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
   aliases: string[];
   supersedes: number | null;
@@ -318,7 +321,17 @@ export async function checkRecord(
     (refs.size
       ? await db
           .selectFrom("source")
-          .select(["id", "kind", "author_kind", "author_login", "author_association", "text"])
+          .select([
+            "id",
+            "kind",
+            "author_kind",
+            "author_login",
+            "author_association",
+            "text",
+            "external_id",
+            "session_id",
+            "turn_id",
+          ])
           .where("project_id", "=", target.projectId)
           .where("id", "in", [...refs])
           .execute()
@@ -515,15 +528,18 @@ export async function checkRecord(
         );
         continue;
       }
+      // The AI's own reply adopts only for the AI, only in a run an interactive session began and saves; checked below with the anchors
       const route =
         s.author_kind === "owner"
           ? "owner_statement"
           : MAINTAINERS.has(s.author_association ?? "")
             ? "explicit"
-            : null;
+            : s.author_kind === "assistant" && s.kind === "session_message" && target.agent
+              ? "agent"
+              : null;
       if (!route) {
         problems.push(
-          `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt`,
+          `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt${s.author_kind === "assistant" ? ", and an AI's own decision only in a trace an interactive session runs" : ""}`,
         );
         continue;
       }
@@ -626,7 +642,7 @@ export async function checkRecord(
     if (u.supersedes) {
       const old = others.get(u.supersedes);
       // Only a successor that can take effect takes the place; a decision or constraint the owner does not adopt waits beside it
-      const takes = !["decision", "constraint"].includes(u.kind) || adoption.length > 0;
+      const takes = !["decision", "constraint"].includes(u.kind) || adoption.some((x) => x.route !== "agent");
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
@@ -650,6 +666,13 @@ export async function checkRecord(
       if (!other) errors.push(`${key}: conflicts with ${k}, which is not a record of this project`);
       return other ? [other.id] : [];
     });
+
+    for (const x of adoption.filter((x) => x.route === "agent")) {
+      const why = await agentRefusal(db, u, x, sources.get(x.source), evidence, anchors);
+      if (!why) continue;
+      problems.push(`${key}: the AI's adoption in s${x.source} left out, so it stays a candidate: ${why}`);
+      adoption.splice(adoption.indexOf(x), 1);
+    }
 
     const fields: Planned["fields"] = [];
     for (const f of u.fields) {
@@ -764,6 +787,53 @@ export type Saved = {
   /** The units this save wrote, for a caller that reconciles them with its own changes */
   written: { id: number; key: string; hint: Hint; adopted: boolean }[];
 };
+
+/**
+ * Why a quote of the AI's reply cannot adopt for the AI, or null: it must be the AI choosing (decides on the same words), outside a turn
+ * that ran a record tool, not about instruction or CI files, and for a "do" on code, after that code changed in the same turn.
+ */
+async function agentRefusal(
+  db: Reads,
+  u: UnitInput,
+  x: Span,
+  s: { external_id: string; session_id: string | null; turn_id: string | null } | undefined,
+  evidence: EvidenceSpan[],
+  anchors: Planned["anchors"],
+): Promise<string | null> {
+  if (!s) return "its source is not a reply of this project";
+  if (/:ask:.*:q:/.test(s.external_id)) return "a question the AI asked is not its decision";
+  if (
+    !evidence.some(
+      (e) => e.role === "decides" && e.source === x.source && e.start === x.start && e.end === x.end,
+    )
+  )
+    return "quote the same words as decides evidence: the AI choosing, not reporting, proposing, or asking";
+  const governs = anchors.filter((a) => a.role === "applies_to").map((a) => a.path);
+  const bound = governs.find((path) => instructionFile(path) || path.startsWith(".github/workflows/"));
+  if (bound) return `${bound} holds rules or CI agents follow; only the owner adopts decisions about it`;
+  if (
+    await db
+      .selectFrom("agent_ineligible_source")
+      .select("source_id")
+      .where("source_id", "=", x.source)
+      .executeTakeFirst()
+  )
+    return "the reply comes from a turn that ran a record tool (or one no call can be placed away from)";
+  if (u.stance === "do" && governs.length) {
+    const edited =
+      s.session_id && s.turn_id
+        ? await db
+            .selectFrom("edit_observation")
+            .select("path")
+            .where("session_id", "=", s.session_id)
+            .where("turn_id", "=", s.turn_id)
+            .where("path", "in", governs)
+            .executeTakeFirst()
+        : undefined;
+    if (!edited) return `the AI did not change ${governs.join(", ")} in the turn it decided it`;
+  }
+  return null;
+}
 
 /** The hash of what a unit says: its text and options. Alias sets are bound to it, so words written for other text are never used. */
 const contentHash = (u: UnitInput): Buffer =>
