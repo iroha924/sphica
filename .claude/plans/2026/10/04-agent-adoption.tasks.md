@@ -40,13 +40,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(schema): add agent adoption, the decides role, run callers, and record tool calls (T02)`
   - 結果: revision 10。`record_call`・`tool_call_observation`・`capture_tool_call`・`agent_ineligible_source` を足し、`extraction_run.begin_call_id`、evidence の `decides`、adoption の `agent`、`unit_support` の組の条件を入れた。run の呼び出し元は列ではなく begin の呼び出し（`begin_call_id`）で持つ。`cd server && node --test test/schema.test.ts test/db.test.ts test/migrate.test.ts` → 106 pass / 0 fail（revision 1〜9 の移行が新しい DB と同じ定義、`decides`・`agent`・除外の view・役割の拒否を含む）。`bun run test` → 727 pass / 0 fail、`bun run typecheck` エラーなし、`bun run codegen:check` 一致、`node scripts/check-pairs.mjs` → 0
 
-- [ ] T03: record ツール用の同期の PreToolUse hook（Claude Code）を足し、record サーバーが呼び出し元を run に結び、全 record ツールの呼び出しを検証と外部取得の前に同期で書き、hook の観測と結び、begin と save で照合する
+- [x] T03: record ツール用の同期の PreToolUse hook（Claude Code）を足し、record サーバーが呼び出し元を run に結び、全 record ツールの呼び出しを検証と外部取得の前に同期で書き、hook の観測と結び、begin と save で照合する
   - 種別: 追加
   - 計画: S3
   - 依存: T02（呼び出しの表と run の呼び出し元の列が要る）
-  - 変更: `server/src/mcp-record.ts`, `server/src/extract.ts`, `server/src/db-write.ts`, `server/src/capture.ts`, `plugin/hooks/hooks.json`, `scripts/check-ai-config.mjs`, `server/test/record.test.ts`, `server/test/capture.test.ts`
+  - 変更: `server/src/mcp-record.ts`, `server/src/extract.ts`, `server/src/trace.ts`, `server/src/capture.ts`, `server/src/caller.ts`, `plugin/hooks/hooks.json`, `scripts/check-ai-config.mjs`, `scripts/check-sql-live.mjs`, `server/test/record.test.ts`, `server/test/capture.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="record call" test/record.test.ts test/capture.test.ts` → pass。hook が spool を通さず同期で観測を書き、サーバーの呼び出しと `tool_use_id` で結ばれる。hook の行が無い呼び出しは不明として残る。`bun run hooks:live` → pass。begin の前で失敗した呼び出し、同じ run を別のターンで使う呼び出しも行が残り、save の呼び出し元が begin と違うと拒まれる。`bun run architecture` → 書き込みの接続が `server/src/db-write.ts` の外に無い
   - コミット: `feat(record): bind the caller to each run and log every record tool call before it runs (T03)`
+  - 結果: record サーバーの全ツール（forget を含む 10 個）が、プロジェクトを決めた直後に `record_call` を ingest で単独に commit してから動く。begin は run に `begin_call_id` を持たせ、save は begin と自分の呼び出しのセッションを比べる（Claude Code は hook の観測、Codex は `_meta`。サーバーの環境変数は使わない）。Claude Code の record ツール用の同期の PreToolUse hook が `capture_tool_call` に直接書く。`node --test --test-name-pattern="record call" test/record.test.ts test/capture.test.ts` → 3 pass / 0 fail。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、hooks:live、受け入れ 105 pass、architecture の reader 境界）
 
 ## P2: 権限と持ち主の判断の保護
 
@@ -162,3 +163,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T01・T02・T03 / 実測で Claude Code の MCP 呼び出しにターンが無いと分かり、持ち主が record ツール用の同期の PreToolUse hook（案 A）を選んだ / T01 の題名と完了条件（前: 両ホストの全形の実測と plan への追記 → 後: 実測した値の判別。実測は plan の前提に追記済み、対話の Codex・SDK・Windows は未検証として plan に残す）、T02 の題名と変更欄（`server/src/db-write.ts` を足す）、T03 の題名・変更欄・完了条件（hook と capture を足す）を直した
 - 2026-10-04 / T01・T15 / pre-commit の bundle の検査が、package に入る最初の変更（`server/src/caller.ts`）のコミットでバージョンの更新を求めた / T15 を取りやめ、バージョンの更新（S13 の一部）を T01 に移した。T01 の計画欄（前: S1 → 後: S1, S13）と変更欄（4 つのファイルを足す）を直した。main が先に新しいバージョンを出したら、マージのときに次のバージョンへ上げ直す
 - 2026-10-04 / T02 / 変更欄（前: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts` → 後: `server/src/db.ts` を外し、移行・語彙・fixture・役割と移行のテストを足す）。run の呼び出し元を列でなく `begin_call_id` で持つことにした（save の照合は begin の呼び出しと比べるだけで足りるため）
+- 2026-10-04 / T03 / 変更欄（前: `server/src/db-write.ts` を含む → 後: `db-write.ts` は T02 で済んだので外し、`server/src/trace.ts`・`server/src/caller.ts`・`scripts/check-sql-live.mjs` を足す）。save の照合は、どちらかのセッションが分からないときは拒まない。その save で AI の採用が通らないよう、T06 で save の呼び出しも対話であることを条件に足す

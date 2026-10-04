@@ -30,7 +30,16 @@ import {
   refresh,
   repoFacts,
 } from "../src/repo-facts.ts";
-import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
+import {
+  callSession,
+  liveUnits,
+  logCall,
+  openRun,
+  pendingSessions,
+  runOf,
+  sessionEdits,
+  sessionSources,
+} from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 const now = at("2026-09-27T00:00:00Z");
@@ -1768,6 +1777,103 @@ test("a record that only defines a field marks its source as used, and harvest c
       { outcome: "units" },
     );
     assert.equal(Number(db.owner.prepare("select count(*) as n from field_def").get()?.n), 1);
+  } finally {
+    await db.done();
+  }
+});
+
+// A Claude Code call: the server's log, and the PreToolUse hook's view of it (session and turn)
+const claudeCall = async (
+  db: TempDb,
+  p: number,
+  tool: string,
+  session: string,
+  toolUseId: string,
+  turn = "t1",
+) => {
+  const call = await logCall(db.ingest, p, tool, {
+    host: "claude-code",
+    session: "stale-env",
+    turn: null,
+    toolUseId,
+    mode: "interactive",
+    raw: "cli",
+  });
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: session,
+    turn_id: turn,
+    tool_use_id: toolUseId,
+    tool_name: `mcp__plugin_sphica_record__${tool}`,
+    owner_turn: 1,
+    observed_at: now,
+  });
+  return call;
+};
+
+test("record call: a run keeps the call that began it, and a call's session comes from the hook, never the server's environment", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "Keep it." });
+    const begin = await claudeCall(db, p, "trace_begin", "ext-live", "toolu_1");
+    const run = await beginTrace(db.ingest, p, "s1", begin);
+    assert.equal((await runOf(db.ingest, run))?.begin_call_id, begin);
+    assert.deepEqual(await callSession(db.ingest, begin), { host: "claude-code", session: "ext-live" });
+    // A call the hook never saw has no session, even though the server's environment named one
+    const unseen = await logCall(db.ingest, p, "record_check", {
+      host: "claude-code",
+      session: "stale-env",
+      turn: null,
+      toolUseId: "toolu_unseen",
+      mode: "interactive",
+      raw: "cli",
+    });
+    assert.equal(await callSession(db.ingest, unseen), null);
+    const codex = await logCall(db.ingest, p, "trace_begin", {
+      host: "codex",
+      session: "cx",
+      turn: "c1",
+      toolUseId: null,
+      mode: "unknown",
+      raw: "user",
+    });
+    assert.deepEqual(await callSession(db.ingest, codex), { host: "codex", session: "cx" });
+  } finally {
+    await db.done();
+  }
+});
+
+test("record call: a save from another session than the one that began the run is refused, and the save's own call stays logged", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "Keep it." });
+    const run = await beginTrace(
+      db.ingest,
+      p,
+      "s1",
+      await claudeCall(db, p, "trace_begin", "ext-a", "toolu_a"),
+    );
+    const other = await claudeCall(db, p, "record_save", "ext-b", "toolu_b");
+    await assert.rejects(
+      saveText(db.ingest, run, p, null, { units: [] }, undefined, other),
+      /This run was begun in another session/,
+    );
+    assert.equal(
+      Number((db.owner.prepare("select count(*) as n from record_call").get() as { n: number }).n),
+      2,
+    );
+    // A save whose session cannot be told is not refused for it (it never adopts for the AI either)
+    const unknown = await logCall(db.ingest, p, "record_save", {
+      host: null,
+      session: null,
+      turn: null,
+      toolUseId: null,
+      mode: "unknown",
+      raw: null,
+    });
+    await saveText(db.ingest, run, p, null, { units: [] }, undefined, unknown);
   } finally {
     await db.done();
   }

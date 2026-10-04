@@ -328,6 +328,8 @@ try {
     Stop: [{ hooks: [hook("capture", { timeout: 30 })] }],
     // Claude Code reads with Read and, often, shell commands: Bash, or PowerShell on Windows without Git Bash
     PreToolUse: [
+      // Synchronous: the record server joins its log of each record tool call to the session and turn this hook writes first
+      { matcher: "mcp__plugin_sphica_record__.*", hooks: [hook("capture", { timeout: 10 })] },
       {
         matcher: "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash|PowerShell",
         hooks: [hook("deliver", { timeout: 5 })],

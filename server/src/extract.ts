@@ -24,6 +24,7 @@ import { checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "
 import type { Probe } from "./repo-facts.ts";
 import { plural } from "./text.ts";
 import {
+  callSession,
   liveUnits,
   openRun,
   PENDING_DAYS,
@@ -109,19 +110,36 @@ async function sessionOf(db: Reads, projectId: number, given: string | undefined
   return s.id;
 }
 
-export async function beginTrace(db: Kysely<DB>, projectId: number, session?: string): Promise<string> {
+export async function beginTrace(
+  db: Kysely<DB>,
+  projectId: number,
+  session?: string,
+  beginCall?: number,
+): Promise<string> {
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const s = await sessionOf(db, projectId, session);
   const run = newRunId();
-  await openRun(db, { projectId, origin: "trace", target: `session:${s}`, sessionId: s, draftId: run });
+  await openRun(db, {
+    projectId,
+    origin: "trace",
+    target: `session:${s}`,
+    sessionId: s,
+    draftId: run,
+    beginCall,
+  });
   return run;
 }
 
-export async function beginGlean(db: Kysely<DB>, projectId: number, session?: string): Promise<string> {
+export async function beginGlean(
+  db: Kysely<DB>,
+  projectId: number,
+  session?: string,
+  beginCall?: number,
+): Promise<string> {
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
   const s = await sessionOf(db, projectId, session);
   const run = newRunId();
-  await openRun(db, { projectId, origin: "glean", target: "glean", sessionId: s, draftId: run });
+  await openRun(db, { projectId, origin: "glean", target: "glean", sessionId: s, draftId: run, beginCall });
   return run;
 }
 
@@ -131,6 +149,7 @@ export async function beginHarvest(
   projectId: number,
   number: number,
   get: Get,
+  beginCall?: number,
 ): Promise<{ run: string; sources: number }> {
   const project = await db.selectFrom("project").select("key").where("id", "=", projectId).executeTakeFirst();
   const pull = await readPull(get, number, repoOf(project?.key ?? ""));
@@ -145,6 +164,7 @@ export async function beginHarvest(
       target: `pr:${number}`,
       sessionId: null,
       draftId: run,
+      beginCall,
     });
     return { run, sources: kept };
   });
@@ -158,6 +178,13 @@ async function bound(db: Reads, id: string, projectId: number): Promise<Run> {
   if (run.status !== "running")
     throw new Error(`This run was already ${run.status}. Begin again for a new one`);
   return run;
+}
+
+/** Refuses to save a run from another session than the one that began it, when both calls name their session. */
+async function sameCaller(db: Reads, begin: number, call: number): Promise<void> {
+  const [a, b] = await Promise.all([callSession(db, begin), callSession(db, call)]);
+  if (a && b && (a.host !== b.host || a.session !== b.session))
+    throw new Error("This run was begun in another session; begin a run in this one");
 }
 
 /** Keeps a GitHub issue or pull request of this repository the owner named as sources for a glean run, and lists their refs. */
@@ -439,9 +466,12 @@ export async function saveText(
   root: string | null,
   record: unknown,
   probe?: Probe,
+  call?: number,
 ): Promise<string> {
   // Read before the lock: capture and delivery wait on it, and reading the working tree and git is the slow part of a save
-  const glean = (await bound(db, id, projectId)).origin === "glean";
+  const begun = await bound(db, id, projectId);
+  if (call !== undefined && begun.begin_call_id !== null) await sameCaller(db, begun.begin_call_id, call);
+  const glean = begun.origin === "glean";
   const gleanFacts = glean ? prepareGlean(root, record, probe) : undefined;
   const facts = gleanFacts ?? prepareRecord(root, record, probe);
   const text = await inTransaction(db, async (trx) => {

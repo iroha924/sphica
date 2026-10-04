@@ -3,7 +3,7 @@
  * Claude Code puts no turn in a call (only its tool use id, which the PreToolUse hook also sees); Codex puts its turn in x-codex-turn-metadata.
  * A value not classified here is unknown, and an unknown caller never adopts an AI decision.
  */
-export type Mode = "interactive" | "headless" | "sdk" | "unknown";
+type Mode = "interactive" | "headless" | "sdk" | "unknown";
 
 export type Caller = {
   host: "claude-code" | "codex" | null;

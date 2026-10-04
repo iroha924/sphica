@@ -1,5 +1,6 @@
 // What trace reads: sessions not traced yet, the run a draft is bound to, and a session's sources, edits, and the project's live records.
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
+import type { Caller } from "./caller.ts";
 import { iso, type Reads } from "./db.ts";
 import type { DB, Session } from "./db-types.ts";
 import type { BeginOrigin } from "./knowledge.ts";
@@ -85,6 +86,7 @@ export type Run = {
   target: string;
   session_id: string | null;
   status: string;
+  begin_call_id: number | null;
   started_at: string;
 };
 
@@ -97,6 +99,7 @@ export async function openRun(
     target: string;
     sessionId: string | null;
     draftId: string;
+    beginCall?: number | null;
   },
 ): Promise<number> {
   const r = await db
@@ -107,6 +110,7 @@ export async function openRun(
       target: v.target,
       session_id: v.sessionId,
       draft_id: v.draftId,
+      begin_call_id: v.beginCall ?? null,
       status: "running",
       started_at: iso(Date.now()),
     })
@@ -119,10 +123,51 @@ export async function runOf(db: Reads, draftId: string): Promise<Run | null> {
   return (
     (await db
       .selectFrom("extraction_run")
-      .select(["id", "project_id", "origin", "target", "session_id", "status", "started_at"])
+      .select(["id", "project_id", "origin", "target", "session_id", "status", "begin_call_id", "started_at"])
       .where("draft_id", "=", draftId)
       .executeTakeFirst()) ?? null
   );
+}
+
+/** Logs a record tool call before it does anything. It commits on its own, so a call that fails or is rolled back keeps its row. */
+export async function logCall(db: Kysely<DB>, projectId: number, tool: string, c: Caller): Promise<number> {
+  const r = await db
+    .insertInto("record_call")
+    .values({
+      project_id: projectId,
+      tool,
+      host: c.host,
+      caller_session: c.session,
+      caller_turn: c.turn,
+      tool_use_id: c.toolUseId,
+      mode: c.mode,
+      mode_raw: c.raw,
+      called_at: iso(Date.now()),
+    })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  return r.id;
+}
+
+/**
+ * The host and session a logged call came from: Codex's own metadata, or for Claude Code the session its PreToolUse hook saw. The
+ * server's own environment is never trusted for it (a server Claude Code keeps across /clear would name the old session).
+ */
+export async function callSession(
+  db: Reads,
+  callId: number,
+): Promise<{ host: string; session: string } | null> {
+  const c = await db
+    .selectFrom("record_call as c")
+    .leftJoin("tool_call_observation as o", (j) =>
+      j.on("o.host", "=", "claude-code").onRef("o.tool_use_id", "=", "c.tool_use_id"),
+    )
+    .select(["c.host", "c.caller_session", "o.session_external"])
+    .where("c.id", "=", callId)
+    .executeTakeFirst();
+  if (!c?.host) return null;
+  const session = c.host === "codex" ? c.caller_session : c.session_external;
+  return session ? { host: c.host, session } : null;
 }
 
 /** A session's messages in order, with whether an earlier run already looked at each. */
