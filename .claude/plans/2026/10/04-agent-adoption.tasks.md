@@ -336,6 +336,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): treat CI's directories as CI paths for the AI's adoption (T33)`
   - 結果: red を実測した。`ciPath` で、大文字小文字と末尾の `/` によらず `.github`・`.github/workflows` とその下を CI のパスとする。`node --test --test-name-pattern="agent adoption|successor place" test/record.test.ts` → 15 pass。`bun run verify` → 終了コード 0（受け入れ 127 pass）。同じレビューの F2〜F5（check の予測と save の結果がずれる境界）は、レビューの回が収束しないので持ち主に相談し、直さずに出すと決まった（PR の Declined findings に残す）
 
+- [x] T34: PR のレビュー指摘を直す（呼び出し元のセッションが begin と今の呼び出しの両方で分かり、同じときだけ AI の採用を受ける）
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T33（PR を作った時点の最後の修正）
+  - 変更: `server/src/extract.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="caller's session is unknown" test/record.test.ts` → 直す前は、hook が見ていない save の呼び出し（セッション不明、起動の形は interactive）で AI の採用が active になる
+  - 完了条件: `cd server && node --test --test-name-pattern="agent adoption" test/record.test.ts` → pass
+  - コミット: `fix(record): adopt the AI's decision only when both calls name the same session (T34)`
+  - 結果: red を実測した（active）。`agentRun` は、起動の形が両方とも interactive に加えて、`callSession` で begin と今の呼び出しのセッションがどちらも分かり、ホストとセッションが同じときだけ AI の採用を許す（plan の方針 1「begin でも save でも確かめ、判別できなければ候補」）。セッションが分からない呼び出しの保存そのものは今どおり通る。`node --test test/record.test.ts test/extract.test.ts` → 88 pass。`bun run verify` → 終了コード 0（SQL 到達 210/210、受け入れ 127 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -380,3 +390,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T31 / T13・T14 の Codex のレビュー（F1〜F4 すべて P2）を受け、修正タスク T31 を足した。review-shipping の指摘 2（hook の取りこぼし 1 回で AI の採用がプロジェクトごとずっと止まる）は Codex と議論し、plan どおり止めたままにして README に書いた
 - 2026-10-04 / T32 / ブランチ全体の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T32 を足した
 - 2026-10-05 / T33 / T32 の Codex のレビュー（F1〜F5 すべて P2）を受け、F1 だけを修正タスク T33 にした。F2〜F5 は持ち主の判断で直さずに出す
+- 2026-10-05 / T34 / PR #273 の GitHub の Codex のレビュー（P2 1 件: 呼び出し元のセッションが分からない save でも AI の採用を受ける）を受け、修正タスク T34 を足した

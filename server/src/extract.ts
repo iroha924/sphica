@@ -256,15 +256,20 @@ export async function gleanFetch(
   ].join("\n");
 }
 
-/** The key namespace, the sources the run may mark as looked at, and what context prints: a heading, one entry per source, and a tail. */
-/** Whether a trace may adopt the AI's own decisions: one an interactive session began, and checks or saves now */
+/**
+ * Whether a trace may adopt the AI's own decisions: one an interactive session began, and the same session, known on both calls, checks
+ * or saves now. A call whose session is unknown (the hook never saw it) may still save, but adopts nothing for the AI
+ */
 async function agentRun(db: Reads, run: Run, call: number | undefined): Promise<boolean> {
   if (run.origin !== "trace" || run.begin_call_id === null || call === undefined) return false;
   const calls = [...new Set([run.begin_call_id, call])];
   const modes = await db.selectFrom("record_call").select("mode").where("id", "in", calls).execute();
-  return modes.length === calls.length && modes.every((m) => m.mode === "interactive");
+  if (modes.length !== calls.length || !modes.every((m) => m.mode === "interactive")) return false;
+  const [a, b] = await Promise.all([callSession(db, run.begin_call_id), callSession(db, call)]);
+  return a !== null && b !== null && a.host === b.host && a.session === b.session;
 }
 
+/** The key namespace, the sources the run may mark as looked at, and what context prints: a heading, one entry per source, and a tail. */
 async function scopeOf(
   db: Reads,
   run: Run,

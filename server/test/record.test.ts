@@ -2555,3 +2555,52 @@ test("successor place: glean's check refuses adopting a successor into a place a
     await db.done();
   }
 });
+
+test("agent adoption: a save whose caller's session is unknown never adopts for the AI", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "o1", text: "Tidy the export." });
+    const text = "I keep the export as one function.";
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(77),
+      indexed: 0,
+    });
+    const begin = await claudeCall(db, p, "trace_begin", "ext-tracer", "toolu_begin", "tt1");
+    const run = await beginTrace(db.ingest, p, "s1", begin);
+    // The hook never saw the save: its session is unknown, though the call says it was interactive
+    const unseen = await logCall(db.ingest, p, "record_save", {
+      host: "claude-code",
+      session: "stale-env",
+      turn: null,
+      toolUseId: "toolu_unseen",
+      mode: "interactive",
+      raw: "cli",
+    });
+    const out = await saveText(
+      db.ingest,
+      run,
+      p,
+      null,
+      { units: [aiDecision("unseen", reply, text)] },
+      undefined,
+      unseen,
+    );
+    assert.equal(lifeOf(db, "unseen"), "candidate");
+    assert.match(out, /an AI's own decision only in a trace an interactive session runs/);
+  } finally {
+    await db.done();
+  }
+});
