@@ -200,6 +200,41 @@ type Plan = {
   once?: string;
 };
 
+/**
+ * How much a record weighs when more apply than one delivery shows: a constraint, then a decision against something, then what the owner
+ * adopted, then what a maintainer adopted, then the rest; newer first within each.
+ */
+const weight = (eb: ExpressionBuilder<DB & { u: DB["unit"] }, "u">) => {
+  const adoptedBy = (
+    who: (s: ExpressionBuilder<DB & { s: DB["source"] }, "s">) => ReturnType<typeof eb.and>,
+  ) =>
+    eb.exists(
+      eb
+        .selectFrom("unit_adoption as ad")
+        .innerJoin("source as s", "s.id", "ad.source_id")
+        .select("ad.id")
+        .whereRef("ad.unit_id", "=", "u.id")
+        .where("ad.retracted_at", "is", null)
+        .where((s) => who(s as never)),
+    );
+  return eb
+    .case()
+    .when("u.kind", "=", "constraint")
+    .then(0)
+    .when("u.stance", "=", "dont")
+    .then(1)
+    .when(adoptedBy((s) => s.or([s("s.author_kind", "=", "owner"), s("s.author_association", "=", "OWNER")])))
+    .then(2)
+    .when(
+      adoptedBy((s) =>
+        s.or([s("s.author_association", "=", "MEMBER"), s("s.author_association", "=", "COLLABORATOR")]),
+      ),
+    )
+    .then(3)
+    .else(4)
+    .end();
+};
+
 const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
   deliverable(db, projectId)
     .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
@@ -208,6 +243,7 @@ const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
     .where("a.retired_at", "is", null)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .groupBy("u.id")
+    .orderBy(weight)
     .orderBy("u.id", "desc");
 
 /** The paths a delivery names in its lead: all of them up to three, then a count. */
@@ -523,6 +559,7 @@ async function atStart(
     );
   const broad = await standing
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .orderBy(weight)
     .orderBy("u.id", "desc")
     .limit(3)
     .execute();
