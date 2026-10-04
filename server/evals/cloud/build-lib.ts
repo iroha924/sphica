@@ -21,7 +21,7 @@ export const shippedMatcher = (root: string) =>
   deliverMatcher(fs.readFileSync(path.join(root, "plugin", "hooks", "hooks.json"), "utf8"));
 
 /** The matcher of Codex's delivery hook before a tool, as plugin/hooks/codex.json ships it. */
-export function codexDeliverMatcher(hooksJson: string): string {
+function codexDeliverMatcher(hooksJson: string): string {
   const hooks = JSON.parse(hooksJson) as {
     hooks: { PreToolUse?: { matcher: string; hooks: { command: string }[] }[] };
   };
