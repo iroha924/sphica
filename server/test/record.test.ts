@@ -2100,3 +2100,43 @@ test("successor place: proposals wait beside the place, the first standing one t
     await db.done();
   }
 });
+
+test("successor place: a successor whose reconsider quote was forgotten keeps replacing, and can itself be replaced", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, settle, life } = successors(db, p);
+    const o = decided("v1", true);
+    const a = decided("v2", true);
+    // a was active before its owner quote for a reconsider condition was forgotten: forget's own recheck kept it active
+    const run = Number(db.owner.prepare("select run_id from unit where id = ?").get(a)?.run_id);
+    db.owner
+      .prepare(
+        "insert into unit_option (unit_id, position, text, outcome, reconsider_when) values (?, 1, 'Postgres', 'rejected', 'if replicas are needed')",
+      )
+      .run(a);
+    const batch = Number(
+      db.owner.prepare("insert into forget_batch (project_id, at) values (?, ?) returning id").get(p, now)
+        ?.id,
+    );
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'r', ?)",
+      )
+      .run(a, now, run);
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, forget_id) values (?, 'candidate', 'active', ?, 'r', ?)",
+      )
+      .run(a, now, batch);
+    link(a, o);
+    await settle([o]);
+    assert.deepEqual([life(o), life(a)], ["superseded", "active"]);
+    const b = decided("v3", true);
+    link(b, a);
+    await settle([b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "superseded", "active"]);
+  } finally {
+    await db.done();
+  }
+});

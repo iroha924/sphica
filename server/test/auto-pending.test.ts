@@ -244,3 +244,17 @@ test("auto pending: an explicit trace reads as before, and a run keeps the mode 
     await db.done();
   }
 });
+
+test("auto pending: an automatic trace whose caller cannot be told does nothing, rather than taking a session still being written", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "Keep it.", session: "s1" });
+    assert.match(
+      await pendingText(db.ingest, p, new Date(), { auto: true, skip: null }),
+      /cannot tell which session called, so the automatic trace does nothing/,
+    );
+  } finally {
+    await db.done();
+  }
+});

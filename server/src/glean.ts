@@ -875,6 +875,8 @@ export async function saveGlean(
   for (const id of settled.redundant)
     changed.push(`${settled.keys.get(id)}: superseded by a record of this save, so not withdrawn`);
   // An owner's adoption added here into a place another successor holds is refused by name, as a save with it would be
+  // As do new records of this save the owner adopted: check sees each alone, judging sees them race
+  for (const w of units.written) if (w.adopted) adopted.add(w.id);
   for (const [id, [to, holder]] of settled.held)
     if (adopted.has(id))
       throw new Error(

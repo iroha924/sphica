@@ -73,6 +73,9 @@ export async function pendingText(
   o: PendingOptions & { limit?: number } = {},
 ): Promise<string> {
   await flush(undefined, TOOL_FLUSH_BUDGET_MS).catch(() => {});
+  // The caller's session was looked for and not found: an automatic trace could take the one still being written, so it does nothing
+  if (o.auto && o.skip === null)
+    return "Sphica cannot tell which session called, so the automatic trace does nothing this time (run /sphica:trace pending yourself).";
   if (o.auto) {
     const auto = await pendingSessions(db, projectId, "recent", now, o.limit ?? 20, o);
     if (!auto.total) return "No recent session waits to be traced.";

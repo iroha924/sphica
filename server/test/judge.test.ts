@@ -302,3 +302,19 @@ test("judge: a record whose source is gone can still be replaced, which is how i
   const j = judge(snap([unit(O, "candidate", { sound: false }), unit(A, null)], [intent(A, O)]));
   assert.deepEqual(states(j), { [O]: "superseded", [A]: "active" });
 });
+
+test("judge: a replaced record that loses its own adoption keeps the reason, which ends its own replacement by name", () => {
+  const j = judge(
+    snap(
+      [unit(O, "superseded"), unit(A, "superseded", { ownerAdopted: false }), unit(B, "active")],
+      [intent(A, O), intent(B, A)],
+      [
+        { from: A, to: O },
+        { from: B, to: A },
+      ],
+    ),
+  );
+  assert.deepEqual(states(j), { [O]: "active", [A]: "superseded", [B]: "active" });
+  assert.equal(j.waits.has(A), false);
+  assert.deepEqual(j.unstood.get(A), { why: "no owner adoption" });
+});

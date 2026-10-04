@@ -45,6 +45,8 @@ export type Judged = {
   /** Target → the successor whose replacement is in effect */
   holders: Map<number, number>;
   waits: Map<number, Wait>;
+  /** Why each unit that holds no place could not stand, whatever its lifecycle */
+  unstood: Map<number, Wait>;
 };
 
 /** A record replaces one of its own kind; a decision and a constraint can replace each other. The schema checks the same pairs */
@@ -118,8 +120,11 @@ export function judge(s: Snapshot): Judged {
     }
   }
   // A superseded unit waits for nothing it can act on; what it waited for is not shown
+  // Why a unit cannot stand, kept for every unit: a replaced one that loses its adoption ends its own replacement for that reason
+  const unstood = new Map<number, Wait>();
+  for (const [id, w] of waits) unstood.set(id, w);
   for (const [id, l] of lifecycle) if (l !== "candidate") waits.delete(id);
-  return { lifecycle, holders, waits };
+  return { lifecycle, holders, waits, unstood };
 }
 
 /** The intent saved first, ties by the successor's id: the same input in any order picks the same holder */

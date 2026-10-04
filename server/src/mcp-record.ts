@@ -120,7 +120,7 @@ server.registerTool(
     tool(async () => {
       const { p, call } = await called("trace_pending", a.cwd, extra._meta);
       // The caller's own session is still being written, so an automatic trace leaves it out
-      const skip = a.auto ? await callSession(conn(), call) : null;
+      const skip = a.auto ? await callSession(conn(), call) : undefined;
       return pendingText(conn(), p.projectId, undefined, { auto: a.auto, skip });
     }),
 );

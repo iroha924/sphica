@@ -762,7 +762,7 @@ export type Saved = {
   /** Anchors judged again under the lock that may point at the wrong place */
   anchorProblems: string[];
   /** The units this save wrote, for a caller that reconciles them with its own changes */
-  written: { id: number; key: string; hint: Hint }[];
+  written: { id: number; key: string; hint: Hint; adopted: boolean }[];
 };
 
 /** The hash of what a unit says: its text and options. Alias sets are bound to it, so words written for other text are never used. */
@@ -1021,6 +1021,7 @@ export async function saveRecord(
     saved.written.push({
       id,
       key: p.key,
+      adopted: p.adoption.length > 0,
       hint: {
         reason: p.adoption.length ? "evidence and adoption found" : "evidence found",
         source: p.adoption[0]?.source ?? p.evidence[0]?.source ?? null,

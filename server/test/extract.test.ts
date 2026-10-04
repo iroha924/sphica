@@ -2574,3 +2574,117 @@ test("trace: a tail too long for a page is cut, with the number of lines left ou
     await db.done();
   }
 });
+
+// One glean on the owner's decision O and A, a proposal to replace it: what the batch asks for together, judged together
+const gleanBench = async () => {
+  const db = tempDb();
+  const p = project(db);
+  const old = message(db, p, { id: "o1", text: "SQLite にしよう。" });
+  await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+    units: [
+      {
+        key: "storage",
+        kind: "decision",
+        stance: "do",
+        text: "SQLite にしよう。",
+        evidence: [{ source: `s${old}`, quote: "SQLite にしよう。", role: "states" }],
+        adoption: [{ source: `s${old}`, quote: "SQLite にしよう。" }],
+      },
+    ],
+  });
+  session(db, p, "g1");
+  const said = message(db, p, { id: "g", text: "Postgres に変える。これで決まり。やめる。", session: "g1" });
+  const assistant = message(db, p, {
+    id: "a",
+    text: "Postgres に変えましょう。",
+    speaker: "assistant",
+    session: "g1",
+  });
+  const glean = async (record: unknown) =>
+    saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, record);
+  await glean({
+    units: [
+      {
+        key: "pg",
+        kind: "decision",
+        stance: "do",
+        text: "Postgres に変えましょう。",
+        evidence: [{ source: `s${assistant}`, quote: "Postgres に変えましょう。", role: "states" }],
+        supersedes: "trace:ext-s1/storage",
+      },
+    ],
+  });
+  const revision = (key: string) =>
+    db.owner.prepare("select revision from unit where key = ?").get(key)?.revision;
+  const state = (key: string) =>
+    db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+  return { db, p, said, glean, revision, state };
+};
+
+test("glean: withdrawing both a record and the proposal that would replace it in one save withdraws both", async () => {
+  const { db, said, glean, revision, state } = await gleanBench();
+  try {
+    await glean({
+      ops: [
+        {
+          op: "adopt",
+          unit: "glean:pg",
+          revision: revision("glean:pg"),
+          source: `s${said}`,
+          quote: "これで決まり。",
+        },
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/storage",
+          revision: revision("trace:ext-s1/storage"),
+          reason_source: `s${said}`,
+          reason_quote: "やめる。",
+        },
+        {
+          op: "withdraw",
+          unit: "glean:pg",
+          revision: revision("glean:pg"),
+          reason_source: `s${said}`,
+          reason_quote: "やめる。",
+        },
+      ],
+    });
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["withdrawn", "withdrawn"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("glean: a new record the owner adopts and an adopted proposal racing for one place in one save are refused by name", async () => {
+  const { db, said, glean, revision, state } = await gleanBench();
+  try {
+    await assert.rejects(
+      glean({
+        units: [
+          {
+            key: "duck",
+            kind: "decision",
+            stance: "do",
+            text: "Postgres に変える。",
+            evidence: [{ source: `s${said}`, quote: "Postgres に変える。", role: "states" }],
+            adoption: [{ source: `s${said}`, quote: "Postgres に変える。" }],
+            supersedes: "trace:ext-s1/storage",
+          },
+        ],
+        ops: [
+          {
+            op: "adopt",
+            unit: "glean:pg",
+            revision: revision("glean:pg"),
+            source: `s${said}`,
+            quote: "これで決まり。",
+          },
+        ],
+      }),
+      /already has a successor/,
+    );
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
+  } finally {
+    await db.done();
+  }
+});

@@ -46,6 +46,8 @@ type UnitRow = {
   stated: number;
   owned: number;
   unquoted: number;
+  /** Ever active: a reconsider condition's quote is needed only to become active the first time */
+  ever: number;
 };
 type Rows = {
   units: UnitRow[];
@@ -61,8 +63,8 @@ function snapshotOf(rows: Rows, withdraw: Set<number>): Loaded {
     units: rows.units.map((u) => {
       // A unit with no state yet starts as a candidate, written before anything else
       const lifecycle = Number(u.stated) === 1 ? (u.lifecycle as Lifecycle) : null;
-      // Kept active without it (a quote forgotten later leaves the record as it was); never activated without it
-      const unquoted = Number(u.unquoted) === 1 && lifecycle !== "active";
+      // Needed only to become active the first time: a quote forgotten later leaves the record as it was
+      const unquoted = Number(u.unquoted) === 1 && Number(u.ever) === 0;
       if (u.missing) missing.set(u.id, u.missing);
       else if (unquoted) missing.set(u.id, "a reconsider condition needs a quote of the owner");
       return {
@@ -83,7 +85,7 @@ function snapshotOf(rows: Rows, withdraw: Set<number>): Loaded {
 }
 
 function waitText(j: Judged, id: number, l: Loaded, target?: number): string {
-  const w = j.waits.get(id);
+  const w = j.waits.get(id) ?? j.unstood.get(id);
   const name = (u: number | undefined) => (u === undefined ? "its target" : (l.keys.get(u) ?? `u${u}`));
   switch (w?.why) {
     case "unsound":
@@ -127,8 +129,13 @@ type Planned = {
 /** What to write, decided from one snapshot before anything is written. A withdrawal of a record this batch replaces is dropped */
 function planOf(rows: Rows, asked: Asked): Planned {
   const withdraw = new Map(asked.withdraw ?? []);
-  const redundant = [...withdraw.keys()].filter(
-    (id) => judge(snapshotOf(rows, new Set()).snapshot).lifecycle.get(id) === "superseded",
+  // A withdrawal is redundant when the record ends up replaced with every other withdrawal of the batch applied, so withdrawing a record
+  // and the successor that would replace it withdraws both
+  const asking = [...withdraw.keys()];
+  const redundant = asking.filter(
+    (id) =>
+      judge(snapshotOf(rows, new Set(asking.filter((other) => other !== id))).snapshot).lifecycle.get(id) ===
+      "superseded",
   );
   for (const id of redundant) withdraw.delete(id);
   const loaded = snapshotOf(rows, new Set(withdraw.keys()));
@@ -255,6 +262,15 @@ async function rowsOf(db: Reads, ids: number[]): Promise<Rows> {
       eb
         .exists(
           eb
+            .selectFrom("unit_state as t")
+            .whereRef("t.unit_id", "=", "u.id")
+            .where("t.to_state", "=", "active")
+            .select(sql`1`.as("x")),
+        )
+        .as("ever"),
+      eb
+        .exists(
+          eb
             .selectFrom("unit_adoption as a")
             .whereRef("a.unit_id", "=", "u.id")
             .where("a.route", "in", ["owner_statement", "explicit"])
@@ -304,6 +320,7 @@ async function rowsOf(db: Reads, ids: number[]): Promise<Rows> {
       ...u,
       unsourced: Number(u.unsourced),
       stated: Number(u.stated),
+      ever: Number(u.ever),
       owned: Number(u.owned),
       unquoted: Number(u.unquoted),
     })),
@@ -367,6 +384,7 @@ export type MigrationIO = {
 
 const UNITS_SQL = `select u.id, u.key, u.kind, u.lifecycle, u.extraction, u.unsourced, s.missing,
   exists (select 1 from unit_state t where t.unit_id = u.id) as stated,
+  exists (select 1 from unit_state t where t.unit_id = u.id and t.to_state = 'active') as ever,
   exists (select 1 from unit_adoption a where a.unit_id = u.id and a.route in ('owner_statement', 'explicit')
     and a.retracted_at is null) as owned,
   exists (select 1 from unit_option o where o.unit_id = u.id and o.reconsider_when is not null and not exists (

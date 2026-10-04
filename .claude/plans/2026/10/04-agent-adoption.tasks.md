@@ -201,6 +201,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(trace): resume automatic traces from unprocessed messages, oldest sessions first (T09)`
   - 結果: `pendingSessions`・`pendingCount`・`pendingText` と `contextText` に既定 false の auto を足し、record サーバーの `trace_pending` と `record_context` に省略できる `auto` を足した（`trace_pending` は auto のとき呼び出し元のセッションを外す）。auto の record_context は最初の未処理の発言から始め、前の 6 件を 1 件 2,000 文字までの文脈として見出しで分け、2 ページで止めて残りの件数を出す。保存で見た扱いになるのは示した対象と引用した発言だけ。`cd server && node --test --test-name-pattern="auto pending" test/auto-pending.test.ts` → 4 pass / 0 fail。`cd server && node --test test/extract.test.ts test/status.test.ts test/record.test.ts test/deliver.test.ts test/auto-pending.test.ts` → 118 pass / 0 fail（明示の trace のページ送りのテストは変えずに通る）。`cd server && bun run test` → 746 pass / 0 fail。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）
 
+- [x] T26: T22・T09 のレビュー指摘を直す（同じ保存の取り下げの冗長の判定、見直し条件の引用は初めての active 化だけ、glean で新しい採用付きの記録の枠の取り合いを拒む、自動 pending は呼び出し元が分からなければ何もしない、置き換え済みの記録が立てない理由を残す）
+  - 種別: 修正
+  - 計画: S15, S8
+  - 依存: T22（直す対象の reconcile）, T09（直す対象の自動 pending）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/judge.ts`, `server/src/reconcile.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/src/extract.ts`, `server/src/mcp-record.ts`, `server/test/judge.test.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/test/auto-pending.test.ts`
+  - red: `cd server && node --test --test-name-pattern="withdrawing both a record|racing for one place" test/extract.test.ts && node --test --test-name-pattern="reconsider quote was forgotten" test/record.test.ts && node --test --test-name-pattern="caller cannot be told" test/auto-pending.test.ts` → 直す前のコードで、両方の取り下げのうち元の記録が active のまま、取り合いが拒まれず、最後の再判定が「records did not settle」で失敗し、呼び出し元が分からないのに自動 pending が一覧を返して落ちる
+  - 完了条件: 同じコマンド → pass。`bun run verify` → 終了コード 0
+  - コミット: `fix(record): settle same-save withdrawals and races; skip auto tracing for an unknown caller (T26)`
+  - 結果: red を実測（4 件とも上の理由で fail。自動 pending はコミット済みの extract.ts に戻して確認）。直した後 4 件 pass、`node --test test/judge.test.ts` → 17 pass。`bun run verify` → 終了コード 0（SQL 到達 199/199、実 DB 10/10、受け入れ 105 pass）。見直し条件の引用の規則は schema の trigger も「一度も active になっていない記録の初めての active 化」にそろえた
+
 - [ ] T10: 新しい持ち主のセッションの開始時に、自動の trace の通知をセッションごとに 1 回出す
   - 種別: 変更
   - 計画: S8
@@ -270,3 +280,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T22 / 変更欄（`server/src/extract.ts`・`search.ts`・`read.ts`・`db.test.ts`・`migrate.test.ts` は変えずに済み外した。judge の条件を直したので `judge.ts`・`judge.test.ts` を足した）。出典が無くなった記録は後継で置き換えて直せる（schema の CHECK どおり、置き換えられないのは隔離だけ）と分かり、judge の条件を「相手が sound」から「相手が隔離でない」に直した。根拠のそろった candidate を forget が判断し直すと active になる（状態を事実から決めるため。forget のテストの期待を直した）。保存の最後の「採用付きの後継が枠を待ったら拒む」は check が同じ transaction で先に拒むので届かず、置かなかった（glean の adopt では残す）
 - 2026-10-04 / T09 / 変更欄（前: `server/test/record.test.ts` → 後: 新しい `server/test/auto-pending.test.ts` と、省略できる `auto` を足す `server/src/mcp-record.ts`）と完了条件のテストファイルを直した。record.test.ts は begin が送る記録の待ち行列を一時の HOME に向けていないので、begin を呼ぶテストを別のファイルに分けた
 - 2026-10-04 / T23 / 変更欄に `db/schema.sql`（印の表 `unit_replacement_gap`）、`server/src/db-types.ts`、`server/src/reconcile.ts`（同期版の adapter）を足した。reconcile を純粋な計画づくりと非同期・同期の読み書きに分け、移行の SQL は reconcile.ts に置いて admin.ts から実行の関数だけを渡す（生の SQL の置き場所と lifecycle の書き手の両方の検査を満たすため）。状態の行を 1 行も持たない記録（どのリリースも作らない）は移行で判定しない。移行は自分の run を足すので、件数・id を前提にした既存の移行テストを合わせた。revision 10 の移行は、このリリースの judge で判定する（規則を変えるときは新しい revision にする）
+- 2026-10-04 / T26 / T21・T22 の Codex のレビュー（F1 P1: 同じ保存で元の記録と後継の両方の取り下げで、元の取り下げが消える。F2 P2: 見直し条件の引用を forget した後継の置き換えが最後の再判定で失敗。F3 P2: glean で新しい採用付きの記録と adopt が枠を取り合っても拒まない）と T09 のレビュー（F1 P2: 呼び出し元が分からないと自動 pending が今のセッションを含める）を受け、T24 のサブエージェントが気づいた点（置き換え済みの記録が採用を失ったときの終わりの理由が一般的な文になる）も合わせて、修正タスク T26 を足した

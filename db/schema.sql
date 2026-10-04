@@ -604,10 +604,11 @@ create trigger unit_state_rules before insert on unit_state begin
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
   select raise(abort, (select missing from unit_support where unit_id = new.unit_id))
   where new.to_state = 'active' and (select missing from unit_support where unit_id = new.unit_id) is not null;
-  -- A reconsider condition is the owner's: each needs a quote of the owner, written when the unit is saved. A quote retracted later, or
-  -- forgotten (forget's recheck is exempt, since the row is gone), leaves the unit as it was, and readers show the condition as unsupported
+  -- A reconsider condition is the owner's: each needs a quote of the owner before the unit first becomes active. A quote retracted or
+  -- forgotten later leaves the unit as it was (it may come back to active), and readers show the condition as unsupported
   select raise(abort, 'a reconsider condition needs a quote of the owner')
-  where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
+  where new.to_state = 'active' and new.forget_id is null
+    and not exists (select 1 from unit_state where unit_id = new.unit_id and to_state = 'active') and exists (select 1 from unit_option o where o.unit_id = new.unit_id
     and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
       where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
   select raise(abort, 'superseded needs a replacement in effect into it')
