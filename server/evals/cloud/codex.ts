@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
-import { claimRunDir, codexModelOf, isolatedCodexHome } from "./codex-home.ts";
+import { checkoutGit, claimRunDir, codexModelOf, isolatedCodexHome, pinCheckout } from "./codex-home.ts";
 import { readPlan, readTasks } from "./firing.ts";
 
 const HERE = import.meta.dirname;
@@ -76,6 +76,8 @@ try {
   // Hooks run without a trust prompt, so they run from a copy outside the checkout the agent can write (it could rewrite .tools)
   const tools = path.join(dir, "tools");
   fs.cpSync(path.join(work, ".tools"), tools, { recursive: true });
+  // The patch is read through a git directory Codex cannot write, so the checkout's own .git config never runs here
+  const checkout = pinCheckout(work, path.join(dir, "git"));
   const mcp =
     condition === "search" || condition === "inject"
       ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
@@ -146,12 +148,8 @@ try {
   result.status = r.status;
   fs.writeFileSync(path.join(dir, "events.jsonl"), r.stdout ?? "");
   fs.writeFileSync(path.join(dir, "stderr.log"), r.stderr ?? "");
-  execFileSync("git", ["-C", work, "add", "-A"]);
-  const patch = execFileSync(
-    "git",
-    ["-C", work, "diff", "--cached", "HEAD", "--", ".", ":!.tools", ":!.eval"],
-    { encoding: "utf8" },
-  );
+  checkoutGit(checkout, ["add", "-A"]);
+  const patch = checkoutGit(checkout, ["diff", "--cached", "HEAD", "--", ".", ":!.tools", ":!.eval"]);
   fs.writeFileSync(path.join(dir, "patch.diff"), patch);
   const calls = (r.stdout ?? "").split("\n").flatMap((l) => {
     try {

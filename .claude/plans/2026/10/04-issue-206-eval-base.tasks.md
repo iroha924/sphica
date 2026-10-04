@@ -267,6 +267,16 @@ base: main
   - コミット: `fix(evals): skip hidden tests in the collect test that runs on Linux CI (T25)`
   - 結果: red は上のとおり 1 件落ちた。直した後 `cd server && NODE_OPTIONS="--import <linux にするファイル>" node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass 84, fail 0。macOS のままでも pass 84, fail 0
 
+- [x] T26: GitHub の Codex の security review（#256、P2）を直す。runner が agent の checkout で流す git（Claude のツールの結果ごとの `status`、終わりの `add`・`diff`、Codex の終わりの `add`・`diff`）が checkout の `.git/config` を読み、agent が書いた `core.fsmonitor` や filter を sandbox の外で、持ち主の権限で実行する
+  - 種別: 修正
+  - 計画: S3, S7
+  - 依存: T25（直す対象のブランチの先頭）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/codex.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd <3c37cd84 の worktree に、agent が core.fsmonitor と filter を設定してから treeState と patchSince を呼ぶテストを置いて>/server && node --test test/zz-red.test.ts` → 落ちる（設定したスクリプトが走った）
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass。本物の Claude と Codex の run が 1 本ずつ、patch と結果を残して終わる
+  - コミット: `fix(evals): read agent checkouts through a pinned git directory (T26)`
+  - 結果: red は上のとおり落ちた。agent が起動する前に checkout の git ディレクトリを run ディレクトリへ `--no-local` で複製し、以後の runner の git は `--git-dir` と `--work-tree` でそれを通し、system と global の設定も切る。直した後 `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-build.test.ts` → pass 94, fail 0。`node evals/cloud/claude.ts`・`node evals/cloud/codex.ts --build <build-base> --repo <inject の slot> --task stale-thumb` → 両方 exit 0、reason null、patch を残し（10 行・12 行）、run ディレクトリに複製の git がある。Claude の watcher は 4 件の印のうち 1 件で変化を記録
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
@@ -301,3 +311,4 @@ base: main
 - 2026-10-04 / T21 / 再レビュー 2 件（測定）を採った / T22。指摘が作り込みのパスへ移ってきたので、レビューの往復はここで打ち切る
 - 2026-10-04 / T23 / GitHub の Codex レビュー（#256）6 件（P1 5 件、うち 1 件はセキュリティ: 作業ツリーの観測が agent の作った symlink をたどり、run の外のファイルを読めた）を全部採った。Codex のモデルは run の CODEX_HOME の設定から記録し、比較は同じ系列のモデルの組が両側で違えば拒否する。ローカルの run の計画は collect の `--local-plan` で渡す
 - 2026-10-04 / T24 / GitHub の Codex の再レビュー（#256）9 件（P1 5 件、うち hidden test の symlink はセキュリティで以前からあるコード）を全部採った。`../..` の判定はエージェントの入力（Claude のツール入力、Codex のコマンド）だけに当て、読んだファイルの中身には当てない（import 文によく出るため）。checkout の深い場所から `../../` で checkout の中を指す run も外す側に倒れる
+- 2026-10-04 / T26 / 基準の index が複製の側で動かないので、agent の commit は tree の変化として数えない（ファイルが変わらないため）。watcher のテストの期待を changed: false に直した。Codex の patch は以前、agent が commit すると HEAD が動いてその分を落としていたが、複製の HEAD は動かないのでこれも直る

@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openReader } from "../../src/db.ts";
-import { claimRunDir } from "./codex-home.ts";
+import { type Checkout, checkoutGit, claimRunDir, pinCheckout } from "./codex-home.ts";
 
 type Hook = { type: "command"; command: string; args: string[]; timeout: number };
 type HookEntry = { matcher?: string; hooks: Hook[] };
@@ -146,22 +146,24 @@ export const runEnv = (parent: NodeJS.ProcessEnv): Record<string, string> =>
   Object.fromEntries(RUN_ENV.flatMap((k) => (parent[k] === undefined ? [] : [[k, parent[k] as string]])));
 
 /** Tracked and untracked changes since the starting commit, without the slot's scaffolding or installed dependencies. */
-export function patchSince(work: string, start: string): string {
+export function patchSince(c: Checkout, start: string): string {
   const leave = [":!.tools", ":!.eval", ":(exclude,glob)**/node_modules/**"];
-  execFileSync("git", ["-C", work, "add", "-A", "--", ".", ...leave]);
+  checkoutGit(c, ["add", "-A", "--", ".", ...leave]);
   // Files the agent wrote under ignored paths (a plan, docs) are part of its answer too
-  const ignored = execFileSync(
-    "git",
-    ["-C", work, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ".", ...leave],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-  )
+  const ignored = checkoutGit(c, [
+    "ls-files",
+    "-z",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "--",
+    ".",
+    ...leave,
+  ])
     .split("\0")
     .filter(Boolean);
-  if (ignored.length) execFileSync("git", ["-C", work, "add", "-f", "--", ...ignored]);
-  return execFileSync("git", ["-C", work, "diff", "--cached", start, "--", ".", ...leave], {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  if (ignored.length) checkoutGit(c, ["add", "-f", "--", ...ignored]);
+  return checkoutGit(c, ["diff", "--cached", start, "--", ".", ...leave]);
 }
 
 /** The last result event of a stream-json run: the final answer, or nothing when the run was cut off. */
@@ -285,7 +287,8 @@ export async function runClaude(o: {
     const env = runEnv(process.env);
     // After each tool result the work tree is looked at, so the first change can be tied to the call that made it; the start state is
     // taken before the agent starts
-    const watch = treeWatcher(work, path.join(dir, "edits.jsonl"));
+    const checkout = pinCheckout(work, path.join(dir, "git"));
+    const watch = treeWatcher(checkout, path.join(dir, "edits.jsonl"));
     const child = spawn("claude", runArgs({ settings, mcp }, o.model), {
       cwd: work,
       env: { ...env, EVAL_RUN_DIR: dir, EVAL_SPHICA_DB: db },
@@ -319,7 +322,7 @@ export async function runClaude(o: {
     result.status = status;
     const final = finalAnswer(fs.readFileSync(path.join(dir, "events.jsonl"), "utf8"));
     fs.writeFileSync(path.join(dir, "answer.md"), final?.result ?? "");
-    fs.writeFileSync(path.join(dir, "patch.diff"), patchSince(work, start));
+    fs.writeFileSync(path.join(dir, "patch.diff"), patchSince(checkout, start));
     // The gold hook's receipts hold what it returned to the session
     const receipts = fs.existsSync(path.join(dir, "eval-receipts.jsonl"))
       ? fs.readFileSync(path.join(dir, "eval-receipts.jsonl"), "utf8")
@@ -382,34 +385,26 @@ export async function runClaude(o: {
  * The work tree's state: each changed or untracked path (installed dependencies aside) with a hash of its content, so two states differ
  * exactly when a file changed between them.
  */
-export function treeState(work: string): string {
+export function treeState(c: Checkout): string {
   // Ignored files count too (an answer written under an ignored docs/ is part of the patch), but not the slot's scaffolding or installed
-  // dependencies, the same set patchSince leaves out
-  const status = execFileSync(
-    "git",
-    [
-      "-C",
-      work,
-      "status",
-      "--porcelain=v1",
-      "-z",
-      "-uall",
-      "--ignored=traditional",
-      "--",
-      ".",
-      ":!.tools",
-      ":!.eval",
-      ":(exclude,glob)**/node_modules/**",
-    ],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-  );
+  // dependencies, the same set patchSince leaves out. The pinned index stays at the start, so a change the agent committed still shows
+  const status = checkoutGit(c, [
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "-uall",
+    "--ignored=traditional",
+    "--",
+    ".",
+    ":!.tools",
+    ":!.eval",
+    ":(exclude,glob)**/node_modules/**",
+  ]);
   const entries = status.split("\0").filter(Boolean).sort();
   const hash = crypto.createHash("sha256");
-  // A change the agent committed leaves the status clean; the commit it made still moves HEAD
-  hash.update(execFileSync("git", ["-C", work, "rev-parse", "HEAD"], { encoding: "utf8" }));
   for (const e of entries) {
     hash.update(e);
-    const file = path.join(work, e.slice(3));
+    const file = path.join(c.work, e.slice(3));
     try {
       // Never follow a link: the agent may point one at a file outside the checkout, which this unsandboxed process could read
       const st = fs.lstatSync(file);
@@ -436,11 +431,11 @@ type TreeMark = {
  * the agent can act.
  */
 export function treeWatcher(
-  work: string,
+  checkout: Checkout,
   file: string,
-  state: (w: string) => string = treeState,
+  state: (c: Checkout) => string = treeState,
 ): (line: string, late?: boolean) => void {
-  let last = state(work);
+  let last = state(checkout);
   const open = new Set<string>();
   return (line: string, late = false) => {
     let e: { type?: string; message?: { content?: unknown } };
@@ -457,7 +452,7 @@ export function treeWatcher(
       if (e.type === "assistant" && c.type === "tool_use" && typeof c.id === "string") open.add(c.id);
       if (e.type === "user" && c.type === "tool_result" && typeof c.tool_use_id === "string") {
         open.delete(c.tool_use_id);
-        const now = state(work);
+        const now = state(checkout);
         const mark: TreeMark = { after: c.tool_use_id, changed: now !== last, in_flight: [...open], late };
         last = now;
         fs.appendFileSync(file, `${JSON.stringify(mark)}\n`);
