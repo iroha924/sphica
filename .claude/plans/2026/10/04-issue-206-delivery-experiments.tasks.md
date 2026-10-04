@@ -171,6 +171,15 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - 完了条件: `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass。保存した採点で各 G・最終の組み合わせ・A/A の判定が変わらない
   - コミット: `fix(evals): hold each task's floor and count one-sided cells in the bars (T16)`
   - 結果: red は上のとおり。直した後 `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass 96, fail 0。保存した採点で G1a 未達・G3 未達・G4 通過（単独）・G6 判定不能、最終の組み合わせは G4 と回帰が未達、A/A は G1a・G3・G4・回帰が未達で、前と同じ。既存のテスト 2 本は古い挙動を期待していたので直した（G4 の前提のテストは new 側を毒の無い run にし、G1a のテストは 2 タスクに 5 run ずつ置いた）
+- [x] T17: GitHub の Codex のレビュー（#271）の 3 件を直す（コメントが issue 番号を指す、G6 の読み込みの前提を過半数で認める、回帰の re-proposal の率が分母と unknown を出さない）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T16（直す対象のブランチの先頭。#271 の 1b21fcd3）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd <1b21fcd3 の worktree に新しいテストを置いて>/server && node --test test/eval-grade.test.ts` → G6 と re-proposal の 2 件が落ちる
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass。保存した採点で判定が変わらない
+  - コミット: `fix(evals): require every G6 run to show the loading change and show re-proposal samples (T17)`
+  - 結果: red は上のとおり 2 件落ちた。直した後 `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts` → pass 98, fail 0。保存した採点で G6 判定不能、最終の組み合わせと A/A の回帰は未達で前と同じ（re-proposal に「known 5 件中、unknown 0」が付いた）
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）

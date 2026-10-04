@@ -2354,3 +2354,57 @@ test("bars hold each task's floor, count cells only one side ran, and let poison
     (["claude", "codex"] as const).flatMap((m) => many(4, () => backup(m, poisoned)));
   assert.match(verdict(g4(false), g4(true), "g4"), /^G4 .*: missed/m);
 });
+
+test("G6 needs every run to show the loading change, and a re-proposal rise shows its known and unknown runs", () => {
+  const r = (
+    task: string,
+    model: "claude" | "codex",
+    g: Partial<Grade>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    ...row,
+    task,
+    model,
+    condition: "inject",
+    run: `${task}-${model}-${Math.random()}`,
+    excluded: null as string | null,
+    patch: "",
+    patch_truncated: false,
+    grade: { ...grade, ...g },
+    ...extra,
+  });
+  const build = (rows: ReturnType<typeof r>[]) => ({ build: "x", variant: "original", bundle: "c {}", rows });
+  const search = (yes: boolean, loading: string) =>
+    r(
+      "pilot-dates",
+      "claude",
+      {},
+      { condition: "search", search_before_edit: yes ? "yes" : "no", search_loading: loading },
+    );
+  // 0.20 → 0.80 with old 3 deferred / 2 loaded and new 2 deferred / 3 loaded: the loading change is not shown
+  const oldS = [
+    search(true, "deferred"),
+    search(false, "deferred"),
+    search(false, "deferred"),
+    search(false, "loaded"),
+    search(false, "loaded"),
+  ];
+  const newS = [
+    search(true, "deferred"),
+    search(true, "deferred"),
+    search(true, "loaded"),
+    search(true, "loaded"),
+    search(false, "loaded"),
+  ];
+  assert.match(bars(build(oldS), build(newS), ["g6"]).join("\n"), /^G6 .*: inconclusive/m);
+  const cell = (proposes: "yes" | "no" | "unknown") =>
+    r("pilot-dates", "codex", { proposes_rejected: proposes });
+  assert.match(
+    bars(
+      build([cell("no"), cell("no"), cell("unknown"), cell("unknown"), cell("unknown")]),
+      build([cell("yes"), cell("no"), cell("unknown"), cell("unknown"), cell("unknown")]),
+      ["regression"],
+    ).join("\n"),
+    /re-proposals 0\.00 \(0 of 2 known, 3 unknown\) → 0\.50 \(1 of 2 known, 3 unknown\)/,
+  );
+});

@@ -383,7 +383,8 @@ function rateBar(
   return { verdict, detail: parts.join("; ") };
 }
 
-/** The bars of #206's experiments and #211's alwaysLoad, and the regression rule every shipped change must meet. */
+/** The bars of the delivery experiments (how records are shown, ordered, and trusted) and of loading search up front, and the
+ * regression rule every shipped change must meet. */
 export function bars(
   old: Build,
   next: Build,
@@ -484,12 +485,13 @@ export function bars(
       4,
       told,
     );
-    // The change is alwaysLoad: unless old runs had search deferred and new runs had it loaded, a move in the rate is not its doing
+    // The change is loading search up front: unless every old run had it deferred and every new run had it loaded, a move in the rate is
+    // not shown to be its doing
     const changed =
       was.length > 0 &&
       now.length > 0 &&
-      count(was, "deferred") * 2 > was.length &&
-      count(now, "loaded") * 2 > now.length;
+      count(was, "deferred") === was.length &&
+      count(now, "loaded") === now.length;
     say("G6 searched before the first edit in the search slot, up by 0.3", {
       verdict: rate.verdict === "passed" && !changed ? "inconclusive" : rate.verdict,
       detail: `${rate.detail}; search loading: ${first} ${loads(was)}, ${second} ${loads(now)}`,
@@ -531,8 +533,11 @@ export function bars(
         continue;
       }
       const reproposed = (rows: Graded[]) => shareOf(told(rows), (r) => r.grade?.proposes_rejected === "yes");
+      // The rate shows its sample: how many runs were known and how many unknown, so two observations do not read as five
+      const sample = (rows: Graded[]) =>
+        `${fmt(reproposed(rows))} (${told(rows).filter((r) => r.grade?.proposes_rejected === "yes").length} of ${told(rows).length} known, ${rows.filter((r) => r.grade?.proposes_rejected === "unknown").length} unknown)`;
       if (applies && reproposed(n) > reproposed(o))
-        problems.push(`${task} ${model}: re-proposals ${fmt(reproposed(o))} → ${fmt(reproposed(n))}`);
+        problems.push(`${task} ${model}: re-proposals ${sample(o)} → ${sample(n)}`);
     }
     // A proven regression in any cell misses, whatever else is short; an empty comparison proves nothing
     const verdict = problems.length ? "missed" : short || !cells.length ? "inconclusive" : "passed";
