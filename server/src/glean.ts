@@ -57,8 +57,9 @@ const Op = z.discriminatedUnion("op", [
       source: SOURCE_REF.optional(),
       file: File.optional(),
       quote,
-      // A reconsider quote belongs to an option's condition, which only trace and harvest write
-      role: z.enum(EVIDENCE_ROLES).exclude(["reconsiders"]),
+      // A reconsider quote belongs to an option's condition, which only trace and harvest write; decides pairs with the AI's own
+      // adoption, which only a trace adds
+      role: z.enum(EVIDENCE_ROLES).exclude(["reconsiders", "decides"]),
       reported_speaker: z.string().trim().min(1).max(100).optional(),
     })
     .strict(),

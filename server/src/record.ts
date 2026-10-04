@@ -437,11 +437,23 @@ export async function checkRecord(
     const key = keys[i] ?? "";
     const quarantine: string[] = [];
     const cites = new Set<number>();
-    const spans = (list: z.infer<typeof Evidence>[]): EvidenceSpan[] =>
+    const spans = (list: z.infer<typeof Evidence>[], option = false): EvidenceSpan[] =>
       list.flatMap((e) => {
         const s = sources.get(Number(e.source.slice(1)));
         if (!s) return [];
         cites.add(s.id);
+        // The schema refuses these at save; refused here too, so check never says a save would pass
+        if (
+          e.role === "decides" &&
+          (option ||
+            !(s.kind === "session_message" && s.author_kind === "assistant") ||
+            /:ask:.*:q:/.test(s.external_id))
+        ) {
+          errors.push(
+            `${key}: decides quotes the AI choosing in its own reply, never a question it asked, someone else's words, or an option`,
+          );
+          return [];
+        }
         const span = locate(s.text, e.quote);
         if (!span) {
           quarantine.push(`quote not found in ${e.source}: "${head(e.quote, 80)}"`);
@@ -491,6 +503,7 @@ export async function checkRecord(
           role:
             e.role ?? (o.outcome === "rejected" ? "rejects" : o.outcome === "chosen" ? "states" : "explains"),
         })),
+        true,
       ),
       reconsider: reconsider(o),
     }));
@@ -802,6 +815,8 @@ async function agentRefusal(
 ): Promise<string | null> {
   if (!s) return "its source is not a reply of this project";
   if (/:ask:.*:q:/.test(s.external_id)) return "a question the AI asked is not its decision";
+  if (!s.turn_id)
+    return "the reply has no turn, so it cannot be told apart from a turn that ran a record tool";
   if (
     !evidence.some(
       (e) => e.role === "decides" && e.source === x.source && e.start === x.start && e.end === x.end,

@@ -227,6 +227,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): settle same-save withdrawals and races; skip auto tracing for an unknown caller (T26)`
   - 結果: red を実測（4 件とも上の理由で fail。自動 pending はコミット済みの extract.ts に戻して確認）。直した後 4 件 pass、`node --test test/judge.test.ts` → 17 pass。`bun run verify` → 終了コード 0（SQL 到達 199/199、実 DB 10/10、受け入れ 105 pass）。見直し条件の引用の規則は schema の trigger も「一度も active になっていない記録の初めての active 化」にそろえた
 
+- [x] T28: T05・T06 のレビュー指摘を直す（turn の無い返事は AI の採用に使えない。置き場所の違う `decides` は check でも拒む）
+  - 種別: 修正
+  - 計画: S3, S7
+  - 依存: T06（直す対象の AI の採用）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="reply with no turn|decides evidence on a question|glean takes no decides" test/record.test.ts` → 直す前は、同じセッションに record ツールのターンがあっても turn の無い返事が AI の採用で active になり、質問への `decides` を check が ok と返し（save は落ちる）、glean が `decides` を受ける
+  - 完了条件: `cd server && node --test --test-name-pattern="agent adoption" test/record.test.ts` → pass
+  - コミット: `fix(record): keep turnless replies from adopting and refuse misplaced decides at check (T28)`
+  - 結果: red を 3 件とも実測した（active になる、check が ok: true、glean の検査が role を拒まない）。`agent_ineligible_source` に turn の無い返事を入れ、`agentRefusal` でも理由を出す。check は `decides` を AI の返事（質問でない）の本体の evidence にだけ受け、ほかはエラーにする。glean の evidence の役から `decides` を外した。`node --test --test-name-pattern="agent adoption" test/record.test.ts` → 7 pass。`bun run verify` → 終了コード 0（SQL 到達 205/205、受け入れ 113 pass）
+
 - [ ] T10: 新しい持ち主のセッションの開始時に、自動の trace の通知をセッションごとに 1 回出す
   - 種別: 変更
   - 計画: S8
@@ -304,3 +314,5 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T27 / T23・T26・T24 の Codex のレビュー（F1 P2: 取り下げと復帰が同じ時刻というだけで、一緒に取り下げた候補まで過去に効いていた後継として戻す）を受け、修正タスク T27 を足した。指摘はこの 1 件だけだった
 - 2026-10-04 / T07 / 変更欄（前: deliver.ts・read.ts・search.ts・extract.ts・review.ts と deliver の 2 つのテスト → 後: review.ts は配信のレビューの経路が deliver.ts にあるので変えず、search の表示の mcp.ts、生きている記録の trace.ts、search.test.ts を足し、deliver-codex.test.ts は変えずに済んだ）
 - 2026-10-04 / T25 / 変更欄に `server/test/acceptance-cases.test.ts` を足した（層ごとの件数を固定しているので、新しい層 reconcile の 8 件を数えに足す）。reconcile の最後の再判定（`records did not settle`）は、judge が読む事実を保存の書き込みが変えないので正しい書き込みからは届かず、ingest の authorizer が事実を書き換えるトリガーを差し込ませないので、rollback は「保存の途中で schema が書き込みを拒むと、それまでの書き込みがすべて戻る」で確かめた。保存をまたぐ順番のテストは、置き換え済みの記録への提案を check が拒む（順番で受け付けが変わるのは check の規則で、reconcile ではない）ので、どの順番でも受け付けられる保存だけで組んだ
+
+- 2026-10-04 / T28 / T05・T06 の Codex のセキュリティレビュー（F1 P2: turn の無い返事が record ツールのターンの除外をすり抜ける。F2 P2: 質問への decides を check が通し save が保存全体を戻す）を受け、修正タスク T28 を足した。同じずれが glean の evidence にもあったので同じタスクで直した

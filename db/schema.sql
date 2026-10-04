@@ -682,7 +682,9 @@ end;
 create view agent_ineligible_source as
 select s.id as source_id from source s join session se on se.id = s.session_id
 where s.kind = 'session_message' and s.author_kind = 'assistant' and (
-  exists (select 1 from record_call c where c.host = 'codex' and se.host = 'codex' and c.caller_session = se.external_id
+  -- A reply with no turn cannot be placed apart from a turn that ran a record tool
+  s.turn_id is null
+  or exists (select 1 from record_call c where c.host = 'codex' and se.host = 'codex' and c.caller_session = se.external_id
     and (c.caller_turn is null or c.caller_turn = s.turn_id))
   -- The hook's row alone counts: the MCP SDK refuses a malformed call before the server can log it
   or exists (select 1 from tool_call_observation o where o.host = 'claude-code' and se.host = 'claude-code'

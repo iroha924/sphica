@@ -10,6 +10,7 @@ import { test } from "node:test";
 import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
+import { checkGlean } from "../src/glean.ts";
 import { readUnit } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import {
@@ -2144,7 +2145,7 @@ test("successor place: a successor whose reconsider quote was forgotten keeps re
 // A trace of session s1 begun and saved by an interactive session other than s1, so its replies may adopt for the AI
 const agentBench = async (db: TempDb, p: number, mode = "interactive", first = true) => {
   if (first) message(db, p, { id: "o1", text: "Tidy the export." });
-  const reply = (id: string, turn: string, text: string) =>
+  const reply = (id: string, turn: string | null, text: string) =>
     insert(db, "source", {
       project_id: p,
       kind: "session_message",
@@ -2173,7 +2174,8 @@ const agentBench = async (db: TempDb, p: number, mode = "interactive", first = t
   const run = await beginTrace(db.ingest, p, "s1", await caller());
   const save = async (record: unknown) =>
     saveText(db.ingest, run, p, null, record, undefined, await caller());
-  return { reply, save };
+  const check = async (record: unknown) => checkText(db.ingest, run, p, null, record, await caller());
+  return { reply, save, check };
 };
 const aiDecision = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
   key,
@@ -2289,6 +2291,98 @@ test("agent adoption: a headless run never adopts for the AI", async () => {
       out,
       /only the owner or a maintainer can adopt, and an AI's own decision only in a trace an interactive session runs/,
     );
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a reply with no turn never adopts, since a turn that ran a record tool cannot be told apart", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    insert(db, "tool_call_observation", {
+      host: "claude-code",
+      session_external: "ext-s1",
+      turn_id: "t1",
+      tool_use_id: "toolu_t1",
+      tool_name: "mcp__plugin_sphica_record__record_save",
+      owner_turn: 1,
+      observed_at: now,
+    });
+    const r = reply("x:assistant", null, "I keep the export as one function.");
+    const out = await save({ units: [aiDecision("no-turn", r, "I keep the export as one function.")] });
+    assert.equal(lifeOf(db, "no-turn"), "candidate");
+    assert.match(out, /cannot be told apart from a turn that ran a record tool/);
+    assert.equal(db.owner.prepare("select count(*) as n from unit_adoption").get()?.n, 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: decides evidence on a question, the owner's words, or an option is refused by check as save refuses it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save, check } = await agentBench(db, p);
+    const asked = reply("t2:ask:toolu_1:q:abc", "t2", "Shall I keep one function?");
+    const owner = Number(db.owner.prepare("select id from source where author_kind = 'owner'").get()?.id);
+    const said = reply("t3:assistant", "t3", "I keep the export as one function.");
+    const cases = [
+      aiDecision("asked", asked, "Shall I keep one function?"),
+      aiDecision("owner", owner, "Tidy the export."),
+      {
+        ...aiDecision("option", said, "I keep the export as one function."),
+        options: [
+          {
+            text: "one function",
+            outcome: "chosen",
+            evidence: [{ source: `s${said}`, quote: "one function", role: "decides" }],
+          },
+        ],
+      },
+    ];
+    for (const unit of cases) {
+      const record = { units: [unit, aiDecision("fine", said, "I keep the export as one function.")] };
+      const checked = await check(record);
+      assert.equal(checked.ok, false, unit.key);
+      assert.match(checked.text, /decides quotes the AI choosing in its own reply/, unit.key);
+    }
+    await assert.rejects(
+      save({ units: [cases[0], aiDecision("fine", said, "I keep the export as one function.")] }),
+      /decides quotes the AI choosing in its own reply/,
+    );
+    assert.equal(db.owner.prepare("select count(*) as n from unit").get()?.n, 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: glean takes no decides evidence, since only a trace pairs it with the AI's own adoption", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const gleaned: Target = {
+      projectId: p,
+      origin: "glean",
+      prefix: "glean:",
+      sessionId: "g1",
+      root: null,
+      sources: null,
+    };
+    const checked = await checkGlean(db.ingest, gleaned, {
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "trace:ext-s1/x",
+          revision: 1,
+          source: "s1",
+          quote: "x",
+          role: "decides",
+        },
+      ],
+    });
+    assert.match(checked.errors.join("\n"), /ops\.0\.role/);
   } finally {
     await db.done();
   }
