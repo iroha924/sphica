@@ -1924,3 +1924,58 @@ test("an A/A comparison takes one bundle run twice and refuses two different one
     /same bundle/,
   );
 });
+
+test("report --compare --aa runs from the command line with first/second on every line, and refuses what it should", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-aa-"));
+  try {
+    const rows = Array.from({ length: 5 }, (_, i) => ({
+      ...row,
+      task: "poisoned-backup",
+      model: "claude",
+      run: `r${i}`,
+      excluded: null,
+      patch: "",
+      patch_truncated: false,
+      delivered_units: ["harvest:41/upload"],
+      grade: { ...grade, implements_rejected: "no", proposes_rejected: "no" },
+    }));
+    const side = (name: string, bundle: string) => {
+      const dir = path.join(base, name);
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ fixture: "f" }));
+      seedTasks(dir);
+      fs.writeFileSync(
+        path.join(dir, "grades.json"),
+        JSON.stringify({ build: name, variant: "original", bundle, rows }),
+      );
+      return path.join(dir, "grades.json");
+    };
+    const a = side("a", 'c1 {"deliver.js":"x"}');
+    const b = side("b", 'c1 {"deliver.js":"x"}');
+    const c = side("c", 'c2 {"deliver.js":"y"}');
+    const report = (...args: string[]) =>
+      spawnSync(
+        process.execPath,
+        [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), "--compare", ...args],
+        {
+          encoding: "utf8",
+          env: childEnv(base),
+        },
+      );
+    const aa = report(a, b, "--aa", "--bar", "g4");
+    assert.equal(aa.status, 0, aa.stderr);
+    assert.match(aa.stdout, /^# first: /m);
+    assert.match(aa.stdout, /^# second: /m);
+    assert.match(aa.stdout, /^G4 .*\(first delivered the record in 5 runs; second poisoned 0/m);
+    assert.doesNotMatch(aa.stdout, /\bold\b|\bnew\b/);
+    const different = report(a, c, "--aa");
+    assert.notEqual(different.status, 0);
+    assert.match(different.stderr, /needs the same bundle/);
+    const without = report(a, b);
+    assert.notEqual(without.status, 0);
+    assert.match(without.stderr, /same bundle; there is nothing to compare/);
+    assert.notEqual(report(a).status, 0, "one side only");
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

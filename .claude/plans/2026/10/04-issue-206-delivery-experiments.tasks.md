@@ -133,6 +133,16 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
   - コミット: `feat(evals): compare one build run twice to measure run-to-run variation (T12)`
   - 結果: `node --test test/eval-grade.test.ts` → pass 49, fail 0。保存した採点への `--compare <base> <final> --bar all` の判定は変わらない
 
+- [x] T13: T12 の Codex レビューの 2 件を直す（A/A を CLI で確かめるテスト、バーの詳細の側の名前）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T12（直す対象）
+  - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd <0cd8c25b の worktree に新しいテストを置いて>/server && node --test test/eval-grade.test.ts` → A/A の G4 の行が `old delivered … new poisoned` で、first / second にならず落ちる
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → `report.ts --compare a b --aa --bar g4` が first / second で出て、違う bundle と `--aa` なしの同じ bundle を拒否するテストが pass
+  - コミット: `fix(evals): name the A/A sides on every line and test the option from the command line (T13)`
+  - 結果: red は上のとおり 1 件落ちた。直した後 `node --test test/eval-grade.test.ts` → pass 50, fail 0
+
 ## 記録
 - 2026-10-04 / T01 / 読み取りは配信以外（read の表示など）でも使える形なので、deliver.ts ではなく新しい `provenance.ts` に置いた。引用のバイトの切り出し `cut` を read.ts から text.ts へ移した（read.ts を配信フックから読むと git まわりまで bundle に入るため）。テストは deliver.test.ts ではなく `provenance.test.ts`（変更欄 前: deliver.ts と deliver.test.ts、後: provenance.ts・text.ts・read.ts・export.ts・provenance.test.ts）
 - 2026-10-04 / T01 / pre-commit の bundle の検査が、パッケージに入る変更のコミットにバージョンの揃えを求めた / `release:plan -- --base v0.6.28`（plugin）を流してから、npm と 3 つの manifest を 0.6.29 に上げて T01 に入れた。T09 で通る G が無ければ戻す（変更欄にバージョンの 4 ファイルを足した）
@@ -146,3 +156,4 @@ baseline と各 variant をローカルで回して各 G を判定し、通っ�
 - 2026-10-04 / T09 / 最終の組み合わせで下がったセルの多くは、変更が届かないセルだった（conflict-cover は G3 を入れておらず衝突の 2 件はどちらの側でも配信されない、stale-thumb は記録が 2 件で順番が効かず 2 件ともオーナーの記録なので G4 でも同じ）。3〜5 run の差は run ごとのばらつきの方が大きく、0.3 のバーを見分けられていない。次に測るなら、同じビルドを 2 回回してばらつきを先に測り、バーと run 数をそれに合わせて決める
 - 2026-10-04 / T09 / バージョンは 0.6.29 のまま残した。pre-commit の検査（scripts/check-mcp-version.mjs）は、公開していない版でも下げるのを止める。パッケージの中身は v0.6.28 と同じで release:plan は none。次に出すときは 0.6.29 以上にする（変更欄 前: バージョンの 4 ファイル、後: 外して、戻したソースとテストにした）
 - 2026-10-04 / T12 / 持ち主の指示で、run ごとのばらつきを測る: baseline と同じビルド（build-base の写し、同じ bundle と fixture、canary を通した）を同じ計画で 92 run 回し、採点して、1 回目と A/A で比べる
+- 2026-10-04 / T12 / Codex レビュー 2 件を採った / T13

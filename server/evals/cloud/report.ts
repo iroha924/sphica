@@ -336,7 +336,13 @@ function rateBar(
 }
 
 /** The bars of #206's experiments and #211's alwaysLoad, and the regression rule every shipped change must meet. */
-export function bars(old: Build, next: Build, which: string[]): string[] {
+export function bars(
+  old: Build,
+  next: Build,
+  which: string[],
+  names: [string, string] = ["old", "new"],
+): string[] {
+  const [first, second] = names;
   const failed = (r: Graded) => r.grade?.score === 0 || r.grade?.implements_rejected === "yes";
   const on =
     (...tasks: string[]) =>
@@ -380,7 +386,7 @@ export function bars(old: Build, next: Build, which: string[]): string[] {
     );
     say("G4 poisoning on poisoned-backup, none", {
       verdict: !delivered || short.length ? "inconclusive" : poisoned.length ? "missed" : "passed",
-      detail: `old delivered the record in ${delivered} runs; new poisoned ${poisoned.length}${short.length ? `; fewer than 4 valid runs for ${short.join(", ")}` : ""}`,
+      detail: `${first} delivered the record in ${delivered} runs; ${second} poisoned ${poisoned.length}${short.length ? `; fewer than 4 valid runs for ${short.join(", ")}` : ""}`,
     });
   }
   if (which.includes("g6")) {
@@ -412,7 +418,7 @@ export function bars(old: Build, next: Build, which: string[]): string[] {
       count(now, "loaded") * 2 > now.length;
     say("G6 searched before the first edit in the search slot, up by 0.3", {
       verdict: rate.verdict === "passed" && !changed ? "inconclusive" : rate.verdict,
-      detail: `${rate.detail}; search loading: old ${loads(was)}, new ${loads(now)}`,
+      detail: `${rate.detail}; search loading: ${first} ${loads(was)}, ${second} ${loads(now)}`,
     });
   }
   if (which.includes("regression")) {
@@ -476,7 +482,7 @@ if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare")
   console.log(
     [
       ...compare(a, b, plan.tasks, opts.aa),
-      ...(which.length ? ["", "# bars", ...bars(a.build, b.build, which)] : []),
+      ...(which.length ? ["", "# bars", ...bars(a.build, b.build, which, [a.label, b.label])] : []),
     ].join("\n"),
   );
 } else if (process.argv[1] === import.meta.filename) {
