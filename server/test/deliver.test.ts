@@ -2326,3 +2326,28 @@ test("decided by an AI: the per-record mark takes no room, so an AI's decision f
   for (let size = 200; size <= 236; size += 4)
     assert.equal(await shownFor(false, size), await shownFor(true, size), `text of ${size}`);
 });
+
+test("auto trace notice: SPHICA_AUTO_TRACE=off turns only the automatic trace off, back to the owner's daily notice", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const saved = process.env.SPHICA_AUTO_TRACE;
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "untraced", session: "s1", sent: new Date().toISOString() });
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    process.env.SPHICA_AUTO_TRACE = "off";
+    const out = await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.doesNotMatch(out, /earlier session/);
+    assert.match(out, /1 session waiting to be traced: run \/sphica:trace pending\./);
+  } finally {
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    if (saved === undefined) delete process.env.SPHICA_AUTO_TRACE;
+    else process.env.SPHICA_AUTO_TRACE = saved;
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

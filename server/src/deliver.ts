@@ -577,6 +577,9 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
+/** SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
+const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
+
 /** Sphica's own words asking the agent to trace on its own, never taken from a record */
 export const AUTO_TRACE = (n: number) =>
   `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, run the trace Skill on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
@@ -974,7 +977,8 @@ export async function deliver(
                       host === "claude-code" &&
                       name === "SessionStart" &&
                       input.source === "startup" &&
-                      process.env.CLAUDE_CODE_ENTRYPOINT === "cli"
+                      process.env.CLAUDE_CODE_ENTRYPOINT === "cli" &&
+                      !AUTO_TRACE_OFF.has((process.env.SPHICA_AUTO_TRACE ?? "").trim().toLowerCase())
                         ? session
                         : null,
                     // A subagent's start is never the owner's, even when the host leaves out its agent id

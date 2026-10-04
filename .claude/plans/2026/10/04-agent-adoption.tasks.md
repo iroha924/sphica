@@ -366,6 +366,15 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(deliver): mark AI decisions in the overview and keep their marks off every budget (T36)`
   - 結果: red を 3 件とも実測した。overview の live は AI の判断に「decided by an AI」を付け、そのときだけ `AI_DECIDED` を足す。配信の行の印 `AI_MARK` は、`fit` の `free`・発言の枠・読み取りの予算（その配信の時刻に AI の判断だった記録の数だけ）のどれでも数えない。自動の record_context は、対象を含むページだけをページ数に数える。同じレビューの残り 1 件（AI の返事だけが残ったセッションが 14 日で見えなくなる）は、trace の後に持ち主の発言なしで入る返事は trace を流したターンの報告に限られ、AI の採用の対象でもないので直さない（PR の Declined findings）。`bun run verify` → 終了コード 0（受け入れ 127 pass）
 
+- [x] T37: 自動の trace だけを止める環境変数 `SPHICA_AUTO_TRACE=off` を足す
+  - 種別: 追加
+  - 計画: S8, S12
+  - 依存: T36（PR #273 の最後の修正）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `README.md`, `README.ja.md`, `.claude/plans/2026/10/04-agent-adoption.plan.md`
+  - 完了条件: `cd server && node --test --test-name-pattern="auto trace notice" test/deliver.test.ts` → pass
+  - コミット: `feat(deliver): let SPHICA_AUTO_TRACE=off turn off only the automatic trace (T37)`
+  - 結果: 持ち主が「既定オン＋停止設定」を選んだ（2026-10-05）。仕組みは researcher と Codex に同じ問いを出し、`userConfig` は 2.1.139 での読み込みと真偽値の環境変数の形が両方とも未確認、settings.json の `env` はどのバージョンでも hook に届くという点で一致したので、環境変数にした（`userConfig` は #280）。`SPHICA_AUTO_TRACE` が off・0・false・no のとき自動の通知を出さず、1 日 1 回の手動の案内に戻る。直す前は止まらないことを、追加したテストが落ちることで確かめた。README（英日）に止め方を書いた。`node --test --test-name-pattern="auto trace notice" test/deliver.test.ts` → 2 pass。`bun run verify` → 終了コード 0（受け入れ 127 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -412,3 +421,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-05 / T33 / T32 の Codex のレビュー（F1〜F5 すべて P2）を受け、F1 だけを修正タスク T33 にした。F2〜F5 は持ち主の判断で直さずに出す
 - 2026-10-05 / T34 / PR #273 の GitHub の Codex のレビュー（P2 1 件: 呼び出し元のセッションが分からない save でも AI の採用を受ける）を受け、修正タスク T34 を足した
 - 2026-10-05 / T35 / PR #273 の GitHub の Codex の 2 回目のレビュー（P2 7 件・P3 1 件）のうち、記録と DB の 4 件を修正タスク T35 にした。表示と配信の 4 件は T36
+- 2026-10-05 / T37 / 持ち主が自動の trace を「既定オン＋停止設定」にすると決め、PR #273 の範囲に T37 を足した（plan の方針 8 と変更履歴）
