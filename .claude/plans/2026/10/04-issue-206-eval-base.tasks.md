@@ -247,6 +247,16 @@ base: main
   - コミット: `fix(evals): close the GitHub Codex review findings on the local runner (T23)`
   - 結果: red は上の 4 項目（matcher と計画の突き合わせはレビュアーの確認を根拠にした）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts test/plugin.test.ts` → 全件 pass（eval-claude 31、eval-grade 48）
 
+- [x] T24: GitHub の Codex の再レビュー（#256）の 9 件を直す（hidden test が symlink 越しに home を読める・macOS 以外で黙って飛ばす、相対パスで他の run を読む、モデルをタスクごとに比べない、eval-loop の手順に local plan が無い、テストの子プロセスに SPHICA_DB を渡す、canary が無関係のエラーを拒否と数える、claude を起動できないと結果が残らない、キャッシュが無いと canary が始まらない）
+  - 種別: 修正
+  - 計画: S2, S3, S7, S10
+  - 依存: T23（直す対象のブランチの先頭）
+  - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/judge.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/canary-check.ts`, `server/evals/cloud/canary.ts`, `server/evals/cloud/claude-run.ts`, `.claude/skills/eval-loop/SKILL.md`, `server/test/eval-claude.test.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd <6953df24 の worktree に新しいテストを置いて>/server && node --test test/eval-claude.test.ts test/eval-grade.test.ts` → 新しいテストが落ちる（起動できない run、外を指すリンク、タスクごとのモデル、canary の無関係なエラー、`../../` で他の run を読むコマンド）
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts` → pass。`bun run verify:ai` → 0
+  - コミット: `fix(evals): fence hidden tests and close the second GitHub Codex review on the runner (T24)`
+  - 結果: red は上のとおり落ちた（`../../` のテストは最初、場所の名前が相対パスの一部に一致して直す前でも通っていたので、名前を直して落ちることを確かめた）。hidden test の sandbox は手で確かめた: `file-read-data` を home の下で禁止し checkout と Node だけを許すと、checkout が home の下でも一時ディレクトリでも、checkout は読め、home のファイルは symlink 経由でも絶対パスでも読めない（`file-read*` まで禁止すると親の stat が止まり Node が動かない）。直した後 `node --test test/eval-claude.test.ts test/eval-grade.test.ts` → pass 87（35＋52）, fail 0
+
 ## 記録
 - 2026-10-04 / T01 / build.ts はモジュールを読んだ時点でビルドを始めるのでスクリプトをテストから読めない / スロットのスクリプトを `slot-scripts.ts` に移し、変更欄に足した（前: build.ts と test、後: slot-scripts.ts を追加）
 - 2026-10-04 / T01 / 持ち主のシェルに `SPHICA_DB` が残っていると run の DB として使ってしまう / runner が渡す変数は `SPHICA_DB` ではなく `EVAL_SPHICA_DB` にした（完了条件の変数名を前: `SPHICA_DB`、後: `EVAL_SPHICA_DB` に直した）
@@ -280,3 +290,4 @@ base: main
 
 - 2026-10-04 / T21 / 再レビュー 2 件（測定）を採った / T22。指摘が作り込みのパスへ移ってきたので、レビューの往復はここで打ち切る
 - 2026-10-04 / T23 / GitHub の Codex レビュー（#256）6 件（P1 5 件、うち 1 件はセキュリティ: 作業ツリーの観測が agent の作った symlink をたどり、run の外のファイルを読めた）を全部採った。Codex のモデルは run の CODEX_HOME の設定から記録し、比較は同じ系列のモデルの組が両側で違えば拒否する。ローカルの run の計画は collect の `--local-plan` で渡す
+- 2026-10-04 / T24 / GitHub の Codex の再レビュー（#256）9 件（P1 5 件、うち hidden test の symlink はセキュリティで以前からあるコード）を全部採った。`../..` の判定はエージェントの入力（Claude のツール入力、Codex のコマンド）だけに当て、読んだファイルの中身には当てない（import 文によく出るため）。checkout の深い場所から `../../` で checkout の中を指す run も外す側に倒れる

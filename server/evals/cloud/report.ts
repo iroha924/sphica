@@ -257,18 +257,26 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
     throw new Error("both builds ran the same bundle; there is nothing to compare");
   if (same && artifacts(old.build) !== artifacts(next.build))
     throw new Error("an A/A comparison needs the same bundle on both sides");
-  // A different model behind "claude" or "codex" on one side would read as a difference in the bundle
-  const modelsOf = (b: Build, family: string) =>
+  // A different model behind "claude" or "codex" in any task and condition would read as a difference in the bundle, so each group the
+  // report compares must have run the same models on both sides
+  const modelsOf = (b: Build, group: string) =>
     JSON.stringify(
       [
-        ...new Set(b.rows.filter((r) => r.model === family && !r.excluded).map((r) => r.agent_model ?? null)),
+        ...new Set(
+          b.rows
+            .filter((r) => !r.excluded && `${r.task} ${r.model} ${r.condition}` === group)
+            .map((r) => r.agent_model ?? null),
+        ),
       ].sort(),
     );
-  for (const family of ["claude", "codex"]) {
-    const [a, b] = [modelsOf(old.build, family), modelsOf(next.build, family)];
+  const groups = new Set(
+    [...old.build.rows, ...next.build.rows].map((r) => `${r.task} ${r.model} ${r.condition}`),
+  );
+  for (const group of groups) {
+    const [a, b] = [modelsOf(old.build, group), modelsOf(next.build, group)];
     if (a !== "[]" && b !== "[]" && a !== b)
       throw new Error(
-        `the builds were run by different ${family} models (${a} / ${b}); compare runs of the same model`,
+        `the builds ran ${group} with different models (${a} / ${b}); compare runs of the same model`,
       );
   }
   const lines = [

@@ -95,9 +95,11 @@ Claude runs on this machine instead of the cloud routines (the owner's subscript
 Local loop progress:
 - [ ] 1. Build (for old/new, the same fixture: build old in a worktree of the base commit, then new with --fixture <old>/fixture.db)
 - [ ] 2. node evals/cloud/canary.ts --build <dir> [--model <m>]  (every check ✓; claude.ts refuses a build without it)
-- [ ] 3. node evals/cloud/claude.ts --build <dir> --repo <slot> --task <id>, once per plan.json row of the conditions measured
-- [ ] 4. node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>, the same rows
-- [ ] 5. node evals/cloud/collect.ts --build <dir> --no-cloud
+- [ ] 3. Write the local plan: [{ "model": "claude"|"codex", "task": <id>, "condition": <slot condition>, "n": <runs> }, ...], one entry per
+        task, condition, and model measured (a subset of plan.json's rows)
+- [ ] 4. Run it: node evals/cloud/claude.ts and node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>, n times per entry, into
+        run directories used by this build only
+- [ ] 5. node evals/cloud/collect.ts --build <dir> --no-cloud --local-plan <plan> (on macOS: hidden tests run only there)
 - [ ] 6. node evals/cloud/grade.ts --loop <dir>/loop.json
 - [ ] 7. node evals/cloud/report.ts --compare <old>/grades.json <new>/grades.json
 ```
@@ -108,7 +110,14 @@ Local loop progress:
 - Tool search is pinned on (`ENABLE_TOOL_SEARCH=true`), so Sphica's tools start deferred on both sides; `search_loading` in loop.json says
   whether search was handed over by ToolSearch (deferred) or there from the start (loaded), and `search_before_edit` whether a search came
   before the first change to the work tree. unknown is never counted as yes or no
-- Tasks set their own run counts (`runs` per condition in tasks.json); plan.json has one row per run asked for
+- Tasks set their own run counts (`runs` per condition in tasks.json); plan.json has one row per run asked for. The local plan says which of
+  them were run: collect keeps the first n runs of each entry, and keeps a missing run, a run past n, and a run the plan did not ask for
+  as excluded, so the denominator is the plan and not what happens to be in the run directories
+- Hidden tests run only on macOS, under sandbox-exec with no network and no file contents under the home directory but the checkout's and
+  Node's; a checkout holding a link that points outside it fails its hidden test unrun. Elsewhere collect stops unless
+  `--skip-hidden-tests` records them as not run
+- A Codex run has no read fence: a run whose commands or output name another run, the build, or the evaluation cache, or whose commands
+  climb two steps out of the checkout, is excluded as having looked outside
 - `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two
 - Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
   delivers. No agent run is needed
