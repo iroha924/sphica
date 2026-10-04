@@ -1553,13 +1553,13 @@ test("replies from a turn that ran a record tool, or that no call can be placed 
   // A Codex call naming no turn rules out its whole session
   call({ host: "codex", caller_session: "ext-cx" });
   assert.deepEqual(ineligible(), [cx1, cx2, cl2]);
-  // A Claude Code call the hook never saw rules out, in every session of its host, the first reply turn at or after it
+  // A Claude Code call the hook never saw rules out every reply of its project and host from then on
   const late = reply("k3:assistant", "k3", "2026-09-27T00:00:05Z", "cl");
   const later = reply("k4:assistant", "k4", "2026-09-27T00:00:09Z", "cl");
   const elsewhere = reply("m1:assistant", "m1", "2026-09-27T00:00:07Z", "cl2");
   call({ host: "claude-code", caller_session: "ext-cl", tool_use_id: "toolu_unseen" });
-  assert.deepEqual(ineligible(), [cx1, cx2, cl2, late, elsewhere]);
-  assert.ok(!ineligible().includes(cl1) && !ineligible().includes(later));
+  assert.deepEqual(ineligible(), [cx1, cx2, cl2, late, later, elsewhere]);
+  assert.ok(!ineligible().includes(cl1));
   const said = cl2;
   const r = runBy("interactive");
   const u = unit({ key: "report", kind: "decision" }, p, r);
@@ -1584,4 +1584,25 @@ test("record tool calls are never changed, and capture writes a hook's observati
   observe();
   observe();
   assert.equal(one("select count(*) as n from tool_call_observation").n, 1);
+});
+
+test("a run begins only from a record tool call of its own project", () => {
+  const theirs = insert(db, "record_call", {
+    project_id: other,
+    tool: "trace_begin",
+    mode: "interactive",
+    called_at: now,
+  });
+  refuses(
+    () =>
+      insert(db, "extraction_run", {
+        project_id: p,
+        origin: "trace",
+        target: "session:s1",
+        status: "running",
+        begin_call_id: theirs,
+        started_at: now,
+      }),
+    /a run begins from a record tool call of its own project/,
+  );
 });

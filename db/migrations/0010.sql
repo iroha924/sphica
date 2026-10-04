@@ -263,6 +263,10 @@ end;
 create trigger record_call_frozen before update on record_call begin
   select raise(abort, 'record tool calls are never changed');
 end;
+create trigger extraction_run_call_project before insert on extraction_run when new.begin_call_id is not null begin
+  select raise(abort, 'a run begins from a record tool call of its own project')
+  where (select project_id from record_call where id = new.begin_call_id) is not new.project_id;
+end;
 create trigger extraction_run_frozen before update on extraction_run
 when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
   or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id or new.begin_call_id is not old.begin_call_id
@@ -411,8 +415,7 @@ where s.kind = 'session_message' and s.author_kind = 'assistant' and (
   or exists (select 1 from record_call c where c.project_id = se.project_id and (c.host is null or c.host = se.host)
     and (c.host is null or (c.host = 'codex' and c.caller_session is null)
       or (c.host = 'claude-code' and not exists (select 1 from tool_call_observation o where o.host = 'claude-code' and o.tool_use_id = c.tool_use_id)))
-    and s.turn_id is (select f.turn_id from source f where f.session_id = se.id and f.kind = 'session_message' and f.author_kind = 'assistant'
-      and f.created_at >= c.called_at order by f.created_at, f.id limit 1)));
+    and s.created_at >= c.called_at));
 create view unit_support as
 select u.id as unit_id, case
   when u.kind in ('decision', 'constraint') and (

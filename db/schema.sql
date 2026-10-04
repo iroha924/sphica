@@ -271,6 +271,10 @@ create index extraction_run_begin_call on extraction_run (begin_call_id) where b
 
 -- A run changes once, when it finishes: only a running run takes a status and a finish time. The one other update is the foreign key
 -- action clearing session_id after its session was deleted
+create trigger extraction_run_call_project before insert on extraction_run when new.begin_call_id is not null begin
+  select raise(abort, 'a run begins from a record tool call of its own project')
+  where (select project_id from record_call where id = new.begin_call_id) is not new.project_id;
+end;
 create trigger extraction_run_frozen before update on extraction_run
 when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
   or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id or new.begin_call_id is not old.begin_call_id
@@ -611,7 +615,7 @@ end;
 -- does every change that can take support away (a retraction, retiring an anchor), so the two never disagree.
 -- Evidence on an option supports the option, never the unit.
 -- Assistant replies that never carry agent adoption: from a turn that ran a record tool (a trace report must not become a decision), from a
--- session whose call named no turn, and, for a call no hook or host placed, the first reply turn at or after it in every session of the project.
+-- session whose call named no turn, and, for a call no hook or host placed, every reply of its project and host from that call on.
 create view agent_ineligible_source as
 select s.id as source_id from source s join session se on se.id = s.session_id
 where s.kind = 'session_message' and s.author_kind = 'assistant' and (
@@ -622,8 +626,7 @@ where s.kind = 'session_message' and s.author_kind = 'assistant' and (
   or exists (select 1 from record_call c where c.project_id = se.project_id and (c.host is null or c.host = se.host)
     and (c.host is null or (c.host = 'codex' and c.caller_session is null)
       or (c.host = 'claude-code' and not exists (select 1 from tool_call_observation o where o.host = 'claude-code' and o.tool_use_id = c.tool_use_id)))
-    and s.turn_id is (select f.turn_id from source f where f.session_id = se.id and f.kind = 'session_message' and f.author_kind = 'assistant'
-      and f.created_at >= c.called_at order by f.created_at, f.id limit 1)));
+    and s.created_at >= c.called_at));
 
 create view unit_support as
 select u.id as unit_id, case

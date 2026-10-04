@@ -49,6 +49,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(record): bind the caller to each run and log every record tool call before it runs (T03)`
   - 結果: record サーバーの全ツール（forget を含む 10 個）が、プロジェクトを決めた直後に `record_call` を ingest で単独に commit してから動く。begin は run に `begin_call_id` を持たせ、save は begin と自分の呼び出しのセッションを比べる（Claude Code は hook の観測、Codex は `_meta`。サーバーの環境変数は使わない）。Claude Code の record ツール用の同期の PreToolUse hook が `capture_tool_call` に直接書く。`node --test --test-name-pattern="record call" test/record.test.ts test/capture.test.ts` → 3 pass / 0 fail。`bun run verify` → 終了コード 0（SQL 到達 204/204、実 DB 10/10、hooks:live、受け入れ 105 pass、architecture の reader 境界）
 
+- [x] T16: T02 のレビュー指摘を直す（結べなかった呼び出しの後の返事をすべて外す、run の begin の呼び出しを同じプロジェクトに限る）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す対象の schema）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/test/schema.test.ts`
+  - red: `cd server && node --test --test-name-pattern="never carry agent adoption|own project" test/schema.test.ts` → 直す前の schema では、結べなかった呼び出しの後の 2 つ目の返事が外れずに落ち、別プロジェクトの呼び出しを begin に持つ run が拒まれずに落ちる
+  - 完了条件: `cd server && node --test test/schema.test.ts test/migrate.test.ts test/db.test.ts` → pass。hook と結べなかった呼び出しの後は、同じプロジェクト・ホストの返事がすべて AI の採用の対象外になり、run の `begin_call_id` は同じプロジェクトの呼び出しだけを指せる
+  - コミット: `fix(schema): rule out replies after an unplaced call and keep begin calls in the project (T16)`
+  - 結果: red を実測（コミット済みの schema.sql に戻して 2 件 fail）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/db.test.ts` → 107 pass / 0 fail。`bun run codegen:check` 一致。0010.sql は schema.sql から作り直した
+
 ## P2: 権限と持ち主の判断の保護
 
 持ち主の判断を AI の経路でも候補の記録でも覆せないようにし、AI の判断を条件つきで active にする。
@@ -73,7 +83,7 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - [ ] T06: record.ts で `agent` の採用を受ける（`decides` との組、質問・record ツールのターン・不明な呼び出し元の除外、`do` で anchor のある判断の同じターンの編集、パスの一覧の警告）
   - 種別: 追加
   - 計画: S5
-  - 依存: T03（record-tool の呼び出しの行で除外する）, T05（権限の判定が要る）
+  - 依存: T03（record-tool の呼び出しの行で除外する）, T05（権限の判定が要る）, T16（除外の view と begin の呼び出しの規則が直っている）
   - 変更: `server/src/record.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="agent adoption" test/record.test.ts` → pass。条件をすべて満たす AI の判断が active になり、AskUserQuestion の質問・`reported_speaker`・`decides` でない引用・record ツールを呼んだターンの返事・呼び出し元が不明の run・同じターンに anchor の path の編集が無い `do` は候補に残る。パスの一覧に当たる `applies_to` は警告を出して候補に残る
   - コミット: `feat(record): adopt an AI's own decision when it quotes the AI deciding and passes the exclusions (T06)`
@@ -164,3 +174,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T01・T15 / pre-commit の bundle の検査が、package に入る最初の変更（`server/src/caller.ts`）のコミットでバージョンの更新を求めた / T15 を取りやめ、バージョンの更新（S13 の一部）を T01 に移した。T01 の計画欄（前: S1 → 後: S1, S13）と変更欄（4 つのファイルを足す）を直した。main が先に新しいバージョンを出したら、マージのときに次のバージョンへ上げ直す
 - 2026-10-04 / T02 / 変更欄（前: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts` → 後: `server/src/db.ts` を外し、移行・語彙・fixture・役割と移行のテストを足す）。run の呼び出し元を列でなく `begin_call_id` で持つことにした（save の照合は begin の呼び出しと比べるだけで足りるため）
 - 2026-10-04 / T03 / 変更欄（前: `server/src/db-write.ts` を含む → 後: `db-write.ts` は T02 で済んだので外し、`server/src/trace.ts`・`server/src/caller.ts`・`scripts/check-sql-live.mjs` を足す）。save の照合は、どちらかのセッションが分からないときは拒まない。その save で AI の採用が通らないよう、T06 で save の呼び出しも対話であることを条件に足す
+- 2026-10-04 / T16 / T02 の Codex のレビュー（F1 P1: 結べなかった呼び出しで最初の返事のターンしか外さず、plan の方針 2 の「結べるまで止める」より緩かった。F2 P2: `begin_call_id` が別プロジェクトの呼び出しを指せ、その対話の判定を借りられた）を両方受け、修正タスク T16 を足して直した。T06 の依存に T16 を足した（前: T03, T05 → 後: T03, T05, T16）
