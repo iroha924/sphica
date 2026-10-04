@@ -356,6 +356,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): close the rule anchor, run origin, cause project, and caller metadata gaps (T35)`
   - 結果: red を 4 件とも実測した。`agentRefusal` は規約と CI のパスをどの role の anchor でも見る。`unit_adoption_route` は agent の採用に trace の run を求める。`unit_replacement_check` と `unit_replacement_end` は、始めと終わりの原因の run・forget が記録と同じプロジェクトかを確かめる（移行 0010 も作り直した）。`callerOf` は目に見える ASCII で 200 文字までの値だけを受け、ほかは不明として残す。`node --test test/caller.test.ts test/record.test.ts test/schema.test.ts` → 105 pass。`bun run verify` → 終了コード 0（受け入れ 127 pass）
 
+- [x] T36: PR #273 の 2 回目のレビュー指摘のうち、表示と配信の 3 件を直す（overview の live に AI の印、行ごとの印は配信の枠を使わない、文脈だけのページは自動のページ数に数えない）
+  - 種別: 修正
+  - 計画: S6, S9
+  - 依存: T35（同じレビューの前半）
+  - 変更: `server/src/overview.ts`, `server/src/deliver.ts`, `server/src/extract.ts`, `server/test/overview.test.ts`, `server/test/deliver.test.ts`, `server/test/auto-pending.test.ts`
+  - red: `cd server && node --test --test-name-pattern="marks an AI's decision|per-record mark takes no room|a page of context alone" test/overview.test.ts test/deliver.test.ts test/auto-pending.test.ts` → 直す前は、overview の live に AI の印が無く、文の長さ 208 で持ち主の判断なら 5 件出るところ AI の判断は 4 件になり、文脈だけのページの後に対象が 1 ページしか出ない
+  - 完了条件: `cd server && node --test test/overview.test.ts test/deliver.test.ts test/auto-pending.test.ts` → pass
+  - コミット: `fix(deliver): mark AI decisions in the overview and keep their marks off every budget (T36)`
+  - 結果: red を 3 件とも実測した。overview の live は AI の判断に「decided by an AI」を付け、そのときだけ `AI_DECIDED` を足す。配信の行の印 `AI_MARK` は、`fit` の `free`・発言の枠・読み取りの予算（その配信の時刻に AI の判断だった記録の数だけ）のどれでも数えない。自動の record_context は、対象を含むページだけをページ数に数える。同じレビューの残り 1 件（AI の返事だけが残ったセッションが 14 日で見えなくなる）は、trace の後に持ち主の発言なしで入る返事は trace を流したターンの報告に限られ、AI の採用の対象でもないので直さない（PR の Declined findings）。`bun run verify` → 終了コード 0（受け入れ 127 pass）
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13

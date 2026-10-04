@@ -37,6 +37,8 @@ export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "th
 // The limits add the request's length, so it takes no room from the records
 const ASK = CONFIRM.length + 1;
 const AI_ROOM = AI_DECIDED.length + 1;
+/** The mark on each line of an AI's decision: Sphica's words like AI_DECIDED, so it spends no record budget either */
+const AI_MARK = ", decided by an AI";
 const LIMITS: Record<Event, { units: number; chars: number }> = {
   session_start: { units: 6, chars: 1000 + ASK },
   pre_edit: { units: 5, chars: 1500 + ASK },
@@ -120,7 +122,7 @@ const line = (
   extra = "",
   ai = false,
 ) =>
-  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${ai ? ", decided by an AI" : ""}): ${head(inline(u.text), 240)}${extra}`;
+  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${ai ? AI_MARK : ""}): ${head(inline(u.text), 240)}${extra}`;
 
 /** The shown records an AI decided (only its own adoption): marked so a reader weighs them below the owner's */
 async function aiDecided(db: Reads, ids: number[]): Promise<Set<number>> {
@@ -143,7 +145,12 @@ function fitMarked(
   ids: (number | null)[],
 ): { text: string; kept: number[]; omitted: number; lead: string } {
   const wide = withAi(lead, chars, ai);
-  const f = fit(lines, wide.chars, wide.lead);
+  const f = fit(
+    lines,
+    wide.chars,
+    wide.lead,
+    ids.map((id) => (ai.has(id ?? -1) ? AI_MARK.length : 0)),
+  );
   if (wide.lead === lead || f.kept.some((i) => ai.has(ids[i] ?? -1))) return { ...f, lead: wide.lead };
   return { ...f, text: f.text && `${lead}${f.text.slice(wide.lead.length)}`, lead };
 }
@@ -203,20 +210,23 @@ export async function recordLines(
 /**
  * Keeps whole lines within the budget. Each entry lists its forms, longest first. Entries go in first in their shortest form (one that does
  * not fit is skipped, so a later, shorter one may still fit); leftover room then lengthens them in order. Returns the kept entries' indexes.
+ * free[i] is how much of entry i's every form is Sphica's own words, which spend no budget.
  */
 function fit(
   lines: (string | string[])[],
   chars: number,
   lead: string,
+  free: number[] = [],
 ): { text: string; kept: number[]; omitted: number } {
   const forms = lines.map((entry) => (Array.isArray(entry) ? entry : [entry]));
+  const cost = (i: number, l: string) => l.length - (free[i] ?? 0);
   const chosen = new Map<number, string>();
   let used = lead.length;
   forms.forEach((f, i) => {
     const short = f[f.length - 1] ?? "";
-    if (used + short.length + 1 > chars) return;
+    if (used + cost(i, short) + 1 > chars) return;
     chosen.set(i, short);
-    used += short.length + 1;
+    used += cost(i, short) + 1;
   });
   for (const [i, short] of chosen) {
     const longer = forms[i]?.find((l) => used - short.length + l.length <= chars);
@@ -367,10 +377,12 @@ async function beforeRead(
         )
         .execute()
     : [];
-  const marked = new Set<number>();
+  // How many of each read's records were an AI's: each carried the mark, and any carried the AI words once
+  const marked = new Map<number, number>();
   for (const r of spent) {
     const ids = shownBy.filter((x) => x.delivery_id === r.id).map((x) => x.unit_id);
-    if ([...(await authorityOf(db, ids, r.at)).values()].includes("agent")) marked.add(r.id);
+    const n = [...(await authorityOf(db, ids, r.at)).values()].filter((a) => a === "agent").length;
+    if (n) marked.set(r.id, n);
   }
   const seen = new Set(sent.map((r) => r.unit_id));
   const readUnits = sent.filter((r) => r.event === "pre_read").length;
@@ -398,7 +410,10 @@ async function beforeRead(
       LIMITS.pre_read.chars,
       READ_SESSION.chars +
         ASK -
-        spent.reduce((n, r) => n + Math.max(r.chars - ASK - (marked.has(r.id) ? AI_ROOM : 0), 0), 0),
+        spent.reduce((n, r) => {
+          const ai = marked.get(r.id) ?? 0;
+          return n + Math.max(r.chars - ASK - (ai ? AI_ROOM + ai * AI_MARK.length : 0), 0);
+        }, 0),
     ),
     `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
     ai,
@@ -545,10 +560,11 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why, ai.has(h.u.id)).slice(2)}`);
   const kept: string[] = [];
   let used = wide.lead.length + 1;
-  for (const l of lines) {
-    if (used + l.length + 1 > wide.chars) break;
+  for (const [i, l] of lines.entries()) {
+    const cost = l.length - (ai.has(shown[i]?.u.id ?? -1) ? AI_MARK.length : 0);
+    if (used + cost + 1 > wide.chars) break;
     kept.push(l);
-    used += l.length + 1;
+    used += cost + 1;
   }
   const ask = shown.slice(0, kept.length).some((h) => ai.has(h.u.id)) ? wide.lead : CONFIRM;
   return {

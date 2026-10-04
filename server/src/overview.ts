@@ -2,6 +2,7 @@
 // Both read the database and the working tree only, and name records by key so the agent reads each before relying on it.
 import path from "node:path";
 import { checkAnchor, fileState } from "./anchors.ts";
+import { AI_DECIDED, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
 import { UNSUPPORTED } from "./read.ts";
@@ -58,6 +59,10 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
         .execute()
     : [];
 
+  const whose = await authorityOf(
+    db,
+    rows.map((r) => r.id),
+  );
   // Each record once, under the directory of its first live applies_to anchor; the page is cut before grouping, so the cursor skips nothing
   const shown: { id: number; group: string; line: string }[] = [];
   for (const r of rows.slice(0, OVERVIEW_LIMITS.records)) {
@@ -66,7 +71,7 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
     const dir = first === undefined ? null : path.posix.dirname(first);
     // Each part is clipped on its own, so a long text never pushes the paths off the line
     // The id reads the record even when a long key is cut
-    const line = `- ${head(inline(r.key), OVERVIEW_LIMITS.key)} (u${r.id}, ${r.kind}${r.stance ? ` ${r.stance}` : ""}): ${head(inline(r.text), OVERVIEW_LIMITS.text)}${paths.length ? ` [${pathList(paths)}]` : ""}`;
+    const line = `- ${head(inline(r.key), OVERVIEW_LIMITS.key)} (u${r.id}, ${r.kind}${r.stance ? ` ${r.stance}` : ""}${whose.get(r.id) === "agent" ? ", decided by an AI" : ""}): ${head(inline(r.text), OVERVIEW_LIMITS.text)}${paths.length ? ` [${pathList(paths)}]` : ""}`;
     shown.push({
       id: r.id,
       group: dir === null ? PROJECT_WIDE : dir === "." ? "(repository root)" : `${dir}/`,
@@ -96,6 +101,7 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
       ? `More follow: call overview again with after: ${last}. Pages are read at different times: a record that became active in between, with a lower id, is not on a later page.`
       : "That is the end of the list.",
     "Read a record by its key or u<id> before relying on it.",
+    ...(shown.some((x) => whose.get(x.id) === "agent") ? [AI_DECIDED] : []),
   ].join("\n");
 }
 

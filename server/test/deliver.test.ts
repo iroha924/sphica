@@ -2285,3 +2285,44 @@ test("decided by an AI: search and read say whose each decision is, with the AI 
     await db.done();
   }
 });
+
+test("decided by an AI: the per-record mark takes no room, so an AI's decision fits wherever the owner's would", async () => {
+  const shownFor = async (owner: boolean, size: number) => {
+    const db = tempDb();
+    const repo = checkout();
+    try {
+      const p = project(db);
+      const said = message(db, p, { id: "o1", text: "Keep them." });
+      for (let n = 0; n < 5; n++) {
+        const u = aiDecided(db, p, `mark-${n}`, `Rule ${n} ${"z".repeat(size)}`, "src/db.ts");
+        if (owner)
+          insert(db, "unit_adoption", {
+            unit_id: u,
+            route: "owner_statement",
+            source_id: said,
+            span_start: 0,
+            span_end: 4,
+            run_id: Number(db.owner.prepare("select run_id from unit where id = ?").get(u)?.run_id),
+            added_at: at("2026-09-27T00:00:00Z"),
+          });
+      }
+      const out = await deliver(
+        {
+          session_id: "e1",
+          cwd: repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Edit",
+          tool_input: { file_path: path.join(repo, "src/db.ts") },
+        },
+        "claude-code",
+        db.file,
+      );
+      return (out.match(/^- trace:ext-s1\/mark-/gm) ?? []).length;
+    } finally {
+      await db.done();
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  };
+  for (let size = 200; size <= 236; size += 4)
+    assert.equal(await shownFor(false, size), await shownFor(true, size), `text of ${size}`);
+});

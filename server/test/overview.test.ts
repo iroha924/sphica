@@ -6,12 +6,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
 import { liveOverview, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, run, type TempDb, tempDb } from "./temp-db.ts";
+import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], root: string | null = null) {
   const t: Target = {
@@ -507,5 +508,21 @@ test("look names the successor that took the owner's decision's place, not a pro
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the live overview marks an AI's decision, with Sphica's words for it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const page = await liveOverview(db.reader, p, null);
+    assert.match(
+      page,
+      /^- trace:ext-s1\/pool \(u\d+, decision do, decided by an AI\): I keep the connection pool small\./m,
+    );
+    assert.ok(page.includes(AI_DECIDED));
+  } finally {
+    await db.done();
   }
 });

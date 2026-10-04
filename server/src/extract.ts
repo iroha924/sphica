@@ -499,14 +499,16 @@ export async function contextText(
     used += text.length;
   }
   const left = items.length - end;
-  const capped = auto && pageNo + 1 >= AUTO_PAGES;
+  // Only a page with targets counts toward the limit: a page of context alone leaves both pages of targets
+  const nextNo = pageNo + (page.some((x) => !x.context) ? 1 : 0);
+  const capped = auto && nextNo >= AUTO_PAGES;
   // The tail goes on a page of its own when it does not fit beside the last sources
   const last = page.at(-1);
   const more = (left > 0 && !capped) || (last !== undefined && used + tailSize > PAGE_CHARS);
   // Recorded only now, after every await: a save running meanwhile never counts a source this reply has not returned yet
   const shown = before ?? { sources: new Set<number>(), cursors: new Map<string, number>(), auto };
   for (const it of page) if (!it.context) shown.sources.add(it.id);
-  if (more && last) shown.cursors.set(`s${last.id}`, pageNo + 1);
+  if (more && last) shown.cursors.set(`s${last.id}`, nextNo);
   shownTo.delete(id);
   shownTo.set(id, shown);
   for (const old of shownTo.keys()) {

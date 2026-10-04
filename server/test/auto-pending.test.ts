@@ -258,3 +258,34 @@ test("auto pending: an automatic trace whose caller cannot be told does nothing,
     await db.done();
   }
 });
+
+test("auto pending: a page of context alone does not use up the run's pages of targets", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    // Six long messages traced before: as context they fill most of the first page
+    for (let i = 0; i < 6; i++)
+      message(db, p, {
+        id: `c${i}`,
+        text: `Earlier ${i}: ${"a".repeat(3000)}`,
+        sent: `2026-09-10T00:0${i}:00Z`,
+      });
+    const first = await beginTrace(db.ingest, p, "s1");
+    await pages(db, first, p, false);
+    await saveText(db.ingest, first, p, null, { units: [] });
+    // Each waiting message is too long to share a page with the context, or with another
+    const waiting = Array.from({ length: 4 }, (_, i) =>
+      message(db, p, {
+        id: `w${i}`,
+        text: `Later ${i}: ${"b".repeat(15_000)}`,
+        sent: `2026-09-10T01:0${i}:00Z`,
+      }),
+    );
+    const second = await beginTrace(db.ingest, p, "s1");
+    const read = await pages(db, second, p, true);
+    const targets = read.flatMap(refs).filter((id) => waiting.includes(id));
+    assert.deepEqual(targets, waiting.slice(0, 2), `${read.length} pages`);
+  } finally {
+    await db.done();
+  }
+});
