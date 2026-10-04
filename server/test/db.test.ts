@@ -727,3 +727,79 @@ test("the record server logs record tool calls, and only the hook's capture view
     /not authorized/,
   );
 });
+
+// A replacement row is history: a save or a forget starts one and later ends it, and nothing rewrites what started it
+test("ingest and forget can start a replacement and set only its end columns", () => {
+  const r = run(db, p);
+  const finding = (key: string) =>
+    insert(db, "unit", {
+      project_id: p,
+      key: `trace:session:s1/${key}`,
+      kind: "finding",
+      text: key,
+      extraction: "supported",
+      run_id: r,
+      created_at: now,
+      content_hash: sha256(key),
+    });
+  const old = finding("replaced");
+  const next = finding("replacing");
+  insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: r, added_at: now });
+  const batch = insert(db, "forget_batch", { project_id: p, at: now });
+  const open = (by: string) =>
+    `insert into unit_replacement (from_unit, to_unit, ${by}, started_at) values (${next}, ${old}, ?, '${now}')`;
+  const row = `where to_unit = ${old} and ended_at is null`;
+  const refusedOn = (connect: () => DatabaseSync, writes: string[]) => {
+    for (const write of writes) assert.match(attempt(connect, write) ?? "", /not authorized/, write);
+  };
+  const others = [
+    `update unit_replacement set started_at = '${now}' ${row}`,
+    `update unit_replacement set from_unit = ${old} ${row}`,
+    `update unit_replacement set to_unit = ${next} ${row}`,
+    `delete from unit_replacement where to_unit = ${old}`,
+  ];
+
+  assert.equal(attempt(ingest, open("run_id"), r), null);
+  refusedOn(ingest, [
+    ...others,
+    `update unit_replacement set run_id = ${r} ${row}`,
+    `update unit_replacement set end_forget_id = ${batch} ${row}`,
+  ]);
+  assert.equal(
+    attempt(
+      ingest,
+      `update unit_replacement set ended_at = ?, end_reason = 'r', end_run_id = ? ${row}`,
+      now,
+      r,
+    ),
+    null,
+  );
+
+  assert.equal(attempt(forget, open("forget_id"), batch), null);
+  refusedOn(forget, [
+    ...others,
+    `update unit_replacement set forget_id = ${batch} ${row}`,
+    `update unit_replacement set end_run_id = ${r} ${row}`,
+  ]);
+  assert.equal(
+    attempt(
+      forget,
+      `update unit_replacement set ended_at = ?, end_reason = 'r', end_forget_id = ? ${row}`,
+      now,
+      batch,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    db.owner
+      .prepare(
+        "select run_id is not null as by_run, end_run_id is not null as end_run, forget_id is not null as by_forget, end_forget_id is not null as end_forget from unit_replacement where to_unit = ? order by id",
+      )
+      .all(old)
+      .map((x) => ({ ...x })),
+    [
+      { by_run: 1, end_run: 1, by_forget: 0, end_forget: 0 },
+      { by_run: 0, end_run: 0, by_forget: 1, end_forget: 1 },
+    ],
+  );
+});

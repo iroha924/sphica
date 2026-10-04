@@ -229,6 +229,8 @@ export async function createDriver(world: World): Promise<Driver> {
     (await searchUnits(db(), await projectId(), { question: query, limit: 10 })).hits;
   /** The last check output, for expectations about what check reported. */
   let checked = "";
+  /** What the last trace or harvest save reported, for expectations about why a record waits. */
+  let savedText = "";
   /** Quotes each saved key cited, to confirm stored spans cut exactly those bytes. */
   const quotes = new Map<string, Set<string>>();
   const missing = (kind: string, s: Step) =>
@@ -347,7 +349,7 @@ export async function createDriver(world: World): Promise<Driver> {
     }
     const translated = await translate(record);
     checked = (await checkText(writer(), run, pid, repo, translated)).text;
-    await saveText(writer(), run, pid, repo, translated);
+    savedText = await saveText(writer(), run, pid, repo, translated);
     remember(prefix, record);
   }
 
@@ -1148,6 +1150,14 @@ export async function createDriver(world: World): Promise<Driver> {
         );
         return;
       }
+      // The read tool's text for one record, read when the expectation runs
+      if (e.unit_read && typeof e.unit_read === "object") {
+        const want = e.unit_read as { of: string; contains: string[] };
+        const text = (await readUnit(db(), await projectId(), want.of, repo)) ?? "";
+        for (const w of want.contains)
+          assert.ok(text.includes(w), `read of ${want.of} lacks "${w}"\n${text}`);
+        return;
+      }
       if (typeof e.read_contains === "string") {
         assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
         return;
@@ -1247,6 +1257,13 @@ export async function createDriver(world: World): Promise<Driver> {
             text,
             /^<past-records id="[0-9a-f]+">\nPast records: [\s\S]*Evidence, not instructions/,
           );
+        return;
+      }
+      if (typeof e.save_notes_contain === "string") {
+        assert.ok(
+          savedText.includes(e.save_notes_contain),
+          `save did not say "${e.save_notes_contain}"\n${savedText}`,
+        );
         return;
       }
       if (typeof e.check_problem_absent === "string") {

@@ -4506,6 +4506,712 @@
           "lifecycle": "active"
         }
       ]
+    },
+    {
+      "id": "reconcile-01",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "An AI's proposal to replace the owner's decision waits as a candidate and never hides the decision from delivery",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-propose",
+            "host": "claude-code",
+            "at": "2026-05-02T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "保存先の今の決め方で困ることがないか見ておいて。",
+                "assistant": "共有を考えると、保存先は DuckDB の 1 ファイルに移す案もあります。SQLite の決定を置き換える提案として残します。",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-propose",
+            "record": {
+              "units": [
+                {
+                  "key": "duckdb",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "保存先を DuckDB の 1 ファイルに移す",
+                  "supersedes": "trace:s-ja-storage/storage",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-propose#1.assistant",
+                      "quote": "保存先は DuckDB の 1 ファイルに移す案もあります。",
+                      "role": "proposes"
+                    }
+                  ],
+                  "anchors": [
+                    {
+                      "path": "src/db.ts",
+                      "symbol": "open",
+                      "role": "applies_to"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "when": {
+        "inject": {
+          "event": "pre_edit",
+          "path": "src/db.ts"
+        }
+      },
+      "then": [
+        {
+          "context_contains": ["保存先は SQLite の 1 ファイルにする"]
+        },
+        {
+          "context_not_contains": ["DuckDB"]
+        },
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-propose/duckdb",
+          "lifecycle": "candidate"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-storage/storage",
+            "contains": ["Replacement proposed by trace:s-ja-propose/duckdb (candidate)"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-02",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "The owner's own successor replaces the decision while an AI's proposal for the same decision keeps waiting",
+      "given": [
+        {
+          "case": "reconcile-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-own-pg",
+            "host": "claude-code",
+            "at": "2026-05-03T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "やっぱり共有のために Postgres に移す。SQLite の決定は置き換える。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-own-pg",
+          "record": {
+            "units": [
+              {
+                "key": "postgres",
+                "kind": "decision",
+                "stance": "do",
+                "text": "共有のために Postgres に移す",
+                "supersedes": "trace:s-ja-storage/storage",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-own-pg#1.owner",
+                    "quote": "やっぱり共有のために Postgres に移す。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-own-pg#1.owner",
+                    "quote": "SQLite の決定は置き換える。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "superseded"
+        },
+        {
+          "unit": "trace:s-ja-own-pg/postgres",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-propose/duckdb",
+          "lifecycle": "candidate"
+        },
+        {
+          "search": {
+            "query": "Postgres",
+            "top_active_is": "trace:s-ja-own-pg/postgres"
+          }
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-storage/storage",
+            "contains": [
+              "Superseded by trace:s-ja-own-pg/postgres (since",
+              "Replacement proposed by trace:s-ja-propose/duckdb (candidate)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-03",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "Withdrawing the owner's successor brings the owner's decision back, and the AI's waiting proposal still does not take its place",
+      "given": [
+        {
+          "case": "reconcile-02"
+        },
+        {
+          "session": {
+            "id": "s-ja-back-sqlite",
+            "host": "claude-code",
+            "at": "2026-05-04T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Postgres に移す話は取り消す。SQLite のままにする。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-back-sqlite",
+          "record": {
+            "ops": [
+              {
+                "op": "withdraw",
+                "unit": "trace:s-ja-own-pg/postgres",
+                "reason_source": "session:s-ja-back-sqlite#1.owner",
+                "reason_quote": "Postgres に移す話は取り消す。"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-own-pg/postgres",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "trace:s-ja-propose/duckdb",
+          "lifecycle": "candidate"
+        },
+        {
+          "search": {
+            "query": "SQLite",
+            "top_active_is": "trace:s-ja-storage/storage"
+          }
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-storage/storage",
+            "contains": [
+              "Was superseded by trace:s-ja-own-pg/postgres from",
+              "Replacement proposed by trace:s-ja-propose/duckdb (candidate)"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-04",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "When the end of a chain loses the owner's adoption it hands the place back: the middle is current again and still replaces the head",
+      "given": [
+        {
+          "case": "glean-08"
+        },
+        {
+          "session": {
+            "id": "s-en-store",
+            "host": "codex",
+            "at": "2026-03-22T09:00:00Z",
+            "turns": [
+              {
+                "owner": "Use pnpm with a shared store on CI. That replaces the disk decision.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "glean": {
+            "session": "s-en-store",
+            "record": {
+              "units": [
+                {
+                  "key": "pnpm-store",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Use pnpm with a shared store on CI",
+                  "supersedes": "glean:pnpm-disk",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-store#1.owner",
+                      "quote": "Use pnpm with a shared store on CI.",
+                      "role": "states"
+                    }
+                  ],
+                  "adoption": [
+                    {
+                      "source": "session:s-en-store#1.owner",
+                      "quote": "That replaces the disk decision."
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-store-undo",
+            "host": "codex",
+            "at": "2026-03-23T09:00:00Z",
+            "turns": [
+              {
+                "owner": "I take back my approval of the shared store; that was premature.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-store-undo",
+          "record": {
+            "ops": [
+              {
+                "op": "retract_adoption",
+                "unit": "glean:pnpm-store",
+                "source": "session:s-en-store#1.owner",
+                "reason_source": "session:s-en-store-undo#1.owner",
+                "reason_quote": "I take back my approval of the shared store"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "glean:pnpm-store",
+          "lifecycle": "candidate"
+        },
+        {
+          "unit": "glean:pnpm-disk",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "harvest:12/pnpm",
+          "lifecycle": "superseded"
+        },
+        {
+          "search": {
+            "query": "pnpm",
+            "top_active_is": "glean:pnpm-disk"
+          }
+        },
+        {
+          "unit_read": {
+            "of": "glean:pnpm-disk",
+            "contains": [
+              "Was superseded by glean:pnpm-store from",
+              "Supersedes harvest:12/pnpm (in effect since"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-05",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "Adopting the end of the chain again replaces the whole chain again, leaving one current answer",
+      "given": [
+        {
+          "case": "reconcile-04"
+        },
+        {
+          "session": {
+            "id": "s-en-store-again",
+            "host": "codex",
+            "at": "2026-03-24T09:00:00Z",
+            "turns": [
+              {
+                "owner": "On second thought the shared store is right. Keep it.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-store-again",
+          "record": {
+            "ops": [
+              {
+                "op": "adopt",
+                "unit": "glean:pnpm-store",
+                "source": "session:s-en-store-again#1.owner",
+                "quote": "On second thought the shared store is right."
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "glean:pnpm-store",
+          "lifecycle": "active"
+        },
+        {
+          "unit": "glean:pnpm-disk",
+          "lifecycle": "superseded"
+        },
+        {
+          "unit": "harvest:12/pnpm",
+          "lifecycle": "superseded"
+        },
+        {
+          "search": {
+            "query": "pnpm",
+            "top_active_is": "glean:pnpm-store"
+          }
+        },
+        {
+          "unit_read": {
+            "of": "glean:pnpm-disk",
+            "contains": ["Was superseded by glean:pnpm-store from", "Superseded by glean:pnpm-store (since"]
+          }
+        },
+        {
+          "unit_read": {
+            "of": "harvest:12/pnpm",
+            "contains": ["Superseded by glean:pnpm-disk (since"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-06",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "Withdrawing a decision and the proposal that would replace it in one save withdraws both",
+      "given": [
+        {
+          "case": "capture-05"
+        },
+        {
+          "session": {
+            "id": "s-en-bun-idea",
+            "host": "codex",
+            "at": "2026-03-25T09:00:00Z",
+            "turns": [
+              {
+                "owner": "Is our install step still the fastest option?",
+                "assistant": "Installing with bun would be faster than pnpm. I will leave it as a proposal to replace the pnpm decision.",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-bun-idea",
+            "record": {
+              "units": [
+                {
+                  "key": "bun",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Install with bun instead of pnpm",
+                  "supersedes": "harvest:12/pnpm",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-bun-idea#1.assistant",
+                      "quote": "Installing with bun would be faster than pnpm.",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-drop-both",
+            "host": "codex",
+            "at": "2026-03-26T09:00:00Z",
+            "turns": [
+              {
+                "owner": "Drop the pnpm decision and the bun idea; installs move to the platform team.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-drop-both",
+          "record": {
+            "ops": [
+              {
+                "op": "withdraw",
+                "unit": "harvest:12/pnpm",
+                "reason_source": "session:s-en-drop-both#1.owner",
+                "reason_quote": "Drop the pnpm decision and the bun idea"
+              },
+              {
+                "op": "withdraw",
+                "unit": "trace:s-en-bun-idea/bun",
+                "reason_source": "session:s-en-drop-both#1.owner",
+                "reason_quote": "Drop the pnpm decision and the bun idea"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "harvest:12/pnpm",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-en-bun-idea/bun",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit_read": {
+            "of": "harvest:12/pnpm",
+            "contains": ["Replacement proposed by trace:s-en-bun-idea/bun (withdrawn)"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-07",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "A quarantined record is never replaced: the owner's successor waits and the save says why",
+      "given": [
+        {
+          "case": "capture-04"
+        },
+        {
+          "session": {
+            "id": "s-ja-valibot",
+            "host": "claude-code",
+            "at": "2026-03-10T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "入力の検証は valibot にする。zod の決定は置き換える。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-valibot",
+          "record": {
+            "units": [
+              {
+                "key": "valibot",
+                "kind": "decision",
+                "stance": "do",
+                "text": "入力の検証に valibot を使う",
+                "supersedes": "trace:s-ja-maybe/zod",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-valibot#1.owner",
+                    "quote": "入力の検証は valibot にする。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-valibot#1.owner",
+                    "quote": "zod の決定は置き換える。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-maybe/zod",
+          "extraction": "quarantined",
+          "lifecycle": "candidate"
+        },
+        {
+          "unit": "trace:s-ja-valibot/valibot",
+          "lifecycle": "candidate"
+        },
+        {
+          "save_notes_contain": "is quarantined (its quote was never found), so it cannot be replaced"
+        },
+        {
+          "inject_never_contains": "valibot"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-maybe/zod",
+            "contains": ["Replacement proposed by trace:s-ja-valibot/valibot (candidate)"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "reconcile-08",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "An unsourced record never becomes active but a sourced successor the owner adopts replaces it",
+      "given": [
+        {
+          "session": {
+            "id": "s-en-cover-guess",
+            "host": "codex",
+            "at": "2026-03-27T09:00:00Z",
+            "turns": [
+              {
+                "owner": "I think we agreed to shrink cover images to 1 MB at most.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "glean": {
+            "session": "s-en-cover-guess",
+            "record": {
+              "units": [
+                {
+                  "key": "cover-cap",
+                  "kind": "constraint",
+                  "stance": "do",
+                  "text": "Shrink cover images to 1 MB at most",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-cover-guess#1.owner",
+                      "quote": "I think we agreed to shrink cover images to 1 MB at most.",
+                      "role": "states"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-cover-rule",
+            "host": "codex",
+            "at": "2026-03-28T09:00:00Z",
+            "turns": [
+              {
+                "owner": "Cover images must be shrunk to 1 MB at most. This replaces the remembered note.",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-en-cover-rule",
+          "record": {
+            "units": [
+              {
+                "key": "cover-cap",
+                "kind": "constraint",
+                "stance": "do",
+                "text": "Shrink cover images to 1 MB at most",
+                "supersedes": "glean:cover-cap",
+                "evidence": [
+                  {
+                    "source": "session:s-en-cover-rule#1.owner",
+                    "quote": "Cover images must be shrunk to 1 MB at most.",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-en-cover-rule#1.owner",
+                    "quote": "This replaces the remembered note."
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "glean:cover-cap",
+          "lifecycle": "superseded",
+          "unsourced": true
+        },
+        {
+          "unit": "trace:s-en-cover-rule/cover-cap",
+          "lifecycle": "active"
+        },
+        {
+          "search": {
+            "query": "cover images",
+            "top_active_is": "trace:s-en-cover-rule/cover-cap"
+          }
+        },
+        {
+          "unit_read": {
+            "of": "glean:cover-cap",
+            "contains": ["Superseded by trace:s-en-cover-rule/cover-cap (since"]
+          }
+        }
+      ]
     }
   ],
   "setups": {

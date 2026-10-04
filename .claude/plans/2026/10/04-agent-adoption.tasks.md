@@ -159,13 +159,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `feat(read): show replacements, waiting proposals, and unrecorded history apart (T24)`
   - 結果: search の後継（`liveSuccessors`）と export の連なりは開いている `unit_replacement` の行だけをたどる。read は「Supersedes X (in effect since … / not in effect[: Y is in effect as its successor])」「Replaced X from … to …: 理由」「Superseded by X (since …)」「Was superseded by X from … to …: 理由」「Replacement proposed by X (状態)」を分けて出し、過去の時点では [started_at, ended_at) に入る行だけを効いている置き換えとする。overview・review・extract は保存された状態と開いた行だけを読んでいて変更なし（保存の出力は reconcile の待つ理由を `△ key candidate: 理由` で出す）。「履歴が記録されていない」印は保存先がまだ無いので出していない（T23 で印を作るときに read へ足す）。`cd server && node --test test/search.test.ts test/overview.test.ts test/export.test.ts test/review.test.ts` → 52 pass / 0 fail（足したケースのうち search の 3 件は変更前の読み手で落ちることを確かめた）。`bun run verify` → 終了コード 0（SQL 到達 198/198、実 DB 10/10、受け入れ 105 pass）
 
-- [ ] T25: 役割ごとの実接続、全 rollback、操作の順番、再採用・同じ保存の取り下げ・隔離・出典なしの受け入れケースと、保存 1 回のロック時間の測定を足す
+- [x] T25: 役割ごとの実接続、全 rollback、操作の順番、再採用・同じ保存の取り下げ・隔離・出典なしの受け入れケースと、保存 1 回のロック時間の測定を足す
   - 種別: 追加
   - 計画: S18
   - 依存: T22（保存の経路が要る）, T23（移行が要る）
-  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/reconcile.test.ts`, `server/test/db.test.ts`
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/reconcile.test.ts`, `server/test/db.test.ts`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run acceptance` → pass。`cd server && node --test --test-name-pattern="judge budget" test/reconcile.test.ts` → pass（保存 1 回のロックが 200 ms 以内）
   - コミット: `test(record): cover reconciling saves end to end and keep their lock time in budget (T25)`
+  - 結果: 受け入れに層 reconcile の 8 件（ja 4・en 4。AI の提案が待っていても持ち主の判断が配信に残る / 提案が待っていても持ち主の後継を保存できる / その後継を取り下げると持ち主の判断が戻る / 連鎖の末尾の採用を撤回すると枠が中間に戻る / 末尾を再び採用すると連鎖全体が置き換わる / 元の記録と提案を同じ保存で取り下げると両方取り下がる / 隔離された記録は置き換わらず保存が理由を出す / 出典なしの記録は後継で置き換わる）と、driver の期待 `unit_read`・`save_notes_contain` を足した。main（c09283df）のコードに同じ cases.json と driver を載せて流し、8 件とも落ちることを確かめた（02・03 は持ち主の後継の保存が「already has a successor, …duckdb (candidate)」で拒まれる、04 は末尾の撤回後も中間が superseded のまま、07 は保存が `CHECK constraint failed: extraction = 'supported' or lifecycle = 'candidate'` で失敗、01・05・06・08 は状態は main でも同じで、read が提案を「Superseded by」と出す・置き換えの期間を出さないことで落ちる）。`server/test/reconcile.test.ts` に、置き換えの行を失った superseded の記録を次の保存が直すこと、reconcile の途中で失敗した保存が run 以外の書き込みをすべて戻すこと、3 つの保存の 6 通りの順番と glean の 2 つの操作の順番で同じ状態と行になること、judge budget（3,200 件・長さ 20 の連鎖 150 本・待っている提案 200 件の相手への持ち主の後継の保存）を足した。`server/test/db.test.ts` に ingest と forget が `unit_replacement` を足し終わりの列だけを書けるテストを足した。`cd server && node --test test/reconcile.test.ts test/db.test.ts test/acceptance-cases.test.ts` → 33 pass / 0 fail。`cd server && node --test --test-name-pattern="judge budget" test/reconcile.test.ts` → pass（ロック 8.7〜37.5 ms、単独で流すと 33.3 ms、全テストと並べて 14.7 ms）。`cd server && bun run test` → 778 pass / 0 fail。`bun run acceptance` → 113 pass / 0 fail。`bun run verify` → 終了コード 0（SQL 到達 201/201、実 DB 10/10、受け入れ 113 pass）
 
 - [x] T05: 権限の判定関数を作り、保存と glean のすべての操作で変更の前後を確かめる。AI の supersedes を禁じ、AI どうしの conflicts を通す
   - 種別: 追加
@@ -302,3 +303,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T06 / 変更欄（前: record.ts と record.test.ts → 後: run の判定の extract.ts・record_check の呼び出しの mcp-record.ts・規約のファイルの判定を共有する rule-files.ts と export.ts・plan を足す）。止めるパスの一覧を、どのリポジトリにもある規約のファイルと CI の定義に直した（plan の方針 7 と変更履歴）。AI の採用が外れた理由が保存の出力に出ないと分かり、save でも check の注意を出すようにした
 - 2026-10-04 / T27 / T23・T26・T24 の Codex のレビュー（F1 P2: 取り下げと復帰が同じ時刻というだけで、一緒に取り下げた候補まで過去に効いていた後継として戻す）を受け、修正タスク T27 を足した。指摘はこの 1 件だけだった
 - 2026-10-04 / T07 / 変更欄（前: deliver.ts・read.ts・search.ts・extract.ts・review.ts と deliver の 2 つのテスト → 後: review.ts は配信のレビューの経路が deliver.ts にあるので変えず、search の表示の mcp.ts、生きている記録の trace.ts、search.test.ts を足し、deliver-codex.test.ts は変えずに済んだ）
+- 2026-10-04 / T25 / 変更欄に `server/test/acceptance-cases.test.ts` を足した（層ごとの件数を固定しているので、新しい層 reconcile の 8 件を数えに足す）。reconcile の最後の再判定（`records did not settle`）は、judge が読む事実を保存の書き込みが変えないので正しい書き込みからは届かず、ingest の authorizer が事実を書き換えるトリガーを差し込ませないので、rollback は「保存の途中で schema が書き込みを拒むと、それまでの書き込みがすべて戻る」で確かめた。保存をまたぐ順番のテストは、置き換え済みの記録への提案を check が拒む（順番で受け付けが変わるのは check の規則で、reconcile ではない）ので、どの順番でも受け付けられる保存だけで組んだ
