@@ -55,15 +55,14 @@ export type AgentHistory = {
 };
 
 /**
- * Records of the project that were ever active as an AI's decision, for evaluating how those decisions held up. A later owner adoption,
+ * Records of the project that were ever active as an AI's decision, for evaluating how those decisions held up. A record becomes one when
+ * it turns active with only the AI's adoption, or stays active while the owner's adoption is taken back. A later owner adoption,
  * replacement, or withdrawal keeps a record here: those are what the evaluation looks for. Read from state and adoption history alone.
  */
 export async function agentHistory(db: Reads, projectId: number): Promise<AgentHistory[]> {
-  const activations = await db
-    .selectFrom("unit_state as s")
-    .innerJoin("unit as u", "u.id", "s.unit_id")
+  const units = await db
+    .selectFrom("unit as u")
     .where("u.project_id", "=", projectId)
-    .where("s.to_state", "=", "active")
     .where(({ exists, selectFrom }) =>
       exists(
         selectFrom("unit_adoption as a")
@@ -72,36 +71,60 @@ export async function agentHistory(db: Reads, projectId: number): Promise<AgentH
           .where("a.route", "=", "agent"),
       ),
     )
-    .select(["u.id", "u.key", "u.content_hash", "u.lifecycle", "s.at"])
-    .orderBy("s.at")
-    .orderBy("s.id")
+    .select(["u.id", "u.key", "u.content_hash", "u.lifecycle"])
+    .orderBy("u.id")
     .execute();
-  const out = new Map<number, AgentHistory>();
-  for (const a of activations) {
-    if (out.has(a.id) || (await authorityOf(db, [a.id], a.at)).get(a.id) !== "agent") continue;
-    const adoptions = await db
-      .selectFrom("unit_adoption")
-      .where("unit_id", "=", a.id)
-      .where("route", "=", "agent")
-      .where("added_at", "<=", a.at)
-      .where((eb) => eb.or([eb("retracted_at", "is", null), eb("retracted_at", ">", a.at)]))
-      .select(["source_id", "span_start", "span_end"])
+  if (!units.length) return [];
+  const ids = units.map((u) => u.id);
+  const [states, adoptions] = await Promise.all([
+    db
+      .selectFrom("unit_state")
+      .where("unit_id", "in", ids)
+      .select(["unit_id", "to_state", "at"])
+      .orderBy("at")
       .orderBy("id")
-      .execute();
-    out.set(a.id, {
-      id: a.id,
-      key: a.key,
-      activeAt: a.at,
-      adoptions: adoptions.map((x) => ({
-        sourceId: x.source_id,
-        spanStart: x.span_start,
-        spanEnd: x.span_end,
-      })),
-      contentHash: a.content_hash,
-      lifecycle: a.lifecycle,
-      authority: "none",
-    });
+      .execute(),
+    db
+      .selectFrom("unit_adoption")
+      .where("unit_id", "in", ids)
+      .select(["unit_id", "route", "source_id", "span_start", "span_end", "added_at", "retracted_at"])
+      .orderBy("id")
+      .execute(),
+  ]);
+  const out: AgentHistory[] = [];
+  for (const u of units) {
+    const mine = states.filter((s) => s.unit_id === u.id);
+    const theirs = adoptions.filter((a) => a.unit_id === u.id);
+    // The moments its authority or state can turn it into an AI's active decision
+    const moments = [
+      ...mine.filter((s) => s.to_state === "active").map((s) => s.at),
+      ...theirs.flatMap((a) => (a.route !== "agent" && a.retracted_at ? [a.retracted_at] : [])),
+    ].sort();
+    for (const at of moments) {
+      const state = mine.filter((s) => s.at <= at).at(-1)?.to_state;
+      if (state !== "active" || (await authorityOf(db, [u.id], at)).get(u.id) !== "agent") continue;
+      out.push({
+        id: u.id,
+        key: u.key,
+        activeAt: at,
+        adoptions: theirs
+          .filter(
+            (a) =>
+              a.route === "agent" && a.added_at <= at && (a.retracted_at === null || a.retracted_at > at),
+          )
+          .map((a) => ({ sourceId: a.source_id, spanStart: a.span_start, spanEnd: a.span_end })),
+        contentHash: u.content_hash,
+        lifecycle: u.lifecycle,
+        authority: "none",
+      });
+      break;
+    }
   }
-  const now = await authorityOf(db, [...out.keys()]);
-  return [...out.values()].map((h) => ({ ...h, authority: now.get(h.id) ?? "none" }));
+  const now = await authorityOf(
+    db,
+    out.map((h) => h.id),
+  );
+  return out
+    .sort((a, b) => (a.activeAt < b.activeAt ? -1 : a.activeAt > b.activeAt ? 1 : a.id - b.id))
+    .map((h) => ({ ...h, authority: now.get(h.id) ?? "none" }));
 }

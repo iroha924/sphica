@@ -278,6 +278,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `test(acceptance): cover AI adoption exclusions, owner decision protection, auto trace notice (T12)`
   - 結果: 受け入れに層 agent の 14 件（ja 7・en 7）を足した。AI の判断が active になり「decided by an AI」として配信と read に出る / AI が返事で伝えた他人の判断を explains で引いた AI の採用は候補に残る / 取得したページ（第三者の PR コメント）を decides で引くと check と保存が拒む / 同じターンに別のファイルを編集した do は候補に残る / AskUserQuestion の質問への decides を check と保存が拒む / record ツールを呼んだターンの返事は Claude Code（hook の観測）でも Codex（record_call）でも候補に残り、次のターンの判断は active になる / headless（sdk-cli）・SDK（sdk-ts）・判別できない呼び出し元の run は候補に残る / 採用されていない記録の conflicts でも持ち主の判断が配信に残る / AI の判断の conflicts と supersedes でも持ち主の制約が active のまま配信に残り、置き換える側は「replacing another record needs the owner's or a maintainer's adoption」で候補に残る / 新しい対話の開始で自動の trace の通知が 1 回だけ出る / resume・headless・判別できない開始では出ない。driver に、trace の呼び出し元（Claude Code の hook の観測と record サーバーの呼び出しの記録を `callerOf` で作る）、ターンの record ツールと AskUserQuestion、`session:<id>#<n>.question`、inject の entrypoint と session、harvest の refused を足した。main（c09283df）に同じ cases.json・driver・load を載せて流し、持ち主の判断の保護（agent-11）が `delivery lacks "保存先は SQLite の 1 ファイルにする"` で落ちることを確かめた（agent-13 も通知が無く落ちる。AI の採用のケースは main に agent の経路と呼び出しの記録が無いので流せない）。入力を 1 つずつ変えて、record ツールの呼び出しを外す・同じファイルを編集する・呼び出し元を cli にすると該当のケースが落ちることも確かめた。伝聞を decides で引くと active になる（意味に頼る部分で Sphica は見分けない。plan のリスクのとおり）。`cd server && node --test test/acceptance-cases.test.ts` → 4 pass / 0 fail。`bun run acceptance` → 127 pass / 0 fail。`bun run verify` → 終了コード 0（SQL 到達 207/207、実 DB 10/10、受け入れ 127 pass）
 
+- [x] T30: T28・T10・T11・T29 のレビュー指摘を直す（持ち主の採用の撤回で AI の判断になった記録を一覧に入れる、自動の trace の通知は startup だけ、glean の新しい記録も decides を受けない）
+  - 種別: 修正
+  - 計画: S8, S9, S7
+  - 依存: T29（直す対象の最後の表示の修正）
+  - 変更: `server/src/authority.ts`, `server/src/deliver.ts`, `server/src/record.ts`, `server/test/authority.test.ts`, `server/test/deliver.test.ts`, `server/test/record.test.ts`
+  - red: `cd server && node --test --test-name-pattern="owner's adoption is taken back|auto trace notice|glean takes no decides" test/authority.test.ts test/deliver.test.ts test/record.test.ts` → 直す前は、active のまま持ち主の採用を撤回した記録が一覧に無く、resume したセッションの compact で通知が出て、glean の新しい記録が decides を受ける
+  - 完了条件: `cd server && node --test --test-name-pattern="agent history|auto trace notice|agent adoption" test/authority.test.ts test/deliver.test.ts test/record.test.ts` → pass
+  - コミット: `fix(record): fix agent history, the session notice, and glean decides from review (T30)`
+  - 結果: red を 3 件とも実測した。`agentHistory` は、active になった時刻と、持ち主か maintainer の採用が撤回された時刻を見て、その時点で active かつ AI の判断なら入れる。通知は SessionStart の source が `startup` のときだけ（resume のあとの compact や source の無い開始では出ない）。check は `decides` を trace の run でだけ受ける。`node --test --test-name-pattern="agent history|auto trace notice|agent adoption" ...` → 10 pass。`bun run verify` → 終了コード 0（SQL 到達 209/209、受け入れ 127 pass）
+
 - [x] T13: 配布する Skill を権限に合わせる（review の過去の判断の観点、export、rules）
   - 種別: 変更
   - 計画: S11
@@ -336,3 +346,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T13 / 変更欄（前: precedent.md・export と rules の Skill・review.ts・export.ts・review.test.ts → 後: review_select の文を review.ts へ移すための mcp.ts、export のテスト、AI の判断の行を作る helper を共有するための temp-db.ts と deliver.test.ts を足した）
 - 2026-10-04 / T14 / 変更欄（前: README の 2 つ・CLAUDE.md・AGENTS.md・knowledge-schema → 後: rg の確認で見つかった古い衝突の説明を直すため glean と trace の Skill、description の検査を書くため plugin-release を足した）。README は方針 12 の文面のうち「新しいセッションの開始時にエージェントが trace する」を、実装どおり Claude Code だけと書いた（Codex の対話の値は未実測で、通知は手動の案内のまま）
 - 2026-10-04 / T12 / 変更欄に `server/test/acceptance-cases.test.ts` を足した（層ごとの件数を固定しているので、新しい層 agent の 14 件を数えに足す）。伝聞の平文は意味に頼るので Sphica は見分けられず、受け入れでは機械で守る部分（decides でない引用は AI の採用にならない）だけを確かめた。コミットの件名（前: `…, and the auto trace notice (T12)` → 後: `…, auto trace notice (T12)`）。commit-msg の検査が 100 文字を超える件名（106 文字）を拒んだため
+- 2026-10-04 / T30 / T28・T10・T11・T29 の Codex のレビュー（F1〜F3 すべて P2）を受け、修正タスク T30 を足した

@@ -191,3 +191,45 @@ test("agent history: records ever active as an AI's decision stay listed after t
     await db.done();
   }
 });
+
+test("agent history: a record still active when the owner's adoption is taken back becomes an AI's decision then", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const owner = message(db, p, { id: "o1", text: "Keep it as is.", sent: "2026-09-19T00:00:00Z" });
+    const both = agentAdopted(db, p, "both");
+    insert(db, "unit_adoption", {
+      unit_id: both.unit,
+      route: "owner_statement",
+      source_id: owner,
+      span_start: 0,
+      span_end: 4,
+      run_id: both.run,
+      added_at: T0,
+    });
+    for (const [from, to, when] of [
+      [null, "candidate", T0],
+      ["candidate", "active", T1],
+    ] as const)
+      insert(db, "unit_state", {
+        unit_id: both.unit,
+        from_state: from,
+        to_state: to,
+        at: when,
+        reason: "r",
+        run_id: both.run,
+      });
+    assert.deepEqual(await agentHistory(db.reader, p), [], "the owner's decision while active");
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'no', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ? and route = 'owner_statement'",
+      )
+      .run(T2, owner, both.unit);
+    assert.deepEqual(
+      (await agentHistory(db.reader, p)).map((h) => [h.key, h.activeAt, h.lifecycle, h.authority]),
+      [["both", T2, "active", "agent"]],
+    );
+  } finally {
+    await db.done();
+  }
+});

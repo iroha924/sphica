@@ -952,11 +952,12 @@ export async function deliver(
                     key: place.key,
                     host,
                     subagent: name === "SubagentStart",
-                    // Only a new interactive Claude Code session: a resume, headless, SDK, or unknown start never traces on its own
+                    // Only a new interactive Claude Code session: a resumed one (even when it compacts later), a start that does not say
+                    // how it started, or a headless, SDK, or unknown one never traces on its own
                     auto:
                       host === "claude-code" &&
                       name === "SessionStart" &&
-                      input.source !== "resume" &&
+                      input.source === "startup" &&
                       process.env.CLAUDE_CODE_ENTRYPOINT === "cli"
                         ? session
                         : null,

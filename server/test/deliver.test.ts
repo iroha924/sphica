@@ -2143,6 +2143,20 @@ test("auto trace notice: a new interactive Claude Code session asks the agent to
       /earlier session/,
       "once per session",
     );
+    // A resumed session is not new, even when it compacts later; nor is a start that says nothing of how it started
+    const resumed = crypto.randomUUID();
+    assert.doesNotMatch(await as("cli", () => start(resumed, "resume")), /earlier session/);
+    assert.doesNotMatch(await as("cli", () => start(resumed, "compact")), /earlier session/);
+    assert.doesNotMatch(
+      await as("cli", () =>
+        deliver(
+          { hook_event_name: "SessionStart", session_id: crypto.randomUUID(), cwd: repo },
+          "claude-code",
+          db.file,
+        ),
+      ),
+      /earlier session/,
+    );
     // The caller's own session is never one to trace
     assert.equal((await as("cli", () => start("ext-s1"))).split("\n").at(-1), AUTO_TRACE(1));
     for (const [entry, source] of [

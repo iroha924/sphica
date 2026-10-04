@@ -43,7 +43,7 @@ import {
   sessionEdits,
   sessionSources,
 } from "../src/trace.ts";
-import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const now = at("2026-09-27T00:00:00Z");
 
@@ -2383,6 +2383,36 @@ test("agent adoption: glean takes no decides evidence, since only a trace pairs 
       ],
     });
     assert.match(checked.errors.join("\n"), /ops\.0\.role/);
+    // Nor does a new record glean saves: it shares trace's check
+    session(db, p, "g1");
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:g1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "g1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text: "I keep it as is.",
+      original_bytes: 16,
+      content_hash: hash(41),
+      indexed: 0,
+    });
+    const units = await checkGlean(db.ingest, gleaned, {
+      units: [
+        {
+          key: "x",
+          kind: "decision",
+          stance: "dont",
+          text: "Keep it.",
+          evidence: [{ source: `s${reply}`, quote: "I keep it as is.", role: "decides" }],
+        },
+      ],
+    });
+    assert.match([...units.errors, ...units.units.errors].join("\n"), /decides quotes the AI choosing/);
   } finally {
     await db.done();
   }

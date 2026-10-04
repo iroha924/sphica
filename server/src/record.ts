@@ -446,11 +446,12 @@ export async function checkRecord(
         if (
           e.role === "decides" &&
           (option ||
+            target.origin !== "trace" ||
             !(s.kind === "session_message" && s.author_kind === "assistant") ||
             /:ask:.*:q:/.test(s.external_id))
         ) {
           errors.push(
-            `${key}: decides quotes the AI choosing in its own reply, never a question it asked, someone else's words, or an option`,
+            `${key}: decides quotes the AI choosing in its own reply, never a question it asked, someone else's words, or an option, and only a trace records it`,
           );
           return [];
         }
