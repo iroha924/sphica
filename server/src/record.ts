@@ -4,6 +4,7 @@ import type { Kysely } from "kysely";
 import { z } from "zod";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { replaceable } from "./judge.ts";
 import {
   EVIDENCE_ROLES,
   FIELD_TYPES,
@@ -776,11 +777,6 @@ const contentHash = (u: UnitInput): Buffer =>
       ),
     ]),
   );
-
-/** Which kinds can replace which: the same kind, or a decision and a constraint either way. The schema checks the same pairs. */
-const replaceable = (successor: string, old: string): boolean =>
-  successor === old ||
-  (["decision", "constraint"].includes(successor) && ["decision", "constraint"].includes(old));
 
 /** Messages the schema's activation rules raise; anything else is a real failure. */
 export const ACTIVATION = /needs|cannot become active/;

@@ -113,13 +113,14 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): hold a successor place the same way for every record and free whole chains (T20)`
   - 結果: red を実測（2 件とも上の理由で fail）。直した後 pass、T04・T18・T19 の後継の枠のテストも pass。forget の接続が再帰の読み取りを拒んだので許した（他の役割と同じ）。旧い規則を前提にした schema のテスト 2 件を新しい規則に書き換えた。`bun run verify` → 終了コード 0（テスト 742 件、SQL 到達 204/204、実 DB 10/10、受け入れ 105 pass）
 
-- [ ] T21: 純粋な `judge(snapshot)` と、`supersedes` でつながる範囲の取得を作る（同期。保存用と移行用の adapter に分ける）
+- [x] T21: 純粋な `judge(snapshot)` と、`supersedes` でつながる範囲の取得を作る（同期。保存用と移行用の adapter に分ける）
   - 種別: 追加
   - 計画: S14
   - 依存: なし
-  - 変更: `server/src/judge.ts`, `server/test/judge.test.ts`
+  - 変更: `server/src/judge.ts`, `server/src/record.ts`, `server/test/judge.test.ts`
   - 完了条件: `cd server && node --test test/judge.test.ts` → pass。plan の方針 5 の条件を snapshot ごとに確かめ、T04・T18・T19・T20 のレビューの 13 件と C18・C20・C22・C23・C25〜C29・C33 の入力が期待どおりの状態・開く行・閉じる行・待つ理由になる。同じ事実を操作の順番を変えて与えても結果が同じで、結果をもう一度 judge に通しても差分が出ない
   - コミット: `feat(record): judge lifecycles and replacements from facts in one pure function (T21)`
+  - 結果: `cd server && node --test test/judge.test.ts` → 15 pass / 0 fail（T04 F1・F2、T18 F1〜F4、T19 F1〜F3、T20 F1・F2、C2・C18・C20・C22・C23・C25・C26・C28・C29 の入力。順番を入れ替えても同じ結果、判定済みの事実は差分なし）。依存が 1 つのつもりだけなので、枠の持ち主は相手ごとに独立して決まり、再帰も繰り返しも要らない。種類の互換 `replaceable` を record.ts から judge.ts に寄せた。`bun run verify` → 終了コード 0、knip で未使用の export なし
 
 - [ ] T22: schema を事実と結果に分け（`unit_replacement`、1 記録 1 つのつもり、印、superseded から active への遷移、trigger を確かめだけにする）、record・glean・forget の保存を「事実 → 正規化 → judge → 差分 → 最後の整合の確認」に集める。view と再帰の復帰と `takes` を外す
   - 種別: 変更
@@ -262,3 +263,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T19 / T18 の Codex のレビュー（F1 P1: 採用済みの候補を active 化の確認が見落とし後継が 2 つ並ぶ。F2 P1: 採用の撤回で元の判断が戻らない。F3 P2: 同じ保存で順番に依存。F4 P2: liveSuccessors が取り下げた後継を返す。F5 P2: read が待っている提案も Superseded by と出す）を 5 件とも受けた。場当たりに直さず、枠を「active になった後継だけ」に単純にした（plan の方針 5 を更新）
 - 2026-10-04 / T20 / T19 の Codex のレビュー（F1 P1: 連鎖の末尾の採用撤回で先頭が戻らない。F2 P1: 前の判断に採用が付くと枠が空いても戻らない。F3 P2: 前の判断の採用撤回で待っている提案が 2 つとも枠を持つ）。3 回目のレビューでも P1 が出たので止めて持ち主に相談し、規則を全記録で同じにする選択肢 1 を受けて修正タスク T20 を足した
 - 2026-10-04 / T21〜T25 / T20 のレビュー（P1 1 件・P2 1 件、4 回目）を受け、持ち主の「妥協せずに最高のもの」で、Codex と 4 往復して後継の枠の作りを「つもりと効いている期間を分け、状態を事実から計算する」に変えた（plan の方針 5）。T18〜T20 の推し量る仕組みは T22 で外す。T05・T06・T07 の依存に T22・T24 を足した。持ち主の Go を受けた
+- 2026-10-04 / T21 / 変更欄に `server/src/record.ts` を足した（`replaceable` を judge.ts へ寄せたため）。snapshot を DB から取る adapter は `unit_replacement` の表が要るので T22 で作る（T21 は純粋な本体だけ）
