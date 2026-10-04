@@ -59,6 +59,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(schema): rule out replies after an unplaced call and keep begin calls in the project (T16)`
   - 結果: red を実測（コミット済みの schema.sql に戻して 2 件 fail）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/db.test.ts` → 107 pass / 0 fail。`bun run codegen:check` 一致。0010.sql は schema.sql から作り直した
 
+- [x] T17: T03 のレビュー指摘を直す（Claude Code の record ツールの hook の行だけでそのターンを外す）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す対象の呼び出しの記録）, T16（同じ view を直したもの）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/test/schema.test.ts`, `.claude/plans/2026/10/04-agent-adoption.plan.md`
+  - red: `cd server && node --test --test-name-pattern="hook row alone" test/schema.test.ts` → 直す前の view は `record_call` と結べた hook の行しか見ないので、サーバーに届かなかった呼び出しのターンが外れずに落ちる
+  - 完了条件: `cd server && node --test test/schema.test.ts test/migrate.test.ts test/db.test.ts` → pass。サーバーに届かなかった record ツールの呼び出しも、hook の行でそのターンが AI の採用の対象外になる
+  - コミット: `fix(schema): let a record tool's hook row alone rule out its turn (T17)`
+  - 結果: red を実測（直す前の view で 1 件 fail）。直した後 `node --test test/schema.test.ts test/migrate.test.ts test/db.test.ts` → 108 pass / 0 fail。`bun run codegen:check` 一致。Codex の拒まれた呼び出しは plan のリスクに足した
+
 ## P2: 権限と持ち主の判断の保護
 
 持ち主の判断を AI の経路でも候補の記録でも覆せないようにし、AI の判断を条件つきで active にする。
@@ -175,3 +185,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-04 / T02 / 変更欄（前: `db/schema.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db.ts`, `server/src/db-write.ts`, `server/test/schema.test.ts` → 後: `server/src/db.ts` を外し、移行・語彙・fixture・役割と移行のテストを足す）。run の呼び出し元を列でなく `begin_call_id` で持つことにした（save の照合は begin の呼び出しと比べるだけで足りるため）
 - 2026-10-04 / T03 / 変更欄（前: `server/src/db-write.ts` を含む → 後: `db-write.ts` は T02 で済んだので外し、`server/src/trace.ts`・`server/src/caller.ts`・`scripts/check-sql-live.mjs` を足す）。save の照合は、どちらかのセッションが分からないときは拒まない。その save で AI の採用が通らないよう、T06 で save の呼び出しも対話であることを条件に足す
 - 2026-10-04 / T16 / T02 の Codex のレビュー（F1 P1: 結べなかった呼び出しで最初の返事のターンしか外さず、plan の方針 2 の「結べるまで止める」より緩かった。F2 P2: `begin_call_id` が別プロジェクトの呼び出しを指せ、その対話の判定を借りられた）を両方受け、修正タスク T16 を足して直した。T06 の依存に T16 を足した（前: T03, T05 → 後: T03, T05, T16）
+- 2026-10-04 / T17 / T03 の Codex のレビュー（F1: T02 の F1 と同じで T16 で直し済み。F2 P2: MCP の SDK が入力の形で拒んだ呼び出しは `record_call` に残らない）。F2 を受けて修正タスク T17 を足した。Codex の拒まれた呼び出しは記録できないので plan のリスクに足した

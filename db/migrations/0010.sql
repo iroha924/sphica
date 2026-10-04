@@ -410,8 +410,9 @@ select s.id as source_id from source s join session se on se.id = s.session_id
 where s.kind = 'session_message' and s.author_kind = 'assistant' and (
   exists (select 1 from record_call c where c.host = 'codex' and se.host = 'codex' and c.caller_session = se.external_id
     and (c.caller_turn is null or c.caller_turn = s.turn_id))
-  or exists (select 1 from record_call c join tool_call_observation o on o.host = 'claude-code' and o.tool_use_id = c.tool_use_id
-    where se.host = 'claude-code' and o.session_external = se.external_id and (o.turn_id is null or o.turn_id = s.turn_id))
+  -- The hook's row alone counts: the MCP SDK refuses a malformed call before the server can log it
+  or exists (select 1 from tool_call_observation o where o.host = 'claude-code' and se.host = 'claude-code'
+    and o.session_external = se.external_id and (o.turn_id is null or o.turn_id = s.turn_id))
   or exists (select 1 from record_call c where c.project_id = se.project_id and (c.host is null or c.host = se.host)
     and (c.host is null or (c.host = 'codex' and c.caller_session is null)
       or (c.host = 'claude-code' and not exists (select 1 from tool_call_observation o where o.host = 'claude-code' and o.tool_use_id = c.tool_use_id)))

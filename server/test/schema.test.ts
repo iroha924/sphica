@@ -1606,3 +1606,25 @@ test("a run begins only from a record tool call of its own project", () => {
     /a run begins from a record tool call of its own project/,
   );
 });
+
+test("a record tool's hook row alone rules out its turn, even when the call never reached the server", () => {
+  const ineligible = () =>
+    (
+      db.owner.prepare("select source_id from agent_ineligible_source order by source_id").all() as {
+        source_id: number;
+      }[]
+    ).map((r) => r.source_id);
+  const k1 = reply("k1:assistant", "k1", "2026-09-10T00:00:01Z", "cl");
+  reply("k2:assistant", "k2", "2026-09-10T00:00:02Z", "cl");
+  // The MCP SDK refuses a malformed call before the server logs it; the hook saw it first
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: "ext-cl",
+    turn_id: "k1",
+    tool_use_id: "toolu_refused",
+    tool_name: "mcp__plugin_sphica_record__harvest_begin",
+    owner_turn: 1,
+    observed_at: now,
+  });
+  assert.deepEqual(ineligible(), [k1]);
+});
