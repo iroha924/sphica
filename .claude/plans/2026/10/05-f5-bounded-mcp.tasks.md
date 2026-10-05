@@ -128,6 +128,16 @@ read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続�
   - コミット: `fix(read): clean each piece before its note so an open escape cannot hide the rest`
   - 結果: red: 上のコマンド → `VISIBLE END` が無く fail。実装後 `node --test test/read.test.ts` → 5 pass。`bun run verify` → 0
 
+- [x] T14: source のヘッダーの欄を、制御文字を除いてから切る
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T05（readRefs と欄の切り詰めがある）
+  - 変更: `server/src/read.ts`, `server/test/read.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'read header terminal' test/read.test.ts` → url に OSC を持つ source の本文 `VISIBLE BODY` が返答に無く fail
+  - 完了条件: `cd server && node --test test/read.test.ts` → pass。ヘッダーの欄に OSC があっても本文が出て、返答に ESC が残らない
+  - コミット: `fix(read): clean header fields before clipping them`
+  - 結果: red: 上のコマンド → `VISIBLE BODY` が無く fail。実装後: 欄を inline してから切り、ヘッダーと本文を別々に plain にした。`node --test test/read.test.ts` → 6 pass。`bun run verify` → 0
+
 ## P3: overview look の続き（#267）
 
 look を続けて呼べば、2,000 件より先のアンカーと見出しごとの 50 行より先の指摘に届き、最後が Complete と言う。

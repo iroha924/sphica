@@ -310,3 +310,32 @@ test("read cut terminal: a cut inside a terminal string sequence keeps the conti
     await db.done();
   }
 });
+
+test("read header terminal: a header field holding a terminal sequence is cleaned before it is clipped, so the body still shows", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const id = insert(db, "source", {
+      project_id: p,
+      kind: "pr_comment",
+      artifact: "pr:1",
+      external_id: "c1",
+      revision: 1,
+      author_kind: "person",
+      author_login: "someone",
+      author_association: "NONE",
+      url: `https://example.invalid/\u001b]0;${"x".repeat(500)}\u0007`,
+      created_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text: "VISIBLE BODY",
+      original_bytes: 12,
+      content_hash: hash(),
+      indexed: 1,
+    });
+    const reply = await readRefs(db.reader, p, [`s${id}`], null);
+    assert.match(reply, /VISIBLE BODY/);
+    assert.ok(!reply.includes("\u001b"));
+  } finally {
+    await db.done();
+  }
+});

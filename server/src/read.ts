@@ -426,7 +426,11 @@ type Piece =
   | { line: string }
   | { head: string; text: string; from: number; resume: (end: number) => string; what: string };
 
-const clip = (v: string) => (bytes(v) > HEADER_FIELD ? `${head(v, HEADER_FIELD - 3)}…` : v);
+/** A header field from outside on one line: cleaned first, since clipping could cut a terminal sequence's end and leave it open */
+const clip = (raw: string) => {
+  const v = inline(raw);
+  return bytes(v) > HEADER_FIELD ? `${head(v, HEADER_FIELD - 3)}…` : v;
+};
 
 /** A byte offset moved back to the start of the character it falls in. */
 function boundary(all: Buffer, at: number): number {
@@ -501,8 +505,9 @@ export async function readRefs(
     const sep = shown.length ? 2 : 0;
     const all = "line" in p ? null : Buffer.from(p.text, "utf8");
     const from = all ? boundary(all, "line" in p ? 0 : p.from) : 0;
-    // Each piece is made plain on its own: a terminal string sequence left open by a cut would otherwise swallow what follows it
-    const whole = "line" in p ? p.line : plain(`${p.head}${all?.subarray(from).toString("utf8") ?? ""}`);
+    // The header and the text are each made plain on their own: a terminal string sequence left open would otherwise swallow what follows
+    const whole =
+      "line" in p ? p.line : `${plain(p.head)}${plain(all?.subarray(from).toString("utf8") ?? "")}`;
     if (used + sep + bytes(whole) + bytes(tail(rest)) <= READ_BUDGET) {
       shown.push(whole);
       used += sep + bytes(whole);
@@ -528,7 +533,7 @@ export async function readRefs(
       break;
     }
     const end = from + bytes(text);
-    shown.push(`${plain(`${p.head}${text}`)}${note(all.length - end, end)}`);
+    shown.push(`${plain(p.head)}${plain(text)}${note(all.length - end, end)}`);
     used += sep + bytes(shown.at(-1) ?? "");
     next = [p.resume(end), ...rest];
     break;
