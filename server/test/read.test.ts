@@ -5,11 +5,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { inTransaction } from "../src/db.ts";
-import { readUnit } from "../src/read.ts";
+import { READ_BUDGET, readRefs, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, root: string | null, record: unknown) {
   const t: Target = {
@@ -30,6 +33,28 @@ async function save(db: TempDb, p: number, root: string | null, record: unknown)
     });
     return saveRecord(trx, t, run, await checkRecord(trx, t, record), []);
   });
+}
+
+const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+const BUDGET = 64 * 1024;
+
+/** The read MCP server on a temporary database, answering for a repository registered as git:github.com/o/r */
+async function server(db: TempDb, root: string) {
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/o/r.git"]);
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const read = async (refs: string[]) => {
+    const r = await client.callTool({ name: "read", arguments: { refs, cwd: root } });
+    return (r.content as { text: string }[])[0]?.text ?? "";
+  };
+  return { client, read };
 }
 
 function repo(): { root: string; git: (...args: string[]) => string } {
@@ -80,6 +105,182 @@ test("read rename budget: a record reads the same alone and after a record that 
     const first = (await readUnit(db.reader, p, "trace:ext-s1/five", root, undefined, shared)) ?? "";
     assert.doesNotMatch(first, /rename not checked/);
     assert.equal((await readUnit(db.reader, p, "trace:ext-s1/sixth", root, undefined, shared)) ?? "", alone);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("read budget: ten long sources in one read stay within 64 KiB through the MCP server", async () => {
+  const db = tempDb();
+  const { root } = repo();
+  const p = project(db);
+  const ids = Array.from({ length: 10 }, (_, n) =>
+    message(db, p, { id: `m${n}`, text: `${"long words ".repeat(5_000)}end of ${n}` }),
+  );
+  const { client, read } = await server(db, root);
+  try {
+    const reply = await read(ids.map((id) => `s${id}`));
+    assert.ok(Buffer.byteLength(reply) <= BUDGET, `${Buffer.byteLength(reply)} bytes`);
+  } finally {
+    await client.close();
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** The text a reply carries for its last (cut) ref, and the refs it names for the rest; [] when it ends. */
+function pageOf(reply: string): { body: string; next: string[] } {
+  const lines = reply.split("\n");
+  const body = lines.slice(2, -1).join("\n");
+  const stop =
+    /\n\n\(This reply stops here to stay within 64 KiB\. Call read with refs (\[.*\]) for the rest\.\)$/.exec(
+      body,
+    );
+  return { body: stop ? body.slice(0, stop.index) : body, next: stop ? JSON.parse(stop[1] ?? "[]") : [] };
+}
+
+/** Follows the continuations of one ref until nothing is left, checking each reply's size, and returns the text it showed in order. */
+async function follow(
+  db: TempDb,
+  p: number,
+  ref: string,
+  root: string | null,
+  strip: (body: string) => string,
+) {
+  let refs = [ref];
+  let text = "";
+  let offset = -1;
+  for (let n = 0; n < 100 && refs.length; n++) {
+    const reply = await readRefs(db.reader, p, refs, root);
+    assert.ok(Buffer.byteLength(reply) <= READ_BUDGET, `reply ${n}: ${Buffer.byteLength(reply)} bytes`);
+    const { body, next } = pageOf(reply);
+    const cut = /\n\((\d+) bytes(?: of this record)? more; read (\S+) for the rest\)$/.exec(body);
+    text += strip(cut ? body.slice(0, cut.index) : body);
+    const at = Number(/@(\d+)/.exec(next[0] ?? "")?.[1] ?? Number.POSITIVE_INFINITY);
+    assert.ok(at > offset, `offset ${at} after ${offset}`);
+    offset = at;
+    refs = next;
+  }
+  assert.deepEqual(refs, []);
+  return text;
+}
+
+test("read budget: long sources are read to their last byte through continuations, whatever characters fall on a boundary", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    // 1, 2, 3, and 4 bytes per character, so cuts fall inside every width
+    const text = `${Array.from({ length: 30_000 }, (_, n) => ["a", "é", "あ", "😀"][n % 4] ?? "").join("")}\nend`;
+    const ids = [message(db, p, { id: "m1", text }), message(db, p, { id: "m2", text: `${text}2` })];
+    for (const [n, id] of ids.entries()) {
+      const got = await follow(db, p, `s${id}`, null, (b) => b.replace(/^s\d+: [^\n]*\n/, ""));
+      assert.equal(got, n ? `${text}2` : text);
+    }
+    // Ten refs in one read: each reply stays in the budget and names what is left, the cut one first
+    const many = Array.from({ length: 10 }, (_, n) =>
+      message(db, p, { id: `x${n}`, text: `${"x".repeat(20_000)}${n}` }),
+    );
+    const first = pageOf(
+      await readRefs(
+        db.reader,
+        p,
+        many.map((id) => `s${id}`),
+        null,
+      ),
+    );
+    const cut = Number(/^s(\d+)@\d+$/.exec(first.next[0] ?? "")?.[1]);
+    assert.ok(many.indexOf(cut) > 0, first.next[0]);
+    assert.deepEqual(
+      first.next.slice(1),
+      many.slice(many.indexOf(cut) + 1).map((id) => `s${id}`),
+    );
+    // A source whose header fields from outside are long still leaves room for text
+    const long = "z".repeat(5_000);
+    const id = insert(db, "source", {
+      project_id: p,
+      kind: "pr_comment",
+      artifact: `pr:${long}`,
+      external_id: "c1",
+      revision: 1,
+      author_kind: "person",
+      author_login: long,
+      author_association: "NONE",
+      url: `https://example.com/${long}`,
+      path: `src/${long}.ts`,
+      line_start: 1,
+      created_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text: "y".repeat(100_000),
+      original_bytes: 100_000,
+      content_hash: hash(),
+      indexed: 1,
+    });
+    const reply = await readRefs(db.reader, p, [`s${id}`], null);
+    const header = pageOf(reply).body.split("\n")[0] ?? "";
+    assert.ok(Buffer.byteLength(header) < 1_600, `${Buffer.byteLength(header)} bytes of header`);
+    assert.match(header, /…/);
+    assert.equal(
+      await follow(db, p, `s${id}`, null, (b) => b.replace(/^s\d+: [^\n]*\n/, "")),
+      "y".repeat(100_000),
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("read budget: a record longer than a reply, one quote over 64 KiB, goes on by byte and digest, and a change sends it back to the start", async () => {
+  const db = tempDb();
+  const { root, git } = repo();
+  try {
+    fs.writeFileSync(path.join(root, "f.ts"), "export const f = 1;\n");
+    git("add", "-A");
+    git("commit", "-qm", "f");
+    const commit = git("rev-parse", "HEAD");
+    const p = project(db);
+    const quote = `${"長い引用 ".repeat(15_000)}おわり。`;
+    const m = message(db, p, { id: "m1", text: quote });
+    await save(db, p, root, {
+      units: [
+        {
+          key: "big",
+          kind: "finding",
+          text: "長い引用がある",
+          evidence: [{ source: `s${m}`, quote, role: "states" }],
+          anchors: [{ path: "f.ts", role: "evidence", commit }],
+        },
+      ],
+    });
+    fs.rmSync(path.join(root, "f.ts"));
+    const whole = (await readUnit(db.reader, p, "trace:ext-s1/big", root)) ?? "";
+    assert.ok(Buffer.byteLength(whole) > READ_BUDGET);
+    const strip = (b: string) => b.replace(/^\(u\d+ continued from byte \d+\)\n/, "");
+    assert.equal(await follow(db, p, "trace:ext-s1/big", root, strip), whole);
+    // Begun after other refs, its continuation read alone matches: the rendering does not depend on what else was read
+    const begun = pageOf(await readRefs(db.reader, p, ["trace:ext-s1/nothing", "trace:ext-s1/big"], root));
+    const go = begun.next[0] ?? "";
+    assert.match(go, /^u\d+@\d+:[0-9a-f]{12}$/);
+    assert.doesNotMatch(
+      pageOf(await readRefs(db.reader, p, [go], root)).body,
+      /changed since the previous page/,
+    );
+    // A record that changed between pages is read again from the start
+    await save(db, p, root, {
+      units: [
+        {
+          key: "other",
+          kind: "finding",
+          text: "おわり",
+          evidence: [{ source: `s${m}`, quote: "おわり。", role: "states" }],
+          conflicts: ["trace:ext-s1/big"],
+        },
+      ],
+    });
+    const id = /^u(\d+)@/.exec(go)?.[1];
+    assert.equal(
+      pageOf(await readRefs(db.reader, p, [go], root)).body,
+      `u${id} changed since the previous page; read u${id} again from the start`,
+    );
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

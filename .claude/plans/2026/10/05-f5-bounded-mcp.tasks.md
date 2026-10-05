@@ -97,7 +97,7 @@ read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続�
   - 結果: 直す前: `node --test --test-name-pattern 'read rename budget' test/read.test.ts` → 5 つの commit を使う record の後に読んだ record が「rename not checked」になり、単独で読んだ描画と一致せず fail
   - 結果: 実装後 → 1 pass。`node --test --test-name-pattern 'rename' test/record.test.ts` → 3 pass（1 record あたり 5 commit の上限はそのまま）。`bun run verify` → 0
 
-- [ ] T05: readRefs で応答全体を 64 KiB に収め、source のヘッダーを制限し、record を byte と digest で続ける
+- [x] T05: readRefs で応答全体を 64 KiB に収め、source のヘッダーを制限し、record を byte と digest で続ける
   - 種別: 修正
   - 計画: S3
   - 依存: T04（digest が他の refs によらないことが要る）
@@ -105,6 +105,8 @@ read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続�
   - red: `cd server && node --test --test-name-pattern 'read budget' test/read.test.ts` → 長い source 10 件の read の text が 64 KiB を超えて fail
   - 完了条件: `cd server && node --test --test-name-pattern 'read budget' test/read.test.ts` → pass。各応答の text が 64 KiB 以下、続きを辿ると全 source の本文と全 record の描画に全バイト一致で届く、1 行が 64 KiB を超える引用、長いヘッダー、2/3/4 bytes の文字が境界に来る本文で offset が毎回増える、描画が変わると digest の不一致、入らない refs が次に渡す refs で返る
   - コミット: `fix(read): keep each reply within 64 KiB and continue records and sources where they stopped`
+  - 結果: red（MCP サーバー経由、直す前の mcp.ts）: `node --test --test-name-pattern 'read budget' test/read.test.ts` → 長い source 10 件の read が 551020 bytes で fail
+  - 結果: 実装後 `node --test test/read.test.ts` → 4 pass（MCP 経由で 64 KiB 以下、1〜4 bytes の文字が混じる source 2 件を続きで全バイト一致まで辿り offset が毎回増える、10 refs で切れた ref の続きが先頭で残りが順に並ぶ、長いヘッダーの source が 1,600 bytes 未満のヘッダーで本文を全部読める、64 KiB を超える 1 行の引用を持つ record を u<id>@<byte>:<digest> で全バイト一致まで辿る、他の refs の後で切れた続きを単独で読んでも digest が一致、記録の変化で最初からの読み直しを返す）。案内の大きさの見積もりで残りのバイト数を 0 として数え 2 bytes 超えたので、最大の桁数で数える形に直した。`bun run verify` → 0
 
 ## P3: overview look の続き（#267）
 

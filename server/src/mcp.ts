@@ -17,7 +17,7 @@ import { liveOverview, lookOverview } from "./overview.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
-import { readSource, readUnit } from "./read.ts";
+import { READ_BUDGET, readRefs } from "./read.ts";
 import { parseDiff, REVIEW_BATCH, reviewBatch, selectedText } from "./review.ts";
 import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsText, searchSources, searchUnits } from "./search.ts";
@@ -224,14 +224,17 @@ server.registerTool(
     title: "Read past records and sources in full",
     description:
       "The full record: its text, options, the exact words cited as evidence and adoption with who said them, links (supersedes, conflicts), " +
-      "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source.",
+      "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source. " +
+      `A reply stays within ${READ_BUDGET / 1024} KiB: when it stops, it names the refs to read next, the one it cut first.`,
     inputSchema: z
       .object({
         refs: z
           .array(z.string().min(1).max(300))
           .min(1)
           .max(10)
-          .describe("Record keys, u<id>, or s<id> (s<id>@<byte> reads a long source on from that byte)"),
+          .describe(
+            "Record keys, u<id>, or s<id>; s<id>@<byte> and u<id>@<byte>:<digest>, as a reply names them, go on from where it stopped",
+          ),
         cwd: CWD,
       })
       .strict(),
@@ -241,15 +244,7 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
-      const parts: string[] = [];
-      const renames = new Map();
-      for (const ref of a.refs) {
-        const got = /^s\d/.test(ref)
-          ? await readSource(db, p.id, ref)
-          : await readUnit(db, p.id, ref, p.root, undefined, renames);
-        parts.push(got ?? `${head(inline(ref), 200)}: not found in this project`);
-      }
-      return text(framed(parts.join("\n\n")));
+      return text(await readRefs(db, p.id, a.refs, p.root));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }

@@ -5,9 +5,10 @@ import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { framed } from "./frame.ts";
 import { renamesSince } from "./git.ts";
 import { inline } from "./panel.ts";
-import { head } from "./text.ts";
+import { bytes, head, sha256 } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
 export const UNSUPPORTED =
@@ -39,6 +40,18 @@ export async function readUnit(
   /** Renames per anchor commit, shared by the records of one read so git runs once per commit */
   renames: Renames = new Map(),
 ): Promise<string | null> {
+  return (await unitView(db, projectId, ref, root, asOf, renames))?.text ?? null;
+}
+
+/** A record as readUnit shows it, with its id so a long one can be continued by u<id>. */
+async function unitView(
+  db: Reads,
+  projectId: number,
+  ref: string,
+  root: string | null,
+  asOf: string | undefined,
+  renames: Renames,
+): Promise<{ id: number; text: string } | null> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
   const u = await db
     .selectFrom("unit")
@@ -64,7 +77,7 @@ export async function readUnit(
           .then((rows) => (rows.length === 1 ? rows[0] : undefined)));
   // As of a past time, a record created later does not exist yet
   if (!bare || (asOf && bare.created_at > asOf)) return null;
-  return describe(db, bare, root, asOf, renames);
+  return { id: bare.id, text: await describe(db, bare, root, asOf, renames) };
 }
 
 type Renames = Map<string, Map<string, string | null> | null>;
@@ -433,4 +446,123 @@ function part(id: number, text: string, from: number): string[] {
   return end < all.length
     ? [shown, `(${all.length - end} more bytes; read s${id}@${end} for the rest)`]
     : [shown];
+}
+
+/** What one read reply carries, its frame included: hosts cut or set aside larger replies (Claude Code at 25,000 tokens by default). */
+export const READ_BUDGET = 64 * 1024;
+/** Bytes of each field from outside in a source's header line (where it lives, who wrote it), so the header always leaves room for text */
+const HEADER_FIELD = 300;
+
+/** One ref of a read: a fixed line, or text shown from a byte offset that a ref made by `resume` continues. */
+type Piece =
+  | { line: string }
+  | { head: string; text: string; from: number; resume: (end: number) => string; what: string };
+
+const clip = (v: string) => (bytes(v) > HEADER_FIELD ? `${head(v, HEADER_FIELD - 3)}…` : v);
+
+/** A byte offset moved back to the start of the character it falls in. */
+function boundary(all: Buffer, at: number): number {
+  let start = Math.min(at, all.length);
+  while (start > 0 && start < all.length && ((all[start] ?? 0) & 0xc0) === 0x80) start--;
+  return start;
+}
+
+async function piece(
+  db: Reads,
+  projectId: number,
+  ref: string,
+  root: string | null,
+  renames: Renames,
+): Promise<Piece> {
+  const missing = { line: `${head(inline(ref), 200)}: not found in this project` };
+  const src = /^s([1-9][0-9]{0,15})(?:@(\d{1,9}))?$/.exec(ref);
+  if (src) {
+    const s = await db
+      .selectFrom("source")
+      .selectAll()
+      .where("project_id", "=", projectId)
+      .where("id", "=", Number(src[1]))
+      .executeTakeFirst();
+    if (!s) return missing;
+    return {
+      head: `s${s.id}: ${s.kind} ${clip(s.artifact)}${s.revision > 1 ? ` revision ${s.revision}` : ""}, by ${clip(speaker(s))}, ${s.created_at}${s.url ? `, ${clip(s.url)}` : ""}${s.path ? `, ${clip(s.path)}${s.line_start ? `:${s.line_start}` : ""}` : ""}${s.truncated ? " (middle not saved)" : ""}\n`,
+      text: s.text,
+      from: Number(src[2] ?? 0),
+      resume: (end) => `s${s.id}@${end}`,
+      what: "bytes",
+    };
+  }
+  // A long record goes on from a byte of its text as shown when it was cut; the digest tells when that text has changed since
+  const more = /^u([1-9][0-9]{0,15})@(\d{1,9}):([0-9a-f]{12})$/.exec(ref);
+  const u = await unitView(db, projectId, more ? `u${more[1]}` : ref, root, undefined, renames);
+  if (!u) return missing;
+  const digest = sha256(u.text).toString("hex").slice(0, 12);
+  if (more && more[3] !== digest)
+    return { line: `u${u.id} changed since the previous page; read u${u.id} again from the start` };
+  const from = Number(more?.[2] ?? 0);
+  return {
+    head: from > 0 ? `(u${u.id} continued from byte ${from})\n` : "",
+    text: u.text,
+    from,
+    resume: (end) => `u${u.id}@${end}:${digest}`,
+    what: "bytes of this record",
+  };
+}
+
+/**
+ * read's reply for refs, framed: whole while they fit in READ_BUDGET; then the ref that does not fit is cut at a character and the reply
+ * names the refs to call read with for the rest, its continuation first. Every reply after the first shows at least one character more.
+ */
+export async function readRefs(
+  db: Reads,
+  projectId: number,
+  refs: string[],
+  root: string | null,
+): Promise<string> {
+  const renames: Renames = new Map();
+  const shown: string[] = [];
+  let used = bytes(framed(""));
+  let next: string[] = [];
+  const tail = (left: string[]) =>
+    left.length
+      ? `\n\n(This reply stops here to stay within ${READ_BUDGET / 1024} KiB. Call read with refs ${JSON.stringify(left)} for the rest.)`
+      : "";
+  for (const [i, ref] of refs.entries()) {
+    const rest = refs.slice(i + 1);
+    const p = await piece(db, projectId, ref, root, renames);
+    const sep = shown.length ? 2 : 0;
+    const all = "line" in p ? null : Buffer.from(p.text, "utf8");
+    const from = all ? boundary(all, "line" in p ? 0 : p.from) : 0;
+    const whole = "line" in p ? p.line : `${p.head}${all?.subarray(from).toString("utf8") ?? ""}`;
+    if (used + sep + bytes(whole) + bytes(tail(rest)) <= READ_BUDGET) {
+      shown.push(whole);
+      used += sep + bytes(whole);
+      continue;
+    }
+    if ("line" in p || !all) {
+      next = refs.slice(i);
+      break;
+    }
+    const note = (left: number, end: number) =>
+      `\n(${left} ${p.what} more; read ${p.resume(end)} for the rest)`;
+    // The note and the refs after it are sized with the largest numbers they can hold, so the text cut to the room left always fits
+    const room =
+      READ_BUDGET -
+      used -
+      sep -
+      bytes(p.head) -
+      bytes(note(all.length, all.length)) -
+      bytes(tail([p.resume(all.length), ...rest]));
+    const text = head(all.subarray(from).toString("utf8"), Math.max(room, 0));
+    if (!text) {
+      next = refs.slice(i);
+      break;
+    }
+    const end = from + bytes(text);
+    shown.push(`${p.head}${text}${note(all.length - end, end)}`);
+    used += sep + bytes(shown.at(-1) ?? "");
+    next = [p.resume(end), ...rest];
+    break;
+  }
+  return framed(`${shown.join("\n\n")}${tail(next)}`);
 }
