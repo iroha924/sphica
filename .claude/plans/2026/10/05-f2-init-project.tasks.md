@@ -30,13 +30,14 @@ base: main
   - 完了条件: `bun run release:plan -- --base d9136f72` → 4 か所が 0.6.32、`bun run verify` → 終了コード 0
   - コミット: `chore(release): bump to 0.6.32`
   - 結果: `bun run release:plan -- --base d9136f72` → `version: npm 0.6.32 / plugin 0.6.32 / marketplace 0.6.32 / Codex 0.6.32`、kind は none（まだ package の入力を変えていない）。`bun run verify` → exit 0
-- [ ] T02: file-lock.ts に withFileLock と replaceFile を足し、テストを書く
+- [x] T02: file-lock.ts に withFileLock と replaceFile を足し、テストを書く
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/src/file-lock.ts`, `server/test/file-lock.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 待つ・時間切れ・pid が書かれる前のロックを奪わない・持ち主以外は消さない・置き換え・失敗時に元が残るの各テストが pass
   - コミット: `feat(lock): add an owner-only file lock and an atomic file replace`
+  - 結果: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 9 件 pass（約 1.3 秒）。`bun run verify` → exit 0
 - [ ] T03: Windows の CI で file-lock のテストを流す
   - 種別: 追加
   - 計画: S5
