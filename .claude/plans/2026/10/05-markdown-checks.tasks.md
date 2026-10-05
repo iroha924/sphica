@@ -30,13 +30,14 @@ markdownlint-cli2 が、リポジトリの Markdown の構造の崩れを pre-co
   - 完了条件: `git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件
   - コミット: `chore(plans): remove the finished F2 plan`
   - 結果: `git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件
-- [ ] T02: markdownlint-cli2 を入れ、構造の規則だけで全文書を検査し、0.6.33 に上げる
+- [x] T02: markdownlint-cli2 を入れ、構造の規則だけで全文書を検査し、0.6.33 に上げる
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/package.json`, `server/bun.lock`, `.markdownlint-cli2.jsonc`, `scripts/lib/markdown-files.mjs`, `scripts/check-markdown.mjs`, `package.json`, `lefthook.yml`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/package.json`, `server/bun.lock`, `.markdownlint-cli2.jsonc`, `scripts/lib/markdown-files.mjs`, `scripts/check-markdown.mjs`, `package.json`, `lefthook.yml`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `knip.json`
   - 完了条件: `bun run markdown` → 終了コード 0。`[x]()` を足した一時的な変更で → MD042 で落ちる（戻す）。依存を stage した後の `bun run release:plan -- --base 30245523` → plugin、4 か所が 0.6.33。`bun run verify` → 終了コード 0
   - コミット: `ci(docs): lint the structure of Markdown with markdownlint-cli2`
+  - 結果: `bun run markdown` → 32 ファイル、0 件。SECURITY.md に `[x]()` を足すと `MD042/no-empty-links` で落ちた（戻した）。依存を stage した後の `bun run release:plan -- --base 30245523` → `release kind: plugin`、4 か所を 0.6.33 に上げた。`bun run verify` → exit 0
 
 ## P2: リンクの検査
 
@@ -87,3 +88,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `docs(claude): mention lychee and the Markdown checks in the commands`
 
 ## 記録
+- 2026-10-05 / T02 / knip が scripts から実行ファイルのパスで呼ぶ markdownlint-cli2 を未使用と判定した。kysely-codegen と同じく server の ignoreDependencies に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた

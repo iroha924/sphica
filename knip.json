@@ -27,7 +27,7 @@
         "evals/retrieval/run.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
-      "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook"],
+      "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook", "markdownlint-cli2"],
       "ignoreBinaries": ["codex"]
     }
   },

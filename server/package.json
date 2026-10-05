@@ -30,6 +30,7 @@
     "knip": "6.36.0",
     "kysely-codegen": "0.20.0",
     "lefthook": "^2.1.14",
+    "markdownlint-cli2": "0.23.3",
     "typescript": "^7.0.2"
   },
   "engines": {

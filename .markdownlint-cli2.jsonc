@@ -1,0 +1,21 @@
+// Only the rules where a mistake breaks how a document renders or where its links lead. Style rules (line length, heading style,
+// list numbering) stay off: the documents follow their own conventions, and a style failure would hide a broken document.
+{
+  "config": {
+    "default": false,
+    // Reversed link syntax: (text)[url]
+    "MD011": true,
+    // Empty links: [text]() or [text](#)
+    "MD042": true,
+    // A fragment that names no heading in the same document
+    "MD051": true,
+    // A reference label with no definition
+    "MD052": true,
+    // A table row with a different number of cells
+    "MD056": true,
+    // A table without blank lines around it
+    "MD058": true
+  },
+  // Plans are working documents removed once their work ships, and their links describe the tree at planning time
+  "ignores": [".claude/plans/**"]
+}
