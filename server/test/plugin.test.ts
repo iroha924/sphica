@@ -1142,7 +1142,7 @@ test("the review Skill walks every batch of the decision lane and refuses a pass
     "Changes to the working tree between batches (which code locations still exist) are not detected",
     "list every place it is violated in that finding's evidence",
     "call `read` again with exactly what it names until nothing is left",
-    "Batch 1 of <n> backed (selection <selection>)",
+    "Batch 1 of <n> backed (selection <selection>).",
     "Without a line for every batch from 1 to n, the verdict is `blocked_unknown`",
   ])
     assert.ok(precedent.includes(rule), rule);
@@ -1152,8 +1152,16 @@ test("the review Skill walks every batch of the decision lane and refuses a pass
     problems: [],
     batch: { all: [], records: [], k: 1, n: 2, selection: "0123456789abcdef", next: null },
   });
-  const receipt = /^Batch \d+ of \d+ backed \(selection /;
+  const receipt = /^Batch \d+ of \d+ backed \(selection [0-9a-f]{16}\)\./;
   assert.match(reply, receipt);
+  // Each example and rule names the whole first sentence, its closing period included
+  for (const example of [
+    "Batch 1 of <n> backed (selection <selection>).",
+    "Batch 2 of <n> backed (selection <selection>).",
+  ])
+    assert.ok(precedent.includes(`\n${example}\n`), example);
+  assert.ok(precedent.includes("`Batch k of n backed (selection ...).`"));
+  assert.ok(skill.includes("`Batch k of n backed (selection ...).`"));
   const written = [
     ...precedent.matchAll(/^.*\b[Bb]atch (?:k|\d+) of (?:n|<n>) backed.*$/gm),
     ...skill.matchAll(/^.*[Bb]atch k of n backed.*$/gm),
@@ -1161,7 +1169,7 @@ test("the review Skill walks every batch of the decision lane and refuses a pass
   assert.ok(written.length >= 3);
   for (const [line] of written) assert.doesNotMatch(line, /\bbatch (?:k|\d+) of/, line);
   for (const rule of [
-    "Past decisions: its `Batch k of n backed (selection ...)` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`",
+    "Past decisions: its `Batch k of n backed (selection ...).` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`",
   ])
     assert.ok(skill.includes(rule), rule);
 });

@@ -73,6 +73,16 @@ base: main
   - 結果: red: `node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → precedent.md に「Batch 1 of <n> backed (selection <selection>)」が無く fail
   - 結果: 実装後 → 1 pass（checkedText の返事が `Batch \d+ of \d+ backed (selection ` で始まり、precedent.md と SKILL.md の受領行に小文字の `batch k of` が無い）。`bun run verify` → 0
 
+- [x] T10: 受領行の例と規定に、返事の 1 文目の末尾のピリオドまで含める
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T09（受領行が大文字の形になっている）
+  - 変更: `plugin/skills/review/reviewers/precedent.md`, `plugin/skills/review/SKILL.md`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → precedent.md に「Batch 1 of <n> backed (selection <selection>).」の行が無く fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → pass。checkedText の返事が `Batch k of n backed (selection <16 桁>).` で始まり、precedent.md の例 2 行と規定、SKILL.md の照合の規定がピリオドまで同じ形
+  - コミット: `fix(review): copy the receipt's closing period too`
+  - 結果: red: 上の完了条件のコマンド → 「Batch 1 of <n> backed (selection <selection>).」で fail。実装後 → 1 pass。`bun run verify` → 0
+
 ## P2: read の応答の上限（#267）
 
 read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続きを辿れば全文に届く。
@@ -130,3 +140,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T03 / Codex のタスクレビュー F1（P2）: 受領行が小文字の `batch` で、review_check の返事（`Batch`）を写すと照合で食い違う / 採る。修正タスク T09 を足した
 - 2026-10-05 / T04 / 変更欄: 前 `server/src/read.ts`, `server/src/mcp.ts`, `server/test/read.test.ts` → 後 `server/src/read.ts`, `server/test/read.test.ts`, `server/test/record.test.ts`（mcp.ts は変えず、上限の数え方が変わった既存テストの題名を直した）
 - 2026-10-05 / T04 / Codex のタスクレビュー: 指摘なし（テストは EPERM で流せず、コードを読んでの判定） / 対応なし
+- 2026-10-05 / T09 / Codex のタスクレビュー F1: 受領行の例に、返事の 1 文目の末尾のピリオドが無く完全一致しない / 採る。修正タスク T10 を足し、同じコミットで終えた

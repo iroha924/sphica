@@ -311,7 +311,7 @@ The launcher compares it with the lane name and model in the launch plan and wit
 - `findings` does not match the number listed
 - There are 2 or more such lines
 - `coverage=COMPLETE` but `unfinished` is not empty
-- Past decisions: its `Batch k of n backed (selection ...)` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`
+- Past decisions: its `Batch k of n backed (selection ...).` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`
 
 **Do not write causes you did not observe.** Whether it hit a limit, lost the connection, or forgot to write the line
 is unknown unless the log shows it. **`UNKNOWN` means "could not observe", not "did not check".**

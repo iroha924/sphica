@@ -108,7 +108,7 @@ For each batch, pass your verdicts to `review_check(diff, findings, after, selec
 `selection`: each finding is `outcome` (`violation`, `complies`, `unrelated`, `undetermined`), `unit` (the record key), `reason`, and for a
 violation or compliance, `evidence` (the changed path and the added line number; for a deleted or renamed-away file, the path alone).
 Give every record of the batch exactly one finding: when a record is violated in several places, list every place it is violated in that finding's evidence.
-Fix what it reports and check again. A verdict it rejects is not a finding. Keep each line it returns as `Batch k of n backed (selection ...)`.
+Fix what it reports and check again. A verdict it rejects is not a finding. Keep each line it returns as `Batch k of n backed (selection ...).`
 
 ## Output
 
@@ -120,13 +120,13 @@ Fix what it reports and check again. A verdict it rejects is not a finding. Keep
 verdict: pass | changes_required | blocked_unknown
 findings: <count>
 questions searched: <count> (of which returned 0: <count>)
-Batch 1 of <n> backed (selection <selection>)
-Batch 2 of <n> backed (selection <selection>)
+Batch 1 of <n> backed (selection <selection>).
+Batch 2 of <n> backed (selection <selection>).
 1. [severity] file:line — one-line summary
 2. ...
 ```
 
-Write one `Batch k of n backed (selection ...)` line for every batch `review_check` passed: the first sentence of its reply, as it is. **Without a line for every batch from 1 to n, the verdict is `blocked_unknown`**, never `pass`.
+Write one `Batch k of n backed (selection ...).` line for every batch `review_check` passed: the first sentence of its reply, as it is. **Without a line for every batch from 1 to n, the verdict is `blocked_unknown`**, never `pass`.
 With no record selected there are no batch lines.
 
 **Never shorten or cut off the list. Give every finding.**
