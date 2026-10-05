@@ -337,3 +337,29 @@ test("read header terminal: a header field holding a terminal sequence is cleane
     await db.done();
   }
 });
+
+test("read hidden sequence: a terminal string longer than a page stays hidden on every page, and the text after it shows", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    // Visible text before and after, so the cut falls inside the sequence and the rest is still more than a page
+    const id = message(db, p, {
+      id: "m1",
+      text: `intro ${"a".repeat(30_000)}\u001b]0;${"H".repeat(100_000)}\u0007${"b".repeat(40_000)}VISIBLE TAIL`,
+    });
+    let refs = [`s${id}`];
+    let seen = "";
+    for (let n = 0; n < 10 && refs.length; n++) {
+      const reply = await readRefs(db.reader, p, refs, null);
+      assert.ok(Buffer.byteLength(reply) <= READ_BUDGET);
+      seen += reply;
+      refs = pageOf(reply).next;
+    }
+    assert.deepEqual(refs, []);
+    assert.match(seen, /intro /);
+    assert.match(seen, /VISIBLE TAIL/);
+    assert.doesNotMatch(seen, /HHHHHHHH/);
+  } finally {
+    await db.done();
+  }
+});

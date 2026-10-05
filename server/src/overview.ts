@@ -109,6 +109,8 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
 /** Anchors checked per page, bytes per line, and bytes for all the lines of a page together: the rest of a reply's budget holds the frame,
  * the headings, what was not checked, and the closing lines. */
 const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: READ_BUDGET - 4 * 1024 } as const;
+/** Condition rows read for one page: more than its bytes can show (a line is over 28 bytes), so a page never reads the whole rest */
+const CONDITION_ROWS = Math.ceil(LOOK_LIMITS.bytes / 28);
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
 const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
 
@@ -259,6 +261,7 @@ export async function lookOverview(
           .as("stands"),
       ])
       .orderBy("o.id")
+      .limit(CONDITION_ROWS)
       .execute();
     let last = start;
     for (const o of options) {
@@ -269,6 +272,7 @@ export async function lookOverview(
       }
       last = o.id;
     }
+    if (!stop && options.length === CONDITION_ROWS) stop = { s: "options", id: last };
   }
   if (!stop && stage <= 2) {
     const start = from.s === "deferred" ? from.id : 0;
@@ -280,6 +284,7 @@ export async function lookOverview(
       .where("id", ">", start)
       .select(["id", "key", "text", "revisit_when"])
       .orderBy("id")
+      .limit(CONDITION_ROWS)
       .execute();
     let last = start;
     for (const d of deferred) {
@@ -290,6 +295,7 @@ export async function lookOverview(
       }
       last = d.id;
     }
+    if (!stop && deferred.length === CONDITION_ROWS) stop = { s: "deferred", id: last };
   }
 
   // Marked lines in instruction files: only the place and the key are shown, never the line, so the file's text cannot forge lines here

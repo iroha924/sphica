@@ -7,7 +7,7 @@ import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
 import { renamesSince } from "./git.ts";
-import { inline, plain } from "./panel.ts";
+import { inline, plain, STRING_SEQUENCE } from "./panel.ts";
 import { bytes, head, sha256 } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
@@ -442,6 +442,21 @@ function boundary(all: Buffer, at: number): number {
   return start;
 }
 
+/** Byte ranges of the terminal string sequences plain drops whole: a page never starts or ends inside one, or its rest would show */
+function sequences(all: Buffer): [number, number][] {
+  const text = all.toString("utf8");
+  const out: [number, number][] = [];
+  let index = 0;
+  let at = 0;
+  for (const m of text.matchAll(STRING_SEQUENCE)) {
+    at += bytes(text.slice(index, m.index));
+    index = m.index + m[0].length;
+    out.push([at, at + bytes(m[0])]);
+    at += bytes(m[0]);
+  }
+  return out;
+}
+
 async function piece(
   db: Reads,
   projectId: number,
@@ -507,7 +522,9 @@ export async function readRefs(
     const p = await piece(db, projectId, ref, root, renames);
     const sep = shown.length ? 2 : 0;
     const all = "line" in p ? null : Buffer.from(p.text, "utf8");
-    const from = all ? boundary(all, "line" in p ? 0 : p.from) : 0;
+    const hide = all ? sequences(all) : [];
+    const begin = all ? boundary(all, "line" in p ? 0 : p.from) : 0;
+    const from = hide.find(([a, b]) => a < begin && begin < b)?.[1] ?? begin;
     // The header and the text are each made plain on their own: a terminal string sequence left open would otherwise swallow what follows
     const whole =
       "line" in p ? p.line : `${plain(p.head)}${plain(all?.subarray(from).toString("utf8") ?? "")}`;
@@ -530,12 +547,15 @@ export async function readRefs(
       bytes(p.head) -
       bytes(note(all.length, all.length)) -
       bytes(tail([p.resume(all.length), ...rest]));
-    const text = head(all.subarray(from).toString("utf8"), Math.max(room, 0));
+    let end = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
+    // A cut inside a sequence moves before it, or past it when the page starts there (the sequence then shows nothing)
+    const inside = hide.find(([a, b]) => a < end && end < b);
+    if (inside) end = inside[0] > from ? inside[0] : inside[1];
+    const text = all.subarray(from, end).toString("utf8");
     if (!text) {
       next = refs.slice(i);
       break;
     }
-    const end = from + bytes(text);
     shown.push(`${plain(p.head)}${plain(text)}${note(all.length - end, end)}`);
     used += sep + bytes(shown.at(-1) ?? "");
     next = [p.resume(end), ...rest];

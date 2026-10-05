@@ -233,6 +233,25 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - コミット: `fix(overview): start the markers on the next page when their cursor will not fit`
   - 結果: red: 上のコマンド → 33820 bytes で fail。実装後: markers の段の入口で、前の段の行とカーソルの分が予算を超えるなら markers の手前で止め、そのページに markers の見出しを出さない。`node --test test/overview.test.ts` → 17 pass。`bun run verify` → 0
 
+- [x] T21: read のページの始まりと切れ目を、端末の制御文字列の中に置かない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T11（切った本文を案内の前に plain にする）
+  - 変更: `server/src/read.ts`, `server/src/panel.ts`, `server/test/read.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'read hidden sequence' test/read.test.ts` → 1 ページより長い OSC の途中で切れると、次のページで隠れていた中身（H の列）が見えて fail
+  - 完了条件: `cd server && node --test test/read.test.ts` → pass。どのページにも中身が出ず、前後の見える本文と続きは全部届く
+  - コミット: `fix(read): never start or cut a page inside a terminal sequence`
+  - 結果: red: 上のコマンド → H の列が出て fail（最初は本文全体が plain の後で 1 ページに収まり red にならなかったので、前後に見える本文を足して切れ目が列の中に落ちる形にした）。実装後: STRING_SEQUENCE の範囲を byte で求め、ページの始まりが列の中なら列の後へ、切れ目が列の中なら列の前（列がページの先頭からなら列の後）へ動かす。`node --test test/read.test.ts` → 7 pass。`bun run verify` → 0
+
+- [x] T22: look の条件の段は、1 ページで出せる行数を超える分を読まない
+  - 種別: 変更
+  - 計画: S4
+  - 依存: T06（look のカーソルがある）
+  - 変更: `server/src/overview.ts`
+  - 完了条件: `cd server && node --test test/overview.test.ts` → pass（条件 120 件ずつのページ送りが 1 回ずつ届く）
+  - コミット: `fix(read): never start or cut a page inside a terminal sequence`
+  - 結果: options と deferred の取得に `CONDITION_ROWS`（LOOK_LIMITS.bytes / 28、1 行は 28 bytes を超える）の上限を付け、全部出せて上限に達したらそこで止める。性能の直しなので red は無い。`node --test test/overview.test.ts` → 17 pass。`bun run verify` → 0
+
 ## 記録
 
 - 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま
@@ -256,3 +275,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / 完了確認 / package にした server（HEAD 7907cd2d）で両ホストを 1 回ずつ実測: 150 KB の `LINE-00001 lorem ipsum dolor sit amet` の行の source を read の `["s1"]` で読む。Codex 0.160.0（codex exec --json、hooks と plugins は無効）は mcp_tool_call の結果が 33,701 文字で truncated なし、モデルは LINE-00001〜00852 を切れ目なく見て続きは s1@32348。Claude Code 2.1.289（claude -p、--strict-mcp-config）は tool_result がファイルに退避されずそのまま 33,660 文字、続きは s1@32348 / 32 KiB は両ホストでそのまま届く。日本語、引用符やバックスラッシュの多い本文、Codex の Code Mode は未計測
 - 2026-10-05 / T13〜T16 / Codex の再レビュー（high）: F1（P2、再現済み）50 の倍数の件数で最後の id を after にした空の束の check が backed を返す → T17。F2（P2、再現済み）長いパスの指示ファイルのカーソルで look のページが 32 KiB を超える → T18。F3（P2）driver で diff を明示すると selection を作り直す → T19 / すべて採る
 - 2026-10-05 / T17〜T19 / Codex の再レビュー（high）F1（P2、再現済み）: markers のカーソルの分を、前の段の行がページを使った後でしか数えていないので、条件の後に長いパスの marker が来ると 32 KiB を超える / 採る。修正タスク T20。T17 と T19 には指摘なし
+- 2026-10-05 / PR #288 / GitHub の Codex（56635757 へのレビュー）P2 4 件: 最後の束の終わりの after（T17 で直し済み）、markers のカーソルの大きさ（T18・T20 で直し済み）、条件の段がページごとに残りを全部読む（T22 で直す）、1 ページより長い制御文字列の中身が次のページで見える（T21 で直す。AGENTS.md の、人に見えない文字をエージェントに見せない不変条件に当たる） / 前 2 件はスレッドを閉じ、後 2 件は直してから閉じる
