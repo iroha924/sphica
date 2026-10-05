@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { leaves } from "./anchors.ts";
 import type { Reads } from "./db.ts";
+import { replaceFile, withFileLock } from "./file-lock.ts";
 import { sphicaHome } from "./sqlite.ts";
 
 export type Place = { key: string; root: string; name: string };
@@ -175,12 +176,16 @@ export function nameLocal(dir: string, name: string): Place {
   if (place?.key.startsWith("git:"))
     throw new Error(`${place.root} has a git remote, so its key is ${place.key}. Add it without --name.`);
   const root = rootOf(dir);
-  const m = localMap();
-  m[root] = name;
   // **Create the directory first.** `sphica init` creates ~/.sphica/, but a user may name a project before that.
   // Writing without it fails with ENOENT, and the project cannot be named.
   fs.mkdirSync(path.dirname(localFile()), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(localFile(), `${JSON.stringify(m, null, 2)}\n`);
+  // Read under the lock: two inits that read before either writes would each drop the other's name. Readers take no lock, and the
+  // replace shows them the old or the new table whole.
+  withFileLock(`${localFile()}.lock`, () => {
+    const m = localMap();
+    m[root] = name;
+    replaceFile(localFile(), `${JSON.stringify(m, null, 2)}\n`);
+  });
   return { key: `local:${name}`, root, name };
 }
 
@@ -190,11 +195,25 @@ export async function projectId(db: Reads, key: string): Promise<number | null> 
   return r?.id ?? null;
 }
 
+/** p with a leading home directory written as ~, for showing; p itself when it is under none of homes */
+export function underHome(p: string, homes: string[], api: path.PlatformPath = path): string {
+  // relative() reads both separators on Windows (Git for Windows writes roots with forward slashes)
+  for (const h of homes) {
+    const rel = api.relative(h, p);
+    if (rel === "") return "~";
+    if (rel !== ".." && !rel.startsWith(`..${api.sep}`) && !api.isAbsolute(rel)) return `~${api.sep}${rel}`;
+  }
+  return p;
+}
+
+/** The one directory whose children doctor looks through for registered projects */
+export const projectsDir = (): string => path.join(os.homedir(), "Projects");
+
 /**
  * Finds registered projects on this machine. Looks only directly under ~/Projects and at named projects.
  * **When two places share a key, neither is chosen.** Never report whichever copy sorts first as the project.
  */
-export function localRoots(roots = [path.join(os.homedir(), "Projects")]): {
+export function localRoots(roots = [projectsDir()]): {
   found: Map<string, string>;
   ambiguous: Map<string, string[]>;
 } {

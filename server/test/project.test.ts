@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,8 +17,10 @@ import {
   patchPaths,
   projectId,
   relativeTo,
+  underHome,
   writePlace,
 } from "../src/project.ts";
+import { type Child, childEnv, runUntilSignal } from "./race.ts";
 import { tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to keep the name map apart; SPHICA_HOME would win over it and point at the shell's directory
@@ -335,4 +337,119 @@ test("a mixed-case remote finds the project registered under the normalized key"
     await db.done();
     r.done();
   }
+});
+
+const NAME_CHILD = path.join(import.meta.dirname, "fixtures", "name-local-child.ts");
+
+/** A home with a name map holding one entry, and two plain directories to name */
+function nameHome(): { home: string; map: string; first: string; a: string; b: string; done: () => void } {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-names-")));
+  const [first, a, b] = ["first", "a", "b"].map((n) => path.join(home, n)) as [string, string, string];
+  for (const d of [first, a, b]) fs.mkdirSync(d);
+  fs.mkdirSync(path.join(home, ".sphica"));
+  const map = path.join(home, ".sphica", "projects.json");
+  fs.writeFileSync(map, JSON.stringify({ [first]: "first" }));
+  // Windows reads the home from USERPROFILE, so both are swapped (the child gets both too)
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  return {
+    home,
+    map,
+    first,
+    a,
+    b,
+    done: () => {
+      for (const [k, v] of Object.entries(real)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      fs.rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+// Two inits read the same map; whichever published last would drop the other's name
+test("two inits naming different directories at once both keep their names (race)", async (t) => {
+  const h = nameHome();
+  const signals = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-signals-"));
+  try {
+    let child: Child | null = null;
+    // Right before this process publishes the map it built, the other init runs to its own publish (or to the held lock)
+    const hold = (target: unknown) => {
+      if (child || String(target) !== h.map) return;
+      child = runUntilSignal(NAME_CHILD, ["race", h.b, "beta"], childEnv(h.home), signals);
+    };
+    const write = fs.writeFileSync;
+    const rename = fs.renameSync;
+    t.mock.method(fs, "writeFileSync", (target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+      hold(target);
+      return (write as (...a: unknown[]) => void)(target, ...rest);
+    });
+    t.mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+      hold(to);
+      rename(from, to);
+    });
+    nameLocal(h.a, "alpha");
+    t.mock.restoreAll();
+    assert.ok(child, "this process never published the name map");
+    const r = await (child as Child);
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(JSON.parse(fs.readFileSync(h.map, "utf8")), {
+      [h.first]: "first",
+      [h.a]: "alpha",
+      [h.b]: "beta",
+    });
+  } finally {
+    h.done();
+    fs.rmSync(signals, { recursive: true, force: true });
+  }
+});
+
+test("an init killed as it publishes leaves the old map whole, and its lock names itself to the next init", () => {
+  const h = nameHome();
+  const signals = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-signals-"));
+  try {
+    const r = spawnSync(process.execPath, [NAME_CHILD, "die", h.a, "alpha", signals], {
+      env: childEnv(h.home),
+      timeout: 30_000,
+    });
+    assert.equal(r.status, 1, String(r.stderr));
+    assert.deepEqual(JSON.parse(fs.readFileSync(h.map, "utf8")), { [h.first]: "first" });
+    assert.equal(identify(h.first)?.key, "local:first");
+    const lock = `${h.map}.lock`;
+    assert.throws(
+      () => nameLocal(h.b, "beta"),
+      (e: Error) => e.message.includes(lock) && e.message.includes("not running"),
+    );
+    assert.deepEqual(JSON.parse(fs.readFileSync(h.map, "utf8")), { [h.first]: "first" });
+  } finally {
+    h.done();
+    fs.rmSync(signals, { recursive: true, force: true });
+  }
+});
+
+test("a publish that fails leaves the old map, no temporary file, and no lock", (t) => {
+  const h = nameHome();
+  try {
+    t.mock.method(fs, "renameSync", () => {
+      throw Object.assign(new Error("cross-device"), { code: "EXDEV" });
+    });
+    assert.throws(() => nameLocal(h.a, "alpha"), /cross-device/);
+    t.mock.restoreAll();
+    assert.deepEqual(fs.readdirSync(path.dirname(h.map)), ["projects.json"]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(h.map, "utf8")), { [h.first]: "first" });
+  } finally {
+    h.done();
+  }
+});
+
+// Git for Windows reports a repository's root with forward slashes, while the home directory has backslashes
+test("a path under home is shown from ~ whichever separators it was written with (under home)", () => {
+  assert.equal(underHome("/Users/o/Projects/one", ["/Users/o"], path.posix), "~/Projects/one");
+  assert.equal(underHome("/Users/other/x", ["/Users/o"], path.posix), "/Users/other/x");
+  assert.equal(underHome("/Users/o2/x", ["/Users/o"], path.posix), "/Users/o2/x");
+  assert.equal(underHome("C:/Users/o/Projects/one", ["C:\\Users\\o"], path.win32), "~\\Projects\\one");
+  assert.equal(underHome("C:\\Users\\o\\Projects\\one", ["C:\\Users\\o"], path.win32), "~\\Projects\\one");
+  assert.equal(underHome("D:/Projects/one", ["C:\\Users\\o"], path.win32), "D:/Projects/one");
 });

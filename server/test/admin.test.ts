@@ -11,6 +11,7 @@ import { SCHEMA_REVISION } from "../src/db.ts";
 import { connectWriter } from "../src/db-write.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { fakeGhPath } from "./fake-gh.ts";
+import { type Child, childEnv, runUntilSignal } from "./race.ts";
 import { at, hash } from "./temp-db.ts";
 
 const signedOut = fakeGhPath();
@@ -55,6 +56,59 @@ test("sphica init creates the database in WAL mode with a version and leaves it 
     [],
     "no temp file left",
   );
+});
+
+const INIT_CHILD = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "db-init-child.ts");
+
+// Without hard links the database is placed by rename, which replaces whatever another init placed after this one looked
+test("two inits creating the database at once without hard links: one creates it and its rows survive (race)", async (t) => {
+  const home = fs.realpathSync(tmp());
+  const file = path.join(home, "sphica.db");
+  const signals = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-signals-"));
+  t.mock.method(fs, "linkSync", () => {
+    throw Object.assign(new Error("hard links are not supported"), { code: "EPERM" });
+  });
+  let child: Child | null = null;
+  const rename = fs.renameSync;
+  // Right before this init places its database, the other one runs to its own placing (or to the held lock)
+  t.mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+    if (!child && String(to) === file) child = runUntilSignal(INIT_CHILD, [file], childEnv(home), signals);
+    rename(from, to);
+  });
+  const log = console.log;
+  console.log = () => {};
+  let mine: string;
+  try {
+    dbInit(file);
+    mine = "Created";
+    const w = connectWriter("owner", file);
+    w.prepare("insert into project (key, name) values ('git:example/parent', 'parent')").run();
+    w.close();
+  } catch (e) {
+    mine = (e as Error).message;
+  } finally {
+    console.log = log;
+    t.mock.restoreAll();
+  }
+  assert.ok(child, "this init never placed its database");
+  const r = await (child as Child);
+  assert.equal(r.code, 0, r.out);
+  const theirs = /Created:/.test(r.out) ? "Created" : r.out;
+  const outcomes = [mine, theirs];
+  assert.equal(
+    outcomes.filter((x) => x === "Created").length,
+    1,
+    `both or neither created it: ${outcomes.join(" / ")}`,
+  );
+  assert.match(outcomes.find((x) => x !== "Created") ?? "", /already exists/);
+  const winner = outcomes[0] === "Created" ? "git:example/parent" : "git:example/child";
+  const raw = new DatabaseSync(file, { readOnly: true });
+  const keys = (raw.prepare("select key from project order by key").all() as { key: string }[]).map(
+    (x) => x.key,
+  );
+  raw.close();
+  assert.deepEqual(keys, [winner]);
+  fs.rmSync(signals, { recursive: true, force: true });
 });
 
 // Even if two sphica init runs both see no database, the later one does not replace the first one's database, with its records, by an empty one.
