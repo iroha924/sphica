@@ -368,6 +368,18 @@ test("doctor queue: the recording queue as it is, and the record tool calls that
     call("codex", null, "2026-10-05T04:00:00.000Z");
     call("codex", null, "2026-10-05T05:00:00.000Z", "codex-session");
     call(null, null, "2026-10-05T06:00:00.000Z");
+    // A joined observation whose hook did not know the turn keeps its session's later replies out
+    raw
+      .prepare(
+        "insert into session (id, project_id, host, external_id, started_at) values ('s-nt', 1, 'claude-code', 'ext-nt', '2026-10-05T00:00:00.000Z')",
+      )
+      .run();
+    call("claude-code", "toolu_nt", "2026-10-05T08:00:00.000Z");
+    raw
+      .prepare(
+        "insert into tool_call_observation (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 'ext-nt', null, 'toolu_nt', 'mcp__plugin_sphica_record__record_save', 1, '2026-10-05T08:00:00.000Z')",
+      )
+      .run();
     // Another project with the same name is its own row, told apart by its key
     raw.prepare("insert into project (key, name) values ('git:gitlab.com/o/r', 'o/r')").run();
     raw
@@ -389,7 +401,13 @@ test("doctor queue: the recording queue as it is, and the record tool calls that
     assert.doesNotMatch(row(out, "Observations not sent"), /adopt/);
     const adoption = out.split("\n").filter((l) => /△ AI adoption /.test(l));
     const local = (t: string) => new Date(t).toLocaleString("sv-SE");
-    assert.equal(adoption.length, 4, out);
+    assert.equal(adoption.length, 5, out);
+    assert.match(
+      adoption.find((l) => l.includes("did not know")) ?? "",
+      new RegExp(
+        `o/r \\(git:github.com/o/r\\): Claude Code replies in 1 session from ${local("2026-10-05T08:00:00.000Z")} on are not adopted as AI decisions: a record tool's hook did not know the turn`,
+      ),
+    );
     assert.match(
       adoption.find((l) => l.includes("Claude Code") && l.includes("github")) ?? "",
       new RegExp(

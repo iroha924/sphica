@@ -140,6 +140,25 @@ async function adoptionStops(
     .orderBy("p.name")
     .orderBy("c.called_at")
     .execute();
+  // A joined observation with no turn still keeps every later reply of its session out
+  const turnless = await db
+    .selectFrom("tool_call_observation as o")
+    .innerJoin("session as se", (j) =>
+      j.on("se.host", "=", "claude-code").onRef("se.external_id", "=", "o.session_external"),
+    )
+    .innerJoin("project as p", "p.id", "se.project_id")
+    .select((eb) => [
+      "p.id",
+      "p.name",
+      "p.key",
+      eb.fn.count<number>("se.id").distinct().as("sessions"),
+      eb.fn.min("o.observed_at").as("first"),
+    ])
+    .where("o.host", "=", "claude-code")
+    .where("o.turn_id", "is", null)
+    .groupBy(["p.id", "p.name", "p.key"])
+    .orderBy("p.name")
+    .execute();
   const groups = new Map<string, typeof calls>();
   for (const c of calls) {
     const k = `${c.id}\u0000${c.host ?? ""}`;
@@ -147,7 +166,9 @@ async function adoptionStops(
   }
   // Names need not be unique; the key tells two projects of one name apart
   const keys = new Map<string, Set<string>>();
-  for (const c of calls) keys.set(c.name, (keys.get(c.name) ?? new Set()).add(c.key));
+  for (const c of [...calls, ...turnless]) keys.set(c.name, (keys.get(c.name) ?? new Set()).add(c.key));
+  const named = (p: { name: string; key: string }) =>
+    inline((keys.get(p.name)?.size ?? 0) > 1 ? `${p.name} (${p.key})` : p.name);
   for (const group of groups.values()) {
     const [first] = group;
     if (!first) continue;
@@ -162,9 +183,14 @@ async function adoptionStops(
         : first.host === "codex"
           ? `Codex replies from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} that named no session`
           : `replies of every host from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} that named no host`;
-    const name = (keys.get(first.name)?.size ?? 0) > 1 ? `${first.name} (${first.key})` : first.name;
-    say("warn", "AI adoption", `${inline(name)}: ${text}`);
+    say("warn", "AI adoption", `${named(first)}: ${text}`);
   }
+  for (const t of turnless)
+    say(
+      "warn",
+      "AI adoption",
+      `${named(t)}: Claude Code replies in ${plural(Number(t.sessions), "session")} from ${new Date(t.first ?? "").toLocaleString("sv-SE")} on are not adopted as AI decisions: a record tool's hook did not know the turn`,
+    );
 }
 
 async function doctor(cwd: string): Promise<void> {

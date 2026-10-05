@@ -149,7 +149,7 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - 結果: red: `node --test --test-name-pattern 'observation on an older database' test/capture.test.ts` → `Error: no such table: capture_tool_call` で fail
   - 結果: 実装後 `node --test --test-name-pattern 'observation' test/capture.test.ts` → 8 pass（T08 のテストは、読めないファイルが calls/ に残る形に直した）。`bun run verify` → 0
 
-- [ ] T14: doctor に、ターンが分からない観測で止まっているセッションを出す
+- [x] T14: doctor に、ターンが分からない観測で止まっているセッションを出す
   - 種別: 修正
   - 計画: S5
   - 依存: T12（doctor の AI の採用の欄が要る）
@@ -157,6 +157,8 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - red: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → ターンが null の観測で止まっているセッションの行が無く fail
   - 完了条件: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → pass。プロジェクトごとに、ターンが分からない観測のあるセッションの数と最初の時刻が出る
   - コミット: `fix(doctor): show sessions stopped by an observation without its turn`
+  - 結果: red: `node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → AI adoption の行が `actual: 4`（ターンが null の観測の行が無い）で fail
+  - 結果: 実装後 同じコマンド → pass（`Claude Code replies in 1 session from ... on are not adopted as AI decisions: a record tool's hook did not know the turn`）。`bun run verify` → 0
 
 ## P4: 梱包と Windows、文書と版
 
