@@ -31,7 +31,15 @@ import { dbFile, SCHEMA_REVISION } from "./db.ts";
 import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
-import { checkLocalName, identify, localRoots, nameLocal, projectsDir, repositoryRoot } from "./project.ts";
+import {
+  checkLocalName,
+  identify,
+  localRoots,
+  nameLocal,
+  projectsDir,
+  repositoryRoot,
+  underHome,
+} from "./project.ts";
 import { splitLine } from "./split-check.ts";
 import { requireRuntime, sphicaHome } from "./sqlite.ts";
 import { plural, reason } from "./text.ts";
@@ -196,10 +204,7 @@ async function doctor(cwd: string): Promise<void> {
         } catch {
           // home is gone; the plain spelling is all there is
         }
-        const tilde = (p: string) => {
-          const h = homes.find((x) => p === x || p.startsWith(`${x}${path.sep}`));
-          return h ? `~${p.slice(h.length)}` : p;
-        };
+        const tilde = (p: string) => underHome(p, homes);
         const rows = await db
           .selectFrom("project as p")
           .select((eb) => [

@@ -17,6 +17,7 @@ import {
   patchPaths,
   projectId,
   relativeTo,
+  underHome,
   writePlace,
 } from "../src/project.ts";
 import { type Child, childEnv, runUntilSignal } from "./race.ts";
@@ -440,4 +441,14 @@ test("a publish that fails leaves the old map, no temporary file, and no lock", 
   } finally {
     h.done();
   }
+});
+
+// Git for Windows reports a repository's root with forward slashes, while the home directory has backslashes
+test("a path under home is shown from ~ whichever separators it was written with (under home)", () => {
+  assert.equal(underHome("/Users/o/Projects/one", ["/Users/o"], path.posix), "~/Projects/one");
+  assert.equal(underHome("/Users/other/x", ["/Users/o"], path.posix), "/Users/other/x");
+  assert.equal(underHome("/Users/o2/x", ["/Users/o"], path.posix), "/Users/o2/x");
+  assert.equal(underHome("C:/Users/o/Projects/one", ["C:\\Users\\o"], path.win32), "~\\Projects\\one");
+  assert.equal(underHome("C:\\Users\\o\\Projects\\one", ["C:\\Users\\o"], path.win32), "~\\Projects\\one");
+  assert.equal(underHome("D:/Projects/one", ["C:\\Users\\o"], path.win32), "D:/Projects/one");
 });

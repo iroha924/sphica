@@ -195,6 +195,17 @@ export async function projectId(db: Reads, key: string): Promise<number | null> 
   return r?.id ?? null;
 }
 
+/** p with a leading home directory written as ~, for showing; p itself when it is under none of homes */
+export function underHome(p: string, homes: string[], api: path.PlatformPath = path): string {
+  // relative() reads both separators on Windows (Git for Windows writes roots with forward slashes)
+  for (const h of homes) {
+    const rel = api.relative(h, p);
+    if (rel === "") return "~";
+    if (rel !== ".." && !rel.startsWith(`..${api.sep}`) && !api.isAbsolute(rel)) return `~${api.sep}${rel}`;
+  }
+  return p;
+}
+
 /** The one directory whose children doctor looks through for registered projects */
 export const projectsDir = (): string => path.join(os.homedir(), "Projects");
 

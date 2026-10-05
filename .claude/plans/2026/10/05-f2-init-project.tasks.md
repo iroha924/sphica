@@ -123,6 +123,16 @@ doctor が、見つからない project には探した場所を、コピーが�
   - コミット: `fix(doctor): say where it looked for a project and list several copies`
   - 結果: red（直す前の cli.ts）→ `○ o/gone   0 records (not on this machine)`、o/same も同じ文面で落ちた。直した後: `cd server && node --test --test-timeout=60000 --test-name-pattern=copies test/cli.test.ts` → pass（o/found は何も付かず、o/gone は `(not found in ~/Projects or the named projects)`、o/same は `(2 copies: ~/Projects/one, ~/Projects/two)`）。`bun run verify` → exit 0
 
+- [x] T11: doctor が Windows の git の書き方のパスでも、ホームの下を ~ で出す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T06（直す対象の doctor の文面が要る）
+  - 変更: `server/src/cli.ts`, `server/src/project.ts`, `server/test/project.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="under home" test/project.test.ts` → `C:/Users/o/Projects/one` がホーム `C:\Users\o` の下として縮まらずに落ちる。今の比べ方をそのまま underHome に移してテストを先に足す
+  - 完了条件: 同じコマンド → pass。`cd server && node --test --test-timeout=60000 --test-name-pattern=copies test/cli.test.ts` → pass。`bun run verify` → 終了コード 0
+  - コミット: `fix(doctor): shorten home in paths Git for Windows writes with forward slashes`
+  - 結果: red（今の比べ方を underHome に移しただけの状態）→ `actual: 'C:/Users/o/Projects/one'`、`expected: '~\\Projects\\one'` で落ちた。直した後: project.test.ts → 19 件 pass、doctor の copies のテスト → pass。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
@@ -134,3 +144,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T06 / doctor が探した場所を localRoots と同じ値で出すため、project.ts に projectsDir を出した。変更欄に `server/src/project.ts` を足した（前: cli.ts・cli.test.ts） / そのまま進めた
 - 2026-10-05 / T05 / Codex のレビュー（6b4cd5d9）→ 指摘なし
 - 2026-10-05 / T10 / review-shipping（Windows で削除待ちのロックに wx が EPERM を返す、推測）と全差分の Codex のレビュー（F1、tmp の削除の EBUSY を故障注入で再現）/ 修正タスク T10 を足して直した。review-shipping の check.yml のコメントの指摘は T12 で直す
+- 2026-10-05 / T11 / 全差分の Codex のレビュー（F4）と T06 の Codex のレビュー（F1）: Windows の git の `C:/…` のパスでホームを ~ に縮められない / 修正タスク T11 を足して直した
