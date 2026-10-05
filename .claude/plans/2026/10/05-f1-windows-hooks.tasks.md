@@ -22,13 +22,14 @@ base: main
 
 Windows の CI で、今の codex.json が空白入りのプラグインのパスで落ちることを、CI のバージョンの検査に邪魔されずに見られる
 
-- [ ] T01: release:plan で種別を確かめ、npm と 3 つの manifest を 0.6.31 に揃える
+- [x] T01: release:plan で種別を確かめ、npm と 3 つの manifest を 0.6.31 に揃える
   - 種別: 変更
   - 計画: S6
   - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base f5103885` → kind が plugin、`bun run verify` → 終了コード 0
+  - 完了条件: `bun run release:plan -- --base f5103885` → 4 か所が 0.6.31、`bun run verify` → 終了コード 0
   - コミット: `chore(release): bump to 0.6.31`
+  - 結果: `bun run release:plan -- --base f5103885` → `version: npm 0.6.31 / plugin 0.6.31 / marketplace 0.6.31 / Codex 0.6.31`、kind は none（まだ package の入力を変えていない）。`bun run verify` → exit 0
 - [ ] T02: check-hooks-live に、Codex のフックを外側のシェルとプラグインのパスごとに起動する部を足す
   - 種別: 追加
   - 計画: S1
@@ -77,3 +78,6 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - コミット: `ci(windows): check doctor's Codex hooks row from the packed CLI`
 
 ## 記録
+
+- 2026-10-05 / T01 / release:plan は package の入力（`plugin/`・`server/src/` など）が変わるまで kind none を返すので、完了条件の「kind が plugin」はこの時点で観測できない / 完了条件を「kind が plugin」から「4 か所が 0.6.31」に変えた。kind plugin は T03 の後に確かめる
+- 2026-10-05 / T02 / 依存の理由に書いた「バージョンを上げないと CI がバージョンの検査で落ちる」は誤り。`scripts/check-hooks-live.mjs` は package の入力ではなく（`scripts/lib/release-scope.mjs`）、バージョンの検査は上げずに通る / 並び順は変えず、そのまま進める
