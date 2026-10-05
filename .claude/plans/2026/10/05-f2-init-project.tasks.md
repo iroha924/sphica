@@ -61,14 +61,15 @@ base: main
 
 2 つの init が同時に走っても、projects.json の名前が消えず、先に置いた DB が置き換えられない
 
-- [ ] T04: nameLocal をロックの中で読み直し、置き換えで書く
+- [x] T04: nameLocal をロックの中で読み直し、置き換えで書く
   - 種別: 修正
   - 計画: S2
   - 依存: T02（withFileLock と replaceFile が要る）
-  - 変更: `server/src/project.ts`, `server/test/project.test.ts`, `server/test/fixtures/name-local-child.ts`
+  - 変更: `server/src/project.ts`, `server/test/project.test.ts`, `server/test/fixtures/name-local-child.ts`, `server/test/race.ts`
   - red: `cd server && node --test --test-timeout=60000 --test-name-pattern=race test/project.test.ts` → projects.json に子の名前が無くて落ちる。テストだけを先に足し、project.ts は main のまま
   - 完了条件: 同じコマンド → pass（元の 1 件・親・子の 3 件が残る）。途中で止まる場合のテスト → projects.json が元の内容で読め、次の nameLocal がロックのファイルの名前を出して止まる。`bun run verify` → 終了コード 0
   - コミット: `fix(init): name local projects under a lock and replace the table atomically`
+  - 結果: red（直す前の project.ts）→ `two inits naming different directories at once both keep their names (race)` が、b の `beta` が消えて落ちた。直した後: `cd server && node --test --test-timeout=60000 test/project.test.ts` → 18 件 pass（race・途中で止まる・rename の失敗を含む）。`bun run verify` → exit 0
 - [ ] T05: dbInit で DB を置く手順全体をロックで囲む
   - 種別: 修正
   - 計画: S3
@@ -95,3 +96,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
 - 2026-10-05 / T03 / Codex のレビュー（c5f547a2）→ 指摘なし / Windows での pass は A4 で確かめる
+- 2026-10-05 / T04 / 子プロセスの同期を T05 と共有するため、変更欄に `server/test/race.ts` を足した（前: project.ts・project.test.ts・name-local-child.ts） / そのまま進めた
