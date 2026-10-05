@@ -30,13 +30,14 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 完了条件: `bun run release:plan -- --base f5103885` → 4 か所が 0.6.31、`bun run verify` → 終了コード 0
   - コミット: `chore(release): bump to 0.6.31`
   - 結果: `bun run release:plan -- --base f5103885` → `version: npm 0.6.31 / plugin 0.6.31 / marketplace 0.6.31 / Codex 0.6.31`、kind は none（まだ package の入力を変えていない）。`bun run verify` → exit 0
-- [ ] T02: check-hooks-live に、Codex のフックを外側のシェルとプラグインのパスごとに起動する部を足す
+- [x] T02: check-hooks-live に、Codex のフックを外側のシェルとプラグインのパスごとに起動する部を足す
   - 種別: 追加
   - 計画: S1
   - 依存: T01（バージョンを上げておかないと PR の CI がバージョンの検査で落ち、red の理由が混ざる）
   - 変更: `scripts/check-hooks-live.mjs`
   - 完了条件: `bun run hooks:live` → macOS で終了コード 0（sh の外側で全コピー・全エントリが通り、各ケースの目印が spool に届く）。push して PR を作り、Windows のジョブが Codex の部で落ちる（T03 の red）
   - コミット: `test(hooks): launch every Codex hook through each outer shell and plugin path`
+  - 結果: `bun run hooks:live` → macOS で exit 0（sh × control・spaced で 18 件）。感度: 引用符を外した codex.json のコピーで `node scripts/check-hooks-live.mjs <copy>` → spaced/sh の 6 件だけが落ち、control は通った。Windows の red は push 後に T03 の red で確かめる
 
 ## P2: Codex のフックを直す
 
