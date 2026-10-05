@@ -73,22 +73,46 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
   - 計画: S4
   - 依存: T02（queueReport が `calls/` と `calls/rejected/` を数える）, T03（queueReport が理由ファイルと `pruned` を読む）
   - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
-  - red: `SPHICA_HOME=<tmp> node -e '<readState と captureNotice を出す>'`（`<tmp>/spool` をファイルにし、`<tmp>/sphica.db` を置く）→ readState が pending 0 を返し、captureNotice が null
+  - red: `SPHICA_HOME=$T/h node -e 'import("./src/capture.ts").then(m => console.log(m.readState().pending, m.captureNotice(process.env.SPHICA_HOME + "/sphica.db")))'` → `0 null`（`$T/h/spool` をファイルにし、`$T/h/sphica.db` を置く）
   - 完了条件: `cd server && node --test --test-name-pattern 'unreadable queue|queue report' test/capture.test.ts` → pass。読めないディレクトリは null とコード、ENOENT は 0、通知が出る。queueReport が 5 つのディレクトリの読める状態・60 秒より古い一時ファイル・理由ごとの件数・保留のプロジェクト別・`calls/` の件数・`pruned` を返す
   - コミット: `fix(capture): tell an unreadable queue from an empty one and report the queue in detail`
-  - 結果: red: `SPHICA_HOME=$T/h node -e '...readState()...captureNotice(...)'`（spool をファイルに）→ `{"pending":0,"rejected":0} null`
+  - 結果: red: `SPHICA_HOME=$T/h node -e '...readState()...captureNotice(...)'` → `{"pending":0,"rejected":0} null`（spool をファイルにした）
   - 結果: 実装後 `node --test --test-name-pattern 'unreadable queue|queue report|stuck is reported' test/capture.test.ts` → 3 pass。`bun run verify` → 0
 
-- [ ] T05: doctor の Recording 欄と、結べない呼び出しの欄
+- [x] T05: doctor の Recording 欄と、結べない呼び出しの欄
   - 種別: 修正
   - 計画: S5
   - 依存: T04（queueReport が要る）
-  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`, `scripts/lib/sql-call-sites.mjs`
-  - red: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → SPHICA_HOME をファイルにした doctor が Recording を `0 pending` の ok と出して fail
+  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → 新しい行（Left-behind files など）が無く fail。spool をファイルにした doctor は Recording を ok と出す
   - 完了条件: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → pass。一時 HOME の子プロセスで、unknown の fail、一時ファイル・理由ごとの拒否・保留のプロジェクト別・prune・送り直し待ち・送れなかった観測のファイル・claude-code / codex / すべてのホストの結べない呼び出しと止まった時刻の各行が出る。`bun run verify` → 0
   - コミット: `fix(doctor): report the capture queue and unjoined record tool calls as they are`
+  - 結果: red: `node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → `no Left-behind files row` で fail。`HOME=$H node src/cli.ts doctor`（spool をファイルに）→ `✓ Recording null pending`
+  - 結果: 実装後 `node --test --test-name-pattern 'doctor' test/cli.test.ts` → 5 pass（一時ファイル・理由ごとの拒否・保留のプロジェクト別・prune・送り直し待ち・送れなかった観測・Claude Code / Codex / すべてのホストの 3 行、読めないキューは ✗ で 0 pending と出さない）。`bun run verify` → 0
 
-## P3: 梱包と Windows、文書と版
+## P3: タスクごとのレビューの指摘の修正
+
+T03・T08 のレビューで見つかった、prune の件数の上書きと、移せない観測で送信が止まる穴を直す。
+
+- [ ] T09: 1 回の flush の中で、ロックを取り直しても prune の件数を足し続ける
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（prune の件数が要る）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'prune count across' test/capture.test.ts` → 2 回目のロック保持の prune が 1 回目の件数を上書きし、合計より小さい count が残って fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'prune count' test/capture.test.ts` → pass。2 回のロック保持で消えた件数の合計が state に残る
+  - コミット: `fix(capture): count every prune of one send, across retaking the lock`
+
+- [ ] T10: 観測のファイルを calls/rejected/ へ移せなくても送信を続ける
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T08（読めないファイルの隔離が要る）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'observation that cannot be moved' test/capture.test.ts` → rename が EBUSY で失敗すると flush が投げ、正常な観測も通常のキューも送られず fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'observation that cannot be moved' test/capture.test.ts` → pass。移せないファイルは calls/ に残り、同じ flush で正常な観測と通常のキューが送られる
+  - コミット: `fix(capture): keep sending when an observation file cannot be set aside`
+
+## P4: 梱包と Windows、文書と版
 
 梱包した hook と Windows で送り直しと doctor が動くことを CI で見て、文書と版を揃える。
 
@@ -116,3 +140,6 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
 - 2026-10-05 / T03 / 実装を先に書いてから red を確かめた / capture.ts の変更を一時的に退けて新しいテストが意図した理由で落ちることを確かめ、戻した
 - 2026-10-05 / T02 / Codex のタスクごとのレビュー（d49c2525）F1: 読めない（EACCES）観測のファイルが flush を投げさせ、通常のキューまで毎回止める / 受理。読み取りの ENOENT 以外の失敗も unreadable で隔離する修正タスク T08 を T04 の前に足した
 - 2026-10-05 / T04 / red の欄を変えた。前: SPHICA_HOME をファイルにして readState と captureNotice を見る。新: SPHICA_HOME の下の spool をファイルにする / SPHICA_HOME 自体をファイルにすると DB も無くなり、captureNotice は「DB が無い」を先に返すので、キューが読めないことを確かめられない
+- 2026-10-05 / T05 / 変更欄から `scripts/lib/sql-call-sites.mjs` を外した（前: cli.ts・cli.test.ts・sql-call-sites.mjs）。red の欄を、spool をファイルにする形と新しい行が無いことに変えた / 台帳は変えずに verify が通った。SPHICA_HOME 自体をファイルにすると DB も無くなる（T04 と同じ理由）
+- 2026-10-05 / T03 / Codex のレビュー（3be8e3b8）F1: removed がロック保持ごとに 0 に戻り、後の prune が件数を上書きする / 受理。修正タスク T09 を足した
+- 2026-10-05 / T08 / Codex のレビュー（538ecc3d）F1: 読めない観測を rename できない（Windows の EBUSY など）と setAside が投げ、送信全体が止まる / 受理。修正タスク T10 を足した。通常のキューの rename の失敗が投げるのは前からの挙動で、この PR では変えない
