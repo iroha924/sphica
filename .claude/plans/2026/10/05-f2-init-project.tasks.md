@@ -151,6 +151,15 @@ doctor が、見つからない project には探した場所を、コピーが�
   - コミット: `test(lock): pass the holder's paths as arguments instead of building its code`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="waiter takes" test/file-lock.test.ts` → pass。`bun run verify` → exit 0。CodeQL の結果は push 後に確かめる
 
+- [x] T14: doctor のテストのコメントを今の不変条件で書き、replaceFile の説明を後始末の失敗に合わせる
+  - 種別: 変更
+  - 計画: S4
+  - 依存: T06（直す対象のテストが要る）, T10（直す対象の後始末が要る）
+  - 変更: `server/test/cli.test.ts`, `server/src/file-lock.ts`
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `docs(init): state the doctor test's invariant and the replace's best-effort cleanup`
+  - 結果: `bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
@@ -166,3 +175,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T12 / 全差分の Codex のレビュー（F2: doctor のテストが ETIMEDOUT を見逃す、再現。F3: 競合の子プロセスに終了の期限が無い）と T06 のレビュー（F2、同じ指摘）、review-shipping（check.yml のコメントの only が古い）/ T12 を足して直した。テストの不備なので変更として扱った
 - 2026-10-05 / T13 / PR #285 の CodeQL（js/bad-code-sanitization、alert 17、server/test/file-lock.test.ts:37）: テストが子プロセスのコードに JSON.stringify でパスを埋めていた。入るのは一時ディレクトリのパスだけで実害は無いが、文字列からのコード生成を避ける規範に合わせて T13 で直した
 - 2026-10-05 / 全体 / 直しの再レビュー（Codex、high、b396ce32..efdf1ff7）→ F1〜F4 の解消を確認、新しい P1/P2 なし
+- 2026-10-05 / T14 / GitHub の Codex のレビュー（PR #285、efdf1ff）3 件: テストのコメントが経緯を書いている（P1）と replaceFile の説明の言い過ぎ（P1）は T14 で直した。ロックを外す処理が pid を読んでから消すまでに、ロックが消されて作り直されると他人のロックを消す（P2）は見送り: 持ち主以外が消すのは人が手で消したときだけで、Node に中身を確かめて消す原子的な操作は無い。PR 本文の Declined findings に書いた

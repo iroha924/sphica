@@ -126,7 +126,7 @@ function release(lock: string, mine: string): void {
 /**
  * Replaces file with text: written and flushed to a temporary file beside it, then renamed over it, so a reader sees the old or the new
  * file whole. Windows refuses the rename while a scanner or reader has the file open, so those errors are retried a few times. On failure
- * the old file is left as it was and the temporary file is removed.
+ * the old file is left as it was, and the temporary file is removed unless its removal keeps failing too.
  */
 export function replaceFile(file: string, text: string): void {
   const tmp = `${file}.${process.pid}.tmp`;

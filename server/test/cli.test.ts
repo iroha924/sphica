@@ -223,8 +223,8 @@ test("doctor as a child process shows Codex's trust in the installed hooks, and 
   }
 });
 
-// "Not on this machine" was a guess: doctor looks only directly under ~/Projects and at named projects, and a project with two copies there
-// was never on that list either
+// Doctor looks only directly under ~/Projects and at named projects, so a project it did not find may still be on this machine, and one
+// with two copies there is found twice; each row has to say which
 test("doctor says where it looked for a project it did not find, and lists a project's copies", () => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-")));
   const repo = (dir: string, remote: string) => {
