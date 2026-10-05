@@ -4,6 +4,7 @@ import type { Kysely } from "kysely";
 import { z } from "zod";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { replaceable } from "./judge.ts";
 import {
   EVIDENCE_ROLES,
   FIELD_TYPES,
@@ -13,6 +14,7 @@ import {
   WORK_STATUSES,
 } from "./knowledge.ts";
 import { inline } from "./panel.ts";
+import { firstState, type Hint, type Reconciled, reconcile } from "./reconcile.ts";
 import {
   commitHeld,
   kindOf,
@@ -26,6 +28,7 @@ import {
   symbolMasked,
   symbolMissing,
 } from "./repo-facts.ts";
+import { instructionFile } from "./rule-files.ts";
 import { head, sha256 } from "./text.ts";
 
 const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
@@ -154,6 +157,8 @@ export type Target = {
   root: string | null;
   /** The sources the run may cite (a trace's session, a harvest's pull request); null for glean, which cites any source of the project */
   sources: readonly number[] | null;
+  /** Whether this run may adopt an AI's own decision: a trace begun and saved by an interactive session */
+  agent?: boolean;
 };
 
 type Planned = {
@@ -166,7 +171,7 @@ type Planned = {
   unsourced?: boolean;
   evidence: EvidenceSpan[];
   options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[]; reconsider: Span | null }[];
-  adoption: (Span & { route: "owner_statement" | "explicit" })[];
+  adoption: (Span & { route: "owner_statement" | "explicit" | "agent" })[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
   aliases: string[];
   supersedes: number | null;
@@ -188,6 +193,39 @@ export type Checked = {
   /** What the check read from the working tree and git; save reads each file again and judges it anew only when it changed */
   facts: RepoFacts;
 };
+
+/**
+ * Whether every line the byte span [start, end) touches is quoted (starts with ">") or inside a fenced code block: words someone pasted, not
+ * words their writer chose. A heuristic: a paste with no quote marks is not caught.
+ */
+function quotedSpan(body: string, start: number, end: number): boolean {
+  const bytes = Buffer.from(body, "utf8");
+  let fenced = false;
+  let touched = false;
+  for (let at = 0; at <= bytes.length; ) {
+    const nl = bytes.indexOf(0x0a, at);
+    const stop = nl < 0 ? bytes.length : nl;
+    const line = bytes.subarray(at, stop).toString("utf8").trimStart();
+    const fence = /^(```|~~~)/.test(line);
+    if (stop >= start && at < end) {
+      touched = true;
+      if (!(fenced || fence || line.startsWith(">"))) return false;
+    }
+    if (fence) fenced = !fenced;
+    if (nl < 0) break;
+    at = nl + 1;
+  }
+  return touched;
+}
+
+/** Whether the byte span [start, end) sits right inside quotation marks on its line: words the writer reports, not words they chose */
+function inlineQuoted(body: string, start: number, end: number): boolean {
+  const bytes = Buffer.from(body, "utf8");
+  const before = bytes.subarray(0, start).toString("utf8").trimEnd().at(-1) ?? "";
+  const after = bytes.subarray(end).toString("utf8").trimStart()[0] ?? "";
+  // english-exempt: Japanese quotation brackets are quotation marks too
+  return /["“'‘`「『]/.test(before) && /["”'’`」』]/.test(after);
+}
 
 /** The byte span of quote in text, or null. The first occurrence is taken. */
 function locate(body: string, quote: string): [number, number] | null {
@@ -316,7 +354,17 @@ export async function checkRecord(
     (refs.size
       ? await db
           .selectFrom("source")
-          .select(["id", "kind", "author_kind", "author_login", "author_association", "text"])
+          .select([
+            "id",
+            "kind",
+            "author_kind",
+            "author_login",
+            "author_association",
+            "text",
+            "external_id",
+            "session_id",
+            "turn_id",
+          ])
           .where("project_id", "=", target.projectId)
           .where("id", "in", [...refs])
           .execute()
@@ -389,31 +437,27 @@ export async function checkRecord(
   const others = new Map(
     (linked.length
       ? await db
-          .selectFrom("unit")
-          .select(["id", "key", "kind", "lifecycle"])
-          .where("project_id", "=", target.projectId)
-          .where("key", "in", linked)
+          .selectFrom("unit as o")
+          .select(["o.id", "o.key", "o.kind", "o.lifecycle"])
+          .where("o.project_id", "=", target.projectId)
+          .where("o.key", "in", linked)
           .execute()
       : []
     ).map((u) => [u.key, u]),
   );
-  // A record has at most one successor that is not withdrawn: the one already there holds the place
+  // The successor in effect now, if any: its replacement holds the record's one place until it ends
   const holders = new Map(
     (others.size
       ? await db
-          .selectFrom("unit_link as l")
-          .innerJoin("unit as n", "n.id", "l.from_unit")
-          .select(["l.to_unit", "n.key", "n.lifecycle"])
-          .where("l.kind", "=", "supersedes")
+          .selectFrom("unit_replacement as h")
+          .innerJoin("unit as n", "n.id", "h.from_unit")
+          .select(["h.to_unit", "n.key", "n.lifecycle"])
+          .where("h.ended_at", "is", null)
           .where(
-            "l.to_unit",
+            "h.to_unit",
             "in",
             [...others.values()].map((o) => o.id),
           )
-          .where("n.lifecycle", "<>", "withdrawn")
-          // Quarantined or unsourced, a successor can never become active, so it holds no place
-          .where("n.extraction", "=", "supported")
-          .where("n.unsourced", "=", 0)
           .execute()
       : []
     ).map((h) => [h.to_unit, h]),
@@ -426,11 +470,24 @@ export async function checkRecord(
     const key = keys[i] ?? "";
     const quarantine: string[] = [];
     const cites = new Set<number>();
-    const spans = (list: z.infer<typeof Evidence>[]): EvidenceSpan[] =>
+    const spans = (list: z.infer<typeof Evidence>[], option = false): EvidenceSpan[] =>
       list.flatMap((e) => {
         const s = sources.get(Number(e.source.slice(1)));
         if (!s) return [];
         cites.add(s.id);
+        // The schema refuses these at save; refused here too, so check never says a save would pass
+        if (
+          e.role === "decides" &&
+          (option ||
+            target.origin !== "trace" ||
+            !(s.kind === "session_message" && s.author_kind === "assistant") ||
+            /:ask:.*:q:/.test(s.external_id))
+        ) {
+          errors.push(
+            `${key}: decides quotes the AI choosing in its own reply, never a question it asked, someone else's words, or an option, and only a trace records it`,
+          );
+          return [];
+        }
         const span = locate(s.text, e.quote);
         if (!span) {
           quarantine.push(`quote not found in ${e.source}: "${head(e.quote, 80)}"`);
@@ -480,6 +537,7 @@ export async function checkRecord(
           role:
             e.role ?? (o.outcome === "rejected" ? "rejects" : o.outcome === "chosen" ? "states" : "explains"),
         })),
+        true,
       ),
       reconsider: reconsider(o),
     }));
@@ -517,21 +575,31 @@ export async function checkRecord(
         );
         continue;
       }
+      // The AI's own reply adopts only for the AI, only in a run an interactive session began and saves; checked below with the anchors
       const route =
         s.author_kind === "owner"
           ? "owner_statement"
           : MAINTAINERS.has(s.author_association ?? "")
             ? "explicit"
-            : null;
+            : s.author_kind === "assistant" && s.kind === "session_message" && target.agent
+              ? "agent"
+              : null;
       if (!route) {
         problems.push(
-          `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt`,
+          `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt${s.author_kind === "assistant" ? ", and an AI's own decision only in a trace an interactive session runs" : ""}`,
         );
         continue;
       }
       const span = locate(s.text, a.quote);
       if (!span) {
         quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
+        continue;
+      }
+      // Words in quotation marks are reported, whoever writes them: an owner pasting what someone wrote, or the AI repeating it
+      if (quotedSpan(s.text, span[0], span[1]) || inlineQuoted(s.text, span[0], span[1])) {
+        problems.push(
+          `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
+        );
         continue;
       }
       adoption.push({ source: s.id, start: span[0], end: span[1], route });
@@ -627,29 +695,53 @@ export async function checkRecord(
     let supersedes: number | null = null;
     if (u.supersedes) {
       const old = others.get(u.supersedes);
+      // Only a successor that can take effect takes the place: a decision or constraint the owner does not adopt, or an implementation
+      // without code or commit evidence (unit_support's rule), waits beside it
+      const implemented = () =>
+        evidence.some(
+          (e) =>
+            e.role === "implements" &&
+            (["commit_message", "file_excerpt"].includes(sources.get(e.source)?.kind ?? "") ||
+              anchors.some(
+                (a) =>
+                  a.role === "evidence" &&
+                  (a.commit ||
+                    (a.observation !== null && sources.get(e.source)?.session_id === target.sessionId)),
+              )),
+        ) || anchors.some((a) => a.role === "evidence" && a.commit);
+      const takes = ["decision", "constraint"].includes(u.kind)
+        ? adoption.some((x) => x.route !== "agent")
+        : u.kind !== "implementation" || implemented();
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
       // A quarantined successor never becomes active, so it takes no place from another in the same save
-      else if (claimed.has(old.id) && !quarantine.length)
+      else if (claimed.has(old.id) && !quarantine.length && takes)
         errors.push(`${key}: another record in this save already supersedes ${u.supersedes}`);
       else if (!replaceable(u.kind, old.kind))
         errors.push(
           `${key}: a ${u.kind} cannot supersede ${u.supersedes}, a ${old.kind} (a record supersedes one of its own kind; a decision and a constraint can replace each other)`,
         );
-      else if (holders.has(old.id) && !quarantine.length) {
+      else if (holders.has(old.id) && !quarantine.length && takes) {
         const h = holders.get(old.id);
         errors.push(
           `${key}: ${u.supersedes} already has a successor, ${h?.key} (${h?.lifecycle}); withdraw it first, or supersede it instead`,
         );
       } else supersedes = old.id;
-      if (supersedes !== null && !quarantine.length) claimed.add(supersedes);
+      if (supersedes !== null && !quarantine.length && takes) claimed.add(supersedes);
     }
     const conflicts = u.conflicts.flatMap((k) => {
       const other = others.get(k);
       if (!other) errors.push(`${key}: conflicts with ${k}, which is not a record of this project`);
       return other ? [other.id] : [];
     });
+
+    for (const x of adoption.filter((x) => x.route === "agent")) {
+      const why = await agentRefusal(db, u, x, sources.get(x.source), evidence, anchors);
+      if (!why) continue;
+      problems.push(`${key}: the AI's adoption in s${x.source} left out, so it stays a candidate: ${why}`);
+      adoption.splice(adoption.indexOf(x), 1);
+    }
 
     const fields: Planned["fields"] = [];
     for (const f of u.fields) {
@@ -761,7 +853,65 @@ export type Saved = {
   superseded: string[];
   /** Anchors judged again under the lock that may point at the wrong place */
   anchorProblems: string[];
+  /** The units this save wrote, for a caller that reconciles them with its own changes */
+  written: { id: number; key: string; hint: Hint; adopted: boolean }[];
 };
+
+/** CI's definitions, or a directory holding them, in any letter case */
+const ciPath = (path: string) => {
+  const p = path.toLowerCase().replace(/\/+$/, "");
+  return p === ".github" || p === ".github/workflows" || p.startsWith(".github/workflows/");
+};
+
+/**
+ * Why a quote of the AI's reply cannot adopt for the AI, or null: it must be the AI choosing (decides on the same words), outside a turn
+ * that ran a record tool, not about instruction or CI files, and for a "do" on code, after that code changed in the same turn.
+ */
+async function agentRefusal(
+  db: Reads,
+  u: UnitInput,
+  x: Span,
+  s: { external_id: string; session_id: string | null; turn_id: string | null } | undefined,
+  evidence: EvidenceSpan[],
+  anchors: Planned["anchors"],
+): Promise<string | null> {
+  if (!s) return "its source is not a reply of this project";
+  if (/:ask:.*:q:/.test(s.external_id)) return "a question the AI asked is not its decision";
+  if (!s.turn_id)
+    return "the reply has no turn, so it cannot be told apart from a turn that ran a record tool";
+  if (
+    !evidence.some(
+      (e) => e.role === "decides" && e.source === x.source && e.start === x.start && e.end === x.end,
+    )
+  )
+    return "quote the same words as decides evidence: the AI choosing, not reporting, proposing, or asking";
+  const governs = anchors.filter((a) => a.role === "applies_to").map((a) => a.path);
+  // Any anchor counts here, not only where it applies: the record is about that file either way
+  const bound = anchors.map((a) => a.path).find((path) => instructionFile(path) || ciPath(path));
+  if (bound) return `${bound} holds rules or CI agents follow; only the owner adopts decisions about it`;
+  if (
+    await db
+      .selectFrom("agent_ineligible_source")
+      .select("source_id")
+      .where("source_id", "=", x.source)
+      .executeTakeFirst()
+  )
+    return "the reply comes from a turn that ran a record tool (or one no call can be placed away from)";
+  if (u.stance === "do" && governs.length) {
+    const edited =
+      s.session_id && s.turn_id
+        ? await db
+            .selectFrom("edit_observation")
+            .select("path")
+            .where("session_id", "=", s.session_id)
+            .where("turn_id", "=", s.turn_id)
+            .where("path", "in", governs)
+            .executeTakeFirst()
+        : undefined;
+    if (!edited) return `the AI did not change ${governs.join(", ")} in the turn it decided it`;
+  }
+  return null;
+}
 
 /** The hash of what a unit says: its text and options. Alias sets are bound to it, so words written for other text are never used. */
 const contentHash = (u: UnitInput): Buffer =>
@@ -780,13 +930,35 @@ const contentHash = (u: UnitInput): Buffer =>
     ]),
   );
 
-/** Which kinds can replace which: the same kind, or a decision and a constraint either way. The schema checks the same pairs. */
-const replaceable = (successor: string, old: string): boolean =>
-  successor === old ||
-  (["decision", "constraint"].includes(successor) && ["decision", "constraint"].includes(old));
-
-/** Messages the schema's activation rules raise; anything else is a real failure. */
-export const ACTIVATION = /needs|cannot become active/;
+/**
+ * Judges what a save wrote, with everything its intents reach, and reports it. A successor the owner adopted into a place another holds
+ * never gets here: check refuses it by name. One nobody adopted waits as a candidate, with the reason.
+ */
+export async function settleSaved(
+  trx: Kysely<DB>,
+  runId: number,
+  saved: Saved,
+  more: { seeds?: number[]; withdraw?: Map<number, Hint> } = {},
+): Promise<Reconciled> {
+  const written = new Map(saved.written.map((w) => [w.id, w]));
+  const settled = await reconcile(
+    trx,
+    [...written.keys(), ...(more.seeds ?? [])],
+    { runId },
+    {
+      hints: new Map(saved.written.map((w) => [w.id, w.hint])),
+      withdraw: more.withdraw,
+    },
+  );
+  const now = new Map(settled.changes.map((c) => [c.id, c.after]));
+  for (const w of saved.written) {
+    if (saved.quarantined.some((q) => q.startsWith(`${w.key} (`))) continue;
+    if (now.get(w.id) === "active") saved.active.push(w.key);
+    else saved.candidates.push({ key: w.key, why: settled.waits.get(w.id) ?? "its support is not complete" });
+  }
+  for (const c of settled.changes) if (c.after === "superseded") saved.superseded.push(c.key);
+  return settled;
+}
 
 /**
  * Writes a checked record inside the caller's transaction. looked lists the sources the run read: each gets a processing outcome, so
@@ -798,11 +970,19 @@ export async function saveRecord(
   runId: number,
   checked: Checked,
   looked: number[],
+  { settle = true }: { settle?: boolean } = {},
 ): Promise<Saved> {
   if (checked.errors.length)
     throw new Error(`The record is not valid:\n${checked.errors.map((e) => `  ${e}`).join("\n")}`);
   const now = iso(Date.now());
-  const saved: Saved = { active: [], candidates: [], quarantined: [], superseded: [], anchorProblems: [] };
+  const saved: Saved = {
+    active: [],
+    candidates: [],
+    quarantined: [],
+    superseded: [],
+    anchorProblems: [],
+    written: [],
+  };
   const cited = new Set<number>();
   for (const d of checked.fieldDefs) {
     cited.add(d.source);
@@ -962,17 +1142,7 @@ export async function saveRecord(
         })
         .execute();
     }
-    await trx
-      .insertInto("unit_state")
-      .values({
-        unit_id: id,
-        from_state: null,
-        to_state: "candidate",
-        at: now,
-        reason: `${target.origin} extracted`,
-        run_id: runId,
-      })
-      .execute();
+    await firstState(trx, id, `${target.origin} extracted`, runId, now);
     if (p.aliases.length)
       await trx
         .insertInto("unit_alias")
@@ -995,52 +1165,18 @@ export async function saveRecord(
         .values({ from_unit: id, to_unit: c, kind: "conflicts", run_id: runId, added_at: now })
         .execute();
 
-    if (p.quarantine.length) {
-      saved.quarantined.push(`${p.key} (${p.quarantine.join("; ")})`);
-      continue;
-    }
-    const first = p.evidence[0]?.source ?? null;
-    try {
-      await trx
-        .insertInto("unit_state")
-        .values({
-          unit_id: id,
-          from_state: "candidate",
-          to_state: "active",
-          at: now,
-          reason: p.adoption.length ? "evidence and adoption found" : "evidence found",
-          source_id: p.adoption[0]?.source ?? first,
-          run_id: runId,
-        })
-        .execute();
-    } catch (e) {
-      const why = (e as Error).message;
-      if (!ACTIVATION.test(why)) throw e;
-      saved.candidates.push({ key: p.key, why });
-      continue;
-    }
-    saved.active.push(p.key);
-    if (p.supersedes !== null) {
-      const old = await trx
-        .selectFrom("unit")
-        .select(["key", "lifecycle"])
-        .where("id", "=", p.supersedes)
-        .executeTakeFirstOrThrow();
-      await trx
-        .insertInto("unit_state")
-        .values({
-          unit_id: p.supersedes,
-          from_state: old.lifecycle,
-          to_state: "superseded",
-          at: now,
-          reason: `superseded by ${p.key}`,
-          source_id: first,
-          run_id: runId,
-        })
-        .execute();
-      saved.superseded.push(old.key);
-    }
+    if (p.quarantine.length) saved.quarantined.push(`${p.key} (${p.quarantine.join("; ")})`);
+    saved.written.push({
+      id,
+      key: p.key,
+      adopted: p.adoption.length > 0,
+      hint: {
+        reason: p.adoption.length ? "evidence and adoption found" : "evidence found",
+        source: p.adoption[0]?.source ?? p.evidence[0]?.source ?? null,
+      },
+    });
   }
+  if (settle) await settleSaved(trx, runId, saved);
   if (checked.work) {
     const w = checked.work;
     const traced = target.sessionId

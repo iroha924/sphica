@@ -67,18 +67,34 @@ Four boundaries (the header of schema.sql):
 | Processing | `extraction_run`, `source_processing` | What each run looked at, so untraced sessions are counted, not guessed |
 | Work and delivery | `work`, `delivery`, `delivery_unit` | Current work, and what the hooks showed (unit ids, never text) |
 
-- **Lifecycle changes only through `unit_state`**, along a fixed table: the first state is candidate; candidate → active, superseded, or withdrawn;
-  active → candidate, superseded, or withdrawn; superseded → candidate only when no live successor is left; withdrawn is final. Its trigger sets `unit.lifecycle`.
-  Code attempts the move and reports the trigger's refusal
-- **Support is one view**, `unit_support`: a decision or constraint needs unit-level unretracted evidence and adoption; an implementation needs code or commit
+- **State is judged from facts.** Writes (saves, glean, forget, migration) change only facts: intents (`unit_link` supersedes, one per record),
+  evidence, adoption, explicit withdrawals. Then `reconcile()` in `server/src/reconcile.ts` loads every record the change reaches through
+  supersedes, runs the pure `judge()` in `server/src/judge.ts`, and writes only the difference: ended replacement rows, opened ones, then
+  `unit_state` rows. It judges again and throws if anything is left over. It is the only writer of `unit_state` and `unit_replacement`
+  (`bun run architecture` checks it); triggers only check that what was written follows the rules
+- **Lifecycle** moves through `unit_state` along a fixed table: the first state is candidate; candidate → active, superseded, or withdrawn;
+  active → candidate, superseded, or withdrawn; superseded → active or candidate; withdrawn is final. Its trigger sets `unit.lifecycle`
+- **Support is one view**, `unit_support`: a decision or constraint needs unit-level unretracted evidence and adoption (an `agent` adoption counts only with
+  its paired `decides` evidence); an implementation needs code or commit
   evidence (or an `evidence` anchor on a path its session edited); a finding, dead end, or question needs unit-level evidence. Activating, retracting, and
   retiring an anchor all read it, so they never disagree. Quarantined and unsourced units never become active
-- **One live successor**: a record has at most one successor that is supported, sourced, and not withdrawn. Withdrawing it brings the record back to candidate
+- **Replacement**: `unit_link` supersedes is the intent; `unit_replacement` holds when a replacement was in effect (start, end, and the run or forget that
+  caused each; a row ends once and is never deleted). At most one open row per replaced record: its holder is the successor in effect. A successor holds
+  the place while it is eligible (not withdrawn, supported, sourced, and for a decision or constraint with an intent, adopted by the owner or a maintainer);
+  when the place is free, the earliest intent takes it. A record superseded before revision 10 whose history was not recorded carries a mark in
+  `unit_replacement_gap`, so read does not show it as a proposal never carried out
 - **Evidence is a byte span of retained text** (`span_start`, `span_end` into the UTF-8 bytes of `source.text`). Quotes are located by the save path, never trusted
-- **Adoption** routes: `owner_statement` (an owner-kind source) or `explicit` (the owner, or OWNER / MEMBER / COLLABORATOR). A merge or a resolved thread never adopts
+- **Adoption** routes: `owner_statement` (an owner-kind source), `explicit` (the owner, or OWNER / MEMBER / COLLABORATOR), or `agent`: the AI's own reply in a
+  session, paired with `decides` evidence on the same span, saved by a run whose begin call was interactive, from a reply with a turn that ran no record tool
+  (the view `agent_ineligible_source`). The `unit_adoption_route` trigger enforces this; `agentRefusal` in `record.ts` also checks AskUserQuestion questions,
+  rule and CI file anchors, and a same-turn edit for a `do` with `applies_to` anchors. A merge or a resolved thread never adopts.
+  `authorityOf` in `server/src/authority.ts` says whose decision a record is as of any time: the owner's, an AI's, or no one's
 - **Aliases** are search words bound to the unit's `content_hash`; only the newest matching set is indexed. They are never evidence
 - **Anchors** hold a path, symbol, and the lines where the symbol was when saved. They are checked against the working tree when read (`server/src/anchors.ts`), never cached
 - **Runs bind writes.** `extraction_run.draft_id` is the run id the record server's begin tools issue; check and save take it, and the record never names a project or target
+- **Record tool calls are logged.** The record server logs every tool call in `record_call` before it runs (host, caller session and turn, mode read by `callerOf` in
+  `server/src/caller.ts`), and a run keeps its begin call. Claude Code puts no turn in a call, so a synchronous PreToolUse hook writes `tool_call_observation`
+  through the capture view `capture_tool_call`, joined by tool use id
 
 ## Writers
 
@@ -86,7 +102,8 @@ Four boundaries (the header of schema.sql):
 |---|---|---|
 | Capture hooks | capture | `server/src/capture.ts`: `capture_session`, `capture_message`, `capture_edit` views |
 | Delivery hooks | reader, then capture | `server/src/deliver.ts`: reads units, logs through the `capture_delivery` view |
-| Record MCP server | ingest | `server/src/mcp-record.ts` → `extract.ts` → `record.ts` (units), `glean.ts` (changes), `github.ts` (sources) |
+| Record MCP server | ingest | `server/src/mcp-record.ts` → `extract.ts` → `record.ts` (units), `glean.ts` (changes), `github.ts` (sources); states and replacement rows through `reconcile.ts` |
+| Record tool hook (Claude Code) | capture | `observeRecordCall` in `server/src/capture.ts`, through the `capture_tool_call` view |
 | `sphica init` | owner, then ingest | `server/src/admin.ts` creates the DB; `cli.ts` registers the project |
 | `sphica doctor --reindex` | owner | `reindex()` in `admin.ts` |
 | `sphica init` on an older revision | owner | `migrate()` in `admin.ts` |
@@ -118,7 +135,7 @@ Processes of the same OS user can rewrite the file directly, so this is not an O
 | owner | none | creating the DB, reindex, the database check in `doctor` |
 | reader | reads and allowed functions (`READER_FUNCTIONS`) only | the read MCP server (`mcp.ts`), delivery reads, `doctor`'s project list |
 | ingest | writes only what the record server's code writes: listed tables, listed update columns, deletes of `artifact_link`, and inside triggers only what `INGEST_TRIGGER_WRITES` lists (a test compares it with every trigger body). Sources go through the view `ingest_source`, which cannot take a session message | the record MCP server, project registration |
-| forget | inserts into `forget_batch`, `source_forgotten`, `unit_state`; deletes sources and what cites them; `secure_delete` and `wal_checkpoint` pragmas. Ingest may do none of the forget-only writes | `forget_apply` in the record server |
+| forget | inserts into `forget_batch`, `source_forgotten`, `unit_state`, `unit_replacement` (and ends rows); deletes sources and what cites them; `secure_delete` and `wal_checkpoint` pragmas. Ingest may do none of the forget-only writes | `forget_apply` in the record server |
 | capture | inserts into the capture views only; reads only `project`'s id, key, and name, `session`'s id, and `source`'s id, session, external id, and kind; functions only inside the views' triggers (`TRIGGER_FUNCTIONS`) | capture and delivery logging |
 
 - Write connections live only in `server/src/db-write.ts`; `bun run architecture` checks the read MCP server cannot reach them

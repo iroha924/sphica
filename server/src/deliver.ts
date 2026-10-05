@@ -10,6 +10,7 @@ import path from "node:path";
 import type { ExpressionBuilder, Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
+import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
 import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
@@ -22,6 +23,7 @@ import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
 import { RevisionMismatch } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
+import { pendingSessions } from "./trace.ts";
 
 type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
 /**
@@ -34,6 +36,9 @@ export const CONFIRM =
 export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "the record text given here");
 // The limits add the request's length, so it takes no room from the records
 const ASK = CONFIRM.length + 1;
+const AI_ROOM = AI_DECIDED.length + 1;
+/** The mark on each line of an AI's decision: Sphica's words like AI_DECIDED, so it spends no record budget either */
+const AI_MARK = ", decided by an AI";
 const LIMITS: Record<Event, { units: number; chars: number }> = {
   session_start: { units: 6, chars: 1000 + ASK },
   pre_edit: { units: 5, chars: 1500 + ASK },
@@ -78,7 +83,10 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
   return { text: note ? `${text || lead}${note}` : text, note };
 };
 
-/** Units that may be delivered: active, supported, sourced, and in no unresolved conflict. */
+/**
+ * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. The owner's decision is held back
+ * only by a conflict with another record the owner adopted: a proposal nobody adopted, or the AI's own decision, never hides it.
+ */
 const deliverable = (db: Reads, projectId: number) =>
   db
     .selectFrom("unit as u")
@@ -94,14 +102,58 @@ const deliverable = (db: Reads, projectId: number) =>
             .where("l.kind", "=", "conflicts")
             .where("l.resolved_at", "is", null)
             .where((eb) =>
-              eb.or([eb("l.from_unit", "=", eb.ref("u.id")), eb("l.to_unit", "=", eb.ref("u.id"))]),
+              eb.or([
+                eb.and([
+                  eb("l.from_unit", "=", eb.ref("u.id")),
+                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.to_unit")]),
+                ]),
+                eb.and([
+                  eb("l.to_unit", "=", eb.ref("u.id")),
+                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.from_unit")]),
+                ]),
+              ]),
             ),
         ),
       ),
     );
 
-const line = (u: { key: string; kind: string; stance: string | null; text: string }, extra = "") =>
-  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}): ${head(inline(u.text), 240)}${extra}`;
+const line = (
+  u: { key: string; kind: string; stance: string | null; text: string },
+  extra = "",
+  ai = false,
+) =>
+  `- ${inline(u.key)} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${ai ? AI_MARK : ""}): ${head(inline(u.text), 240)}${extra}`;
+
+/** The shown records an AI decided (only its own adoption): marked so a reader weighs them below the owner's */
+async function aiDecided(db: Reads, ids: number[]): Promise<Set<number>> {
+  const whose = await authorityOf(db, ids);
+  return new Set(ids.filter((id) => whose.get(id) === "agent"));
+}
+/** The lead with the words for records an AI decided, and the room they take, when any may be shown */
+const withAi = (lead: string, chars: number, ai: Set<number>) =>
+  ai.size ? { lead: `${lead} ${AI_DECIDED}`, chars: chars + AI_ROOM } : { lead, chars };
+
+/**
+ * Fits the lines with room for the AI words, then keeps the words only when a kept line is an AI's decision. ids[i] is line i's unit
+ * (null for a line that is no record): dropping the words only shortens the text, so it still fits.
+ */
+function fitMarked(
+  lines: (string | string[])[],
+  chars: number,
+  lead: string,
+  ai: Set<number>,
+  ids: (number | null)[],
+): { text: string; kept: number[]; omitted: number; lead: string } {
+  const wide = withAi(lead, chars, ai);
+  const f = fit(
+    lines,
+    wide.chars,
+    wide.lead,
+    ids.map((id) => (ai.has(id ?? -1) ? AI_MARK.length : 0)),
+  );
+  if (wide.lead === lead || f.kept.some((i) => ai.has(ids[i] ?? -1))) return { ...f, lead: wide.lead };
+  return { ...f, text: f.text && `${lead}${f.text.slice(wide.lead.length)}`, lead };
+}
 
 /** Cuts to n characters (not bytes), marking the cut. */
 const clip = (text: string, n: number) => {
@@ -148,30 +200,36 @@ export async function recordLines(
   db: Reads,
   units: { id: number; key: string; kind: string; stance: string | null; text: string }[],
 ): Promise<string[]> {
-  const why = await reasons(
-    db,
-    units.map((u) => u.id),
-  );
-  return units.map((u) => line(u, why.get(u.id)));
+  const ids = units.map((u) => u.id);
+  const [why, ai] = await Promise.all([reasons(db, ids), aiDecided(db, ids)]);
+  return units.map((u) => line(u, why.get(u.id), ai.has(u.id)));
+}
+
+/** A lead for records rendered as deliveries render them: with the AI words when any of them is an AI's decision */
+export async function leadFor(db: Reads, ids: number[], lead: string): Promise<string> {
+  return (await aiDecided(db, ids)).size ? `${lead} ${AI_DECIDED}` : lead;
 }
 
 /**
  * Keeps whole lines within the budget. Each entry lists its forms, longest first. Entries go in first in their shortest form (one that does
  * not fit is skipped, so a later, shorter one may still fit); leftover room then lengthens them in order. Returns the kept entries' indexes.
+ * free[i] is how much of entry i's every form is Sphica's own words, which spend no budget.
  */
 function fit(
   lines: (string | string[])[],
   chars: number,
   lead: string,
+  free: number[] = [],
 ): { text: string; kept: number[]; omitted: number } {
   const forms = lines.map((entry) => (Array.isArray(entry) ? entry : [entry]));
+  const cost = (i: number, l: string) => l.length - (free[i] ?? 0);
   const chosen = new Map<number, string>();
   let used = lead.length;
   forms.forEach((f, i) => {
     const short = f[f.length - 1] ?? "";
-    if (used + short.length + 1 > chars) return;
+    if (used + cost(i, short) + 1 > chars) return;
     chosen.set(i, short);
-    used += short.length + 1;
+    used += cost(i, short) + 1;
   });
   for (const [i, short] of chosen) {
     const longer = forms[i]?.find((l) => used - short.length + l.length <= chars);
@@ -224,15 +282,24 @@ async function beforeEdit(db: Reads, projectId: number, rels: string[]): Promise
     db,
     shown.map((u) => u.id),
   );
-  const lead = `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`;
-  const f = fit(
-    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const f = fitMarked(
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
+        : line(u, "", ai.has(u.id)),
+    ),
     LIMITS.pre_edit.chars,
-    lead,
+    `Active decisions applying to ${named(rels)} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
+    ai,
+    shown.map((u) => u.id),
   );
   const omitted = rows.length - shown.length + f.omitted;
   return {
-    ...noted(f.text, lead, [leftOut(omitted)]),
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted,
@@ -298,8 +365,28 @@ async function beforeRead(
     .where(({ exists, selectFrom }) =>
       exists(selectFrom("delivery_unit as x").select("x.unit_id").whereRef("x.delivery_id", "=", "d.id")),
     )
-    .select("d.chars")
+    .select(["d.id", "d.at", "d.chars"])
     .execute();
+  // A read that showed an AI's decision also carried the AI words, which spend no budget, like the request: told from its records'
+  // authority as of when it was delivered
+  const shownBy = spent.length
+    ? await db
+        .selectFrom("delivery_unit")
+        .select(["delivery_id", "unit_id"])
+        .where(
+          "delivery_id",
+          "in",
+          spent.map((r) => r.id),
+        )
+        .execute()
+    : [];
+  // How many of each read's records were an AI's: each carried the mark, and any carried the AI words once
+  const marked = new Map<number, number>();
+  for (const r of spent) {
+    const ids = shownBy.filter((x) => x.delivery_id === r.id).map((x) => x.unit_id);
+    const n = [...(await authorityOf(db, ids, r.at)).values()].filter((a) => a === "agent").length;
+    if (n) marked.set(r.id, n);
+  }
   const seen = new Set(sent.map((r) => r.unit_id));
   const readUnits = sent.filter((r) => r.event === "pre_read").length;
   const rows = (
@@ -312,18 +399,32 @@ async function beforeRead(
     shown.map((u) => u.id),
   );
   // A shell command that names a path is not proof it was read, so the wording says only that it was named
-  const lead = `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`;
-  const f = fit(
-    shown.map((u) => (why.has(u.id) ? [line(u, why.get(u.id)), line(u)] : line(u))),
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const f = fitMarked(
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
+        : line(u, "", ai.has(u.id)),
+    ),
     Math.min(
       LIMITS.pre_read.chars,
-      READ_SESSION.chars + ASK - spent.reduce((n, r) => n + Math.max(r.chars - ASK, 0), 0),
+      READ_SESSION.chars +
+        ASK -
+        spent.reduce((n, r) => {
+          const ai = marked.get(r.id) ?? 0;
+          return n + Math.max(r.chars - ASK - (ai ? AI_ROOM + ai * AI_MARK.length : 0), 0);
+        }, 0),
     ),
-    lead,
+    `Active decisions applying to ${named(rels)}, which ${how === "reading" ? "you are reading" : "this command names"} (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
+    ai,
+    shown.map((u) => u.id),
   );
   const omitted = rows.length - shown.length + f.omitted;
   return {
-    ...noted(f.text, lead, [leftOut(omitted)]),
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted,
@@ -453,17 +554,24 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
   }
   const shown = hits.slice(0, LIMITS.prompt.units);
+  const ai = await aiDecided(
+    db,
+    shown.map((h) => h.u.id),
+  );
+  const wide = withAi(CONFIRM, LIMITS.prompt.chars, ai);
   // The request, then one line per record with the note on each
-  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why).slice(2)}`);
+  const lines = shown.map((h) => `${NOTE}: ${line(h.u, h.why, ai.has(h.u.id)).slice(2)}`);
   const kept: string[] = [];
-  let used = ASK;
-  for (const l of lines) {
-    if (used + l.length + 1 > LIMITS.prompt.chars) break;
+  let used = wide.lead.length + 1;
+  for (const [i, l] of lines.entries()) {
+    const cost = l.length - (ai.has(shown[i]?.u.id ?? -1) ? AI_MARK.length : 0);
+    if (used + cost + 1 > wide.chars) break;
     kept.push(l);
-    used += l.length + 1;
+    used += cost + 1;
   }
+  const ask = shown.slice(0, kept.length).some((h) => ai.has(h.u.id)) ? wide.lead : CONFIRM;
   return {
-    ...noted(kept.length ? [CONFIRM, ...kept].join("\n") : "", CONFIRM, [leftOut(hits.length - kept.length)]),
+    ...noted(kept.length ? [ask, ...kept].join("\n") : "", ask, [leftOut(hits.length - kept.length)]),
     units: shown.slice(0, kept.length).map((h) => h.u.id),
     eligible: hits.length,
     omitted: hits.length - kept.length,
@@ -472,16 +580,35 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
+/** SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
+const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
+
+/** Sphica's own words asking the agent to trace on its own, never taken from a record */
+export const AUTO_TRACE = (n: number) =>
+  `- ${n} earlier session${n === 1 ? "" : "s"} of this project ${n === 1 ? "waits" : "wait"} to be traced. After the user's request is done, run the trace Skill on your own for the oldest (at most 2), as its "On your own" section says, without asking the user.`;
+
 /**
- * Records grow only when the owner traces, so session start says when sessions wait: in the owner's own sessions only (a headless run
- * would use up the notice), at most once a local day per database and project (a mark that cannot be written shows it again).
+ * Records grow only when sessions are traced, so session start says when sessions wait, in the owner's own sessions only (a headless run
+ * would use up the notice). A new interactive Claude Code session asks the agent to trace on its own, once per session; anywhere else
+ * (Codex, whose interactive turns are not measured yet, a resumed session, an unknown start) it asks the owner to, at most once a local
+ * day per database and project. A mark that cannot be written shows it again.
  */
 async function waiting(
   db: Reads,
   projectId: number,
-  place: { file: string; key: string; host: Host; owner: boolean },
+  place: { file: string; key: string; host: Host; owner: boolean; auto: string | null },
 ): Promise<string> {
   if (!place.owner) return "";
+  if (place.auto !== null) {
+    const { total } = await pendingSessions(db, projectId, "recent", new Date(), 1, {
+      auto: true,
+      skip: { host: place.host, session: place.auto },
+    });
+    if (!total) return "";
+    if (!markOnce("auto-trace", `${path.resolve(place.file)}\0${place.key}\0${place.host}\0${place.auto}`))
+      return "";
+    return AUTO_TRACE(total);
+  }
   const n = (await pendingCount(db, projectId)).recent;
   if (!n) return "";
   const day = new Date().toLocaleDateString("sv-SE");
@@ -495,7 +622,7 @@ async function atStart(
   db: Reads,
   projectId: number,
   branch: string | null,
-  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean },
+  place: { file: string; key: string; host: Host; owner: boolean; subagent: boolean; auto: string | null },
 ): Promise<Plan> {
   const current = db
     .selectFrom("work")
@@ -531,23 +658,32 @@ async function atStart(
     current.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
     standing.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
   ]).then((r) => r.map((x) => Number(x?.n ?? 0)));
+  const ai = await aiDecided(
+    db,
+    broad.map((u) => u.id),
+  );
   const lines = [
     ...work.map((w) => {
       // The reader connection already turns next back into an array (db.ts JSON_COLUMNS)
       const next = (w.next as unknown as string[])[0];
       return `- Work: ${head(inline(w.title), 120)} (${w.status}${w.branch && w.branch === branch ? ", this branch" : ""}): ${head(inline(w.current), 200)}${next ? `; next: ${head(inline(next), 120)}` : ""}`;
     }),
-    ...broad.map((u) => line(u)),
+    ...broad.map((u) => line(u, "", ai.has(u.id))),
   ];
-  const lead = `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`;
-  const f = fit(lines, LIMITS.session_start.chars, lead);
+  const f = fitMarked(
+    lines,
+    LIMITS.session_start.chars,
+    `Sphica: this project's current work and standing constraints. ${CONFIRM} ${NOTE}:`,
+    ai,
+    [...work.map(() => null), ...broad.map((u) => u.id)],
+  );
   // Lines after the work items are the constraints; a key merely written inside a work item is not a shown constraint
   const shownUnits = f.kept.flatMap((i) => (i >= work.length ? (broad[i - work.length]?.id ?? []) : []));
   // The lists and the totals are separate reads, so a change between them never makes a count negative
   const workLeft = Math.max((workTotal ?? 0) - f.kept.filter((i) => i < work.length).length, 0);
   const broadLeft = Math.max((broadTotal ?? 0) - shownUnits.length, 0);
   return {
-    ...noted(f.text, lead, [
+    ...noted(f.text, f.lead, [
       leftOut(broadLeft),
       workLeftOut(workLeft),
       await waiting(db, projectId, place),
@@ -594,15 +730,20 @@ async function beforeReview(
   const checked = `checked ${n} changed path${n === 1 ? "" : "s"} against ${base}`;
   if (!rows.length) return { ...said(`Sphica ${checked}: no active recorded decision applies.`, null), once };
   const shown = rows.slice(0, LIMITS.review.units);
-  const lead = `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`;
-  const f = fit(
-    shown.map((u) => line(u, ` [${inline(u.because)}]`)),
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const f = fitMarked(
+    shown.map((u) => line(u, ` [${inline(u.because)}]`, ai.has(u.id))),
     LIMITS.review.chars,
-    lead,
+    `Sphica: past decisions that apply to this change (${checked}). ${NOTE}; compare the change against each:`,
+    ai,
+    shown.map((u) => u.id),
   );
   const omitted = rows.length - shown.length + f.omitted;
   return {
-    ...noted(f.text, lead, [leftOut(omitted)]),
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
     eligible: rows.length,
     omitted,
@@ -833,6 +974,16 @@ export async function deliver(
                     key: place.key,
                     host,
                     subagent: name === "SubagentStart",
+                    // Only a new interactive Claude Code session: a resumed one (even when it compacts later), a start that does not say
+                    // how it started, or a headless, SDK, or unknown one never traces on its own
+                    auto:
+                      host === "claude-code" &&
+                      name === "SessionStart" &&
+                      input.source === "startup" &&
+                      process.env.CLAUDE_CODE_ENTRYPOINT === "cli" &&
+                      !AUTO_TRACE_OFF.has((process.env.SPHICA_AUTO_TRACE ?? "").trim().toLowerCase())
+                        ? session
+                        : null,
                     // A subagent's start is never the owner's, even when the host leaves out its agent id
                     owner:
                       name !== "SubagentStart" &&

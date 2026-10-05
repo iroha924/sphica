@@ -30,6 +30,7 @@ export const EVIDENCE_ROLES = [
   "explains",
   "implements",
   "reconsiders",
+  "decides",
 ] as const;
 
 /** @public Read as text by scripts/check-pairs.mjs. */

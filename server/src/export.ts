@@ -3,11 +3,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Selectable } from "kysely";
+import { AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
 import { cut, speaker } from "./read.ts";
-import { RULE_NAMES } from "./rule-files.ts";
+import { instructionFile } from "./rule-files.ts";
 
 export const EXPORT_LIMITS = { records: 50, depth: 20, bytes: 60 * 1024 } as const;
 
@@ -91,9 +92,14 @@ async function lines(db: Reads, u: Unit): Promise<string[]> {
   // A field keeps its own line breaks. The block's own lines use indents 0 and 2, so each later line of a field goes to 4
   // (and of a quote to 6): no line of a field can pass for a label, an option, or a quote
   const kept = (t: string) => plain(t).split("\n").join("\n    ");
+  // Whose decision it is as of the export: a reader without Sphica weighs an AI's below the owner's
+  const whose = ["decision", "constraint"].includes(u.kind)
+    ? (await authorityOf(db, [u.id])).get(u.id)
+    : undefined;
   const out = [
     `key: ${inline(u.key)} (u${u.id})`,
     `kind: ${u.kind}${u.stance ? ` ${u.stance}` : ""}`,
+    ...(whose ? [`authority: ${AUTHORITY[whose]}`] : []),
     `text: ${kept(u.text)}`,
   ];
   if (u.why) out.push(`why: ${kept(u.why)}`);
@@ -132,8 +138,9 @@ function fenced(body: string[]): string {
 }
 
 /**
- * The records a decision replaced, newest first, walked back through `supersedes`, each once. The walk stops at EXPORT_LIMITS.depth;
- * a record there that still replaced another makes the chain incomplete, so that is an error, not a shorter chain.
+ * The records a decision replaces now, newest first, walked back through open replacement rows, each once: an intent that never took
+ * effect, or a period that ended, is not a replacement. The walk stops at EXPORT_LIMITS.depth; a record there that still replaces
+ * another makes the chain incomplete, so that is an error, not a shorter chain.
  */
 async function replaced(db: Reads, from: Unit): Promise<{ newer: string; unit: Unit }[] | string> {
   const seen = new Set([from.id]);
@@ -141,17 +148,17 @@ async function replaced(db: Reads, from: Unit): Promise<{ newer: string; unit: U
   let frontier = [from];
   for (let depth = 0; frontier.length; depth++) {
     const older = await db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as u", "u.id", "l.to_unit")
+      .selectFrom("unit_replacement as h")
+      .innerJoin("unit as u", "u.id", "h.to_unit")
       .where(
-        "l.from_unit",
+        "h.from_unit",
         "in",
         frontier.map((u) => u.id),
       )
-      .where("l.kind", "=", "supersedes")
+      .where("h.ended_at", "is", null)
       .selectAll("u")
-      .select("l.from_unit")
-      .orderBy("l.from_unit")
+      .select("h.from_unit")
+      .orderBy("h.from_unit")
       .orderBy("u.id")
       .execute();
     if (!older.some((u) => !seen.has(u.id))) break;
@@ -242,21 +249,6 @@ export async function exportDecisions(
   if (Buffer.byteLength(document) > EXPORT_LIMITS.bytes) return tooBig;
   return { document };
 }
-
-/**
- * Where coding agents load standing instructions, Skills, and settings from (the same places the review Skill treats as binding rules),
- * compared without case.
- */
-const INSTRUCTION_DIRS = new Set([".claude", ".agents", ".codex", ".cursor"]);
-const instructionFile = (relative: string) => {
-  const parts = relative.toLowerCase().split(/[\\/]/);
-  const names = [...RULE_NAMES].map((n) => n.toLowerCase());
-  return (
-    parts.some((p) => INSTRUCTION_DIRS.has(p)) ||
-    names.includes(parts.at(-1) ?? "") ||
-    parts.slice(-2).join("/") === ".github/copilot-instructions.md"
-  );
-};
 
 /**
  * Where the owner asked the export to be written, checked against where the write really lands: a path relative to the repository

@@ -2,6 +2,7 @@
 // said them, its links and state history, and each anchor checked against the working tree now.
 import type { Selectable } from "kysely";
 import { checkAnchor, fileState } from "./anchors.ts";
+import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { renamesSince } from "./git.ts";
@@ -143,7 +144,23 @@ async function describe(
       .innerJoin("unit as b", "b.id", "l.to_unit")
       .where((eb) => eb.or([eb("l.from_unit", "=", u.id), eb("l.to_unit", "=", u.id)]))
       .where("l.added_at", "<=", asOf ?? "9999")
-      .select(["l.kind", "l.resolved_at", "a.id as from_id", "a.key as from_key", "b.key as to_key"])
+      .select((eb) => [
+        "l.kind",
+        "l.resolved_at",
+        "a.id as from_id",
+        "b.id as to_id",
+        "a.key as from_key",
+        "b.key as to_key",
+        // A proposer's lifecycle as of the time read, shown beside a proposal that never took effect
+        eb
+          .selectFrom("unit_state as t")
+          .whereRef("t.unit_id", "=", "a.id")
+          .where("t.at", "<=", asOf ?? "9999")
+          .select("t.to_state")
+          .orderBy("t.id", "desc")
+          .limit(1)
+          .as("from_lifecycle"),
+      ])
       .execute(),
     db
       .selectFrom("unit_state")
@@ -190,10 +207,15 @@ async function describe(
     for (const l of links) l.resolved_at = later(l.resolved_at);
   }
 
+  // Whose decision it is, as of the time read: the owner's binds; an AI's may be left with a reason
+  const whose = ["decision", "constraint"].includes(u.kind)
+    ? (await authorityOf(db, [u.id], asOf)).get(u.id)
+    : undefined;
   const out = [
-    `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${lifecycle}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
+    `${u.key} (u${u.id}, revision ${u.revision}): ${u.kind}${u.stance ? ` ${u.stance}` : ""}, ${lifecycle}${whose ? `, ${AUTHORITY[whose]}` : ""}${u.extraction === "quarantined" ? `, quarantined: ${u.extraction_reason}` : ""}${u.unsourced ? ", unsourced: no source was given, so it is never used as fact" : ""}`,
     u.text,
   ];
+  if (whose === "agent") out.push(AI_DECIDED);
   if (u.why) out.push(`Why: ${u.why}`);
   if (u.scope_note) out.push(`Scope: ${u.scope_note}`);
   if (u.revisit_when) out.push(`Revisit when: ${u.revisit_when}`);
@@ -250,13 +272,21 @@ async function describe(
       );
     }
   }
-  for (const l of links) {
-    if (l.kind === "supersedes")
-      out.push(l.from_id === u.id ? `Supersedes ${l.to_key}` : `Superseded by ${l.from_key}`);
-    else
-      out.push(
-        `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : " (unresolved)"}`,
-      );
+  out.push(...(await replacements(db, u.id, links, asOf)));
+  // An unresolved conflict holds a record back from automatic delivery, except that the owner's decision is held back only by the owner's
+  const conflicting = links.filter((l) => l.kind === "conflicts");
+  const sides = await authorityOf(
+    db,
+    conflicting.map((l) => (l.from_id === u.id ? l.to_id : l.from_id)),
+    asOf,
+  );
+  const mine = (await authorityOf(db, [u.id], asOf)).get(u.id);
+  for (const l of conflicting) {
+    const other = l.from_id === u.id ? l.to_id : l.from_id;
+    const held = mine !== "owner" || sides.get(other) === "owner";
+    out.push(
+      `Conflicts with ${l.from_id === u.id ? l.to_key : l.from_key}${l.resolved_at ? " (resolved)" : held ? " (unresolved: held back from automatic delivery until resolved, not withdrawn)" : " (unresolved: still delivered, since only the owner's words hold the owner's decision back)"}`,
+    );
   }
   // The newest set bound to the record's words, as of the time read; search uses the same one
   const aliases = await db
@@ -271,6 +301,81 @@ async function describe(
   if (terms.length) out.push(`Aliases (search only): ${terms.map((t) => inline(t)).join(", ")}`);
   out.push(`History: ${history.map((s) => `${s.to_state} ${s.at} (${s.reason})`).join("; ")}`);
   return out.join("\n");
+}
+
+type Link = {
+  kind: string;
+  from_id: number;
+  to_id: number;
+  from_key: string;
+  to_key: string;
+  from_lifecycle: string | null;
+};
+
+/**
+ * A record's replacements told apart from stored rows alone: its own intent and whether it is in effect, periods that ended with why,
+ * and proposals into it that never took effect. As of a past time, a row is in effect when that time falls in [started_at, ended_at).
+ */
+async function replacements(
+  db: Reads,
+  id: number,
+  links: Link[],
+  asOf: string | undefined,
+): Promise<string[]> {
+  const intents = links.filter((l) => l.kind === "supersedes");
+  if (!intents.length) return [];
+  const own = intents.find((l) => l.from_id === id);
+  const rows = await db
+    .selectFrom("unit_replacement as h")
+    .innerJoin("unit as a", "a.id", "h.from_unit")
+    .where((eb) =>
+      eb.or([
+        eb("h.from_unit", "=", id),
+        eb("h.to_unit", "=", id),
+        // Who holds the place this record means to take
+        ...(own ? [eb("h.to_unit", "=", own.to_id)] : []),
+      ]),
+    )
+    .where("h.started_at", "<=", asOf ?? "9999")
+    .select(["h.from_unit", "h.to_unit", "h.started_at", "h.ended_at", "h.end_reason", "a.key as from_key"])
+    .orderBy("h.id")
+    .execute();
+  // Intents whose earlier effect the update to revision 10 could not date: never shown as proposals that never took effect
+  const gaps = await db
+    .selectFrom("unit_replacement_gap")
+    .select(["from_unit", "to_unit"])
+    .where((eb) => eb.or([eb("from_unit", "=", id), eb("to_unit", "=", id)]))
+    .execute();
+  const gap = (from: number, to: number) => gaps.some((g) => g.from_unit === from && g.to_unit === to);
+  const unrecorded = "its history before the update to revision 10 was not recorded";
+  const open = (r: (typeof rows)[number]) => r.ended_at === null || (asOf !== undefined && r.ended_at > asOf);
+  const period = (r: (typeof rows)[number]) =>
+    `from ${r.started_at} to ${r.ended_at}: ${inline(r.end_reason ?? "")}`;
+  const out: string[] = [];
+  if (own) {
+    const mine = rows.filter((r) => r.from_unit === id && r.to_unit === own.to_id);
+    const now = mine.find(open);
+    const holder = rows.find((r) => r.to_unit === own.to_id && r.from_unit !== id && open(r));
+    out.push(
+      `Supersedes ${own.to_key} (${now ? `in effect since ${now.started_at}` : holder ? `not in effect: ${holder.from_key} is in effect as its successor` : "not in effect"})`,
+    );
+    for (const r of mine) if (!open(r)) out.push(`Replaced ${own.to_key} ${period(r)}`);
+    if (gap(id, own.to_id)) out.push(`Supersedes ${own.to_key}: ${unrecorded}`);
+  }
+  const into = rows.filter((r) => r.to_unit === id);
+  for (const r of into)
+    out.push(
+      open(r)
+        ? `Superseded by ${r.from_key} (since ${r.started_at})`
+        : `Was superseded by ${r.from_key} ${period(r)}`,
+    );
+  for (const l of intents) {
+    if (l.to_id !== id) continue;
+    if (gap(l.from_id, id)) out.push(`Superseded by ${l.from_key} at some time: ${unrecorded}`);
+    else if (!into.some((r) => r.from_unit === l.from_id))
+      out.push(`Replacement proposed by ${l.from_key} (${l.from_lifecycle ?? "candidate"})`);
+  }
+  return out;
 }
 
 /** Where a gone file may have moved since the anchor's commit; empty when there is no commit to compare with or no rename was seen. */

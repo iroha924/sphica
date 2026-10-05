@@ -16,6 +16,7 @@ import {
   HOLD_DAYS,
   isOwnerTurn,
   MAX_MESSAGE,
+  observeRecordCall,
   onHook,
   openTurn,
   readInput,
@@ -1649,6 +1650,68 @@ test("a legacy key held while two projects share its normalized key stays held, 
         .all()
         .map((r) => r.project_id),
       [1],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("record call: the hook logs a record tool's session and turn straight to the database, and nothing for other tools", async () => {
+  const db = tempDb();
+  try {
+    const input = {
+      hook_event_name: "PreToolUse",
+      session_id: "ext-s1",
+      prompt_id: "t1",
+      tool_name: "mcp__plugin_sphica_record__trace_begin",
+      tool_use_id: "toolu_1",
+    };
+    await observeRecordCall(db.file, input, true);
+    await observeRecordCall(db.file, input, true);
+    await observeRecordCall(
+      db.file,
+      { ...input, tool_name: "mcp__other__trace_begin", tool_use_id: "toolu_2" },
+      true,
+    );
+    await observeRecordCall(db.file, { ...input, tool_use_id: "toolu_3", prompt_id: undefined }, false);
+    assert.deepEqual(
+      db.owner
+        .prepare(
+          "select session_external, turn_id, tool_use_id, owner_turn from tool_call_observation order by id",
+        )
+        .all()
+        .map((r) => ({ ...r })),
+      [
+        { session_external: "ext-s1", turn_id: "t1", tool_use_id: "toolu_1", owner_turn: 1 },
+        { session_external: "ext-s1", turn_id: null, tool_use_id: "toolu_3", owner_turn: 0 },
+      ],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("record call: hook values out of bounds are never stored as sent", async () => {
+  const db = tempDb();
+  try {
+    const long = "x".repeat(10_000);
+    const input = {
+      hook_event_name: "PreToolUse",
+      session_id: "ext-s1",
+      prompt_id: "t1",
+      tool_name: "mcp__plugin_sphica_record__trace_begin",
+      tool_use_id: "toolu_1",
+    };
+    await observeRecordCall(db.file, { ...input, session_id: long }, true);
+    await observeRecordCall(db.file, { ...input, tool_use_id: long }, true);
+    await observeRecordCall(db.file, { ...input, tool_name: `mcp__plugin_sphica_record__${long}` }, true);
+    await observeRecordCall(db.file, { ...input, tool_use_id: "toolu_2", prompt_id: long }, true);
+    assert.deepEqual(
+      db.owner
+        .prepare("select session_external, turn_id, tool_use_id from tool_call_observation order by id")
+        .all()
+        .map((r) => ({ ...r })),
+      [{ session_external: "ext-s1", turn_id: null, tool_use_id: "toolu_2" }],
     );
   } finally {
     await db.done();

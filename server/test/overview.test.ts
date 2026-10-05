@@ -6,11 +6,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
 import { liveOverview, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
+import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], root: string | null = null) {
   const t: Target = {
@@ -443,6 +445,84 @@ test("look follows a replaced record's chain once, however many lines mark it", 
     assert.ok(queries < 20, `${queries} queries`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("look follows only replacements in effect: a chain of three ends at its live record, and one withdrawn hands the place back", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [record(m, "old", "constraint")], root);
+    await save(db, p, [record(m, "mid", "constraint", { supersedes: "trace:ext-s1/old" })], root);
+    await save(db, p, [record(m, "new", "constraint", { supersedes: "trace:ext-s1/mid" })], root);
+    fs.writeFileSync(
+      path.join(root, "CLAUDE.md"),
+      ["old", "mid", "new"].map((k) => `- rule <!-- sphica: trace:ext-s1/${k} -->`).join("\n"),
+    );
+    const look = await lookOverview(db.reader, p, root);
+    assert.match(look, /CLAUDE\.md:1: trace:ext-s1\/old was superseded by trace:ext-s1\/new\n/);
+    assert.match(look, /CLAUDE\.md:2: trace:ext-s1\/mid was superseded by trace:ext-s1\/new\n/);
+    // The end of the chain is withdrawn: its replacement of mid ends, so mid is live again and old leads to it
+    const id = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/new'").get()?.id);
+    const runId = run(db, p);
+    await inTransaction(db.ingest, (trx) =>
+      reconcile(
+        trx,
+        [id],
+        { runId },
+        { withdraw: new Map([[id, { reason: "the owner withdrew it", source: null }]]) },
+      ),
+    );
+    const after = await lookOverview(db.reader, p, root);
+    assert.match(after, /CLAUDE\.md:1: trace:ext-s1\/old was superseded by trace:ext-s1\/mid\n/);
+    assert.doesNotMatch(after, /CLAUDE\.md:2:/);
+    assert.match(after, /CLAUDE\.md:3: trace:ext-s1\/new was withdrawn/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("look names the successor that took the owner's decision's place, not a proposal still waiting beside it", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [record(m, "old-rule", "constraint")], root);
+    await save(
+      db,
+      p,
+      [record(m, "waiting", "constraint", { adoption: [], supersedes: "trace:ext-s1/old-rule" })],
+      root,
+    );
+    await save(db, p, [record(m, "new-rule", "constraint", { supersedes: "trace:ext-s1/old-rule" })], root);
+    fs.writeFileSync(path.join(root, "CLAUDE.md"), "- An old rule <!-- sphica: trace:ext-s1/old-rule -->\n");
+    assert.match(
+      await lookOverview(db.reader, p, root),
+      /CLAUDE\.md:1: trace:ext-s1\/old-rule was superseded by trace:ext-s1\/new-rule\n/,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the live overview marks an AI's decision, with Sphica's words for it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const page = await liveOverview(db.reader, p, null);
+    assert.match(
+      page,
+      /^- trace:ext-s1\/pool \(u\d+, decision do, decided by an AI\): I keep the connection pool small\./m,
+    );
+    assert.ok(page.includes(AI_DECIDED));
+  } finally {
     await db.done();
   }
 });

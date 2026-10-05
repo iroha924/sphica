@@ -1,7 +1,10 @@
 // The decision lane of a code review: which active records a diff touches (review-findings.ts checks the verdicts about them).
 // A record applies when the diff changes a path it is anchored to, or, for a record with no code location that says not to do something
 // (or to defer it), when an added line names one of its options. Candidates and superseded records never apply.
+import { authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
+import { inline } from "./panel.ts";
+import { head } from "./text.ts";
 
 /** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */
 export type FileDiff = { path: string; added: string[]; lines: number[]; gone?: true };
@@ -198,4 +201,24 @@ export async function selectForReview(
     }
   }
   return [...out.values()];
+}
+
+/** Sphica's own words for a reviewer about an AI's decision, never taken from a record: shown only beside one */
+export const AI_DEPARTURE =
+  "A record marked decided by an AI was decided by an AI in an earlier session, not by the owner: a change that departs from it is a violation only when the change gives no reason for departing.";
+
+/** The records review_select returns, one line each, with the AI's decisions marked */
+export async function selectedText(db: Reads, hits: Applicable[]): Promise<string> {
+  const whose = await authorityOf(
+    db,
+    hits.map((u) => u.id),
+  );
+  const ai = hits.some((u) => whose.get(u.id) === "agent");
+  return [
+    ...hits.map(
+      (u) =>
+        `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${whose.get(u.id) === "agent" ? ", decided by an AI" : ""}): ${head(inline(u.text), 300)} [${u.because}]`,
+    ),
+    ...(ai ? [AI_DEPARTURE] : []),
+  ].join("\n");
 }

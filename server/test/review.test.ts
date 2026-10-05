@@ -2,11 +2,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
+import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { parseDiff, selectForReview } from "../src/review.ts";
+import { AI_DEPARTURE, parseDiff, selectedText, selectForReview } from "../src/review.ts";
 import { checkFindings } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown) {
   const t: Target = {
@@ -290,6 +291,98 @@ test("records anchored to a changed path, and location-free don't records naming
     assert.deepEqual(mixed, [
       "trace:ext-s1/storage: contradictory verdicts (violation, complies); give one outcome",
     ]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("only the record in effect applies: a replaced one does not until its successor is withdrawn, and a waiting proposal never does", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "SQLite にする。DuckDB に移す。" });
+    const ai = message(db, p, { id: "a1", text: "Postgres がよさそう。", speaker: "assistant" });
+    const decided = (key: string, quote: string, extra = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+      anchors: [{ path: "src/db.ts", role: "applies_to" }],
+      ...extra,
+    });
+    await save(db, p, { units: [decided("sqlite", "SQLite にする。")] });
+    await save(db, p, {
+      units: [
+        {
+          key: "postgres",
+          kind: "decision",
+          stance: "do",
+          text: "Postgres がよさそう。",
+          evidence: [{ source: `s${ai}`, quote: "Postgres がよさそう。", role: "proposes" }],
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+          supersedes: "trace:ext-s1/sqlite",
+        },
+      ],
+    });
+    await save(db, p, {
+      units: [decided("duckdb", "DuckDB に移す。", { supersedes: "trace:ext-s1/sqlite" })],
+    });
+    const files = parseDiff(DIFF);
+    const keys = async () => (await selectForReview(db.reader, p, files)).map((h) => h.key);
+    assert.deepEqual(await keys(), ["trace:ext-s1/duckdb"]);
+    const id = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/duckdb'").get()?.id);
+    const runId = run(db, p);
+    await inTransaction(db.ingest, (trx) =>
+      reconcile(
+        trx,
+        [id],
+        { runId },
+        { withdraw: new Map([[id, { reason: "the owner withdrew it", source: null }]]) },
+      ),
+    );
+    assert.deepEqual(await keys(), ["trace:ext-s1/sqlite"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("review_select marks an AI's decision and says a departure from it needs only a reason", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const files = parseDiff(DIFF);
+    const text = await selectedText(db.reader, await selectForReview(db.reader, p, files));
+    assert.match(
+      text,
+      /^- trace:ext-s1\/pool \(decision do, decided by an AI\): I keep the connection pool small\. \[anchored to src\/db\.ts\]$/m,
+    );
+    assert.ok(text.endsWith(AI_DEPARTURE));
+    const owner = tempDb();
+    try {
+      const q = project(owner);
+      const m = message(owner, q, { id: "m1", text: "Keep one SQLite file." });
+      await save(owner, q, {
+        units: [
+          {
+            key: "sqlite",
+            kind: "constraint",
+            stance: "do",
+            text: "Keep one SQLite file.",
+            evidence: [{ source: `s${m}`, quote: "Keep one SQLite file.", role: "states" }],
+            adoption: [{ source: `s${m}`, quote: "Keep one SQLite file." }],
+            anchors: [{ path: "src/db.ts", role: "applies_to" }],
+          },
+        ],
+      });
+      const plain = await selectedText(owner.reader, await selectForReview(owner.reader, q, files));
+      assert.match(plain, /^- trace:ext-s1\/sqlite \(constraint do\): Keep one SQLite file\./);
+      assert.ok(!plain.includes(AI_DEPARTURE));
+    } finally {
+      await owner.done();
+    }
   } finally {
     await db.done();
   }

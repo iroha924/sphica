@@ -213,42 +213,6 @@ create index edit_observation_path on edit_observation (path);
 
 -- One extraction by trace, harvest, or glean. target names what it read: `session:<uuid>`, `pr:<n>`, or `glean`.
 -- A migration that changes lifecycles records itself as a run too (origin migration, target `revision:<n>`), so each change names where it came from.
--- Each record tool call as the record server saw it, written and committed before the call does anything, so a failed call keeps its row.
--- Who called comes from what the host passes (caller.ts): Codex's session and turn, or Claude Code's tool use id, which the PreToolUse
--- hook's tool_call_observation joins to a session and turn.
-create table record_call (
-  id integer primary key autoincrement not null,
-  project_id integer not null references project (id) on delete cascade,
-  tool text not null check (tool <> ''),
-  host text check (host in ('claude-code', 'codex')),
-  caller_session text,
-  caller_turn text,
-  tool_use_id text,
-  mode text not null check (mode in ('interactive', 'headless', 'sdk', 'unknown')),
-  mode_raw text,
-  called_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', called_at) is called_at)
-) strict;
-create index record_call_project on record_call (project_id, host, called_at);
-create index record_call_caller on record_call (host, caller_session, caller_turn);
-create index record_call_tool_use on record_call (tool_use_id) where tool_use_id is not null;
-create trigger record_call_frozen before update on record_call begin
-  select raise(abort, 'record tool calls are never changed');
-end;
-
--- Record tool calls as Claude Code's PreToolUse hook saw them, written before the tool runs: the hook input names the session and turn
--- the MCP call itself does not carry.
-create table tool_call_observation (
-  id integer primary key autoincrement not null,
-  host text not null check (host in ('claude-code', 'codex')),
-  session_external text not null check (session_external <> ''),
-  turn_id text,
-  tool_use_id text not null check (tool_use_id <> ''),
-  tool_name text not null check (tool_name <> ''),
-  owner_turn integer not null check (owner_turn in (0, 1)),
-  observed_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', observed_at) is observed_at),
-  unique (host, tool_use_id)
-) strict;
-
 create table extraction_run (
   id integer primary key autoincrement not null,
   project_id integer not null references project (id) on delete cascade,
@@ -259,25 +223,18 @@ create table extraction_run (
   input_bytes integer check (input_bytes >= 0),
   -- The CLI-issued draft this run saves. A saved run's draft saves nothing again; the draft is bound to this run's project and target
   draft_id text unique,
-  -- The record tool call that began this run; save compares its own caller with it
-  begin_call_id integer references record_call (id),
   started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
   finished_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', finished_at) is finished_at),
   check (finished_at >= started_at)
 ) strict;
 create index extraction_run_project on extraction_run (project_id);
 create index extraction_run_session on extraction_run (session_id) where session_id is not null;
-create index extraction_run_begin_call on extraction_run (begin_call_id) where begin_call_id is not null;
 
 -- A run changes once, when it finishes: only a running run takes a status and a finish time. The one other update is the foreign key
 -- action clearing session_id after its session was deleted
-create trigger extraction_run_call_project before insert on extraction_run when new.begin_call_id is not null begin
-  select raise(abort, 'a run begins from a record tool call of its own project')
-  where (select project_id from record_call where id = new.begin_call_id) is not new.project_id;
-end;
 create trigger extraction_run_frozen before update on extraction_run
 when new.id is not old.id or new.project_id is not old.project_id or new.origin is not old.origin or new.target is not old.target
-  or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id or new.begin_call_id is not old.begin_call_id
+  or new.input_bytes is not old.input_bytes or new.draft_id is not old.draft_id
   or new.started_at is not old.started_at
   or (new.session_id is not old.session_id and (new.session_id is not null or exists (select 1 from session where id = old.session_id)))
   or ((new.status is not old.status or new.finished_at is not old.finished_at) and old.status <> 'running') begin
@@ -384,7 +341,7 @@ create table unit_evidence (
   source_id integer not null references source (id) on delete cascade,
   span_start integer not null check (span_start >= 0),
   span_end integer not null check (span_end > span_start),
-  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements', 'reconsiders', 'decides')),
+  role text not null check (role in ('states', 'proposes', 'rejects', 'explains', 'implements', 'reconsiders')),
   -- A third party the owner reported ("X said ..."): hearsay by the owner, never X's own statement
   reported_speaker text,
   run_id integer not null references extraction_run (id),
@@ -410,13 +367,12 @@ create index unit_evidence_option on unit_evidence (unit_id, option_id);
 create index unit_evidence_retraction on unit_evidence (retraction_source_id) where retraction_source_id is not null;
 create index unit_evidence_run on unit_evidence (run_id);
 
--- Evidence that the project adopted a decision or constraint. route: owner_statement (an owner-kind source span),
--- explicit (an explicit disposition in a source, such as a maintainer's reply saying it is adopted), or agent (the AI deciding in its own
--- reply, paired with the same span's decides evidence, saved by an interactive session's run). A merge or a resolved thread is never adoption.
+-- Evidence that the project adopted a decision or constraint. route: owner_statement (an owner-kind source span) or
+-- explicit (an explicit disposition in a source, such as a maintainer's reply saying it is adopted). A merge or a resolved thread is never adoption.
 create table unit_adoption (
   id integer primary key autoincrement not null,
   unit_id integer not null references unit (id) on delete cascade,
-  route text not null check (route in ('owner_statement', 'explicit', 'agent')),
+  route text not null check (route in ('owner_statement', 'explicit')),
   source_id integer not null references source (id) on delete cascade,
   span_start integer not null check (span_start >= 0),
   span_end integer not null check (span_end > span_start),
@@ -449,20 +405,6 @@ create trigger unit_adoption_route before insert on unit_adoption begin
   where exists (select 1 from source where id = new.source_id and kind = 'pr_event');
   select raise(abort, 'adoption applies to decisions and constraints')
   where not exists (select 1 from unit where id = new.unit_id and kind in ('decision', 'constraint'));
-  select raise(abort, 'agent adoption pairs with live decides evidence on the same span of the unit')
-  where new.route = 'agent' and not exists (select 1 from unit_evidence e where e.unit_id = new.unit_id and e.option_id is null
-    and e.role = 'decides' and e.source_id = new.source_id and e.span_start = new.span_start and e.span_end = new.span_end
-    and e.retracted_at is null);
-  select raise(abort, 'agent adoption needs a trace run')
-  where new.route = 'agent' and not exists (select 1 from extraction_run where id = new.run_id and origin = 'trace');
-  select raise(abort, 'agent adoption needs a run begun by an interactive session')
-  where new.route = 'agent' and not exists (select 1 from extraction_run r join record_call c on c.id = r.begin_call_id
-    where r.id = new.run_id and c.mode = 'interactive');
-  select raise(abort, 'agent adoption cannot cite a reply from a turn that ran a record tool, or one no record tool call can be placed away from')
-  where new.route = 'agent' and exists (select 1 from agent_ineligible_source where source_id = new.source_id);
-  select raise(abort, 'agent adoption cites a reply of the session the trace reads')
-  where new.route = 'agent' and not exists (select 1 from source s join extraction_run r on r.id = new.run_id
-    where s.id = new.source_id and s.session_id = r.session_id);
 end;
 
 create table unit_link (
@@ -481,8 +423,6 @@ create table unit_link (
 ) strict;
 -- Lookups by the unit a link points at: its successors, and its conflicts from either side
 create index unit_link_to on unit_link (to_unit, kind);
--- A record means to replace at most one other (the record input has one supersedes)
-create unique index unit_link_one_intent on unit_link (from_unit) where kind = 'supersedes';
 create index unit_link_run on unit_link (run_id);
 create trigger unit_link_frozen before update on unit_link begin
   select raise(abort, 'links are frozen; only an unresolved conflict can be resolved, once')
@@ -499,91 +439,6 @@ create trigger unit_link_supersedes_acyclic before insert on unit_link when new.
     with recursive chain(id) as (
       select new.to_unit union select l.to_unit from unit_link l join chain on l.from_unit = chain.id where l.kind = 'supersedes')
     select 1 from chain where id = new.from_unit);
-end;
-
--- When a replacement is in effect: a supersedes link is the intent, and a row here says it took effect, from when, and until when. One open
--- row per replaced record is its successor place. Saves write rows only as judge decides (server/src/judge.ts); a row ends once and is
--- never rewritten, and a replacement that takes effect again is a new row.
-create table unit_replacement (
-  id integer primary key autoincrement not null,
-  from_unit integer not null references unit (id) on delete cascade,
-  to_unit integer not null references unit (id) on delete cascade,
-  run_id integer references extraction_run (id),
-  forget_id integer references forget_batch (id),
-  started_at text not null check (strftime('%Y-%m-%dT%H:%M:%fZ', started_at) is started_at),
-  ended_at text check (strftime('%Y-%m-%dT%H:%M:%fZ', ended_at) is ended_at),
-  end_reason text,
-  end_run_id integer references extraction_run (id),
-  end_forget_id integer references forget_batch (id),
-  check ((run_id is null) <> (forget_id is null)),
-  check ((ended_at is null) = (end_reason is null)),
-  check (ended_at is null or (end_run_id is null) <> (end_forget_id is null)),
-  check (ended_at is not null or (end_run_id is null and end_forget_id is null)),
-  check (ended_at >= started_at),
-  check (from_unit <> to_unit)
-) strict;
-create unique index unit_replacement_place on unit_replacement (to_unit) where ended_at is null;
-create index unit_replacement_from on unit_replacement (from_unit);
-create index unit_replacement_to on unit_replacement (to_unit);
-create index unit_replacement_run on unit_replacement (run_id) where run_id is not null;
-create index unit_replacement_forget on unit_replacement (forget_id) where forget_id is not null;
-create index unit_replacement_end_run on unit_replacement (end_run_id) where end_run_id is not null;
-create index unit_replacement_end_forget on unit_replacement (end_forget_id) where end_forget_id is not null;
-create trigger unit_replacement_check before insert on unit_replacement begin
-  select raise(abort, 'a replacement''s cause belongs to the project of the records it joins')
-  where exists (select 1 from extraction_run where id = new.run_id
-      and project_id is not (select project_id from unit where id = new.to_unit))
-    or exists (select 1 from forget_batch where id = new.forget_id
-      and project_id is not (select project_id from unit where id = new.to_unit));
-  select raise(abort, 'a replacement takes effect only from the record''s own intent to replace that one')
-  where not exists (select 1 from unit_link where from_unit = new.from_unit and to_unit = new.to_unit and kind = 'supersedes');
-  select raise(abort, 'a replacement starts open')
-  where new.ended_at is not null;
-  -- A record whose source is gone can be replaced (that is how it is fixed); a quarantined one, never active, cannot
-  select raise(abort, 'a replacement takes effect only from a sound successor into a record not quarantined nor withdrawn')
-  where exists (select 1 from unit where id = new.from_unit and (extraction <> 'supported' or unsourced = 1 or lifecycle = 'withdrawn'))
-    or exists (select 1 from unit where id = new.to_unit and (extraction <> 'supported' or lifecycle = 'withdrawn'));
-  -- Of a decision or constraint, only the owner's or a maintainer's adoption lets a replacement take effect, whatever it replaces
-  select raise(abort, 'a decision or constraint replaces another only with the owner''s or a maintainer''s adoption')
-  where exists (select 1 from unit where id = new.from_unit and kind in ('decision', 'constraint'))
-    and not exists (select 1 from unit_adoption where unit_id = new.from_unit and route in ('owner_statement', 'explicit') and retracted_at is null);
-  select raise(abort, 'a replacement takes effect only from a sound successor with full support')
-  where exists (select 1 from unit_support where unit_id = new.from_unit and missing is not null);
-end;
-create trigger unit_replacement_end before update on unit_replacement begin
-  select raise(abort, 'a replacement''s cause belongs to the project of the records it joins')
-  where exists (select 1 from extraction_run where id = new.end_run_id
-      and project_id is not (select project_id from unit where id = new.to_unit))
-    or exists (select 1 from forget_batch where id = new.end_forget_id
-      and project_id is not (select project_id from unit where id = new.to_unit));
-  select raise(abort, 'a replacement only ever ends, once')
-  where old.ended_at is not null or new.ended_at is null or new.id is not old.id or new.from_unit is not old.from_unit
-    or new.to_unit is not old.to_unit or new.run_id is not old.run_id or new.forget_id is not old.forget_id
-    or new.started_at is not old.started_at;
-end;
-create trigger unit_replacement_no_delete before delete on unit_replacement
-when exists (select 1 from unit where id = old.from_unit) and exists (select 1 from unit where id = old.to_unit) begin
-  select raise(abort, 'replacements are history and are never removed');
-end;
-create trigger unit_rev_replacement_i after insert on unit_replacement begin
-  update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
-end;
-create trigger unit_rev_replacement_u after update on unit_replacement begin
-  update unit set revision = revision + 1 where id in (new.from_unit, new.to_unit);
-end;
-
--- An intent whose earlier effect the update to revision 10 could not date: read says the history was not recorded, rather than calling it
--- a proposal that never took effect. Written only by that migration.
-create table unit_replacement_gap (
-  from_unit integer not null references unit (id) on delete cascade,
-  to_unit integer not null references unit (id) on delete cascade,
-  run_id integer not null references extraction_run (id),
-  primary key (from_unit, to_unit)
-) strict;
-create index unit_replacement_gap_to on unit_replacement_gap (to_unit);
-create index unit_replacement_gap_run on unit_replacement_gap (run_id);
-create trigger unit_replacement_gap_frozen before update on unit_replacement_gap begin
-  select raise(abort, 'a gap in replacement history is never changed');
 end;
 
 -- Lifecycle history and the only route for lifecycle changes. The trigger checks the rules and then sets unit.lifecycle.
@@ -611,27 +466,28 @@ create trigger unit_state_rules before insert on unit_state begin
   select raise(abort, 'from_state must be the current lifecycle')
   where new.from_state is not (select lifecycle from unit where id = new.unit_id)
     and exists (select 1 from unit_state where unit_id = new.unit_id);
-  select raise(abort, 'not a lifecycle change a unit can make: withdrawn is final, and a superseded unit comes back only once nothing replaces it')
+  -- A successor's state is read from its history, not its lifecycle column: a row written in the same statement may not be applied yet
+  select raise(abort, 'not a lifecycle change a unit can make: withdrawn is final, and a superseded unit only returns to candidate once every successor is withdrawn')
   where exists (select 1 from unit_state where unit_id = new.unit_id) and not (
     (new.from_state = 'candidate' and new.to_state in ('active', 'superseded', 'withdrawn'))
     or (new.from_state = 'active' and new.to_state in ('candidate', 'superseded', 'withdrawn'))
-    or (new.from_state = 'superseded' and new.to_state in ('candidate', 'active')
-      and not exists (select 1 from unit_replacement where to_unit = new.unit_id and ended_at is null)));
+    or (new.from_state = 'superseded' and new.to_state = 'candidate' and not exists (
+      select 1 from unit_link l join unit s on s.id = l.from_unit where l.to_unit = new.unit_id and l.kind = 'supersedes'
+        and s.extraction = 'supported' and s.unsourced = 0
+        and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn')));
   select raise(abort, 'a quarantined or unsourced unit cannot become active')
   where new.to_state = 'active' and exists (select 1 from unit where id = new.unit_id and (extraction <> 'supported' or unsourced = 1));
   select raise(abort, (select missing from unit_support where unit_id = new.unit_id))
   where new.to_state = 'active' and (select missing from unit_support where unit_id = new.unit_id) is not null;
-  -- A reconsider condition is the owner's: each needs a quote of the owner before the unit first becomes active. A quote retracted or
-  -- forgotten later leaves the unit as it was (it may come back to active), and readers show the condition as unsupported
+  -- A reconsider condition is the owner's: each needs a quote of the owner, written when the unit is saved. A quote retracted later, or
+  -- forgotten (forget's recheck is exempt, since the row is gone), leaves the unit as it was, and readers show the condition as unsupported
   select raise(abort, 'a reconsider condition needs a quote of the owner')
-  where new.to_state = 'active' and new.forget_id is null
-    and not exists (select 1 from unit_state where unit_id = new.unit_id and to_state = 'active') and exists (select 1 from unit_option o where o.unit_id = new.unit_id
+  where new.to_state = 'active' and new.forget_id is null and exists (select 1 from unit_option o where o.unit_id = new.unit_id
     and o.reconsider_when is not null and not exists (select 1 from unit_evidence e join source s on s.id = e.source_id
       where e.option_id = o.id and e.role = 'reconsiders' and s.author_kind = 'owner'));
-  select raise(abort, 'superseded needs a replacement in effect into it')
-  where new.to_state = 'superseded' and not exists (select 1 from unit_replacement where to_unit = new.unit_id and ended_at is null);
-  select raise(abort, 'a unit something replaces is superseded, not active')
-  where new.to_state = 'active' and exists (select 1 from unit_replacement where to_unit = new.unit_id and ended_at is null);
+  select raise(abort, 'superseded needs a supersedes link from an active successor')
+  where new.to_state = 'superseded' and not exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+    where l.to_unit = new.unit_id and l.kind = 'supersedes' and s.lifecycle = 'active');
 end;
 -- The one update allowed is the foreign key action clearing source_id after its source was forgotten
 create trigger unit_state_append_only before update on unit_state
@@ -645,6 +501,17 @@ create trigger unit_state_no_delete before delete on unit_state when exists (sel
 end;
 create trigger unit_state_apply after insert on unit_state begin
   update unit set lifecycle = new.to_state, revision = revision + 1 where id = new.unit_id;
+end;
+-- Withdrawing a record's last live successor brings the record back to candidate, to be judged again. Successors are read from history:
+-- the withdrawal just written may not be applied to its unit yet
+create trigger unit_state_restore after insert on unit_state when new.to_state = 'withdrawn' begin
+  insert into unit_state (unit_id, from_state, to_state, at, reason, source_id, run_id, forget_id)
+  select o.id, 'superseded', 'candidate', new.at, 'its successor was withdrawn', new.source_id, new.run_id, new.forget_id
+  from unit_link l join unit o on o.id = l.to_unit
+  where l.from_unit = new.unit_id and l.kind = 'supersedes' and o.lifecycle = 'superseded'
+    and not exists (select 1 from unit_link k join unit s on s.id = k.from_unit where k.to_unit = o.id and k.kind = 'supersedes'
+      and k.from_unit <> new.unit_id and s.extraction = 'supported' and s.unsourced = 0
+      and (select to_state from unit_state where unit_id = k.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 
 -- Where a unit applies in code, or code cited as evidence. Validated against the working tree when served, never cached here.
@@ -694,32 +561,11 @@ end;
 -- What an active unit must have, in one place: missing says what it lacks, and is null when it lacks nothing. Activating reads it, and so
 -- does every change that can take support away (a retraction, retiring an anchor), so the two never disagree.
 -- Evidence on an option supports the option, never the unit.
--- Assistant replies that never carry agent adoption: from a turn that ran a record tool (a trace report must not become a decision), from a
--- session whose call named no turn, and, for a call no hook or host placed, every reply of its project and host from that call on.
-create view agent_ineligible_source as
-select s.id as source_id from source s join session se on se.id = s.session_id
-where s.kind = 'session_message' and s.author_kind = 'assistant' and (
-  -- A reply with no turn cannot be placed apart from a turn that ran a record tool
-  s.turn_id is null
-  or exists (select 1 from record_call c where c.host = 'codex' and se.host = 'codex' and c.caller_session = se.external_id
-    and (c.caller_turn is null or c.caller_turn = s.turn_id))
-  -- The hook's row alone counts: the MCP SDK refuses a malformed call before the server can log it
-  or exists (select 1 from tool_call_observation o where o.host = 'claude-code' and se.host = 'claude-code'
-    and o.session_external = se.external_id
-    -- An observation with no turn places the call only in time, like an unplaced call: replies from then on
-    and (o.turn_id = s.turn_id or (o.turn_id is null and s.created_at >= o.observed_at)))
-  or exists (select 1 from record_call c where c.project_id = se.project_id and (c.host is null or c.host = se.host)
-    and (c.host is null or (c.host = 'codex' and c.caller_session is null)
-      or (c.host = 'claude-code' and not exists (select 1 from tool_call_observation o where o.host = 'claude-code' and o.tool_use_id = c.tool_use_id)))
-    and s.created_at >= c.called_at));
-
 create view unit_support as
 select u.id as unit_id, case
   when u.kind in ('decision', 'constraint') and (
     not exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.retracted_at is null)
-    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null
-      and (a.route <> 'agent' or exists (select 1 from unit_evidence e where e.unit_id = u.id and e.option_id is null and e.role = 'decides'
-        and e.source_id = a.source_id and e.span_start = a.span_start and e.span_end = a.span_end and e.retracted_at is null))))
+    or not exists (select 1 from unit_adoption a where a.unit_id = u.id and a.retracted_at is null))
     then 'an active decision or constraint needs unretracted evidence and adoption'
   when u.kind = 'implementation' and not (
     exists (select 1 from unit_evidence e join source s on s.id = e.source_id where e.unit_id = u.id and e.option_id is null
@@ -889,10 +735,6 @@ create trigger unit_evidence_check before insert on unit_evidence begin
   where new.role = 'reconsiders' and (new.option_id is null
     or not exists (select 1 from unit_option where id = new.option_id and reconsider_when is not null)
     or not exists (select 1 from source where id = new.source_id and author_kind = 'owner'));
-  -- The AI stating its own choice in a reply: never a question it asked (AskUserQuestion's questions are recorded as its message)
-  select raise(abort, 'decides quotes the AI choosing in its own reply, never a question it asked or an option')
-  where new.role = 'decides' and (new.option_id is not null or not exists (select 1 from source where id = new.source_id
-    and kind = 'session_message' and author_kind = 'assistant' and external_id not glob '*:ask:*:q:*'));
 end;
 create trigger unit_evidence_retract before update on unit_evidence begin
   select raise(abort, 'evidence is only ever retracted, once')
@@ -919,6 +761,22 @@ create trigger unit_adoption_no_delete before delete on unit_adoption
 when exists (select 1 from unit where id = old.unit_id) and exists (select 1 from source where id = old.source_id)
   and not (old.retracted_at is not null and not exists (select 1 from source where id = old.retraction_source_id)) begin
   select raise(abort, 'adoption is retracted, never deleted');
+end;
+-- A retraction, or retiring an anchor, that would leave an active unit without its required support must first move it back to candidate
+create trigger unit_evidence_retract_support after update of retracted_at on unit_evidence
+when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
+  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
+  select raise(abort, 'move the unit back to candidate before retracting its last evidence');
+end;
+create trigger unit_adoption_retract_support after update of retracted_at on unit_adoption
+when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
+  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
+  select raise(abort, 'move the unit back to candidate before retracting its last adoption');
+end;
+create trigger unit_anchor_retire_support after update of retired_at on unit_anchor
+when exists (select 1 from unit u join unit_support s on s.unit_id = u.id
+  where u.id = new.unit_id and u.lifecycle = 'active' and s.missing is not null) begin
+  select raise(abort, 'move the unit back to candidate before retiring its last code anchor');
 end;
 create trigger unit_adoption_check before insert on unit_adoption begin
   select raise(abort, 'adoption and unit belong to different projects')
@@ -952,6 +810,14 @@ create trigger unit_link_check before insert on unit_link begin
   select raise(abort, 'a record supersedes one of its own kind; a decision and a constraint can replace each other')
   where new.kind = 'supersedes' and not exists (select 1 from unit a join unit b on b.id = new.to_unit where a.id = new.from_unit
     and (a.kind = b.kind or (a.kind in ('decision', 'constraint') and b.kind in ('decision', 'constraint'))));
+  -- One live successor at a time. A withdrawn one gives its place up, and a quarantined or unsourced one never takes it: it can never
+  -- become active, nor be withdrawn. States are read from history, as in unit_state_rules
+  select raise(abort, 'the record already has a successor that is not withdrawn')
+  where new.kind = 'supersedes'
+    and exists (select 1 from unit n where n.id = new.from_unit and n.extraction = 'supported' and n.unsourced = 0)
+    and exists (select 1 from unit_link l join unit s on s.id = l.from_unit
+    where l.to_unit = new.to_unit and l.kind = 'supersedes' and s.extraction = 'supported' and s.unsourced = 0
+      and (select to_state from unit_state where unit_id = l.from_unit order by id desc limit 1) is not 'withdrawn');
 end;
 create trigger unit_state_project before insert on unit_state begin
   select raise(abort, 'a state comes after its unit was created')
@@ -1166,13 +1032,6 @@ create trigger capture_edit_insert instead of insert on capture_edit begin
   select new.session_id, new.turn_id, new.tool_event_id, new.path, new.via, new.observed_at
   where exists (select 1 from session where id = new.session_id) on conflict do nothing;
 end;
-create view capture_tool_call as
-select host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at from tool_call_observation;
-create trigger capture_tool_call_insert instead of insert on capture_tool_call begin
-  insert into tool_call_observation (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at)
-  values (new.host, new.session_external, new.turn_id, new.tool_use_id, new.tool_name, new.owner_turn, new.observed_at)
-  on conflict do nothing;
-end;
 -- units is a JSON array of the unit ids delivered; each must belong to the delivered session's project
 create view capture_delivery as
   select session_id, event, outcome, reason, path, eligible, omitted, chars, at, null as units from delivery;
@@ -1211,4 +1070,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 10;
+pragma user_version = 9;

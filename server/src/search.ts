@@ -1,11 +1,13 @@
 // Search over records (units) and retained sources. Ranked word search (FTS5 bm25) finds candidates; a candidate counts as a hit only
 // when it holds more than half of the question's content terms (text.ts queryTerms). Weaker matches are counted, not shown, so a question
 // with no answer comes back empty instead of returning whatever shares one word with it.
+
 import { sql } from "kysely";
+import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { repoPath } from "./record.ts";
-import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
+import { ftsQuery, head, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
 const UNIT_PAGE = 200;
@@ -32,6 +34,8 @@ export type UnitHit = {
   aliasOnly: boolean;
   /** Set when the unit is here because it replaced a hit */
   successorOf?: string;
+  /** Whose decision a decision or constraint is now */
+  authority?: Authority;
 };
 
 export type UnitQuery = {
@@ -162,8 +166,13 @@ export async function searchUnits(
       b.matched.length - a.matched.length ||
       a.rank - b.rank,
   );
+  const top = hits.slice(0, q.limit);
+  const whose = await authorityOf(
+    db,
+    top.filter((h) => ["decision", "constraint"].includes(h.kind)).map((h) => h.id),
+  );
   return {
-    hits: hits.slice(0, q.limit).map(({ rank: _rank, ...h }) => h),
+    hits: top.map(({ rank: _rank, ...h }) => ({ ...h, authority: whose.get(h.id) })),
     weaker,
     terms: wanted,
     stopped,
@@ -183,44 +192,27 @@ export type Successor = {
 };
 
 /**
- * The records at the end of a record's supersedes chain: each adopted replacement is followed until one that nothing replaced, so a
- * record replaced twice leads to the one that holds now. A visited set keeps a cycle from looping.
+ * The record in effect at the end of a record's chain of replacements, following open replacement rows until a record nothing replaces.
+ * A record has at most one open row into it, so the chain is a line; a proposal waiting for the place has no row and is never shown.
  */
 export async function liveSuccessors(db: Reads, id: number): Promise<Successor[]> {
   const seen = new Set([id]);
-  const found: Successor[] = [];
-  const replaced = new Set<number>();
-  for (let frontier = [id]; frontier.length; ) {
+  let end: Successor | undefined;
+  for (let at = id; ; ) {
     const next = await db
-      .selectFrom("unit_link as l")
-      .innerJoin("unit as n", "n.id", "l.from_unit")
-      .where("l.to_unit", "in", frontier)
-      .where("l.kind", "=", "supersedes")
-      .where("n.extraction", "=", "supported")
-      // A replacement never adopted (still a candidate) is not what holds now
-      .where("n.lifecycle", "<>", "candidate")
-      .select([
-        "l.to_unit",
-        "n.id",
-        "n.key",
-        "n.kind",
-        "n.stance",
-        "n.lifecycle",
-        "n.text",
-        "n.why",
-        "n.revisit_when",
-      ])
-      .execute();
-    frontier = [];
-    for (const { to_unit, ...n } of next) {
-      replaced.add(to_unit);
-      if (seen.has(n.id)) continue;
-      seen.add(n.id);
-      found.push(n);
-      frontier.push(n.id);
-    }
+      .selectFrom("unit_replacement as h")
+      .innerJoin("unit as n", "n.id", "h.from_unit")
+      .where("h.to_unit", "=", at)
+      .where("h.ended_at", "is", null)
+      .select(["n.id", "n.key", "n.kind", "n.stance", "n.lifecycle", "n.text", "n.why", "n.revisit_when"])
+      .executeTakeFirst();
+    // Rows only open along acyclic intents; the visited set keeps a damaged database from looping a read
+    if (!next || seen.has(next.id)) break;
+    seen.add(next.id);
+    end = next;
+    at = next.id;
   }
-  return found.filter((n) => !replaced.has(n.id));
+  return end ? [end] : [];
 }
 
 type UnitRow = {
@@ -440,3 +432,26 @@ export async function searchSources(
   if (!stopped && hits.length < limit && ranked.length > SOURCE_SCAN_MAX) stopped = true;
   return { hits, weaker, terms: wanted, stopped, read };
 }
+
+const hitText = (h: UnitHit) =>
+  [
+    `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    head(h.text, 600),
+    ...(h.why ? [`Why: ${head(h.why, 400)}`] : []),
+    ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, 200)}`] : []),
+    ...(h.options.length
+      ? [
+          `Options: ${h.options.map((o) => `${o.text} (${o.outcome}${o.why ? `: ${head(o.why, 160)}` : ""})`).join(" / ")}`,
+        ]
+      : []),
+    ...(h.anchors.length
+      ? [`Code: ${h.anchors.map((a) => `${a.path}${a.symbol ? ` ${a.symbol}` : ""} (${a.role})`).join(", ")}`]
+      : []),
+    h.successorOf
+      ? `Replaces ${h.successorOf}, which matched`
+      : `Matched: ${h.matched.join(", ")}${h.aliasOnly ? " (search aliases only)" : ""}`,
+  ].join("\n");
+
+/** Hits as the search tool prints them, with Sphica's words for an AI's decision when one is among them */
+export const hitsText = (hits: UnitHit[]) =>
+  [...hits.map(hitText), ...(hits.some((h) => h.authority === "agent") ? [AI_DECIDED] : [])].join("\n\n");

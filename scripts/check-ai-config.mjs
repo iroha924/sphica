@@ -328,6 +328,8 @@ try {
     Stop: [{ hooks: [hook("capture", { timeout: 30 })] }],
     // Claude Code reads with Read and, often, shell commands: Bash, or PowerShell on Windows without Git Bash
     PreToolUse: [
+      // Synchronous: the record server joins its log of each record tool call to the session and turn this hook writes first
+      { matcher: "mcp__plugin_sphica_record__.*", hooks: [hook("capture", { timeout: 10 })] },
       {
         matcher: "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash|PowerShell",
         hooks: [hook("deliver", { timeout: 5 })],
@@ -440,9 +442,19 @@ for (const name of pluginSkills) {
     /^policy:\n\s+allow_implicit_invocation:\s*false\s*$/m.test(
       fs.readFileSync(policy, "utf8").replaceAll("\r\n", "\n"),
     );
-  if ((fields["disable-model-invocation"] === "true") !== codexExplicitOnly) {
+  // Codex may be stricter than Claude Code (trace starts on its own only in Claude Code), never looser
+  if (fields["disable-model-invocation"] === "true" && !codexExplicitOnly) {
     fail(
-      `${relative}: disable-model-invocation: true and allow_implicit_invocation: false in agents/openai.yaml do not match`,
+      `${relative}: disable-model-invocation: true needs allow_implicit_invocation: false in agents/openai.yaml, or Codex starts it on its own`,
+    );
+  }
+  // The description is what an agent reads to decide whether to invoke it, so it must say what the settings allow
+  if (
+    (fields["disable-model-invocation"] === "true") !==
+    /\bUse only when the user explicitly asks\b/.test(fields.description ?? "")
+  ) {
+    fail(
+      `${relative}: the description says "Use only when the user explicitly asks" exactly when disable-model-invocation is true`,
     );
   }
 

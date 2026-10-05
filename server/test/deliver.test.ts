@@ -6,14 +6,29 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
+import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { CONFIRM, deliver, recordLines } from "../src/deliver.ts";
+import { AUTO_TRACE, CONFIRM, deliver, leadFor, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
+import { readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
+import { hitsText, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
-import { insert, message, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
+import {
+  aiDecided,
+  at,
+  hash,
+  insert,
+  message,
+  plan,
+  project,
+  session,
+  statements,
+  type TempDb,
+  tempDb,
+} from "./temp-db.ts";
 
 const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
 before(() => {
@@ -101,16 +116,9 @@ test("delivery brings anchored, named, and broad records, never candidates or co
         },
       ],
     });
+    // The owner's own words against it hold the owner's decision back until resolved
     await save(db, p, {
-      units: [
-        {
-          key: "q",
-          kind: "question",
-          text: "q",
-          evidence: [{ source: `s${m}`, quote: "SQLite", role: "states" }],
-          conflicts: ["trace:ext-s1/sqlite"],
-        },
-      ],
+      units: [decided("q", m, "Maybe Postgres.", { conflicts: ["trace:ext-s1/sqlite"] })],
     });
     insert(db, "work", {
       project_id: p,
@@ -1931,5 +1939,439 @@ test("concurrent reads that cannot take the write lock still answer, unlogged an
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("owner decision protected: an unadopted record in conflict never holds the owner's decision back, an adopted one does", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file. Store every timestamp in UTC." });
+    const ai = message(db, p, { id: "m2", text: "Postgres would scale better.", speaker: "assistant" });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    await save(db, p, {
+      units: [
+        {
+          key: "pg",
+          kind: "decision",
+          stance: "do",
+          text: "Postgres",
+          evidence: [{ source: `s${ai}`, quote: "Postgres would scale better.", role: "proposes" }],
+          conflicts: ["trace:ext-s1/sqlite"],
+        },
+      ],
+    });
+    const edit = (file: string) =>
+      deliver(
+        {
+          session_id: `sess-${file}`,
+          cwd: repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Edit",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    assert.match(await edit("src/db.ts"), /trace:ext-s1\/sqlite/);
+    // The owner's own words against it do hold it back until resolved
+    await save(db, p, {
+      units: [decided("local", m, "Store every timestamp in UTC.", { conflicts: ["trace:ext-s1/utc"] })],
+    });
+    assert.equal(await edit("src/dates.ts"), "");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a record an AI decided is delivered marked, with Sphica's words for it; the owner's is not", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep one SQLite file." });
+    await save(db, p, {
+      units: [
+        decided("sqlite", m, "Keep one SQLite file.", {
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    // The AI's own decision, adopted the way the schema allows: its reply deciding, an interactive run
+    session(db, p, "s1");
+    const now = at("2026-09-27T00:00:00Z");
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text: "I keep dates in UTC.",
+      original_bytes: 20,
+      content_hash: hash(3),
+      indexed: 0,
+    });
+    const call = insert(db, "record_call", {
+      project_id: p,
+      tool: "trace_begin",
+      host: "codex",
+      caller_session: "x",
+      caller_turn: "y",
+      mode: "interactive",
+      called_at: now,
+    });
+    const run = insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "session:s1",
+      session_id: "s1",
+      status: "running",
+      begin_call_id: call,
+      started_at: now,
+    });
+    const unit = insert(db, "unit", {
+      project_id: p,
+      key: "trace:ext-s1/utc",
+      kind: "decision",
+      stance: "do",
+      text: "Keep dates in UTC",
+      extraction: "supported",
+      run_id: run,
+      created_at: now,
+      content_hash: hash(4),
+    });
+    insert(db, "unit_evidence", {
+      unit_id: unit,
+      source_id: reply,
+      span_start: 0,
+      span_end: 6,
+      role: "decides",
+      run_id: run,
+      added_at: now,
+    });
+    insert(db, "unit_adoption", {
+      unit_id: unit,
+      route: "agent",
+      source_id: reply,
+      span_start: 0,
+      span_end: 6,
+      run_id: run,
+      added_at: now,
+    });
+    insert(db, "unit_anchor", {
+      unit_id: unit,
+      path: "src/dates.ts",
+      role: "applies_to",
+      run_id: run,
+      added_at: now,
+    });
+    for (const [from, to] of [
+      [null, "candidate"],
+      ["candidate", "active"],
+    ] as const)
+      insert(db, "unit_state", {
+        unit_id: unit,
+        from_state: from,
+        to_state: to,
+        at: now,
+        reason: "r",
+        run_id: run,
+      });
+    const edit = (file: string) =>
+      deliver(
+        {
+          session_id: `sess-${file}`,
+          cwd: repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Edit",
+          tool_input: { file_path: path.join(repo, file) },
+        },
+        "claude-code",
+        db.file,
+      );
+    const ai = await edit("src/dates.ts");
+    assert.match(ai, /trace:ext-s1\/utc \(decision do, decided by an AI\)/);
+    assert.ok(ai.includes(AI_DECIDED));
+    const owners = await edit("src/db.ts");
+    assert.match(owners, /trace:ext-s1\/sqlite \(constraint do\)/);
+    assert.ok(!owners.includes(AI_DECIDED));
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("auto trace notice: a new interactive Claude Code session asks the agent to trace, once, and nothing else does", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const today = new Date().toISOString();
+    message(db, p, { id: "m1", text: "untraced", session: "s1", sent: today });
+    message(db, p, { id: "m2", text: "untraced too", session: "s2", sent: today });
+    const start = (session: string, source = "startup", host: "claude-code" | "codex" = "claude-code") =>
+      deliver({ hook_event_name: "SessionStart", source, session_id: session, cwd: repo }, host, db.file);
+    const as = async (entry: string | undefined, run: () => Promise<string>) => {
+      if (entry === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      else process.env.CLAUDE_CODE_ENTRYPOINT = entry;
+      try {
+        return await run();
+      } finally {
+        delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      }
+    };
+    const fresh = crypto.randomUUID();
+    const first = await as("cli", () => start(fresh));
+    assert.equal(first.split("\n").at(-1), AUTO_TRACE(2));
+    assert.doesNotMatch(
+      await as("cli", () => start(fresh, "compact")),
+      /earlier session/,
+      "once per session",
+    );
+    // A resumed session is not new, even when it compacts later; nor is a start that says nothing of how it started
+    const resumed = crypto.randomUUID();
+    assert.doesNotMatch(await as("cli", () => start(resumed, "resume")), /earlier session/);
+    assert.doesNotMatch(await as("cli", () => start(resumed, "compact")), /earlier session/);
+    assert.doesNotMatch(
+      await as("cli", () =>
+        deliver(
+          { hook_event_name: "SessionStart", session_id: crypto.randomUUID(), cwd: repo },
+          "claude-code",
+          db.file,
+        ),
+      ),
+      /earlier session/,
+    );
+    // The caller's own session is never one to trace
+    assert.equal((await as("cli", () => start("ext-s1"))).split("\n").at(-1), AUTO_TRACE(1));
+    for (const [entry, source] of [
+      ["cli", "resume"],
+      ["sdk-cli", "startup"],
+      ["sdk-ts", "startup"],
+      [undefined, "startup"],
+    ] as const)
+      assert.doesNotMatch(
+        await as(entry, () => start(crypto.randomUUID(), source)),
+        /earlier session/,
+        `${entry} ${source}`,
+      );
+    // A Codex started from a Claude Code shell inherits cli, and its interactive turns are not measured yet
+    assert.doesNotMatch(
+      await as("cli", () => start(crypto.randomUUID(), "startup", "codex")),
+      /earlier session/,
+    );
+    assert.doesNotMatch(
+      await as("cli", () =>
+        deliver(
+          { hook_event_name: "SubagentStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+          "claude-code",
+          db.file,
+        ),
+      ),
+      /earlier session/,
+      "a subagent",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: the AI words come only when an AI's decision is kept within the budget", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "ai-long", `I keep the pool small. ${"x".repeat(230)}`, "src/db.ts");
+    const words = Array.from({ length: 4 }, (_, n) => `Keep rule ${n}. ${"y".repeat(230)}`);
+    const m = message(db, p, { id: "m1", text: words.join(" ") });
+    await save(db, p, {
+      units: words.map((w, n) =>
+        decided(`owner-long-${n}`, m, w, { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ),
+    });
+    const out = await deliver(
+      {
+        session_id: "e1",
+        cwd: repo,
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: path.join(repo, "src/db.ts") },
+      },
+      "claude-code",
+      db.file,
+    );
+    assert.match(out, /owner-long-3/);
+    assert.doesNotMatch(out, /ai-long/);
+    assert.doesNotMatch(out, /decided by an AI/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: the AI words spend none of a session's read budget", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    for (let n = 0; n < 8; n++)
+      aiDecided(db, p, `ai-${n}`, `I keep file ${n} as one module.`, `src/file${n}.ts`);
+    const outs: string[] = [];
+    for (let n = 0; n < 8; n++)
+      outs.push(
+        await deliver(
+          {
+            session_id: "r1",
+            cwd: repo,
+            hook_event_name: "PreToolUse",
+            tool_name: "Read",
+            tool_input: { file_path: path.join(repo, `src/file${n}.ts`) },
+          },
+          "claude-code",
+          db.file,
+        ),
+      );
+    assert.deepEqual(
+      outs.map((o, n) => o.includes(`ai-${n}`)),
+      Array(8).fill(true),
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: search and read say whose each decision is, with the AI words beside an AI's", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const m = message(db, p, { id: "m1", text: "Maybe a bigger connection pool." });
+    await save(db, p, {
+      units: [
+        {
+          key: "bigger",
+          kind: "decision",
+          stance: "do",
+          text: "A bigger connection pool",
+          evidence: [{ source: `s${m}`, quote: "Maybe a bigger connection pool.", role: "proposes" }],
+        },
+      ],
+    });
+    const r = await searchUnits(db.reader, p, { question: "connection pool", limit: 10 });
+    const text = hitsText(r.hits);
+    assert.match(text, /trace:ext-s1\/pool \(u\d+\): decision do, active, decided by an AI/);
+    assert.match(text, /trace:ext-s1\/bigger \(u\d+\): decision do, candidate, adopted by no one/);
+    assert.ok(text.includes(AI_DECIDED));
+    assert.ok((await readUnit(db.reader, p, "trace:ext-s1/pool", null))?.includes(AI_DECIDED));
+    assert.ok(!(await readUnit(db.reader, p, "trace:ext-s1/bigger", null))?.includes(AI_DECIDED));
+  } finally {
+    await db.done();
+  }
+});
+
+test("decided by an AI: the per-record mark takes no room, so an AI's decision fits wherever the owner's would", async () => {
+  const shownFor = async (owner: boolean, size: number) => {
+    const db = tempDb();
+    const repo = checkout();
+    try {
+      const p = project(db);
+      const said = message(db, p, { id: "o1", text: "Keep them." });
+      for (let n = 0; n < 5; n++) {
+        const u = aiDecided(db, p, `mark-${n}`, `Rule ${n} ${"z".repeat(size)}`, "src/db.ts");
+        if (owner)
+          insert(db, "unit_adoption", {
+            unit_id: u,
+            route: "owner_statement",
+            source_id: said,
+            span_start: 0,
+            span_end: 4,
+            run_id: Number(db.owner.prepare("select run_id from unit where id = ?").get(u)?.run_id),
+            added_at: at("2026-09-27T00:00:00Z"),
+          });
+      }
+      const out = await deliver(
+        {
+          session_id: "e1",
+          cwd: repo,
+          hook_event_name: "PreToolUse",
+          tool_name: "Edit",
+          tool_input: { file_path: path.join(repo, "src/db.ts") },
+        },
+        "claude-code",
+        db.file,
+      );
+      return (out.match(/^- trace:ext-s1\/mark-/gm) ?? []).length;
+    } finally {
+      await db.done();
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  };
+  for (let size = 200; size <= 236; size += 4)
+    assert.equal(await shownFor(false, size), await shownFor(true, size), `text of ${size}`);
+});
+
+test("auto trace notice: SPHICA_AUTO_TRACE=off turns only the automatic trace off, back to the owner's daily notice", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const saved = process.env.SPHICA_AUTO_TRACE;
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "untraced", session: "s1", sent: new Date().toISOString() });
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    process.env.SPHICA_AUTO_TRACE = "off";
+    const out = await deliver(
+      { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+      "claude-code",
+      db.file,
+    );
+    assert.doesNotMatch(out, /earlier session/);
+    assert.match(out, /1 session waiting to be traced: run \/sphica:trace pending\./);
+  } finally {
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    if (saved === undefined) delete process.env.SPHICA_AUTO_TRACE;
+    else process.env.SPHICA_AUTO_TRACE = saved;
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("decided by an AI: the evaluation's gold lines carry the mark and the AI words, as a delivery does", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const u = aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
+    const rows = [
+      {
+        id: u,
+        key: "trace:ext-s1/pool",
+        kind: "decision",
+        stance: "do",
+        text: "I keep the connection pool small.",
+      },
+    ];
+    const [line] = await recordLines(db.reader, rows);
+    assert.match(line ?? "", /^- trace:ext-s1\/pool \(decision do, decided by an AI\): /);
+    assert.equal(await leadFor(db.reader, [u], "Lead."), `Lead. ${AI_DECIDED}`);
+    assert.equal(await leadFor(db.reader, [], "Lead."), "Lead.");
+  } finally {
+    await db.done();
   }
 });

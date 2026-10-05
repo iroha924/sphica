@@ -1367,17 +1367,34 @@ test("glean: withdrawing the successor brings back the record it replaced, and a
       units: [decided("storage-4", said, "Postgres にする。", { supersedes: "trace:ext-s1/storage" })],
     });
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:storage-4")], ["superseded", "active"]);
-    // A successor still waiting for adoption holds the place too, and the refusal names it
+    // A successor still waiting for adoption holds no place of the owner's decision: the owner's own successor goes ahead,
+    // and the waiting one can no longer become active beside it
     // Quoting the earlier session keeps it sourced, and without adoption it waits as a candidate
     const { adoption: _, ...unadopted } = decided("storage-5", old, "SQLite にしよう。", {
       supersedes: "glean:storage-4",
     });
     await glean({ units: [unadopted] });
     assert.equal(state("glean:storage-5"), "candidate");
+    await glean({
+      units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })],
+    });
+    assert.deepEqual([state("glean:storage-4"), state("glean:storage-6")], ["superseded", "active"]);
     await assert.rejects(
-      glean({ units: [decided("storage-6", said, "Postgres にする。", { supersedes: "glean:storage-4" })] }),
-      /glean:storage-4 already has a successor, glean:storage-5 \(candidate\); withdraw it first, or supersede it instead/,
+      glean({
+        ops: [
+          {
+            op: "adopt",
+            unit: "glean:storage-5",
+            revision: db.owner.prepare("select revision from unit where key = 'glean:storage-5'").get()
+              ?.revision,
+            source: `s${said}`,
+            quote: "Postgres にする。",
+          },
+        ],
+      }),
+      /glean:storage-4 already has a successor, glean:storage-6 \(in effect\); withdraw it first, or supersede it instead/,
     );
+    assert.equal(state("glean:storage-5"), "candidate");
     // A successor whose quote was not found is quarantined: it can never be adopted or withdrawn, so it holds no place
     await glean({
       units: [decided("cache-q", said, "引用に無い言葉。", { supersedes: "trace:ext-s1/cache" })],
@@ -2553,6 +2570,120 @@ test("trace: a tail too long for a page is cut, with the number of lines left ou
       page,
       /- and \d+ more lines left out: find records with search, and every field definition with the fields tool/,
     );
+  } finally {
+    await db.done();
+  }
+});
+
+// One glean on the owner's decision O and A, a proposal to replace it: what the batch asks for together, judged together
+const gleanBench = async () => {
+  const db = tempDb();
+  const p = project(db);
+  const old = message(db, p, { id: "o1", text: "SQLite にしよう。" });
+  await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+    units: [
+      {
+        key: "storage",
+        kind: "decision",
+        stance: "do",
+        text: "SQLite にしよう。",
+        evidence: [{ source: `s${old}`, quote: "SQLite にしよう。", role: "states" }],
+        adoption: [{ source: `s${old}`, quote: "SQLite にしよう。" }],
+      },
+    ],
+  });
+  session(db, p, "g1");
+  const said = message(db, p, { id: "g", text: "Postgres に変える。これで決まり。やめる。", session: "g1" });
+  const assistant = message(db, p, {
+    id: "a",
+    text: "Postgres に変えましょう。",
+    speaker: "assistant",
+    session: "g1",
+  });
+  const glean = async (record: unknown) =>
+    saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, null, record);
+  await glean({
+    units: [
+      {
+        key: "pg",
+        kind: "decision",
+        stance: "do",
+        text: "Postgres に変えましょう。",
+        evidence: [{ source: `s${assistant}`, quote: "Postgres に変えましょう。", role: "states" }],
+        supersedes: "trace:ext-s1/storage",
+      },
+    ],
+  });
+  const revision = (key: string) =>
+    db.owner.prepare("select revision from unit where key = ?").get(key)?.revision;
+  const state = (key: string) =>
+    db.owner.prepare("select lifecycle from unit where key = ?").get(key)?.lifecycle;
+  return { db, p, said, glean, revision, state };
+};
+
+test("glean: withdrawing both a record and the proposal that would replace it in one save withdraws both", async () => {
+  const { db, said, glean, revision, state } = await gleanBench();
+  try {
+    await glean({
+      ops: [
+        {
+          op: "adopt",
+          unit: "glean:pg",
+          revision: revision("glean:pg"),
+          source: `s${said}`,
+          quote: "これで決まり。",
+        },
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/storage",
+          revision: revision("trace:ext-s1/storage"),
+          reason_source: `s${said}`,
+          reason_quote: "やめる。",
+        },
+        {
+          op: "withdraw",
+          unit: "glean:pg",
+          revision: revision("glean:pg"),
+          reason_source: `s${said}`,
+          reason_quote: "やめる。",
+        },
+      ],
+    });
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["withdrawn", "withdrawn"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("glean: a new record the owner adopts and an adopted proposal racing for one place in one save are refused by name", async () => {
+  const { db, said, glean, revision, state } = await gleanBench();
+  try {
+    await assert.rejects(
+      glean({
+        units: [
+          {
+            key: "duck",
+            kind: "decision",
+            stance: "do",
+            text: "Postgres に変える。",
+            evidence: [{ source: `s${said}`, quote: "Postgres に変える。", role: "states" }],
+            adoption: [{ source: `s${said}`, quote: "Postgres に変える。" }],
+            supersedes: "trace:ext-s1/storage",
+          },
+        ],
+        ops: [
+          {
+            op: "adopt",
+            unit: "glean:pg",
+            revision: revision("glean:pg"),
+            source: `s${said}`,
+            quote: "これで決まり。",
+          },
+        ],
+      }),
+      /already has a successor/,
+    );
+    assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
   } finally {
     await db.done();
   }

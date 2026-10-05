@@ -27,6 +27,10 @@ type Turn = {
   ends?: "stop" | "interrupt";
   /** Files the owner changes by hand after the turn ends */
   owner_edits_after?: string[];
+  /** Questions the agent asked with AskUserQuestion and the answers the owner chose, before its reply */
+  asks?: { question: string; answer: string }[];
+  /** Record tools the agent ran in the turn (a trace report), as the hook and the record server saw them */
+  record_tools?: string[];
 };
 /** `entrypoint` is the CLAUDE_CODE_ENTRYPOINT the hooks see */
 type Session = { id: string; host?: string; at: string; entrypoint?: string; turns: Turn[] };
@@ -58,6 +62,11 @@ function sourceTexts(world: World, cases: Case[]): Map<string, string> {
     s.turns.forEach((t, i) => {
       texts.set(`session:${s.id}#${i + 1}.owner`, t.owner);
       texts.set(`session:${s.id}#${i + 1}.assistant`, t.assistant);
+      if (t.asks?.length)
+        texts.set(
+          `session:${s.id}#${i + 1}.question`,
+          t.asks.map((a, k) => `Q${k + 1}: ${a.question}`).join("\n\n"),
+        );
     });
   world.sessions.forEach(addSession);
   for (const c of cases) for (const g of c.given) if (g.session) addSession(g.session as Session);

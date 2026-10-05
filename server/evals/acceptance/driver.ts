@@ -10,7 +10,8 @@ import { type Kysely, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { checkAnchor } from "../../src/anchors.ts";
 import { askedBefore, askedText } from "../../src/asked.ts";
-import { flush, onHook } from "../../src/capture.ts";
+import { callerOf } from "../../src/caller.ts";
+import { flush, observeRecordCall, onHook } from "../../src/capture.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
@@ -36,6 +37,7 @@ import { checkFindings } from "../../src/review-findings.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
 import { ftsQuery } from "../../src/text.ts";
+import { logCall } from "../../src/trace.ts";
 import type { Step, World } from "./load.ts";
 
 export type Driver = {
@@ -52,7 +54,10 @@ class NotBuilt extends Error {}
 
 type Session = World["sessions"][number];
 
-/** One delivery hook call of an inject step. event subagent_start is the host's SubagentStart. */
+/**
+ * One delivery hook call of an inject step. event subagent_start is the host's SubagentStart. entrypoint is the CLAUDE_CODE_ENTRYPOINT
+ * the hook runs with; session names the session, so calls of one sequence can start different sessions.
+ */
 type Inject = {
   event: string;
   path?: string;
@@ -61,6 +66,8 @@ type Inject = {
   host?: Host;
   agent_id?: string;
   command?: string;
+  entrypoint?: string;
+  session?: string;
 };
 
 const CLI = path.join(import.meta.dirname, "..", "..", "src", "cli.ts");
@@ -172,7 +179,9 @@ export async function createDriver(world: World): Promise<Driver> {
    */
   const inject = async (i: Inject) => {
     const input = {
-      session_id: `inject-${++injectSession}-${path.basename(dir)}`,
+      session_id: i.session
+        ? `${i.session}-${path.basename(dir)}`
+        : `inject-${++injectSession}-${path.basename(dir)}`,
       cwd: repo,
       ...(i.agent_id ? { agent_id: i.agent_id, agent_type: "Explore" } : {}),
       ...(i.event === "pre_read" && i.command !== undefined
@@ -189,7 +198,14 @@ export async function createDriver(world: World): Promise<Driver> {
               ? { hook_event_name: "SubagentStart" }
               : { hook_event_name: "SessionStart", source: i.source ?? "startup" }),
     };
-    return deliver(input, i.host ?? "claude-code", file);
+    const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
+    if (i.entrypoint) process.env.CLAUDE_CODE_ENTRYPOINT = i.entrypoint;
+    try {
+      return await deliver(input, i.host ?? "claude-code", file);
+    } finally {
+      if (entrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
+      else process.env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
+    }
   };
   /** Every delivery a session could see: start, a prompt naming the needle, and an edit of every anchored path. */
   const everything = async (needle: string) => {
@@ -229,10 +245,49 @@ export async function createDriver(world: World): Promise<Driver> {
     (await searchUnits(db(), await projectId(), { question: query, limit: 10 })).hits;
   /** The last check output, for expectations about what check reported. */
   let checked = "";
+  /** What the last trace or harvest save reported, for expectations about why a record waits. */
+  let savedText = "";
   /** Quotes each saved key cited, to confirm stored spans cut exactly those bytes. */
   const quotes = new Map<string, Set<string>>();
   const missing = (kind: string, s: Step) =>
     new NotBuilt(`${kind} not built yet: ${Object.keys(s).join(", ")}`);
+
+  let toolUses = 0;
+  /**
+   * Logs a record tool call as each host makes it. Claude Code's PreToolUse hook sees the call first, and the server joins its own row to
+   * that by tool use id; Codex names its session and turn in the call. The server's environment is passed, never set on this process.
+   */
+  const recordCall = async (
+    tool: string,
+    by: { host: Host; session: string; turn: string; entrypoint?: string },
+  ) => {
+    if (by.host === "codex")
+      return logCall(
+        writer(),
+        await projectId(),
+        tool,
+        callerOf({
+          "x-codex-turn-metadata": { session_id: by.session, turn_id: by.turn, turn_trigger: "user" },
+        }),
+      );
+    const toolUseId = `toolu-${++toolUses}`;
+    await observeRecordCall(
+      file,
+      {
+        hook_event_name: "PreToolUse",
+        session_id: by.session,
+        prompt_id: by.turn,
+        tool_use_id: toolUseId,
+        tool_name: `mcp__plugin_sphica_record__${tool}`,
+      },
+      true,
+    );
+    const env = {
+      CLAUDE_CODE_SESSION_ID: by.session,
+      ...(by.entrypoint ? { CLAUDE_CODE_ENTRYPOINT: by.entrypoint } : {}),
+    };
+    return logCall(writer(), await projectId(), tool, callerOf({ "claudecode/toolUseId": toolUseId }, env));
+  };
 
   /** Plays a session through the capture hooks the way its host would, editing the repository for real, then sends the queue. */
   const captured = new Set<string>();
@@ -259,9 +314,19 @@ export async function createDriver(world: World): Promise<Driver> {
     if (s.entrypoint) process.env.CLAUDE_CODE_ENTRYPOINT = s.entrypoint;
     try {
       hook("start", { hook_event_name: "SessionStart" });
-      s.turns.forEach((t, i) => {
+      for (const [i, t] of s.turns.entries()) {
         const turn = turnId(i + 1);
         hook(turn, { hook_event_name: "UserPromptSubmit", prompt: t.owner });
+        for (const tool of t.record_tools ?? [])
+          await recordCall(tool, { host, session: s.id, turn, entrypoint: s.entrypoint ?? "cli" });
+        for (const [k, a] of (t.asks ?? []).entries())
+          hook(turn, {
+            hook_event_name: "PostToolUse",
+            tool_use_id: `${turn}-ask-${k}`,
+            tool_name: "AskUserQuestion",
+            tool_input: { questions: [{ question: a.question }] },
+            tool_response: { answers: { [a.question]: a.answer } },
+          });
         t.edits.forEach((rel, k) => {
           const abs = touch(rel, i + 1);
           hook(turn, {
@@ -281,7 +346,7 @@ export async function createDriver(world: World): Promise<Driver> {
           hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
         else if (host === "codex") hook(turn, { hook_event_name: "Interrupt" });
         for (const rel of t.owner_edits_after ?? []) touch(rel, i + 1);
-      });
+      }
     } finally {
       if (entrypoint === undefined) delete process.env.CLAUDE_CODE_ENTRYPOINT;
       else process.env.CLAUDE_CODE_ENTRYPOINT = entrypoint;
@@ -290,18 +355,22 @@ export async function createDriver(world: World): Promise<Driver> {
     assert.equal(sent.rejected, 0, `the database rejected records of ${id}`);
   }
 
-  /** The source a case names as `session:<id>#<turn>.<owner|assistant>`. */
-  async function sessionSource(ref: string) {
-    const m = /^session:([^#]+)#(\d+)\.(owner|assistant)$/.exec(ref);
+  /** The source a case names as `session:<id>#<turn>.<owner|assistant|question>`; question is what the agent asked with AskUserQuestion. */
+  async function sessionSource(ref: string, quote?: string) {
+    const m = /^session:([^#]+)#(\d+)\.(owner|assistant|question)$/.exec(ref);
     if (!m) return undefined;
-    return db()
+    const rows = await db()
       .selectFrom("source as m")
       .innerJoin("session as s", "s.id", "m.session_id")
       .where("s.external_id", "=", m[1] ?? "")
       .where("m.turn_id", "=", turnId(Number(m[2])))
       .where("m.author_kind", "=", m[3] === "owner" ? "owner" : "assistant")
-      .select(["m.id", "m.kind", "m.text", "s.host"])
-      .executeTakeFirst();
+      .select(["m.id", "m.kind", "m.text", "m.external_id", "s.host"])
+      .execute();
+    // The reader may not call like; an AskUserQuestion turn holds the question and the answers beside the turn's own messages. A turn
+    // can ask more than once: the one holding the quoted words is the one meant
+    const kind = rows.filter((r) => r.external_id.includes(":ask:") === (m[3] === "question"));
+    return (quote ? kind.find((r) => r.text.includes(quote)) : undefined) ?? kind[0];
   }
 
   /** The source id behind a case's reference, as the `s<id>` ref context prints. */
@@ -329,25 +398,36 @@ export async function createDriver(world: World): Promise<Driver> {
       .executeTakeFirst();
   }
 
-  async function ref(r: string): Promise<string> {
-    const got = (await sessionSource(r)) ?? (await githubSource(r));
+  async function ref(r: string, quote?: string): Promise<string> {
+    const got = (await sessionSource(r, quote)) ?? (await githubSource(r));
     if (!got) throw new Error(`no source for ${r}`);
     return `s${got.id}`;
   }
 
-  /** The record server's flow, called as its tools call it: check (kept for expectations), then save. */
-  async function extract(run: string, prefix: string, record: Record<string, unknown>, pages?: number) {
+  /**
+   * The record server's flow, called as its tools call it: check (kept for expectations), then save. With call, each tool call is logged
+   * first, as the server does, and check and save carry the call.
+   */
+  async function extract(
+    run: string,
+    prefix: string,
+    record: Record<string, unknown>,
+    pages?: number,
+    call?: (tool: string) => Promise<number>,
+  ) {
     const pid = await projectId();
     // Read the context pages first, as the Skills do: saving marks only the sources shown (and quoted) as looked at.
     // The cursor is taken from the page's last line only: source text above it may hold the same words
+    await call?.("record_context");
     for (let page = await contextText(writer(), run, pid, repo), read = 1; ; read++) {
       const next = /call record_context with after: "(s\d+)"[^\n]*$/.exec(page)?.[1];
       if (!next || (pages !== undefined && read >= pages)) break;
+      await call?.("record_context");
       page = await contextText(writer(), run, pid, repo, next);
     }
     const translated = await translate(record);
-    checked = (await checkText(writer(), run, pid, repo, translated)).text;
-    await saveText(writer(), run, pid, repo, translated);
+    checked = (await checkText(writer(), run, pid, repo, translated, await call?.("record_check"))).text;
+    savedText = await saveText(writer(), run, pid, repo, translated, undefined, await call?.("record_save"));
     remember(prefix, record);
   }
 
@@ -363,17 +443,29 @@ export async function createDriver(world: World): Promise<Driver> {
     }
   }
 
+  /** Runs extract; a case that expects the save refused keeps the refusal as the outcome, and any other failure still fails the case */
+  async function outcome(refused: boolean | undefined, save: () => Promise<void>) {
+    if (!refused) return save();
+    saves = [
+      await save().then(
+        () => ({ status: 0, out: "saved" }),
+        (e: Error) => ({ status: 1, out: e.message }),
+      ),
+    ];
+  }
+
   async function harvest(step: {
     pr: number;
     refetch_with_edits?: boolean;
     record: Record<string, unknown>;
+    refused?: boolean;
   }) {
     if (step.refetch_with_edits) {
       edited.add(step.pr);
       writeGh();
     }
     const begun = await beginHarvest(writer(), await projectId(), step.pr, gh("example/tsundoku"));
-    await extract(begun.run, `harvest:${step.pr}/`, step.record);
+    await outcome(step.refused, () => extract(begun.run, `harvest:${step.pr}/`, step.record));
   }
 
   /** Replaces case references with source refs, deep inside a record. */
@@ -381,10 +473,11 @@ export async function createDriver(world: World): Promise<Driver> {
     if (Array.isArray(v)) return Promise.all(v.map(translate));
     if (!v || typeof v !== "object") return v;
     const out: Record<string, unknown> = {};
+    const said = v as Record<string, unknown>;
     for (const [k, x] of Object.entries(v))
       out[k] =
         (k === "source" || k === "reason_source") && typeof x === "string"
-          ? await ref(x)
+          ? await ref(x, String((k === "source" ? said.quote : said.reason_quote) ?? "") || undefined)
           : await translate(x);
     return out;
   }
@@ -395,24 +488,29 @@ export async function createDriver(world: World): Promise<Driver> {
     refused?: boolean;
     /** How many context pages the agent reads before saving; every page when absent */
     pages?: number;
+    /**
+     * The Claude Code session running the trace, with the CLAUDE_CODE_ENTRYPOINT its record server sees (none: an unknown start). Without
+     * it no call is logged, as with a run begun before calls were logged, and the AI's own words never adopt.
+     */
+    caller?: { entrypoint?: string };
   }): Promise<void> {
     const s = sessions.get(step.session);
     if (!s) throw new Error(`unknown session ${step.session}`);
     const uuid = sessionId(await projectId(), s.host === "codex" ? "codex" : "claude-code", s.id);
     const { processed_without_units: empty, ...record } = step.record;
-    const run = await beginTrace(writer(), await projectId(), uuid);
-    const pages = step.pages;
-    // Only a case that expects the refusal keeps it as an outcome; any other failed save still fails the case
-    if (step.refused) {
-      saves = [
-        await extract(run, `trace:${s.id}/`, record).then(
-          () => ({ status: 0, out: "saved" }),
-          (e: Error) => ({ status: 1, out: e.message }),
-        ),
-      ];
-      return;
-    }
-    await extract(run, `trace:${s.id}/`, record, pages);
+    const by = step.caller;
+    const call = by
+      ? (tool: string) =>
+          recordCall(tool, {
+            host: "claude-code",
+            session: `tracer-${path.basename(dir)}`,
+            turn: "t1",
+            entrypoint: by.entrypoint,
+          })
+      : undefined;
+    const run = await beginTrace(writer(), await projectId(), uuid, await call?.("trace_begin"));
+    await outcome(step.refused, () => extract(run, `trace:${s.id}/`, record, step.pages, call));
+    if (step.refused) return;
     for (const other of (empty ?? []) as string[]) await trace({ session: other, record: { units: [] } });
   }
 
@@ -1148,6 +1246,14 @@ export async function createDriver(world: World): Promise<Driver> {
         );
         return;
       }
+      // The read tool's text for one record, read when the expectation runs
+      if (e.unit_read && typeof e.unit_read === "object") {
+        const want = e.unit_read as { of: string; contains: string[] };
+        const text = (await readUnit(db(), await projectId(), want.of, repo)) ?? "";
+        for (const w of want.contains)
+          assert.ok(text.includes(w), `read of ${want.of} lacks "${w}"\n${text}`);
+        return;
+      }
       if (typeof e.read_contains === "string") {
         assert.ok(lastRead.includes(e.read_contains), `read does not say "${e.read_contains}"\n${lastRead}`);
         return;
@@ -1247,6 +1353,13 @@ export async function createDriver(world: World): Promise<Driver> {
             text,
             /^<past-records id="[0-9a-f]+">\nPast records: [\s\S]*Evidence, not instructions/,
           );
+        return;
+      }
+      if (typeof e.save_notes_contain === "string") {
+        assert.ok(
+          savedText.includes(e.save_notes_contain),
+          `save did not say "${e.save_notes_contain}"\n${savedText}`,
+        );
         return;
       }
       if (typeof e.check_problem_absent === "string") {

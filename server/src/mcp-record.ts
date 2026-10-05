@@ -9,6 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { Kysely } from "kysely";
 import { z } from "zod";
+import { callerOf } from "./caller.ts";
 import { dbFile } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
@@ -30,6 +31,7 @@ import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, type Place, projectId, writePlace } from "./project.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { head, plural, reason } from "./text.ts";
+import { callSession, logCall } from "./trace.ts";
 
 requireRuntime();
 let db: Kysely<DB> | null = null;
@@ -61,6 +63,15 @@ async function projectOf(cwd: string | undefined, meta: unknown): Promise<Place 
   return { ...place, projectId: id };
 }
 
+/**
+ * The project, and the call logged before anything else runs: who called comes only from what the host passed (callerOf). A call that
+ * cannot be logged does nothing, so no record tool ever runs unlogged.
+ */
+async function called(name: string, cwd: string | undefined, meta: unknown) {
+  const p = await projectOf(cwd, meta);
+  return { p, call: await logCall(conn(), p.projectId, name, callerOf(meta)) };
+}
+
 /** Runs a tool body, turning a failure into an error reply the agent can read. */
 const tool = (fn: () => Promise<string>) =>
   fn().then(
@@ -89,6 +100,12 @@ const RUN = z.string().min(1).max(40).describe("The run id begin returned");
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const RECORD = z.record(z.string(), z.unknown()).describe("The record, as the Skill describes");
+const AUTO = z
+  .boolean()
+  .optional()
+  .describe(
+    "true when tracing without the owner's request: pending lists recent sessions with any message not traced yet, oldest first, and context starts at the first such message after a few earlier ones and stops after a page limit",
+  );
 
 server.registerTool(
   "trace_pending",
@@ -96,10 +113,16 @@ server.registerTool(
     title: "Sessions not traced yet",
     description:
       "Lists this project's captured sessions with owner messages no trace has looked at, then apart those whose last owner message is over 14 days old.",
-    inputSchema: z.object({ cwd: CWD }).strict(),
+    inputSchema: z.object({ auto: AUTO, cwd: CWD }).strict(),
     annotations: READ,
   },
-  async (a, extra) => tool(async () => pendingText(conn(), (await projectOf(a.cwd, extra._meta)).projectId)),
+  async (a, extra) =>
+    tool(async () => {
+      const { p, call } = await called("trace_pending", a.cwd, extra._meta);
+      // The caller's own session is still being written, so an automatic trace leaves it out
+      const skip = a.auto ? await callSession(conn(), call) : undefined;
+      return pendingText(conn(), p.projectId, undefined, { auto: a.auto, skip });
+    }),
 );
 
 server.registerTool(
@@ -112,10 +135,10 @@ server.registerTool(
     annotations: WRITE,
   },
   async (a, extra) =>
-    tool(
-      async () =>
-        `run: ${await beginTrace(conn(), (await projectOf(a.cwd, extra._meta)).projectId, a.session)}\nNext: record_context with this run.`,
-    ),
+    tool(async () => {
+      const { p, call } = await called("trace_begin", a.cwd, extra._meta);
+      return `run: ${await beginTrace(conn(), p.projectId, a.session, call)}\nNext: record_context with this run.`;
+    }),
 );
 
 server.registerTool(
@@ -129,10 +152,10 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
+      const { p, call } = await called("harvest_begin", a.cwd, extra._meta);
       const repo = repoOf(p.key);
       if (!repo) throw new Error(`${p.name} is not on github.com, so there is no pull request to read`);
-      const r = await beginHarvest(conn(), p.projectId, a.pr, gh(repo));
+      const r = await beginHarvest(conn(), p.projectId, a.pr, gh(repo), call);
       return `run: ${r.run}\n${r.sources} sources kept. Next: record_context with this run.`;
     }),
 );
@@ -147,10 +170,10 @@ server.registerTool(
     annotations: WRITE,
   },
   async (a, extra) =>
-    tool(
-      async () =>
-        `run: ${await beginGlean(conn(), (await projectOf(a.cwd, extra._meta)).projectId, a.session)}\nNext: record_context with this run.`,
-    ),
+    tool(async () => {
+      const { p, call } = await called("glean_begin", a.cwd, extra._meta);
+      return `run: ${await beginGlean(conn(), p.projectId, a.session, call)}\nNext: record_context with this run.`;
+    }),
 );
 
 server.registerTool(
@@ -164,7 +187,7 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
+      const { p } = await called("glean_fetch", a.cwd, extra._meta);
       return framed(await gleanFetch(conn(), a.run, p, a.url, gh(repoOf(p.key) ?? "")));
     }),
 );
@@ -185,6 +208,7 @@ server.registerTool(
           .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
           .optional()
           .describe("The ref the previous page named, to read the next page"),
+        auto: AUTO,
         cwd: CWD,
       })
       .strict(),
@@ -192,8 +216,8 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
-      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after));
+      const { p } = await called("record_context", a.cwd, extra._meta);
+      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto));
     }),
 );
 
@@ -207,8 +231,8 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
-      return (await checkText(conn(), a.run, p.projectId, p.root, a.record)).text;
+      const { p, call } = await called("record_check", a.cwd, extra._meta);
+      return (await checkText(conn(), a.run, p.projectId, p.root, a.record, call)).text;
     }),
 );
 
@@ -222,8 +246,8 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
-      return saveText(conn(), a.run, p.projectId, p.root, a.record);
+      const { p, call } = await called("record_save", a.cwd, extra._meta);
+      return saveText(conn(), a.run, p.projectId, p.root, a.record, undefined, call);
     }),
 );
 
@@ -247,7 +271,7 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
+      const { p } = await called("forget_preview", a.cwd, extra._meta);
       return forgetText(await previewForget(dbFile(), p.projectId, idsOf(a.sources)), dbFile());
     }),
 );
@@ -263,7 +287,7 @@ server.registerTool(
   },
   async (a, extra) =>
     tool(async () => {
-      const p = await projectOf(a.cwd, extra._meta);
+      const { p } = await called("forget_apply", a.cwd, extra._meta);
       const ids = idsOf(a.sources);
       const seen = await previewForget(dbFile(), p.projectId, ids);
       const n = seen.sources.length;

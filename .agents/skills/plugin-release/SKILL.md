@@ -166,7 +166,8 @@ When changing aspects, read `plugin-agent-authoring` first too.
 
 - For a Skill that should start only when explicitly called, pair `disable-model-invocation: true` in SKILL.md (Claude Code) with
   `policy.allow_implicit_invocation: false` in the Skill directory's `agents/openai.yaml` (Codex). Codex does not read the former.
-  `verify:ai` checks the pair
+  `verify:ai` checks that Codex is never looser than Claude Code (it may be stricter, as trace is), and that the description says "Use only when the user explicitly asks" exactly for such a Skill (an agent decides
+  from the description whether to start it)
 - Pre-approval of MCP tools in `allowed-tools` is unverified on a real host for the record server's tools. Check it after delivery with
   `claude -p "/sphica:<skill>" --plugin-dir <plugin> --permission-mode default --output-format json` and an empty `permission_denials`
 - When checking after delivery, confirm in Codex that the body is read when explicitly started with `$sphica:<skill>` too

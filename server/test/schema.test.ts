@@ -411,7 +411,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 9);
+  assert.equal(one("pragma user_version").user_version, 10);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -621,30 +621,30 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
     run_id: Number(one("select run_id from unit where id = ?", next).run_id),
     added_at: now,
   });
-  // A successor that is not active yet replaces nothing
-  refuses(() => state(old, "active", "superseded"), /needs a supersedes link from an active successor/);
+  // An intent alone replaces nothing: superseded needs the replacement in effect
+  refuses(() => state(old, "active", "superseded"), /needs a replacement in effect into it/);
+  const replacement = insert(db, "unit_replacement", {
+    from_unit: next,
+    to_unit: old,
+    run_id: Number(one("select run_id from unit where id = ?", next).run_id),
+    started_at: now,
+  });
   state(next, "candidate", "active");
   state(old, "active", "superseded");
-  // Two live answers: the old one cannot come back beside its successor
+  // While it is replaced, it cannot come back nor be withdrawn
   refuses(() => state(old, "superseded", "active"), /not a lifecycle change/);
+  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
   refuses(() => state(old, "superseded", "withdrawn"), /not a lifecycle change/);
-  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
-  state(next, "active", "candidate");
-  refuses(() => state(old, "superseded", "candidate"), /not a lifecycle change/);
-  state(next, "candidate", "withdrawn");
+  sql(
+    "update unit_replacement set ended_at = ?, end_reason = 'next withdrawn', end_run_id = run_id where id = ?",
+    now,
+    replacement,
+  );
+  state(next, "active", "withdrawn");
   for (const to of ["candidate", "active", "superseded"])
     refuses(() => state(next, "withdrawn", to), /not a lifecycle change/);
-  // Its last live successor withdrawn, the old record is a candidate again, by a state the schema writes
-  assert.deepEqual(
-    {
-      ...one(
-        "select from_state, to_state, reason from unit_state where unit_id = ? order by id desc limit 1",
-        old,
-      ),
-    },
-    { from_state: "superseded", to_state: "candidate", reason: "its successor was withdrawn" },
-  );
-  state(old, "candidate", "active");
+  // Once nothing replaces it, it comes straight back
+  state(old, "superseded", "active");
   state(old, "active", "withdrawn");
   assert.deepEqual(
     [old, next].map((u) => one("select lifecycle from unit where id = ?", u).lifecycle),
@@ -652,7 +652,7 @@ test("a lifecycle moves only along the listed transitions, and withdrawn is fina
   );
 });
 
-test("a record has one live successor at a time, of a kind that can replace it", () => {
+test("a record has one replacement in effect at a time, from its successor's one intent, of a kind that can replace it", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const link = (from: number, to: number) =>
     insert(db, "unit_link", {
@@ -662,23 +662,38 @@ test("a record has one live successor at a time, of a kind that can replace it",
       run_id: Number(one("select run_id from unit where id = ?", from).run_id),
       added_at: now,
     });
-  const made = (key: string, kind: string) => {
+  const replace = (from: number, to: number) =>
+    insert(db, "unit_replacement", {
+      from_unit: from,
+      to_unit: to,
+      run_id: Number(one("select run_id from unit where id = ?", from).run_id),
+      started_at: now,
+    });
+  const made = (key: string, kind: string, adopt = true) => {
     const u = unit({ key, kind });
     evidence(u, src);
+    if (adopt && ["decision", "constraint"].includes(kind)) adoption(u, src);
     state(u, null, "candidate");
     return u;
   };
   const old = made("old", "decision");
   refuses(() => link(made("finding", "finding"), old), /supersedes one of its own kind/);
   const first = made("first", "constraint");
-  link(first, old);
-  // A candidate successor holds the place: a second one would make two answers once both are adopted
   const second = made("second", "decision");
-  refuses(() => link(second, old), /already has a successor that is not withdrawn/);
-  state(first, "candidate", "withdrawn");
+  // Proposals wait beside the place in any number; a record means to replace only one
+  link(first, old);
   link(second, old);
-  // A quarantined or unsourced successor can never become active or be withdrawn, so it takes no place
-  const other = made("other", "finding");
+  refuses(() => link(second, made("elsewhere", "decision")), /UNIQUE/);
+  // A replacement takes effect only from an intent, and the place takes one
+  refuses(() => replace(made("stranger", "decision"), old), /own intent to replace that one/);
+  replace(first, old);
+  refuses(() => replace(second, old), /UNIQUE/);
+  // A decision or constraint replaces another only with the owner's or a maintainer's adoption
+  const proposal = made("proposal", "decision", false);
+  const target = made("target", "decision");
+  link(proposal, target);
+  refuses(() => replace(proposal, target), /owner's or a maintainer's adoption/);
+  // A quarantined record never becomes active, so nothing replaces it; one whose source is gone can be
   const quarantined = unit({
     key: "q",
     kind: "finding",
@@ -686,31 +701,34 @@ test("a record has one live successor at a time, of a kind that can replace it",
     extraction_reason: "quote not found",
   });
   state(quarantined, null, "candidate");
-  link(quarantined, other);
+  const fixer = made("fixer", "finding");
+  link(fixer, quarantined);
+  refuses(() => replace(fixer, quarantined), /not quarantined nor withdrawn/);
   const unsourced = unit({ key: "n", kind: "finding", unsourced: 1 });
   state(unsourced, null, "candidate");
-  link(unsourced, other);
-  const sourced = made("sourced", "finding");
-  link(sourced, other);
-  // Its only live successor withdrawn, the record comes back, though the quarantined and unsourced ones still point at it
-  state(other, "candidate", "active");
-  state(sourced, "candidate", "active");
-  state(other, "active", "superseded");
-  state(sourced, "active", "withdrawn");
-  assert.equal(one("select lifecycle from unit where id = ?", other).lifecycle, "candidate");
-  // And from there a superseded record with only quarantined or unsourced successors left may be moved back by hand too
-  state(other, "candidate", "withdrawn");
-  assert.deepEqual(
-    db.owner
-      .prepare("select from_unit from unit_link where to_unit = ? order by from_unit")
-      .all(old)
-      .map((r) => r.from_unit),
-    [first, second],
-    "the withdrawn successor's link stays",
+  const mender = made("mender", "finding");
+  link(mender, unsourced);
+  replace(mender, unsourced);
+  // A replacement only ever ends, once, and is never removed
+  const row = Number(one("select id from unit_replacement where from_unit = ?", first).id);
+  refuses(
+    () => sql("update unit_replacement set started_at = ? where id = ?", now, row),
+    /only ever ends, once/,
   );
+  sql(
+    "update unit_replacement set ended_at = ?, end_reason = 'r', end_run_id = run_id where id = ?",
+    now,
+    row,
+  );
+  refuses(
+    () => sql("update unit_replacement set end_reason = 'again' where id = ?", row),
+    /only ever ends, once/,
+  );
+  refuses(() => sql("delete from unit_replacement where id = ?", row), /never removed/);
+  replace(second, old);
 });
 
-test("support is judged by one rule: a retraction or a retired anchor that takes it away is refused while the unit is active", () => {
+test("support is judged by one rule: a retraction or a retired anchor that takes it away leaves the unit unable to become active", () => {
   const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
   const retract = (id: number) =>
     sql(
@@ -727,9 +745,8 @@ test("support is judged by one rule: a retraction or a retired anchor that takes
   adoption(d, src);
   state(d, null, "candidate");
   state(d, "candidate", "active");
-  refuses(() => retract(own), /back to candidate before retracting its last evidence/);
-  state(d, "active", "candidate");
   retract(own);
+  state(d, "active", "candidate");
   refuses(() => state(d, "candidate", "active"), /needs unretracted evidence and adoption/);
   // An implementation's proof can be a commit-pinned anchor: retiring it is the same loss
   const i = unit({ key: "i1", kind: "implementation" });
@@ -750,9 +767,8 @@ test("support is judged by one rule: a retraction or a retired anchor that takes
   state(i, "candidate", "active");
   const retire = (id: number) => sql("update unit_anchor set retired_at = ? where id = ?", now, id);
   retire(plain);
-  refuses(() => retire(proof), /back to candidate before retiring its last code anchor/);
-  state(i, "active", "candidate");
   retire(proof);
+  state(i, "active", "candidate");
   refuses(() => state(i, "candidate", "active"), /needs code or commit evidence/);
   assert.deepEqual(
     db.owner
@@ -795,9 +811,9 @@ test("evidence and adoption stay in their project, inside the text, once, and ar
       src,
       u,
     );
-  refuses(() => retract("unit_adoption"), /back to candidate/);
-  state(u, "active", "candidate");
+  // Taking support away is a fact; what follows for the unit is judged by the save that wrote it (server/src/reconcile.ts)
   retract("unit_adoption");
+  state(u, "active", "candidate");
   refuses(() => retract("unit_adoption"), /retracted, once/);
 });
 
@@ -1433,4 +1449,317 @@ test("a field value is sealed with its unit, fits its field's kinds and type, an
   assert.equal(Number(one("select count(*) as n from field_def").n), 0);
   assert.ok(revision() > after);
   assert.deepEqual(hits("acme"), []);
+});
+
+// An AI reply in a session, with its turn; a question it asked through AskUserQuestion carries `:ask:...:q:` in its id
+const reply = (id: string, turn: string, sent: string, sessionId = "s1", host = "claude-code") => {
+  session(db, p, sessionId, host);
+  return insert(db, "source", {
+    project_id: p,
+    kind: "session_message",
+    artifact: `session:${sessionId}`,
+    external_id: id,
+    revision: 1,
+    session_id: sessionId,
+    turn_id: turn,
+    author_kind: "assistant",
+    created_at: at(sent),
+    captured_at: at(sent),
+    text: "I keep it as is.",
+    original_bytes: 16,
+    content_hash: sha256(id),
+    indexed: 0,
+  });
+};
+const call = (v: Values) =>
+  insert(db, "record_call", {
+    project_id: p,
+    tool: "trace_begin",
+    mode: "interactive",
+    called_at: now,
+    ...v,
+  });
+// A run begun by a call in the given mode
+const runBy = (mode: string) => {
+  session(db, p, "s1");
+  const c = call({ host: "claude-code", caller_session: "ext-s9", tool_use_id: `toolu_${mode}`, mode });
+  return insert(db, "extraction_run", {
+    project_id: p,
+    origin: "trace",
+    target: "session:s1",
+    session_id: "s1",
+    status: "running",
+    begin_call_id: c,
+    started_at: now,
+  });
+};
+
+test("decides quotes the AI's own reply, never the owner, a question it asked, or an option", () => {
+  const u = unit({ key: "keep", kind: "decision" });
+  const owner = message(db, p, { id: "o1", text: "Keep it as is." });
+  refuses(() => evidence(u, owner, { role: "decides" }), /decides quotes the AI choosing in its own reply/);
+  const asked = reply("t1:ask:toolu_1:q:abc", "t1", "2026-09-10T00:00:00Z");
+  refuses(() => evidence(u, asked, { role: "decides" }), /decides quotes the AI choosing in its own reply/);
+  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
+  const o = insert(db, "unit_option", { unit_id: u, position: 1, text: "keep", outcome: "chosen" });
+  refuses(
+    () => evidence(u, said, { role: "decides", option_id: o }),
+    /decides quotes the AI choosing in its own reply/,
+  );
+  evidence(u, said, { role: "decides" });
+});
+
+test("agent adoption pairs with live decides evidence and needs a run an interactive session began", () => {
+  const said = reply("t1:assistant", "t1", "2026-09-10T00:00:01Z");
+  const live = (mode: string) => {
+    const r = runBy(mode);
+    const u = unit({ key: `keep-${mode}`, kind: "decision" }, p, r);
+    return { u, r };
+  };
+  const { u } = live("interactive");
+  refuses(() => adoption(u, said, { route: "agent" }), /agent adoption pairs with live decides evidence/);
+  evidence(u, said, { role: "states" });
+  refuses(() => adoption(u, said, { route: "agent" }), /agent adoption pairs with live decides evidence/);
+  evidence(u, said, { role: "decides" });
+  adoption(u, said, { route: "agent" });
+  state(u, null, "candidate");
+  state(u, "candidate", "active");
+  assert.equal(one("select lifecycle from unit where id = ?", u).lifecycle, "active");
+  for (const mode of ["headless", "sdk", "unknown"]) {
+    const { u: v } = live(mode);
+    evidence(v, said, { role: "decides" });
+    refuses(
+      () => adoption(v, said, { route: "agent" }),
+      /agent adoption needs a run begun by an interactive session/,
+    );
+  }
+  // A run with no begin call (written before calls were logged) never adopts for the AI
+  const old = unit({ key: "old", kind: "decision" });
+  evidence(old, said, { role: "decides" });
+  refuses(
+    () => adoption(old, said, { route: "agent" }),
+    /agent adoption needs a run begun by an interactive session/,
+  );
+});
+
+test("replies from a turn that ran a record tool, or that no call can be placed away from, never carry agent adoption", () => {
+  const ineligible = () =>
+    (
+      db.owner.prepare("select source_id from agent_ineligible_source order by source_id").all() as {
+        source_id: number;
+      }[]
+    ).map((r) => r.source_id);
+  // Codex names its session and turn in the call
+  const cx1 = reply("c1:assistant", "c1", "2026-09-10T00:00:01Z", "cx", "codex");
+  const cx2 = reply("c2:assistant", "c2", "2026-09-10T00:00:02Z", "cx", "codex");
+  call({ host: "codex", caller_session: "ext-cx", caller_turn: "c1" });
+  assert.deepEqual(ineligible(), [cx1]);
+  // Claude Code's turn comes from the PreToolUse hook, joined by the tool use id
+  const cl1 = reply("k1:assistant", "k1", "2026-09-10T00:00:01Z", "cl");
+  const cl2 = reply("k2:assistant", "k2", "2026-09-10T00:00:02Z", "cl");
+  call({ host: "claude-code", caller_session: "ext-cl", tool_use_id: "toolu_k2" });
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: "ext-cl",
+    turn_id: "k2",
+    tool_use_id: "toolu_k2",
+    tool_name: "mcp__plugin_sphica_record__trace_begin",
+    owner_turn: 1,
+    observed_at: now,
+  });
+  assert.deepEqual(ineligible(), [cx1, cl2]);
+  // A Codex call naming no turn rules out its whole session
+  call({ host: "codex", caller_session: "ext-cx" });
+  assert.deepEqual(ineligible(), [cx1, cx2, cl2]);
+  // A Claude Code call the hook never saw rules out every reply of its project and host from then on
+  const late = reply("k3:assistant", "k3", "2026-09-27T00:00:05Z", "cl");
+  const later = reply("k4:assistant", "k4", "2026-09-27T00:00:09Z", "cl");
+  const elsewhere = reply("m1:assistant", "m1", "2026-09-27T00:00:07Z", "cl2");
+  call({ host: "claude-code", caller_session: "ext-cl", tool_use_id: "toolu_unseen" });
+  assert.deepEqual(ineligible(), [cx1, cx2, cl2, late, later, elsewhere]);
+  assert.ok(!ineligible().includes(cl1));
+  const said = cl2;
+  const r = runBy("interactive");
+  const u = unit({ key: "report", kind: "decision" }, p, r);
+  evidence(u, said, { role: "decides" });
+  refuses(
+    () => adoption(u, said, { route: "agent" }),
+    /cannot cite a reply from a turn that ran a record tool/,
+  );
+});
+
+test("record tool calls are never changed, and capture writes a hook's observation once through its view", () => {
+  const c = call({ host: "codex", caller_session: "ext-cx", caller_turn: "c1" });
+  refuses(
+    () => sql("update record_call set mode = 'headless' where id = ?", c),
+    /record tool calls are never changed/,
+  );
+  const observe = () =>
+    sql(
+      "insert into capture_tool_call (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 'ext-s1', 't1', 'toolu_1', 'mcp__plugin_sphica_record__trace_begin', 1, ?)",
+      now,
+    );
+  observe();
+  observe();
+  assert.equal(one("select count(*) as n from tool_call_observation").n, 1);
+});
+
+test("a run begins only from a record tool call of its own project", () => {
+  const theirs = insert(db, "record_call", {
+    project_id: other,
+    tool: "trace_begin",
+    mode: "interactive",
+    called_at: now,
+  });
+  refuses(
+    () =>
+      insert(db, "extraction_run", {
+        project_id: p,
+        origin: "trace",
+        target: "session:s1",
+        status: "running",
+        begin_call_id: theirs,
+        started_at: now,
+      }),
+    /a run begins from a record tool call of its own project/,
+  );
+});
+
+test("a record tool's hook row alone rules out its turn, even when the call never reached the server", () => {
+  const ineligible = () =>
+    (
+      db.owner.prepare("select source_id from agent_ineligible_source order by source_id").all() as {
+        source_id: number;
+      }[]
+    ).map((r) => r.source_id);
+  const k1 = reply("k1:assistant", "k1", "2026-09-10T00:00:01Z", "cl");
+  reply("k2:assistant", "k2", "2026-09-10T00:00:02Z", "cl");
+  // The MCP SDK refuses a malformed call before the server logs it; the hook saw it first
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: "ext-cl",
+    turn_id: "k1",
+    tool_use_id: "toolu_refused",
+    tool_name: "mcp__plugin_sphica_record__harvest_begin",
+    owner_turn: 1,
+    observed_at: now,
+  });
+  assert.deepEqual(ineligible(), [k1]);
+});
+
+test("agent adoption comes only from a trace run", () => {
+  const said = reply("g1:assistant", "g1", "2026-09-10T00:00:01Z");
+  const c = call({
+    host: "claude-code",
+    caller_session: "ext-s9",
+    tool_use_id: "toolu_glean",
+    mode: "interactive",
+  });
+  const gleaned = insert(db, "extraction_run", {
+    project_id: p,
+    origin: "glean",
+    target: "session:s1",
+    status: "running",
+    begin_call_id: c,
+    started_at: now,
+  });
+  const u = unit({ key: "gleaned", kind: "decision" }, p, gleaned);
+  evidence(u, said, { role: "decides", run_id: gleaned });
+  refuses(() => adoption(u, said, { route: "agent", run_id: gleaned }), /agent adoption needs a trace run/);
+});
+
+test("a replacement's start and end causes belong to the project of the records it joins", () => {
+  const src = message(db, p, { id: "m1", text: "Use SQLite. Decided." });
+  const old = unit({ key: "old-x", kind: "finding" });
+  const next = unit({ key: "next-x", kind: "finding" });
+  for (const u of [old, next]) evidence(u, src);
+  const run = Number(one("select run_id from unit where id = ?", next).run_id);
+  insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: run, added_at: now });
+  const theirs = insert(db, "extraction_run", {
+    project_id: other,
+    origin: "trace",
+    target: "session:z",
+    status: "running",
+    started_at: now,
+  });
+  const theirForget = insert(db, "forget_batch", { project_id: other, at: now });
+  refuses(
+    () => insert(db, "unit_replacement", { from_unit: next, to_unit: old, run_id: theirs, started_at: now }),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+  refuses(
+    () =>
+      insert(db, "unit_replacement", {
+        from_unit: next,
+        to_unit: old,
+        forget_id: theirForget,
+        started_at: now,
+      }),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+  const row = insert(db, "unit_replacement", { from_unit: next, to_unit: old, run_id: run, started_at: now });
+  refuses(
+    () =>
+      sql(
+        "update unit_replacement set ended_at = ?, end_reason = 'x', end_run_id = ? where id = ?",
+        now,
+        theirs,
+        row,
+      ),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+  refuses(
+    () =>
+      sql(
+        "update unit_replacement set ended_at = ?, end_reason = 'x', end_forget_id = ? where id = ?",
+        now,
+        theirForget,
+        row,
+      ),
+    /a replacement's cause belongs to the project of the records it joins/,
+  );
+});
+
+test("agent adoption cites a reply of the session the trace reads", () => {
+  const other = reply("o1:assistant", "o1", "2026-09-10T00:00:01Z", "s2");
+  const r = runBy("interactive");
+  const u = unit({ key: "elsewhere", kind: "decision" }, p, r);
+  evidence(u, other, { role: "decides", run_id: r });
+  refuses(
+    () => adoption(u, other, { route: "agent", run_id: r }),
+    /agent adoption cites a reply of the session the trace reads/,
+  );
+});
+
+test("a replacement takes effect only from a successor with full support", () => {
+  const old = unit({ key: "old-s", kind: "finding" });
+  const next = unit({ key: "next-s", kind: "finding" });
+  const run = Number(one("select run_id from unit where id = ?", next).run_id);
+  insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: run, added_at: now });
+  refuses(
+    () => insert(db, "unit_replacement", { from_unit: next, to_unit: old, run_id: run, started_at: now }),
+    /a replacement takes effect only from a sound successor/,
+  );
+});
+
+test("an observation with no turn rules out only replies after it, as an unplaced call does", () => {
+  const ineligible = () =>
+    (
+      db.owner.prepare("select source_id from agent_ineligible_source order by source_id").all() as {
+        source_id: number;
+      }[]
+    ).map((r) => r.source_id);
+  const before = reply("n1:assistant", "n1", "2026-09-10T00:00:01Z", "nt");
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: "ext-nt",
+    turn_id: null,
+    tool_use_id: "toolu_nt",
+    tool_name: "mcp__plugin_sphica_record__trace_begin",
+    owner_turn: 1,
+    observed_at: "2026-09-10T00:00:05.000Z",
+  });
+  const after = reply("n2:assistant", "n2", "2026-09-10T00:00:09Z", "nt");
+  assert.deepEqual(ineligible(), [after]);
+  assert.ok(!ineligible().includes(before));
 });

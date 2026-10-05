@@ -11,7 +11,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { openReader } from "../../src/db.ts";
 import { openWriter } from "../../src/db-write.ts";
-import { CONFIRM_GOLD, recordLines } from "../../src/deliver.ts";
+import { CONFIRM_GOLD, leadFor, recordLines } from "../../src/deliver.ts";
 import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
@@ -131,7 +131,14 @@ async function goldText(file: string, keys: string[]): Promise<string> {
       if (!shown.includes(inline(r.text)) || (r.why && !shown.includes(`Why: ${inline(r.why)}`)))
         throw new Error(`gold record ${r.key} would be cut by the delivery renderer`);
     });
-    return [GOLD_LEAD, ...lines].join("\n");
+    return [
+      await leadFor(
+        db,
+        rows.map((r) => r.id),
+        GOLD_LEAD,
+      ),
+      ...lines,
+    ].join("\n");
   } finally {
     await db.destroy();
   }

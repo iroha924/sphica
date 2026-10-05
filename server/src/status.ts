@@ -4,7 +4,7 @@ import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
 import { head, plural } from "./text.ts";
-import { PENDING_DAYS, pendingCutoff, untracedSessions } from "./trace.ts";
+import { PENDING_DAYS, type PendingOptions, pendingCutoff, untracedSessions } from "./trace.ts";
 
 type Coverage = {
   sessions: number;
@@ -19,15 +19,19 @@ type Coverage = {
   work: { title: string; current: string; status: string }[];
 };
 
-/** Untraced sessions, split by whether their last owner message is within PENDING_DAYS of now (status and session start share this). */
+/**
+ * Untraced sessions, split by whether their last owner message is within PENDING_DAYS of now (status and session start share this).
+ * With `auto`, they are counted as an automatic trace finds them.
+ */
 export async function pendingCount(
   db: Reads,
   projectId: number,
   now: Date = new Date(),
+  o: PendingOptions = {},
 ): Promise<{ recent: number; older: number }> {
   const cutoff = pendingCutoff(now);
   const r = await db
-    .selectFrom(untracedSessions(db, projectId).as("w"))
+    .selectFrom(untracedSessions(db, projectId, o).as("w"))
     .select([
       sql<number>`count(case when w.last >= ${cutoff} then 1 end)`.as("recent"),
       sql<number>`count(case when w.last < ${cutoff} then 1 end)`.as("older"),

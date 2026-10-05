@@ -943,6 +943,43 @@ export async function readInput(stream: NodeJS.ReadableStream): Promise<HookInpu
   return JSON.parse(raw || "{}") as HookInput;
 }
 
+/** Claude Code's names for the record server's tools */
+const RECORD_TOOLS = "mcp__plugin_sphica_record__";
+/** How long the record tools' hook waits for a save holding the lock. The tool waits too, so this stays under the hook's timeout */
+const OBSERVE_WAIT_MS = 5000;
+
+/**
+ * Logs a record tool call's session and turn before the tool runs, written straight to the database (never queued): the record server
+ * joins its own log to this by tool use id, since Claude Code puts no turn in the MCP call.
+ */
+/** A host's id or short name: anything else is never stored as sent */
+const hostId = (v: string | undefined) => (v && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null);
+
+export async function observeRecordCall(file: string, input: HookInput, owner: boolean): Promise<void> {
+  // Out of bounds, the call goes unobserved, so the record server treats it as unplaced and adoption stays off
+  const session = hostId(input.session_id);
+  const toolUse = hostId(input.tool_use_id);
+  const tool = hostId(input.tool_name);
+  if (!session || !toolUse || !tool?.startsWith(RECORD_TOOLS)) return;
+  const cap = openWriter("capture", file, OBSERVE_WAIT_MS);
+  try {
+    await cap
+      .insertInto("capture_tool_call")
+      .values({
+        host: "claude-code",
+        session_external: session,
+        turn_id: hostId(input.prompt_id),
+        tool_use_id: toolUse,
+        tool_name: tool,
+        owner_turn: owner ? 1 : 0,
+        observed_at: iso(Date.now()),
+      })
+      .execute();
+  } finally {
+    await cap.destroy().catch(() => {});
+  }
+}
+
 async function main(): Promise<void> {
   if (process.argv[2] === "--flush") {
     await flush();
@@ -950,6 +987,10 @@ async function main(): Promise<void> {
   }
   const input = await readInput(process.stdin);
   const host: Host = process.argv[2] === "codex" ? "codex" : "claude-code";
+  if (host === "claude-code" && input.hook_event_name === "PreToolUse") {
+    await observeRecordCall(dbFile(), input, isOwnerTurn(input));
+    return;
+  }
   // Stop needs JSON on success. Return it first so a failed recording never breaks the hook contract.
   if (host === "codex" && input.hook_event_name === "Stop") process.stdout.write("{}");
   const { flush: send, notice } = onHook(host, input);

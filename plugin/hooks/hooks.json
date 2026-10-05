@@ -97,6 +97,19 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "mcp__plugin_sphica_record__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/capture.js"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Read|Skill|Bash|PowerShell",
         "hooks": [
           {

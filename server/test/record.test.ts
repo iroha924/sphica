@@ -10,7 +10,9 @@ import { test } from "node:test";
 import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
 import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
+import { checkGlean } from "../src/glean.ts";
 import { readUnit } from "../src/read.ts";
+import { reconcile } from "../src/reconcile.ts";
 import {
   anchorProblem,
   checkRecord,
@@ -30,8 +32,18 @@ import {
   refresh,
   repoFacts,
 } from "../src/repo-facts.ts";
-import { liveUnits, openRun, pendingSessions, runOf, sessionEdits, sessionSources } from "../src/trace.ts";
-import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { liveSuccessors } from "../src/search.ts";
+import {
+  callSession,
+  liveUnits,
+  logCall,
+  openRun,
+  pendingSessions,
+  runOf,
+  sessionEdits,
+  sessionSources,
+} from "../src/trace.ts";
+import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const now = at("2026-09-27T00:00:00Z");
 
@@ -1768,6 +1780,984 @@ test("a record that only defines a field marks its source as used, and harvest c
       { outcome: "units" },
     );
     assert.equal(Number(db.owner.prepare("select count(*) as n from field_def").get()?.n), 1);
+  } finally {
+    await db.done();
+  }
+});
+
+// A Claude Code call: the server's log, and the PreToolUse hook's view of it (session and turn)
+const claudeCall = async (
+  db: TempDb,
+  p: number,
+  tool: string,
+  session: string,
+  toolUseId: string,
+  turn = "t1",
+) => {
+  const call = await logCall(db.ingest, p, tool, {
+    host: "claude-code",
+    session: "stale-env",
+    turn: null,
+    toolUseId,
+    mode: "interactive",
+    raw: "cli",
+  });
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: session,
+    turn_id: turn,
+    tool_use_id: toolUseId,
+    tool_name: `mcp__plugin_sphica_record__${tool}`,
+    owner_turn: 1,
+    observed_at: now,
+  });
+  return call;
+};
+
+test("record call: a run keeps the call that began it, and a call's session comes from the hook, never the server's environment", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "Keep it." });
+    const begin = await claudeCall(db, p, "trace_begin", "ext-live", "toolu_1");
+    const run = await beginTrace(db.ingest, p, "s1", begin);
+    assert.equal((await runOf(db.ingest, run))?.begin_call_id, begin);
+    assert.deepEqual(await callSession(db.ingest, begin), {
+      host: "claude-code",
+      session: "ext-live",
+      owner: true,
+    });
+    // A call the hook never saw has no session, even though the server's environment named one
+    const unseen = await logCall(db.ingest, p, "record_check", {
+      host: "claude-code",
+      session: "stale-env",
+      turn: null,
+      toolUseId: "toolu_unseen",
+      mode: "interactive",
+      raw: "cli",
+    });
+    assert.equal(await callSession(db.ingest, unseen), null);
+    const codex = await logCall(db.ingest, p, "trace_begin", {
+      host: "codex",
+      session: "cx",
+      turn: "c1",
+      toolUseId: null,
+      mode: "unknown",
+      raw: "user",
+    });
+    assert.deepEqual(await callSession(db.ingest, codex), { host: "codex", session: "cx", owner: true });
+  } finally {
+    await db.done();
+  }
+});
+
+test("record call: a save from another session than the one that began the run is refused, and the save's own call stays logged", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "Keep it." });
+    const run = await beginTrace(
+      db.ingest,
+      p,
+      "s1",
+      await claudeCall(db, p, "trace_begin", "ext-a", "toolu_a"),
+    );
+    const other = await claudeCall(db, p, "record_save", "ext-b", "toolu_b");
+    await assert.rejects(
+      saveText(db.ingest, run, p, null, { units: [] }, undefined, other),
+      /This run was begun in another session/,
+    );
+    assert.equal(
+      Number((db.owner.prepare("select count(*) as n from record_call").get() as { n: number }).n),
+      2,
+    );
+    // A save whose session cannot be told is not refused for it (it never adopts for the AI either)
+    const unknown = await logCall(db.ingest, p, "record_save", {
+      host: null,
+      session: null,
+      turn: null,
+      toolUseId: null,
+      mode: "unknown",
+      raw: null,
+    });
+    await saveText(db.ingest, run, p, null, { units: [] }, undefined, unknown);
+  } finally {
+    await db.done();
+  }
+});
+
+test("owner decision protected: in one save, a proposal waiting as a candidate does not take the place the owner's successor takes", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const ai = message(db, p, { id: "m2", text: "Postgres のほうが良さそうです。", speaker: "assistant" });
+    const b = message(db, p, { id: "m3", text: "DuckDB に移す。" });
+    const decided = (key: string, source: number, quote: string, adopt: boolean, extra = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...(adopt ? { adoption: [{ source: `s${source}`, quote }] } : {}),
+      ...extra,
+    });
+    await save(db, target(p), { units: [decided("sqlite", a, "SQLite にする", true)] });
+    const { saved } = await save(db, target(p), {
+      units: [
+        decided("postgres", ai, "Postgres のほうが良さそう", false, { supersedes: "trace:ext-s1/sqlite" }),
+        decided("duckdb", b, "DuckDB に移す", true, { supersedes: "trace:ext-s1/sqlite" }),
+      ],
+    });
+    assert.deepEqual(saved.superseded, ["trace:ext-s1/sqlite"]);
+  } finally {
+    await db.done();
+  }
+});
+
+// Records written as facts (units, evidence, adoption, intents) and settled the way saves settle them
+const successors = (db: TempDb, p: number) => {
+  const owner = message(db, p, { id: "o9", text: "Use SQLite." });
+  const ai = message(db, p, { id: "a9", text: "Use Postgres.", speaker: "assistant" });
+  const runId = Number(
+    (
+      db.owner
+        .prepare(
+          "insert into extraction_run (project_id, origin, target, status, started_at) values (?, 'trace', 'session:s1', 'running', ?) returning id",
+        )
+        .get(p, now) as { id: number }
+    ).id,
+  );
+  const exec = (sql: string, ...a: (string | number | null)[]) => db.owner.prepare(sql).run(...a);
+  const decided = (key: string, adopt: boolean) => {
+    const u = Number(
+      (
+        db.owner
+          .prepare(
+            "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (?, ?, 'decision', 'do', ?, 'supported', ?, ?, ?) returning id",
+          )
+          .get(p, `trace:ext-s1/${key}`, key, runId, now, hash(key.length)) as { id: number }
+      ).id,
+    );
+    exec(
+      "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (?, ?, 0, 3, 'states', ?, ?)",
+      u,
+      adopt ? owner : ai,
+      runId,
+      now,
+    );
+    if (adopt)
+      exec(
+        "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) values (?, 'owner_statement', ?, 0, 3, ?, ?)",
+        u,
+        owner,
+        runId,
+        now,
+      );
+    return u;
+  };
+  const link = (from: number, to: number) =>
+    exec(
+      "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'supersedes', ?, ?)",
+      from,
+      to,
+      runId,
+      now,
+    );
+  const unadopt = (u: number) =>
+    exec(
+      "update unit_adoption set retracted_at = ?, retraction_reason = 'r', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 3 where unit_id = ?",
+      now,
+      owner,
+      u,
+    );
+  const settle = (ids: number[], withdraw: number[] = []) =>
+    inTransaction(db.ingest, (trx) =>
+      reconcile(
+        trx,
+        ids,
+        { runId },
+        { withdraw: new Map(withdraw.map((id) => [id, { reason: "withdrawn", source: owner }])) },
+      ),
+    );
+  const life = (u: number) =>
+    (db.owner.prepare("select lifecycle from unit where id = ?").get(u) as { lifecycle: string }).lifecycle;
+  return { decided, link, unadopt, settle, life };
+};
+
+test("successor place: the owner's decision comes back when its successor's adoption is taken back", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, unadopt, settle, life } = successors(db, p);
+    const o = decided("sqlite", true);
+    const s = decided("duckdb", true);
+    link(s, o);
+    await settle([o, s]);
+    assert.deepEqual([life(o), life(s)], ["superseded", "active"]);
+    unadopt(s);
+    await settle([s]);
+    assert.deepEqual([life(o), life(s)], ["active", "candidate"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: search and read name only the successor that replaced the owner's decision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, settle } = successors(db, p);
+    const o = decided("sqlite", true);
+    link(decided("postgres", false), o);
+    const gone = decided("mysql", true);
+    link(gone, o);
+    await settle([o]);
+    await settle([gone], [gone]);
+    const now2 = decided("duckdb", true);
+    link(now2, o);
+    await settle([now2]);
+    assert.deepEqual(
+      (await liveSuccessors(db.reader, o)).map((n) => n.key),
+      ["trace:ext-s1/duckdb"],
+    );
+    const text = (await readUnit(db.reader, p, `u${o}`, null)) ?? "";
+    assert.match(text, /Superseded by trace:ext-s1\/duckdb/);
+    assert.doesNotMatch(text, /Superseded by trace:ext-s1\/(postgres|mysql)/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("owner decision protected: in one save, the order of a waiting proposal and the owner's successor does not matter", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const ai = message(db, p, { id: "m2", text: "Postgres のほうが良さそうです。", speaker: "assistant" });
+    const b = message(db, p, { id: "m3", text: "DuckDB に移す。" });
+    const decided = (key: string, source: number, quote: string, adopt: boolean, extra = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "states" }],
+      ...(adopt ? { adoption: [{ source: `s${source}`, quote }] } : {}),
+      ...extra,
+    });
+    await save(db, target(p), { units: [decided("sqlite", a, "SQLite にする", true)] });
+    const { saved } = await save(db, target(p), {
+      units: [
+        decided("duckdb", b, "DuckDB に移す", true, { supersedes: "trace:ext-s1/sqlite" }),
+        decided("postgres", ai, "Postgres のほうが良さそう", false, { supersedes: "trace:ext-s1/sqlite" }),
+      ],
+    });
+    assert.deepEqual(saved.superseded, ["trace:ext-s1/sqlite"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: when the end of a chain loses its adoption, the middle comes back and still replaces the head (C18)", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, unadopt, settle, life } = successors(db, p);
+    const o = decided("v1", true);
+    const a = decided("v2", true);
+    const b = decided("v3", true);
+    link(a, o);
+    link(b, a);
+    await settle([o, a, b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "superseded", "active"]);
+    unadopt(b);
+    await settle([b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "active", "candidate"]);
+    // Adopted again (other words of the owner), the end replaces the whole chain again: never two answers
+    db.owner
+      .prepare(
+        "insert into unit_adoption (unit_id, route, source_id, span_start, span_end, run_id, added_at) select ?, 'owner_statement', source_id, 4, 10, run_id, ? from unit_evidence where unit_id = ?",
+      )
+      .run(b, at("2026-09-28T00:00:00Z"), o);
+    await settle([b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "superseded", "active"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: proposals wait beside the place, the first standing one takes it, and the next takes it when it falls", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, unadopt, settle, life } = successors(db, p);
+    const o = decided("plain", false);
+    const a = decided("first", true);
+    const b = decided("second", true);
+    link(a, o);
+    link(b, o);
+    await settle([o]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "active", "candidate"]);
+    unadopt(a);
+    await settle([a]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "candidate", "active"]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: a successor whose reconsider quote was forgotten keeps replacing, and can itself be replaced", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { decided, link, settle, life } = successors(db, p);
+    const o = decided("v1", true);
+    const a = decided("v2", true);
+    // a was active before its owner quote for a reconsider condition was forgotten: forget's own recheck kept it active
+    const run = Number(db.owner.prepare("select run_id from unit where id = ?").get(a)?.run_id);
+    db.owner
+      .prepare(
+        "insert into unit_option (unit_id, position, text, outcome, reconsider_when) values (?, 1, 'Postgres', 'rejected', 'if replicas are needed')",
+      )
+      .run(a);
+    const batch = Number(
+      db.owner.prepare("insert into forget_batch (project_id, at) values (?, ?) returning id").get(p, now)
+        ?.id,
+    );
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, null, 'candidate', ?, 'r', ?)",
+      )
+      .run(a, now, run);
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, forget_id) values (?, 'candidate', 'active', ?, 'r', ?)",
+      )
+      .run(a, now, batch);
+    link(a, o);
+    await settle([o]);
+    assert.deepEqual([life(o), life(a)], ["superseded", "active"]);
+    const b = decided("v3", true);
+    link(b, a);
+    await settle([b]);
+    assert.deepEqual([life(o), life(a), life(b)], ["superseded", "superseded", "active"]);
+  } finally {
+    await db.done();
+  }
+});
+
+// A trace of session s1 begun and saved by an interactive session other than s1, so its replies may adopt for the AI
+const agentBench = async (db: TempDb, p: number, mode = "interactive", first = true) => {
+  if (first) message(db, p, { id: "o1", text: "Tidy the export." });
+  const reply = (id: string, turn: string | null, text: string) =>
+    insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: id,
+      revision: 1,
+      session_id: "s1",
+      turn_id: turn,
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(id.length),
+      indexed: 0,
+    });
+  const caller = () =>
+    logCall(db.ingest, p, "trace_begin", {
+      host: "codex",
+      session: "tracer",
+      turn: "tt",
+      toolUseId: null,
+      mode: mode as "interactive",
+      raw: "x",
+    });
+  const run = await beginTrace(db.ingest, p, "s1", await caller());
+  const save = async (record: unknown) =>
+    saveText(db.ingest, run, p, null, record, undefined, await caller());
+  const check = async (record: unknown) => checkText(db.ingest, run, p, null, record, await caller());
+  return { reply, save, check };
+};
+const aiDecision = (key: string, source: number, quote: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  kind: "decision",
+  stance: "dont",
+  text: quote,
+  evidence: [{ source: `s${source}`, quote, role: "decides" }],
+  adoption: [{ source: `s${source}`, quote }],
+  ...extra,
+});
+const lifeOf = (db: TempDb, key: string) =>
+  db.owner.prepare("select lifecycle from unit where key = ?").get(`trace:ext-s1/${key}`)?.lifecycle;
+
+test("agent adoption: the AI's own decision in an interactive trace becomes active as the AI's", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const r = reply("t1:assistant", "t1", "I keep the export as one function.");
+    const out = await save({ units: [aiDecision("one-function", r, "I keep the export as one function.")] });
+    assert.match(out, /one-function/);
+    assert.equal(lifeOf(db, "one-function"), "active");
+    assert.equal(db.owner.prepare("select route from unit_adoption").get()?.route, "agent");
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a question it asked, words that are not decides, a trace's own turn, and rule files stay candidates", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const asked = reply("t2:ask:toolu_1:q:abc", "t2", "Shall I keep one function?");
+    const said = reply("t3:assistant", "t3", "I keep the export as one function.");
+    const traced = reply("t4:assistant", "t4", "I keep the cache as it is.");
+    // The turn that ran a record tool (the hook saw it): its reply is a trace report, never a decision
+    insert(db, "tool_call_observation", {
+      host: "claude-code",
+      session_external: "ext-s1",
+      turn_id: "t4",
+      tool_use_id: "toolu_t4",
+      tool_name: "mcp__plugin_sphica_record__trace_save",
+      owner_turn: 1,
+      observed_at: now,
+    });
+    const rules = reply("t5:assistant", "t5", "I keep CLAUDE.md short.");
+    const out = await save({
+      units: [
+        {
+          ...aiDecision("asked", asked, "Shall I keep one function?"),
+          evidence: [{ source: `s${asked}`, quote: "Shall I keep one function?", role: "states" }],
+        },
+        {
+          ...aiDecision("states", said, "I keep the export as one function."),
+          evidence: [{ source: `s${said}`, quote: "I keep the export as one function.", role: "states" }],
+        },
+        aiDecision("traced", traced, "I keep the cache as it is."),
+        aiDecision("rules", rules, "I keep CLAUDE.md short.", {
+          anchors: [{ path: "CLAUDE.md", role: "applies_to" }],
+        }),
+      ],
+    });
+    for (const key of ["asked", "states", "traced", "rules"]) assert.equal(lifeOf(db, key), "candidate", key);
+    assert.match(out, /a question the AI asked is not its decision|decides quotes the AI choosing/);
+    assert.match(out, /quote the same words as decides evidence/);
+    assert.match(out, /comes from a turn that ran a record tool/);
+    assert.match(out, /CLAUDE\.md holds rules or CI agents follow/);
+    assert.equal(db.owner.prepare("select count(*) as n from unit_adoption").get()?.n, 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a do on code needs the AI to have changed that code in the same turn", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const r = reply("t6:assistant", "t6", "I split the parser.");
+    const decision = (key: string) => ({
+      ...aiDecision(key, r, "I split the parser."),
+      stance: "do",
+      anchors: [{ path: "src/parse.ts", role: "applies_to" }],
+    });
+    await save({ units: [decision("unchanged")] });
+    assert.equal(lifeOf(db, "unchanged"), "candidate");
+    insert(db, "edit_observation", {
+      session_id: "s1",
+      turn_id: "t6",
+      tool_event_id: "e1",
+      path: "src/parse.ts",
+      via: "tool",
+      observed_at: now,
+    });
+    const second = await agentBench(db, p, "interactive", false);
+    await second.save({ units: [decision("changed")] });
+    assert.equal(lifeOf(db, "changed"), "active");
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a headless run never adopts for the AI", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p, "headless");
+    const r = reply("t7:assistant", "t7", "I keep the export as one function.");
+    const out = await save({ units: [aiDecision("headless", r, "I keep the export as one function.")] });
+    assert.equal(lifeOf(db, "headless"), "candidate");
+    assert.match(
+      out,
+      /only the owner or a maintainer can adopt, and an AI's own decision only in a trace an interactive session runs/,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a reply with no turn never adopts, since a turn that ran a record tool cannot be told apart", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    insert(db, "tool_call_observation", {
+      host: "claude-code",
+      session_external: "ext-s1",
+      turn_id: "t1",
+      tool_use_id: "toolu_t1",
+      tool_name: "mcp__plugin_sphica_record__record_save",
+      owner_turn: 1,
+      observed_at: now,
+    });
+    const r = reply("x:assistant", null, "I keep the export as one function.");
+    const out = await save({ units: [aiDecision("no-turn", r, "I keep the export as one function.")] });
+    assert.equal(lifeOf(db, "no-turn"), "candidate");
+    assert.match(out, /cannot be told apart from a turn that ran a record tool/);
+    assert.equal(db.owner.prepare("select count(*) as n from unit_adoption").get()?.n, 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: decides evidence on a question, the owner's words, or an option is refused by check as save refuses it", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save, check } = await agentBench(db, p);
+    const asked = reply("t2:ask:toolu_1:q:abc", "t2", "Shall I keep one function?");
+    const owner = Number(db.owner.prepare("select id from source where author_kind = 'owner'").get()?.id);
+    const said = reply("t3:assistant", "t3", "I keep the export as one function.");
+    const cases = [
+      aiDecision("asked", asked, "Shall I keep one function?"),
+      aiDecision("owner", owner, "Tidy the export."),
+      {
+        ...aiDecision("option", said, "I keep the export as one function."),
+        options: [
+          {
+            text: "one function",
+            outcome: "chosen",
+            evidence: [{ source: `s${said}`, quote: "one function", role: "decides" }],
+          },
+        ],
+      },
+    ];
+    for (const unit of cases) {
+      const record = { units: [unit, aiDecision("fine", said, "I keep the export as one function.")] };
+      const checked = await check(record);
+      assert.equal(checked.ok, false, unit.key);
+      assert.match(checked.text, /decides quotes the AI choosing in its own reply/, unit.key);
+    }
+    await assert.rejects(
+      save({ units: [cases[0], aiDecision("fine", said, "I keep the export as one function.")] }),
+      /decides quotes the AI choosing in its own reply/,
+    );
+    assert.equal(db.owner.prepare("select count(*) as n from unit").get()?.n, 0);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: glean takes no decides evidence, since only a trace pairs it with the AI's own adoption", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const gleaned: Target = {
+      projectId: p,
+      origin: "glean",
+      prefix: "glean:",
+      sessionId: "g1",
+      root: null,
+      sources: null,
+    };
+    const checked = await checkGlean(db.ingest, gleaned, {
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "trace:ext-s1/x",
+          revision: 1,
+          source: "s1",
+          quote: "x",
+          role: "decides",
+        },
+      ],
+    });
+    assert.match(checked.errors.join("\n"), /ops\.0\.role/);
+    // Nor does a new record glean saves: it shares trace's check
+    session(db, p, "g1");
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:g1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "g1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text: "I keep it as is.",
+      original_bytes: 16,
+      content_hash: hash(41),
+      indexed: 0,
+    });
+    const units = await checkGlean(db.ingest, gleaned, {
+      units: [
+        {
+          key: "x",
+          kind: "decision",
+          stance: "dont",
+          text: "Keep it.",
+          evidence: [{ source: `s${reply}`, quote: "I keep it as is.", role: "decides" }],
+        },
+      ],
+    });
+    assert.match([...units.errors, ...units.units.errors].join("\n"), /decides quotes the AI choosing/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a CI path written in other letter case, or CI's directory itself, is still a CI path", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const paths = [".github/WORKFLOWS/check.yml", ".github/workflows", ".github"];
+    const out = await save({
+      units: paths.map((path, n) => {
+        const r = reply(`t${n}:assistant`, `t${n}`, `I keep the CI check ${n} disabled.`);
+        return aiDecision(`ci-${n}`, r, `I keep the CI check ${n} disabled.`, {
+          anchors: [{ path, role: "applies_to" }],
+        });
+      }),
+    });
+    for (const n of [0, 1, 2]) assert.equal(lifeOf(db, `ci-${n}`), "candidate", paths[n]);
+    assert.match(out, /holds rules or CI agents follow/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: an implementation that cannot become active takes no place from another in the same save", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "toCsv を直した。 toCsv を分けた。 toCsv をまた直した。" });
+    insert(db, "edit_observation", {
+      session_id: "s1",
+      turn_id: "t1",
+      path: "src/export.ts",
+      via: "tool",
+      observed_at: now,
+    });
+    const done = (key: string, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "implementation",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "implements" }],
+      anchors: [{ path: "src/export.ts", symbol: "toCsv", role: "evidence" }],
+      ...extra,
+    });
+    await save(db, target(p), { units: [done("old", "toCsv を直した。")] });
+    await save(db, target(p), {
+      units: [
+        {
+          key: "proposal",
+          kind: "implementation",
+          text: "toCsv を分けた",
+          evidence: [{ source: `s${m}`, quote: "toCsv を分けた。", role: "states" }],
+          supersedes: "trace:ext-s1/old",
+        },
+        done("good", "toCsv をまた直した。", { supersedes: "trace:ext-s1/old" }),
+      ],
+    });
+    assert.deepEqual(
+      ["old", "proposal", "good"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
+      ["superseded", "candidate", "active"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("successor place: glean's check refuses adopting a successor into a place another holds, as its save does", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Use SQLite. Maybe DuckDB. Use Postgres. Adopt both." });
+    const said = (key: string, quote: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+      ...extra,
+    });
+    await save(db, target(p), { units: [said("old", "Use SQLite.")] });
+    await save(db, target(p), {
+      units: [
+        {
+          key: "waiting",
+          kind: "decision",
+          stance: "do",
+          text: "Maybe DuckDB.",
+          evidence: [{ source: `s${m}`, quote: "Maybe DuckDB.", role: "proposes" }],
+          supersedes: "trace:ext-s1/old",
+        },
+      ],
+    });
+    await save(db, target(p), {
+      units: [said("holder", "Use Postgres.", { supersedes: "trace:ext-s1/old" })],
+    });
+    const revision = Number(
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/waiting'").get()?.revision,
+    );
+    const gleaned: Target = {
+      projectId: p,
+      origin: "glean",
+      prefix: "glean:",
+      sessionId: "s1",
+      root: null,
+      sources: null,
+    };
+    const adopt = {
+      op: "adopt",
+      unit: "trace:ext-s1/waiting",
+      revision,
+      source: `s${m}`,
+      quote: "Adopt both.",
+    };
+    const refused = await checkGlean(db.ingest, gleaned, { units: [], ops: [adopt] });
+    assert.match(
+      refused.errors.join("\n"),
+      /trace:ext-s1\/old already has a successor, trace:ext-s1\/holder \(in effect\)/,
+    );
+    const holderRevision = Number(
+      db.owner.prepare("select revision from unit where key = 'trace:ext-s1/holder'").get()?.revision,
+    );
+    const freed = await checkGlean(db.ingest, gleaned, {
+      units: [],
+      ops: [
+        {
+          op: "withdraw",
+          unit: "trace:ext-s1/holder",
+          revision: holderRevision,
+          reason_source: `s${m}`,
+          reason_quote: "Adopt both.",
+        },
+        adopt,
+      ],
+    });
+    assert.deepEqual(freed.errors, []);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a save whose caller's session is unknown never adopts for the AI", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "o1", text: "Tidy the export." });
+    const text = "I keep the export as one function.";
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(77),
+      indexed: 0,
+    });
+    const begin = await claudeCall(db, p, "trace_begin", "ext-tracer", "toolu_begin", "tt1");
+    const run = await beginTrace(db.ingest, p, "s1", begin);
+    // The hook never saw the save: its session is unknown, though the call says it was interactive
+    const unseen = await logCall(db.ingest, p, "record_save", {
+      host: "claude-code",
+      session: "stale-env",
+      turn: null,
+      toolUseId: "toolu_unseen",
+      mode: "interactive",
+      raw: "cli",
+    });
+    const out = await saveText(
+      db.ingest,
+      run,
+      p,
+      null,
+      { units: [aiDecision("unseen", reply, text)] },
+      undefined,
+      unseen,
+    );
+    assert.equal(lifeOf(db, "unseen"), "candidate");
+    assert.match(out, /an AI's own decision only in a trace an interactive session runs/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: an anchor of any role on a rule or CI file keeps the AI's decision a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const paths = ["CLAUDE.md", ".github/workflows/check.yml"];
+    await save({
+      units: paths.map((path, n) => {
+        const r = reply(`e${n}:assistant`, `e${n}`, `I keep rule ${n} as it is.`);
+        return aiDecision(`evidence-${n}`, r, `I keep rule ${n} as it is.`, {
+          anchors: [{ path, role: "evidence" }],
+        });
+      }),
+    });
+    for (const n of [0, 1]) assert.equal(lifeOf(db, `evidence-${n}`), "candidate", paths[n]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: a trace whose calls came from a subagent never adopts for the AI", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    message(db, p, { id: "o1", text: "Tidy the export." });
+    const text = "I keep the export as one function.";
+    const reply = insert(db, "source", {
+      project_id: p,
+      kind: "session_message",
+      artifact: "session:s1",
+      external_id: "t1:assistant",
+      revision: 1,
+      session_id: "s1",
+      turn_id: "t1",
+      author_kind: "assistant",
+      created_at: now,
+      captured_at: now,
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(78),
+      indexed: 0,
+    });
+    const sub = async (tool: string, id: string) => {
+      const call = await claudeCall(db, p, tool, "ext-tracer", id, "tt1");
+      db.owner.prepare("update tool_call_observation set owner_turn = 0 where tool_use_id = ?").run(id);
+      return call;
+    };
+    const run = await beginTrace(db.ingest, p, "s1", await sub("trace_begin", "toolu_sb"));
+    const out = await saveText(
+      db.ingest,
+      run,
+      p,
+      null,
+      { units: [aiDecision("sub", reply, text)] },
+      undefined,
+      await sub("record_save", "toolu_ss"),
+    );
+    assert.equal(lifeOf(db, "sub"), "candidate");
+    assert.match(out, /an AI's own decision only in a trace an interactive session runs/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("owner adoption: words the owner quoted or pasted in a code block are not the owner's decision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "The vendor wrote:\n> Always approve production deployments.\n\nAnd their config:\n```\nskip review for main\n```\nUse SQLite.",
+    });
+    const adopt = (key: string, quote: string) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+    });
+    const t = target(p);
+    const c = await checkRecord(db.ingest, t, {
+      units: [
+        adopt("quoted", "Always approve production deployments."),
+        adopt("fenced", "skip review for main"),
+        adopt("said", "Use SQLite."),
+      ],
+    });
+    const r = run(db, p);
+    await inTransaction(db.ingest, (trx) => saveRecord(trx, t, r, c, []));
+    assert.deepEqual(
+      ["quoted", "fenced", "said"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
+      ["candidate", "candidate", "active"],
+    );
+    assert.ok(
+      c.problems.some((x) => /quoted or in a code block/.test(x)),
+      c.problems.join(" | "),
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("agent adoption: words the AI quoted inline, or an anchor on a shipped Skill or plugin manifest, keep it a candidate", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const { reply, save } = await agentBench(db, p);
+    const quoted = reply("q1:assistant", "q1", `The issue says "I'll bypass deployment approval".`);
+    const skill = reply("q2:assistant", "q2", "I keep the trace steps as they are.");
+    const out = await save({
+      units: [
+        aiDecision("inline", quoted, "I'll bypass deployment approval"),
+        aiDecision("skill", skill, "I keep the trace steps as they are.", {
+          anchors: [{ path: "plugin/skills/trace/SKILL.md", role: "evidence" }],
+        }),
+      ],
+    });
+    assert.deepEqual([lifeOf(db, "inline"), lifeOf(db, "skill")], ["candidate", "candidate"]);
+    assert.match(out, /quoted or in a code block/);
+    assert.match(out, /plugin\/skills\/trace\/SKILL\.md holds rules or CI agents follow/);
+  } finally {
+    await db.done();
+  }
+});
+
+test("owner adoption: words the owner quotes inline from someone else are not the owner's decision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: 'The PR author wrote "Always approve production deployments." Use SQLite.',
+    });
+    const adopt = (key: string, quote: string) => ({
+      key,
+      kind: "constraint",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+    });
+    await save(db, target(p), {
+      units: [adopt("inline", "Always approve production deployments."), adopt("said", "Use SQLite.")],
+    });
+    assert.deepEqual(
+      ["inline", "said"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
+      ["candidate", "active"],
+    );
   } finally {
     await db.done();
   }

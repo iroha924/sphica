@@ -7,7 +7,7 @@ import { cleanGit } from "./git.ts";
 
 export const RULE_LIMITS = { files: 200, bytes: 256 * 1024, depth: 8, entries: 5000 } as const;
 
-export const RULE_NAMES = new Set(["CLAUDE.md", "AGENTS.md", "AGENTS.override.md"]);
+const RULE_NAMES = new Set(["CLAUDE.md", "AGENTS.md", "AGENTS.override.md"]);
 /** git pathspecs for the same set; `**` also matches the top directory. */
 const PATHSPECS = [...RULE_NAMES, ".claude/rules/**/*.md"].map((p) => `:(glob)**/${p}`);
 
@@ -126,3 +126,26 @@ function walk(root: string): { paths: string[]; incomplete: string | null } {
   ];
   return { paths, incomplete: why.length ? why.join("; ") : null };
 }
+
+/**
+ * Where coding agents load standing instructions, Skills, and settings from (the same places the review Skill treats as binding rules),
+ * and the Skills and manifests a plugin ships for them, compared without case.
+ */
+const INSTRUCTION_DIRS = new Set([
+  ".claude",
+  ".agents",
+  ".codex",
+  ".cursor",
+  "skills",
+  ".claude-plugin",
+  ".codex-plugin",
+]);
+export const instructionFile = (relative: string) => {
+  const parts = relative.toLowerCase().split(/[\\/]/);
+  const names = [...RULE_NAMES, "SKILL.md"].map((n) => n.toLowerCase());
+  return (
+    parts.some((p) => INSTRUCTION_DIRS.has(p)) ||
+    names.includes(parts.at(-1) ?? "") ||
+    parts.slice(-2).join("/") === ".github/copilot-instructions.md"
+  );
+};

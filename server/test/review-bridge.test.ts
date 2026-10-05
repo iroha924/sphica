@@ -285,17 +285,8 @@ test("a non-ASCII anchored path is matched, and a record in an unresolved confli
         }),
       ],
     });
-    await save(db, p, {
-      units: [
-        {
-          key: "q",
-          kind: "question",
-          text: "q",
-          evidence: [{ source: `s${m}`, quote: "Maybe not.", role: "states" }],
-          conflicts: ["trace:ext-s1/sqlite"],
-        },
-      ],
-    });
+    // The owner's own words against it hold the owner's decision back until resolved
+    await save(db, p, { units: [decided("q", m, "Maybe not.", { conflicts: ["trace:ext-s1/sqlite"] })] });
     fs.writeFileSync(path.join(repo, "src", "設計.ts"), "export const a = 2;\n");
     fs.writeFileSync(path.join(repo, "src", "db.ts"), "export const open = () => 7;\n");
     const out = await deliver(

@@ -7,9 +7,21 @@ import path from "node:path";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "../src/export.ts";
+import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { at, hash, insert, message, project, session, type TempDb, tempDb } from "./temp-db.ts";
+import {
+  aiDecided,
+  at,
+  hash,
+  insert,
+  message,
+  project,
+  run,
+  session,
+  type TempDb,
+  tempDb,
+} from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], session = "s1") {
   const t: Target = {
@@ -108,6 +120,51 @@ test("a chosen decision comes with its quotes and every decision it replaced, ne
       "no export time",
     );
     assert.equal(await exported(db, p, ["trace:ext-s1/sync"]), doc, "the same choice writes the same bytes");
+  } finally {
+    await db.done();
+  }
+});
+
+test("the chain holds only replacements in effect: a period that ended and a proposal that waits are left out", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const said = "Decided.";
+    const m = message(db, p, { id: "m1", text: said });
+    const ai = message(db, p, { id: "a1", text: "Maybe MySQL.", speaker: "assistant" });
+    await save(db, p, [decision(m, said, "sqlite")]);
+    await save(db, p, [decision(m, said, "postgres", { supersedes: "trace:ext-s1/sqlite" })]);
+    // Nobody adopted it: it waits, beside sync once sync replaces postgres, and is not part of any chain
+    await save(db, p, [
+      {
+        key: "mysql",
+        kind: "decision",
+        stance: "do",
+        text: "mysql text",
+        evidence: [{ source: `s${ai}`, quote: "Maybe MySQL.", role: "proposes" }],
+        supersedes: "trace:ext-s1/postgres",
+      },
+    ]);
+    await save(db, p, [decision(m, said, "sync", { supersedes: "trace:ext-s1/postgres" })]);
+    // postgres loses the owner's adoption: sync still replaces it, but its own replacement of sqlite ends and sqlite comes back
+    const postgres = Number(
+      db.owner.prepare("select id from unit where key = 'trace:ext-s1/postgres'").get()?.id,
+    );
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'taken back', retraction_source_id = source_id, retraction_span_start = span_start, retraction_span_end = span_end where unit_id = ?",
+      )
+      .run(new Date().toISOString(), postgres);
+    const runId = run(db, p);
+    await inTransaction(db.ingest, (trx) => reconcile(trx, [postgres], { runId }));
+    const doc = await exported(db, p, ["trace:ext-s1/sync"]);
+    assert.deepEqual(
+      [...doc.matchAll(/^#+ .*$/gm)].map((h) => h[0]),
+      ["# Decisions exported from Sphica", "## Decision 1", "### Superseded 1.1"],
+    );
+    assert.match(doc, /trace:ext-s1\/sync supersedes trace:ext-s1\/postgres/);
+    assert.doesNotMatch(doc, /sqlite|mysql/);
+    assert.match(await exported(db, p, ["trace:ext-s1/sqlite"]), /key: trace:ext-s1\/sqlite/);
   } finally {
     await db.done();
   }
@@ -501,4 +558,22 @@ test("the reply is one line saying where to write, then the document and nothing
     exportReply({ relative: "d.md", exists: true }, doc),
     /^Write to d\.md, replacing an existing file/,
   );
+});
+
+test("each exported decision says whose it is, so a reader without Sphica weighs an AI's below the owner's", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    aiDecided(db, p, "pool", "I keep the connection pool small.");
+    const m = message(db, p, { id: "m1", text: "Use SQLite." });
+    await save(db, p, [decision(m, "Use SQLite.", "sqlite")]);
+    const doc = await exported(db, p, ["trace:ext-s1/sqlite", "trace:ext-s1/pool"]);
+    assert.match(
+      doc,
+      /key: trace:ext-s1\/sqlite \(u\d+\)\nkind: decision do\nauthority: the owner's decision\n/,
+    );
+    assert.match(doc, /key: trace:ext-s1\/pool \(u\d+\)\nkind: decision do\nauthority: decided by an AI\n/);
+  } finally {
+    await db.done();
+  }
 });

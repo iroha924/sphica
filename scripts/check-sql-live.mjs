@@ -65,6 +65,24 @@ await withTempDir(async (dir) => {
     // english-exempt: Japanese record fixture sent through the real CLI and hook
     hook({ hook_event_name: "Stop", last_assistant_message: "通した。" });
     note("capture flush", runFlush(dir, covDir, asSession("live-1")));
+    // A record tool's PreToolUse writes its session and turn straight through the capture role, before the tool runs
+    note(
+      "record tool hook",
+      hook({
+        hook_event_name: "PreToolUse",
+        tool_name: "mcp__plugin_sphica_record__trace_begin",
+        tool_use_id: "toolu_live",
+      }),
+    );
+    {
+      const raw = new DatabaseSync(path.join(dir, ".sphica", "sphica.db"), { readOnly: true });
+      const seen = raw
+        .prepare("select turn_id from tool_call_observation where tool_use_id = 'toolu_live'")
+        .get();
+      raw.close();
+      if (seen?.turn_id !== "p1")
+        failures.push(`the record tool hook did not log its turn (got ${JSON.stringify(seen)})`);
+    }
 
     // Records from an unregistered project are set aside, not dropped. If the owner works on a new machine before
     // running init, those messages land here. Deleting them would lose them for good.

@@ -686,3 +686,131 @@ test("the forget connection keeps secure_delete on and changes only the unit and
   ])
     assert.equal(attempt(forget, allowed), null, allowed);
 });
+
+test("the record server logs record tool calls, and only the hook's capture view writes an observation", () => {
+  assert.equal(
+    attempt(
+      ingest,
+      "insert into record_call (project_id, tool, host, caller_session, mode, called_at) values (?, 'trace_begin', 'codex', 'cx', 'interactive', ?)",
+      p,
+      now,
+    ),
+    null,
+  );
+  assert.match(attempt(ingest, "update record_call set mode = 'headless'") ?? "", /not authorized/);
+  assert.match(
+    attempt(
+      ingest,
+      "insert into tool_call_observation (host, session_external, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 's', 'toolu_1', 't', 1, ?)",
+      now,
+    ) ?? "",
+    /not authorized/,
+  );
+  const observe =
+    "insert into capture_tool_call (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 's', 't1', 'toolu_1', 'mcp__plugin_sphica_record__trace_begin', 1, ?)";
+  assert.equal(attempt(capture, observe, now), null);
+  assert.match(
+    attempt(
+      capture,
+      "insert into tool_call_observation (host, session_external, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 's', 'toolu_2', 't', 1, ?)",
+      now,
+    ) ?? "",
+    /not authorized/,
+  );
+  assert.match(
+    attempt(
+      capture,
+      "insert into record_call (project_id, tool, mode, called_at) values (?, 't', 'unknown', ?)",
+      p,
+      now,
+    ) ?? "",
+    /not authorized/,
+  );
+});
+
+// A replacement row is history: a save or a forget starts one and later ends it, and nothing rewrites what started it
+test("ingest and forget can start a replacement and set only its end columns", () => {
+  const r = run(db, p);
+  const finding = (key: string) =>
+    insert(db, "unit", {
+      project_id: p,
+      key: `trace:session:s1/${key}`,
+      kind: "finding",
+      text: key,
+      extraction: "supported",
+      run_id: r,
+      created_at: now,
+      content_hash: sha256(key),
+    });
+  const old = finding("replaced");
+  const next = finding("replacing");
+  // A successor takes effect only with its support
+  const said = message(db, p, { id: "m-replacing", text: "Replacing it." });
+  insert(db, "unit_evidence", {
+    unit_id: next,
+    source_id: said,
+    span_start: 0,
+    span_end: 9,
+    role: "states",
+    run_id: r,
+    added_at: now,
+  });
+  insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: r, added_at: now });
+  const batch = insert(db, "forget_batch", { project_id: p, at: now });
+  const open = (by: string) =>
+    `insert into unit_replacement (from_unit, to_unit, ${by}, started_at) values (${next}, ${old}, ?, '${now}')`;
+  const row = `where to_unit = ${old} and ended_at is null`;
+  const refusedOn = (connect: () => DatabaseSync, writes: string[]) => {
+    for (const write of writes) assert.match(attempt(connect, write) ?? "", /not authorized/, write);
+  };
+  const others = [
+    `update unit_replacement set started_at = '${now}' ${row}`,
+    `update unit_replacement set from_unit = ${old} ${row}`,
+    `update unit_replacement set to_unit = ${next} ${row}`,
+    `delete from unit_replacement where to_unit = ${old}`,
+  ];
+
+  assert.equal(attempt(ingest, open("run_id"), r), null);
+  refusedOn(ingest, [
+    ...others,
+    `update unit_replacement set run_id = ${r} ${row}`,
+    `update unit_replacement set end_forget_id = ${batch} ${row}`,
+  ]);
+  assert.equal(
+    attempt(
+      ingest,
+      `update unit_replacement set ended_at = ?, end_reason = 'r', end_run_id = ? ${row}`,
+      now,
+      r,
+    ),
+    null,
+  );
+
+  assert.equal(attempt(forget, open("forget_id"), batch), null);
+  refusedOn(forget, [
+    ...others,
+    `update unit_replacement set forget_id = ${batch} ${row}`,
+    `update unit_replacement set end_run_id = ${r} ${row}`,
+  ]);
+  assert.equal(
+    attempt(
+      forget,
+      `update unit_replacement set ended_at = ?, end_reason = 'r', end_forget_id = ? ${row}`,
+      now,
+      batch,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    db.owner
+      .prepare(
+        "select run_id is not null as by_run, end_run_id is not null as end_run, forget_id is not null as by_forget, end_forget_id is not null as end_forget from unit_replacement where to_unit = ? order by id",
+      )
+      .all(old)
+      .map((x) => ({ ...x })),
+    [
+      { by_run: 1, end_run: 1, by_forget: 0, end_forget: 0 },
+      { by_run: 0, end_run: 0, by_forget: 1, end_forget: 1 },
+    ],
+  );
+});
