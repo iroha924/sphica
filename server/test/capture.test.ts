@@ -2159,7 +2159,7 @@ test("observation resend: a file not in the hook's shape is set aside with its r
   }
 });
 
-test("unreadable observation: a file that cannot be read is set aside, and the rest of the send goes on", async () => {
+test("unreadable observation: a file that cannot be read now stays for the next send, and the rest of the send goes on", async () => {
   reset();
   const db = tempDb();
   project(db);
@@ -2179,7 +2179,11 @@ test("unreadable observation: a file that cannot be read is set aside, and the r
         .map((x) => x.tool_use_id),
       ["toolu_ok"],
     );
-    assert.equal(fs.readFileSync(path.join(callsRejectedDir(), "1-a.json.reason"), "utf8"), "unreadable");
+    assert.ok(
+      fs.existsSync(locked),
+      "a read that fails says nothing about its content, so it is never set aside",
+    );
+    assert.ok(!fs.existsSync(callsRejectedDir()));
   } finally {
     reset();
     await db.done();
@@ -2224,6 +2228,24 @@ test("observation that cannot be moved: it stays in calls/ for the next send, an
   } finally {
     r1.mock.restore();
     r2.mock.restore();
+    reset();
+    await db.done();
+  }
+});
+
+test("observation on an older database: kept observations never stop the queue on a revision without the observation view", async () => {
+  reset();
+  const db = tempDb(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev9.sql"), "utf8"));
+  project(db);
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    fs.writeFileSync(path.join(callsDir(), "1-a.json"), JSON.stringify(observed));
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1, "the conversation is still recorded before the database is migrated");
+    assert.equal(readState().error, null);
+    assert.deepEqual(kept(), [observed], "kept for a send after the migration");
+  } finally {
     reset();
     await db.done();
   }

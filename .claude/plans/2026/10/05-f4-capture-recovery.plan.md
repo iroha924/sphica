@@ -64,8 +64,9 @@ approved_at: 2026-10-05
    - hook から flush は起動しない（次の UserPromptSubmit / Stop の flush が送る）
 3. flush
    - 最初のロック保持で、`unregistered/` の後・通常のキューの前に `calls/` を BATCH 件ずつ処理する。1 バッチ 1 トランザクションで `capture_tool_call` へ insert し、commit が返ってからそのバッチのファイルを消す。`late()` で打ち切り、残りは次の flush。通常キューの最低 1 バッチの規則（`queueBatches === 0`）は変えない
-   - 読むときの ENOENT は hook が先に結んで消したものとして飛ばす。読めない・形が違うものは `calls/rejected/` へ移し、隣に理由（`unreadable` / `shape`）を書く
-   - バッチが CONSTRAINT / MISMATCH / TOOBIG / RANGE で拒まれたら 1 件ずつ入れ直し、拒まれたものだけを `calls/rejected/` へ `sqlite:<CODE 名>` で移す
+   - 内容が不正なものだけを `calls/rejected/` へ移し、隣に理由を書く: JSON として読めない（`unreadable`）、形が違う（`shape`）、その 1 行を SQLite が CONSTRAINT / MISMATCH / TOOBIG / RANGE で拒む（`sqlite:<CODE 名>`）。ファイルを読めない・移せない・消せないときは、そのファイルを `calls/` に残して次のファイルへ進む（読むときの ENOENT は hook が先に結んで消したもの）
+   - それ以外の DB の失敗（古いリビジョンの DB に view が無い、busy、I/O）では、その flush の観測の送信だけを止めて残りを `calls/` に残す。flush から投げず、state の時刻と error も変えない。通常のキューはそのまま送る
+   - バッチが CONSTRAINT / MISMATCH / TOOBIG / RANGE で拒まれたら 1 件ずつ入れ直す
    - 通常のキューの拒否（`sendBatch`）も `rejected/<name>.reason` に理由を書く: `unreadable`（JSON が読めない）、`version`（未知の版）、`no-project`、`sqlite:<CODE 名>`。本文と例外メッセージは書かない
    - prune は消した件数を返し、途中の例外でも消した分を数える。flush は 1 回の中の件数を total に足し、成功の state にも失敗の state にも `pruned: { at, count }` を書く。count が 0 なら前の `pruned` を引き継ぐ。件数が 1 以上なら、バッチを送らなくても state を書く
 4. 状態の読み取り
@@ -75,6 +76,7 @@ approved_at: 2026-10-05
    - Recording 欄に queueReport を出す。読めないディレクトリがあれば fail、一時ファイル・拒否・送れなかった観測があれば warn。外から来た文字列（プロジェクトキー、エラーコード）は `plain()` を通す
    - DB が使えるとき、新しい欄で結べない record ツールの呼び出しを、view の 711-713 行と同じ条件で数える: claude-code（tool_use_id があり観測が無い）、codex（caller_session が null）、すべてのホスト（host が null）を別の行にし、プロジェクトごとに件数と最初の `called_at` を「この時刻以降の <ホスト> の返事は AI の判断として採用されない」と出す。claude-code の行は、`calls/` に同じ tool_use_id のファイルがあるものを「送り直し待ち」、無いものと tool_use_id が null のものを「送り直せない」に分ける
    - 「送れなかった観測のファイル N 件（理由ごと、`calls/rejected/`）」は別の行にし、そこから呼び出しが結べないとは書かない
+   - 結ばれた観測のうちターンが null のものは、そのセッションのその時刻以降の返事を外し続ける（view の 707-710 行）。プロジェクト・セッションごとに最初の `observed_at` を出す
 6. 文書: README.md・README.ja.md の制限の行を、送り直しで戻る場合（turn が分かるときだけ別ターンが戻る）と戻らない場合（hook が動かない・tool use id が無い・導入前・送れなかったファイル）に直す。保存済みの候補は上がらないことも書く。knowledge-schema の Skill（実体は `.agents/skills/knowledge-schema/`）の該当箇所も同じ変更で直す
 7. 版: 版を触る前に `bun run release:plan -- --base v0.6.33` を流し、`plugin` なら `plugin/package.json` と 3 つの manifest（`scripts/release-plan.mjs:29` の 4 ファイル）を同じ版に上げる
 
@@ -87,6 +89,7 @@ approved_at: 2026-10-05
 - 採用: 拒否の理由は隣の `.reason` ファイル。棄却: ファイル名に理由を埋める（「戻せば再送」の手順が崩れる）
 - 採用: 観測の拒否は `calls/rejected/` に分ける。棄却: 共有の `rejected/` に入れる（SessionStart が spool 直下へ戻せと案内し、そこでは project 無しで再び拒まれる）
 - 採用: readState は軽いまま、詳しい集計は doctor 専用の queueReport。棄却: readState に全部入れる（SessionStart が毎回最大 1000 件の本文を読む）
+- 採用: `calls/` の失敗は、内容の不正だけを隔離し、ファイル操作の失敗はそのファイルを残して続け、DB の失敗はその flush の観測の送信だけを止める。棄却: 読めないファイルを `unreadable` で隔離する（Windows の一時的な EBUSY でも唯一の送り直し元を失う）。棄却: 観測を通常のキューの後に送る（キューが毎回予算を使い切ると観測が送られない）
 - 採用: `calls/` は自動で prune しない。棄却: 期限で消す（送り直し元を失い止めが永久に残る）
 - 採用: 推し量りで止めを外さない（持ち主の決定）
 
@@ -123,3 +126,4 @@ approved_at: 2026-10-05
 なし
 
 ## 変更履歴
+- 2026-10-05 / 方針 3 の calls/ の失敗の扱いを 1 つの規則にし、方針 5 にターンが null の観測の行を足した / 全差分のレビュー（Codex の P1・P2、review-shipping）で、古いリビジョンの DB で flush が止まることと、一時的な読み取りの失敗で送り直し元を失うことが分かり、修正が続けて新しい欠陥を生んだので Codex（session 01a10bd3-5f15-7b80-bd85-da7500c075a5）と規則を決め直した / 守りを強める向きで範囲・公開の約束・依存・データは変わらないので Go は不要

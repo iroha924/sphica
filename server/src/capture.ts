@@ -38,8 +38,8 @@ const stateFile = (): string => path.join(sphicaHome(), "capture.json");
 /** Records the database rejected. Moved here instead of deleted, and counted by doctor (fix and move them back to resend). */
 export const rejectedDir = (): string => path.join(spoolDir(), "rejected");
 /**
- * Records of projects not registered yet. Kept here instead of deleted. Hooks do not touch the database, so whether a project is
- * registered is known only when sending. Deleting them would lose the messages in between even after a later `sphica init`.
+ * Records of projects not registered yet. Kept here instead of deleted. The recording hooks queue without reading the database, so
+ * whether a project is registered is known only when sending. Deleting them would lose the messages in between even after a later `sphica init`.
  * The next send reads here too, so registering is enough for them to go in.
  */
 export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered");
@@ -1021,10 +1021,11 @@ async function sendBatch(
 }
 
 /**
- * Writes one batch of observations from calls/, removing each file only after the database has it. A file gone before it is read was
- * written and removed by its hook. One the database refuses is set aside alone, so it never holds back the others.
+ * Writes one batch of observations from calls/, removing each file only after the database has it. Only content that can never be written
+ * is set aside; a file that cannot be read, moved, or removed stays for the next send. False when the database itself failed (an older
+ * revision without the view, a busy lock): the rest stay too, and the send goes on to the queue.
  */
-async function sendObservations(db: Kysely<DB>, names: { name: string; from: string }[]): Promise<void> {
+async function sendObservations(db: Kysely<DB>, names: { name: string; from: string }[]): Promise<boolean> {
   // One that cannot be moved either stays in calls/, so the next send tries it again
   const aside = (name: string, why: string) => {
     try {
@@ -1038,8 +1039,8 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
     let text: string;
     try {
       text = fs.readFileSync(path.join(from, name), "utf8");
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") aside(name, "unreadable");
+    } catch {
+      // Gone (its hook wrote it and removed it) or not readable now
       continue;
     }
     let o: Observation | null = null;
@@ -1053,7 +1054,7 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
     if (o) rows.push({ name, o });
     else aside(name, why);
   }
-  if (!rows.length) return;
+  if (!rows.length) return true;
   const insert = (part: typeof rows) =>
     db
       .insertInto("capture_tool_call")
@@ -1063,12 +1064,12 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
   try {
     await insert(rows);
   } catch (e) {
-    if (!rejected(e)) throw e;
+    if (!rejected(e)) return false;
     for (const x of rows)
       try {
         await insert([x]);
       } catch (e2) {
-        if (!rejected(e2)) throw e2;
+        if (!rejected(e2)) return false;
         bad.set(x.name, `sqlite:${CODE_NAMES[sqliteCode(e2) ?? -1] ?? "unknown"}`);
       }
   }
@@ -1082,6 +1083,7 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
         // Written already: the next send writes it again, which adds nothing
       }
   }
+  return true;
 }
 
 /**
@@ -1136,7 +1138,7 @@ export async function flush(
         for (const part of chunks(queued(callsDir()), BATCH)) {
           if (late()) break;
           client ??= openWriter("capture", file);
-          await sendObservations(client, part);
+          if (!(await sendObservations(client, part))) break;
           batches++;
         }
       }

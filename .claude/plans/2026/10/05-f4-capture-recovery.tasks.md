@@ -138,6 +138,26 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - 結果: red: `node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → AI adoption の行が `actual: 3, expected: 4`（同じ名前の 2 つのプロジェクトが 1 行に混ざる）で fail
   - 結果: 実装後 同じコマンド → pass（同じ名前のプロジェクトはキーを添えて別の行）。`bun run verify` → 0（3 回目。下の記録を参照）
 
+- [x] T13: calls/ の失敗を 1 つの規則で扱い、古いリビジョンの DB でも録音を止めない
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T10（calls/ を残して続ける形が要る）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'observation on an older database' test/capture.test.ts` → リビジョン 9 の DB で `no such table: capture_tool_call` が flush から投げられ、通常のキューも送られず fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'observation' test/capture.test.ts` → pass。リビジョン 9 の DB で会話は送られ、観測は calls/ に残り、state の error は null。読めないファイルは calls/ に残り、後ろの正常な観測は送られる
+  - コミット: `fix(capture): never stop recording over a kept observation the database cannot take yet`
+  - 結果: red: `node --test --test-name-pattern 'observation on an older database' test/capture.test.ts` → `Error: no such table: capture_tool_call` で fail
+  - 結果: 実装後 `node --test --test-name-pattern 'observation' test/capture.test.ts` → 8 pass（T08 のテストは、読めないファイルが calls/ に残る形に直した）。`bun run verify` → 0
+
+- [ ] T14: doctor に、ターンが分からない観測で止まっているセッションを出す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T12（doctor の AI の採用の欄が要る）
+  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → ターンが null の観測で止まっているセッションの行が無く fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → pass。プロジェクトごとに、ターンが分からない観測のあるセッションの数と最初の時刻が出る
+  - コミット: `fix(doctor): show sessions stopped by an observation without its turn`
+
 ## P4: 梱包と Windows、文書と版
 
 梱包した hook と Windows で送り直しと doctor が動くことを CI で見て、文書と版を揃える。
@@ -177,3 +197,5 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T12 / verify が 2 回続けて record.test.ts の rename limit（一時ディレクトリの rmSync が ENOTEMPTY）で落ちた。このブランチは触っていない / 単独で 3 回 pass、`bun run test` は T12 の変更あり・なしとも 0、3 回目の verify は 0。負荷で起きる既存の不安定さとみて手を入れない
 - 2026-10-05 / T06, T07 / コミットの件名が 100 文字の上限を超えたので短くした。T06 は `ci(hooks): check a missed observation is resent, and doctor's unreadable queue on Windows`、T07 は `docs: say when a missed record tool observation is resent`（版は T01 で上げ済み）
 - 2026-10-05 / T09〜T12 / Codex のレビュー（483ed6e4..e0cc9ab3） / 指摘なし
+- 2026-10-05 / 全差分 / Codex の全差分レビュー F1（P1）: リビジョン 9 の DB で calls/ の送信が no such table を投げ、通常のキューまで止まる（review-shipping も packed 0.6.34 で再現）。F2（P2）: ターンが null の観測は結ばれた後もセッションを止め続けるのに doctor に出ない / どちらも受理。T13・T14 を足した。calls/ の修正が続けて新しい欠陥を生んだので、規則を Codex と決め直して plan の方針 3 を直した（Go 不要、変更履歴を参照）
+- 2026-10-05 / 全差分 / review-shipping: 古いコメント「Hooks do not touch the database」（受理、T13 で直す）。読み取りの一時的な失敗で観測を unreadable に隔離してしまう（受理、T13 の規則で calls/ に残す）
