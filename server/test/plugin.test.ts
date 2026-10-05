@@ -25,6 +25,7 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
+import { checkedText } from "../src/review-findings.ts";
 import { fakeCodex } from "./fake-codex.ts";
 import { message, project, tempDb } from "./temp-db.ts";
 
@@ -1130,6 +1131,49 @@ test("search with asked leaves out the session it is given and says when it cann
   }
 });
 
+// Batch receipts are compared by the model following the review Skill, not by code: the rules have to be written where it reads them
+test("the review Skill walks every batch of the decision lane and refuses a pass without a receipt for each", () => {
+  const precedent = fs.readFileSync(path.join(REPO_PLUGIN, "skills/review/reviewers/precedent.md"), "utf8");
+  const skill = fs.readFileSync(path.join(REPO_PLUGIN, "skills/review/SKILL.md"), "utf8");
+  for (const rule of [
+    "Records come 50 at a time.",
+    'until it says "This is the last batch"',
+    "A check that passes speaks for its batch only.",
+    "Changes to the working tree between batches (which code locations still exist) are not detected",
+    "list every place it is violated in that finding's evidence",
+    "call `read` again with exactly what it names until nothing is left",
+    "Batch 1 of <n> backed (selection <selection>).",
+    "Without a line for every batch from 1 to n, the verdict is `blocked_unknown`",
+  ])
+    assert.ok(precedent.includes(rule), rule);
+  assert.doesNotMatch(precedent, /several violations of one record are fine/);
+  // The receipts are copied from review_check's reply, so they start the way it does
+  const reply = checkedText({
+    problems: [],
+    batch: { all: [], records: [], k: 1, n: 2, selection: "0123456789abcdef", next: null, aligned: true },
+  });
+  const receipt = /^Batch \d+ of \d+ backed \(selection [0-9a-f]{16}\)\./;
+  assert.match(reply, receipt);
+  // Each example and rule names the whole first sentence, its closing period included
+  for (const example of [
+    "Batch 1 of <n> backed (selection <selection>).",
+    "Batch 2 of <n> backed (selection <selection>).",
+  ])
+    assert.ok(precedent.includes(`\n${example}\n`), example);
+  assert.ok(precedent.includes("`Batch k of n backed (selection ...).`"));
+  assert.ok(skill.includes("`Batch k of n backed (selection ...).`"));
+  const written = [
+    ...precedent.matchAll(/^.*\b[Bb]atch (?:k|\d+) of (?:n|<n>) backed.*$/gm),
+    ...skill.matchAll(/^.*[Bb]atch k of n backed.*$/gm),
+  ];
+  assert.ok(written.length >= 3);
+  for (const [line] of written) assert.doesNotMatch(line, /\bbatch (?:k|\d+) of/, line);
+  for (const rule of [
+    "Past decisions: its `Batch k of n backed (selection ...).` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`",
+  ])
+    assert.ok(skill.includes(rule), rule);
+});
+
 // A raw argument shape lets the SDK strip a key it does not know, so a misspelled filter (paths for path) would be ignored without a word
 test("every tool of both MCP servers refuses an unknown argument by name", async () => {
   const valid: Record<string, Record<string, unknown>> = {
@@ -1140,7 +1184,7 @@ test("every tool of both MCP servers refuses an unknown argument by name", async
     fields: {},
     overview: { view: "live" },
     review_select: { diff: "x" },
-    review_check: { diff: "x", findings: [] },
+    review_check: { diff: "x", findings: [], selection: "0123456789abcdef" },
     trace_pending: {},
     trace_begin: {},
     harvest_begin: { pr: 1 },

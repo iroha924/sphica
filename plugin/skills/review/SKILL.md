@@ -149,7 +149,7 @@ Layer 5 and "patterns the surrounding code already follows" remain, so the revie
 |---|---|---|
 | MCP does not connect, the database is unreachable, or the project is not registered | The tool call fails, or says "not checked" | **`unable`** + the reason it gave |
 | Checked, and no record applies | "No active record applies" | **`ran`**. A grounded negative |
-| Checked, and records apply | The list of records | Pass them to the `precedent` aspect |
+| Checked, and records apply | The first batch of records (`Batch 1 of n`, 50 at most) | Pass the change to the `precedent` aspect; it walks every batch |
 
 ## Step 3 — Start the reviewers
 
@@ -311,6 +311,7 @@ The launcher compares it with the lane name and model in the launch plan and wit
 - `findings` does not match the number listed
 - There are 2 or more such lines
 - `coverage=COMPLETE` but `unfinished` is not empty
+- Past decisions: its `Batch k of n backed (selection ...).` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`
 
 **Do not write causes you did not observe.** Whether it hit a limit, lost the connection, or forgot to write the line
 is unknown unless the log shows it. **`UNKNOWN` means "could not observe", not "did not check".**
@@ -347,7 +348,6 @@ There are 3 verdicts. **`PLAUSIBLE` is the default.**
 **Do not issue `REFUTED` because something is "speculative" or "depends on runtime state".**
 The cost of `PLAUSIBLE` is one unverified label left behind; **the cost of a wrong `REFUTED` is a real defect
 disappearing, dressed up as having been ruled on.**
-
 
 **When Codex is available, assign refutation to the other model.** Codex refutes Claude's findings, and
 Claude refutes Codex's. For findings from both, prefer a decisive reproduction.

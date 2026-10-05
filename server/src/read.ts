@@ -5,9 +5,10 @@ import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { framed } from "./frame.ts";
 import { renamesSince } from "./git.ts";
-import { inline } from "./panel.ts";
-import { head } from "./text.ts";
+import { inline, plain, STRING_SEQUENCE } from "./panel.ts";
+import { bytes, head, sha256 } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
 export const UNSUPPORTED =
@@ -39,6 +40,18 @@ export async function readUnit(
   /** Renames per anchor commit, shared by the records of one read so git runs once per commit */
   renames: Renames = new Map(),
 ): Promise<string | null> {
+  return (await unitView(db, projectId, ref, root, asOf, renames))?.text ?? null;
+}
+
+/** A record as readUnit shows it, with its id so a long one can be continued by u<id>. */
+async function unitView(
+  db: Reads,
+  projectId: number,
+  ref: string,
+  root: string | null,
+  asOf: string | undefined,
+  renames: Renames,
+): Promise<{ id: number; text: string } | null> {
   const byId = /^u([1-9][0-9]{0,15})$/.exec(ref);
   const u = await db
     .selectFrom("unit")
@@ -64,12 +77,12 @@ export async function readUnit(
           .then((rows) => (rows.length === 1 ? rows[0] : undefined)));
   // As of a past time, a record created later does not exist yet
   if (!bare || (asOf && bare.created_at > asOf)) return null;
-  return describe(db, bare, root, asOf, renames);
+  return { id: bare.id, text: await describe(db, bare, root, asOf, renames) };
 }
 
 type Renames = Map<string, Map<string, string | null> | null>;
 
-/** Commits one read asks git about for renames. */
+/** Commits one record asks git about for renames. Each record counts its own, so what it shows does not depend on what else is read. */
 const RENAME_LOOKUPS = 5;
 
 async function describe(
@@ -264,11 +277,12 @@ async function describe(
     out.push(
       "Code (checked in the working tree now; a located symbol does not prove the record still holds):",
     );
+    const used = new Set<string>();
     for (const a of live) {
       const c = checkAnchor(root, a);
       const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
       out.push(
-        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames)}` : ""}`,
+        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames, used)}` : ""}`,
       );
     }
   }
@@ -383,13 +397,16 @@ function movedTo(
   root: string | null,
   a: { path: string; commit_sha: string | null },
   renames: Renames,
+  /** The commits this record has looked up, cached ones included */
+  used: Set<string>,
 ): string {
   if (!root || !a.commit_sha || fileState(root, a.path) !== "gone") return "";
-  if (!renames.has(a.commit_sha)) {
-    // Each lookup is a git run; a read of records with many anchor commits stays within the tool's time
-    if (renames.size >= RENAME_LOOKUPS) return "; rename not checked";
-    renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
+  if (!used.has(a.commit_sha)) {
+    // Each lookup is a git run; a record with many anchor commits stays within the tool's time
+    if (used.size >= RENAME_LOOKUPS) return "; rename not checked";
+    used.add(a.commit_sha);
   }
+  if (!renames.has(a.commit_sha)) renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
   const to = seen.get(a.path);
@@ -399,34 +416,159 @@ function movedTo(
     : "";
 }
 
-/** A retained source by `s<id>`, with who wrote it and where it lives; null when there is none. */
-export async function readSource(db: Reads, projectId: number, ref: string): Promise<string | null> {
-  // s<id>@<byte> reads on from that byte: a source can hold more than one reply carries
-  const m = /^s([1-9][0-9]{0,15})(?:@(\d{1,9}))?$/.exec(ref);
-  if (!m) return null;
-  const s = await db
-    .selectFrom("source")
-    .selectAll()
-    .where("project_id", "=", projectId)
-    .where("id", "=", Number(m[1]))
-    .executeTakeFirst();
-  if (!s) return null;
-  return [
-    `s${s.id}: ${s.kind} ${s.artifact}${s.revision > 1 ? ` revision ${s.revision}` : ""}, by ${speaker(s)}, ${s.created_at}${s.url ? `, ${s.url}` : ""}${s.path ? `, ${s.path}${s.line_start ? `:${s.line_start}` : ""}` : ""}${s.truncated ? " (middle not saved)" : ""}`,
-    ...part(s.id, s.text, Number(m[2] ?? 0)),
-  ].join("\n");
+/**
+ * What one reply carries, its frame included. Codex keeps about 10,000 tokens it counts as bytes / 4 and drops the middle of a longer
+ * reply without a word; Claude Code sets aside a reply over 25,000 tokens.
+ */
+export const READ_BUDGET = 32 * 1024;
+/** Bytes of each field from outside in a source's header line (where it lives, who wrote it), so the header always leaves room for text */
+const HEADER_FIELD = 300;
+
+/** One ref of a read: a fixed line, or text shown from a byte offset that a ref made by `resume` continues. */
+type Piece =
+  | { line: string }
+  | { head: string; text: string; from: number; resume: (end: number) => string; what: string };
+
+/** A header field from outside on one line: cleaned first, since clipping could cut a terminal sequence's end and leave it open */
+const clip = (raw: string) => {
+  const v = inline(raw);
+  return bytes(v) > HEADER_FIELD ? `${head(v, HEADER_FIELD - 3)}…` : v;
+};
+
+/** A byte offset moved back to the start of the character it falls in. */
+function boundary(all: Buffer, at: number): number {
+  let start = Math.min(at, all.length);
+  while (start > 0 && start < all.length && ((all[start] ?? 0) & 0xc0) === 0x80) start--;
+  return start;
 }
 
-const PART = 64 * 1024;
+/** Control sequences (ESC [ or CSI, parameters, intermediates, final byte), which plain also drops whole however long */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matches the terminal control sequences plain drops
+const CONTROL_SEQUENCE = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]?/;
+const HIDDEN = new RegExp(`${STRING_SEQUENCE.source}|${CONTROL_SEQUENCE.source}`, "g");
 
-/** One reply's worth of the text from a byte offset (moved back to a character boundary), and where the rest starts. */
-function part(id: number, text: string, from: number): string[] {
-  const all = Buffer.from(text, "utf8");
-  let start = Math.min(from, all.length);
-  while (start > 0 && start < all.length && ((all[start] ?? 0) & 0xc0) === 0x80) start--;
-  const shown = head(all.subarray(start).toString("utf8"), PART);
-  const end = start + Buffer.byteLength(shown, "utf8");
-  return end < all.length
-    ? [shown, `(${all.length - end} more bytes; read s${id}@${end} for the rest)`]
-    : [shown];
+/**
+ * Byte ranges of the terminal sequences plain drops whole: a page never starts or ends inside one, or its rest would show. A match plain
+ * does not drop whole (colons in a control sequence's parameters) is ordinary text, cut like any other.
+ */
+function sequences(all: Buffer): [number, number][] {
+  const text = all.toString("utf8");
+  const out: [number, number][] = [];
+  let index = 0;
+  let at = 0;
+  for (const m of text.matchAll(HIDDEN)) {
+    at += bytes(text.slice(index, m.index));
+    index = m.index + m[0].length;
+    if (plain(m[0]) === "") out.push([at, at + bytes(m[0])]);
+    at += bytes(m[0]);
+  }
+  return out;
+}
+
+async function piece(
+  db: Reads,
+  projectId: number,
+  ref: string,
+  root: string | null,
+  renames: Renames,
+): Promise<Piece> {
+  const missing = { line: `${head(inline(ref), 200)}: not found in this project` };
+  const src = /^s([1-9][0-9]{0,15})(?:@(\d{1,9}))?$/.exec(ref);
+  if (src) {
+    const s = await db
+      .selectFrom("source")
+      .selectAll()
+      .where("project_id", "=", projectId)
+      .where("id", "=", Number(src[1]))
+      .executeTakeFirst();
+    if (!s) return missing;
+    return {
+      head: `s${s.id}: ${s.kind} ${clip(s.artifact)}${s.revision > 1 ? ` revision ${s.revision}` : ""}, by ${clip(speaker(s))}, ${s.created_at}${s.url ? `, ${clip(s.url)}` : ""}${s.path ? `, ${clip(s.path)}${s.line_start ? `:${s.line_start}` : ""}` : ""}${s.truncated ? " (middle not saved)" : ""}\n`,
+      text: s.text,
+      from: Number(src[2] ?? 0),
+      resume: (end) => `s${s.id}@${end}`,
+      what: "bytes",
+    };
+  }
+  // A long record goes on from a byte of its text as shown when it was cut; the digest tells when that text has changed since
+  const more = /^u([1-9][0-9]{0,15})@(\d{1,9}):([0-9a-f]{12})$/.exec(ref);
+  const u = await unitView(db, projectId, more ? `u${more[1]}` : ref, root, undefined, renames);
+  if (!u) return missing;
+  const digest = sha256(u.text).toString("hex").slice(0, 12);
+  if (more && more[3] !== digest)
+    return { line: `u${u.id} changed since the previous page; read u${u.id} again from the start` };
+  const from = Number(more?.[2] ?? 0);
+  return {
+    head: from > 0 ? `(u${u.id} continued from byte ${from})\n` : "",
+    text: u.text,
+    from,
+    resume: (end) => `u${u.id}@${end}:${digest}`,
+    what: "bytes of this record",
+  };
+}
+
+/**
+ * read's reply for refs, framed: whole while they fit in READ_BUDGET; then the ref that does not fit is cut at a character and the reply
+ * names the refs to call read with for the rest, its continuation first. Every reply after the first shows at least one character more.
+ */
+export async function readRefs(
+  db: Reads,
+  projectId: number,
+  refs: string[],
+  root: string | null,
+): Promise<string> {
+  const renames: Renames = new Map();
+  const shown: string[] = [];
+  let used = bytes(framed(""));
+  let next: string[] = [];
+  const tail = (left: string[]) =>
+    left.length
+      ? `\n\n(This reply stops here to stay within ${READ_BUDGET / 1024} KiB. Call read with refs ${JSON.stringify(left)} for the rest.)`
+      : "";
+  for (const [i, ref] of refs.entries()) {
+    const rest = refs.slice(i + 1);
+    const p = await piece(db, projectId, ref, root, renames);
+    const sep = shown.length ? 2 : 0;
+    const all = "line" in p ? null : Buffer.from(p.text, "utf8");
+    const hide = all ? sequences(all) : [];
+    const begin = all ? boundary(all, "line" in p ? 0 : p.from) : 0;
+    const from = hide.find(([a, b]) => a < begin && begin < b)?.[1] ?? begin;
+    // The header and the text are each made plain on their own: a terminal string sequence left open would otherwise swallow what follows
+    const whole =
+      "line" in p ? p.line : `${plain(p.head)}${plain(all?.subarray(from).toString("utf8") ?? "")}`;
+    if (used + sep + bytes(whole) + bytes(tail(rest)) <= READ_BUDGET) {
+      shown.push(whole);
+      used += sep + bytes(whole);
+      continue;
+    }
+    if ("line" in p || !all) {
+      next = refs.slice(i);
+      break;
+    }
+    const note = (left: number, end: number) =>
+      `\n(${left} ${p.what} more; read ${p.resume(end)} for the rest)`;
+    // The note and the refs after it are sized with the largest numbers they can hold, so the text cut to the room left always fits
+    const room =
+      READ_BUDGET -
+      used -
+      sep -
+      bytes(p.head) -
+      bytes(note(all.length, all.length)) -
+      bytes(tail([p.resume(all.length), ...rest]));
+    const cut = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
+    // A cut inside a sequence moves before it, or past it when the page starts there (the sequence then shows nothing)
+    const inside = hide.find(([a, b]) => a < cut && cut < b);
+    let end = inside ? (inside[0] > from ? inside[0] : inside[1]) : cut;
+    if (bytes(plain(all.subarray(from, end).toString("utf8"))) > Math.max(room, 0)) end = cut;
+    const text = all.subarray(from, end).toString("utf8");
+    if (!text) {
+      next = refs.slice(i);
+      break;
+    }
+    shown.push(`${plain(p.head)}${plain(text)}${note(all.length - end, end)}`);
+    used += sep + bytes(shown.at(-1) ?? "");
+    next = [p.resume(end), ...rest];
+    break;
+  }
+  return framed(`${shown.join("\n\n")}${tail(next)}`);
 }

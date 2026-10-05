@@ -50,7 +50,7 @@ export const panel = (head: string, lines: string[], end: string): string =>
  * are dropped, and visible drops invisible characters (so agents reading this output never see text people on the terminal cannot).
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: drops terminal string sequences (OSC, DCS, APC, PM, SOS) through their terminator
-const STRING_SEQUENCE = /\u001b[\]P_^X][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g;
+export const STRING_SEQUENCE = /\u001b[\]P_^X][^\u0007\u001b]*(?:\u0007|\u001b\\)?/g;
 
 export const plain = (s: string): string =>
   visible(

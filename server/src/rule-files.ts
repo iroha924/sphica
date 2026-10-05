@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { leaves } from "./anchors.ts";
 import { cleanGit } from "./git.ts";
+import { sha256 } from "./text.ts";
 
 export const RULE_LIMITS = { files: 200, bytes: 256 * 1024, depth: 8, entries: 5000 } as const;
 
@@ -28,13 +29,27 @@ export type RuleFiles = {
   incomplete: string | null;
 };
 
-/** The instruction files under root. In a git work tree, tracked and untracked files git does not ignore; elsewhere, a bounded walk. */
-export function ruleFiles(root: string): RuleFiles {
+/** A short name for an instruction file's path that stays the same length however long the path is. */
+export const pathHash = (rel: string): string => sha256(rel).toString("hex").slice(0, 16);
+
+/**
+ * The instruction files under root, in path order. In a git work tree, tracked and untracked files git does not ignore; elsewhere, a
+ * bounded walk. With `from` (a pathHash), the files before that one are not read again.
+ */
+export function ruleFiles(root: string, from?: string): RuleFiles {
   const listed = gitList(root) ?? walk(root);
   const out: RuleFiles = { files: [], skipped: 0, incomplete: listed.incomplete };
   const realRoot = fs.realpathSync(root);
+  const paths = [...new Set(listed.paths)].sort();
+  const start = from
+    ? Math.max(
+        paths.findIndex((rel) => pathHash(rel) === from),
+        0,
+      )
+    : 0;
   // The cap counts every file looked at, read or not, so it bounds the work
-  for (const [i, rel] of [...new Set(listed.paths)].sort().entries()) {
+  for (const [i, rel] of paths.entries()) {
+    if (i < start) continue;
     if (i >= RULE_LIMITS.files) {
       out.skipped++;
       continue;

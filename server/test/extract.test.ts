@@ -20,7 +20,7 @@ import {
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
-import { readSource, readUnit } from "../src/read.ts";
+import { readRefs, readUnit } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { searchUnits } from "../src/search.ts";
 import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
@@ -2464,7 +2464,7 @@ test("trace: one message longer than a page is cut with a pointer to read the re
     assert.ok(rest, page.slice(-200));
     assert.doesNotMatch(page, /終わり/);
     // The pointer reads on from where the page cut off
-    const tail = (await readSource(db.reader, p, rest)) ?? "";
+    const tail = await readRefs(db.reader, p, [rest], null);
     assert.match(tail, /終わり/);
     assert.doesNotMatch(tail, /始まり/);
     // The record cites the unread message with words it does not hold: that proves no reading, so it is not marked

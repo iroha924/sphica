@@ -1,12 +1,13 @@
 // On-request overviews for MCP overview: every live decision and constraint by directory (live), and records that need a look (look).
 // Both read the database and the working tree only, and name records by key so the agent reads each before relying on it.
 import path from "node:path";
+import { z } from "zod";
 import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
-import { UNSUPPORTED } from "./read.ts";
-import { ruleFiles } from "./rule-files.ts";
+import { READ_BUDGET, UNSUPPORTED } from "./read.ts";
+import { pathHash, ruleFiles } from "./rule-files.ts";
 import { bytes, head } from "./text.ts";
 
 /** One page: 50 records whose key, text, paths, and heading are each clipped, so a page stays under 64 KiB. Past it the reply says where to go on. */
@@ -105,92 +106,140 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
   ].join("\n");
 }
 
-/** Anchors checked, lines per heading, bytes per line, and bytes for all headings together; past them a heading says how many it left out. */
-const LOOK_LIMITS = { anchors: 2000, lines: 50, line: 2200, bytes: 56 * 1024 } as const;
+/** Anchors checked per page, bytes per line, and bytes for all the lines of a page together: the rest of a reply's budget holds the frame,
+ * the headings, what was not checked, and the closing lines. */
+const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: READ_BUDGET - 4 * 1024 } as const;
+/** Condition rows read for one page: more than its bytes can show (a line is over 28 bytes), so a page never reads the whole rest */
+const CONDITION_ROWS = Math.ceil(LOOK_LIMITS.bytes / 28);
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
 const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
 
 /**
- * Records that need a look: live records whose anchored file is gone or whose symbol is not found, written conditions for reconsidering,
- * and marked lines in instruction files whose record was replaced or withdrawn. It says what each is and never decides or changes anything.
+ * Where a look page goes on from: the stage, and the last item of it already dealt with, by a position that does not move when other items
+ * come or go (an id, or a marker's file, line, and place in the line). Passed back as given, base64url JSON.
  */
-export async function lookOverview(db: Reads, projectId: number, root: string | null): Promise<string> {
+const Cursor = z.discriminatedUnion("s", [
+  z.object({ s: z.enum(["anchors", "options", "deferred"]), id: z.number().int().min(0) }).strict(),
+  z
+    .object({
+      s: z.literal("markers"),
+      // The file's pathHash, or empty for the first marker
+      file: z.string().regex(/^(?:[0-9a-f]{16})?$/),
+      line: z.number().int().min(0),
+      n: z.number().int().min(0),
+    })
+    .strict(),
+]);
+type Cursor = z.infer<typeof Cursor>;
+const STAGES = ["anchors", "options", "deferred", "markers"] as const;
+
+/** A look cursor from the string a page gave, or null when it is not one. */
+export function lookCursor(after: string): Cursor | null {
+  try {
+    const parsed = Cursor.safeParse(JSON.parse(Buffer.from(after, "base64url").toString("utf8")));
+    // Decoding skips characters outside base64url, so only text that encodes back to itself is the cursor a page gave
+    return parsed.success && cursorText(parsed.data) === after ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+const cursorText = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString("base64url");
+
+/**
+ * Records that need a look, a page at a time: live records whose anchored file is gone or whose symbol is not found, written conditions for
+ * reconsidering, and marked lines in instruction files whose record was replaced or withdrawn. A page stops at its byte budget or after
+ * checking LOOK_LIMITS.anchors anchors, and moves past an item only once its line is shown. It never decides or changes anything.
+ */
+export async function lookOverview(
+  db: Reads,
+  projectId: number,
+  root: string | null,
+  after?: string,
+): Promise<string> {
+  const from: Cursor = (after === undefined ? null : lookCursor(after)) ?? { s: "anchors", id: 0 };
+  if (after !== undefined && !lookCursor(after)) throw new Error("after is not a cursor a look page gave");
+  const stage = STAGES.indexOf(from.s);
   const notChecked: string[] = [];
-  const sections: string[] = [];
-  // One budget for the whole reply, so many long lines under one heading cannot push it past what a host passes on
+  const lines = {
+    gone: [] as string[],
+    lost: [] as string[],
+    conditions: [] as string[],
+    marked: [] as string[],
+  };
   let used = 0;
-  const section = (title: string, lines: string[], empty: string) => {
-    const shown: string[] = [];
-    for (const line of lines.slice(0, LOOK_LIMITS.lines).map((l) => head(l, LOOK_LIMITS.line))) {
-      if (used + bytes(line) + 1 > LOOK_LIMITS.bytes) break;
-      used += bytes(line) + 1;
-      shown.push(line);
-    }
-    sections.push(
-      [
-        `## ${title}`,
-        ...(shown.length || lines.length ? shown : [empty]),
-        ...(lines.length > shown.length
-          ? [`(${lines.length - shown.length} more not shown: deal with these first, then ask again)`]
-          : []),
-      ].join("\n"),
-    );
+  let stop: Cursor | null = null;
+  /** Adds a line when it fits the page; false means the page is full and the item waits for the next page */
+  const fits = (to: string[], line: string) => {
+    const shown = head(line, LOOK_LIMITS.line);
+    if (used + bytes(shown) + 1 > LOOK_LIMITS.bytes) return false;
+    used += bytes(shown) + 1;
+    to.push(shown);
+    return true;
   };
 
   // Anchored code: a gone file and a symbol no longer found are different reasons to look
-  const live = db
-    .selectFrom("unit_anchor as a")
-    .innerJoin("unit as u", "u.id", "a.unit_id")
-    .where("u.project_id", "=", projectId)
-    .where("u.lifecycle", "=", "active")
-    .where("a.retired_at", "is", null);
-  const [anchors, total] = await Promise.all([
-    live
-      .select(["u.key", "u.kind", "a.path", "a.symbol", "a.line_start", "a.role"])
-      .orderBy("a.id")
-      .limit(LOOK_LIMITS.anchors)
-      .execute(),
-    live.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst(),
-  ]);
-  const gone: string[] = [];
-  const lost: string[] = [];
-  if (!root) notChecked.push("code locations: no working tree for this project here");
-  else {
-    let unknown = 0;
-    let unscanned = 0;
-    for (const a of anchors) {
-      const where = `- ${inline(a.key)} (${a.kind}): ${inline(a.path)} (${a.role})`;
-      const file = fileState(root, a.path);
-      if (file === "gone") gone.push(where);
-      else if (file === "unknown") unknown++;
-      else if (a.symbol) {
-        const state = checkAnchor(root, a).state;
-        if (state === "missing")
-          lost.push(`- ${inline(a.key)} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`);
-        else if (state === "unknown") unscanned++;
+  if (stage <= 0) {
+    if (!root) notChecked.push("code locations: no working tree for this project here");
+    else {
+      const start = from.s === "anchors" ? from.id : 0;
+      const anchors = await db
+        .selectFrom("unit_anchor as a")
+        .innerJoin("unit as u", "u.id", "a.unit_id")
+        .where("u.project_id", "=", projectId)
+        .where("u.lifecycle", "=", "active")
+        .where("a.retired_at", "is", null)
+        .where("a.id", ">", start)
+        .select(["a.id", "u.key", "u.kind", "a.path", "a.symbol", "a.line_start", "a.role"])
+        .orderBy("a.id")
+        .limit(LOOK_LIMITS.anchors + 1)
+        .execute();
+      let unknown = 0;
+      let unscanned = 0;
+      let last = start;
+      for (const a of anchors.slice(0, LOOK_LIMITS.anchors)) {
+        const file = fileState(root, a.path);
+        let shown = true;
+        if (file === "gone")
+          shown = fits(lines.gone, `- ${inline(a.key)} (${a.kind}): ${inline(a.path)} (${a.role})`);
+        else if (file === "unknown") unknown++;
+        else if (a.symbol) {
+          const state = checkAnchor(root, a).state;
+          if (state === "missing")
+            shown = fits(
+              lines.lost,
+              `- ${inline(a.key)} (${a.kind}): ${inline(a.symbol)} in ${inline(a.path)} (${a.role})`,
+            );
+          else if (state === "unknown") unscanned++;
+        }
+        if (!shown) {
+          stop = { s: "anchors", id: last };
+          break;
+        }
+        last = a.id;
       }
+      if (!stop && anchors.length > LOOK_LIMITS.anchors) stop = { s: "anchors", id: last };
+      if (unknown)
+        notChecked.push(`${unknown} code locations that lead outside the repository or cannot be followed`);
+      if (unscanned)
+        notChecked.push(
+          `${unscanned} code locations whose file could not be scanned for the symbol (too large, binary, or unreadable)`,
+        );
     }
-    if (unknown)
-      notChecked.push(`${unknown} code locations that lead outside the repository or cannot be followed`);
-    if (unscanned)
-      notChecked.push(
-        `${unscanned} code locations whose file could not be scanned for the symbol (too large, binary, or unreadable)`,
-      );
-    const past = Number(total?.n ?? 0) - anchors.length;
-    if (past > 0) notChecked.push(`${past} code locations past the first ${LOOK_LIMITS.anchors} (by age)`);
   }
-  section("Files gone", gone, root ? "none" : "not checked");
-  section("Symbol not found (the file is still there)", lost, root ? "none" : "not checked");
 
   // Conditions are shown for a person or agent to judge; whether one has come about is never decided here
-  const [options, deferred] = await Promise.all([
-    db
+  if (!stop && stage <= 1) {
+    const start = from.s === "options" ? from.id : 0;
+    const options = await db
       .selectFrom("unit_option as o")
       .innerJoin("unit as u", "u.id", "o.unit_id")
       .where("u.project_id", "=", projectId)
       .where("u.lifecycle", "=", "active")
       .where("o.reconsider_when", "is not", null)
+      .where("o.id", ">", start)
       .select((eb) => [
+        "o.id",
         "u.key",
         "o.text",
         "o.reconsider_when",
@@ -208,80 +257,133 @@ export async function lookOverview(db: Reads, projectId: number, root: string | 
           .as("stands"),
       ])
       .orderBy("o.id")
-      .execute(),
-    db
+      .limit(CONDITION_ROWS)
+      .execute();
+    let last = start;
+    for (const o of options) {
+      const line = `- ${inline(o.key)}: rejected option ${inline(head(o.text, 120))}, reconsider when: ${inline(head(o.reconsider_when ?? "", 300))}${o.stands ? "" : ` [${UNSUPPORTED}]`}`;
+      if (!fits(lines.conditions, line)) {
+        stop = { s: "options", id: last };
+        break;
+      }
+      last = o.id;
+    }
+    if (!stop && options.length === CONDITION_ROWS) stop = { s: "options", id: last };
+  }
+  if (!stop && stage <= 2) {
+    const start = from.s === "deferred" ? from.id : 0;
+    const deferred = await db
       .selectFrom("unit")
       .where("project_id", "=", projectId)
       .where("lifecycle", "=", "active")
       .where("revisit_when", "is not", null)
-      .select(["key", "text", "revisit_when"])
+      .where("id", ">", start)
+      .select(["id", "key", "text", "revisit_when"])
       .orderBy("id")
-      .execute(),
-  ]);
-  section(
-    "Conditions to reconsider (judge whether one has come about; nothing here is decided)",
-    [
-      ...options.map(
-        (o) =>
-          `- ${inline(o.key)}: rejected option ${inline(head(o.text, 120))}, reconsider when: ${inline(head(o.reconsider_when ?? "", 300))}${o.stands ? "" : ` [${UNSUPPORTED}]`}`,
-      ),
-      ...deferred.map(
-        (d) =>
-          `- ${inline(d.key)}: deferred ${inline(head(d.text, 120))}, revisit when: ${inline(head(d.revisit_when ?? "", 300))}`,
-      ),
-    ],
-    "none",
-  );
+      .limit(CONDITION_ROWS)
+      .execute();
+    let last = start;
+    for (const d of deferred) {
+      const line = `- ${inline(d.key)}: deferred ${inline(head(d.text, 120))}, revisit when: ${inline(head(d.revisit_when ?? "", 300))}`;
+      if (!fits(lines.conditions, line)) {
+        stop = { s: "deferred", id: last };
+        break;
+      }
+      last = d.id;
+    }
+    if (!stop && deferred.length === CONDITION_ROWS) stop = { s: "deferred", id: last };
+  }
 
   // Marked lines in instruction files: only the place and the key are shown, never the line, so the file's text cannot forge lines here
-  const marked: string[] = [];
-  if (!root) notChecked.push("instruction files: no working tree for this project here");
-  else {
-    const scan = ruleFiles(root);
-    const found: { file: string; line: number; key: string }[] = [];
-    for (const f of scan.files)
-      for (const [i, text] of f.text.split(/\r?\n/).entries())
-        for (const m of text.matchAll(MARKER)) found.push({ file: f.path, line: i + 1, key: m[1] ?? "" });
-    const keys = [...new Set(found.map((f) => f.key))];
-    // In slices: SQLite takes at most 32,766 parameters in one statement, and instruction files can hold more markers
-    const units = new Map<string, { id: number; key: string; lifecycle: string }>();
-    for (let i = 0; i < keys.length; i += 500)
-      for (const u of await db
-        .selectFrom("unit")
-        .select(["id", "key", "lifecycle"])
-        .where("project_id", "=", projectId)
-        .where("key", "in", keys.slice(i, i + 500))
-        .execute())
-        units.set(u.key, u);
-    const chains = new Map<number, { key: string; lifecycle: string } | null>();
-    for (const f of found) {
-      const u = units.get(f.key);
-      const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
-      if (!u) marked.push(`${where} is not a record of this project`);
-      else if (u.lifecycle === "withdrawn") marked.push(`${where} was withdrawn`);
-      else if (u.lifecycle === "superseded") {
-        // A file can mark the same record thousands of times: its chain is followed once
-        let next = chains.get(u.id);
-        if (next === undefined) {
-          next = await successor(db, u.id);
-          chains.set(u.id, next);
-        }
-        marked.push(
-          `${where} was superseded${next ? ` by ${inline(next.key)}${next.lifecycle === "active" ? "" : `, which is ${next.lifecycle} too`}` : ""}`,
-        );
+  if (!stop) {
+    if (!root) notChecked.push("instruction files: no working tree for this project here");
+    else {
+      // The cursor names its file by pathHash, so it stays short whatever the path, and the files before it are not read again.
+      // When that file is gone, its hash matches nothing and the markers start over from the first file
+      const resume = from.s === "markers" && from.file ? from : null;
+      const scan = ruleFiles(root, resume?.file);
+      const todo: { file: string; line: number; n: number; key: string }[] = [];
+      for (const f of scan.files) {
+        const same = resume !== null && pathHash(f.path) === resume.file;
+        for (const [i, text] of f.text.split(/\r?\n/).entries())
+          for (const [n, m] of [...text.matchAll(MARKER)].entries())
+            if (!same || i + 1 > resume.line || (i + 1 === resume.line && n > resume.n))
+              todo.push({ file: f.path, line: i + 1, n, key: m[1] ?? "" });
       }
+      const units = new Map<string, { id: number; key: string; lifecycle: string } | null>();
+      const chains = new Map<number, { key: string; lifecycle: string } | null>();
+      let last: Cursor | null = resume;
+      // In slices of 500: a page asks only about the markers it reaches, and SQLite takes at most 32,766 parameters in one statement
+      for (let i = 0; i < todo.length && !stop; i += 500) {
+        const slice = todo.slice(i, i + 500);
+        const keys = [...new Set(slice.map((f) => f.key))].filter((k) => !units.has(k));
+        for (const k of keys) units.set(k, null);
+        if (keys.length)
+          for (const u of await db
+            .selectFrom("unit")
+            .select(["id", "key", "lifecycle"])
+            .where("project_id", "=", projectId)
+            .where("key", "in", keys)
+            .execute())
+            units.set(u.key, u);
+        for (const f of slice) {
+          const u = units.get(f.key);
+          const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
+          let line: string | null = null;
+          if (!u) line = `${where} is not a record of this project`;
+          else if (u.lifecycle === "withdrawn") line = `${where} was withdrawn`;
+          else if (u.lifecycle === "superseded") {
+            // A file can mark the same record thousands of times: its chain is followed once
+            let next = chains.get(u.id);
+            if (next === undefined) {
+              next = await successor(db, u.id);
+              chains.set(u.id, next);
+            }
+            line = `${where} was superseded${next ? ` by ${inline(next.key)}${next.lifecycle === "active" ? "" : `, which is ${next.lifecycle} too`}` : ""}`;
+          }
+          if (line !== null && !fits(lines.marked, line)) {
+            // Before the first marker of this page the stage starts over from where the page began
+            stop = last ?? { s: "markers", file: "", line: 0, n: 0 };
+            break;
+          }
+          last = { s: "markers", file: pathHash(f.file), line: f.line, n: f.n };
+        }
+      }
+      if (scan.skipped)
+        notChecked.push(
+          `${scan.skipped} instruction files not read (over the caps, not regular files, or outside the repository)`,
+        );
+      if (scan.incomplete) notChecked.push(`instruction files: the listing ${scan.incomplete}`);
     }
-    if (scan.skipped)
-      notChecked.push(
-        `${scan.skipped} instruction files not read (over the caps, not regular files, or outside the repository)`,
-      );
-    if (scan.incomplete) notChecked.push(`instruction files: the listing ${scan.incomplete}`);
   }
-  section("Rule markers whose record changed", marked, root ? "none" : "not checked");
 
+  // A heading appears on the pages that reach its part of the list: on one page when everything fits
+  const reached = (at: number) => stage <= at && (stop === null || STAGES.indexOf(stop.s) >= at);
+  const section = (title: string, shown: string[], empty: string) =>
+    `## ${title}\n${shown.length ? shown.join("\n") : empty}`;
+  const sections: string[] = [];
+  if (reached(0)) {
+    sections.push(section("Files gone", lines.gone, root ? "none" : "not checked"));
+    sections.push(
+      section("Symbol not found (the file is still there)", lines.lost, root ? "none" : "not checked"),
+    );
+  }
+  if (reached(1) || reached(2))
+    sections.push(
+      section(
+        "Conditions to reconsider (judge whether one has come about; nothing here is decided)",
+        lines.conditions,
+        "none",
+      ),
+    );
+  if (reached(3))
+    sections.push(section("Rule markers whose record changed", lines.marked, root ? "none" : "not checked"));
   return [
     ...sections,
     `## Not checked\n${notChecked.length ? notChecked.map((n) => `- ${n}`).join("\n") : "nothing: every place above was checked"}`,
+    stop
+      ? `Partial: more follow. Call overview with view look and after: "${cursorText(stop)}". Pages are read at different times: a record or file that changed in between may be missed or shown twice.`
+      : "Complete: every section was listed to its end. Not checked entries on any page still apply.",
     "Read a record by its key before acting on it. Change a record only through /sphica:trace, with the owner's words.",
   ].join("\n\n");
 }

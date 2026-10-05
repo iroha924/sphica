@@ -27,12 +27,11 @@ import {
   saveText,
 } from "../../src/extract.ts";
 import { applyForget, previewForget } from "../../src/forget.ts";
-import { framed } from "../../src/frame.ts";
 import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
 import { liveOverview, lookOverview } from "../../src/overview.ts";
-import { readSource, readUnit } from "../../src/read.ts";
-import { type Applicable, parseDiff, selectForReview } from "../../src/review.ts";
+import { readRefs, readUnit } from "../../src/read.ts";
+import { type Applicable, parseDiff, reviewBatch } from "../../src/review.ts";
 import { checkFindings } from "../../src/review-findings.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
@@ -221,6 +220,8 @@ export async function createDriver(world: World): Promise<Driver> {
   let applicable: Applicable[] = [];
   let lane = "";
   let validation: string[] = [];
+  /** The diff, after, and selection of the last review_select, which review_validate checks against as review_check would */
+  let selected: { text: string; after: number | null; selection: string } | null = null;
   /** A one-file diff as git prints it */
   const diffOf = (d: { path: string; add: string }) =>
     `--- a/${d.path}\n+++ b/${d.path}\n@@ -1,0 +1,1 @@\n+${d.add}\n`;
@@ -606,11 +607,16 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.overview && typeof step.overview === "object") {
-        const o = step.overview as { view: "live" | "look"; after?: number };
+        const o = step.overview as { view: "live" | "look"; after?: number | string };
         overview =
           o.view === "live"
-            ? await liveOverview(db(), await projectId(), o.after ?? null)
-            : await lookOverview(db(), await projectId(), repo);
+            ? await liveOverview(db(), await projectId(), typeof o.after === "number" ? o.after : null)
+            : await lookOverview(
+                db(),
+                await projectId(),
+                repo,
+                typeof o.after === "string" ? o.after : undefined,
+              );
         return;
       }
       if (step.export && typeof step.export === "object") {
@@ -621,10 +627,8 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (Array.isArray(step.read)) {
-        const parts: string[] = [];
-        for (const key of step.read as string[])
-          parts.push((await readUnit(db(), await projectId(), key, repo)) ?? `${key}: not found`);
-        lastRead = parts.join("\n\n");
+        // The reply the read tool gives: framed, within its budget, naming what to read next
+        lastRead = await readRefs(db(), await projectId(), step.read as string[], repo);
         return;
       }
       // The owner's confirmation is the record server's part (tested there); here the preview is applied as confirmed
@@ -697,12 +701,24 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.review_select && typeof step.review_select === "object") {
-        const d = (step.review_select as { diff: { path: string; add: string } }).diff;
+        const { diff: d, after } = step.review_select as {
+          diff: { path: string; add: string };
+          after?: number;
+        };
         // A fresh reader, as the MCP server opens one: a missing database must show as not checked
         const r = openReader(file);
         try {
-          applicable = await selectForReview(r, await projectId().catch(() => -1), parseDiff(diffOf(d)));
+          const text = diffOf(d);
+          const batch = await reviewBatch(
+            r,
+            await projectId().catch(() => -1),
+            parseDiff(text),
+            after ?? null,
+            text,
+          );
+          applicable = batch.records;
           lane = "checked";
+          selected = { text, after: after ?? null, selection: batch.selection };
         } catch {
           applicable = [];
           lane = "not_checked";
@@ -712,8 +728,22 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.review_validate && typeof step.review_validate === "object") {
-        const v = step.review_validate as { findings: unknown };
-        validation = await checkFindings(db(), await projectId(), [], v.findings);
+        // Checked as review_check is called: the diff, the batch's after, and the selection review_select gave for them
+        const v = step.review_validate as {
+          findings: unknown;
+          diff?: { path: string; add: string };
+          after?: number;
+        };
+        const pid = await projectId();
+        // After a review_select, always its selection and after: a record or diff changed since then must show as a changed selection
+        const text = v.diff ? diffOf(v.diff) : (selected?.text ?? "");
+        const after = v.after ?? selected?.after ?? null;
+        const files = parseDiff(text);
+        const selection = selected
+          ? selected.selection
+          : (await reviewBatch(db(), pid, files, after, text)).selection;
+        validation = (await checkFindings(db(), pid, files, v.findings, { after, selection, diff: text }))
+          .problems;
         return;
       }
       if (step.inject && typeof step.inject === "object") {
@@ -1347,7 +1377,7 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (typeof e.read_of_source === "string") {
-        const text = framed((await readSource(db(), await projectId(), await ref(e.read_of_source))) ?? "");
+        const text = await readRefs(db(), await projectId(), [await ref(e.read_of_source)], repo);
         if (e.framed_as_past_evidence)
           assert.match(
             text,

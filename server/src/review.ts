@@ -4,7 +4,7 @@
 import { authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
-import { head } from "./text.ts";
+import { head, sha256 } from "./text.ts";
 
 /** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */
 export type FileDiff = { path: string; added: string[]; lines: number[]; gone?: true };
@@ -113,6 +113,7 @@ export function parseDiff(text: string): FileDiff[] {
 
 export type Applicable = {
   id: number;
+  revision: number;
   key: string;
   kind: string;
   stance: string | null;
@@ -120,7 +121,7 @@ export type Applicable = {
   because: string;
 };
 
-/** Active, supported, sourced records the diff touches, each with why it applies. */
+/** Active, supported, sourced records the diff touches, each with why it applies, in id order. */
 export async function selectForReview(
   db: Reads,
   projectId: number,
@@ -138,7 +139,7 @@ export async function selectForReview(
         .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
         .where("a.path", "in", paths)
         .where("a.retired_at", "is", null)
-        .select(["u.id", "u.key", "u.kind", "u.stance", "u.text", "a.path", "a.symbol"])
+        .select(["u.id", "u.revision", "u.key", "u.kind", "u.stance", "u.text", "a.path", "a.symbol"])
         .orderBy("u.id")
         .execute()
     : [];
@@ -147,6 +148,7 @@ export async function selectForReview(
     if (!out.has(a.id))
       out.set(a.id, {
         id: a.id,
+        revision: a.revision,
         key: a.key,
         kind: a.kind,
         stance: a.stance,
@@ -169,7 +171,7 @@ export async function selectForReview(
         ),
       ),
     )
-    .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .select(["u.id", "u.revision", "u.key", "u.kind", "u.stance", "u.text"])
     .execute();
   const options = free.length
     ? await db
@@ -190,6 +192,7 @@ export async function selectForReview(
       if (hit) {
         out.set(u.id, {
           id: u.id,
+          revision: u.revision,
           key: u.key,
           kind: u.kind,
           stance: u.stance,
@@ -200,7 +203,55 @@ export async function selectForReview(
       }
     }
   }
-  return [...out.values()];
+  return [...out.values()].sort((a, b) => a.id - b.id);
+}
+
+/** Records one review_select reply and one review_check call cover: a reviewer judges a batch at a time. */
+export const REVIEW_BATCH = 50;
+
+export type Batch = {
+  /** Every record the diff touches, in id order */
+  all: Applicable[];
+  /** The records of this batch: the first REVIEW_BATCH after `after` */
+  records: Applicable[];
+  k: number;
+  n: number;
+  /** Ties the batches of one review together: the diff, and each selected record's id and revision */
+  selection: string;
+  /** The id to pass as after for the next batch, or null on the last */
+  next: number | null;
+  /** Whether after is where a batch ends (or absent): any other start would let receipts skip the records before it */
+  aligned: boolean;
+};
+
+/** The batch of a review after the record id `after` (null for the first). `diff` is the text `files` was read from. */
+export async function reviewBatch(
+  db: Reads,
+  projectId: number,
+  files: FileDiff[],
+  after: number | null,
+  diff: string,
+): Promise<Batch> {
+  const all = await selectForReview(db, projectId, files);
+  const rest = all.filter((u) => u.id > (after ?? 0));
+  const records = rest.slice(0, REVIEW_BATCH);
+  const n = Math.max(1, Math.ceil(all.length / REVIEW_BATCH));
+  const k = Math.min(n, Math.floor((all.length - rest.length) / REVIEW_BATCH) + 1);
+  // The whole text: parsed files keep only added lines, so two changes that remove different lines would share one selection
+  const selection = sha256(JSON.stringify([diff, all.map((u) => `${u.id}:${u.revision}`)]))
+    .toString("hex")
+    .slice(0, 16);
+  const last = records.at(-1);
+  const ends = all.filter((_, i) => (i + 1) % REVIEW_BATCH === 0).map((u) => u.id);
+  return {
+    all,
+    records,
+    k,
+    n,
+    selection,
+    next: rest.length > records.length && last ? last.id : null,
+    aligned: after === null || ends.includes(after),
+  };
 }
 
 /** Sphica's own words for a reviewer about an AI's decision, never taken from a record: shown only beside one */

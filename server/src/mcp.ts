@@ -13,13 +13,13 @@ import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "./expor
 import { fieldsText } from "./fields.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
-import { liveOverview, lookOverview } from "./overview.ts";
+import { liveOverview, lookCursor, lookOverview } from "./overview.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
-import { readSource, readUnit } from "./read.ts";
-import { parseDiff, selectedText, selectForReview } from "./review.ts";
-import { checkFindings } from "./review-findings.ts";
+import { READ_BUDGET, readRefs } from "./read.ts";
+import { parseDiff, REVIEW_BATCH, reviewBatch, selectedText } from "./review.ts";
+import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsText, searchSources, searchUnits } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
@@ -224,14 +224,17 @@ server.registerTool(
     title: "Read past records and sources in full",
     description:
       "The full record: its text, options, the exact words cited as evidence and adoption with who said them, links (supersedes, conflicts), " +
-      "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source.",
+      "state history, and each code location checked in the working tree now. Pass keys or u<id> from search, or s<id> for a source. " +
+      `A reply stays within ${READ_BUDGET / 1024} KiB: when it stops, it names the refs to read next, the one it cut first.`,
     inputSchema: z
       .object({
         refs: z
           .array(z.string().min(1).max(300))
           .min(1)
           .max(10)
-          .describe("Record keys, u<id>, or s<id> (s<id>@<byte> reads a long source on from that byte)"),
+          .describe(
+            "Record keys, u<id>, or s<id>; s<id>@<byte> and u<id>@<byte>:<digest>, as a reply names them, go on from where it stopped",
+          ),
         cwd: CWD,
       })
       .strict(),
@@ -241,15 +244,7 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
-      const parts: string[] = [];
-      const renames = new Map();
-      for (const ref of a.refs) {
-        const got = /^s\d/.test(ref)
-          ? await readSource(db, p.id, ref)
-          : await readUnit(db, p.id, ref, p.root, undefined, renames);
-        parts.push(got ?? `${head(inline(ref), 200)}: not found in this project`);
-      }
-      return text(framed(parts.join("\n\n")));
+      return text(await readRefs(db, p.id, a.refs, p.root));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }
@@ -337,32 +332,39 @@ server.registerTool(
       "On request, not before every change. view live lists every active decision and constraint of the project, grouped by the directory it " +
       "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
       "is not found, written conditions for reconsidering an option (for you to judge, never applied), and lines in CLAUDE.md, AGENTS.md, or " +
-      ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn. Read a record by its key before relying on it.",
+      ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn, a page at a time until one says Complete (pass the after it gives). " +
+      "Read a record by its key before relying on it.",
     inputSchema: z
       .object({
         view: z
           .enum(["live", "look"])
           .describe("live: every active decision and constraint; look: records that need a look"),
         after: z
-          .number()
-          .int()
-          .min(0)
+          .union([z.number().int().min(0), z.string().min(1).max(8192)])
           .optional()
-          .describe("With live: the id the previous page said to continue after"),
+          .describe(
+            "With live: the id the previous page said to continue after. With look: the cursor the previous page gave, as it is",
+          ),
         cwd: CWD,
       })
       .strict(),
     annotations: READ_ONLY,
   },
   async (a, extra) => {
+    if (a.view === "live" && typeof a.after === "string")
+      return text("after: with view live, pass the id the previous page gave", true);
+    if (a.view === "look" && typeof a.after === "number")
+      return text("after: with view look, pass the cursor the previous page gave, as it is", true);
+    if (typeof a.after === "string" && !lookCursor(a.after))
+      return text("after: not a cursor a look page gave; call look without after to start again", true);
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
       return text(
         framed(
-          a.view === "live"
-            ? await liveOverview(db, p.id, a.after ?? null)
-            : await lookOverview(db, p.id, p.root),
+          typeof a.after === "string" || a.view === "look"
+            ? await lookOverview(db, p.id, p.root, typeof a.after === "string" ? a.after : undefined)
+            : await liveOverview(db, p.id, a.after ?? null),
         ),
       );
     } catch (e) {
@@ -377,8 +379,20 @@ server.registerTool(
     title: "Past decisions a change touches",
     description:
       "For a code review: the active decisions, constraints, and implementation records this diff touches (records anchored to a changed path, " +
-      "and records with no code location that forbid or defer an option an added line names). Judge each against the diff, then check the verdicts with review_check.",
-    inputSchema: z.object({ diff: DIFF, cwd: CWD }).strict(),
+      `and records with no code location that forbid or defer an option an added line names), ${REVIEW_BATCH} at a time in id order. ` +
+      "Judge each record of the batch against the diff, check the verdicts with review_check (same after and selection), then ask for the next batch.",
+    inputSchema: z
+      .object({
+        diff: DIFF,
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("The id the previous batch said to continue after; leave out for the first batch"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a, extra) => {
@@ -386,11 +400,21 @@ server.registerTool(
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return notChecked(new Error(p));
       const files = parseDiff(a.diff);
-      const hits = await selectForReview(db, p.id, files);
-      if (!hits.length)
+      const b = await reviewBatch(db, p.id, files, a.after ?? null, a.diff);
+      if (!b.all.length)
         return text(`Decision lane: checked. No active record applies to the ${files.length} changed files.`);
+      if (!b.aligned)
+        return text(
+          `Decision lane: not checked. after ${a.after} is not where a batch ended: pass the after a batch gave, or none for the first batch.`,
+          true,
+        );
+      if (!b.records.length)
+        return text(
+          `Decision lane: checked. No record after id ${a.after}: ${b.all.length} records apply in all (selection ${b.selection}).`,
+        );
+      const from = b.all.length - b.all.filter((u) => u.id > (a.after ?? 0)).length + 1;
       return text(
-        `Decision lane: checked. ${hits.length} records apply; read each before judging it.\n${framed(await selectedText(db, hits))}`,
+        `Decision lane: checked. ${b.all.length} records apply. Batch ${b.k} of ${b.n} (records ${from}-${from + b.records.length - 1}), selection ${b.selection}; read each before judging it.\n${framed(await selectedText(db, b.records))}\n${b.next === null ? "This is the last batch." : `Next batch: after checking this one, call review_select with after: ${b.next}.`}`,
       );
     } catch (e) {
       return notChecked(e);
@@ -403,12 +427,23 @@ server.registerTool(
   {
     title: "Check decision verdicts",
     description:
-      "Checks a reviewer's verdicts on the records review_select returned. Each finding: outcome (violation, complies, unrelated, undetermined), " +
-      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). Every record review_select returned needs one outcome. Returns the problems, or none.",
+      "Checks a reviewer's verdicts on one batch review_select returned, with that batch's after and selection. Each finding: outcome (violation, complies, unrelated, undetermined), " +
+      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file), " +
+      "or a list of them for every place a record is violated. Every record of the batch needs exactly one finding. Returns the problems, or that the batch is backed and which records later batches still have to judge.",
     inputSchema: z
       .object({
         diff: DIFF,
-        findings: z.array(z.record(z.string(), z.unknown())).max(50),
+        findings: z.array(z.record(z.string(), z.unknown())).max(REVIEW_BATCH),
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("The after given to review_select for this batch; leave out for the first batch"),
+        selection: z
+          .string()
+          .regex(/^[0-9a-f]{16}$/)
+          .describe("The selection review_select gave"),
         cwd: CWD,
       })
       .strict(),
@@ -418,11 +453,14 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return notChecked(new Error(p));
-      const problems = await checkFindings(db, p.id, parseDiff(a.diff), a.findings);
       return text(
-        problems.length
-          ? `${problems.length} problems:\n${problems.map((x) => `- ${x}`).join("\n")}`
-          : "No problems: every verdict is backed.",
+        checkedText(
+          await checkFindings(db, p.id, parseDiff(a.diff), a.findings, {
+            after: a.after ?? null,
+            selection: a.selection,
+            diff: a.diff,
+          }),
+        ),
       );
     } catch (e) {
       return notChecked(e);
