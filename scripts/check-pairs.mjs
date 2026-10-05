@@ -499,6 +499,17 @@ if (TRAILER !== null) {
     const pinned = grab(".github/workflows/zizmor.yml", /ACTIONLINT: "([^"]+)"/, "zizmor.yml ACTIONLINT");
     if (pinned !== actionlint)
       fail.push(`mise.toml actionlint ${actionlint} differs from zizmor.yml ACTIONLINT ${pinned}`);
+    // verify needs lychee wherever it runs, so each workflow that runs verify must install it, at the version mise.toml pins
+    const lychee = grab(
+      "mise.toml",
+      /^"github:lycheeverse\/lychee" = \{ version = "([^"]+)"/m,
+      "mise.toml lychee",
+    );
+    for (const file of [".github/workflows/check.yml", ".github/workflows/release.yml"]) {
+      const pin = grab(file, /LYCHEE: "([^"]+)"/, `${file} LYCHEE`);
+      if (lychee && pin && pin !== lychee)
+        fail.push(`${file}: LYCHEE ${pin} differs from mise.toml lychee ${lychee}`);
+    }
   }
 }
 

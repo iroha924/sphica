@@ -5,7 +5,7 @@
     ".": {
       "project": ["scripts/**/*.{js,mjs,cjs,ts}"],
       "ignoreDependencies": ["kysely", "kysely-codegen", "js-tokens"],
-      "ignoreBinaries": ["lefthook"]
+      "ignoreBinaries": ["lefthook", "lychee"]
     },
     "server": {
       "entry": [

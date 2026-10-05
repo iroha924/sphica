@@ -1,0 +1,8 @@
+# Shared by scripts/check-links.mjs and scripts/check-tarball.mjs, which pass this file by absolute path (lychee looks only in the
+# working directory, and the tarball check runs from plugin/).
+# Offline: only files, images, and heading anchors are checked. External URLs fail for reasons that are not the document's (rate limits,
+# outages), so they are not checked at all.
+offline = true
+# A string in lychee 0.24: `true` refuses to start
+include_fragments = "anchor-only"
+no_progress = true

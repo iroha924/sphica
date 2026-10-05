@@ -43,13 +43,14 @@ markdownlint-cli2 が、リポジトリの Markdown の構造の崩れを pre-co
 
 lychee が、相対リンク・画像・見出しアンカーと自分のリポジトリへの絶対 URL を、pre-commit・verify:ai・CI で落とす
 
-- [ ] T03: lychee を mise と CI に入れ、check-links.mjs を verify:ai と lefthook から流す
+- [x] T03: lychee を mise と CI に入れ、check-links.mjs を verify:ai と lefthook から流す
   - 種別: 追加
   - 計画: S3
   - 依存: T02（Markdown の一覧の共通の関数が要る）
-  - 変更: `mise.toml`, `lychee.toml`, `scripts/check-links.mjs`, `package.json`, `lefthook.yml`, `.github/workflows/check.yml`, `.github/workflows/release.yml`, `scripts/check-pairs.mjs`
+  - 変更: `mise.toml`, `lychee.toml`, `scripts/check-links.mjs`, `package.json`, `lefthook.yml`, `.github/workflows/check.yml`, `.github/workflows/release.yml`, `scripts/check-pairs.mjs`, `knip.json`
   - 完了条件: `bun run verify:ai` → 終了コード 0。README.ja.md の見出しを指すアンカーを壊した一時的な変更で `node scripts/check-links.mjs` → 落ちる（戻す）。check.yml の lychee のバージョンだけを変えた一時的な変更で `bun run pairs` → 落ちる（戻す）。`actionlint` → 指摘なし。`bun run verify` → 終了コード 0
   - コミット: `ci(docs): check Markdown links and anchors offline with lychee`
+  - 結果: `node scripts/check-links.mjs` → 39 リンク、14 OK（自分のリポジトリの blob/main の URL を remap で読み替え）、0 エラー。README.ja.md の `blob/main/README.ja.md#貢献` を `#no-such-heading` にすると `Cannot find fragment` で落ち、`bun run verify:ai` も exit 1（戻した）。check.yml の LYCHEE を 0.24.1 にすると `bun run pairs` が `LYCHEE 0.24.1 differs from mise.toml lychee 0.24.2` で落ちた（戻した）。CI で落とす tarball の sha256 は手元のダウンロードで一致、中身は `lychee-x86_64-unknown-linux-gnu/lychee` なので `--strip-components=1` で取り出す。`actionlint` → 指摘なし。`bun run verify` → exit 0
 - [ ] T04: check-ai-config.mjs の checkLocalLinks を消す
   - 種別: 削除
   - 計画: S4
@@ -89,3 +90,5 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 ## 記録
 - 2026-10-05 / T02 / knip が scripts から実行ファイルのパスで呼ぶ markdownlint-cli2 を未使用と判定した。kysely-codegen と同じく server の ignoreDependencies に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
+- 2026-10-05 / T03 / knip が scripts から呼ぶ外部の実行ファイル lychee を未登録と判定した。lefthook と同じくルートの ignoreBinaries に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
+- 2026-10-05 / T03 / mise の aqua の lychee の登録が、0.24.2 が配っていないアセット名（lychee-arm64-macos.dmg）を探して入らなかった（lefthook の links の job で発覚）。mise.toml を `github:lycheeverse/lychee`（version_prefix `lychee-v`）に変え、check-pairs の照合もその書き方を読むように直した / そのまま進めた
