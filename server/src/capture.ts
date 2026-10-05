@@ -48,6 +48,8 @@ export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered
  * directory: an older send reads only the queue's top level and unregistered/, and would set aside a record with no project.
  */
 export const callsDir = (): string => path.join(spoolDir(), "calls");
+/** Observations no send can write, with the reason beside each. Apart from rejected/, whose records go back to the queue's top level */
+export const callsRejectedDir = (): string => path.join(callsDir(), "rejected");
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
 export const HOLD_DAYS = 30;
 export const HOLD_MAX = 1000;
@@ -876,10 +878,79 @@ async function sendBatch(
   return { sent, rejected: bad.length };
 }
 
+const CODE_NAMES: Record<number, string> = { 18: "TOOBIG", 19: "CONSTRAINT", 20: "MISMATCH", 25: "RANGE" };
+
+/** Moves a queued file into dir with a short reason beside it: a code, never the record's text or an error message. */
+function setAside(from: string, name: string, dir: string, reason: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    fs.renameSync(path.join(from, name), path.join(dir, name));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // a concurrent send moved it first
+    throw e;
+  }
+  try {
+    fs.writeFileSync(path.join(dir, `${name}.reason`), reason, { mode: 0o600 });
+  } catch {
+    // Without its reason doctor shows it as unknown; the record itself is kept
+  }
+}
+
+/**
+ * Writes one batch of observations from calls/, removing each file only after the database has it. A file gone before it is read was
+ * written and removed by its hook. One the database refuses is set aside alone, so it never holds back the others.
+ */
+async function sendObservations(db: Kysely<DB>, names: { name: string; from: string }[]): Promise<void> {
+  const rows: { name: string; o: Observation }[] = [];
+  for (const { name, from } of names) {
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(from, name), "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw e;
+    }
+    let o: Observation | null = null;
+    let why = "unreadable";
+    try {
+      o = observation(JSON.parse(text));
+      why = "shape";
+    } catch {
+      // not JSON
+    }
+    if (o) rows.push({ name, o });
+    else setAside(from, name, callsRejectedDir(), why);
+  }
+  if (!rows.length) return;
+  const insert = (part: typeof rows) =>
+    db
+      .insertInto("capture_tool_call")
+      .values(part.map((x) => observationRow(x.o)))
+      .execute();
+  const bad = new Map<string, string>();
+  try {
+    await insert(rows);
+  } catch (e) {
+    if (!rejected(e)) throw e;
+    for (const x of rows)
+      try {
+        await insert([x]);
+      } catch (e2) {
+        if (!rejected(e2)) throw e2;
+        bad.set(x.name, `sqlite:${CODE_NAMES[sqliteCode(e2) ?? -1] ?? "unknown"}`);
+      }
+  }
+  for (const x of rows) {
+    const why = bad.get(x.name);
+    if (why) setAside(callsDir(), x.name, callsRejectedDir(), why);
+    else fs.rmSync(path.join(callsDir(), x.name), { force: true });
+  }
+}
+
 /**
  * Sends the queue to the database. **The connection is capture, and this only adds rows.** Sending the same thing twice adds no rows.
  * Records of unregistered projects are held (only projects registered with `sphica init` are recorded); the first lock hold looks at
- * the held records present when it starts once, so they never take the place of queued records. The queue is then sent in batches
+ * the held records and then the kept record tool observations present when it starts once, so they never take the place of queued records. The queue is then sent in batches
  * until it is empty or `budgetMs` is spent, at least one batch of it per call. A send that finds the lock taken waits for it within its budget,
  * and after unlocking a send looks at the queue again, so a holder that runs out of time does not leave records behind.
  * Failures such as a lost connection keep the batch queued for the next send.
@@ -921,6 +992,12 @@ export async function flush(
         for (const part of chunks(queued(held), BATCH)) {
           if (late()) break;
           await send(part);
+        }
+        for (const part of chunks(queued(callsDir()), BATCH)) {
+          if (late()) break;
+          client ??= openWriter("capture", file);
+          await sendObservations(client, part);
+          batches++;
         }
       }
       while (queueBatches === 0 || !late()) {

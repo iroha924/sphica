@@ -31,14 +31,16 @@ hook が DB に書けなかった record ツールの呼び出しが、次の fl
   - コミット: `feat(capture): keep each record tool observation in spool/calls until the database has it`
   - 結果: `bun run release:plan -- --base v0.6.33` → plugin、4 つの版を 0.6.34 に上げた。`node --test --test-name-pattern 'observation|record call' test/capture.test.ts` → 5 pass。書き込みロックを持った DB で hook が 50 ms 待って失敗すると `calls/` に同じ観測が 1 件残り、ロックが無ければ残らない。`calls/` が書けなくても DB に行が入る。`bun run verify` → 0
 
-- [ ] T02: flush が `calls/` を送り、結べなかった呼び出しの止めを外す
+- [x] T02: flush が `calls/` を送り、結べなかった呼び出しの止めを外す
   - 種別: 修正
   - 計画: S2
   - 依存: T01（`calls/` のファイルと検査関数が要る）
-  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `scripts/check-sql-live.mjs`
   - red: `cd server && node --test --test-name-pattern 'observation resend' test/capture.test.ts` → hook が書けなかった呼び出しの後、flush しても `tool_call_observation` に行が無く、別ターンの返事への agent の採用の insert が拒否されて fail
   - 完了条件: `cd server && node --test --test-name-pattern 'observation resend' test/capture.test.ts` → pass。再送後に別ターンが通り呼び出しのターンは拒否のまま、重複の再送で行が変わらない、未結合がもう 1 件あれば拒否のまま、拡張年の 2 例が `calls/rejected/` に `shape` で移り同じバッチの正常な観測は入る、callSession が再送前 null・再送後に観測のセッション、trace_pending の auto は再送前に何もしない
   - コミット: `fix(capture): resend record tool observations a hook could not write`
+  - 結果: red（送信を足す前）: 2 件とも fail。1 件目は送信前の拒否・callSession の null・trace_pending の「cannot tell」までは通り、flush の後に `calls/` に観測が残る「sent and removed」で落ちた。2 件目は `toolu_ok` が入らず落ちた
+  - 結果: 実装後 `node --test --test-name-pattern 'observation|record call' test/capture.test.ts` → 7 pass。`bun run verify` → 0（sql:live に calls/ の送り直しを足した）
 
 ## P2: 待ち行列の診断（#278）
 
@@ -94,3 +96,4 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
 ## 記録
 
 - 2026-10-05 / T01, T07 / pre-commit の bundle 検査が、package の入力を変える最初のコミットで版の上げを求めた / 版の上げを T07 から T01 へ移した。T01 の変更欄に 4 ファイルを足し（前: capture.ts と capture.test.ts だけ）、T07 の変更欄から 4 ファイルを外し、T07 の名前から「・版」を外し完了条件を「4 つの版が 0.6.34 で同じ」にした
+- 2026-10-05 / T02 / sql:live が capture.ts の新しい insert を子プロセスで通っていないと落とした / T02 の変更欄に `scripts/check-sql-live.mjs` を足した（前: capture.ts と capture.test.ts だけ）。calls/ に置いた観測を `--flush` が送ることを子プロセスで確かめる

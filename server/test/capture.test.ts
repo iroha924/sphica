@@ -9,6 +9,7 @@ import { migrate } from "../src/admin.ts";
 import {
   answersOf,
   callsDir,
+  callsRejectedDir,
   captureNotice,
   closeTurn,
   current,
@@ -32,10 +33,12 @@ import {
   write,
 } from "../src/capture.ts";
 import { dbFile } from "../src/db.ts";
+import { pendingText } from "../src/extract.ts";
 import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
+import { callSession } from "../src/trace.ts";
 import { snapshot } from "../src/worktree.ts";
-import { project, statements, tempDb } from "./temp-db.ts";
+import { at, insert, project, session, statements, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
 if (process.versions.bun) throw new Error("run these tests with node --test (bun run test)");
@@ -1779,6 +1782,166 @@ test("observation: the hook keeps the observation in calls/ until the database h
       db.owner.prepare("select count(*) as n from tool_call_observation where tool_use_id = 'toolu_3'").get()
         ?.n,
       1,
+    );
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("observation resend: a send writes what the hook could not, lifting the stop for other turns but never for the call's own", async () => {
+  reset();
+  const db = tempDb();
+  try {
+    const p = project(db);
+    session(db, p, "s1");
+    const reply = (turn: string, sent: string) =>
+      insert(db, "source", {
+        project_id: p,
+        kind: "session_message",
+        artifact: "session:s1",
+        external_id: `${turn}:assistant`,
+        revision: 1,
+        session_id: "s1",
+        turn_id: turn,
+        author_kind: "assistant",
+        created_at: at(sent),
+        captured_at: at(sent),
+        text: "I keep it as is.",
+        original_bytes: 16,
+        content_hash: Buffer.alloc(32, turn.length),
+        indexed: 0,
+      });
+    const call = (v: Record<string, string>) =>
+      insert(db, "record_call", { project_id: p, tool: "trace_begin", mode: "interactive", ...v });
+    // The run is begun by a Codex call of another session, so only the Claude Code call below decides what can be adopted
+    const begin = call({
+      host: "codex",
+      caller_session: "x",
+      caller_turn: "y",
+      called_at: at("2026-10-05T00:00:00Z"),
+    });
+    const run = insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "session:s1",
+      session_id: "s1",
+      status: "running",
+      begin_call_id: begin,
+      started_at: at("2026-10-05T00:00:00Z"),
+    });
+    let units = 0;
+    const adopt = (source: number) => {
+      const key = `k${++units}`;
+      const u = insert(db, "unit", {
+        project_id: p,
+        key,
+        kind: "decision",
+        stance: "do",
+        text: key,
+        extraction: "supported",
+        run_id: run,
+        created_at: at("2026-10-05T01:00:00Z"),
+        content_hash: Buffer.alloc(32, units),
+      });
+      const span = {
+        unit_id: u,
+        source_id: source,
+        span_start: 0,
+        span_end: 6,
+        run_id: run,
+        added_at: at("2026-10-05T01:00:00Z"),
+      };
+      insert(db, "unit_evidence", { ...span, role: "decides" });
+      insert(db, "unit_adoption", { ...span, route: "agent" });
+    };
+    const refused = /cannot cite a reply from a turn that ran a record tool/;
+    const own = reply("t1", "2026-10-05T00:00:02Z");
+    const next = reply("t2", "2026-10-05T00:00:05Z");
+    const c1 = call({ host: "claude-code", tool_use_id: "toolu_1", called_at: at("2026-10-05T00:00:01Z") });
+    const input = {
+      hook_event_name: "PreToolUse",
+      session_id: "ext-s1",
+      prompt_id: "t1",
+      tool_name: "mcp__plugin_sphica_record__trace_begin",
+      tool_use_id: "toolu_1",
+    };
+    db.owner.exec("begin immediate");
+    await assert.rejects(observeRecordCall(db.file, input, true, 50));
+    db.owner.exec("commit");
+    const [file] = fs.readdirSync(callsDir()).filter((f) => f.endsWith(".json"));
+    const saved = fs.readFileSync(path.join(callsDir(), file ?? ""), "utf8");
+    // Unjoined, every later reply of the project stays a candidate, and the trace cannot tell which session called
+    assert.throws(() => adopt(next), refused);
+    assert.equal(await callSession(db.reader, c1), null);
+    assert.match(
+      await pendingText(db.reader, p, new Date("2026-10-05T02:00:00Z"), { auto: true, skip: null }),
+      /cannot tell which session called/,
+    );
+    await flush(db.file);
+    assert.deepEqual(kept(), [], "sent and removed");
+    assert.deepEqual(await callSession(db.reader, c1), {
+      host: "claude-code",
+      session: "ext-s1",
+      owner: true,
+    });
+    adopt(next);
+    assert.throws(() => adopt(own), refused, "the turn that ran the record tool stays out");
+    // A copy left behind (the hook stopped before removing it) adds nothing
+    const observedAt = db.owner.prepare("select observed_at from tool_call_observation").get()?.observed_at;
+    fs.writeFileSync(path.join(callsDir(), file ?? ""), saved);
+    await flush(db.file);
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id, observed_at from tool_call_observation")
+        .all()
+        .map((r) => ({ ...r })),
+      [{ tool_use_id: "toolu_1", observed_at: observedAt }],
+    );
+    // Another call still unjoined keeps the stop from then on
+    call({ host: "claude-code", tool_use_id: "toolu_2", called_at: at("2026-10-05T00:00:06Z") });
+    assert.throws(() => adopt(reply("t3", "2026-10-05T00:00:07Z")), refused);
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("observation resend: a file not in the hook's shape is set aside with its reason and never stops the others", async () => {
+  reset();
+  const db = tempDb();
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    const files = {
+      "1-a.json": JSON.stringify({ ...observed, toolUse: "toolu_far", at: "+010000-01-01T00:00:00.000Z" }),
+      "2-b.json": JSON.stringify({ ...observed, toolUse: "toolu_neg", at: "-000001-01-01T00:00:00.000Z" }),
+      "3-c.json": "{not json",
+      "4-d.json": JSON.stringify({ ...observed, toolUse: "toolu_ok" }),
+    };
+    for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(callsDir(), name), text);
+    await flush(db.file);
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation")
+        .all()
+        .map((r) => r.tool_use_id),
+      ["toolu_ok"],
+    );
+    assert.deepEqual(kept(), []);
+    const aside = fs.readdirSync(callsRejectedDir()).sort();
+    assert.deepEqual(aside, [
+      "1-a.json",
+      "1-a.json.reason",
+      "2-b.json",
+      "2-b.json.reason",
+      "3-c.json",
+      "3-c.json.reason",
+    ]);
+    assert.deepEqual(
+      ["1-a", "2-b", "3-c"].map((n) =>
+        fs.readFileSync(path.join(callsRejectedDir(), `${n}.json.reason`), "utf8"),
+      ),
+      ["shape", "shape", "unreadable"],
     );
   } finally {
     reset();

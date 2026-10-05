@@ -83,6 +83,33 @@ await withTempDir(async (dir) => {
       if (seen?.turn_id !== "p1")
         failures.push(`the record tool hook did not log its turn (got ${JSON.stringify(seen)})`);
     }
+    // An observation the hook could not write stays in calls/ until a send writes it
+    {
+      const calls = path.join(dir, ".sphica", "spool", "calls");
+      fs.mkdirSync(calls, { recursive: true });
+      const missed = {
+        v: 1,
+        host: "claude-code",
+        session: "live-1",
+        turn: "p2",
+        toolUse: "toolu_missed",
+        tool: "mcp__plugin_sphica_record__record_save",
+        owner: 1,
+        at: new Date().toISOString(),
+      };
+      fs.writeFileSync(path.join(calls, `${Date.now()}-0-missed.json`), JSON.stringify(missed));
+      note("observation resend", runFlush(dir, covDir, asSession("live-1")));
+      const raw = new DatabaseSync(path.join(dir, ".sphica", "sphica.db"), { readOnly: true });
+      const seen = raw
+        .prepare("select turn_id from tool_call_observation where tool_use_id = 'toolu_missed'")
+        .get();
+      raw.close();
+      const left = fs.readdirSync(calls).filter((f) => f.endsWith(".json"));
+      if (seen?.turn_id !== "p2" || left.length)
+        failures.push(
+          `a kept observation was not resent (got ${JSON.stringify(seen)}, left ${left.join(" / ")})`,
+        );
+    }
 
     // Records from an unregistered project are set aside, not dropped. If the owner works on a new machine before
     // running init, those messages land here. Deleting them would lose them for good.
