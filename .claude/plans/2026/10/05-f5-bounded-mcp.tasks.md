@@ -186,11 +186,10 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - 結果: `bun run verify` → 0。今のケースに review_select の後に記録を変えて検証するものは無いので、変化の検出を acceptance で通す red は作れない（selection の不一致の検出そのものは review.test.ts の 120 件のテストが見ている）
 
 - [x] T16: read と look の上限を 32 KiB に下げ、look の行の予算を READ_BUDGET から決める
-  - 種別: 修正
+  - 種別: 変更
   - 計画: S3, S4
   - 依存: T05（READ_BUDGET がある）, T06（look のページの予算がある）
   - 変更: `server/src/read.ts`, `server/src/overview.ts`, `server/test/read.test.ts`, `server/test/overview.test.ts`, `server/test/search.test.ts`, `.claude/plans/2026/10/05-f5-bounded-mcp.plan.md`
-  - red: なし。64 KiB の応答を Codex が真ん中で切ることは review-shipping が packed の server で再現した（ホストの挙動で、テストの中では再現できない）
   - 完了条件: `cd server && node --test test/read.test.ts test/overview.test.ts` → pass。read の各応答と、枠を付けた look の各ページが 32 KiB 以下で、続きを辿って全部に届く
   - コミット: `fix(read): keep read and look replies within 32 KiB, which Codex passes on whole`
   - 結果: `node --test test/read.test.ts test/overview.test.ts` → 21 pass。70 KiB の source を 2 回で読み切る前提だった search.test.ts を、続きを最後まで辿る形に直した。plan の上限の記述と変更履歴を直した。`bun run verify` → 0
@@ -214,3 +213,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / 全差分 / 同 F3（P2）: driver の review_validate が review_select の selection を使わず作り直すので、記録の変化の検出を通らない / 採る。修正タスク T15
 - 2026-10-05 / 全差分 / review-shipping（再現済み）: Codex 0.160.0 は 64 KiB の read の応答を約 10,000 トークン（bytes/4 の見積もり）で真ん中から切り、続きの案内だけ残るので本文が黙って抜ける。Claude Code 2.1.289 は詰まった ASCII の 64 KiB をファイルに退避した / plan の前提（64 KiB は切られない）が誤り。上限の値と範囲を新しい会話で Codex と相談中
 - 2026-10-05 / T16 / 上限の値を新しい会話で Codex と相談（session 01a10c61-fc03-7ce3-b9cf-7500406edeb2）: read と look は共通の 32 KiB、look は枠などの分を先に確保、live と review_select の返答の大きさは範囲の外で後追い、32 KiB の両ホストでの実測が要る / 採る。実測は完了確認の段で行う
+- 2026-10-05 / T16 / 種別を修正から変更にし red の欄を消した（完了したタスクの欄の直し）/ 64 KiB の応答を Codex が真ん中で切ることはホストの挙動で、テストの中で落ちる red を作れない（review-shipping が packed の server で再現済み）。tasks の検査の違反を `| head` で見落としたままコミットしたので、このコミットで直した
