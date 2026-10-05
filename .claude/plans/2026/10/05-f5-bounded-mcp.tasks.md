@@ -133,6 +133,16 @@ look を続けて呼べば、2,000 件より先のアンカーと見出しごと
   - 結果: red: `node --test --test-name-pattern 'look cursor' test/overview.test.ts` → 2,500 アンカーの最後の 1 件の gone のファイルが、どの呼び出しでも出ず fail（actual 0、expected 1）
   - 結果: 実装後 `node --test test/overview.test.ts` → 14 pass（2,500 アンカーで最初の 2,000 件の指摘ゼロのページも進んで最後が Complete、gone と lost の混在、120 件ずつの options と deferred の条件、2 ファイル 90 か所の markers がページをまたいで 1 回ずつ、壊れたカーソルの拒否、MCP で live に文字列・look に整数・壊れたカーソルが引数エラー）。1 ページ目にすべて出る前提だった既存テストは、ページをたどる形に直した。`bun run verify` → 0
 
+- [x] T12: look のカーソルは、ページが返した文字列そのものだけを受け付ける
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T06（look のカーソルがある）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'look cursor strict' test/overview.test.ts` → 末尾に `!` を足したカーソルが受け付けられて fail
+  - 完了条件: `cd server && node --test test/overview.test.ts` → pass。前後の `!`、途中の空白、末尾の `=` を足したカーソルが null
+  - コミット: `fix(overview): accept only the exact cursor a look page gave`
+  - 結果: red: 上のコマンド → `eyJzIjoiYW5jaG9ycyIsImlkIjoyMDAwfQ!` が受け付けられて fail。実装後 `node --test test/overview.test.ts` → 15 pass。`bun run verify` → 0
+
 ## P4: acceptance
 
 acceptance の driver が MCP と同じ組み立てを通り、束・続き・カーソルを検査する。
@@ -159,3 +169,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T05 / Codex のタスクレビュー F1（P2、再現済み）: 本文を OSC の途中で切ると、framed の plain が閉じていない制御文字列として続きの案内と次の refs まで消す / 採る。修正タスク T11 を足し、同じコミットで終えた
 - 2026-10-05 / T07 / 変更欄: 前 `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts` → 後 `server/evals/acceptance/driver.ts`, `server/src/read.ts`, `server/test/search.test.ts`, `server/test/extract.test.ts`。層ごとの件数は合意した数として acceptance-cases.test.ts が固定しているのでケースは足さず、driver が readRefs を通るようになって不要になった readSource を消した
 - 2026-10-05 / T11 / Codex のタスクレビュー: 指摘なし / 対応なし
+- 2026-10-05 / T06 / Codex のタスクレビュー F1（P2、再現済み）: base64url の decode が範囲外の文字を読み飛ばすので、壊れたカーソルが通る / 採る。修正タスク T12 を足し、同じコミットで終えた

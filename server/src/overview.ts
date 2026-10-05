@@ -133,7 +133,8 @@ const STAGES = ["anchors", "options", "deferred", "markers"] as const;
 export function lookCursor(after: string): Cursor | null {
   try {
     const parsed = Cursor.safeParse(JSON.parse(Buffer.from(after, "base64url").toString("utf8")));
-    return parsed.success ? parsed.data : null;
+    // Decoding skips characters outside base64url, so only text that encodes back to itself is the cursor a page gave
+    return parsed.success && cursorText(parsed.data) === after ? parsed.data : null;
   } catch {
     return null;
   }

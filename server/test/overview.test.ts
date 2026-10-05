@@ -11,7 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
-import { liveOverview, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
+import { liveOverview, lookCursor, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
@@ -702,4 +702,11 @@ test("overview refuses a cursor for the other view, and a broken one, before rea
   } finally {
     await client.close();
   }
+});
+
+test("look cursor strict: only the exact text a page gave is a cursor, not one with characters base64url decoding skips", () => {
+  const given = Buffer.from(JSON.stringify({ s: "anchors", id: 2000 })).toString("base64url");
+  assert.deepEqual(lookCursor(given), { s: "anchors", id: 2000 });
+  for (const broken of [`${given}!`, `!${given}`, `${given.slice(0, 4)} ${given.slice(4)}`, `${given}=`])
+    assert.equal(lookCursor(broken), null, broken);
 });
