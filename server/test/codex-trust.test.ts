@@ -176,6 +176,19 @@ test("a definition Codex cannot read, and a state key Codex trims differently, a
     assert.ok("unknown" in hookTrust(text, ID, REL, "darwin", new Map()), text);
   // Both names of the Windows command are one field to Codex, so naming it twice fails the whole file
   unknown(file("Stop", [{ hooks: [{ ...h, commandWindows: "y", command_windows: "y" }] }]));
+  // The file itself takes only a string description and the hooks table; anything else fails it
+  unknown(JSON.stringify({ description: 42, hooks: JSON.parse(json).hooks }));
+  unknown(JSON.stringify({ name: "sphica", hooks: JSON.parse(json).hooks }));
+  assert.ok(
+    "hooks" in
+      hookTrust(
+        JSON.stringify({ description: "d", hooks: JSON.parse(json).hooks }),
+        ID,
+        REL,
+        "darwin",
+        new Map(),
+      ),
+  );
   // Codex reads timeout as a whole number, and 600.0 is not one to it even though JSON.parse makes it 600
   unknown(json.replace('"command":"x"', '"command":"x","timeout":600.0'));
   unknown(json.replace('"command":"x"', '"command":"x","timeout":6e2'));

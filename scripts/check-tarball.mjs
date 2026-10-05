@@ -34,6 +34,8 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
 const parentEnv = { ...process.env };
 delete parentEnv.SPHICA_DB;
 delete parentEnv.SPHICA_HOME;
+// doctor would start the Codex under the parent's CODEX_HOME, which writes there
+delete parentEnv.CODEX_HOME;
 // init reads the signed-in account through gh: a fake gh first on PATH answers, so the runner's gh never reaches api.github.com
 const bin = path.join(home, "fake-gh");
 fs.mkdirSync(bin);

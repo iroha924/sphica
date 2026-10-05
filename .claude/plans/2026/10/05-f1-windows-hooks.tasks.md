@@ -111,6 +111,15 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 完了条件: `bun install --cwd server --frozen-lockfile` → `no changes`。push 後の release の dry run の prepare が pass
   - コミット: `fix(deps): let knip share the bundled smol-toml so the SBOM lists only what ships`
   - 結果: `bun add` が直下を 1.9.0 にし、knip の `^1.8.0` に入れ子の 1.8.0（`knip/smol-toml`）を残していた。入れ子のエントリを消した後: `bun install --cwd server --frozen-lockfile` → `no changes`、`server/node_modules/knip/node_modules/smol-toml` を消して入れ直しても作られない、`bun run knip` → exit 0。dry run は push 後に確かめる
+- [x] T11: 検査の子プロセスに親の CODEX_HOME を渡さず、Codex が読めない hooks ファイルのトップレベルを unknown にする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T09（直す対象の関数と、全差分のレビューの指摘が要る）
+  - 変更: `scripts/lib/live-harness.mjs`, `scripts/check-tarball.mjs`, `.claude/rules/verification.md`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`
+  - red: `node <scratchpad>/red-codex-home.mts scripts/check-sql-live.mjs` → `codex started with CODEX_HOME=<親の CODEX_HOME>`（検査の doctor が親の Codex を起動した）。`cd server && node --test test/codex-trust.test.ts` → トップレベルに `description: 42` のある定義で unknown にならず落ちる
+  - 完了条件: `cd server && node --test test/codex-trust.test.ts` → 8 件 pass
+  - コミット: `fix(doctor): keep checks off the parent's CODEX_HOME and refuse hooks files Codex cannot read`
+  - 結果: red を 2 つとも実測。直した後: 同じ red のコマンド → `codex started with CODEX_HOME=(never started)`、codex-trust のテスト 8 件 pass、`bun run typecheck` → exit 0、`bun run verify:ai` → exit 0。再発を止めるものとして `.claude/rules/verification.md` の temp-home の規則に `CODEX_HOME` を足した（機械の検査は無い）
 - [x] T06: Windows の CI に、パックした doctor の「Codex hooks」の行を確かめる手順を足す
   - 種別: 追加
   - 計画: S5
@@ -121,6 +130,8 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 結果: `actionlint .github/workflows/check.yml` → exit 0。`node scripts/check-codex-trust-live.mjs` → macOS で `codex trust: doctor read 9 hooks of plugin through codex`。期待値の雛形の timeout を 1 ずらしたコピー → `expected all 9 Codex hooks trusted` と `expected 1 modified and 1 disabled` の 2 件で落ちた。Windows は push 後に plan の A3 で確かめる
 
 ## 記録
+
+- 2026-10-05 / T11 / 全差分の Codex のレビュー（新しい会話、ea2dbfc8、high）: P2 2 件。1 `live-harness` の `childEnv` と `check-tarball.mjs` が親の `CODEX_HOME` を子に渡し、検査の doctor が持ち主の Codex を起動して `tmp/arg0` を書きうる、2 Codex の `HooksFile` は `deny_unknown_fields` で `description` は文字列なのに、トップレベルを見ずに trusted を返す。2 件とも採る / T11 を足して直した
 
 - 2026-10-05 / T08 / T06 の head（99aacc16、run 37259168911）の Windows のジョブ: node が無いケースは最初に走る powershell.exe の外側が 59,575 ms、残りの外側は 2.2〜2.5 秒。最初の 1 回だけが遅い（推測: PowerShell のコマンド探索のキャッシュを作る）ので、60 秒の上限は足りていなかった。パックした doctor の検査は `codex trust: doctor read 9 hooks of package through npm's codex.cmd` / そのまま
 

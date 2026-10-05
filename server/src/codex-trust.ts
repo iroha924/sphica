@@ -113,6 +113,13 @@ export function hookTrust(
   } catch {
     return { unknown: "the hooks file is not JSON" };
   }
+  // Codex refuses the whole file for any other top-level key, or a description that is not a string
+  if (
+    isTable(file) &&
+    (Object.keys(file).some((k) => k !== "hooks" && k !== "description") ||
+      (file.description != null && typeof file.description !== "string"))
+  )
+    return { unknown: "the hooks file has a top-level field Codex would not read" };
   const events = isTable(file) ? file.hooks : undefined;
   if (!isTable(events)) return { unknown: "the hooks file has no hooks table" };
   const hooks: HookTrust[] = [];
