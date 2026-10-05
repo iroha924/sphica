@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hasBannedName } from "./lib/banned-name.mjs";
+import { linksOutside } from "./lib/link-containment.mjs";
 import { tarballProblems, trackedDistribution } from "./lib/tarball.mjs";
 
 const tgz = process.argv[2] && path.resolve(process.argv[2]);
@@ -58,6 +59,35 @@ try {
   const expected = JSON.parse(fs.readFileSync(path.join(root, "plugin", "package.json"), "utf8")).version;
   if (version !== expected)
     throw new Error(`tarball is ${version}, but the repository version is ${expected} (stale tarball)`);
+  // The packed Markdown, which the repository's own checks do not see as shipped: a link whose target is in the checkout but not in the
+  // package passes there. Same rules and offline link check as the repository, with every path given literally.
+  const docs = [...paths].filter((f) => f.endsWith(".md")).map((f) => path.join(pkg, f));
+  execFileSync(
+    process.execPath,
+    [
+      path.join(root, "server", "node_modules", "markdownlint-cli2", "markdownlint-cli2-bin.mjs"),
+      "--config",
+      path.join(root, ".markdownlint-cli2.jsonc"),
+      ...docs.map((f) => `:${f}`),
+    ],
+    { cwd: pkg, stdio: ["ignore", "ignore", "inherit"] },
+  );
+  let links;
+  try {
+    links = execFileSync(
+      "lychee",
+      ["--config", path.join(root, "lychee.toml"), "--format", "json", "--verbose", "--", ...docs],
+      // --verbose (which the containment check needs) also lists every excluded URL on stderr, so it is shown only on failure
+      { cwd: pkg, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  } catch (e) {
+    throw new Error(`lychee found broken links in the packed Markdown\n${e.stderr ?? ""}${e.stdout ?? ""}`);
+  }
+  const outside = linksOutside(JSON.parse(links), pkg);
+  if (outside.length)
+    throw new Error(
+      `packed Markdown links to files outside the package:\n${outside.map((x) => `  ${x.source}: ${x.url}`).join("\n")}`,
+    );
   const named = cli("--version").trim().split(/\s+/)[0];
   if (named !== version)
     throw new Error(`the tarball CLI reported ${named}, but the package version is ${version}`);

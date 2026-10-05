@@ -92,13 +92,14 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - 完了条件: `cd server && node --test --test-timeout=60000 test/link-containment.test.ts` → 成功と失敗の混ざった JSON、package の外の既存ファイル、正常な `../trace/SKILL.md` の各テストが pass
   - コミット: `feat(tarball): find relative links that resolve outside the package`
   - 結果: `cd server && node --test --test-timeout=60000 test/link-containment.test.ts` → 3 件 pass（成功と失敗の混ざった報告で package の外の既存ファイルだけを返し、`../trace/SKILL.md` と自分のアンカーと https は返さない。package の中から外へ向く symlink も外と数える。成功を数えるのに一覧が空の報告は --verbose 無しとして拒む）。`bun run verify` → exit 0
-- [ ] T06: check-tarball で展開した package に markdownlint と lychee をかけ、包含を確かめる
+- [x] T06: check-tarball で展開した package に markdownlint と lychee をかけ、包含を確かめる
   - 種別: 追加
   - 計画: S5
   - 依存: T02（markdownlint の設定が要る）, T03（lychee と設定が要る）, T05（包含の判定が要る）
   - 変更: `scripts/check-tarball.mjs`
   - 完了条件: `bun run bundle && (cd plugin && npm pack)` の tarball で `node scripts/check-tarball.mjs <tgz>` → 終了コード 0。package の外の既存ファイルを指す相対リンクを plugin の Markdown に足して同じ手順 → 包含の判定で落ちる（戻す）。`bun run verify` → 終了コード 0
   - コミット: `ci(tarball): lint and link-check the packed Markdown`
+  - 結果: `bun run bundle` の後に pack した tarball で `node scripts/check-tarball.mjs` → exit 0（50 ファイル、THIRD_PARTY_NOTICES と README のコピーも検査）。plugin/skills/trace/SKILL.md に `../../../../../../../../../../../../etc/hosts` へのリンクを足して同じ手順 → `packed Markdown links to files outside the package: ... file:///etc/hosts` で exit 1（戻した）。lychee の `--verbose` が除外した URL を stderr に大量に出すので、stderr は失敗したときだけ見せる。`bun run verify` → exit 0
 
 ## P4: 文書
 
