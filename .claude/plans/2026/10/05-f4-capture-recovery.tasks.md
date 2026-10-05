@@ -57,6 +57,17 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
   - 結果: red（capture.ts を直す前に戻して）: `node --test --test-name-pattern 'rejection reason|prune count' test/capture.test.ts` → 理由ファイルが 1 つも無く deepEqual で fail、capture.json に `pruned` が無く `undefined !== 2` で fail
   - 結果: 実装後 `node --test --test-name-pattern 'rejection reason|prune count' test/capture.test.ts` → 2 pass（unreadable / version / no-project / sqlite:CONSTRAINT、送らない flush でも件数が残り、0 件の flush と 2 件目の削除で落ちた flush でも直前の値か 1 件が残る）。`bun run verify` → 0
 
+- [x] T08: 読めない観測のファイルを calls/rejected/ へ移し、送信を止めない
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（観測の送信が要る）
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'unreadable observation' test/capture.test.ts` → 読み取り権限の無い観測のファイルで flush が EACCES を投げ、正常な観測も通常のキューも送られず fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'unreadable observation' test/capture.test.ts` → pass。読めないファイルは `calls/rejected/` に `unreadable` で移り、同じ flush で正常な観測と通常のキューが送られる
+  - コミット: `fix(capture): set aside an observation file that cannot be read instead of stopping the send`
+  - 結果: red: `node --test --test-name-pattern 'unreadable observation' test/capture.test.ts` → `EACCES: permission denied, open '.../spool/calls/1-a.json'` で fail
+  - 結果: 実装後 同じコマンド → pass（読めないファイルが `calls/rejected/` に unreadable で移り、正常な観測と通常のキュー 1 件が送られた）。`bun run verify` → 0
+
 - [ ] T04: readState の読めない状態、SessionStart の通知、queueReport
   - 種別: 修正
   - 計画: S4
@@ -101,3 +112,4 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
 - 2026-10-05 / T02 / sql:live が capture.ts の新しい insert を子プロセスで通っていないと落とした / T02 の変更欄に `scripts/check-sql-live.mjs` を足した（前: capture.ts と capture.test.ts だけ）。calls/ に置いた観測を `--flush` が送ることを子プロセスで確かめる
 - 2026-10-05 / T01 / Codex のタスクごとのレビュー（65383caf） / 指摘なし。ロック時の実走と Windows は Codex 側で未実行（read-only）
 - 2026-10-05 / T03 / 実装を先に書いてから red を確かめた / capture.ts の変更を一時的に退けて新しいテストが意図した理由で落ちることを確かめ、戻した
+- 2026-10-05 / T02 / Codex のタスクごとのレビュー（d49c2525）F1: 読めない（EACCES）観測のファイルが flush を投げさせ、通常のキューまで毎回止める / 受理。読み取りの ENOENT 以外の失敗も unreadable で隔離する修正タスク T08 を T04 の前に足した

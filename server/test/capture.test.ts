@@ -2025,6 +2025,33 @@ test("observation resend: a file not in the hook's shape is set aside with its r
   }
 });
 
+test("unreadable observation: a file that cannot be read is set aside, and the rest of the send goes on", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    const locked = path.join(callsDir(), "1-a.json");
+    fs.writeFileSync(locked, JSON.stringify({ ...observed, toolUse: "toolu_locked" }));
+    fs.chmodSync(locked, 0o000);
+    fs.writeFileSync(path.join(callsDir(), "2-b.json"), JSON.stringify({ ...observed, toolUse: "toolu_ok" }));
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1, "the queue is still sent");
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation")
+        .all()
+        .map((x) => x.tool_use_id),
+      ["toolu_ok"],
+    );
+    assert.equal(fs.readFileSync(path.join(callsRejectedDir(), "1-a.json.reason"), "utf8"), "unreadable");
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
 test("record call: hook values out of bounds are never stored as sent", async () => {
   const db = tempDb();
   try {

@@ -923,8 +923,9 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
     try {
       text = fs.readFileSync(path.join(from, name), "utf8");
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw e;
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT")
+        setAside(from, name, callsRejectedDir(), "unreadable");
+      continue;
     }
     let o: Observation | null = null;
     let why = "unreadable";
