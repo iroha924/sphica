@@ -176,6 +176,15 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - コミット: `test(acceptance): drive review batches, read budgets, and look cursors as the tools do`
   - 結果: driver の read と read_of_source は readRefs、overview の look は文字列の after、review_select は reviewBatch（after 付き）、review_validate は diff・after・selection を通す。使われなくなった readSource と part を消し、それを呼んでいたテスト 2 本を readRefs に移した。`bun run verify` → 0（acceptance のケースは件数を変えずに全件 pass）
 
+- [x] T15: driver の review_validate が、直前の review_select の selection をそのまま使う
+  - 種別: 変更
+  - 計画: S5
+  - 依存: T07（driver が束と selection を通す）
+  - 変更: `server/evals/acceptance/driver.ts`
+  - 完了条件: `bun run verify` → 0。review_select の後の review_validate は、その diff・after・selection で checkFindings を呼ぶ（作り直さない）
+  - コミット: `test(acceptance): check verdicts against the selection review_select gave`
+  - 結果: `bun run verify` → 0。今のケースに review_select の後に記録を変えて検証するものは無いので、変化の検出を acceptance で通す red は作れない（selection の不一致の検出そのものは review.test.ts の 120 件のテストが見ている）
+
 ## 記録
 
 - 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま

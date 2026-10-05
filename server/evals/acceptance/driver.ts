@@ -220,6 +220,8 @@ export async function createDriver(world: World): Promise<Driver> {
   let applicable: Applicable[] = [];
   let lane = "";
   let validation: string[] = [];
+  /** The diff, after, and selection of the last review_select, which review_validate checks against as review_check would */
+  let selected: { text: string; after: number | null; selection: string } | null = null;
   /** A one-file diff as git prints it */
   const diffOf = (d: { path: string; add: string }) =>
     `--- a/${d.path}\n+++ b/${d.path}\n@@ -1,0 +1,1 @@\n+${d.add}\n`;
@@ -716,6 +718,7 @@ export async function createDriver(world: World): Promise<Driver> {
           );
           applicable = batch.records;
           lane = "checked";
+          selected = { text, after: after ?? null, selection: batch.selection };
         } catch {
           applicable = [];
           lane = "not_checked";
@@ -732,12 +735,16 @@ export async function createDriver(world: World): Promise<Driver> {
           after?: number;
         };
         const pid = await projectId();
-        const text = v.diff ? diffOf(v.diff) : "";
+        // After a review_select, its own selection: a record changed since then must show as a changed selection
+        const text = v.diff ? diffOf(v.diff) : (selected?.text ?? "");
+        const after = v.after ?? (v.diff ? null : (selected?.after ?? null));
         const files = parseDiff(text);
-        const { selection } = await reviewBatch(db(), pid, files, v.after ?? null, text);
-        validation = (
-          await checkFindings(db(), pid, files, v.findings, { after: v.after ?? null, selection, diff: text })
-        ).problems;
+        const selection =
+          !v.diff && selected
+            ? selected.selection
+            : (await reviewBatch(db(), pid, files, after, text)).selection;
+        validation = (await checkFindings(db(), pid, files, v.findings, { after, selection, diff: text }))
+          .problems;
         return;
       }
       if (step.inject && typeof step.inject === "object") {
