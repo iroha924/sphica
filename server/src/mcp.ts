@@ -421,8 +421,8 @@ server.registerTool(
     title: "Check decision verdicts",
     description:
       "Checks a reviewer's verdicts on one batch review_select returned, with that batch's after and selection. Each finding: outcome (violation, complies, unrelated, undetermined), " +
-      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). " +
-      "Every record of the batch needs one outcome. Returns the problems, or that the batch is backed and which records later batches still have to judge.",
+      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file), " +
+      "or a list of them for every place a record is violated. Every record of the batch needs exactly one finding. Returns the problems, or that the batch is backed and which records later batches still have to judge.",
     inputSchema: z
       .object({
         diff: DIFF,

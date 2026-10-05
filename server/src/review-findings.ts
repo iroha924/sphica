@@ -7,16 +7,15 @@ import { inline } from "./panel.ts";
 import { type Batch, type FileDiff, REVIEW_BATCH, reviewBatch } from "./review.ts";
 import { head } from "./text.ts";
 
+/** A place in the changed code: a path in the diff and a line added there (the path alone for a file that is gone) */
+const Place = z.object({ path: z.string().min(1), line: z.number().int().positive().optional() }).strict();
 const Finding = z
   .object({
     outcome: z.enum(["violation", "complies", "unrelated", "undetermined"]),
     unit: z.string().min(1),
     reason: z.string().optional(),
-    /** Changed code the verdict rests on: a path in the diff and a line added there (the path alone for a file that is gone) */
-    evidence: z
-      .object({ path: z.string().min(1), line: z.number().int().positive().optional() })
-      .strict()
-      .optional(),
+    /** The places the verdict rests on: one, or every place a record is violated */
+    evidence: z.union([Place, z.array(Place).min(1)]).optional(),
   })
   .strict();
 const Findings = z.array(Finding).max(REVIEW_BATCH);
@@ -26,7 +25,7 @@ export type Checked = { problems: string[]; batch: Batch | null };
 
 /**
  * Problems with a reviewer's verdicts on one batch: a violation or compliance must name an applicable record, give a reason, and point at
- * changed code; each record of the batch gets one outcome, never contradictory ones. The selection must be the one review_select gave, so
+ * changed code, every place of it; each record of the batch gets exactly one finding. The selection must be the one review_select gave, so
  * the batches of one review cover the same records.
  */
 export async function checkFindings(
@@ -52,6 +51,8 @@ export async function checkFindings(
     };
   const applicable = new Set(batch.all.map((u) => u.key));
   const here = new Set(batch.records.map((u) => u.key));
+  // A record can be violated at no more places than the diff has: its added lines and the files that are gone
+  const places = files.reduce((n, f) => n + (f.gone ? 1 : f.lines.length), 0);
   const problems: string[] = [];
   for (const [i, f] of parsed.data.entries()) {
     const at = `findings.${i} (${f.outcome} ${f.unit})`;
@@ -63,25 +64,37 @@ export async function checkFindings(
     if (!applicable.has(f.unit))
       problems.push(`${at}: not a record this diff touches; cite one review_select returned`);
     if (!f.reason?.trim()) problems.push(`${at}: give the reason, tying the record to the change`);
-    if (!f.evidence) problems.push(`${at}: needs evidence in the changed code (a path and an added line)`);
-    else {
-      const file = files.find((x) => x.path === f.evidence?.path);
-      if (!file) problems.push(`${at}: evidence path ${f.evidence.path} is not in the diff`);
+    if (!f.evidence) {
+      problems.push(`${at}: needs evidence in the changed code (a path and an added line)`);
+      continue;
+    }
+    const given = Array.isArray(f.evidence) ? f.evidence : [f.evidence];
+    const distinct = [...new Map(given.map((e) => [`${e.line ?? ""}:${e.path}`, e])).values()];
+    if (distinct.length > places) {
+      problems.push(
+        `${at}: ${distinct.length} places of evidence, more places than the diff has (${places})`,
+      );
+      continue;
+    }
+    for (const e of distinct) {
+      const file = files.find((x) => x.path === e.path);
+      if (!file) problems.push(`${at}: evidence path ${e.path} is not in the diff`);
       else if (file.gone) {
         // A deleted or renamed-away file has no added lines: its path is the evidence
-      } else if (f.evidence.line === undefined)
-        problems.push(`${at}: evidence in ${file.path} needs an added line`);
-      else if (!file.lines.includes(f.evidence.line))
-        problems.push(`${at}: evidence line ${f.evidence.line} is not an added line of ${file.path}`);
+      } else if (e.line === undefined) problems.push(`${at}: evidence in ${file.path} needs an added line`);
+      else if (!file.lines.includes(e.line))
+        problems.push(`${at}: evidence line ${e.line} is not an added line of ${file.path}`);
     }
   }
-  // Every record of the batch is judged, once: several violations are fine, but not a violation and a compliance
+  // Every record of the batch is judged once: the places of several violations go in one finding's evidence
   for (const key of here) {
-    const outcomes = [...new Set(parsed.data.filter((f) => f.unit === key).map((f) => f.outcome))];
-    if (!outcomes.length)
+    const given = parsed.data.filter((f) => f.unit === key).length;
+    if (!given)
       problems.push(`${key}: no verdict; give one (unrelated or undetermined when it does not apply)`);
-    else if (outcomes.length > 1)
-      problems.push(`${key}: contradictory verdicts (${outcomes.join(", ")}); give one outcome`);
+    else if (given > 1)
+      problems.push(
+        `${key}: ${given} findings; give one per record, with every place it is violated in its evidence`,
+      );
   }
   return { problems, batch };
 }

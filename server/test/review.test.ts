@@ -370,68 +370,108 @@ test("records anchored to a changed path, and location-free don't records naming
       wide.map((u) => u.key),
       ["trace:ext-s1/no-telemetry"],
     );
+    // The places of one record's violations go in one finding; each place is checked, and a deleted file's path alone is a place
     const problems = await problemsOf(db, p, files, [
       {
         outcome: "violation",
         unit: "trace:ext-s1/storage",
         reason: "adds pg",
-        evidence: { path: "src/db.ts", line: 5 },
+        evidence: [
+          { path: "src/db.ts", line: 3 },
+          { path: "other.ts", line: 1 },
+          { path: "gone.ts" },
+          { path: "src/db.ts" },
+        ],
       },
       { outcome: "complies", unit: "trace:ext-s1/maybe" },
-      {
-        outcome: "violation",
-        unit: "trace:ext-s1/storage",
-        reason: "x",
-        evidence: { path: "src/db.ts", line: 3 },
-      },
-      {
-        outcome: "violation",
-        unit: "trace:ext-s1/storage",
-        reason: "x",
-        evidence: { path: "other.ts", line: 1 },
-      },
       { outcome: "unrelated", unit: "trace:ext-s1/no-telemetry" },
-      // A deleted file has no added lines: its path is the evidence
-      {
-        outcome: "violation",
-        unit: "trace:ext-s1/storage",
-        reason: "drops the file",
-        evidence: { path: "gone.ts" },
-      },
-      { outcome: "violation", unit: "trace:ext-s1/storage", reason: "x", evidence: { path: "src/db.ts" } },
     ]);
     assert.deepEqual(problems, [
+      "findings.0 (violation trace:ext-s1/storage): evidence line 3 is not an added line of src/db.ts",
+      "findings.0 (violation trace:ext-s1/storage): evidence path other.ts is not in the diff",
+      "findings.0 (violation trace:ext-s1/storage): evidence in src/db.ts needs an added line",
       "findings.1 (complies trace:ext-s1/maybe): not a record this diff touches; cite one review_select returned",
       "findings.1 (complies trace:ext-s1/maybe): give the reason, tying the record to the change",
       "findings.1 (complies trace:ext-s1/maybe): needs evidence in the changed code (a path and an added line)",
-      "findings.2 (violation trace:ext-s1/storage): evidence line 3 is not an added line of src/db.ts",
-      "findings.3 (violation trace:ext-s1/storage): evidence path other.ts is not in the diff",
-      "findings.6 (violation trace:ext-s1/storage): evidence in src/db.ts needs an added line",
     ]);
     assert.match((await problemsOf(db, p, files, [{ outcome: "maybe" }])).join(), /findings\.0/);
-    // Every record review_select returned needs a verdict, and one record cannot both comply and be violated
+    // Every record review_select returned needs a verdict
     assert.deepEqual(await problemsOf(db, p, files, []), [
       "trace:ext-s1/storage: no verdict; give one (unrelated or undetermined when it does not apply)",
       "trace:ext-s1/no-telemetry: no verdict; give one (unrelated or undetermined when it does not apply)",
     ]);
-    const mixed = await problemsOf(db, p, files, [
-      {
-        outcome: "violation",
-        unit: "trace:ext-s1/storage",
-        reason: "adds pg",
-        evidence: { path: "src/db.ts", line: 5 },
-      },
-      {
-        outcome: "complies",
-        unit: "trace:ext-s1/storage",
-        reason: "keeps it",
-        evidence: { path: "src/db.ts", line: 5 },
-      },
-      { outcome: "unrelated", unit: "trace:ext-s1/no-telemetry" },
+  } finally {
+    await db.done();
+  }
+});
+
+test("review evidence: one finding per record holds every place it is violated, each checked once", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "SQLite にする。" });
+    await save(db, p, {
+      units: [
+        {
+          key: "storage",
+          kind: "decision",
+          stance: "do",
+          text: "SQLite にする。",
+          evidence: [{ source: `s${m}`, quote: "SQLite にする。", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "SQLite にする。" }],
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        },
+      ],
+    });
+    // 22 added lines: a record violated on 21 of them is judged in one finding
+    const added = Array.from({ length: 22 }, (_, n) => `+import pg${n} from "pg";`);
+    const files = parseDiff(
+      [
+        "--- a/src/db.ts",
+        "+++ b/src/db.ts",
+        "@@ -0,0 +1,22 @@",
+        ...added,
+        "--- a/gone.ts",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "-old",
+      ].join("\n"),
+    );
+    const at = (lines: number[]) => lines.map((line) => ({ path: "src/db.ts", line }));
+    const violation = (evidence: unknown) => ({
+      outcome: "violation",
+      unit: "trace:ext-s1/storage",
+      reason: "adds pg",
+      evidence,
+    });
+    const lines = Array.from({ length: 21 }, (_, n) => n + 1);
+    assert.deepEqual(await problemsOf(db, p, files, [violation(at(lines))]), []);
+    // Each of the 21 places is checked: one that is not an added line is named
+    assert.deepEqual(await problemsOf(db, p, files, [violation(at([...lines.slice(1), 40]))]), [
+      "findings.0 (violation trace:ext-s1/storage): evidence line 40 is not an added line of src/db.ts",
     ]);
-    assert.deepEqual(mixed, [
-      "trace:ext-s1/storage: contradictory verdicts (violation, complies); give one outcome",
-    ]);
+    // A place given twice counts once; the single-place object still works
+    assert.deepEqual(await problemsOf(db, p, files, [violation(at([2, 2, 3]))]), []);
+    assert.deepEqual(await problemsOf(db, p, files, [violation({ path: "src/db.ts", line: 4 })]), []);
+    // More distinct places than the diff has (22 added lines and one deleted file) is refused
+    assert.deepEqual(
+      await problemsOf(db, p, files, [
+        violation([...at(Array.from({ length: 23 }, (_, n) => n + 1)), { path: "gone.ts" }]),
+      ]),
+      [
+        "findings.0 (violation trace:ext-s1/storage): 24 places of evidence, more places than the diff has (23)",
+      ],
+    );
+    // A second finding on the same record is a problem, whatever its outcome
+    assert.deepEqual(
+      await problemsOf(db, p, files, [
+        violation(at([1])),
+        { outcome: "complies", unit: "trace:ext-s1/storage", reason: "keeps it", evidence: at([2]) },
+      ]),
+      [
+        "trace:ext-s1/storage: 2 findings; give one per record, with every place it is violated in its evidence",
+      ],
+    );
   } finally {
     await db.done();
   }
