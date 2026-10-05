@@ -32,15 +32,22 @@ Pass the diff under review and the root of the repository under review (`cwd`) t
 |---|---|---|
 | The tool call fails, or it says "Decision lane: not checked" | MCP does not connect, the database is unreachable, or the project is not registered | **`blocked_unknown`** + the reason it gave |
 | "Decision lane: checked" with no record | No active record applies | Continue to Step 3; 0 records may be treated as a **grounded negative** |
-| "Decision lane: checked" with records | Each record and why it applies (anchored to a changed path, or an added line names an option it rejected); an AI's decision is marked `decided by an AI` | Continue |
+| "Decision lane: checked" with records | One batch of at most 50 records, `Batch k of n`, and a `selection`. Each record says why it applies (anchored to a changed path, or an added line names an option it rejected); an AI's decision is marked `decided by an AI` | Continue |
 
 **When returning `blocked_unknown`, state concretely what was missing.** Silently returning 0 results makes the caller read it as "no findings".
 **This step is deterministic and can claim coverage.** It selects only active records; candidates and superseded records never apply.
+
+**Records come 50 at a time.** Take the batches one after another: Steps 2 and 4 and "Check your verdicts" for one batch,
+then `review_select` again with the `after` it names, until it says "This is the last batch". Keep the `selection` of the first batch:
+every later batch and check must show the same one. A check that says the records changed means starting again from the first batch.
+**A check that passes speaks for its batch only.** It never covers a batch you did not check.
+Changes to the working tree between batches (which code locations still exist) are not detected; review a tree that does not change.
 
 ## Step 2 — Read every selected record
 
 `read([keys], cwd)` returns each record's text, its options, the exact words cited as evidence and adoption with who said them, what it
 superseded or conflicts with, and each code location checked in the working tree now. **Judge from this body, never from the key or the one line.**
+When a reply says some refs were not read or a record continues, call `read` again with exactly what it names until nothing is left.
 
 ## Step 3 — Search by the approach's meaning
 
@@ -97,9 +104,11 @@ Then always check the following.
 
 ## Check your verdicts
 
-Before answering, pass your verdicts to `review_check(diff, findings, cwd)`: each finding is `outcome` (`violation`, `complies`, `unrelated`,
-`undetermined`), `unit` (the record key), `reason`, and for a violation or compliance, `evidence` (the changed path and the added line number; for a deleted or renamed-away file, the path alone).
-Give every record `review_select` returned exactly one outcome (several violations of one record are fine). Fix what it reports. A verdict it rejects is not a finding.
+For each batch, pass your verdicts to `review_check(diff, findings, after, selection, cwd)` with the batch's `after` (none for the first) and the
+`selection`: each finding is `outcome` (`violation`, `complies`, `unrelated`, `undetermined`), `unit` (the record key), `reason`, and for a
+violation or compliance, `evidence` (the changed path and the added line number; for a deleted or renamed-away file, the path alone).
+Give every record of the batch exactly one finding: when a record is violated in several places, list every place it is violated in that finding's evidence.
+Fix what it reports and check again. A verdict it rejects is not a finding. Keep each line it returns as `Batch k of n backed (selection ...)`.
 
 ## Output
 
@@ -111,9 +120,14 @@ Give every record `review_select` returned exactly one outcome (several violatio
 verdict: pass | changes_required | blocked_unknown
 findings: <count>
 questions searched: <count> (of which returned 0: <count>)
+batch 1 of <n> backed (selection <selection>)
+batch 2 of <n> backed (selection <selection>)
 1. [severity] file:line — one-line summary
 2. ...
 ```
+
+Write one `batch k of n backed` line for every batch `review_check` passed, copied from its reply. **Without a line for every batch from 1 to n, the verdict is `blocked_unknown`**, never `pass`.
+With no record selected there are no batch lines.
 
 **Never shorten or cut off the list. Give every finding.**
 

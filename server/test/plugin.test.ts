@@ -1130,6 +1130,28 @@ test("search with asked leaves out the session it is given and says when it cann
   }
 });
 
+// Batch receipts are compared by the model following the review Skill, not by code: the rules have to be written where it reads them
+test("the review Skill walks every batch of the decision lane and refuses a pass without a receipt for each", () => {
+  const precedent = fs.readFileSync(path.join(REPO_PLUGIN, "skills/review/reviewers/precedent.md"), "utf8");
+  const skill = fs.readFileSync(path.join(REPO_PLUGIN, "skills/review/SKILL.md"), "utf8");
+  for (const rule of [
+    "Records come 50 at a time.",
+    'until it says "This is the last batch"',
+    "A check that passes speaks for its batch only.",
+    "Changes to the working tree between batches (which code locations still exist) are not detected",
+    "list every place it is violated in that finding's evidence",
+    "call `read` again with exactly what it names until nothing is left",
+    "batch 1 of <n> backed (selection <selection>)",
+    "Without a line for every batch from 1 to n, the verdict is `blocked_unknown`",
+  ])
+    assert.ok(precedent.includes(rule), rule);
+  assert.doesNotMatch(precedent, /several violations of one record are fine/);
+  for (const rule of [
+    "Past decisions: its `batch k of n backed (selection ...)` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`",
+  ])
+    assert.ok(skill.includes(rule), rule);
+});
+
 // A raw argument shape lets the SDK strip a key it does not know, so a misspelled filter (paths for path) would be ignored without a word
 test("every tool of both MCP servers refuses an unknown argument by name", async () => {
   const valid: Record<string, Record<string, unknown>> = {
@@ -1140,7 +1162,7 @@ test("every tool of both MCP servers refuses an unknown argument by name", async
     fields: {},
     overview: { view: "live" },
     review_select: { diff: "x" },
-    review_check: { diff: "x", findings: [] },
+    review_check: { diff: "x", findings: [], selection: "0123456789abcdef" },
     trace_pending: {},
     trace_begin: {},
     harvest_begin: { pr: 1 },

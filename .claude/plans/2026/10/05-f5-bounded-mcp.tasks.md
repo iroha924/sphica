@@ -42,13 +42,14 @@ base: main
   - コミット: `feat(review): take one finding per record with every place it is violated`
   - 結果: `node --test test/review.test.ts` → 11 pass（review evidence: 21 か所を 1 要素で通す、1 か所が追加行でないと名指し、重複は 1 か所、23 か所の diff に 24 か所で拒否、同じ記録の 2 要素で問題）。上限を超える配列には必ず不正な場所が入るので、上限の検査を場所ごとの検査より先にした。`bun run verify` → 0
 
-- [ ] T03: precedent.md と SKILL.md に束ごとの手順と受領行の照合を書く
+- [x] T03: precedent.md と SKILL.md に束ごとの手順と受領行の照合を書く
   - 種別: 変更
   - 計画: S2
   - 依存: T01（返答の文言と受領行の形が要る）, T02（finding の形の書き換えが要る）
   - 変更: `plugin/skills/review/reviewers/precedent.md`, `plugin/skills/review/SKILL.md`, `server/test/plugin.test.ts`
   - 完了条件: `cd server && node --test test/plugin.test.ts` → pass。precedent.md に束ごとの select → read（続きも）→ 判定 → check と受領行、1 記録 1 finding、作業ツリーの変化は検出しない前提があり、SKILL.md に欠落・重複・selection の混在で blocked_unknown の規定がある
   - コミット: `docs(review): walk every batch of the decision lane and reconcile the receipts`
+  - 結果: `node --test --test-name-pattern 'review Skill walks|unknown argument' test/plugin.test.ts` → 2 pass（規定の存在の検査。モデルの実際の照合は検証していない）。SKILL.md の行数上限（497）のため、照合の規定は既存の UNKNOWN の箇条に 1 行で入れ、元からあった二重の空行を 1 つにした。`bun run verify` → 0
 
 - [x] T08: selection を diff の本文から作る（解析後のファイル一覧では削除行と文脈が落ちる）
   - 種別: 修正
@@ -111,3 +112,5 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 
 - 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま
 - 2026-10-05 / T01 / Codex のタスクレビュー F1（P2、再現済み）: selection が parseDiff の結果から作られ、削除行だけが違う diff が同じ selection になる / 採る。plan は diff の本文から作ると決めていた。修正タスク T08 を足した
+- 2026-10-05 / T02 / Codex のタスクレビュー: 指摘なし（Codex 側はテストを一時ディレクトリの EPERM で流せず、コードを読んでの判定） / 対応なし
+- 2026-10-05 / T08 / Codex のタスクレビュー: 指摘なし / 対応なし
