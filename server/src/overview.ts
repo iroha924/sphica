@@ -7,7 +7,7 @@ import { AI_DECIDED, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
 import { READ_BUDGET, UNSUPPORTED } from "./read.ts";
-import { ruleFiles } from "./rule-files.ts";
+import { pathHash, ruleFiles } from "./rule-files.ts";
 import { bytes, head } from "./text.ts";
 
 /** One page: 50 records whose key, text, paths, and heading are each clipped, so a page stays under 64 KiB. Past it the reply says where to go on. */
@@ -123,7 +123,8 @@ const Cursor = z.discriminatedUnion("s", [
   z
     .object({
       s: z.literal("markers"),
-      file: z.string().max(4096),
+      // The file's pathHash, or empty for the first marker
+      file: z.string().regex(/^(?:[0-9a-f]{16})?$/),
       line: z.number().int().min(0),
       n: z.number().int().min(0),
     })
@@ -167,16 +168,11 @@ export async function lookOverview(
     marked: [] as string[],
   };
   let used = 0;
-  // Room kept for a cursor longer than the fixed reserve covers: a marker's cursor carries its file's path
-  let reserve = 0;
-  /** Whether this page looked at any marker */
-  let begun = false;
   let stop: Cursor | null = null;
   /** Adds a line when it fits the page; false means the page is full and the item waits for the next page */
   const fits = (to: string[], line: string) => {
     const shown = head(line, LOOK_LIMITS.line);
-    // A page shows at least one line, so a cursor too long to reserve room for cannot stop the pages from moving on
-    if (used > 0 && used + bytes(shown) + 1 + reserve > LOOK_LIMITS.bytes) return false;
+    if (used + bytes(shown) + 1 > LOOK_LIMITS.bytes) return false;
     used += bytes(shown) + 1;
     to.push(shown);
     return true;
@@ -302,61 +298,56 @@ export async function lookOverview(
   if (!stop) {
     if (!root) notChecked.push("instruction files: no working tree for this project here");
     else {
-      const scan = ruleFiles(root);
-      const found: { file: string; line: number; n: number; key: string }[] = [];
-      for (const f of scan.files)
+      // The cursor names its file by pathHash, so it stays short whatever the path, and the files before it are not read again.
+      // When that file is gone, its hash matches nothing and the markers start over from the first file
+      const resume = from.s === "markers" && from.file ? from : null;
+      const scan = ruleFiles(root, resume?.file);
+      const todo: { file: string; line: number; n: number; key: string }[] = [];
+      for (const f of scan.files) {
+        const same = resume !== null && pathHash(f.path) === resume.file;
         for (const [i, text] of f.text.split(/\r?\n/).entries())
           for (const [n, m] of [...text.matchAll(MARKER)].entries())
-            found.push({ file: f.path, line: i + 1, n, key: m[1] ?? "" });
-      found.sort((x, y) => (x.file < y.file ? -1 : x.file > y.file ? 1 : x.line - y.line || x.n - y.n));
-      const past = (f: { file: string; line: number; n: number }) =>
-        from.s === "markers" &&
-        (f.file < from.file ||
-          (f.file === from.file && (f.line < from.line || (f.line === from.line && f.n <= from.n))));
-      const todo = found.filter((f) => !past(f));
-      // A reduce, not Math.max(...): instruction files can hold more markers than a call takes arguments
-      reserve = [...(from.s === "markers" ? [from] : []), ...todo].reduce(
-        (most, f) => Math.max(most, bytes(cursorText({ s: "markers", file: f.file, line: f.line, n: f.n }))),
-        0,
-      );
-      const keys = [...new Set(todo.map((f) => f.key))];
-      // In slices: SQLite takes at most 32,766 parameters in one statement, and instruction files can hold more markers
-      const units = new Map<string, { id: number; key: string; lifecycle: string }>();
-      for (let i = 0; i < keys.length; i += 500)
-        for (const u of await db
-          .selectFrom("unit")
-          .select(["id", "key", "lifecycle"])
-          .where("project_id", "=", projectId)
-          .where("key", "in", keys.slice(i, i + 500))
-          .execute())
-          units.set(u.key, u);
+            if (!same || i + 1 > resume.line || (i + 1 === resume.line && n > resume.n))
+              todo.push({ file: f.path, line: i + 1, n, key: m[1] ?? "" });
+      }
+      const units = new Map<string, { id: number; key: string; lifecycle: string } | null>();
       const chains = new Map<number, { key: string; lifecycle: string } | null>();
-      let last: Cursor | null = from.s === "markers" ? from : null;
-      // Lines from earlier sections may leave no room for a long markers cursor: then the markers start on the next page
-      if (used > 0 && used + reserve > LOOK_LIMITS.bytes)
-        stop = last ?? { s: "markers", file: "", line: 0, n: 0 };
-      for (const f of stop ? [] : todo) {
-        begun = true;
-        const u = units.get(f.key);
-        const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
-        let line: string | null = null;
-        if (!u) line = `${where} is not a record of this project`;
-        else if (u.lifecycle === "withdrawn") line = `${where} was withdrawn`;
-        else if (u.lifecycle === "superseded") {
-          // A file can mark the same record thousands of times: its chain is followed once
-          let next = chains.get(u.id);
-          if (next === undefined) {
-            next = await successor(db, u.id);
-            chains.set(u.id, next);
+      let last: Cursor | null = resume;
+      // In slices of 500: a page asks only about the markers it reaches, and SQLite takes at most 32,766 parameters in one statement
+      for (let i = 0; i < todo.length && !stop; i += 500) {
+        const slice = todo.slice(i, i + 500);
+        const keys = [...new Set(slice.map((f) => f.key))].filter((k) => !units.has(k));
+        for (const k of keys) units.set(k, null);
+        if (keys.length)
+          for (const u of await db
+            .selectFrom("unit")
+            .select(["id", "key", "lifecycle"])
+            .where("project_id", "=", projectId)
+            .where("key", "in", keys)
+            .execute())
+            units.set(u.key, u);
+        for (const f of slice) {
+          const u = units.get(f.key);
+          const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
+          let line: string | null = null;
+          if (!u) line = `${where} is not a record of this project`;
+          else if (u.lifecycle === "withdrawn") line = `${where} was withdrawn`;
+          else if (u.lifecycle === "superseded") {
+            // A file can mark the same record thousands of times: its chain is followed once
+            let next = chains.get(u.id);
+            if (next === undefined) {
+              next = await successor(db, u.id);
+              chains.set(u.id, next);
+            }
+            line = `${where} was superseded${next ? ` by ${inline(next.key)}${next.lifecycle === "active" ? "" : `, which is ${next.lifecycle} too`}` : ""}`;
           }
-          line = `${where} was superseded${next ? ` by ${inline(next.key)}${next.lifecycle === "active" ? "" : `, which is ${next.lifecycle} too`}` : ""}`;
+          if (line !== null && !fits(lines.marked, line)) {
+            // Before the first marker of this page the stage starts over from where the page began
+            stop = last ?? { s: "markers", file: "", line: 0, n: 0 };
+            break;
+          }
+          last = { s: "markers", file: pathHash(f.file), line: f.line, n: f.n };
         }
-        if (line !== null && !fits(lines.marked, line)) {
-          // Before the first marker of this page the stage starts over from the beginning of the markers
-          stop = last ?? { s: "markers", file: "", line: 0, n: 0 };
-          break;
-        }
-        last = { s: "markers", file: f.file, line: f.line, n: f.n };
       }
       if (scan.skipped)
         notChecked.push(
@@ -385,8 +376,7 @@ export async function lookOverview(
         "none",
       ),
     );
-  // The markers heading appears once the page has looked at a marker, or when the list ends with none
-  if (reached(3) && (begun || stop === null))
+  if (reached(3))
     sections.push(section("Rule markers whose record changed", lines.marked, root ? "none" : "not checked"));
   return [
     ...sections,

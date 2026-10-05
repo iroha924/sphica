@@ -442,13 +442,18 @@ function boundary(all: Buffer, at: number): number {
   return start;
 }
 
-/** Byte ranges of the terminal string sequences plain drops whole: a page never starts or ends inside one, or its rest would show */
+/** Control sequences (ESC [ or CSI, parameters, intermediates, final byte), which plain also drops whole however long */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matches the terminal control sequences plain drops
+const CONTROL_SEQUENCE = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]?/;
+const HIDDEN = new RegExp(`${STRING_SEQUENCE.source}|${CONTROL_SEQUENCE.source}`, "g");
+
+/** Byte ranges of the terminal sequences plain drops whole: a page never starts or ends inside one, or its rest would show */
 function sequences(all: Buffer): [number, number][] {
   const text = all.toString("utf8");
   const out: [number, number][] = [];
   let index = 0;
   let at = 0;
-  for (const m of text.matchAll(STRING_SEQUENCE)) {
+  for (const m of text.matchAll(HIDDEN)) {
     at += bytes(text.slice(index, m.index));
     index = m.index + m[0].length;
     out.push([at, at + bytes(m[0])]);

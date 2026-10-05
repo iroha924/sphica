@@ -363,3 +363,27 @@ test("read hidden sequence: a terminal string longer than a page stays hidden on
     await db.done();
   }
 });
+
+test("read hidden csi: a control sequence with a long parameter list is never cut, so its parameters do not show on the next page", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const id = message(db, p, {
+      id: "m1",
+      text: `intro ${"a".repeat(30_000)}\u001b[${"1;".repeat(50_000)}31m${"b".repeat(40_000)}VISIBLE TAIL`,
+    });
+    let refs = [`s${id}`];
+    let seen = "";
+    for (let n = 0; n < 10 && refs.length; n++) {
+      const reply = await readRefs(db.reader, p, refs, null);
+      assert.ok(Buffer.byteLength(reply) <= READ_BUDGET);
+      seen += reply;
+      refs = pageOf(reply).next;
+    }
+    assert.deepEqual(refs, []);
+    assert.match(seen, /VISIBLE TAIL/);
+    assert.doesNotMatch(seen, /(?:1;){8}/);
+  } finally {
+    await db.done();
+  }
+});

@@ -17,7 +17,7 @@ import { READ_BUDGET } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
+import { aiDecided, message, project, run, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], root: string | null = null) {
   const t: Target = {
@@ -732,6 +732,11 @@ test("look cursor size: a page whose cursor names a long instruction-file path s
     const pages = await lookPages(db, p, root);
     assert.ok(pages.length >= 2, `${pages.length} pages`);
     assert.equal([...pages.join("\n").matchAll(/ is not a record of this project/g)].length, 40);
+    // The cursor names the file without carrying its path, so a path of any length (Windows allows 32,767 characters) fits it
+    for (const page of pages.slice(0, -1)) {
+      const cursor = /after: "([^"]+)"/.exec(page)?.[1] ?? "";
+      assert.ok(cursor.length < 120, `a cursor of ${cursor.length} characters`);
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     await db.done();
@@ -770,6 +775,32 @@ test("look cursor size across stages: conditions that nearly fill a page leave r
     const all = pages.join("\n");
     assert.equal([...all.matchAll(/rejected option o{110}\d+,/g)].length, 60);
     assert.equal([...all.matchAll(/u{900}\/gone is not a record/g)].length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("look markers bounded: a page asks the database only about the markers it can show", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-many-"));
+  try {
+    const p = project(db);
+    fs.writeFileSync(
+      path.join(root, "AGENTS.md"),
+      `${Array.from({ length: 3000 }, (_, i) => `- <!-- sphica: trace:none/m${i} -->`).join("\n")}\n`,
+    );
+    let first = "";
+    const asked = await statements(async () => {
+      first = await lookOverview(db.reader, p, root);
+    });
+    const lookups = asked.filter((q) => /from "unit" where "project_id" = \? and "key" in/.test(q));
+    assert.ok(lookups.length <= 2, `${lookups.length} key lookups on the first page`);
+    assert.match(first, /^Partial: more follow\./m);
+    const all = (await lookPages(db, p, root)).join("\n");
+    for (const i of [0, 1499, 2999])
+      assert.equal([...all.matchAll(new RegExp(`/m${i} is not a record`, "g"))].length, 1, `m${i}`);
+    assert.equal([...all.matchAll(/ is not a record of this project/g)].length, 3000);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     await db.done();

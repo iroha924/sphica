@@ -252,6 +252,36 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - コミット: `fix(read): never start or cut a page inside a terminal sequence`
   - 結果: options と deferred の取得に `CONDITION_ROWS`（LOOK_LIMITS.bytes / 28、1 行は 28 bytes を超える）の上限を付け、全部出せて上限に達したらそこで止める。性能の直しなので red は無い。`node --test test/overview.test.ts` → 17 pass。`bun run verify` → 0
 
+- [x] T23: read のページの切れ目を、CSI（ESC [ と引数）の中にも置かない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T21（制御文字列の範囲で切れ目を動かす）
+  - 変更: `server/src/read.ts`, `server/test/read.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'read hidden csi' test/read.test.ts` → 5 万個の `1;` を引数に持つ CSI の途中で切れると、次のページに `1;1;…` が出て fail
+  - 完了条件: `cd server && node --test test/read.test.ts` → pass
+  - コミット: `fix(look): hash the markers cursor, ask only for shown markers, never cut a CSI`
+  - 結果: red: 上のコマンド → `1;` の列が出て fail。実装後: 隠す範囲に `(?:ESC[|CSI)[0-?]*[ -/]*[@-~]?` を足した。`node --test test/read.test.ts` → 8 pass
+
+- [x] T24: look の markers の段は、そのページで出せる分の marker だけを DB に問い合わせ、続きのページでは前のファイルを読まない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T06（look のカーソルがある）
+  - 変更: `server/src/overview.ts`, `server/src/rule-files.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'look markers bounded' test/overview.test.ts` → 3,000 個の marker で 1 ページ目に key の問い合わせが 6 回あって fail
+  - 完了条件: `cd server && node --test test/overview.test.ts` → pass。1 ページ目の問い合わせが 2 回以下、3,000 個に 1 回ずつ届く
+  - コミット: `fix(look): hash the markers cursor, ask only for shown markers, never cut a CSI`
+  - 結果: red: 上のコマンド → 6 回で fail。実装後: marker を 500 個ずつ、ページが埋まるまで問い合わせる。ruleFiles は from（pathHash）より前のファイルを読まない。`node --test test/overview.test.ts` → 18 pass
+
+- [x] T25: look の markers のカーソルは、パスの代わりに pathHash（16 桁）でファイルを指す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T24（ruleFiles が pathHash から読み始める）
+  - 変更: `server/src/overview.ts`, `server/src/rule-files.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'look cursor size:' test/overview.test.ts` → 制御文字の多い長いパスのカーソルが 4875 文字で fail
+  - 完了条件: `cd server && node --test test/overview.test.ts` → pass。カーソルが 120 文字未満
+  - コミット: `fix(look): hash the markers cursor, ask only for shown markers, never cut a CSI`
+  - 結果: red: 上のコマンド → 4875 文字で fail。実装後: カーソルの file を pathHash（空なら markers の最初から）にし、そのファイルが無くなっていれば最初のファイルからやり直す。長さが一定になったので、T18 と T20 で入れたカーソルの分の確保と markers の手前で止める処理は外した（T18・T20 のテストはそのまま通る）。`node --test test/overview.test.ts` → 18 pass。`bun run verify` → 0（T23〜T25 をまとめて）
+
 ## 記録
 
 - 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま
@@ -276,3 +306,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T13〜T16 / Codex の再レビュー（high）: F1（P2、再現済み）50 の倍数の件数で最後の id を after にした空の束の check が backed を返す → T17。F2（P2、再現済み）長いパスの指示ファイルのカーソルで look のページが 32 KiB を超える → T18。F3（P2）driver で diff を明示すると selection を作り直す → T19 / すべて採る
 - 2026-10-05 / T17〜T19 / Codex の再レビュー（high）F1（P2、再現済み）: markers のカーソルの分を、前の段の行がページを使った後でしか数えていないので、条件の後に長いパスの marker が来ると 32 KiB を超える / 採る。修正タスク T20。T17 と T19 には指摘なし
 - 2026-10-05 / PR #288 / GitHub の Codex（56635757 へのレビュー）P2 4 件: 最後の束の終わりの after（T17 で直し済み）、markers のカーソルの大きさ（T18・T20 で直し済み）、条件の段がページごとに残りを全部読む（T22 で直す）、1 ページより長い制御文字列の中身が次のページで見える（T21 で直す。AGENTS.md の、人に見えない文字をエージェントに見せない不変条件に当たる） / 前 2 件はスレッドを閉じ、後 2 件は直してから閉じる
+- 2026-10-06 / PR #288 / GitHub の Codex（d77340ee へのレビュー、持ち主の依頼で `@codex review`）P2 3 件: CSI の中で切ると引数が次のページに出る（T23）、markers の問い合わせとファイルの読み直しがページ数の 2 乗（T24）、Windows で 4,096 文字を超えるパスのカーソルが受け付けられない（T25）。セキュリティのレビューは指摘なし / 持ち主が 3 件とも直す（B）を選んだ
