@@ -176,3 +176,4 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T06 / Windows の doctor の検査は、SPHICA_HOME ではなく別の HOME の `.sphica/spool` をファイルにする形にした（T04 と同じ理由。後の step が使う HOME も壊さない）
 - 2026-10-05 / T12 / verify が 2 回続けて record.test.ts の rename limit（一時ディレクトリの rmSync が ENOTEMPTY）で落ちた。このブランチは触っていない / 単独で 3 回 pass、`bun run test` は T12 の変更あり・なしとも 0、3 回目の verify は 0。負荷で起きる既存の不安定さとみて手を入れない
 - 2026-10-05 / T06, T07 / コミットの件名が 100 文字の上限を超えたので短くした。T06 は `ci(hooks): check a missed observation is resent, and doctor's unreadable queue on Windows`、T07 は `docs: say when a missed record tool observation is resent`（版は T01 で上げ済み）
+- 2026-10-05 / T09〜T12 / Codex のレビュー（483ed6e4..e0cc9ab3） / 指摘なし
