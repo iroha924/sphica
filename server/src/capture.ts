@@ -161,7 +161,7 @@ export function fit(body: string): {
  * Prunes set-aside records. Without a limit they fill the disk — used without registering, unsendable
  * records pile up forever. Names start with the time they were stored (ms), so name order is oldest first.
  */
-function prune(held: string): void {
+function prune(held: string, removed: () => void = () => {}): void {
   let files: string[];
   try {
     files = fs
@@ -174,7 +174,10 @@ function prune(held: string): void {
   const cutoff = Date.now() - HOLD_DAYS * 24 * 60 * 60 * 1000;
   const stale = files.filter((f) => Number(f.split("-")[0]) < cutoff);
   const over = files.slice(0, Math.max(0, files.length - HOLD_MAX));
-  for (const f of new Set([...stale, ...over])) fs.rmSync(path.join(held, f), { force: true });
+  for (const f of new Set([...stale, ...over])) {
+    fs.rmSync(path.join(held, f), { force: true });
+    removed();
+  }
 }
 
 /** Writes one queued file into dir and returns its path. Names start with the time they were stored (ms), so name order is oldest first. */
@@ -566,11 +569,37 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   return { flush: false };
 }
 
-type State = { flushedAt?: string; error?: string | null; deferred?: number };
+/** pruned is the last time held records expired and how many: kept until a later prune removes some, so doctor can show it */
+type State = {
+  flushedAt?: string;
+  error?: string | null;
+  deferred?: number;
+  pruned?: { at: string; count: number };
+};
+
+/** The state file, each field read with a type check (so doctor and the SessionStart warning survive it being edited from outside). */
+function readStateFile(): State {
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(stateFile(), "utf8"));
+    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
+  } catch {
+    // Not sent yet, or half-written and unreadable
+  }
+  const p = raw.pruned as { at?: unknown; count?: unknown } | undefined;
+  return {
+    flushedAt: typeof raw.flushedAt === "string" ? raw.flushedAt : undefined,
+    // error is a string on send failure and null on success. An empty reason still counts as a failure.
+    error: typeof raw.error === "string" ? raw.error || "unknown failure" : null,
+    deferred: typeof raw.deferred === "number" ? raw.deferred : undefined,
+    pruned:
+      p && typeof p.at === "string" && typeof p.count === "number" ? { at: p.at, count: p.count } : undefined,
+  };
+}
 
 function writeState(s: State): void {
   try {
-    fs.writeFileSync(stateFile(), JSON.stringify(s));
+    fs.writeFileSync(stateFile(), JSON.stringify({ ...s, pruned: s.pruned ?? readStateFile().pruned }));
   } catch {
     // Recording continues even if the state cannot be written
   }
@@ -598,23 +627,8 @@ export function readState(): State & {
     rejected: count(rejectedDir()),
     unregistered: count(unregisteredDir()),
   };
-  // Read each field with a type check (so doctor and the SessionStart warning survive the file being edited from outside).
-  let raw: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(stateFile(), "utf8"));
-    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
-  } catch {
-    // Not sent yet, or half-written and unreadable
-  }
-  // error is a string on send failure and null on success. An empty reason still counts as a failure.
-  const error = typeof raw.error === "string" ? raw.error || "unknown failure" : null;
-  return {
-    flushedAt: typeof raw.flushedAt === "string" ? raw.flushedAt : undefined,
-    error,
-    deferred: typeof raw.deferred === "number" ? raw.deferred : undefined,
-    ...counts,
-    stuck: error && counts.pending > 0 ? error : null,
-  };
+  const state = readStateFile();
+  return { ...state, ...counts, stuck: state.error && counts.pending > 0 ? state.error : null };
 }
 
 /**
@@ -805,6 +819,24 @@ const queued = (from: string): { name: string; from: string }[] => {
   }
 };
 
+const CODE_NAMES: Record<number, string> = { 18: "TOOBIG", 19: "CONSTRAINT", 20: "MISMATCH", 25: "RANGE" };
+
+/** Moves a queued file into dir with a short reason beside it: a code, never the record's text or an error message. */
+function setAside(from: string, name: string, dir: string, reason: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    fs.renameSync(path.join(from, name), path.join(dir, name));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // a concurrent send moved it first
+    throw e;
+  }
+  try {
+    fs.writeFileSync(path.join(dir, `${name}.reason`), reason, { mode: 0o600 });
+  } catch {
+    // Without its reason doctor shows it as unknown; the record itself is kept
+  }
+}
+
 /**
  * Sends one batch. Records of unregistered projects are moved to unregistered/, records the database rejects to rejected/, the rest deleted.
  * **One invalid record never stops later records.** When the batch fails on a bad value it resends one by one.
@@ -816,13 +848,24 @@ async function sendBatch(
   const held = unregisteredDir();
   const records: { name: string; from: string; r: Spooled }[] = [];
   for (const { name, from } of names) {
+    let raw: unknown;
     let r: Spooled | null;
     try {
-      r = current(JSON.parse(fs.readFileSync(path.join(from, name), "utf8")));
+      raw = JSON.parse(fs.readFileSync(path.join(from, name), "utf8"));
     } catch {
-      // Unreadable or of an unknown version: set it aside for the owner to see, never delete it
-      fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
-      fs.renameSync(path.join(from, name), path.join(rejectedDir(), name));
+      // Set aside for the owner to see, never deleted
+      setAside(from, name, rejectedDir(), "unreadable");
+      continue;
+    }
+    try {
+      r = current(raw);
+    } catch {
+      setAside(
+        from,
+        name,
+        rejectedDir(),
+        typeof (raw as { project?: unknown })?.project === "string" ? "version" : "no-project",
+      );
       continue;
     }
     if (r) records.push({ name, from, r });
@@ -830,7 +873,7 @@ async function sendBatch(
   }
   let sent = 0;
   let strayed: typeof records = [];
-  const bad: typeof records = [];
+  const bad: ((typeof records)[number] & { why: string })[] = [];
   try {
     const out = await write(
       db,
@@ -848,20 +891,11 @@ async function sendBatch(
         if (out.strayed.size) strayed.push(x);
       } catch (e2) {
         if (!rejected(e2)) throw e2;
-        bad.push(x);
+        bad.push({ ...x, why: `sqlite:${CODE_NAMES[sqliteCode(e2) ?? -1] ?? "unknown"}` });
       }
     }
   }
-  if (bad.length) {
-    fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
-    for (const x of bad) {
-      try {
-        fs.renameSync(path.join(x.from, x.name), path.join(rejectedDir(), x.name));
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; // a concurrent send moved it first
-      }
-    }
-  }
+  for (const x of bad) setAside(x.from, x.name, rejectedDir(), x.why);
   if (strayed.length) {
     fs.mkdirSync(held, { recursive: true, mode: 0o700 });
     for (const x of strayed) {
@@ -876,24 +910,6 @@ async function sendBatch(
   const moved = new Set([...bad, ...strayed].map((x) => x.name));
   for (const x of records) if (!moved.has(x.name)) fs.rmSync(path.join(x.from, x.name), { force: true });
   return { sent, rejected: bad.length };
-}
-
-const CODE_NAMES: Record<number, string> = { 18: "TOOBIG", 19: "CONSTRAINT", 20: "MISMATCH", 25: "RANGE" };
-
-/** Moves a queued file into dir with a short reason beside it: a code, never the record's text or an error message. */
-function setAside(from: string, name: string, dir: string, reason: string): void {
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  try {
-    fs.renameSync(path.join(from, name), path.join(dir, name));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // a concurrent send moved it first
-    throw e;
-  }
-  try {
-    fs.writeFileSync(path.join(dir, `${name}.reason`), reason, { mode: 0o600 });
-  } catch {
-    // Without its reason doctor shows it as unknown; the record itself is kept
-  }
 }
 
 /**
@@ -985,10 +1001,12 @@ export async function flush(
     };
     const late = () => batches > 0 && Date.now() >= deadline;
     const sentBefore = batches;
+    let removed = 0;
+    const pruned = () => (removed ? { at: new Date().toISOString(), count: removed } : undefined);
     try {
       if (first) {
         // Expired held records are dropped before they could be sent. Records held during this send are not in the list.
-        prune(held);
+        prune(held, () => removed++);
         for (const part of chunks(queued(held), BATCH)) {
           if (late()) break;
           await send(part);
@@ -1006,13 +1024,19 @@ export async function flush(
         await send(part);
         queueBatches++;
       }
-      prune(held);
+      prune(held, () => removed++);
       total.deferred = queued(held).length;
       // Written before unlocking, so it never overwrites the state of a send that ran after this one. With nothing sent, the last send time stays.
       if (batches > sentBefore)
-        writeState({ flushedAt: new Date().toISOString(), error: null, deferred: total.deferred });
+        writeState({
+          flushedAt: new Date().toISOString(),
+          error: null,
+          deferred: total.deferred,
+          pruned: pruned(),
+        });
+      else if (removed) writeState({ ...readStateFile(), pruned: pruned() });
     } catch (e) {
-      writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300) });
+      writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300), pruned: pruned() });
       throw e;
     } finally {
       await (client as Kysely<DB> | null)?.destroy().catch(() => {});

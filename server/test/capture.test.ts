@@ -1624,6 +1624,82 @@ test("a queued record without a project key goes to rejected/ and the rest are s
   }
 });
 
+test("rejection reason: each record set aside in rejected/ carries why, never its text", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    fs.mkdirSync(spoolDir(), { recursive: true });
+    fs.writeFileSync(path.join(spoolDir(), "1-1-a.json"), "{not json");
+    fs.writeFileSync(path.join(spoolDir(), "2-1-b.json"), JSON.stringify({ v: 3, project: registered }));
+    fs.writeFileSync(path.join(spoolDir(), "3-1-c.json"), JSON.stringify({ v: 2, kind: "message" }));
+    queue(spoolDir(), 4, 4, {
+      ...owned(registered, 4),
+      session: "s-other",
+      host: "elsewhere",
+    } as unknown as Spooled);
+    queue(spoolDir(), 5, 5, owned(registered, 5));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1);
+    const why = Object.fromEntries(
+      fs
+        .readdirSync(rejectedDir())
+        .filter((f) => f.endsWith(".reason"))
+        .map((f) => [f.slice(0, 3), fs.readFileSync(path.join(rejectedDir(), f), "utf8")]),
+    );
+    assert.deepEqual(why, {
+      "1-1": "unreadable",
+      "2-1": "version",
+      "3-1": "no-project",
+      "4-1": "sqlite:CONSTRAINT",
+    });
+    assert.equal(left(rejectedDir()), 4, "the records stay to be fixed and moved back");
+  } finally {
+    fs.rmSync(rejectedDir(), { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("prune count: the last prune that removed held records is kept, through sends that remove none and a failed send", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const stale = Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000;
+  try {
+    fs.rmSync(path.join(home, ".sphica", "capture.json"), { force: true });
+    queue(unregisteredDir(), stale, 1, owned("git:example/none", 1));
+    queue(unregisteredDir(), stale, 2, owned("git:example/none", 2));
+    await flush(db.file);
+    const first = readState();
+    assert.equal(first.pruned?.count, 2);
+    assert.equal(first.flushedAt, undefined, "nothing was sent, so no send time");
+    queue(spoolDir(), Date.now(), 3, owned(registered, 3));
+    await flush(db.file);
+    assert.deepEqual(readState().pruned, first.pruned, "a send that removes none keeps the last count");
+    // The second removal fails: the one already removed still counts, on the failed send's state
+    queue(unregisteredDir(), stale, 4, owned("git:example/none", 4));
+    queue(unregisteredDir(), stale, 5, owned("git:example/none", 5));
+    const rm = fs.rmSync;
+    let calls = 0;
+    const m = mock.method(fs, "rmSync", (...a: Parameters<typeof fs.rmSync>) => {
+      if (String(a[0]).includes(`${path.sep}unregistered${path.sep}`) && ++calls === 2)
+        throw new Error("EPERM");
+      return rm(...a);
+    });
+    try {
+      await assert.rejects(flush(db.file), /EPERM/);
+    } finally {
+      m.mock.restore();
+    }
+    const failed = readState();
+    assert.equal(failed.pruned?.count, 1);
+    assert.match(failed.error ?? "", /EPERM/);
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
 // Before migrating, a third spelling must not pick one of two projects its key normalizes to: writing into the empty one would leave
 // two projects with records, which revision 8 refuses to merge
 test("a legacy key held while two projects share its normalized key stays held, and the migration still merges them", async () => {

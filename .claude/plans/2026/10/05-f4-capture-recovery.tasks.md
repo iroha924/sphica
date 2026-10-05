@@ -39,14 +39,14 @@ hook が DB に書けなかった record ツールの呼び出しが、次の fl
   - red: `cd server && node --test --test-name-pattern 'observation resend' test/capture.test.ts` → hook が書けなかった呼び出しの後、flush しても `tool_call_observation` に行が無く、別ターンの返事への agent の採用の insert が拒否されて fail
   - 完了条件: `cd server && node --test --test-name-pattern 'observation resend' test/capture.test.ts` → pass。再送後に別ターンが通り呼び出しのターンは拒否のまま、重複の再送で行が変わらない、未結合がもう 1 件あれば拒否のまま、拡張年の 2 例が `calls/rejected/` に `shape` で移り同じバッチの正常な観測は入る、callSession が再送前 null・再送後に観測のセッション、trace_pending の auto は再送前に何もしない
   - コミット: `fix(capture): resend record tool observations a hook could not write`
-  - 結果: red（送信を足す前）: 2 件とも fail。1 件目は送信前の拒否・callSession の null・trace_pending の「cannot tell」までは通り、flush の後に `calls/` に観測が残る「sent and removed」で落ちた。2 件目は `toolu_ok` が入らず落ちた
+  - 結果: red（送信を足す前）: `node --test --test-name-pattern 'observation resend' test/capture.test.ts` → 2 件とも fail。1 件目は送信前の拒否・callSession の null・trace_pending の「cannot tell」までは通り、flush の後に `calls/` に観測が残る「sent and removed」で落ちた。2 件目は `toolu_ok` が入らず落ちた
   - 結果: 実装後 `node --test --test-name-pattern 'observation|record call' test/capture.test.ts` → 7 pass。`bun run verify` → 0（sql:live に calls/ の送り直しを足した）
 
 ## P2: 待ち行列の診断（#278）
 
 doctor が待ち行列を読めない・残った・拒まれた・保留・消えた状態と、結べない呼び出しをそのまま出す。
 
-- [ ] T03: 拒否の理由ファイルと prune の件数
+- [x] T03: 拒否の理由ファイルと prune の件数
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -54,6 +54,8 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
   - red: `cd server && node --test --test-name-pattern 'rejection reason|prune count' test/capture.test.ts` → `rejected/<name>.reason` が無く、capture.json に `pruned` が無くて fail
   - 完了条件: `cd server && node --test --test-name-pattern 'rejection reason|prune count' test/capture.test.ts` → pass。`unreadable` / `version` / `no-project` / `sqlite:<CODE>` が書かれ、prune の件数が成功・失敗・送らなかった flush のどれでも残り、0 件の flush は前の値を引き継ぐ
   - コミット: `fix(capture): keep why each record was rejected and how many held records were pruned`
+  - 結果: red（capture.ts を直す前に戻して）: `node --test --test-name-pattern 'rejection reason|prune count' test/capture.test.ts` → 理由ファイルが 1 つも無く deepEqual で fail、capture.json に `pruned` が無く `undefined !== 2` で fail
+  - 結果: 実装後 `node --test --test-name-pattern 'rejection reason|prune count' test/capture.test.ts` → 2 pass（unreadable / version / no-project / sqlite:CONSTRAINT、送らない flush でも件数が残り、0 件の flush と 2 件目の削除で落ちた flush でも直前の値か 1 件が残る）。`bun run verify` → 0
 
 - [ ] T04: readState の読めない状態、SessionStart の通知、queueReport
   - 種別: 修正
@@ -97,3 +99,5 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
 
 - 2026-10-05 / T01, T07 / pre-commit の bundle 検査が、package の入力を変える最初のコミットで版の上げを求めた / 版の上げを T07 から T01 へ移した。T01 の変更欄に 4 ファイルを足し（前: capture.ts と capture.test.ts だけ）、T07 の変更欄から 4 ファイルを外し、T07 の名前から「・版」を外し完了条件を「4 つの版が 0.6.34 で同じ」にした
 - 2026-10-05 / T02 / sql:live が capture.ts の新しい insert を子プロセスで通っていないと落とした / T02 の変更欄に `scripts/check-sql-live.mjs` を足した（前: capture.ts と capture.test.ts だけ）。calls/ に置いた観測を `--flush` が送ることを子プロセスで確かめる
+- 2026-10-05 / T01 / Codex のタスクごとのレビュー（65383caf） / 指摘なし。ロック時の実走と Windows は Codex 側で未実行（read-only）
+- 2026-10-05 / T03 / 実装を先に書いてから red を確かめた / capture.ts の変更を一時的に退けて新しいテストが意図した理由で落ちることを確かめ、戻した
