@@ -348,8 +348,10 @@ function nameHome(): { home: string; map: string; first: string; a: string; b: s
   fs.mkdirSync(path.join(home, ".sphica"));
   const map = path.join(home, ".sphica", "projects.json");
   fs.writeFileSync(map, JSON.stringify({ [first]: "first" }));
-  const realHome = process.env.HOME;
+  // Windows reads the home from USERPROFILE, so both are swapped (the child gets both too)
+  const real = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   process.env.HOME = home;
+  process.env.USERPROFILE = home;
   return {
     home,
     map,
@@ -357,7 +359,10 @@ function nameHome(): { home: string; map: string; first: string; a: string; b: s
     a,
     b,
     done: () => {
-      process.env.HOME = realHome;
+      for (const [k, v] of Object.entries(real)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
       fs.rmSync(home, { recursive: true, force: true });
     },
   };

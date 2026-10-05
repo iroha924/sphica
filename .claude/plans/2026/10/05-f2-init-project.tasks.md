@@ -90,6 +90,15 @@ base: main
   - コミット: `fix(init): place a new database under a lock so a concurrent init cannot replace it`
   - 結果: red（直す前の admin.ts）→ `both or neither created it: Created / Created` で落ちた。直した後: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 38 件 pass。`bun run verify` → exit 0
 
+- [x] T09: nameLocal の競合のテストで USERPROFILE も一時的なホームに差し替える
+  - 種別: 変更
+  - 計画: S2
+  - 依存: T04（直す対象のテストが要る）
+  - 変更: `server/test/project.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/project.test.ts` → pass。`bun run verify` → 終了コード 0
+  - コミット: `test(init): swap USERPROFILE too in the name map race tests`
+  - 結果: `cd server && node --test --test-timeout=60000 test/project.test.ts` → 18 件 pass。`bun run verify` → exit 0
+
 ## P3: doctor の文面
 
 doctor が、見つからない project には探した場所を、コピーが複数ある project にはその一覧を出す
@@ -109,3 +118,5 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T03 / Codex のレビュー（c5f547a2）→ 指摘なし / Windows での pass は A4 で確かめる
 - 2026-10-05 / T04 / 子プロセスの同期を T05 と共有するため、変更欄に `server/test/race.ts` を足した（前: project.ts・project.test.ts・name-local-child.ts） / そのまま進めた
 - 2026-10-05 / T08 / T07 の Codex のレビュー（bb52da3d、F1〜F3 を故障注入で再現）で、読み戻しの失敗・close の失敗・後始末の削除の一時的な失敗でロックが残ることが分かった / 修正タスク T08 を T07 の後に足して直した
+- 2026-10-05 / T09 / T04 の Codex のレビュー（bbf17334、F1）: nameHome が HOME だけを差し替え、Windows で流すと実際のユーザーの projects.json を触る / テストの不備なので修正ではなく変更として T09 を足した（macOS では red を観測できない）
+- 2026-10-05 / T08 / Codex のレビュー（4f2355af）→ 指摘なし
