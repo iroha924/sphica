@@ -508,8 +508,8 @@ if (TRAILER !== null) {
     );
     for (const file of [".github/workflows/check.yml", ".github/workflows/release.yml"]) {
       const lines = read(file).split("\n");
-      const at = lines.findIndex((l) => l === "      - name: Install lychee");
-      const verify = lines.findIndex((l) => l === "        run: bun run verify");
+      const at = lines.indexOf("      - name: Install lychee");
+      const verify = lines.indexOf("        run: bun run verify");
       // The step ends at the next step or job; the job ends at the next job key
       let end = at + 1;
       while (at !== -1 && end < lines.length && !/^ {6}- |^ {2}\S/.test(lines[end])) end++;
@@ -518,7 +518,7 @@ if (TRAILER !== null) {
       const pin = body.map((l) => /^ {10}LYCHEE: "([^"]+)"$/.exec(l)?.[1]).find(Boolean);
       if (at === -1) fail.push(`${file}: no Install lychee step`);
       else if (
-        !body.some((l) => l.includes("/lychee-v${LYCHEE}/")) ||
+        !body.some((l) => /\/lychee-v\$\{LYCHEE\}\//.test(l)) ||
         !body.some((l) => l.includes("sha256sum -c -")) ||
         !body.some((l) => l.includes('>> "$GITHUB_PATH"'))
       )
