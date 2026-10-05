@@ -83,6 +83,16 @@ base: main
   - コミット: `fix(review): copy the receipt's closing period too`
   - 結果: red: 上の完了条件のコマンド → 「Batch 1 of <n> backed (selection <selection>).」で fail。実装後 → 1 pass。`bun run verify` → 0
 
+- [x] T13: 束の境目でない after を review_select と review_check で拒む
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（束がある）
+  - 変更: `server/src/review.ts`, `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/test/review.test.ts`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'review batch boundary' test/review.test.ts` → 120 件で after に 1 件目の id を渡した check が問題なしを返し fail
+  - 完了条件: `cd server && node --test test/review.test.ts` → pass。境目でない after の check が「after N is not where a batch review_select gave ends」を返す
+  - コミット: `fix(review): refuse an after that is not where a batch ended`
+  - 結果: red: 上のコマンド → 問題なし（[]）で fail。実装後 `node --test test/review.test.ts` → 13 pass。review_select も境目でない after を not checked で返す。`bun run verify` → 0
+
 ## P2: read の応答の上限（#267）
 
 read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続きを辿れば全文に届く。
@@ -170,3 +180,7 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T07 / 変更欄: 前 `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts` → 後 `server/evals/acceptance/driver.ts`, `server/src/read.ts`, `server/test/search.test.ts`, `server/test/extract.test.ts`。層ごとの件数は合意した数として acceptance-cases.test.ts が固定しているのでケースは足さず、driver が readRefs を通るようになって不要になった readSource を消した
 - 2026-10-05 / T11 / Codex のタスクレビュー: 指摘なし / 対応なし
 - 2026-10-05 / T06 / Codex のタスクレビュー F1（P2、再現済み）: base64url の decode が範囲外の文字を読み飛ばすので、壊れたカーソルが通る / 採る。修正タスク T12 を足し、同じコミットで終えた
+- 2026-10-05 / 全差分 / Codex の全差分レビュー（high）F1（P2、再現済み）: 束の境目でない after から始めると、u1 を飛ばしたまま Batch 1〜3 of 3 の受領行がそろう / 採る。修正タスク T13
+- 2026-10-05 / 全差分 / 同 F2（P2、再現済み）: source のヘッダーの欄を切ると端末の制御文字列の終わりが落ち、本文と続きの案内が消える / 採る。修正タスク T14
+- 2026-10-05 / 全差分 / 同 F3（P2）: driver の review_validate が review_select の selection を使わず作り直すので、記録の変化の検出を通らない / 採る。修正タスク T15
+- 2026-10-05 / 全差分 / review-shipping（再現済み）: Codex 0.160.0 は 64 KiB の read の応答を約 10,000 トークン（bytes/4 の見積もり）で真ん中から切り、続きの案内だけ残るので本文が黙って抜ける。Claude Code 2.1.289 は詰まった ASCII の 64 KiB をファイルに退避した / plan の前提（64 KiB は切られない）が誤り。上限の値と範囲を新しい会話で Codex と相談中

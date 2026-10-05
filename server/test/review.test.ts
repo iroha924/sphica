@@ -320,6 +320,43 @@ test("review batch: 120 records go in three batches by id, each check speaks for
   }
 });
 
+test("review batch boundary: an after that is not where a batch ended is refused, so receipts cannot skip a record", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const words = Array.from({ length: 120 }, (_, n) => `Rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: words.join(" ") });
+    const unit = (w: string, n: number) => ({
+      key: `r${n}`,
+      kind: "decision",
+      stance: "do",
+      text: w,
+      evidence: [{ source: `s${m}`, quote: w, role: "states" }],
+      adoption: [{ source: `s${m}`, quote: w }],
+      anchors: [{ path: "src/db.ts", role: "applies_to" }],
+    });
+    await save(db, p, { units: words.slice(0, 50).map(unit) });
+    await save(db, p, { units: words.slice(50, 100).map((w, i) => unit(w, i + 50)) });
+    await save(db, p, { units: words.slice(100).map((w, i) => unit(w, i + 100)) });
+    const files = parseDiff(DIFF);
+    const first = await reviewBatch(db.reader, p, files, null, DIFF);
+    const skipped = first.records[0]?.id ?? 0;
+    const off = await reviewBatch(db.reader, p, files, skipped, DIFF);
+    const c = await checkFindings(
+      db.reader,
+      p,
+      files,
+      off.records.map((u) => ({ outcome: "unrelated", unit: u.key })),
+      { after: skipped, selection: first.selection, diff: DIFF },
+    );
+    assert.deepEqual(c.problems, [
+      `after ${skipped} is not where a batch review_select gave ends; start again from the first batch`,
+    ]);
+  } finally {
+    await db.done();
+  }
+});
+
 test("review selection: diffs that differ only in removed or context lines are told apart", async () => {
   const db = tempDb();
   try {

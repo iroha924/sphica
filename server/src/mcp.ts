@@ -403,6 +403,11 @@ server.registerTool(
       const b = await reviewBatch(db, p.id, files, a.after ?? null, a.diff);
       if (!b.all.length)
         return text(`Decision lane: checked. No active record applies to the ${files.length} changed files.`);
+      if (!b.aligned)
+        return text(
+          `Decision lane: not checked. after ${a.after} is not where a batch ended: pass the after a batch gave, or none for the first batch.`,
+          true,
+        );
       if (!b.records.length)
         return text(
           `Decision lane: checked. No record after id ${a.after}: ${b.all.length} records apply in all (selection ${b.selection}).`,

@@ -220,6 +220,8 @@ export type Batch = {
   selection: string;
   /** The id to pass as after for the next batch, or null on the last */
   next: number | null;
+  /** Whether after is where a batch ends (or absent): any other start would let receipts skip the records before it */
+  aligned: boolean;
 };
 
 /** The batch of a review after the record id `after` (null for the first). `diff` is the text `files` was read from. */
@@ -240,7 +242,16 @@ export async function reviewBatch(
     .toString("hex")
     .slice(0, 16);
   const last = records.at(-1);
-  return { all, records, k, n, selection, next: rest.length > records.length && last ? last.id : null };
+  const ends = all.filter((_, i) => (i + 1) % REVIEW_BATCH === 0).map((u) => u.id);
+  return {
+    all,
+    records,
+    k,
+    n,
+    selection,
+    next: rest.length > records.length && last ? last.id : null,
+    aligned: after === null || ends.includes(after),
+  };
 }
 
 /** Sphica's own words for a reviewer about an AI's decision, never taken from a record: shown only beside one */

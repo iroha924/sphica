@@ -1150,7 +1150,7 @@ test("the review Skill walks every batch of the decision lane and refuses a pass
   // The receipts are copied from review_check's reply, so they start the way it does
   const reply = checkedText({
     problems: [],
-    batch: { all: [], records: [], k: 1, n: 2, selection: "0123456789abcdef", next: null },
+    batch: { all: [], records: [], k: 1, n: 2, selection: "0123456789abcdef", next: null, aligned: true },
   });
   const receipt = /^Batch \d+ of \d+ backed \(selection [0-9a-f]{16}\)\./;
   assert.match(reply, receipt);

@@ -49,6 +49,13 @@ export async function checkFindings(
       ],
       batch: null,
     };
+  if (!batch.aligned)
+    return {
+      problems: [
+        `after ${at.after} is not where a batch review_select gave ends; start again from the first batch`,
+      ],
+      batch: null,
+    };
   const applicable = new Set(batch.all.map((u) => u.key));
   const here = new Set(batch.records.map((u) => u.key));
   // A record can be violated at no more places than the diff has: its added lines and the files that are gone
