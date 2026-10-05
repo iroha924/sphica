@@ -1,0 +1,102 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^apply_patch$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^apply_patch$|^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

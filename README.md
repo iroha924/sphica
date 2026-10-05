@@ -69,7 +69,7 @@ codex plugin marketplace add iroha924/sphica --ref main
 codex plugin add sphica@sphica
 ```
 
-In Codex, open `/hooks` and mark Sphica's hooks as trusted. Automatic recording does not start until you do. If a plugin update changes the hooks, trust them again.
+In Codex, open `/hooks` and mark Sphica's hooks as trusted. Automatic recording does not start until you do. If a plugin update changes the hooks, trust them again. The "Codex hooks" line of `sphica doctor` shows how many are trusted (for Codex 0.160.0).
 
 **3. Set up in your repository**
 
@@ -192,7 +192,7 @@ npm uninstall -g sphica
 Run `sphica doctor` first. It shows which part is out of date or not working. Common cases:
 
 - **`sphica: command not found`.** The plugin does not put the CLI on your PATH. Run `npm i -g sphica`.
-- **Nothing is recorded.** Check that `sphica doctor` lists the repository under Projects. In Codex, also check that the hooks are trusted in `/hooks`.
+- **Nothing is recorded.** Check that `sphica doctor` lists the repository under Projects. In Codex, also check the "Codex hooks" line, or `/hooks`, for hooks that are not trusted.
 - **The MCP servers report an older version.** Restart the session, or run `/reload-plugins` in Claude Code.
 - **A search finds nothing.** Search matches words. Try other words, the other language, an identifier, or fewer words. Ask the agent to check `status`: sessions not traced yet are searchable only as captured text.
 - **`doctor` says the full-text index is broken.** Run `sphica doctor --reindex`.

@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { SAMPLES, splitLine } from "../src/split-check.ts";
+import { fakeCodex } from "./fake-codex.ts";
 import { fakeGhPath } from "./fake-gh.ts";
 
 const signedOut = fakeGhPath();
@@ -171,6 +172,54 @@ test("uninstall names a SPHICA_DB in a sibling of ~/.sphica as outside it", () =
     assert.match(out, /SPHICA_DB points outside it/, out);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor as a child process shows Codex's trust in the installed hooks, and an untrusted hook does not fail it", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-"));
+  const codex = fakeCodex();
+  const doctor = () => {
+    try {
+      const out = execFileSync(process.execPath, [CLI, "doctor"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          PATH: `${codex.bin}${path.delimiter}${signedOut}`,
+          HOME: home,
+          USERPROFILE: home,
+          CODEX_HOME: codex.home,
+        },
+        timeout: 30_000,
+      });
+      return { code: 0, out };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return { code: err.status ?? -1, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+    }
+  };
+  try {
+    // A database, so the only failures doctor could have are its own rows
+    assert.equal(runIn(home, "init", "--cwd", home).code, 0);
+    const trusted = doctor();
+    assert.match(trusted.out, /✓ Codex hooks\s+9 of 9 trusted in /, trusted.out);
+    assert.equal(trusted.code, 0, trusted.out);
+    const text = fs.readFileSync(codex.config, "utf8");
+    fs.writeFileSync(
+      codex.config,
+      text
+        .replace(/(stop:0:0"\]\ntrusted_hash = "sha256:)6/, "$10")
+        .replace(/(pre_tool_use:0:0"\]\ntrusted_hash = "[^"]+"\nenabled = )true/, "$1false"),
+    );
+    const changed = doctor();
+    assert.match(
+      changed.out,
+      /△ Codex hooks\s+8 of 9 trusted in [^\n]+; 1 modified, 1 disabled\. open \/hooks/,
+      changed.out,
+    );
+    assert.equal(changed.code, 0, changed.out);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(path.dirname(codex.home), { recursive: true, force: true });
   }
 });
 

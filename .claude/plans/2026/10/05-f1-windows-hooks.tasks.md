@@ -67,20 +67,22 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
 
 `sphica doctor` に「Codex hooks」の行が出て、trusted / modified / untrusted / disabled / unknown が分かる
 
-- [ ] T04: smol-toml を足し、Codex と同じハッシュを出す純粋関数とテストを書く
+- [x] T04: smol-toml を足し、Codex と同じハッシュを出す純粋関数とテストを書く
   - 種別: 追加
   - 計画: S3
   - 依存: T03（Windows の手書きの期待値は出荷する EncodedCommand の文字列から作る）
-  - 変更: `server/package.json`, `bun.lock`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`, `server/test/fixtures/codex-trust/`
+  - 変更: `server/package.json`, `server/bun.lock`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`, `server/test/fixtures/codex-trust/`
   - 完了条件: `cd server && node --test test/codex-trust.test.ts` → 固定の 9 件が trusted、手書きの期待値と境界のケースが全件 pass。`bun run notices` → 終了コード 0
   - コミット: `feat(doctor): compute Codex's hook trust hashes`
-- [ ] T05: doctor の observe と report に「Codex hooks」の行を足し、既存のテストを隔離し、CLI の子プロセスのテストと README を足す
+  - 結果: `cd server && node --test test/codex-trust.test.ts` → 7 件 pass（この PC の Codex 0.160.0 が書いた 9 件が全部 trusted、手書きの正規化済み JSON の sha256 と POSIX・Windows で一致、境界のケース）。`bun run notices` → `third-party notices: 103 packages`
+- [x] T05: doctor の observe と report に「Codex hooks」の行を足し、既存のテストを隔離し、CLI の子プロセスのテストと README を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T04（ハッシュと状態を出す関数が要る）
-  - 変更: `server/src/plugin.ts`, `server/test/plugin.test.ts`, `server/test/cli.test.ts`, `README.md`, `README.ja.md`
+  - 変更: `server/src/plugin.ts`, `server/test/plugin.test.ts`, `server/test/cli.test.ts`, `server/test/fake-codex.ts`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify` → 終了コード 0（偽の codex が一時の CODEX_HOME を受け取り、config.toml の中身と mtime が変わらず、trusted・modified・disabled の行が出て、その行で終了コードが 1 にならない）
   - コミット: `feat(doctor): report whether Codex trusts Sphica's current hooks`
+  - 結果: `bun run verify` → exit 0。plugin.test.ts の新しい 3 件と cli.test.ts の 1 件が pass（偽の codex が一時の CODEX_HOME を受け取る、config.toml の中身と mtime が変わらない、`✓ Codex hooks 9 of 9 trusted`、変更後 `△ … 8 of 9 trusted …; 1 modified, 1 disabled`、CLI の終了コードは 0 のまま、0.161.0・0.159.2 は unknown）。この PC の開発版の `node server/src/cli.ts doctor` → `✓ Codex hooks        9 of 9 trusted in ~/.codex/config.toml`
 - [ ] T06: Windows の CI に、パックした doctor の「Codex hooks」の行を確かめる手順を足す
   - 種別: 追加
   - 計画: S5
@@ -90,6 +92,8 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - コミット: `ci(windows): check doctor's Codex hooks row from the packed CLI`
 
 ## 記録
+
+- 2026-10-05 / T04, T05 / T04 だけでは knip が T05 で使う export を未使用として落とすので、1 コミット（T04, T05）にした。T04 の変更欄 `bun.lock` → `server/bun.lock`、T05 の変更欄に `server/test/fake-codex.ts`（両方のテストが使う一時の CODEX_HOME と偽の codex）を足した。CLI の bundle が上限 582,000 を超えた（592,431。smol-toml 37,087、codex-trust 5,806）ので、別のコミット 5f8b75ab で上限を 625,000 にした
 
 - 2026-10-05 / T01 / release:plan は package の入力（`plugin/`・`server/src/` など）が変わるまで kind none を返すので、完了条件の「kind が plugin」はこの時点で観測できない / 完了条件を「kind が plugin」から「4 か所が 0.6.31」に変えた。kind plugin は T03 の後に確かめる
 - 2026-10-05 / T07 / T02・T03 の Codex のレビュー（新しい会話、084a5fc0）: F1 spool のファイルが読む前に detached send に消されて ENOENT、F2 検査のタイムアウトが codex.json の timeout を使っていない、F3 一時ディレクトリの親に空白があると control の throw で止まる。3 件とも採る（F3 は red を CI で見た後なので throw を外す）。T03 の head の CI では Linux の check (24.15) が一時ディレクトリの削除で ENOTEMPTY（Codex の部の Stop・Interrupt が起こした detached send が残る）/ T07 を足し、Codex の部の Stop・Interrupt は subagent の入力にして send を起こさない
