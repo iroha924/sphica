@@ -735,14 +735,13 @@ export async function createDriver(world: World): Promise<Driver> {
           after?: number;
         };
         const pid = await projectId();
-        // After a review_select, its own selection: a record changed since then must show as a changed selection
+        // After a review_select, always its selection and after: a record or diff changed since then must show as a changed selection
         const text = v.diff ? diffOf(v.diff) : (selected?.text ?? "");
-        const after = v.after ?? (v.diff ? null : (selected?.after ?? null));
+        const after = v.after ?? selected?.after ?? null;
         const files = parseDiff(text);
-        const selection =
-          !v.diff && selected
-            ? selected.selection
-            : (await reviewBatch(db(), pid, files, after, text)).selection;
+        const selection = selected
+          ? selected.selection
+          : (await reviewBatch(db(), pid, files, after, text)).selection;
         validation = (await checkFindings(db(), pid, files, v.findings, { after, selection, diff: text }))
           .problems;
         return;

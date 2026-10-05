@@ -56,6 +56,14 @@ export async function checkFindings(
       ],
       batch: null,
     };
+  // A batch past the last record holds nothing to judge, so a check of it would vouch for nothing
+  if (!batch.records.length && batch.all.length)
+    return {
+      problems: [
+        `no record after ${at.after}: the last batch is the one that ended there; start again from the first batch`,
+      ],
+      batch: null,
+    };
   const applicable = new Set(batch.all.map((u) => u.key));
   const here = new Set(batch.records.map((u) => u.key));
   // A record can be violated at no more places than the diff has: its added lines and the files that are gone

@@ -357,6 +357,39 @@ test("review batch boundary: an after that is not where a batch ended is refused
   }
 });
 
+test("review batch empty: when the records fill whole batches, the empty batch after the last one cannot be checked as backed", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const words = Array.from({ length: 50 }, (_, n) => `Rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: words.join(" ") });
+    await save(db, p, {
+      units: words.map((w, n) => ({
+        key: `r${n}`,
+        kind: "decision",
+        stance: "do",
+        text: w,
+        evidence: [{ source: `s${m}`, quote: w, role: "states" }],
+        adoption: [{ source: `s${m}`, quote: w }],
+        anchors: [{ path: "src/db.ts", role: "applies_to" }],
+      })),
+    });
+    const files = parseDiff(DIFF);
+    const first = await reviewBatch(db.reader, p, files, null, DIFF);
+    const last = first.all.at(-1)?.id ?? 0;
+    const empty = await checkFindings(db.reader, p, files, [], {
+      after: last,
+      selection: first.selection,
+      diff: DIFF,
+    });
+    assert.deepEqual(empty.problems, [
+      `no record after ${last}: the last batch is the one that ended there; start again from the first batch`,
+    ]);
+  } finally {
+    await db.done();
+  }
+});
+
 test("review selection: diffs that differ only in removed or context lines are told apart", async () => {
   const db = tempDb();
   try {

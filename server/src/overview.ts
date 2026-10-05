@@ -165,11 +165,14 @@ export async function lookOverview(
     marked: [] as string[],
   };
   let used = 0;
+  // Room kept for a cursor longer than the fixed reserve covers: a marker's cursor carries its file's path
+  let reserve = 0;
   let stop: Cursor | null = null;
   /** Adds a line when it fits the page; false means the page is full and the item waits for the next page */
   const fits = (to: string[], line: string) => {
     const shown = head(line, LOOK_LIMITS.line);
-    if (used + bytes(shown) + 1 > LOOK_LIMITS.bytes) return false;
+    // A page shows at least one line, so a cursor too long to reserve room for cannot stop the pages from moving on
+    if (used > 0 && used + bytes(shown) + 1 + reserve > LOOK_LIMITS.bytes) return false;
     used += bytes(shown) + 1;
     to.push(shown);
     return true;
@@ -303,6 +306,11 @@ export async function lookOverview(
         (f.file < from.file ||
           (f.file === from.file && (f.line < from.line || (f.line === from.line && f.n <= from.n))));
       const todo = found.filter((f) => !past(f));
+      // A reduce, not Math.max(...): instruction files can hold more markers than a call takes arguments
+      reserve = [...(from.s === "markers" ? [from] : []), ...todo].reduce(
+        (most, f) => Math.max(most, bytes(cursorText({ s: "markers", file: f.file, line: f.line, n: f.n }))),
+        0,
+      );
       const keys = [...new Set(todo.map((f) => f.key))];
       // In slices: SQLite takes at most 32,766 parameters in one statement, and instruction files can hold more markers
       const units = new Map<string, { id: number; key: string; lifecycle: string }>();

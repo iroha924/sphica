@@ -194,6 +194,35 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - コミット: `fix(read): keep read and look replies within 32 KiB, which Codex passes on whole`
   - 結果: `node --test test/read.test.ts test/overview.test.ts` → 21 pass。70 KiB の source を 2 回で読み切る前提だった search.test.ts を、続きを最後まで辿る形に直した。plan の上限の記述と変更履歴を直した。`bun run verify` → 0
 
+- [x] T17: 最後の束より後の空の束の check を拒む
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T13（境目の判定がある）
+  - 変更: `server/src/review-findings.ts`, `server/test/review.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'review batch empty' test/review.test.ts` → 50 件ちょうどで after に最後の id、findings が空の check が問題なしを返して fail
+  - 完了条件: `cd server && node --test test/review.test.ts` → pass。空の束の check が「no record after N」を返す
+  - コミット: `fix(review): refuse an empty batch, fit long look cursors, keep the selection`
+  - 結果: red: 修正を stash した状態で上のコマンド → fail。実装後 `node --test test/review.test.ts` → 14 pass
+
+- [x] T18: look のページに、markers のカーソルの大きさの分を確保する
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T16（look の予算が READ_BUDGET から決まる）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'look cursor size' test/overview.test.ts` → 制御文字の多い長いディレクトリ名の CLAUDE.md で、1 ページ目が 33568 bytes になり fail
+  - 完了条件: `cd server && node --test test/overview.test.ts` → pass。そのページが枠込みで 32 KiB 以下、40 か所の marker に 1 回ずつ届く
+  - コミット: `fix(review): refuse an empty batch, fit long look cursors, keep the selection`
+  - 結果: red: 上のコマンド → 33568 bytes で fail。実装後: markers の段で、残りの marker のカーソルの最大の大きさを確保し、ページに 1 行も無いときは確保なしで 1 行出す（前進の保証）。`node --test test/overview.test.ts` → 16 pass
+
+- [x] T19: driver の review_validate は、review_select の後なら diff を明示しても保存した selection と after を使う
+  - 種別: 変更
+  - 計画: S5
+  - 依存: T15（保存した selection がある）
+  - 変更: `server/evals/acceptance/driver.ts`
+  - 完了条件: `bun run verify` → 0
+  - コミット: `fix(review): refuse an empty batch, fit long look cursors, keep the selection`
+  - 結果: `bun run verify` → 0（T17〜T19 をまとめて）
+
 ## 記録
 
 - 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま
@@ -215,3 +244,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T16 / 上限の値を新しい会話で Codex と相談（session 01a10c61-fc03-7ce3-b9cf-7500406edeb2）: read と look は共通の 32 KiB、look は枠などの分を先に確保、live と review_select の返答の大きさは範囲の外で後追い、32 KiB の両ホストでの実測が要る / 採る。実測は完了確認の段で行う
 - 2026-10-05 / T16 / 種別を修正から変更にし red の欄を消した（完了したタスクの欄の直し）/ 64 KiB の応答を Codex が真ん中で切ることはホストの挙動で、テストの中で落ちる red を作れない（review-shipping が packed の server で再現済み）。tasks の検査の違反を `| head` で見落としたままコミットしたので、このコミットで直した
 - 2026-10-05 / 完了確認 / package にした server（HEAD 7907cd2d）で両ホストを 1 回ずつ実測: 150 KB の `LINE-00001 lorem ipsum dolor sit amet` の行の source を read の `["s1"]` で読む。Codex 0.160.0（codex exec --json、hooks と plugins は無効）は mcp_tool_call の結果が 33,701 文字で truncated なし、モデルは LINE-00001〜00852 を切れ目なく見て続きは s1@32348。Claude Code 2.1.289（claude -p、--strict-mcp-config）は tool_result がファイルに退避されずそのまま 33,660 文字、続きは s1@32348 / 32 KiB は両ホストでそのまま届く。日本語、引用符やバックスラッシュの多い本文、Codex の Code Mode は未計測
+- 2026-10-05 / T13〜T16 / Codex の再レビュー（high）: F1（P2、再現済み）50 の倍数の件数で最後の id を after にした空の束の check が backed を返す → T17。F2（P2、再現済み）長いパスの指示ファイルのカーソルで look のページが 32 KiB を超える → T18。F3（P2）driver で diff を明示すると selection を作り直す → T19 / すべて採る

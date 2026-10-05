@@ -715,3 +715,25 @@ test("look cursor strict: only the exact text a page gave is a cursor, not one w
   for (const broken of [`${given}!`, `!${given}`, `${given.slice(0, 4)} ${given.slice(4)}`, `${given}=`])
     assert.equal(lookCursor(broken), null, broken);
 });
+
+test("look cursor size: a page whose cursor names a long instruction-file path still fits the reply budget", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-long-path-"));
+  try {
+    const p = project(db);
+    // Control characters in the directory names grow sixfold in the cursor's JSON
+    const dir = path.join(root, ..."abc".split("").map((c) => `${c}${"\u0001".repeat(200)}`));
+    fs.mkdirSync(dir, { recursive: true });
+    const mark = (k: number) => `<!-- sphica: trace:${"u".repeat(900)}/${k} -->`;
+    fs.writeFileSync(
+      path.join(dir, "CLAUDE.md"),
+      `${Array.from({ length: 40 }, (_, i) => `- ${mark(i)}`).join("\n")}\n`,
+    );
+    const pages = await lookPages(db, p, root);
+    assert.ok(pages.length >= 2, `${pages.length} pages`);
+    assert.equal([...pages.join("\n").matchAll(/ is not a record of this project/g)].length, 40);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
