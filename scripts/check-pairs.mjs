@@ -499,16 +499,25 @@ if (TRAILER !== null) {
     const pinned = grab(".github/workflows/zizmor.yml", /ACTIONLINT: "([^"]+)"/, "zizmor.yml ACTIONLINT");
     if (pinned !== actionlint)
       fail.push(`mise.toml actionlint ${actionlint} differs from zizmor.yml ACTIONLINT ${pinned}`);
-    // verify needs lychee wherever it runs, so each workflow that runs verify must install it, at the version mise.toml pins
+    // verify and check-tarball need lychee wherever they run, so each workflow that runs them must install it at the version mise.toml
+    // pins, as a step (not a comment that happens to name the version) placed before verify and put on PATH
     const lychee = grab(
       "mise.toml",
       /^"github:lycheeverse\/lychee" = \{ version = "([^"]+)"/m,
       "mise.toml lychee",
     );
     for (const file of [".github/workflows/check.yml", ".github/workflows/release.yml"]) {
-      const pin = grab(file, /LYCHEE: "([^"]+)"/, `${file} LYCHEE`);
-      if (lychee && pin && pin !== lychee)
-        fail.push(`${file}: LYCHEE ${pin} differs from mise.toml lychee ${lychee}`);
+      const text = read(file);
+      const step =
+        /^ {6}- name: Install lychee\n {8}env:\n {10}LYCHEE: "([^"]+)"\n[\s\S]*?lychee-v\$\{LYCHEE\}[\s\S]*?sha256sum -c -[\s\S]*?>> "\$GITHUB_PATH"\n/m.exec(
+          text,
+        );
+      const verify = text.search(/^ {8}run: bun run verify$/m);
+      if (!step) fail.push(`${file}: no Install lychee step that checks the SHA-256 and puts lychee on PATH`);
+      else if (verify === -1 || step.index > verify)
+        fail.push(`${file}: Install lychee does not come before bun run verify`);
+      else if (lychee && step[1] !== lychee)
+        fail.push(`${file}: LYCHEE ${step[1]} differs from mise.toml lychee ${lychee}`);
     }
   }
 }

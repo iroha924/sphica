@@ -89,6 +89,16 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `fix(deps): resolve smol-toml to one version so the SBOM matches what ships`
   - 結果: red → syft 1.52.0 で `SBOM lists smol-toml 1.8.0, which is not bundled`（markdownlint-cli2 0.23.3 が smol-toml を 1.8.0 で完全固定し、bun.lock に入れ子の `markdownlint-cli2/smol-toml` ができた。syft は devDependency を名前で除くので、出荷する依存と同じ名前の入れ子が残る）。`overrides` に `"smol-toml": "1.9.0"` を足した後: 入れ子のエントリが消え、`SBOM: 102 components, exactly matching the bundled dependencies`、node_modules を消して入れ直しても `bun run markdown` → 0 件
 
+- [x] T12: check-pairs で lychee の導入の step そのものを確かめ、lychee.toml のコメントを直す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象の照合が要る）
+  - 変更: `scripts/check-pairs.mjs`, `lychee.toml`
+  - red: check.yml の Install lychee の step を消して `# LYCHEE: "0.24.2"` のコメントだけを残し `bun run pairs` → exit 0 で通る。戻す
+  - 完了条件: 同じ手順 → `no Install lychee step` で落ちる。release.yml の LYCHEE だけを 0.24.1 にして → 落ちる（戻す）。`bun run verify` → 終了コード 0
+  - コミット: `fix(pairs): require the lychee install step, not just its version string`
+  - 結果: red → step を消してコメントだけ残しても `bun run pairs` が exit 0。直した後: `.github/workflows/check.yml: no Install lychee step that checks the SHA-256 and puts lychee on PATH`、release.yml の 0.24.1 で `LYCHEE 0.24.1 differs from mise.toml lychee 0.24.2`（どちらも戻した）。verify より後ろに置いた step も落とす。`bun run verify` → exit 0
+
 ## P3: 配る Markdown の検査
 
 展開した tarball の Markdown に両方がかかり、package の外を指す相対リンクが落ちる
@@ -141,3 +151,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T10 / T07 で CLAUDE.md の command の行だけを直し、AGENTS.md の同じ行が古いままだった（rg-pairs の規定に反する） / 修正タスク T10 を足して直した
 - 2026-10-05 / 全体 / plan の手順の S1 を外して振り直したので、各タスクの計画欄を 1 つずつ下げた（S2→S1 … S6→S5、中身は同じ）。取りやめた T01 の計画欄は S1 のまま（取りやめなので担わない） / 振り直しは機械的で、完了したタスクの中身は変えていない
 - 2026-10-05 / T11 / review-shipping（再現）と全差分の Codex のレビュー（F1、P1）: markdownlint-cli2 の入れ子の smol-toml 1.8.0 で release の SBOM の検査が落ちる / overrides で 1.9.0 にそろえた（出荷する bundle はもともと 1.9.0）。依存を足すのではなく解決のしかたを変える直しなので、Go は取り直していない
+- 2026-10-05 / T12 / 全差分の Codex のレビュー（F2、再現）: lychee の照合がバージョンの文字列しか見ず、導入の step を消しても通る。review-shipping: lychee.toml のコメントが「tarball の検査は plugin/ から」と古い / 修正タスク T12 を足して直した
