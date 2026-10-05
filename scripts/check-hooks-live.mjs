@@ -441,7 +441,8 @@ await withTempDir(async (dir) => {
         env: { ...env, PATH: pathDirs.join(path.delimiter), PLUGIN_ROOT: stub, STUB_EXIT: code },
         input: "{}",
         encoding: "utf8",
-        timeout: TIMEOUT_MS,
+        // A PowerShell that cannot find node takes 24 to 39 seconds to say so on the Windows runner
+        timeout: 2 * TIMEOUT_MS,
         windowsVerbatimArguments: Boolean(s.verbatim),
         windowsHide: true,
       });

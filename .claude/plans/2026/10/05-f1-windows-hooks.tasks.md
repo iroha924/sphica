@@ -63,6 +63,16 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - コミット: `test(hooks): keep the Codex launch check from racing detached sends and from Codex's timeouts`
   - 結果: red は T03 の head（084a5fc0）の Linux の check (24.15) で実測（check (26) は通った）。直した後: `bun run hooks:live` → exit 0、続けて `node scripts/check-hooks-live.mjs` を 3 回 → 3 回とも exit 0。sh の包みのケース: `node exiting 0 → 0 in 22 ms, node exiting 7 → 7 in 23 ms, without node → 127 in 3 ms`
 
+- [x] T08: node の無い PATH で起動を試すケースの時間の上限を、Windows の PowerShell の実測に合わせる
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T07（所要時間を出す包みのケースが要る）
+  - 変更: `scripts/check-hooks-live.mjs`
+  - red: `gh run view 37257640239 --job 111598032701 --log-failed` → `the Codex launch line through powershell.exe, without node, exited null` と `spawnSync ... powershell.exe ETIMEDOUT`（60 秒）
+  - 完了条件: `bun run hooks:live` → exit 0。push 後の Windows のジョブ → 包みのケースが全部期待どおり
+  - コミット: `test(hooks): give a PowerShell without node time to report it`
+  - 結果: T07 の head（08d15b11、run 37258408775）の Windows のジョブで node が無いケースの所要時間は powershell.exe 39,132 ms、pwsh 24,458 ms、cmd.exe 24,294 ms、COMSPEC 26,060 ms、Git Bash 24,373 ms（どれも終了コード 1）。上限を 60 秒から 120 秒にした。`bun run hooks:live` → exit 0
+
 ## P3: doctor が Codex のフックの信頼を出す
 
 `sphica doctor` に「Codex hooks」の行が出て、trusted / modified / untrusted / disabled / unknown が分かる
@@ -92,6 +102,8 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - コミット: `ci(windows): check doctor's Codex hooks row from the packed CLI`
 
 ## 記録
+
+- 2026-10-05 / T08 / node が PATH に無いときの遅さは、外側のシェルによらず内側の powershell.exe が「見つからない」と言うまでの時間（24〜26 秒）で、外側が powershell.exe だと 39 秒になる。今の commandWindows も内側で PowerShell を起動していたので退行ではない（推測）。実機では Codex のフックの timeout（10 秒）で止まる / 製品は変えず、検査の上限だけを上げる（T08）。plan のリスクに足す
 
 - 2026-10-05 / T04, T05 / T04 だけでは knip が T05 で使う export を未使用として落とすので、1 コミット（T04, T05）にした。T04 の変更欄 `bun.lock` → `server/bun.lock`、T05 の変更欄に `server/test/fake-codex.ts`（両方のテストが使う一時の CODEX_HOME と偽の codex）を足した。CLI の bundle が上限 582,000 を超えた（592,431。smol-toml 37,087、codex-trust 5,806）ので、別のコミット 5f8b75ab で上限を 625,000 にした
 
