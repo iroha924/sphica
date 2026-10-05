@@ -79,6 +79,16 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `fix(docs): keep the checkout path literal in the remap and end options before files`
   - 結果: red → `$` 入りのパスで `.../dollar.zcsq/repo/b.md#b` が File not found（`repo$work` が `repo` に化けた）、`--review.md` で lychee が `For more information, try '--help'` で終了。直した後: `$` を `$$` にした remap で通り、`--` の後に一覧を置くと `--review.md` を含めて 0 エラー。`bun run verify` → exit 0
 
+- [x] T11: smol-toml を 1.9.0 の 1 つにそろえ、release の SBOM の検査を通す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（markdownlint-cli2 の依存が要る）
+  - 変更: `server/package.json`, `server/bun.lock`
+  - red: release.yml と同じ syft 1.52.0 で HEAD の `server` を `git archive` して `node scripts/check-sbom.mjs` → `SBOM lists smol-toml 1.8.0, which is not bundled`
+  - 完了条件: 同じ手順を stage した中身で → `SBOM: 102 components, exactly matching the bundled dependencies`。`bun run markdown` → 0 件。`bun run verify` → 終了コード 0
+  - コミット: `fix(deps): resolve smol-toml to one version so the SBOM matches what ships`
+  - 結果: red → syft 1.52.0 で `SBOM lists smol-toml 1.8.0, which is not bundled`（markdownlint-cli2 0.23.3 が smol-toml を 1.8.0 で完全固定し、bun.lock に入れ子の `markdownlint-cli2/smol-toml` ができた。syft は devDependency を名前で除くので、出荷する依存と同じ名前の入れ子が残る）。`overrides` に `"smol-toml": "1.9.0"` を足した後: 入れ子のエントリが消え、`SBOM: 102 components, exactly matching the bundled dependencies`、node_modules を消して入れ直しても `bun run markdown` → 0 件
+
 ## P3: 配る Markdown の検査
 
 展開した tarball の Markdown に両方がかかり、package の外を指す相対リンクが落ちる
@@ -130,3 +140,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T01 / 取りやめ（[-]）。`git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件: done の検査は、チェックを付けたコミットが `.claude/plans/` の外を変えていることを求め、plan の中だけを変える T01 は通らない。F2 の plan と tasks の削除は `3e413a3c` で済んでいて、plan の S1 を片付けとして直した / tasks を組むときに plan の中だけのタスクを作らない
 - 2026-10-05 / T10 / T07 で CLAUDE.md の command の行だけを直し、AGENTS.md の同じ行が古いままだった（rg-pairs の規定に反する） / 修正タスク T10 を足して直した
 - 2026-10-05 / 全体 / plan の手順の S1 を外して振り直したので、各タスクの計画欄を 1 つずつ下げた（S2→S1 … S6→S5、中身は同じ）。取りやめた T01 の計画欄は S1 のまま（取りやめなので担わない） / 振り直しは機械的で、完了したタスクの中身は変えていない
+- 2026-10-05 / T11 / review-shipping（再現）と全差分の Codex のレビュー（F1、P1）: markdownlint-cli2 の入れ子の smol-toml 1.8.0 で release の SBOM の検査が落ちる / overrides で 1.9.0 にそろえた（出荷する bundle はもともと 1.9.0）。依存を足すのではなく解決のしかたを変える直しなので、Go は取り直していない
