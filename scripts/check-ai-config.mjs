@@ -267,9 +267,23 @@ try {
     fail("plugin/.codex-plugin/plugin.json: Codex hooks must read ./hooks/codex.json");
   }
   const codexHooks = JSON.parse(read("plugin/hooks/codex.json")).hooks;
+  // Codex runs commandWindows through the session's shell (PowerShell, cmd, or Git Bash). The path stays in the environment and the
+  // shell sees only base64, so no character in the path is parsed as code. A node that never starts leaves $LASTEXITCODE null.
+  const windowsCommand = (name) =>
+    `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(
+      `& node "$env:PLUGIN_ROOT/dist/${name}.js" codex; if ($null -eq $LASTEXITCODE) { exit 1 }; exit $LASTEXITCODE`,
+      "utf16le",
+    ).toString("base64")}`;
+  for (const [event, groups] of Object.entries(codexHooks ?? {}))
+    for (const hook of groups.flatMap((group) => group.hooks ?? [])) {
+      const name = /dist\/(capture|deliver)\.js/.exec(hook.command ?? "")?.[1];
+      if (!name || hook.commandWindows !== windowsCommand(name))
+        fail(
+          `plugin/hooks/codex.json: a ${event} hook's commandWindows is not the encoded launch of its bundle`,
+        );
+    }
   const codexCapture = ["$", '{PLUGIN_ROOT}/dist/capture.js" codex'].join("");
-  const codexCaptureWindows =
-    "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex";
+  const codexCaptureWindows = windowsCommand("capture");
   for (const event of ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "Interrupt"]) {
     const commands = codexHooks?.[event]?.flatMap((group) => group.hooks ?? []) ?? [];
     if (!commands.some((hook) => hook.command?.includes(codexCapture))) {
@@ -283,8 +297,7 @@ try {
     }
   }
   const codexDeliver = ["$", '{PLUGIN_ROOT}/dist/deliver.js" codex'].join("");
-  const codexDeliverWindows =
-    "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex";
+  const codexDeliverWindows = windowsCommand("deliver");
   for (const event of ["SessionStart", "SubagentStart", "UserPromptSubmit", "PreToolUse"]) {
     const groups = (codexHooks?.[event] ?? []).filter((group) =>
       (group.hooks ?? []).some((hook) => hook.command?.includes(codexDeliver)),

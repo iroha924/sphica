@@ -43,7 +43,7 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
 
 空白や `$`・`%` を含むプラグインのパスでも、Windows のどの外側のシェルからも Codex のフックが動く
 
-- [ ] T03: codex.json の commandWindows を EncodedCommand にし、包みのケースと check-ai-config を直す
+- [x] T03: codex.json の commandWindows を EncodedCommand にし、包みのケースと check-ai-config を直す
   - 種別: 修正
   - 計画: S2
   - 依存: T02（直す前に落ちることを示す検査が要る）
@@ -51,6 +51,7 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - red: `gh run view <T02 の head の check の run> --log-failed` → Windows のジョブで、対照が powershell.exe・pwsh で通り、空白入りのコピーが `Cannot find module` で落ちている
   - 完了条件: `bun run verify` → 終了コード 0。push 後の Windows のジョブ → 全コピー・全外側のシェルで全エントリが終了コード 0、各ケースの目印が spool に届き、包みのケースが期待どおり
   - コミット: `fix(hooks): pass the plugin root to Codex's Windows hooks through the environment`
+  - 結果: red（T02 の head 383ba025、check の run 37257190619 の Windows のジョブ）→ `hooks: 70 failure(s)`。control は powershell.exe・pwsh・cmd.exe・COMSPEC で通り、spaced と expanding は powershell.exe・pwsh で `Cannot find module '...\plugin'`（空白で割れる）、Git Bash は control でも `...\repo\:PLUGIN_ROOT\dist\...`（`$env` を bash が読む）、cmd.exe・COMSPEC は全部通った。直した後: `bun run verify:ai` → exit 0、1 件の base64 を変えると `a SessionStart hook's commandWindows is not the encoded launch of its bundle` で落ちる。`bun run hooks:live` → macOS で exit 0（包みのケース: sh で 0 → 0、7 → 7、node なし → 0 以外）。Windows の green は push 後に plan の A2 で確かめる
 
 ## P3: doctor が Codex のフックの信頼を出す
 

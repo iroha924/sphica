@@ -399,6 +399,51 @@ await withTempDir(async (dir) => {
       .flat()
       .flatMap((g) => g.hooks).length;
   if (launched !== expected) fail(`launched ${launched} Codex hooks, expected ${expected}`);
+
+  // ---- The launch line itself, on a stub whose capture.js exits with a given code: what each shell makes of node's exit ----
+  const stub = path.join(dir, "stub root");
+  fs.mkdirSync(path.join(stub, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(stub, "dist", "capture.js"), "process.exit(Number(process.env.STUB_EXIT));\n");
+  const captureHook = codexHooks.UserPromptSubmit.flatMap((g) => g.hooks).find((h) =>
+    h.command.includes("capture.js"),
+  );
+  const nodeExe = path.basename(process.execPath);
+  const withoutNode = dirs.filter((d) => d !== path.dirname(process.execPath));
+  for (const s of shells) {
+    // PowerShell turns any failing native command into 1; the others pass node's code through
+    const powershell = /powershell|pwsh/.test(s.name);
+    const shellDirs = [...(windows ? [powershellDir] : []), path.dirname(s.file)];
+    if ([...withoutNode, ...shellDirs].some((d) => fs.existsSync(path.join(d, nodeExe))))
+      throw new Error(`node is not the only one on PATH for ${s.name}, so a missing node cannot be shown`);
+    for (const { what, code, expect, pathDirs } of [
+      { what: "node exiting 0", code: "0", expect: (st) => st === 0, pathDirs: [...dirs, ...shellDirs] },
+      {
+        what: "node exiting 7",
+        code: "7",
+        expect: (st) => (powershell ? st !== 0 : st === 7),
+        pathDirs: [...dirs, ...shellDirs],
+      },
+      { what: "without node", code: "0", expect: (st) => st !== 0, pathDirs: [...withoutNode, ...shellDirs] },
+    ]) {
+      const line = (
+        windows ? (captureHook.commandWindows ?? captureHook.command) : captureHook.command
+      ).replaceAll(["$", "{PLUGIN_ROOT}"].join(""), stub);
+      const r = spawnSync(s.file, s.args(line), {
+        cwd: repo,
+        env: { ...env, PATH: pathDirs.join(path.delimiter), PLUGIN_ROOT: stub, STUB_EXIT: code },
+        input: "{}",
+        encoding: "utf8",
+        timeout: TIMEOUT_MS,
+        windowsVerbatimArguments: Boolean(s.verbatim),
+        windowsHide: true,
+      });
+      if (r.error || !expect(r.status))
+        fail(
+          `the Codex launch line through ${s.name}, ${what}, exited ${r.status}`,
+          r.error?.message ?? r.stderr,
+        );
+    }
+  }
 });
 
 if (failures.length) {

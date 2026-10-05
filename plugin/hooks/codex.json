@@ -6,13 +6,13 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AYwBhAHAAdAB1AHIAZQAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           },
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AZABlAGwAaQB2AGUAcgAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           }
         ]
@@ -24,7 +24,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AZABlAGwAaQB2AGUAcgAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           }
         ]
@@ -36,13 +36,13 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AYwBhAHAAdAB1AHIAZQAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           },
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AZABlAGwAaQB2AGUAcgAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           }
         ]
@@ -55,7 +55,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AYwBhAHAAdAB1AHIAZQAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           }
         ]
@@ -67,7 +67,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AYwBhAHAAdAB1AHIAZQAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 10
           }
         ]
@@ -79,7 +79,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/capture.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/capture.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AYwBhAHAAdAB1AHIAZQAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 3
           }
         ]
@@ -92,7 +92,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/dist/deliver.js\" codex",
-            "commandWindows": "powershell.exe -NoProfile -NonInteractive -Command node $env:PLUGIN_ROOT/dist/deliver.js codex",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -EncodedCommand JgAgAG4AbwBkAGUAIAAiACQAZQBuAHYAOgBQAEwAVQBHAEkATgBfAFIATwBPAFQALwBkAGkAcwB0AC8AZABlAGwAaQB2AGUAcgAuAGoAcwAiACAAYwBvAGQAZQB4ADsAIABpAGYAIAAoACQAbgB1AGwAbAAgAC0AZQBxACAAJABMAEEAUwBUAEUAWABJAFQAQwBPAEQARQApACAAewAgAGUAeABpAHQAIAAxACAAfQA7ACAAZQB4AGkAdAAgACQATABBAFMAVABFAFgASQBUAEMATwBEAEUA",
             "timeout": 5
           }
         ]
