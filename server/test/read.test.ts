@@ -383,6 +383,21 @@ test("read hidden csi: a control sequence with a long parameter list is never cu
     assert.deepEqual(refs, []);
     assert.match(seen, /VISIBLE TAIL/);
     assert.doesNotMatch(seen, /(?:1;){8}/);
+    // A sequence plain does not drop whole (colons in its parameters) is ordinary text: it is cut like any text, within the budget
+    const colon = message(db, p, {
+      id: "m2",
+      text: `${"a".repeat(30_000)}\u001b[${"1:".repeat(50_000)}31m${"b".repeat(40_000)}END`,
+    });
+    let more = [`s${colon}`];
+    let tail = "";
+    for (let n = 0; n < 20 && more.length; n++) {
+      const reply = await readRefs(db.reader, p, more, null);
+      assert.ok(Buffer.byteLength(reply) <= READ_BUDGET, `reply ${n}: ${Buffer.byteLength(reply)} bytes`);
+      tail += reply;
+      more = pageOf(reply).next;
+    }
+    assert.deepEqual(more, []);
+    assert.match(tail, /END/);
   } finally {
     await db.done();
   }

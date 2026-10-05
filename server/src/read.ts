@@ -447,7 +447,10 @@ function boundary(all: Buffer, at: number): number {
 const CONTROL_SEQUENCE = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]?/;
 const HIDDEN = new RegExp(`${STRING_SEQUENCE.source}|${CONTROL_SEQUENCE.source}`, "g");
 
-/** Byte ranges of the terminal sequences plain drops whole: a page never starts or ends inside one, or its rest would show */
+/**
+ * Byte ranges of the terminal sequences plain drops whole: a page never starts or ends inside one, or its rest would show. A match plain
+ * does not drop whole (colons in a control sequence's parameters) is ordinary text, cut like any other.
+ */
 function sequences(all: Buffer): [number, number][] {
   const text = all.toString("utf8");
   const out: [number, number][] = [];
@@ -456,7 +459,7 @@ function sequences(all: Buffer): [number, number][] {
   for (const m of text.matchAll(HIDDEN)) {
     at += bytes(text.slice(index, m.index));
     index = m.index + m[0].length;
-    out.push([at, at + bytes(m[0])]);
+    if (plain(m[0]) === "") out.push([at, at + bytes(m[0])]);
     at += bytes(m[0]);
   }
   return out;
@@ -552,10 +555,11 @@ export async function readRefs(
       bytes(p.head) -
       bytes(note(all.length, all.length)) -
       bytes(tail([p.resume(all.length), ...rest]));
-    let end = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
+    const cut = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
     // A cut inside a sequence moves before it, or past it when the page starts there (the sequence then shows nothing)
-    const inside = hide.find(([a, b]) => a < end && end < b);
-    if (inside) end = inside[0] > from ? inside[0] : inside[1];
+    const inside = hide.find(([a, b]) => a < cut && cut < b);
+    let end = inside ? (inside[0] > from ? inside[0] : inside[1]) : cut;
+    if (bytes(plain(all.subarray(from, end).toString("utf8"))) > Math.max(room, 0)) end = cut;
     const text = all.subarray(from, end).toString("utf8");
     if (!text) {
       next = refs.slice(i);
