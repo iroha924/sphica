@@ -94,7 +94,7 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
 
 T03・T08 のレビューで見つかった、prune の件数の上書きと、移せない観測で送信が止まる穴を直す。
 
-- [ ] T09: 1 回の flush の中で、ロックを取り直しても prune の件数を足し続ける
+- [x] T09: 1 回の flush の中で、ロックを取り直しても prune の件数を足し続ける
   - 種別: 修正
   - 計画: S3
   - 依存: T03（prune の件数が要る）
@@ -102,6 +102,8 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - red: `cd server && node --test --test-name-pattern 'prune count across' test/capture.test.ts` → 2 回目のロック保持の prune が 1 回目の件数を上書きし、合計より小さい count が残って fail
   - 完了条件: `cd server && node --test --test-name-pattern 'prune count' test/capture.test.ts` → pass。2 回のロック保持で消えた件数の合計が state に残る
   - コミット: `fix(capture): count every prune of one send, across retaking the lock`
+  - 結果: red: `node --test --test-name-pattern 'prune count across' test/capture.test.ts` → `actual: 1, expected: 3` で fail
+  - 結果: 実装後 `node --test --test-name-pattern 'prune count' test/capture.test.ts` → 2 pass。`bun run verify` → 0
 
 - [ ] T10: 観測のファイルを calls/rejected/ へ移せなくても送信を続ける
   - 種別: 修正

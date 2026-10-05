@@ -1092,6 +1092,9 @@ export async function flush(
   const total = { sent: 0, deferred: 0, rejected: 0 };
   let batches = 0;
   let queueBatches = 0;
+  // Summed over every lock hold of this send, so a later hold's state never undercounts an earlier hold's prune
+  let removed = 0;
+  const pruned = () => (removed ? { at: new Date().toISOString(), count: removed } : undefined);
   for (let first = true; ; first = false) {
     let unlock = lock();
     while (!unlock && Date.now() < deadline) {
@@ -1110,8 +1113,6 @@ export async function flush(
     };
     const late = () => batches > 0 && Date.now() >= deadline;
     const sentBefore = batches;
-    let removed = 0;
-    const pruned = () => (removed ? { at: new Date().toISOString(), count: removed } : undefined);
     try {
       if (first) {
         // Expired held records are dropped before they could be sent. Records held during this send are not in the list.

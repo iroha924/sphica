@@ -1794,6 +1794,36 @@ test("prune count: the last prune that removed held records is kept, through sen
   }
 });
 
+test("prune count across retaking the lock: one send keeps the sum of what each lock hold pruned", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const stale = Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000;
+  const rm = fs.rmSync;
+  let arrived = false;
+  // Right after the first hold unlocks, a hook queues a record and another expired held record turns up: the send takes the lock again
+  const spy = mock.method(fs, "rmSync", ((target: fs.PathLike, ...rest: unknown[]) => {
+    (rm as (...a: unknown[]) => void)(target, ...rest);
+    if (!arrived && String(target).endsWith(".lock")) {
+      arrived = true;
+      queue(spoolDir(), Date.now(), 9, owned(registered, 9));
+      queue(unregisteredDir(), stale, 3, owned("git:example/none", 3));
+    }
+  }) as typeof fs.rmSync);
+  try {
+    queue(unregisteredDir(), stale, 1, owned("git:example/none", 1));
+    queue(unregisteredDir(), stale, 2, owned("git:example/none", 2));
+    queue(spoolDir(), Date.now(), 8, owned(registered, 8));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 2, "both holds sent");
+    assert.equal(readState().pruned?.count, 3);
+  } finally {
+    spy.mock.restore();
+    reset();
+    await db.done();
+  }
+});
+
 // Before migrating, a third spelling must not pick one of two projects its key normalizes to: writing into the empty one would leave
 // two projects with records, which revision 8 refuses to merge
 test("a legacy key held while two projects share its normalized key stays held, and the migration still merges them", async () => {
