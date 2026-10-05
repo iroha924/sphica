@@ -17,9 +17,17 @@ pre-commit:
       root: server/
       glob: "*.ts"
       run: bun run typecheck
+    # Structure only; links are checked over every document by the links job, since a heading changed here can break a link elsewhere
+    - name: markdown
+      glob: "*.md"
+      run: node scripts/check-markdown.mjs {staged_files}
     - name: ai-config
       glob: "{AGENTS.md,CLAUDE.md,.agents/skills/**,.claude/skills/**,.claude/rules/**,.claude/agents/**,.claude-plugin/**,plugin/skills/review/reviewers/**,plugin/skills/**,scripts/check-ai-config.mjs,package.json}"
-      run: bun run verify:ai
+      # Links are checked by the links job on every commit
+      run: node scripts/check-ai-config.mjs
+    # Every document on every commit: a heading or file changed in one place can break a link in another
+    - name: links
+      run: mise exec -- node scripts/check-links.mjs
     # The version check only means something after bundle. As a separate job it runs in parallel,
     # reads the bundle before it is rebuilt, and passes vacuously (measured: passed 4 out of 4).
     - name: bundle

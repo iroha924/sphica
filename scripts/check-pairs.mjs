@@ -499,6 +499,37 @@ if (TRAILER !== null) {
     const pinned = grab(".github/workflows/zizmor.yml", /ACTIONLINT: "([^"]+)"/, "zizmor.yml ACTIONLINT");
     if (pinned !== actionlint)
       fail.push(`mise.toml actionlint ${actionlint} differs from zizmor.yml ACTIONLINT ${pinned}`);
+    // verify and check-tarball need lychee wherever they run, so each workflow that runs them must install it at the version mise.toml
+    // pins: a step of its own, in the same job as verify and before it, whose own (uncommented) lines check the SHA-256 and put it on PATH
+    const lychee = grab(
+      "mise.toml",
+      /^"github:lycheeverse\/lychee" = \{ version = "([^"]+)"/m,
+      "mise.toml lychee",
+    );
+    for (const file of [".github/workflows/check.yml", ".github/workflows/release.yml"]) {
+      const lines = read(file).split("\n");
+      const at = lines.indexOf("      - name: Install lychee");
+      const verify = lines.indexOf("        run: bun run verify");
+      // The step ends at the next step or job; the job ends at the next job key
+      let end = at + 1;
+      while (at !== -1 && end < lines.length && !/^ {6}- |^ {2}\S/.test(lines[end])) end++;
+      const body = lines.slice(at + 1, end).filter((l) => !/^\s*#/.test(l));
+      const between = at === -1 || verify === -1 ? [] : lines.slice(end, verify);
+      const pin = body.map((l) => /^ {10}LYCHEE: "([^"]+)"$/.exec(l)?.[1]).find(Boolean);
+      if (at === -1) fail.push(`${file}: no Install lychee step`);
+      else if (
+        !body.some((l) => /\/lychee-v\$\{LYCHEE\}\//.test(l)) ||
+        !body.some((l) => l.includes("sha256sum -c -")) ||
+        !body.some((l) => l.includes('>> "$GITHUB_PATH"'))
+      )
+        fail.push(
+          `${file}: the Install lychee step does not download LYCHEE, check its SHA-256, and put it on PATH`,
+        );
+      else if (verify === -1 || verify < end || between.some((l) => /^ {2}\S/.test(l)))
+        fail.push(`${file}: Install lychee is not before bun run verify in the same job`);
+      else if (lychee && pin !== lychee)
+        fail.push(`${file}: LYCHEE ${pin} differs from mise.toml lychee ${lychee}`);
+    }
   }
 }
 
