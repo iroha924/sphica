@@ -500,24 +500,32 @@ if (TRAILER !== null) {
     if (pinned !== actionlint)
       fail.push(`mise.toml actionlint ${actionlint} differs from zizmor.yml ACTIONLINT ${pinned}`);
     // verify and check-tarball need lychee wherever they run, so each workflow that runs them must install it at the version mise.toml
-    // pins, as a step (not a comment that happens to name the version) placed before verify and put on PATH
+    // pins: a step of its own, in the same job as verify and before it, whose own (uncommented) lines check the SHA-256 and put it on PATH
     const lychee = grab(
       "mise.toml",
       /^"github:lycheeverse\/lychee" = \{ version = "([^"]+)"/m,
       "mise.toml lychee",
     );
     for (const file of [".github/workflows/check.yml", ".github/workflows/release.yml"]) {
-      const text = read(file);
-      const step =
-        /^ {6}- name: Install lychee\n {8}env:\n {10}LYCHEE: "([^"]+)"\n[\s\S]*?lychee-v\$\{LYCHEE\}[\s\S]*?sha256sum -c -[\s\S]*?>> "\$GITHUB_PATH"\n/m.exec(
-          text,
-        );
-      const verify = text.search(/^ {8}run: bun run verify$/m);
-      if (!step) fail.push(`${file}: no Install lychee step that checks the SHA-256 and puts lychee on PATH`);
-      else if (verify === -1 || step.index > verify)
-        fail.push(`${file}: Install lychee does not come before bun run verify`);
-      else if (lychee && step[1] !== lychee)
-        fail.push(`${file}: LYCHEE ${step[1]} differs from mise.toml lychee ${lychee}`);
+      const lines = read(file).split("\n");
+      const at = lines.findIndex((l) => l === "      - name: Install lychee");
+      const verify = lines.findIndex((l) => l === "        run: bun run verify");
+      // The step ends at the next step or job; the job ends at the next job key
+      let end = at + 1;
+      while (at !== -1 && end < lines.length && !/^ {6}- |^ {2}\S/.test(lines[end])) end++;
+      const body = lines.slice(at + 1, end).filter((l) => !/^\s*#/.test(l));
+      const between = at === -1 || verify === -1 ? [] : lines.slice(end, verify);
+      const pin = body.map((l) => /^ {10}LYCHEE: "([^"]+)"$/.exec(l)?.[1]).find(Boolean);
+      if (at === -1) fail.push(`${file}: no Install lychee step`);
+      else if (
+        !body.some((l) => l.includes("sha256sum -c -")) ||
+        !body.some((l) => l.includes('>> "$GITHUB_PATH"'))
+      )
+        fail.push(`${file}: the Install lychee step does not check the SHA-256 and put lychee on PATH`);
+      else if (verify === -1 || verify < end || between.some((l) => /^ {2}\S/.test(l)))
+        fail.push(`${file}: Install lychee is not before bun run verify in the same job`);
+      else if (lychee && pin !== lychee)
+        fail.push(`${file}: LYCHEE ${pin} differs from mise.toml lychee ${lychee}`);
     }
   }
 }
