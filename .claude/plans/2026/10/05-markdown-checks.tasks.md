@@ -59,6 +59,16 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - 完了条件: `git grep -n checkLocalLinks -- scripts` → 該当なし（終了コード 1）。存在しないファイルへの相対リンクを `.agents/skills` の SKILL.md に足した一時的な変更で `bun run verify:ai` → 落ちる（戻す）。`bun run verify` → 終了コード 0
   - コミット: `refactor(ai-config): leave link checks to lychee`
 
+- [x] T08: markdownlint をパッケージの入口から node で起動し、ファイル名を文字どおりに渡す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す対象の検査が要る）
+  - 変更: `scripts/check-markdown.mjs`, `scripts/lib/markdown-files.mjs`, `lefthook.yml`
+  - red: `tmpglob/review{a,b}.md` に `[x]()` を書いて `git add -N` し `node scripts/check-markdown.mjs` → 33 件ではなく 32 件しか検査せず 0 件で通る。戻す
+  - 完了条件: 同じ手順 → MD042 で落ちる。stage したファイルとして渡しても落ちる。`.claude/plans/` のファイルを渡すと検査しない。`bun run verify` → 終了コード 0
+  - コミット: `fix(docs): run markdownlint through node and pass file names literally`
+  - 結果: red（T02 の check-markdown.mjs）→ `Linting: 32 files`、`Summary: 0 issues`。`--` を付けても `Linting: 0 files` で文字どおりにならず、`:` を頭に付ける形にした。直した後: 全文書で `Linting: 33 files` と `tmpglob/review{a,b}.md:3:1 error MD042`、ファイルを渡す形でも exit 1、plan を渡すと exit 0（検査しない）。lychee は実在するファイル名をそのまま読む（同じ名前で `File not found` を正しく出した）。`bun run verify` → exit 0
+
 ## P3: 配る Markdown の検査
 
 展開した tarball の Markdown に両方がかかり、package の外を指す相対リンクが落ちる
@@ -92,3 +102,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T02 / knip が scripts から実行ファイルのパスで呼ぶ markdownlint-cli2 を未使用と判定した。kysely-codegen と同じく server の ignoreDependencies に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
 - 2026-10-05 / T03 / knip が scripts から呼ぶ外部の実行ファイル lychee を未登録と判定した。lefthook と同じくルートの ignoreBinaries に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
 - 2026-10-05 / T03 / mise の aqua の lychee の登録が、0.24.2 が配っていないアセット名（lychee-arm64-macos.dmg）を探して入らなかった（lefthook の links の job で発覚）。mise.toml を `github:lycheeverse/lychee`（version_prefix `lychee-v`）に変え、check-pairs の照合もその書き方を読むように直した / そのまま進めた
+- 2026-10-05 / T08 / T02 の Codex のレビュー（a67aee21）: F1 ファイル名が glob として読まれ、`{` などを含む名前が漏れる（再現）、F2 拡張子のない .bin を直接起動して Windows で動かない / 修正タスク T08 を足して直した

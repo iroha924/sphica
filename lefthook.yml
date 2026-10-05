@@ -20,7 +20,7 @@ pre-commit:
     # Structure only; links are checked over every document by the links job, since a heading changed here can break a link elsewhere
     - name: markdown
       glob: "*.md"
-      run: server/node_modules/.bin/markdownlint-cli2 --no-globs --config .markdownlint-cli2.jsonc {staged_files}
+      run: node scripts/check-markdown.mjs {staged_files}
     - name: ai-config
       glob: "{AGENTS.md,CLAUDE.md,.agents/skills/**,.claude/skills/**,.claude/rules/**,.claude/agents/**,.claude-plugin/**,plugin/skills/review/reviewers/**,plugin/skills/**,scripts/check-ai-config.mjs,package.json}"
       # Links are checked by the links job on every commit
