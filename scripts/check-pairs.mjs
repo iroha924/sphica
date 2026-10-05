@@ -518,10 +518,13 @@ if (TRAILER !== null) {
       const pin = body.map((l) => /^ {10}LYCHEE: "([^"]+)"$/.exec(l)?.[1]).find(Boolean);
       if (at === -1) fail.push(`${file}: no Install lychee step`);
       else if (
+        !body.some((l) => l.includes("/lychee-v${LYCHEE}/")) ||
         !body.some((l) => l.includes("sha256sum -c -")) ||
         !body.some((l) => l.includes('>> "$GITHUB_PATH"'))
       )
-        fail.push(`${file}: the Install lychee step does not check the SHA-256 and put lychee on PATH`);
+        fail.push(
+          `${file}: the Install lychee step does not download LYCHEE, check its SHA-256, and put it on PATH`,
+        );
       else if (verify === -1 || verify < end || between.some((l) => /^ {2}\S/.test(l)))
         fail.push(`${file}: Install lychee is not before bun run verify in the same job`);
       else if (lychee && pin !== lychee)

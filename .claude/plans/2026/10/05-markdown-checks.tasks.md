@@ -109,6 +109,16 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `fix(pairs): read the lychee install step as a block before verify in the same job`
   - 結果: red → SHA-256 の行をコメントにしても exit 0。直した後: コメント → `the Install lychee step does not check the SHA-256 and put lychee on PATH`、偽の step を前に → 同じく落ちる、後ろへ動かす → `Install lychee is not before bun run verify in the same job`、`id: lychee` を足す → exit 0（どれも戻した）。`bun run verify` → exit 0
 
+- [x] T14: lychee の導入の step が LYCHEE の版をダウンロードすることも確かめる
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T13（直す対象の照合が要る）
+  - 変更: `scripts/check-pairs.mjs`
+  - red: check.yml の URL の `lychee-v${LYCHEE}` を `lychee-v0.24.1` にして `bun run pairs` → exit 0 で通る。戻す
+  - 完了条件: 同じ手順 → 落ちる。`bun run verify` → 終了コード 0
+  - コミット: `fix(pairs): require the lychee download to use the pinned version`
+  - 結果: red → URL だけ 0.24.1 にしても exit 0（T13 の書き直しで、T12 の正規表現が見ていた URL の確認が抜けていた）。直した後: `the Install lychee step does not download LYCHEE, check its SHA-256, and put it on PATH` で落ちた（戻した）。`bun run verify` → exit 0
+
 ## P3: 配る Markdown の検査
 
 展開した tarball の Markdown に両方がかかり、package の外を指す相対リンクが落ちる
@@ -163,3 +173,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T11 / review-shipping（再現）と全差分の Codex のレビュー（F1、P1）: markdownlint-cli2 の入れ子の smol-toml 1.8.0 で release の SBOM の検査が落ちる / overrides で 1.9.0 にそろえた（出荷する bundle はもともと 1.9.0）。依存を足すのではなく解決のしかたを変える直しなので、Go は取り直していない
 - 2026-10-05 / T12 / 全差分の Codex のレビュー（F2、再現）: lychee の照合がバージョンの文字列しか見ず、導入の step を消しても通る。review-shipping: lychee.toml のコメントが「tarball の検査は plugin/ から」と古い / 修正タスク T12 を足して直した
 - 2026-10-05 / T13 / T11・T12 の Codex の再レビュー（high）: F1 smol-toml 1.9.0 では markdownlint が TOML の設定の規則のオプションを落とす（再現。いまの設定は JSONC で影響なし）、F2 check-pairs の正規表現が step の境界をまたぎ、コメントにした SHA-256 の行や verify の後ろの本物の step を通す（再現） / T13 を足して直した。F1 は設定ファイルに JSONC に留める理由を書いて塞いだ
+- 2026-10-05 / T14 / T13 の Codex の確認のレビュー: F2 URL が LYCHEE の版を使うかの確認が抜けた（再現、T13 の書き直しでの後退）→ T14 で直した。F1 SHA-256 の行を `: # ...` のように行の途中でコメントにするとすり抜ける（再現）→ 見送り: この照合はうっかりした食い違いを止めるもので、わざとの書き換えは PR のレビューで見える。PR 本文の Declined findings に書いた。レビューの往復が収束しないので、ここで区切った
