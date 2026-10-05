@@ -22,13 +22,14 @@ base: main
 
 markdownlint-cli2 が、リポジトリの Markdown の構造の崩れを pre-commit と verify で落とす
 
-- [ ] T01: F2 の plan と tasks を消す
+- [x] T01: F2 の plan と tasks を消す
   - 種別: 削除
   - 計画: S1
   - 依存: なし
   - 変更: `.claude/plans/2026/10/05-f2-init-project.plan.md`, `.claude/plans/2026/10/05-f2-init-project.tasks.md`
   - 完了条件: `git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件
   - コミット: `chore(plans): remove the finished F2 plan`
+  - 結果: `git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件
 - [ ] T02: markdownlint-cli2 を入れ、構造の規則だけで全文書を検査し、0.6.33 に上げる
   - 種別: 追加
   - 計画: S2
