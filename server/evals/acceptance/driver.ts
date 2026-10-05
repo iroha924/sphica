@@ -714,9 +714,13 @@ export async function createDriver(world: World): Promise<Driver> {
       if (step.review_validate && typeof step.review_validate === "object") {
         const v = step.review_validate as { findings: unknown };
         const pid = await projectId();
-        const first = await reviewBatch(db(), pid, [], null);
+        const first = await reviewBatch(db(), pid, [], null, "");
         validation = (
-          await checkFindings(db(), pid, [], v.findings, { after: null, selection: first.selection })
+          await checkFindings(db(), pid, [], v.findings, {
+            after: null,
+            selection: first.selection,
+            diff: "",
+          })
         ).problems;
         return;
       }

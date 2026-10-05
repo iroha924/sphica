@@ -50,7 +50,7 @@ base: main
   - 完了条件: `cd server && node --test test/plugin.test.ts` → pass。precedent.md に束ごとの select → read（続きも）→ 判定 → check と受領行、1 記録 1 finding、作業ツリーの変化は検出しない前提があり、SKILL.md に欠落・重複・selection の混在で blocked_unknown の規定がある
   - コミット: `docs(review): walk every batch of the decision lane and reconcile the receipts`
 
-- [ ] T08: selection を diff の本文から作る（解析後のファイル一覧では削除行と文脈が落ちる）
+- [x] T08: selection を diff の本文から作る（解析後のファイル一覧では削除行と文脈が落ちる）
   - 種別: 修正
   - 計画: S1
   - 依存: T01（selection がある）
@@ -58,6 +58,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern 'review selection' test/review.test.ts` → 削除行だけが違う 2 つの diff の selection が同じで fail
   - 完了条件: `cd server && node --test test/review.test.ts` → pass。削除行・文脈だけが違う diff の selection が違い、同じ diff の本文なら同じ
   - コミット: `fix(review): tie the selection to the whole diff text`
+  - 結果: red: `node --test --test-name-pattern 'review selection' test/review.test.ts` → 削除行だけが違う 2 つの diff で selection が一致して fail（reviewBatch に足した diff の引数を直す前のコードは使わない）
+  - 結果: 実装後 `node --test test/review.test.ts` → 12 pass。`bun run verify` → 0
 
 ## P2: read の応答の上限（#267）
 

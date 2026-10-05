@@ -33,7 +33,7 @@ export async function checkFindings(
   projectId: number,
   files: FileDiff[],
   raw: unknown,
-  at: { after: number | null; selection: string },
+  at: { after: number | null; selection: string; diff: string },
 ): Promise<Checked> {
   const parsed = Findings.safeParse(raw);
   if (!parsed.success)
@@ -41,7 +41,7 @@ export async function checkFindings(
       problems: parsed.error.issues.map((i) => `findings.${i.path.join(".")}: ${i.message}`),
       batch: null,
     };
-  const batch = await reviewBatch(db, projectId, files, at.after);
+  const batch = await reviewBatch(db, projectId, files, at.after, at.diff);
   if (batch.selection !== at.selection)
     return {
       problems: [

@@ -222,19 +222,21 @@ export type Batch = {
   next: number | null;
 };
 
-/** The batch of a review after the record id `after` (null for the first). */
+/** The batch of a review after the record id `after` (null for the first). `diff` is the text `files` was read from. */
 export async function reviewBatch(
   db: Reads,
   projectId: number,
   files: FileDiff[],
   after: number | null,
+  diff: string,
 ): Promise<Batch> {
   const all = await selectForReview(db, projectId, files);
   const rest = all.filter((u) => u.id > (after ?? 0));
   const records = rest.slice(0, REVIEW_BATCH);
   const n = Math.max(1, Math.ceil(all.length / REVIEW_BATCH));
   const k = Math.min(n, Math.floor((all.length - rest.length) / REVIEW_BATCH) + 1);
-  const selection = sha256(JSON.stringify([files, all.map((u) => `${u.id}:${u.revision}`)]))
+  // The whole text: parsed files keep only added lines, so two changes that remove different lines would share one selection
+  const selection = sha256(JSON.stringify([diff, all.map((u) => `${u.id}:${u.revision}`)]))
     .toString("hex")
     .slice(0, 16);
   const last = records.at(-1);

@@ -398,7 +398,7 @@ server.registerTool(
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return notChecked(new Error(p));
       const files = parseDiff(a.diff);
-      const b = await reviewBatch(db, p.id, files, a.after ?? null);
+      const b = await reviewBatch(db, p.id, files, a.after ?? null, a.diff);
       if (!b.all.length)
         return text(`Decision lane: checked. No active record applies to the ${files.length} changed files.`);
       if (!b.records.length)
@@ -451,6 +451,7 @@ server.registerTool(
           await checkFindings(db, p.id, parseDiff(a.diff), a.findings, {
             after: a.after ?? null,
             selection: a.selection,
+            diff: a.diff,
           }),
         ),
       );
