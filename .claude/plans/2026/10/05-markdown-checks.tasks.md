@@ -171,6 +171,16 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `docs(docs): keep config comments to three lines and state the plans exclusion`
   - 結果: red → lychee.toml の先頭 4 行と .markdownlint-cli2.jsonc の先頭 4 行が続くコメント、AGENTS.md と CLAUDE.md が「every tracked Markdown file's links」。直した後: どちらも 2 行、両方の説明が `the links of tracked Markdown outside .claude/plans/`。`bun run verify` → exit 0
 
+- [x] T16: link-containment.mjs のコメントを 3 行以内にする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象のコメントが要る）
+  - 変更: `scripts/lib/link-containment.mjs`
+  - red: `sed -n 15,18p scripts/lib/link-containment.mjs` → 区切りを含めて 4 行続く `/** ... */`（規約は 1〜3 行）
+  - 完了条件: この PR で足した、続くコメントがどれも 3 行以内。`bun run verify` → 終了コード 0
+  - コミット: `docs(tarball): keep the containment comment to two lines`
+  - 結果: red → `/**`、2 行、` */` の 4 行。直した後: `//` の 2 行。この PR で変えたファイルの 4 行以上のコメントは、どれもこの PR より前からあるもの。`bun run verify` → exit 0
+
 ## 記録
 - 2026-10-05 / T02 / knip が scripts から実行ファイルのパスで呼ぶ markdownlint-cli2 を未使用と判定した。kysely-codegen と同じく server の ignoreDependencies に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
 - 2026-10-05 / T03 / knip が scripts から呼ぶ外部の実行ファイル lychee を未登録と判定した。lefthook と同じくルートの ignoreBinaries に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
@@ -185,3 +195,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T13 / T11・T12 の Codex の再レビュー（high）: F1 smol-toml 1.9.0 では markdownlint が TOML の設定の規則のオプションを落とす（再現。いまの設定は JSONC で影響なし）、F2 check-pairs の正規表現が step の境界をまたぎ、コメントにした SHA-256 の行や verify の後ろの本物の step を通す（再現） / T13 を足して直した。F1 は設定ファイルに JSONC に留める理由を書いて塞いだ
 - 2026-10-05 / T14 / T13 の Codex の確認のレビュー: F2 URL が LYCHEE の版を使うかの確認が抜けた（再現、T13 の書き直しでの後退）→ T14 で直した。F1 SHA-256 の行を `: # ...` のように行の途中でコメントにするとすり抜ける（再現）→ 見送り: この照合はうっかりした食い違いを止めるもので、わざとの書き換えは PR のレビューで見える。PR 本文の Declined findings に書いた。レビューの往復が収束しないので、ここで区切った
 - 2026-10-05 / T15 / GitHub の Codex のレビュー（PR #286、e5b9798）3 件: lychee.toml のコメントが 4 行（P1、コメントは 1〜3 行の規約）、AGENTS.md と CLAUDE.md の verify:ai の説明が .claude/plans/ を外すことを書いていない（P2、2 件）。今回足した .markdownlint-cli2.jsonc のコメントも 4 行だった / T15 で直した
+- 2026-10-05 / T16 / GitHub の Codex のレビュー（4be312a）2 件: link-containment.mjs の `/** */` が区切りを含めて 4 行（P1）→ T16 で直した（T15 で区切りを含む 4 行を許容と見たのは誤り）。pre-commit の links が stage した中身ではなく作業ツリーを見る（P2、再現）→ 見送り: plan で Codex と合意した制限（部分的な stage は CI が見る）。PR 本文の Declined findings に書いた

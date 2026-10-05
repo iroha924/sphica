@@ -12,10 +12,8 @@ const real = (file) => {
   }
 };
 
-/**
- * report is lychee's `--format json --verbose` output. Without --verbose the successful links are only counted, so a report that counts
- * some but lists none is refused rather than read as "nothing outside".
- */
+// report is lychee's `--format json --verbose` output. Without --verbose successful links are only counted, so a report that counts
+// some but lists none is refused rather than read as "nothing outside".
 export function linksOutside(report, root) {
   const map = report.success_map ?? {};
   const listed = Object.values(map).reduce((n, links) => n + links.length, 0);
