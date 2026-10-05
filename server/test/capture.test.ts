@@ -2176,6 +2176,49 @@ test("unreadable observation: a file that cannot be read is set aside, and the r
   }
 });
 
+test("observation that cannot be moved: it stays in calls/ for the next send, and the rest of the send goes on", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const busy = (target: unknown) => String(target).endsWith(`${path.sep}1-a.json`);
+  const ebusy = () => Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
+  const read = fs.readFileSync;
+  const rename = fs.renameSync;
+  // Another process holds the file without sharing it, as Windows allows: neither reading nor moving it works
+  const r1 = mock.method(fs, "readFileSync", ((target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (busy(target)) throw ebusy();
+    return (read as (...a: unknown[]) => unknown)(target, ...rest);
+  }) as typeof fs.readFileSync);
+  const r2 = mock.method(fs, "renameSync", ((from: fs.PathLike, to: fs.PathLike) => {
+    if (busy(from)) throw ebusy();
+    return rename(from, to);
+  }) as typeof fs.renameSync);
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    fs.writeFileSync(
+      path.join(callsDir(), "1-a.json"),
+      JSON.stringify({ ...observed, toolUse: "toolu_busy" }),
+    );
+    fs.writeFileSync(path.join(callsDir(), "2-b.json"), JSON.stringify({ ...observed, toolUse: "toolu_ok" }));
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1, "the queue is still sent");
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation")
+        .all()
+        .map((x) => x.tool_use_id),
+      ["toolu_ok"],
+    );
+    assert.ok(fs.existsSync(path.join(callsDir(), "1-a.json")), "kept for the next send");
+  } finally {
+    r1.mock.restore();
+    r2.mock.restore();
+    reset();
+    await db.done();
+  }
+});
+
 test("record call: hook values out of bounds are never stored as sent", async () => {
   const db = tempDb();
   try {

@@ -1025,14 +1025,21 @@ async function sendBatch(
  * written and removed by its hook. One the database refuses is set aside alone, so it never holds back the others.
  */
 async function sendObservations(db: Kysely<DB>, names: { name: string; from: string }[]): Promise<void> {
+  // One that cannot be moved either stays in calls/, so the next send tries it again
+  const aside = (name: string, why: string) => {
+    try {
+      setAside(callsDir(), name, callsRejectedDir(), why);
+    } catch {
+      // left where it is
+    }
+  };
   const rows: { name: string; o: Observation }[] = [];
   for (const { name, from } of names) {
     let text: string;
     try {
       text = fs.readFileSync(path.join(from, name), "utf8");
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT")
-        setAside(from, name, callsRejectedDir(), "unreadable");
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") aside(name, "unreadable");
       continue;
     }
     let o: Observation | null = null;
@@ -1044,7 +1051,7 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
       // not JSON
     }
     if (o) rows.push({ name, o });
-    else setAside(from, name, callsRejectedDir(), why);
+    else aside(name, why);
   }
   if (!rows.length) return;
   const insert = (part: typeof rows) =>
@@ -1067,8 +1074,13 @@ async function sendObservations(db: Kysely<DB>, names: { name: string; from: str
   }
   for (const x of rows) {
     const why = bad.get(x.name);
-    if (why) setAside(callsDir(), x.name, callsRejectedDir(), why);
-    else fs.rmSync(path.join(callsDir(), x.name), { force: true });
+    if (why) aside(x.name, why);
+    else
+      try {
+        fs.rmSync(path.join(callsDir(), x.name), { force: true });
+      } catch {
+        // Written already: the next send writes it again, which adds nothing
+      }
   }
 }
 
