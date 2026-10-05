@@ -210,9 +210,13 @@ test("read shows cited words and who said them, links, history, and each anchor 
     // A long source reads in parts: the first says where the rest starts, and reading from there ends with the text's end
     const long = message(db, p, { id: "long", text: `${"a".repeat(70 * 1024)}THE END` });
     const first = await readRefs(db.reader, p, [`s${long}`], null);
-    const next = /read s(\d+)@(\d+) for the rest/.exec(first);
-    assert.ok(next, first.slice(-200));
-    const rest = await readRefs(db.reader, p, [`s${next?.[1]}@${next?.[2]}`], null);
+    let rest = first;
+    for (let n = 0; n < 10; n++) {
+      const next = /read (s\d+@\d+) for the rest/.exec(rest);
+      if (!next) break;
+      rest = await readRefs(db.reader, p, [next[1] ?? ""], null);
+    }
+    assert.ok(/read s\d+@\d+ for the rest/.test(first), first.slice(-200));
     assert.match(rest, /THE END\n<\/past-records/);
     assert.equal(first.includes("THE END"), false);
     assert.match(await readRefs(db.reader, p, ["x"], null), /x: not found in this project/);

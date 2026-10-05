@@ -36,7 +36,6 @@ async function save(db: TempDb, p: number, root: string | null, record: unknown)
 }
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
-const BUDGET = 64 * 1024;
 
 /** The read MCP server on a temporary database, answering for a repository registered as git:github.com/o/r */
 async function server(db: TempDb, root: string) {
@@ -111,7 +110,7 @@ test("read rename budget: a record reads the same alone and after a record that 
   }
 });
 
-test("read budget: ten long sources in one read stay within 64 KiB through the MCP server", async () => {
+test("read budget: ten long sources in one read stay within the reply budget through the MCP server", async () => {
   const db = tempDb();
   const { root } = repo();
   const p = project(db);
@@ -121,7 +120,7 @@ test("read budget: ten long sources in one read stay within 64 KiB through the M
   const { client, read } = await server(db, root);
   try {
     const reply = await read(ids.map((id) => `s${id}`));
-    assert.ok(Buffer.byteLength(reply) <= BUDGET, `${Buffer.byteLength(reply)} bytes`);
+    assert.ok(Buffer.byteLength(reply) <= READ_BUDGET, `${Buffer.byteLength(reply)} bytes`);
   } finally {
     await client.close();
     await db.done();
@@ -133,10 +132,9 @@ test("read budget: ten long sources in one read stay within 64 KiB through the M
 function pageOf(reply: string): { body: string; next: string[] } {
   const lines = reply.split("\n");
   const body = lines.slice(2, -1).join("\n");
-  const stop =
-    /\n\n\(This reply stops here to stay within 64 KiB\. Call read with refs (\[.*\]) for the rest\.\)$/.exec(
-      body,
-    );
+  const stop = new RegExp(
+    `\\n\\n\\(This reply stops here to stay within ${READ_BUDGET / 1024} KiB\\. Call read with refs (\\[.*\\]) for the rest\\.\\)$`,
+  ).exec(body);
   return { body: stop ? body.slice(0, stop.index) : body, next: stop ? JSON.parse(stop[1] ?? "[]") : [] };
 }
 
@@ -229,7 +227,7 @@ test("read budget: long sources are read to their last byte through continuation
   }
 });
 
-test("read budget: a record longer than a reply, one quote over 64 KiB, goes on by byte and digest, and a change sends it back to the start", async () => {
+test("read budget: a record longer than a reply, one quote over a reply, goes on by byte and digest, and a change sends it back to the start", async () => {
   const db = tempDb();
   const { root, git } = repo();
   try {

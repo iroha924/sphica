@@ -11,7 +11,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
+import { framed } from "../src/frame.ts";
 import { liveOverview, lookCursor, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
+import { READ_BUDGET } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
@@ -301,7 +303,7 @@ test("live keeps every record on one line with its paths, and a page stays under
   }
 });
 
-test("look counts what it could not check, follows a long chain to its live end, reads long keys, and stays under 64 KiB", async () => {
+test("look counts what it could not check, follows a long chain to its live end, reads long keys, and keeps each page within the reply budget", async () => {
   const db = tempDb();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
   try {
@@ -539,7 +541,10 @@ async function lookPages(db: TempDb, p: number, root: string | null) {
   let after: string | undefined;
   for (let n = 0; n < 50; n++) {
     const page = await lookOverview(db.reader, p, root, after);
-    assert.ok(Buffer.byteLength(page) < 64 * 1024, `page ${n}: ${Buffer.byteLength(page)} bytes`);
+    assert.ok(
+      Buffer.byteLength(framed(page)) <= READ_BUDGET,
+      `page ${n}: ${Buffer.byteLength(framed(page))} bytes`,
+    );
     pages.push(page);
     after = /after: "([^"]+)"/.exec(page)?.[1];
     if (!after) break;

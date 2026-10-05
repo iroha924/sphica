@@ -6,7 +6,7 @@ import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
-import { UNSUPPORTED } from "./read.ts";
+import { READ_BUDGET, UNSUPPORTED } from "./read.ts";
 import { ruleFiles } from "./rule-files.ts";
 import { bytes, head } from "./text.ts";
 
@@ -106,8 +106,9 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
   ].join("\n");
 }
 
-/** Anchors checked per page, bytes per line, and bytes for all the lines of a page together. */
-const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: 56 * 1024 } as const;
+/** Anchors checked per page, bytes per line, and bytes for all the lines of a page together: the rest of a reply's budget holds the frame,
+ * the headings, what was not checked, and the closing lines. */
+const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: READ_BUDGET - 4 * 1024 } as const;
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
 const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
 

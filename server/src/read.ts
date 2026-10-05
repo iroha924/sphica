@@ -416,8 +416,11 @@ function movedTo(
     : "";
 }
 
-/** What one read reply carries, its frame included: hosts cut or set aside larger replies (Claude Code at 25,000 tokens by default). */
-export const READ_BUDGET = 64 * 1024;
+/**
+ * What one reply carries, its frame included. Codex keeps about 10,000 tokens it counts as bytes / 4 and drops the middle of a longer
+ * reply without a word; Claude Code sets aside a reply over 25,000 tokens.
+ */
+export const READ_BUDGET = 32 * 1024;
 /** Bytes of each field from outside in a source's header line (where it lives, who wrote it), so the header always leaves room for text */
 const HEADER_FIELD = 300;
 
