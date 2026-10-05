@@ -308,13 +308,19 @@ export function captureNotice(file: string = dbFile()): string | null {
       "Create it with sphica init",
     );
   const s = readState();
+  if (s.unreadable)
+    return panel(
+      "sphica: cannot read the recording queue",
+      [spoolDir(), s.unreadable],
+      "Check with sphica doctor",
+    );
   if (s.stuck)
     return panel(
       "sphica: cannot send recordings",
       [`${s.pending} pending / failed: ${plain(s.stuck.slice(0, 120))}`],
       "Check with sphica doctor",
     );
-  if (s.rejected > 0)
+  if (s.rejected)
     return panel(
       `sphica: the database rejected ${plural(s.rejected, "record")}`,
       // Paths go in the box lines: a newline in HOME must not forge a line outside the box.
@@ -610,25 +616,127 @@ function writeState(s: State): void {
  * (once the queue empties, the failure is in the past). The session start warning and doctor share this check.
  */
 export function readState(): State & {
-  pending: number;
-  rejected: number;
-  unregistered: number;
+  pending: number | null;
+  rejected: number | null;
+  unregistered: number | null;
+  /** The error code when the queue itself cannot be read; its counts are then null, never 0 */
+  unreadable: string | null;
   stuck: string | null;
 } {
-  const count = (dir: string) => {
-    try {
-      return fs.readdirSync(dir).filter((f) => f.endsWith(".json") && !f.startsWith(".")).length;
-    } catch {
-      return 0; // not there yet
-    }
-  };
+  const queue = listQueue(spoolDir());
   const counts = {
-    pending: count(spoolDir()),
-    rejected: count(rejectedDir()),
-    unregistered: count(unregisteredDir()),
+    pending: queue.files?.length ?? null,
+    rejected: listQueue(rejectedDir()).files?.length ?? null,
+    unregistered: listQueue(unregisteredDir()).files?.length ?? null,
   };
   const state = readStateFile();
-  return { ...state, ...counts, stuck: state.error && counts.pending > 0 ? state.error : null };
+  const stuck = state.error && (counts.pending ?? 0) > 0 ? state.error : null;
+  return { ...state, ...counts, unreadable: queue.code, stuck };
+}
+
+/** A queue directory's records and its dot-named temporary files. A directory not made yet is empty; one that cannot be read is null. */
+function listQueue(dir: string): { files: string[] | null; temp: string[]; code: string | null } {
+  try {
+    const names = fs.readdirSync(dir);
+    return {
+      files: names.filter((f) => f.endsWith(".json") && !f.startsWith(".")),
+      temp: names.filter((f) => f.endsWith(".json") && f.startsWith(".")),
+      code: null,
+    };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "unknown";
+    return code === "ENOENT" ? { files: [], temp: [], code: null } : { files: null, temp: [], code };
+  }
+}
+
+/** A temporary file younger than this may be a write still going on, so only older ones count as left behind. */
+const TEMP_AGE_MS = 60_000;
+const REASON = /^[a-z]+(:[A-Z]+)?$/;
+
+type DirReport = {
+  files: number | null;
+  code: string | null;
+  temp: { count: number; oldestMs: number; bytes: number };
+};
+
+/**
+ * What doctor shows of the queue: each directory's records and temporary files left behind, why records were set aside, the held
+ * recordings by project, the observations waiting to be resent, and the last prune. Reads every held file, so only doctor calls it.
+ */
+export function queueReport(now: number = Date.now()) {
+  const dirs = {
+    queue: spoolDir(),
+    calls: callsDir(),
+    rejected: rejectedDir(),
+    unregistered: unregisteredDir(),
+    callsRejected: callsRejectedDir(),
+  };
+  const listed = Object.fromEntries(Object.entries(dirs).map(([k, d]) => [k, listQueue(d)])) as Record<
+    keyof typeof dirs,
+    ReturnType<typeof listQueue>
+  >;
+  const report = (k: keyof typeof dirs): DirReport => {
+    const temp = { count: 0, oldestMs: 0, bytes: 0 };
+    for (const name of listed[k].temp)
+      try {
+        const st = fs.statSync(path.join(dirs[k], name));
+        const age = now - st.mtimeMs;
+        if (age < TEMP_AGE_MS) continue;
+        temp.count++;
+        temp.bytes += st.size;
+        temp.oldestMs = Math.max(temp.oldestMs, age);
+      } catch {
+        // gone since listed
+      }
+    return { files: listed[k].files?.length ?? null, code: listed[k].code, temp };
+  };
+  const reasons = (k: "rejected" | "callsRejected") => {
+    const out: Record<string, number> = {};
+    for (const name of listed[k].files ?? []) {
+      let why = "unknown";
+      try {
+        const text = fs.readFileSync(path.join(dirs[k], `${name}.reason`), "utf8");
+        if (REASON.test(text)) why = text;
+      } catch {
+        // set aside before reasons were kept, or the reason could not be written
+      }
+      out[why] = (out[why] ?? 0) + 1;
+    }
+    return out;
+  };
+  const read = (dir: string, name: string): unknown => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const held = new Map<string, { count: number; oldestMs: number }>();
+  for (const name of listed.unregistered.files ?? []) {
+    const key = (read(dirs.unregistered, name) as { project?: unknown } | null)?.project;
+    const project = typeof key === "string" ? key : "unreadable";
+    const age = Math.max(0, now - (Number(name.split("-")[0]) || now));
+    const h = held.get(project) ?? { count: 0, oldestMs: 0 };
+    held.set(project, { count: h.count + 1, oldestMs: Math.max(h.oldestMs, age) });
+  }
+  const waiting = new Set<string>();
+  for (const name of listed.calls.files ?? []) {
+    const o = observation(read(dirs.calls, name));
+    if (o) waiting.add(o.toolUse);
+  }
+  return {
+    dirs: Object.fromEntries(Object.keys(dirs).map((k) => [k, report(k as keyof typeof dirs)])) as Record<
+      keyof typeof dirs,
+      DirReport
+    >,
+    rejected: reasons("rejected"),
+    callsRejected: reasons("callsRejected"),
+    held: [...held]
+      .map(([project, h]) => ({ project, ...h }))
+      .sort((a, b) => a.project.localeCompare(b.project)),
+    waiting,
+    pruned: readStateFile().pruned,
+  };
 }
 
 /**

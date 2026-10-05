@@ -68,14 +68,16 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
   - 結果: red: `node --test --test-name-pattern 'unreadable observation' test/capture.test.ts` → `EACCES: permission denied, open '.../spool/calls/1-a.json'` で fail
   - 結果: 実装後 同じコマンド → pass（読めないファイルが `calls/rejected/` に unreadable で移り、正常な観測と通常のキュー 1 件が送られた）。`bun run verify` → 0
 
-- [ ] T04: readState の読めない状態、SessionStart の通知、queueReport
+- [x] T04: readState の読めない状態、SessionStart の通知、queueReport
   - 種別: 修正
   - 計画: S4
   - 依存: T02（queueReport が `calls/` と `calls/rejected/` を数える）, T03（queueReport が理由ファイルと `pruned` を読む）
   - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
-  - red: `cd server && node --test --test-name-pattern 'unreadable queue' test/capture.test.ts` → SPHICA_HOME をファイルにすると readState が pending 0 を返し、captureNotice が null で fail
+  - red: `SPHICA_HOME=<tmp> node -e '<readState と captureNotice を出す>'`（`<tmp>/spool` をファイルにし、`<tmp>/sphica.db` を置く）→ readState が pending 0 を返し、captureNotice が null
   - 完了条件: `cd server && node --test --test-name-pattern 'unreadable queue|queue report' test/capture.test.ts` → pass。読めないディレクトリは null とコード、ENOENT は 0、通知が出る。queueReport が 5 つのディレクトリの読める状態・60 秒より古い一時ファイル・理由ごとの件数・保留のプロジェクト別・`calls/` の件数・`pruned` を返す
   - コミット: `fix(capture): tell an unreadable queue from an empty one and report the queue in detail`
+  - 結果: red: `SPHICA_HOME=$T/h node -e '...readState()...captureNotice(...)'`（spool をファイルに）→ `{"pending":0,"rejected":0} null`
+  - 結果: 実装後 `node --test --test-name-pattern 'unreadable queue|queue report|stuck is reported' test/capture.test.ts` → 3 pass。`bun run verify` → 0
 
 - [ ] T05: doctor の Recording 欄と、結べない呼び出しの欄
   - 種別: 修正
@@ -113,3 +115,4 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
 - 2026-10-05 / T01 / Codex のタスクごとのレビュー（65383caf） / 指摘なし。ロック時の実走と Windows は Codex 側で未実行（read-only）
 - 2026-10-05 / T03 / 実装を先に書いてから red を確かめた / capture.ts の変更を一時的に退けて新しいテストが意図した理由で落ちることを確かめ、戻した
 - 2026-10-05 / T02 / Codex のタスクごとのレビュー（d49c2525）F1: 読めない（EACCES）観測のファイルが flush を投げさせ、通常のキューまで毎回止める / 受理。読み取りの ENOENT 以外の失敗も unreadable で隔離する修正タスク T08 を T04 の前に足した
+- 2026-10-05 / T04 / red の欄を変えた。前: SPHICA_HOME をファイルにして readState と captureNotice を見る。新: SPHICA_HOME の下の spool をファイルにする / SPHICA_HOME 自体をファイルにすると DB も無くなり、captureNotice は「DB が無い」を先に返すので、キューが読めないことを確かめられない

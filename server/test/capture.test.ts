@@ -23,6 +23,7 @@ import {
   observeRecordCall,
   onHook,
   openTurn,
+  queueReport,
   readInput,
   readState,
   rejectedDir,
@@ -1165,6 +1166,99 @@ test("without a database, session start reports it in the same box format", () =
     captureNotice(missing),
     `✦ sphica: no database, so conversations are not recorded\n│ ${missing}\n╰─ Create it with sphica init`,
   );
+});
+
+test("unreadable queue: a queue that cannot be read is unknown, never 0, and the session start says so", () => {
+  reset();
+  const capture = path.join(home, "sphica.db");
+  fs.writeFileSync(capture, "");
+  try {
+    assert.deepEqual(
+      [readState().pending, readState().unreadable],
+      [0, null],
+      "a queue not made yet is empty",
+    );
+    fs.mkdirSync(path.dirname(spoolDir()), { recursive: true });
+    fs.writeFileSync(spoolDir(), "");
+    const s = readState();
+    assert.deepEqual([s.pending, s.rejected, s.unregistered, s.unreadable], [null, null, null, "ENOTDIR"]);
+    assert.match(captureNotice(capture) ?? "", /cannot read the recording queue\n│ .*spool\n│ ENOTDIR/);
+  } finally {
+    fs.rmSync(spoolDir(), { force: true });
+    fs.rmSync(capture, { force: true });
+  }
+});
+
+test("queue report: what is in each queue directory, why records were set aside, and what was pruned", () => {
+  reset();
+  const now = Date.now();
+  const write = (dir: string, name: string, body: string, mtime?: number) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), body);
+    if (mtime) fs.utimesSync(path.join(dir, name), mtime / 1000, mtime / 1000);
+  };
+  try {
+    write(spoolDir(), "1-1-a.json", "{}");
+    write(spoolDir(), ".lock", "1", now - 600_000);
+    // A send in progress writes under a dot name: only one older than a minute counts as left behind
+    write(spoolDir(), ".2-1-b.json", "x".repeat(10), now - 600_000);
+    write(spoolDir(), ".3-1-c.json", "x".repeat(5), now - 1_000);
+    write(callsDir(), "4-1-d.json", JSON.stringify({ ...observed, toolUse: "toolu_wait" }));
+    write(callsDir(), ".5-1-e.json", "xx", now - 120_000);
+    write(rejectedDir(), "6-1-f.json", "{");
+    write(rejectedDir(), "6-1-f.json.reason", "unreadable");
+    write(rejectedDir(), "7-1-g.json", "{}");
+    write(rejectedDir(), "7-1-g.json.reason", "sqlite:CONSTRAINT");
+    write(rejectedDir(), "8-1-h.json", "{}");
+    write(rejectedDir(), "9-1-i.json", "{}");
+    write(rejectedDir(), "9-1-i.json.reason", "\u001b[2Jforged");
+    write(callsRejectedDir(), "10-1-j.json", "{");
+    write(callsRejectedDir(), "10-1-j.json.reason", "shape");
+    const held = (t: number, i: number, key: string) =>
+      write(unregisteredDir(), `${t}-1-${i}.json`, JSON.stringify(owned(key, i)));
+    held(now - 3 * 86_400_000, 11, "git:example/a");
+    held(now - 86_400_000, 12, "git:example/a");
+    held(now - 2 * 86_400_000, 13, "git:example/b");
+    write(unregisteredDir(), `${now}-1-14.json`, "{");
+    fs.writeFileSync(
+      path.join(home, ".sphica", "capture.json"),
+      JSON.stringify({ pruned: { at: "2026-10-01T00:00:00.000Z", count: 7 } }),
+    );
+    const r = queueReport(now);
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(r.dirs).map(([k, d]) => [k, [d.files, d.code, d.temp.count, d.temp.bytes]]),
+      ),
+      {
+        queue: [1, null, 1, 10],
+        calls: [1, null, 1, 2],
+        rejected: [4, null, 0, 0],
+        unregistered: [4, null, 0, 0],
+        callsRejected: [1, null, 0, 0],
+      },
+    );
+    assert.ok(r.dirs.queue.temp.oldestMs >= 600_000);
+    assert.deepEqual(r.rejected, { "sqlite:CONSTRAINT": 1, unknown: 2, unreadable: 1 });
+    assert.deepEqual(r.callsRejected, { shape: 1 });
+    assert.deepEqual(
+      r.held.map((h) => [h.project, h.count, Math.round(h.oldestMs / 86_400_000)]),
+      [
+        ["git:example/a", 2, 3],
+        ["git:example/b", 1, 2],
+        ["unreadable", 1, 0],
+      ],
+    );
+    assert.deepEqual([...r.waiting], ["toolu_wait"]);
+    assert.deepEqual(r.pruned, { at: "2026-10-01T00:00:00.000Z", count: 7 });
+    // A directory that cannot be read is unknown, with its code
+    fs.rmSync(callsRejectedDir(), { recursive: true });
+    fs.writeFileSync(callsRejectedDir(), "");
+    const broken = queueReport(now).dirs.callsRejected;
+    assert.deepEqual([broken.files, broken.code], [null, "ENOTDIR"]);
+  } finally {
+    reset();
+    fs.rmSync(path.join(home, ".sphica", "capture.json"), { force: true });
+  }
 });
 
 test("stuck is reported only with queued items and a recorded failure, and a broken state file does not crash", () => {
