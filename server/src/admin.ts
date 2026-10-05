@@ -12,6 +12,7 @@ import { HOLD_DAYS, HOLD_MAX } from "./capture.ts";
 import { indent } from "./cli/view.ts";
 import { dbFile, iso, SCHEMA_REVISION, sqliteCode } from "./db.ts";
 import { connectWriter } from "./db-write.ts";
+import { withFileLock } from "./file-lock.ts";
 import { inline } from "./panel.ts";
 import { packageVersionAt, ROOT } from "./plugin.ts";
 import { settleForMigration } from "./reconcile.ts";
@@ -338,17 +339,20 @@ export function dbInit(file: string = dbFile()): void {
       },
       true,
     );
-    // rename replaces a database already in place. link stops with EEXIST when the destination is taken (the later of two concurrent inits).
-    // File systems without hard links (FAT, exFAT) fall back to rename. Copying is not used: stopping midway leaves a partial database.
-    try {
-      fs.linkSync(tmp, file);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EEXIST" || fs.existsSync(file))
-        throw new Error(
-          `${file} already exists (another sphica init created it first). Run this again to check it.`,
-        );
-      fs.renameSync(tmp, file);
-    }
+    // rename replaces a database already in place, and file systems without hard links (FAT, exFAT) have only rename. So every init places
+    // its database under one lock, checking again inside it: the later of two concurrent inits stops instead of replacing the first one's.
+    // Copying is not used: stopping midway leaves a partial database.
+    const taken = () =>
+      new Error(`${file} already exists (another sphica init created it first). Run this again to check it.`);
+    withFileLock(`${file}.init.lock`, () => {
+      if (fs.existsSync(file)) throw taken();
+      try {
+        fs.linkSync(tmp, file);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "EEXIST") throw taken();
+        fs.renameSync(tmp, file);
+      }
+    });
   } finally {
     for (const f of [tmp, `${tmp}-wal`, `${tmp}-shm`]) fs.rmSync(f, { force: true });
   }

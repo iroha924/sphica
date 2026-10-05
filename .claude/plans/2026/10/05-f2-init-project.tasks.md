@@ -80,7 +80,7 @@ base: main
   - 完了条件: 同じコマンド → pass（元の 1 件・親・子の 3 件が残る）。途中で止まる場合のテスト → projects.json が元の内容で読め、次の nameLocal がロックのファイルの名前を出して止まる。`bun run verify` → 終了コード 0
   - コミット: `fix(init): name local projects under a lock and replace the table atomically`
   - 結果: red（直す前の project.ts）→ `two inits naming different directories at once both keep their names (race)` が、b の `beta` が消えて落ちた。直した後: `cd server && node --test --test-timeout=60000 test/project.test.ts` → 18 件 pass（race・途中で止まる・rename の失敗を含む）。`bun run verify` → exit 0
-- [ ] T05: dbInit で DB を置く手順全体をロックで囲む
+- [x] T05: dbInit で DB を置く手順全体をロックで囲む
   - 種別: 修正
   - 計画: S3
   - 依存: T02（withFileLock が要る）
@@ -88,6 +88,7 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 --test-name-pattern=race test/admin.test.ts` → 両方が Created と出て、子の目印の行が無くて落ちる。テストだけを先に足し、admin.ts は main のまま
   - 完了条件: 同じコマンド → pass（Created は 1 つだけで、もう 1 つは already exists。勝った方の目印の行が残る）。`bun run verify` → 終了コード 0
   - コミット: `fix(init): place a new database under a lock so a concurrent init cannot replace it`
+  - 結果: red（直す前の admin.ts）→ `both or neither created it: Created / Created` で落ちた。直した後: `cd server && node --test --test-timeout=60000 test/admin.test.ts` → 38 件 pass。`bun run verify` → exit 0
 
 ## P3: doctor の文面
 
