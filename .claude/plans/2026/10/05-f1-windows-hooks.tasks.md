@@ -93,6 +93,15 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 完了条件: `bun run verify` → 終了コード 0（偽の codex が一時の CODEX_HOME を受け取り、config.toml の中身と mtime が変わらず、trusted・modified・disabled の行が出て、その行で終了コードが 1 にならない）
   - コミット: `feat(doctor): report whether Codex trusts Sphica's current hooks`
   - 結果: `bun run verify` → exit 0。plugin.test.ts の新しい 3 件と cli.test.ts の 1 件が pass（偽の codex が一時の CODEX_HOME を受け取る、config.toml の中身と mtime が変わらない、`✓ Codex hooks 9 of 9 trusted`、変更後 `△ … 8 of 9 trusted …; 1 modified, 1 disabled`、CLI の終了コードは 0 のまま、0.161.0・0.159.2 は unknown）。この PC の開発版の `node server/src/cli.ts doctor` → `✓ Codex hooks        9 of 9 trusted in ~/.codex/config.toml`
+- [x] T09: Codex が読めない定義と、Codex と削り方の違う状態のキーで trusted と出さない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T05（直す対象の関数と、T04・T05 のレビューの指摘が要る）
+  - 変更: `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`
+  - red: `cd server && node --test test/codex-trust.test.ts` → 新しいテストが `commandWindows` と `command_windows` の両方を書いた定義で unknown にならず落ちる
+  - 完了条件: `cd server && node --test test/codex-trust.test.ts` → 8 件 pass
+  - コミット: `fix(doctor): never call hooks trusted that Codex cannot read or keys it trims differently`
+  - 結果: red を実測（直す前は 1 つ目の assert で `actual: false, expected: true`）。直した後: 8 件 pass、`bun run typecheck` → exit 0。600.0・6e2 の timeout、U+FEFF・U+0085 のキーは、直す前のコードでは JSON.parse が 600 にし、JS の trim が U+FEFF を削り U+0085 を残すので、どれも落ちる側だった（コードを読んでの判断で、assert ごとの red は見ていない）
 - [x] T06: Windows の CI に、パックした doctor の「Codex hooks」の行を確かめる手順を足す
   - 種別: 追加
   - 計画: S5
@@ -103,6 +112,8 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 結果: `actionlint .github/workflows/check.yml` → exit 0。`node scripts/check-codex-trust-live.mjs` → macOS で `codex trust: doctor read 9 hooks of plugin through codex`。期待値の雛形の timeout を 1 ずらしたコピー → `expected all 9 Codex hooks trusted` と `expected 1 modified and 1 disabled` の 2 件で落ちた。Windows は push 後に plan の A3 で確かめる
 
 ## 記録
+
+- 2026-10-05 / T09 / T04・T05 の Codex のレビュー（新しい会話、70f19166）: F1 `commandWindows` と `command_windows` の両方や `timeout: 600.0` など、Codex が読めない定義に trusted を返す、F2 状態のキーを JS の trim で削るので U+FEFF・U+0085 で Codex と食い違う。2 件とも採る。重複したキー一般（同じ名前を 2 回）は JSON.parse で見分けられず、出荷する codex.json は手で書き換えない限り起きないので扱わない。5f8b75ab（bundle の上限）には指摘なし / T09 を足して直した。T09 は T05 の後に足したので T06 の前に置いた
 
 - 2026-10-05 / T06 / 検査は Windows に限らず macOS・Linux でも動く（POSIX では偽の `codex`、Windows では npm の形の `codex.cmd` と `codex.js`）ので、名前を `scripts/check-codex-trust-windows.mjs` から `scripts/check-codex-trust-live.mjs` に変え、`bun run verify` にも `codex-trust:live` として入れた。変更欄に `package.json` を足した
 

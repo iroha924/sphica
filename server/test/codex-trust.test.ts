@@ -166,3 +166,23 @@ test("what Sphica does not ship, and config it cannot read, is unknown, never a 
   assert.ok("unknown" in readHookStates("[hooks\nstate = 1"));
   assert.ok("unknown" in readHookStates("[hooks]\nstate = 1\n"));
 });
+
+test("a definition Codex cannot read, and a state key Codex trims differently, are never trusted", () => {
+  const h = { type: "command", command: "x" };
+  const json = file("Stop", [{ hooks: [h] }]);
+  const key = `${ID}:${REL}:stop:0:0`;
+  const hash = hashOf(json);
+  const unknown = (text: string) =>
+    assert.ok("unknown" in hookTrust(text, ID, REL, "darwin", new Map()), text);
+  // Both names of the Windows command are one field to Codex, so naming it twice fails the whole file
+  unknown(file("Stop", [{ hooks: [{ ...h, commandWindows: "y", command_windows: "y" }] }]));
+  // Codex reads timeout as a whole number, and 600.0 is not one to it even though JSON.parse makes it 600
+  unknown(json.replace('"command":"x"', '"command":"x","timeout":600.0'));
+  unknown(json.replace('"command":"x"', '"command":"x","timeout":6e2'));
+  // Codex trims keys with Rust's whitespace: U+FEFF stays part of the key, U+0085 goes
+  const at = (k: string) =>
+    hooksOf(hookTrust(json, ID, REL, "darwin", states(`[hooks.state."${k}"]\ntrusted_hash = "${hash}"\n`)))[0]
+      ?.trust;
+  assert.equal(at(`\\uFEFF${key}`), "untrusted");
+  assert.equal(at(`\\u0085${key}`), "trusted");
+});

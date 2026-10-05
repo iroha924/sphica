@@ -38,6 +38,10 @@ const DEFAULT_CONTEXT_LIMIT = 2500;
 // Clamped to 1..3 seconds with a default of 1; every other event defaults to 600
 const SHORT = new Set(["SessionEnd", "Interrupt"]);
 
+// Rust's char::is_whitespace, which Codex trims state keys with: unlike String.prototype.trim it drops U+0085 and keeps U+FEFF
+const RUST_SPACE =
+  /^[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+|[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$/g;
+
 const isTable = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
@@ -72,7 +76,7 @@ export function readHookStates(configToml: string | null): Map<string, HookState
   if (table === undefined) return states;
   if (!isTable(table)) return { unknown: "hooks.state in config.toml is not a table" };
   for (const [raw, value] of Object.entries(table)) {
-    const key = raw.trim();
+    const key = raw.replace(RUST_SPACE, "");
     // Codex skips an entry it cannot read as a state, as if it were not there
     if (!key || !isTable(value)) continue;
     const { enabled, trusted_hash } = value;
@@ -102,7 +106,10 @@ export function hookTrust(
 ): TrustResult {
   let file: unknown;
   try {
-    file = JSON.parse(hooksJson);
+    // Codex reads these numbers as whole numbers, so 600.0 or 6e2 fails its read even though JSON.parse makes them 600
+    file = JSON.parse(hooksJson, (_key, value, context?: { source?: string }) =>
+      typeof value === "number" && /[.eE]/.test(context?.source ?? "") ? Number.NaN : value,
+    );
   } catch {
     return { unknown: "the hooks file is not JSON" };
   }
@@ -123,6 +130,9 @@ export function hookTrust(
         if (!isTable(handler) || handler.type !== "command")
           return { unknown: `a ${event} hook is not a command` };
         const { command, timeout, statusMessage, additionalContextLimit } = handler;
+        // Two names for one field: Codex fails the whole file when both are given
+        if ("commandWindows" in handler && "command_windows" in handler)
+          return { unknown: `a ${event} hook names its Windows command twice` };
         const commandWindows = handler.commandWindows ?? handler.command_windows;
         if (
           typeof command !== "string" ||
