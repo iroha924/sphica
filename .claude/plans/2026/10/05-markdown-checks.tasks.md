@@ -74,13 +74,14 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 展開した tarball の Markdown に両方がかかり、package の外を指す相対リンクが落ちる
 
-- [ ] T05: 包含の判定の関数とテストを書く
+- [x] T05: 包含の判定の関数とテストを書く
   - 種別: 追加
   - 計画: S5
   - 依存: なし
   - 変更: `scripts/lib/link-containment.mjs`, `scripts/lib/link-containment.d.mts`, `server/test/link-containment.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/link-containment.test.ts` → 成功と失敗の混ざった JSON、package の外の既存ファイル、正常な `../trace/SKILL.md` の各テストが pass
   - コミット: `feat(tarball): find relative links that resolve outside the package`
+  - 結果: `cd server && node --test --test-timeout=60000 test/link-containment.test.ts` → 3 件 pass（成功と失敗の混ざった報告で package の外の既存ファイルだけを返し、`../trace/SKILL.md` と自分のアンカーと https は返さない。package の中から外へ向く symlink も外と数える。成功を数えるのに一覧が空の報告は --verbose 無しとして拒む）。`bun run verify` → exit 0
 - [ ] T06: check-tarball で展開した package に markdownlint と lychee をかけ、包含を確かめる
   - 種別: 追加
   - 計画: S5
