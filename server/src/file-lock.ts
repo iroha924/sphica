@@ -54,10 +54,14 @@ export function withFileLock<T>(lock: string, fn: () => T, waitMs = WAIT_MS): T 
   const until = performance.now() + waitMs;
   for (;;) {
     let fd: number | null = null;
+    let refused: unknown = null;
     try {
       fd = fs.openSync(lock, "wx");
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      const code = (e as NodeJS.ErrnoException).code;
+      // Windows refuses a create with EPERM while the last holder's delete is pending, so a busy answer is waited out like a held lock
+      if (code === "EPERM" || code === "EACCES" || code === "EBUSY") refused = e;
+      else if (code !== "EEXIST") throw e;
     }
     if (fd !== null) {
       // The create succeeded, so the file is this call's even if the pid never gets into it or the descriptor fails to close
@@ -77,7 +81,7 @@ export function withFileLock<T>(lock: string, fn: () => T, waitMs = WAIT_MS): T 
       }
       break;
     }
-    if (performance.now() >= until) throw new Error(heldBy(lock));
+    if (performance.now() >= until) throw refused ?? new Error(heldBy(lock));
     sleep(POLL_MS);
   }
   let result: T;
@@ -136,7 +140,11 @@ export function replaceFile(file: string, text: string): void {
     }
     retryBusy(() => fs.renameSync(tmp, file));
   } catch (e) {
-    fs.rmSync(tmp, { force: true });
+    try {
+      retryBusy(() => fs.rmSync(tmp, { force: true }));
+    } catch {
+      // the first error says why the replace failed
+    }
     throw e;
   }
 }

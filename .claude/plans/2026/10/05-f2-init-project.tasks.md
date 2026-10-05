@@ -67,6 +67,16 @@ base: main
   - コミット: `fix(lock): clean up the lock when closing it, reading it back, or removing it fails`
   - 結果: red（直す前の file-lock.ts）→ 3 件が落ちた: `/no space/` に合わない（EBUSY に置き換わる）、close の EIO の後にロックが残る、読めないロックで `Missing expected exception`。直した後: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 15 件 pass。`bun run verify` → exit 0
 
+- [x] T10: ロックの作成が一時的に拒否されたら待ち、置き換えの失敗の後の一時ファイルの削除も取り直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T08（直す対象の後始末の経路が要る）
+  - 変更: `server/src/file-lock.ts`, `server/test/file-lock.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="busy create|busy cleanup" test/file-lock.test.ts` → 削除待ちの EPERM で待たずに投げ、tmp の削除の EBUSY で元のエラーが置き換わって落ちる。テストだけを先に足す
+  - 完了条件: 同じコマンド → pass。`bun run verify` → 終了コード 0
+  - コミット: `fix(lock): wait out a create Windows refuses and retry the temporary file cleanup`
+  - 結果: red（直す前の file-lock.ts）→ 2 件が落ちた（EPERM がそのまま投げられる、`/cross-device/` に合わない）。消えない EACCES は待った後にその EACCES で止まる（直す前も後も pass）。直した後: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 18 件 pass。`bun run verify` → exit 0
+
 ## P2: init の同時実行を直す
 
 2 つの init が同時に走っても、projects.json の名前が消えず、先に置いた DB が置き換えられない
@@ -123,3 +133,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T08 / Codex のレビュー（4f2355af）→ 指摘なし
 - 2026-10-05 / T06 / doctor が探した場所を localRoots と同じ値で出すため、project.ts に projectsDir を出した。変更欄に `server/src/project.ts` を足した（前: cli.ts・cli.test.ts） / そのまま進めた
 - 2026-10-05 / T05 / Codex のレビュー（6b4cd5d9）→ 指摘なし
+- 2026-10-05 / T10 / review-shipping（Windows で削除待ちのロックに wx が EPERM を返す、推測）と全差分の Codex のレビュー（F1、tmp の削除の EBUSY を故障注入で再現）/ 修正タスク T10 を足して直した。review-shipping の check.yml のコメントの指摘は T12 で直す

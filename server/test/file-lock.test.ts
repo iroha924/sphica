@@ -243,3 +243,49 @@ test("a failed replace keeps the old file whole and removes the temporary file",
   assert.equal(fs.readFileSync(file, "utf8"), "old");
   assert.deepEqual(fs.readdirSync(dir), ["t.json"]);
 });
+
+// Windows answers a create with EPERM, not EEXIST, while the last holder's delete is still pending (a scanner has it open)
+test("a create refused while the previous lock is being deleted is waited out, not thrown (busy create)", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  const open = fs.openSync;
+  let refused = 0;
+  t.mock.method(fs, "openSync", (target: fs.PathLike, ...rest: unknown[]) => {
+    if (target === lock && refused++ < 2) throw Object.assign(new Error("delete pending"), { code: "EPERM" });
+    return (open as (...a: unknown[]) => number)(target, ...rest);
+  });
+  assert.equal(
+    withFileLock(lock, () => 7),
+    7,
+  );
+  t.mock.restoreAll();
+  assert.equal(refused, 3);
+});
+
+test("a create refused for good fails with its own error once the wait is over (busy create)", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  t.mock.method(fs, "openSync", () => {
+    throw Object.assign(new Error("access denied"), { code: "EACCES" });
+  });
+  assert.throws(() => withFileLock(lock, () => assert.fail("ran"), 200), /access denied/);
+  t.mock.restoreAll();
+});
+
+test("a failed replace whose cleanup is refused for a moment still removes the temporary file and keeps the first error (busy cleanup)", (t) => {
+  const dir = tmp();
+  const file = path.join(dir, "t.json");
+  fs.writeFileSync(file, "old");
+  const rm = fs.rmSync;
+  let refused = 0;
+  t.mock.method(fs, "renameSync", () => {
+    throw Object.assign(new Error("cross-device"), { code: "EXDEV" });
+  });
+  t.mock.method(fs, "rmSync", (target: fs.PathLike, options?: fs.RmOptions) => {
+    if (String(target).endsWith(".tmp") && refused++ < 1)
+      throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    rm(target, options);
+  });
+  assert.throws(() => replaceFile(file, "new"), /cross-device/);
+  t.mock.restoreAll();
+  assert.equal(fs.readFileSync(file, "utf8"), "old");
+  assert.deepEqual(fs.readdirSync(dir), ["t.json"]);
+});
