@@ -68,7 +68,7 @@ codex plugin marketplace add iroha924/sphica --ref main
 codex plugin add sphica@sphica
 ```
 
-Codex では `/hooks` を開き、Sphica のフックを信頼済みにしてください。信頼するまでは、自動記録が始まりません。plugin の更新でフックが変わったら、もう一度信頼してください。
+Codex では `/hooks` を開き、Sphica のフックを信頼済みにしてください。信頼するまでは、自動記録が始まりません。plugin の更新でフックが変わったら、もう一度信頼してください。信頼済みの数は `sphica doctor` の「Codex hooks」の行で確かめられます（Codex 0.160.0 のとき）。
 
 **3. リポジトリで準備する**
 
@@ -191,7 +191,7 @@ npm uninstall -g sphica
 まず `sphica doctor` を流してください。古くなっているところや、動いていないところを教えてくれます。よくある症状:
 
 - **`sphica: command not found`。** plugin は CLI を PATH に置きません。`npm i -g sphica` を流してください。
-- **何も記録されない。** `sphica doctor` の Projects にそのリポジトリがあるか確かめてください。Codex では、`/hooks` でフックが信頼済みかも確かめてください。
+- **何も記録されない。** `sphica doctor` の Projects にそのリポジトリがあるか確かめてください。Codex では、doctor の「Codex hooks」の行か `/hooks` で、信頼されていないフックが無いかも確かめてください。
 - **MCP サーバーのバージョンが古いままになっている。** セッションを開き直すか、Claude Code なら `/reload-plugins` を流してください。
 - **検索で何も見つからない。** 検索はワードの一致です。別のワードやもう一方の言語、識別子で試すか、ワードを減らしてください。エージェントに `status` を見てもらうと、まだ trace していないセッションは原文としてしか検索できないことが分かります。
 - **`doctor` が全文検索のインデックスが壊れていると表示する。** `sphica doctor --reindex` を流してください。

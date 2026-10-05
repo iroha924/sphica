@@ -1,0 +1,29 @@
+# Written by codex-cli 0.160.0 on macOS after trusting Sphica 0.6.30's hooks in /hooks (copied from a real config.toml)
+
+[hooks.state."sphica@sphica:hooks/codex.json:post_tool_use:0:0"]
+trusted_hash = "sha256:3893f2cb09885aae5cdfebf4a3b04ae504a48c780437a19eee4dd35d868a08c1"
+
+[hooks.state."sphica@sphica:hooks/codex.json:session_start:0:0"]
+trusted_hash = "sha256:281fcaad7ad5cbb15f29be8a1d4348178cbb3176ec659daae61769d62a3409c2"
+
+[hooks.state."sphica@sphica:hooks/codex.json:user_prompt_submit:0:0"]
+trusted_hash = "sha256:cb0c2a4fe5e468c7ad74251abc7dd78d79a35238a0e720c3522eb1aa497e188d"
+
+[hooks.state."sphica@sphica:hooks/codex.json:stop:0:0"]
+trusted_hash = "sha256:6e040b0c72b44d67f6cbe1f8a7b072618bfedcc9aa6d536b65fc2f2c11bf6a9a"
+
+[hooks.state."sphica@sphica:hooks/codex.json:interrupt:0:0"]
+trusted_hash = "sha256:7c5f76d2912d4197e35237579ee1a06124fa4347809f6af09af7db4296ef2208"
+
+[hooks.state."sphica@sphica:hooks/codex.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:1af8fc4d95a1cea385268a69e964f28a53a849a25d6dd83f31f121fe399ebe07"
+enabled = true
+
+[hooks.state."sphica@sphica:hooks/codex.json:session_start:0:1"]
+trusted_hash = "sha256:ca9ddb041ff0743bc60afaa34e947cfa2c293cc54f6f56ccca70c209bc1aee93"
+
+[hooks.state."sphica@sphica:hooks/codex.json:user_prompt_submit:0:1"]
+trusted_hash = "sha256:b1c5155f8f6aecf0dd35685e6520ad2bacca56ed3934e49a8e3177b72393c095"
+
+[hooks.state."sphica@sphica:hooks/codex.json:subagent_start:0:0"]
+trusted_hash = "sha256:4840f56c53bedc1abddd7a9a6a204f3e62550e756acde2a4cac9ecf1e3875913"

@@ -12,6 +12,7 @@ import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SPHICA_TOOLS } from "../evals/cloud/canary-check.ts";
 import { sessionId } from "../src/knowledge.ts";
 import {
+  codexCommand,
   compareVersions,
   differingFiles,
   findExe,
@@ -24,6 +25,7 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
+import { fakeCodex } from "./fake-codex.ts";
 import { message, project, tempDb } from "./temp-db.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -31,6 +33,8 @@ const REPO_PLUGIN = path.join(SRC, "..", "..", "plugin");
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-plugin-"));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+/** observe() reads CODEX_HOME and starts codex: never the owner's ~/.codex */
+const noCodex = { ...process.env, CODEX_HOME: path.join(tmp, "no-codex-home") };
 /** Builds a package with a manifest and one content file. */
 function plugin(where: string, version: string, body = "x"): Install {
   const root = path.join(tmp, where);
@@ -327,7 +331,7 @@ test("identifies the running MCP from its launch source and detects a cache recr
   try {
     await new Promise((r) => setTimeout(r, 500));
     const mine = () => {
-      const running = observe(tmp).running;
+      const running = observe(tmp, process.platform, noCodex).running;
       return Array.isArray(running) ? running.find((r) => r.pid === child.pid) : undefined;
     };
     assert.equal(mine()?.version, "0.0.1");
@@ -377,7 +381,12 @@ test("on Windows, doctor says what it could not inspect instead of starting npm,
   fs.writeFileSync(path.join(empty, "claude.cmd"), "");
   // A node with no npm beside it, so the result does not depend on how the machine running the test installed node
   const node = path.join(fs.mkdtempSync(path.join(tmp, "bare-node-")), "node.exe");
-  const s = observe(tmp, "win32", { PATH: empty, PATHEXT: ".COM;.EXE;.BAT;.CMD" }, node);
+  const s = observe(
+    tmp,
+    "win32",
+    { PATH: empty, PATHEXT: ".COM;.EXE;.BAT;.CMD", CODEX_HOME: noCodex.CODEX_HOME },
+    node,
+  );
   assert.deepEqual(s.running, { unknown: "not checked on Windows" });
   assert.deepEqual(s.claude, { unknown: "no claude.exe on PATH (an npm install puts claude.cmd there)" });
   assert.deepEqual(s.global, { unknown: "no npm CLI next to node" });
@@ -405,6 +414,92 @@ test("doctor finds the npm CLI next to node and claude.exe on a Windows PATH", (
   fs.writeFileSync(path.join(exes, "claude.exe"), "");
   assert.equal(findExe("claude", `${shims};${exes}`, "win32"), path.join(exes, "claude.exe"));
   assert.equal(findExe("claude", shims, "win32"), null);
+});
+
+test("doctor reads Codex's trust in the installed hooks from a temporary CODEX_HOME, and never writes it", () => {
+  const codex = fakeCodex();
+  const env = {
+    ...process.env,
+    PATH: `${codex.bin}${path.delimiter}${process.env.PATH ?? ""}`,
+    CODEX_HOME: codex.home,
+  };
+  const before = { text: fs.readFileSync(codex.config, "utf8"), mtime: fs.statSync(codex.config).mtimeMs };
+  const row = () => {
+    const r = report(observe(tmp, process.platform, env));
+    return { ...r, out: stripVTControlCharacters(r.lines.join("\n")) };
+  };
+  const trusted = row();
+  assert.match(trusted.out, /✓ Codex hooks\s+9 of 9 trusted in /);
+  assert.equal(fs.realpathSync(fs.readFileSync(codex.seen, "utf8")), fs.realpathSync(codex.home));
+  assert.deepEqual(
+    { text: fs.readFileSync(codex.config, "utf8"), mtime: fs.statSync(codex.config).mtimeMs },
+    before,
+  );
+  assert.ok(!trusted.issues.includes("Codex hooks"));
+
+  fs.writeFileSync(
+    codex.config,
+    before.text
+      .replace(/(stop:0:0"\]\ntrusted_hash = "sha256:)6/, "$10")
+      .replace(/(pre_tool_use:0:0"\]\ntrusted_hash = "[^"]+"\nenabled = )true/, "$1false"),
+  );
+  const changed = row();
+  assert.match(
+    changed.out,
+    /△ Codex hooks\s+8 of 9 trusted in [^\n]+; 1 modified, 1 disabled\. open \/hooks in Codex and trust Sphica's hooks; enable the disabled ones in \/hooks if that was not intended/,
+  );
+  assert.ok(changed.issues.includes("Codex hooks"));
+  assert.ok(!changed.failures.includes("Codex hooks"), "untrusted hooks warn; they do not fail doctor");
+
+  fs.rmSync(codex.config);
+  assert.match(row().out, /△ Codex hooks\s+0 of 9 trusted in [^\n]+; 9 untrusted\. open \/hooks/);
+});
+
+test("doctor says Codex hook trust is unknown for a Codex whose hash rule it has not checked", () => {
+  for (const [version, reason] of [
+    ["0.161.0", /Codex 0\.161\.0; Sphica reads its hook trust only for 0\.160\.0/],
+    ["0.159.2", /Codex 0\.159\.2; Sphica reads its hook trust only for 0\.160\.0/],
+  ] as const) {
+    const codex = fakeCodex(version);
+    const env = {
+      ...process.env,
+      PATH: `${codex.bin}${path.delimiter}${process.env.PATH ?? ""}`,
+      CODEX_HOME: codex.home,
+    };
+    const r = report(observe(tmp, process.platform, env));
+    const out = stripVTControlCharacters(r.lines.join("\n"));
+    assert.match(out, new RegExp(`○ Codex hooks\\s+unknown \\(${reason.source}\\)\\. Check /hooks in Codex`));
+    assert.ok(!r.issues.includes("Codex hooks"), "unknown is not something to fix");
+  }
+  assert.match(
+    stripVTControlCharacters(
+      report(seen({ codexHooks: { unknown: "more than one Codex cache" } })).lines.join("\n"),
+    ),
+    /○ Codex hooks\s+unknown \(more than one Codex cache\)/,
+  );
+  // No Codex install: no row at all
+  assert.doesNotMatch(report(seen({})).lines.join("\n"), /Codex hooks/);
+});
+
+test("on Windows, codex is started the way PATH resolves it: codex.exe as is, npm's codex.cmd through its codex.js", () => {
+  const npm = fs.mkdtempSync(path.join(tmp, "npm-"));
+  const native = fs.mkdtempSync(path.join(tmp, "native-"));
+  const node = "C:\\node\\node.exe";
+  const env = (dirs: string[]) => ({ PATH: dirs.join(";"), PATHEXT: ".COM;.EXE;.BAT;.CMD" });
+  fs.writeFileSync(path.join(native, "codex.exe"), "");
+  fs.writeFileSync(path.join(npm, "codex.cmd"), "");
+  assert.deepEqual(codexCommand("win32", env([native, npm]), node), [
+    path.join(native, "codex.exe"),
+    ["--version"],
+  ]);
+  // npm's shim without its codex.js beside it cannot be started without a shell
+  assert.equal(codexCommand("win32", env([npm, native]), node), null);
+  const js = path.join(npm, "node_modules", "@openai", "codex", "bin", "codex.js");
+  fs.mkdirSync(path.dirname(js), { recursive: true });
+  fs.writeFileSync(js, "");
+  assert.deepEqual(codexCommand("win32", env([npm, native]), node), [node, [js, "--version"]]);
+  assert.equal(codexCommand("win32", env([]), node), null);
+  assert.deepEqual(codexCommand("darwin", {}, node), ["codex", ["--version"]]);
 });
 
 test("sphica --version prints the npm package version", () => {

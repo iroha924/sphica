@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CODEX_TRUST_VERIFIED, type HookTrust, hookTrust, readHookStates } from "./codex-trust.ts";
 import { caution, faint, type Mark, mark, pad, width } from "./panel.ts";
 
 const MANIFEST = path.join(".claude-plugin", "plugin.json");
@@ -214,6 +215,8 @@ export type Seen = {
   claudeVersion?: string;
   codex: Install[];
   codexCache: string;
+  /** Codex's trust in the installed Codex plugin's hooks, as the user config records it. Absent when no Codex install was found. */
+  codexHooks?: { config: string; hooks: HookTrust[] } | Unknown;
   running: Running[] | Unknown;
 };
 
@@ -306,11 +309,17 @@ export function observe(
   }
   const codexCache = path.join(codexHome, "plugins", "cache");
   const codex: Install[] = [];
+  const markets: string[] = [];
   for (const market of safeDirs(codexCache)) {
     for (const v of safeDirs(path.join(codexCache, market, "sphica"))) {
       codex.push(install(path.join(codexCache, market, "sphica", v)));
+      markets.push(market);
     }
   }
+  let codexHooks: Seen["codexHooks"];
+  if (codex.length > 1) codexHooks = { unknown: "more than one Codex cache" };
+  else if (codex[0] && markets[0])
+    codexHooks = codexHookTrust(codex[0].root, `sphica@${markets[0]}`, codexHome, platform, env, execPath);
 
   let running: Seen["running"];
   if (platform === "win32") running = { unknown: "not checked on Windows" };
@@ -368,7 +377,102 @@ export function observe(
       global = { unknown: "npm root -g failed" };
     }
 
-  return { repository, cli: install(ROOT), global, claude, claudeVersion, codex, codexCache, running };
+  return {
+    repository,
+    cli: install(ROOT),
+    global,
+    claude,
+    claudeVersion,
+    codex,
+    codexCache,
+    codexHooks,
+    running,
+  };
+}
+
+/**
+ * The Codex that `codex` starts here, as [file, args] for `--version`. On Windows npm installs codex.cmd, which execFile cannot start,
+ * so its codex.js runs through this node instead; the first hit on PATH wins, as it does for the user.
+ */
+export function codexCommand(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  execPath: string,
+): [string, string[]] | null {
+  if (platform !== "win32") return ["codex", ["--version"]];
+  const exts = (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  for (const dir of (env.PATH ?? env.Path ?? "").split(";").filter(Boolean))
+    for (const ext of exts) {
+      const at = path.join(dir, `codex${ext.toLowerCase()}`);
+      if (!fs.existsSync(at)) continue;
+      if (ext.toLowerCase() === ".exe") return [at, ["--version"]];
+      const js = path.join(dir, "node_modules", "@openai", "codex", "bin", "codex.js");
+      return fs.existsSync(js) ? [execPath, [js, "--version"]] : null;
+    }
+  return null;
+}
+
+/** Reads only: the installed hooks file, Codex's version, and $CODEX_HOME/config.toml. Trust is changed only in Codex's /hooks. */
+function codexHookTrust(
+  root: string,
+  pluginId: string,
+  codexHome: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  execPath: string,
+): NonNullable<Seen["codexHooks"]> {
+  const command = codexCommand(platform, env, execPath);
+  if (!command) return { unknown: "no codex.exe, or codex.js beside codex.cmd, on PATH" };
+  let version: string | undefined;
+  try {
+    // Codex prepares files under CODEX_HOME even for --version, so it gets the same environment doctor was given
+    const out = execFileSync(command[0], command[1], {
+      encoding: "utf8",
+      env,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    });
+    version = /^codex-cli (\d+\.\d+\.\d+)$/m.exec(out)?.[1];
+  } catch {
+    return { unknown: "codex --version failed" };
+  }
+  if (!version) return { unknown: "codex --version printed no version" };
+  if (!CODEX_TRUST_VERIFIED.includes(version))
+    return {
+      unknown: `Codex ${version}; Sphica reads its hook trust only for ${CODEX_TRUST_VERIFIED.join(", ")}`,
+    };
+  let file: string;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, ".codex-plugin", "plugin.json"), "utf8")) as {
+      hooks?: unknown;
+    };
+    if (typeof manifest.hooks !== "string")
+      return { unknown: "the Codex plugin manifest names no hooks file" };
+    file = path.resolve(root, manifest.hooks);
+  } catch {
+    return { unknown: "the Codex plugin manifest could not be read" };
+  }
+  const relative = path.relative(root, file);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+    return { unknown: "the hooks file is outside the plugin" };
+  let hooksJson: string;
+  try {
+    hooksJson = fs.readFileSync(file, "utf8");
+  } catch {
+    return { unknown: "the hooks file could not be read" };
+  }
+  const config = path.join(codexHome, "config.toml");
+  let toml: string | null;
+  try {
+    toml = fs.readFileSync(config, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") return { unknown: "config.toml could not be read" };
+    toml = null;
+  }
+  const states = readHookStates(toml);
+  if (!(states instanceof Map)) return states;
+  const trust = hookTrust(hooksJson, pluginId, relative.split(path.sep).join("/"), platform, states);
+  return "unknown" in trust ? trust : { config, hooks: trust.hooks };
 }
 
 function safeDirs(dir: string): string[] {
@@ -538,6 +642,34 @@ export function report(
         : against(x);
     if (update) todo.add("codex");
     row("Codex", x, note);
+  }
+
+  // Codex skips a hook that is untrusted, modified since it was trusted, or disabled; capture of other hooks keeps running and hides it
+  if (unknown(s.codexHooks))
+    say("none", "Codex hooks", `unknown (${s.codexHooks.unknown}). Check /hooks in Codex`);
+  else if (s.codexHooks) {
+    const { hooks, config } = s.codexHooks;
+    const count = (t: HookTrust["trust"]) => hooks.filter((h) => h.trust === t).length;
+    const trusted = count("trusted");
+    const disabled = hooks.filter((h) => !h.enabled).length;
+    const summary = `${trusted} of ${hooks.length} trusted in ${short(config)}`;
+    if (trusted === hooks.length && !disabled) say("ok", "Codex hooks", summary);
+    else {
+      const parts = [
+        [count("modified"), "modified"],
+        [count("untrusted"), "untrusted"],
+        [disabled, "disabled"],
+      ].filter(([n]) => n);
+      const steps = [
+        trusted < hooks.length ? "open /hooks in Codex and trust Sphica's hooks" : "",
+        disabled ? "enable the disabled ones in /hooks if that was not intended" : "",
+      ].filter(Boolean);
+      say(
+        "warn",
+        "Codex hooks",
+        `${summary}; ${parts.map(([n, w]) => `${n} ${w}`).join(", ")}. ${steps.join("; ")}`,
+      );
+    }
   }
 
   // The minimum without a visible repository: the same version with different contents on the two hosts. It does not claim which is older.

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Launches a package's capture and delivery hooks the way Claude Code would from its hooks/hooks.json: node with the entry's
-// `args` (exec form, no shell), for the entries whose matcher matches.
+// `args` (exec form, no shell), for the entries whose matcher matches; then every hooks/codex.json entry the way Codex would,
+// through each shell Codex can use here and from plugin roots holding characters a shell might mangle.
 // This is a launch check of the shipped definitions, not a run inside a real host.
 //
 // Usage: node scripts/check-hooks-live.mjs [<package root>]   (default: plugin/, which `bun run bundle` builds)
@@ -273,6 +274,187 @@ await withTempDir(async (dir) => {
     fail("a new interactive session was not asked to trace the waiting session", asked);
   if (/wait(s)? to be traced/.test(fire("SessionStart", { source: "compact" }, "smoke-2", interactive)))
     fail("the automatic trace notice came twice in one session");
+
+  // ---- Codex: every codex.json entry, through each shell Codex can run hooks with, from plugin roots a shell might mangle ----
+  // Codex 0.160.0 picks commandWindows on Windows (else command), replaces ${PLUGIN_ROOT} and its siblings as text, sets them in the
+  // environment too, and runs the line through the session's shell
+  const codexHooks = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "codex.json"), "utf8")).hooks;
+  const powershellDir = path.join(systemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0");
+  const shells = windows
+    ? [
+        {
+          name: "powershell.exe",
+          file: path.join(powershellDir, "powershell.exe"),
+          args: (l) => ["-NoProfile", "-Command", l],
+        },
+        { name: "pwsh", file: onPath("pwsh"), args: (l) => ["-NoProfile", "-Command", l] },
+        {
+          name: "cmd.exe",
+          file: path.join(systemRoot ?? "C:\\Windows", "System32", "cmd.exe"),
+          args: (l) => ["/c", `"${l}"`],
+          verbatim: true,
+        },
+        // No shell in the session: COMSPEC with an upper-case /C
+        { name: "COMSPEC", file: process.env.ComSpec, args: (l) => ["/C", `"${l}"`], verbatim: true },
+        // Git Bash, not System32's bash.exe (WSL)
+        {
+          name: "Git Bash",
+          file: path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe"),
+          args: (l) => ["-c", l],
+        },
+      ]
+    : [{ name: "sh", file: "/bin/sh", args: (l) => ["-c", l] }];
+  for (const s of shells)
+    if (!s.file || !fs.existsSync(s.file)) throw new Error(`${s.name} is not installed here`);
+  // A sh expands $ and backquotes inside the double quotes command puts the path in, so that root runs only where commandWindows is used
+  const roots = [
+    { name: "control", dir: "plugin-control" },
+    { name: "spaced", dir: "plugin root & (x) it's" },
+    ...(windows ? [{ name: "expanding", dir: "plugin $HOME `x %PATH%" }] : []),
+  ];
+  const codexData = path.join(dir, "plugin-data");
+  fs.mkdirSync(codexData, { recursive: true });
+  // A detached send from an earlier case may delete a queued file between listing and reading it; the database then has it
+  const readQueued = (f) => {
+    try {
+      return fs.readFileSync(path.join(spool, f), "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const queuedOrSent = (marker) =>
+    fs
+      .readdirSync(spool)
+      .filter((f) => f.endsWith(".json") && !f.startsWith("."))
+      .some((f) => readQueued(f).includes(marker)) ||
+    query((db) => Boolean(db.prepare("select 1 from source where text like ?").get(`%${marker}%`)));
+  const inputs = {
+    SessionStart: { source: "startup" },
+    SubagentStart: { agent_id: "a1", agent_type: "explorer" },
+    PreToolUse: { tool_name: "Bash", tool_input: { command: "cat src/a.ts" } },
+    PostToolUse: { tool_name: "apply_patch", tool_input: { command: "" }, tool_response: "" },
+    // As a subagent's, so neither starts a detached send that outlives this script and its temp directory (the Claude Code part
+    // above already checks the send)
+    Stop: { last_assistant_message: "Done.", agent_id: "a1" },
+    Interrupt: { agent_id: "a1" },
+  };
+  let launched = 0;
+  for (const r of roots) {
+    const at = path.join(dir, r.dir);
+    fs.cpSync(pkg, at, { recursive: true });
+    const values = {
+      PLUGIN_ROOT: at,
+      CLAUDE_PLUGIN_ROOT: at,
+      PLUGIN_DATA: codexData,
+      CLAUDE_PLUGIN_DATA: codexData,
+    };
+    for (const s of shells) {
+      const tag = `${r.name}/${s.name}`;
+      const session = `codex-${r.name}-${s.name}`.replace(/[^A-Za-z0-9-]/g, "-");
+      const childPath = [...dirs, ...(windows ? [powershellDir] : []), path.dirname(s.file)].join(
+        path.delimiter,
+      );
+      const run = (event, h, input) => {
+        let line = windows ? (h.commandWindows ?? h.command) : h.command;
+        for (const [k, v] of Object.entries(values)) line = line.replaceAll(`\${${k}}`, v);
+        launched++;
+        return spawnSync(s.file, s.args(line), {
+          cwd: repo,
+          env: { ...env, PATH: childPath, ...values },
+          input: JSON.stringify({
+            hook_event_name: event,
+            session_id: session,
+            turn_id: `t-${session}`,
+            cwd: repo,
+            ...input,
+          }),
+          encoding: "utf8",
+          // Codex stops a hook at its own timeout (600 seconds when unset)
+          timeout: (h.timeout ?? 600) * 1000,
+          windowsVerbatimArguments: Boolean(s.verbatim),
+          windowsHide: true,
+        });
+      };
+      const check = (event, i, result) => {
+        if (result.error || result.status !== 0)
+          fail(
+            `Codex ${event} hook ${i} through ${tag} failed (exit ${result.status})`,
+            result.error?.message ?? `${result.stdout}${result.stderr}`,
+          );
+      };
+      // UserPromptSubmit first: its capture reads this case's own marker from stdin, so a queued marker proves stdin reached node
+      // english-exempt: non-ASCII on purpose, so a shell that re-encodes stdin loses the marker
+      const marker = `codex prompt ${tag} 記録 ${process.pid}`;
+      codexHooks.UserPromptSubmit.flatMap((g) => g.hooks).forEach((h, i) => {
+        check("UserPromptSubmit", i, run("UserPromptSubmit", h, { prompt: marker }));
+      });
+      if (!queuedOrSent(marker))
+        fail(`Codex UserPromptSubmit through ${tag} queued nothing with this case's prompt`);
+      for (const [event, input] of Object.entries(inputs))
+        (codexHooks[event] ?? [])
+          .flatMap((g) => g.hooks)
+          .forEach((h, i) => {
+            check(event, i, run(event, h, input));
+          });
+    }
+  }
+  const expected =
+    roots.length *
+    shells.length *
+    Object.values(codexHooks)
+      .flat()
+      .flatMap((g) => g.hooks).length;
+  if (launched !== expected) fail(`launched ${launched} Codex hooks, expected ${expected}`);
+
+  // ---- The launch line itself, on a stub whose capture.js exits with a given code: what each shell makes of node's exit ----
+  const stub = path.join(dir, "stub root");
+  fs.mkdirSync(path.join(stub, "dist"), { recursive: true });
+  fs.writeFileSync(path.join(stub, "dist", "capture.js"), "process.exit(Number(process.env.STUB_EXIT));\n");
+  const captureHook = codexHooks.UserPromptSubmit.flatMap((g) => g.hooks).find((h) =>
+    h.command.includes("capture.js"),
+  );
+  const nodeExe = path.basename(process.execPath);
+  const withoutNode = dirs.filter((d) => d !== path.dirname(process.execPath));
+  for (const s of shells) {
+    // PowerShell turns any failing native command into 1; the others pass node's code through
+    const powershell = /powershell|pwsh/.test(s.name);
+    const shellDirs = [...(windows ? [powershellDir] : []), path.dirname(s.file)];
+    if ([...withoutNode, ...shellDirs].some((d) => fs.existsSync(path.join(d, nodeExe))))
+      throw new Error(`node is not the only one on PATH for ${s.name}, so a missing node cannot be shown`);
+    const took = [];
+    for (const { what, code, expect, pathDirs } of [
+      { what: "node exiting 0", code: "0", expect: (st) => st === 0, pathDirs: [...dirs, ...shellDirs] },
+      {
+        what: "node exiting 7",
+        code: "7",
+        expect: (st) => (powershell ? st !== 0 : st === 7),
+        pathDirs: [...dirs, ...shellDirs],
+      },
+      { what: "without node", code: "0", expect: (st) => st !== 0, pathDirs: [...withoutNode, ...shellDirs] },
+    ]) {
+      const line = (
+        windows ? (captureHook.commandWindows ?? captureHook.command) : captureHook.command
+      ).replaceAll(["$", "{PLUGIN_ROOT}"].join(""), stub);
+      const started = Date.now();
+      const r = spawnSync(s.file, s.args(line), {
+        cwd: repo,
+        env: { ...env, PATH: pathDirs.join(path.delimiter), PLUGIN_ROOT: stub, STUB_EXIT: code },
+        input: "{}",
+        encoding: "utf8",
+        // A PowerShell that cannot find node takes 24 to 39 seconds to say so on the Windows runner
+        timeout: 2 * TIMEOUT_MS,
+        windowsVerbatimArguments: Boolean(s.verbatim),
+        windowsHide: true,
+      });
+      took.push(`${what} → ${r.status} in ${Date.now() - started} ms`);
+      if (r.error || !expect(r.status))
+        fail(
+          `the Codex launch line through ${s.name}, ${what}, exited ${r.status}`,
+          r.error?.message ?? r.stderr,
+        );
+    }
+    console.log(`codex launch line through ${s.name}: ${took.join(", ")}`);
+  }
 });
 
 if (failures.length) {
@@ -280,5 +462,5 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(
-  `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send)`,
+  `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
 );

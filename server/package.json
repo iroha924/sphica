@@ -19,6 +19,7 @@
     "fast-string-width": "3.0.2",
     "fast-wrap-ansi": "0.2.2",
     "kysely": "0.29.6",
+    "smol-toml": "1.9.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
