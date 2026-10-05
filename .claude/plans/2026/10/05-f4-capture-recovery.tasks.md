@@ -201,3 +201,4 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T09〜T12 / Codex のレビュー（483ed6e4..e0cc9ab3） / 指摘なし
 - 2026-10-05 / 全差分 / Codex の全差分レビュー F1（P1）: リビジョン 9 の DB で calls/ の送信が no such table を投げ、通常のキューまで止まる（review-shipping も packed 0.6.34 で再現）。F2（P2）: ターンが null の観測は結ばれた後もセッションを止め続けるのに doctor に出ない / どちらも受理。T13・T14 を足した。calls/ の修正が続けて新しい欠陥を生んだので、規則を Codex と決め直して plan の方針 3 を直した（Go 不要、変更履歴を参照）
 - 2026-10-05 / 全差分 / review-shipping: 古いコメント「Hooks do not touch the database」（受理、T13 で直す）。読み取りの一時的な失敗で観測を unreadable に隔離してしまう（受理、T13 の規則で calls/ に残す）
+- 2026-10-05 / T13, T14 / Codex の再レビュー（e426cc85..d1d0008c、high） / 指摘なし
