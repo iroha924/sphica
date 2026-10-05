@@ -62,17 +62,28 @@ base: main
   - 結果: red: `node --test --test-name-pattern 'review selection' test/review.test.ts` → 削除行だけが違う 2 つの diff で selection が一致して fail（reviewBatch に足した diff の引数を直す前のコードは使わない）
   - 結果: 実装後 `node --test test/review.test.ts` → 12 pass。`bun run verify` → 0
 
+- [ ] T09: 受領行の書式をツールの返事と同じ大文字の `Batch k of n backed` にそろえる
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（受領行の規定がある）
+  - 変更: `plugin/skills/review/reviewers/precedent.md`, `plugin/skills/review/SKILL.md`, `server/test/plugin.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → 受領行の書式が checkedText の返事（`Batch 1 of 2 backed (selection ...)`）の先頭と一致せず fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → pass。precedent.md と SKILL.md の受領行がすべて `Batch k of n backed` で、checkedText の返事の先頭がその形で始まる
+  - コミット: `fix(review): write batch receipts exactly as review_check replies`
+
 ## P2: read の応答の上限（#267）
 
 read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続きを辿れば全文に届く。
 
-- [ ] T04: record の描画を同じ呼び出しの他の refs から切り離す（rename の予算を record ごとに数える）
+- [x] T04: record の描画を同じ呼び出しの他の refs から切り離す（rename の予算を record ごとに数える）
   - 種別: 変更
   - 計画: S3
   - 依存: なし
-  - 変更: `server/src/read.ts`, `server/src/mcp.ts`, `server/test/read.test.ts`
+  - 変更: `server/src/read.ts`, `server/test/read.test.ts`, `server/test/record.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern 'read rename budget' test/read.test.ts` → pass。同じ record の描画が、一緒に読む refs とその順によらず一致する
   - コミット: `fix(read): count rename lookups per record so other refs do not change it`
+  - 結果: 直す前: `node --test --test-name-pattern 'read rename budget' test/read.test.ts` → 5 つの commit を使う record の後に読んだ record が「rename not checked」になり、単独で読んだ描画と一致せず fail
+  - 結果: 実装後 → 1 pass。`node --test --test-name-pattern 'rename' test/record.test.ts` → 3 pass（1 record あたり 5 commit の上限はそのまま）。`bun run verify` → 0
 
 - [ ] T05: readRefs で応答全体を 64 KiB に収め、source のヘッダーを制限し、record を byte と digest で続ける
   - 種別: 修正
@@ -114,3 +125,5 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T01 / Codex のタスクレビュー F1（P2、再現済み）: selection が parseDiff の結果から作られ、削除行だけが違う diff が同じ selection になる / 採る。plan は diff の本文から作ると決めていた。修正タスク T08 を足した
 - 2026-10-05 / T02 / Codex のタスクレビュー: 指摘なし（Codex 側はテストを一時ディレクトリの EPERM で流せず、コードを読んでの判定） / 対応なし
 - 2026-10-05 / T08 / Codex のタスクレビュー: 指摘なし / 対応なし
+- 2026-10-05 / T03 / Codex のタスクレビュー F1（P2）: 受領行が小文字の `batch` で、review_check の返事（`Batch`）を写すと照合で食い違う / 採る。修正タスク T09 を足した
+- 2026-10-05 / T04 / 変更欄: 前 `server/src/read.ts`, `server/src/mcp.ts`, `server/test/read.test.ts` → 後 `server/src/read.ts`, `server/test/read.test.ts`, `server/test/record.test.ts`（mcp.ts は変えず、上限の数え方が変わった既存テストの題名を直した）

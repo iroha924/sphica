@@ -1446,7 +1446,7 @@ test("unreadable kind: a path whose content cannot be read is judged again when 
   }
 });
 
-test("rename probes: one read asks git about at most 5 commits, and says the rest were not checked", async () => {
+test("rename probes: one record asks git about at most 5 commits, and says the rest were not checked", async () => {
   const db = tempDb();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-probes-")));
   try {

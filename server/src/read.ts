@@ -69,7 +69,7 @@ export async function readUnit(
 
 type Renames = Map<string, Map<string, string | null> | null>;
 
-/** Commits one read asks git about for renames. */
+/** Commits one record asks git about for renames. Each record counts its own, so what it shows does not depend on what else is read. */
 const RENAME_LOOKUPS = 5;
 
 async function describe(
@@ -264,11 +264,12 @@ async function describe(
     out.push(
       "Code (checked in the working tree now; a located symbol does not prove the record still holds):",
     );
+    const used = new Set<string>();
     for (const a of live) {
       const c = checkAnchor(root, a);
       const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
       out.push(
-        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames)}` : ""}`,
+        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames, used)}` : ""}`,
       );
     }
   }
@@ -383,13 +384,16 @@ function movedTo(
   root: string | null,
   a: { path: string; commit_sha: string | null },
   renames: Renames,
+  /** The commits this record has looked up, cached ones included */
+  used: Set<string>,
 ): string {
   if (!root || !a.commit_sha || fileState(root, a.path) !== "gone") return "";
-  if (!renames.has(a.commit_sha)) {
-    // Each lookup is a git run; a read of records with many anchor commits stays within the tool's time
-    if (renames.size >= RENAME_LOOKUPS) return "; rename not checked";
-    renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
+  if (!used.has(a.commit_sha)) {
+    // Each lookup is a git run; a record with many anchor commits stays within the tool's time
+    if (used.size >= RENAME_LOOKUPS) return "; rename not checked";
+    used.add(a.commit_sha);
   }
+  if (!renames.has(a.commit_sha)) renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
   const to = seen.get(a.path);
