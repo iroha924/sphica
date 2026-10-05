@@ -60,15 +60,21 @@ export function withFileLock<T>(lock: string, fn: () => T, waitMs = WAIT_MS): T 
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
     }
     if (fd !== null) {
-      // The create succeeded, so the file is this call's even if the pid never gets into it
+      // The create succeeded, so the file is this call's even if the pid never gets into it or the descriptor fails to close
       try {
-        fs.writeFileSync(fd, mine);
+        try {
+          fs.writeFileSync(fd, mine);
+        } finally {
+          fs.closeSync(fd);
+        }
       } catch (e) {
-        fs.closeSync(fd);
-        fs.rmSync(lock, { force: true });
+        try {
+          retryBusy(() => fs.rmSync(lock, { force: true }));
+        } catch {
+          // reported by the next run's timeout; the first error says why
+        }
         throw e;
       }
-      fs.closeSync(fd);
       break;
     }
     if (performance.now() >= until) throw new Error(heldBy(lock));
@@ -92,19 +98,24 @@ export function withFileLock<T>(lock: string, fn: () => T, waitMs = WAIT_MS): T 
 
 /** Removes lock if it still holds mine. A remove that keeps failing throws, so a lock left behind is never silent. */
 function release(lock: string, mine: string): void {
-  let held: string;
+  const cannot = (e: unknown) =>
+    new Error(
+      `The work finished, but Sphica could not remove ${lock} (${(e as Error).message}). Delete it before running this again.`,
+    );
+  let held = "";
   try {
-    held = fs.readFileSync(lock, "utf8");
-  } catch {
-    return; // already gone
+    retryBusy(() => {
+      held = fs.readFileSync(lock, "utf8");
+    });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw cannot(e);
   }
   if (held !== mine) return;
   try {
     retryBusy(() => fs.rmSync(lock, { force: true }));
   } catch (e) {
-    throw new Error(
-      `The work finished, but Sphica could not remove ${lock} (${(e as Error).message}). Delete it before running this again.`,
-    );
+    throw cannot(e);
   }
 }
 

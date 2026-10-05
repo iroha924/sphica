@@ -57,6 +57,16 @@ base: main
   - コミット: `fix(lock): never leave the lock behind when writing the pid or removing it fails`
   - 結果: red（直す前の file-lock.ts）→ 3 件が落ちた: 「the lock this call created was left behind」、EBUSY の後にロックが残る、消せないロックで `Missing expected exception`。直した後: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 12 件 pass。`bun run verify` → exit 0
 
+- [x] T08: ロックが読めない・close に失敗した・削除が一時的に失敗したときもロックを残さない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T07（直す対象の後始末の経路が要る）
+  - 変更: `server/src/file-lock.ts`, `server/test/file-lock.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern=cleanup test/file-lock.test.ts` → pid の書き込みの失敗の後の EBUSY で元のエラーが置き換わり、close の EIO でロックが残り、読めないロックで黙って成功して落ちる。テストだけを先に足す
+  - 完了条件: 同じコマンド → pass。`bun run verify` → 終了コード 0
+  - コミット: `fix(lock): clean up the lock when closing it, reading it back, or removing it fails`
+  - 結果: red（直す前の file-lock.ts）→ 3 件が落ちた: `/no space/` に合わない（EBUSY に置き換わる）、close の EIO の後にロックが残る、読めないロックで `Missing expected exception`。直した後: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 15 件 pass。`bun run verify` → exit 0
+
 ## P2: init の同時実行を直す
 
 2 つの init が同時に走っても、projects.json の名前が消えず、先に置いた DB が置き換えられない
@@ -97,3 +107,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
 - 2026-10-05 / T03 / Codex のレビュー（c5f547a2）→ 指摘なし / Windows での pass は A4 で確かめる
 - 2026-10-05 / T04 / 子プロセスの同期を T05 と共有するため、変更欄に `server/test/race.ts` を足した（前: project.ts・project.test.ts・name-local-child.ts） / そのまま進めた
+- 2026-10-05 / T08 / T07 の Codex のレビュー（bb52da3d、F1〜F3 を故障注入で再現）で、読み戻しの失敗・close の失敗・後始末の削除の一時的な失敗でロックが残ることが分かった / 修正タスク T08 を T07 の後に足して直した

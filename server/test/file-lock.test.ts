@@ -157,6 +157,54 @@ test("a lock it cannot remove is reported, not left behind silently (cannot remo
   t.mock.restoreAll();
 });
 
+test("a pid write that fails, then a remove refused for a moment, still removes the lock and keeps the first error (cleanup)", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  const write = fs.writeFileSync;
+  const rm = fs.rmSync;
+  let refused = 0;
+  t.mock.method(fs, "writeFileSync", (target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (typeof target === "number") throw Object.assign(new Error("no space"), { code: "ENOSPC" });
+    return (write as (...a: unknown[]) => void)(target, ...rest);
+  });
+  t.mock.method(fs, "rmSync", (target: fs.PathLike, options?: fs.RmOptions) => {
+    if (target === lock && refused++ < 1) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    rm(target, options);
+  });
+  assert.throws(() => withFileLock(lock, () => assert.fail("ran")), /no space/);
+  t.mock.restoreAll();
+  assert.equal(fs.existsSync(lock), false);
+});
+
+test("a descriptor that fails to close after the pid is written removes the lock and does not run fn (cleanup)", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  const close = fs.closeSync;
+  let failed = false;
+  t.mock.method(fs, "closeSync", (fd: number) => {
+    close(fd);
+    if (!failed) {
+      failed = true;
+      throw Object.assign(new Error("io"), { code: "EIO" });
+    }
+  });
+  assert.throws(() => withFileLock(lock, () => assert.fail("ran")), /io/);
+  t.mock.restoreAll();
+  assert.equal(fs.existsSync(lock), false);
+});
+
+test("a lock it cannot read back after fn is reported, not left behind silently (cleanup)", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  const read = fs.readFileSync;
+  t.mock.method(fs, "readFileSync", (target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (target === lock) throw Object.assign(new Error("denied"), { code: "EACCES" });
+    return (read as (...a: unknown[]) => unknown)(target, ...rest);
+  });
+  assert.throws(
+    () => withFileLock(lock, () => 7),
+    (e: Error) => e.message.includes(`could not remove ${lock}`),
+  );
+  t.mock.restoreAll();
+});
+
 test("replaceFile replaces an existing file and leaves no temporary file", () => {
   const dir = tmp();
   const file = path.join(dir, "t.json");
