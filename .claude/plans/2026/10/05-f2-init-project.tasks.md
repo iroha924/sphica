@@ -22,13 +22,14 @@ base: main
 
 バージョンをそろえ、持ち主だけが消すロックと、壊れない置き換えの部品ができて、Windows の CI でも動く
 
-- [ ] T01: release:plan で種別を確かめ、npm と 3 つの manifest を 0.6.32 にそろえる
+- [x] T01: release:plan で種別を確かめ、npm と 3 つの manifest を 0.6.32 にそろえる
   - 種別: 変更
   - 計画: S6
   - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base d9136f72` → 4 か所が 0.6.32、`bun run verify` → 終了コード 0
   - コミット: `chore(release): bump to 0.6.32`
+  - 結果: `bun run release:plan -- --base d9136f72` → `version: npm 0.6.32 / plugin 0.6.32 / marketplace 0.6.32 / Codex 0.6.32`、kind は none（まだ package の入力を変えていない）。`bun run verify` → exit 0
 - [ ] T02: file-lock.ts に withFileLock と replaceFile を足し、テストを書く
   - 種別: 追加
   - 計画: S1
