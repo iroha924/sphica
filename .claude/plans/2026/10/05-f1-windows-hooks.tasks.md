@@ -102,6 +102,15 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 完了条件: `cd server && node --test test/codex-trust.test.ts` → 8 件 pass
   - コミット: `fix(doctor): never call hooks trusted that Codex cannot read or keys it trims differently`
   - 結果: red を実測（直す前は 1 つ目の assert で `actual: false, expected: true`）。直した後: 8 件 pass、`bun run typecheck` → exit 0。600.0・6e2 の timeout、U+FEFF・U+0085 のキーは、直す前のコードでは JSON.parse が 600 にし、JS の trim が U+FEFF を削り U+0085 を残すので、どれも落ちる側だった（コードを読んでの判断で、assert ごとの red は見ていない）
+- [x] T10: ロックファイルに残った knip 用の smol-toml 1.8.0 を消し、SBOM が bundle と一致するようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（smol-toml を足した変更が要る）
+  - 変更: `server/bun.lock`
+  - red: `gh run view 37259168736 --log-failed` → release の dry run の prepare が `SBOM lists smol-toml 1.8.0, which is not bundled` で落ちている
+  - 完了条件: `bun install --cwd server --frozen-lockfile` → `no changes`。push 後の release の dry run の prepare が pass
+  - コミット: `fix(deps): let knip share the bundled smol-toml so the SBOM lists only what ships`
+  - 結果: `bun add` が直下を 1.9.0 にし、knip の `^1.8.0` に入れ子の 1.8.0（`knip/smol-toml`）を残していた。入れ子のエントリを消した後: `bun install --cwd server --frozen-lockfile` → `no changes`、`server/node_modules/knip/node_modules/smol-toml` を消して入れ直しても作られない、`bun run knip` → exit 0。dry run は push 後に確かめる
 - [x] T06: Windows の CI に、パックした doctor の「Codex hooks」の行を確かめる手順を足す
   - 種別: 追加
   - 計画: S5
