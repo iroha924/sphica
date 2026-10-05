@@ -38,13 +38,23 @@ base: main
   - 完了条件: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 待つ・時間切れ・pid が書かれる前のロックを奪わない・持ち主以外は消さない・置き換え・失敗時に元が残るの各テストが pass
   - コミット: `feat(lock): add an owner-only file lock and an atomic file replace`
   - 結果: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 9 件 pass（約 1.3 秒）。`bun run verify` → exit 0
-- [ ] T03: Windows の CI で file-lock のテストを流す
+- [x] T03: Windows の CI で file-lock のテストを流す
   - 種別: 追加
   - 計画: S5
   - 依存: T02（流すテストのファイルが要る）
   - 変更: `.github/workflows/check.yml`
   - 完了条件: `bun run verify` → 終了コード 0（actionlint を含む）。push 後の Windows のジョブで file-lock のテストの step が pass
   - コミット: `ci(windows): run the file lock tests on Windows`
+  - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0。Windows のジョブの step の pass は push 後に plan の A4 で確かめる
+
+- [ ] T07: ロックの pid の書き込みと削除の失敗でロックを残さない
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の withFileLock が要る）
+  - 変更: `server/src/file-lock.ts`, `server/test/file-lock.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="pid write fails|cannot remove" test/file-lock.test.ts` → pid の書き込みが ENOSPC で失敗した後に空のロックが残り、削除が EBUSY で失敗しても withFileLock が成功を返して落ちる。テストだけを先に足す
+  - 完了条件: 同じコマンド → pass（書き込みの失敗ではロックを消して投げる。削除の一時的な失敗は取り直し、消せなければ fn の結果ではなくロックの場所を伝えるエラーを投げる）。`bun run verify` → 終了コード 0
+  - コミット: `fix(lock): never leave the lock behind when writing the pid or removing it fails`
 
 ## P2: init の同時実行を直す
 
@@ -81,3 +91,5 @@ doctor が、見つからない project には探した場所を、コピーが�
   - コミット: `fix(doctor): say where it looked for a project and list several copies`
 
 ## 記録
+
+- 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
