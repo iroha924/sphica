@@ -59,7 +59,7 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 依存: T03（直す対象の検査と、T02・T03 のレビューの指摘が要る）
   - 変更: `scripts/check-hooks-live.mjs`
   - red: `gh run view 37257640239 --job 111598032797 --log-failed` → Linux（Node 24.15）の check-hooks-live が `ENOTEMPTY, Directory not empty: /tmp/sphica-live-…` で落ちている
-  - 完了条件: `bun run hooks:live` を 3 回 → 3 回とも exit 0。push 後の Linux の check の 2 つが pass
+  - 完了条件: `for i in 1 2 3; do node scripts/check-hooks-live.mjs || exit 1; done` → 3 回とも exit 0。push 後の Linux の check の 2 つが pass
   - コミット: `test(hooks): keep the Codex launch check from racing detached sends and from Codex's timeouts`
   - 結果: red は T03 の head（084a5fc0）の Linux の check (24.15) で実測（check (26) は通った）。直した後: `bun run hooks:live` → exit 0、続けて `node scripts/check-hooks-live.mjs` を 3 回 → 3 回とも exit 0。sh の包みのケース: `node exiting 0 → 0 in 22 ms, node exiting 7 → 7 in 23 ms, without node → 127 in 3 ms`
 
