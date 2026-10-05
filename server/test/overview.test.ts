@@ -6,6 +6,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
 import { liveOverview, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
@@ -371,12 +374,15 @@ test("look counts what it could not check, follows a long chain to its live end,
         (_, i) => `- made up <!-- sphica: trace:${"u".repeat(900)}/${i} -->`,
       ).join("\n")}\n`,
     );
-    const look = await lookOverview(db.reader, p, root);
-    assert.ok(Buffer.byteLength(look) < 64 * 1024, `${Buffer.byteLength(look)} bytes`);
+    // Many long lines fill the first page, which says where to go on; the rest come on later pages
+    const pages = await lookPages(db, p, root);
+    assert.match(pages[0] ?? "", /^Partial: more follow\. Call overview with view look and after: "/m);
+    const look = pages.join("\n");
     assert.match(look, /- 1 code locations whose file could not be scanned/);
     assert.match(look, /AGENTS\.md:1: trace:ext-s1\/v0 was superseded by trace:ext-s1\/v25\n/);
     assert.match(look, /AGENTS\.md:2: trace:s{400}\/k was superseded by trace:s{400}\/k2/);
-    assert.match(look, /\(\d+ more not shown/);
+    assert.equal([...look.matchAll(/^- AGENTS\.md:\d+: /gm)].length, 62);
+    assert.equal([...look.matchAll(/^- trace:ext-s1\/g\d+ \(constraint\): /gm)].length, 150);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     await db.done();
@@ -524,5 +530,176 @@ test("the live overview marks an AI's decision, with Sphica's words for it", asy
     assert.ok(page.includes(AI_DECIDED));
   } finally {
     await db.done();
+  }
+});
+
+/** Every page of look, following the cursor each page names, with each page's size checked */
+async function lookPages(db: TempDb, p: number, root: string | null) {
+  const pages: string[] = [];
+  let after: string | undefined;
+  for (let n = 0; n < 50; n++) {
+    const page = await lookOverview(db.reader, p, root, after);
+    assert.ok(Buffer.byteLength(page) < 64 * 1024, `page ${n}: ${Buffer.byteLength(page)} bytes`);
+    pages.push(page);
+    after = /after: "([^"]+)"/.exec(page)?.[1];
+    if (!after) break;
+  }
+  return pages;
+}
+
+test("look cursor: 2,500 anchors are all checked across pages, a page of anchors with nothing to show moves on, and the last says Complete", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-cursor-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    for (let s = 0; s < 3; s++)
+      await save(
+        db,
+        p,
+        Array.from({ length: 50 }, (_, i) =>
+          record(m, `a${s}-${i}`, "constraint", {
+            anchors: Array.from({ length: 20 }, (_, k) => ({
+              path: `d/${s}-${i}-${k}.ts`,
+              role: "applies_to",
+            })),
+          }),
+        ).slice(0, s === 2 ? 25 : 50),
+      );
+    fs.mkdirSync(path.join(root, "d"));
+    for (let s = 0; s < 3; s++)
+      for (let i = 0; i < 50; i++)
+        for (let k = 0; k < 20; k++) fs.writeFileSync(path.join(root, "d", `${s}-${i}-${k}.ts`), "x\n");
+    // Only the last of the 2,500 anchors points at a file that is gone
+    fs.rmSync(path.join(root, "d", "2-24-19.ts"));
+    const pages = await lookPages(db, p, root);
+    const all = pages.join("\n");
+    assert.equal([...all.matchAll(/d\/2-24-19\.ts/g)].length, 1, all.slice(0, 2000));
+    assert.match(pages.at(-1) ?? "", /Complete: every section was listed to its end\./);
+    assert.ok(pages.length >= 2);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("look cursor: gone and lost anchors, long lists of conditions of both kinds, and markers across files each come once over the pages", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-stages-"));
+  try {
+    const p = project(db);
+    const when = "if replicas are ever needed";
+    const m = message(db, p, { id: "m1", text: `${said} If replicas are ever needed, look again.` });
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(path.join(root, "src", "keep.ts"), "export function open() {}\n");
+    fs.writeFileSync(path.join(root, "src", "gone.ts"), "export const x = 1;\n");
+    const long = (n: number) => `${"o".repeat(100)}${n}`;
+    await save(db, p, [
+      record(m, "gone-file", "decision", { anchors: [{ path: "src/gone.ts", role: "applies_to" }] }),
+      record(m, "lost-symbol", "constraint", {
+        anchors: [{ path: "src/keep.ts", symbol: "close", role: "applies_to" }],
+      }),
+      record(m, "fine", "decision", {
+        anchors: [{ path: "src/keep.ts", symbol: "open", role: "applies_to" }],
+      }),
+      // 120 rejected options with conditions, 12 to a record
+      ...Array.from({ length: 10 }, (_, r) =>
+        record(m, `opts${r}`, "decision", {
+          options: Array.from({ length: 12 }, (_, o) => ({
+            text: `${long(r * 12 + o)}`,
+            outcome: "rejected",
+            reconsider_when: `${when} ${"w".repeat(320)}`,
+            reconsider_quote: { source: `s${m}`, quote: "If replicas are ever needed, look again." },
+          })),
+        }),
+      ),
+    ]);
+    // 120 deferred records, saved 50 at a time
+    for (let b = 0; b < 3; b++)
+      await save(
+        db,
+        p,
+        Array.from({ length: b === 2 ? 20 : 50 }, (_, i) => ({
+          ...record(m, `later${b * 50 + i}`, "decision"),
+          stance: "defer",
+          text: long(b * 50 + i),
+          revisit_when: `after the release ${"r".repeat(320)}`,
+        })),
+      );
+    fs.rmSync(path.join(root, "src", "gone.ts"));
+    // Markers in two files, two on some lines, naming records that are not this project's
+    const mark = (k: string) => `<!-- sphica: trace:${"u".repeat(900)}/${k} -->`;
+    fs.writeFileSync(
+      path.join(root, "CLAUDE.md"),
+      `${Array.from({ length: 40 }, (_, i) => `- ${mark(`c${i}a`)} ${mark(`c${i}b`)}`).join("\n")}\n`,
+    );
+    fs.writeFileSync(
+      path.join(root, "AGENTS.md"),
+      `${Array.from({ length: 10 }, (_, i) => `- ${mark(`a${i}`)}`).join("\n")}\n`,
+    );
+    const pages = await lookPages(db, p, root);
+    const all = pages.join("\n");
+    assert.ok(pages.length >= 4, `${pages.length} pages`);
+    assert.equal([...all.matchAll(/^- trace:ext-s1\/gone-file \(decision\): src\/gone\.ts/gm)].length, 1);
+    assert.equal(
+      [...all.matchAll(/^- trace:ext-s1\/lost-symbol \(constraint\): close in src\/keep\.ts/gm)].length,
+      1,
+    );
+    assert.doesNotMatch(all, /trace:ext-s1\/fine/);
+    for (let n = 0; n < 120; n++) {
+      assert.equal(
+        [...all.matchAll(new RegExp(`rejected option ${long(n)},`, "g"))].length,
+        1,
+        `option ${n}`,
+      );
+      assert.equal([...all.matchAll(new RegExp(`deferred ${long(n)},`, "g"))].length, 1, `deferred ${n}`);
+    }
+    for (const k of [
+      ...Array.from({ length: 40 }, (_, i) => [`c${i}a`, `c${i}b`]).flat(),
+      ...Array.from({ length: 10 }, (_, i) => `a${i}`),
+    ])
+      assert.equal([...all.matchAll(new RegExp(`u{900}/${k} is not a record`, "g"))].length, 1, k);
+    assert.match(
+      pages.at(-1) ?? "",
+      /Complete: every section was listed to its end\. Not checked entries on any page still apply\./,
+    );
+    for (const page of pages.slice(0, -1)) assert.match(page, /^Partial: more follow\./m);
+    // A cursor that is not one a page gave is refused
+    await assert.rejects(lookOverview(db.reader, p, root, "bm90IGEgY3Vyc29y"), /not a cursor/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("overview refuses a cursor for the other view, and a broken one, before reading anything", async () => {
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "mcp.ts")],
+      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+      stderr: "ignore",
+    }),
+  );
+  try {
+    const call = async (args: Record<string, unknown>) => {
+      const r = await client.callTool({ name: "overview", arguments: { ...args, cwd: "/nonexistent" } });
+      return { error: r.isError === true, text: (r.content as { text: string }[])[0]?.text ?? "" };
+    };
+    assert.deepEqual(await call({ view: "live", after: "abc" }), {
+      error: true,
+      text: "after: with view live, pass the id the previous page gave",
+    });
+    assert.deepEqual(await call({ view: "look", after: 3 }), {
+      error: true,
+      text: "after: with view look, pass the cursor the previous page gave, as it is",
+    });
+    assert.deepEqual(await call({ view: "look", after: "not-a-cursor" }), {
+      error: true,
+      text: "after: not a cursor a look page gave; call look without after to start again",
+    });
+  } finally {
+    await client.close();
   }
 });

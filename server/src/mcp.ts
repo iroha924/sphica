@@ -13,7 +13,7 @@ import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "./expor
 import { fieldsText } from "./fields.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
-import { liveOverview, lookOverview } from "./overview.ts";
+import { liveOverview, lookCursor, lookOverview } from "./overview.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
@@ -332,32 +332,39 @@ server.registerTool(
       "On request, not before every change. view live lists every active decision and constraint of the project, grouped by the directory it " +
       "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
       "is not found, written conditions for reconsidering an option (for you to judge, never applied), and lines in CLAUDE.md, AGENTS.md, or " +
-      ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn. Read a record by its key before relying on it.",
+      ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn, a page at a time until one says Complete (pass the after it gives). " +
+      "Read a record by its key before relying on it.",
     inputSchema: z
       .object({
         view: z
           .enum(["live", "look"])
           .describe("live: every active decision and constraint; look: records that need a look"),
         after: z
-          .number()
-          .int()
-          .min(0)
+          .union([z.number().int().min(0), z.string().min(1).max(8192)])
           .optional()
-          .describe("With live: the id the previous page said to continue after"),
+          .describe(
+            "With live: the id the previous page said to continue after. With look: the cursor the previous page gave, as it is",
+          ),
         cwd: CWD,
       })
       .strict(),
     annotations: READ_ONLY,
   },
   async (a, extra) => {
+    if (a.view === "live" && typeof a.after === "string")
+      return text("after: with view live, pass the id the previous page gave", true);
+    if (a.view === "look" && typeof a.after === "number")
+      return text("after: with view look, pass the cursor the previous page gave, as it is", true);
+    if (typeof a.after === "string" && !lookCursor(a.after))
+      return text("after: not a cursor a look page gave; call look without after to start again", true);
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return text(p);
       return text(
         framed(
-          a.view === "live"
-            ? await liveOverview(db, p.id, a.after ?? null)
-            : await lookOverview(db, p.id, p.root),
+          typeof a.after === "string" || a.view === "look"
+            ? await lookOverview(db, p.id, p.root, typeof a.after === "string" ? a.after : undefined)
+            : await liveOverview(db, p.id, a.after ?? null),
         ),
       );
     } catch (e) {

@@ -112,7 +112,7 @@ read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続�
 
 look を続けて呼べば、2,000 件より先のアンカーと見出しごとの 50 行より先の指摘に届き、最後が Complete と言う。
 
-- [ ] T06: look に不透明なカーソルを足し、アンカー・条件・markers を段階ごとに続ける
+- [x] T06: look に不透明なカーソルを足し、アンカー・条件・markers を段階ごとに続ける
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -120,6 +120,8 @@ look を続けて呼べば、2,000 件より先のアンカーと見出しごと
   - red: `cd server && node --test --test-name-pattern 'look cursor' test/overview.test.ts` → 2,500 アンカーで 2,000 件目より後の gone のファイルが、どの呼び出しでも出ずに fail
   - 完了条件: `cd server && node --test --test-name-pattern 'look cursor' test/overview.test.ts` → pass。gone と lost の混在、指摘ゼロのアンカーだけのページ、見出しあたり 120 件の options と deferred の条件、複数ファイルの markers で全指摘に 1 回ずつ届き、最後が Complete、各ページが 64 KiB 以下。壊れたカーソル・live に文字列・look に整数は引数エラー
   - コミット: `fix(overview): continue the look view past its anchor and line caps with a cursor`
+  - 結果: red: `node --test --test-name-pattern 'look cursor' test/overview.test.ts` → 2,500 アンカーの最後の 1 件の gone のファイルが、どの呼び出しでも出ず fail（actual 0、expected 1）
+  - 結果: 実装後 `node --test test/overview.test.ts` → 14 pass（2,500 アンカーで最初の 2,000 件の指摘ゼロのページも進んで最後が Complete、gone と lost の混在、120 件ずつの options と deferred の条件、2 ファイル 90 か所の markers がページをまたいで 1 回ずつ、壊れたカーソルの拒否、MCP で live に文字列・look に整数・壊れたカーソルが引数エラー）。1 ページ目にすべて出る前提だった既存テストは、ページをたどる形に直した。`bun run verify` → 0
 
 ## P4: acceptance
 
