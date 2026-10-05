@@ -22,7 +22,7 @@ base: main
 
 markdownlint-cli2 が、リポジトリの Markdown の構造の崩れを pre-commit と verify で落とす
 
-- [ ] T01: F2 の plan と tasks を消す
+- [-] T01: F2 の plan と tasks を消す
   - 種別: 削除
   - 計画: S1
   - 依存: なし
