@@ -277,7 +277,7 @@ await withTempDir(async (dir) => {
 
   // ---- Codex: every codex.json entry, through each shell Codex can run hooks with, from plugin roots a shell might mangle ----
   // Codex 0.160.0 picks commandWindows on Windows (else command), replaces ${PLUGIN_ROOT} and its siblings as text, sets them in the
-  // environment too, and runs the line through the session's shell (hooks/src/engine/discovery.rs, command_runner.rs, core/src/shell.rs)
+  // environment too, and runs the line through the session's shell
   const codexHooks = JSON.parse(fs.readFileSync(path.join(pkg, "hooks", "codex.json"), "utf8")).hooks;
   const powershellDir = path.join(systemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0");
   const shells = windows
@@ -314,26 +314,34 @@ await withTempDir(async (dir) => {
   ];
   const codexData = path.join(dir, "plugin-data");
   fs.mkdirSync(codexData, { recursive: true });
+  // A detached send from an earlier case may delete a queued file between listing and reading it; the database then has it
+  const readQueued = (f) => {
+    try {
+      return fs.readFileSync(path.join(spool, f), "utf8");
+    } catch {
+      return "";
+    }
+  };
   const queuedOrSent = (marker) =>
     fs
       .readdirSync(spool)
       .filter((f) => f.endsWith(".json") && !f.startsWith("."))
-      .some((f) => fs.readFileSync(path.join(spool, f), "utf8").includes(marker)) ||
+      .some((f) => readQueued(f).includes(marker)) ||
     query((db) => Boolean(db.prepare("select 1 from source where text like ?").get(`%${marker}%`)));
   const inputs = {
     SessionStart: { source: "startup" },
     SubagentStart: { agent_id: "a1", agent_type: "explorer" },
     PreToolUse: { tool_name: "Bash", tool_input: { command: "cat src/a.ts" } },
     PostToolUse: { tool_name: "apply_patch", tool_input: { command: "" }, tool_response: "" },
-    Stop: { last_assistant_message: "Done." },
-    Interrupt: {},
+    // As a subagent's, so neither starts a detached send that outlives this script and its temp directory (the Claude Code part
+    // above already checks the send)
+    Stop: { last_assistant_message: "Done.", agent_id: "a1" },
+    Interrupt: { agent_id: "a1" },
   };
   let launched = 0;
   for (const r of roots) {
     const at = path.join(dir, r.dir);
     fs.cpSync(pkg, at, { recursive: true });
-    // The control proves the shell and PATH work, so no part of its path may hold a space
-    if (r.name === "control" && /\s/.test(at)) throw new Error(`the control plugin root has a space: ${at}`);
     const values = {
       PLUGIN_ROOT: at,
       CLAUDE_PLUGIN_ROOT: at,
@@ -361,7 +369,8 @@ await withTempDir(async (dir) => {
             ...input,
           }),
           encoding: "utf8",
-          timeout: TIMEOUT_MS,
+          // Codex stops a hook at its own timeout (600 seconds when unset)
+          timeout: (h.timeout ?? 600) * 1000,
           windowsVerbatimArguments: Boolean(s.verbatim),
           windowsHide: true,
         });
@@ -389,9 +398,6 @@ await withTempDir(async (dir) => {
           });
     }
   }
-  // Stop and Interrupt start detached sends: wait for them to empty the queue before the temp directory goes
-  for (let i = 0; i < 40 && fs.readdirSync(spool).some((f) => f.endsWith(".json")); i++)
-    await new Promise((r) => setTimeout(r, 250));
   const expected =
     roots.length *
     shells.length *
@@ -415,6 +421,7 @@ await withTempDir(async (dir) => {
     const shellDirs = [...(windows ? [powershellDir] : []), path.dirname(s.file)];
     if ([...withoutNode, ...shellDirs].some((d) => fs.existsSync(path.join(d, nodeExe))))
       throw new Error(`node is not the only one on PATH for ${s.name}, so a missing node cannot be shown`);
+    const took = [];
     for (const { what, code, expect, pathDirs } of [
       { what: "node exiting 0", code: "0", expect: (st) => st === 0, pathDirs: [...dirs, ...shellDirs] },
       {
@@ -428,6 +435,7 @@ await withTempDir(async (dir) => {
       const line = (
         windows ? (captureHook.commandWindows ?? captureHook.command) : captureHook.command
       ).replaceAll(["$", "{PLUGIN_ROOT}"].join(""), stub);
+      const started = Date.now();
       const r = spawnSync(s.file, s.args(line), {
         cwd: repo,
         env: { ...env, PATH: pathDirs.join(path.delimiter), PLUGIN_ROOT: stub, STUB_EXIT: code },
@@ -437,12 +445,14 @@ await withTempDir(async (dir) => {
         windowsVerbatimArguments: Boolean(s.verbatim),
         windowsHide: true,
       });
+      took.push(`${what} → ${r.status} in ${Date.now() - started} ms`);
       if (r.error || !expect(r.status))
         fail(
           `the Codex launch line through ${s.name}, ${what}, exited ${r.status}`,
           r.error?.message ?? r.stderr,
         );
     }
+    console.log(`codex launch line through ${s.name}: ${took.join(", ")}`);
   }
 });
 

@@ -53,6 +53,16 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - コミット: `fix(hooks): pass the plugin root to Codex's Windows hooks through the environment`
   - 結果: red（T02 の head 383ba025、check の run 37257190619 の Windows のジョブ）→ `hooks: 70 failure(s)`。control は powershell.exe・pwsh・cmd.exe・COMSPEC で通り、spaced と expanding は powershell.exe・pwsh で `Cannot find module '...\plugin'`（空白で割れる）、Git Bash は control でも `...\repo\:PLUGIN_ROOT\dist\...`（`$env` を bash が読む）、cmd.exe・COMSPEC は全部通った。直した後: `bun run verify:ai` → exit 0、1 件の base64 を変えると `a SessionStart hook's commandWindows is not the encoded launch of its bundle` で落ちる。`bun run hooks:live` → macOS で exit 0（包みのケース: sh で 0 → 0、7 → 7、node なし → 0 以外）。Windows の green は push 後に plan の A2 で確かめる
 
+- [x] T07: Codex の起動の検査の競合・タイムアウト・一時ディレクトリの空白を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T03（直す対象の検査と、T02・T03 のレビューの指摘が要る）
+  - 変更: `scripts/check-hooks-live.mjs`
+  - red: `gh run view 37257640239 --job 111598032797 --log-failed` → Linux（Node 24.15）の check-hooks-live が `ENOTEMPTY, Directory not empty: /tmp/sphica-live-…` で落ちている
+  - 完了条件: `bun run hooks:live` を 3 回 → 3 回とも exit 0。push 後の Linux の check の 2 つが pass
+  - コミット: `test(hooks): keep the Codex launch check from racing detached sends and from Codex's timeouts`
+  - 結果: red は T03 の head（084a5fc0）の Linux の check (24.15) で実測（check (26) は通った）。直した後: `bun run hooks:live` → exit 0、続けて `node scripts/check-hooks-live.mjs` を 3 回 → 3 回とも exit 0。sh の包みのケース: `node exiting 0 → 0 in 22 ms, node exiting 7 → 7 in 23 ms, without node → 127 in 3 ms`
+
 ## P3: doctor が Codex のフックの信頼を出す
 
 `sphica doctor` に「Codex hooks」の行が出て、trusted / modified / untrusted / disabled / unknown が分かる
@@ -82,4 +92,6 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
 ## 記録
 
 - 2026-10-05 / T01 / release:plan は package の入力（`plugin/`・`server/src/` など）が変わるまで kind none を返すので、完了条件の「kind が plugin」はこの時点で観測できない / 完了条件を「kind が plugin」から「4 か所が 0.6.31」に変えた。kind plugin は T03 の後に確かめる
+- 2026-10-05 / T07 / T02・T03 の Codex のレビュー（新しい会話、084a5fc0）: F1 spool のファイルが読む前に detached send に消されて ENOENT、F2 検査のタイムアウトが codex.json の timeout を使っていない、F3 一時ディレクトリの親に空白があると control の throw で止まる。3 件とも採る（F3 は red を CI で見た後なので throw を外す）。T03 の head の CI では Linux の check (24.15) が一時ディレクトリの削除で ENOTEMPTY（Codex の部の Stop・Interrupt が起こした detached send が残る）/ T07 を足し、Codex の部の Stop・Interrupt は subagent の入力にして send を起こさない
+- 2026-10-05 / T03 / T03 の head の Windows のジョブ: 15 通り（パス 3 × 外側のシェル 5）の全エントリが終了コード 0、各ケースの目印が spool に届いた。落ちたのは包みのケースの「powershell.exe の外側、PATH に node が無い」だけで、60 秒で ETIMEDOUT（cmd・pwsh・Git Bash の外側は時間内に 0 以外で終わった）/ 仮説（子の env に LOCALAPPDATA・PSModulePath が無く、Windows PowerShell 5.1 がコマンドを探すときにモジュールをキャッシュ無しで全部読む）は未検証。T07 で包みのケースの所要時間をログに出し、次の CI で確かめてから扱いを決める
 - 2026-10-05 / T02 / 依存の理由に書いた「バージョンを上げないと CI がバージョンの検査で落ちる」は誤り。`scripts/check-hooks-live.mjs` は package の入力ではなく（`scripts/lib/release-scope.mjs`）、バージョンの検査は上げずに通る / 並び順は変えず、そのまま進める
