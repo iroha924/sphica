@@ -7,11 +7,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { markdownFiles } from "./lib/markdown-files.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const remap = `^https://github\\.com/iroha924/sphica/blob/main/(.*)$ ${pathToFileURL(root).href}/$1`;
+// `$` in the replacement names a capture group, so one in the checkout's path is doubled to stay literal
+const target = pathToFileURL(root).href.replaceAll("$", "$$$$");
+const remap = `^https://github\\.com/iroha924/sphica/blob/main/(.*)$ ${target}/$1`;
 try {
+  // `--` so a file named like an option (--x.md) is read as a file
   execFileSync(
     "lychee",
-    ["--config", path.join(root, "lychee.toml"), "--remap", remap, ...markdownFiles(root)],
+    ["--config", path.join(root, "lychee.toml"), "--remap", remap, "--", ...markdownFiles(root)],
     {
       cwd: root,
       stdio: "inherit",

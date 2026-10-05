@@ -70,6 +70,16 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `fix(docs): run markdownlint through node and pass file names literally`
   - 結果: red（T02 の check-markdown.mjs）→ `Linting: 32 files`、`Summary: 0 issues`。`--` を付けても `Linting: 0 files` で文字どおりにならず、`:` を頭に付ける形にした。直した後: 全文書で `Linting: 33 files` と `tmpglob/review{a,b}.md:3:1 error MD042`、ファイルを渡す形でも exit 1、plan を渡すと exit 0（検査しない）。lychee は実在するファイル名をそのまま読む（同じ名前で `File not found` を正しく出した）。`bun run verify` → exit 0
 
+- [x] T09: リンクの検査で、checkout のパスの `$` と、`-` で始まるファイル名を正しく扱う
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す対象の check-links.mjs が要る）
+  - 変更: `scripts/check-links.mjs`
+  - red: パスに `$` を含む一時的なディレクトリで同じ形の remap を作って lychee を流す → 正しいリンクが別のパス（`$work` が消えた先）で `File not found`。`--review.md` を `git add -N` して `node scripts/check-links.mjs` → lychee が引数の誤りで終了。どちらも戻す
+  - 完了条件: 同じ手順 → どちらも通る。`bun run verify` → 終了コード 0
+  - コミット: `fix(docs): keep the checkout path literal in the remap and end options before files`
+  - 結果: red → `$` 入りのパスで `.../dollar.zcsq/repo/b.md#b` が File not found（`repo$work` が `repo` に化けた）、`--review.md` で lychee が `For more information, try '--help'` で終了。直した後: `$` を `$$` にした remap で通り、`--` の後に一覧を置くと `--review.md` を含めて 0 エラー。`bun run verify` → exit 0
+
 ## P3: 配る Markdown の検査
 
 展開した tarball の Markdown に両方がかかり、package の外を指す相対リンクが落ちる
@@ -105,3 +115,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T03 / knip が scripts から呼ぶ外部の実行ファイル lychee を未登録と判定した。lefthook と同じくルートの ignoreBinaries に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
 - 2026-10-05 / T03 / mise の aqua の lychee の登録が、0.24.2 が配っていないアセット名（lychee-arm64-macos.dmg）を探して入らなかった（lefthook の links の job で発覚）。mise.toml を `github:lycheeverse/lychee`（version_prefix `lychee-v`）に変え、check-pairs の照合もその書き方を読むように直した / そのまま進めた
 - 2026-10-05 / T08 / T02 の Codex のレビュー（a67aee21）: F1 ファイル名が glob として読まれ、`{` などを含む名前が漏れる（再現）、F2 拡張子のない .bin を直接起動して Windows で動かない / 修正タスク T08 を足して直した
+- 2026-10-05 / T09 / T03・T08 の Codex のレビュー（4296adde..32dc0443）: F1 checkout のパスの `$` が remap の置換の変数として読まれる（再現）、F2 `-` で始まるファイル名が lychee のオプションとして読まれる（再現）。T08 は指摘なし / 修正タスク T09 を足して直した
