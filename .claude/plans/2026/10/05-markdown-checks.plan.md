@@ -102,7 +102,7 @@ approved_at: 2026-10-05
 
 ## 手順
 
-- S1: F2 の plan と tasks を消す
+- S1: F2 の plan と tasks を消す（片付けなので、タスクではなく作業ブランチのコミット `3e413a3c` で行った）
 - S2: markdownlint-cli2 と設定、Markdown の一覧の共通の関数、`bun run markdown`、lefthook の `markdown`、release:plan の後に 0.6.33 に上げる
 - S3: lychee（mise・`lychee.toml`・`scripts/check-links.mjs`・remap）、`verify:ai` への組み込み、lefthook の `links` と `ai-config`、CI での導入、check-pairs での照合
 - S4: `checkLocalLinks` を消す
@@ -130,3 +130,4 @@ approved_at: 2026-10-05
 なし
 
 ## 変更履歴
+- 2026-10-05 / S1 を片付けとして扱い、tasks の T01 を取りやめにした / done の検査は、チェックを付けたコミットが `.claude/plans/` の外を変えていることを求め、plan の中だけを変える T01 は通らない。削除は `3e413a3c` で済んでいる / Go 不要（範囲は変わらない）

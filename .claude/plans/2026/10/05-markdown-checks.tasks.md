@@ -22,14 +22,13 @@ base: main
 
 markdownlint-cli2 が、リポジトリの Markdown の構造の崩れを pre-commit と verify で落とす
 
-- [x] T01: F2 の plan と tasks を消す
+- [-] T01: F2 の plan と tasks を消す
   - 種別: 削除
   - 計画: S1
   - 依存: なし
   - 変更: `.claude/plans/2026/10/05-f2-init-project.plan.md`, `.claude/plans/2026/10/05-f2-init-project.tasks.md`
   - 完了条件: `git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件
   - コミット: `chore(plans): remove the finished F2 plan`
-  - 結果: `git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件
 - [x] T02: markdownlint-cli2 を入れ、構造の規則だけで全文書を検査し、0.6.33 に上げる
   - 種別: 追加
   - 計画: S2
@@ -112,9 +111,21 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - コミット: `docs(claude): mention lychee and the Markdown checks in the commands`
   - 結果: `bun run verify:ai` → exit 0（CLAUDE.md の行を含め、リンクは 0 エラー）
 
+- [x] T10: AGENTS.md の command の行を CLAUDE.md にそろえる
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（そろえる先の CLAUDE.md の行が要る）
+  - 変更: `AGENTS.md`
+  - red: `git show 23ff0b33:AGENTS.md | grep -c lychee` → 0（CLAUDE.md だけ直して AGENTS.md の同じ行が古いまま）
+  - 完了条件: `grep -c lychee AGENTS.md` → 2。`bun run verify:ai` → 終了コード 0
+  - コミット: `docs(agents): mention lychee and the Markdown checks in the commands`
+  - 結果: red → `git show 23ff0b33:AGENTS.md | grep -c lychee` は 0。直した後: `grep -c lychee AGENTS.md` → 2、`bun run verify:ai` → exit 0
+
 ## 記録
 - 2026-10-05 / T02 / knip が scripts から実行ファイルのパスで呼ぶ markdownlint-cli2 を未使用と判定した。kysely-codegen と同じく server の ignoreDependencies に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
 - 2026-10-05 / T03 / knip が scripts から呼ぶ外部の実行ファイル lychee を未登録と判定した。lefthook と同じくルートの ignoreBinaries に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
 - 2026-10-05 / T03 / mise の aqua の lychee の登録が、0.24.2 が配っていないアセット名（lychee-arm64-macos.dmg）を探して入らなかった（lefthook の links の job で発覚）。mise.toml を `github:lycheeverse/lychee`（version_prefix `lychee-v`）に変え、check-pairs の照合もその書き方を読むように直した / そのまま進めた
 - 2026-10-05 / T08 / T02 の Codex のレビュー（a67aee21）: F1 ファイル名が glob として読まれ、`{` などを含む名前が漏れる（再現）、F2 拡張子のない .bin を直接起動して Windows で動かない / 修正タスク T08 を足して直した
 - 2026-10-05 / T09 / T03・T08 の Codex のレビュー（4296adde..32dc0443）: F1 checkout のパスの `$` が remap の置換の変数として読まれる（再現）、F2 `-` で始まるファイル名が lychee のオプションとして読まれる（再現）。T08 は指摘なし / 修正タスク T09 を足して直した
+- 2026-10-05 / T01 / 取りやめ（[-]）。`git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件: done の検査は、チェックを付けたコミットが `.claude/plans/` の外を変えていることを求め、plan の中だけを変える T01 は通らない。F2 の plan と tasks の削除は `3e413a3c` で済んでいて、plan の S1 を片付けとして直した / tasks を組むときに plan の中だけのタスクを作らない
+- 2026-10-05 / T10 / T07 で CLAUDE.md の command の行だけを直し、AGENTS.md の同じ行が古いままだった（rg-pairs の規定に反する） / 修正タスク T10 を足して直した
