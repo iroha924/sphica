@@ -137,13 +137,14 @@ look を続けて呼べば、2,000 件より先のアンカーと見出しごと
 
 acceptance の driver が MCP と同じ組み立てを通り、束・続き・カーソルを検査する。
 
-- [ ] T07: driver とケースを readRefs・束・look のカーソルに合わせる
+- [x] T07: driver とケースを readRefs・束・look のカーソルに合わせる
   - 種別: 変更
   - 計画: S5
   - 依存: T02（review_validate が finding の新しい形と束を通す）, T05（readRefs が要る）, T06（look のカーソルが要る）
-  - 変更: `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/evals/acceptance/driver.ts`, `server/src/read.ts`, `server/test/search.test.ts`, `server/test/extract.test.ts`
   - 完了条件: `bun run verify` → 0。review・read・overview の acceptance ケースが新しい driver を通り、review_validate に diff・after・selection が渡る
-  - コミット: `test(acceptance): drive review batches, read budgets, and look cursors through the shared builders`
+  - コミット: `test(acceptance): drive review batches, read budgets, and look cursors as the tools do`
+  - 結果: driver の read と read_of_source は readRefs、overview の look は文字列の after、review_select は reviewBatch（after 付き）、review_validate は diff・after・selection を通す。使われなくなった readSource と part を消し、それを呼んでいたテスト 2 本を readRefs に移した。`bun run verify` → 0（acceptance のケースは件数を変えずに全件 pass）
 
 ## 記録
 
@@ -156,3 +157,5 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T04 / Codex のタスクレビュー: 指摘なし（テストは EPERM で流せず、コードを読んでの判定） / 対応なし
 - 2026-10-05 / T09 / Codex のタスクレビュー F1: 受領行の例に、返事の 1 文目の末尾のピリオドが無く完全一致しない / 採る。修正タスク T10 を足し、同じコミットで終えた
 - 2026-10-05 / T05 / Codex のタスクレビュー F1（P2、再現済み）: 本文を OSC の途中で切ると、framed の plain が閉じていない制御文字列として続きの案内と次の refs まで消す / 採る。修正タスク T11 を足し、同じコミットで終えた
+- 2026-10-05 / T07 / 変更欄: 前 `server/evals/acceptance/driver.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts` → 後 `server/evals/acceptance/driver.ts`, `server/src/read.ts`, `server/test/search.test.ts`, `server/test/extract.test.ts`。層ごとの件数は合意した数として acceptance-cases.test.ts が固定しているのでケースは足さず、driver が readRefs を通るようになって不要になった readSource を消した
+- 2026-10-05 / T11 / Codex のタスクレビュー: 指摘なし / 対応なし

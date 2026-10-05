@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { checkAnchor, locate } from "../src/anchors.ts";
 import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
-import { readSource, readUnit } from "../src/read.ts";
+import { readRefs, readUnit } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
@@ -205,17 +205,17 @@ test("read shows cited words and who said them, links, history, and each anchor 
       (await readUnit(db.reader, p, "ext-s1/storage", root)) ?? "",
       /^trace:ext-s1\/storage \(u\d+/,
     );
-    assert.match((await readSource(db.reader, p, `s${m}`)) ?? "", /session_message session:s1, by the owner/);
-    assert.equal(await readSource(db.reader, p, "s999"), null);
+    assert.match(await readRefs(db.reader, p, [`s${m}`], null), /session_message session:s1, by the owner/);
+    assert.match(await readRefs(db.reader, p, ["s999"], null), /s999: not found in this project/);
     // A long source reads in parts: the first says where the rest starts, and reading from there ends with the text's end
     const long = message(db, p, { id: "long", text: `${"a".repeat(70 * 1024)}THE END` });
-    const first = (await readSource(db.reader, p, `s${long}`)) ?? "";
+    const first = await readRefs(db.reader, p, [`s${long}`], null);
     const next = /read s(\d+)@(\d+) for the rest/.exec(first);
     assert.ok(next, first.slice(-200));
-    const rest = (await readSource(db.reader, p, `s${next?.[1]}@${next?.[2]}`)) ?? "";
-    assert.match(rest, /THE END$/);
+    const rest = await readRefs(db.reader, p, [`s${next?.[1]}@${next?.[2]}`], null);
+    assert.match(rest, /THE END\n<\/past-records/);
     assert.equal(first.includes("THE END"), false);
-    assert.equal(await readSource(db.reader, p, "x"), null);
+    assert.match(await readRefs(db.reader, p, ["x"], null), /x: not found in this project/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

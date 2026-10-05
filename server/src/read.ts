@@ -416,38 +416,6 @@ function movedTo(
     : "";
 }
 
-/** A retained source by `s<id>`, with who wrote it and where it lives; null when there is none. */
-export async function readSource(db: Reads, projectId: number, ref: string): Promise<string | null> {
-  // s<id>@<byte> reads on from that byte: a source can hold more than one reply carries
-  const m = /^s([1-9][0-9]{0,15})(?:@(\d{1,9}))?$/.exec(ref);
-  if (!m) return null;
-  const s = await db
-    .selectFrom("source")
-    .selectAll()
-    .where("project_id", "=", projectId)
-    .where("id", "=", Number(m[1]))
-    .executeTakeFirst();
-  if (!s) return null;
-  return [
-    `s${s.id}: ${s.kind} ${s.artifact}${s.revision > 1 ? ` revision ${s.revision}` : ""}, by ${speaker(s)}, ${s.created_at}${s.url ? `, ${s.url}` : ""}${s.path ? `, ${s.path}${s.line_start ? `:${s.line_start}` : ""}` : ""}${s.truncated ? " (middle not saved)" : ""}`,
-    ...part(s.id, s.text, Number(m[2] ?? 0)),
-  ].join("\n");
-}
-
-const PART = 64 * 1024;
-
-/** One reply's worth of the text from a byte offset (moved back to a character boundary), and where the rest starts. */
-function part(id: number, text: string, from: number): string[] {
-  const all = Buffer.from(text, "utf8");
-  let start = Math.min(from, all.length);
-  while (start > 0 && start < all.length && ((all[start] ?? 0) & 0xc0) === 0x80) start--;
-  const shown = head(all.subarray(start).toString("utf8"), PART);
-  const end = start + Buffer.byteLength(shown, "utf8");
-  return end < all.length
-    ? [shown, `(${all.length - end} more bytes; read s${id}@${end} for the rest)`]
-    : [shown];
-}
-
 /** What one read reply carries, its frame included: hosts cut or set aside larger replies (Claude Code at 25,000 tokens by default). */
 export const READ_BUDGET = 64 * 1024;
 /** Bytes of each field from outside in a source's header line (where it lives, who wrote it), so the header always leaves room for text */
