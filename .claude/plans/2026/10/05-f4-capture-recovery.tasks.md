@@ -142,13 +142,14 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 
 梱包した hook と Windows で送り直しと doctor が動くことを CI で見て、文書と版を揃える。
 
-- [ ] T06: 梱包した hook の送り直しの検査と、Windows の doctor の検査
+- [x] T06: 梱包した hook の送り直しの検査と、Windows の doctor の検査
   - 種別: 追加
   - 計画: S6
   - 依存: T02（送り直しが要る）, T05（doctor の unknown が要る）
   - 変更: `scripts/check-hooks-live.mjs`, `.github/workflows/check.yml`
   - 完了条件: `bun run bundle && node scripts/check-hooks-live.mjs` → pass。record 用 PreToolUse の hook がロックを持った DB で hooks.json の timeout 以内に終わり、`calls/` にファイルを残し、`capture.js --flush` の後に観測の行が入る
   - コミット: `ci(hooks): check the packed hook resends a missed record tool observation, and doctor's unreadable queue on Windows`
+  - 結果: `bun run bundle && node scripts/check-hooks-live.mjs` → 0（ロックを持った DB で record 用 PreToolUse が hooks.json の timeout 内に終わり、calls/ に 1 件残し、`capture.js --flush` で行が入り消えた）。dist/capture.js の "calls" を書き換えて流すと `left 0 observations` で 1 failure になるのを確かめ、bundle し直した。Windows の step は CI で確かめる（未実行）。`bun run verify` → 0
 
 - [ ] T07: README 両言語・knowledge-schema の Skill
   - 種別: 変更
@@ -171,4 +172,5 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T08 / Codex のレビュー（538ecc3d）F1: 読めない観測を rename できない（Windows の EBUSY など）と setAside が投げ、送信全体が止まる / 受理。修正タスク T10 を足した。通常のキューの rename の失敗が投げるのは前からの挙動で、この PR では変えない
 - 2026-10-05 / T04 / Codex のレビュー（1bb9b112）F1: doctor が読めないキューを ok / null pending と出す / T05 で直っている（✗ と「the queue cannot be read」）。F2: 理由の正規表現がハイフンを許さず no-project が unknown になる / 受理。修正タスク T11 を足した
 - 2026-10-05 / T05 / Codex のレビュー（11063e12）F1: 集計のキーが project.name と host で、同じ名前の別のプロジェクトが混ざる / 受理。修正タスク T12 を足した
+- 2026-10-05 / T06 / Windows の doctor の検査は、SPHICA_HOME ではなく別の HOME の `.sphica/spool` をファイルにする形にした（T04 と同じ理由。後の step が使う HOME も壊さない）
 - 2026-10-05 / T12 / verify が 2 回続けて record.test.ts の rename limit（一時ディレクトリの rmSync が ENOTEMPTY）で落ちた。このブランチは触っていない / 単独で 3 回 pass、`bun run test` は T12 の変更あり・なしとも 0、3 回目の verify は 0。負荷で起きる既存の不安定さとみて手を入れない

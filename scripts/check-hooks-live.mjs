@@ -267,6 +267,44 @@ await withTempDir(async (dir) => {
     await new Promise((r) => setTimeout(r, 250));
   if (reads !== 1) fail(`expected one emitted pre_read delivery for the smoke session, found ${reads}`);
 
+  // ---- A record tool hook that cannot write, within its own timeout, leaves its observation for the next send ----
+  {
+    const tool = "mcp__plugin_sphica_record__record_save";
+    const entry = (manifest.PreToolUse ?? []).find(
+      (g) => g.matcher && new RegExp(`^(?:${g.matcher})$`).test(tool),
+    );
+    const limitMs = (entry?.hooks?.[0]?.timeout ?? 0) * 1000;
+    if (!limitMs) fail("hooks.json gives the record tool hook no timeout");
+    const calls = path.join(spool, "calls");
+    const holder = new DatabaseSync(dbFile, { timeout: 5_000 });
+    holder.exec("begin immediate");
+    const started = Date.now();
+    try {
+      fire("PreToolUse", { tool_name: tool, tool_use_id: "toolu_locked", prompt_id: "t2" }, "smoke-1");
+    } finally {
+      holder.exec("rollback");
+      holder.close();
+    }
+    const took = Date.now() - started;
+    if (limitMs && took >= limitMs)
+      fail(`the record tool hook took ${took} ms, past its ${limitMs} ms timeout`);
+    const kept = () =>
+      fs.existsSync(calls)
+        ? fs.readdirSync(calls).filter((f) => f.endsWith(".json") && !f.startsWith("."))
+        : [];
+    if (kept().length !== 1)
+      fail(`a record tool hook that could not write left ${kept().length} observations in ${calls}`);
+    const flushed = node([path.join(pkg, "dist", "capture.js"), "--flush"]);
+    if (flushed.status !== 0) fail("capture.js --flush failed", `${flushed.stdout}${flushed.stderr}`);
+    const seen = query((db) =>
+      db.prepare("select turn_id from tool_call_observation where tool_use_id = 'toolu_locked'").get(),
+    );
+    if (seen?.turn_id !== "t2" || kept().length)
+      fail(
+        `the next send did not write the kept observation (got ${JSON.stringify(seen)}, left ${kept().length})`,
+      );
+  }
+
   // ---- A new interactive session is asked once to trace the smoke session, which now waits ----
   const interactive = { CLAUDE_CODE_ENTRYPOINT: "cli" };
   const asked = fire("SessionStart", { source: "startup" }, "smoke-2", interactive);
