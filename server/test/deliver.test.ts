@@ -2040,6 +2040,7 @@ test("a record an AI decided is delivered marked, with Sphica's words for it; th
       project_id: p,
       origin: "trace",
       target: "session:s1",
+      session_id: "s1",
       status: "running",
       begin_call_id: call,
       started_at: now,

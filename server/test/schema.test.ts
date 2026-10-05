@@ -1481,11 +1481,13 @@ const call = (v: Values) =>
   });
 // A run begun by a call in the given mode
 const runBy = (mode: string) => {
+  session(db, p, "s1");
   const c = call({ host: "claude-code", caller_session: "ext-s9", tool_use_id: `toolu_${mode}`, mode });
   return insert(db, "extraction_run", {
     project_id: p,
     origin: "trace",
     target: "session:s1",
+    session_id: "s1",
     status: "running",
     begin_call_id: c,
     started_at: now,
@@ -1716,4 +1718,48 @@ test("a replacement's start and end causes belong to the project of the records 
       ),
     /a replacement's cause belongs to the project of the records it joins/,
   );
+});
+
+test("agent adoption cites a reply of the session the trace reads", () => {
+  const other = reply("o1:assistant", "o1", "2026-09-10T00:00:01Z", "s2");
+  const r = runBy("interactive");
+  const u = unit({ key: "elsewhere", kind: "decision" }, p, r);
+  evidence(u, other, { role: "decides", run_id: r });
+  refuses(
+    () => adoption(u, other, { route: "agent", run_id: r }),
+    /agent adoption cites a reply of the session the trace reads/,
+  );
+});
+
+test("a replacement takes effect only from a successor with full support", () => {
+  const old = unit({ key: "old-s", kind: "finding" });
+  const next = unit({ key: "next-s", kind: "finding" });
+  const run = Number(one("select run_id from unit where id = ?", next).run_id);
+  insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: run, added_at: now });
+  refuses(
+    () => insert(db, "unit_replacement", { from_unit: next, to_unit: old, run_id: run, started_at: now }),
+    /a replacement takes effect only from a sound successor/,
+  );
+});
+
+test("an observation with no turn rules out only replies after it, as an unplaced call does", () => {
+  const ineligible = () =>
+    (
+      db.owner.prepare("select source_id from agent_ineligible_source order by source_id").all() as {
+        source_id: number;
+      }[]
+    ).map((r) => r.source_id);
+  const before = reply("n1:assistant", "n1", "2026-09-10T00:00:01Z", "nt");
+  insert(db, "tool_call_observation", {
+    host: "claude-code",
+    session_external: "ext-nt",
+    turn_id: null,
+    tool_use_id: "toolu_nt",
+    tool_name: "mcp__plugin_sphica_record__trace_begin",
+    owner_turn: 1,
+    observed_at: "2026-09-10T00:00:05.000Z",
+  });
+  const after = reply("n2:assistant", "n2", "2026-09-10T00:00:09Z", "nt");
+  assert.deepEqual(ineligible(), [after]);
+  assert.ok(!ineligible().includes(before));
 });

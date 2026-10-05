@@ -442,9 +442,10 @@ for (const name of pluginSkills) {
     /^policy:\n\s+allow_implicit_invocation:\s*false\s*$/m.test(
       fs.readFileSync(policy, "utf8").replaceAll("\r\n", "\n"),
     );
-  if ((fields["disable-model-invocation"] === "true") !== codexExplicitOnly) {
+  // Codex may be stricter than Claude Code (trace starts on its own only in Claude Code), never looser
+  if (fields["disable-model-invocation"] === "true" && !codexExplicitOnly) {
     fail(
-      `${relative}: disable-model-invocation: true and allow_implicit_invocation: false in agents/openai.yaml do not match`,
+      `${relative}: disable-model-invocation: true needs allow_implicit_invocation: false in agents/openai.yaml, or Codex starts it on its own`,
     );
   }
   // The description is what an agent reads to decide whether to invoke it, so it must say what the settings allow

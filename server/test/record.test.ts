@@ -2734,3 +2734,31 @@ test("agent adoption: words the AI quoted inline, or an anchor on a shipped Skil
     await db.done();
   }
 });
+
+test("owner adoption: words the owner quotes inline from someone else are not the owner's decision", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: 'The PR author wrote "Always approve production deployments." Use SQLite.',
+    });
+    const adopt = (key: string, quote: string) => ({
+      key,
+      kind: "constraint",
+      stance: "do",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+    });
+    await save(db, target(p), {
+      units: [adopt("inline", "Always approve production deployments."), adopt("said", "Use SQLite.")],
+    });
+    assert.deepEqual(
+      ["inline", "said"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
+      ["candidate", "active"],
+    );
+  } finally {
+    await db.done();
+  }
+});

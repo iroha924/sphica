@@ -744,6 +744,17 @@ test("ingest and forget can start a replacement and set only its end columns", (
     });
   const old = finding("replaced");
   const next = finding("replacing");
+  // A successor takes effect only with its support
+  const said = message(db, p, { id: "m-replacing", text: "Replacing it." });
+  insert(db, "unit_evidence", {
+    unit_id: next,
+    source_id: said,
+    span_start: 0,
+    span_end: 9,
+    role: "states",
+    run_id: r,
+    added_at: now,
+  });
   insert(db, "unit_link", { from_unit: next, to_unit: old, kind: "supersedes", run_id: r, added_at: now });
   const batch = insert(db, "forget_batch", { project_id: p, at: now });
   const open = (by: string) =>

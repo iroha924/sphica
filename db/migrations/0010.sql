@@ -418,6 +418,9 @@ create trigger unit_adoption_route before insert on unit_adoption begin
     where r.id = new.run_id and c.mode = 'interactive');
   select raise(abort, 'agent adoption cannot cite a reply from a turn that ran a record tool, or one no record tool call can be placed away from')
   where new.route = 'agent' and exists (select 1 from agent_ineligible_source where source_id = new.source_id);
+  select raise(abort, 'agent adoption cites a reply of the session the trace reads')
+  where new.route = 'agent' and not exists (select 1 from source s join extraction_run r on r.id = new.run_id
+    where s.id = new.source_id and s.session_id = r.session_id);
 end;
 create trigger unit_link_frozen before update on unit_link begin
   select raise(abort, 'links are frozen; only an unresolved conflict can be resolved, once')
@@ -453,6 +456,8 @@ create trigger unit_replacement_check before insert on unit_replacement begin
   select raise(abort, 'a decision or constraint replaces another only with the owner''s or a maintainer''s adoption')
   where exists (select 1 from unit where id = new.from_unit and kind in ('decision', 'constraint'))
     and not exists (select 1 from unit_adoption where unit_id = new.from_unit and route in ('owner_statement', 'explicit') and retracted_at is null);
+  select raise(abort, 'a replacement takes effect only from a sound successor with full support')
+  where exists (select 1 from unit_support where unit_id = new.from_unit and missing is not null);
 end;
 create trigger unit_replacement_end before update on unit_replacement begin
   select raise(abort, 'a replacement''s cause belongs to the project of the records it joins')
@@ -541,7 +546,9 @@ where s.kind = 'session_message' and s.author_kind = 'assistant' and (
     and (c.caller_turn is null or c.caller_turn = s.turn_id))
   -- The hook's row alone counts: the MCP SDK refuses a malformed call before the server can log it
   or exists (select 1 from tool_call_observation o where o.host = 'claude-code' and se.host = 'claude-code'
-    and o.session_external = se.external_id and (o.turn_id is null or o.turn_id = s.turn_id))
+    and o.session_external = se.external_id
+    -- An observation with no turn places the call only in time, like an unplaced call: replies from then on
+    and (o.turn_id = s.turn_id or (o.turn_id is null and s.created_at >= o.observed_at)))
   or exists (select 1 from record_call c where c.project_id = se.project_id and (c.host is null or c.host = se.host)
     and (c.host is null or (c.host = 'codex' and c.caller_session is null)
       or (c.host = 'claude-code' and not exists (select 1 from tool_call_observation o where o.host = 'claude-code' and o.tool_use_id = c.tool_use_id)))

@@ -405,6 +405,16 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
   - コミット: `fix(record): close inline quotes, auto trace field and work writes, and shipped Skill anchors (T40)`
   - 結果: red を実測した。AI の採用の引用が、同じ行で引用符（日本語のかぎかっこを含む）の内側にあるときは採用にしない。`instructionFile` は `skills` ディレクトリ・`SKILL.md`・`.claude-plugin`・`.codex-plugin` も規約の面にする（export の書き出し先の拒否にも効くので Skill の説明を直した）。自動の run では、field_defs の引用も対象の発言を求め、work は対象を引用した記録と一緒のときだけ受ける。持ち主の指示でこの回で PR のレビューの修正を終える。`bun run verify` → 終了コード 0（受け入れ 128 pass）
 
+- [x] T41: PR #273 の最後のレビュー指摘 6 件を直す（持ち主の採用も引用符の中の言葉は使わない、AI の採用は trace の対象のセッションの返事だけ、hook の値の長さを制限、根拠の足りない後継は置き換えを始めない、ターンの分からない観測は時刻の後だけを外す、Codex では trace を自動で起動しない）
+  - 種別: 修正
+  - 計画: S2, S3, S5, S7
+  - 依存: T40（PR #273 の前のコミット）
+  - 変更: `db/schema.sql`, `db/migrations/0010.sql`, `server/src/record.ts`, `server/src/capture.ts`, `plugin/skills/trace/agents/openai.yaml`, `plugin/skills/trace/SKILL.md`, `scripts/check-ai-config.mjs`, `.agents/skills/plugin-release/SKILL.md`, `server/test/record.test.ts`, `server/test/capture.test.ts`, `server/test/schema.test.ts`, `server/test/db.test.ts`, `server/test/temp-db.ts`, `server/test/authority.test.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --test --test-name-pattern="out of bounds are never stored|cites a reply of the session|full support|observation with no turn|quotes inline from someone" test/capture.test.ts test/schema.test.ts test/record.test.ts` → 直す前は 5 件とも落ちる（長い値がそのまま残る、別のセッションの返事の AI の採用と根拠の無い後継の置き換えを DB が受ける、ターンの無い観測がそれより前の返事も外す、持ち主の発言の `"…"` の中の言葉が持ち主の採用になる）。Codex の自動起動は直す前の `openai.yaml` が `allow_implicit_invocation: true`
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(record): close the last review gaps in adoption, hook values, and Codex invocation (T41)`
+  - 結果: red を実測した。引用符の判定をすべての採用に広げた。`unit_adoption_route` は AI の採用の引用元の返事が run の対象のセッションのものかを最後に確かめ、`unit_replacement_check` は根拠の足りない後継を最後に拒み、`agent_ineligible_source` はターンの無い観測を時刻の後の返事だけに当てる（移行 0010 も作り直した）。capture は hook の値が目に見える ASCII で 200 文字までのときだけ観測を書く。Codex の trace は明示の起動だけに戻し、check-ai-config は「Codex は Claude Code より厳しくてよいが緩くはしない」に直した。手で run を作るテストに対象のセッションを、後継に根拠を持たせた。実 DB の写しの移行をやり直し、状態の数が変わらず integrity_check も ok。`bun run verify` → 終了コード 0（受け入れ 128 pass）。持ち主の指示で、これを最後の修正とし、追加のレビュー依頼はしない
+
 - [-] T15: `release:plan` で種類を確かめ、npm と 3 つの manifest を同じ新しいバージョンに上げる
   - 種別: 変更
   - 計画: S13
@@ -455,3 +465,4 @@ record サーバーが誰に呼ばれたかを知り、AI の採用・`decides`�
 - 2026-10-05 / T38 / PR #273 の GitHub の Codex の 3 回目のレビュー（P2 5 件、うち 1 件はセキュリティ）を受け、修正タスク T38 にした。引用・コードブロックの言葉を採用にしない形は持ち主が選んだ
 - 2026-10-05 / T39 / PR #273 の GitHub の Codex の 4 回目のレビュー（P2 5 件）を、持ち主の判断で 5 件とも直すことにして T39 にした
 - 2026-10-05 / T40 / PR #273 の GitHub の Codex の 5 回目のレビュー（P2 3 件、うち 1 件はセキュリティ）を T40 にした。持ち主の指示で、これを PR のレビューの修正の最後にする
+- 2026-10-05 / T41 / PR #273 の GitHub の Codex のレビュー（P2 6 件、うち 1 件はセキュリティ）を T41 にした。持ち主の指示で、これで修正を終え、追加の `@codex review` はしない

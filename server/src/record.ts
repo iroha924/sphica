@@ -595,11 +595,8 @@ export async function checkRecord(
         quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
         continue;
       }
-      // The AI often repeats others' words in quotation marks; its own choice is never quoted that way
-      if (
-        quotedSpan(s.text, span[0], span[1]) ||
-        (route === "agent" && inlineQuoted(s.text, span[0], span[1]))
-      ) {
+      // Words in quotation marks are reported, whoever writes them: an owner pasting what someone wrote, or the AI repeating it
+      if (quotedSpan(s.text, span[0], span[1]) || inlineQuoted(s.text, span[0], span[1])) {
         problems.push(
           `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
         );

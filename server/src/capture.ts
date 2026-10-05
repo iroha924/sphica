@@ -952,18 +952,25 @@ const OBSERVE_WAIT_MS = 5000;
  * Logs a record tool call's session and turn before the tool runs, written straight to the database (never queued): the record server
  * joins its own log to this by tool use id, since Claude Code puts no turn in the MCP call.
  */
+/** A host's id or short name: anything else is never stored as sent */
+const hostId = (v: string | undefined) => (v && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null);
+
 export async function observeRecordCall(file: string, input: HookInput, owner: boolean): Promise<void> {
-  if (!input.session_id || !input.tool_use_id || !input.tool_name?.startsWith(RECORD_TOOLS)) return;
+  // Out of bounds, the call goes unobserved, so the record server treats it as unplaced and adoption stays off
+  const session = hostId(input.session_id);
+  const toolUse = hostId(input.tool_use_id);
+  const tool = hostId(input.tool_name);
+  if (!session || !toolUse || !tool?.startsWith(RECORD_TOOLS)) return;
   const cap = openWriter("capture", file, OBSERVE_WAIT_MS);
   try {
     await cap
       .insertInto("capture_tool_call")
       .values({
         host: "claude-code",
-        session_external: input.session_id,
-        turn_id: input.prompt_id ?? null,
-        tool_use_id: input.tool_use_id,
-        tool_name: input.tool_name,
+        session_external: session,
+        turn_id: hostId(input.prompt_id),
+        tool_use_id: toolUse,
+        tool_name: tool,
         owner_turn: owner ? 1 : 0,
         observed_at: iso(Date.now()),
       })

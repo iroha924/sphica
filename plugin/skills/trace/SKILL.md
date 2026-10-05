@@ -51,7 +51,7 @@ A session with nothing worth keeping is saved with `"units": []`: it is marked a
 
 ## On your own
 
-When Sphica's session-start notice says earlier sessions wait to be traced, run this after the user's request is done, without asking them:
+When Sphica's session-start notice in Claude Code says earlier sessions wait to be traced, run this after the user's request is done, without asking them. Codex does not start this Skill on its own yet: there it runs only when the user asks.
 
 1. `trace_pending` with `auto: true`. It lists sessions other than this one, oldest first. Take the first one or two; never this session.
    If it says it cannot tell which session called, stop: do nothing this time

@@ -177,6 +177,7 @@ export function aiDecided(db: TempDb, p: number, key: string, text: string, anch
     project_id: p,
     origin: "trace",
     target: "session:s1",
+    session_id: "s1",
     status: "running",
     begin_call_id: call,
     started_at: now,
