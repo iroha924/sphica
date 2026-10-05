@@ -195,11 +195,14 @@ export async function projectId(db: Reads, key: string): Promise<number | null> 
   return r?.id ?? null;
 }
 
+/** The one directory whose children doctor looks through for registered projects */
+export const projectsDir = (): string => path.join(os.homedir(), "Projects");
+
 /**
  * Finds registered projects on this machine. Looks only directly under ~/Projects and at named projects.
  * **When two places share a key, neither is chosen.** Never report whichever copy sorts first as the project.
  */
-export function localRoots(roots = [path.join(os.homedir(), "Projects")]): {
+export function localRoots(roots = [projectsDir()]): {
   found: Map<string, string>;
   ambiguous: Map<string, string[]>;
 } {

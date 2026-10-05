@@ -223,6 +223,55 @@ test("doctor as a child process shows Codex's trust in the installed hooks, and 
   }
 });
 
+// "Not on this machine" was a guess: doctor looks only directly under ~/Projects and at named projects, and a project with two copies there
+// was never on that list either
+test("doctor says where it looked for a project it did not find, and lists a project's copies", () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-")));
+  const repo = (dir: string, remote: string) => {
+    fs.mkdirSync(dir, { recursive: true });
+    execFileSync("git", ["init", "-q", dir], { stdio: "ignore" });
+    execFileSync("git", ["-C", dir, "remote", "add", "origin", remote], { stdio: "ignore" });
+    return dir;
+  };
+  const projects = path.join(home, "Projects");
+  const env = {
+    PATH: `${signedOut}${path.delimiter}${process.env.PATH ?? ""}`,
+    HOME: home,
+    USERPROFILE: home,
+  };
+  const sphica = (...args: string[]) => {
+    try {
+      return execFileSync(process.execPath, [CLI, ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+        timeout: 30_000,
+      });
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string };
+      return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    }
+  };
+  try {
+    for (const dir of [
+      repo(path.join(projects, "found"), "https://github.com/o/found.git"),
+      repo(path.join(projects, "one"), "https://github.com/o/same.git"),
+      repo(path.join(home, "elsewhere", "gone"), "https://github.com/o/gone.git"),
+    ])
+      assert.match(sphica("init", "--cwd", dir), /registered/);
+    repo(path.join(projects, "two"), "git@github.com:o/same.git");
+    const out = sphica("doctor");
+    const row = (name: string) =>
+      out.split("\n").find((l) => l.includes(name)) ?? assert.fail(`no row for ${name}\n${out}`);
+    assert.doesNotMatch(row("o/found"), /not found|copies|not on this machine/, out);
+    assert.match(row("o/gone"), /\(not found in ~\/Projects or the named projects\)/, out);
+    assert.match(row("o/same"), /\(2 copies: ~\/Projects\/one, ~\/Projects\/two\)/, out);
+    assert.doesNotMatch(out, /not on this machine/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("doctor's word splitting line: this Node matches the shipped samples, and a mismatch is a warning that does not offer reindex", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-"));
   try {

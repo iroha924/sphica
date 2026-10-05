@@ -103,14 +103,15 @@ base: main
 
 doctor が、見つからない project には探した場所を、コピーが複数ある project にはその一覧を出す
 
-- [ ] T06: doctor の Projects の欄で、探した場所と複数のコピーを出す
+- [x] T06: doctor の Projects の欄で、探した場所と複数のコピーを出す
   - 種別: 修正
   - 計画: S4
   - 依存: なし
-  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`
+  - 変更: `server/src/cli.ts`, `server/src/project.ts`, `server/test/cli.test.ts`
   - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="doctor.*copies" test/cli.test.ts` → 2 つのコピーがある project が「not on this machine」と出て落ちる。テストだけを先に足す
   - 完了条件: 同じコマンド → pass（見つかった・見つからない・2 つのコピーの 3 行がそれぞれ期待の文面）。`bun run verify` → 終了コード 0
   - コミット: `fix(doctor): say where it looked for a project and list several copies`
+  - 結果: red（直す前の cli.ts）→ `○ o/gone   0 records (not on this machine)`、o/same も同じ文面で落ちた。直した後: `cd server && node --test --test-timeout=60000 --test-name-pattern=copies test/cli.test.ts` → pass（o/found は何も付かず、o/gone は `(not found in ~/Projects or the named projects)`、o/same は `(2 copies: ~/Projects/one, ~/Projects/two)`）。`bun run verify` → exit 0
 
 ## 記録
 
@@ -120,3 +121,5 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T08 / T07 の Codex のレビュー（bb52da3d、F1〜F3 を故障注入で再現）で、読み戻しの失敗・close の失敗・後始末の削除の一時的な失敗でロックが残ることが分かった / 修正タスク T08 を T07 の後に足して直した
 - 2026-10-05 / T09 / T04 の Codex のレビュー（bbf17334、F1）: nameHome が HOME だけを差し替え、Windows で流すと実際のユーザーの projects.json を触る / テストの不備なので修正ではなく変更として T09 を足した（macOS では red を観測できない）
 - 2026-10-05 / T08 / Codex のレビュー（4f2355af）→ 指摘なし
+- 2026-10-05 / T06 / doctor が探した場所を localRoots と同じ値で出すため、project.ts に projectsDir を出した。変更欄に `server/src/project.ts` を足した（前: cli.ts・cli.test.ts） / そのまま進めた
+- 2026-10-05 / T05 / Codex のレビュー（6b4cd5d9）→ 指摘なし
