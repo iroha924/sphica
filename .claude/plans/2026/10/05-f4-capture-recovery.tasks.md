@@ -151,13 +151,14 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - コミット: `ci(hooks): check the packed hook resends a missed record tool observation, and doctor's unreadable queue on Windows`
   - 結果: `bun run bundle && node scripts/check-hooks-live.mjs` → 0（ロックを持った DB で record 用 PreToolUse が hooks.json の timeout 内に終わり、calls/ に 1 件残し、`capture.js --flush` で行が入り消えた）。dist/capture.js の "calls" を書き換えて流すと `left 0 observations` で 1 failure になるのを確かめ、bundle し直した。Windows の step は CI で確かめる（未実行）。`bun run verify` → 0
 
-- [ ] T07: README 両言語・knowledge-schema の Skill
+- [x] T07: README 両言語・knowledge-schema の Skill
   - 種別: 変更
   - 計画: S7
   - 依存: T02（送り直しの挙動を書く）, T05（doctor の出力を書く）
   - 変更: `README.md`, `README.ja.md`, `.agents/skills/knowledge-schema/SKILL.md`
   - 完了条件: `bun run release:plan -- --base v0.6.33` → `plugin`、4 つの版が 0.6.34 で同じ。`bun run verify` → 0
   - コミット: `docs: say when a missed record tool observation is resent, and bump to 0.6.34`
+  - 結果: `bun run release:plan -- --base v0.6.33` → kind plugin、4 つとも 0.6.34。`bun run verify` → 0
 
 ## 記録
 
@@ -174,3 +175,4 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T05 / Codex のレビュー（11063e12）F1: 集計のキーが project.name と host で、同じ名前の別のプロジェクトが混ざる / 受理。修正タスク T12 を足した
 - 2026-10-05 / T06 / Windows の doctor の検査は、SPHICA_HOME ではなく別の HOME の `.sphica/spool` をファイルにする形にした（T04 と同じ理由。後の step が使う HOME も壊さない）
 - 2026-10-05 / T12 / verify が 2 回続けて record.test.ts の rename limit（一時ディレクトリの rmSync が ENOTEMPTY）で落ちた。このブランチは触っていない / 単独で 3 回 pass、`bun run test` は T12 の変更あり・なしとも 0、3 回目の verify は 0。負荷で起きる既存の不安定さとみて手を入れない
+- 2026-10-05 / T06, T07 / コミットの件名が 100 文字の上限を超えたので短くした。T06 は `ci(hooks): check a missed observation is resent, and doctor's unreadable queue on Windows`、T07 は `docs: say when a missed record tool observation is resent`（版は T01 で上げ済み）
