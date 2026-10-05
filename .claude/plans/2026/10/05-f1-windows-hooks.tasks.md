@@ -93,15 +93,18 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
   - 完了条件: `bun run verify` → 終了コード 0（偽の codex が一時の CODEX_HOME を受け取り、config.toml の中身と mtime が変わらず、trusted・modified・disabled の行が出て、その行で終了コードが 1 にならない）
   - コミット: `feat(doctor): report whether Codex trusts Sphica's current hooks`
   - 結果: `bun run verify` → exit 0。plugin.test.ts の新しい 3 件と cli.test.ts の 1 件が pass（偽の codex が一時の CODEX_HOME を受け取る、config.toml の中身と mtime が変わらない、`✓ Codex hooks 9 of 9 trusted`、変更後 `△ … 8 of 9 trusted …; 1 modified, 1 disabled`、CLI の終了コードは 0 のまま、0.161.0・0.159.2 は unknown）。この PC の開発版の `node server/src/cli.ts doctor` → `✓ Codex hooks        9 of 9 trusted in ~/.codex/config.toml`
-- [ ] T06: Windows の CI に、パックした doctor の「Codex hooks」の行を確かめる手順を足す
+- [x] T06: Windows の CI に、パックした doctor の「Codex hooks」の行を確かめる手順を足す
   - 種別: 追加
   - 計画: S5
   - 依存: T05（doctor の行が要る）
-  - 変更: `.github/workflows/check.yml`, `scripts/check-codex-trust-windows.mjs`
+  - 変更: `.github/workflows/check.yml`, `scripts/check-codex-trust-live.mjs`, `package.json`
   - 完了条件: `actionlint` → 終了コード 0。push 後の Windows のジョブ → 行が ✓「9 of 9 trusted」で unknown でなく、変更後に 1 modified・1 disabled と `/hooks` の案内
   - コミット: `ci(windows): check doctor's Codex hooks row from the packed CLI`
+  - 結果: `actionlint .github/workflows/check.yml` → exit 0。`node scripts/check-codex-trust-live.mjs` → macOS で `codex trust: doctor read 9 hooks of plugin through codex`。期待値の雛形の timeout を 1 ずらしたコピー → `expected all 9 Codex hooks trusted` と `expected 1 modified and 1 disabled` の 2 件で落ちた。Windows は push 後に plan の A3 で確かめる
 
 ## 記録
+
+- 2026-10-05 / T06 / 検査は Windows に限らず macOS・Linux でも動く（POSIX では偽の `codex`、Windows では npm の形の `codex.cmd` と `codex.js`）ので、名前を `scripts/check-codex-trust-windows.mjs` から `scripts/check-codex-trust-live.mjs` に変え、`bun run verify` にも `codex-trust:live` として入れた。変更欄に `package.json` を足した
 
 - 2026-10-05 / T08 / node が PATH に無いときの遅さは、外側のシェルによらず内側の powershell.exe が「見つからない」と言うまでの時間（24〜26 秒）で、外側が powershell.exe だと 39 秒になる。今の commandWindows も内側で PowerShell を起動していたので退行ではない（推測）。実機では Codex のフックの timeout（10 秒）で止まる / 製品は変えず、検査の上限だけを上げる（T08）。plan のリスクに足す
 

@@ -150,5 +150,7 @@ jobs:
             | HOME="$home" USERPROFILE="$home" timeout 30 node "$out/package/dist/mcp.js" > mcp.out || true
           # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
           grep -q '"search"' mcp.out
-          # The packed hooks, launched as hooks/hooks.json defines them (shell form goes through PowerShell, as without Git Bash)
+          # The packed hooks, launched as hooks/hooks.json defines them, and every codex.json entry through each shell Codex can use
           node ../scripts/check-hooks-live.mjs "$out/package"
+          # doctor's Codex hooks row from the packed CLI, with npm's codex.cmd on PATH as Windows installs it
+          node ../scripts/check-codex-trust-live.mjs "$out/package"

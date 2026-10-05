@@ -142,6 +142,7 @@ A1〜A8 は PR の準備、A9・A10 はリリースの完了。
 - Windows PowerShell 5.1 で stdin が node へ渡らない → A2 の spool の検査で落ちる。落ちたら同じ session で Codex と方針を見直す
 - Codex が 0.160.0 から上がると doctor の行が unknown になる → 理由に「0.160.0 だけ検証した」と出す。版を足すのはソースを読み直してからの変更
 - Codex の起動の仕方が変わると、CI が通っても実機で落ちうる（CI は Codex 本体ではなく同じ形でシェルを起動する） → 前提にソースの行を記し、Codex の版を足すときに見直す
+- node が PATH に無いと、内側の powershell.exe が見つからないと言うまで Windows の CI で 24〜39 秒かかる（外側によらない） → 実機では Codex のフックの timeout で止まり、今の commandWindows も同じ形なので退行ではない。検査の上限だけ 120 秒にする
 - 外側が PowerShell のときフックの終了コードは 0/1 に丸まる → 今のフックは 0 以外を使い分けていないので影響は無い
 
 ## 未解決
@@ -149,3 +150,5 @@ A1〜A8 は PR の準備、A9・A10 はリリースの完了。
 なし
 
 ## 変更履歴
+
+- 2026-10-05 / リスクに node の無い PATH での PowerShell の遅さを足した / T03 の head の Windows の CI で ETIMEDOUT を観測し、T07 で所要時間を測った / Go 不要（製品は変えず検査の上限だけ）
