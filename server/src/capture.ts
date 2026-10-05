@@ -651,7 +651,7 @@ function listQueue(dir: string): { files: string[] | null; temp: string[]; code:
 
 /** A temporary file younger than this may be a write still going on, so only older ones count as left behind. */
 const TEMP_AGE_MS = 60_000;
-const REASON = /^[a-z]+(:[A-Z]+)?$/;
+const REASON = /^[a-z]+(-[a-z]+)?(:[A-Z]+)?$/;
 
 type DirReport = {
   files: number | null;

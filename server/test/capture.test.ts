@@ -1211,6 +1211,10 @@ test("queue report: what is in each queue directory, why records were set aside,
     write(rejectedDir(), "7-1-g.json.reason", "sqlite:CONSTRAINT");
     write(rejectedDir(), "8-1-h.json", "{}");
     write(rejectedDir(), "9-1-i.json", "{}");
+    write(rejectedDir(), "9-2-k.json", "{}");
+    write(rejectedDir(), "9-2-k.json.reason", "no-project");
+    write(rejectedDir(), "9-3-l.json", "{}");
+    write(rejectedDir(), "9-3-l.json.reason", "version");
     write(rejectedDir(), "9-1-i.json.reason", "\u001b[2Jforged");
     write(callsRejectedDir(), "10-1-j.json", "{");
     write(callsRejectedDir(), "10-1-j.json.reason", "shape");
@@ -1232,13 +1236,19 @@ test("queue report: what is in each queue directory, why records were set aside,
       {
         queue: [1, null, 1, 10],
         calls: [1, null, 1, 2],
-        rejected: [4, null, 0, 0],
+        rejected: [6, null, 0, 0],
         unregistered: [4, null, 0, 0],
         callsRejected: [1, null, 0, 0],
       },
     );
     assert.ok(r.dirs.queue.temp.oldestMs >= 600_000);
-    assert.deepEqual(r.rejected, { "sqlite:CONSTRAINT": 1, unknown: 2, unreadable: 1 });
+    assert.deepEqual(r.rejected, {
+      "no-project": 1,
+      "sqlite:CONSTRAINT": 1,
+      unknown: 2,
+      unreadable: 1,
+      version: 1,
+    });
     assert.deepEqual(r.callsRejected, { shape: 1 });
     assert.deepEqual(
       r.held.map((h) => [h.project, h.count, Math.round(h.oldestMs / 86_400_000)]),

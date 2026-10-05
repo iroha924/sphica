@@ -116,7 +116,7 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - 結果: red: `node --test --test-name-pattern 'observation that cannot be moved' test/capture.test.ts` → `EBUSY: resource busy or locked` が flush から投げられて fail
   - 結果: 実装後 `node --test --test-name-pattern 'observation' test/capture.test.ts` → 7 pass（移せないファイルは calls/ に残り、正常な観測と通常のキュー 1 件が送られた）。送った後の削除の失敗も同じく握るようにした。`bun run verify` → 0
 
-- [ ] T11: 拒否の理由 no-project を doctor が unknown と数えない
+- [x] T11: 拒否の理由 no-project を doctor が unknown と数えない
   - 種別: 修正
   - 計画: S4
   - 依存: T04（queueReport が要る）
@@ -124,6 +124,17 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - red: `cd server && node --test --test-name-pattern 'queue report' test/capture.test.ts` → 理由ファイルが `no-project` の記録が `unknown` に数えられて fail
   - 完了条件: `cd server && node --test --test-name-pattern 'queue report' test/capture.test.ts` → pass。no-project・unreadable・version・sqlite:<CODE>・shape がそのまま数えられ、それ以外の中身は unknown
   - コミット: `fix(capture): count the no-project rejection reason as itself`
+  - 結果: red: `node --test --test-name-pattern 'queue report' test/capture.test.ts` → `actual: { unreadable: 1, 'sqlite:CONSTRAINT': 1, unknown: 3, version: 1 }`（no-project が unknown に入る）で fail
+  - 結果: 実装後 同じコマンド → pass。`bun run verify` → 0
+
+- [ ] T12: doctor の AI の採用の止まりを、名前ではなくプロジェクトごとに数える
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（doctor の欄が要る）
+  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → 同じ名前の 2 つのプロジェクトの呼び出しが 1 行にまとまり、件数と時刻が混ざって fail
+  - 完了条件: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → pass。同じ名前のプロジェクトは別の行になり、それぞれキーで見分けられる
+  - コミット: `fix(doctor): count stopped AI adoption per project, not per project name`
 
 ## P4: 梱包と Windows、文書と版
 
@@ -157,3 +168,4 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T03 / Codex のレビュー（3be8e3b8）F1: removed がロック保持ごとに 0 に戻り、後の prune が件数を上書きする / 受理。修正タスク T09 を足した
 - 2026-10-05 / T08 / Codex のレビュー（538ecc3d）F1: 読めない観測を rename できない（Windows の EBUSY など）と setAside が投げ、送信全体が止まる / 受理。修正タスク T10 を足した。通常のキューの rename の失敗が投げるのは前からの挙動で、この PR では変えない
 - 2026-10-05 / T04 / Codex のレビュー（1bb9b112）F1: doctor が読めないキューを ok / null pending と出す / T05 で直っている（✗ と「the queue cannot be read」）。F2: 理由の正規表現がハイフンを許さず no-project が unknown になる / 受理。修正タスク T11 を足した
+- 2026-10-05 / T05 / Codex のレビュー（11063e12）F1: 集計のキーが project.name と host で、同じ名前の別のプロジェクトが混ざる / 受理。修正タスク T12 を足した
