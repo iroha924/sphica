@@ -84,7 +84,7 @@ approved_at: 2026-10-05
 
 ### 片付け
 
-- 前の PR の F2 の plan と tasks（`.claude/plans/2026/10/05-f2-init-project.*`）を消す
+- 前の PR の F2 の plan と tasks（`.claude/plans/2026/10/05-f2-init-project.*`）を消す。手順の S にもタスクにもせず、作業ブランチのコミット `3e413a3c` で行った
 
 ### リリース
 
@@ -102,12 +102,11 @@ approved_at: 2026-10-05
 
 ## 手順
 
-- S1: F2 の plan と tasks を消す（片付けなので、タスクではなく作業ブランチのコミット `3e413a3c` で行った）
-- S2: markdownlint-cli2 と設定、Markdown の一覧の共通の関数、`bun run markdown`、lefthook の `markdown`、release:plan の後に 0.6.33 に上げる
-- S3: lychee（mise・`lychee.toml`・`scripts/check-links.mjs`・remap）、`verify:ai` への組み込み、lefthook の `links` と `ai-config`、CI での導入、check-pairs での照合
-- S4: `checkLocalLinks` を消す
-- S5: check-tarball に両方をかけ、包含の判定の関数とテスト
-- S6: CLAUDE.md の command の節
+- S1: markdownlint-cli2 と設定、Markdown の一覧の共通の関数、`bun run markdown`、lefthook の `markdown`、release:plan の後に 0.6.33 に上げる
+- S2: lychee（mise・`lychee.toml`・`scripts/check-links.mjs`・remap）、`verify:ai` への組み込み、lefthook の `links` と `ai-config`、CI での導入、check-pairs での照合
+- S3: `checkLocalLinks` を消す
+- S4: check-tarball に両方をかけ、包含の判定の関数とテスト
+- S5: CLAUDE.md の command の節
 
 ## 完了条件
 
@@ -130,4 +129,4 @@ approved_at: 2026-10-05
 なし
 
 ## 変更履歴
-- 2026-10-05 / S1 を片付けとして扱い、tasks の T01 を取りやめにした / done の検査は、チェックを付けたコミットが `.claude/plans/` の外を変えていることを求め、plan の中だけを変える T01 は通らない。削除は `3e413a3c` で済んでいる / Go 不要（範囲は変わらない）
+- 2026-10-05 / 手順から S1（F2 の plan の削除）を外して S2〜S6 を S1〜S5 に振り直し、tasks の T01 を取りやめにした / done の検査は、チェックを付けたコミットが `.claude/plans/` の外を変えていることを求め、plan の中だけを変える T01 は通らない。削除は `3e413a3c` で済んでいる / Go 不要（範囲は変わらない）

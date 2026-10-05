@@ -31,7 +31,7 @@ markdownlint-cli2 が、リポジトリの Markdown の構造の崩れを pre-co
   - コミット: `chore(plans): remove the finished F2 plan`
 - [x] T02: markdownlint-cli2 を入れ、構造の規則だけで全文書を検査し、0.6.33 に上げる
   - 種別: 追加
-  - 計画: S2
+  - 計画: S1
   - 依存: なし
   - 変更: `server/package.json`, `server/bun.lock`, `.markdownlint-cli2.jsonc`, `scripts/lib/markdown-files.mjs`, `scripts/check-markdown.mjs`, `package.json`, `lefthook.yml`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `knip.json`
   - 完了条件: `bun run markdown` → 終了コード 0。`[x]()` を足した一時的な変更で → MD042 で落ちる（戻す）。依存を stage した後の `bun run release:plan -- --base 30245523` → plugin、4 か所が 0.6.33。`bun run verify` → 終了コード 0
@@ -44,7 +44,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 - [x] T03: lychee を mise と CI に入れ、check-links.mjs を verify:ai と lefthook から流す
   - 種別: 追加
-  - 計画: S3
+  - 計画: S2
   - 依存: T02（Markdown の一覧の共通の関数が要る）
   - 変更: `mise.toml`, `lychee.toml`, `scripts/check-links.mjs`, `package.json`, `lefthook.yml`, `.github/workflows/check.yml`, `.github/workflows/release.yml`, `scripts/check-pairs.mjs`, `knip.json`
   - 完了条件: `bun run verify:ai` → 終了コード 0。README.ja.md の見出しを指すアンカーを壊した一時的な変更で `node scripts/check-links.mjs` → 落ちる（戻す）。check.yml の lychee のバージョンだけを変えた一時的な変更で `bun run pairs` → 落ちる（戻す）。`actionlint` → 指摘なし。`bun run verify` → 終了コード 0
@@ -52,7 +52,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - 結果: `node scripts/check-links.mjs` → 39 リンク、14 OK（自分のリポジトリの blob/main の URL を remap で読み替え）、0 エラー。README.ja.md の `blob/main/README.ja.md#貢献` を `#no-such-heading` にすると `Cannot find fragment` で落ち、`bun run verify:ai` も exit 1（戻した）。check.yml の LYCHEE を 0.24.1 にすると `bun run pairs` が `LYCHEE 0.24.1 differs from mise.toml lychee 0.24.2` で落ちた（戻した）。CI で落とす tarball の sha256 は手元のダウンロードで一致、中身は `lychee-x86_64-unknown-linux-gnu/lychee` なので `--strip-components=1` で取り出す。`actionlint` → 指摘なし。`bun run verify` → exit 0
 - [x] T04: check-ai-config.mjs の checkLocalLinks を消す
   - 種別: 削除
-  - 計画: S4
+  - 計画: S3
   - 依存: T03（同じファイルを lychee が見ていることが要る）
   - 変更: `scripts/check-ai-config.mjs`
   - 完了条件: `git grep -n checkLocalLinks -- scripts` → 該当なし（終了コード 1）。存在しないファイルへの相対リンクを `.agents/skills` の SKILL.md に足した一時的な変更で `bun run verify:ai` → 落ちる（戻す）。`bun run verify` → 終了コード 0
@@ -61,7 +61,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 - [x] T08: markdownlint をパッケージの入口から node で起動し、ファイル名を文字どおりに渡す
   - 種別: 修正
-  - 計画: S2
+  - 計画: S1
   - 依存: T02（直す対象の検査が要る）
   - 変更: `scripts/check-markdown.mjs`, `scripts/lib/markdown-files.mjs`, `lefthook.yml`
   - red: `tmpglob/review{a,b}.md` に `[x]()` を書いて `git add -N` し `node scripts/check-markdown.mjs` → 33 件ではなく 32 件しか検査せず 0 件で通る。戻す
@@ -71,7 +71,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 - [x] T09: リンクの検査で、checkout のパスの `$` と、`-` で始まるファイル名を正しく扱う
   - 種別: 修正
-  - 計画: S3
+  - 計画: S2
   - 依存: T03（直す対象の check-links.mjs が要る）
   - 変更: `scripts/check-links.mjs`
   - red: パスに `$` を含む一時的なディレクトリで同じ形の remap を作って lychee を流す → 正しいリンクが別のパス（`$work` が消えた先）で `File not found`。`--review.md` を `git add -N` して `node scripts/check-links.mjs` → lychee が引数の誤りで終了。どちらも戻す
@@ -85,7 +85,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 - [x] T05: 包含の判定の関数とテストを書く
   - 種別: 追加
-  - 計画: S5
+  - 計画: S4
   - 依存: なし
   - 変更: `scripts/lib/link-containment.mjs`, `scripts/lib/link-containment.d.mts`, `server/test/link-containment.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/link-containment.test.ts` → 成功と失敗の混ざった JSON、package の外の既存ファイル、正常な `../trace/SKILL.md` の各テストが pass
@@ -93,7 +93,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - 結果: `cd server && node --test --test-timeout=60000 test/link-containment.test.ts` → 3 件 pass（成功と失敗の混ざった報告で package の外の既存ファイルだけを返し、`../trace/SKILL.md` と自分のアンカーと https は返さない。package の中から外へ向く symlink も外と数える。成功を数えるのに一覧が空の報告は --verbose 無しとして拒む）。`bun run verify` → exit 0
 - [x] T06: check-tarball で展開した package に markdownlint と lychee をかけ、包含を確かめる
   - 種別: 追加
-  - 計画: S5
+  - 計画: S4
   - 依存: T02（markdownlint の設定が要る）, T03（lychee と設定が要る）, T05（包含の判定が要る）
   - 変更: `scripts/check-tarball.mjs`
   - 完了条件: `bun run bundle && (cd plugin && npm pack)` の tarball で `node scripts/check-tarball.mjs <tgz>` → 終了コード 0。package の外の既存ファイルを指す相対リンクを plugin の Markdown に足して同じ手順 → 包含の判定で落ちる（戻す）。`bun run verify` → 終了コード 0
@@ -104,7 +104,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 - [x] T07: CLAUDE.md の command の節に lychee と Markdown の検査を書く
   - 種別: 変更
-  - 計画: S6
+  - 計画: S5
   - 依存: T03（書く対象の検査が要る）
   - 変更: `CLAUDE.md`
   - 完了条件: `bun run verify:ai` → 終了コード 0
@@ -113,7 +113,7 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 - [x] T10: AGENTS.md の command の行を CLAUDE.md にそろえる
   - 種別: 修正
-  - 計画: S6
+  - 計画: S5
   - 依存: T07（そろえる先の CLAUDE.md の行が要る）
   - 変更: `AGENTS.md`
   - red: `git show 23ff0b33:AGENTS.md | grep -c lychee` → 0（CLAUDE.md だけ直して AGENTS.md の同じ行が古いまま）
@@ -129,3 +129,4 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 - 2026-10-05 / T09 / T03・T08 の Codex のレビュー（4296adde..32dc0443）: F1 checkout のパスの `$` が remap の置換の変数として読まれる（再現）、F2 `-` で始まるファイル名が lychee のオプションとして読まれる（再現）。T08 は指摘なし / 修正タスク T09 を足して直した
 - 2026-10-05 / T01 / 取りやめ（[-]）。`git ls-files .claude/plans/2026/10/05-f2-init-project.*` → 0 件: done の検査は、チェックを付けたコミットが `.claude/plans/` の外を変えていることを求め、plan の中だけを変える T01 は通らない。F2 の plan と tasks の削除は `3e413a3c` で済んでいて、plan の S1 を片付けとして直した / tasks を組むときに plan の中だけのタスクを作らない
 - 2026-10-05 / T10 / T07 で CLAUDE.md の command の行だけを直し、AGENTS.md の同じ行が古いままだった（rg-pairs の規定に反する） / 修正タスク T10 を足して直した
+- 2026-10-05 / 全体 / plan の手順の S1 を外して振り直したので、各タスクの計画欄を 1 つずつ下げた（S2→S1 … S6→S5、中身は同じ）。取りやめた T01 の計画欄は S1 のまま（取りやめなので担わない） / 振り直しは機械的で、完了したタスクの中身は変えていない
