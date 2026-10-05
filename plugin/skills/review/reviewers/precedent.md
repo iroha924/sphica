@@ -120,13 +120,13 @@ Fix what it reports and check again. A verdict it rejects is not a finding. Keep
 verdict: pass | changes_required | blocked_unknown
 findings: <count>
 questions searched: <count> (of which returned 0: <count>)
-batch 1 of <n> backed (selection <selection>)
-batch 2 of <n> backed (selection <selection>)
+Batch 1 of <n> backed (selection <selection>)
+Batch 2 of <n> backed (selection <selection>)
 1. [severity] file:line — one-line summary
 2. ...
 ```
 
-Write one `batch k of n backed` line for every batch `review_check` passed, copied from its reply. **Without a line for every batch from 1 to n, the verdict is `blocked_unknown`**, never `pass`.
+Write one `Batch k of n backed (selection ...)` line for every batch `review_check` passed: the first sentence of its reply, as it is. **Without a line for every batch from 1 to n, the verdict is `blocked_unknown`**, never `pass`.
 With no record selected there are no batch lines.
 
 **Never shorten or cut off the list. Give every finding.**

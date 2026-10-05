@@ -25,6 +25,7 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
+import { checkedText } from "../src/review-findings.ts";
 import { fakeCodex } from "./fake-codex.ts";
 import { message, project, tempDb } from "./temp-db.ts";
 
@@ -1141,13 +1142,26 @@ test("the review Skill walks every batch of the decision lane and refuses a pass
     "Changes to the working tree between batches (which code locations still exist) are not detected",
     "list every place it is violated in that finding's evidence",
     "call `read` again with exactly what it names until nothing is left",
-    "batch 1 of <n> backed (selection <selection>)",
+    "Batch 1 of <n> backed (selection <selection>)",
     "Without a line for every batch from 1 to n, the verdict is `blocked_unknown`",
   ])
     assert.ok(precedent.includes(rule), rule);
   assert.doesNotMatch(precedent, /several violations of one record are fine/);
+  // The receipts are copied from review_check's reply, so they start the way it does
+  const reply = checkedText({
+    problems: [],
+    batch: { all: [], records: [], k: 1, n: 2, selection: "0123456789abcdef", next: null },
+  });
+  const receipt = /^Batch \d+ of \d+ backed \(selection /;
+  assert.match(reply, receipt);
+  const written = [
+    ...precedent.matchAll(/^.*\b[Bb]atch (?:k|\d+) of (?:n|<n>) backed.*$/gm),
+    ...skill.matchAll(/^.*[Bb]atch k of n backed.*$/gm),
+  ];
+  assert.ok(written.length >= 3);
+  for (const [line] of written) assert.doesNotMatch(line, /\bbatch (?:k|\d+) of/, line);
   for (const rule of [
-    "Past decisions: its `batch k of n backed (selection ...)` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`",
+    "Past decisions: its `Batch k of n backed (selection ...)` lines miss a batch from 1 to n, repeat one, pass `n`, or differ in `n` or `selection`",
   ])
     assert.ok(skill.includes(rule), rule);
 });

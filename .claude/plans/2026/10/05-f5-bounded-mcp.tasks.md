@@ -62,7 +62,7 @@ base: main
   - 結果: red: `node --test --test-name-pattern 'review selection' test/review.test.ts` → 削除行だけが違う 2 つの diff で selection が一致して fail（reviewBatch に足した diff の引数を直す前のコードは使わない）
   - 結果: 実装後 `node --test test/review.test.ts` → 12 pass。`bun run verify` → 0
 
-- [ ] T09: 受領行の書式をツールの返事と同じ大文字の `Batch k of n backed` にそろえる
+- [x] T09: 受領行の書式をツールの返事と同じ大文字の `Batch k of n backed` にそろえる
   - 種別: 修正
   - 計画: S2
   - 依存: T03（受領行の規定がある）
@@ -70,6 +70,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → 受領行の書式が checkedText の返事（`Batch 1 of 2 backed (selection ...)`）の先頭と一致せず fail
   - 完了条件: `cd server && node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → pass。precedent.md と SKILL.md の受領行がすべて `Batch k of n backed` で、checkedText の返事の先頭がその形で始まる
   - コミット: `fix(review): write batch receipts exactly as review_check replies`
+  - 結果: red: `node --test --test-name-pattern 'review Skill walks' test/plugin.test.ts` → precedent.md に「Batch 1 of <n> backed (selection <selection>)」が無く fail
+  - 結果: 実装後 → 1 pass（checkedText の返事が `Batch \d+ of \d+ backed (selection ` で始まり、precedent.md と SKILL.md の受領行に小文字の `batch k of` が無い）。`bun run verify` → 0
 
 ## P2: read の応答の上限（#267）
 
@@ -127,3 +129,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T08 / Codex のタスクレビュー: 指摘なし / 対応なし
 - 2026-10-05 / T03 / Codex のタスクレビュー F1（P2）: 受領行が小文字の `batch` で、review_check の返事（`Batch`）を写すと照合で食い違う / 採る。修正タスク T09 を足した
 - 2026-10-05 / T04 / 変更欄: 前 `server/src/read.ts`, `server/src/mcp.ts`, `server/test/read.test.ts` → 後 `server/src/read.ts`, `server/test/read.test.ts`, `server/test/record.test.ts`（mcp.ts は変えず、上限の数え方が変わった既存テストの題名を直した）
+- 2026-10-05 / T04 / Codex のタスクレビュー: 指摘なし（テストは EPERM で流せず、コードを読んでの判定） / 対応なし
