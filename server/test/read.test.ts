@@ -286,3 +286,27 @@ test("read budget: a record longer than a reply, one quote over 64 KiB, goes on 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("read cut terminal: a cut inside a terminal string sequence keeps the continuation, and the text after it is reached", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const id = message(db, p, {
+      id: "m1",
+      text: `${"a".repeat(65_000)}\u001b]0;${"x".repeat(300)}\u0007VISIBLE END`,
+    });
+    let refs = [`s${id}`];
+    let seen = "";
+    for (let n = 0; n < 5 && refs.length; n++) {
+      const reply = await readRefs(db.reader, p, refs, null);
+      assert.ok(Buffer.byteLength(reply) <= READ_BUDGET);
+      seen += reply;
+      refs = pageOf(reply).next;
+    }
+    assert.match(seen, /VISIBLE END/);
+    // Text from outside never carries the sequence into the reply
+    assert.ok(!seen.includes("\u001b"));
+  } finally {
+    await db.done();
+  }
+});

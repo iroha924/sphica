@@ -7,7 +7,7 @@ import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
 import { renamesSince } from "./git.ts";
-import { inline } from "./panel.ts";
+import { inline, plain } from "./panel.ts";
 import { bytes, head, sha256 } from "./text.ts";
 
 /** How a reconsider condition reads once its owner quote is gone. */
@@ -533,7 +533,8 @@ export async function readRefs(
     const sep = shown.length ? 2 : 0;
     const all = "line" in p ? null : Buffer.from(p.text, "utf8");
     const from = all ? boundary(all, "line" in p ? 0 : p.from) : 0;
-    const whole = "line" in p ? p.line : `${p.head}${all?.subarray(from).toString("utf8") ?? ""}`;
+    // Each piece is made plain on its own: a terminal string sequence left open by a cut would otherwise swallow what follows it
+    const whole = "line" in p ? p.line : plain(`${p.head}${all?.subarray(from).toString("utf8") ?? ""}`);
     if (used + sep + bytes(whole) + bytes(tail(rest)) <= READ_BUDGET) {
       shown.push(whole);
       used += sep + bytes(whole);
@@ -559,7 +560,7 @@ export async function readRefs(
       break;
     }
     const end = from + bytes(text);
-    shown.push(`${p.head}${text}${note(all.length - end, end)}`);
+    shown.push(`${plain(`${p.head}${text}`)}${note(all.length - end, end)}`);
     used += sep + bytes(shown.at(-1) ?? "");
     next = [p.resume(end), ...rest];
     break;

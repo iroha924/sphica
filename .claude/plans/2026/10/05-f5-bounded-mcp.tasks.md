@@ -108,6 +108,16 @@ read に何個の ref を渡しても 1 回の応答が 64 KiB 以下で、続�
   - 結果: red（MCP サーバー経由、直す前の mcp.ts）: `node --test --test-name-pattern 'read budget' test/read.test.ts` → 長い source 10 件の read が 551020 bytes で fail
   - 結果: 実装後 `node --test test/read.test.ts` → 4 pass（MCP 経由で 64 KiB 以下、1〜4 bytes の文字が混じる source 2 件を続きで全バイト一致まで辿り offset が毎回増える、10 refs で切れた ref の続きが先頭で残りが順に並ぶ、長いヘッダーの source が 1,600 bytes 未満のヘッダーで本文を全部読める、64 KiB を超える 1 行の引用を持つ record を u<id>@<byte>:<digest> で全バイト一致まで辿る、他の refs の後で切れた続きを単独で読んでも digest が一致、記録の変化で最初からの読み直しを返す）。案内の大きさの見積もりで残りのバイト数を 0 として数え 2 bytes 超えたので、最大の桁数で数える形に直した。`bun run verify` → 0
 
+- [x] T11: 切った本文を案内より先に plain にし、閉じていない端末の制御文字列が続きの案内を消さないようにする
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T05（readRefs がある）
+  - 変更: `server/src/read.ts`, `server/test/read.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'read cut terminal' test/read.test.ts` → OSC の途中で切れた source の案内と次の refs が消え、`VISIBLE END` に届かず fail
+  - 完了条件: `cd server && node --test test/read.test.ts` → pass。OSC の途中で切っても続きを辿って `VISIBLE END` に届き、返答に ESC が残らない
+  - コミット: `fix(read): clean each piece before its note so an open escape cannot hide the rest`
+  - 結果: red: 上のコマンド → `VISIBLE END` が無く fail。実装後 `node --test test/read.test.ts` → 5 pass。`bun run verify` → 0
+
 ## P3: overview look の続き（#267）
 
 look を続けて呼べば、2,000 件より先のアンカーと見出しごとの 50 行より先の指摘に届き、最後が Complete と言う。
@@ -145,3 +155,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T04 / 変更欄: 前 `server/src/read.ts`, `server/src/mcp.ts`, `server/test/read.test.ts` → 後 `server/src/read.ts`, `server/test/read.test.ts`, `server/test/record.test.ts`（mcp.ts は変えず、上限の数え方が変わった既存テストの題名を直した）
 - 2026-10-05 / T04 / Codex のタスクレビュー: 指摘なし（テストは EPERM で流せず、コードを読んでの判定） / 対応なし
 - 2026-10-05 / T09 / Codex のタスクレビュー F1: 受領行の例に、返事の 1 文目の末尾のピリオドが無く完全一致しない / 採る。修正タスク T10 を足し、同じコミットで終えた
+- 2026-10-05 / T05 / Codex のタスクレビュー F1（P2、再現済み）: 本文を OSC の途中で切ると、framed の plain が閉じていない制御文字列として続きの案内と次の refs まで消す / 採る。修正タスク T11 を足し、同じコミットで終えた
