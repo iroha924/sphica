@@ -22,14 +22,16 @@ base: main
 
 選ばれた記録が 51 件以上でも、review_check が判定の残った記録を名指しし、全体の合格を言わない。
 
-- [ ] T01: 束と selection で review_select / review_check を回し、判定の無い記録を件数によらず名指しする
+- [x] T01: 束と selection で review_select / review_check を回し、判定の無い記録を件数によらず名指しする
   - 種別: 修正
   - 計画: S1
   - 依存: なし
-  - 変更: `server/src/review.ts`, `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/test/review.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/src/review.ts`, `server/src/review-findings.ts`, `server/src/mcp.ts`, `server/test/review.test.ts`, `server/evals/acceptance/driver.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern 'review batch' test/review.test.ts` → 51 件選ばれ 50 件に finding を渡すと「No problems: every verdict is backed.」が返り、残り 1 件の key が無くて fail
   - 完了条件: `cd server && node --test --test-name-pattern 'review batch' test/review.test.ts` → pass。並びが u.id 順、120 件が 3 束、各束の成功が束に限った文言、最後でない束は残りの key と after を返す、束の間に revision を上げると selection の不一致、束の外の finding は not in this batch
   - コミット: `fix(review): judge the decision lane in batches of 50 and name the records left`
+  - 結果: red（reviewBatch だけ足し、checkFindings は直す前のまま）: `node --test --test-name-pattern 'review batch' test/review.test.ts` → 「the record left is named: []」で fail（51 件中 50 件の判定で問題なしを返し、r50 を名指ししない）。旧テスト「more records than findings can hold do not make every verdict set fail」はこの挙動を固定していたので置き換えた
+  - 結果: 実装後 `node --test test/review.test.ts` → 10 pass（51 件の 2 束、120 件の 3 束を 1 回ずつ、束の外の finding と束の中の判定なし、conflicts の link で revision を上げると selection の不一致）。`bun run verify` → 0。版は 0.6.35
 
 - [ ] T02: 1 記録 1 finding にし、違反した場所を evidence の配列で全か所検査する
   - 種別: 変更
@@ -94,3 +96,5 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - コミット: `test(acceptance): drive review batches, read budgets, and look cursors through the shared builders`
 
 ## 記録
+
+- 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま

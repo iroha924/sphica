@@ -32,7 +32,7 @@ import { gh } from "../../src/github.ts";
 import { type Host, sessionId } from "../../src/knowledge.ts";
 import { liveOverview, lookOverview } from "../../src/overview.ts";
 import { readSource, readUnit } from "../../src/read.ts";
-import { type Applicable, parseDiff, selectForReview } from "../../src/review.ts";
+import { type Applicable, parseDiff, reviewBatch, selectForReview } from "../../src/review.ts";
 import { checkFindings } from "../../src/review-findings.ts";
 import { searchSources, searchUnits, type UnitHit } from "../../src/search.ts";
 import { status } from "../../src/status.ts";
@@ -713,7 +713,11 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       if (step.review_validate && typeof step.review_validate === "object") {
         const v = step.review_validate as { findings: unknown };
-        validation = await checkFindings(db(), await projectId(), [], v.findings);
+        const pid = await projectId();
+        const first = await reviewBatch(db(), pid, [], null);
+        validation = (
+          await checkFindings(db(), pid, [], v.findings, { after: null, selection: first.selection })
+        ).problems;
         return;
       }
       if (step.inject && typeof step.inject === "object") {

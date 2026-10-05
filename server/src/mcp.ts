@@ -18,8 +18,8 @@ import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
 import { readSource, readUnit } from "./read.ts";
-import { parseDiff, selectedText, selectForReview } from "./review.ts";
-import { checkFindings } from "./review-findings.ts";
+import { parseDiff, REVIEW_BATCH, reviewBatch, selectedText } from "./review.ts";
+import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsText, searchSources, searchUnits } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
@@ -377,8 +377,20 @@ server.registerTool(
     title: "Past decisions a change touches",
     description:
       "For a code review: the active decisions, constraints, and implementation records this diff touches (records anchored to a changed path, " +
-      "and records with no code location that forbid or defer an option an added line names). Judge each against the diff, then check the verdicts with review_check.",
-    inputSchema: z.object({ diff: DIFF, cwd: CWD }).strict(),
+      `and records with no code location that forbid or defer an option an added line names), ${REVIEW_BATCH} at a time in id order. ` +
+      "Judge each record of the batch against the diff, check the verdicts with review_check (same after and selection), then ask for the next batch.",
+    inputSchema: z
+      .object({
+        diff: DIFF,
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("The id the previous batch said to continue after; leave out for the first batch"),
+        cwd: CWD,
+      })
+      .strict(),
     annotations: READ_ONLY,
   },
   async (a, extra) => {
@@ -386,11 +398,16 @@ server.registerTool(
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return notChecked(new Error(p));
       const files = parseDiff(a.diff);
-      const hits = await selectForReview(db, p.id, files);
-      if (!hits.length)
+      const b = await reviewBatch(db, p.id, files, a.after ?? null);
+      if (!b.all.length)
         return text(`Decision lane: checked. No active record applies to the ${files.length} changed files.`);
+      if (!b.records.length)
+        return text(
+          `Decision lane: checked. No record after id ${a.after}: ${b.all.length} records apply in all (selection ${b.selection}).`,
+        );
+      const from = b.all.length - b.all.filter((u) => u.id > (a.after ?? 0)).length + 1;
       return text(
-        `Decision lane: checked. ${hits.length} records apply; read each before judging it.\n${framed(await selectedText(db, hits))}`,
+        `Decision lane: checked. ${b.all.length} records apply. Batch ${b.k} of ${b.n} (records ${from}-${from + b.records.length - 1}), selection ${b.selection}; read each before judging it.\n${framed(await selectedText(db, b.records))}\n${b.next === null ? "This is the last batch." : `Next batch: after checking this one, call review_select with after: ${b.next}.`}`,
       );
     } catch (e) {
       return notChecked(e);
@@ -403,12 +420,23 @@ server.registerTool(
   {
     title: "Check decision verdicts",
     description:
-      "Checks a reviewer's verdicts on the records review_select returned. Each finding: outcome (violation, complies, unrelated, undetermined), " +
-      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). Every record review_select returned needs one outcome. Returns the problems, or none.",
+      "Checks a reviewer's verdicts on one batch review_select returned, with that batch's after and selection. Each finding: outcome (violation, complies, unrelated, undetermined), " +
+      "unit (the record key), reason, and for violation or complies, evidence: the changed path and an added line number (the path alone for a deleted or renamed-away file). " +
+      "Every record of the batch needs one outcome. Returns the problems, or that the batch is backed and which records later batches still have to judge.",
     inputSchema: z
       .object({
         diff: DIFF,
-        findings: z.array(z.record(z.string(), z.unknown())).max(50),
+        findings: z.array(z.record(z.string(), z.unknown())).max(REVIEW_BATCH),
+        after: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("The after given to review_select for this batch; leave out for the first batch"),
+        selection: z
+          .string()
+          .regex(/^[0-9a-f]{16}$/)
+          .describe("The selection review_select gave"),
         cwd: CWD,
       })
       .strict(),
@@ -418,11 +446,13 @@ server.registerTool(
     try {
       const p = await projectOf(a.cwd, extra._meta);
       if (typeof p === "string") return notChecked(new Error(p));
-      const problems = await checkFindings(db, p.id, parseDiff(a.diff), a.findings);
       return text(
-        problems.length
-          ? `${problems.length} problems:\n${problems.map((x) => `- ${x}`).join("\n")}`
-          : "No problems: every verdict is backed.",
+        checkedText(
+          await checkFindings(db, p.id, parseDiff(a.diff), a.findings, {
+            after: a.after ?? null,
+            selection: a.selection,
+          }),
+        ),
       );
     } catch (e) {
       return notChecked(e);

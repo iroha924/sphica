@@ -4,8 +4,15 @@ import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { AI_DEPARTURE, parseDiff, selectedText, selectForReview } from "../src/review.ts";
-import { checkFindings } from "../src/review-findings.ts";
+import {
+  AI_DEPARTURE,
+  type FileDiff,
+  parseDiff,
+  reviewBatch,
+  selectedText,
+  selectForReview,
+} from "../src/review.ts";
+import { checkedText, checkFindings } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
 import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
@@ -28,6 +35,12 @@ async function save(db: TempDb, p: number, record: unknown) {
     });
     return saveRecord(trx, t, run, await checkRecord(trx, t, record), []);
   });
+}
+
+/** The problems with verdicts on the first batch, checked with the selection review_select would give */
+async function problemsOf(db: TempDb, p: number, files: FileDiff[], findings: unknown) {
+  const { selection } = await reviewBatch(db.reader, p, files, null);
+  return (await checkFindings(db.reader, p, files, findings, { after: null, selection })).problems;
 }
 
 const DIFF = [
@@ -150,8 +163,8 @@ test("inside a hunk, an added or removed line that looks like a file header stay
   assert.deepEqual(parseDiff(diff), [{ path: "src/a.ts", added: ["++ b/decoy.ts", "real"], lines: [1, 2] }]);
 });
 
-// Findings hold at most 50 verdicts, so a verdict for every record is asked only while that many fit
-test("more records than findings can hold do not make every verdict set fail", async () => {
+// A review judges its records 50 at a time: a check above that never passes records it was not given as judged
+test("review batch: 51 selected records and verdicts for the first 50 name the one left", async () => {
   const db = tempDb();
   try {
     const p = project(db);
@@ -171,8 +184,136 @@ test("more records than findings can hold do not make every verdict set fail", a
     await save(db, p, { units: [unit(words[50] ?? "", 50)] });
     const files = parseDiff(DIFF);
     assert.equal((await selectForReview(db.reader, p, files)).length, 51);
+    const first = await reviewBatch(db.reader, p, files, null);
     const some = Array.from({ length: 50 }, (_, n) => ({ outcome: "unrelated", unit: `trace:ext-s1/r${n}` }));
-    assert.deepEqual(await checkFindings(db.reader, p, files, some), []);
+    const checked = await checkFindings(db.reader, p, files, some, {
+      after: null,
+      selection: first.selection,
+    });
+    const said = JSON.stringify(checked);
+    assert.ok(said.includes("trace:ext-s1/r50"), `the record left is named: ${said}`);
+    assert.ok(!said.includes("every verdict is backed"), said);
+    assert.deepEqual(checked.problems, []);
+    const last = first.records.at(-1)?.id ?? 0;
+    assert.equal(first.next, last);
+    assert.equal(
+      checkedText(checked),
+      `Batch 1 of 2 backed (selection ${first.selection}). Not judged in this call: 1 records (next batch: trace:ext-s1/r50); call review_select with after: ${last}, then review_check with the same after.`,
+    );
+    // The second batch holds only the record left, and its check says it was the last
+    const second = await reviewBatch(db.reader, p, files, last);
+    assert.deepEqual(
+      second.records.map((u) => u.key),
+      ["trace:ext-s1/r50"],
+    );
+    assert.equal(second.selection, first.selection);
+    const done = await checkFindings(
+      db.reader,
+      p,
+      files,
+      [{ outcome: "unrelated", unit: "trace:ext-s1/r50" }],
+      {
+        after: last,
+        selection: first.selection,
+      },
+    );
+    assert.equal(
+      checkedText(done),
+      `Batch 2 of 2 backed (selection ${first.selection}). This was the last batch (51 records in all).`,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("review batch: 120 records go in three batches by id, each check speaks for its batch, and a changed record breaks the selection", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const words = Array.from({ length: 120 }, (_, n) => `Rule ${n}.`);
+    const m = message(db, p, { id: "m1", text: words.join(" ") });
+    const unit = (w: string, n: number) => ({
+      key: `r${n}`,
+      kind: "decision",
+      stance: "do",
+      text: w,
+      evidence: [{ source: `s${m}`, quote: w, role: "states" }],
+      adoption: [{ source: `s${m}`, quote: w }],
+      anchors: [{ path: "src/db.ts", role: "applies_to" }],
+    });
+    await save(db, p, { units: words.slice(0, 50).map(unit) });
+    await save(db, p, { units: words.slice(50, 100).map((w, i) => unit(w, i + 50)) });
+    await save(db, p, { units: words.slice(100).map((w, i) => unit(w, i + 100)) });
+    const files = parseDiff(DIFF);
+    const all = await selectForReview(db.reader, p, files);
+    assert.deepEqual(
+      all.map((u) => u.id),
+      all.map((u) => u.id).toSorted((a, b) => a - b),
+    );
+    const judged = (b: { records: { key: string }[] }) =>
+      b.records.map((u) => ({ outcome: "unrelated", unit: u.key }));
+    const seen: string[] = [];
+    let after: number | null = null;
+    const texts: string[] = [];
+    const first = await reviewBatch(db.reader, p, files, null);
+    for (;;) {
+      const b = await reviewBatch(db.reader, p, files, after);
+      seen.push(...b.records.map((u) => u.key));
+      const c = await checkFindings(db.reader, p, files, judged(b), { after, selection: first.selection });
+      assert.deepEqual(c.problems, []);
+      texts.push(checkedText(c));
+      if (b.next === null) break;
+      after = b.next;
+    }
+    assert.equal(seen.length, 120);
+    assert.equal(new Set(seen).size, 120);
+    assert.equal(texts.length, 3);
+    assert.match(texts[0] ?? "", /^Batch 1 of 3 backed .* Not judged in this call: 70 records/);
+    assert.match(texts[1] ?? "", /^Batch 2 of 3 backed .* Not judged in this call: 20 records/);
+    assert.match(texts[2] ?? "", /^Batch 3 of 3 backed .* This was the last batch \(120 records in all\)\.$/);
+    for (const t of texts) assert.doesNotMatch(t, /every verdict/);
+
+    // A verdict on a record of another batch, and a record of this batch left without one, are both problems
+    const second = await reviewBatch(db.reader, p, files, first.next);
+    const wrong = await checkFindings(
+      db.reader,
+      p,
+      files,
+      [...judged(first).slice(1), { outcome: "unrelated", unit: second.records[0]?.key }],
+      { after: null, selection: first.selection },
+    );
+    assert.deepEqual(wrong.problems, [
+      `findings.49 (unrelated ${second.records[0]?.key}): not in this batch; judge it with the batch review_select returns it in`,
+      `${first.records[0]?.key}: no verdict; give one (unrelated or undetermined when it does not apply)`,
+    ]);
+
+    // A record that changes between batches (its revision rises) changes the selection: the review starts again
+    await save(db, p, {
+      units: [
+        {
+          key: "other",
+          kind: "decision",
+          stance: "do",
+          text: "Rule 0.",
+          evidence: [{ source: `s${m}`, quote: "Rule 0.", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "Rule 0." }],
+          anchors: [{ path: "src/other.ts", role: "applies_to" }],
+          conflicts: ["trace:ext-s1/r0"],
+        },
+      ],
+    });
+    assert.deepEqual(
+      (await selectForReview(db.reader, p, files)).map((u) => u.id),
+      all.map((u) => u.id),
+    );
+    const stale = await checkFindings(db.reader, p, files, judged(second), {
+      after: first.next,
+      selection: first.selection,
+    });
+    assert.deepEqual(stale.problems, [
+      "the records this diff touches changed since review_select gave this selection; start again from the first batch",
+    ]);
+    assert.notEqual((await reviewBatch(db.reader, p, files, null)).selection, first.selection);
   } finally {
     await db.done();
   }
@@ -229,7 +370,7 @@ test("records anchored to a changed path, and location-free don't records naming
       wide.map((u) => u.key),
       ["trace:ext-s1/no-telemetry"],
     );
-    const problems = await checkFindings(db.reader, p, files, [
+    const problems = await problemsOf(db, p, files, [
       {
         outcome: "violation",
         unit: "trace:ext-s1/storage",
@@ -267,13 +408,13 @@ test("records anchored to a changed path, and location-free don't records naming
       "findings.3 (violation trace:ext-s1/storage): evidence path other.ts is not in the diff",
       "findings.6 (violation trace:ext-s1/storage): evidence in src/db.ts needs an added line",
     ]);
-    assert.match((await checkFindings(db.reader, p, files, [{ outcome: "maybe" }])).join(), /findings\.0/);
+    assert.match((await problemsOf(db, p, files, [{ outcome: "maybe" }])).join(), /findings\.0/);
     // Every record review_select returned needs a verdict, and one record cannot both comply and be violated
-    assert.deepEqual(await checkFindings(db.reader, p, files, []), [
+    assert.deepEqual(await problemsOf(db, p, files, []), [
       "trace:ext-s1/storage: no verdict; give one (unrelated or undetermined when it does not apply)",
       "trace:ext-s1/no-telemetry: no verdict; give one (unrelated or undetermined when it does not apply)",
     ]);
-    const mixed = await checkFindings(db.reader, p, files, [
+    const mixed = await problemsOf(db, p, files, [
       {
         outcome: "violation",
         unit: "trace:ext-s1/storage",
