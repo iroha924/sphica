@@ -43,6 +43,11 @@ export const rejectedDir = (): string => path.join(spoolDir(), "rejected");
  * The next send reads here too, so registering is enough for them to go in.
  */
 export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered");
+/**
+ * Record tool observations kept until the database has them, so a hook that could not write one leaves it for the next send. Their own
+ * directory: an older send reads only the queue's top level and unregistered/, and would set aside a record with no project.
+ */
+export const callsDir = (): string => path.join(spoolDir(), "calls");
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
 export const HOLD_DAYS = 30;
 export const HOLD_MAX = 1000;
@@ -170,14 +175,19 @@ function prune(held: string): void {
   for (const f of new Set([...stale, ...over])) fs.rmSync(path.join(held, f), { force: true });
 }
 
-function spool(record: Spooled): void {
-  const dir = spoolDir();
+/** Writes one queued file into dir and returns its path. Names start with the time they were stored (ms), so name order is oldest first. */
+function put(dir: string, record: unknown): string {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const name = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}.json`;
   const tmp = path.join(dir, `.${name}`);
   // Write under another name, then replace, so a half-written file is never sent.
   fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
   fs.renameSync(tmp, path.join(dir, name));
+  return path.join(dir, name);
+}
+
+function spool(record: Spooled): void {
+  put(spoolDir(), record);
 }
 
 /** The current branch. Reads HEAD without starting git (in a worktree .git is a file pointing to the real location). */
@@ -948,36 +958,91 @@ const RECORD_TOOLS = "mcp__plugin_sphica_record__";
 /** How long the record tools' hook waits for a save holding the lock. The tool waits too, so this stays under the hook's timeout */
 const OBSERVE_WAIT_MS = 5000;
 
-/**
- * Logs a record tool call's session and turn before the tool runs, written straight to the database (never queued): the record server
- * joins its own log to this by tool use id, since Claude Code puts no turn in the MCP call.
- */
 /** A host's id or short name: anything else is never stored as sent */
-const hostId = (v: string | undefined) => (v && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null);
+const hostId = (v: unknown) => (typeof v === "string" && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null);
 
-export async function observeRecordCall(file: string, input: HookInput, owner: boolean): Promise<void> {
+/** A record tool call as the hook saw it: what the hook writes to the database and keeps in calls/ until the database has it. */
+export type Observation = {
+  v: 1;
+  host: "claude-code";
+  session: string;
+  turn: string | null;
+  toolUse: string;
+  tool: string;
+  owner: 0 | 1;
+  at: string;
+};
+const OBSERVATION_KEYS = ["at", "host", "owner", "session", "tool", "toolUse", "turn", "v"].join();
+
+/**
+ * The observation in raw, or null unless it is exactly what the hook writes. Never repaired: a file changed into another valid shape
+ * would place a call in a turn the hook never saw. The time is a 4-digit year, as SQLite's date functions read it.
+ */
+export function observation(raw: unknown): Observation | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (Object.keys(o).sort().join() !== OBSERVATION_KEYS) return null;
+  if (o.v !== 1 || o.host !== "claude-code" || !hostId(o.session) || !hostId(o.toolUse)) return null;
+  if (!hostId(o.tool)?.startsWith(RECORD_TOOLS)) return null;
+  if (o.turn !== null && !hostId(o.turn)) return null;
+  if (o.owner !== 0 && o.owner !== 1) return null;
+  const at =
+    typeof o.at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(o.at) ? o.at : null;
+  if (!at || Number.isNaN(Date.parse(at)) || new Date(at).toISOString() !== at) return null;
+  return o as Observation;
+}
+
+const observationRow = (o: Observation) => ({
+  host: o.host,
+  session_external: o.session,
+  turn_id: o.turn,
+  tool_use_id: o.toolUse,
+  tool_name: o.tool,
+  owner_turn: o.owner,
+  observed_at: o.at,
+});
+
+/**
+ * Logs a record tool call's session and turn before the tool runs, written straight to the database: the record server joins its own log
+ * to this by tool use id, since Claude Code puts no turn in the MCP call. The same observation is kept in calls/ first and removed once
+ * written, so one the hook could not write (the lock held past the wait, the hook stopped) is resent by the next send.
+ */
+export async function observeRecordCall(
+  file: string,
+  input: HookInput,
+  owner: boolean,
+  waitMs: number = OBSERVE_WAIT_MS,
+): Promise<void> {
   // Out of bounds, the call goes unobserved, so the record server treats it as unplaced and adoption stays off
-  const session = hostId(input.session_id);
-  const toolUse = hostId(input.tool_use_id);
-  const tool = hostId(input.tool_name);
-  if (!session || !toolUse || !tool?.startsWith(RECORD_TOOLS)) return;
-  const cap = openWriter("capture", file, OBSERVE_WAIT_MS);
+  const o = observation({
+    v: 1,
+    host: "claude-code",
+    session: hostId(input.session_id),
+    turn: hostId(input.prompt_id),
+    toolUse: hostId(input.tool_use_id),
+    tool: hostId(input.tool_name),
+    owner: owner ? 1 : 0,
+    at: iso(Date.now()),
+  });
+  if (!o) return;
+  let kept: string | null = null;
   try {
-    await cap
-      .insertInto("capture_tool_call")
-      .values({
-        host: "claude-code",
-        session_external: session,
-        turn_id: hostId(input.prompt_id),
-        tool_use_id: toolUse,
-        tool_name: tool,
-        owner_turn: owner ? 1 : 0,
-        observed_at: iso(Date.now()),
-      })
-      .execute();
+    kept = put(callsDir(), o);
+  } catch {
+    // Not kept: the write below still goes ahead, so a call the database can take is still observed
+  }
+  const cap = openWriter("capture", file, waitMs);
+  try {
+    await cap.insertInto("capture_tool_call").values(observationRow(o)).execute();
   } finally {
     await cap.destroy().catch(() => {});
   }
+  if (kept)
+    try {
+      fs.rmSync(kept, { force: true });
+    } catch {
+      // Left behind, the next send writes it again, which adds nothing
+    }
 }
 
 async function main(): Promise<void> {

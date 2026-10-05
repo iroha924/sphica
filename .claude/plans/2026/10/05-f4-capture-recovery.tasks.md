@@ -22,13 +22,14 @@ base: main
 
 hook が DB に書けなかった record ツールの呼び出しが、次の flush で結ばれ、AI の採用の止めが外れる。
 
-- [ ] T01: 観測の形と検査、hook の先置き・直接の書き込み・後消し
+- [x] T01: 観測の形と検査、hook の先置き・直接の書き込み・後消し
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`
+  - 変更: `server/src/capture.ts`, `server/test/capture.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test --test-name-pattern 'observation' test/capture.test.ts` → pass。検査関数が 8 キー・各値の条件・拡張年の at を拒み、ロックを持った DB で hook を流すと `calls/` にファイルが残り、ロックが無ければ行が入ってファイルが消える
   - コミット: `feat(capture): keep each record tool observation in spool/calls until the database has it`
+  - 結果: `bun run release:plan -- --base v0.6.33` → plugin、4 つの版を 0.6.34 に上げた。`node --test --test-name-pattern 'observation|record call' test/capture.test.ts` → 5 pass。書き込みロックを持った DB で hook が 50 ms 待って失敗すると `calls/` に同じ観測が 1 件残り、ロックが無ければ残らない。`calls/` が書けなくても DB に行が入る。`bun run verify` → 0
 
 - [ ] T02: flush が `calls/` を送り、結べなかった呼び出しの止めを外す
   - 種別: 修正
@@ -82,12 +83,14 @@ doctor が待ち行列を読めない・残った・拒まれた・保留・消�
   - 完了条件: `bun run bundle && node scripts/check-hooks-live.mjs` → pass。record 用 PreToolUse の hook がロックを持った DB で hooks.json の timeout 以内に終わり、`calls/` にファイルを残し、`capture.js --flush` の後に観測の行が入る
   - コミット: `ci(hooks): check the packed hook resends a missed record tool observation, and doctor's unreadable queue on Windows`
 
-- [ ] T07: README 両言語・knowledge-schema の Skill・版
+- [ ] T07: README 両言語・knowledge-schema の Skill
   - 種別: 変更
   - 計画: S7
   - 依存: T02（送り直しの挙動を書く）, T05（doctor の出力を書く）
-  - 変更: `README.md`, `README.ja.md`, `.agents/skills/knowledge-schema/SKILL.md`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base v0.6.33` → `plugin`、4 つの版が同じ。`bun run verify` → 0
+  - 変更: `README.md`, `README.ja.md`, `.agents/skills/knowledge-schema/SKILL.md`
+  - 完了条件: `bun run release:plan -- --base v0.6.33` → `plugin`、4 つの版が 0.6.34 で同じ。`bun run verify` → 0
   - コミット: `docs: say when a missed record tool observation is resent, and bump to 0.6.34`
 
 ## 記録
+
+- 2026-10-05 / T01, T07 / pre-commit の bundle 検査が、package の入力を変える最初のコミットで版の上げを求めた / 版の上げを T07 から T01 へ移した。T01 の変更欄に 4 ファイルを足し（前: capture.ts と capture.test.ts だけ）、T07 の変更欄から 4 ファイルを外し、T07 の名前から「・版」を外し完了条件を「4 つの版が 0.6.34 で同じ」にした

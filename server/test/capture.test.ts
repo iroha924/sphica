@@ -8,6 +8,7 @@ import { after, before, mock, test } from "node:test";
 import { migrate } from "../src/admin.ts";
 import {
   answersOf,
+  callsDir,
   captureNotice,
   closeTurn,
   current,
@@ -16,6 +17,8 @@ import {
   HOLD_DAYS,
   isOwnerTurn,
   MAX_MESSAGE,
+  type Observation,
+  observation,
   observeRecordCall,
   onHook,
   openTurn,
@@ -1687,6 +1690,98 @@ test("record call: the hook logs a record tool's session and turn straight to th
       ],
     );
   } finally {
+    await db.done();
+  }
+});
+
+const observed: Observation = {
+  v: 1,
+  host: "claude-code",
+  session: "ext-s1",
+  turn: "t1",
+  toolUse: "toolu_1",
+  tool: "mcp__plugin_sphica_record__trace_begin",
+  owner: 1,
+  at: "2026-10-05T01:02:03.004Z",
+};
+/** The observations kept in calls/, oldest first */
+const kept = (): unknown[] => {
+  const dir = callsDir();
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".json") && !f.startsWith("."))
+    .sort()
+    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+};
+
+test("observation: only exactly what the hook writes passes, never repaired", () => {
+  assert.deepEqual(observation(observed), observed);
+  assert.deepEqual(observation({ ...observed, turn: null, owner: 0 }), { ...observed, turn: null, owner: 0 });
+  const { turn: _, ...noTurn } = observed;
+  for (const bad of [
+    null,
+    [],
+    "x",
+    noTurn,
+    { ...observed, extra: 1 },
+    { ...observed, v: 2 },
+    { ...observed, host: "codex" },
+    { ...observed, session: "" },
+    { ...observed, session: "a b" },
+    { ...observed, toolUse: "x".repeat(201) },
+    { ...observed, tool: "mcp__other__trace_begin" },
+    { ...observed, turn: 1 },
+    { ...observed, owner: true },
+    { ...observed, owner: 2 },
+    { ...observed, at: "2026-10-05T01:02:03Z" },
+    { ...observed, at: "2026-13-05T01:02:03.004Z" },
+    { ...observed, at: "+010000-01-01T00:00:00.000Z" },
+    { ...observed, at: "-000001-01-01T00:00:00.000Z" },
+  ])
+    assert.equal(observation(bad), null, JSON.stringify(bad));
+});
+
+test("observation: the hook keeps the observation in calls/ until the database has it", async () => {
+  reset();
+  const db = tempDb();
+  try {
+    const input = {
+      hook_event_name: "PreToolUse",
+      session_id: "ext-s1",
+      prompt_id: "t1",
+      tool_name: "mcp__plugin_sphica_record__trace_begin",
+      tool_use_id: "toolu_1",
+    };
+    await observeRecordCall(db.file, input, true);
+    assert.deepEqual(kept(), [], "written, so nothing is left to resend");
+    // A save holds the write lock past the hook's wait
+    db.owner.exec("begin immediate");
+    await assert.rejects(observeRecordCall(db.file, { ...input, tool_use_id: "toolu_2" }, false, 50));
+    db.owner.exec("commit");
+    const [left, ...more] = kept() as Observation[];
+    assert.deepEqual(more, []);
+    assert.deepEqual({ ...left, at: "<at>" }, { ...observed, toolUse: "toolu_2", owner: 0, at: "<at>" });
+    assert.deepEqual(observation(left), left, "kept in the shape the send accepts");
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation order by id")
+        .all()
+        .map((r) => r.tool_use_id),
+      ["toolu_1"],
+    );
+    // calls/ cannot be written: the database still gets the observation
+    reset();
+    fs.mkdirSync(spoolDir(), { recursive: true });
+    fs.writeFileSync(callsDir(), "");
+    await observeRecordCall(db.file, { ...input, tool_use_id: "toolu_3" }, true);
+    assert.equal(
+      db.owner.prepare("select count(*) as n from tool_call_observation where tool_use_id = 'toolu_3'").get()
+        ?.n,
+      1,
+    );
+  } finally {
+    reset();
     await db.done();
   }
 });
