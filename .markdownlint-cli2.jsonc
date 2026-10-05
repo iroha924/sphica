@@ -1,7 +1,5 @@
-// Only the rules where a mistake breaks how a document renders or where its links lead. Style rules (line length, heading style,
-// list numbering) stay off: the documents follow their own conventions, and a style failure would hide a broken document.
-// Keep this file JSONC: server/package.json overrides smol-toml to 1.9.0 (one version for the SBOM), and markdownlint drops the options of
-// rules read from TOML with that version.
+// Only rules where a mistake breaks rendering or links; style rules stay off, since a style failure would hide a broken document.
+// Keep this JSONC: smol-toml is overridden to 1.9.0 for the SBOM, and with it markdownlint drops the options of rules read from TOML.
 {
   "config": {
     "default": false,
