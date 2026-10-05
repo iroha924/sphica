@@ -103,13 +103,14 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
 
 ## P4: 文書
 
-- [ ] T07: CLAUDE.md の command の節に lychee と Markdown の検査を書く
+- [x] T07: CLAUDE.md の command の節に lychee と Markdown の検査を書く
   - 種別: 変更
   - 計画: S6
   - 依存: T03（書く対象の検査が要る）
   - 変更: `CLAUDE.md`
   - 完了条件: `bun run verify:ai` → 終了コード 0
   - コミット: `docs(claude): mention lychee and the Markdown checks in the commands`
+  - 結果: `bun run verify:ai` → exit 0（CLAUDE.md の行を含め、リンクは 0 エラー）
 
 ## 記録
 - 2026-10-05 / T02 / knip が scripts から実行ファイルのパスで呼ぶ markdownlint-cli2 を未使用と判定した。kysely-codegen と同じく server の ignoreDependencies に足し、変更欄に `knip.json` を足した（前: knip.json なし） / そのまま進めた
