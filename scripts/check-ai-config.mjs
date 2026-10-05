@@ -58,15 +58,6 @@ function frontmatter(relative, source) {
   return fields;
 }
 
-function checkLocalLinks(relative, source) {
-  for (const match of source.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
-    const target = match[1].split("#", 1)[0];
-    if (!target || /^(https?:|mailto:)/.test(target)) continue;
-    const resolved = path.resolve(root, path.dirname(relative), target);
-    if (!fs.existsSync(resolved)) fail(`${relative}: link target does not exist: ${target}`);
-  }
-}
-
 const agents = read("AGENTS.md");
 const lines = agents.trimEnd().split("\n").length;
 const bytes = Buffer.byteLength(agents);
@@ -168,7 +159,6 @@ for (const name of claudeSkills) {
     fail(`${relative}: needs Triggers and Does not trigger sections`);
   }
   if (/\b(TODO|TBD)\b/.test(source)) fail(`${relative}: TODO / TBD remains`);
-  checkLocalLinks(relative, source);
 }
 
 for (const name of developmentSkills) {
@@ -182,7 +172,6 @@ for (const name of developmentSkills) {
     fail(`${relative}: trigger and non-trigger examples are incomplete`);
   }
   if (/\b(TODO|TBD)\b/.test(source)) fail(`${relative}: an unfinished placeholder remains`);
-  checkLocalLinks(relative, source);
 
   const claudePath = path.join(root, `.claude/skills/${name}`);
   try {
@@ -418,7 +407,6 @@ for (const name of pluginSkills) {
       `${relative}: ${source.split("\n").length} lines. Keep it at 497 or fewer (if you added a section, remove duplicated concepts)`,
     );
   }
-  checkLocalLinks(relative, source);
 
   // allowed-tools pre-approves tools for the Skill's own turn; a tool the body names but the list lacks is denied in a headless run.
   // Reviewers under reviewers/ get their tools from the launch table in SKILL.md, so their names are checked through SKILL.md.

@@ -51,13 +51,14 @@ lychee が、相対リンク・画像・見出しアンカーと自分のリポ�
   - 完了条件: `bun run verify:ai` → 終了コード 0。README.ja.md の見出しを指すアンカーを壊した一時的な変更で `node scripts/check-links.mjs` → 落ちる（戻す）。check.yml の lychee のバージョンだけを変えた一時的な変更で `bun run pairs` → 落ちる（戻す）。`actionlint` → 指摘なし。`bun run verify` → 終了コード 0
   - コミット: `ci(docs): check Markdown links and anchors offline with lychee`
   - 結果: `node scripts/check-links.mjs` → 39 リンク、14 OK（自分のリポジトリの blob/main の URL を remap で読み替え）、0 エラー。README.ja.md の `blob/main/README.ja.md#貢献` を `#no-such-heading` にすると `Cannot find fragment` で落ち、`bun run verify:ai` も exit 1（戻した）。check.yml の LYCHEE を 0.24.1 にすると `bun run pairs` が `LYCHEE 0.24.1 differs from mise.toml lychee 0.24.2` で落ちた（戻した）。CI で落とす tarball の sha256 は手元のダウンロードで一致、中身は `lychee-x86_64-unknown-linux-gnu/lychee` なので `--strip-components=1` で取り出す。`actionlint` → 指摘なし。`bun run verify` → exit 0
-- [ ] T04: check-ai-config.mjs の checkLocalLinks を消す
+- [x] T04: check-ai-config.mjs の checkLocalLinks を消す
   - 種別: 削除
   - 計画: S4
   - 依存: T03（同じファイルを lychee が見ていることが要る）
   - 変更: `scripts/check-ai-config.mjs`
   - 完了条件: `git grep -n checkLocalLinks -- scripts` → 該当なし（終了コード 1）。存在しないファイルへの相対リンクを `.agents/skills` の SKILL.md に足した一時的な変更で `bun run verify:ai` → 落ちる（戻す）。`bun run verify` → 終了コード 0
   - コミット: `refactor(ai-config): leave link checks to lychee`
+  - 結果: `git grep -n checkLocalLinks -- scripts` → 該当なし（exit 1）。`.agents/skills/knowledge-schema/SKILL.md` に `[the missing page](references/missing.md)` を足すと、lychee が `File not found` を出して `bun run verify:ai` が exit 1（戻した）。`bun run verify` → exit 0
 
 - [x] T08: markdownlint をパッケージの入口から node で起動し、ファイル名を文字どおりに渡す
   - 種別: 修正
