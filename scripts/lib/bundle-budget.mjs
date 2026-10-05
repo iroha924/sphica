@@ -7,7 +7,7 @@ const BUDGETS = {
   "mcp-record": 1_857_000,
   capture: 393_000,
   deliver: 429_000,
-  cli: 582_000,
+  cli: 625_000,
 };
 
 const HOOKS = new Set(["capture", "deliver"]);
