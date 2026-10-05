@@ -31,10 +31,12 @@ test("a waiter takes the lock once its holder releases it", async () => {
   const dir = tmp();
   const lock = path.join(dir, "x.lock");
   const ready = path.join(dir, "ready");
-  // The holder takes the lock, says so, and releases it after 300 ms
+  // The holder takes the lock, says so, and releases it after 300 ms. The script is fixed text; the paths come in as arguments
   const holder = spawn(process.execPath, [
     "-e",
-    `const fs=require("fs");fs.writeFileSync(${JSON.stringify(lock)},String(process.pid),{flag:"wx"});fs.writeFileSync(${JSON.stringify(ready)},"");setTimeout(()=>fs.rmSync(${JSON.stringify(lock)}),300);`,
+    'const fs=require("fs");const [lock,ready]=process.argv.slice(1);fs.writeFileSync(lock,String(process.pid),{flag:"wx"});fs.writeFileSync(ready,"");setTimeout(()=>fs.rmSync(lock),300);',
+    lock,
+    ready,
   ]);
   const exited = new Promise((resolve) => holder.on("exit", resolve));
   const until = Date.now() + 10_000;

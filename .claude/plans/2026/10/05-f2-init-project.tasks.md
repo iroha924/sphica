@@ -142,6 +142,15 @@ doctor が、見つからない project には探した場所を、コピーが�
   - コミット: `test(init): fail on a hung child or CLI instead of passing on partial output`
   - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0（project・admin・cli のテストを含む）
 
+- [x] T13: ロックを持つ子プロセスのコードを固定の文字列にし、パスを引数で渡す
+  - 種別: 変更
+  - 計画: S1
+  - 依存: T02（直す対象のテストが要る）
+  - 変更: `server/test/file-lock.test.ts`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → pass。PR の CodeQL で js/bad-code-sanitization が出ない。`bun run verify` → 終了コード 0
+  - コミット: `test(lock): pass the holder's paths as arguments instead of building its code`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern="waiter takes" test/file-lock.test.ts` → pass。`bun run verify` → exit 0。CodeQL の結果は push 後に確かめる
+
 ## 記録
 
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
@@ -155,3 +164,5 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T10 / review-shipping（Windows で削除待ちのロックに wx が EPERM を返す、推測）と全差分の Codex のレビュー（F1、tmp の削除の EBUSY を故障注入で再現）/ 修正タスク T10 を足して直した。review-shipping の check.yml のコメントの指摘は T12 で直す
 - 2026-10-05 / T11 / 全差分の Codex のレビュー（F4）と T06 の Codex のレビュー（F1）: Windows の git の `C:/…` のパスでホームを ~ に縮められない / 修正タスク T11 を足して直した
 - 2026-10-05 / T12 / 全差分の Codex のレビュー（F2: doctor のテストが ETIMEDOUT を見逃す、再現。F3: 競合の子プロセスに終了の期限が無い）と T06 のレビュー（F2、同じ指摘）、review-shipping（check.yml のコメントの only が古い）/ T12 を足して直した。テストの不備なので変更として扱った
+- 2026-10-05 / T13 / PR #285 の CodeQL（js/bad-code-sanitization、alert 17、server/test/file-lock.test.ts:37）: テストが子プロセスのコードに JSON.stringify でパスを埋めていた。入るのは一時ディレクトリのパスだけで実害は無いが、文字列からのコード生成を避ける規範に合わせて T13 で直した
+- 2026-10-05 / 全体 / 直しの再レビュー（Codex、high、b396ce32..efdf1ff7）→ F1〜F4 の解消を確認、新しい P1/P2 なし
