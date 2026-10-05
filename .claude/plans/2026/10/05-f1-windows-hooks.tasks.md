@@ -113,6 +113,8 @@ Windows の CI で、今の codex.json が空白入りのプラグインのパ�
 
 ## 記録
 
+- 2026-10-05 / T08 / T06 の head（99aacc16、run 37259168911）の Windows のジョブ: node が無いケースは最初に走る powershell.exe の外側が 59,575 ms、残りの外側は 2.2〜2.5 秒。最初の 1 回だけが遅い（推測: PowerShell のコマンド探索のキャッシュを作る）ので、60 秒の上限は足りていなかった。パックした doctor の検査は `codex trust: doctor read 9 hooks of package through npm's codex.cmd` / そのまま
+
 - 2026-10-05 / T09 / T04・T05 の Codex のレビュー（新しい会話、70f19166）: F1 `commandWindows` と `command_windows` の両方や `timeout: 600.0` など、Codex が読めない定義に trusted を返す、F2 状態のキーを JS の trim で削るので U+FEFF・U+0085 で Codex と食い違う。2 件とも採る。重複したキー一般（同じ名前を 2 回）は JSON.parse で見分けられず、出荷する codex.json は手で書き換えない限り起きないので扱わない。5f8b75ab（bundle の上限）には指摘なし / T09 を足して直した。T09 は T05 の後に足したので T06 の前に置いた
 
 - 2026-10-05 / T06 / 検査は Windows に限らず macOS・Linux でも動く（POSIX では偽の `codex`、Windows では npm の形の `codex.cmd` と `codex.js`）ので、名前を `scripts/check-codex-trust-windows.mjs` から `scripts/check-codex-trust-live.mjs` に変え、`bun run verify` にも `codex-trust:live` として入れた。変更欄に `package.json` を足した
