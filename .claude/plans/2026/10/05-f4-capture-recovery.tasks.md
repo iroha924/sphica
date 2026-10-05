@@ -127,7 +127,7 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - 結果: red: `node --test --test-name-pattern 'queue report' test/capture.test.ts` → `actual: { unreadable: 1, 'sqlite:CONSTRAINT': 1, unknown: 3, version: 1 }`（no-project が unknown に入る）で fail
   - 結果: 実装後 同じコマンド → pass。`bun run verify` → 0
 
-- [ ] T12: doctor の AI の採用の止まりを、名前ではなくプロジェクトごとに数える
+- [x] T12: doctor の AI の採用の止まりを、名前ではなくプロジェクトごとに数える
   - 種別: 修正
   - 計画: S5
   - 依存: T05（doctor の欄が要る）
@@ -135,6 +135,8 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
   - red: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → 同じ名前の 2 つのプロジェクトの呼び出しが 1 行にまとまり、件数と時刻が混ざって fail
   - 完了条件: `cd server && node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → pass。同じ名前のプロジェクトは別の行になり、それぞれキーで見分けられる
   - コミット: `fix(doctor): count stopped AI adoption per project, not per project name`
+  - 結果: red: `node --test --test-name-pattern 'doctor queue' test/cli.test.ts` → AI adoption の行が `actual: 3, expected: 4`（同じ名前の 2 つのプロジェクトが 1 行に混ざる）で fail
+  - 結果: 実装後 同じコマンド → pass（同じ名前のプロジェクトはキーを添えて別の行）。`bun run verify` → 0（3 回目。下の記録を参照）
 
 ## P4: 梱包と Windows、文書と版
 
@@ -169,3 +171,4 @@ T03・T08 のレビューで見つかった、prune の件数の上書きと、�
 - 2026-10-05 / T08 / Codex のレビュー（538ecc3d）F1: 読めない観測を rename できない（Windows の EBUSY など）と setAside が投げ、送信全体が止まる / 受理。修正タスク T10 を足した。通常のキューの rename の失敗が投げるのは前からの挙動で、この PR では変えない
 - 2026-10-05 / T04 / Codex のレビュー（1bb9b112）F1: doctor が読めないキューを ok / null pending と出す / T05 で直っている（✗ と「the queue cannot be read」）。F2: 理由の正規表現がハイフンを許さず no-project が unknown になる / 受理。修正タスク T11 を足した
 - 2026-10-05 / T05 / Codex のレビュー（11063e12）F1: 集計のキーが project.name と host で、同じ名前の別のプロジェクトが混ざる / 受理。修正タスク T12 を足した
+- 2026-10-05 / T12 / verify が 2 回続けて record.test.ts の rename limit（一時ディレクトリの rmSync が ENOTEMPTY）で落ちた。このブランチは触っていない / 単独で 3 回 pass、`bun run test` は T12 の変更あり・なしとも 0、3 回目の verify は 0。負荷で起きる既存の不安定さとみて手を入れない

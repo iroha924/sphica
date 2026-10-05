@@ -118,7 +118,7 @@ async function adoptionStops(
   const calls = await db
     .selectFrom("record_call as c")
     .innerJoin("project as p", "p.id", "c.project_id")
-    .select(["p.name", "c.host", "c.tool_use_id", "c.called_at"])
+    .select(["p.id", "p.name", "p.key", "c.host", "c.tool_use_id", "c.called_at"])
     .where((eb) =>
       eb.or([
         eb("c.host", "is", null),
@@ -142,9 +142,12 @@ async function adoptionStops(
     .execute();
   const groups = new Map<string, typeof calls>();
   for (const c of calls) {
-    const k = `${c.name}\u0000${c.host ?? ""}`;
+    const k = `${c.id}\u0000${c.host ?? ""}`;
     groups.set(k, [...(groups.get(k) ?? []), c]);
   }
+  // Names need not be unique; the key tells two projects of one name apart
+  const keys = new Map<string, Set<string>>();
+  for (const c of calls) keys.set(c.name, (keys.get(c.name) ?? new Set()).add(c.key));
   for (const group of groups.values()) {
     const [first] = group;
     if (!first) continue;
@@ -159,7 +162,8 @@ async function adoptionStops(
         : first.host === "codex"
           ? `Codex replies from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} that named no session`
           : `replies of every host from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} that named no host`;
-    say("warn", "AI adoption", `${inline(first.name)}: ${text}`);
+    const name = (keys.get(first.name)?.size ?? 0) > 1 ? `${first.name} (${first.key})` : first.name;
+    say("warn", "AI adoption", `${inline(name)}: ${text}`);
   }
 }
 

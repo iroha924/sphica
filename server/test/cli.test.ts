@@ -368,6 +368,13 @@ test("doctor queue: the recording queue as it is, and the record tool calls that
     call("codex", null, "2026-10-05T04:00:00.000Z");
     call("codex", null, "2026-10-05T05:00:00.000Z", "codex-session");
     call(null, null, "2026-10-05T06:00:00.000Z");
+    // Another project with the same name is its own row, told apart by its key
+    raw.prepare("insert into project (key, name) values ('git:gitlab.com/o/r', 'o/r')").run();
+    raw
+      .prepare(
+        "insert into record_call (project_id, tool, host, tool_use_id, mode, called_at) values (2, 'record_save', 'claude-code', 'toolu_other', 'interactive', '2026-10-05T07:00:00.000Z')",
+      )
+      .run();
     raw.close();
     const out = sphica("doctor");
     assert.match(
@@ -382,23 +389,29 @@ test("doctor queue: the recording queue as it is, and the record tool calls that
     assert.doesNotMatch(row(out, "Observations not sent"), /adopt/);
     const adoption = out.split("\n").filter((l) => /△ AI adoption /.test(l));
     const local = (t: string) => new Date(t).toLocaleString("sv-SE");
-    assert.equal(adoption.length, 3, out);
+    assert.equal(adoption.length, 4, out);
     assert.match(
-      adoption.find((l) => l.includes("Claude Code")) ?? "",
+      adoption.find((l) => l.includes("Claude Code") && l.includes("github")) ?? "",
       new RegExp(
-        `o/r: Claude Code replies from ${local("2026-10-05T01:00:00.000Z")} on are not adopted as AI decisions: 3 record tool calls without a hook observation \\(1 waiting to be resent, 2 that cannot be\\)`,
+        `o/r \\(git:github.com/o/r\\): Claude Code replies from ${local("2026-10-05T01:00:00.000Z")} on are not adopted as AI decisions: 3 record tool calls without a hook observation \\(1 waiting to be resent, 2 that cannot be\\)`,
+      ),
+    );
+    assert.match(
+      adoption.find((l) => l.includes("gitlab")) ?? "",
+      new RegExp(
+        `o/r \\(git:gitlab.com/o/r\\): Claude Code replies from ${local("2026-10-05T07:00:00.000Z")} on .*: 1 record tool call without a hook observation \\(0 waiting to be resent, 1 that cannot be\\)`,
       ),
     );
     assert.match(
       adoption.find((l) => l.includes("Codex")) ?? "",
       new RegExp(
-        `o/r: Codex replies from ${local("2026-10-05T04:00:00.000Z")} on .*: 1 record tool call that named no session`,
+        `o/r \\(git:github.com/o/r\\): Codex replies from ${local("2026-10-05T04:00:00.000Z")} on .*: 1 record tool call that named no session`,
       ),
     );
     assert.match(
       adoption.find((l) => l.includes("every host")) ?? "",
       new RegExp(
-        `o/r: replies of every host from ${local("2026-10-05T06:00:00.000Z")} on .*: 1 record tool call that named no host`,
+        `o/r \\(git:github.com/o/r\\): replies of every host from ${local("2026-10-05T06:00:00.000Z")} on .*: 1 record tool call that named no host`,
       ),
     );
     // A queue that cannot be read is unknown and fails, never 0 pending
