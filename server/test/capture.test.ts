@@ -8,6 +8,8 @@ import { after, before, mock, test } from "node:test";
 import { migrate } from "../src/admin.ts";
 import {
   answersOf,
+  callsDir,
+  callsRejectedDir,
   captureNotice,
   closeTurn,
   current,
@@ -16,9 +18,12 @@ import {
   HOLD_DAYS,
   isOwnerTurn,
   MAX_MESSAGE,
+  type Observation,
+  observation,
   observeRecordCall,
   onHook,
   openTurn,
+  queueReport,
   readInput,
   readState,
   rejectedDir,
@@ -29,10 +34,12 @@ import {
   write,
 } from "../src/capture.ts";
 import { dbFile } from "../src/db.ts";
+import { pendingText } from "../src/extract.ts";
 import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
+import { callSession } from "../src/trace.ts";
 import { snapshot } from "../src/worktree.ts";
-import { project, statements, tempDb } from "./temp-db.ts";
+import { at, insert, project, session, statements, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
 if (process.versions.bun) throw new Error("run these tests with node --test (bun run test)");
@@ -1161,6 +1168,109 @@ test("without a database, session start reports it in the same box format", () =
   );
 });
 
+test("unreadable queue: a queue that cannot be read is unknown, never 0, and the session start says so", () => {
+  reset();
+  const capture = path.join(home, "sphica.db");
+  fs.writeFileSync(capture, "");
+  try {
+    assert.deepEqual(
+      [readState().pending, readState().unreadable],
+      [0, null],
+      "a queue not made yet is empty",
+    );
+    fs.mkdirSync(path.dirname(spoolDir()), { recursive: true });
+    fs.writeFileSync(spoolDir(), "");
+    const s = readState();
+    assert.deepEqual([s.pending, s.rejected, s.unregistered, s.unreadable], [null, null, null, "ENOTDIR"]);
+    assert.match(captureNotice(capture) ?? "", /cannot read the recording queue\n│ .*spool\n│ ENOTDIR/);
+  } finally {
+    fs.rmSync(spoolDir(), { force: true });
+    fs.rmSync(capture, { force: true });
+  }
+});
+
+test("queue report: what is in each queue directory, why records were set aside, and what was pruned", () => {
+  reset();
+  const now = Date.now();
+  const write = (dir: string, name: string, body: string, mtime?: number) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), body);
+    if (mtime) fs.utimesSync(path.join(dir, name), mtime / 1000, mtime / 1000);
+  };
+  try {
+    write(spoolDir(), "1-1-a.json", "{}");
+    write(spoolDir(), ".lock", "1", now - 600_000);
+    // A send in progress writes under a dot name: only one older than a minute counts as left behind
+    write(spoolDir(), ".2-1-b.json", "x".repeat(10), now - 600_000);
+    write(spoolDir(), ".3-1-c.json", "x".repeat(5), now - 1_000);
+    write(callsDir(), "4-1-d.json", JSON.stringify({ ...observed, toolUse: "toolu_wait" }));
+    write(callsDir(), ".5-1-e.json", "xx", now - 120_000);
+    write(rejectedDir(), "6-1-f.json", "{");
+    write(rejectedDir(), "6-1-f.json.reason", "unreadable");
+    write(rejectedDir(), "7-1-g.json", "{}");
+    write(rejectedDir(), "7-1-g.json.reason", "sqlite:CONSTRAINT");
+    write(rejectedDir(), "8-1-h.json", "{}");
+    write(rejectedDir(), "9-1-i.json", "{}");
+    write(rejectedDir(), "9-2-k.json", "{}");
+    write(rejectedDir(), "9-2-k.json.reason", "no-project");
+    write(rejectedDir(), "9-3-l.json", "{}");
+    write(rejectedDir(), "9-3-l.json.reason", "version");
+    write(rejectedDir(), "9-1-i.json.reason", "\u001b[2Jforged");
+    write(callsRejectedDir(), "10-1-j.json", "{");
+    write(callsRejectedDir(), "10-1-j.json.reason", "shape");
+    const held = (t: number, i: number, key: string) =>
+      write(unregisteredDir(), `${t}-1-${i}.json`, JSON.stringify(owned(key, i)));
+    held(now - 3 * 86_400_000, 11, "git:example/a");
+    held(now - 86_400_000, 12, "git:example/a");
+    held(now - 2 * 86_400_000, 13, "git:example/b");
+    write(unregisteredDir(), `${now}-1-14.json`, "{");
+    fs.writeFileSync(
+      path.join(home, ".sphica", "capture.json"),
+      JSON.stringify({ pruned: { at: "2026-10-01T00:00:00.000Z", count: 7 } }),
+    );
+    const r = queueReport(now);
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(r.dirs).map(([k, d]) => [k, [d.files, d.code, d.temp.count, d.temp.bytes]]),
+      ),
+      {
+        queue: [1, null, 1, 10],
+        calls: [1, null, 1, 2],
+        rejected: [6, null, 0, 0],
+        unregistered: [4, null, 0, 0],
+        callsRejected: [1, null, 0, 0],
+      },
+    );
+    assert.ok(r.dirs.queue.temp.oldestMs >= 600_000);
+    assert.deepEqual(r.rejected, {
+      "no-project": 1,
+      "sqlite:CONSTRAINT": 1,
+      unknown: 2,
+      unreadable: 1,
+      version: 1,
+    });
+    assert.deepEqual(r.callsRejected, { shape: 1 });
+    assert.deepEqual(
+      r.held.map((h) => [h.project, h.count, Math.round(h.oldestMs / 86_400_000)]),
+      [
+        ["git:example/a", 2, 3],
+        ["git:example/b", 1, 2],
+        ["unreadable", 1, 0],
+      ],
+    );
+    assert.deepEqual([...r.waiting], ["toolu_wait"]);
+    assert.deepEqual(r.pruned, { at: "2026-10-01T00:00:00.000Z", count: 7 });
+    // A directory that cannot be read is unknown, with its code
+    fs.rmSync(callsRejectedDir(), { recursive: true });
+    fs.writeFileSync(callsRejectedDir(), "");
+    const broken = queueReport(now).dirs.callsRejected;
+    assert.deepEqual([broken.files, broken.code], [null, "ENOTDIR"]);
+  } finally {
+    reset();
+    fs.rmSync(path.join(home, ".sphica", "capture.json"), { force: true });
+  }
+});
+
 test("stuck is reported only with queued items and a recorded failure, and a broken state file does not crash", () => {
   reset();
   const file = path.join(home, ".sphica", "capture.json");
@@ -1618,6 +1728,112 @@ test("a queued record without a project key goes to rejected/ and the rest are s
   }
 });
 
+test("rejection reason: each record set aside in rejected/ carries why, never its text", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    fs.mkdirSync(spoolDir(), { recursive: true });
+    fs.writeFileSync(path.join(spoolDir(), "1-1-a.json"), "{not json");
+    fs.writeFileSync(path.join(spoolDir(), "2-1-b.json"), JSON.stringify({ v: 3, project: registered }));
+    fs.writeFileSync(path.join(spoolDir(), "3-1-c.json"), JSON.stringify({ v: 2, kind: "message" }));
+    queue(spoolDir(), 4, 4, {
+      ...owned(registered, 4),
+      session: "s-other",
+      host: "elsewhere",
+    } as unknown as Spooled);
+    queue(spoolDir(), 5, 5, owned(registered, 5));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1);
+    const why = Object.fromEntries(
+      fs
+        .readdirSync(rejectedDir())
+        .filter((f) => f.endsWith(".reason"))
+        .map((f) => [f.slice(0, 3), fs.readFileSync(path.join(rejectedDir(), f), "utf8")]),
+    );
+    assert.deepEqual(why, {
+      "1-1": "unreadable",
+      "2-1": "version",
+      "3-1": "no-project",
+      "4-1": "sqlite:CONSTRAINT",
+    });
+    assert.equal(left(rejectedDir()), 4, "the records stay to be fixed and moved back");
+  } finally {
+    fs.rmSync(rejectedDir(), { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("prune count: the last prune that removed held records is kept, through sends that remove none and a failed send", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const stale = Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000;
+  try {
+    fs.rmSync(path.join(home, ".sphica", "capture.json"), { force: true });
+    queue(unregisteredDir(), stale, 1, owned("git:example/none", 1));
+    queue(unregisteredDir(), stale, 2, owned("git:example/none", 2));
+    await flush(db.file);
+    const first = readState();
+    assert.equal(first.pruned?.count, 2);
+    assert.equal(first.flushedAt, undefined, "nothing was sent, so no send time");
+    queue(spoolDir(), Date.now(), 3, owned(registered, 3));
+    await flush(db.file);
+    assert.deepEqual(readState().pruned, first.pruned, "a send that removes none keeps the last count");
+    // The second removal fails: the one already removed still counts, on the failed send's state
+    queue(unregisteredDir(), stale, 4, owned("git:example/none", 4));
+    queue(unregisteredDir(), stale, 5, owned("git:example/none", 5));
+    const rm = fs.rmSync;
+    let calls = 0;
+    const m = mock.method(fs, "rmSync", (...a: Parameters<typeof fs.rmSync>) => {
+      if (String(a[0]).includes(`${path.sep}unregistered${path.sep}`) && ++calls === 2)
+        throw new Error("EPERM");
+      return rm(...a);
+    });
+    try {
+      await assert.rejects(flush(db.file), /EPERM/);
+    } finally {
+      m.mock.restore();
+    }
+    const failed = readState();
+    assert.equal(failed.pruned?.count, 1);
+    assert.match(failed.error ?? "", /EPERM/);
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("prune count across retaking the lock: one send keeps the sum of what each lock hold pruned", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const stale = Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000;
+  const rm = fs.rmSync;
+  let arrived = false;
+  // Right after the first hold unlocks, a hook queues a record and another expired held record turns up: the send takes the lock again
+  const spy = mock.method(fs, "rmSync", ((target: fs.PathLike, ...rest: unknown[]) => {
+    (rm as (...a: unknown[]) => void)(target, ...rest);
+    if (!arrived && String(target).endsWith(".lock")) {
+      arrived = true;
+      queue(spoolDir(), Date.now(), 9, owned(registered, 9));
+      queue(unregisteredDir(), stale, 3, owned("git:example/none", 3));
+    }
+  }) as typeof fs.rmSync);
+  try {
+    queue(unregisteredDir(), stale, 1, owned("git:example/none", 1));
+    queue(unregisteredDir(), stale, 2, owned("git:example/none", 2));
+    queue(spoolDir(), Date.now(), 8, owned(registered, 8));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 2, "both holds sent");
+    assert.equal(readState().pruned?.count, 3);
+  } finally {
+    spy.mock.restore();
+    reset();
+    await db.done();
+  }
+});
+
 // Before migrating, a third spelling must not pick one of two projects its key normalizes to: writing into the empty one would leave
 // two projects with records, which revision 8 refuses to merge
 test("a legacy key held while two projects share its normalized key stays held, and the migration still merges them", async () => {
@@ -1687,6 +1903,350 @@ test("record call: the hook logs a record tool's session and turn straight to th
       ],
     );
   } finally {
+    await db.done();
+  }
+});
+
+const observed: Observation = {
+  v: 1,
+  host: "claude-code",
+  session: "ext-s1",
+  turn: "t1",
+  toolUse: "toolu_1",
+  tool: "mcp__plugin_sphica_record__trace_begin",
+  owner: 1,
+  at: "2026-10-05T01:02:03.004Z",
+};
+/** The observations kept in calls/, oldest first */
+const kept = (): unknown[] => {
+  const dir = callsDir();
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".json") && !f.startsWith("."))
+    .sort()
+    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+};
+
+test("observation: only exactly what the hook writes passes, never repaired", () => {
+  assert.deepEqual(observation(observed), observed);
+  assert.deepEqual(observation({ ...observed, turn: null, owner: 0 }), { ...observed, turn: null, owner: 0 });
+  const { turn: _, ...noTurn } = observed;
+  for (const bad of [
+    null,
+    [],
+    "x",
+    noTurn,
+    { ...observed, extra: 1 },
+    { ...observed, v: 2 },
+    { ...observed, host: "codex" },
+    { ...observed, session: "" },
+    { ...observed, session: "a b" },
+    { ...observed, toolUse: "x".repeat(201) },
+    { ...observed, tool: "mcp__other__trace_begin" },
+    { ...observed, turn: 1 },
+    { ...observed, owner: true },
+    { ...observed, owner: 2 },
+    { ...observed, at: "2026-10-05T01:02:03Z" },
+    { ...observed, at: "2026-13-05T01:02:03.004Z" },
+    { ...observed, at: "+010000-01-01T00:00:00.000Z" },
+    { ...observed, at: "-000001-01-01T00:00:00.000Z" },
+  ])
+    assert.equal(observation(bad), null, JSON.stringify(bad));
+});
+
+test("observation: the hook keeps the observation in calls/ until the database has it", async () => {
+  reset();
+  const db = tempDb();
+  try {
+    const input = {
+      hook_event_name: "PreToolUse",
+      session_id: "ext-s1",
+      prompt_id: "t1",
+      tool_name: "mcp__plugin_sphica_record__trace_begin",
+      tool_use_id: "toolu_1",
+    };
+    await observeRecordCall(db.file, input, true);
+    assert.deepEqual(kept(), [], "written, so nothing is left to resend");
+    // A save holds the write lock past the hook's wait
+    db.owner.exec("begin immediate");
+    await assert.rejects(observeRecordCall(db.file, { ...input, tool_use_id: "toolu_2" }, false, 50));
+    db.owner.exec("commit");
+    const [left, ...more] = kept() as Observation[];
+    assert.deepEqual(more, []);
+    assert.deepEqual({ ...left, at: "<at>" }, { ...observed, toolUse: "toolu_2", owner: 0, at: "<at>" });
+    assert.deepEqual(observation(left), left, "kept in the shape the send accepts");
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation order by id")
+        .all()
+        .map((r) => r.tool_use_id),
+      ["toolu_1"],
+    );
+    // calls/ cannot be written: the database still gets the observation
+    reset();
+    fs.mkdirSync(spoolDir(), { recursive: true });
+    fs.writeFileSync(callsDir(), "");
+    await observeRecordCall(db.file, { ...input, tool_use_id: "toolu_3" }, true);
+    assert.equal(
+      db.owner.prepare("select count(*) as n from tool_call_observation where tool_use_id = 'toolu_3'").get()
+        ?.n,
+      1,
+    );
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("observation resend: a send writes what the hook could not, lifting the stop for other turns but never for the call's own", async () => {
+  reset();
+  const db = tempDb();
+  try {
+    const p = project(db);
+    session(db, p, "s1");
+    const reply = (turn: string, sent: string) =>
+      insert(db, "source", {
+        project_id: p,
+        kind: "session_message",
+        artifact: "session:s1",
+        external_id: `${turn}:assistant`,
+        revision: 1,
+        session_id: "s1",
+        turn_id: turn,
+        author_kind: "assistant",
+        created_at: at(sent),
+        captured_at: at(sent),
+        text: "I keep it as is.",
+        original_bytes: 16,
+        content_hash: Buffer.alloc(32, turn.length),
+        indexed: 0,
+      });
+    const call = (v: Record<string, string>) =>
+      insert(db, "record_call", { project_id: p, tool: "trace_begin", mode: "interactive", ...v });
+    // The run is begun by a Codex call of another session, so only the Claude Code call below decides what can be adopted
+    const begin = call({
+      host: "codex",
+      caller_session: "x",
+      caller_turn: "y",
+      called_at: at("2026-10-05T00:00:00Z"),
+    });
+    const run = insert(db, "extraction_run", {
+      project_id: p,
+      origin: "trace",
+      target: "session:s1",
+      session_id: "s1",
+      status: "running",
+      begin_call_id: begin,
+      started_at: at("2026-10-05T00:00:00Z"),
+    });
+    let units = 0;
+    const adopt = (source: number) => {
+      const key = `k${++units}`;
+      const u = insert(db, "unit", {
+        project_id: p,
+        key,
+        kind: "decision",
+        stance: "do",
+        text: key,
+        extraction: "supported",
+        run_id: run,
+        created_at: at("2026-10-05T01:00:00Z"),
+        content_hash: Buffer.alloc(32, units),
+      });
+      const span = {
+        unit_id: u,
+        source_id: source,
+        span_start: 0,
+        span_end: 6,
+        run_id: run,
+        added_at: at("2026-10-05T01:00:00Z"),
+      };
+      insert(db, "unit_evidence", { ...span, role: "decides" });
+      insert(db, "unit_adoption", { ...span, route: "agent" });
+    };
+    const refused = /cannot cite a reply from a turn that ran a record tool/;
+    const own = reply("t1", "2026-10-05T00:00:02Z");
+    const next = reply("t2", "2026-10-05T00:00:05Z");
+    const c1 = call({ host: "claude-code", tool_use_id: "toolu_1", called_at: at("2026-10-05T00:00:01Z") });
+    const input = {
+      hook_event_name: "PreToolUse",
+      session_id: "ext-s1",
+      prompt_id: "t1",
+      tool_name: "mcp__plugin_sphica_record__trace_begin",
+      tool_use_id: "toolu_1",
+    };
+    db.owner.exec("begin immediate");
+    await assert.rejects(observeRecordCall(db.file, input, true, 50));
+    db.owner.exec("commit");
+    const [file] = fs.readdirSync(callsDir()).filter((f) => f.endsWith(".json"));
+    const saved = fs.readFileSync(path.join(callsDir(), file ?? ""), "utf8");
+    // Unjoined, every later reply of the project stays a candidate, and the trace cannot tell which session called
+    assert.throws(() => adopt(next), refused);
+    assert.equal(await callSession(db.reader, c1), null);
+    assert.match(
+      await pendingText(db.reader, p, new Date("2026-10-05T02:00:00Z"), { auto: true, skip: null }),
+      /cannot tell which session called/,
+    );
+    await flush(db.file);
+    assert.deepEqual(kept(), [], "sent and removed");
+    assert.deepEqual(await callSession(db.reader, c1), {
+      host: "claude-code",
+      session: "ext-s1",
+      owner: true,
+    });
+    adopt(next);
+    assert.throws(() => adopt(own), refused, "the turn that ran the record tool stays out");
+    // A copy left behind (the hook stopped before removing it) adds nothing
+    const observedAt = db.owner.prepare("select observed_at from tool_call_observation").get()?.observed_at;
+    fs.writeFileSync(path.join(callsDir(), file ?? ""), saved);
+    await flush(db.file);
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id, observed_at from tool_call_observation")
+        .all()
+        .map((r) => ({ ...r })),
+      [{ tool_use_id: "toolu_1", observed_at: observedAt }],
+    );
+    // Another call still unjoined keeps the stop from then on
+    call({ host: "claude-code", tool_use_id: "toolu_2", called_at: at("2026-10-05T00:00:06Z") });
+    assert.throws(() => adopt(reply("t3", "2026-10-05T00:00:07Z")), refused);
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("observation resend: a file not in the hook's shape is set aside with its reason and never stops the others", async () => {
+  reset();
+  const db = tempDb();
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    const files = {
+      "1-a.json": JSON.stringify({ ...observed, toolUse: "toolu_far", at: "+010000-01-01T00:00:00.000Z" }),
+      "2-b.json": JSON.stringify({ ...observed, toolUse: "toolu_neg", at: "-000001-01-01T00:00:00.000Z" }),
+      "3-c.json": "{not json",
+      "4-d.json": JSON.stringify({ ...observed, toolUse: "toolu_ok" }),
+    };
+    for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(callsDir(), name), text);
+    await flush(db.file);
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation")
+        .all()
+        .map((r) => r.tool_use_id),
+      ["toolu_ok"],
+    );
+    assert.deepEqual(kept(), []);
+    const aside = fs.readdirSync(callsRejectedDir()).sort();
+    assert.deepEqual(aside, [
+      "1-a.json",
+      "1-a.json.reason",
+      "2-b.json",
+      "2-b.json.reason",
+      "3-c.json",
+      "3-c.json.reason",
+    ]);
+    assert.deepEqual(
+      ["1-a", "2-b", "3-c"].map((n) =>
+        fs.readFileSync(path.join(callsRejectedDir(), `${n}.json.reason`), "utf8"),
+      ),
+      ["shape", "shape", "unreadable"],
+    );
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("unreadable observation: a file that cannot be read now stays for the next send, and the rest of the send goes on", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    const locked = path.join(callsDir(), "1-a.json");
+    fs.writeFileSync(locked, JSON.stringify({ ...observed, toolUse: "toolu_locked" }));
+    fs.chmodSync(locked, 0o000);
+    fs.writeFileSync(path.join(callsDir(), "2-b.json"), JSON.stringify({ ...observed, toolUse: "toolu_ok" }));
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1, "the queue is still sent");
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation")
+        .all()
+        .map((x) => x.tool_use_id),
+      ["toolu_ok"],
+    );
+    assert.ok(
+      fs.existsSync(locked),
+      "a read that fails says nothing about its content, so it is never set aside",
+    );
+    assert.ok(!fs.existsSync(callsRejectedDir()));
+  } finally {
+    reset();
+    await db.done();
+  }
+});
+
+test("observation that cannot be moved: it stays in calls/ for the next send, and the rest of the send goes on", async () => {
+  reset();
+  const db = tempDb();
+  project(db);
+  const busy = (target: unknown) => String(target).endsWith(`${path.sep}1-a.json`);
+  const ebusy = () => Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
+  const read = fs.readFileSync;
+  const rename = fs.renameSync;
+  // Another process holds the file without sharing it, as Windows allows: neither reading nor moving it works
+  const r1 = mock.method(fs, "readFileSync", ((target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (busy(target)) throw ebusy();
+    return (read as (...a: unknown[]) => unknown)(target, ...rest);
+  }) as typeof fs.readFileSync);
+  const r2 = mock.method(fs, "renameSync", ((from: fs.PathLike, to: fs.PathLike) => {
+    if (busy(from)) throw ebusy();
+    return rename(from, to);
+  }) as typeof fs.renameSync);
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    fs.writeFileSync(
+      path.join(callsDir(), "1-a.json"),
+      JSON.stringify({ ...observed, toolUse: "toolu_busy" }),
+    );
+    fs.writeFileSync(path.join(callsDir(), "2-b.json"), JSON.stringify({ ...observed, toolUse: "toolu_ok" }));
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1, "the queue is still sent");
+    assert.deepEqual(
+      db.owner
+        .prepare("select tool_use_id from tool_call_observation")
+        .all()
+        .map((x) => x.tool_use_id),
+      ["toolu_ok"],
+    );
+    assert.ok(fs.existsSync(path.join(callsDir(), "1-a.json")), "kept for the next send");
+  } finally {
+    r1.mock.restore();
+    r2.mock.restore();
+    reset();
+    await db.done();
+  }
+});
+
+test("observation on an older database: kept observations never stop the queue on a revision without the observation view", async () => {
+  reset();
+  const db = tempDb(fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev9.sql"), "utf8"));
+  project(db);
+  try {
+    fs.mkdirSync(callsDir(), { recursive: true });
+    fs.writeFileSync(path.join(callsDir(), "1-a.json"), JSON.stringify(observed));
+    queue(spoolDir(), Date.now(), 1, owned(registered, 1));
+    const r = await flush(db.file);
+    assert.equal(r.sent, 1, "the conversation is still recorded before the database is migrated");
+    assert.equal(readState().error, null);
+    assert.deepEqual(kept(), [observed], "kept for a send after the migration");
+  } finally {
+    reset();
     await db.done();
   }
 });

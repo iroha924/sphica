@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -269,6 +270,174 @@ test("doctor says where it looked for a project it did not find, and lists a pro
     assert.match(row("o/gone"), /\(not found in ~\/Projects or the named projects\)/, out);
     assert.match(row("o/same"), /\(2 copies: ~\/Projects\/one, ~\/Projects\/two\)/, out);
     assert.doesNotMatch(out, /not on this machine/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor queue: the recording queue as it is, and the record tool calls that stop AI adoption", () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-")));
+  const env = {
+    PATH: `${signedOut}${path.delimiter}${process.env.PATH ?? ""}`,
+    HOME: home,
+    USERPROFILE: home,
+  };
+  const sphica = (...args: string[]) => {
+    try {
+      return execFileSync(process.execPath, [CLI, ...args], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+        timeout: 30_000,
+      });
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; code?: string };
+      // doctor exits 1 on this machine's plugin state, which is not what this test is about; a hang is
+      if (err.code === "ETIMEDOUT") throw new Error(`sphica ${args.join(" ")} did not finish in 30 seconds`);
+      return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    }
+  };
+  const row = (out: string, label: string) =>
+    out.split("\n").find((l) => l.includes(label)) ?? assert.fail(`no ${label} row\n${out}`);
+  const sphicaHome = path.join(home, ".sphica");
+  const spool = path.join(sphicaHome, "spool");
+  const put = (dir: string, name: string, body: string, ageMs = 0) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), body);
+    if (ageMs) {
+      const t = (Date.now() - ageMs) / 1000;
+      fs.utimesSync(path.join(dir, name), t, t);
+    }
+  };
+  try {
+    const repo = path.join(home, "Projects", "r");
+    fs.mkdirSync(repo, { recursive: true });
+    execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", "https://github.com/o/r.git"], {
+      stdio: "ignore",
+    });
+    assert.match(sphica("init", "--cwd", repo), /registered/);
+    const observed = (toolUse: string) =>
+      JSON.stringify({
+        v: 1,
+        host: "claude-code",
+        session: "ext-s1",
+        turn: "t1",
+        toolUse,
+        tool: "mcp__plugin_sphica_record__record_save",
+        owner: 1,
+        at: "2026-10-05T00:00:00.000Z",
+      });
+    put(spool, ".1-1-a.json", "x".repeat(40), 5 * 60_000);
+    put(path.join(spool, "calls"), "2-1-b.json", observed("toolu_wait"));
+    put(path.join(spool, "rejected"), "3-1-c.json", "{");
+    put(path.join(spool, "rejected"), "3-1-c.json.reason", "unreadable");
+    put(path.join(spool, "rejected"), "4-1-d.json", "{}");
+    put(path.join(spool, "calls", "rejected"), "5-1-e.json", "{");
+    put(path.join(spool, "calls", "rejected"), "5-1-e.json.reason", "shape");
+    put(
+      path.join(spool, "unregistered"),
+      `${Date.now() - 2 * 86_400_000}-1-f.json`,
+      JSON.stringify({ v: 2, kind: "message", project: "git:example/held" }),
+    );
+    fs.writeFileSync(
+      path.join(sphicaHome, "capture.json"),
+      JSON.stringify({ pruned: { at: "2026-10-01T00:00:00.000Z", count: 3 } }),
+    );
+    const raw = new DatabaseSync(path.join(sphicaHome, "sphica.db"));
+    const call = (
+      host: string | null,
+      toolUse: string | null,
+      called: string,
+      session: string | null = null,
+    ) =>
+      raw
+        .prepare(
+          "insert into record_call (project_id, tool, host, caller_session, tool_use_id, mode, called_at) values (1, 'record_save', ?, ?, ?, 'interactive', ?)",
+        )
+        .run(host, session, toolUse, called);
+    call("claude-code", "toolu_joined", "2026-10-05T00:00:00.000Z");
+    raw
+      .prepare(
+        "insert into tool_call_observation (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 'ext-s1', 't0', 'toolu_joined', 'mcp__plugin_sphica_record__record_save', 1, '2026-10-05T00:00:00.000Z')",
+      )
+      .run();
+    call("claude-code", "toolu_wait", "2026-10-05T01:00:00.000Z");
+    call("claude-code", "toolu_lost", "2026-10-05T02:00:00.000Z");
+    call("claude-code", null, "2026-10-05T03:00:00.000Z");
+    call("codex", null, "2026-10-05T04:00:00.000Z");
+    call("codex", null, "2026-10-05T05:00:00.000Z", "codex-session");
+    call(null, null, "2026-10-05T06:00:00.000Z");
+    // A joined observation whose hook did not know the turn keeps its session's later replies out
+    raw
+      .prepare(
+        "insert into session (id, project_id, host, external_id, started_at) values ('s-nt', 1, 'claude-code', 'ext-nt', '2026-10-05T00:00:00.000Z')",
+      )
+      .run();
+    call("claude-code", "toolu_nt", "2026-10-05T08:00:00.000Z");
+    raw
+      .prepare(
+        "insert into tool_call_observation (host, session_external, turn_id, tool_use_id, tool_name, owner_turn, observed_at) values ('claude-code', 'ext-nt', null, 'toolu_nt', 'mcp__plugin_sphica_record__record_save', 1, '2026-10-05T08:00:00.000Z')",
+      )
+      .run();
+    // Another project with the same name is its own row, told apart by its key
+    raw.prepare("insert into project (key, name) values ('git:gitlab.com/o/r', 'o/r')").run();
+    raw
+      .prepare(
+        "insert into record_call (project_id, tool, host, tool_use_id, mode, called_at) values (2, 'record_save', 'claude-code', 'toolu_other', 'interactive', '2026-10-05T07:00:00.000Z')",
+      )
+      .run();
+    raw.close();
+    const out = sphica("doctor");
+    assert.match(
+      row(out, "Left-behind files"),
+      /1 temporary file older than a minute in .*spool \(oldest 5 min, 40 bytes\)/,
+    );
+    assert.match(row(out, "Rejected records"), /2 records .*rejected.*: unknown 1, unreadable 1/);
+    assert.match(row(out, "Held recordings"), /git:example\/held 1 \(oldest 2 days\)/);
+    assert.match(row(out, "Last prune"), /3 held recordings expired at 2026-10-01/);
+    assert.match(row(out, "Observations to resend"), /1 record tool observation waits in .*calls/);
+    assert.match(row(out, "Observations not sent"), /1 file .*calls.rejected.*: shape 1/);
+    assert.doesNotMatch(row(out, "Observations not sent"), /adopt/);
+    const adoption = out.split("\n").filter((l) => /△ AI adoption /.test(l));
+    const local = (t: string) => new Date(t).toLocaleString("sv-SE");
+    assert.equal(adoption.length, 5, out);
+    assert.match(
+      adoption.find((l) => l.includes("did not know")) ?? "",
+      new RegExp(
+        `o/r \\(git:github.com/o/r\\): Claude Code replies in 1 session from ${local("2026-10-05T08:00:00.000Z")} on are not adopted as AI decisions: a record tool's hook did not know the turn`,
+      ),
+    );
+    assert.match(
+      adoption.find((l) => l.includes("Claude Code") && l.includes("github")) ?? "",
+      new RegExp(
+        `o/r \\(git:github.com/o/r\\): Claude Code replies from ${local("2026-10-05T01:00:00.000Z")} on are not adopted as AI decisions: 3 record tool calls without a hook observation \\(1 waiting to be resent, 2 that cannot be\\)`,
+      ),
+    );
+    assert.match(
+      adoption.find((l) => l.includes("gitlab")) ?? "",
+      new RegExp(
+        `o/r \\(git:gitlab.com/o/r\\): Claude Code replies from ${local("2026-10-05T07:00:00.000Z")} on .*: 1 record tool call without a hook observation \\(0 waiting to be resent, 1 that cannot be\\)`,
+      ),
+    );
+    assert.match(
+      adoption.find((l) => l.includes("Codex")) ?? "",
+      new RegExp(
+        `o/r \\(git:github.com/o/r\\): Codex replies from ${local("2026-10-05T04:00:00.000Z")} on .*: 1 record tool call that named no session`,
+      ),
+    );
+    assert.match(
+      adoption.find((l) => l.includes("every host")) ?? "",
+      new RegExp(
+        `o/r \\(git:github.com/o/r\\): replies of every host from ${local("2026-10-05T06:00:00.000Z")} on .*: 1 record tool call that named no host`,
+      ),
+    );
+    // A queue that cannot be read is unknown and fails, never 0 pending
+    fs.rmSync(spool, { recursive: true });
+    fs.writeFileSync(spool, "");
+    const broken = sphica("doctor");
+    assert.match(row(broken, "Recording"), /✗ Recording\s+the queue cannot be read \(ENOTDIR\)/);
+    assert.doesNotMatch(row(broken, "Recording"), /0 pending/);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

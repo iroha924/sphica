@@ -160,6 +160,13 @@ jobs:
           grep -E "✓ Schema version" doctor.out
           grep -E "✓ Full-text index" doctor.out
           grep -E "○ GitHub owner +none" doctor.out
+          # A recording queue that cannot be read is a failure, never 0 pending. Its own HOME, so the steps below keep a usable one
+          qhome="$(mktemp -d)"
+          mkdir -p "$qhome/.sphica"
+          : > "$qhome/.sphica/spool"
+          HOME="$qhome" USERPROFILE="$qhome" node "$out/package/dist/cli.js" doctor > doctor-queue.out || true
+          cat doctor-queue.out
+          grep -E "✗ Recording +the queue cannot be read" doctor-queue.out
           # Does MCP start and return the tool list?
           printf '%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \

@@ -24,10 +24,18 @@ import {
 } from "@stricli/core";
 import { bindOwner, dbInit, inspect, reindex } from "./admin.ts";
 import { leaves } from "./anchors.ts";
-import { readState, rejectedDir, unregisteredDir } from "./capture.ts";
+import {
+  callsDir,
+  callsRejectedDir,
+  queueReport,
+  readState,
+  rejectedDir,
+  spoolDir,
+  unregisteredDir,
+} from "./capture.ts";
 import { withDb } from "./cli/common.ts";
 import { closing, failure, indent, section, steps, stopped, title } from "./cli/view.ts";
-import { dbFile, SCHEMA_REVISION } from "./db.ts";
+import { dbFile, type Reads, SCHEMA_REVISION } from "./db.ts";
 import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
@@ -98,6 +106,93 @@ const TEXT: ApplicationText = {
   commandErrorResult: (e) => failed(e.message),
 };
 
+/**
+ * Record tool calls no hook or host placed, by project and host: the same conditions as the view agent_ineligible_source, under which
+ * no reply of that host from the first such call on is adopted as an AI decision. waiting holds the tool use ids kept in calls/.
+ */
+async function adoptionStops(
+  db: Reads,
+  waiting: Set<string>,
+  say: (m: Mark, label: string, text: string) => void,
+): Promise<void> {
+  const calls = await db
+    .selectFrom("record_call as c")
+    .innerJoin("project as p", "p.id", "c.project_id")
+    .select(["p.id", "p.name", "p.key", "c.host", "c.tool_use_id", "c.called_at"])
+    .where((eb) =>
+      eb.or([
+        eb("c.host", "is", null),
+        eb.and([eb("c.host", "=", "codex"), eb("c.caller_session", "is", null)]),
+        eb.and([
+          eb("c.host", "=", "claude-code"),
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom("tool_call_observation as o")
+                .select("o.id")
+                .where("o.host", "=", "claude-code")
+                .whereRef("o.tool_use_id", "=", "c.tool_use_id"),
+            ),
+          ),
+        ]),
+      ]),
+    )
+    .orderBy("p.name")
+    .orderBy("c.called_at")
+    .execute();
+  // A joined observation with no turn still keeps every later reply of its session out
+  const turnless = await db
+    .selectFrom("tool_call_observation as o")
+    .innerJoin("session as se", (j) =>
+      j.on("se.host", "=", "claude-code").onRef("se.external_id", "=", "o.session_external"),
+    )
+    .innerJoin("project as p", "p.id", "se.project_id")
+    .select((eb) => [
+      "p.id",
+      "p.name",
+      "p.key",
+      eb.fn.count<number>("se.id").distinct().as("sessions"),
+      eb.fn.min("o.observed_at").as("first"),
+    ])
+    .where("o.host", "=", "claude-code")
+    .where("o.turn_id", "is", null)
+    .groupBy(["p.id", "p.name", "p.key"])
+    .orderBy("p.name")
+    .execute();
+  const groups = new Map<string, typeof calls>();
+  for (const c of calls) {
+    const k = `${c.id}\u0000${c.host ?? ""}`;
+    groups.set(k, [...(groups.get(k) ?? []), c]);
+  }
+  // Names need not be unique; the key tells two projects of one name apart
+  const keys = new Map<string, Set<string>>();
+  for (const c of [...calls, ...turnless]) keys.set(c.name, (keys.get(c.name) ?? new Set()).add(c.key));
+  const named = (p: { name: string; key: string }) =>
+    inline((keys.get(p.name)?.size ?? 0) > 1 ? `${p.name} (${p.key})` : p.name);
+  for (const group of groups.values()) {
+    const [first] = group;
+    if (!first) continue;
+    const from = new Date(first.called_at).toLocaleString("sv-SE");
+    const n = group.length;
+    const text =
+      first.host === "claude-code"
+        ? (() => {
+            const resend = group.filter((c) => c.tool_use_id && waiting.has(c.tool_use_id)).length;
+            return `Claude Code replies from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} without a hook observation (${resend} waiting to be resent, ${n - resend} that cannot be)`;
+          })()
+        : first.host === "codex"
+          ? `Codex replies from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} that named no session`
+          : `replies of every host from ${from} on are not adopted as AI decisions: ${plural(n, "record tool call")} that named no host`;
+    say("warn", "AI adoption", `${named(first)}: ${text}`);
+  }
+  for (const t of turnless)
+    say(
+      "warn",
+      "AI adoption",
+      `${named(t)}: Claude Code replies in ${plural(Number(t.sessions), "session")} from ${new Date(t.first ?? "").toLocaleString("sv-SE")} on are not adopted as AI decisions: a record tool's hook did not know the turn`,
+    );
+}
+
 async function doctor(cwd: string): Promise<void> {
   const issues: string[] = [];
   const count = (m: Mark, label: string) => {
@@ -156,15 +251,79 @@ async function doctor(cwd: string): Promise<void> {
     }
   }
   const s = readState();
-  say(
-    s.stuck ? "fail" : s.rejected ? "warn" : "ok",
-    "Recording",
-    `${s.pending} pending${s.flushedAt ? ` / last sent ${new Date(s.flushedAt).toLocaleString("sv-SE")}` : ""}${
-      s.stuck ? ` / failed: ${plain(s.stuck)} (sent again after the next turn)` : ""
-    }${s.unregistered ? ` / ${s.unregistered} set aside for unregistered projects (${unregisteredDir()})` : ""}${
-      s.rejected ? ` / ${s.rejected} rejected by the database (${rejectedDir()})` : ""
-    }`,
-  );
+  if (s.unreadable)
+    say("fail", "Recording", `the queue cannot be read (${inline(s.unreadable)}) at ${inline(spoolDir())}`);
+  else
+    say(
+      s.stuck ? "fail" : "ok",
+      "Recording",
+      `${s.pending} pending${s.flushedAt ? ` / last sent ${new Date(s.flushedAt).toLocaleString("sv-SE")}` : ""}${
+        s.stuck ? ` / failed: ${plain(s.stuck)} (sent again after the next turn)` : ""
+      }`,
+    );
+  const q = queueReport();
+  const dirOf = {
+    queue: spoolDir(),
+    calls: callsDir(),
+    rejected: rejectedDir(),
+    unregistered: unregisteredDir(),
+    callsRejected: callsRejectedDir(),
+  };
+  const minutes = (ms: number) =>
+    ms < 2 * 3_600_000
+      ? `${Math.round(ms / 60_000)} min`
+      : ms < 2 * 86_400_000
+        ? `${Math.round(ms / 3_600_000)} h`
+        : `${Math.round(ms / 86_400_000)} days`;
+  const reasons = (r: Record<string, number>) =>
+    Object.entries(r)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([why, n]) => `${inline(why)} ${n}`)
+      .join(", ");
+  for (const [k, d] of Object.entries(q.dirs) as [
+    keyof typeof dirOf,
+    (typeof q.dirs)[keyof typeof dirOf],
+  ][]) {
+    // The queue's own line says so already
+    if (d.code && k !== "queue")
+      say("fail", "Queue directory", `${inline(dirOf[k])} cannot be read (${inline(d.code)})`);
+    if (d.temp.count)
+      say(
+        "warn",
+        "Left-behind files",
+        `${plural(d.temp.count, "temporary file")} older than a minute in ${inline(dirOf[k])} (oldest ${minutes(d.temp.oldestMs)}, ${d.temp.bytes} bytes): written but never put in the queue`,
+      );
+  }
+  if (q.dirs.rejected.files)
+    say(
+      "warn",
+      "Rejected records",
+      `${plural(q.dirs.rejected.files, "record")} in ${inline(rejectedDir())}: ${reasons(q.rejected)}. Fix them, then move them back to ${inline(spoolDir())} to resend`,
+    );
+  if (q.held.length)
+    say(
+      "none",
+      "Held recordings",
+      `for projects not registered, in ${inline(unregisteredDir())}: ${q.held.map((h) => `${inline(h.project)} ${h.count} (oldest ${minutes(h.oldestMs)})`).join(" / ")}. Register a project with sphica init to send its recordings`,
+    );
+  if (q.pruned)
+    say(
+      "none",
+      "Last prune",
+      `${plural(q.pruned.count, "held recording")} expired at ${new Date(q.pruned.at).toLocaleString("sv-SE")}`,
+    );
+  if (q.dirs.calls.files)
+    say(
+      "none",
+      "Observations to resend",
+      `${plural(q.dirs.calls.files, "record tool observation")} ${q.dirs.calls.files === 1 ? "waits" : "wait"} in ${inline(callsDir())} for the next send`,
+    );
+  if (q.dirs.callsRejected.files)
+    say(
+      "warn",
+      "Observations not sent",
+      `${plural(q.dirs.callsRejected.files, "file")} in ${inline(callsRejectedDir())}: ${reasons(q.callsRejected)}`,
+    );
   if (usable) {
     try {
       await withDb("reader", async (db) => {
@@ -196,6 +355,7 @@ async function doctor(cwd: string): Promise<void> {
             "Records",
             `${plural(twice.length, "set")} of live records hold the same words. Read them with Sphica's read and withdraw the extra ones with /sphica:glean`,
           );
+        await adoptionStops(db, q.waiting, say);
         const { found, ambiguous } = localRoots();
         // git reports a repository's root through symlinks resolved (macOS's /var is /private/var), so both spellings of home count
         const homes = [os.homedir()];

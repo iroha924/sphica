@@ -94,7 +94,9 @@ Four boundaries (the header of schema.sql):
 - **Runs bind writes.** `extraction_run.draft_id` is the run id the record server's begin tools issue; check and save take it, and the record never names a project or target
 - **Record tool calls are logged.** The record server logs every tool call in `record_call` before it runs (host, caller session and turn, mode read by `callerOf` in
   `server/src/caller.ts`), and a run keeps its begin call. Claude Code puts no turn in a call, so a synchronous PreToolUse hook writes `tool_call_observation`
-  through the capture view `capture_tool_call`, joined by tool use id
+  through the capture view `capture_tool_call`, joined by tool use id. The hook first keeps the same observation in `spool/calls/` and removes it once written;
+  one it could not write (the lock held past its wait) is written by the next send, which lifts the stop on later replies but never on the calling turn's. A call with
+  no hook row, no tool use id, or before install stays unjoined for good: nothing guesses its turn from sessions or times
 
 ## Writers
 
@@ -103,7 +105,7 @@ Four boundaries (the header of schema.sql):
 | Capture hooks | capture | `server/src/capture.ts`: `capture_session`, `capture_message`, `capture_edit` views |
 | Delivery hooks | reader, then capture | `server/src/deliver.ts`: reads units, logs through the `capture_delivery` view |
 | Record MCP server | ingest | `server/src/mcp-record.ts` → `extract.ts` → `record.ts` (units), `glean.ts` (changes), `github.ts` (sources); states and replacement rows through `reconcile.ts` |
-| Record tool hook (Claude Code) | capture | `observeRecordCall` in `server/src/capture.ts`, through the `capture_tool_call` view |
+| Record tool hook (Claude Code) | capture | `observeRecordCall` in `server/src/capture.ts`, through the `capture_tool_call` view; what it could not write, by the next send from `spool/calls/` |
 | `sphica init` | owner, then ingest | `server/src/admin.ts` creates the DB; `cli.ts` registers the project |
 | `sphica doctor --reindex` | owner | `reindex()` in `admin.ts` |
 | `sphica init` on an older revision | owner | `migrate()` in `admin.ts` |

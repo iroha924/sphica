@@ -38,11 +38,18 @@ const stateFile = (): string => path.join(sphicaHome(), "capture.json");
 /** Records the database rejected. Moved here instead of deleted, and counted by doctor (fix and move them back to resend). */
 export const rejectedDir = (): string => path.join(spoolDir(), "rejected");
 /**
- * Records of projects not registered yet. Kept here instead of deleted. Hooks do not touch the database, so whether a project is
- * registered is known only when sending. Deleting them would lose the messages in between even after a later `sphica init`.
+ * Records of projects not registered yet. Kept here instead of deleted. The recording hooks queue without reading the database, so
+ * whether a project is registered is known only when sending. Deleting them would lose the messages in between even after a later `sphica init`.
  * The next send reads here too, so registering is enough for them to go in.
  */
 export const unregisteredDir = (): string => path.join(spoolDir(), "unregistered");
+/**
+ * Record tool observations kept until the database has them, so a hook that could not write one leaves it for the next send. Their own
+ * directory: an older send reads only the queue's top level and unregistered/, and would set aside a record with no project.
+ */
+export const callsDir = (): string => path.join(spoolDir(), "calls");
+/** Observations no send can write, with the reason beside each. Apart from rejected/, whose records go back to the queue's top level */
+export const callsRejectedDir = (): string => path.join(callsDir(), "rejected");
 /** Limit for set-aside records: room to move machines and register without filling the disk. */
 export const HOLD_DAYS = 30;
 export const HOLD_MAX = 1000;
@@ -154,7 +161,7 @@ export function fit(body: string): {
  * Prunes set-aside records. Without a limit they fill the disk — used without registering, unsendable
  * records pile up forever. Names start with the time they were stored (ms), so name order is oldest first.
  */
-function prune(held: string): void {
+function prune(held: string, removed: () => void = () => {}): void {
   let files: string[];
   try {
     files = fs
@@ -167,17 +174,25 @@ function prune(held: string): void {
   const cutoff = Date.now() - HOLD_DAYS * 24 * 60 * 60 * 1000;
   const stale = files.filter((f) => Number(f.split("-")[0]) < cutoff);
   const over = files.slice(0, Math.max(0, files.length - HOLD_MAX));
-  for (const f of new Set([...stale, ...over])) fs.rmSync(path.join(held, f), { force: true });
+  for (const f of new Set([...stale, ...over])) {
+    fs.rmSync(path.join(held, f), { force: true });
+    removed();
+  }
 }
 
-function spool(record: Spooled): void {
-  const dir = spoolDir();
+/** Writes one queued file into dir and returns its path. Names start with the time they were stored (ms), so name order is oldest first. */
+function put(dir: string, record: unknown): string {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const name = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}.json`;
   const tmp = path.join(dir, `.${name}`);
   // Write under another name, then replace, so a half-written file is never sent.
   fs.writeFileSync(tmp, JSON.stringify(record), { mode: 0o600 });
   fs.renameSync(tmp, path.join(dir, name));
+  return path.join(dir, name);
+}
+
+function spool(record: Spooled): void {
+  put(spoolDir(), record);
 }
 
 /** The current branch. Reads HEAD without starting git (in a worktree .git is a file pointing to the real location). */
@@ -293,13 +308,19 @@ export function captureNotice(file: string = dbFile()): string | null {
       "Create it with sphica init",
     );
   const s = readState();
+  if (s.unreadable)
+    return panel(
+      "sphica: cannot read the recording queue",
+      [spoolDir(), s.unreadable],
+      "Check with sphica doctor",
+    );
   if (s.stuck)
     return panel(
       "sphica: cannot send recordings",
       [`${s.pending} pending / failed: ${plain(s.stuck.slice(0, 120))}`],
       "Check with sphica doctor",
     );
-  if (s.rejected > 0)
+  if (s.rejected)
     return panel(
       `sphica: the database rejected ${plural(s.rejected, "record")}`,
       // Paths go in the box lines: a newline in HOME must not forge a line outside the box.
@@ -554,11 +575,37 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
   return { flush: false };
 }
 
-type State = { flushedAt?: string; error?: string | null; deferred?: number };
+/** pruned is the last time held records expired and how many: kept until a later prune removes some, so doctor can show it */
+type State = {
+  flushedAt?: string;
+  error?: string | null;
+  deferred?: number;
+  pruned?: { at: string; count: number };
+};
+
+/** The state file, each field read with a type check (so doctor and the SessionStart warning survive it being edited from outside). */
+function readStateFile(): State {
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(stateFile(), "utf8"));
+    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
+  } catch {
+    // Not sent yet, or half-written and unreadable
+  }
+  const p = raw.pruned as { at?: unknown; count?: unknown } | undefined;
+  return {
+    flushedAt: typeof raw.flushedAt === "string" ? raw.flushedAt : undefined,
+    // error is a string on send failure and null on success. An empty reason still counts as a failure.
+    error: typeof raw.error === "string" ? raw.error || "unknown failure" : null,
+    deferred: typeof raw.deferred === "number" ? raw.deferred : undefined,
+    pruned:
+      p && typeof p.at === "string" && typeof p.count === "number" ? { at: p.at, count: p.count } : undefined,
+  };
+}
 
 function writeState(s: State): void {
   try {
-    fs.writeFileSync(stateFile(), JSON.stringify(s));
+    fs.writeFileSync(stateFile(), JSON.stringify({ ...s, pruned: s.pruned ?? readStateFile().pruned }));
   } catch {
     // Recording continues even if the state cannot be written
   }
@@ -569,39 +616,126 @@ function writeState(s: State): void {
  * (once the queue empties, the failure is in the past). The session start warning and doctor share this check.
  */
 export function readState(): State & {
-  pending: number;
-  rejected: number;
-  unregistered: number;
+  pending: number | null;
+  rejected: number | null;
+  unregistered: number | null;
+  /** The error code when the queue itself cannot be read; its counts are then null, never 0 */
+  unreadable: string | null;
   stuck: string | null;
 } {
-  const count = (dir: string) => {
+  const queue = listQueue(spoolDir());
+  const counts = {
+    pending: queue.files?.length ?? null,
+    rejected: listQueue(rejectedDir()).files?.length ?? null,
+    unregistered: listQueue(unregisteredDir()).files?.length ?? null,
+  };
+  const state = readStateFile();
+  const stuck = state.error && (counts.pending ?? 0) > 0 ? state.error : null;
+  return { ...state, ...counts, unreadable: queue.code, stuck };
+}
+
+/** A queue directory's records and its dot-named temporary files. A directory not made yet is empty; one that cannot be read is null. */
+function listQueue(dir: string): { files: string[] | null; temp: string[]; code: string | null } {
+  try {
+    const names = fs.readdirSync(dir);
+    return {
+      files: names.filter((f) => f.endsWith(".json") && !f.startsWith(".")),
+      temp: names.filter((f) => f.endsWith(".json") && f.startsWith(".")),
+      code: null,
+    };
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code ?? "unknown";
+    return code === "ENOENT" ? { files: [], temp: [], code: null } : { files: null, temp: [], code };
+  }
+}
+
+/** A temporary file younger than this may be a write still going on, so only older ones count as left behind. */
+const TEMP_AGE_MS = 60_000;
+const REASON = /^[a-z]+(-[a-z]+)?(:[A-Z]+)?$/;
+
+type DirReport = {
+  files: number | null;
+  code: string | null;
+  temp: { count: number; oldestMs: number; bytes: number };
+};
+
+/**
+ * What doctor shows of the queue: each directory's records and temporary files left behind, why records were set aside, the held
+ * recordings by project, the observations waiting to be resent, and the last prune. Reads every held file, so only doctor calls it.
+ */
+export function queueReport(now: number = Date.now()) {
+  const dirs = {
+    queue: spoolDir(),
+    calls: callsDir(),
+    rejected: rejectedDir(),
+    unregistered: unregisteredDir(),
+    callsRejected: callsRejectedDir(),
+  };
+  const listed = Object.fromEntries(Object.entries(dirs).map(([k, d]) => [k, listQueue(d)])) as Record<
+    keyof typeof dirs,
+    ReturnType<typeof listQueue>
+  >;
+  const report = (k: keyof typeof dirs): DirReport => {
+    const temp = { count: 0, oldestMs: 0, bytes: 0 };
+    for (const name of listed[k].temp)
+      try {
+        const st = fs.statSync(path.join(dirs[k], name));
+        const age = now - st.mtimeMs;
+        if (age < TEMP_AGE_MS) continue;
+        temp.count++;
+        temp.bytes += st.size;
+        temp.oldestMs = Math.max(temp.oldestMs, age);
+      } catch {
+        // gone since listed
+      }
+    return { files: listed[k].files?.length ?? null, code: listed[k].code, temp };
+  };
+  const reasons = (k: "rejected" | "callsRejected") => {
+    const out: Record<string, number> = {};
+    for (const name of listed[k].files ?? []) {
+      let why = "unknown";
+      try {
+        const text = fs.readFileSync(path.join(dirs[k], `${name}.reason`), "utf8");
+        if (REASON.test(text)) why = text;
+      } catch {
+        // set aside before reasons were kept, or the reason could not be written
+      }
+      out[why] = (out[why] ?? 0) + 1;
+    }
+    return out;
+  };
+  const read = (dir: string, name: string): unknown => {
     try {
-      return fs.readdirSync(dir).filter((f) => f.endsWith(".json") && !f.startsWith(".")).length;
+      return JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
     } catch {
-      return 0; // not there yet
+      return null;
     }
   };
-  const counts = {
-    pending: count(spoolDir()),
-    rejected: count(rejectedDir()),
-    unregistered: count(unregisteredDir()),
-  };
-  // Read each field with a type check (so doctor and the SessionStart warning survive the file being edited from outside).
-  let raw: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(stateFile(), "utf8"));
-    if (parsed && typeof parsed === "object") raw = parsed as Record<string, unknown>;
-  } catch {
-    // Not sent yet, or half-written and unreadable
+  const held = new Map<string, { count: number; oldestMs: number }>();
+  for (const name of listed.unregistered.files ?? []) {
+    const key = (read(dirs.unregistered, name) as { project?: unknown } | null)?.project;
+    const project = typeof key === "string" ? key : "unreadable";
+    const age = Math.max(0, now - (Number(name.split("-")[0]) || now));
+    const h = held.get(project) ?? { count: 0, oldestMs: 0 };
+    held.set(project, { count: h.count + 1, oldestMs: Math.max(h.oldestMs, age) });
   }
-  // error is a string on send failure and null on success. An empty reason still counts as a failure.
-  const error = typeof raw.error === "string" ? raw.error || "unknown failure" : null;
+  const waiting = new Set<string>();
+  for (const name of listed.calls.files ?? []) {
+    const o = observation(read(dirs.calls, name));
+    if (o) waiting.add(o.toolUse);
+  }
   return {
-    flushedAt: typeof raw.flushedAt === "string" ? raw.flushedAt : undefined,
-    error,
-    deferred: typeof raw.deferred === "number" ? raw.deferred : undefined,
-    ...counts,
-    stuck: error && counts.pending > 0 ? error : null,
+    dirs: Object.fromEntries(Object.keys(dirs).map((k) => [k, report(k as keyof typeof dirs)])) as Record<
+      keyof typeof dirs,
+      DirReport
+    >,
+    rejected: reasons("rejected"),
+    callsRejected: reasons("callsRejected"),
+    held: [...held]
+      .map(([project, h]) => ({ project, ...h }))
+      .sort((a, b) => a.project.localeCompare(b.project)),
+    waiting,
+    pruned: readStateFile().pruned,
   };
 }
 
@@ -793,6 +927,24 @@ const queued = (from: string): { name: string; from: string }[] => {
   }
 };
 
+const CODE_NAMES: Record<number, string> = { 18: "TOOBIG", 19: "CONSTRAINT", 20: "MISMATCH", 25: "RANGE" };
+
+/** Moves a queued file into dir with a short reason beside it: a code, never the record's text or an error message. */
+function setAside(from: string, name: string, dir: string, reason: string): void {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    fs.renameSync(path.join(from, name), path.join(dir, name));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return; // a concurrent send moved it first
+    throw e;
+  }
+  try {
+    fs.writeFileSync(path.join(dir, `${name}.reason`), reason, { mode: 0o600 });
+  } catch {
+    // Without its reason doctor shows it as unknown; the record itself is kept
+  }
+}
+
 /**
  * Sends one batch. Records of unregistered projects are moved to unregistered/, records the database rejects to rejected/, the rest deleted.
  * **One invalid record never stops later records.** When the batch fails on a bad value it resends one by one.
@@ -804,13 +956,24 @@ async function sendBatch(
   const held = unregisteredDir();
   const records: { name: string; from: string; r: Spooled }[] = [];
   for (const { name, from } of names) {
+    let raw: unknown;
     let r: Spooled | null;
     try {
-      r = current(JSON.parse(fs.readFileSync(path.join(from, name), "utf8")));
+      raw = JSON.parse(fs.readFileSync(path.join(from, name), "utf8"));
     } catch {
-      // Unreadable or of an unknown version: set it aside for the owner to see, never delete it
-      fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
-      fs.renameSync(path.join(from, name), path.join(rejectedDir(), name));
+      // Set aside for the owner to see, never deleted
+      setAside(from, name, rejectedDir(), "unreadable");
+      continue;
+    }
+    try {
+      r = current(raw);
+    } catch {
+      setAside(
+        from,
+        name,
+        rejectedDir(),
+        typeof (raw as { project?: unknown })?.project === "string" ? "version" : "no-project",
+      );
       continue;
     }
     if (r) records.push({ name, from, r });
@@ -818,7 +981,7 @@ async function sendBatch(
   }
   let sent = 0;
   let strayed: typeof records = [];
-  const bad: typeof records = [];
+  const bad: ((typeof records)[number] & { why: string })[] = [];
   try {
     const out = await write(
       db,
@@ -836,20 +999,11 @@ async function sendBatch(
         if (out.strayed.size) strayed.push(x);
       } catch (e2) {
         if (!rejected(e2)) throw e2;
-        bad.push(x);
+        bad.push({ ...x, why: `sqlite:${CODE_NAMES[sqliteCode(e2) ?? -1] ?? "unknown"}` });
       }
     }
   }
-  if (bad.length) {
-    fs.mkdirSync(rejectedDir(), { recursive: true, mode: 0o700 });
-    for (const x of bad) {
-      try {
-        fs.renameSync(path.join(x.from, x.name), path.join(rejectedDir(), x.name));
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; // a concurrent send moved it first
-      }
-    }
-  }
+  for (const x of bad) setAside(x.from, x.name, rejectedDir(), x.why);
   if (strayed.length) {
     fs.mkdirSync(held, { recursive: true, mode: 0o700 });
     for (const x of strayed) {
@@ -867,9 +1021,75 @@ async function sendBatch(
 }
 
 /**
+ * Writes one batch of observations from calls/, removing each file only after the database has it. Only content that can never be written
+ * is set aside; a file that cannot be read, moved, or removed stays for the next send. False when the database itself failed (an older
+ * revision without the view, a busy lock): the rest stay too, and the send goes on to the queue.
+ */
+async function sendObservations(db: Kysely<DB>, names: { name: string; from: string }[]): Promise<boolean> {
+  // One that cannot be moved either stays in calls/, so the next send tries it again
+  const aside = (name: string, why: string) => {
+    try {
+      setAside(callsDir(), name, callsRejectedDir(), why);
+    } catch {
+      // left where it is
+    }
+  };
+  const rows: { name: string; o: Observation }[] = [];
+  for (const { name, from } of names) {
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(from, name), "utf8");
+    } catch {
+      // Gone (its hook wrote it and removed it) or not readable now
+      continue;
+    }
+    let o: Observation | null = null;
+    let why = "unreadable";
+    try {
+      o = observation(JSON.parse(text));
+      why = "shape";
+    } catch {
+      // not JSON
+    }
+    if (o) rows.push({ name, o });
+    else aside(name, why);
+  }
+  if (!rows.length) return true;
+  const insert = (part: typeof rows) =>
+    db
+      .insertInto("capture_tool_call")
+      .values(part.map((x) => observationRow(x.o)))
+      .execute();
+  const bad = new Map<string, string>();
+  try {
+    await insert(rows);
+  } catch (e) {
+    if (!rejected(e)) return false;
+    for (const x of rows)
+      try {
+        await insert([x]);
+      } catch (e2) {
+        if (!rejected(e2)) return false;
+        bad.set(x.name, `sqlite:${CODE_NAMES[sqliteCode(e2) ?? -1] ?? "unknown"}`);
+      }
+  }
+  for (const x of rows) {
+    const why = bad.get(x.name);
+    if (why) aside(x.name, why);
+    else
+      try {
+        fs.rmSync(path.join(callsDir(), x.name), { force: true });
+      } catch {
+        // Written already: the next send writes it again, which adds nothing
+      }
+  }
+  return true;
+}
+
+/**
  * Sends the queue to the database. **The connection is capture, and this only adds rows.** Sending the same thing twice adds no rows.
  * Records of unregistered projects are held (only projects registered with `sphica init` are recorded); the first lock hold looks at
- * the held records present when it starts once, so they never take the place of queued records. The queue is then sent in batches
+ * the held records and then the kept record tool observations present when it starts once, so they never take the place of queued records. The queue is then sent in batches
  * until it is empty or `budgetMs` is spent, at least one batch of it per call. A send that finds the lock taken waits for it within its budget,
  * and after unlocking a send looks at the queue again, so a holder that runs out of time does not leave records behind.
  * Failures such as a lost connection keep the batch queued for the next send.
@@ -886,6 +1106,9 @@ export async function flush(
   const total = { sent: 0, deferred: 0, rejected: 0 };
   let batches = 0;
   let queueBatches = 0;
+  // Summed over every lock hold of this send, so a later hold's state never undercounts an earlier hold's prune
+  let removed = 0;
+  const pruned = () => (removed ? { at: new Date().toISOString(), count: removed } : undefined);
   for (let first = true; ; first = false) {
     let unlock = lock();
     while (!unlock && Date.now() < deadline) {
@@ -907,10 +1130,16 @@ export async function flush(
     try {
       if (first) {
         // Expired held records are dropped before they could be sent. Records held during this send are not in the list.
-        prune(held);
+        prune(held, () => removed++);
         for (const part of chunks(queued(held), BATCH)) {
           if (late()) break;
           await send(part);
+        }
+        for (const part of chunks(queued(callsDir()), BATCH)) {
+          if (late()) break;
+          client ??= openWriter("capture", file);
+          if (!(await sendObservations(client, part))) break;
+          batches++;
         }
       }
       while (queueBatches === 0 || !late()) {
@@ -919,13 +1148,19 @@ export async function flush(
         await send(part);
         queueBatches++;
       }
-      prune(held);
+      prune(held, () => removed++);
       total.deferred = queued(held).length;
       // Written before unlocking, so it never overwrites the state of a send that ran after this one. With nothing sent, the last send time stays.
       if (batches > sentBefore)
-        writeState({ flushedAt: new Date().toISOString(), error: null, deferred: total.deferred });
+        writeState({
+          flushedAt: new Date().toISOString(),
+          error: null,
+          deferred: total.deferred,
+          pruned: pruned(),
+        });
+      else if (removed) writeState({ ...readStateFile(), pruned: pruned() });
     } catch (e) {
-      writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300) });
+      writeState({ flushedAt: new Date().toISOString(), error: reason(e).slice(0, 300), pruned: pruned() });
       throw e;
     } finally {
       await (client as Kysely<DB> | null)?.destroy().catch(() => {});
@@ -948,36 +1183,91 @@ const RECORD_TOOLS = "mcp__plugin_sphica_record__";
 /** How long the record tools' hook waits for a save holding the lock. The tool waits too, so this stays under the hook's timeout */
 const OBSERVE_WAIT_MS = 5000;
 
-/**
- * Logs a record tool call's session and turn before the tool runs, written straight to the database (never queued): the record server
- * joins its own log to this by tool use id, since Claude Code puts no turn in the MCP call.
- */
 /** A host's id or short name: anything else is never stored as sent */
-const hostId = (v: string | undefined) => (v && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null);
+const hostId = (v: unknown) => (typeof v === "string" && /^[\x21-\x7e]{1,200}$/.test(v) ? v : null);
 
-export async function observeRecordCall(file: string, input: HookInput, owner: boolean): Promise<void> {
+/** A record tool call as the hook saw it: what the hook writes to the database and keeps in calls/ until the database has it. */
+export type Observation = {
+  v: 1;
+  host: "claude-code";
+  session: string;
+  turn: string | null;
+  toolUse: string;
+  tool: string;
+  owner: 0 | 1;
+  at: string;
+};
+const OBSERVATION_KEYS = ["at", "host", "owner", "session", "tool", "toolUse", "turn", "v"].join();
+
+/**
+ * The observation in raw, or null unless it is exactly what the hook writes. Never repaired: a file changed into another valid shape
+ * would place a call in a turn the hook never saw. The time is a 4-digit year, as SQLite's date functions read it.
+ */
+export function observation(raw: unknown): Observation | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (Object.keys(o).sort().join() !== OBSERVATION_KEYS) return null;
+  if (o.v !== 1 || o.host !== "claude-code" || !hostId(o.session) || !hostId(o.toolUse)) return null;
+  if (!hostId(o.tool)?.startsWith(RECORD_TOOLS)) return null;
+  if (o.turn !== null && !hostId(o.turn)) return null;
+  if (o.owner !== 0 && o.owner !== 1) return null;
+  const at =
+    typeof o.at === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(o.at) ? o.at : null;
+  if (!at || Number.isNaN(Date.parse(at)) || new Date(at).toISOString() !== at) return null;
+  return o as Observation;
+}
+
+const observationRow = (o: Observation) => ({
+  host: o.host,
+  session_external: o.session,
+  turn_id: o.turn,
+  tool_use_id: o.toolUse,
+  tool_name: o.tool,
+  owner_turn: o.owner,
+  observed_at: o.at,
+});
+
+/**
+ * Logs a record tool call's session and turn before the tool runs, written straight to the database: the record server joins its own log
+ * to this by tool use id, since Claude Code puts no turn in the MCP call. The same observation is kept in calls/ first and removed once
+ * written, so one the hook could not write (the lock held past the wait, the hook stopped) is resent by the next send.
+ */
+export async function observeRecordCall(
+  file: string,
+  input: HookInput,
+  owner: boolean,
+  waitMs: number = OBSERVE_WAIT_MS,
+): Promise<void> {
   // Out of bounds, the call goes unobserved, so the record server treats it as unplaced and adoption stays off
-  const session = hostId(input.session_id);
-  const toolUse = hostId(input.tool_use_id);
-  const tool = hostId(input.tool_name);
-  if (!session || !toolUse || !tool?.startsWith(RECORD_TOOLS)) return;
-  const cap = openWriter("capture", file, OBSERVE_WAIT_MS);
+  const o = observation({
+    v: 1,
+    host: "claude-code",
+    session: hostId(input.session_id),
+    turn: hostId(input.prompt_id),
+    toolUse: hostId(input.tool_use_id),
+    tool: hostId(input.tool_name),
+    owner: owner ? 1 : 0,
+    at: iso(Date.now()),
+  });
+  if (!o) return;
+  let kept: string | null = null;
   try {
-    await cap
-      .insertInto("capture_tool_call")
-      .values({
-        host: "claude-code",
-        session_external: session,
-        turn_id: hostId(input.prompt_id),
-        tool_use_id: toolUse,
-        tool_name: tool,
-        owner_turn: owner ? 1 : 0,
-        observed_at: iso(Date.now()),
-      })
-      .execute();
+    kept = put(callsDir(), o);
+  } catch {
+    // Not kept: the write below still goes ahead, so a call the database can take is still observed
+  }
+  const cap = openWriter("capture", file, waitMs);
+  try {
+    await cap.insertInto("capture_tool_call").values(observationRow(o)).execute();
   } finally {
     await cap.destroy().catch(() => {});
   }
+  if (kept)
+    try {
+      fs.rmSync(kept, { force: true });
+    } catch {
+      // Left behind, the next send writes it again, which adds nothing
+    }
 }
 
 async function main(): Promise<void> {
