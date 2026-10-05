@@ -412,6 +412,7 @@ test("an init killed as it publishes leaves the old map whole, and its lock name
   try {
     const r = spawnSync(process.execPath, [NAME_CHILD, "die", h.a, "alpha", signals], {
       env: childEnv(h.home),
+      timeout: 30_000,
     });
     assert.equal(r.status, 1, String(r.stderr));
     assert.deepEqual(JSON.parse(fs.readFileSync(h.map, "utf8")), { [h.first]: "first" });

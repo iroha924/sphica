@@ -248,7 +248,9 @@ test("doctor says where it looked for a project it did not find, and lists a pro
         timeout: 30_000,
       });
     } catch (e) {
-      const err = e as { stdout?: string; stderr?: string };
+      const err = e as { stdout?: string; stderr?: string; code?: string };
+      // doctor exits 1 on this machine's plugin state, which is not what this test is about; a hang is
+      if (err.code === "ETIMEDOUT") throw new Error(`sphica ${args.join(" ")} did not finish in 30 seconds`);
       return `${err.stdout ?? ""}${err.stderr ?? ""}`;
     }
   };

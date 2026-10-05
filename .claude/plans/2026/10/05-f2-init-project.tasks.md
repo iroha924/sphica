@@ -133,6 +133,15 @@ doctor が、見つからない project には探した場所を、コピーが�
   - コミット: `fix(doctor): shorten home in paths Git for Windows writes with forward slashes`
   - 結果: red（今の比べ方を underHome に移しただけの状態）→ `actual: 'C:/Users/o/Projects/one'`、`expected: '~\\Projects\\one'` で落ちた。直した後: project.test.ts → 19 件 pass、doctor の copies のテスト → pass。`bun run verify` → exit 0
 
+- [x] T12: 競合と doctor のテストが子プロセスの止まりを見逃さないようにし、Windows のジョブのコメントを直す
+  - 種別: 変更
+  - 計画: S5
+  - 依存: T05（直す対象の子プロセスの同期が要る）, T06（直す対象の doctor のテストが要る）
+  - 変更: `server/test/race.ts`, `server/test/project.test.ts`, `server/test/cli.test.ts`, `.github/workflows/check.yml`
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/project.test.ts test/admin.test.ts test/cli.test.ts` → pass。`actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → 終了コード 0
+  - コミット: `test(init): fail on a hung child or CLI instead of passing on partial output`
+  - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0（project・admin・cli のテストを含む）
+
 ## 記録
 
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
@@ -145,3 +154,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 - 2026-10-05 / T05 / Codex のレビュー（6b4cd5d9）→ 指摘なし
 - 2026-10-05 / T10 / review-shipping（Windows で削除待ちのロックに wx が EPERM を返す、推測）と全差分の Codex のレビュー（F1、tmp の削除の EBUSY を故障注入で再現）/ 修正タスク T10 を足して直した。review-shipping の check.yml のコメントの指摘は T12 で直す
 - 2026-10-05 / T11 / 全差分の Codex のレビュー（F4）と T06 の Codex のレビュー（F1）: Windows の git の `C:/…` のパスでホームを ~ に縮められない / 修正タスク T11 を足して直した
+- 2026-10-05 / T12 / 全差分の Codex のレビュー（F2: doctor のテストが ETIMEDOUT を見逃す、再現。F3: 競合の子プロセスに終了の期限が無い）と T06 のレビュー（F2、同じ指摘）、review-shipping（check.yml のコメントの only が古い）/ T12 を足して直した。テストの不備なので変更として扱った

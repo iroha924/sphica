@@ -17,7 +17,7 @@ export function childEnv(home: string): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Starts script with args and blocks until it signals into signals, at most 20 s. Returns the child's exit. */
+/** Starts script with args and blocks until it signals into signals, at most 20 s. Returns the child's exit (killed after 30 s). */
 export function runUntilSignal(
   script: string,
   args: string[],
@@ -35,7 +35,14 @@ export function runUntilSignal(
   child.stderr.on("data", (d) => {
     out += d;
   });
-  const exited: Child = new Promise((resolve) => child.on("close", (code) => resolve({ code, out })));
+  // A child that hangs after signalling is killed, so the test fails with the child's output instead of only the test timeout
+  const timer = setTimeout(() => child.kill(), 30_000);
+  const exited: Child = new Promise((resolve) =>
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, out });
+    }),
+  );
   const until = Date.now() + 20_000;
   while (!fs.existsSync(path.join(signals, "done")) && !fs.existsSync(path.join(signals, "blocked"))) {
     if (Date.now() > until) {
