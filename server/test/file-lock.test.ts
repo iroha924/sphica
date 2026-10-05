@@ -101,6 +101,62 @@ test("the holder removes only a lock that still holds its own pid", () => {
   assert.equal(fs.readFileSync(lock, "utf8"), String(process.ppid));
 });
 
+test("when the pid write fails after the exclusive create, the lock is removed and the error is thrown", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  const write = fs.writeFileSync;
+  t.mock.method(fs, "writeFileSync", (target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    // Created, then the disk is full: by path the file appears empty first, by descriptor it already exists
+    if (target === lock) write(lock, "", { flag: "wx" });
+    if (target === lock || typeof target === "number")
+      throw Object.assign(new Error("no space"), { code: "ENOSPC" });
+    return (write as (...a: unknown[]) => void)(target, ...rest);
+  });
+  let ran = false;
+  assert.throws(
+    () =>
+      withFileLock(lock, () => {
+        ran = true;
+      }),
+    /no space/,
+  );
+  t.mock.restoreAll();
+  assert.equal(ran, false);
+  assert.equal(fs.existsSync(lock), false, "the lock this call created was left behind");
+});
+
+test("a remove Windows refuses for a moment is retried until the lock is gone", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  const rm = fs.rmSync;
+  let refused = 0;
+  t.mock.method(fs, "rmSync", (target: fs.PathLike, options?: fs.RmOptions) => {
+    if (target === lock && refused++ < 2) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+    rm(target, options);
+  });
+  assert.equal(
+    withFileLock(lock, () => 7),
+    7,
+  );
+  t.mock.restoreAll();
+  assert.equal(fs.existsSync(lock), false);
+});
+
+test("a lock it cannot remove is reported, not left behind silently (cannot remove)", (t) => {
+  const lock = path.join(tmp(), "x.lock");
+  t.mock.method(fs, "rmSync", () => {
+    throw Object.assign(new Error("busy"), { code: "EBUSY" });
+  });
+  assert.throws(
+    () => withFileLock(lock, () => 7),
+    (e: Error) => e.message.includes(`could not remove ${lock}`),
+  );
+  // An error from fn itself wins over the failed remove
+  assert.throws(
+    () => withFileLock(path.join(path.dirname(lock), "y.lock"), () => assert.fail("fn failed")),
+    /fn failed/,
+  );
+  t.mock.restoreAll();
+});
+
 test("replaceFile replaces an existing file and leaves no temporary file", () => {
   const dir = tmp();
   const file = path.join(dir, "t.json");

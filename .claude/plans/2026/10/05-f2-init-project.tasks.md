@@ -47,7 +47,7 @@ base: main
   - コミット: `ci(windows): run the file lock tests on Windows`
   - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0。Windows のジョブの step の pass は push 後に plan の A4 で確かめる
 
-- [ ] T07: ロックの pid の書き込みと削除の失敗でロックを残さない
+- [x] T07: ロックの pid の書き込みと削除の失敗でロックを残さない
   - 種別: 修正
   - 計画: S1
   - 依存: T02（直す対象の withFileLock が要る）
@@ -55,6 +55,7 @@ base: main
   - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="pid write fails|cannot remove" test/file-lock.test.ts` → pid の書き込みが ENOSPC で失敗した後に空のロックが残り、削除が EBUSY で失敗しても withFileLock が成功を返して落ちる。テストだけを先に足す
   - 完了条件: 同じコマンド → pass（書き込みの失敗ではロックを消して投げる。削除の一時的な失敗は取り直し、消せなければ fn の結果ではなくロックの場所を伝えるエラーを投げる）。`bun run verify` → 終了コード 0
   - コミット: `fix(lock): never leave the lock behind when writing the pid or removing it fails`
+  - 結果: red（直す前の file-lock.ts）→ 3 件が落ちた: 「the lock this call created was left behind」、EBUSY の後にロックが残る、消せないロックで `Missing expected exception`。直した後: `cd server && node --test --test-timeout=60000 test/file-lock.test.ts` → 12 件 pass。`bun run verify` → exit 0
 
 ## P2: init の同時実行を直す
 
@@ -93,3 +94,4 @@ doctor が、見つからない project には探した場所を、コピーが�
 ## 記録
 
 - 2026-10-05 / T07 / T02 の Codex のレビュー（F1・F2、故障注入で再現）で、pid の書き込みの失敗と削除の失敗でロックが残ることが分かった / 修正タスク T07 を T03 の後に足した
+- 2026-10-05 / T03 / Codex のレビュー（c5f547a2）→ 指摘なし / Windows での pass は A4 で確かめる

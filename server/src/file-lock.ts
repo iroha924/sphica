@@ -6,11 +6,25 @@ import fs from "node:fs";
 
 const WAIT_MS = 5_000;
 const POLL_MS = 40;
-const RENAME_TRIES = 5;
+const TRIES = 5;
 
 const sleep = (ms: number): void => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 };
+
+/** Runs op, retrying the errors Windows gives while a scanner or a reader has the file open */
+function retryBusy(op: () => void): void {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      op();
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (attempt >= TRIES || !(code === "EPERM" || code === "EACCES" || code === "EBUSY")) throw e;
+      sleep(50 * attempt);
+    }
+  }
+}
 
 /** Why a waiter gave up: the holder's pid, and whether that pid is gone (only ESRCH says so; any other answer leaves it unknown). */
 function heldBy(lock: string): string {
@@ -39,23 +53,58 @@ export function withFileLock<T>(lock: string, fn: () => T, waitMs = WAIT_MS): T 
   const mine = String(process.pid);
   const until = performance.now() + waitMs;
   for (;;) {
+    let fd: number | null = null;
     try {
-      fs.writeFileSync(lock, mine, { flag: "wx" });
-      break;
+      fd = fs.openSync(lock, "wx");
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    }
+    if (fd !== null) {
+      // The create succeeded, so the file is this call's even if the pid never gets into it
+      try {
+        fs.writeFileSync(fd, mine);
+      } catch (e) {
+        fs.closeSync(fd);
+        fs.rmSync(lock, { force: true });
+        throw e;
+      }
+      fs.closeSync(fd);
+      break;
     }
     if (performance.now() >= until) throw new Error(heldBy(lock));
     sleep(POLL_MS);
   }
+  let result: T;
   try {
-    return fn();
-  } finally {
+    result = fn();
+  } catch (e) {
+    // fn's own error is the one to report; a lock that cannot be removed then shows as held on the next run
     try {
-      if (fs.readFileSync(lock, "utf8") === mine) fs.rmSync(lock, { force: true });
+      release(lock, mine);
     } catch {
-      // already gone
+      // reported by the next run's timeout
     }
+    throw e;
+  }
+  release(lock, mine);
+  return result;
+}
+
+/** Removes lock if it still holds mine. A remove that keeps failing throws, so a lock left behind is never silent. */
+function release(lock: string, mine: string): void {
+  let held: string;
+  try {
+    held = fs.readFileSync(lock, "utf8");
+  } catch {
+    return; // already gone
+  }
+  if (held !== mine) return;
+  try {
+    retryBusy(() => fs.rmSync(lock, { force: true }));
+  } catch (e) {
+    throw new Error(
+      `The work finished, but Sphica could not remove ${lock} (${(e as Error).message}). Delete it before running this again.`,
+    );
   }
 }
 
@@ -74,16 +123,7 @@ export function replaceFile(file: string, text: string): void {
     } finally {
       fs.closeSync(fd);
     }
-    for (let attempt = 1; ; attempt++) {
-      try {
-        fs.renameSync(tmp, file);
-        return;
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (attempt >= RENAME_TRIES || !(code === "EPERM" || code === "EACCES" || code === "EBUSY")) throw e;
-        sleep(50 * attempt);
-      }
-    }
+    retryBusy(() => fs.renameSync(tmp, file));
   } catch (e) {
     fs.rmSync(tmp, { force: true });
     throw e;
