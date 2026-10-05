@@ -167,6 +167,8 @@ export async function lookOverview(
   let used = 0;
   // Room kept for a cursor longer than the fixed reserve covers: a marker's cursor carries its file's path
   let reserve = 0;
+  /** Whether this page looked at any marker */
+  let begun = false;
   let stop: Cursor | null = null;
   /** Adds a line when it fits the page; false means the page is full and the item waits for the next page */
   const fits = (to: string[], line: string) => {
@@ -324,7 +326,11 @@ export async function lookOverview(
           units.set(u.key, u);
       const chains = new Map<number, { key: string; lifecycle: string } | null>();
       let last: Cursor | null = from.s === "markers" ? from : null;
-      for (const f of todo) {
+      // Lines from earlier sections may leave no room for a long markers cursor: then the markers start on the next page
+      if (used > 0 && used + reserve > LOOK_LIMITS.bytes)
+        stop = last ?? { s: "markers", file: "", line: 0, n: 0 };
+      for (const f of stop ? [] : todo) {
+        begun = true;
         const u = units.get(f.key);
         const where = `- ${inline(f.file)}:${f.line}: ${inline(f.key)}`;
         let line: string | null = null;
@@ -373,7 +379,8 @@ export async function lookOverview(
         "none",
       ),
     );
-  if (reached(3))
+  // The markers heading appears once the page has looked at a marker, or when the list ends with none
+  if (reached(3) && (begun || stop === null))
     sections.push(section("Rule markers whose record changed", lines.marked, root ? "none" : "not checked"));
   return [
     ...sections,

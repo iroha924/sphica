@@ -737,3 +737,41 @@ test("look cursor size: a page whose cursor names a long instruction-file path s
     await db.done();
   }
 });
+
+test("look cursor size across stages: conditions that nearly fill a page leave room for a long markers cursor", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-cross-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: `${said} If replicas are ever needed, look again.` });
+    const option = (n: number) => ({
+      text: `${"o".repeat(110)}${n}`,
+      outcome: "rejected",
+      reconsider_when: `if replicas are ever needed ${"w".repeat(320)}`,
+      reconsider_quote: { source: `s${m}`, quote: "If replicas are ever needed, look again." },
+    });
+    await save(
+      db,
+      p,
+      Array.from({ length: 6 }, (_, r) =>
+        record(m, `opts${r}`, "decision", {
+          options: Array.from({ length: 10 }, (_, o) => option(r * 10 + o)),
+        }),
+      ),
+    );
+    const dir = path.join(root, ..."abc".split("").map((c) => `${c}${"\u0001".repeat(200)}`));
+    fs.mkdirSync(dir, { recursive: true });
+    // The first marker names a live record (nothing to show), the second one no record of this project
+    fs.writeFileSync(
+      path.join(dir, "CLAUDE.md"),
+      `- <!-- sphica: trace:ext-s1/opts0 -->\n- <!-- sphica: trace:${"u".repeat(900)}/gone -->\n`,
+    );
+    const pages = await lookPages(db, p, root);
+    const all = pages.join("\n");
+    assert.equal([...all.matchAll(/rejected option o{110}\d+,/g)].length, 60);
+    assert.equal([...all.matchAll(/u{900}\/gone is not a record/g)].length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});

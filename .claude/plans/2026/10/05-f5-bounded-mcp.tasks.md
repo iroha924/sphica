@@ -223,6 +223,16 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
   - コミット: `fix(review): refuse an empty batch, fit long look cursors, keep the selection`
   - 結果: `bun run verify` → 0（T17〜T19 をまとめて）
 
+- [x] T20: 前の段の行でページが埋まっているときは、markers を次のページから始める
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T18（markers のカーソルの分を確保する）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`
+  - red: `cd server && node --test --test-name-pattern 'look cursor size across stages' test/overview.test.ts` → 60 件の条件の後に長いパスの CLAUDE.md の marker が来ると、1 ページ目が 33820 bytes で fail
+  - 完了条件: `cd server && node --test test/overview.test.ts` → pass。そのページが枠込みで 32 KiB 以下、60 件の条件と marker に 1 回ずつ届く
+  - コミット: `fix(overview): start the markers on the next page when their cursor will not fit`
+  - 結果: red: 上のコマンド → 33820 bytes で fail。実装後: markers の段の入口で、前の段の行とカーソルの分が予算を超えるなら markers の手前で止め、そのページに markers の見出しを出さない。`node --test test/overview.test.ts` → 17 pass。`bun run verify` → 0
+
 ## 記録
 
 - 2026-10-05 / T01 / checkFindings の形が変わり、acceptance の driver の型検査が通らなくなる / 変更欄に `server/evals/acceptance/driver.ts` を足し（前: 無し）、review_validate を最小限合わせた。diff・after・selection を通すのは T07 のまま
@@ -245,3 +255,4 @@ acceptance の driver が MCP と同じ組み立てを通り、束・続き・�
 - 2026-10-05 / T16 / 種別を修正から変更にし red の欄を消した（完了したタスクの欄の直し）/ 64 KiB の応答を Codex が真ん中で切ることはホストの挙動で、テストの中で落ちる red を作れない（review-shipping が packed の server で再現済み）。tasks の検査の違反を `| head` で見落としたままコミットしたので、このコミットで直した
 - 2026-10-05 / 完了確認 / package にした server（HEAD 7907cd2d）で両ホストを 1 回ずつ実測: 150 KB の `LINE-00001 lorem ipsum dolor sit amet` の行の source を read の `["s1"]` で読む。Codex 0.160.0（codex exec --json、hooks と plugins は無効）は mcp_tool_call の結果が 33,701 文字で truncated なし、モデルは LINE-00001〜00852 を切れ目なく見て続きは s1@32348。Claude Code 2.1.289（claude -p、--strict-mcp-config）は tool_result がファイルに退避されずそのまま 33,660 文字、続きは s1@32348 / 32 KiB は両ホストでそのまま届く。日本語、引用符やバックスラッシュの多い本文、Codex の Code Mode は未計測
 - 2026-10-05 / T13〜T16 / Codex の再レビュー（high）: F1（P2、再現済み）50 の倍数の件数で最後の id を after にした空の束の check が backed を返す → T17。F2（P2、再現済み）長いパスの指示ファイルのカーソルで look のページが 32 KiB を超える → T18。F3（P2）driver で diff を明示すると selection を作り直す → T19 / すべて採る
+- 2026-10-05 / T17〜T19 / Codex の再レビュー（high）F1（P2、再現済み）: markers のカーソルの分を、前の段の行がページを使った後でしか数えていないので、条件の後に長いパスの marker が来ると 32 KiB を超える / 採る。修正タスク T20。T17 と T19 には指摘なし
