@@ -70,7 +70,7 @@ base: main
   - 結果: `cd server && node --test test/deliver.test.ts` → pass 46 / fail 0
   - 結果: `node server/evals/scale/run.ts --sizes 3000,10000 --no-stress --no-drain` → uniform 10,000 件のプロンプトの最大 133 ms・130 ms・177 ms（修正前は 3 行とも timeout）、3,000 件で最大 148 ms
 
-- [ ] T05: review の選び出しの修正（32,767 件で失敗する件を含む）
+- [x] T05: review の選び出しの修正（32,767 件で失敗する件を含む）
   - 種別: 修正
   - 計画: S3, S5
   - 依存: T03（選び出しと配信の結果を固定してから書き換える）
@@ -78,6 +78,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern "32,767" test/review.test.ts` → 場所の無い dont / defer が 32,767 件で `too many SQL variables` になり落ちる
   - 完了条件: `cd server && node --test test/review.test.ts test/deliver.test.ts` → 全部通る
   - コミット: `fix(review): select location-free options through a subquery and group them per unit`
+  - 結果: red `cd server && node --test --test-name-pattern "32,767" test/review.test.ts` → 修正前のコードで `Error: too many SQL variables` で落ちた
+  - 結果: `cd server && node --test test/review.test.ts test/review-bridge.test.ts test/deliver.test.ts` → pass 74 / fail 0
 
 - [ ] T06: 計測し直し、Bash の配信が 1 秒を超えていれば直す
   - 種別: 修正
