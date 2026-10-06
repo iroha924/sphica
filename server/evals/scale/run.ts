@@ -258,7 +258,7 @@ const CASES: Case[] = [
     name: "read 10 files in one session",
     event: "PreToolUse",
     input: { tool_name: "Read" },
-    expect: () => [],
+    expect: (f) => [f.keys.last ?? ""],
     calls: 10,
     only: "stress",
   },
@@ -284,7 +284,7 @@ const CASES: Case[] = [
     name: "subagent start",
     event: "SubagentStart",
     input: { agent_id: "a1", agent_type: "Explore" },
-    expect: () => [],
+    expect: (f) => (f.keys.broad ? [f.keys.broad] : []),
   },
 ];
 
