@@ -20,6 +20,9 @@ on:
       - scripts/lib/tarball.mjs
       - scripts/check-sbom.mjs
       - scripts/lib/sbom.mjs
+      - scripts/sbom-embedded.mjs
+      - scripts/lib/embedded.mjs
+      - scripts/licenses/embedded/**
       - scripts/release-env.mjs
       - scripts/lib/release-env.mjs
       - scripts/release-finish.mjs
@@ -63,6 +66,13 @@ jobs:
           echo "${SYFT_SHA256}  syft.tar.gz" | sha256sum -c -
           tar xzf syft.tar.gz syft
           ./syft scan "dir:$GITHUB_WORKSPACE/server" -o "cyclonedx-json=$RUNNER_TEMP/sbom.cdx.json" -q
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      # The MCP SDK carries some packages inside its dist, which the lockfile does not list; prepare checks and publish attests this file
+      - name: Add the packages the MCP SDK carries in its dist
+        run: node scripts/sbom-embedded.mjs "$RUNNER_TEMP/sbom.cdx.json" "$RUNNER_TEMP/sbom.cdx.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom
@@ -88,6 +98,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      # The packages the MCP SDK carries in its dist are in no lockfile, so the scan reads them from an SBOM of their own
+      - name: List the packages the MCP SDK carries in its dist
+        run: node scripts/sbom-embedded.mjs --only-embedded "$RUNNER_TEMP/embedded.cdx.json"
       # osv-scanner from its release with a pinned checksum, not the action, whose image is a mutable tag. The summary trusts the
       # results only with the exit code this step records (0 none, 1 found), so a scan that did not finish is never read as clean
       - name: Scan dependencies
@@ -104,18 +121,14 @@ jobs:
           echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
           status=0
-          ./osv-scanner -r --format=json --output-file="$RUNNER_TEMP/osv/results.json" "$GITHUB_WORKSPACE" || status=$?
+          ./osv-scanner -r -L "$RUNNER_TEMP/embedded.cdx.json" --format=json --output-file="$RUNNER_TEMP/osv/results.json" "$GITHUB_WORKSPACE" || status=$?
           echo "exit=$status" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24.21.0"
-          package-manager-cache: false
       - name: Summarize the scan
         id: summary
         env:
           SCANNER_EXIT: ${{ steps.scan.outputs.exit }}
         run: node scripts/osv-summary.mjs "$RUNNER_TEMP/osv/results.json" "$(git rev-parse HEAD)" "$SCANNER_EXIT"
-      # checkout and setup-node have no continue-on-error, so the summary must not depend on them
+      # checkout, setup-node, and the SBOM step have no continue-on-error, so the summary must not depend on them
       - name: Say the results are unavailable when a step failed
         id: fallback
         if: failure()

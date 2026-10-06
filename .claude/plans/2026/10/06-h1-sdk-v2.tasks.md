@@ -71,13 +71,16 @@ ajv など SDK v2 の中に入って bundle に入る 6 パッケージを THIRD
   - 結果: `index.json` から content-type を一時的に外して `node scripts/bundle.mjs` → `bundle check failed: - the bundles carry content-type 1.0.5 inside the MCP SDK, but scripts/licenses/embedded lacks it`。戻した
   - 結果: `cd server && node --test test/embedded.test.ts` → 4 pass。`bun run verify` → exit 0
 
-- [ ] T05: release の SBOM と OSV のスキャンに同梱パッケージを足す
+- [x] T05: release の SBOM と OSV のスキャンに同梱パッケージを足す
   - 種別: 追加
   - 計画: S3
   - 依存: T04（同梱パッケージの一覧が要る）
-  - 変更: `scripts/sbom-embedded.mjs`, `server/test/sbom.test.ts`, `.github/workflows/release.yml`
+  - 変更: `scripts/sbom-embedded.mjs`, `scripts/lib/sbom.mjs`, `scripts/lib/sbom.d.mts`, `server/test/sbom.test.ts`, `.github/workflows/release.yml`
   - 完了条件: `cd server && node --test test/sbom.test.ts` → 全件 pass。足した component と dependencies を `sbomProblems` が通すケースを含む。`actionlint .github/workflows/release.yml` → 指摘なし
   - コミット: `ci(release): add the SDK's embedded packages to the SBOM and the OSV scan (T05)`
+  - 結果: `cd server && node --test test/sbom.test.ts` → 8 pass（足した 3 件: SDK の依存として加えた後に notices と一致する、SDK の無い SBOM と既に載っている SBOM を拒む、purl の形）
+  - 結果: `node scripts/sbom-embedded.mjs --only-embedded <tmp>/embedded.cdx.json` を手元の osv-scanner 2.3.6 で `-L` → `found 6 packages`、結果の JSON に 6 つが npm の ecosystem で出る
+  - 結果: `actionlint .github/workflows/release.yml` → 指摘なし。`bun run verify` → exit 0。release の dry run での確かめは PR の CI（plan の A5）
 
 ## P3: 梱包した両サーバーを Windows で確かめる
 
@@ -108,3 +111,4 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
 - 2026-10-06 / T02 / Codex のタスクごとのレビューは指摘なし / そのまま
 - 2026-10-06 / T04 / @cfworker/json-schema は bundle に入らない（metafile で確認）。変更欄から `scripts/licenses/embedded/@cfworker+json-schema@4.1.1.txt` を外し、完了条件の 7 パッケージを 6 に / plan の方針と変更履歴も直した
 - 2026-10-06 / T04 / 変更欄: 前は `scripts/check-embedded.mjs`, `package.json` を含む。新しくは `scripts/licenses/embedded/index.json`, `scripts/lib/embedded.mjs`, `scripts/lib/embedded.d.mts`, `scripts/bundle.mjs`, `server/test/embedded.test.ts` を足し、その 2 つを外した。完了条件も `node scripts/check-embedded.mjs` から `bun run bundle` に / 照合を bundle の中で流すため（plan の変更履歴）
+- 2026-10-06 / T05 / 変更欄: 前は `scripts/sbom-embedded.mjs`, `server/test/sbom.test.ts`, `.github/workflows/release.yml`。新しくは `scripts/lib/sbom.mjs` と `scripts/lib/sbom.d.mts` を足した / 足す処理を CLI ではなく既存の SBOM の lib に置いてテストするため
