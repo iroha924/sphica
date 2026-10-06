@@ -225,7 +225,8 @@ server.registerTool(
   "record_check",
   {
     title: "Check a record",
-    description: "Checks a record against the run's retained text without saving it.",
+    description:
+      "Checks a record by running the save in a transaction that rolls back: it refuses what record_save would refuse and says what would become of each record (would be active, would stay a candidate, would be superseded), writing nothing.",
     inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: READ,
   },

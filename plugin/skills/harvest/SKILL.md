@@ -37,7 +37,8 @@ as `cwd` to every tool.
    sources an earlier harvest already looked at: what they decided may already be saved, so search before recording it again. Read all of it before writing:
    when a page ends with `call record_context with after: "s<N>"`, call it again with that `after`, until the last page
 4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
-   "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. Fix and check again until there are no errors.
+   "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. As in trace, check runs the save in a transaction that
+   rolls back and says what would become of each record (`would be active`, ...). Fix and check again until there are no errors.
    A file the pull request touched may have moved since: on a warning that a path is not in the working tree, give the commit that holds it,
    or anchor where the code is now
 5. **Save**: `record_save` with the same run and record

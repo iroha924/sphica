@@ -107,13 +107,14 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `test(record): check the lock wait by order, and never hang on the lock holder (T09)`
   - 結果: red は scratchpad の再現（今の形で子が準備の前に `process.exit(1)` する）で「pending」と出た。直した後は、親が lock を求めた時刻 <= 子が外した時刻 <= 親が取れた時刻 を確かめ、子が準備の前に終わると準備待ちが失敗し、finally で子を止めて終了を待つ。`cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0。`bun run verify` → 終了コード 0
 
-- [ ] T06: trace・harvest・glean の Skill と record_check のツールの説明を直す
+- [x] T06: trace・harvest・glean の Skill と record_check のツールの説明を直す
   - 種別: 変更
   - 計画: S6
   - 依存: T02（返答の形が決まっている必要がある）
   - 変更: `plugin/skills/trace/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `plugin/skills/glean/SKILL.md`, `server/src/mcp-record.ts`
   - 完了条件: `bun run verify:ai` → 終了コード 0。`rg -n "would be active|rolled back|rolls back" plugin/skills/trace/SKILL.md plugin/skills/harvest/SKILL.md plugin/skills/glean/SKILL.md server/src/mcp-record.ts` → 4 ファイルとも一致
   - コミット: `docs(skills): say record_check previews the save and what it reports (T06)`
+  - 結果: `bun run verify:ai` → 終了コード 0。`rg -n "would be active|rolled back|rolls back" ...` → 4 ファイルとも一致。`bun run verify` → 終了コード 0
 
 ## 記録
 2026-10-06 / T02 / 変更欄と red を直した。変更: `server/src/extract.ts`, `server/test/extract.test.ts` → 4 ファイル（`server/test/record.test.ts` は呼び出し元のテストの置き場、`server/test/temp-db.ts` は全部の表を取り出す `dump`）。red: 3 つのテスト名 → 2 つ（glean の problems は今のコードでも check に出るので red にならない。成功のテストの中で確かめる）/ 欄を直して進めた
