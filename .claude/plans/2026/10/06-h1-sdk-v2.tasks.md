@@ -33,7 +33,7 @@ base: main
   - 結果: `cd server && node --test test/plugin.test.ts test/read.test.ts test/overview.test.ts` → 65 pass, 0 fail（forget_apply の確認・拒否・取消・遅れた答えのキャンセルを含む）
   - 結果: `bun run verify` → exit 0。bundle は `mcp.js` 1,650,435 → 1,675,735、`mcp-record.js` 1,737,044 → 1,762,361 バイトで予算の内側
 
-- [ ] T02: 受信バッファの上限を外し、10 MiB を超える要求を受けるテストを足す
+- [x] T02: 受信バッファの上限を外し、10 MiB を超える要求を受けるテストを足す
   - 種別: 修正
   - 計画: S1, S2
   - 依存: T01（v2 の transport が要る）
@@ -41,6 +41,9 @@ base: main
   - red: `cd server && node --test --test-name-pattern="10 MiB" test/plugin.test.ts` → 既定の 10 MiB の上限で transport が閉じ、返答が来ずに落ちる
   - 完了条件: `cd server && node --test test/plugin.test.ts` → 全件 pass。足したテストが要求の大きさが 10 MiB を超えることと、その後の呼び出しにも返答が来ることを確かめている
   - コミット: `fix(mcp): accept stdio requests over 10 MiB as SDK v1 did (T02)`
+  - 結果: red: 直す前に `cd server && node --test --test-name-pattern="10 MiB" test/plugin.test.ts` → `Error [SdkError]: Connection closed` で 1 fail（記録サーバーだけ・読み取りサーバーだけを元に戻した 2 通りで確かめた）
+  - 結果: 直した後 `cd server && node --test --test-name-pattern="10 MiB" test/plugin.test.ts` → 1 pass。要求が 10 MiB を超えることをテストの中で assert している
+  - 結果: `bun run verify` → exit 0
 
 - [ ] T03: 両サーバーのツール一覧と、ホストの _meta がハンドラーに届くことのテストを足す
   - 種別: 追加

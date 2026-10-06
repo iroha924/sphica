@@ -468,4 +468,7 @@ server.registerTool(
   },
 );
 
-await server.connect(new StdioServerTransport());
+// The SDK's 10 MiB default closes the connection on a larger request, ending the session; tool arguments carry no such bound
+await server.connect(
+  new StdioServerTransport(undefined, undefined, { maxBufferSize: Number.POSITIVE_INFINITY }),
+);

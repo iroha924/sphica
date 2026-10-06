@@ -694,6 +694,38 @@ test("the record MCP server starts without a database and lists the trace, harve
   }
 });
 
+// Past the SDK's 10 MiB default the stdio transport closes, which would end every later call in the session too
+test("both MCP servers answer a request over 10 MiB and keep answering after it", async () => {
+  const big = "x".repeat(11 * 1024 * 1024);
+  for (const [entry, oversized, next] of [
+    ["mcp.ts", { name: "search", arguments: { query: big, cwd: "/nonexistent" } }, "status"],
+    [
+      "mcp-record.ts",
+      { name: "record_check", arguments: { run: "none", record: { units: [{ text: big }] } } },
+      "trace_pending",
+    ],
+  ] as const) {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(SRC, entry)],
+        env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+        stderr: "ignore",
+      }),
+    );
+    try {
+      assert.ok(Buffer.byteLength(JSON.stringify(oversized)) > 10 * 1024 * 1024);
+      const r = await client.callTool(oversized);
+      assert.equal(r.isError, true, entry);
+      const after = await client.callTool({ name: next, arguments: { cwd: "/nonexistent" } });
+      assert.ok(after.content.length > 0, entry);
+    } finally {
+      await client.close();
+    }
+  }
+});
+
 // Codex starts plugin MCP servers in the plugin root and names the session's directory only in each call's _meta (codex-cli 0.157.1)
 test("the record MCP server writes to the workspace the host names in the call, not where it was started", async () => {
   const db = tempDb();
