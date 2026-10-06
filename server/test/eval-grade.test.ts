@@ -2802,3 +2802,21 @@ test("checkpoint gives Codex the schema text its key holds, in the call's own di
     f.done();
   }
 });
+
+test("checkpoint marks a row reused only when its Codex grade was", () => {
+  const f = gradeFixture(runs("a1"));
+  try {
+    assert.equal(f.run().status, 0);
+    fs.writeFileSync(path.join(f.base, "owner", ".codex", "config.toml"), 'model = "n"\n');
+    const again = f.run();
+    assert.equal(again.status, 0, again.stderr);
+    assert.deepEqual(
+      [f.calls("codex"), f.calls("claude")],
+      [2, 1],
+      "Codex grades again, Claude's grade is reused",
+    );
+    assert.match(again.stdout, /r1: score 2\n/);
+  } finally {
+    f.done();
+  }
+});

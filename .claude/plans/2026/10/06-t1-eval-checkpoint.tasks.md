@@ -78,6 +78,16 @@ eval-loop Skill に checkpoint と、最初から採点し直す方法を書く�
   - コミット: `fix(eval): give the Codex grader the schema text its checkpoint key holds (T05)`
   - 結果: red は直す前に `cd server && node --test --test-name-pattern="checkpoint gives Codex" test/eval-grade.test.ts` → fail（「not the repository's file: …/server/evals/cloud/grade.schema.json」）。直した後は `--test-name-pattern="checkpoint"` → pass 11 / fail 0、eval-grade.test.ts 全体 pass 70 / fail 0、`bun run lint`・`bun run typecheck` は指摘なし。schema は採点者の作業ディレクトリではなく、1 回の呼び出しの HOME に書く
 
+- [x] T06: 行ごとの `(reused)` を Codex の採点だけで決め、grade.ts の先頭のコメントを 3 行に収める
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（行ごとの出力と先頭のコメントが grade.ts にある）
+  - 変更: `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="checkpoint marks" test/eval-grade.test.ts` → fail（Codex の設定を変えて再実行すると、Codex は採点し直し Claude だけが使い回されるのに、行に `(reused)` が付く）
+  - 完了条件: `cd server && node --test --test-name-pattern="checkpoint" test/eval-grade.test.ts` → pass。`sed -n 1,4p server/evals/cloud/grade.ts` の 4 行目がコメントでない
+  - コミット: `fix(eval): mark a row reused only when its Codex grade was (T06)`
+  - 結果: red は直す前に `cd server && node --test --test-name-pattern="checkpoint marks" test/eval-grade.test.ts` → fail（Codex を呼び直し Claude だけを使い回した行が `codex inject r1: score 2 (reused)`）。直した後は `--test-name-pattern="checkpoint"` → pass 12 / fail 0、eval-grade.test.ts 全体 pass 71 / fail 0、`bun run lint`・`bun run typecheck` は指摘なし。`sed -n 1,4p server/evals/cloud/grade.ts` は 3 行のコメントと import
+
 ## 記録
 
 - 2026-10-06 / T01 / Codex のタスクごとのレビュー（afc825ee）は指摘 0 件。Codex の sandbox では mkdtemp が EPERM でファイル操作のテストを流せなかった / 手元で同じテストを流して pass を確かめた
@@ -87,3 +97,4 @@ eval-loop Skill に checkpoint と、最初から採点し直す方法を書く�
 - 2026-10-06 / T04 / Codex のタスクごとのレビュー（4628ab80）は指摘 0 件（sandbox ではテストを流せず、手元で pass）
 - 2026-10-06 / 全差分 / Codex の全差分レビュー（high）で P2 を 1 件: key の schema は開始時の本文だが、Codex の `--output-schema` は repo のファイルを指すので、採点中に schema が変わるとずれる / 採る。修正タスク T05 を足した
 - 2026-10-06 / T04, T05 / 直した差分（4628ab80, 32f15ae0）の再レビューは指摘 0 件。checkpointKey の全入力が、採点者の起動に渡す値と同じであることを読んで確かめた / レビューの往復はここで止めた
+- 2026-10-06 / PR #292 / GitHub の Codex の指摘 2 件: P1 grade.ts の先頭のコメントが 4 行（comments.md は 1〜3 行）、P2 Claude だけが使い回された行にも `(reused)` が付く / どちらも採る。修正タスク T06 を足した

@@ -1,7 +1,6 @@
-// Grades one evaluation loop blind (step 5 of the eval-loop Skill): every result row of loop.json goes to Codex with only the task and the
-// run's own answer and patch, in an empty directory, and comes back through grade.schema.json; the table counts every started run.
-// Each finished grader call is saved in grades.checkpoint.json beside it, and a rerun calls the graders only for what is not saved with the
-// same inputs. Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none]
+// Grades one evaluation loop blind (eval-loop Skill step 5): each result row goes to Codex with only the task, answer, and patch, in an empty
+// directory, through grade.schema.json; the table counts every started run. Each finished call is kept in grades.checkpoint.json, and a rerun
+// calls the graders only for what it lacks. Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none]
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -176,6 +175,7 @@ for (const row of loop.rows) {
     );
   const before = reused;
   const got = accept(graderRun("codex", task, row, prompt));
+  const codexReused = reused > before;
   // The second grade is kept beside the first for agreement; the table's values stay Codex's
   const other = args.second === "claude" ? accept(graderRun("claude", task, row, prompt)) : null;
   const second = other && ("graded" in other ? { grade: other.graded } : { ungraded: other.ungraded });
@@ -185,7 +185,7 @@ for (const row of loop.rows) {
     ...(second ? { second } : {}),
   });
   console.log(
-    `${row.model} ${row.condition} ${row.run}: ${"graded" in got ? `score ${got.graded.score}` : `ungraded (${got.ungraded})`}${reused > before ? " (reused)" : ""}`,
+    `${row.model} ${row.condition} ${row.run}: ${"graded" in got ? `score ${got.graded.score}` : `ungraded (${got.ungraded})`}${codexReused ? " (reused)" : ""}`,
   );
 }
 
