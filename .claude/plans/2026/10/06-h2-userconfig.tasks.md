@@ -31,13 +31,14 @@ review コマンド名と自動 trace の停止を、hook が `CLAUDE_PLUGIN_OPT
   - コミット: `feat(review): read review command names from userConfig, falling back to the env (T01)`
   - 結果: `bun run release:plan -- --base v0.6.37` → `release kind: plugin`、`version: npm 0.6.38 / plugin 0.6.38 / marketplace 0.6.38 / Codex 0.6.38`。red: 実装前に `node --test --test-name-pattern=review_commands test/review-bridge.test.ts` が option の `audit` で配信が空（`actual: ''`）で落ちた。実装後 `node --test test/review-bridge.test.ts` → 11 pass, 0 fail。`bun run verify` → exit 0
 
-- [ ] T02: 自動 trace を userConfig と SPHICA_AUTO_TRACE のどちらかの off で止める
+- [x] T02: 自動 trace を userConfig と SPHICA_AUTO_TRACE のどちらかの off で止める
   - 種別: 追加
   - 計画: S2
   - 依存: なし
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 全件 pass。足した option の false のケースが、今のコードでは落ちる（結果欄に red の実測を残す）
-  - コミット: `feat(deliver): stop the automatic trace when the plugin's userConfig or SPHICA_AUTO_TRACE turns it off`
+  - コミット: `feat(deliver): stop the automatic trace when userConfig or SPHICA_AUTO_TRACE turns it off (T02)`
+  - 結果: red: 実装前に `node --test --test-name-pattern="auto_trace and SPHICA" test/deliver.test.ts` が option "false" で自動 trace の依頼が出たまま（`1 earlier session ... waits to be traced`）で落ちた。実装後 `node --test test/deliver.test.ts` → 44 pass, 0 fail。`bun run verify` → exit 0
 
 ## P2: plugin の設定として出す
 

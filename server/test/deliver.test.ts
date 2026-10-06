@@ -2353,6 +2353,64 @@ test("auto trace notice: SPHICA_AUTO_TRACE=off turns only the automatic trace of
   }
 });
 
+test("auto trace notice: the plugin's auto_trace and SPHICA_AUTO_TRACE each turn it off, and either one off keeps it off", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const saved = { env: process.env.SPHICA_AUTO_TRACE, option: process.env.CLAUDE_PLUGIN_OPTION_AUTO_TRACE };
+  const set = (k: "SPHICA_AUTO_TRACE" | "CLAUDE_PLUGIN_OPTION_AUTO_TRACE", v: string | undefined) => {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  };
+  try {
+    const p = project(db);
+    message(db, p, { id: "m1", text: "untraced", session: "s1", sent: new Date().toISOString() });
+    const start = (option: string | undefined, env: string | undefined, entry = "cli") => {
+      set("CLAUDE_PLUGIN_OPTION_AUTO_TRACE", option);
+      set("SPHICA_AUTO_TRACE", env);
+      process.env.CLAUDE_CODE_ENTRYPOINT = entry;
+      return deliver(
+        { hook_event_name: "SessionStart", source: "startup", session_id: crypto.randomUUID(), cwd: repo },
+        "claude-code",
+        db.file,
+      );
+    };
+    const off = await start("false", undefined);
+    assert.doesNotMatch(off, /earlier session/);
+    assert.match(off, /1 session waiting to be traced: run \/sphica:trace pending\./);
+    for (const [option, env] of [
+      [" FALSE ", undefined],
+      ["false", "on"],
+      ["true", "off"],
+      [undefined, "0"],
+      ["true", "no"],
+      ["true", "false"],
+    ] as const)
+      assert.doesNotMatch(await start(option, env), /earlier session/, `option ${option}, env ${env}`);
+    for (const [option, env] of [
+      [undefined, undefined],
+      ["true", undefined],
+      ["true", "on"],
+      ["", undefined],
+    ] as const)
+      assert.equal(
+        (await start(option, env)).split("\n").at(-1),
+        AUTO_TRACE(1),
+        `option ${option}, env ${env}`,
+      );
+    assert.doesNotMatch(
+      await start("true", undefined, "sdk-cli"),
+      /earlier session/,
+      "headless stays without it",
+    );
+  } finally {
+    delete process.env.CLAUDE_CODE_ENTRYPOINT;
+    set("SPHICA_AUTO_TRACE", saved.env);
+    set("CLAUDE_PLUGIN_OPTION_AUTO_TRACE", saved.option);
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("decided by an AI: the evaluation's gold lines carry the mark and the AI words, as a delivery does", async () => {
   const db = tempDb();
   try {
