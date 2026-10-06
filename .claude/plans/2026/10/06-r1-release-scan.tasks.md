@@ -70,6 +70,16 @@ base: main
   - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。osv にジョブ単位の `continue-on-error: true`、publish は `!cancelled()` と sbom・prepare の成功、notify-approval は `!cancelled()` と prepare の成功だけを条件にする。`bun run verify` → 成功
   - コミット: `fix(release): keep a failed OSV job from blocking publish or the dry run (T07)`
   - 結果: red は T03 のコミットの release.yml で 0 を実測。直した後は 1。`actionlint .github/workflows/release.yml` → 出力なし（exit 0）。`bun run verify` → exit 0
+
+- [x] T09: 表のセルを、名前・バージョン・ID に使う文字だけに絞る
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T06（直す対象のセルが要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 2 件 fail（`a\| ![x](...)` で行の列が増える。許す文字のテストの行が一致しない）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。`A-Za-z0-9@/._:+~-` の外の文字は `?` になり、行の列は 4 つのまま、バックスラッシュとバッククォートの余りが無い
+  - コミット: `fix(release): keep only name characters in OSV table cells (T09)`
+  - 結果: red は T06 の実装（`git stash` で lib だけ戻した）で 2 件 fail を実測。直した後 9 件 pass。`bun run verify` → exit 0
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -113,3 +123,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T02 / osv ジョブは contents: read だけで security-events を持たないので、osv-scanner.yml の fork PR の除外（security-events を fork に渡せないため）は理由が無くなった / plan にあった fork PR の除外は付けなかった
 - 2026-10-06 / T06, T07 / T02 と T05 の Codex のレビュー: [P1] scanner の docker イメージの取得はステップの外の準備処理で、continue-on-error が効かずに osv が落ち、publish と dry run を止める。[P2] checkout・setup-node の失敗も同じ。[P2] バックスラッシュのエスケープでは GFM の自動リンクと文字参照が残る / 3 件とも採り、T06（セルをコードスパンに）と T07（osv をジョブ単位で continue-on-error、publish と notify-approval は osv の結果によらない条件）を足した
 - 2026-10-06 / T08 / T03 の Codex のレビュー: [P2] 警告に入れる gh の出力の CR を除いておらず、CR の後ろが別の workflow command になり得る（再現つき） / 採って T08 を足した。T06・T07 のレビューは指摘なし
+- 2026-10-06 / T09, T10 / 差分全体の Codex のレビュー: [P2] 既存のバックスラッシュの後の `|` でセルを抜けられる（GFM の描画で再現）。[P2] checkout・setup-node の失敗で要約が飛ばされ、summary に unavailable が残らない / 2 件とも採った。T09 はエスケープを足すのをやめて許す文字に絞り、T10 は failure() の予備のステップを足した

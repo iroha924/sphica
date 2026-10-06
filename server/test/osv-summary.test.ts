@@ -84,8 +84,14 @@ test("an ID in two packages counts once; each package keeps its row", () => {
 });
 
 test("a table cell cannot break out of its row", () => {
-  const s = osvSummary(report(pkg("a|b\n| x |", "1", ["ID|1"])), SHA);
-  assert.match(s.markdown, /^\| `a\\\|b \\\| x \\\|` \| `1` \| `npm` \| `ID\\\|1` \|$/m);
+  for (const name of ["a|b\n| x |", "a\\| ![x](https://example.org/i)", "a`|`b", "a\\`|"]) {
+    const s = osvSummary(report(pkg(name, "1", ["GHSA-1"])), SHA);
+    const row = s.markdown.split("\n").find((l) => l.endsWith("| `GHSA-1` |"));
+    assert.ok(row, name);
+    assert.equal(row.split("|").length, 6, row);
+    assert.doesNotMatch(row, /\\/, row);
+    assert.equal(row.split("`").length, 9, row);
+  }
 });
 
 test("groups naming vulnerabilities the package does not list are unavailable, not none", () => {
@@ -107,18 +113,30 @@ test("groups naming vulnerabilities the package does not list are unavailable, n
   }
 });
 
-// Each cell is a code span, so GFM shows it as typed: no images, links, autolinks, emphasis, or character references
-test("Markdown in a cell is shown as text", () => {
-  const s = osvSummary(report(pkg("![x](https://example.org/i)", "www.example.org", ["*ID*&copy;"])), SHA);
+// Cells keep only the characters package names, versions, and IDs use, inside a code span, so GFM shows them as typed
+test("a cell keeps name characters and replaces the rest", () => {
+  const s = osvSummary(
+    report(
+      pkg("@scope/a_b.js", "1.0.0-rc.1+build~2", ["GHSA-x1y2-z3w4-0000"]),
+      pkg("golang.org/x/net", "v0.0.0-20210101:1", ["GO-2021-0053"]),
+      pkg("![x](https://example.org/i)", "1", ["*ID*&copy;"]),
+      pkg("a`<b>`c d", "1", ["X"]),
+    ),
+    SHA,
+  );
   assert.match(
     s.markdown,
-    /^\| `!\[x\]\(https:\/\/example\.org\/i\)` \| `www\.example\.org` \| `npm` \| `\*ID\*&copy;` \|$/m,
+    /^\| `@scope\/a_b\.js` \| `1\.0\.0-rc\.1\+build~2` \| `npm` \| `GHSA-x1y2-z3w4-0000` \|$/m,
   );
-});
-
-test("a backtick cannot close a cell's code span", () => {
-  const s = osvSummary(report(pkg("a`<b>`c", "1", ["X"])), SHA);
-  assert.match(s.markdown, /^\| `a'<b>'c` \| `1` \| `npm` \| `X` \|$/m);
+  assert.match(
+    s.markdown,
+    /^\| `golang\.org\/x\/net` \| `v0\.0\.0-20210101:1` \| `npm` \| `GO-2021-0053` \|$/m,
+  );
+  assert.match(
+    s.markdown,
+    /^\| `\?\?x\?\?https:\/\/example\.org\/i\?` \| `1` \| `npm` \| `\?ID\?\?copy\?` \|$/m,
+  );
+  assert.match(s.markdown, /^\| `a\?\?b\?\?c\?d` \| `1` \| `npm` \| `X` \|$/m);
 });
 
 test("the approval comment's line names the status", () => {

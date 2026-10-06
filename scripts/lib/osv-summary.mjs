@@ -1,14 +1,11 @@
 // Summarizes osv-scanner's JSON output (`--format=json`) for the release run. A scan that left no readable results is
 // `unavailable`, never `none`: only a well-formed result with no vulnerabilities says there are none.
 
-// A code span shows a name from the results file as typed (no links, images, emphasis, or character references). A backtick
-// would close the span and a pipe the table cell, so they are replaced and escaped
+// Keeps only the characters package names, versions, ecosystems, and IDs use, inside a code span. Escaping instead would have to
+// cover every GFM rule (pipes after backslashes, autolinks, references); anything else becomes "?"
 const cell = (value) => {
-  const text = String(value)
-    .replace(/[\r\n]+/g, " ")
-    .replaceAll("`", "'")
-    .replaceAll("|", "\\|");
-  return text.trim() ? `\`${text}\`` : "";
+  const text = String(value).replace(/[^A-Za-z0-9@/._:+~-]/g, "?");
+  return text ? `\`${text}\`` : "";
 };
 
 /** Packages with vulnerabilities, or null when the shape is not osv-scanner's. */
