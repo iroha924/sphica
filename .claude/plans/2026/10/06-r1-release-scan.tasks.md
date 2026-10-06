@@ -80,6 +80,16 @@ base: main
   - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。`A-Za-z0-9@/._:+~-` の外の文字は `?` になり、行の列は 4 つのまま、バックスラッシュとバッククォートの余りが無い
   - コミット: `fix(release): keep only name characters in OSV table cells (T09)`
   - 結果: red は T06 の実装（`git stash` で lib だけ戻した）で 2 件 fail を実測。直した後 9 件 pass。`bun run verify` → exit 0
+
+- [x] T11: 複数の lockfile に同じ package@version があっても表は 1 行にまとめる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象の表が要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 1 件 fail（2 つの lockfile の hono@4.0.0 が 2 行になり、「in 2 packages」と出る）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。ecosystem・名前・バージョンが同じなら 1 行で、ID は重ねずにまとめる
+  - コミット: `fix(release): merge the same package from several lockfiles into one OSV row (T11)`
+  - 結果: red は上のとおり 1 件 fail を実測。直した後 10 件 pass。`bun run verify` → exit 0
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -134,3 +144,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T06, T07 / T02 と T05 の Codex のレビュー: [P1] scanner の docker イメージの取得はステップの外の準備処理で、continue-on-error が効かずに osv が落ち、publish と dry run を止める。[P2] checkout・setup-node の失敗も同じ。[P2] バックスラッシュのエスケープでは GFM の自動リンクと文字参照が残る / 3 件とも採り、T06（セルをコードスパンに）と T07（osv をジョブ単位で continue-on-error、publish と notify-approval は osv の結果によらない条件）を足した
 - 2026-10-06 / T08 / T03 の Codex のレビュー: [P2] 警告に入れる gh の出力の CR を除いておらず、CR の後ろが別の workflow command になり得る（再現つき） / 採って T08 を足した。T06・T07 のレビューは指摘なし
 - 2026-10-06 / T09, T10 / 差分全体の Codex のレビュー: [P2] 既存のバックスラッシュの後の `|` でセルを抜けられる（GFM の描画で再現）。[P2] checkout・setup-node の失敗で要約が飛ばされ、summary に unavailable が残らない / 2 件とも採った。T09 はエスケープを足すのをやめて許す文字に絞り、T10 は failure() の予備のステップを足した
+- 2026-10-06 / T11 / 差分全体の 2 回目の Codex のレビュー: [P3] 同じ package@version が複数の lockfile にあると表の行とパッケージ数が重なる（再現つき）。ほかの指摘は無い / 採って T11 を足した。レビューは P3 だけに収まったので、差分全体の 3 回目は頼まずに PR へ進む

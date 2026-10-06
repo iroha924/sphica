@@ -83,6 +83,22 @@ test("an ID in two packages counts once; each package keeps its row", () => {
   assert.match(s.markdown, /^\| `b` \| `2` \| `npm` \| `GHSA-1` \|$/m);
 });
 
+test("the same package in two lockfiles is one row with its IDs merged", () => {
+  const s = osvSummary(
+    JSON.stringify({
+      results: [
+        { source: { path: "/w/server/bun.lock" }, packages: [pkg("hono", "4.0.0", ["GHSA-1"])] },
+        { source: { path: "/w/plugin/bun.lock" }, packages: [pkg("hono", "4.0.0", ["GHSA-1", "GHSA-2"])] },
+      ],
+    }),
+    SHA,
+  );
+  assert.equal(s.count, 2);
+  assert.match(s.markdown, /2 known vulnerabilities in 1 package\./);
+  assert.equal(s.markdown.match(/^\| `hono` /gm)?.length, 1);
+  assert.match(s.markdown, /^\| `hono` \| `4\.0\.0` \| `npm` \| `GHSA-1`, `GHSA-2` \|$/m);
+});
+
 test("a table cell cannot break out of its row", () => {
   for (const name of ["a|b\n| x |", "a\\| ![x](https://example.org/i)", "a`|`b", "a\\`|"]) {
     const s = osvSummary(report(pkg(name, "1", ["GHSA-1"])), SHA);

@@ -11,7 +11,8 @@ const cell = (value) => {
 /** Packages with vulnerabilities, or null when the shape is not osv-scanner's. */
 function vulnerable(report) {
   if (!report || typeof report !== "object" || !Array.isArray(report.results)) return null;
-  const rows = [];
+  // One row per package and version, though several lockfiles may list it
+  const rows = new Map();
   for (const result of report.results) {
     if (!result || typeof result !== "object" || !Array.isArray(result.packages)) return null;
     for (const entry of result.packages) {
@@ -24,15 +25,14 @@ function vulnerable(report) {
         Array.isArray(entry.groups) && entry.groups.some((g) => Array.isArray(g?.ids) && g.ids.length > 0);
       if (vulns.length === 0 && grouped) return null;
       if (vulns.length === 0) continue;
-      rows.push({
-        name: pkg.name,
-        version: pkg.version,
-        ecosystem: String(pkg.ecosystem ?? ""),
-        ids: vulns.map((v) => v.id),
-      });
+      const ecosystem = String(pkg.ecosystem ?? "");
+      const key = JSON.stringify([ecosystem, pkg.name, pkg.version]);
+      const row = rows.get(key) ?? { name: pkg.name, version: pkg.version, ecosystem, ids: [] };
+      for (const v of vulns) if (!row.ids.includes(v.id)) row.ids.push(v.id);
+      rows.set(key, row);
     }
   }
-  return rows;
+  return [...rows.values()];
 }
 
 /**
