@@ -111,7 +111,7 @@ base: main
   - 計画: S1
   - 依存: T01（計測スクリプトが要る）
   - 変更: `server/evals/scale/run.ts`
-  - red: `node server/evals/scale/run.ts --sizes 359 --no-drain`（`selectForReview` の場所の無い記録の経路を一時的に空にして）→ stress の review 2 行が `none` のまま
+  - red: `node server/evals/scale/run.ts --sizes 359 --no-drain` → `selectForReview` の場所の無い記録の経路を一時的に空にしても、stress の review 2 行が `none` のまま
   - 完了条件: `node server/evals/scale/run.ts --sizes 359 --no-drain` → stress の review 2 行が none。同じく経路を空にすると `missing trace:ext-b198/k9925` が出る
   - コミット: `fix(evals): check both the anchored and the location-free record in the stress review`
   - 結果: red `node server/evals/scale/run.ts --sizes 359 --no-drain` → 経路を空にしたコードで、stress の review 2 行が none（見逃し）
