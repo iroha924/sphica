@@ -718,6 +718,40 @@ test("save: under the write lock files are only read again, and a file changed m
   }
 });
 
+test("check fails as save does when writing breaks for a reason that is not the record's, instead of asking to fix the record", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "openStore を見る。" });
+    // The anchored file cannot be read once the lock is held: nothing the record could change
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file)) throw new Error("the disk went away");
+        return PROBE.read(r, rel);
+      },
+    };
+    const record = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    await assert.rejects(checkText(db.ingest, run, p, root, record, undefined, probe), /the disk went away/);
+    await assert.rejects(saveText(db.ingest, run, p, root, record, probe), /the disk went away/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("check shows what save would quarantine, and anchors judged again under the lock, once each", async () => {
   const db = tempDb();
   const root = repo();

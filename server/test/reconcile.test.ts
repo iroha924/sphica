@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from "node:sqlite";
 import { test } from "node:test";
@@ -536,6 +537,13 @@ test("a replacement that ends after the clock went back ends no earlier than it 
   }
 });
 
+/** The environment a child process gets: HOME in a temporary directory, without the variables that point at the owner's Sphica or Codex */
+function childEnv(home: string): NodeJS.ProcessEnv {
+  const owner = ["SPHICA_DB", "SPHICA_HOME", "CODEX_HOME"];
+  const kept = Object.entries(process.env).filter(([k]) => !owner.includes(k));
+  return { ...Object.fromEntries(kept), HOME: home, USERPROFILE: home };
+}
+
 // A lock another process holds blocks this thread's busy wait, so only another process can hold it while the check waits
 test("record_check waits for a write lock another process holds, as save does, and then runs", async () => {
   const db = tempDb();
@@ -571,7 +579,8 @@ const poll = setInterval(() => {
         db.file,
         signal,
       ],
-      { stdio: ["ignore", "pipe", "inherit"] },
+      // A home of its own, and none of the owner's Sphica or Codex locations
+      { stdio: ["ignore", "pipe", "inherit"], env: childEnv(path.dirname(db.file)) },
     );
     let out = "";
     holder.stdout.on("data", (b: Buffer) => {

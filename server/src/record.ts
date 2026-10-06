@@ -886,6 +886,9 @@ const contentHash = (u: UnitInput): Buffer =>
     ]),
   );
 
+/** A save the judge turned down for something in the record itself: check reports it as an error to fix, unlike a failure of the writing */
+export class SaveRefused extends Error {}
+
 /**
  * Judges what a save wrote, with everything its intents reach, and reports it. A successor this save wrote or adopted that the judge leaves
  * waiting for a place another successor holds is refused by name, so the batch rolls back; one that cannot stand waits as a candidate.
@@ -911,7 +914,7 @@ export async function settleSaved(
   const key = (id: number) => settled.keys.get(id) ?? `u${id}`;
   for (const [id, [to, holder]] of settled.held)
     if (mine.has(id))
-      throw new Error(
+      throw new SaveRefused(
         mine.has(holder)
           ? `${key(id)}: another record in this save already supersedes ${key(to)}`
           : `${key(id)}: ${key(to)} already has a successor, ${key(holder)} (in effect); withdraw it first, or supersede it instead`,

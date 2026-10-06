@@ -156,6 +156,26 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `test(record): read the lock holder's output after its stdio closes (T13)`
   - 結果: 手元で `cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0、Windows の手順と同じコマンドを `bash -eo pipefail` で流して終了コード 0。`bun run verify` → 終了コード 0。Windows の CI は push の後に確かめる
 
+- [x] T14: check が返答に変えるのは judge の後の拒否だけにし、書き込みの失敗は save と同じく例外で返す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（judge の後の拒否は T03 から）
+  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/test/extract.test.ts`
+  - red: `cd server && node --test --test-name-pattern="check fails as save does when writing breaks" test/extract.test.ts` → lock の中でファイルが読めないと、save は例外で終わるのに check は「fix the record and check again」と返し、「Missing expected rejection」で落ちる
+  - 完了条件: `cd server && node --test test/extract.test.ts test/record.test.ts` → pass。judge の後の拒否は `SaveRefused` で、check はそれだけを ✗ の行にし、ほかの例外は save と同じく投げる
+  - コミット: `fix(record): turn only the judged refusal into record_check errors, and fail on anything else as save does (T14)`
+  - 結果: red は直す前のコードで「Missing expected rejection」。直した後 `cd server && node --test test/extract.test.ts test/record.test.ts` → pass 103 / fail 0。`bun run verify` → 終了コード 0
+
+- [x] T15: lock を持つ子プロセスに一時の HOME を渡し、持ち主の Sphica と Codex の場所を渡さない
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直すテストが T04 にある）
+  - 変更: `server/test/reconcile.test.ts`
+  - red: `SPHICA_DB=/owner/real.db node -e '<env を渡さない spawnSync で子の SPHICA_DB を出す>'` → 子が「/owner/real.db」を受け継ぐ
+  - 完了条件: `SPHICA_DB=/nonexistent/owner.db cd server && node --test test/reconcile.test.ts` → pass。子の env は HOME と USERPROFILE が一時ディレクトリで、`SPHICA_DB`・`SPHICA_HOME`・`CODEX_HOME` が無い
+  - コミット: `test(record): run the lock holder with a temporary home and without the owner's locations (T15)`
+  - 結果: red は env を渡さない形で子が「/owner/real.db」を出した。直した後 `SPHICA_DB=/nonexistent/owner.db node --test test/reconcile.test.ts`（server で）→ pass 7 / fail 0。`bun run verify` → 終了コード 0
+
 ## 記録
 2026-10-06 / T02 / 変更欄と red を直した。変更: `server/src/extract.ts`, `server/test/extract.test.ts` → 4 ファイル（`server/test/record.test.ts` は呼び出し元のテストの置き場、`server/test/temp-db.ts` は全部の表を取り出す `dump`）。red: 3 つのテスト名 → 2 つ（glean の problems は今のコードでも check に出るので red にならない。成功のテストの中で確かめる）/ 欄を直して進めた
 2026-10-06 / T01 / Codex のレビュー（c247a0a7）: 指摘 0 件。Codex の環境では db.test.ts が一時ディレクトリを作れず流れなかったので、手元で流した pass 27 で確かめた / 直すものなし
@@ -171,3 +191,4 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
 2026-10-06 / 全体 / Codex の全差分のレビュー（high、main...347a59c1）: P2 1 件、T09 の後も子が起動から 1500 ms で lock を外すので、CI で親が遅れると順序の確認が落ちる（Codex が縮めた形で再現）。ほかの check と save の食い違い、権限の問題は見つからなかった / 採用。修正タスク T11 を足した。プロセス間の合図はファイルにした（親は lock を待つ間ブロックするので、stdin への書き込みは届く保証が無い）
 2026-10-06 / T10, T11 / Codex の再レビュー（347a59c1..1ecbedbe）: T10 は直っている。T11 に P2 1 件、合図を書いてから時刻を記録しているので、その間に親が止まると順序の確認が落ちる（Codex が縮めた形で再現）。子に待つ時間の上限が無い / 採用。修正タスク T12 を足した。レビューの往復はここで閉じ、以降は GitHub の Codex と CI に任せる
 2026-10-06 / T13 / PR #291 の CI で Windows の job だけが落ちた。lock を持つ子の「released」の行が読めておらず、Node の `exit` は stdio が閉じる前に来ることがあるため（macOS では起きなかった）/ 修正タスク T13 を足した
+2026-10-06 / T14, T15 / GitHub の Codex のレビュー（aa1d04ae）: P2 1 件、check が書き込みのどの例外も記録の誤りとして返し、基盤の失敗を隠す。P1 1 件、lock を持つ子プロセスが持ち主の環境変数を受け継ぐ（verification.md の temp-home の規則）/ 2 件とも採用。修正タスク T14 と T15 を足した

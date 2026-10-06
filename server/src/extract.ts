@@ -29,6 +29,7 @@ import {
   finishRun,
   prepareRecord,
   type Saved,
+  SaveRefused,
   saveRecord,
   type Target,
 } from "./record.ts";
@@ -695,7 +696,8 @@ export async function checkText(
       await finishRun(trx, v.run.id);
       return { v, done, refused: null };
     } catch (e) {
-      return { v, done: null, refused: (e as Error).message };
+      if (!(e instanceof SaveRefused)) throw e;
+      return { v, done: null, refused: e.message };
     }
   });
   const errors = [...v.errors, ...(refused === null ? [] : [refused])];
