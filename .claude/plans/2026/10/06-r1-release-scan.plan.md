@@ -53,7 +53,7 @@ S1: 承認の前のスキャン
 - `scripts/lib/osv-summary.mjs` に、OSV の JSON（`--format=json` の出力の文字列、または読めなかったこと）から `{ status, count, markdown }` を作る関数を置く。`status` は `found` / `none` / `unavailable`。ファイルが無い・空・JSON でない・`results` の形が違うときは `unavailable`。`count` は脆弱性 ID の重複を除いた数（aliases はまとめない）。表は package@version ごとに ID を並べる。markdown の見出しにスキャンした SHA を入れる
 - `scripts/osv-summary.mjs <results.json> <sha>` が上の関数を呼び、markdown を stdout と `$GITHUB_STEP_SUMMARY` に出し、`status` と `count` を `$GITHUB_OUTPUT` に書く。結果が読めないことでは 0 以外で終わらない
 - テストは `server/test/osv-summary.test.ts`。fixture: ファイルなし、空、壊れた JSON、形の違い、0 件、1 件、1 つの ID が 2 パッケージ、複数
-- release.yml の `osv` ジョブ: タグの push と pull_request の両方で走る。fork の PR は osv-scanner.yml と同じ条件で外す。`permissions: contents: read`。harden-runner（audit）→ checkout（persist-credentials: false、ref は既定）→ scanner の action（`scan-args` は `--output=results.json`、`--format=json`、`-r`、`./`、`continue-on-error: true`）→ setup-node → `node scripts/osv-summary.mjs results.json "$(git rev-parse HEAD)"`。外から来る値は env で渡し、スクリプトの中に埋め込まない
+- release.yml の `osv` ジョブ: タグの push と pull_request の両方で走る。fork の PR は osv-scanner.yml と同じ条件で外す。`permissions: contents: read`。harden-runner（audit）→ checkout（persist-credentials: false、ref は既定）→ osv-scanner v2.6.0 の linux_amd64 のバイナリを配布元から取り、固定した SHA-256 で確かめて `-r --format=json --output-file=$RUNNER_TEMP/osv/results.json $GITHUB_WORKSPACE` で流す（`continue-on-error: true`）→ setup-node → `node scripts/osv-summary.mjs "$RUNNER_TEMP/osv/results.json" "$(git rev-parse HEAD)"`。外から来る値は env で渡し、スクリプトの中に埋め込まない
 - `notify-approval` は `needs: [prepare, osv]` にし、コメントに 1 行足す: `OSV scan of <sha>: N known vulnerabilities` / `no known vulnerabilities` / `results unavailable (see the run summary)`
 - `publish` は `needs: [sbom, prepare, osv]` にし、条件を `!cancelled()`・タグの push・sbom と prepare の成功にする（osv の結果は問わない）。`notify-approval` も `!cancelled()`・タグの push・prepare の成功にする。osv はジョブ単位で `continue-on-error: true` にする（scanner のイメージの取得は準備処理で、ステップの continue-on-error が効かない）
 - release.yml の `pull_request.paths` に `scripts/osv-summary.mjs` と `scripts/lib/osv-summary.mjs` を足す
@@ -70,7 +70,7 @@ S3: plugin-release Skill
 
 ## 採った案と棄却した案
 
-- 採用: scanner の action を普通のジョブで直接呼び、失敗を `unavailable` として扱う。棄却: OSV の reusable workflow を release.yml から呼ぶ（スキャンの失敗でジョブが落ち、dry run の失敗でタグを打てなくなる。上げない SARIF のために security-events: write が要る）
+- 採用: チェックサムを固定した osv-scanner のバイナリを普通のジョブで流し、失敗を `unavailable` として扱う。棄却: scanner の action を直接呼ぶ（動かすイメージ `:v2.6.0` が書き換えられるタグで、取得はステップの外で失敗する）。棄却: OSV の reusable workflow を release.yml から呼ぶ（スキャンの失敗でジョブが落ち、dry run の失敗でタグを打てなくなる。上げない SARIF のために security-events: write が要る）
 - 採用: publish が osv を needs で待ち、osv の結果は問わない条件にする。棄却: publish が osv を待たない（スキャンの前に承認・publish に進める）、osv の成功を既定の条件で求める（イメージの取得や準備の失敗で release が止まる）
 - 採用: GITHUB_TOKEN の workflow_dispatch で main の workflow を起こす。棄却: merge を PAT か GitHub App のトークンにする（シークレットのない release にシークレットが入る）、release.yml の中で ref: main のスキャンを走らせる（SARIF が呼び出し側のタグの ref で上がり、main のアラートは更新されない）
 - 採用: dispatch の失敗は警告だけで、summary の run URL を Claude が見届ける。棄却: dispatch を Node のスクリプトにして偽の gh でテストする（警告だけの 2 行のために足すスクリプトで、トークンの権限や Scorecard の受け付けは偽の gh では確かめられない）
@@ -94,7 +94,7 @@ S3: plugin-release Skill
 
 - Scorecard の API が workflow_dispatch の run の publish_results を拒む → A4 で分かる。scorecard.yml の `publish_results` を `${{ github.event_name != 'workflow_dispatch' }}` にする修正を PR で出し、SARIF の code scanning への送信は残す。PR と #268 にそう書く
 - ランナーの gh が run の URL を返さない → summary は「run URL not returned」になり、9 段目の見届けは未検証と報告する。#268 は閉じず、run の ID を取る方法を別に考えて #268 に残す
-- scanner の docker イメージが取れずにスキャンが失敗する → `unavailable` で表示し、release は止めない。持ち主は承認の前に summary で見る
+- scanner のバイナリが取れない、チェックサムが合わない、スキャンが失敗する → `unavailable` で表示し、release は止めない。持ち主は承認の前に summary で見る
 
 ## 未解決
 
@@ -103,3 +103,4 @@ S3: plugin-release Skill
 ## 変更履歴
 - 2026-10-06 / publish と notify-approval の条件を osv の結果によらないものにし、osv をジョブ単位の continue-on-error にした / T02 のレビューで、scanner のイメージの取得はステップの外で行われ、ステップの continue-on-error が効かないと分かった / Go 不要（範囲・持ち主の操作・止めない約束は同じ）
 - 2026-10-06 / scanner の action の固定を 7f58dd から v2.6.0 のタグが指す a345acff（同じパス、同じ内容）にした / zizmor が「固定したハッシュとバージョンのコメントが食い違う」と code scanning に出した / Go 不要
+- 2026-10-06 / scanner を action から、チェックサムを固定した osv-scanner v2.6.0 のバイナリに変え、結果を $RUNNER_TEMP の新しいディレクトリに書かせた / GitHub の Codex のレビュー: action が動かすイメージは書き換えられるタグで、チェックアウトに results.json があると古い結果を要約し得る / Go 不要（同じ道具・同じバージョンで、範囲と持ち主の操作は同じ）

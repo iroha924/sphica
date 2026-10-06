@@ -71,7 +71,7 @@ jobs:
           if-no-files-found: error
 
   # Scans the revision being released so the owner can read the result before approving. Findings and a failed scan are reported,
-  # not failed on: a failed scanner step leaves the results unavailable, and a failed job (an image pull, setup) does not fail the run
+  # not failed on: a failed scan step leaves the results unavailable, and a failed job (checkout, setup) does not fail the run
   osv:
     name: "${{ github.event_name == 'push' && format('release {0}: osv', github.ref_name) || 'dry run: osv' }}"
     continue-on-error: true
@@ -88,23 +88,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The scanner of osv-scanner-action v2.6.0, the tag osv-scanner.yml pins, called directly so its failure does not fail the job
+      # osv-scanner from its release with a pinned checksum, not the action, whose image is a mutable tag. It exits 1 on findings, and
+      # it writes into a fresh directory, so a results.json in the checkout can never stand in for a scan that did not run
       - name: Scan dependencies
-        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
         continue-on-error: true
-        with:
-          scan-args: |-
-            --output=results.json
-            --format=json
-            -r
-            ./
+        env:
+          OSV_SCANNER: "2.6.0"
+          OSV_SCANNER_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/osv"
+          cd "$RUNNER_TEMP/osv"
+          curl -fsSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+          ./osv-scanner -r --format=json --output-file="$RUNNER_TEMP/osv/results.json" "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.21.0"
           package-manager-cache: false
       - name: Summarize the scan
         id: summary
-        run: node scripts/osv-summary.mjs results.json "$(git rev-parse HEAD)"
+        run: node scripts/osv-summary.mjs "$RUNNER_TEMP/osv/results.json" "$(git rev-parse HEAD)"
       # checkout and setup-node have no continue-on-error, so the summary must not depend on them
       - name: Say the results are unavailable when a step failed
         id: fallback

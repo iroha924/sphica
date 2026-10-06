@@ -110,6 +110,16 @@ base: main
   - 完了条件: `grep -c '\.\.\.process\.env' server/test/osv-summary.test.ts` → 0。子の環境は PATH と一時ディレクトリの HOME・USERPROFILE と GITHUB_* だけ。`SPHICA_HOME=/nonexistent SPHICA_DB=/nonexistent/x.db node --test test/osv-summary.test.ts`（server で）→ pass
   - コミット: `fix(test): run the OSV summary CLI with a temporary HOME only (T13)`
   - 結果: red は 1 を実測、直した後 0。`SPHICA_HOME=/nonexistent SPHICA_DB=/nonexistent/x.db node --test test/osv-summary.test.ts` → 10 件 pass
+
+- [x] T14: scanner をチェックサムを固定したバイナリにし、結果を新しいディレクトリに書かせる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T12（直す対象の scanner の呼び出しが要る）
+  - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `grep -c "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → 1（action の image は `docker://ghcr.io/google/osv-scanner-action:v2.6.0` という書き換えられるタグで、結果はチェックアウトの `results.json` に書いて読む）
+  - 完了条件: `grep -c "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → 0。`OSV_SCANNER_SHA256` が配布元の `osv-scanner_SHA256SUMS` の linux_amd64 の行と一致。要約は `$RUNNER_TEMP/osv/results.json` を読む。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功。PR の dry run の osv の log に `OSV scan of` と結果の行が出る
+  - コミット: `fix(release): run osv-scanner from its checksum-pinned release into a fresh directory (T14)`
+  - 結果: red は 1 を実測、直した後 0。配布元の SHA256SUMS の linux_amd64 は `ca69b3d3…b108` で、取ったバイナリの SHA-256 と一致。同じバージョンの darwin_arm64 を `-r --format=json --output-file=<一時>/results.json <worktree>` で流し、server/bun.lock の 323 パッケージから 3 件（braces、katex、proxy-addr）を出し、exit 1（見つかったとき）、要約は CI と同じ表。actionlint → exit 0。`bun run verify` → exit 0。dry run は push 後の CI で確かめる
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -166,4 +176,5 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T09, T10 / 差分全体の Codex のレビュー: [P2] 既存のバックスラッシュの後の `|` でセルを抜けられる（GFM の描画で再現）。[P2] checkout・setup-node の失敗で要約が飛ばされ、summary に unavailable が残らない / 2 件とも採った。T09 はエスケープを足すのをやめて許す文字に絞り、T10 は failure() の予備のステップを足した
 - 2026-10-06 / T11 / 差分全体の 2 回目の Codex のレビュー: [P3] 同じ package@version が複数の lockfile にあると表の行とパッケージ数が重なる（再現つき）。ほかの指摘は無い / 採って T11 を足した。レビューは P3 だけに収まったので、差分全体の 3 回目は頼まずに PR へ進む
 - 2026-10-06 / T12 / PR #293 の CI で zizmor が「固定したハッシュとバージョンのコメントが食い違う」を code scanning に出した / 中身が同じ v2.6.0 のタグのコミットに固定し直す T12 を足した
-\n- 2026-10-06 / T13, T14 / GitHub の Codex のレビュー（PR #293 の最初の head 2db22f0）: [P1] テストの子プロセスに親の環境をそのまま渡している（temp-home）。[P2] タグのコミットに results.json があると、scanner が書く前に落ちたとき古いファイルを要約し得る。[P2] scanner の action は書き換えられるイメージのタグを動かす / 3 件とも採った。T13 は子の環境を絞る、T14 は action をやめてチェックサムを固定した osv-scanner のバイナリを $RUNNER_TEMP の新しいディレクトリへ書かせる\n
+
+- 2026-10-06 / T13, T14 / GitHub の Codex のレビュー（PR #293 の最初の head 2db22f0）: [P1] テストの子プロセスに親の環境をそのまま渡している（temp-home）。[P2] タグのコミットに results.json があると、scanner が書く前に落ちたとき古いファイルを要約し得る。[P2] scanner の action は書き換えられるイメージのタグを動かす / 3 件とも採った。T13 は子の環境を絞る、T14 は action をやめてチェックサムを固定した osv-scanner のバイナリを $RUNNER_TEMP の新しいディレクトリへ書かせる
