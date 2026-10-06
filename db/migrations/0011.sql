@@ -1,6 +1,5 @@
--- Revision 10 → 11 of generation 2: a harvest run keeps the sources it may show and cite, chosen when it begins (harvest_run_source).
--- A harvest still running has no such rows and could only fall back to the pull request's current sources, so it is removed: its
--- session gets "Begin again" on its next call. Nothing cites a running run; a save writes its records and finishes the run at once.
+-- Revision 10 → 11 of generation 2: a harvest run keeps the sources it may cite, chosen when it begins (harvest_run_source). A running
+-- harvest has none, so it is removed and its session gets "Begin again"; nothing cites a running run (a save also finishes it).
 -- Every statement that stays is the same as in the schema at revision 11.
 
 create temp table sphica_migration_note (rule text, item text, action text);

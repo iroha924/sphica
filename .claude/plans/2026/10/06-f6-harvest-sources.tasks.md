@@ -54,6 +54,16 @@ base: main
   - 結果: red（直す前のコード）: `node --test --test-name-pattern 'cleared' test/github.test.ts` → fail。空にした後も 5 種類の今の版が版 1 の本文（Notes leak、Confirmed、Why not yarn? など）のまま
   - 結果: 実装後 `node --test test/github.test.ts test/extract.test.ts` → 49 pass（5 種類とも版 2 が空、版 1 を read で読める、空のまま取り込み直しても行が増えない、一度も本文の無かった comment:71 は行を作らない）。既存の 2 テストは空の item を数に入れる形に直した。`bun run verify` → 0
 
+- [x] T06: 0011.sql の冒頭コメントを 3 行に縮める
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（0011.sql が要る）
+  - 変更: `db/migrations/0011.sql`
+  - red: `sed -n 1,5p db/migrations/0011.sql` → 冒頭のコメントが 4 行（コメントは 1〜3 行の規約に反する）
+  - 完了条件: `sed -n 1,4p db/migrations/0011.sql` → コメント 3 行の後に空行。`cd server && node --test test/migrate.test.ts` → pass
+  - コミット: `fix(schema): keep the revision 11 migration's header to three lines (T06)`
+  - 結果: red: 直す前の冒頭コメントは 4 行。直した後 `sed -n 1,4p` → 3 行と空行。`node --test test/migrate.test.ts` → 53 pass。`bun run verify` → 0
+
 ## P2: doctor と README
 
 doctor と README から ~/Projects の前提が消える。
@@ -87,3 +97,4 @@ doctor と README から ~/Projects の前提が消える。
 - 2026-10-06 / T02, T03 / Codex のタスクごとのレビュー（746d34be、6d8fb33c）はどちらも指摘なし。Codex は sandbox でファイルの DB のテストと sql:reach を流せなかったので、手元の `bun run verify`（sql:reach を含む）が 0 で終わることを確かめた / 対応なし
 - 2026-10-06 / T05 / `check_plan.py done` が「T05 のコミット 3772727 が .claude/plans/ の外を変えていない」で NG。T05 は .claude/plans/ の中のファイルを消すだけのタスクで、外を変える理由が無い / 検査の作りの上で通らないものとして残し、完了の報告に書く。ほかのタスク（T01〜T04）は done の対象で違反なし
 - 2026-10-06 / T04 / Codex のタスクごとのレビュー（f27156e0）は指摘なし。Codex は sandbox で子プロセスのテストを流せなかったので、手元で cli.test.ts と project.test.ts の 28 pass を確かめた / 対応なし
+- 2026-10-06 / T06 / PR #290 で GitHub の Codex が P2 を 1 件（0011.sql の冒頭コメントが 4 行で、1〜3 行の規約に反する）。セキュリティレビューは指摘なし / 直すと判断し T06 を足した
