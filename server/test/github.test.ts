@@ -10,12 +10,22 @@ import {
   gh,
   ghUser,
   linkIssues,
-  pullSources,
+  pullSourceIds,
   readPull,
   repoOf,
   storeItems,
 } from "../src/github.ts";
-import { at, insert, plan, project, statements, tempDb } from "./temp-db.ts";
+import { at, insert, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
+
+/** The sources a harvest of pull request n begun now would keep */
+async function currentSources(db: TempDb, p: number, n: number) {
+  const ids = await pullSourceIds(db.reader, p, n);
+  return db.owner
+    .prepare(
+      `select kind, artifact, revision, text from source where id in (${ids.map(() => "?").join(", ")})`,
+    )
+    .all(...ids) as { kind: string; artifact: string; revision: number; text: string }[];
+}
 
 const sha = (c: string) => c.repeat(40);
 const user = (login: string, id: number, type = "User") => ({ login, id, type });
@@ -276,7 +286,7 @@ test("stores sources with who wrote them, adds a revision only when text changed
       db.owner.prepare("select diff_hunk from source where external_id = 'hunk-1'").get()?.diff_hunk,
     );
     assert.ok(!hunk.includes("sk-proj-abc") && hunk.includes("[redacted"), hunk);
-    const current = await pullSources(db.reader, p, 7);
+    const current = await currentSources(db, p, 7);
     assert.equal(current.length, ids.length, "only the current revision of each source");
     assert.deepEqual(
       current.filter((s) => s.kind === "pr_body").map((s) => [s.revision, s.text]),
@@ -286,15 +296,13 @@ test("stores sources with who wrote them, adds a revision only when text changed
     // A cleared body becomes an empty current revision: the old text stays as history but is no longer what the pull request says
     await storeItems(db.ingest, p, (await readPull(fake("   "), 7)).items);
     assert.deepEqual(
-      (await pullSources(db.reader, p, 7))
-        .filter((s) => s.kind === "pr_body")
-        .map((s) => [s.revision, s.text]),
+      (await currentSources(db, p, 7)).filter((s) => s.kind === "pr_body").map((s) => [s.revision, s.text]),
       [[3, ""]],
     );
     // The cleared body closes no issue: the next harvest drops the link, so the issue stops being part of the pull request
     await linkIssues(db.ingest, p, 7, []);
     assert.equal(
-      (await pullSources(db.reader, p, 7)).some((s) => s.artifact === "issue:14"),
+      (await currentSources(db, p, 7)).some((s) => s.artifact === "issue:14"),
       false,
     );
   } finally {
@@ -568,13 +576,11 @@ test("tombstone: after the newest revision is forgotten, an older one is not sho
     const b = (await storeItems(db.ingest, p, (await readPull(fake("Version B."), 7)).items))[0] as number;
     await applyForget(db.file, p, [b], await previewForget(db.file, p, [b]));
     await storeItems(db.ingest, p, (await readPull(fake("Version B."), 7)).items);
-    const bodies = (await pullSources(db.reader, p, 7)).filter((s) => s.kind === "pr_body");
+    const bodies = (await currentSources(db, p, 7)).filter((s) => s.kind === "pr_body");
     assert.deepEqual(bodies, [], "version A is not the pull request's current body");
     await storeItems(db.ingest, p, (await readPull(fake("Version C."), 7)).items);
     assert.deepEqual(
-      (await pullSources(db.reader, p, 7))
-        .filter((s) => s.kind === "pr_body")
-        .map((s) => [s.text, s.revision]),
+      (await currentSources(db, p, 7)).filter((s) => s.kind === "pr_body").map((s) => [s.text, s.revision]),
       [["Version C.", 3]],
     );
   } finally {

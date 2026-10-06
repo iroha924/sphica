@@ -32,14 +32,16 @@ base: main
   - 結果: `cd server && node --test test/migrate.test.ts test/schema.test.ts test/db.test.ts` → 123 pass。revision 10 の fixture から移行した DB と新しい DB の定義が一致、走っている途中の harvest 2 件がメモ付きで消え、保存済みの harvest・走っている途中の trace と glean・source・record_call が残った。trigger は別プロジェクトの source と trace・glean の実行を拒んだ。ingest の insert が通り、forget の source の削除で行が消えた
   - 結果: `bun run codegen:check` → matches。`bun run verify` → 0。版は 0.6.36
 
-- [ ] T02: beginHarvest が範囲を保存し、context・check・save が保存した範囲だけを見る
+- [x] T02: beginHarvest が範囲を保存し、context・check・save が保存した範囲だけを見る
   - 種別: 修正
   - 計画: S2
   - 依存: T01（harvest_run_source の表が要る）
-  - 変更: `server/src/extract.ts`, `server/src/github.ts`, `server/test/extract.test.ts`
+  - 変更: `server/src/extract.ts`, `server/src/github.ts`, `server/test/extract.test.ts`, `server/test/github.test.ts`
   - red: `cd server && node --test --test-name-pattern 'harvest run keeps' test/extract.test.ts` → B がコメントの版 2 を取り込んだ後、A の context に版 1 が無く、A の check が版 1 の引用を範囲外として拒んで fail
   - 完了条件: `cd server && node --test test/extract.test.ts` → pass。A は B の版 2 と、B の本文が閉じる issue の変化の影響を受けない。DB を開き直しても同じ。A の source の forget と B の新しい版の forget が A の範囲から版を外す。B の範囲は B に沿って進む。移行で消えた実行 id の check が「Begin again」を返す
   - コミット: `fix(harvest): keep each run's sources as they were when it began (T02)`
+  - 結果: red（直す前のコード）: `node --test --test-name-pattern 'harvest run keeps' test/extract.test.ts` → 2 件 fail。B の後の A の context に source が 1 件も出ない。forget のテストでは、同じミリ秒に取り込まれた B の版 2 の本文が A に混ざった（時刻で絞る形の穴の再現）
+  - 結果: 実装後 `node --test test/github.test.ts test/extract.test.ts` → 48 pass（A の context は版 1 と issue 9 を出し、B の版 2 と issue 12 を出さない。開き直した reader でも同じ。A の check と save が版 1 の引用で通る。B の範囲は版 2 と issue 12。A のコメントの forget と、B だけが持つ本文の版 2 の forget で、A から両方が外れる。存在しない実行 id の check は Begin again）。`bun run verify` → 0
 
 - [ ] T03: 空にされた issue 本文・コメント・review を空の今の版として保存する
   - 種別: 修正
@@ -75,3 +77,4 @@ doctor と README から ~/Projects の前提が消える。
   - コミット: `chore(plans): remove finished plans (T05)`
 
 ## 記録
+- 2026-10-06 / T02 / github.test.ts が pullSources を使っていた / 変更欄に `server/test/github.test.ts` を足した（前: extract.ts, github.ts, extract.test.ts）。テストは pullSourceIds で読み直す形にした

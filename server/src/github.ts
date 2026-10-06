@@ -532,8 +532,8 @@ export async function linkIssues(
       .execute();
 }
 
-/** The current revision of every source of a pull request and the issues it closes, in time order, with whether a run looked at each. */
-export async function pullSources(db: Reads, projectId: number, number: number) {
+/** The current revision of every source of a pull request and the issues it closes: what a harvest run begun now keeps. */
+export async function pullSourceIds(db: Reads, projectId: number, number: number): Promise<number[]> {
   const artifacts = [
     `pr:${number}`,
     ...(
@@ -545,24 +545,50 @@ export async function pullSources(db: Reads, projectId: number, number: number) 
         .execute()
     ).map((l) => l.to_artifact),
   ];
+  const rows = await db
+    .selectFrom("source as s")
+    .where("s.project_id", "=", projectId)
+    .where("s.artifact", "in", artifacts)
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("source as n")
+            .select("n.id")
+            .whereRef("n.project_id", "=", "s.project_id")
+            .whereRef("n.kind", "=", "s.kind")
+            .whereRef("n.external_id", "=", "s.external_id")
+            .whereRef("n.revision", ">", "s.revision"),
+        ),
+      ),
+    )
+    // A revision older than one the owner forgot is not the item's current text
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom("source_forgotten as f")
+            .select("f.source_id")
+            .whereRef("f.project_id", "=", "s.project_id")
+            .whereRef("f.kind", "=", "s.kind")
+            .whereRef("f.external_id", "=", "s.external_id")
+            .whereRef("f.revision", ">", "s.revision"),
+        ),
+      ),
+    )
+    .select("s.id")
+    .execute();
+  return rows.map((r) => r.id);
+}
+
+/**
+ * The sources a harvest run kept when it began, in time order, with whether a run looked at each. Another harvest's newer revisions
+ * never enter; what the owner forgot since leaves, with every older revision of it.
+ */
+export async function runSources(db: Reads, runId: number) {
   return (
     db
-      .selectFrom("source as s")
-      .where("s.project_id", "=", projectId)
-      .where("s.artifact", "in", artifacts)
-      .where(({ not, exists, selectFrom }) =>
-        not(
-          exists(
-            selectFrom("source as n")
-              .select("n.id")
-              .whereRef("n.project_id", "=", "s.project_id")
-              .whereRef("n.kind", "=", "s.kind")
-              .whereRef("n.external_id", "=", "s.external_id")
-              .whereRef("n.revision", ">", "s.revision"),
-          ),
-        ),
-      )
-      // A revision older than one the owner forgot is not the item's current text
+      .selectFrom("harvest_run_source as h")
+      .innerJoin("source as s", "s.id", "h.source_id")
+      .where("h.run_id", "=", runId)
       .where(({ not, exists, selectFrom }) =>
         not(
           exists(
@@ -584,7 +610,6 @@ export async function pullSources(db: Reads, projectId: number, number: number) 
         "s.author_login",
         "s.author_association",
         "s.created_at",
-        "s.captured_at",
         "s.path",
         "s.line_start",
         "s.text",
