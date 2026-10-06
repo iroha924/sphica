@@ -93,3 +93,11 @@ test("bundles without any of the SDK's dist files fail, so an empty list never p
     ["no bundle includes the MCP SDK's dist files, so the packages it carries were not checked"],
   );
 });
+
+test("a package region written with backslashes is caught too", () => {
+  const read = () =>
+    "//#region ..\\..\\node_modules\\.pnpm\\punycode@2.3.1\\node_modules\\punycode\\punycode.js";
+  const got = embeddedProblems({ mcp: meta([SDK]) }, read, []);
+  assert.equal(got.length, 1);
+  assert.match(got[0] ?? "", /cannot read the package in .*punycode/);
+});

@@ -108,6 +108,17 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
   - 結果: 直した後 `cd server && node --test test/embedded.test.ts` → 6 pass。metafile の無い場合の期待に「SDK のファイルが無い」も加わった
   - 結果: `bun run verify` → exit 0（bundle の照合は今の 6 パッケージで通る）
 
+- [x] T09: バックスラッシュ区切りの読めない region の印も照合で落とす
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T08（読めない印を落とす検査が要る）
+  - 変更: `scripts/lib/embedded.mjs`, `server/test/embedded.test.ts`
+  - red: `cd server && node --test test/embedded.test.ts` → 足した `..\..\node_modules\.pnpm\…` の印のケースで問題が返らず落ちる
+  - 完了条件: `cd server && node --test test/embedded.test.ts` → 全件 pass。`bun run bundle` → exit 0
+  - コミット: `fix(notices): treat backslash-separated region markers as package regions too (T09)`
+  - 結果: red: 直す前に `cd server && node --test test/embedded.test.ts` → 足した 1 件が落ちた（6 pass, 1 fail）
+  - 結果: 直した後 `cd server && node --test test/embedded.test.ts` → 7 pass。`bun run verify` → exit 0
+
 ## P4: structuredContent の注記を実測に合わせる
 
 両ホストで structuredContent を持つ返答の扱いを測り、`server/src/mcp.ts` の注記を確かめた範囲に書き直す。
@@ -128,3 +139,5 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
 - 2026-10-06 / T05 / 変更欄: 前は `scripts/sbom-embedded.mjs`, `server/test/sbom.test.ts`, `.github/workflows/release.yml`。新しくは `scripts/lib/sbom.mjs` と `scripts/lib/sbom.d.mts` を足した / 足す処理を CLI ではなく既存の SBOM の lib に置いてテストするため
 - 2026-10-06 / T06 / 完了条件: 前は「PR の CI の Windows job のログで…通る」。新しくは actionlint と手元での同じ送り方 / check の workflow は PR でしか走らず、Windows の結果は plan の A6 と重なるため
 - 2026-10-06 / T04 / Codex のタスクごとのレビューで P2 が 2 件（読めない region の印を黙って飛ばす、SDK の入力が 0 件でも通る）。どちらも空振りで通る穴なので T08 を足して直す。node_modules 以外から SDK のファイルが入る場合の指摘は、bundle が SDK を node_modules から解決するので見送る / T08 を追加
+- 2026-10-06 / T05 / Codex のタスクごとのレビューは指摘なし（syft 1.52.0 の実出力に足して notices と一致することも確かめた）/ そのまま
+- 2026-10-06 / T08 / Codex のタスクごとのレビューで P2 が 1 件（バックスラッシュ区切りの読めない region の行が検査を素通りする。今の SDK の dist はスラッシュ区切り）/ T09 を足して直す

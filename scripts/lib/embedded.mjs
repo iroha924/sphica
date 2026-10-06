@@ -67,7 +67,7 @@ export function embeddedProblems(metas, read, listed) {
           const text = read(input);
           for (const p of markedPackages(text)) found.add(p);
           // A package region the pattern cannot read would drop out of the comparison unseen
-          for (const line of text.match(/^\/\/#region .*node_modules\/.*$/gm) ?? [])
+          for (const line of text.match(/^\/\/#region .*node_modules[\\/].*$/gm) ?? [])
             if (markedPackages(line).size === 0)
               problems.push(`cannot read the package in ${input}: ${line}`);
         }
