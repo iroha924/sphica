@@ -22,13 +22,14 @@ base: main
 
 採点者の結果を保存する場所の読み書きと、入力が一致するかを決めるキーを作る。grade.ts の挙動はまだ変えない。
 
-- [ ] T01: `checkpointKey`・`loadCheckpoint`・`saveCheckpoint` と採点者の起動引数の定数を足す
+- [x] T01: `checkpointKey`・`loadCheckpoint`・`saveCheckpoint` と採点者の起動引数の定数を足す
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/cloud/grading.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern="checkpoint" test/eval-grade.test.ts` → pass。何も変えなければ同じキー、plan の各要素を 1 つずつ変えると違うキー（swapped で expect・against を変えたとき、文面だけを変えたときも含む）。無いファイルは空、壊れた JSON・形の違い・version の違いはパスを挙げて throw し、ファイルのバイト列は変わらない。保存した内容を読み戻すと同じ
   - コミット: `feat(eval): add the grading checkpoint's key, load, and atomic save (T01)`
+  - 結果: `cd server && node --test --test-name-pattern="checkpoint" test/eval-grade.test.ts` → pass 2 / fail 0（キーは 22 通りの変更と swapped の expect・against の変更でどれも変わり、同じ入力で同じ。無いファイルは空、保存して読み戻すと同じで一時ファイルは残らない、壊れた 7 通りはパスを挙げて throw しバイト列は変わらない）。eval-grade.test.ts 全体 pass 61 / fail 0、`bun run lint`・`bun run typecheck`・`bun run english`・`bun run architecture` は指摘なし
 
 ## P2: grade.ts が checkpoint で動く
 

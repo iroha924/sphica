@@ -8,7 +8,16 @@ import path from "node:path";
 import { test } from "node:test";
 import { claimRunDir, codexModelOf } from "../evals/cloud/codex-home.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
-import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
+import {
+  blindPrompt,
+  type CheckpointInput,
+  checkpointKey,
+  gradedTask,
+  loadCheckpoint,
+  receiveGrade,
+  saveCheckpoint,
+  tabulate,
+} from "../evals/cloud/grading.ts";
 import {
   answerFormat,
   capPatch,
@@ -2407,4 +2416,102 @@ test("G6 needs every run to show the loading change, and a re-proposal rise show
     ).join("\n"),
     /re-proposals 0\.00 \(0 of 2 known, 3 unknown\) → 0\.50 \(1 of 2 known, 3 unknown\)/,
   );
+});
+
+test("the checkpoint key is the same for the same grader call and changes with any of its inputs", () => {
+  const base: CheckpointInput = {
+    grader: "codex",
+    task: { ...task, conflict: "two rules" },
+    row: { ...row, presented: "rec" },
+    prompt: "grade this",
+    build: "b",
+    bundle: "c",
+    variant: "original",
+    schema: "{}",
+    codexConfig: 'model = "m"',
+  };
+  const key = checkpointKey(base);
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.equal(checkpointKey(structuredClone(base)), key);
+  const changes: [string, Partial<CheckpointInput>][] = [
+    ["grader", { grader: "claude" }],
+    ["task id", { task: { ...base.task, id: "other" } }],
+    ["task prompt", { task: { ...base.task, prompt: "other" } }],
+    ["expect", { task: { ...base.task, expect: "other" } }],
+    ["against", { task: { ...base.task, against: "other" } }],
+    ["no against", { task: { ...base.task, against: undefined } }],
+    ["conflict", { task: { ...base.task, conflict: "other" } }],
+    ["prompt text", { prompt: "grade this again" }],
+    ["answer", { row: { ...base.row, answer: "other" } }],
+    ["empty answer", { row: { ...base.row, answer: "" } }],
+    ["patch", { row: { ...base.row, patch: "other" } }],
+    ["patch cut", { row: { ...base.row, patch_truncated: true } }],
+    ["presented", { row: { ...base.row, presented: null } }],
+    ["model", { row: { ...base.row, model: "claude" } }],
+    ["row task", { row: { ...base.row, task: "other" } }],
+    ["condition", { row: { ...base.row, condition: "gold" } }],
+    ["run", { row: { ...base.row, run: "r2" } }],
+    ["build", { build: null }],
+    ["bundle", { bundle: "d" }],
+    ["variant", { variant: "swapped" }],
+    ["schema", { schema: '{"type":"object"}' }],
+    ["codex config", { codexConfig: 'model = "n"' }],
+  ];
+  for (const [what, change] of changes) assert.notEqual(checkpointKey({ ...base, ...change }), key, what);
+  // A swapped run's grader never sees the original expect and against, yet a change to them still grades again
+  const swapped = { ...base, variant: "swapped" };
+  for (const t of [{ expect: "other" }, { against: "other" }])
+    assert.notEqual(
+      checkpointKey({ ...swapped, task: { ...base.task, ...t } }),
+      checkpointKey(swapped),
+      JSON.stringify(t),
+    );
+});
+
+test("a checkpoint that is missing is empty, one saved reads back the same, and an unreadable one is refused untouched", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-checkpoint-"));
+  try {
+    const file = path.join(dir, "grades.checkpoint.json");
+    assert.deepEqual(loadCheckpoint(file), { version: 1, entries: {} });
+    const saved = {
+      version: 1 as const,
+      entries: {
+        ["a".repeat(64)]: {
+          grader: "codex" as const,
+          status: 0,
+          output: "{}",
+          at: "2026-10-06T00:00:00.000Z",
+        },
+      },
+    };
+    saveCheckpoint(file, saved);
+    assert.deepEqual(loadCheckpoint(file), saved);
+    assert.deepEqual(fs.readdirSync(dir), ["grades.checkpoint.json"], "no temporary file is left");
+    const entry = saved.entries["a".repeat(64)];
+    for (const [what, text] of [
+      ["not JSON", "{"],
+      ["no entries", JSON.stringify({ version: 1, entries: null })],
+      ["another version", JSON.stringify({ version: 2, entries: {} })],
+      ["a key that is not a digest", JSON.stringify({ version: 1, entries: { k: entry } })],
+      [
+        "output not a string",
+        JSON.stringify({ version: 1, entries: { ["a".repeat(64)]: { ...entry, output: 1 } } }),
+      ],
+      [
+        "an unknown grader",
+        JSON.stringify({ version: 1, entries: { ["a".repeat(64)]: { ...entry, grader: "x" } } }),
+      ],
+      ["an extra field", JSON.stringify({ version: 1, entries: {}, extra: 1 })],
+    ] as [string, string][]) {
+      fs.writeFileSync(file, text);
+      assert.throws(
+        () => loadCheckpoint(file),
+        (e: Error) => e.message.includes(file),
+        what,
+      );
+      assert.equal(fs.readFileSync(file, "utf8"), text, `${what}: the file is left as it was`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
