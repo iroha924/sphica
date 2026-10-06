@@ -50,6 +50,25 @@ base: main
   - コミット: `ci(release): scan the tagged revision with OSV before approval (T02)`
   - 結果: `actionlint .github/workflows/release.yml` → 出力なし（exit 0）。`bun run verify` → exit 0（acceptance 130 件 pass を含む）。zizmor は手元に無く、CI で見る
 
+
+- [x] T06: 表のセルをコードスパンにして、自動リンク・文字参照も効かないようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T05（直す対象のエスケープが要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 5 件 fail（表の行がコードスパンでない。`www.example.org` と `&copy;` がそのまま Markdown として残る）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。各セルはコードスパンで、バッククォートは `'` に、`|` は `\|` になる
+  - コミット: `fix(release): show OSV table cells as code spans (T06)`
+  - 結果: red は上のとおり 5 件 fail を実測。直した後 `cd server && node --test test/osv-summary.test.ts` → 10 件 pass
+
+- [ ] T07: osv ジョブの失敗（イメージの取得・準備の失敗）で publish と dry run が止まらないようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の osv ジョブが要る）
+  - 変更: `.github/workflows/release.yml`
+  - red: `awk '/^  osv:/,/^  prepare:/' .github/workflows/release.yml | grep -c '^    continue-on-error: true'` → 0（ジョブ単位の continue-on-error が無く、publish と notify-approval は osv の成功を既定の条件で求める）
+  - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。osv にジョブ単位の `continue-on-error: true`、publish は `!cancelled()` と sbom・prepare の成功、notify-approval は `!cancelled()` と prepare の成功だけを条件にする。`bun run verify` → 成功
+  - コミット: `fix(release): keep a failed OSV job from blocking publish or the dry run (T07)`
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -80,3 +99,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T01 / テストが TS から .mjs を読むのに型宣言が要り、pre-commit の typecheck で止まった / 変更欄に `scripts/lib/osv-summary.d.mts` を足した（前: 3 ファイル、後: 4 ファイル）
 - 2026-10-06 / T05 / T01 の Codex のレビューで 3 件（groups だけ残った結果が none、ENOENT 以外の読み取りエラーで CLI が落ちる、セルの Markdown）を再現つきで受けた / 3 件とも直すことにして修正タスク T05 を T01 の後に足した
 - 2026-10-06 / T02 / osv ジョブは contents: read だけで security-events を持たないので、osv-scanner.yml の fork PR の除外（security-events を fork に渡せないため）は理由が無くなった / plan にあった fork PR の除外は付けなかった
+- 2026-10-06 / T06, T07 / T02 と T05 の Codex のレビュー: [P1] scanner の docker イメージの取得はステップの外の準備処理で、continue-on-error が効かずに osv が落ち、publish と dry run を止める。[P2] checkout・setup-node の失敗も同じ。[P2] バックスラッシュのエスケープでは GFM の自動リンクと文字参照が残る / 3 件とも採り、T06（セルをコードスパンに）と T07（osv をジョブ単位で continue-on-error、publish と notify-approval は osv の結果によらない条件）を足した

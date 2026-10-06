@@ -59,7 +59,7 @@ test("one vulnerability is found with its package row", () => {
   assert.equal(s.status, "found");
   assert.equal(s.count, 1);
   assert.match(s.markdown, /1 known vulnerability in 1 package\./);
-  assert.match(s.markdown, /^\| hono \| 4\.0\.0 \| npm \| GHSA-aaaa \|$/m);
+  assert.match(s.markdown, /^\| `hono` \| `4\.0\.0` \| `npm` \| `GHSA-aaaa` \|$/m);
   assert.doesNotMatch(s.markdown, /zod/);
 });
 
@@ -79,13 +79,13 @@ test("an ID in two packages counts once; each package keeps its row", () => {
   assert.equal(s.status, "found");
   assert.equal(s.count, 3);
   assert.match(s.markdown, /3 known vulnerabilities in 3 packages\./);
-  assert.match(s.markdown, /^\| a \| 1 \| npm \| GHSA-1, GHSA-2 \|$/m);
-  assert.match(s.markdown, /^\| b \| 2 \| npm \| GHSA-1 \|$/m);
+  assert.match(s.markdown, /^\| `a` \| `1` \| `npm` \| `GHSA-1`, `GHSA-2` \|$/m);
+  assert.match(s.markdown, /^\| `b` \| `2` \| `npm` \| `GHSA-1` \|$/m);
 });
 
 test("a table cell cannot break out of its row", () => {
   const s = osvSummary(report(pkg("a|b\n| x |", "1", ["ID|1"])), SHA);
-  assert.match(s.markdown, /^\| a\\\|b \\\| x \\\| \| 1 \| npm \| ID\\\|1 \|$/m);
+  assert.match(s.markdown, /^\| `a\\\|b \\\| x \\\|` \| `1` \| `npm` \| `ID\\\|1` \|$/m);
 });
 
 test("groups naming vulnerabilities the package does not list are unavailable, not none", () => {
@@ -107,12 +107,18 @@ test("groups naming vulnerabilities the package does not list are unavailable, n
   }
 });
 
+// Each cell is a code span, so GFM shows it as typed: no images, links, autolinks, emphasis, or character references
 test("Markdown in a cell is shown as text", () => {
-  const s = osvSummary(report(pkg("![x](https://example.org/i)", "1.0.0", ["*ID*"])), SHA);
+  const s = osvSummary(report(pkg("![x](https://example.org/i)", "www.example.org", ["*ID*&copy;"])), SHA);
   assert.match(
     s.markdown,
-    /^\| \\!\\\[x\\\]\\\(https:\/\/example\.org\/i\\\) \| 1\.0\.0 \| npm \| \\\*ID\\\* \|$/m,
+    /^\| `!\[x\]\(https:\/\/example\.org\/i\)` \| `www\.example\.org` \| `npm` \| `\*ID\*&copy;` \|$/m,
   );
+});
+
+test("a backtick cannot close a cell's code span", () => {
+  const s = osvSummary(report(pkg("a`<b>`c", "1", ["X"])), SHA);
+  assert.match(s.markdown, /^\| `a'<b>'c` \| `1` \| `npm` \| `X` \|$/m);
 });
 
 test("the approval comment's line names the status", () => {

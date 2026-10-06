@@ -1,11 +1,15 @@
 // Summarizes osv-scanner's JSON output (`--format=json`) for the release run. A scan that left no readable results is
 // `unavailable`, never `none`: only a well-formed result with no vulnerabilities says there are none.
 
-// Backslash-escapes Markdown punctuation so names from the results file render as text
-const cell = (value) =>
-  String(value)
+// A code span shows a name from the results file as typed (no links, images, emphasis, or character references). A backtick
+// would close the span and a pipe the table cell, so they are replaced and escaped
+const cell = (value) => {
+  const text = String(value)
     .replace(/[\r\n]+/g, " ")
-    .replace(/[\\`*_{}[\]()<>#+!|~]/g, "\\$&");
+    .replaceAll("`", "'")
+    .replaceAll("|", "\\|");
+  return text.trim() ? `\`${text}\`` : "";
+};
 
 /** Packages with vulnerabilities, or null when the shape is not osv-scanner's. */
 function vulnerable(report) {
@@ -44,7 +48,7 @@ export function osvSummary(text, sha) {
   let reason = "";
   if (text === null) reason = "the scan wrote no results file";
   else if (typeof text !== "string")
-    reason = `the results file could not be read (${cell(text.code ?? "unknown error")})`;
+    reason = `the results file could not be read (${String(text.code ?? "unknown error")})`;
   else if (text.trim() === "") reason = "the results file is empty";
   else {
     try {
