@@ -175,8 +175,8 @@ async function build(name: string, n: number, kind: "uniform" | "stress"): Promi
     const broad = [...Array(n).keys()].reverse().find((i) => i % 100 >= 6 && i % 100 < 16) ?? 0;
     keys.free = `trace:ext-b${Math.floor(free / PER_SAVE)}/k${free}`;
     keys.broad = `trace:ext-b${Math.floor(broad / PER_SAVE)}/k${broad}`;
+    // Only the last record's file changes: review shows five records in id order, and the 500 sharing hot.ts would fill them
     added = `const c = vendor${free}client;`;
-    changed.push("src/shared/hot.ts");
     // A history of other sessions and their deliveries, as a project used for months has
     db.owner.exec("begin");
     const now = Date.now();
@@ -208,8 +208,7 @@ type Case = {
   calls?: number;
 };
 
-// Review shows at most five records in id order, so in the stress shape the 500 records sharing a changed file fill it
-const reviewed = (f: Fixture) => (f.keys.free ? ["trace:ext-b"] : [f.keys.last ?? ""]);
+const reviewed = (f: Fixture) => [f.keys.last ?? "", ...(f.keys.free ? [f.keys.free] : [])];
 
 const CASES: Case[] = [
   {

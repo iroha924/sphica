@@ -106,6 +106,17 @@ base: main
   - コミット: `docs(plugin-release): run the scale benchmark when changing delivery matching`
   - 結果: `bun run verify:ai` → exit 0（AI config と links がエラー 0）。発火条件に `server/src/deliver.ts` も足した（照合を変える人がこの Skill を開くように）
 
+- [x] T08: stress の review の計測が、場所の無い記録の取りこぼしを見逃す件を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（計測スクリプトが要る）
+  - 変更: `server/evals/scale/run.ts`
+  - red: `node server/evals/scale/run.ts --sizes 359 --no-drain`（`selectForReview` の場所の無い記録の経路を一時的に空にして）→ stress の review 2 行が `none` のまま
+  - 完了条件: `node server/evals/scale/run.ts --sizes 359 --no-drain` → stress の review 2 行が none。同じく経路を空にすると `missing trace:ext-b198/k9925` が出る
+  - コミット: `fix(evals): check both the anchored and the location-free record in the stress review`
+  - 結果: red `node server/evals/scale/run.ts --sizes 359 --no-drain` → 経路を空にしたコードで、stress の review 2 行が none（見逃し）
+  - 結果: `node server/evals/scale/run.ts --sizes 359 --no-drain` → exit 0、stress の review 2 行が none（最大 141 ms・146 ms）。経路を空にすると 2 行とも `missing trace:ext-b198/k9925`。確かめた後に `server/src/review.ts` を HEAD に戻した
+
 ## 記録
 
 - 2026-10-07 / T01 / 修正前の計測で stress の review 2 行が「期待した記録が無い」になった。review の配信は 1 回 5 件まで id 順で、差分に入れた 500 件共有のファイルの記録で埋まるため（仕様どおり） / stress の review の期待を「記録を出していること」（`trace:ext-b` を含む）に直した。uniform は最後の記録の key を引き続き見る
@@ -115,3 +126,4 @@ base: main
 - 2026-10-07 / T04 / 配列の探し直しをやめても、新しいプロセスでのプロンプトの時間は変わらなかった（10,000 件で timeout のまま）。支配的だったのは記録ごとに作る `\p{L}` の正規表現の組み立てで、新しいプロセスで 30,000 個作るのに 11,498 ms、`includes` なら 3 ms（実測） / 正規表現を作る前に部分文字列で振り落とす判定を足した（含まれないなら正規表現も一致しないので、一致の規則は変わらない。anchor のパスは schema の CHECK で `\` を含まない）。変更欄に `server/src/db.ts`（`byUnit` を review と共有）と `server/test/temp-db.ts`（32,767 件を入れるヘルパー）を足した
 - 2026-10-07 / T04, T05 / 新しい会話の Codex のレビュー（4146fd5e、89988626）はどちらも指摘なし。T04 は前置きの判定と元の判定を 39,200 通りで突き合わせて一致。Codex 側はテストと計測を読み取り専用の環境で流せず（一時ディレクトリの EPERM）、こちらで流した結果だけがある / 採るものなし
 - 2026-10-07 / T06 / Bash の配信もパスの書き方ごとに正規表現を作っていた / どの書き方もファイル名で終わるのでファイル名と書き方を `includes` で先に見る形にし、cwd からの相対・`./`・引用符・`:行番号`・`=` の後と、長いパス・入れ子のパス・cwd から出るパスを一致させないことのテストを足した（修正前のコードでも通る）
+- 2026-10-07 / T08 / review-shipping の指摘: stress の review の期待が全 key 共通の接頭辞 `trace:ext-b` だけで、場所の無い記録が出なくても通る（今回直した `selectForReview` の経路） / T08 を足した。stress の review の差分から 500 件共有の `src/shared/hot.ts` を外し、最後の記録と場所の無い記録の 2 件の key を見る。共有ファイルの負荷は Read の行で引き続き測る。review-shipping のほかの確認（tarball 51 ファイル、bundle 予算、バージョン、Windows のパスの前置き判定の模擬 1,664 通り、修正前のコードで red）は指摘なし
