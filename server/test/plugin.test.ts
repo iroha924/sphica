@@ -726,6 +726,149 @@ test("both MCP servers answer a request over 10 MiB and keep answering after it"
   }
 });
 
+// Hosts read these schemas to build the calls; a change here changes what an agent can send
+test("both MCP servers list each tool's arguments and hints, and refuse an argument they do not know", async () => {
+  // name: required, all properties, readOnlyHint, destructiveHint
+  const want: Record<string, [string[], string[], boolean, boolean]> = {
+    export: [["path", "records"], ["cwd", "path", "records"], true, false],
+    fields: [[], ["cwd"], true, false],
+    overview: [["view"], ["after", "cwd", "view"], true, false],
+    read: [["refs"], ["cwd", "refs"], true, false],
+    review_check: [
+      ["diff", "findings", "selection"],
+      ["after", "cwd", "diff", "findings", "selection"],
+      true,
+      false,
+    ],
+    review_select: [["diff"], ["after", "cwd", "diff"], true, false],
+    search: [
+      ["query"],
+      ["asked", "cwd", "kinds", "lifecycles", "limit", "path", "query", "session", "sources"],
+      true,
+      false,
+    ],
+    status: [[], ["cwd"], true, false],
+    forget_apply: [["sources"], ["cwd", "sources"], false, true],
+    forget_preview: [["sources"], ["cwd", "sources"], true, false],
+    glean_begin: [[], ["cwd", "session"], false, false],
+    glean_fetch: [["run", "url"], ["cwd", "run", "url"], false, false],
+    harvest_begin: [["pr"], ["cwd", "pr"], false, false],
+    record_check: [["record", "run"], ["cwd", "record", "run"], true, false],
+    record_context: [["run"], ["after", "auto", "cwd", "run"], true, false],
+    record_save: [["record", "run"], ["cwd", "record", "run"], false, false],
+    trace_begin: [[], ["cwd", "session"], false, false],
+    trace_pending: [[], ["auto", "cwd"], true, false],
+  };
+  const seen: string[] = [];
+  for (const entry of ["mcp.ts", "mcp-record.ts"]) {
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(SRC, entry)],
+        env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+        stderr: "ignore",
+      }),
+    );
+    try {
+      for (const t of (await client.listTools()).tools) {
+        seen.push(t.name);
+        const s = t.inputSchema as {
+          required?: string[];
+          properties?: object;
+          additionalProperties?: unknown;
+        };
+        assert.deepEqual(
+          [
+            [...(s.required ?? [])].sort(),
+            Object.keys(s.properties ?? {}).sort(),
+            t.annotations?.readOnlyHint,
+            t.annotations?.destructiveHint,
+          ],
+          want[t.name],
+          t.name,
+        );
+        assert.equal(s.additionalProperties, false, t.name);
+        const r = await client.callTool({ name: t.name, arguments: { unknownArgument: 1 } });
+        assert.equal(r.isError, true, t.name);
+        assert.match(JSON.stringify(r.content), /unknownArgument/, t.name);
+      }
+    } finally {
+      await client.close();
+    }
+  }
+  assert.deepEqual(seen.sort(), Object.keys(want).sort());
+});
+
+// Who called a record tool comes only from the host's _meta and environment, never from the arguments
+test("the record MCP server logs the caller from the host's _meta for Claude Code and Codex", async () => {
+  const db = tempDb();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-caller-"));
+  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/c.git"], { cwd: dir });
+  project(db, "git:github.com/o/c", "o/c");
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp-record.ts")],
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: db.file,
+        CLAUDE_PROJECT_DIR: dir,
+        CLAUDE_CODE_ENTRYPOINT: "cli",
+        CLAUDE_CODE_SESSION_ID: "claude-session-1",
+      },
+      stderr: "ignore",
+    }),
+  );
+  try {
+    const claude = await client.callTool({
+      name: "trace_pending",
+      arguments: { cwd: dir },
+      _meta: { "claudecode/toolUseId": "toolu_01abc" },
+    });
+    assert.notEqual(claude.isError, true, JSON.stringify(claude.content));
+    const codex = await client.callTool({
+      name: "trace_pending",
+      arguments: { cwd: dir },
+      _meta: {
+        "codex/sandbox-state-meta": { sandboxCwd: pathToFileURL(dir).href },
+        "x-codex-turn-metadata": { session_id: "codex-session-1", turn_id: "turn-1", turn_trigger: "exec" },
+      },
+    });
+    assert.notEqual(codex.isError, true, JSON.stringify(codex.content));
+    const rows = db.owner
+      .prepare(
+        "select host, caller_session, caller_turn, tool_use_id, mode, mode_raw from record_call order by id",
+      )
+      .all()
+      .map((r) => ({ ...r }));
+    assert.deepEqual(rows, [
+      {
+        host: "claude-code",
+        caller_session: "claude-session-1",
+        caller_turn: null,
+        tool_use_id: "toolu_01abc",
+        mode: "interactive",
+        mode_raw: "cli",
+      },
+      {
+        host: "codex",
+        caller_session: "codex-session-1",
+        caller_turn: "turn-1",
+        tool_use_id: null,
+        mode: "headless",
+        mode_raw: "exec",
+      },
+    ]);
+  } finally {
+    await client.close();
+    await db.done();
+  }
+});
+
 // Codex starts plugin MCP servers in the plugin root and names the session's directory only in each call's _meta (codex-cli 0.157.1)
 test("the record MCP server writes to the workspace the host names in the call, not where it was started", async () => {
   const db = tempDb();

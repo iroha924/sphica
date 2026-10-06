@@ -45,13 +45,16 @@ base: main
   - 結果: 直した後 `cd server && node --test --test-name-pattern="10 MiB" test/plugin.test.ts` → 1 pass。要求が 10 MiB を超えることをテストの中で assert している
   - 結果: `bun run verify` → exit 0
 
-- [ ] T03: 両サーバーのツール一覧と、ホストの _meta がハンドラーに届くことのテストを足す
+- [x] T03: 両サーバーのツール一覧と、ホストの _meta がハンドラーに届くことのテストを足す
   - 種別: 追加
   - 計画: S2
   - 依存: T01（v2 のクライアントで呼ぶ）
   - 変更: `server/test/plugin.test.ts`
   - 完了条件: `cd server && node --test test/plugin.test.ts` → 全件 pass。ツール一覧（名前、description、annotations、required、`additionalProperties: false`）と知らない引数の拒否、`claudecode/toolUseId`・`x-codex-turn-metadata`・Codex の sandbox の cwd のケースを含む
   - コミット: `test(mcp): pin both servers' tool lists and host metadata under SDK v2 (T03)`
+  - 結果: `cd server && node --test --test-name-pattern="refuse an argument|logs the caller" test/plugin.test.ts` → 2 pass。18 ツールの required・properties・readOnlyHint・destructiveHint と `additionalProperties: false`、知らない引数の拒否、Claude Code と Codex の caller の列を確かめる
+  - 結果: 0.6.38（v1）と T01 の bundle（v2）の tools/list を比べると、違いは `inputSchema.$schema` が draft-07 から 2020-12 になったことと、各ツールの `execution: {taskSupport: "forbidden"}` が無くなったことだけ
+  - 結果: `bun run verify` → exit 0
 
 ## P2: SDK が同梱するパッケージを表記とスキャンに載せる
 
@@ -98,3 +101,4 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
   - コミット: `docs(mcp): state what the hosts showed for structuredContent under SDK v2 (T07)`
 
 ## 記録
+- 2026-10-06 / T01 / Codex のタスクごとのレビューは指摘なし / そのまま
