@@ -53,6 +53,7 @@ export function markedPackages(text) {
 export function embeddedProblems(metas, read, listed) {
   const problems = [];
   const found = new Set();
+  let files = 0;
   for (const [entry, meta] of Object.entries(metas)) {
     const outputs = meta && typeof meta === "object" ? meta.outputs : undefined;
     if (!outputs || typeof outputs !== "object") {
@@ -61,9 +62,18 @@ export function embeddedProblems(metas, read, listed) {
     }
     for (const out of Object.values(outputs))
       for (const input of Object.keys(out?.inputs ?? {}))
-        if (/node_modules\/@modelcontextprotocol\/[^/]+\/dist\//.test(input.replaceAll("\\", "/")))
-          for (const p of markedPackages(read(input))) found.add(p);
+        if (/node_modules\/@modelcontextprotocol\/[^/]+\/dist\//.test(input.replaceAll("\\", "/"))) {
+          files++;
+          const text = read(input);
+          for (const p of markedPackages(text)) found.add(p);
+          // A package region the pattern cannot read would drop out of the comparison unseen
+          for (const line of text.match(/^\/\/#region .*node_modules\/.*$/gm) ?? [])
+            if (markedPackages(line).size === 0)
+              problems.push(`cannot read the package in ${input}: ${line}`);
+        }
   }
+  if (files === 0)
+    problems.push("no bundle includes the MCP SDK's dist files, so the packages it carries were not checked");
   const want = new Set(listed.map((p) => `${p.name} ${p.version}`));
   for (const p of found)
     if (!want.has(p))

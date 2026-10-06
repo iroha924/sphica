@@ -51,7 +51,10 @@ test("the list passes only when it names exactly the packages the bundled SDK fi
 test("a missing metafile fails instead of passing with nothing found", () => {
   assert.deepEqual(
     embeddedProblems({ mcp: null }, () => "", []),
-    ["mcp: no metafile to find the SDK's embedded packages in"],
+    [
+      "mcp: no metafile to find the SDK's embedded packages in",
+      "no bundle includes the MCP SDK's dist files, so the packages it carries were not checked",
+    ],
   );
 });
 
@@ -75,4 +78,18 @@ test("a listed package without its license text is a problem, and the shipped li
   const shipped = embeddedPackages();
   assert.deepEqual(shipped.problems, []);
   assert.ok(shipped.packages.length > 0);
+});
+
+test("a region naming node_modules in a form the check cannot read fails instead of being skipped", () => {
+  const read = () => "//#region ./node_modules/.pnpm/punycode@2.3.1/node_modules/punycode/punycode.js";
+  const got = embeddedProblems({ mcp: meta([SDK]) }, read, []);
+  assert.equal(got.length, 1);
+  assert.match(got[0] ?? "", /cannot read the package in .*punycode/);
+});
+
+test("bundles without any of the SDK's dist files fail, so an empty list never passes unread", () => {
+  assert.deepEqual(
+    embeddedProblems({ mcp: meta(["server/src/mcp.ts"]) }, () => "", []),
+    ["no bundle includes the MCP SDK's dist files, so the packages it carries were not checked"],
+  );
 });
