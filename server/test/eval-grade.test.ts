@@ -2778,3 +2778,27 @@ test("checkpoint starts Codex with the settings its key holds, even when the own
     f.done();
   }
 });
+
+test("checkpoint gives Codex the schema text its key holds, in the call's own directory", () => {
+  const f = gradeFixture(runs("a1"));
+  try {
+    const codex = path.join(f.base, "bin", "codex");
+    const seen = path.join(f.base, "ctl", "schema");
+    fs.writeFileSync(
+      codex,
+      fs
+        .readFileSync(codex, "utf8")
+        .replace(
+          "input=$(cat)\n",
+          `input=$(cat)\nfor a in "$@"; do [ "$prev" = "--output-schema" ] && { echo "$a"; cat "$a"; } > ${JSON.stringify(seen)}; prev=$a; done\n`,
+        ),
+    );
+    assert.equal(f.run("--second", "none").status, 0);
+    const [given, ...text] = fs.readFileSync(seen, "utf8").split("\n");
+    const repo = path.join(import.meta.dirname, "..", "evals", "cloud");
+    assert.ok(given && !given.startsWith(repo), `not the repository's file: ${given}`);
+    assert.equal(text.join("\n"), fs.readFileSync(path.join(repo, "grade.schema.json"), "utf8"));
+  } finally {
+    f.done();
+  }
+});

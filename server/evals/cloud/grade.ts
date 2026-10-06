@@ -26,8 +26,7 @@ import {
 } from "./grading.ts";
 import type { Grade } from "./schema-check.ts";
 
-const SCHEMA_FILE = path.join(import.meta.dirname, "grade.schema.json");
-const schema = fs.readFileSync(SCHEMA_FILE, "utf8");
+const schema = fs.readFileSync(path.join(import.meta.dirname, "grade.schema.json"), "utf8");
 const { values: args } = parseArgs({
   options: {
     // A build's loop.json (collect writes it in the build directory); the grades go beside it
@@ -59,10 +58,13 @@ function gradeOne(prompt: string, settings: string): { status: number | null; ou
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-home-"));
   try {
     isolatedCodexHome(path.join(home, ".codex"), "", settings);
+    // The schema text the checkpoint key holds, not the file, which may change while grading runs
+    const schemaFile = path.join(home, "grade.schema.json");
+    fs.writeFileSync(schemaFile, schema);
     const out = path.join(dir, "grade.json");
     const r = spawnSync(
       "codex",
-      [...GRADER_ARGS.codex, "-C", dir, "--output-schema", SCHEMA_FILE, "-o", out, "-"],
+      [...GRADER_ARGS.codex, "-C", dir, "--output-schema", schemaFile, "-o", out, "-"],
       {
         input: prompt,
         encoding: "utf8",

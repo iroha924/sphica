@@ -68,9 +68,21 @@ eval-loop Skill に checkpoint と、最初から採点し直す方法を書く�
   - コミット: `fix(eval): start the Codex grader with the settings its checkpoint key holds (T04)`
   - 結果: red は直す前に `cd server && node --test --test-name-pattern="checkpoint starts Codex" test/eval-grade.test.ts` → fail（actual [model "m", model "n"] / expected [model "m", model "m"]）。直した後は `--test-name-pattern="checkpoint"` → pass 10 / fail 0、eval-grade.test.ts 全体 pass 69 / fail 0、`bun run lint`・`bun run typecheck` は指摘なし。`isolatedCodexHome` は設定の本文を引数で受け、省略時は今までどおり持ち主の config を読む（codex.ts の呼び出しは変わらない）
 
+- [x] T05: Codex に渡す schema を、key に入れたのと同じ本文にする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（key と起動の両方が grade.ts にある）
+  - 変更: `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="checkpoint gives Codex" test/eval-grade.test.ts` → fail（Codex の `--output-schema` が repo の `grade.schema.json` を指す。採点中にこのファイルが変わると、key の schema と Codex が読む schema がずれる）
+  - 完了条件: `cd server && node --test --test-name-pattern="checkpoint" test/eval-grade.test.ts` → pass。Codex の `--output-schema` は 1 回の呼び出しの一時ディレクトリにあるファイルで、本文は開始時に読んだ schema と同じ
+  - コミット: `fix(eval): give the Codex grader the schema text its checkpoint key holds (T05)`
+  - 結果: red は直す前に `cd server && node --test --test-name-pattern="checkpoint gives Codex" test/eval-grade.test.ts` → fail（「not the repository's file: …/server/evals/cloud/grade.schema.json」）。直した後は `--test-name-pattern="checkpoint"` → pass 11 / fail 0、eval-grade.test.ts 全体 pass 70 / fail 0、`bun run lint`・`bun run typecheck` は指摘なし。schema は採点者の作業ディレクトリではなく、1 回の呼び出しの HOME に書く
+
 ## 記録
 
 - 2026-10-06 / T01 / Codex のタスクごとのレビュー（afc825ee）は指摘 0 件。Codex の sandbox では mkdtemp が EPERM でファイル操作のテストを流せなかった / 手元で同じテストを流して pass を確かめた
 - 2026-10-06 / T02 / Codex の設定を key に入れるには、呼ぶ前に設定の本文が要る / 変更欄を `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts` から、`server/evals/cloud/codex-home.ts` を足した形に変えた（`ownerCodexSettings` を切り出し、`isolatedCodexHome` もそれを使う）
 - 2026-10-06 / T02 / 設定を最初に読むと、行が 0 件のビルドで持ち主の config が無いと止まった（既存の `collect and grade refuse --out` テスト） / Codex を呼ぶ行が出たときだけ読むようにした
 - 2026-10-06 / T02 / Codex のタスクごとのレビュー（4722706d）で P2 を 1 件再現: key の設定は最初に 1 回読むが、Codex の起動は呼ぶたびに持ち主の config を読み直すので、途中で設定が変わると別のモデルの結果が古い設定の key に保存される / 採る。修正タスク T04 を足した
+- 2026-10-06 / T04 / Codex のタスクごとのレビュー（4628ab80）は指摘 0 件（sandbox ではテストを流せず、手元で pass）
+- 2026-10-06 / 全差分 / Codex の全差分レビュー（high）で P2 を 1 件: key の schema は開始時の本文だが、Codex の `--output-schema` は repo のファイルを指すので、採点中に schema が変わるとずれる / 採る。修正タスク T05 を足した
