@@ -15,10 +15,12 @@ approved_at: 2026-10-06
 - 自動 trace: userConfig と `SPHICA_AUTO_TRACE` のどちらかが off なら止める。env で止めている人は、userConfig を変えても止まったまま
 - 実装の塊: 読む側 2 か所とテスト → manifest と README、対話の dialog の実測 → バージョンを 0.6.38 に上げて release
 - その release run で #268（承認前の OSV スキャン、merge 後の main のスキャンの再実行）を初めて実地で確かめ、見届けてから #268 を閉じる
+- code scanning の #19（proxy-addr 2.0.7、express 経由、配布物には入らない）を `server/bun.lock` の 1 行で 2.0.8 に上げる。#18（katex）は上げる手段が無いので PR の外で dismiss する
 - 変えないもの: Codex 側（userConfig 相当が無い）、hook の起動の形（hooks.json）、env の設定の効き方、最低バージョン 2.1.139
 
 ## 持ち主の決定
 
+- code scanning の #19 をこの PR で直し、#18 は dismiss する（Go の後に持ち主が追加）
 - 次の作業は H2 #280 を先にする（Project の並びの H1 → H2 を入れ替え、release run で #268 の確認も兼ねる）
 - #280 の要求: review コマンド名を `userConfig` にし、`SPHICA_REVIEW_COMMANDS` にフォールバックする。`options` は使わない
 - 自動 trace の停止設定を同じ仕組みに載せるかは計画で決める（#280 の本文）
@@ -64,6 +66,7 @@ approved_at: 2026-10-06
   - review: UserPromptExpansion と PreToolUse/Skill の両経路で、option 未設定・空・空白・カンマだけ（→ env が効く）、非空（→ option の名前が効き、env だけにある名前は効かない）、大小文字と余白、複数名
   - 自動 trace: option 未設定、"true"、"false"、env の off/0/false/no、option off と env on、option on と env off、止めた後の 1 日 1 回の手動の案内。headless・resume・subagent では option が on でも自動 trace しない
   - option を読まない今のコードで、option のケースが意図した理由（option の名前が効かない、option の false で止まらない）で落ちることを先に確かめる
+- `server/bun.lock` の proxy-addr を `bun update proxy-addr` で 2.0.8 にする（express の `^2.0.7` の範囲の中。package.json は変えない）。2.0.8 は jshttp の公式リポジトリから 2.0.7 と同じ maintainer が 2026-09-15 に公開し、依存も同じ
 - バージョンは 0.6.38（npm と 3 つの manifest）。PR 本文は `Refs #268`（Closes を書かない。release-finish が閉じてしまうため）
 
 ## 採った案と棄却した案
@@ -73,6 +76,7 @@ approved_at: 2026-10-06
 - 採用: auto_trace も同じ PR。棄却: review だけ（真偽値が 2.1.139 でも渡ると実測したので、分ける理由が無い）
 - 採用: 各所で env を直接読む。棄却: 共通関数（2 か所で判定が違い、キーの変換しかしない）
 - 採用: 対話の dialog は 2.1.291 だけで実測。棄却: 2.1.139 の対話も見る（値の受け渡しは headless で同じと確かめた。/config は 2.1.269 以上でしか出ない）
+- 採用: #18 katex は dismiss。棄却: overrides で 0.18.2 以上に上げる（micromark-extension-math が `^0.16.0` に固定し、0.x の minor を越える。開発時の markdownlint の経路だけで配布物に入らない）
 - 採用: dialog が出るだけでは止めない。棄却: dialog が出たら出さない（既存の設定が消えるか設定を終えられないときだけ止める）
 
 ## 手順
@@ -83,6 +87,7 @@ approved_at: 2026-10-06
 - S4: README.md と README.ja.md を S3 の結果に合わせて直す
 - S5: バージョンを 0.6.38 に上げる（`bun run release:plan -- --base v0.6.37` で kind が plugin になることを確かめる）
 - S6: release。plugin-release Skill をその都度読み直し、そのとおりに進める。承認の前に、run の summary と PR コメントの OSV 結果がタグの SHA のものかを確かめる。merge 後に refresh-scans が dispatch した OSV と Scorecard の run の URL・main の SHA・結論を確かめ、両方成功なら #268 を閉じる。見られなければ #268 は開けたまま
+- S7: `server/bun.lock` の proxy-addr を 2.0.8 にする（code scanning #19）
 
 ## 完了条件
 
@@ -95,6 +100,7 @@ approved_at: 2026-10-06
 - A7: `npm view sphica version` → `0.6.38`。`bun run release:status` → `release ledger is consistent`
 - A8: `node -e 'console.log(Object.keys(require(process.env.HOME + "/.claude/plugins/cache/sphica/sphica/0.6.38/.claude-plugin/plugin.json").userConfig))'` → `[ 'review_commands', 'auto_trace' ]`
 - A9: `gh run list --workflow osv-scanner.yml --branch main -L 1` と `gh run list --workflow scorecard.yml --branch main -L 1` → release の merge コミットの run が success。`gh issue view 268 --json state` → `CLOSED`（確かめた後に手で閉じる）
+- A10: `rg -n '"proxy-addr": \["proxy-addr@2.0.8"' server/bun.lock` → 1 行。release の後の main の OSV の run で #19 が閉じる
 
 ## リスク
 
@@ -108,3 +114,4 @@ approved_at: 2026-10-06
 なし
 
 ## 変更履歴
+2026-10-06 / S7・A10 を足し、code scanning #19 の proxy-addr を 2.0.8 に上げる / 持ち主に #18・#19 も同じ PR で直せるかを聞かれ、#19 は lockfile の 1 行で直り #18 は上げる手段が無いと確かめた / Go 済み（持ち主の返事「1」）

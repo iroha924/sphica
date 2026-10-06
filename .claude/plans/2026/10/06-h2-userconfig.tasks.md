@@ -88,6 +88,16 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
   - 完了条件: `bun run release:plan -- --base v0.6.37` → `release kind: plugin` で、4 か所が 0.6.38。`bun run verify` → exit 0
   - コミット: `chore(release): bump to 0.6.38`
 
+- [x] T07: server/bun.lock の proxy-addr を 2.0.8 に上げる（code scanning #19）
+  - 種別: 修正
+  - 計画: S7
+  - 依存: なし
+  - 変更: `server/bun.lock`
+  - red: `rg -n '"proxy-addr": \["proxy-addr@2.0.7"' server/bun.lock` → 1 行（OSV の GHSA-jqcg-44mw-7w3h の範囲 introduced 1.1.0, fixed 2.0.8 に入る）
+  - 完了条件: `rg -n '"proxy-addr": \["proxy-addr@2.0.8"' server/bun.lock` → 1 行で、`git diff --stat` は bun.lock の 1 行だけ。`bun run verify` → exit 0
+  - コミット: `fix(deps): update proxy-addr to 2.0.8 in the lockfile (T07)`
+  - 結果: `bun update proxy-addr` → `proxy-addr 2.0.7 -> 2.0.8`、bun.lock の 1 行だけが変わり integrity は `npm view proxy-addr@2.0.8 dist.integrity` と一致。`bun run verify` → exit 0
+
 ## 記録
 2026-10-06 / T01 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの引き上げを求めて止めた（前回の PR も最初のコードのコミットで上げていた） / T01 の欄を変えた。計画 S1 → S1, S5。変更に 4 つのバージョンのファイルを足した。完了条件に release:plan の行を足した
 2026-10-06 / T05 / バージョンの引き上げを T01 に移したので不要になった / [-] にした。S6 は T04 の計画（S4 → S4, S6）に移した
@@ -96,3 +106,4 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 2026-10-06 / T06 / 完了条件が「`<command>` → <期待>」の書式でなく tasks の検査に落ちていた（T06 のコミットで見落とした） / 中身は変えずに書式だけを直した
 2026-10-06 / T03 / Codex のタスクごとのレビュー: 指摘なし / なし
 2026-10-06 / T03 / 結果欄の実測の行が「`<command>` → <観測>」の書式でなく tasks の検査に落ちていた / 中身は変えずに書式だけを直した
+2026-10-06 / T07 / 持ち主の追加の依頼で code scanning #19 を同じ PR で直す（plan の S7） / T07 を足した。#18 は PR の外で dismiss する
