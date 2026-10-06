@@ -740,7 +740,11 @@ test("check shows what save would quarantine, and anchors judged again under the
           kind: "finding",
           text: "openStore を見る",
           evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
-          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+          // Two roles on one place: the save judges each, and check shows the warning once
+          anchors: [
+            { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            { path: "src.ts", symbol: "openStore", role: "evidence" },
+          ],
         },
         {
           key: "ghost",

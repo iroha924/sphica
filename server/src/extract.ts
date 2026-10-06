@@ -701,15 +701,15 @@ export async function checkText(
   const errors = [...v.errors, ...(refused === null ? [] : [refused])];
   const lines = [
     ...errors.map((e) => `✗ ${e}`),
-    ...v.problems.map((p) => `△ ${p}`),
+    ...[...new Set(v.problems)].map((p) => `△ ${p}`),
     ...(done
       ? [
           ...done.saved.active.map((k) => `✓ would be active: ${k}`),
           ...done.saved.superseded.map((k) => `✓ would be superseded: ${k}`),
           ...done.saved.candidates.map((c) => `△ would stay a candidate: ${c.key}: ${c.why}`),
           ...done.saved.quarantined.map((q) => `△ would be quarantined: ${q}`),
-          // Judged again under the lock; glean's validation names the operation before the record, so match the end
-          ...done.saved.anchorProblems
+          // Judged again under the lock, once per place; glean's validation names the operation before the record, so match the end
+          ...[...new Set(done.saved.anchorProblems)]
             .filter((a) => !v.problems.some((p) => p === a || p.endsWith(` ${a}`)))
             .map((a) => `△ ${a}`),
           ...done.changed.map((c) => `✓ would: ${c}`),

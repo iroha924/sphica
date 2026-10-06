@@ -87,6 +87,25 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `test(acceptance): pin record_check's preview lines and the post-judge refusal (T05)`
   - 結果: reconcile-09（結果の行）と reconcile-10（同じ glean の中の 2 つの採用の拒否）を足した。今のコードで `--test-name-pattern="reconcile-(09|10)" evals/acceptance/run.ts` → pass 2。一時の worktree で、reconcile-09 は T01 のコミット c247a0a7 で落ち、reconcile-10 は T02 のコミット 32150823 で「check did not say ...」で落ちた。`cd server && node --test test/acceptance-cases.test.ts` → pass 4。`bun run verify` → 終了コード 0
 
+- [x] T08: lock の中で見つかった同じ anchor の警告を、check の返答で 1 回だけ出す
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T07（lock の中の anchor の警告を check に出すのは T07 から）
+  - 変更: `server/src/extract.ts`, `server/test/extract.test.ts`
+  - red: `cd server && node --test --test-name-pattern="check shows what save would quarantine" test/extract.test.ts` → 同じファイルと symbol に役割の違う anchor を 2 つ置くと、lock の中の警告が 2 行出て落ちる
+  - 完了条件: `cd server && node --test test/extract.test.ts` → pass。役割の違う 2 つの anchor でも、check の返答の警告は 1 行
+  - コミット: `fix(record): show each anchor warning found under the lock once in record_check (T08)`
+  - 結果: red は直す前のコードで落ちた（警告が 2 行、actual 2 / expected 1）。lock の中の警告だけでなく、準備の時点でファイルが変わっていた 2 回目の check では検証の problems の側にも同じ警告が 2 つ入るので、両方を重ねないようにした。`cd server && node --test test/extract.test.ts test/record.test.ts` → pass 102 / fail 0。`bun run verify` → 終了コード 0
+
+- [ ] T09: lock を持つ子プロセスのテストを、時間の長さではなく順序で確かめ、子の失敗でも止まらないようにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直すテストが T04 にある）
+  - 変更: `server/test/reconcile.test.ts`
+  - red: `node <scratchpad>/held.mjs` → 今のテストと同じ spawn と準備待ちの形で子を準備の前に `process.exit(1)` させると、準備待ちの Promise が終わらず「pending」と出る
+  - 完了条件: `cd server && node --test test/reconcile.test.ts` → pass。親が lock を求めた時刻 < 子が lock を外す時刻 <= 親が lock を取れた時刻 を確かめ、子が準備の前に終わるとテストは失敗で終わる
+  - コミット: `test(record): check the lock wait by order, and never hang on the lock holder (T09)`
+
 - [ ] T06: trace・harvest・glean の Skill と record_check のツールの説明を直す
   - 種別: 変更
   - 計画: S6
