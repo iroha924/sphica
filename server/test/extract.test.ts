@@ -24,7 +24,7 @@ import { type Get, gh } from "../src/github.ts";
 import { readRefs, readUnit } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { searchUnits } from "../src/search.ts";
-import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
+import { dump, insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-extract-home-"));
@@ -128,6 +128,102 @@ const fakeGet: Get = async (p) => {
 };
 
 const place = (p: number, root: string) => ({ key: "git:github.com/o/r", root, name: "o/r", projectId: p });
+
+test("check reports what save would, and leaves the database as it was: trace with work, and glean with a file excerpt", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "SQLite にしよう。" });
+    const aside = message(db, p, { id: "m2", text: "ところで昼は何にする？" });
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, null);
+    const record = {
+      units: [
+        {
+          key: "storage",
+          kind: "decision",
+          stance: "do",
+          text: "SQLite に保存する",
+          evidence: [{ source: `s${m}`, quote: "SQLite にしよう。", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "SQLite にしよう。" }],
+          aliases: ["保存先", "storage"],
+        },
+      ],
+      work: {
+        key: "storage",
+        title: "保存先",
+        goal: "1 ファイル",
+        current: "決めた",
+        next: [],
+        status: "done",
+      },
+    };
+    const found = async () =>
+      (await searchUnits(db.reader, p, { question: "保存先", limit: 5 })).hits.map((h) => h.key);
+    const before = dump(db);
+    // Checked twice: neither check leaves anything, and the save after them still marks what context showed
+    for (let i = 0; i < 2; i++) {
+      const checked = await checkText(db.ingest, run, p, null, record);
+      assert.equal(checked.ok, true);
+      assert.match(checked.text, /✓ would be active: trace:ext-s1\/storage/);
+      assert.deepEqual(dump(db), before);
+      assert.deepEqual(await found(), []);
+    }
+    assert.match(await saveText(db.ingest, run, p, null, record), /✓ trace:ext-s1\/storage active/);
+    assert.deepEqual(await found(), ["trace:ext-s1/storage"]);
+    assert.deepEqual(
+      db.owner.prepare("select outcome from source_processing where source_id = ?").all(aside),
+      [{ outcome: "no_unit" }].map((r) => Object.assign(Object.create(null), r)),
+    );
+
+    session(db, p, "g1");
+    const o = message(db, p, { id: "o1", text: "src.ts の openStore を見る。", session: "g1" });
+    const first = await beginGlean(db.ingest, p, "g1");
+    const look = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${o}`, quote: "src.ts の openStore を見る。", role: "states" }],
+        },
+      ],
+    };
+    const unsourced = await checkText(db.ingest, first, p, root, look);
+    assert.match(unsourced.text, /△ glean:look: its only evidence is the owner's words in this session/);
+    assert.match(unsourced.text, /△ would stay a candidate: glean:look/);
+    await saveText(db.ingest, first, p, root, look);
+    const g = await beginGlean(db.ingest, p, "g1");
+    const rev = Number(
+      db.owner.prepare("select revision from unit where key = 'glean:look'").get()?.revision,
+    );
+    const ops = {
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:look",
+          revision: rev,
+          file: { path: "docs/note.md", lines: [3, 3] },
+          quote: "Back up before a release.",
+          role: "explains",
+        },
+      ],
+    };
+    const gleaned = dump(db);
+    const checked = await checkText(db.ingest, g, p, root, ops);
+    assert.match(checked.text, /✓ would: glean:look: evidence added/);
+    assert.deepEqual(dump(db), gleaned);
+    assert.match(await saveText(db.ingest, g, p, root, ops), /✓ glean:look: evidence added/);
+    assert.equal(
+      Number(db.owner.prepare("select count(*) as n from source where kind = 'file_excerpt'").get()?.n),
+      1,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("trace: pending lists the session, begin binds it, and check and save take the run id", async () => {
   const db: TempDb = tempDb();
@@ -622,7 +718,92 @@ test("save: under the write lock files are only read again, and a file changed m
   }
 });
 
-test("save: anchor changed after check is reported by the save, without asking git under the lock", async () => {
+test("check fails as save does when writing breaks for a reason that is not the record's, instead of asking to fix the record", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "openStore を見る。" });
+    // The anchored file cannot be read once the lock is held: nothing the record could change
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file)) throw new Error("the disk went away");
+        return PROBE.read(r, rel);
+      },
+    };
+    const record = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    await assert.rejects(checkText(db.ingest, run, p, root, record, undefined, probe), /the disk went away/);
+    await assert.rejects(saveText(db.ingest, run, p, root, record, probe), /the disk went away/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check shows what save would quarantine, and anchors judged again under the lock, once each", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "openStore を見る。" });
+    // openStore leaves src.ts once the check holds the lock, after preparation judged it
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file))
+          fs.writeFileSync(path.join(root, rel), "export function closeStore() {}\n");
+        return PROBE.read(r, rel);
+      },
+    };
+    const record = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
+          // Two roles on one place: the save judges each, and check shows the warning once
+          anchors: [
+            { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            { path: "src.ts", symbol: "openStore", role: "evidence" },
+          ],
+        },
+        {
+          key: "ghost",
+          kind: "finding",
+          text: "誰も言っていない",
+          evidence: [{ source: `s${m}`, quote: "誰も言っていない", role: "states" }],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    const checked = (await checkText(db.ingest, run, p, root, record, undefined, probe)).text;
+    assert.match(checked, /△ would be quarantined: trace:ext-s1\/ghost \(quote not found/);
+    assert.doesNotMatch(checked, /will be quarantined/);
+    const gone = /△ trace:ext-s1\/look: symbol "openStore" is not found in src\.ts/g;
+    assert.equal(checked.match(gone)?.length, 1, checked);
+    // Prepared after the file changed, the warning comes from validation and from the save alike: still shown once
+    const again = (await checkText(db.ingest, run, p, root, record, undefined, probe)).text;
+    assert.equal(again.match(gone)?.length, 1, again);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check and save: an anchor changed under the lock is reported by both, without asking git under the lock", async () => {
   const db = tempDb();
   const root = repo();
   try {
@@ -645,6 +826,7 @@ test("save: anchor changed after check is reported by the save, without asking g
         return PROBE.files(r);
       },
     };
+    const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     const m = message(db, p, { id: "m1", text: "openStore を見る。" });
     const record = {
       units: [
@@ -653,19 +835,29 @@ test("save: anchor changed after check is reported by the save, without asking g
           kind: "finding",
           text: "openStore を見る",
           evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
-          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+          anchors: [
+            { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            // A commit makes preparation ask git, so "nothing under the lock" is about calls that happened
+            { path: "docs/note.md", role: "evidence", commit: head },
+          ],
         },
       ],
     };
     const run = await beginTrace(db.ingest, p, "s1");
     await contextText(db.ingest, run, p, root);
     assert.doesNotMatch((await checkText(db.ingest, run, p, root, record)).text, /anchor path/);
+    const missing =
+      /△ trace:ext-s1\/look: anchor path src\.ts is not in the working tree \(near paths not checked\)/;
+    // check runs the same steps: it sees the change under the lock too, and asks git nothing while it holds it
     remove = "src.ts";
-    const out = await saveText(db.ingest, run, p, root, record, probe);
-    assert.match(
-      out,
-      /△ trace:ext-s1\/look: anchor path src\.ts is not in the working tree \(near paths not checked\)/,
+    assert.match((await checkText(db.ingest, run, p, root, record, undefined, probe)).text, missing);
+    assert.ok(
+      calls.some((c) => c.fn === "holds" && !c.locked),
+      "the check asked git before the lock",
     );
+    fs.writeFileSync(path.join(root, "src.ts"), "export function openStore() {}\n");
+    const out = await saveText(db.ingest, run, p, root, record, probe);
+    assert.match(out, missing);
     assert.deepEqual(
       calls.filter((c) => c.locked),
       [],
@@ -2821,7 +3013,7 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
           },
         ],
       }),
-      /already has a successor/,
+      /glean:duck: another record in this save already supersedes trace:ext-s1\/storage/,
     );
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
   } finally {

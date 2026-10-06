@@ -41,7 +41,9 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
    the last page (the one with the live records). Saving marks as looked at only the messages you were shown and those you quote; the
    rest stay pending.
    Use `search` and `read` to look at older records this session may replace
-4. **Check**: `record_check` with the run and the record below as `record`. Errors refuse the save; fix and check again. Warnings say what will be
+4. **Check**: `record_check` with the run and the record below as `record`. It runs the save in a transaction that rolls back, so nothing is
+   written: it refuses what the save would refuse, and says what would become of each record (`would be active`, `would stay a candidate` with
+   the reason, `would be superseded`, `would be quarantined`). Errors refuse the save; fix and check again. Warnings say what will be
    left out, quarantined, or kept as a candidate, and why. An anchor warning (a path not in the working tree, with near paths; a directory; a
    symbol not in the file) means fix the anchor and check again; keep it only when you know it is right
 5. **Save**: `record_save` with the same run and record. A run saves once

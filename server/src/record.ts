@@ -445,27 +445,8 @@ export async function checkRecord(
       : []
     ).map((u) => [u.key, u]),
   );
-  // The successor in effect now, if any: its replacement holds the record's one place until it ends
-  const holders = new Map(
-    (others.size
-      ? await db
-          .selectFrom("unit_replacement as h")
-          .innerJoin("unit as n", "n.id", "h.from_unit")
-          .select(["h.to_unit", "n.key", "n.lifecycle"])
-          .where("h.ended_at", "is", null)
-          .where(
-            "h.to_unit",
-            "in",
-            [...others.values()].map((o) => o.id),
-          )
-          .execute()
-      : []
-    ).map((h) => [h.to_unit, h]),
-  );
 
   const units: Planned[] = [];
-  // Records this save supersedes: one record has one successor
-  const claimed = new Set<number>();
   for (const [i, u] of record.units.entries()) {
     const key = keys[i] ?? "";
     const quarantine: string[] = [];
@@ -694,41 +675,16 @@ export async function checkRecord(
 
     let supersedes: number | null = null;
     if (u.supersedes) {
+      // Which successor takes the place is the judge's to say, after the save writes: see settleSaved
       const old = others.get(u.supersedes);
-      // Only a successor that can take effect takes the place: a decision or constraint the owner does not adopt, or an implementation
-      // without code or commit evidence (unit_support's rule), waits beside it
-      const implemented = () =>
-        evidence.some(
-          (e) =>
-            e.role === "implements" &&
-            (["commit_message", "file_excerpt"].includes(sources.get(e.source)?.kind ?? "") ||
-              anchors.some(
-                (a) =>
-                  a.role === "evidence" &&
-                  (a.commit ||
-                    (a.observation !== null && sources.get(e.source)?.session_id === target.sessionId)),
-              )),
-        ) || anchors.some((a) => a.role === "evidence" && a.commit);
-      const takes = ["decision", "constraint"].includes(u.kind)
-        ? adoption.some((x) => x.route !== "agent")
-        : u.kind !== "implementation" || implemented();
       if (!old) errors.push(`${key}: supersedes ${u.supersedes}, which is not a record of this project`);
       else if (!["active", "candidate"].includes(old.lifecycle))
         errors.push(`${key}: ${u.supersedes} is already ${old.lifecycle}`);
-      // A quarantined successor never becomes active, so it takes no place from another in the same save
-      else if (claimed.has(old.id) && !quarantine.length && takes)
-        errors.push(`${key}: another record in this save already supersedes ${u.supersedes}`);
       else if (!replaceable(u.kind, old.kind))
         errors.push(
           `${key}: a ${u.kind} cannot supersede ${u.supersedes}, a ${old.kind} (a record supersedes one of its own kind; a decision and a constraint can replace each other)`,
         );
-      else if (holders.has(old.id) && !quarantine.length && takes) {
-        const h = holders.get(old.id);
-        errors.push(
-          `${key}: ${u.supersedes} already has a successor, ${h?.key} (${h?.lifecycle}); withdraw it first, or supersede it instead`,
-        );
-      } else supersedes = old.id;
-      if (supersedes !== null && !quarantine.length && takes) claimed.add(supersedes);
+      else supersedes = old.id;
     }
     const conflicts = u.conflicts.flatMap((k) => {
       const other = others.get(k);
@@ -854,7 +810,7 @@ export type Saved = {
   /** Anchors judged again under the lock that may point at the wrong place */
   anchorProblems: string[];
   /** The units this save wrote, for a caller that reconciles them with its own changes */
-  written: { id: number; key: string; hint: Hint; adopted: boolean }[];
+  written: { id: number; key: string; hint: Hint }[];
 };
 
 /** CI's definitions, or a directory holding them, in any letter case */
@@ -930,15 +886,18 @@ const contentHash = (u: UnitInput): Buffer =>
     ]),
   );
 
+/** A save the judge turned down for something in the record itself: check reports it as an error to fix, unlike a failure of the writing */
+export class SaveRefused extends Error {}
+
 /**
- * Judges what a save wrote, with everything its intents reach, and reports it. A successor the owner adopted into a place another holds
- * never gets here: check refuses it by name. One nobody adopted waits as a candidate, with the reason.
+ * Judges what a save wrote, with everything its intents reach, and reports it. A successor this save wrote or adopted that the judge leaves
+ * waiting for a place another successor holds is refused by name, so the batch rolls back; one that cannot stand waits as a candidate.
  */
 export async function settleSaved(
   trx: Kysely<DB>,
   runId: number,
   saved: Saved,
-  more: { seeds?: number[]; withdraw?: Map<number, Hint> } = {},
+  more: { seeds?: number[]; withdraw?: Map<number, Hint>; adopted?: Set<number> } = {},
 ): Promise<Reconciled> {
   const written = new Map(saved.written.map((w) => [w.id, w]));
   const settled = await reconcile(
@@ -950,6 +909,16 @@ export async function settleSaved(
       withdraw: more.withdraw,
     },
   );
+  // Only a successor that could stand on its own waits for a held place, so every one of them is a choice the save made that cannot take effect
+  const mine = new Set([...written.keys(), ...(more.adopted ?? [])]);
+  const key = (id: number) => settled.keys.get(id) ?? `u${id}`;
+  for (const [id, [to, holder]] of settled.held)
+    if (mine.has(id))
+      throw new SaveRefused(
+        mine.has(holder)
+          ? `${key(id)}: another record in this save already supersedes ${key(to)}`
+          : `${key(id)}: ${key(to)} already has a successor, ${key(holder)} (in effect); withdraw it first, or supersede it instead`,
+      );
   const now = new Map(settled.changes.map((c) => [c.id, c.after]));
   for (const w of saved.written) {
     if (saved.quarantined.some((q) => q.startsWith(`${w.key} (`))) continue;
@@ -1169,7 +1138,6 @@ export async function saveRecord(
     saved.written.push({
       id,
       key: p.key,
-      adopted: p.adoption.length > 0,
       hint: {
         reason: p.adoption.length ? "evidence and adoption found" : "evidence found",
         source: p.adoption[0]?.source ?? p.evidence[0]?.source ?? null,

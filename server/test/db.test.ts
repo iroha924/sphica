@@ -5,7 +5,7 @@ import path from "node:path";
 import { constants, DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { type Kysely, sql } from "kysely";
-import { openReader, SCHEMA_REVISION } from "../src/db.ts";
+import { inRolledBack, inTransaction, openReader, SCHEMA_REVISION } from "../src/db.ts";
 import type { DB } from "../src/db-types.ts";
 import { connectWriter, INGEST_TRIGGER_WRITES } from "../src/db-write.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
@@ -828,4 +828,80 @@ test("ingest and forget can start a replacement and set only its end columns", (
       { by_run: 0, end_run: 0, by_forget: 1, end_forget: 1 },
     ],
   );
+});
+
+// Filtered here: the reader may not call like
+const projectKeys = async (q: Pick<Kysely<DB>, "selectFrom">) =>
+  (await q.selectFrom("project").select("key").orderBy("key").execute())
+    .map((r) => r.key)
+    .filter((k) => k.startsWith("local:preview"));
+
+test("a rolled-back transaction shows its writes to fn, commits none, and frees the connection", async () => {
+  const seen = await inRolledBack(db.ingest, async (trx) => {
+    await trx.insertInto("project").values({ key: "local:preview-1", name: "p" }).execute();
+    return projectKeys(trx);
+  });
+  assert.deepEqual(seen, ["local:preview-1"]);
+  assert.deepEqual(await projectKeys(db.ingest), []);
+  await assert.rejects(
+    inRolledBack(db.ingest, async (trx) => {
+      await trx.insertInto("project").values({ key: "local:preview-2", name: "p" }).execute();
+      throw new Error("refused inside");
+    }),
+    /refused inside/,
+  );
+  assert.deepEqual(await projectKeys(db.ingest), []);
+  // The connection is free again: a committing transaction runs on it
+  await inTransaction(db.ingest, (trx) =>
+    trx.insertInto("project").values({ key: "local:preview-3", name: "p" }).execute(),
+  );
+  assert.deepEqual(await projectKeys(db.ingest), ["local:preview-3"]);
+  db.owner.prepare("delete from project where key like 'local:preview%'").run();
+});
+
+test("a rolled-back transaction whose rollback fails after fn succeeded throws instead of returning", async () => {
+  await assert.rejects(
+    inRolledBack(db.ingest, async (trx) => {
+      await trx.insertInto("project").values({ key: "local:preview-4", name: "p" }).execute();
+      // Ending the transaction inside fn leaves nothing to roll back, and the write stays
+      await sql`commit`.execute(trx);
+      return "preview";
+    }),
+    /no transaction is active/,
+  );
+  assert.deepEqual(await projectKeys(db.ingest), ["local:preview-4"]);
+  db.owner.prepare("delete from project where key like 'local:preview%'").run();
+});
+
+test("rolled-back and committing transactions on one connection run one after another, and other connections see only commits", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  let entered: () => void = () => {};
+  const inside = new Promise<void>((r) => {
+    entered = r;
+  });
+  const order: string[] = [];
+  const preview = inRolledBack(db.ingest, async (trx) => {
+    await trx.insertInto("project").values({ key: "local:preview-5", name: "p" }).execute();
+    entered();
+    await held;
+    order.push("preview");
+  });
+  await inside;
+  const save = inTransaction(db.ingest, async (trx) => {
+    order.push("save");
+    await trx.insertInto("project").values({ key: "local:preview-6", name: "p" }).execute();
+  });
+  const second = inRolledBack(db.ingest, async () => {
+    order.push("second preview");
+  });
+  // While the preview holds its write, the reader sees only what was committed
+  assert.deepEqual(await projectKeys(db.reader), []);
+  release();
+  await Promise.all([preview, save, second]);
+  assert.deepEqual(order, ["preview", "save", "second preview"]);
+  assert.deepEqual(await projectKeys(db.reader), ["local:preview-6"]);
+  db.owner.prepare("delete from project where key like 'local:preview%'").run();
 });

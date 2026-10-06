@@ -49,8 +49,9 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
    the owner's message that quotes it
 5. **Read**: `record_context` with the run: the owner's messages in this session with their refs. When a page ends with
    `call record_context with after: "s<N>"`, call it again with that `after`
-6. **Check**: `record_check` with the run and the record below. Fix errors and check again. A note to ask the owner for a source means
-   step 2 is not done
+6. **Check**: `record_check` with the run and the record below. It runs the save in a transaction that rolls back, so it refuses what the
+   save would refuse and lists what would change (`would be active`, `would: <change>`) without writing it. Fix errors and check again. A
+   note to ask the owner for a source means step 2 is not done
 7. **Save**: `record_save`. **Report** what changed, copying save's lines
 
 ## The record

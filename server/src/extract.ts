@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import type { Kysely } from "kysely";
 import { AUTHORITY, authorityOf } from "./authority.ts";
 import { flush, TOOL_FLUSH_BUDGET_MS } from "./capture.ts";
-import { inTransaction, type Reads } from "./db.ts";
+import { inRolledBack, inTransaction, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import {
   type Get,
@@ -19,12 +19,21 @@ import {
   runSources,
   storeItems,
 } from "./github.ts";
-import { checkGlean, prepareGlean, saveGlean } from "./glean.ts";
+import { checkGlean, type GleanFacts, prepareGlean, saveGlean } from "./glean.ts";
 import { HOSTS, sessionId } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import type { Place } from "./project.ts";
-import { type Checked, checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "./record.ts";
-import type { Probe } from "./repo-facts.ts";
+import {
+  type Checked,
+  checkRecord,
+  finishRun,
+  prepareRecord,
+  type Saved,
+  SaveRefused,
+  saveRecord,
+  type Target,
+} from "./record.ts";
+import type { Probe, RepoFacts } from "./repo-facts.ts";
 import { plural } from "./text.ts";
 import {
   callSession,
@@ -568,33 +577,151 @@ function contextOnly(
   ];
 }
 
-/** Checks a record against the run without saving it. ok is false when an error would refuse the save. */
+/** Read before the lock: capture and delivery wait on it, and reading the working tree and git is the slow part of a save */
+async function prepare(
+  db: Kysely<DB>,
+  id: string,
+  projectId: number,
+  root: string | null,
+  record: unknown,
+  probe: Probe | undefined,
+  call: number | undefined,
+): Promise<{ facts: RepoFacts; gleanFacts?: GleanFacts }> {
+  const begun = await bound(db, id, projectId);
+  if (call !== undefined && begun.begin_call_id !== null) await sameCaller(db, begun.begin_call_id, call);
+  const gleanFacts = begun.origin === "glean" ? prepareGlean(root, record, probe) : undefined;
+  return { facts: gleanFacts ?? prepareRecord(root, record, probe), gleanFacts };
+}
+
+/** A record validated inside the save's transaction: errors refuse it before anything is written */
+type Validated = {
+  run: Run;
+  errors: string[];
+  problems: string[];
+  /** Validation's warning for each unit that will be quarantined */
+  quarantine: string[];
+  units: number;
+  /** Glean's operations on existing records; null for trace and harvest */
+  ops: number | null;
+  write: (trx: Kysely<DB>) => Promise<{ saved: Saved; changed: string[] }>;
+};
+
+/** The save's validation, the same for check and save, run inside the transaction the writes go in */
+async function validate(
+  trx: Kysely<DB>,
+  id: string,
+  projectId: number,
+  root: string | null,
+  record: unknown,
+  prepared: { facts: RepoFacts; gleanFacts?: GleanFacts },
+  call: number | undefined,
+): Promise<Validated> {
+  const run = await bound(trx, id, projectId);
+  const scope = await scopeOf(trx, run, root);
+  scope.target.agent = await agentRun(trx, run, call);
+  const quarantine = (units: Checked["units"]) =>
+    units
+      .filter((u) => u.quarantine.length)
+      .map((u) => `${u.key} will be quarantined: ${u.quarantine.join("; ")}`);
+  if (run.origin === "glean") {
+    const c = await checkGlean(trx, scope.target, record, prepared.gleanFacts);
+    return {
+      run,
+      errors: c.errors,
+      problems: c.problems,
+      quarantine: quarantine(c.units.units),
+      units: c.units.units.length,
+      ops: c.ops.length,
+      write: async (w) => {
+        const g = await saveGlean(w, scope.target, run.id, c);
+        return { saved: g.units, changed: g.changed };
+      },
+    };
+  }
+  const checked = await checkRecord(trx, scope.target, record, prepared.facts);
+  checked.errors.push(...contextOnly(id, scope.items, checked));
+  return {
+    run,
+    errors: checked.errors,
+    problems: checked.problems,
+    quarantine: quarantine(checked.units),
+    units: checked.units.length,
+    ops: null,
+    write: async (w) => {
+      // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
+      const shown = shownTo.get(id)?.sources ?? new Set<number>();
+      // Only a quote found in the source counts: citing a message with words it does not hold proves nothing was read
+      const cited = new Set(
+        [
+          ...checked.units.flatMap((u) => [
+            ...u.evidence,
+            ...u.adoption,
+            ...u.options.flatMap((o) => [...o.evidence, ...(o.reconsider ? [o.reconsider] : [])]),
+            ...u.fields,
+          ]),
+          ...checked.fieldDefs,
+        ].map((q) => q.source),
+      );
+      const saved = await saveRecord(
+        w,
+        scope.target,
+        run.id,
+        checked,
+        scope.looked.filter((s) => shown.has(s) || cited.has(s)),
+      );
+      return { saved, changed: [] };
+    },
+  };
+}
+
+/**
+ * Checks a record by running the save itself in a transaction that always rolls back, so it refuses what the save would refuse and says
+ * what would become of each unit. ok is false when the save would be refused.
+ */
 export async function checkText(
-  db: Reads,
+  db: Kysely<DB>,
   id: string,
   projectId: number,
   root: string | null,
   record: unknown,
   call?: number,
+  probe?: Probe,
 ): Promise<{ ok: boolean; text: string }> {
-  const run = await bound(db, id, projectId);
-  const { target, items } = await scopeOf(db, run, root);
-  target.agent = await agentRun(db, run, call);
-  const c =
-    run.origin === "glean" ? await checkGlean(db, target, record) : await checkRecord(db, target, record);
-  if (!("ops" in c)) c.errors.push(...contextOnly(id, items, c));
-  const units = "ops" in c ? c.units.units : c.units;
+  const prepared = await prepare(db, id, projectId, root, record, probe, call);
+  const { v, done, refused } = await inRolledBack(db, async (trx) => {
+    const v = await validate(trx, id, projectId, root, record, prepared, call);
+    if (v.errors.length) return { v, done: null, refused: null };
+    try {
+      const done = await v.write(trx);
+      await finishRun(trx, v.run.id);
+      return { v, done, refused: null };
+    } catch (e) {
+      if (!(e instanceof SaveRefused)) throw e;
+      return { v, done: null, refused: e.message };
+    }
+  });
+  const errors = [...v.errors, ...(refused === null ? [] : [refused])];
   const lines = [
-    ...c.errors.map((e) => `✗ ${e}`),
-    ...c.problems.map((p) => `△ ${p}`),
-    ...units
-      .filter((u) => u.quarantine.length)
-      .map((u) => `△ ${u.key} will be quarantined: ${u.quarantine.join("; ")}`),
+    ...errors.map((e) => `✗ ${e}`),
+    ...[...new Set(v.problems)].map((p) => `△ ${p}`),
+    ...(done
+      ? [
+          ...done.saved.active.map((k) => `✓ would be active: ${k}`),
+          ...done.saved.superseded.map((k) => `✓ would be superseded: ${k}`),
+          ...done.saved.candidates.map((c) => `△ would stay a candidate: ${c.key}: ${c.why}`),
+          ...done.saved.quarantined.map((q) => `△ would be quarantined: ${q}`),
+          // Judged again under the lock, once per place; glean's validation names the operation before the record, so match the end
+          ...[...new Set(done.saved.anchorProblems)]
+            .filter((a) => !v.problems.some((p) => p === a || p.endsWith(` ${a}`)))
+            .map((a) => `△ ${a}`),
+          ...done.changed.map((c) => `✓ would: ${c}`),
+        ]
+      : v.quarantine.map((q) => `△ ${q}`)),
   ];
-  const summary = c.errors.length
-    ? `✗ ${plural(c.errors.length, "error")}; fix the record and check again`
-    : `✓ ${plural(units.length, "record")}${"ops" in c ? ` and ${plural(c.ops.length, "change")}` : ""} can be saved`;
-  return { ok: c.errors.length === 0, text: [...lines, summary].join("\n") };
+  const summary = errors.length
+    ? `✗ ${plural(errors.length, "error")}; fix the record and check again`
+    : `✓ ${plural(v.units, "record")}${v.ops === null ? "" : ` and ${plural(v.ops, "change")}`} can be saved`;
+  return { ok: errors.length === 0, text: [...lines, summary].join("\n") };
 }
 
 /** Saves a record for the run in one transaction and reports what became of each unit. */
@@ -607,64 +734,22 @@ export async function saveText(
   probe?: Probe,
   call?: number,
 ): Promise<string> {
-  // Read before the lock: capture and delivery wait on it, and reading the working tree and git is the slow part of a save
-  const begun = await bound(db, id, projectId);
-  if (call !== undefined && begun.begin_call_id !== null) await sameCaller(db, begun.begin_call_id, call);
-  const glean = begun.origin === "glean";
-  const gleanFacts = glean ? prepareGlean(root, record, probe) : undefined;
-  const facts = gleanFacts ?? prepareRecord(root, record, probe);
+  const prepared = await prepare(db, id, projectId, root, record, probe, call);
   const text = await inTransaction(db, async (trx) => {
-    const run = await bound(trx, id, projectId);
-    const scope = await scopeOf(trx, run, root);
-    scope.target.agent = await agentRun(trx, run, call);
-    const lines: string[] = [];
-    const notes: string[] = [];
-    const saved =
-      run.origin === "glean"
-        ? await saveGlean(
-            trx,
-            scope.target,
-            run.id,
-            await checkGlean(trx, scope.target, record, gleanFacts),
-          ).then((g) => {
-            lines.push(...g.changed.map((c) => `✓ ${c}`));
-            return g.units;
-          })
-        : await checkRecord(trx, scope.target, record, facts).then((checked) => {
-            checked.errors.push(...contextOnly(id, scope.items, checked));
-            // What check would warn about is said at save too: what was left out, and why a record stays a candidate
-            notes.push(...checked.problems);
-            // Looked at: what context showed this run, and what the record cites (a quote proves the message was read)
-            const shown = shownTo.get(id)?.sources ?? new Set<number>();
-            // Only a quote found in the source counts: citing a message with words it does not hold proves nothing was read
-            const cited = new Set(
-              [
-                ...checked.units.flatMap((u) => [
-                  ...u.evidence,
-                  ...u.adoption,
-                  ...u.options.flatMap((o) => [...o.evidence, ...(o.reconsider ? [o.reconsider] : [])]),
-                  ...u.fields,
-                ]),
-                ...checked.fieldDefs,
-              ].map((q) => q.source),
-            );
-            return saveRecord(
-              trx,
-              scope.target,
-              run.id,
-              checked,
-              scope.looked.filter((s) => shown.has(s) || cited.has(s)),
-            );
-          });
-    await finishRun(trx, run.id);
+    const v = await validate(trx, id, projectId, root, record, prepared, call);
+    if (v.errors.length)
+      throw new Error(`The record is not valid:\n${v.errors.map((e) => `  ${e}`).join("\n")}`);
+    const { saved, changed } = await v.write(trx);
+    await finishRun(trx, v.run.id);
     return [
       ...saved.active.map((k) => `✓ ${k} active`),
       ...saved.superseded.map((k) => `✓ ${k} superseded`),
       ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
       ...saved.quarantined.map((q) => `△ ${q} quarantined`),
       ...saved.anchorProblems.map((a) => `△ ${a}`),
-      ...notes.map((n) => `△ ${n}`),
-      ...lines,
+      // What check would warn about is said at save too: what was left out, and why a record stays a candidate
+      ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
+      ...changed.map((c) => `✓ ${c}`),
       "✓ saved",
     ].join("\n");
   });
