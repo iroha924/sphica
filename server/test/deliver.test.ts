@@ -2594,3 +2594,58 @@ test("prompt delivery still names a record when 32,767 records are deliverable, 
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("a shell command names an anchored path in each form it may be written, and no longer or nested path", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep the store a Map." });
+    await save(db, p, {
+      units: [
+        decided("map", m, "Keep the store a Map.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+      ],
+    });
+    for (const dir of ["src", "lib"]) fs.mkdirSync(path.join(repo, dir));
+    const named = async (command: string, cwd = repo) =>
+      /trace:ext-s1\/map /.test(
+        await deliver(
+          {
+            hook_event_name: "PreToolUse",
+            session_id: crypto.randomUUID(),
+            cwd,
+            tool_name: "Bash",
+            tool_input: { command },
+          },
+          "claude-code",
+          db.file,
+        ),
+      );
+    for (const command of [
+      "cat src/db.ts",
+      "cat ./src/db.ts",
+      `cat ${path.join(repo, "src", "db.ts")}`,
+      "grep -n x 'src/db.ts'",
+      "head src/db.ts:10",
+      "x=src/db.ts",
+    ])
+      assert.ok(await named(command), command);
+    assert.ok(await named("cat db.ts", path.join(repo, "src")), "relative to the command's cwd");
+    assert.equal(
+      await named("cat ../src/db.ts", path.join(repo, "lib")),
+      false,
+      "a path that climbs out of the command's cwd is not read as the file",
+    );
+    for (const command of [
+      "cat src/db.tsx",
+      "cat old/src/db.ts",
+      "cat xsrc/db.ts",
+      "cat db.ts",
+      "cat src/db",
+    ])
+      assert.equal(await named(command), false, command);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

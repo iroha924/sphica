@@ -486,10 +486,15 @@ async function namedInCommand(
         }
     return [...out];
   };
+  // Every form ends with the file's name, and a pattern is built only for a form the command contains: building one costs more than matching
   return paths
     .map((r) => r.path)
-    .filter((p) =>
-      forms(p).some((t) => new RegExp(`(?:^|[${edge}])${esc(t)}(?:$|[${edge}:])`).test(command)),
+    .filter(
+      (p) =>
+        command.includes(p.slice(p.lastIndexOf("/") + 1)) &&
+        forms(p).some(
+          (t) => command.includes(t) && new RegExp(`(?:^|[${edge}])${esc(t)}(?:$|[${edge}:])`).test(command),
+        ),
     );
 }
 

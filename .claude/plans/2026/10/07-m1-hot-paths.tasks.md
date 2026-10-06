@@ -81,7 +81,7 @@ base: main
   - 結果: red `cd server && node --test --test-name-pattern "32,767" test/review.test.ts` → 修正前のコードで `Error: too many SQL variables` で落ちた
   - 結果: `cd server && node --test test/review.test.ts test/review-bridge.test.ts test/deliver.test.ts` → pass 74 / fail 0
 
-- [ ] T06: 計測し直し、Bash の配信が 1 秒を超えていれば直す
+- [x] T06: 計測し直し、Bash の配信が 1 秒を超えていれば直す
   - 種別: 修正
   - 計画: S6
   - 依存: T01（計測スクリプトが要る）, T04（プロンプトの修正後の値で判断する）, T05（review の修正後の値で判断する）
@@ -89,6 +89,9 @@ base: main
   - red: `node server/evals/scale/run.ts` → stress か uniform の 10,000 件で Bash の最大が 1,000 ms を超える（超えなければこのタスクは取りやめ）
   - 完了条件: `node server/evals/scale/run.ts` → 0 で終わり、10,000 件の両系統でプロンプト・review の 2 つの入口・Bash の最大が 1,000 ms 以内
   - コミット: `fix(deliver): name shell paths without one regex per anchored path`
+  - 結果: red `node server/evals/scale/run.ts --sizes 359,1000,3000,10000,30000 --no-drain` → T04 の後のコードで Bash の最大が uniform 10,000 件 1,820 ms、stress 1,614 ms、uniform 30,000 件 timeout
+  - 結果: `cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 52 / fail 0。足したパスの書き方のテストは修正前のコードでも通った
+  - 結果: `node server/evals/scale/run.ts` → exit 0、problems はすべて none。10,000 件の最大は uniform でプロンプト 510 ms・Bash 166 ms・review 138 ms、stress でプロンプト 171 ms・Bash 132 ms・review 141 ms。30,000 件はすべて上限内（プロンプト最大 2,617 ms、Bash 233 ms）。capture 50,000 件は 8,166 ms・sent 50,000・left 0・rows 50,000
 
 ## P4: 仕上げ
 
@@ -109,3 +112,5 @@ base: main
 - 2026-10-07 / T03 / review の hook の結果のテストは、review の checkout の作り方を持つ `review-bridge.test.ts` に置くほうが合う / 変更欄を `server/test/review.test.ts`, `server/test/deliver.test.ts` から `server/test/review.test.ts`, `server/test/review-bridge.test.ts` に、完了条件のファイルも同じく変えた
 - 2026-10-07 / T02 / plan の「position の順と id の順が違う選択肢」は作れない。選択肢は保存のときに配列の順で position = i + 1 として 1 文で入り（`record.ts`）、書き換えは trigger `unit_option_frozen` が止める / fixture に入れず、ここに残す
 - 2026-10-07 / T04 / 配列の探し直しをやめても、新しいプロセスでのプロンプトの時間は変わらなかった（10,000 件で timeout のまま）。支配的だったのは記録ごとに作る `\p{L}` の正規表現の組み立てで、新しいプロセスで 30,000 個作るのに 11,498 ms、`includes` なら 3 ms（実測） / 正規表現を作る前に部分文字列で振り落とす判定を足した（含まれないなら正規表現も一致しないので、一致の規則は変わらない。anchor のパスは schema の CHECK で `\` を含まない）。変更欄に `server/src/db.ts`（`byUnit` を review と共有）と `server/test/temp-db.ts`（32,767 件を入れるヘルパー）を足した
+- 2026-10-07 / T04, T05 / 新しい会話の Codex のレビュー（4146fd5e、89988626）はどちらも指摘なし。T04 は前置きの判定と元の判定を 39,200 通りで突き合わせて一致。Codex 側はテストと計測を読み取り専用の環境で流せず（一時ディレクトリの EPERM）、こちらで流した結果だけがある / 採るものなし
+- 2026-10-07 / T06 / Bash の配信もパスの書き方ごとに正規表現を作っていた / どの書き方もファイル名で終わるのでファイル名と書き方を `includes` で先に見る形にし、cwd からの相対・`./`・引用符・`:行番号`・`=` の後と、長いパス・入れ子のパス・cwd から出るパスを一致させないことのテストを足した（修正前のコードでも通る）
