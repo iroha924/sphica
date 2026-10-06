@@ -234,6 +234,10 @@ test("the plugin's review_commands names the review commands; without a name in 
         }
         assert.equal(await w.typed("audit"), "", label);
       }
+      // A setting holding only names no command can have does not hide the environment variable
+      process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = "@, code review";
+      assert.match(await w.typed("deploy"), /trace:ext-s1\/sqlite/, "malformed option names");
+      assert.match(await w.called({ skill: "check-env" }), /trace:ext-s1\/sqlite/, "malformed option names");
     } finally {
       delete process.env.SPHICA_REVIEW_COMMANDS;
       delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;

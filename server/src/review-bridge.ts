@@ -37,8 +37,8 @@ export function reviewCall(input: ReviewInput): { name: string; args: string } |
     (list ?? "")
       .split(",")
       .map((n) => n.trim().toLowerCase())
-      .filter(Boolean);
-  // The plugin's review_commands setting (Claude Code exports only a saved value); without a name in it, the environment variable
+      .filter((n) => NAME.test(n));
+  // The plugin's review_commands setting (Claude Code exports only a saved value); without a valid command name in it, the environment variable
   const option = names(process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS);
   const named = option.length > 0 ? option : names(process.env.SPHICA_REVIEW_COMMANDS);
   if (!named.includes(lower) && !lower.includes("review")) return null;

@@ -584,6 +584,31 @@ if (TRAILER !== null) {
     );
 }
 
+// ---- Plugin settings match the hooks that read them ----
+//
+// Claude Code exports a saved userConfig value to hooks as CLAUDE_PLUGIN_OPTION_<KEY uppercased>. Renaming either side alone
+// leaves the setting with no effect and every test green, since the tests set the environment variable themselves.
+{
+  const MANIFEST = "plugin/.claude-plugin/plugin.json";
+  const declared = Object.keys(JSON.parse(read(MANIFEST)).userConfig ?? {}).map(
+    (k) => `CLAUDE_PLUGIN_OPTION_${k.toUpperCase()}`,
+  );
+  if (declared.length === 0) fail.push(`cannot extract any userConfig keys from ${MANIFEST}`);
+  const sources = fs
+    .readdirSync("server/src", { recursive: true })
+    .filter((f) => /\.ts$/.test(f))
+    .map((f) => read(`server/src/${f}`));
+  const used = [
+    ...new Set(sources.flatMap((t) => [...t.matchAll(/CLAUDE_PLUGIN_OPTION_[A-Z0-9_]+/g)].map((m) => m[0]))),
+  ];
+  const unread = declared.filter((v) => !used.includes(v));
+  if (unread.length)
+    fail.push(`${MANIFEST} declares userConfig that no code in server/src reads: ${unread.join(", ")}`);
+  const undeclared = used.filter((v) => !declared.includes(v));
+  if (undeclared.length)
+    fail.push(`server/src reads plugin options ${MANIFEST} does not declare: ${undeclared.join(", ")}`);
+}
+
 if (fail.length) {
   console.error(`\n${fail.map((f) => `  ${f}`).join("\n\n")}\n`);
   process.exit(1);

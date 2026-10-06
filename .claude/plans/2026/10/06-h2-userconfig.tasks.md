@@ -108,6 +108,26 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
   - コミット: `fix(deps): override katex to 0.18.9 past the prototype pollution advisory (T08)`
   - 結果: `bun install` → katex 0.16.47 → 0.18.9 と commander 8.3.0 → 15.0.0 の 2 行だけが変わり、integrity は npm と一致。OSV の query → katex 0.18.9 と commander 15.0.0 は該当なし。`node_modules/.bin/markdownlint-cli2 math.md`（行内とブロックの数式）→ `0 issues`。micromark と mathHtml で描画 → katex の HTML が出る。`bun run verify` → exit 0
 
+- [x] T09: review_commands をコマンド名として成り立つものだけで判定し、成り立たない値だけなら env を使う
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T06（両経路のフォールバックのテストに足す）
+  - 変更: `server/src/review-bridge.ts`, `server/test/review-bridge.test.ts`
+  - red: `cd server && node --test --test-name-pattern=review_commands test/review-bridge.test.ts` → option `@, code review` と env の `deploy` で配信が空（`actual: ''`）で落ちる
+  - 完了条件: `cd server && node --test test/review-bridge.test.ts` → 全件 pass
+  - コミット: `fix(review): require a valid command name in review_commands, and check userConfig pairs (T09, T10)`
+  - 結果: red: 直す前に `node --test --test-name-pattern=review_commands test/review-bridge.test.ts` → 0 pass, 1 fail（`actual: ''`）。直した後 `node --test test/review-bridge.test.ts` → 11 pass, 0 fail。`bun run verify` → exit 0
+
+- [x] T10: check-pairs に userConfig のキーと hook が読む CLAUDE_PLUGIN_OPTION_* の対応を足す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（userConfig の宣言が要る）
+  - 変更: `scripts/check-pairs.mjs`
+  - red: `review_commands` を `review_commandz` に変えて `node scripts/check-pairs.mjs` → exit 0（食い違いを見逃す）
+  - 完了条件: `node scripts/check-pairs.mjs` → 今の木で exit 0、キーの名前を変えると exit 1、hook 側の名前を変えると exit 1
+  - コミット: `fix(review): require a valid command name in review_commands, and check userConfig pairs (T09, T10)`
+  - 結果: red: 足す前に `review_commandz` にして `node scripts/check-pairs.mjs` → exit 0。足した後 `node scripts/check-pairs.mjs` → 今の木で exit 0、`review_commandz` で exit 1（declares … REVIEW_COMMANDZ / reads … REVIEW_COMMANDS）、deliver.ts を `CLAUDE_PLUGIN_OPTION_AUTOTRACE` にして exit 1。`bun run verify` → exit 0
+
 ## 記録
 2026-10-06 / T01 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの引き上げを求めて止めた（前回の PR も最初のコードのコミットで上げていた） / T01 の欄を変えた。計画 S1 → S1, S5。変更に 4 つのバージョンのファイルを足した。完了条件に release:plan の行を足した
 2026-10-06 / T05 / バージョンの引き上げを T01 に移したので不要になった / [-] にした。S6 は T04 の計画（S4 → S4, S6）に移した
@@ -119,3 +139,4 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 2026-10-06 / T07 / 持ち主の追加の依頼で code scanning #19 を同じ PR で直す（plan の S7） / T07 を足した。#18 は PR の外で dismiss する
 2026-10-06 / T08 / 持ち主が #18 を dismiss ではなく overrides で上げるほうを選んだ（plan の S8）。0.18.11 は minimumReleaseAge（7 日）で入らなかった / T08 を足し、0.18.9 にした
 2026-10-06 / 全体 / Codex の全差分レビュー（high）で P3: proxy-addr の更新で tarball の THIRD_PARTY_NOTICES.md も変わる / 見送り。notices は lockfile に合わせて変わるのが正しく、依頼文の受け入れ条件が狭すぎた。review-shipping は指摘なし
+2026-10-06 / T09・T10 / GitHub の Codex のレビュー（PR #294）で P1: userConfig のキーと hook の読み取りの対応が check-pairs に無い（再現した）、P2: review_commands に成り立たない名前だけがあると env のフォールバックが止まる（再現した） / 両方採用。T10・T09 を足して直した
