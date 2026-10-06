@@ -159,6 +159,11 @@ export interface ForgetBatch {
   project_id: number;
 }
 
+export interface HarvestRunSource {
+  run_id: number;
+  source_id: number;
+}
+
 export interface IngestSource {
   artifact: string | null;
   author_association: string | null;
@@ -476,6 +481,7 @@ export interface DB {
   extraction_run: ExtractionRun;
   field_def: FieldDef;
   forget_batch: ForgetBatch;
+  harvest_run_source: HarvestRunSource;
   ingest_source: IngestSource;
   owner_identity: OwnerIdentity;
   project: Project;

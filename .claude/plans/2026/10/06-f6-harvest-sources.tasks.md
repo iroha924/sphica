@@ -22,13 +22,15 @@ base: main
 
 別の harvest が割り込んでも実行中の範囲が変わらず、空にされた本文が今の版になる。
 
-- [ ] T01: revision 11 で harvest_run_source を足し、走っている途中の harvest を移行で消す
+- [x] T01: revision 11 で harvest_run_source を足し、走っている途中の harvest を移行で消す
   - 種別: 追加
   - 計画: S1, S5
   - 依存: なし
   - 変更: `db/schema.sql`, `db/migrations/0011.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/test/fixtures/schema-rev10.sql`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`, `server/test/db.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/migrate.test.ts test/schema.test.ts test/db.test.ts` → pass。移行した DB と新しい DB が一致し、走っている途中の harvest がメモ付きで消え、保存済みの harvest・走っている途中の trace と glean・source・record_call が残る。trigger が別のプロジェクトの source と harvest でない実行を拒む。ingest は insert でき、forget の source の削除で行が消える。`bun run codegen:check` → 差分なし
   - コミット: `feat(schema): keep a harvest run's sources in harvest_run_source (revision 11) (T01)`
+  - 結果: `cd server && node --test test/migrate.test.ts test/schema.test.ts test/db.test.ts` → 123 pass。revision 10 の fixture から移行した DB と新しい DB の定義が一致、走っている途中の harvest 2 件がメモ付きで消え、保存済みの harvest・走っている途中の trace と glean・source・record_call が残った。trigger は別プロジェクトの source と trace・glean の実行を拒んだ。ingest の insert が通り、forget の source の削除で行が消えた
+  - 結果: `bun run codegen:check` → matches。`bun run verify` → 0。版は 0.6.36
 
 - [ ] T02: beginHarvest が範囲を保存し、context・check・save が保存した範囲だけを見る
   - 種別: 修正

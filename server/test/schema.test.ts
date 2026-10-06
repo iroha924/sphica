@@ -411,7 +411,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 10);
+  assert.equal(one("pragma user_version").user_version, 11);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -1762,4 +1762,20 @@ test("an observation with no turn rules out only replies after it, as an unplace
   const after = reply("n2:assistant", "n2", "2026-09-10T00:00:09Z", "nt");
   assert.deepEqual(ineligible(), [after]);
   assert.ok(!ineligible().includes(before));
+});
+
+test("a harvest run keeps only sources of its own project, and only a harvest run keeps any", () => {
+  const src = message(db, p, { id: "m1", text: "kept" });
+  const elsewhere = message(db, other, { id: "m2", text: "elsewhere", session: "s2" });
+  const keep = (runId: number, sourceId: number) =>
+    sql("insert into harvest_run_source (run_id, source_id) values (?, ?)", runId, sourceId);
+  const harvest = run(db, p, "harvest", "pr:1");
+  keep(harvest, src);
+  refuses(() => keep(harvest, elsewhere), /only a harvest run keeps sources, from its own project/);
+  refuses(() => keep(run(db, p), src), /only a harvest run keeps sources, from its own project/);
+  refuses(
+    () => keep(run(db, p, "glean", "glean"), src),
+    /only a harvest run keeps sources, from its own project/,
+  );
+  assert.equal(one("select count(*) as n from harvest_run_source").n, 1);
 });
