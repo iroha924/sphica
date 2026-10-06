@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { embeddedPackages } from "./lib/embedded.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 /** Workspaces whose code is bundled. */
@@ -152,6 +153,23 @@ const entries = [...seen]
       source: source(m),
     };
   });
+
+// Packages the MCP SDK carries inside its dist ship as bundled code too, though npm lists none of them as dependencies
+const embedded = embeddedPackages();
+for (const p of embedded.packages)
+  entries.push({
+    name: p.name,
+    version: p.version,
+    spdx: p.license,
+    text: p.text,
+    from: "LICENSE",
+    notice: null,
+    source: p.source,
+  });
+if (embedded.problems.length) {
+  console.error(embedded.problems.join("\n"));
+  process.exit(1);
+}
 
 const missing = entries.filter((e) => !e.text);
 const out = [

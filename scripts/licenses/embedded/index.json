@@ -1,0 +1,8 @@
+[
+  { "name": "ajv", "version": "8.18.0", "license": "MIT", "source": "https://github.com/ajv-validator/ajv", "in": "@modelcontextprotocol/server" },
+  { "name": "ajv-formats", "version": "3.0.1", "license": "MIT", "source": "https://github.com/ajv-validator/ajv-formats", "in": "@modelcontextprotocol/server" },
+  { "name": "content-type", "version": "1.0.5", "license": "MIT", "source": "https://github.com/jshttp/content-type", "in": "@modelcontextprotocol/server" },
+  { "name": "fast-deep-equal", "version": "3.1.3", "license": "MIT", "source": "https://github.com/epoberezkin/fast-deep-equal", "in": "@modelcontextprotocol/server" },
+  { "name": "fast-uri", "version": "3.1.0", "license": "BSD-3-Clause", "source": "https://github.com/fastify/fast-uri", "in": "@modelcontextprotocol/server" },
+  { "name": "json-schema-traverse", "version": "1.0.0", "license": "MIT", "source": "https://github.com/epoberezkin/json-schema-traverse", "in": "@modelcontextprotocol/server" }
+]

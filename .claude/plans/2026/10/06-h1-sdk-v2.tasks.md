@@ -53,20 +53,23 @@ base: main
   - 完了条件: `cd server && node --test test/plugin.test.ts` → 全件 pass。ツール一覧（名前、description、annotations、required、`additionalProperties: false`）と知らない引数の拒否、`claudecode/toolUseId`・`x-codex-turn-metadata`・Codex の sandbox の cwd のケースを含む
   - コミット: `test(mcp): pin both servers' tool lists and host metadata under SDK v2 (T03)`
   - 結果: `cd server && node --test --test-name-pattern="refuse an argument|logs the caller" test/plugin.test.ts` → 2 pass。18 ツールの required・properties・readOnlyHint・destructiveHint と `additionalProperties: false`、知らない引数の拒否、Claude Code と Codex の caller の列を確かめる
-  - 結果: 0.6.38（v1）と T01 の bundle（v2）の tools/list を比べると、違いは `inputSchema.$schema` が draft-07 から 2020-12 になったことと、各ツールの `execution: {taskSupport: "forbidden"}` が無くなったことだけ
+  - 結果: 0.6.38（v1）と T01 の bundle（v2）に SDK のクライアントで `client.listTools()` → 違いは `inputSchema.$schema` が draft-07 から 2020-12 になったことと、各ツールの `execution: {taskSupport: "forbidden"}` が無くなったことだけ
   - 結果: `bun run verify` → exit 0
 
 ## P2: SDK が同梱するパッケージを表記とスキャンに載せる
 
-ajv など SDK v2 の中に入っている 7 パッケージを THIRD_PARTY_NOTICES・release の SBOM・OSV に載せ、SDK を上げて同梱が変わったら verify が落ちる。
+ajv など SDK v2 の中に入って bundle に入る 6 パッケージを THIRD_PARTY_NOTICES・release の SBOM・OSV に載せ、SDK を上げて同梱が変わったら verify が落ちる。
 
-- [ ] T04: 同梱パッケージのライセンス文と照合の検査を足し、THIRD_PARTY_NOTICES に載せる
+- [x] T04: 同梱パッケージのライセンス文と照合の検査を足し、THIRD_PARTY_NOTICES に載せる
   - 種別: 追加
   - 計画: S3
   - 依存: T01（v2 の配布物が node_modules に要る）
-  - 変更: `scripts/licenses/embedded/ajv@8.18.0.txt`, `scripts/licenses/embedded/ajv-formats@3.0.1.txt`, `scripts/licenses/embedded/fast-uri@3.1.0.txt`, `scripts/licenses/embedded/fast-deep-equal@3.1.3.txt`, `scripts/licenses/embedded/json-schema-traverse@1.0.0.txt`, `scripts/licenses/embedded/content-type@1.0.5.txt`, `scripts/licenses/embedded/@cfworker+json-schema@4.1.1.txt`, `scripts/check-embedded.mjs`, `scripts/third-party-notices.mjs`, `package.json`
-  - 完了条件: `node scripts/check-embedded.mjs` → exit 0。一覧から 1 ファイルを一時的に外すと落ちる（結果欄に実測を残す）。`bun run notices` → exit 0 で、生成した notices に 7 パッケージが載る。`bun run verify` → exit 0
+  - 変更: `scripts/licenses/embedded/ajv@8.18.0.txt`, `scripts/licenses/embedded/ajv-formats@3.0.1.txt`, `scripts/licenses/embedded/fast-uri@3.1.0.txt`, `scripts/licenses/embedded/fast-deep-equal@3.1.3.txt`, `scripts/licenses/embedded/json-schema-traverse@1.0.0.txt`, `scripts/licenses/embedded/content-type@1.0.5.txt`, `scripts/licenses/embedded/index.json`, `scripts/lib/embedded.mjs`, `scripts/lib/embedded.d.mts`, `scripts/bundle.mjs`, `scripts/third-party-notices.mjs`, `server/test/embedded.test.ts`
+  - 完了条件: `bun run bundle` → exit 0。`index.json` から 1 つを一時的に外すと落ちる（結果欄に実測を残す）。生成した `plugin/THIRD_PARTY_NOTICES.md` に 6 パッケージが載る。`cd server && node --test test/embedded.test.ts` → 全件 pass。`bun run verify` → exit 0
   - コミット: `feat(notices): list the packages MCP SDK v2 embeds in its dist (T04)`
+  - 結果: `node scripts/bundle.mjs` → exit 0、`third-party notices: 18 packages`。表に ajv 8.18.0・ajv-formats 3.0.1・content-type 1.0.5・fast-deep-equal 3.1.3・fast-uri 3.1.0・json-schema-traverse 1.0.0 が載り、SDK の LICENSE の licensing transition の前置きが 2 か所（server と core）入る
+  - 結果: `index.json` から content-type を一時的に外して `node scripts/bundle.mjs` → `bundle check failed: - the bundles carry content-type 1.0.5 inside the MCP SDK, but scripts/licenses/embedded lacks it`。戻した
+  - 結果: `cd server && node --test test/embedded.test.ts` → 4 pass。`bun run verify` → exit 0
 
 - [ ] T05: release の SBOM と OSV のスキャンに同梱パッケージを足す
   - 種別: 追加
@@ -102,3 +105,6 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
 
 ## 記録
 - 2026-10-06 / T01 / Codex のタスクごとのレビューは指摘なし / そのまま
+- 2026-10-06 / T02 / Codex のタスクごとのレビューは指摘なし / そのまま
+- 2026-10-06 / T04 / @cfworker/json-schema は bundle に入らない（metafile で確認）。変更欄から `scripts/licenses/embedded/@cfworker+json-schema@4.1.1.txt` を外し、完了条件の 7 パッケージを 6 に / plan の方針と変更履歴も直した
+- 2026-10-06 / T04 / 変更欄: 前は `scripts/check-embedded.mjs`, `package.json` を含む。新しくは `scripts/licenses/embedded/index.json`, `scripts/lib/embedded.mjs`, `scripts/lib/embedded.d.mts`, `scripts/bundle.mjs`, `server/test/embedded.test.ts` を足し、その 2 つを外した。完了条件も `node scripts/check-embedded.mjs` から `bun run bundle` に / 照合を bundle の中で流すため（plan の変更履歴）

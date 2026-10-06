@@ -13,7 +13,7 @@ approved_at: 2026-10-06
 - 依存を `@modelcontextprotocol/sdk` 1.x から `@modelcontextprotocol/server` 2.2.0（固定）へ替え、テストのクライアントは devDependency の `@modelcontextprotocol/client` 2.2.0 にする。express・hono・jose などの v1 の依存がなくなる
 - 両サーバーは 2025 年版の手書きの stdio 接続のまま移す。Claude Code は 2026-07-28 版の `server/discover` を先に試し、Method not found で 2025 年版へ戻るので、今と同じ版で動き、`forget_apply` の確認ダイアログ（elicitInput）も書き換えずに済む
 - 変えないもの: ツールの名前・引数・返答の意味、ホストの `_meta` の扱い、受け取れるリクエストの大きさ（v2 の 10 MiB の上限は外して v1 と同じにする）
-- v2 は ajv など 7 個のパッケージを自分の配布物の中に同梱しているので、そのライセンス文をリポジトリに置き、THIRD_PARTY_NOTICES・release の SBOM・OSV のスキャンに載せ、SDK を上げて同梱が変わったら verify が落ちるようにする
+- v2 は ajv など 6 個のパッケージを自分の配布物の中に同梱して bundle に入るので、そのライセンス文をリポジトリに置き、THIRD_PARTY_NOTICES・release の SBOM・OSV のスキャンに載せ、SDK を上げて同梱が変わったら verify が落ちるようにする
 - 実装の塊: 依存とサーバーとテストの移行 → 同梱パッケージの notices / SBOM / OSV → 梱包したサーバーの検査（Windows を含む）と bundle の予算 → 0.6.39 で release
 - 確かめ: 両ホストの headless で読み取りと記録を一時の SPHICA_HOME で通し、structuredContent の扱いを実測して mcp.ts の注記を直す。Claude Code の対話での forget の確認は持ち主に 1 回流してもらう
 
@@ -65,7 +65,7 @@ approved_at: 2026-10-06
   - 直列化して 10 MiB を超える `record_check` の要求に、通常の返答（拒否か判定）が返り、その後の呼び出しにもサーバーが答える。要求が 10 MiB を超えていることもテストで確かめる
 - 同梱パッケージ:
   - 一覧はリポジトリに置くライセンス文のファイル `scripts/licenses/embedded/<name>@<version>.txt`（scoped は `@scope+name@version.txt`）。それぞれそのバージョンの npm tarball から 1 回写す
-  - 新しい `scripts/check-embedded.mjs` を `bun run verify` に入れる。インストール済みの `@modelcontextprotocol/{server,core}` の `dist/**/*.mjs` から region の印を読み、`_ajv@…` のような pnpm の peer の接尾辞を外して名前とバージョンにし、一覧と完全に一致しなければ落ちる。workerd 用の @cfworker/json-schema も載せる（多めに載せる方針どおり）
+  - 照合は `scripts/lib/embedded.mjs` に置き、`scripts/bundle.mjs` が予算の検査と並べて流す（metafile のある所で、release の build でも必ず通る）。`.build/meta-<entry>.json` から bundle に入った `@modelcontextprotocol/*/dist/` のファイルを取り、その region の印を読み、`_ajv@…` のような pnpm の peer の接尾辞を外して名前とバージョンにし、一覧と完全に一致しなければ落ちる。metafile が無ければ落ちる（飛ばさない）。workerd 用の @cfworker/json-schema は bundle に入らないので載せない
   - `scripts/third-party-notices.mjs` は npm で解決したパッケージの後に一覧の各パッケージを表とライセンス文に足す
   - 新しい `scripts/sbom-embedded.mjs <in.cdx.json> <out.cdx.json>` は一覧の各パッケージを top-level の `library` の component（`purl` は `pkg:npm/<name>@<version>`）として足し、`dependencies` に同梱元の SDK パッケージからの関係を足す。`--only-embedded <out>` は一覧だけの CycloneDX を書く
   - release.yml: `sbom` job に setup-node を足し、syft の直後に `sbom-embedded.mjs` を流して、足した後の file だけを upload する（`prepare` の check-sbom と publish の attest が同じ artifact を見る）。`osv` job は `sbom` に依存させず、setup-node をスキャンの前に移し、`--only-embedded` で書いた file を `-L <file>.cdx.json` で `-r` と並べて渡す。`sbomProblems` は変えない
@@ -81,7 +81,7 @@ approved_at: 2026-10-06
 - 採用: 2.2.0 に固定。棄却: 10/12 まで待って 2.3.1（今入れられない。上げるのは別の依存更新で足りる）
 - 採用: テストは SDK v2 の client を devDependency で使う。棄却: 手書きの JSON-RPC クライアント（保守が増える）
 - 採用: 受信バッファの上限を Infinity にして v1 と同じにする。棄却: 既定の 10 MiB（超えるとセッションごと切れる）、有限の大きな値（公開の上限が新しくできる）
-- 採用: 同梱パッケージはライセンス文のファイルを一覧にし、SDK の配布物の印と verify で照らす。棄却: bundle の metafile から読む（sbom と osv の job が bundle に依存し、job の順序が崩れる）、同梱パッケージを通常の依存として入れる（出荷の形と違う）
+- 採用: 同梱パッケージはライセンス文のファイルを一覧にし、verify で bundle の metafile が示すチャンクの印と照らす（sbom と osv の job は一覧だけを読む）。棄却: sbom と osv の job が metafile を読む（bundle に依存し、job の順序が崩れる）、インストール済みの dist 全部の印と照らす（bundle に入らない workerd 用のパッケージまで載る）、同梱パッケージを通常の依存として入れる（出荷の形と違う）
 - 採用: osv は `sbom` に依存させず、一覧だけの CycloneDX を自分で書いて読ませる。棄却: `osv` を `sbom` の後にする（sbom が落ちると「スキャン結果なし」の行が出なくなる）
 
 ## 手順
@@ -97,9 +97,9 @@ approved_at: 2026-10-06
 
 - A1: `bun run verify` → exit 0（最後の HEAD で）
 - A2: `cd server && node --test test/plugin.test.ts` → 足したツール一覧・`_meta`・10 MiB を超える要求のテストを含めて全件 pass
-- A3: `node scripts/check-embedded.mjs` → exit 0。一覧から 1 つ消すと落ちることを確かめる
-- A4: `rg -n "ajv|ajv-formats|fast-uri|fast-deep-equal|json-schema-traverse|content-type|@cfworker/json-schema|Licensing transition|licensing transition" plugin/THIRD_PARTY_NOTICES.md` → 同梱の 7 パッケージが表とライセンス文に載り、`@modelcontextprotocol/server` と core の LICENSE が移行の前置きを含めてそのまま載る
-- A5: `gh workflow run release.yml --ref <PR の head>` → `sbom` の artifact に同梱の 7 パッケージがあり、`prepare` の check-sbom が通り、`osv` の結果 JSON（`--all-packages`）に同梱のパッケージがスキャンした対象として出る
+- A3: `bun run bundle` → exit 0。`scripts/licenses/embedded/index.json` から 1 つ消すと `bundle check failed` で落ちることを確かめる
+- A4: `rg -n "ajv|ajv-formats|fast-uri|fast-deep-equal|json-schema-traverse|content-type|licensing transition" plugin/THIRD_PARTY_NOTICES.md` → 同梱の 6 パッケージが表とライセンス文に載り、`@modelcontextprotocol/server` と core の LICENSE が移行の前置きを含めてそのまま載る
+- A5: `gh workflow run release.yml --ref <PR の head>` → `sbom` の artifact に同梱の 6 パッケージがあり、`prepare` の check-sbom が通り、`osv` の結果 JSON（`--all-packages`）に同梱のパッケージがスキャンした対象として出る
 - A6: `gh pr checks <PR>` → Linux（Node 24.15 と 26）と Windows が全部 pass し、Windows のログで梱包した `mcp.js` と `mcp-record.js` の tools/list と tools/call が通っている
 - A7: リポジトリの外で展開した `npm pack` の tarball の `node plugin/dist/mcp.js` と `node plugin/dist/mcp-record.js` → node_modules の無い場所で一時の DB に向けて SDK のクライアントで呼び、両方で initialize・tools/list・tools/call が返る
 - A8: 梱包した v2 のサーバーを挟んだプロキシで `claude -p --mcp-config <プロキシの設定>` と `codex exec -c mcp_servers.<プロキシ>` → ログで Claude Code 2.1.291 は `server/discover` に -32601 が返って `initialize` 2025-11-25 に戻り、Codex は `initialize` 2025-06-18 で接続している
@@ -123,3 +123,6 @@ approved_at: 2026-10-06
 なし
 
 ## 変更履歴
+
+- 2026-10-06 / 照合の対象を、インストール済みの dist 全部から bundle の metafile が示すチャンクへ狭め、@cfworker/json-schema を一覧から外した / bundle に入っていないこと、tarball にライセンス文が無く中に punycode 由来のコードがあることを metafile と tarball で確かめた / Go は要らない（範囲・公開インターフェース・依存は変わらない）
+- 2026-10-06 / 照合を新しい `scripts/check-embedded.mjs` ではなく `scripts/bundle.mjs` の中（予算の検査の隣）で流し、一覧に名前・ライセンス・出どころを持つ `scripts/licenses/embedded/index.json` を足した。A3 を `bun run bundle` に / metafile が必ずある所で動き、release の build でも飛ばせない。notices の表に SPDX と出どころが要る / Go は要らない

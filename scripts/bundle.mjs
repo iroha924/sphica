@@ -10,6 +10,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { checkBundles } from "./lib/bundle-budget.mjs";
+import { embeddedPackages, embeddedProblems } from "./lib/embedded.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "plugin", "dist");
@@ -43,7 +44,12 @@ const metas = Object.fromEntries(
     }
   }),
 );
-const over = checkBundles(metas);
+const listed = embeddedPackages();
+const over = [
+  ...checkBundles(metas),
+  ...listed.problems,
+  ...embeddedProblems(metas, (input) => fs.readFileSync(path.join(root, input), "utf8"), listed.packages),
+];
 if (over.length) {
   console.error(`bundle check failed:\n${over.map((p) => `- ${p}`).join("\n")}`);
   process.exit(1);
