@@ -126,3 +126,4 @@ approved_at: 2026-10-06
 
 - 2026-10-06 / 照合の対象を、インストール済みの dist 全部から bundle の metafile が示すチャンクへ狭め、@cfworker/json-schema を一覧から外した / bundle に入っていないこと、tarball にライセンス文が無く中に punycode 由来のコードがあることを metafile と tarball で確かめた / Go は要らない（範囲・公開インターフェース・依存は変わらない）
 - 2026-10-06 / 照合を新しい `scripts/check-embedded.mjs` ではなく `scripts/bundle.mjs` の中（予算の検査の隣）で流し、一覧に名前・ライセンス・出どころを持つ `scripts/licenses/embedded/index.json` を足した。A3 を `bun run bundle` に / metafile が必ずある所で動き、release の build でも飛ばせない。notices の表に SPDX と出どころが要る / Go は要らない
+- 2026-10-06 / 保留: merge と release をしない / SDK v2（2.2.0〜2.3.1）は fast-uri 3.1.0（既知の脆弱性 9 件、修正は 3.1.8）と ajv 8.18.0 を dist に埋め込んでいて overrides で上げられず、0.6.38 の 3.1.8 から後退するため。再開の条件は、SDK が同梱の fast-uri を 3.1.8 以上にした版を公開し、その版が minimumReleaseAge を過ぎたとき / 持ち主の判断（保留して上流を待つ）
