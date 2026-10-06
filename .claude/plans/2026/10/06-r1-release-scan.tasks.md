@@ -89,7 +89,7 @@ release の merge の後に、main の OSV と Scorecard の run を workflow_di
   - 計画: S2
   - 依存: T03（直す対象の refresh-scans が要る）
   - 変更: `.github/workflows/release.yml`
-  - red: refresh-scans の run の中身を、stderr に `failed 100%\r::error::forged` を出して exit 1 する偽の gh で流す → `::error::forged` が独立した行として 2 回出る
+  - red: `PATH=<偽の gh のディレクトリ>:$PATH bash --noprofile --norc -eo pipefail <refresh-scans の run の中身>` → 偽の gh が stderr に `failed 100%\r::error::forged` を出して exit 1 すると、`::error::forged` が独立した行として 2 回出る
   - 完了条件: 同じ偽の gh で流す → `::error::forged` の行は 0、`%` は `%25`、CR は `%0D`、LF は `%0A` になり exit 0。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
   - コミット: `fix(release): escape gh's output in the dispatch warning (T08)`
   - 結果: red は上のとおり 2 行を実測。直した後は 0 行で、警告は `failed 100%25%0D::error::forged`、exit 0。actionlint → exit 0。`bun run verify` → exit 0
