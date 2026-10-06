@@ -1,25 +1,33 @@
 // Grades one evaluation loop blind (step 5 of the eval-loop Skill): every result row of loop.json goes to Codex with only the task and the
 // run's own answer and patch, in an empty directory, and comes back through grade.schema.json; the table counts every started run.
-// Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none]
+// Each finished grader call is saved in grades.checkpoint.json beside it, and a rerun calls the graders only for what is not saved with the
+// same inputs. Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none]
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { isolatedCodexHome } from "./codex-home.ts";
+import { replaceFile } from "../../src/file-lock.ts";
+import { isolatedCodexHome, ownerCodexSettings } from "./codex-home.ts";
 import { readTasks } from "./firing.ts";
 import {
   blindPrompt,
   type Cell,
+  checkpointKey,
+  GRADER_ARGS,
   type GradeRow,
+  type Grader,
   type GradeTask,
   gradedTask,
+  loadCheckpoint,
   receiveGrade,
+  saveCheckpoint,
   tabulate,
 } from "./grading.ts";
 import type { Grade } from "./schema-check.ts";
 
-const HERE = import.meta.dirname;
+const SCHEMA_FILE = path.join(import.meta.dirname, "grade.schema.json");
+const schema = fs.readFileSync(SCHEMA_FILE, "utf8");
 const { values: args } = parseArgs({
   options: {
     // A build's loop.json (collect writes it in the build directory); the grades go beside it
@@ -34,6 +42,7 @@ if (args.second !== "claude" && args.second !== "none") throw new Error("--secon
 const plan = readTasks<{ tasks: GradeTask[] }>(path.dirname(args.loop));
 // report reads tasks.json beside grades.json, so it is always written into the build
 const out = path.join(path.dirname(args.loop), "grades.json");
+const checkpointFile = path.join(path.dirname(args.loop), "grades.checkpoint.json");
 const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
   build?: string | null;
   variant?: string;
@@ -53,21 +62,7 @@ function gradeOne(prompt: string): { status: number | null; output: string } {
     const out = path.join(dir, "grade.json");
     const r = spawnSync(
       "codex",
-      [
-        "exec",
-        "-s",
-        "read-only",
-        "--ephemeral",
-        "--ignore-rules",
-        "--skip-git-repo-check",
-        "-C",
-        dir,
-        "--output-schema",
-        path.join(HERE, "grade.schema.json"),
-        "-o",
-        out,
-        "-",
-      ],
+      [...GRADER_ARGS.codex, "-C", dir, "--output-schema", SCHEMA_FILE, "-o", out, "-"],
       {
         input: prompt,
         encoding: "utf8",
@@ -94,25 +89,12 @@ function gradeOne(prompt: string): { status: number | null; output: string } {
 function gradeClaude(prompt: string): { status: number | null; output: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
   try {
-    const schema = fs.readFileSync(path.join(HERE, "grade.schema.json"), "utf8");
-    const r = spawnSync(
-      "claude",
-      [
-        "-p",
-        "--setting-sources",
-        "",
-        "--strict-mcp-config",
-        "--tools",
-        "",
-        "--disable-slash-commands",
-        "--no-session-persistence",
-        "--output-format",
-        "json",
-        "--json-schema",
-        schema,
-      ],
-      { cwd: dir, input: prompt, encoding: "utf8", timeout: 15 * 60_000 },
-    );
+    const r = spawnSync("claude", [...GRADER_ARGS.claude, "--json-schema", schema], {
+      cwd: dir,
+      input: prompt,
+      encoding: "utf8",
+      timeout: 15 * 60_000,
+    });
     let output = "";
     try {
       const structured = (JSON.parse(r.stdout) as { structured_output?: unknown }).structured_output;
@@ -122,6 +104,46 @@ function gradeClaude(prompt: string): { status: number | null; output: string } 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+const checkpoint = loadCheckpoint(checkpointFile);
+// Read only when a row is graded, so a build with nothing to grade needs no Codex config
+let codexConfig: string | undefined;
+const variant = loop.variant ?? "original";
+let called = 0;
+let reused = 0;
+
+/** A saved call with the same inputs, else a new one, saved before anything else runs when it exited 0 (a failed call is tried again). */
+function graderRun(
+  grader: Grader,
+  task: GradeTask,
+  row: GradeRow,
+  prompt: string,
+): { status: number | null; output: string } {
+  if (grader === "codex") codexConfig ??= ownerCodexSettings();
+  const key = checkpointKey({
+    grader,
+    task,
+    row,
+    prompt,
+    build: loop.build ?? null,
+    bundle: loop.bundle,
+    variant,
+    schema,
+    codexConfig: grader === "codex" ? (codexConfig ?? null) : null,
+  });
+  const saved = checkpoint.entries[key];
+  if (saved) {
+    reused++;
+    return saved;
+  }
+  called++;
+  const run = grader === "codex" ? gradeOne(prompt) : gradeClaude(prompt);
+  if (run.status === 0) {
+    checkpoint.entries[key] = { grader, ...run, at: new Date().toISOString() };
+    saveCheckpoint(checkpointFile, checkpoint);
+  }
+  return run;
 }
 
 const graded: (GradeRow & {
@@ -139,18 +161,19 @@ for (const row of loop.rows) {
     graded.push({ ...row, ungraded: `unknown task ${row.task}` });
     continue;
   }
-  const prompt = blindPrompt(gradedTask(task, loop.variant ?? "original"), row);
+  const prompt = blindPrompt(gradedTask(task, variant), row);
   const accept = (run: { status: number | null; output: string }) =>
     receiveGrade(
       run,
       row.patch_truncated,
-      gradedTask(task, loop.variant ?? "original").against !== undefined,
+      gradedTask(task, variant).against !== undefined,
       Boolean(row.presented),
       task.conflict !== undefined,
     );
-  const got = accept(gradeOne(prompt));
+  const before = reused;
+  const got = accept(graderRun("codex", task, row, prompt));
   // The second grade is kept beside the first for agreement; the table's values stay Codex's
-  const other = args.second === "claude" ? accept(gradeClaude(prompt)) : null;
+  const other = args.second === "claude" ? accept(graderRun("claude", task, row, prompt)) : null;
   const second = other && ("graded" in other ? { grade: other.graded } : { ungraded: other.ungraded });
   graded.push({
     ...row,
@@ -158,14 +181,14 @@ for (const row of loop.rows) {
     ...(second ? { second } : {}),
   });
   console.log(
-    `${row.model} ${row.condition} ${row.run}: ${"graded" in got ? `score ${got.graded.score}` : `ungraded (${got.ungraded})`}`,
+    `${row.model} ${row.condition} ${row.run}: ${"graded" in got ? `score ${got.graded.score}` : `ungraded (${got.ungraded})`}${reused > before ? " (reused)" : ""}`,
   );
 }
 
 const table = tabulate(graded);
-fs.writeFileSync(
+replaceFile(
   out,
-  `${JSON.stringify({ build: loop.build ?? null, variant: loop.variant ?? "original", bundle: loop.bundle, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
+  `${JSON.stringify({ build: loop.build ?? null, variant, bundle: loop.bundle, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
 );
 
 const fmt = (c: Cell) =>
@@ -181,4 +204,5 @@ const fmt = (c: Cell) =>
     `tracked failure ${c.tracked_failure}`,
   ].join("  |  ");
 for (const c of table) console.log(fmt(c));
+console.log(`Grader calls: ${called} made, ${reused} reused from ${checkpointFile}.`);
 console.log("Graders run read-only in an empty directory; read-only does not stop them reading elsewhere.");

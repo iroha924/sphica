@@ -7,16 +7,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export function isolatedCodexHome(codexHome: string, extraConfig = ""): void {
-  const owner = path.join(os.homedir(), ".codex");
-  fs.mkdirSync(codexHome, { recursive: true });
-  fs.symlinkSync(path.join(owner, "auth.json"), path.join(codexHome, "auth.json"));
-  const settings = fs
-    .readFileSync(path.join(owner, "config.toml"), "utf8")
+/** The lines of the owner's Codex config that an isolated CODEX_HOME keeps: the model and the effort. */
+export function ownerCodexSettings(): string {
+  return fs
+    .readFileSync(path.join(os.homedir(), ".codex", "config.toml"), "utf8")
     .split("\n")
     .filter((l) => /^(model|model_reasoning_effort)\s*=/.test(l))
     .join("\n");
-  fs.writeFileSync(path.join(codexHome, "config.toml"), `${settings}\n${extraConfig}`);
+}
+
+export function isolatedCodexHome(codexHome: string, extraConfig = ""): void {
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
+  fs.writeFileSync(path.join(codexHome, "config.toml"), `${ownerCodexSettings()}\n${extraConfig}`);
 }
 
 /** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */

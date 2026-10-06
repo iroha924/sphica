@@ -35,14 +35,15 @@ base: main
 
 採点者の呼び出しを 1 件ずつ保存し、再実行では入力が一致しない分と終わっていない分だけを採点する。
 
-- [ ] T02: grade.ts を checkpoint で動かし、`grades.json` をアトミックに書く
+- [x] T02: grade.ts を checkpoint で動かし、`grades.json` をアトミックに書く
   - 種別: 修正
   - 計画: S2
   - 依存: T01（キーと読み書きが要る）
-  - 変更: `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`
+  - 変更: `server/evals/cloud/grade.ts`, `server/evals/cloud/codex-home.ts`, `server/test/eval-grade.test.ts`
   - red: grade.ts を変える前に、止まった実行の再開のテスト（`checkpoint resumes`）だけを足して `cd server && node --test --test-name-pattern="checkpoint resumes" test/eval-grade.test.ts` → fail（再実行で codex が 3 回呼ばれる。期待は 2 回）
   - 完了条件: `cd server && node --test --test-name-pattern="checkpoint" test/eval-grade.test.ts` → pass。plan の方針にある子プロセスのテスト（再開、終わったビルドの再実行で 0 回、answer を変えた行だけ、終了コード 1 は呼び直し・形の崩れは使い回し、Claude の途中で止めた再開、壊れた checkpoint、文面が同じで run が違う 2 行、保存の失敗）がすべて通る。既存の `the grader runs with its own HOME` と `collect and grade refuse --out` のテストも通る
   - コミット: `fix(eval): save each grader result as it finishes and grade only what is left on a rerun (T02)`
+  - 結果: red は grade.ts を変える前に `cd server && node --test --test-name-pattern="checkpoint resumes" test/eval-grade.test.ts` → fail（「the rerun grades only the two rows left」actual 3 / expected 2）。変更後は `--test-name-pattern="checkpoint"` → pass 9 / fail 0（再開、終わったビルドの再実行で 0 回と answer を変えた行だけ、exit 1 の呼び直しと形の崩れの使い回し、Claude の途中で止めた再開、壊れた checkpoint 3 通り、文面が同じ 2 行、保存の失敗）。eval-grade.test.ts 全体 pass 68 / fail 0、`bun run lint`・`bun run typecheck`・`bun run english` は指摘なし
 
 ## P3: 手順書
 
@@ -57,3 +58,7 @@ eval-loop Skill に checkpoint と、最初から採点し直す方法を書く�
   - コミット: `docs(skills): say how grading resumes from its checkpoint (T03)`
 
 ## 記録
+
+- 2026-10-06 / T01 / Codex のタスクごとのレビュー（afc825ee）は指摘 0 件。Codex の sandbox では mkdtemp が EPERM でファイル操作のテストを流せなかった / 手元で同じテストを流して pass を確かめた
+- 2026-10-06 / T02 / Codex の設定を key に入れるには、呼ぶ前に設定の本文が要る / 変更欄を `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts` から、`server/evals/cloud/codex-home.ts` を足した形に変えた（`ownerCodexSettings` を切り出し、`isolatedCodexHome` もそれを使う）
+- 2026-10-06 / T02 / 設定を最初に読むと、行が 0 件のビルドで持ち主の config が無いと止まった（既存の `collect and grade refuse --out` テスト） / Codex を呼ぶ行が出たときだけ読むようにした
