@@ -6,9 +6,8 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
-import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { Client, type ClientOptions, type ElicitResult } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { SPHICA_TOOLS } from "../evals/cloud/canary-check.ts";
 import { sessionId } from "../src/knowledge.ts";
 import {
@@ -916,10 +915,12 @@ test("forget_apply removes sources only when the owner types the count in the ho
     message(db, p, { id: `m${i}`, text: `token ${secret} number ${i}` }),
   );
   const left = () => Number(db.owner.prepare("select count(*) as n from source").get()?.n);
-  const connect = async (options: ClientOptions, answer?: (message: string) => unknown) => {
+  const connect = async (
+    options: ClientOptions,
+    answer?: (message: string) => ElicitResult | Promise<ElicitResult>,
+  ) => {
     const client = new Client({ name: "test", version: "0" }, options);
-    if (answer)
-      client.setRequestHandler(ElicitRequestSchema, async (r) => answer(String(r.params.message)) as never);
+    if (answer) client.setRequestHandler("elicitation/create", async (r) => answer(String(r.params.message)));
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
@@ -945,8 +946,8 @@ test("forget_apply removes sources only when the owner types the count in the ho
   const form = { capabilities: { elicitation: { form: {} } } };
   let asked = "";
   const typing =
-    (typed: string, action = "accept") =>
-    (m: string) => {
+    (typed: string, action: ElicitResult["action"] = "accept") =>
+    (m: string): ElicitResult => {
       asked = m;
       return { action, content: { confirm: typed } };
     };
@@ -995,19 +996,20 @@ test("forget_apply removes sources only when the owner types the count in the ho
     assert.equal(r.error, false, r.text);
     assert.equal(left(), 2);
     // A call the host gave up on removes nothing, even when the owner answers the dialog it left open
-    let answerLater: ((v: unknown) => void) | null = null;
-    const late = await connect(form, () => new Promise((resolve) => (answerLater = resolve)));
+    let answerLater: ((v: ElicitResult) => void) | null = null;
+    const late = await connect(form, () => new Promise<ElicitResult>((resolve) => (answerLater = resolve)));
     clients.push(late);
     const stop = new AbortController();
     const pending = late
-      .callTool({ name: "forget_apply", arguments: { sources: [`s${ids[3]}`], cwd: dir } }, undefined, {
-        signal: stop.signal,
-      })
+      .callTool(
+        { name: "forget_apply", arguments: { sources: [`s${ids[3]}`], cwd: dir } },
+        { signal: stop.signal },
+      )
       .catch(() => null);
     while (!answerLater) await new Promise((t) => setTimeout(t, 20));
     stop.abort();
     await pending;
-    (answerLater as (v: unknown) => void)({ action: "accept", content: { confirm: "1" } });
+    (answerLater as (v: ElicitResult) => void)({ action: "accept", content: { confirm: "1" } });
     await new Promise((t) => setTimeout(t, 500));
     assert.equal(left(), 2, "a cancelled call forgot nothing");
   } finally {

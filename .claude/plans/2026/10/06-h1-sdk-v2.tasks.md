@@ -22,13 +22,16 @@ base: main
 
 依存を v2 に替え、サーバーとテストを移し、v1 と同じ大きさの要求を受け、ツール一覧と `_meta` の扱いが変わらないことをテストで押さえる。
 
-- [ ] T01: 依存を @modelcontextprotocol/server 2.2.0 に替え、両サーバーとテストのクライアントを v2 へ移し、バージョンを 0.6.39 にそろえる
+- [x] T01: 依存を @modelcontextprotocol/server 2.2.0 に替え、両サーバーとテストのクライアントを v2 へ移し、バージョンを 0.6.39 にそろえる
   - 種別: 変更
   - 計画: S1, S5
   - 依存: なし
   - 変更: `server/package.json`, `server/bun.lock`, `server/src/mcp.ts`, `server/src/mcp-record.ts`, `server/test/read.test.ts`, `server/test/overview.test.ts`, `server/test/plugin.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `rg -n "@modelcontextprotocol/sdk" server/src server/test server/package.json` → 0 件。`bun run release:plan -- --base v0.6.38` → `release kind: plugin` で 4 か所が 0.6.39。`bun run verify` → exit 0（bundle の予算を超えたら止めて結果欄に実測を書く）
   - コミット: `feat(mcp): move the read and record servers to MCP SDK v2 (T01)`
+  - 結果: `rg -n "@modelcontextprotocol/sdk" server/src server/test server/package.json` → 0 件
+  - 結果: `cd server && node --test test/plugin.test.ts test/read.test.ts test/overview.test.ts` → 65 pass, 0 fail（forget_apply の確認・拒否・取消・遅れた答えのキャンセルを含む）
+  - 結果: `bun run verify` → exit 0。bundle は `mcp.js` 1,650,435 → 1,675,735、`mcp-record.js` 1,737,044 → 1,762,361 バイトで予算の内側
 
 - [ ] T02: 受信バッファの上限を外し、10 MiB を超える要求を受けるテストを足す
   - 種別: 修正

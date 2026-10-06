@@ -5,8 +5,8 @@
 // The project is the host's workspace: Claude Code's CLAUDE_PROJECT_DIR, or the session directory Codex puts in each call's _meta (it
 // starts this server in the plugin root). A cwd argument naming another project is refused, so text read in one project cannot steer a write into another.
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import type { Kysely } from "kysely";
 import { z } from "zod";
 import { callerOf } from "./caller.ts";
@@ -116,9 +116,9 @@ server.registerTool(
     inputSchema: z.object({ auto: AUTO, cwd: CWD }).strict(),
     annotations: READ,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p, call } = await called("trace_pending", a.cwd, extra._meta);
+      const { p, call } = await called("trace_pending", a.cwd, ctx.mcpReq._meta);
       // The caller's own session is still being written, so an automatic trace leaves it out
       const skip = a.auto ? await callSession(conn(), call) : undefined;
       return pendingText(conn(), p.projectId, undefined, { auto: a.auto, skip });
@@ -134,9 +134,9 @@ server.registerTool(
     inputSchema: z.object({ session: z.string().min(1).max(200).optional(), cwd: CWD }).strict(),
     annotations: WRITE,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p, call } = await called("trace_begin", a.cwd, extra._meta);
+      const { p, call } = await called("trace_begin", a.cwd, ctx.mcpReq._meta);
       return `run: ${await beginTrace(conn(), p.projectId, a.session, call)}\nNext: record_context with this run.`;
     }),
 );
@@ -150,9 +150,9 @@ server.registerTool(
     inputSchema: z.object({ pr: z.number().int().positive(), cwd: CWD }).strict(),
     annotations: { ...WRITE, openWorldHint: true },
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p, call } = await called("harvest_begin", a.cwd, extra._meta);
+      const { p, call } = await called("harvest_begin", a.cwd, ctx.mcpReq._meta);
       const repo = repoOf(p.key);
       if (!repo) throw new Error(`${p.name} is not on github.com, so there is no pull request to read`);
       const r = await beginHarvest(conn(), p.projectId, a.pr, gh(repo), call);
@@ -169,9 +169,9 @@ server.registerTool(
     inputSchema: z.object({ session: z.string().min(1).max(200).optional(), cwd: CWD }).strict(),
     annotations: WRITE,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p, call } = await called("glean_begin", a.cwd, extra._meta);
+      const { p, call } = await called("glean_begin", a.cwd, ctx.mcpReq._meta);
       return `run: ${await beginGlean(conn(), p.projectId, a.session, call)}\nNext: record_context with this run.`;
     }),
 );
@@ -185,9 +185,9 @@ server.registerTool(
     inputSchema: z.object({ run: RUN, url: z.string().url().max(500), cwd: CWD }).strict(),
     annotations: { ...WRITE, openWorldHint: true },
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p } = await called("glean_fetch", a.cwd, extra._meta);
+      const { p } = await called("glean_fetch", a.cwd, ctx.mcpReq._meta);
       return framed(await gleanFetch(conn(), a.run, p, a.url, gh(repoOf(p.key) ?? "")));
     }),
 );
@@ -214,9 +214,9 @@ server.registerTool(
       .strict(),
     annotations: READ,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p } = await called("record_context", a.cwd, extra._meta);
+      const { p } = await called("record_context", a.cwd, ctx.mcpReq._meta);
       return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto));
     }),
 );
@@ -230,9 +230,9 @@ server.registerTool(
     inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: READ,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p, call } = await called("record_check", a.cwd, extra._meta);
+      const { p, call } = await called("record_check", a.cwd, ctx.mcpReq._meta);
       return (await checkText(conn(), a.run, p.projectId, p.root, a.record, call)).text;
     }),
 );
@@ -245,9 +245,9 @@ server.registerTool(
     inputSchema: z.object({ run: RUN, record: RECORD, cwd: CWD }).strict(),
     annotations: WRITE,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p, call } = await called("record_save", a.cwd, extra._meta);
+      const { p, call } = await called("record_save", a.cwd, ctx.mcpReq._meta);
       return saveText(conn(), a.run, p.projectId, p.root, a.record, undefined, call);
     }),
 );
@@ -270,9 +270,9 @@ server.registerTool(
     inputSchema: z.object({ sources: SOURCES, cwd: CWD }).strict(),
     annotations: READ,
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p } = await called("forget_preview", a.cwd, extra._meta);
+      const { p } = await called("forget_preview", a.cwd, ctx.mcpReq._meta);
       return forgetText(await previewForget(dbFile(), p.projectId, idsOf(a.sources)), dbFile());
     }),
 );
@@ -286,9 +286,9 @@ server.registerTool(
     inputSchema: z.object({ sources: SOURCES, cwd: CWD }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   },
-  async (a, extra) =>
+  async (a, ctx) =>
     tool(async () => {
-      const { p } = await called("forget_apply", a.cwd, extra._meta);
+      const { p } = await called("forget_apply", a.cwd, ctx.mcpReq._meta);
       const ids = idsOf(a.sources);
       const seen = await previewForget(dbFile(), p.projectId, ids);
       const n = seen.sources.length;
@@ -316,19 +316,19 @@ server.registerTool(
                 required: ["confirm"],
               },
             },
-            { timeout: ANSWER_MS, signal: extra.signal },
+            { timeout: ANSWER_MS, signal: ctx.mcpReq.signal },
           );
         } catch (e) {
           throw refused(`The confirmation did not come back (${head(reason(e), 200)})`);
         }
         // The host gave up on this call: an answer arriving after that must not act on its own
-        if (extra.signal.aborted) throw refused("The call was cancelled");
+        if (ctx.mcpReq.signal.aborted) throw refused("The call was cancelled");
         if (answer.action !== "accept")
           throw refused(`You ${answer.action === "decline" ? "declined" : "cancelled"}`);
         if (String(answer.content?.confirm ?? "").trim() !== String(n))
           throw refused(`The number typed does not match ${n}`);
       }
-      const done = await applyForget(dbFile(), p.projectId, ids, seen, extra.signal);
+      const done = await applyForget(dbFile(), p.projectId, ids, seen, ctx.mcpReq.signal);
       return [
         n ? `Forgot ${plural(n, "source")}.` : "Nothing new to forget.",
         forgetText(done.outcome, dbFile()),

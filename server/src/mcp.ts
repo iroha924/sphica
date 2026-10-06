@@ -4,8 +4,8 @@
 // **Responses are text content only.** With structuredContent, neither host passes the text to the model,
 // and declaring outputSchema makes the SDK throw when structuredContent is missing.
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
@@ -97,9 +97,9 @@ server.registerTool(
     inputSchema: z.object({ cwd: CWD }).strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return text(p);
       return text(await status(db, p.id, head(inline(p.name), 200)));
     } catch (e) {
@@ -151,9 +151,9 @@ server.registerTool(
       .strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return text(p);
       const limit = a.limit ?? 8;
       if (a.asked) {
@@ -240,9 +240,9 @@ server.registerTool(
       .strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return text(p);
       return text(await readRefs(db, p.id, a.refs, p.root));
     } catch (e) {
@@ -276,9 +276,9 @@ server.registerTool(
       .strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return text(`Nothing was exported: ${p}`, true);
       const where = exportPath(p.root, a.path);
       if ("error" in where) return text(`Nothing was exported: ${where.error}`, true);
@@ -301,9 +301,9 @@ server.registerTool(
     inputSchema: z.object({ cwd: CWD }).strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return text(p, true);
       return text(await fieldsText(db, p.id));
     } catch (e) {
@@ -350,7 +350,7 @@ server.registerTool(
       .strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     if (a.view === "live" && typeof a.after === "string")
       return text("after: with view live, pass the id the previous page gave", true);
     if (a.view === "look" && typeof a.after === "number")
@@ -358,7 +358,7 @@ server.registerTool(
     if (typeof a.after === "string" && !lookCursor(a.after))
       return text("after: not a cursor a look page gave; call look without after to start again", true);
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return text(p);
       return text(
         framed(
@@ -395,9 +395,9 @@ server.registerTool(
       .strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return notChecked(new Error(p));
       const files = parseDiff(a.diff);
       const b = await reviewBatch(db, p.id, files, a.after ?? null, a.diff);
@@ -449,9 +449,9 @@ server.registerTool(
       .strict(),
     annotations: READ_ONLY,
   },
-  async (a, extra) => {
+  async (a, ctx) => {
     try {
-      const p = await projectOf(a.cwd, extra._meta);
+      const p = await projectOf(a.cwd, ctx.mcpReq._meta);
       if (typeof p === "string") return notChecked(new Error(p));
       return text(
         checkedText(
