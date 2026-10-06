@@ -765,7 +765,7 @@ test("check shows what save would quarantine, and anchors judged again under the
   }
 });
 
-test("save: anchor changed after check is reported by the save, without asking git under the lock", async () => {
+test("check and save: an anchor changed under the lock is reported by both, without asking git under the lock", async () => {
   const db = tempDb();
   const root = repo();
   try {
@@ -788,6 +788,7 @@ test("save: anchor changed after check is reported by the save, without asking g
         return PROBE.files(r);
       },
     };
+    const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     const m = message(db, p, { id: "m1", text: "openStore を見る。" });
     const record = {
       units: [
@@ -796,19 +797,29 @@ test("save: anchor changed after check is reported by the save, without asking g
           kind: "finding",
           text: "openStore を見る",
           evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
-          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+          anchors: [
+            { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            // A commit makes preparation ask git, so "nothing under the lock" is about calls that happened
+            { path: "docs/note.md", role: "evidence", commit: head },
+          ],
         },
       ],
     };
     const run = await beginTrace(db.ingest, p, "s1");
     await contextText(db.ingest, run, p, root);
     assert.doesNotMatch((await checkText(db.ingest, run, p, root, record)).text, /anchor path/);
+    const missing =
+      /△ trace:ext-s1\/look: anchor path src\.ts is not in the working tree \(near paths not checked\)/;
+    // check runs the same steps: it sees the change under the lock too, and asks git nothing while it holds it
     remove = "src.ts";
-    const out = await saveText(db.ingest, run, p, root, record, probe);
-    assert.match(
-      out,
-      /△ trace:ext-s1\/look: anchor path src\.ts is not in the working tree \(near paths not checked\)/,
+    assert.match((await checkText(db.ingest, run, p, root, record, undefined, probe)).text, missing);
+    assert.ok(
+      calls.some((c) => c.fn === "holds" && !c.locked),
+      "the check asked git before the lock",
     );
+    fs.writeFileSync(path.join(root, "src.ts"), "export function openStore() {}\n");
+    const out = await saveText(db.ingest, run, p, root, record, probe);
+    assert.match(out, missing);
     assert.deepEqual(
       calls.filter((c) => c.locked),
       [],

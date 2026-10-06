@@ -69,13 +69,14 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `fix(record): show quarantined records and anchors judged under the lock in record_check (T07)`
   - 結果: red は直す前のコードで落ちた（check の返答が「will be quarantined」だけで、`would be quarantined` の行と lock の中の anchor の警告が無い）。直した後 `cd server && node --test test/extract.test.ts test/record.test.ts` → pass 102 / fail 0。`bun run verify` → 終了コード 0
 
-- [ ] T04: check の lock の中の時間を測るテストと、Windows の job の手順を足す
+- [x] T04: check の lock の中の時間を測るテストと、Windows の job の手順を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T02（check が lock を取るのは T02 から）
-  - 変更: `server/test/reconcile.test.ts`, `.github/workflows/check.yml`
+  - 変更: `server/test/reconcile.test.ts`, `server/test/extract.test.ts`, `.github/workflows/check.yml`
   - 完了条件: `cd server && node --test test/reconcile.test.ts` → pass。3,200 件の場面で `begin immediate` の成功から rollback までが 200 ms 以内、lock を待った時間を別に出す。Probe で git と最初の準備が `begin immediate` の前に起きる。lock を持つ子プロセスがいる間、check は save と同じように待つ。`actionlint .github/workflows/check.yml` → 指摘なし
   - コミット: `test(record): bound how long record_check holds the write lock, and run it on Windows (T04)`
+  - 結果: `cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0。3,200 件の場面で record_check が lock を持ったのは 10.8 ms（待ち 0.0 ms）、save は 10.7 ms。lock を 400 ms 持つ子プロセスがいる間、check は 200 ms を超えて待ってから通った。anchor の lock のテストで、check でも git（holds）は lock の前だけに呼ばれた。`actionlint .github/workflows/check.yml` → 指摘なし。Windows の手順と同じコマンド（`--test-name-pattern="rolled-back|record_check waits"`）を手元で流して pass 4。`bun run verify` → 終了コード 0
 
 - [ ] T05: acceptance に check の結果の行と、judge の後の拒否の case を足す
   - 種別: 追加
@@ -99,3 +100,5 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
 2026-10-06 / T03 / red と完了条件を直した。red: `--test-name-pattern="issue 275" test/extract.test.ts` → `--test-name-pattern="check and save agree" test/record.test.ts`（テスト名に issue 番号を入れず、場面のテストは record.test.ts の save の補助関数で作った。場面 3 は T02 で check も拒否するようになったので、red は文面の違い）。完了条件の rg: `claimed|takes|implemented` → `const (claimed|takes|implemented)\b`（前からあるコメントの「takes the write lock」に一致するため）/ 欄を直して進めた
 2026-10-06 / T03 / record.test.ts を置き換えるときに、同じ文字列が前の別のテストにもあり、別のテスト 2 つを消した。HEAD の record.test.ts に戻し、1 回だけ一致することを確かめる形でやり直した / 消えたテストは無い（`git diff` の `-test(` は名前を変えた 1 件だけ）
 2026-10-06 / T02 / Codex のレビュー（32150823）: P2 1 件、check の返答に save の quarantined の結果と、lock の中で見直した anchor の警告が出ない（Codex が再現）/ 採用。修正タスク T07 を T04 の前に足した
+2026-10-06 / T03 / Codex のレビュー（447bd831）: 指摘 0 件（Codex の環境ではテストが一時ディレクトリを作れず、メモリ上の SQLite で 4 つの場面と 6 種類の記録を確かめた）/ 直すものなし
+2026-10-06 / T04 / 変更欄に `server/test/extract.test.ts` を足した（Probe で git と最初の準備が lock の前に起きることは、既存の anchor の lock のテストを check にも広げて確かめる）。途中で check が ENOENT を返したが、テストの probe が同じファイルを `force` なしで 2 回消していたためで、製品の不具合ではない（main とこのブランチで同じ場面を check と save に流し、どちらも通ることを確かめた）/ commit 付きの anchor を消さないファイルに置いた

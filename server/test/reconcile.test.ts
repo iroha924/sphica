@@ -1,9 +1,12 @@
 // Saves that reconcile lifecycles and replacements, on real connections: a broken state is repaired or the whole save goes back, the order
 // of saves does not change where they settle, and one save into a crowded place holds the write lock only briefly.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
+import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from "node:sqlite";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
+import { checkText } from "../src/extract.ts";
 import { checkGlean, saveGlean } from "../src/glean.ts";
 import { checkRecord, finishRun, prepareRecord, saveRecord, type Target } from "../src/record.ts";
 import { sha256 } from "../src/text.ts";
@@ -319,12 +322,42 @@ test("order: withdrawing the owner's successor and adopting the waiting proposal
   assert.deepEqual(settled[1], settled[0]);
 });
 
+/**
+ * How long a call holds the write lock on this process's connections, from begin immediate returning to its rollback or commit returning,
+ * and how long it waited to take it
+ */
+async function lockTimes(fn: () => Promise<unknown>): Promise<{ held: number; waited: number }> {
+  const prepare = DatabaseSync.prototype.prepare;
+  const at = { asked: 0, began: 0, ended: 0 };
+  DatabaseSync.prototype.prepare = function (this: DatabaseSync, ...args: Parameters<typeof prepare>) {
+    const st = prepare.apply(this, args);
+    const text = String(args[0]);
+    if (["begin immediate", "rollback", "commit"].includes(text)) {
+      const run = st.run.bind(st) as (...a: SQLInputValue[]) => StatementResultingChanges;
+      st.run = ((...a: SQLInputValue[]) => {
+        if (text === "begin immediate") at.asked = performance.now();
+        const out = run(...a);
+        if (text === "begin immediate") at.began = performance.now();
+        else at.ended = performance.now();
+        return out;
+      }) as typeof st.run;
+    }
+    return st;
+  };
+  try {
+    await fn();
+  } finally {
+    DatabaseSync.prototype.prepare = prepare;
+  }
+  return { held: at.ended - at.began, waited: at.began - at.asked };
+}
+
 const CHAINS = 150;
 const CHAIN = 20;
 const PROPOSALS = 200;
 const BUDGET_MS = 200;
 
-test("judge budget: one save into a place with a long chain and many waiting proposals holds the write lock under 200 ms", async (t) => {
+test("judge budget: one check or save into a place with a long chain and many waiting proposals holds the write lock under 200 ms", async (t) => {
   const db = tempDb();
   try {
     const p = project(db);
@@ -400,6 +433,24 @@ test("judge budget: one save into a place with a long chain and many waiting pro
         },
       ],
     };
+    // record_check runs this same save and rolls it back, holding the lock as long
+    const draft = "budget-check";
+    await openRun(db.ingest, {
+      projectId: p,
+      origin: "trace",
+      target: "session:s1",
+      sessionId: "s1",
+      draftId: draft,
+    });
+    let checked = "";
+    const check = await lockTimes(async () => {
+      checked = (await checkText(db.ingest, draft, p, null, record)).text;
+    });
+    t.diagnostic(
+      `judge budget: record_check held the lock ${check.held.toFixed(1)} ms after waiting ${check.waited.toFixed(1)} ms`,
+    );
+    assert.match(checked, new RegExp(`✓ would be active: ${PREFIX}new-store`));
+    assert.ok(check.held < BUDGET_MS, `the check held the write lock ${check.held.toFixed(1)} ms`);
     const runId = await runIn(db, p);
     const facts = prepareRecord(null, record);
     const t0 = performance.now();
@@ -472,6 +523,49 @@ test("a replacement that ends after the clock went back ends no earlier than it 
       db.owner.prepare("select lifecycle from unit where key = ?").get(`${PREFIX}old`)?.lifecycle,
       "active",
     );
+  } finally {
+    await db.done();
+  }
+});
+
+// A lock another process holds blocks this thread's busy wait, so only another process can hold it while the check waits
+test("record_check waits for a write lock another process holds, as save does, and then runs", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep it." });
+    const draft = "waits";
+    await openRun(db.ingest, {
+      projectId: p,
+      origin: "trace",
+      target: "session:s1",
+      sessionId: "s1",
+      draftId: draft,
+    });
+    const holder = spawn(
+      process.execPath,
+      [
+        "-e",
+        `const { DatabaseSync } = require("node:sqlite");
+const c = new DatabaseSync(process.argv[1]);
+c.exec("begin immediate");
+process.stdout.write("held\\n");
+setTimeout(() => { c.exec("rollback"); c.close(); }, 400);`,
+        db.file,
+      ],
+      { stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const exited = new Promise((resolve) => holder.on("exit", resolve));
+    await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
+    let checked = "";
+    const times = await lockTimes(async () => {
+      checked = (
+        await checkText(db.ingest, draft, p, null, { units: [decided("kept", m, "Keep it.", true)] })
+      ).text;
+    });
+    await exited;
+    assert.match(checked, new RegExp(`✓ would be active: ${PREFIX}kept`));
+    assert.ok(times.waited > 200, `the check waited ${times.waited.toFixed(1)} ms for the lock`);
   } finally {
     await db.done();
   }
