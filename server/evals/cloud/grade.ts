@@ -54,11 +54,11 @@ const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
  * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
  * loop for it to read nearby, and none of the owner's hooks or plugins can add context to a blind grade.
  */
-function gradeOne(prompt: string): { status: number | null; output: string } {
+function gradeOne(prompt: string, settings: string): { status: number | null; output: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-home-"));
   try {
-    isolatedCodexHome(path.join(home, ".codex"));
+    isolatedCodexHome(path.join(home, ".codex"), "", settings);
     const out = path.join(dir, "grade.json");
     const r = spawnSync(
       "codex",
@@ -107,7 +107,8 @@ function gradeClaude(prompt: string): { status: number | null; output: string } 
 }
 
 const checkpoint = loadCheckpoint(checkpointFile);
-// Read only when a row is graded, so a build with nothing to grade needs no Codex config
+// Read once, when the first row is graded: every Codex call of the run starts with the settings its key holds, and a build with nothing
+// to grade needs no Codex config
 let codexConfig: string | undefined;
 const variant = loop.variant ?? "original";
 let called = 0;
@@ -120,7 +121,8 @@ function graderRun(
   row: GradeRow,
   prompt: string,
 ): { status: number | null; output: string } {
-  if (grader === "codex") codexConfig ??= ownerCodexSettings();
+  const settings = grader === "codex" ? (codexConfig ?? ownerCodexSettings()) : null;
+  if (settings !== null) codexConfig = settings;
   const key = checkpointKey({
     grader,
     task,
@@ -130,7 +132,7 @@ function graderRun(
     bundle: loop.bundle,
     variant,
     schema,
-    codexConfig: grader === "codex" ? (codexConfig ?? null) : null,
+    codexConfig: settings,
   });
   const saved = checkpoint.entries[key];
   if (saved) {
@@ -138,7 +140,7 @@ function graderRun(
     return saved;
   }
   called++;
-  const run = grader === "codex" ? gradeOne(prompt) : gradeClaude(prompt);
+  const run = settings !== null ? gradeOne(prompt, settings) : gradeClaude(prompt);
   if (run.status === 0) {
     checkpoint.entries[key] = { grader, ...run, at: new Date().toISOString() };
     saveCheckpoint(checkpointFile, checkpoint);

@@ -2753,3 +2753,28 @@ test("checkpoint that cannot be saved stops grading before the next grader call 
     f.done();
   }
 });
+
+test("checkpoint starts Codex with the settings its key holds, even when the owner's config changes during grading", () => {
+  const f = gradeFixture(runs("a1", "a2"));
+  try {
+    const codex = path.join(f.base, "bin", "codex");
+    const seen = path.join(f.base, "ctl", "configs");
+    const ownerConfig = path.join(f.base, "owner", ".codex", "config.toml");
+    fs.writeFileSync(
+      codex,
+      fs
+        .readFileSync(codex, "utf8")
+        .replace(
+          "input=$(cat)\n",
+          `input=$(cat)\ngrep model "$CODEX_HOME/config.toml" >> ${JSON.stringify(seen)}\nprintf 'model = "n"\\n' > ${JSON.stringify(ownerConfig)}\n`,
+        ),
+    );
+    assert.equal(f.run("--second", "none").status, 0);
+    assert.deepEqual(fs.readFileSync(seen, "utf8").split("\n").filter(Boolean), [
+      'model = "m"',
+      'model = "m"',
+    ]);
+  } finally {
+    f.done();
+  }
+});

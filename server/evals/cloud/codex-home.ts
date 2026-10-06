@@ -16,10 +16,14 @@ export function ownerCodexSettings(): string {
     .join("\n");
 }
 
-export function isolatedCodexHome(codexHome: string, extraConfig = ""): void {
+export function isolatedCodexHome(
+  codexHome: string,
+  extraConfig = "",
+  settings = ownerCodexSettings(),
+): void {
   fs.mkdirSync(codexHome, { recursive: true });
   fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
-  fs.writeFileSync(path.join(codexHome, "config.toml"), `${ownerCodexSettings()}\n${extraConfig}`);
+  fs.writeFileSync(path.join(codexHome, "config.toml"), `${settings}\n${extraConfig}`);
 }
 
 /** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */

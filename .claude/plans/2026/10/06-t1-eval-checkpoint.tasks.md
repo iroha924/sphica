@@ -58,8 +58,19 @@ eval-loop Skill に checkpoint と、最初から採点し直す方法を書く�
   - コミット: `docs(skills): say how grading resumes from its checkpoint (T03)`
   - 結果: `bun run verify:ai` → exit 0（AI config と links の指摘なし）。5 段目に `<build dir>/grades.checkpoint.json`、止まった後の再実行は残りと入力の変わった分だけを採点すること、最初からやり直すにはファイルを消すこと、Claude の既定のモデルの変化は検出しないことを足した
 
+- [x] T04: Codex を起動する設定を、key に入れたのと同じ本文にする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（key と起動の両方が grade.ts にある）
+  - 変更: `server/evals/cloud/grade.ts`, `server/evals/cloud/codex-home.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="checkpoint starts Codex" test/eval-grade.test.ts` → fail（1 回目の呼び出しで持ち主の config を model "n" に変えると、2 回目の Codex が model "n" で起動する。key は model "m" のまま）
+  - 完了条件: `cd server && node --test --test-name-pattern="checkpoint" test/eval-grade.test.ts` → pass。途中で持ち主の config が変わっても、1 回の実行の Codex はすべて key と同じ本文の設定で起動する
+  - コミット: `fix(eval): start the Codex grader with the settings its checkpoint key holds (T04)`
+  - 結果: red は直す前に `cd server && node --test --test-name-pattern="checkpoint starts Codex" test/eval-grade.test.ts` → fail（actual [model "m", model "n"] / expected [model "m", model "m"]）。直した後は `--test-name-pattern="checkpoint"` → pass 10 / fail 0、eval-grade.test.ts 全体 pass 69 / fail 0、`bun run lint`・`bun run typecheck` は指摘なし。`isolatedCodexHome` は設定の本文を引数で受け、省略時は今までどおり持ち主の config を読む（codex.ts の呼び出しは変わらない）
+
 ## 記録
 
 - 2026-10-06 / T01 / Codex のタスクごとのレビュー（afc825ee）は指摘 0 件。Codex の sandbox では mkdtemp が EPERM でファイル操作のテストを流せなかった / 手元で同じテストを流して pass を確かめた
 - 2026-10-06 / T02 / Codex の設定を key に入れるには、呼ぶ前に設定の本文が要る / 変更欄を `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts` から、`server/evals/cloud/codex-home.ts` を足した形に変えた（`ownerCodexSettings` を切り出し、`isolatedCodexHome` もそれを使う）
 - 2026-10-06 / T02 / 設定を最初に読むと、行が 0 件のビルドで持ち主の config が無いと止まった（既存の `collect and grade refuse --out` テスト） / Codex を呼ぶ行が出たときだけ読むようにした
+- 2026-10-06 / T02 / Codex のタスクごとのレビュー（4722706d）で P2 を 1 件再現: key の設定は最初に 1 回読むが、Codex の起動は呼ぶたびに持ち主の config を読み直すので、途中で設定が変わると別のモデルの結果が古い設定の key に保存される / 採る。修正タスク T04 を足した
