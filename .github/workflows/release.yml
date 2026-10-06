@@ -24,6 +24,8 @@ on:
       - scripts/lib/release-env.mjs
       - scripts/release-finish.mjs
       - scripts/lib/release-finish.mjs
+      - scripts/osv-summary.mjs
+      - scripts/lib/osv-summary.mjs
       # A PR that bumps the version is a release PR, so run the same steps before the tag is pushed
       - plugin/package.json
 
@@ -67,6 +69,63 @@ jobs:
           path: ${{ runner.temp }}/sbom.cdx.json
           retention-days: 7
           if-no-files-found: error
+
+  # Scans the revision being released so the owner can read the result before approving. Findings and a failed scan are reported,
+  # not failed on: a failed scan step leaves the results unavailable, and a failed job (checkout, setup) does not fail the run
+  osv:
+    name: "${{ github.event_name == 'push' && format('release {0}: osv', github.ref_name) || 'dry run: osv' }}"
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      line: ${{ steps.summary.outputs.line || steps.fallback.outputs.line }}
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # osv-scanner from its release with a pinned checksum, not the action, whose image is a mutable tag. The summary trusts the
+      # results only with the exit code this step records (0 none, 1 found), so a scan that did not finish is never read as clean
+      - name: Scan dependencies
+        id: scan
+        continue-on-error: true
+        env:
+          OSV_SCANNER: "2.6.0"
+          OSV_SCANNER_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/osv"
+          cd "$RUNNER_TEMP/osv"
+          curl -fsSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+          status=0
+          ./osv-scanner -r --format=json --output-file="$RUNNER_TEMP/osv/results.json" "$GITHUB_WORKSPACE" || status=$?
+          echo "exit=$status" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Summarize the scan
+        id: summary
+        env:
+          SCANNER_EXIT: ${{ steps.scan.outputs.exit }}
+        run: node scripts/osv-summary.mjs "$RUNNER_TEMP/osv/results.json" "$(git rev-parse HEAD)" "$SCANNER_EXIT"
+      # checkout and setup-node have no continue-on-error, so the summary must not depend on them
+      - name: Say the results are unavailable when a step failed
+        id: fallback
+        if: failure()
+        run: |
+          {
+            echo "### OSV scan of \`$GITHUB_SHA\`"
+            echo
+            echo "Results unavailable: a step of the osv job failed. See its log."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "line=OSV scan of $GITHUB_SHA: results unavailable (see the run summary)" >> "$GITHUB_OUTPUT"
 
   prepare:
     name: "${{ github.event_name == 'push' && format('release {0}: prepare', github.ref_name) || 'dry run: prepare' }}"
@@ -225,8 +284,8 @@ jobs:
   notify-approval:
     # Runs only on a tag push. GitHub does not evaluate the name of a skipped job, so the name is plain text
     name: ask for approval
-    needs: prepare
-    if: github.event_name == 'push'
+    needs: [prepare, osv]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -242,19 +301,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PULL: ${{ needs.prepare.outputs.pull }}
           SHA512: ${{ needs.prepare.outputs.sha512 }}
+          OSV: ${{ needs.osv.outputs.line }}
+          OSV_JOB: ${{ needs.osv.result }}
         run: |
           set -e
           {
             echo "$GITHUB_REF_NAME waits for the owner's approval of npm-release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
             echo "SHA-512 of the checked tarball: \`$SHA512\`"
+            echo
+            echo "${OSV:-OSV scan: the osv job ended with $OSV_JOB and left no result (see the run)}"
           } > "$RUNNER_TEMP/comment.md"
           gh pr comment "$PULL" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
 
   publish:
     name: publish
-    needs: [sbom, prepare]
-    if: github.event_name == 'push'
+    # Waits for osv to finish, whatever its result, so the approval is not asked for before the scan is in the summary
+    needs: [sbom, prepare, osv]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.sbom.result == 'success' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Does not start until the owner approves. The trusted publisher is limited to this workflow and this environment
@@ -382,6 +446,39 @@ jobs:
           gh pr merge "$PULL" --repo "$GITHUB_REPOSITORY" --merge --match-head-commit "$GITHUB_SHA"
           commit="$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  # The token's merge starts no push run, so start main's OSV and Scorecard runs here (a dispatch by the token does start them).
+  # npm and the merge are done by now, so a failed dispatch only warns; Claude watches the runs this summary lists
+  refresh-scans:
+    name: refresh scans
+    needs: merge
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Start the OSV and Scorecard runs on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "### Scans started on main" >> "$GITHUB_STEP_SUMMARY"
+          for workflow in osv-scanner.yml scorecard.yml; do
+            if out="$(gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main 2>&1)"; then
+              url="$(grep -Eo 'https://[^[:space:]]+/actions/runs/[0-9]+' <<< "$out" | head -n 1 || true)"
+              line="- $workflow: ${url:-dispatched; run URL not returned}"
+            else
+              # Escaped as workflow command data, so gh's output cannot start a command of its own
+              out="${out//%/%25}"; out="${out//$'\r'/%0D}"; out="${out//$'\n'/%0A}"
+              echo "::warning::could not dispatch $workflow on main: $out"
+              line="- $workflow: dispatch failed; start it with gh workflow run $workflow --ref main"
+            fi
+            echo "$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          done
 
   finish:
     name: finish

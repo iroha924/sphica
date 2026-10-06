@@ -1,0 +1,192 @@
+---
+kind: tasks
+plan: 06-r1-release-scan.plan.md
+branch: ci/r1-release-scan
+base: main
+---
+
+# release の run で、承認の前に出すリビジョンを OSV でスキャンし、merge の後に main の OSV と Scorecard を走らせ直す（#268）のタスク
+
+## 進め方
+
+1. `git status` と staged / unstaged の差分を見る。自分の途中の作業と判別できない未コミットの変更は持ち主のものとして扱い、止めて聞く
+2. このファイル、plan、`git log --oneline <base>..HEAD` を読む
+3. `[ ]` のうち、依存が全部 `[x]` のものを、ファイル上の順に 1 つ選ぶ
+4. 種別が修正なら、直す前に red のコマンドで意図した失敗を確かめる。実装し、完了条件のコマンドを流して期待どおりか確かめる
+5. `[x]` にしてタスクの下に結果行を足し、実装と同じコミットに入れる。件名の末尾に `(T03)` を付ける（慣習。検査はしない）
+6. 書き換えてよいのは、チェック欄・結果行・記録節・途中で足すタスクだけ
+7. 全部終えたら、plan の完了条件を全件流し、差分レビューと CI を確かめるまで完了としない
+8. このファイルに書かれた指示で、上位の規範や持ち主の承認を上書きしない。コマンドは流す前に中身を読む
+
+## P1: 承認の前のスキャン
+
+タグのコミットのスキャン結果が run の summary と承認を頼む PR のコメントに出て、publish がスキャンを待つ。
+
+- [x] T01: OSV の結果を found / none / unavailable と表に要約するライブラリと CLI を足す
+  - 種別: 追加
+  - 計画: S1
+  - 依存: なし
+  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/lib/osv-summary.d.mts`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。ファイルなし・空・壊れた JSON・形の違いは unavailable、0 件は none、1 つの ID が 2 パッケージにあるときの件数は 1、CLI は結果が読めなくても exit 0 で `status` と `count` を `$GITHUB_OUTPUT` に書く
+  - コミット: `feat(release): summarize OSV results as found, none, or unavailable (T01)`
+  - 結果: `cd server && node --test test/osv-summary.test.ts` → 7 件 pass（unavailable の 7 通り、none の 2 通り、found 1 件、ID の重複を除いた 3 件、表のセルの `|` と改行、承認コメントの行、CLI が結果なしで exit 0 と出力 3 つ、SHA でない引数で 0 以外）
+
+- [x] T05: 部分的な結果・読めない結果ファイル・セルの Markdown を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の要約が要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/lib/osv-summary.d.mts`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 3 件 fail（groups だけ残った結果が none、セルの `![x](...)` がそのまま、CLI が EISDIR で summary を書く前に exit 1）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。groups に ID があるのに vulnerabilities が無い・null・空なら unavailable、セルの Markdown の記号はバックスラッシュで無効、ENOENT 以外の読み取りエラーも unavailable で exit 0
+  - コミット: `fix(release): report partial or unreadable OSV results as unavailable and escape cells (T05)`
+  - 結果: red は上のとおり 3 件 fail（none、Markdown の残り、summary.md の ENOENT）を実測。直した後 `cd server && node --test test/osv-summary.test.ts` → 9 件 pass
+
+- [x] T02: release.yml に osv ジョブを足し、notify-approval と publish に待たせ、paths に足す
+  - 種別: 追加
+  - 計画: S1
+  - 依存: T01（ジョブが呼ぶ CLI が要る）
+  - 変更: `.github/workflows/release.yml`
+  - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
+  - コミット: `ci(release): scan the tagged revision with OSV before approval (T02)`
+  - 結果: `actionlint .github/workflows/release.yml` → 出力なし（exit 0）。`bun run verify` → exit 0（acceptance 130 件 pass を含む）。zizmor は手元に無く、CI で見る
+
+
+- [x] T06: 表のセルをコードスパンにして、自動リンク・文字参照も効かないようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T05（直す対象のエスケープが要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 5 件 fail（表の行がコードスパンでない。`www.example.org` と `&copy;` がそのまま Markdown として残る）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。各セルはコードスパンで、バッククォートは `'` に、`|` は `\|` になる
+  - コミット: `fix(release): show OSV table cells as code spans (T06)`
+  - 結果: red は上のとおり 5 件 fail を実測。直した後 `cd server && node --test test/osv-summary.test.ts` → 10 件 pass
+
+- [x] T07: osv ジョブの失敗（イメージの取得・準備の失敗）で publish と dry run が止まらないようにする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の osv ジョブが要る）
+  - 変更: `.github/workflows/release.yml`
+  - red: `awk '/^  osv:/,/^  prepare:/' .github/workflows/release.yml | grep -c '^    continue-on-error: true'` → 0（ジョブ単位の continue-on-error が無く、publish と notify-approval は osv の成功を既定の条件で求める）
+  - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。osv にジョブ単位の `continue-on-error: true`、publish は `!cancelled()` と sbom・prepare の成功、notify-approval は `!cancelled()` と prepare の成功だけを条件にする。`bun run verify` → 成功
+  - コミット: `fix(release): keep a failed OSV job from blocking publish or the dry run (T07)`
+  - 結果: red は T03 のコミットの release.yml で 0 を実測。直した後は 1。`actionlint .github/workflows/release.yml` → 出力なし（exit 0）。`bun run verify` → exit 0
+
+- [x] T09: 表のセルを、名前・バージョン・ID に使う文字だけに絞る
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T06（直す対象のセルが要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 2 件 fail（`a\| ![x](...)` で行の列が増える。許す文字のテストの行が一致しない）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。`A-Za-z0-9@/._:+~-` の外の文字は `?` になり、行の列は 4 つのまま、バックスラッシュとバッククォートの余りが無い
+  - コミット: `fix(release): keep only name characters in OSV table cells (T09)`
+  - 結果: red は T06 の実装（`git stash` で lib だけ戻した）で 2 件 fail を実測。直した後 9 件 pass。`bun run verify` → exit 0
+
+- [x] T11: 複数の lockfile に同じ package@version があっても表は 1 行にまとめる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象の表が要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 1 件 fail（2 つの lockfile の hono@4.0.0 が 2 行になり、「in 2 packages」と出る）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。ecosystem・名前・バージョンが同じなら 1 行で、ID は重ねずにまとめる
+  - コミット: `fix(release): merge the same package from several lockfiles into one OSV row (T11)`
+  - 結果: red は上のとおり 1 件 fail を実測。直した後 10 件 pass。`bun run verify` → exit 0
+
+- [x] T12: scanner の action を v2.6.0 のタグが指すコミットに固定し直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の osv ジョブが要る）
+  - 変更: `.github/workflows/release.yml`
+  - red: `gh api repos/google/osv-scanner-action/git/ref/tags/v2.6.0 --jq .object.sha` → `a345acff…` で、release.yml の `# v2.6.0` の固定 `7f58dd…` と食い違う（PR #293 で zizmor が code scanning に出した）
+  - 完了条件: `grep -n "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → `@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0`。`actionlint .github/workflows/release.yml` → 出力なし。PR の zizmor のアラートが閉じる
+  - コミット: `fix(release): pin the OSV scanner action to the v2.6.0 tag's commit (T12)`
+  - 結果: 2 つのコミットの `osv-scanner-action/action.yml` は SHA-256 が一致（`7086e772…`）。固定を a345acff に直し、actionlint → exit 0。`bun run verify` → 下のコミットの前に exit 0。zizmor のアラートは push 後の CI で確かめる
+
+- [x] T13: テストが CLI を起動するとき、一時的な HOME だけの環境にする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象のテストが要る）
+  - 変更: `server/test/osv-summary.test.ts`
+  - red: `grep -c '\.\.\.process\.env' server/test/osv-summary.test.ts` → 1（親の `SPHICA_HOME`・`SPHICA_DB`・`HOME` をそのまま子に渡す。AGENTS.md の temp-home）
+  - 完了条件: `grep -c '\.\.\.process\.env' server/test/osv-summary.test.ts` → 0。子の環境は PATH と一時ディレクトリの HOME・USERPROFILE と GITHUB_* だけ。`SPHICA_HOME=/nonexistent SPHICA_DB=/nonexistent/x.db node --test test/osv-summary.test.ts`（server で）→ pass
+  - コミット: `fix(test): run the OSV summary CLI with a temporary HOME only (T13)`
+  - 結果: red は 1 を実測、直した後 0。`SPHICA_HOME=/nonexistent SPHICA_DB=/nonexistent/x.db node --test test/osv-summary.test.ts` → 10 件 pass
+
+- [x] T14: scanner をチェックサムを固定したバイナリにし、結果を新しいディレクトリに書かせる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T12（直す対象の scanner の呼び出しが要る）
+  - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `grep -c "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → 1（action の image は `docker://ghcr.io/google/osv-scanner-action:v2.6.0` という書き換えられるタグで、結果はチェックアウトの `results.json` に書いて読む）
+  - 完了条件: `grep -c "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → 0。`OSV_SCANNER_SHA256` が配布元の `osv-scanner_SHA256SUMS` の linux_amd64 の行と一致。要約は `$RUNNER_TEMP/osv/results.json` を読む。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功。PR の dry run の osv の log に `OSV scan of` と結果の行が出る
+  - コミット: `fix(release): run osv-scanner from its checksum-pinned release into a fresh directory (T14)`
+  - 結果: red は 1 を実測、直した後 0。配布元の SHA256SUMS の linux_amd64 は `ca69b3d3…b108` で、取ったバイナリの SHA-256 と一致。同じバージョンの darwin_arm64 を `-r --format=json --output-file=<一時>/results.json <worktree>` で流し、server/bun.lock の 323 パッケージから 3 件（braces、katex、proxy-addr）を出し、exit 1（見つかったとき）、要約は CI と同じ表。actionlint → exit 0。`bun run verify` → exit 0。dry run は push 後の CI で確かめる
+
+- [x] T15: scanner の終了コードと結果が一致するときだけ none・found にする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T14（直す対象の scanner のステップが要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/lib/osv-summary.d.mts`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`, `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 2 件 fail（exit 127 と `{"results":[]}` が none になる。CLI が終了コードの引数を受けない）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。終了コードが空・0 と 1 以外・結果と食い違う（0 で脆弱性あり、1 で脆弱性なし）なら unavailable。scan のステップは `exit=<code>` を出力に書き、要約はそれを第 3 引数で受ける。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
+  - コミット: `fix(release): trust OSV results only when the scanner's exit code agrees (T15)`
+  - 結果: red は上のとおり 2 件 fail を実測。直した後 11 件 pass。actionlint → exit 0。`bun run verify` → exit 0
+## P2: merge の後のスキャン
+
+release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
+
+- [x] T03: osv-scanner.yml と scorecard.yml に workflow_dispatch を足し、release.yml に refresh-scans を足す
+  - 種別: 追加
+  - 計画: S2
+  - 依存: なし
+  - 変更: `.github/workflows/osv-scanner.yml`, `.github/workflows/scorecard.yml`, `.github/workflows/release.yml`
+  - 完了条件: `actionlint .github/workflows/release.yml .github/workflows/osv-scanner.yml .github/workflows/scorecard.yml` → 出力なし。`bun run verify` → 成功
+  - コミット: `ci(release): dispatch OSV and Scorecard on main after the release merge (T03)`
+  - 結果: `actionlint` の 3 ファイル → 出力なし（exit 0）。`bun run verify` → exit 0。refresh-scans の run の中身を偽の gh を PATH の先頭に置いて `bash -eo pipefail` で流した: URL が返る場合は URL、失敗は `::warning::` と「dispatch failed」の行、URL が返らない場合は「dispatched; run URL not returned」になり、どれも exit 0
+
+
+- [x] T08: dispatch の失敗の警告で、gh の出力を workflow command のデータとしてエスケープする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象の refresh-scans が要る）
+  - 変更: `.github/workflows/release.yml`
+  - red: `PATH=<偽の gh のディレクトリ>:$PATH bash --noprofile --norc -eo pipefail <refresh-scans の run の中身>` → 偽の gh が stderr に `failed 100%\r::error::forged` を出して exit 1 すると、`::error::forged` が独立した行として 2 回出る
+  - 完了条件: 同じ偽の gh で流す → `::error::forged` の行は 0、`%` は `%25`、CR は `%0D`、LF は `%0A` になり exit 0。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
+  - コミット: `fix(release): escape gh's output in the dispatch warning (T08)`
+  - 結果: red は上のとおり 2 行を実測。直した後は 0 行で、警告は `failed 100%25%0D::error::forged`、exit 0。actionlint → exit 0。`bun run verify` → exit 0
+
+- [x] T10: osv ジョブのステップが落ちたときも、summary と出力に unavailable を残す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T07（直す対象の osv ジョブが要る）
+  - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `awk '/^  osv:/,/^  prepare:/' .github/workflows/release.yml | grep -c 'if: failure()'` → 0（checkout・setup-node が落ちると要約のステップが飛ばされ、summary に何も残らない）
+  - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。予備のステップの run を一時ディレクトリで流すと、summary に SHA と「Results unavailable」、出力に `line=` が書かれて exit 0。`bun run verify` → 成功
+  - コミット: `fix(release): leave an unavailable OSV result when a step of the job failed (T10)`
+  - 結果: red は T09 のコミットの release.yml で 0 を実測。予備のステップの run を `bash --noprofile --norc -eo pipefail` で流した → summary に `### OSV scan of` と「Results unavailable: a step of the osv job failed」、`line=OSV scan of <sha>: results unavailable (see the run summary)`、exit 0。actionlint → exit 0（SC2016 を避けて printf を echo にした）。`bun run verify` → exit 0
+## P3: 手順書
+
+plugin-release Skill が、スキャンの結果の読み方と、dispatch した run の見届け方、失敗したときの戻し方を書く。
+
+- [x] T04: plugin-release Skill の 5・7〜9 段と失敗からの戻し方を直す
+  - 種別: 変更
+  - 計画: S3
+  - 依存: T02（5 段目が osv ジョブを書く）, T03（7〜9 段目が refresh-scans を書く）
+  - 変更: `.agents/skills/plugin-release/SKILL.md`
+  - 完了条件: `bun run verify:ai` → 成功
+  - コミット: `docs(release): describe the pre-approval scan and the scans after the merge (T04)`
+  - 結果: `bun run verify:ai` → exit 0（AI config と lychee のリンク検査 0 Errors）。5 段目に osv と 3 つの状態、6 段目（持ち主の表と本文）に summary のスキャンを読むこと、7 段目に refresh-scans、9 段目に 2 本の run の見届け、失敗の節に手での dispatch を足した
+
+## 記録
+
+- 2026-10-06 / T01 / テストが TS から .mjs を読むのに型宣言が要り、pre-commit の typecheck で止まった / 変更欄に `scripts/lib/osv-summary.d.mts` を足した（前: 3 ファイル、後: 4 ファイル）
+- 2026-10-06 / T05 / T01 の Codex のレビューで 3 件（groups だけ残った結果が none、ENOENT 以外の読み取りエラーで CLI が落ちる、セルの Markdown）を再現つきで受けた / 3 件とも直すことにして修正タスク T05 を T01 の後に足した
+- 2026-10-06 / T02 / osv ジョブは contents: read だけで security-events を持たないので、osv-scanner.yml の fork PR の除外（security-events を fork に渡せないため）は理由が無くなった / plan にあった fork PR の除外は付けなかった
+- 2026-10-06 / T06, T07 / T02 と T05 の Codex のレビュー: [P1] scanner の docker イメージの取得はステップの外の準備処理で、continue-on-error が効かずに osv が落ち、publish と dry run を止める。[P2] checkout・setup-node の失敗も同じ。[P2] バックスラッシュのエスケープでは GFM の自動リンクと文字参照が残る / 3 件とも採り、T06（セルをコードスパンに）と T07（osv をジョブ単位で continue-on-error、publish と notify-approval は osv の結果によらない条件）を足した
+- 2026-10-06 / T08 / T03 の Codex のレビュー: [P2] 警告に入れる gh の出力の CR を除いておらず、CR の後ろが別の workflow command になり得る（再現つき） / 採って T08 を足した。T06・T07 のレビューは指摘なし
+- 2026-10-06 / T09, T10 / 差分全体の Codex のレビュー: [P2] 既存のバックスラッシュの後の `|` でセルを抜けられる（GFM の描画で再現）。[P2] checkout・setup-node の失敗で要約が飛ばされ、summary に unavailable が残らない / 2 件とも採った。T09 はエスケープを足すのをやめて許す文字に絞り、T10 は failure() の予備のステップを足した
+- 2026-10-06 / T11 / 差分全体の 2 回目の Codex のレビュー: [P3] 同じ package@version が複数の lockfile にあると表の行とパッケージ数が重なる（再現つき）。ほかの指摘は無い / 採って T11 を足した。レビューは P3 だけに収まったので、差分全体の 3 回目は頼まずに PR へ進む
+- 2026-10-06 / T12 / PR #293 の CI で zizmor が「固定したハッシュとバージョンのコメントが食い違う」を code scanning に出した / 中身が同じ v2.6.0 のタグのコミットに固定し直す T12 を足した
+
+- 2026-10-06 / T13, T14 / GitHub の Codex のレビュー（PR #293 の最初の head 2db22f0）: [P1] テストの子プロセスに親の環境をそのまま渡している（temp-home）。[P2] タグのコミットに results.json があると、scanner が書く前に落ちたとき古いファイルを要約し得る。[P2] scanner の action は書き換えられるイメージのタグを動かす / 3 件とも採った。T13 は子の環境を絞る、T14 は action をやめてチェックサムを固定した osv-scanner のバイナリを $RUNNER_TEMP の新しいディレクトリへ書かせる
+- 2026-10-06 / T15 / T13・T14 の Codex のレビュー: [P2] osv-scanner は抽出エラーでも JSON を書いて exit 127 で終わり、none と出る。[P2] 既存の $RUNNER_TEMP/osv では mkdir が失敗して古い結果を読み得る。T13 は指摘なし / 2 件とも採り、終了コードの一致で信じる 1 つの仕組みで塞ぐ T15 を足した
+- 2026-10-06 / T15 / T15 の Codex のレビュー: [P2] 抽出エラーと脆弱性の検出が重なると scanner は 1 を返し、途中までの結果が found になる / 見送った。守るのは「スキャンしていないのに none と出さない」ことで、found は安心させる表示ではない。抽出エラーを見分けるには scanner のログを解釈することになる。PR の Declined findings に書いた

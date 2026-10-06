@@ -9,6 +9,8 @@ on:
     - cron: "0 4 * * 1"
   push:
     branches: [main]
+  # The release run starts it after its merge, which starts no push run
+  workflow_dispatch:
 
 permissions: read-all
 
