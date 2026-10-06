@@ -43,7 +43,7 @@ base: main
   - 結果: red（直す前のコード）: `node --test --test-name-pattern 'harvest run keeps' test/extract.test.ts` → 2 件 fail。B の後の A の context に source が 1 件も出ない。forget のテストでは、同じミリ秒に取り込まれた B の版 2 の本文が A に混ざった（時刻で絞る形の穴の再現）
   - 結果: 実装後 `node --test test/github.test.ts test/extract.test.ts` → 48 pass（A の context は版 1 と issue 9 を出し、B の版 2 と issue 12 を出さない。開き直した reader でも同じ。A の check と save が版 1 の引用で通る。B の範囲は版 2 と issue 12。A のコメントの forget と、B だけが持つ本文の版 2 の forget で、A から両方が外れる。存在しない実行 id の check は Begin again）。`bun run verify` → 0
 
-- [ ] T03: 空にされた issue 本文・コメント・review を空の今の版として保存する
+- [x] T03: 空にされた issue 本文・コメント・review を空の今の版として保存する
   - 種別: 修正
   - 計画: S3
   - 依存: なし
@@ -51,6 +51,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern 'cleared' test/github.test.ts` → issue コメントを空にした後の harvest で、今の版が前の本文のままで fail
   - 完了条件: `cd server && node --test test/github.test.ts` → pass。5 種類それぞれで今の版が空になり、前の版を read で読める。空のまま取り込み直しても行は増えない。一度も保存されていない空の item は行を作らない
   - コミット: `fix(harvest): record a cleared issue body, comment, or review as an empty revision (T03)`
+  - 結果: red（直す前のコード）: `node --test --test-name-pattern 'cleared' test/github.test.ts` → fail。空にした後も 5 種類の今の版が版 1 の本文（Notes leak、Confirmed、Why not yarn? など）のまま
+  - 結果: 実装後 `node --test test/github.test.ts test/extract.test.ts` → 49 pass（5 種類とも版 2 が空、版 1 を read で読める、空のまま取り込み直しても行が増えない、一度も本文の無かった comment:71 は行を作らない）。既存の 2 テストは空の item を数に入れる形に直した。`bun run verify` → 0
 
 ## P2: doctor と README
 
@@ -78,3 +80,4 @@ doctor と README から ~/Projects の前提が消える。
 
 ## 記録
 - 2026-10-06 / T02 / github.test.ts が pullSources を使っていた / 変更欄に `server/test/github.test.ts` を足した（前: extract.ts, github.ts, extract.test.ts）。テストは pullSourceIds で読み直す形にした
+- 2026-10-06 / T01 / Codex のタスクごとのレビュー（207dde87）は指摘なし。Codex はファイルの DB のテストを sandbox で流せなかったので、同じテストを手元で流して 123 pass を確かめた / 対応なし

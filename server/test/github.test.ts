@@ -15,6 +15,7 @@ import {
   repoOf,
   storeItems,
 } from "../src/github.ts";
+import { readRefs } from "../src/read.ts";
 import { at, insert, plan, project, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 /** The sources a harvest of pull request n begun now would keep */
@@ -163,7 +164,7 @@ test("closing references inside HTML comments, or after one left open, are not r
   assert.ok(Date.now() - started < 1000, `took ${Date.now() - started} ms`);
 });
 
-test("reads the body, comments, reviews with text, review comments with their position, commits, the merge, and closed issues", async () => {
+test("reads the body, comments, reviews, review comments with their position, commits, the merge, and closed issues", async () => {
   const pull = await readPull(fake("Fixes #14, closes #15, and fixes #7. Switch to pnpm."), 7);
   assert.equal(pull.title, "Switch to pnpm");
   assert.deepEqual(pull.closes, [14, 15]);
@@ -172,7 +173,10 @@ test("reads the body, comments, reviews with text, review comments with their po
     [
       ["pr_body", "pr:7"],
       ["pr_comment", "comment:70"],
+      // Empty ones too: text cleared after an earlier harvest becomes an empty current revision
+      ["pr_comment", "comment:71"],
       ["review", "review:72"],
+      ["review", "review:73"],
       ["review_comment", "review_comment:74"],
       ["review_comment", "review_comment:75"],
       ["commit_message", `commit:${sha("b")}`],
@@ -181,12 +185,12 @@ test("reads the body, comments, reviews with text, review comments with their po
       ["issue_comment", "comment:76"],
     ],
   );
-  const review = pull.items[3];
+  const review = pull.items[5];
   assert.deepEqual(
     [review?.path, review?.lines, review?.commit, review?.parent],
     ["src/db.ts", [4, 6], sha("a"), "review_comment:70"],
   );
-  const outside = pull.items[4];
+  const outside = pull.items[6];
   assert.deepEqual([outside?.path, outside?.lines, outside?.commit], [null, null, null]);
   assert.equal(repoOf("git:github.com/o/r"), "o/r");
   assert.equal(repoOf("git:gitlab.com/o/r"), null);
@@ -241,9 +245,9 @@ test("stores sources with who wrote them, adds a revision only when text changed
       ids = await storeItems(db.ingest, p, first.items);
     });
     // Each item is looked up by its id through the unique index of items, not by scanning the project's sources: once for its latest
-    // revision, and once for the id of a revision just written
+    // revision, and once for the id of a revision just written (an empty item never stored has none)
     const lookups = asked.filter((s) => /^select .* from "source" .*"external_id" = \?/.test(s));
-    assert.equal(lookups.length, 2 * first.items.length);
+    assert.equal(lookups.length, first.items.length + ids.filter((id) => id !== null).length);
     for (const s of lookups) assert.match(plan(db, s), /source_item_once/, s);
     await linkIssues(db.ingest, p, 7, first.closes);
     await linkIssues(db.ingest, p, 7, first.closes);
@@ -287,7 +291,11 @@ test("stores sources with who wrote them, adds a revision only when text changed
     );
     assert.ok(!hunk.includes("sk-proj-abc") && hunk.includes("[redacted"), hunk);
     const current = await currentSources(db, p, 7);
-    assert.equal(current.length, ids.length, "only the current revision of each source");
+    assert.equal(
+      current.length,
+      ids.filter((id) => id !== null).length,
+      "only the current revision of each source",
+    );
     assert.deepEqual(
       current.filter((s) => s.kind === "pr_body").map((s) => [s.revision, s.text]),
       [[2, "Fixes #14. Switch to pnpm. Edited."]],
@@ -311,6 +319,76 @@ test("stores sources with who wrote them, adds a revision only when text changed
 });
 
 // A range can start on the old side and end on the new one, where the two line numbers count different files
+// Clearing a comment, review, or issue body on GitHub is something said too: the empty text becomes the item's current revision, and the
+// earlier words stay readable as what was said before
+test("a cleared issue body, comment, review, and review comment become empty current revisions, as a cleared pull request body does", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const said = (body: string | null, id: number) => ({
+      id,
+      body,
+      user: user("dev", 2),
+      author_association: "CONTRIBUTOR",
+      created_at: "2026-03-17T10:00:00Z",
+      html_url: "u",
+    });
+    // Each kind is cleared a different way GitHub can send it: null, empty, or only white space
+    const pull =
+      (cleared: boolean): Get =>
+      async (q) =>
+        (
+          ({
+            "pulls/7": {
+              number: 7,
+              title: "t",
+              body: "Fixes #14.",
+              html_url: "u",
+              created_at: "2026-03-17T09:00:00Z",
+              merged_at: null,
+              user: user("hana", 1),
+              author_association: "OWNER",
+            },
+            "issues/7/comments": [said(cleared ? null : "Why not yarn?", 70), said("", 71)],
+            "pulls/7/reviews": [
+              { ...said(cleared ? "" : "Looks right", 72), state: "COMMENTED", submitted_at: null },
+            ],
+            "pulls/7/comments": [
+              { ...said(cleared ? " \n " : "Consider OFF", 74), path: "src/db.ts", line: 6 },
+            ],
+            "pulls/7/commits": [],
+            "issues/14": { ...said(cleared ? null : "Notes leak", 14), number: 14 },
+            "issues/14/comments": [said(cleared ? "" : "Confirmed", 76)],
+          }) as Record<string, unknown>
+        )[q.split("?")[0] ?? ""];
+    await storeItems(db.ingest, p, (await readPull(pull(false), 7, "o/r")).items);
+    await linkIssues(db.ingest, p, 7, [14]);
+    const before = Number(db.owner.prepare("select count(*) as n from source").get()?.n);
+    await storeItems(db.ingest, p, (await readPull(pull(true), 7, "o/r")).items);
+    const kinds = ["pr_comment", "review", "review_comment", "issue_body", "issue_comment"];
+    const current = (await currentSources(db, p, 7)).filter((s) => kinds.includes(s.kind));
+    assert.deepEqual(
+      current.map((s) => [s.kind, s.revision, s.text]).sort(),
+      kinds.map((k) => [k, 2, ""]).sort(),
+    );
+    // The earlier words stay as what was said before
+    const old = db.owner.prepare("select id from source where text = 'Why not yarn?'").get()?.id;
+    assert.match(await readRefs(db.reader, p, [`s${old}`], null), /Why not yarn\?/);
+    // Cleared again, nothing is added; an item never stored with text is not stored empty
+    await storeItems(db.ingest, p, (await readPull(pull(true), 7, "o/r")).items);
+    assert.equal(
+      Number(db.owner.prepare("select count(*) as n from source").get()?.n),
+      before + kinds.length,
+    );
+    assert.equal(
+      db.owner.prepare("select count(*) as n from source where external_id = 'comment:71'").get()?.n,
+      0,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("a review comment range that runs backwards or across sides keeps only its end line, and the harvest still stores", async () => {
   const db = tempDb();
   try {

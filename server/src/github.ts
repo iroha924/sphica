@@ -208,6 +208,9 @@ const item = (
   ...v,
 });
 
+// A cleared text is passed on as empty, so text cleared after an earlier harvest becomes an empty current revision (storeItems keeps no
+// row for an item that never had text)
+const said = (body: string | null | undefined): string => (body?.trim() ? body : "");
 const sha = (s: string | undefined): string | null => (s && /^[0-9a-f]{40}$/.test(s) ? s : null);
 const cleanPath = (p: string | undefined): string | null =>
   p &&
@@ -233,8 +236,6 @@ export async function readPull(
     get(`pulls/${number}/commits?per_page=100`, true) as Promise<Commit[]>,
   ]);
   const items: Item[] = [];
-  // An empty body is passed on too, so a body cleared after an earlier harvest becomes an empty current revision (storeItems keeps
-  // no row for a body that was never there)
   items.push(
     item({
       kind: "pr_body",
@@ -244,64 +245,59 @@ export async function readPull(
       association: p.author_association ?? null,
       url: p.html_url,
       createdAt: p.created_at,
-      text: p.body?.trim() ? p.body : "",
+      text: said(p.body),
     }),
   );
   for (const c of comments)
-    if (c.body?.trim())
-      items.push(
-        item({
-          kind: "pr_comment",
-          artifact,
-          externalId: `comment:${c.id}`,
-          author: c.user ?? null,
-          association: c.author_association ?? null,
-          url: c.html_url,
-          createdAt: c.created_at,
-          text: c.body,
-        }),
-      );
+    items.push(
+      item({
+        kind: "pr_comment",
+        artifact,
+        externalId: `comment:${c.id}`,
+        author: c.user ?? null,
+        association: c.author_association ?? null,
+        url: c.html_url,
+        createdAt: c.created_at,
+        text: said(c.body),
+      }),
+    );
   for (const r of reviews)
-    if (r.body?.trim())
-      items.push(
-        item({
-          kind: "review",
-          artifact,
-          externalId: `review:${r.id}`,
-          author: r.user ?? null,
-          association: r.author_association ?? null,
-          url: r.html_url,
-          createdAt: r.submitted_at ?? p.created_at,
-          text: r.body,
-        }),
-      );
-  for (const c of reviewComments)
-    if (c.body?.trim()) {
-      const end = c.line ?? null;
-      // A range that starts on the old side counts its first line in another file than its end, so only the end line is kept
-      const start =
-        c.start_line && c.start_line <= (end ?? 0) && (c.start_side ?? c.side) === c.side
-          ? c.start_line
-          : end;
-      items.push(
-        item({
-          kind: "review_comment",
-          artifact,
-          externalId: `review_comment:${c.id}`,
-          author: c.user ?? null,
-          association: c.author_association ?? null,
-          parent: c.in_reply_to_id ? `review_comment:${c.in_reply_to_id}` : null,
-          url: c.html_url,
-          createdAt: c.created_at,
-          text: c.body,
-          path: cleanPath(c.path),
-          // Lines mean nothing without the path they are in
-          lines: cleanPath(c.path) && end && start ? [start, end] : null,
-          hunk: c.diff_hunk ?? null,
-          commit: sha(c.commit_id),
-        }),
-      );
-    }
+    items.push(
+      item({
+        kind: "review",
+        artifact,
+        externalId: `review:${r.id}`,
+        author: r.user ?? null,
+        association: r.author_association ?? null,
+        url: r.html_url,
+        createdAt: r.submitted_at ?? p.created_at,
+        text: said(r.body),
+      }),
+    );
+  for (const c of reviewComments) {
+    const end = c.line ?? null;
+    // A range that starts on the old side counts its first line in another file than its end, so only the end line is kept
+    const start =
+      c.start_line && c.start_line <= (end ?? 0) && (c.start_side ?? c.side) === c.side ? c.start_line : end;
+    items.push(
+      item({
+        kind: "review_comment",
+        artifact,
+        externalId: `review_comment:${c.id}`,
+        author: c.user ?? null,
+        association: c.author_association ?? null,
+        parent: c.in_reply_to_id ? `review_comment:${c.in_reply_to_id}` : null,
+        url: c.html_url,
+        createdAt: c.created_at,
+        text: said(c.body),
+        path: cleanPath(c.path),
+        // Lines mean nothing without the path they are in
+        lines: cleanPath(c.path) && end && start ? [start, end] : null,
+        hunk: c.diff_hunk ?? null,
+        commit: sha(c.commit_id),
+      }),
+    );
+  }
   for (const c of commits)
     items.push(
       item({
@@ -338,33 +334,31 @@ export async function readIssue(get: Get, n: number): Promise<Item[]> {
   const items: Item[] = [];
   const issue = (await get(`issues/${n}`)) as Issue;
   if (issue.pull_request) return items;
-  if (issue.body?.trim())
+  items.push(
+    item({
+      kind: "issue_body",
+      artifact: `issue:${n}`,
+      externalId: `issue:${n}`,
+      author: issue.user ?? null,
+      association: issue.author_association ?? null,
+      url: issue.html_url,
+      createdAt: issue.created_at,
+      text: said(issue.body),
+    }),
+  );
+  for (const c of (await get(`issues/${n}/comments?per_page=100`, true)) as Comment[])
     items.push(
       item({
-        kind: "issue_body",
+        kind: "issue_comment",
         artifact: `issue:${n}`,
-        externalId: `issue:${n}`,
-        author: issue.user ?? null,
-        association: issue.author_association ?? null,
-        url: issue.html_url,
-        createdAt: issue.created_at,
-        text: issue.body,
+        externalId: `comment:${c.id}`,
+        author: c.user ?? null,
+        association: c.author_association ?? null,
+        url: c.html_url,
+        createdAt: c.created_at,
+        text: said(c.body),
       }),
     );
-  for (const c of (await get(`issues/${n}/comments?per_page=100`, true)) as Comment[])
-    if (c.body?.trim())
-      items.push(
-        item({
-          kind: "issue_comment",
-          artifact: `issue:${n}`,
-          externalId: `comment:${c.id}`,
-          author: c.user ?? null,
-          association: c.author_association ?? null,
-          url: c.html_url,
-          createdAt: c.created_at,
-          text: c.body,
-        }),
-      );
   return items;
 }
 
