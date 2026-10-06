@@ -22,13 +22,14 @@ base: main
 
 タグのコミットのスキャン結果が run の summary と承認を頼む PR のコメントに出て、publish がスキャンを待つ。
 
-- [ ] T01: OSV の結果を found / none / unavailable と表に要約するライブラリと CLI を足す
+- [x] T01: OSV の結果を found / none / unavailable と表に要約するライブラリと CLI を足す
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/lib/osv-summary.d.mts`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`
   - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。ファイルなし・空・壊れた JSON・形の違いは unavailable、0 件は none、1 つの ID が 2 パッケージにあるときの件数は 1、CLI は結果が読めなくても exit 0 で `status` と `count` を `$GITHUB_OUTPUT` に書く
   - コミット: `feat(release): summarize OSV results as found, none, or unavailable (T01)`
+  - 結果: `cd server && node --test test/osv-summary.test.ts` → 7 件 pass（unavailable の 7 通り、none の 2 通り、found 1 件、ID の重複を除いた 3 件、表のセルの `|` と改行、承認コメントの行、CLI が結果なしで exit 0 と出力 3 つ、SHA でない引数で 0 以外）
 
 - [ ] T02: release.yml に osv ジョブを足し、notify-approval と publish に待たせ、paths に足す
   - 種別: 追加
@@ -63,3 +64,5 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
   - コミット: `docs(release): describe the pre-approval scan and the scans after the merge (T04)`
 
 ## 記録
+
+- 2026-10-06 / T01 / テストが TS から .mjs を読むのに型宣言が要り、pre-commit の typecheck で止まった / 変更欄に `scripts/lib/osv-summary.d.mts` を足した（前: 3 ファイル、後: 4 ファイル）
