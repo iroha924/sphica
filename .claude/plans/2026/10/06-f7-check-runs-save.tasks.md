@@ -126,6 +126,16 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `ci(windows): fail the rollback step when its pattern runs fewer tests (T10)`
   - 結果: red: 一致しない名前でも終了コード 0（TAP の集計は `# pass 2`）。直した後: `actionlint .github/workflows/check.yml` → 指摘なし。手順と同じコマンドを `bash -eo pipefail` で流し、今の名前で終了コード 0、一致しない名前で 1。`bun run verify` → 終了コード 0
 
+- [x] T11: lock を持つ子プロセスが、親が lock を求めた後で外すようにする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T09（直すテストが T09 の形）
+  - 変更: `server/test/reconcile.test.ts`
+  - red: `node <scratchpad>/old-order.mjs` → 子が起動から 1500 ms で外す形で親が 1700 ms 遅れると「order holds false」
+  - 完了条件: `cd server && node --test test/reconcile.test.ts` → pass。子は親が `begin immediate` の直前に書くファイルを見てから 500 ms 後に外し、順序の確認が親の遅れによらない
+  - コミット: `test(record): let the lock holder go only after the check asks for the lock (T11)`
+  - 結果: red は再現スクリプトで「asked 1791259237351 released 1791259237149 ... order holds false」。直した後 `cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0。`bun run verify` → 終了コード 0
+
 ## 記録
 2026-10-06 / T02 / 変更欄と red を直した。変更: `server/src/extract.ts`, `server/test/extract.test.ts` → 4 ファイル（`server/test/record.test.ts` は呼び出し元のテストの置き場、`server/test/temp-db.ts` は全部の表を取り出す `dump`）。red: 3 つのテスト名 → 2 つ（glean の problems は今のコードでも check に出るので red にならない。成功のテストの中で確かめる）/ 欄を直して進めた
 2026-10-06 / T01 / Codex のレビュー（c247a0a7）: 指摘 0 件。Codex の環境では db.test.ts が一時ディレクトリを作れず流れなかったので、手元で流した pass 27 で確かめた / 直すものなし
@@ -138,3 +148,4 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
 2026-10-06 / T04 / Codex のレビュー（a3b35a14）: P2 2 件。子プロセスが lock を持つ 400 ms と親の待ち時間の計測が同期していない（CI が遅いと正しく待っても落ちる）、子が準備の前に終わると準備待ちが終わらず、check が例外を投げると子を待たずに後片付けに進む（Codex が再現）/ 2 件とも採用。修正タスク T09 を足した
 2026-10-06 / T07 / Codex のレビュー（1ce324f1）: P2 1 件、同じファイルと symbol に役割の違う anchor が 2 つあると、lock の中の警告が check に 2 行出る（Codex が再現。save も同じく 2 行出す前からの動き）/ 採用。plan の「同じ警告は 2 回出ない」に合わせ、check の返答の中で重ねない。修正タスク T08 を足した
 2026-10-06 / 全体 / review-shipping（main...347a59c1）: 出してよい。指摘 1 件（低リスク）、Windows の手順は `--test-name-pattern` に一致するテストが無くても緑で通る（再現済み）/ 採用。修正タスク T10 を足した
+2026-10-06 / 全体 / Codex の全差分のレビュー（high、main...347a59c1）: P2 1 件、T09 の後も子が起動から 1500 ms で lock を外すので、CI で親が遅れると順序の確認が落ちる（Codex が縮めた形で再現）。ほかの check と save の食い違い、権限の問題は見つからなかった / 採用。修正タスク T11 を足した。プロセス間の合図はファイルにした（親は lock を待つ間ブロックするので、stdin への書き込みは届く保証が無い）

@@ -2,6 +2,7 @@
 // of saves does not change where they settle, and one save into a crowded place holds the write lock only briefly.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import { performance } from "node:perf_hooks";
 import { DatabaseSync, type SQLInputValue, type StatementResultingChanges } from "node:sqlite";
 import { test } from "node:test";
@@ -328,6 +329,7 @@ test("order: withdrawing the owner's successor and adopting the waiting proposal
  */
 async function lockTimes(
   fn: () => Promise<unknown>,
+  beforeBegin: () => void = () => {},
 ): Promise<{ held: number; waited: number; askedAt: number; beganAt: number }> {
   const prepare = DatabaseSync.prototype.prepare;
   const at = { asked: 0, began: 0, ended: 0, askedAt: 0, beganAt: 0 };
@@ -337,7 +339,10 @@ async function lockTimes(
     if (["begin immediate", "rollback", "commit"].includes(text)) {
       const run = st.run.bind(st) as (...a: SQLInputValue[]) => StatementResultingChanges;
       st.run = ((...a: SQLInputValue[]) => {
-        if (text === "begin immediate") [at.asked, at.askedAt] = [performance.now(), Date.now()];
+        if (text === "begin immediate") {
+          beforeBegin();
+          [at.asked, at.askedAt] = [performance.now(), Date.now()];
+        }
         const out = run(...a);
         if (text === "begin immediate") [at.began, at.beganAt] = [performance.now(), Date.now()];
         else at.ended = performance.now();
@@ -544,7 +549,9 @@ test("record_check waits for a write lock another process holds, as save does, a
       sessionId: "s1",
       draftId: draft,
     });
-    // The holder says when it lets go, so the wait is checked by order, not by how long either side took to get there
+    // The holder lets go only after the check asks for the lock, told by a file written just before (this thread blocks while it waits, so no
+    // message it sends could be delivered), and says when, so the wait is checked by order, not by how long either side took to get there
+    const signal = `${db.file}.asking`;
     const holder = spawn(
       process.execPath,
       [
@@ -553,8 +560,14 @@ test("record_check waits for a write lock another process holds, as save does, a
 const c = new DatabaseSync(process.argv[1]);
 c.exec("begin immediate");
 process.stdout.write("held\\n");
-setTimeout(() => { process.stdout.write("released " + Date.now() + "\\n"); c.exec("rollback"); c.close(); }, 1500);`,
+const fs = require("node:fs");
+const poll = setInterval(() => {
+  if (!fs.existsSync(process.argv[2])) return;
+  clearInterval(poll);
+  setTimeout(() => { process.stdout.write("released " + Date.now() + "\\n"); c.exec("rollback"); c.close(); }, 500);
+}, 10);`,
         db.file,
+        signal,
       ],
       { stdio: ["ignore", "pipe", "inherit"] },
     );
@@ -572,11 +585,14 @@ setTimeout(() => { process.stdout.write("released " + Date.now() + "\\n"); c.exe
         );
       });
       let checked = "";
-      const times = await lockTimes(async () => {
-        checked = (
-          await checkText(db.ingest, draft, p, null, { units: [decided("kept", m, "Keep it.", true)] })
-        ).text;
-      });
+      const times = await lockTimes(
+        async () => {
+          checked = (
+            await checkText(db.ingest, draft, p, null, { units: [decided("kept", m, "Keep it.", true)] })
+          ).text;
+        },
+        () => fs.writeFileSync(signal, ""),
+      );
       assert.equal(await exited, 0);
       const released = Number(/released (\d+)/.exec(out)?.[1]);
       assert.match(checked, new RegExp(`✓ would be active: ${PREFIX}kept`));
