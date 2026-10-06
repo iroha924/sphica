@@ -41,7 +41,7 @@ approved_at: 2026-10-06
 
 - `.github/workflows/release.yml:368`: merge は GITHUB_TOKEN で行い、ほかの workflow を起こさない。u168 の記録も同じ（2026-10-02）
 - GitHub の docs: GITHUB_TOKEN が起こしたイベントは新しい run を作らないが、`workflow_dispatch` と `repository_dispatch` は例外（https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow 、Codex が 2026-10-06 に確認）。workflow_dispatch はそのトリガーが既定ブランチの workflow にあるときだけ起こせる
-- google/osv-scanner-action の reusable workflow（a345acff…、v2.6.0）は、スキャンが結果ファイルを書かずに失敗するとジョブを落とす。呼び出す側のジョブには continue-on-error を書けない。中で使う scanner の action は `osv-scanner-action/osv-scanner-action@7f58dd6750d78fc29a900ba64b1a0f946f62fba4`（docker、SARIF は上げない）
+- google/osv-scanner-action の reusable workflow（a345acff…、v2.6.0）は、スキャンが結果ファイルを書かずに失敗するとジョブを落とす。呼び出す側のジョブには continue-on-error を書けない。中で使う scanner の action は `osv-scanner-action/osv-scanner-action@7f58dd6750d78fc29a900ba64b1a0f946f62fba4`（docker、SARIF は上げない）。v2.6.0 のタグが指すのは a345acff で、そこの `osv-scanner-action/action.yml` は 7f58dd と同じ内容（SHA-256 が一致、2026-10-06）
 - `scripts/lib/release-gate.mjs:61`: タグを打つ head で release（dry run）が成功していることを求める。dry run のジョブが落ちると release に進めない
 - ossf/scorecard-action（2d114668…、v2.4.4）の README: 対応するトリガーは push と schedule（既定ブランチ）で、`workflow_dispatch` は experimental。publish_results を有効にした dispatch の run を Scorecard の API が受けるかは未検証
 - `gh workflow run` は、作った run の URL を返せるときは返す（gh 2.97.0 の help）。ランナーの gh のバージョンで返るかは未検証
@@ -102,3 +102,4 @@ S3: plugin-release Skill
 
 ## 変更履歴
 - 2026-10-06 / publish と notify-approval の条件を osv の結果によらないものにし、osv をジョブ単位の continue-on-error にした / T02 のレビューで、scanner のイメージの取得はステップの外で行われ、ステップの continue-on-error が効かないと分かった / Go 不要（範囲・持ち主の操作・止めない約束は同じ）
+- 2026-10-06 / scanner の action の固定を 7f58dd から v2.6.0 のタグが指す a345acff（同じパス、同じ内容）にした / zizmor が「固定したハッシュとバージョンのコメントが食い違う」と code scanning に出した / Go 不要

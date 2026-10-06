@@ -90,6 +90,16 @@ base: main
   - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。ecosystem・名前・バージョンが同じなら 1 行で、ID は重ねずにまとめる
   - コミット: `fix(release): merge the same package from several lockfiles into one OSV row (T11)`
   - 結果: red は上のとおり 1 件 fail を実測。直した後 10 件 pass。`bun run verify` → exit 0
+
+- [x] T12: scanner の action を v2.6.0 のタグが指すコミットに固定し直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の osv ジョブが要る）
+  - 変更: `.github/workflows/release.yml`
+  - red: `gh api repos/google/osv-scanner-action/git/ref/tags/v2.6.0 --jq .object.sha` → `a345acff…` で、release.yml の `# v2.6.0` の固定 `7f58dd…` と食い違う（PR #293 で zizmor が code scanning に出した）
+  - 完了条件: `grep -n "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → `@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0`。`actionlint .github/workflows/release.yml` → 出力なし。PR の zizmor のアラートが閉じる
+  - コミット: `fix(release): pin the OSV scanner action to the v2.6.0 tag's commit (T12)`
+  - 結果: 2 つのコミットの `osv-scanner-action/action.yml` は SHA-256 が一致（`7086e772…`）。固定を a345acff に直し、actionlint → exit 0。`bun run verify` → 下のコミットの前に exit 0。zizmor のアラートは push 後の CI で確かめる
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -145,3 +155,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T08 / T03 の Codex のレビュー: [P2] 警告に入れる gh の出力の CR を除いておらず、CR の後ろが別の workflow command になり得る（再現つき） / 採って T08 を足した。T06・T07 のレビューは指摘なし
 - 2026-10-06 / T09, T10 / 差分全体の Codex のレビュー: [P2] 既存のバックスラッシュの後の `|` でセルを抜けられる（GFM の描画で再現）。[P2] checkout・setup-node の失敗で要約が飛ばされ、summary に unavailable が残らない / 2 件とも採った。T09 はエスケープを足すのをやめて許す文字に絞り、T10 は failure() の予備のステップを足した
 - 2026-10-06 / T11 / 差分全体の 2 回目の Codex のレビュー: [P3] 同じ package@version が複数の lockfile にあると表の行とパッケージ数が重なる（再現つき）。ほかの指摘は無い / 採って T11 を足した。レビューは P3 だけに収まったので、差分全体の 3 回目は頼まずに PR へ進む
+- 2026-10-06 / T12 / PR #293 の CI で zizmor が「固定したハッシュとバージョンのコメントが食い違う」を code scanning に出した / 中身が同じ v2.6.0 のタグのコミットに固定し直す T12 を足した
