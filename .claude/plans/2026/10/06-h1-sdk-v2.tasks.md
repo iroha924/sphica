@@ -123,13 +123,16 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
 
 両ホストで structuredContent を持つ返答の扱いを測り、`server/src/mcp.ts` の注記を確かめた範囲に書き直す。
 
-- [ ] T07: structuredContent の扱いを両ホストで実測し、mcp.ts の注記を書き直す
+- [x] T07: structuredContent の扱いを両ホストで実測し、mcp.ts の注記を書き直す
   - 種別: 変更
   - 計画: S6
   - 依存: T01（v2 のサーバーの注記を直す）
   - 変更: `server/src/mcp.ts`
   - 完了条件: 使い捨ての fixture を 3 回ずつ `claude -p` と `codex exec` → 3 つの形でモデルが受け取った内容を結果欄に書き、`server/src/mcp.ts` の注記がそれに合う。`bun run verify` → exit 0
   - コミット: `docs(mcp): state what the hosts showed for structuredContent under SDK v2 (T07)`
+  - 結果: 使い捨ての fixture（SDK v2 2.2.0、outputSchema なし、readOnlyHint 付き）を 3 回ずつ `claude -p` → Claude Code 2.1.291 は 3 回とも text_only: TEXT-A、structured_only: STRUCT-B、both: STRUCT-D だけ（テキストの C は渡らない）
+  - 結果: 同じ fixture を 3 回ずつ `codex exec` → codex-cli 0.160.1 は 3 回とも text_only: TEXT-A、structured_only: STRUCT-B、both: TEXT-C と STRUCT-D の両方。readOnlyHint が無いと exec では「MCP tool call requires approval」で呼べなかった
+  - 結果: `bun run verify` → exit 0。注記を「Claude Code はテキストを落とし、Codex は両方渡す」に直した
 
 ## 記録
 - 2026-10-06 / T01 / Codex のタスクごとのレビューは指摘なし / そのまま

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // MCP server that lets Claude Code and Codex look up past implementation and decisions. **The database is read only** (the reader connection, sqlite.ts).
-// **Responses are text content only.** With structuredContent, neither host passes the text to the model,
-// and declaring outputSchema makes the SDK throw when structuredContent is missing.
+// **Responses are text content only.** With structuredContent, Claude Code (2.1.291) gives the model only that and drops the text
+// (Codex 0.160 passes both), and declaring outputSchema makes the SDK throw when structuredContent is missing.
 
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
