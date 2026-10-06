@@ -450,7 +450,9 @@ jobs:
               url="$(grep -Eo 'https://[^[:space:]]+/actions/runs/[0-9]+' <<< "$out" | head -n 1 || true)"
               line="- $workflow: ${url:-dispatched; run URL not returned}"
             else
-              echo "::warning::could not dispatch $workflow on main: ${out//$'\n'/ }"
+              # Escaped as workflow command data, so gh's output cannot start a command of its own
+              out="${out//%/%25}"; out="${out//$'\r'/%0D}"; out="${out//$'\n'/%0A}"
+              echo "::warning::could not dispatch $workflow on main: $out"
               line="- $workflow: dispatch failed; start it with gh workflow run $workflow --ref main"
             fi
             echo "$line"

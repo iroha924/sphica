@@ -83,6 +83,16 @@ release の merge の後に、main の OSV と Scorecard の run を workflow_di
   - コミット: `ci(release): dispatch OSV and Scorecard on main after the release merge (T03)`
   - 結果: `actionlint` の 3 ファイル → 出力なし（exit 0）。`bun run verify` → exit 0。refresh-scans の run の中身を偽の gh を PATH の先頭に置いて `bash -eo pipefail` で流した: URL が返る場合は URL、失敗は `::warning::` と「dispatch failed」の行、URL が返らない場合は「dispatched; run URL not returned」になり、どれも exit 0
 
+
+- [x] T08: dispatch の失敗の警告で、gh の出力を workflow command のデータとしてエスケープする
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象の refresh-scans が要る）
+  - 変更: `.github/workflows/release.yml`
+  - red: refresh-scans の run の中身を、stderr に `failed 100%\r::error::forged` を出して exit 1 する偽の gh で流す → `::error::forged` が独立した行として 2 回出る
+  - 完了条件: 同じ偽の gh で流す → `::error::forged` の行は 0、`%` は `%25`、CR は `%0D`、LF は `%0A` になり exit 0。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
+  - コミット: `fix(release): escape gh's output in the dispatch warning (T08)`
+  - 結果: red は上のとおり 2 行を実測。直した後は 0 行で、警告は `failed 100%25%0D::error::forged`、exit 0。actionlint → exit 0。`bun run verify` → exit 0
 ## P3: 手順書
 
 plugin-release Skill が、スキャンの結果の読み方と、dispatch した run の見届け方、失敗したときの戻し方を書く。
@@ -102,3 +112,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T05 / T01 の Codex のレビューで 3 件（groups だけ残った結果が none、ENOENT 以外の読み取りエラーで CLI が落ちる、セルの Markdown）を再現つきで受けた / 3 件とも直すことにして修正タスク T05 を T01 の後に足した
 - 2026-10-06 / T02 / osv ジョブは contents: read だけで security-events を持たないので、osv-scanner.yml の fork PR の除外（security-events を fork に渡せないため）は理由が無くなった / plan にあった fork PR の除外は付けなかった
 - 2026-10-06 / T06, T07 / T02 と T05 の Codex のレビュー: [P1] scanner の docker イメージの取得はステップの外の準備処理で、continue-on-error が効かずに osv が落ち、publish と dry run を止める。[P2] checkout・setup-node の失敗も同じ。[P2] バックスラッシュのエスケープでは GFM の自動リンクと文字参照が残る / 3 件とも採り、T06（セルをコードスパンに）と T07（osv をジョブ単位で continue-on-error、publish と notify-approval は osv の結果によらない条件）を足した
+- 2026-10-06 / T08 / T03 の Codex のレビュー: [P2] 警告に入れる gh の出力の CR を除いておらず、CR の後ろが別の workflow command になり得る（再現つき） / 採って T08 を足した。T06・T07 のレビューは指摘なし
