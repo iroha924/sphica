@@ -189,3 +189,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 
 - 2026-10-06 / T13, T14 / GitHub の Codex のレビュー（PR #293 の最初の head 2db22f0）: [P1] テストの子プロセスに親の環境をそのまま渡している（temp-home）。[P2] タグのコミットに results.json があると、scanner が書く前に落ちたとき古いファイルを要約し得る。[P2] scanner の action は書き換えられるイメージのタグを動かす / 3 件とも採った。T13 は子の環境を絞る、T14 は action をやめてチェックサムを固定した osv-scanner のバイナリを $RUNNER_TEMP の新しいディレクトリへ書かせる
 - 2026-10-06 / T15 / T13・T14 の Codex のレビュー: [P2] osv-scanner は抽出エラーでも JSON を書いて exit 127 で終わり、none と出る。[P2] 既存の $RUNNER_TEMP/osv では mkdir が失敗して古い結果を読み得る。T13 は指摘なし / 2 件とも採り、終了コードの一致で信じる 1 つの仕組みで塞ぐ T15 を足した
+- 2026-10-06 / T15 / T15 の Codex のレビュー: [P2] 抽出エラーと脆弱性の検出が重なると scanner は 1 を返し、途中までの結果が found になる / 見送った。守るのは「スキャンしていないのに none と出さない」ことで、found は安心させる表示ではない。抽出エラーを見分けるには scanner のログを解釈することになる。PR の Declined findings に書いた
