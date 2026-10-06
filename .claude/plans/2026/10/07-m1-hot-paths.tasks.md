@@ -22,13 +22,15 @@ base: main
 
 本物の hook と同じ条件で、記録数ごとの配信と capture の吐き出しの時間と中身を測り、main の表が取れる。
 
-- [ ] T01: 計測スクリプトを足し、main で流して修正前の表を取る
+- [x] T01: 計測スクリプトを足し、main で流して修正前の表を取る
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/scale/run.ts`, `knip.json`
   - 完了条件: `node server/evals/scale/run.ts` → 表の頭に commit・node・OS・CPU・件数が出て、uniform 10,000 件のプロンプトの行が timeout か 1,000 ms 超え、capture の 50,000 件の行が送った件数 50,000・残り 0
   - コミット: `feat(evals): add a scale benchmark for delivery hooks and capture drain`
+  - 結果: `node server/evals/scale/run.ts` → e5c7ec0e、node v24.15.0、Darwin 27.0.0 arm64、Apple M4 Pro x12 で、uniform 10,000 件のプロンプト 3 行が全部 timeout（5,008〜5,014 ms）、capture は 50,000 件で 8,171 ms・sent 50,000・left 0・rows 50,000
+  - 結果: `node server/evals/scale/run.ts` → プロンプトの最大は 359 件で 479 ms、1,000 件で 1,248 ms、3,000 件で 3,812 ms。Bash は 10,000 件で 1,857 ms（stress 1,641 ms）、30,000 件で timeout。Read・Edit・review・SessionStart・SubagentStart は 30,000 件まで 139 ms 以下
 
 ## P2: 今の挙動を固定する
 
@@ -96,6 +98,8 @@ base: main
   - コミット: `docs(plugin-release): run the scale benchmark when changing delivery matching`
 
 ## 記録
+
+- 2026-10-07 / T01 / 修正前の計測で stress の review 2 行が「期待した記録が無い」になった。review の配信は 1 回 5 件まで id 順で、差分に入れた 500 件共有のファイルの記録で埋まるため（仕様どおり） / stress の review の期待を「記録を出していること」（`trace:ext-b` を含む）に直した。uniform は最後の記録の key を引き続き見る
 
 - 2026-10-07 / T03 / review の hook の結果のテストは、review の checkout の作り方を持つ `review-bridge.test.ts` に置くほうが合う / 変更欄を `server/test/review.test.ts`, `server/test/deliver.test.ts` から `server/test/review.test.ts`, `server/test/review-bridge.test.ts` に、完了条件のファイルも同じく変えた
 - 2026-10-07 / T02 / plan の「position の順と id の順が違う選択肢」は作れない。選択肢は保存のときに配列の順で position = i + 1 として 1 文で入り（`record.ts`）、書き換えは trigger `unit_option_frozen` が止める / fixture に入れず、ここに残す
