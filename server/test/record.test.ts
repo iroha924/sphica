@@ -1851,7 +1851,7 @@ test("record call: a run keeps the call that began it, and a call's session come
   }
 });
 
-test("record call: a save from another session than the one that began the run is refused, and the save's own call stays logged", async () => {
+test("record call: a check or save from another session than the one that began the run is refused, and its own call stays logged", async () => {
   const db = tempDb();
   try {
     const p = project(db);
@@ -1862,6 +1862,18 @@ test("record call: a save from another session than the one that began the run i
       "s1",
       await claudeCall(db, p, "trace_begin", "ext-a", "toolu_a"),
     );
+    // check refuses it as save does: it runs the same steps
+    await assert.rejects(
+      checkText(
+        db.ingest,
+        run,
+        p,
+        null,
+        { units: [] },
+        await claudeCall(db, p, "record_check", "ext-b", "toolu_c"),
+      ),
+      /This run was begun in another session/,
+    );
     const other = await claudeCall(db, p, "record_save", "ext-b", "toolu_b");
     await assert.rejects(
       saveText(db.ingest, run, p, null, { units: [] }, undefined, other),
@@ -1869,7 +1881,7 @@ test("record call: a save from another session than the one that began the run i
     );
     assert.equal(
       Number((db.owner.prepare("select count(*) as n from record_call").get() as { n: number }).n),
-      2,
+      3,
     );
     // A save whose session cannot be told is not refused for it (it never adopts for the AI either)
     const unknown = await logCall(db.ingest, p, "record_save", {

@@ -84,6 +84,34 @@ export function project(db: TempDb, key = "git:github.com/o/r", name = "o/r"): n
   );
 }
 
+/**
+ * Every row of every table, sorted, with the sequence counters and the full-text indexes' storage tables: what a rolled-back transaction must
+ * leave as it found it. Virtual tables are read through their storage tables, and rows are compared whole, so no table needs a rowid.
+ */
+export function dump(db: TempDb): Record<string, string[]> {
+  const tables = db.owner
+    .prepare(
+      "select name from sqlite_schema where type = 'table' and sql not like 'CREATE VIRTUAL%' order by name",
+    )
+    .all() as { name: string }[];
+  const text = (_: string, v: unknown) =>
+    typeof v === "bigint" ? v.toString() : v instanceof Uint8Array ? Buffer.from(v).toString("hex") : v;
+  return Object.fromEntries(
+    tables.map(({ name }) => {
+      // FTS storage holds integers past 2^53
+      const all = db.owner.prepare(`select * from "${name}"`);
+      all.setReadBigInts(true);
+      return [
+        name,
+        all
+          .all()
+          .map((r) => JSON.stringify(r, text))
+          .sort(),
+      ];
+    }),
+  );
+}
+
 type Values = Record<string, string | number | Buffer | null>;
 
 /** Inserts one row and returns its rowid. **Writes with the owner connection** (it has the tokenizer function, so FTS triggers run as in production). */

@@ -24,7 +24,7 @@ import { type Get, gh } from "../src/github.ts";
 import { readRefs, readUnit } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { searchUnits } from "../src/search.ts";
-import { insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
+import { dump, insert, message, plan, project, session, statements, type TempDb, tempDb } from "./temp-db.ts";
 
 // begin sends the recording queue first; it must read an empty queue under a temporary HOME, never the owner's
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-extract-home-"));
@@ -128,6 +128,102 @@ const fakeGet: Get = async (p) => {
 };
 
 const place = (p: number, root: string) => ({ key: "git:github.com/o/r", root, name: "o/r", projectId: p });
+
+test("check reports what save would, and leaves the database as it was: trace with work, and glean with a file excerpt", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "SQLite にしよう。" });
+    const aside = message(db, p, { id: "m2", text: "ところで昼は何にする？" });
+    const run = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, run, p, null);
+    const record = {
+      units: [
+        {
+          key: "storage",
+          kind: "decision",
+          stance: "do",
+          text: "SQLite に保存する",
+          evidence: [{ source: `s${m}`, quote: "SQLite にしよう。", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "SQLite にしよう。" }],
+          aliases: ["保存先", "storage"],
+        },
+      ],
+      work: {
+        key: "storage",
+        title: "保存先",
+        goal: "1 ファイル",
+        current: "決めた",
+        next: [],
+        status: "done",
+      },
+    };
+    const found = async () =>
+      (await searchUnits(db.reader, p, { question: "保存先", limit: 5 })).hits.map((h) => h.key);
+    const before = dump(db);
+    // Checked twice: neither check leaves anything, and the save after them still marks what context showed
+    for (let i = 0; i < 2; i++) {
+      const checked = await checkText(db.ingest, run, p, null, record);
+      assert.equal(checked.ok, true);
+      assert.match(checked.text, /✓ would be active: trace:ext-s1\/storage/);
+      assert.deepEqual(dump(db), before);
+      assert.deepEqual(await found(), []);
+    }
+    assert.match(await saveText(db.ingest, run, p, null, record), /✓ trace:ext-s1\/storage active/);
+    assert.deepEqual(await found(), ["trace:ext-s1/storage"]);
+    assert.deepEqual(
+      db.owner.prepare("select outcome from source_processing where source_id = ?").all(aside),
+      [{ outcome: "no_unit" }].map((r) => Object.assign(Object.create(null), r)),
+    );
+
+    session(db, p, "g1");
+    const o = message(db, p, { id: "o1", text: "src.ts の openStore を見る。", session: "g1" });
+    const first = await beginGlean(db.ingest, p, "g1");
+    const look = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${o}`, quote: "src.ts の openStore を見る。", role: "states" }],
+        },
+      ],
+    };
+    const unsourced = await checkText(db.ingest, first, p, root, look);
+    assert.match(unsourced.text, /△ glean:look: its only evidence is the owner's words in this session/);
+    assert.match(unsourced.text, /△ would stay a candidate: glean:look/);
+    await saveText(db.ingest, first, p, root, look);
+    const g = await beginGlean(db.ingest, p, "g1");
+    const rev = Number(
+      db.owner.prepare("select revision from unit where key = 'glean:look'").get()?.revision,
+    );
+    const ops = {
+      ops: [
+        {
+          op: "add_evidence",
+          unit: "glean:look",
+          revision: rev,
+          file: { path: "docs/note.md", lines: [3, 3] },
+          quote: "Back up before a release.",
+          role: "explains",
+        },
+      ],
+    };
+    const gleaned = dump(db);
+    const checked = await checkText(db.ingest, g, p, root, ops);
+    assert.match(checked.text, /✓ would: glean:look: evidence added/);
+    assert.deepEqual(dump(db), gleaned);
+    assert.match(await saveText(db.ingest, g, p, root, ops), /✓ glean:look: evidence added/);
+    assert.equal(
+      Number(db.owner.prepare("select count(*) as n from source where kind = 'file_excerpt'").get()?.n),
+      1,
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("trace: pending lists the session, begin binds it, and check and save take the run id", async () => {
   const db: TempDb = tempDb();

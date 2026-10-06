@@ -35,14 +35,15 @@ save と同じ処理を流して必ず戻すトランザクションの助けを
 
 check が save と同じ準備・検証・書き込み・judge を流して戻し、save と同じ結果の行を返す。#275 の 4 件のずれをなくす。
 
-- [ ] T02: save の処理を共通の実行に切り出し、check をそれで流してロールバックする
+- [x] T02: save の処理を共通の実行に切り出し、check をそれで流してロールバックする
   - 種別: 修正
   - 計画: S2
   - 依存: T01（`inRolledBack` が要る）
-  - 変更: `server/src/extract.ts`, `server/test/extract.test.ts`
-  - red: `cd server && node --test --test-name-pattern="check refuses a caller save refuses|check reports what save would|check keeps glean problems" test/extract.test.ts` → 別のセッションからの check が通ってしまう、check の返答に `would be active` の行が無い、で落ちる
+  - 変更: `server/src/extract.ts`, `server/test/extract.test.ts`, `server/test/record.test.ts`, `server/test/temp-db.ts`
+  - red: `cd server && node --test --test-name-pattern="check reports what save would|check or save from another session" test/extract.test.ts test/record.test.ts` → 別のセッションからの check が通ってしまう、check の返答に `would be active` の行が無い、で落ちる
   - 完了条件: `cd server && node --test test/extract.test.ts` → pass。別のセッションからの check が save と同じく拒否される。check の返答に save と同じ結果の行が `would ...` で出て、glean の problems も出る。check の前後で全部の表の中身・`sqlite_sequence`・検索の結果が同じ（trace の work と source_processing、glean のファイルの抜粋の source を含む）。check、check、save の順で、表示しただけの source が source_processing に入る
   - コミット: `fix(record): run the save in a rolled-back transaction for record_check (T02)`
+  - 結果: red は直す前の `server/src/extract.ts`（HEAD）に一時的に戻して流し、2 つとも落ちた（`would be active` の行が無い、別のセッションからの check で「Missing expected rejection」）。直した後は 2 つとも pass。`cd server && node --test test/extract.test.ts test/record.test.ts test/auto-pending.test.ts test/forget.test.ts` → pass 119 / fail 0（テストを足す前）。`bun run verify` → 終了コード 0
 
 - [ ] T03: 場所を待つ後継の拒否を judge の後の 1 か所に移し、check の予測のコードを消す
   - 種別: 修正
@@ -82,3 +83,5 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `docs(skills): say record_check previews the save and what it reports (T06)`
 
 ## 記録
+2026-10-06 / T02 / 変更欄と red を直した。変更: `server/src/extract.ts`, `server/test/extract.test.ts` → 4 ファイル（`server/test/record.test.ts` は呼び出し元のテストの置き場、`server/test/temp-db.ts` は全部の表を取り出す `dump`）。red: 3 つのテスト名 → 2 つ（glean の problems は今のコードでも check に出るので red にならない。成功のテストの中で確かめる）/ 欄を直して進めた
+2026-10-06 / T01 / Codex のレビュー（c247a0a7）: 指摘 0 件。Codex の環境では db.test.ts が一時ディレクトリを作れず流れなかったので、手元で流した pass 27 で確かめた / 直すものなし
