@@ -78,13 +78,14 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `test(record): bound how long record_check holds the write lock, and run it on Windows (T04)`
   - 結果: `cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0。3,200 件の場面で record_check が lock を持ったのは 10.8 ms（待ち 0.0 ms）、save は 10.7 ms。lock を 400 ms 持つ子プロセスがいる間、check は 200 ms を超えて待ってから通った。anchor の lock のテストで、check でも git（holds）は lock の前だけに呼ばれた。`actionlint .github/workflows/check.yml` → 指摘なし。Windows の手順と同じコマンド（`--test-name-pattern="rolled-back|record_check waits"`）を手元で流して pass 4。`bun run verify` → 終了コード 0
 
-- [ ] T05: acceptance に check の結果の行と、judge の後の拒否の case を足す
+- [x] T05: acceptance に check の結果の行と、judge の後の拒否の case を足す
   - 種別: 追加
   - 計画: S5
   - 依存: T03（judge の後の拒否が要る）
-  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
-  - 完了条件: `cd server && node --test test/acceptance-cases.test.ts` → pass。足した 2 つの case が T03 の前のコードでは落ち、今のコードでは通る（`git stash` ではなく T02 のコミットに戻した一時の worktree で確かめる）
+  - 変更: `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
+  - 完了条件: `cd server && node --test test/acceptance-cases.test.ts` → pass。足した 2 つの case が今のコードで通り、結果の行の case は T02 の前のコード、judge の後の拒否の case は T03 の前のコードで落ちる（そのコミットの一時の worktree で確かめる）
   - コミット: `test(acceptance): pin record_check's preview lines and the post-judge refusal (T05)`
+  - 結果: reconcile-09（結果の行）と reconcile-10（同じ glean の中の 2 つの採用の拒否）を足した。今のコードで `--test-name-pattern="reconcile-(09|10)" evals/acceptance/run.ts` → pass 2。一時の worktree で、reconcile-09 は T01 のコミット c247a0a7 で落ち、reconcile-10 は T02 のコミット 32150823 で「check did not say ...」で落ちた。`cd server && node --test test/acceptance-cases.test.ts` → pass 4。`bun run verify` → 終了コード 0
 
 - [ ] T06: trace・harvest・glean の Skill と record_check のツールの説明を直す
   - 種別: 変更
@@ -102,3 +103,6 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
 2026-10-06 / T02 / Codex のレビュー（32150823）: P2 1 件、check の返答に save の quarantined の結果と、lock の中で見直した anchor の警告が出ない（Codex が再現）/ 採用。修正タスク T07 を T04 の前に足した
 2026-10-06 / T03 / Codex のレビュー（447bd831）: 指摘 0 件（Codex の環境ではテストが一時ディレクトリを作れず、メモリ上の SQLite で 4 つの場面と 6 種類の記録を確かめた）/ 直すものなし
 2026-10-06 / T04 / 変更欄に `server/test/extract.test.ts` を足した（Probe で git と最初の準備が lock の前に起きることは、既存の anchor の lock のテストを check にも広げて確かめる）。途中で check が ENOENT を返したが、テストの probe が同じファイルを `force` なしで 2 回消していたためで、製品の不具合ではない（main とこのブランチで同じ場面を check と save に流し、どちらも通ることを確かめた）/ commit 付きの anchor を消さないファイルに置いた
+2026-10-06 / T05 / 変更欄から `server/evals/acceptance/driver.ts` を外した（既存の `check_notes_contain` と `save_refused_contains` で書けた）。完了条件: 「2 つとも T03 の前のコードで落ちる」→「結果の行の case は T02 の前、拒否の case は T03 の前で落ちる」（結果の行は T02 で入ったので、T02 のコードでは通るのが正しい）/ 欄を直して進めた
+2026-10-06 / T04 / Codex のレビュー（a3b35a14）: P2 2 件。子プロセスが lock を持つ 400 ms と親の待ち時間の計測が同期していない（CI が遅いと正しく待っても落ちる）、子が準備の前に終わると準備待ちが終わらず、check が例外を投げると子を待たずに後片付けに進む（Codex が再現）/ 2 件とも採用。修正タスク T09 を足した
+2026-10-06 / T07 / Codex のレビュー（1ce324f1）: P2 1 件、同じファイルと symbol に役割の違う anchor が 2 つあると、lock の中の警告が check に 2 行出る（Codex が再現。save も同じく 2 行出す前からの動き）/ 採用。plan の「同じ警告は 2 回出ない」に合わせ、check の返答の中で重ねない。修正タスク T08 を足した

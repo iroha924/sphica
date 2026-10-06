@@ -5214,6 +5214,147 @@
       ]
     },
     {
+      "id": "reconcile-09",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "record_check runs the save and rolls it back, so it says which records the save would make active and superseded",
+      "given": [
+        { "case": "reconcile-01" },
+        {
+          "session": {
+            "id": "s-ja-check-pg",
+            "host": "claude-code",
+            "at": "2026-05-04T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "共有のために MySQL に移す。SQLite の決定は置き換える。",
+                "assistant": "了解です。",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-check-pg",
+          "record": {
+            "units": [
+              {
+                "key": "mysql",
+                "kind": "decision",
+                "stance": "do",
+                "text": "共有のために MySQL に移す",
+                "supersedes": "trace:s-ja-storage/storage",
+                "evidence": [
+                  {
+                    "source": "session:s-ja-check-pg#1.owner",
+                    "quote": "共有のために MySQL に移す。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  { "source": "session:s-ja-check-pg#1.owner", "quote": "SQLite の決定は置き換える。" }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        { "check_notes_contain": "✓ would be active: trace:s-ja-check-pg/mysql" },
+        { "check_notes_contain": "✓ would be superseded: trace:s-ja-storage/storage" },
+        { "unit": "trace:s-ja-check-pg/mysql", "lifecycle": "active" },
+        { "unit": "trace:s-ja-storage/storage", "lifecycle": "superseded" }
+      ]
+    },
+    {
+      "id": "reconcile-10",
+      "layer": "reconcile",
+      "lang": "en",
+      "summary": "Two proposals the owner adopts in one glean for the same decision are refused by name by both check and save, and nothing changes",
+      "given": [
+        { "case": "reconcile-01" },
+        {
+          "session": {
+            "id": "s-en-propose-pg",
+            "host": "claude-code",
+            "at": "2026-05-04T11:00:00+09:00",
+            "turns": [
+              {
+                "owner": "Is the storage choice still fine?",
+                "assistant": "We could move storage to Postgres instead of SQLite.",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-en-propose-pg",
+            "record": {
+              "units": [
+                {
+                  "key": "postgres",
+                  "kind": "decision",
+                  "stance": "do",
+                  "text": "Move storage to Postgres",
+                  "supersedes": "trace:s-ja-storage/storage",
+                  "evidence": [
+                    {
+                      "source": "session:s-en-propose-pg#1.assistant",
+                      "quote": "We could move storage to Postgres instead of SQLite.",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-en-adopt-both",
+            "host": "claude-code",
+            "at": "2026-05-04T12:00:00+09:00",
+            "turns": [{ "owner": "Go with DuckDB. Go with Postgres.", "assistant": "", "edits": [] }]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-en-adopt-both",
+          "record": {
+            "ops": [
+              {
+                "op": "adopt",
+                "unit": "trace:s-ja-propose/duckdb",
+                "source": "session:s-en-adopt-both#1.owner",
+                "quote": "Go with DuckDB."
+              },
+              {
+                "op": "adopt",
+                "unit": "trace:s-en-propose-pg/postgres",
+                "source": "session:s-en-adopt-both#1.owner",
+                "quote": "Go with Postgres."
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "check_notes_contain": "trace:s-en-propose-pg/postgres: another record in this save already supersedes trace:s-ja-storage/storage"
+        },
+        {
+          "save_refused_contains": "trace:s-en-propose-pg/postgres: another record in this save already supersedes trace:s-ja-storage/storage"
+        },
+        { "unit": "trace:s-ja-storage/storage", "lifecycle": "active" },
+        { "unit": "trace:s-ja-propose/duckdb", "lifecycle": "candidate" },
+        { "unit": "trace:s-en-propose-pg/postgres", "lifecycle": "candidate" }
+      ]
+    },
+    {
       "id": "agent-01",
       "layer": "agent",
       "lang": "ja",
