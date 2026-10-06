@@ -120,6 +120,16 @@ base: main
   - 完了条件: `grep -c "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → 0。`OSV_SCANNER_SHA256` が配布元の `osv-scanner_SHA256SUMS` の linux_amd64 の行と一致。要約は `$RUNNER_TEMP/osv/results.json` を読む。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功。PR の dry run の osv の log に `OSV scan of` と結果の行が出る
   - コミット: `fix(release): run osv-scanner from its checksum-pinned release into a fresh directory (T14)`
   - 結果: red は 1 を実測、直した後 0。配布元の SHA256SUMS の linux_amd64 は `ca69b3d3…b108` で、取ったバイナリの SHA-256 と一致。同じバージョンの darwin_arm64 を `-r --format=json --output-file=<一時>/results.json <worktree>` で流し、server/bun.lock の 323 パッケージから 3 件（braces、katex、proxy-addr）を出し、exit 1（見つかったとき）、要約は CI と同じ表。actionlint → exit 0。`bun run verify` → exit 0。dry run は push 後の CI で確かめる
+
+- [x] T15: scanner の終了コードと結果が一致するときだけ none・found にする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T14（直す対象の scanner のステップが要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/lib/osv-summary.d.mts`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`, `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 2 件 fail（exit 127 と `{"results":[]}` が none になる。CLI が終了コードの引数を受けない）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。終了コードが空・0 と 1 以外・結果と食い違う（0 で脆弱性あり、1 で脆弱性なし）なら unavailable。scan のステップは `exit=<code>` を出力に書き、要約はそれを第 3 引数で受ける。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
+  - コミット: `fix(release): trust OSV results only when the scanner's exit code agrees (T15)`
+  - 結果: red は上のとおり 2 件 fail を実測。直した後 11 件 pass。actionlint → exit 0。`bun run verify` → exit 0
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -178,3 +188,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T12 / PR #293 の CI で zizmor が「固定したハッシュとバージョンのコメントが食い違う」を code scanning に出した / 中身が同じ v2.6.0 のタグのコミットに固定し直す T12 を足した
 
 - 2026-10-06 / T13, T14 / GitHub の Codex のレビュー（PR #293 の最初の head 2db22f0）: [P1] テストの子プロセスに親の環境をそのまま渡している（temp-home）。[P2] タグのコミットに results.json があると、scanner が書く前に落ちたとき古いファイルを要約し得る。[P2] scanner の action は書き換えられるイメージのタグを動かす / 3 件とも採った。T13 は子の環境を絞る、T14 は action をやめてチェックサムを固定した osv-scanner のバイナリを $RUNNER_TEMP の新しいディレクトリへ書かせる
+- 2026-10-06 / T15 / T13・T14 の Codex のレビュー: [P2] osv-scanner は抽出エラーでも JSON を書いて exit 127 で終わり、none と出る。[P2] 既存の $RUNNER_TEMP/osv では mkdir が失敗して古い結果を読み得る。T13 は指摘なし / 2 件とも採り、終了コードの一致で信じる 1 つの仕組みで塞ぐ T15 を足した

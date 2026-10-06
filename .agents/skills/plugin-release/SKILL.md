@@ -102,7 +102,7 @@ Once, before the first release, the owner sets these up in the web UI (without t
    It also stops when the PR has no Release notes, and records a digest of the notes the owner is about to read.
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner.
    Beside `prepare`, `osv` scans the tag commit's dependencies with osv-scanner (`scripts/osv-summary.mjs`): the run summary shows the scanned SHA and
-   `found` (with a table of packages and IDs), `none`, or `unavailable` (the scan left no readable results), and the PR comment carries the same one line.
+   `found` (with a table of packages and IDs), `none`, or `unavailable` (the scanner did not finish, exited with a code other than 0 or 1, or left results that disagree with that code or cannot be read), and the PR comment carries the same one line.
    The scanner is the osv-scanner release binary checked against the SHA-256 pinned in release.yml (`OSV_SCANNER_SHA256`).
    Neither findings nor a failed scan stop the release; `publish` waits only for the scan to finish. When the job fails before it can scan,
    the summary or the comment says so. Claude tells the owner the line when handing over the URL

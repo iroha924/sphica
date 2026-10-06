@@ -104,3 +104,4 @@ S3: plugin-release Skill
 - 2026-10-06 / publish と notify-approval の条件を osv の結果によらないものにし、osv をジョブ単位の continue-on-error にした / T02 のレビューで、scanner のイメージの取得はステップの外で行われ、ステップの continue-on-error が効かないと分かった / Go 不要（範囲・持ち主の操作・止めない約束は同じ）
 - 2026-10-06 / scanner の action の固定を 7f58dd から v2.6.0 のタグが指す a345acff（同じパス、同じ内容）にした / zizmor が「固定したハッシュとバージョンのコメントが食い違う」と code scanning に出した / Go 不要
 - 2026-10-06 / scanner を action から、チェックサムを固定した osv-scanner v2.6.0 のバイナリに変え、結果を $RUNNER_TEMP の新しいディレクトリに書かせた / GitHub の Codex のレビュー: action が動かすイメージは書き換えられるタグで、チェックアウトに results.json があると古い結果を要約し得る / Go 不要（同じ道具・同じバージョンで、範囲と持ち主の操作は同じ）
+- 2026-10-06 / scanner の終了コードを出力に残し、0 で脆弱性なし・1 で脆弱性ありと結果が一致するときだけ none・found にする。それ以外と終了コードなしは unavailable / T14 のレビュー: osv-scanner は抽出エラーでも JSON を書いて 127 で終わり、既存のディレクトリでは mkdir が失敗して古い結果を読み得る / Go 不要

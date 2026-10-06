@@ -36,14 +36,18 @@ function vulnerable(report) {
 }
 
 /**
- * `text` is the results file's contents, null when the file is missing, or `{ code }` when reading it failed. `count` is the
- * number of distinct vulnerability IDs (aliases are not merged); the table has one row per package and version.
+ * `text` is the results file's contents, null when the file is missing, or `{ code }` when reading it failed. `scannerExit` is
+ * osv-scanner's exit code as text ("" when it did not finish); when given, only 0 with no vulnerabilities or 1 with some is trusted.
+ * `count` is the number of distinct vulnerability IDs (aliases are not merged); the table has one row per package and version.
  */
-export function osvSummary(text, sha) {
+export function osvSummary(text, sha, scannerExit) {
   const head = `### OSV scan of \`${sha}\``;
   let report;
   let reason = "";
-  if (text === null) reason = "the scan wrote no results file";
+  if (scannerExit === "") reason = "the scanner did not finish";
+  else if (scannerExit !== undefined && scannerExit !== "0" && scannerExit !== "1")
+    reason = `the scanner exited with ${/^\d+$/.test(scannerExit) ? scannerExit : "an unknown code"}`;
+  else if (text === null) reason = "the scan wrote no results file";
   else if (typeof text !== "string")
     reason = `the results file could not be read (${String(text.code ?? "unknown error")})`;
   else if (text.trim() === "") reason = "the results file is empty";
@@ -55,7 +59,9 @@ export function osvSummary(text, sha) {
     }
   }
   const rows = reason ? null : vulnerable(report);
-  if (!rows) {
+  if (rows && scannerExit !== undefined && (scannerExit === "1") !== rows.length > 0)
+    reason = `the scanner's exit code ${scannerExit} does not match its results`;
+  if (!rows || reason) {
     reason ||= "the results file is not osv-scanner's JSON";
     return {
       status: "unavailable",

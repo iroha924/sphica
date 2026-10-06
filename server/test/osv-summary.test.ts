@@ -155,6 +155,27 @@ test("a cell keeps name characters and replaces the rest", () => {
   assert.match(s.markdown, /^\| `a\?\?b\?\?c\?d` \| `1` \| `npm` \| `X` \|$/m);
 });
 
+// osv-scanner exits 0 with no vulnerabilities and 1 with some; any other code, none at all, or a code that disagrees with the results
+// means the results cannot be trusted, even when its JSON reads fine
+test("the scanner's exit code must agree with its results", () => {
+  const clean = JSON.stringify({ results: [] });
+  const found = report(pkg("a", "1", ["GHSA-1"]));
+  assert.equal(osvSummary(clean, SHA, "0").status, "none");
+  assert.equal(osvSummary(found, SHA, "1").status, "found");
+  for (const [text, code, reason] of [
+    [clean, "127", "the scanner exited with 127"],
+    [clean, "128", "the scanner exited with 128"],
+    [clean, "", "the scanner did not finish"],
+    [found, "", "the scanner did not finish"],
+    [clean, "1", "exit code 1 does not match"],
+    [found, "0", "exit code 0 does not match"],
+  ] as const) {
+    const s = osvSummary(text, SHA, code);
+    assert.equal(s.status, "unavailable", `${code} ${text}`);
+    assert.match(s.markdown, new RegExp(reason));
+  }
+});
+
 test("the approval comment's line names the status", () => {
   assert.equal(
     osvLine({ status: "found", count: 2 }, SHA),
@@ -175,7 +196,7 @@ test("the approval comment's line names the status", () => {
 test("the CLI writes the summary and outputs, and exits 0 when results are missing", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-osv-summary-"));
   try {
-    const run = (file: string) => {
+    const run = (file: string, code = "1") => {
       const env = {
         PATH: process.env.PATH ?? "",
         HOME: dir,
@@ -185,7 +206,7 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
       };
       fs.rmSync(env.GITHUB_STEP_SUMMARY, { force: true });
       fs.rmSync(env.GITHUB_OUTPUT, { force: true });
-      const r = spawnSync(process.execPath, [path.join(ROOT, "scripts/osv-summary.mjs"), file, SHA], {
+      const r = spawnSync(process.execPath, [path.join(ROOT, "scripts/osv-summary.mjs"), file, SHA, code], {
         env,
         encoding: "utf8",
       });
@@ -195,10 +216,10 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
         output: fs.readFileSync(env.GITHUB_OUTPUT, "utf8"),
       };
     };
-    const missing = run(path.join(dir, "results.json"));
+    const missing = run(path.join(dir, "results.json"), "");
     assert.equal(missing.status, 0, missing.stderr);
     assert.equal(missing.summary, missing.stdout);
-    assert.match(missing.summary, /Results unavailable: the scan wrote no results file/);
+    assert.match(missing.summary, /Results unavailable: the scanner did not finish/);
     assert.equal(
       missing.output,
       `status=unavailable\ncount=0\nline=OSV scan of ${SHA}: results unavailable (see the run summary)\n`,
@@ -213,6 +234,11 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
     assert.equal(unreadable.status, 0, unreadable.stderr);
     assert.match(unreadable.summary, /Results unavailable: the results file could not be read \(EISDIR\)/);
     assert.match(unreadable.output, /^status=unavailable\n/);
+
+    fs.writeFileSync(path.join(dir, "results.json"), JSON.stringify({ results: [] }));
+    const failed = run(path.join(dir, "results.json"), "127");
+    assert.equal(failed.status, 0, failed.stderr);
+    assert.match(failed.output, /^status=unavailable\n/);
 
     const bad = spawnSync(
       process.execPath,

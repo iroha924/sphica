@@ -88,9 +88,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # osv-scanner from its release with a pinned checksum, not the action, whose image is a mutable tag. It exits 1 on findings, and
-      # it writes into a fresh directory, so a results.json in the checkout can never stand in for a scan that did not run
+      # osv-scanner from its release with a pinned checksum, not the action, whose image is a mutable tag. The summary trusts the
+      # results only with the exit code this step records (0 none, 1 found), so a scan that did not finish is never read as clean
       - name: Scan dependencies
+        id: scan
         continue-on-error: true
         env:
           OSV_SCANNER: "2.6.0"
@@ -102,14 +103,18 @@ jobs:
           curl -fsSLo osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER}/osv-scanner_linux_amd64"
           echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
-          ./osv-scanner -r --format=json --output-file="$RUNNER_TEMP/osv/results.json" "$GITHUB_WORKSPACE"
+          status=0
+          ./osv-scanner -r --format=json --output-file="$RUNNER_TEMP/osv/results.json" "$GITHUB_WORKSPACE" || status=$?
+          echo "exit=$status" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.21.0"
           package-manager-cache: false
       - name: Summarize the scan
         id: summary
-        run: node scripts/osv-summary.mjs "$RUNNER_TEMP/osv/results.json" "$(git rev-parse HEAD)"
+        env:
+          SCANNER_EXIT: ${{ steps.scan.outputs.exit }}
+        run: node scripts/osv-summary.mjs "$RUNNER_TEMP/osv/results.json" "$(git rev-parse HEAD)" "$SCANNER_EXIT"
       # checkout and setup-node have no continue-on-error, so the summary must not depend on them
       - name: Say the results are unavailable when a step failed
         id: fallback
