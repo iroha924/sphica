@@ -22,13 +22,14 @@ base: main
 
 save と同じ処理を流して必ず戻すトランザクションの助けを作り、バージョンを 0.6.37 に上げる。
 
-- [ ] T01: `inRolledBack` を足し、npm と plugin の manifest 3 つを 0.6.37 に上げる
+- [x] T01: `inRolledBack` を足し、npm と plugin の manifest 3 つを 0.6.37 に上げる
   - 種別: 追加
   - 計画: S1, S7
   - 依存: なし
   - 変更: `server/src/db.ts`, `server/test/db.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test test/db.test.ts` → pass。fn の書き込みが rollback で消える、fn が throw しても接続が返る、成功の側の rollback の失敗が throw になる、同じ接続で重ねた呼び出しが入れ子のエラーにならずに順に流れる、止めている間に別の接続はコミット済みの状態だけを読む。`bun run release:plan -- --base v0.6.36` → `plugin`
   - コミット: `feat(db): add a transaction that always rolls back, for previews (T01)`
+  - 結果: `cd server && node --test test/db.test.ts` → pass 27 / fail 0（足した 3 つ: 書き込みが戻る・throw の後に接続が使える、fn の中で commit すると「no transaction is active」で throw、重ねた preview・save・preview が順に流れ reader はコミット済みだけを読む）。biome と tsc は指摘なし。release:plan はコミットの後に流す
 
 ## P2: check が save を流す
 

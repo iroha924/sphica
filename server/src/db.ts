@@ -65,6 +65,26 @@ export async function inTransaction<T>(db: Kysely<DB>, fn: (trx: Kysely<DB>) => 
   });
 }
 
+/**
+ * Runs fn in a writing transaction like inTransaction, then always rolls back: fn sees its own writes and none of them is committed.
+ * The connection stays held until the rollback ends. A rollback that fails after fn succeeded is thrown, so no result is returned for
+ * writes that might remain.
+ */
+export async function inRolledBack<T>(db: Kysely<DB>, fn: (trx: Kysely<DB>) => Promise<T>): Promise<T> {
+  return db.connection().execute(async (c) => {
+    await sql`begin immediate`.execute(c);
+    let out: T;
+    try {
+      out = await fn(c);
+    } catch (e) {
+      await sql`rollback`.execute(c).catch(() => {});
+      throw e;
+    }
+    await sql`rollback`.execute(c);
+    return out;
+  });
+}
+
 /** The time format written to the database (ISO 8601 UTC, to milliseconds). The schema CHECK rejects anything else. */
 export const iso = (d: Date | string | number): string => {
   const t = new Date(d);
