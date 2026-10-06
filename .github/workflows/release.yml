@@ -80,7 +80,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      line: ${{ steps.summary.outputs.line }}
+      line: ${{ steps.summary.outputs.line || steps.fallback.outputs.line }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -105,6 +105,17 @@ jobs:
       - name: Summarize the scan
         id: summary
         run: node scripts/osv-summary.mjs results.json "$(git rev-parse HEAD)"
+      # checkout and setup-node have no continue-on-error, so the summary must not depend on them
+      - name: Say the results are unavailable when a step failed
+        id: fallback
+        if: failure()
+        run: |
+          {
+            echo "### OSV scan of \`$GITHUB_SHA\`"
+            echo
+            echo "Results unavailable: a step of the osv job failed. See its log."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "line=OSV scan of $GITHUB_SHA: results unavailable (see the run summary)" >> "$GITHUB_OUTPUT"
 
   prepare:
     name: "${{ github.event_name == 'push' && format('release {0}: prepare', github.ref_name) || 'dry run: prepare' }}"

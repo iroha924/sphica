@@ -103,6 +103,16 @@ release の merge の後に、main の OSV と Scorecard の run を workflow_di
   - 完了条件: 同じ偽の gh で流す → `::error::forged` の行は 0、`%` は `%25`、CR は `%0D`、LF は `%0A` になり exit 0。`actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
   - コミット: `fix(release): escape gh's output in the dispatch warning (T08)`
   - 結果: red は上のとおり 2 行を実測。直した後は 0 行で、警告は `failed 100%25%0D::error::forged`、exit 0。actionlint → exit 0。`bun run verify` → exit 0
+
+- [x] T10: osv ジョブのステップが落ちたときも、summary と出力に unavailable を残す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T07（直す対象の osv ジョブが要る）
+  - 変更: `.github/workflows/release.yml`, `.agents/skills/plugin-release/SKILL.md`
+  - red: `awk '/^  osv:/,/^  prepare:/' .github/workflows/release.yml | grep -c 'if: failure()'` → 0（checkout・setup-node が落ちると要約のステップが飛ばされ、summary に何も残らない）
+  - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。予備のステップの run を一時ディレクトリで流すと、summary に SHA と「Results unavailable」、出力に `line=` が書かれて exit 0。`bun run verify` → 成功
+  - コミット: `fix(release): leave an unavailable OSV result when a step of the job failed (T10)`
+  - 結果: red は T09 のコミットの release.yml で 0 を実測。予備のステップの run を `bash --noprofile --norc -eo pipefail` で流した → summary に `### OSV scan of` と「Results unavailable: a step of the osv job failed」、`line=OSV scan of <sha>: results unavailable (see the run summary)`、exit 0。actionlint → exit 0（SC2016 を避けて printf を echo にした）。`bun run verify` → exit 0
 ## P3: 手順書
 
 plugin-release Skill が、スキャンの結果の読み方と、dispatch した run の見届け方、失敗したときの戻し方を書く。

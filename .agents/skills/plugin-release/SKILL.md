@@ -103,7 +103,8 @@ Once, before the first release, the owner sets these up in the web UI (without t
    The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner.
    Beside `prepare`, `osv` scans the tag commit's dependencies with osv-scanner (`scripts/osv-summary.mjs`): the run summary shows the scanned SHA and
    `found` (with a table of packages and IDs), `none`, or `unavailable` (the scan left no readable results), and the PR comment carries the same one line.
-   Neither findings nor a failed scan stop the release; `publish` waits only for the scan to finish. Claude tells the owner the line when handing over the URL
+   Neither findings nor a failed scan stop the release; `publish` waits only for the scan to finish. When the job fails before it can scan
+   (the scanner image is pulled while the job is set up), the comment says how the `osv` job ended instead. Claude tells the owner the line when handing over the URL
 6. The owner approves the `npm-release` environment on the run page. `publish` then runs both checks again, compares the SHA-512 of the same tarball,
    attests the SBOM, and runs `npm publish <tgz> --tag latest --provenance` (trusted publishing, no token). The version is the default install from here
 7. `merge` merges the PR with `gh pr merge <PR> --merge --match-head-commit <head>` using the run's token. A merge by that token starts no other workflow,
