@@ -136,7 +136,10 @@ jobs:
       # record_check runs the save in a transaction it always rolls back, and waits like save for a lock another process holds
       - name: Rolled-back checks and the write lock on Windows
         working-directory: server
-        run: node --test --test-timeout=60000 --test-name-pattern="rolled-back|record_check waits" test/db.test.ts test/reconcile.test.ts
+        run: |
+          node --test --test-reporter=tap --test-timeout=60000 --test-name-pattern="rolled-back|record_check waits" test/db.test.ts test/reconcile.test.ts | tee rollback.tap
+          # A pattern that matches no test still passes, so count the four this step is for
+          grep -qx "# pass 4" rollback.tap
       # Prints how much a shell-form hook pays for starting PowerShell on each call; it never fails on the numbers
       - name: Measure hook launch directly and through PowerShell
         run: node scripts/measure-hook-launch.mjs
