@@ -217,22 +217,22 @@ test("the plugin's review_commands names the review commands; without a name in 
   const w = await world();
   try {
     fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 5;\n");
-    process.env.SPHICA_REVIEW_COMMANDS = "deploy";
+    process.env.SPHICA_REVIEW_COMMANDS = " DePloy , , Check-ENV ";
     try {
       process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = " Audit ,check-pr ";
       assert.match(await w.typed("audit"), /trace:ext-s1\/sqlite/);
       assert.match(await w.called({ skill: "Check-PR" }), /trace:ext-s1\/sqlite/);
       assert.equal(await w.typed("deploy"), "", "a name only in the environment variable is not used");
       assert.equal(await w.called({ skill: "deploy" }), "");
-      for (const empty of ["", "   ", " , ,"]) {
-        process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = empty;
-        assert.match(await w.typed("deploy"), /trace:ext-s1\/sqlite/, `option ${JSON.stringify(empty)}`);
-        assert.match(
-          await w.called({ skill: "deploy" }),
-          /trace:ext-s1\/sqlite/,
-          `option ${JSON.stringify(empty)}`,
-        );
-        assert.equal(await w.typed("audit"), "", `option ${JSON.stringify(empty)}`);
+      for (const empty of [undefined, "", "   ", " , ,"]) {
+        if (empty === undefined) delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;
+        else process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = empty;
+        const label = `option ${JSON.stringify(empty)}`;
+        for (const name of ["deploy", "check-env"]) {
+          assert.match(await w.typed(name), /trace:ext-s1\/sqlite/, `${label}, ${name}`);
+          assert.match(await w.called({ skill: name }), /trace:ext-s1\/sqlite/, `${label}, ${name}`);
+        }
+        assert.equal(await w.typed("audit"), "", label);
       }
     } finally {
       delete process.env.SPHICA_REVIEW_COMMANDS;

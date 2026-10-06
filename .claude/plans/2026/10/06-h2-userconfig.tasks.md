@@ -40,6 +40,16 @@ review コマンド名と自動 trace の停止を、hook が `CLAUDE_PLUGIN_OPT
   - コミット: `feat(deliver): stop the automatic trace when userConfig or SPHICA_AUTO_TRACE turns it off (T02)`
   - 結果: red: 実装前に `node --test --test-name-pattern="auto_trace and SPHICA" test/deliver.test.ts` が option "false" で自動 trace の依頼が出たまま（`1 earlier session ... waits to be traced`）で落ちた。実装後 `node --test test/deliver.test.ts` → 44 pass, 0 fail。`bun run verify` → exit 0
 
+- [x] T06: テストを親の env から隔離し、レビューで足りなかったケースを足す
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T01（review の option を読むテストが要る）, T02（auto_trace の option を読むテストが要る）
+  - 変更: `server/test/deliver.test.ts`, `server/test/review-bridge.test.ts`
+  - red: `cd server && CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false node --test test/deliver.test.ts` → 既定オンの既存テスト（a new interactive Claude Code session asks the agent to trace）が 1 件落ちる。`SPHICA_AUTO_TRACE=off` でも同じ
+  - 完了条件: `cd server && node --test test/deliver.test.ts test/review-bridge.test.ts` を env なし・`CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false`・`SPHICA_AUTO_TRACE=off`・`CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS=zzz` で流して、どれも全件 pass
+  - コミット: `test(deliver): isolate the auto trace settings and cover the review and auto trace fallbacks (T06)`
+  - 結果: red: 直す前に `CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false` と `SPHICA_AUTO_TRACE=off` のそれぞれで 54 pass, 1 fail（既定オンの既存テスト）。直した後は 4 通りとも 55 pass, 0 fail。`bun run verify` → exit 0
+
 ## P2: plugin の設定として出す
 
 plugin.json に userConfig を足し、対話の dialog の動きを実測して、README に設定のしかたを書く。
@@ -75,3 +85,5 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 ## 記録
 2026-10-06 / T01 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの引き上げを求めて止めた（前回の PR も最初のコードのコミットで上げていた） / T01 の欄を変えた。計画 S1 → S1, S5。変更に 4 つのバージョンのファイルを足した。完了条件に release:plan の行を足した
 2026-10-06 / T05 / バージョンの引き上げを T01 に移したので不要になった / [-] にした。S6 は T04 の計画（S4 → S4, S6）に移した
+2026-10-06 / T01 / Codex のタスクごとのレビューで P3: option 未設定のフォールバックと env 側の正規化・複数名を両経路で見ていない / 採用。T06 で直した
+2026-10-06 / T02 / Codex のタスクごとのレビューで P2: 新しい option と SPHICA_AUTO_TRACE をファイル全体で隔離しておらず、親の env で既存テストが落ちる（再現した）。P3: option が on のときの resume と subagent を見ていない / 両方採用。T06 を足して直した

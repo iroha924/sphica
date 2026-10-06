@@ -30,15 +30,20 @@ import {
   tempDb,
 } from "./temp-db.ts";
 
-const saved = { parent: process.env.SPHICA_PARENT_SESSION, entry: process.env.CLAUDE_CODE_ENTRYPOINT };
+const ISOLATED = [
+  "SPHICA_PARENT_SESSION",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "SPHICA_AUTO_TRACE",
+  "CLAUDE_PLUGIN_OPTION_AUTO_TRACE",
+] as const;
+const saved = Object.fromEntries(ISOLATED.map((k) => [k, process.env[k]]));
 before(() => {
-  // Run from Claude Code's Bash, the parent session marker would make every prompt look like a child's
-  delete process.env.SPHICA_PARENT_SESSION;
-  delete process.env.CLAUDE_CODE_ENTRYPOINT;
+  // Run from Claude Code's Bash, the parent session marker would make every prompt look like a child's,
+  // and the owner's own auto trace setting would turn the automatic trace off
+  for (const k of ISOLATED) delete process.env[k];
 });
 after(() => {
-  if (saved.parent !== undefined) process.env.SPHICA_PARENT_SESSION = saved.parent;
-  if (saved.entry !== undefined) process.env.CLAUDE_CODE_ENTRYPOINT = saved.entry;
+  for (const k of ISOLATED) if (saved[k] !== undefined) process.env[k] = saved[k];
 });
 
 function checkout(): string {
@@ -2402,6 +2407,22 @@ test("auto trace notice: the plugin's auto_trace and SPHICA_AUTO_TRACE each turn
       /earlier session/,
       "headless stays without it",
     );
+    set("CLAUDE_PLUGIN_OPTION_AUTO_TRACE", "true");
+    set("SPHICA_AUTO_TRACE", undefined);
+    process.env.CLAUDE_CODE_ENTRYPOINT = "cli";
+    for (const [event, source] of [
+      ["SessionStart", "resume"],
+      ["SubagentStart", "startup"],
+    ] as const)
+      assert.doesNotMatch(
+        await deliver(
+          { hook_event_name: event, source, session_id: crypto.randomUUID(), cwd: repo },
+          "claude-code",
+          db.file,
+        ),
+        /earlier session/,
+        `${event} ${source} stays without it`,
+      );
   } finally {
     delete process.env.CLAUDE_CODE_ENTRYPOINT;
     set("SPHICA_AUTO_TRACE", saved.env);
