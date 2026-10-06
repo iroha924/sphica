@@ -424,6 +424,37 @@ jobs:
           commit="$(gh pr view "$PULL" --repo "$GITHUB_REPOSITORY" --json mergeCommit --jq .mergeCommit.oid)"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
+  # The token's merge starts no push run, so start main's OSV and Scorecard runs here (a dispatch by the token does start them).
+  # npm and the merge are done by now, so a failed dispatch only warns; Claude watches the runs this summary lists
+  refresh-scans:
+    name: refresh scans
+    needs: merge
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - name: Start the OSV and Scorecard runs on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "### Scans started on main" >> "$GITHUB_STEP_SUMMARY"
+          for workflow in osv-scanner.yml scorecard.yml; do
+            if out="$(gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main 2>&1)"; then
+              url="$(grep -Eo 'https://[^[:space:]]+/actions/runs/[0-9]+' <<< "$out" | head -n 1 || true)"
+              line="- $workflow: ${url:-dispatched; run URL not returned}"
+            else
+              echo "::warning::could not dispatch $workflow on main: ${out//$'\n'/ }"
+              line="- $workflow: dispatch failed; start it with gh workflow run $workflow --ref main"
+            fi
+            echo "$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+          done
+
   finish:
     name: finish
     needs: [prepare, merge]

@@ -54,13 +54,14 @@ base: main
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
 
-- [ ] T03: osv-scanner.yml と scorecard.yml に workflow_dispatch を足し、release.yml に refresh-scans を足す
+- [x] T03: osv-scanner.yml と scorecard.yml に workflow_dispatch を足し、release.yml に refresh-scans を足す
   - 種別: 追加
   - 計画: S2
   - 依存: なし
   - 変更: `.github/workflows/osv-scanner.yml`, `.github/workflows/scorecard.yml`, `.github/workflows/release.yml`
   - 完了条件: `actionlint .github/workflows/release.yml .github/workflows/osv-scanner.yml .github/workflows/scorecard.yml` → 出力なし。`bun run verify` → 成功
   - コミット: `ci(release): dispatch OSV and Scorecard on main after the release merge (T03)`
+  - 結果: `actionlint` の 3 ファイル → 出力なし（exit 0）。`bun run verify` → exit 0。refresh-scans の run の中身を偽の gh を PATH の先頭に置いて `bash -eo pipefail` で流した: URL が返る場合は URL、失敗は `::warning::` と「dispatch failed」の行、URL が返らない場合は「dispatched; run URL not returned」になり、どれも exit 0
 
 ## P3: 手順書
 
