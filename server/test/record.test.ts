@@ -9,7 +9,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { locate, locateIn, masksSymbol, masksSymbolIn, readRepoText } from "../src/anchors.ts";
 import { inTransaction } from "../src/db.ts";
-import { beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
+import { beginGlean, beginTrace, checkText, contextText, saveText } from "../src/extract.ts";
 import { checkGlean } from "../src/glean.ts";
 import { readUnit } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
@@ -43,7 +43,7 @@ import {
   sessionEdits,
   sessionSources,
 } from "../src/trace.ts";
-import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
+import { at, dump, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const now = at("2026-09-27T00:00:00Z");
 
@@ -763,21 +763,17 @@ test("supersedes retires the old record with evidence, and conflicts link both",
       ...extra,
     });
     await save(db, target(p), { units: [unit("sqlite", a, "SQLite にする。")] });
-    // Two successors of one record in a batch would leave both active as its replacement
-    const twice = await inTransaction(db.ingest, (trx) =>
-      checkRecord(trx, target(p), {
+    // Two successors of one record in a batch would leave both active as its replacement: the save refuses and writes neither
+    await assert.rejects(
+      save(db, target(p), {
         units: [
           unit("pg1", b, "やっぱり Postgres に移す。", { supersedes: "trace:ext-s1/sqlite" }),
           unit("pg2", b, "やっぱり Postgres に移す。", { supersedes: "trace:ext-s1/sqlite" }),
         ],
       }),
+      /trace:ext-s1\/pg2: another record in this save already supersedes trace:ext-s1\/sqlite/,
     );
-    assert.ok(
-      twice.errors.some((e) =>
-        /pg2: another record in this save already supersedes trace:ext-s1\/sqlite/.test(e),
-      ),
-      twice.errors.join("\n"),
-    );
+    assert.equal(lifecycle(db, "trace:ext-s1/pg1"), undefined);
     const { saved } = await save(db, target(p), {
       units: [unit("postgres", b, "やっぱり Postgres に移す。", { supersedes: "trace:ext-s1/sqlite" })],
     });
@@ -2497,7 +2493,7 @@ test("successor place: an implementation that cannot become active takes no plac
   }
 });
 
-test("successor place: glean's check refuses adopting a successor into a place another holds, as its save does", async () => {
+test("successor place: glean's check and save refuse adopting a successor into a place another holds, and withdrawing the holder frees it", async () => {
   const db = tempDb();
   try {
     const p = project(db);
@@ -2530,14 +2526,6 @@ test("successor place: glean's check refuses adopting a successor into a place a
     const revision = Number(
       db.owner.prepare("select revision from unit where key = 'trace:ext-s1/waiting'").get()?.revision,
     );
-    const gleaned: Target = {
-      projectId: p,
-      origin: "glean",
-      prefix: "glean:",
-      sessionId: "s1",
-      root: null,
-      sources: null,
-    };
     const adopt = {
       op: "adopt",
       unit: "trace:ext-s1/waiting",
@@ -2545,16 +2533,19 @@ test("successor place: glean's check refuses adopting a successor into a place a
       source: `s${m}`,
       quote: "Adopt both.",
     };
-    const refused = await checkGlean(db.ingest, gleaned, { units: [], ops: [adopt] });
-    assert.match(
-      refused.errors.join("\n"),
-      /trace:ext-s1\/old already has a successor, trace:ext-s1\/holder \(in effect\)/,
-    );
+    const refusal =
+      /trace:ext-s1\/waiting: trace:ext-s1\/old already has a successor, trace:ext-s1\/holder \(in effect\)/;
+    const refused = await beginGlean(db.ingest, p, "s1");
+    const before = dump(db);
+    const checked = await checkText(db.ingest, refused, p, null, { ops: [adopt] });
+    assert.equal(checked.ok, false);
+    assert.match(checked.text, refusal);
+    await assert.rejects(saveText(db.ingest, refused, p, null, { ops: [adopt] }), refusal);
+    assert.deepEqual(dump(db), before);
     const holderRevision = Number(
       db.owner.prepare("select revision from unit where key = 'trace:ext-s1/holder'").get()?.revision,
     );
-    const freed = await checkGlean(db.ingest, gleaned, {
-      units: [],
+    const freed = await checkText(db.ingest, await beginGlean(db.ingest, p, "s1"), p, null, {
       ops: [
         {
           op: "withdraw",
@@ -2566,7 +2557,8 @@ test("successor place: glean's check refuses adopting a successor into a place a
         adopt,
       ],
     });
-    assert.deepEqual(freed.errors, []);
+    assert.equal(freed.ok, true, freed.text);
+    assert.match(freed.text, /✓ would: trace:ext-s1\/waiting: active/);
   } finally {
     await db.done();
   }
@@ -2769,6 +2761,233 @@ test("owner adoption: words the owner quotes inline from someone else are not th
     assert.deepEqual(
       ["inline", "said"].map((k) => state(db, `trace:ext-s1/${k}`)?.lifecycle),
       ["candidate", "active"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+// check runs the save and rolls it back, so the two give one answer from the judge, and check leaves nothing behind
+const lifecycle = (db: TempDb, key: string) =>
+  (db.owner.prepare("select lifecycle from unit where key = ?").get(key) as { lifecycle: string } | undefined)
+    ?.lifecycle;
+const revision = (db: TempDb, key: string) =>
+  Number(
+    (db.owner.prepare("select revision from unit where key = ?").get(key) as { revision: number }).revision,
+  );
+const ownerDecided = (key: string, source: number, quote: string, adopt: boolean, extra = {}) => ({
+  key,
+  kind: "decision",
+  stance: "do",
+  text: quote,
+  evidence: [{ source: `s${source}`, quote, role: "states" }],
+  ...(adopt ? { adoption: [{ source: `s${source}`, quote }] } : {}),
+  ...extra,
+});
+/** Checks then saves the same record on one run; check must leave every table as it found it */
+async function checkThenSave(db: TempDb, run: string, p: number, record: unknown) {
+  const before = dump(db);
+  const checked = await checkText(db.ingest, run, p, null, record);
+  assert.deepEqual(dump(db), before);
+  const saved = await saveText(db.ingest, run, p, null, record).then(
+    (text) => ({ ok: true, text }),
+    (e: Error) => ({ ok: false, text: e.message }),
+  );
+  return { checked, saved };
+}
+
+for (const taken of ["adoption", "evidence"] as const)
+  test(`check and save agree: glean adopts a successor while the same batch retracts the holder's ${taken}`, async () => {
+    const db = tempDb();
+    try {
+      const p = project(db);
+      const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+      const b = message(db, p, { id: "m2", text: "Postgres も候補。" });
+      const c = message(db, p, { id: "m3", text: "DuckDB に移す。" });
+      await save(db, target(p), { units: [ownerDecided("sqlite", a, "SQLite にする。", true)] });
+      await save(db, target(p), {
+        units: [
+          ownerDecided("postgres", b, "Postgres も候補。", false, { supersedes: "trace:ext-s1/sqlite" }),
+        ],
+      });
+      await save(db, target(p), {
+        units: [ownerDecided("duckdb", c, "DuckDB に移す。", true, { supersedes: "trace:ext-s1/sqlite" })],
+      });
+      assert.equal(lifecycle(db, "trace:ext-s1/duckdb"), "active");
+      const o = message(db, p, { id: "o1", text: "DuckDB はやめる。Postgres にする。", session: "g1" });
+      const run = await beginGlean(db.ingest, p, "g1");
+      const reason = { reason_source: `s${o}`, reason_quote: "DuckDB はやめる。" };
+      const record = {
+        ops: [
+          {
+            op: `retract_${taken}`,
+            unit: "trace:ext-s1/duckdb",
+            revision: revision(db, "trace:ext-s1/duckdb"),
+            source: `s${c}`,
+            ...reason,
+          },
+          {
+            op: "adopt",
+            unit: "trace:ext-s1/postgres",
+            revision: revision(db, "trace:ext-s1/postgres"),
+            source: `s${o}`,
+            quote: "Postgres にする。",
+          },
+        ],
+      };
+      const { checked, saved } = await checkThenSave(db, run, p, record);
+      assert.equal(checked.ok, true, checked.text);
+      assert.match(checked.text, /✓ would: trace:ext-s1\/postgres: active/);
+      assert.equal(saved.ok, true, saved.text);
+      assert.deepEqual(
+        ["postgres", "duckdb", "sqlite"].map((k) => lifecycle(db, `trace:ext-s1/${k}`)),
+        ["active", "candidate", "superseded"],
+      );
+    } finally {
+      await db.done();
+    }
+  });
+
+test("check and save agree: a glean implementation saved unsourced takes no place from a sourced one in the same save", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    session(db, p, "s1");
+    const first = prSource(db, p, {
+      id: "c1",
+      kind: "commit_message",
+      text: "Cache in JSON",
+      login: "kai",
+      assoc: "MEMBER",
+    });
+    const second = prSource(db, p, {
+      id: "c2",
+      kind: "commit_message",
+      text: "Cache in SQLite",
+      login: "kai",
+      assoc: "MEMBER",
+    });
+    const built = (key: string, source: number, quote: string, extra = {}) => ({
+      key,
+      kind: "implementation",
+      text: quote,
+      evidence: [{ source: `s${source}`, quote, role: "implements" }],
+      ...extra,
+    });
+    await save(db, target(p), { units: [built("json", first, "Cache in JSON")] });
+    assert.equal(lifecycle(db, "trace:ext-s1/json"), "active");
+    const o = message(db, p, { id: "o1", text: "src.ts でキャッシュを SQLite にした。", session: "g1" });
+    insert(db, "edit_observation", {
+      session_id: "g1",
+      turn_id: "t1",
+      path: "src.ts",
+      via: "tool",
+      observed_at: now,
+    });
+    const run = await beginGlean(db.ingest, p, "g1");
+    const record = {
+      units: [
+        // Only the owner's words in this session back it, so it is saved unsourced and can never stand
+        built("remembered", o, "src.ts でキャッシュを SQLite にした。", {
+          anchors: [{ path: "src.ts", role: "evidence" }],
+          supersedes: "trace:ext-s1/json",
+        }),
+        built("sqlite", second, "Cache in SQLite", { supersedes: "trace:ext-s1/json" }),
+      ],
+    };
+    const { checked, saved } = await checkThenSave(db, run, p, record);
+    assert.equal(checked.ok, true, checked.text);
+    assert.match(checked.text, /✓ would be active: glean:sqlite/);
+    assert.match(checked.text, /✓ would be superseded: trace:ext-s1\/json/);
+    assert.equal(saved.ok, true, saved.text);
+    assert.deepEqual(
+      ["glean:sqlite", "glean:remembered", "trace:ext-s1/json"].map((k) => lifecycle(db, k)),
+      ["active", "candidate", "superseded"],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("check and save agree: two glean adoptions into one place are refused by name, and nothing is written", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const b = message(db, p, { id: "m2", text: "Postgres も候補。" });
+    const c = message(db, p, { id: "m3", text: "DuckDB も候補。" });
+    await save(db, target(p), { units: [ownerDecided("sqlite", a, "SQLite にする。", true)] });
+    await save(db, target(p), {
+      units: [
+        ownerDecided("postgres", b, "Postgres も候補。", false, { supersedes: "trace:ext-s1/sqlite" }),
+        ownerDecided("duckdb", c, "DuckDB も候補。", false, { supersedes: "trace:ext-s1/sqlite" }),
+      ],
+    });
+    const o = message(db, p, { id: "o1", text: "Postgres にする。DuckDB にする。", session: "g1" });
+    const run = await beginGlean(db.ingest, p, "g1");
+    const adopt = (key: string, quote: string) => ({
+      op: "adopt",
+      unit: `trace:ext-s1/${key}`,
+      revision: revision(db, `trace:ext-s1/${key}`),
+      source: `s${o}`,
+      quote,
+    });
+    const record = { ops: [adopt("postgres", "Postgres にする。"), adopt("duckdb", "DuckDB にする。")] };
+    const before = dump(db);
+    const { checked, saved } = await checkThenSave(db, run, p, record);
+    const refusal =
+      /trace:ext-s1\/duckdb: another record in this save already supersedes trace:ext-s1\/sqlite/;
+    assert.equal(checked.ok, false);
+    assert.match(checked.text, refusal);
+    assert.doesNotMatch(checked.text, /would/);
+    assert.equal(saved.ok, false);
+    assert.match(saved.text, refusal);
+    assert.deepEqual(dump(db), before);
+  } finally {
+    await db.done();
+  }
+});
+
+test("check and save agree: two successors of a quarantined record both wait, and neither is refused", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const a = message(db, p, { id: "m1", text: "SQLite にする。" });
+    const b = message(db, p, { id: "m2", text: "Postgres に移す。DuckDB に移す。" });
+    await save(db, target(p), {
+      units: [
+        {
+          ...ownerDecided("sqlite", a, "SQLite にする。", true),
+          evidence: [{ source: `s${a}`, quote: "MySQL", role: "states" }],
+        },
+      ],
+    });
+    assert.equal(
+      (
+        db.owner.prepare("select extraction from unit where key = 'trace:ext-s1/sqlite'").get() as {
+          extraction: string;
+        }
+      ).extraction,
+      "quarantined",
+    );
+    const run = await beginTrace(db.ingest, p, "s1");
+    const record = {
+      units: [
+        ownerDecided("postgres", b, "Postgres に移す。", true, { supersedes: "trace:ext-s1/sqlite" }),
+        ownerDecided("duckdb", b, "DuckDB に移す。", true, { supersedes: "trace:ext-s1/sqlite" }),
+      ],
+    };
+    const { checked, saved } = await checkThenSave(db, run, p, record);
+    assert.equal(checked.ok, true, checked.text);
+    for (const k of ["postgres", "duckdb"])
+      assert.match(
+        checked.text,
+        new RegExp(`△ would stay a candidate: trace:ext-s1/${k}: trace:ext-s1/sqlite is quarantined`),
+      );
+    assert.equal(saved.ok, true, saved.text);
+    assert.deepEqual(
+      ["postgres", "duckdb", "sqlite"].map((k) => lifecycle(db, `trace:ext-s1/${k}`)),
+      ["candidate", "candidate", "candidate"],
     );
   } finally {
     await db.done();

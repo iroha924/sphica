@@ -416,23 +416,6 @@ export async function checkGlean(
       if (got && got.s.kind === "pr_event") errors.push(`${what}: the merge does not adopt a proposal`);
       else if (got && got.s.author_kind !== "owner" && !MAINTAINERS.has(got.s.author_association ?? ""))
         errors.push(`${what}: only the owner or a maintainer can adopt`);
-      // Save refuses an adoption into a place another successor holds; this batch withdrawing that successor frees it
-      const held = await db
-        .selectFrom("unit_link as l")
-        .innerJoin("unit_replacement as r", (j) =>
-          j.onRef("r.to_unit", "=", "l.to_unit").on("r.ended_at", "is", null),
-        )
-        .innerJoin("unit as h", "h.id", "r.from_unit")
-        .innerJoin("unit as t", "t.id", "l.to_unit")
-        .where("l.from_unit", "=", u.id)
-        .where("l.kind", "=", "supersedes")
-        .where("r.from_unit", "!=", u.id)
-        .select(["h.key as holder", "t.key as replaced"])
-        .executeTakeFirst();
-      if (held && !parsed.data.ops.some((o) => o.op === "withdraw" && o.unit === held.holder))
-        errors.push(
-          `${what}: ${held.replaced} already has a successor, ${held.holder} (in effect); withdraw it first, or supersede it instead`,
-        );
     }
     if (op.op === "anchor" && !repoPath(op.path))
       errors.push(`${what}: the path is not inside the repository`);
@@ -889,17 +872,10 @@ export async function saveGlean(
   const settled = await settleSaved(trx, runId, units, {
     seeds: [...touched.keys(), ...withdraw.keys()],
     withdraw,
+    adopted,
   });
   for (const id of settled.redundant)
     changed.push(`${settled.keys.get(id)}: superseded by a record of this save, so not withdrawn`);
-  // An owner's adoption added here into a place another successor holds is refused by name, as a save with it would be
-  // As do new records of this save the owner adopted: check sees each alone, judging sees them race
-  for (const w of units.written) if (w.adopted) adopted.add(w.id);
-  for (const [id, [to, holder]] of settled.held)
-    if (adopted.has(id))
-      throw new Error(
-        `${settled.keys.get(id)}: ${settled.keys.get(to)} already has a successor, ${settled.keys.get(holder)} (in effect); withdraw it first, or supersede it instead`,
-      );
   const written = new Set(units.written.map((w) => w.id));
   for (const ch of settled.changes) {
     if (written.has(ch.id)) continue;

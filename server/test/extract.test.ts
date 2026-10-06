@@ -2917,7 +2917,7 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
           },
         ],
       }),
-      /already has a successor/,
+      /glean:duck: another record in this save already supersedes trace:ext-s1\/storage/,
     );
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
   } finally {
