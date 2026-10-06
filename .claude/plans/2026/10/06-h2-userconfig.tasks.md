@@ -46,7 +46,7 @@ review コマンド名と自動 trace の停止を、hook が `CLAUDE_PLUGIN_OPT
   - 依存: T01（review の option を読むテストが要る）, T02（auto_trace の option を読むテストが要る）
   - 変更: `server/test/deliver.test.ts`, `server/test/review-bridge.test.ts`
   - red: `cd server && CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false node --test test/deliver.test.ts` → 既定オンの既存テスト（a new interactive Claude Code session asks the agent to trace）が 1 件落ちる。`SPHICA_AUTO_TRACE=off` でも同じ
-  - 完了条件: `cd server && node --test test/deliver.test.ts test/review-bridge.test.ts` を env なし・`CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false`・`SPHICA_AUTO_TRACE=off`・`CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS=zzz` で流して、どれも全件 pass
+  - 完了条件: `cd server && node --test test/deliver.test.ts test/review-bridge.test.ts` → env なし・`CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false`・`SPHICA_AUTO_TRACE=off`・`CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS=zzz` のどれを付けて流しても全件 pass
   - コミット: `test(deliver): isolate the auto trace settings and cover the review and auto trace fallbacks (T06)`
   - 結果: red: 直す前に `CLAUDE_PLUGIN_OPTION_AUTO_TRACE=false` と `SPHICA_AUTO_TRACE=off` のそれぞれで 54 pass, 1 fail（既定オンの既存テスト）。直した後は 4 通りとも 55 pass, 0 fail。`bun run verify` → exit 0
 
@@ -62,19 +62,19 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
   - 完了条件: `claude plugin validate plugin` → `Validation passed`。`bun run verify` → exit 0。2.1.291 の対話（一時の CLAUDE_CONFIG_DIR とローカルの marketplace）で、新規と更新のそれぞれ、dialog を確定した後と取消した後の plugin の有効状態・hook・既存の env の効き方を結果欄に書く。既存の設定が消えるか設定を終えられないなら、ここで止めて持ち主に戻す
   - コミット: `feat(plugin): declare review_commands and auto_trace as userConfig (T03)`
   - 結果: `claude plugin validate plugin` → `Validation passed`。`bun run verify` → exit 0
-  - 結果: 実測は 2.1.291、一時の HOME と CLAUDE_CONFIG_DIR、ローカルの marketplace（directory source）、ダミーの API キー、userConfig の無い 0.0.1 と同じ形の userConfig を持つ 0.0.2 の probe plugin（SessionStart の exec form hook が `CLAUDE_PLUGIN_OPTION_*` と `SPHICA_*` を書き出す）、expect で対話を操作。settings.json の env に `SPHICA_AUTO_TRACE=off`（と `SPHICA_REVIEW_COMMANDS=deploy`）を置いた
-  - 結果: 新規（CLI の `claude plugin install`）: dialog は出ず「2 userConfig options not yet set」と出るだけ。plugin は有効、対話で起動しても dialog は出ず hook が走り、env はそのまま届く。`CLAUDE_PLUGIN_OPTION_*` は無い
-  - 結果: 更新（0.0.1 を入れて marketplace を 0.0.2 にし `claude plugin update`）: dialog は出ない。plugin は有効のまま、hook は 0.0.2 で走り、env はそのまま届く
-  - 結果: 新規（対話の `/plugin install`）: インストールの後に「Configure uctest」の dialog が出る。取消（Esc）: 「Installed uctest. Plugin is now active.」、plugin は有効、pluginConfigs は無し、env は残る。確定（空と default のまま Save configuration）: 「Installed and configured uctest.」、pluginConfigs は `{"auto_trace": true}` だけ（空の review_commands は保存されない）、次の起動の hook に `CLAUDE_PLUGIN_OPTION_AUTO_TRACE="true"` と env の `SPHICA_AUTO_TRACE=off` が両方届く（どちらかが off で止める読み方なので止まったまま）
-  - 結果: どの経路でも既存の設定は消えず、設定を終えられないことも無かったので release へ進める
+  - 結果: `claude plugin install uctest@local` → dialog は出ず「2 userConfig options not yet set」と出るだけ。expect で対話を起動しても dialog は出ず、hook が走り env はそのまま届き、`CLAUDE_PLUGIN_OPTION_*` は無い（2.1.291、一時の HOME と CLAUDE_CONFIG_DIR、ローカルの marketplace、userConfig を持つ probe plugin、settings.json の env に `SPHICA_AUTO_TRACE=off` と `SPHICA_REVIEW_COMMANDS=deploy`）
+  - 結果: `claude plugin update uctest@local` → userConfig の無い 0.0.1 から 0.0.2 への更新で dialog は出ない。plugin は有効のまま、hook は 0.0.2 で走り、env はそのまま届く
+  - 結果: `/plugin install uctest@local` → 対話で出た Configure の dialog を Esc で取消すと「Installed uctest. Plugin is now active.」、plugin は有効、pluginConfigs は無し、env は残る
+  - 結果: `/plugin install uctest@local` → 対話で出た Configure の dialog を空と default のまま Save configuration で確定すると「Installed and configured uctest.」、pluginConfigs は `{"auto_trace": true}` だけ、次の起動の hook に `CLAUDE_PLUGIN_OPTION_AUTO_TRACE="true"` と env の `SPHICA_AUTO_TRACE=off` が両方届く（どちらかが off で止める読み方なので止まったまま）。どの経路でも既存の設定は消えず、設定を終えられないことも無かったので release へ進める
 
-- [ ] T04: README.md と README.ja.md に /config での設定と env との関係を書く
+- [x] T04: README.md と README.ja.md に /config での設定と env との関係を書く
   - 種別: 変更
   - 計画: S4, S6
   - 依存: T03（dialog の実測で、README に書いてよい操作が決まる）
   - 変更: `README.md`, `README.ja.md`
   - 完了条件: `bun run verify:ai` → exit 0。`rg -n "review_commands|auto_trace|2\.1\.269" README.md README.ja.md` → 両ファイルの自動 trace と review の段落に出る
-  - コミット: `docs(readme): describe the review_commands and auto_trace plugin settings`
+  - コミット: `docs(readme): describe the review_commands and auto_trace plugin settings (T04)`
+  - 結果: `bun run verify:ai` → exit 0（verify に含まれる）。`rg -n "review_commands|auto_trace|2\.1\.269" README.md README.ja.md` → README.md:23・115・116、README.ja.md:23・113・114 に出る。`bun run verify` → exit 0。T03 の実測で取消でも plugin は有効のままだったので、README には /config と env の書き方だけを書き、dialog の操作は書いていない
 
 ## P3: 0.6.38 として出す
 
@@ -93,3 +93,6 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 2026-10-06 / T05 / バージョンの引き上げを T01 に移したので不要になった / [-] にした。S6 は T04 の計画（S4 → S4, S6）に移した
 2026-10-06 / T01 / Codex のタスクごとのレビューで P3: option 未設定のフォールバックと env 側の正規化・複数名を両経路で見ていない / 採用。T06 で直した
 2026-10-06 / T02 / Codex のタスクごとのレビューで P2: 新しい option と SPHICA_AUTO_TRACE をファイル全体で隔離しておらず、親の env で既存テストが落ちる（再現した）。P3: option が on のときの resume と subagent を見ていない / 両方採用。T06 を足して直した
+2026-10-06 / T06 / 完了条件が「`<command>` → <期待>」の書式でなく tasks の検査に落ちていた（T06 のコミットで見落とした） / 中身は変えずに書式だけを直した
+2026-10-06 / T03 / Codex のタスクごとのレビュー: 指摘なし / なし
+2026-10-06 / T03 / 結果欄の実測の行が「`<command>` → <観測>」の書式でなく tasks の検査に落ちていた / 中身は変えずに書式だけを直した
