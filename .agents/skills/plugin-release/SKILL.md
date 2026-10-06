@@ -61,7 +61,7 @@ Claude runs every other command exactly as written in the steps below.
 
 | Step | What the owner does | Why |
 |---|---|---|
-| 6 | Open the run from the link the run comments on the PR, read the PR (including its Release notes), and approve `npm-release` with Review deployments | The owner is the only reviewer, and the release publishes, merges, and creates the GitHub Release without asking again |
+| 6 | Open the run from the link the run comments on the PR, read the PR (including its Release notes) and the OSV scan in the run summary, and approve `npm-release` with Review deployments | The owner is the only reviewer, and the release publishes, merges, and creates the GitHub Release without asking again |
 
 Do not merge Renovate's dependency PRs (1 a month) or lockfile maintenance PRs directly. Dependencies are package inputs, so a PR
 that does not bump the version fails CI's version gate. Pull them into a release PR, bump the version, ship it, and close the original PR after pulling it in
@@ -100,16 +100,23 @@ Once, before the first release, the owner sets these up in the web UI (without t
    that `check`, `pr-body`, and `release` succeeded on that head, and that no review thread is left open (`scripts/release-gate.mjs`), and that only the owner can approve `npm-release` (`scripts/release-env.mjs`);
    after `verify`, it runs `npm pack` and checks the result with `scripts/check-tarball.mjs` (the file list, starting outside the repository, `init` in a temporary HOME).
    It also stops when the PR has no Release notes, and records a digest of the notes the owner is about to read.
-   The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner
+   The SHA-512 appears in the job summary, and the run comments on the PR with its URL. Claude hands that URL to the owner.
+   Beside `prepare`, `osv` scans the tag commit's dependencies with osv-scanner (`scripts/osv-summary.mjs`): the run summary shows the scanned SHA and
+   `found` (with a table of packages and IDs), `none`, or `unavailable` (the scan left no readable results), and the PR comment carries the same one line.
+   Neither findings nor a failed scan stop the release; `publish` waits only for the scan to finish. Claude tells the owner the line when handing over the URL
 6. The owner approves the `npm-release` environment on the run page. `publish` then runs both checks again, compares the SHA-512 of the same tarball,
    attests the SBOM, and runs `npm publish <tgz> --tag latest --provenance` (trusted publishing, no token). The version is the default install from here
-7. `merge` merges the PR with `gh pr merge <PR> --merge --match-head-commit <head>` using the run's token. A merge by that token starts no other workflow
+7. `merge` merges the PR with `gh pr merge <PR> --merge --match-head-commit <head>` using the run's token. A merge by that token starts no other workflow,
+   so `refresh-scans` then starts `osv-scanner.yml` and `scorecard.yml` on main with `gh workflow run` (a dispatch by the token does start them)
+   and lists each run's URL in its summary. A failed dispatch only warns; the release does not fail for it
 8. `finish` runs `scripts/release-finish.mjs`. npm serves a published version a few minutes later (2 min 15 s for 0.5.4, about 6 min for 0.5.5 and 0.5.6), so it first waits up to 12 minutes for it. Then: the merge commit's tree equals the tag's (`git diff --exit-code <head> <merge commit>`), the tarball npm serves
    has the SBOM attestation from this tag (`gh attestation verify <tgz> --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom --signer-workflow iroha924/sphica/.github/workflows/release.yml --source-ref refs/tags/v<version>`),
    and npm `latest` is the version. It then creates the GitHub Release from the PR body's "Release notes" section as is, only if the notes still match the digest from step 5
    (`gh release create v<version> --verify-tag --title v<version> --notes-file <file>`; not git log, which OpenSSF Best Practices' `release_notes` does not accept) closes the issues the PR closes that are still open (a merge by the run's token does not close them), and comments the result on the PR
 9. Claude follows the run with `gh run watch <run-id> --exit-status`. When it succeeds, list npm's dist-tags, the remote tag, the global CLI, the marketplace,
-   and the Claude/Codex caches with `bun run release:status`, and confirm no step remains. Items it failed to observe show as `unknown`, not `none` or `not found`
+   and the Claude/Codex caches with `bun run release:status`, and confirm no step remains. Items it failed to observe show as `unknown`, not `none` or `not found`.
+   Then watch the two scan runs `refresh-scans` listed (`gh run view <release run-id> --log --job <refresh-scans job id>` shows the URLs) with
+   `gh run watch <id> --exit-status`. A line without a URL is reported as not observed; do not take an earlier run of the same workflow in its place
 
 **Do not re-tag the same `v<version>`.** A published version can never be published again, and provenance's references could no longer be followed.
 
@@ -124,6 +131,8 @@ When a job fails, `report-failure` comments on the PR with the failed jobs and w
   then rerun the failed job with `gh run rerun <run-id> --failed` (creating the Release is skipped when it exists),
   or run the failed check by hand with the commands in step 8
 - Do not rerun `publish` after it succeeded
+- `refresh-scans` warned that a dispatch failed, or a scan run it started failed: npm and the merge are done, so nothing is released again.
+  Start the scan on main by hand with `gh workflow run <osv-scanner.yml or scorecard.yml> --repo iroha924/sphica --ref main` and watch that run
 
 So that the marketplace never points to an unpublished version, the run publishes before it merges (steps 6 then 7).
 

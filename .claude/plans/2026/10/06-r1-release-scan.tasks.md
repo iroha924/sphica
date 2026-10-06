@@ -87,13 +87,14 @@ release の merge の後に、main の OSV と Scorecard の run を workflow_di
 
 plugin-release Skill が、スキャンの結果の読み方と、dispatch した run の見届け方、失敗したときの戻し方を書く。
 
-- [ ] T04: plugin-release Skill の 5・7〜9 段と失敗からの戻し方を直す
+- [x] T04: plugin-release Skill の 5・7〜9 段と失敗からの戻し方を直す
   - 種別: 変更
   - 計画: S3
   - 依存: T02（5 段目が osv ジョブを書く）, T03（7〜9 段目が refresh-scans を書く）
   - 変更: `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run verify:ai` → 成功
   - コミット: `docs(release): describe the pre-approval scan and the scans after the merge (T04)`
+  - 結果: `bun run verify:ai` → exit 0（AI config と lychee のリンク検査 0 Errors）。5 段目に osv と 3 つの状態、6 段目（持ち主の表と本文）に summary のスキャンを読むこと、7 段目に refresh-scans、9 段目に 2 本の run の見届け、失敗の節に手での dispatch を足した
 
 ## 記録
 
