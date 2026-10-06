@@ -577,7 +577,8 @@ const poll = setInterval(() => {
     holder.stdout.on("data", (b: Buffer) => {
       out += b.toString();
     });
-    const exited = new Promise<number | null>((resolve) => holder.on("exit", resolve));
+    // close, not exit: on Windows exit can come before the last of the holder's output has been read
+    const exited = new Promise<number | null>((resolve) => holder.on("close", resolve));
     try {
       await new Promise<void>((resolve, reject) => {
         holder.stdout.on("data", () => out.includes("held\n") && resolve());
