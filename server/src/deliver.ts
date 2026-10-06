@@ -580,7 +580,7 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
   };
 }
 
-/** SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
+/** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
 const AUTO_TRACE_OFF = new Set(["off", "0", "false", "no"]);
 
 /** Sphica's own words asking the agent to trace on its own, never taken from a record */
@@ -981,7 +981,10 @@ export async function deliver(
                       name === "SessionStart" &&
                       input.source === "startup" &&
                       process.env.CLAUDE_CODE_ENTRYPOINT === "cli" &&
-                      !AUTO_TRACE_OFF.has((process.env.SPHICA_AUTO_TRACE ?? "").trim().toLowerCase())
+                      // Either the plugin's auto_trace setting or the environment variable turning it off keeps it off
+                      ![process.env.CLAUDE_PLUGIN_OPTION_AUTO_TRACE, process.env.SPHICA_AUTO_TRACE].some(
+                        (v) => AUTO_TRACE_OFF.has((v ?? "").trim().toLowerCase()),
+                      )
                         ? session
                         : null,
                     // A subagent's start is never the owner's, even when the host leaves out its agent id

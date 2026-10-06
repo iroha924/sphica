@@ -33,10 +33,14 @@ export function reviewCall(input: ReviewInput): { name: string; args: string } |
   if (typeof name !== "string" || !NAME.test(name)) return null;
   const lower = name.toLowerCase();
   if (lower === "sphica:review") return null;
-  const named = (process.env.SPHICA_REVIEW_COMMANDS ?? "")
-    .split(",")
-    .map((n) => n.trim().toLowerCase())
-    .filter(Boolean);
+  const names = (list: string | undefined) =>
+    (list ?? "")
+      .split(",")
+      .map((n) => n.trim().toLowerCase())
+      .filter((n) => NAME.test(n));
+  // The plugin's review_commands setting (Claude Code exports only a saved value); without a valid command name in it, the environment variable
+  const option = names(process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS);
+  const named = option.length > 0 ? option : names(process.env.SPHICA_REVIEW_COMMANDS);
   if (!named.includes(lower) && !lower.includes("review")) return null;
   return { name, args: typeof args === "string" ? args.slice(0, 1000) : "" };
 }
