@@ -21,6 +21,7 @@ import {
   at,
   hash,
   insert,
+  manyAdopted,
   message,
   plan,
   project,
@@ -2558,6 +2559,36 @@ test("prompt delivery keeps its order, which anchor or option it names, and what
       units: [decided("against", m3, "Drop alefFn.", { conflicts: ["trace:ext-s1/two-anchors"] })],
     });
     assert.equal(await prompt("zetaFn を直す"), "", "a record in an unresolved conflict is held back");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("prompt delivery still names a record when 32,767 records are deliverable, past SQLite's limit on bound values", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const n = 32_767;
+    manyAdopted(db, p, n, (i) => ({
+      key: `trace:ext-s1/r${i}`,
+      kind: "constraint",
+      stance: "do",
+      ...(i === n - 1 ? { anchor: { path: "src/last.ts", symbol: "lastOfAll" } } : {}),
+    }));
+    const deliverableCount = db.owner
+      .prepare(
+        "select count(*) as n from unit where project_id = ? and lifecycle = 'active' and extraction = 'supported' and unsourced = 0",
+      )
+      .get(p)?.n;
+    assert.equal(deliverableCount, n);
+    const text = await deliver(
+      { session_id: "sess", cwd: repo, hook_event_name: "UserPromptSubmit", prompt: "lastOfAll を直したい" },
+      "claude-code",
+      db.file,
+    );
+    assert.match(text, new RegExp(`trace:ext-s1/r${n - 1} .*\\[names lastOfAll\\]`));
   } finally {
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });

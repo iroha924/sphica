@@ -12,7 +12,7 @@ import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
 import { branchOf, type HookInput, isOwnerTurn, readInput } from "./capture.ts";
-import { dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
+import { byUnit, dbFile, inTransaction, iso, openReader, type Reads } from "./db.ts";
 import type { DB, Delivery } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
 import { type Host, sessionId } from "./knowledge.ts";
@@ -508,48 +508,69 @@ function pathNamed(prompt: string, root: string, rel: string): boolean {
   ).test(prompt);
 }
 
+/** f with its answer kept per argument, so a string many records share is matched against the prompt once */
+function once<T>(f: (k: string) => T): (k: string) => T {
+  const seen = new Map<string, T>();
+  return (k) => {
+    if (!seen.has(k)) seen.set(k, f(k));
+    return seen.get(k) as T;
+  };
+}
+
 /** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
 async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
+  // Building a Unicode-class pattern costs far more than the match, so only a word the text contains gets one
   const word = (w: string, s: string) =>
+    s.includes(w) &&
     new RegExp(
       `(?<![\\p{L}\\p{N}_$])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_$])`,
       "u",
     ).test(s);
   // A symbol that is also a plain word (open, save) is named only when written as code: followed by ( or inside backticks
-  const named = (symbol: string) =>
-    symbol.length >= 3 &&
-    (/[^a-z]/.test(symbol)
-      ? word(symbol, text)
-      : text.includes(`${symbol}(`) || text.includes(`\`${symbol}\``));
+  const named = once(
+    (symbol: string) =>
+      symbol.length >= 3 &&
+      (/[^a-z]/.test(symbol)
+        ? word(symbol, text)
+        : text.includes(`${symbol}(`) || text.includes(`\`${symbol}\``)),
+  );
+  // Every form pathNamed matches holds the path itself once either separator is read as /
+  const slashed = prompt.replaceAll("\\", "/");
+  const pathIn = once((rel: string) => slashed.includes(rel) && pathNamed(prompt, root, rel));
+  const optionIn = once(
+    (option: string) => option.length >= 3 && word(option.normalize("NFKC").toLowerCase(), lower),
+  );
+  // Kind, then id: the order prompts show records in, written out rather than left to whichever index the query plan walks
   const units = await deliverable(db, projectId)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+    .orderBy("u.kind")
+    .orderBy("u.id")
     .execute();
-  const ids = units.map((u) => u.id);
-  const [anchors, options] = ids.length
-    ? await Promise.all([
-        db
-          .selectFrom("unit_anchor")
-          .select(["unit_id", "path", "symbol"])
-          .where("unit_id", "in", ids)
-          .where("retired_at", "is", null)
-          .execute(),
-        db
-          .selectFrom("unit_option")
-          .select(["unit_id", "text", "outcome"])
-          .where("unit_id", "in", ids)
-          .execute(),
-      ])
-    : [[], []];
+  // The children of the same deliverable set by subquery: a list of every id would pass SQLite's limit on bound values
+  const ids = deliverable(db, projectId).select("u.id");
+  const [anchors, options] = await Promise.all([
+    db
+      .selectFrom("unit_anchor")
+      .select(["unit_id", "path", "symbol"])
+      .where("unit_id", "in", ids)
+      .where("retired_at", "is", null)
+      .orderBy("id")
+      .execute()
+      .then(byUnit),
+    db
+      .selectFrom("unit_option")
+      .select(["unit_id", "text", "outcome"])
+      .where("unit_id", "in", ids)
+      .orderBy("id")
+      .execute()
+      .then(byUnit),
+  ]);
   const hits: { u: (typeof units)[number]; why: string }[] = [];
   for (const u of units) {
-    const a = anchors.find(
-      (x) => x.unit_id === u.id && ((x.symbol && named(x.symbol)) || pathNamed(prompt, root, x.path)),
-    );
-    const o = options.find(
-      (x) => x.unit_id === u.id && x.text.length >= 3 && word(x.text.normalize("NFKC").toLowerCase(), lower),
-    );
+    const a = anchors.get(u.id)?.find((x) => (x.symbol && named(x.symbol)) || pathIn(x.path));
+    const o = options.get(u.id)?.find((x) => optionIn(x.text));
     if (a) hits.push({ u, why: ` [names ${a.symbol && named(a.symbol) ? a.symbol : a.path}]` });
     else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
   }

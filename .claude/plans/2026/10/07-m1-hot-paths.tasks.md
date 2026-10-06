@@ -58,14 +58,17 @@ base: main
 
 プロンプト配信と review の選び出しが、記録数に比例する探し直しと、全件の id を並べる `in` をやめる。
 
-- [ ] T04: プロンプト配信の修正（32,767 件で空を返す件を含む）とバージョンの引き上げ
+- [x] T04: プロンプト配信の修正（32,767 件で空を返す件を含む）とバージョンの引き上げ
   - 種別: 修正
   - 計画: S3, S4, S8
   - 依存: T02（並びと一致を固定してから書き換える）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `server/src/deliver.ts`, `server/src/db.ts`, `server/test/deliver.test.ts`, `server/test/temp-db.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && node --test --test-name-pattern "32,767" test/deliver.test.ts` → 一致する記録があるのにプロンプト配信が空を返して落ちる
   - 完了条件: `cd server && node --test test/deliver.test.ts` → 全部通る。`node server/evals/scale/run.ts` → uniform 10,000 件のプロンプトの最大が 1,000 ms 以内
   - コミット: `fix(deliver): match prompts per unit without scanning every anchor and option, and bind no id list`
+  - 結果: red `cd server && node --test --test-name-pattern "32,767" test/deliver.test.ts` → 修正前のコードで `actual: ''` で落ちた。同じテストを 32,766 件にすると通った（上限が原因）
+  - 結果: `cd server && node --test test/deliver.test.ts` → pass 46 / fail 0
+  - 結果: `node server/evals/scale/run.ts --sizes 3000,10000 --no-stress --no-drain` → uniform 10,000 件のプロンプトの最大 133 ms・130 ms・177 ms（修正前は 3 行とも timeout）、3,000 件で最大 148 ms
 
 - [ ] T05: review の選び出しの修正（32,767 件で失敗する件を含む）
   - 種別: 修正
@@ -103,3 +106,4 @@ base: main
 
 - 2026-10-07 / T03 / review の hook の結果のテストは、review の checkout の作り方を持つ `review-bridge.test.ts` に置くほうが合う / 変更欄を `server/test/review.test.ts`, `server/test/deliver.test.ts` から `server/test/review.test.ts`, `server/test/review-bridge.test.ts` に、完了条件のファイルも同じく変えた
 - 2026-10-07 / T02 / plan の「position の順と id の順が違う選択肢」は作れない。選択肢は保存のときに配列の順で position = i + 1 として 1 文で入り（`record.ts`）、書き換えは trigger `unit_option_frozen` が止める / fixture に入れず、ここに残す
+- 2026-10-07 / T04 / 配列の探し直しをやめても、新しいプロセスでのプロンプトの時間は変わらなかった（10,000 件で timeout のまま）。支配的だったのは記録ごとに作る `\p{L}` の正規表現の組み立てで、新しいプロセスで 30,000 個作るのに 11,498 ms、`includes` なら 3 ms（実測） / 正規表現を作る前に部分文字列で振り落とす判定を足した（含まれないなら正規表現も一致しないので、一致の規則は変わらない。anchor のパスは schema の CHECK で `\` を含まない）。変更欄に `server/src/db.ts`（`byUnit` を review と共有）と `server/test/temp-db.ts`（32,767 件を入れるヘルパー）を足した

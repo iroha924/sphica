@@ -97,3 +97,14 @@ export function sqliteCode(e: unknown): number | null {
   const x = e as { code?: unknown; errcode?: unknown };
   return x?.code === "ERR_SQLITE_ERROR" && typeof x.errcode === "number" ? x.errcode & 0xff : null;
 }
+
+/** Rows grouped by their unit, keeping their order within it */
+export function byUnit<T extends { unit_id: number }>(rows: T[]): Map<number, T[]> {
+  const out = new Map<number, T[]>();
+  for (const r of rows) {
+    const list = out.get(r.unit_id);
+    if (list) list.push(r);
+    else out.set(r.unit_id, [r]);
+  }
+  return out;
+}
