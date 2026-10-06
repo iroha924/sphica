@@ -17,17 +17,20 @@ const saved = {
   parent: process.env.SPHICA_PARENT_SESSION,
   entry: process.env.CLAUDE_CODE_ENTRYPOINT,
   names: process.env.SPHICA_REVIEW_COMMANDS,
+  option: process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS,
 };
 before(() => {
   delete process.env.SPHICA_PARENT_SESSION;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   delete process.env.SPHICA_REVIEW_COMMANDS;
+  delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;
 });
 after(() => {
   for (const [k, v] of [
     ["SPHICA_PARENT_SESSION", saved.parent],
     ["CLAUDE_CODE_ENTRYPOINT", saved.entry],
     ["SPHICA_REVIEW_COMMANDS", saved.names],
+    ["CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS", saved.option],
   ] as const)
     if (v !== undefined) process.env[k] = v;
 });
@@ -204,6 +207,36 @@ test("other commands, Sphica's own review, and subagents stay quiet; SPHICA_REVI
       assert.match(await w.typed("audit"), /trace:ext-s1\/sqlite/);
     } finally {
       delete process.env.SPHICA_REVIEW_COMMANDS;
+    }
+  } finally {
+    await w.done();
+  }
+});
+
+test("the plugin's review_commands names the review commands; without a name in it, SPHICA_REVIEW_COMMANDS does", async () => {
+  const w = await world();
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 5;\n");
+    process.env.SPHICA_REVIEW_COMMANDS = "deploy";
+    try {
+      process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = " Audit ,check-pr ";
+      assert.match(await w.typed("audit"), /trace:ext-s1\/sqlite/);
+      assert.match(await w.called({ skill: "Check-PR" }), /trace:ext-s1\/sqlite/);
+      assert.equal(await w.typed("deploy"), "", "a name only in the environment variable is not used");
+      assert.equal(await w.called({ skill: "deploy" }), "");
+      for (const empty of ["", "   ", " , ,"]) {
+        process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS = empty;
+        assert.match(await w.typed("deploy"), /trace:ext-s1\/sqlite/, `option ${JSON.stringify(empty)}`);
+        assert.match(
+          await w.called({ skill: "deploy" }),
+          /trace:ext-s1\/sqlite/,
+          `option ${JSON.stringify(empty)}`,
+        );
+        assert.equal(await w.typed("audit"), "", `option ${JSON.stringify(empty)}`);
+      }
+    } finally {
+      delete process.env.SPHICA_REVIEW_COMMANDS;
+      delete process.env.CLAUDE_PLUGIN_OPTION_REVIEW_COMMANDS;
     }
   } finally {
     await w.done();

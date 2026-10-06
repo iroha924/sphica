@@ -22,13 +22,14 @@ base: main
 
 review コマンド名と自動 trace の停止を、hook が `CLAUDE_PLUGIN_OPTION_*` から読み、無ければ今の env で動く。
 
-- [ ] T01: review コマンド名を userConfig から読み、無ければ SPHICA_REVIEW_COMMANDS を使う
+- [x] T01: review コマンド名を userConfig から読み、無ければ SPHICA_REVIEW_COMMANDS を使う
   - 種別: 追加
-  - 計画: S1
+  - 計画: S1, S5
   - 依存: なし
-  - 変更: `server/src/review-bridge.ts`, `server/test/review-bridge.test.ts`
-  - 完了条件: `cd server && node --test test/review-bridge.test.ts` → 全件 pass。足した option のケースが、option を読まない今のコードでは落ちる（結果欄に red の実測を残す）
-  - コミット: `feat(review): read review command names from the plugin's userConfig, falling back to SPHICA_REVIEW_COMMANDS`
+  - 変更: `server/src/review-bridge.ts`, `server/test/review-bridge.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `cd server && node --test test/review-bridge.test.ts` → 全件 pass。足した option のケースが、option を読まない今のコードでは落ちる（結果欄に red の実測を残す）。`bun run release:plan -- --base v0.6.37` → `release kind: plugin` で、4 か所が 0.6.38
+  - コミット: `feat(review): read review command names from userConfig, falling back to the env (T01)`
+  - 結果: `bun run release:plan -- --base v0.6.37` → `release kind: plugin`、`version: npm 0.6.38 / plugin 0.6.38 / marketplace 0.6.38 / Codex 0.6.38`。red: 実装前に `node --test --test-name-pattern=review_commands test/review-bridge.test.ts` が option の `audit` で配信が空（`actual: ''`）で落ちた。実装後 `node --test test/review-bridge.test.ts` → 11 pass, 0 fail。`bun run verify` → exit 0
 
 - [ ] T02: 自動 trace を userConfig と SPHICA_AUTO_TRACE のどちらかの off で止める
   - 種別: 追加
@@ -52,7 +53,7 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 
 - [ ] T04: README.md と README.ja.md に /config での設定と env との関係を書く
   - 種別: 変更
-  - 計画: S4
+  - 計画: S4, S6
   - 依存: T03（dialog の実測で、README に書いてよい操作が決まる）
   - 変更: `README.md`, `README.ja.md`
   - 完了条件: `bun run verify:ai` → exit 0。`rg -n "review_commands|auto_trace|2\.1\.269" README.md README.ja.md` → 両ファイルの自動 trace と review の段落に出る
@@ -62,7 +63,7 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 
 バージョンを上げ、release run で #268 の確認も済ませる。
 
-- [ ] T05: npm と 3 つの manifest を 0.6.38 に上げる
+- [-] T05: npm と 3 つの manifest を 0.6.38 に上げる
   - 種別: 変更
   - 計画: S5, S6
   - 依存: T04（パッケージに入る変更が全部入ってから上げる）
@@ -71,3 +72,5 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
   - コミット: `chore(release): bump to 0.6.38`
 
 ## 記録
+2026-10-06 / T01 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの引き上げを求めて止めた（前回の PR も最初のコードのコミットで上げていた） / T01 の欄を変えた。計画 S1 → S1, S5。変更に 4 つのバージョンのファイルを足した。完了条件に release:plan の行を足した
+2026-10-06 / T05 / バージョンの引き上げを T01 に移したので不要になった / [-] にした。S6 は T04 の計画（S4 → S4, S6）に移した
