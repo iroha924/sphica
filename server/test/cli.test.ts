@@ -224,9 +224,8 @@ test("doctor as a child process shows Codex's trust in the installed hooks, and 
   }
 });
 
-// Doctor looks only directly under ~/Projects and at named projects, so a project it did not find may still be on this machine, and one
-// with two copies there is found twice; each row has to say which
-test("doctor says where it looked for a project it did not find, and lists a project's copies", () => {
+// Repositories live wherever their owner keeps them, so doctor lists what the database registered and never searches a directory for it
+test("doctor lists every registered project the same way, wherever its repository lives", () => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-")));
   const repo = (dir: string, remote: string) => {
     fs.mkdirSync(dir, { recursive: true });
@@ -234,7 +233,6 @@ test("doctor says where it looked for a project it did not find, and lists a pro
     execFileSync("git", ["-C", dir, "remote", "add", "origin", remote], { stdio: "ignore" });
     return dir;
   };
-  const projects = path.join(home, "Projects");
   const env = {
     PATH: `${signedOut}${path.delimiter}${process.env.PATH ?? ""}`,
     HOME: home,
@@ -257,19 +255,17 @@ test("doctor says where it looked for a project it did not find, and lists a pro
   };
   try {
     for (const dir of [
-      repo(path.join(projects, "found"), "https://github.com/o/found.git"),
-      repo(path.join(projects, "one"), "https://github.com/o/same.git"),
-      repo(path.join(home, "elsewhere", "gone"), "https://github.com/o/gone.git"),
+      repo(path.join(home, "Projects", "here"), "https://github.com/o/here.git"),
+      repo(path.join(home, "code", "elsewhere"), "https://github.com/o/elsewhere.git"),
     ])
       assert.match(sphica("init", "--cwd", dir), /registered/);
-    repo(path.join(projects, "two"), "git@github.com:o/same.git");
+    repo(path.join(home, "work", "copy"), "git@github.com:o/here.git");
     const out = sphica("doctor");
     const row = (name: string) =>
       out.split("\n").find((l) => l.includes(name)) ?? assert.fail(`no row for ${name}\n${out}`);
-    assert.doesNotMatch(row("o/found"), /not found|copies|not on this machine/, out);
-    assert.match(row("o/gone"), /\(not found in ~\/Projects or the named projects\)/, out);
-    assert.match(row("o/same"), /\(2 copies: ~\/Projects\/one, ~\/Projects\/two\)/, out);
-    assert.doesNotMatch(out, /not on this machine/);
+    for (const name of ["o/here", "o/elsewhere"])
+      assert.match(row(name), new RegExp(`${name}\\s+0 records$`), out);
+    assert.doesNotMatch(out.slice(out.indexOf("\n  Projects")), /not found|copies/, out);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

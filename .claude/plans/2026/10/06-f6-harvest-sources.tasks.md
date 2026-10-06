@@ -58,13 +58,15 @@ base: main
 
 doctor と README から ~/Projects の前提が消える。
 
-- [ ] T04: doctor の ~/Projects の探索と表示を消し、README の例と project.ts のコメントを直す
+- [x] T04: doctor の ~/Projects の探索と表示を消し、README の例と project.ts のコメントを直す
   - 種別: 削除
   - 計画: S4
   - 依存: なし
   - 変更: `server/src/project.ts`, `server/src/cli.ts`, `server/test/cli.test.ts`, `server/test/project.test.ts`, `README.md`, `README.ja.md`
   - 完了条件: `cd server && node --test test/cli.test.ts test/project.test.ts` → pass。子プロセスの `sphica doctor` の Projects 欄に `not found` も `copies` も出ない。`rg -n 'localRoots|projectsDir|~/Projects' server/src README.md README.ja.md plugin` → 一致なし
   - コミット: `refactor(doctor): stop looking for projects under ~/Projects (T04)`
+  - 結果: `node --test test/cli.test.ts test/project.test.ts` → 28 pass。HOME を一時ディレクトリにした子プロセスの doctor で、~/Projects の下と ~/code の下に置いた 2 つ（と別の場所の clone 1 つ）が、どちらも `o/here       0 records` の形で並び、Projects 欄に not found も copies も出なかった
+  - 結果: `rg -n 'localRoots|projectsDir|~/Projects' server/src README.md README.ja.md plugin` → 一致なし。`bun run verify` → 0
 
 ## P3: 片付け
 
@@ -81,3 +83,4 @@ doctor と README から ~/Projects の前提が消える。
 ## 記録
 - 2026-10-06 / T02 / github.test.ts が pullSources を使っていた / 変更欄に `server/test/github.test.ts` を足した（前: extract.ts, github.ts, extract.test.ts）。テストは pullSourceIds で読み直す形にした
 - 2026-10-06 / T01 / Codex のタスクごとのレビュー（207dde87）は指摘なし。Codex はファイルの DB のテストを sandbox で流せなかったので、同じテストを手元で流して 123 pass を確かめた / 対応なし
+- 2026-10-06 / T02, T03 / Codex のタスクごとのレビュー（746d34be、6d8fb33c）はどちらも指摘なし。Codex は sandbox でファイルの DB のテストと sql:reach を流せなかったので、手元の `bun run verify`（sql:reach を含む）が 0 で終わることを確かめた / 対応なし

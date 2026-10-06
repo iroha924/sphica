@@ -10,14 +10,12 @@ import { connectWriter } from "../src/db-write.ts";
 import {
   hostWorkspace,
   identify,
-  localRoots,
   nameLocal,
   normalizeKey,
   normalizeRemote,
   patchPaths,
   projectId,
   relativeTo,
-  underHome,
   writePlace,
 } from "../src/project.ts";
 import { type Child, childEnv, runUntilSignal } from "./race.ts";
@@ -176,43 +174,6 @@ test("a broken name map stops instead of being skipped, and places with a remote
     r.done();
     process.env.HOME = realHome;
     fs.rmSync(home, { recursive: true, force: true });
-  }
-});
-
-// With two clones of the same remote, the sync would silently pick whichever sorts first.
-test("does not choose when two locations share a key", () => {
-  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-roots-")));
-  // Keep this machine's name map out (named projects would mix into found).
-  const realHome = process.env.HOME;
-  process.env.HOME = tmp;
-  try {
-    // Remotes differing only in case are one repository, so the two places share a key
-    for (const [n, remote] of [
-      ["one", "git@github.com:o/same.git"],
-      ["two", "https://GitHub.com/O/Same.git"],
-    ] as const) {
-      const d = path.join(tmp, n);
-      execFileSync("git", ["init", "-q", d], { stdio: "ignore" });
-      execFileSync("git", ["-C", d, "remote", "add", "origin", remote], {
-        stdio: "ignore",
-      });
-    }
-    const solo = path.join(tmp, "solo");
-    execFileSync("git", ["init", "-q", solo], { stdio: "ignore" });
-    execFileSync("git", ["-C", solo, "remote", "add", "origin", "git@github.com:o/solo.git"], {
-      stdio: "ignore",
-    });
-    const { found, ambiguous } = localRoots([tmp]);
-    assert.equal(found.get("git:github.com/o/solo"), solo);
-    assert.equal(found.has("git:github.com/o/same"), false);
-    assert.deepEqual(ambiguous.get("git:github.com/o/same")?.sort(), [
-      path.join(tmp, "one"),
-      path.join(tmp, "two"),
-    ]);
-    assert.deepEqual([...localRoots(["/no/such/dir"]).found], []);
-  } finally {
-    process.env.HOME = realHome;
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
@@ -442,14 +403,4 @@ test("a publish that fails leaves the old map, no temporary file, and no lock", 
   } finally {
     h.done();
   }
-});
-
-// Git for Windows reports a repository's root with forward slashes, while the home directory has backslashes
-test("a path under home is shown from ~ whichever separators it was written with (under home)", () => {
-  assert.equal(underHome("/Users/o/Projects/one", ["/Users/o"], path.posix), "~/Projects/one");
-  assert.equal(underHome("/Users/other/x", ["/Users/o"], path.posix), "/Users/other/x");
-  assert.equal(underHome("/Users/o2/x", ["/Users/o"], path.posix), "/Users/o2/x");
-  assert.equal(underHome("C:/Users/o/Projects/one", ["C:\\Users\\o"], path.win32), "~\\Projects\\one");
-  assert.equal(underHome("C:\\Users\\o\\Projects\\one", ["C:\\Users\\o"], path.win32), "~\\Projects\\one");
-  assert.equal(underHome("D:/Projects/one", ["C:\\Users\\o"], path.win32), "D:/Projects/one");
 });

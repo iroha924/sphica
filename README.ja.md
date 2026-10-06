@@ -73,7 +73,7 @@ Codex では `/hooks` を開き、Sphica のフックを信頼済みにしてく
 **3. リポジトリで準備する**
 
 ```bash
-cd ~/Projects/your-repo
+cd path/to/your-repo
 sphica init
 ```
 
