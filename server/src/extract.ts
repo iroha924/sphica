@@ -702,15 +702,19 @@ export async function checkText(
   const lines = [
     ...errors.map((e) => `✗ ${e}`),
     ...v.problems.map((p) => `△ ${p}`),
-    ...v.quarantine.map((q) => `△ ${q}`),
     ...(done
       ? [
           ...done.saved.active.map((k) => `✓ would be active: ${k}`),
           ...done.saved.superseded.map((k) => `✓ would be superseded: ${k}`),
           ...done.saved.candidates.map((c) => `△ would stay a candidate: ${c.key}: ${c.why}`),
+          ...done.saved.quarantined.map((q) => `△ would be quarantined: ${q}`),
+          // Judged again under the lock; glean's validation names the operation before the record, so match the end
+          ...done.saved.anchorProblems
+            .filter((a) => !v.problems.some((p) => p === a || p.endsWith(` ${a}`)))
+            .map((a) => `△ ${a}`),
           ...done.changed.map((c) => `✓ would: ${c}`),
         ]
-      : []),
+      : v.quarantine.map((q) => `△ ${q}`)),
   ];
   const summary = errors.length
     ? `✗ ${plural(errors.length, "error")}; fix the record and check again`

@@ -59,7 +59,7 @@ check が save と同じ準備・検証・書き込み・judge を流して戻�
 
 check が lock を持つ時間を測って予算に収め、acceptance の case と Skill の説明を新しい返答に合わせる。
 
-- [ ] T07: check の返答に、save の quarantined の結果と、lock の中で見直した anchor の警告を出す
+- [x] T07: check の返答に、save の quarantined の結果と、lock の中で見直した anchor の警告を出す
   - 種別: 修正
   - 計画: S2
   - 依存: T02（check が save を流している必要がある）
@@ -67,6 +67,7 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - red: `cd server && node --test --test-name-pattern="check shows what save would quarantine" test/extract.test.ts` → check の返答に `would be quarantined` の行と、lock の中で symbol が消えた anchor の警告が無い、で落ちる
   - 完了条件: `cd server && node --test test/extract.test.ts` → pass。根拠の無い記録で check が `△ would be quarantined:` を出し、lock の中で anchor のファイルが変わると check も save と同じ警告を出す。同じ警告は 2 回出ない
   - コミット: `fix(record): show quarantined records and anchors judged under the lock in record_check (T07)`
+  - 結果: red は直す前のコードで落ちた（check の返答が「will be quarantined」だけで、`would be quarantined` の行と lock の中の anchor の警告が無い）。直した後 `cd server && node --test test/extract.test.ts test/record.test.ts` → pass 102 / fail 0。`bun run verify` → 終了コード 0
 
 - [ ] T04: check の lock の中の時間を測るテストと、Windows の job の手順を足す
   - 種別: 追加

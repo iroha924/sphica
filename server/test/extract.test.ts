@@ -718,6 +718,53 @@ test("save: under the write lock files are only read again, and a file changed m
   }
 });
 
+test("check shows what save would quarantine, and anchors judged again under the lock, once each", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "openStore を見る。" });
+    // openStore leaves src.ts once the check holds the lock, after preparation judged it
+    const probe: Probe = {
+      ...PROBE,
+      read: (r, rel) => {
+        if (rel === "src.ts" && !lockFree(db.file))
+          fs.writeFileSync(path.join(root, rel), "export function closeStore() {}\n");
+        return PROBE.read(r, rel);
+      },
+    };
+    const record = {
+      units: [
+        {
+          key: "look",
+          kind: "finding",
+          text: "openStore を見る",
+          evidence: [{ source: `s${m}`, quote: "openStore を見る。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+        },
+        {
+          key: "ghost",
+          kind: "finding",
+          text: "誰も言っていない",
+          evidence: [{ source: `s${m}`, quote: "誰も言っていない", role: "states" }],
+        },
+      ],
+    };
+    const run = await beginTrace(db.ingest, p, "s1");
+    const checked = (await checkText(db.ingest, run, p, root, record, undefined, probe)).text;
+    assert.match(checked, /△ would be quarantined: trace:ext-s1\/ghost \(quote not found/);
+    assert.doesNotMatch(checked, /will be quarantined/);
+    const gone = /△ trace:ext-s1\/look: symbol "openStore" is not found in src\.ts/g;
+    assert.equal(checked.match(gone)?.length, 1, checked);
+    // Prepared after the file changed, the warning comes from validation and from the save alike: still shown once
+    const again = (await checkText(db.ingest, run, p, root, record, undefined, probe)).text;
+    assert.equal(again.match(gone)?.length, 1, again);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("save: anchor changed after check is reported by the save, without asking git under the lock", async () => {
   const db = tempDb();
   const root = repo();
