@@ -72,13 +72,14 @@ doctor と README から ~/Projects の前提が消える。
 
 終わった計画ファイルが残らない。
 
-- [ ] T05: 全タスクが終わった計画ファイルを消す
+- [x] T05: 全タスクが終わった計画ファイルを消す
   - 種別: 削除
   - 計画: S6
   - 依存: なし
   - 変更: `.claude/plans/2026/10/03-issue-210-turn-boundaries.plan.md`, `.claude/plans/2026/10/03-issue-210-turn-boundaries.tasks.md`, `.claude/plans/2026/10/03-issue-211-read-workspace.plan.md`, `.claude/plans/2026/10/03-issue-211-read-workspace.tasks.md`, `.claude/plans/2026/10/03-issue-239-eval-loop-findings.plan.md`, `.claude/plans/2026/10/03-issue-239-eval-loop-findings.tasks.md`, `.claude/plans/2026/10/04-agent-adoption.plan.md`, `.claude/plans/2026/10/04-agent-adoption.tasks.md`, `.claude/plans/2026/10/04-issue-206-delivery-experiments.plan.md`, `.claude/plans/2026/10/04-issue-206-delivery-experiments.tasks.md`, `.claude/plans/2026/10/04-issue-206-eval-base.plan.md`, `.claude/plans/2026/10/04-issue-206-eval-base.tasks.md`, `.claude/plans/2026/10/05-f1-windows-hooks.plan.md`, `.claude/plans/2026/10/05-f1-windows-hooks.tasks.md`, `.claude/plans/2026/10/05-f4-capture-recovery.plan.md`, `.claude/plans/2026/10/05-f4-capture-recovery.tasks.md`, `.claude/plans/2026/10/05-f5-bounded-mcp.plan.md`, `.claude/plans/2026/10/05-f5-bounded-mcp.tasks.md`, `.claude/plans/2026/10/05-markdown-checks.plan.md`, `.claude/plans/2026/10/05-markdown-checks.tasks.md`
   - 完了条件: `git ls-files .claude/plans` → 06-f6-harvest-sources の 2 つだけ。`bun run verify:ai` → 終了コード 0
   - コミット: `chore(plans): remove finished plans (T05)`
+  - 結果: `git ls-files .claude/plans` → 06-f6-harvest-sources の plan と tasks の 2 つだけ（消したのは 10 組 20 ファイル。どれも tasks の全項目が `[x]`）。`bun run verify:ai` → 0
 
 ## 記録
 - 2026-10-06 / T02 / github.test.ts が pullSources を使っていた / 変更欄に `server/test/github.test.ts` を足した（前: extract.ts, github.ts, extract.test.ts）。テストは pullSourceIds で読み直す形にした
