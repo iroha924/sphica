@@ -34,21 +34,23 @@ base: main
 
 直す前の並び・一致・除外を、今のコードで緑になるテストで固定する。
 
-- [ ] T02: プロンプト配信の特徴づけのテスト
+- [x] T02: プロンプト配信の特徴づけのテスト
   - 種別: 追加
   - 計画: S2
   - 依存: なし
   - 変更: `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --test --test-name-pattern "prompt delivery keeps" test/deliver.test.ts` → 今のコードで全部通る
   - コミット: `test(deliver): pin prompt delivery order, precedence, and matching before the rewrite`
+  - 結果: `cd server && node --test --test-name-pattern "prompt delivery keeps" test/deliver.test.ts` → pass 1 / fail 0（e5c7ec0e のコードのまま）。5 件の一致は constraint・constraint・decision の順で出て、id 順ではなく kind 順だった
 
-- [ ] T03: review の選び出しの特徴づけのテスト
+- [x] T03: review の選び出しの特徴づけのテスト
   - 種別: 追加
   - 計画: S2
   - 依存: なし
-  - 変更: `server/test/review.test.ts`, `server/test/deliver.test.ts`
-  - 完了条件: `cd server && node --test --test-name-pattern "review selection keeps" test/review.test.ts test/deliver.test.ts` → 今のコードで全部通る
+  - 変更: `server/test/review.test.ts`, `server/test/review-bridge.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern "review selection keeps" test/review.test.ts test/review-bridge.test.ts` → 今のコードで全部通る
   - コミット: `test(review): pin review selection and its delivery before the rewrite`
+  - 結果: `cd server && node --test --test-name-pattern "review selection keeps" test/review.test.ts test/review-bridge.test.ts` → pass 2 / fail 0（e5c7ec0e のコードのまま）
 
 ## P3: 修正
 
@@ -94,3 +96,6 @@ base: main
   - コミット: `docs(plugin-release): run the scale benchmark when changing delivery matching`
 
 ## 記録
+
+- 2026-10-07 / T03 / review の hook の結果のテストは、review の checkout の作り方を持つ `review-bridge.test.ts` に置くほうが合う / 変更欄を `server/test/review.test.ts`, `server/test/deliver.test.ts` から `server/test/review.test.ts`, `server/test/review-bridge.test.ts` に、完了条件のファイルも同じく変えた
+- 2026-10-07 / T02 / plan の「position の順と id の順が違う選択肢」は作れない。選択肢は保存のときに配列の順で position = i + 1 として 1 文で入り（`record.ts`）、書き換えは trigger `unit_option_frozen` が止める / fixture に入れず、ここに残す

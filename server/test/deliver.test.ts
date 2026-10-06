@@ -2454,3 +2454,112 @@ test("decided by an AI: the evaluation's gold lines carry the mark and the AI wo
     await db.done();
   }
 });
+
+test("prompt delivery keeps its order, which anchor or option it names, and what it never matches", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Use alphaFn. Use betaFn. Use gammaFn. Use deltaFn. Use epsFn.",
+    });
+    const named = (key: string, kind: string, quote: string, extra: Record<string, unknown> = {}) => ({
+      ...decided(key, m, quote, extra),
+      kind,
+      ...(kind === "finding" ? { stance: undefined, adoption: undefined } : {}),
+    });
+    // Saved in this order, so ids interleave the kinds: decision, constraint, finding, decision, constraint
+    await save(db, p, {
+      units: [
+        named("a-decision", "decision", "Use alphaFn.", {
+          anchors: [{ path: "src/a.ts", symbol: "alphaFn", role: "applies_to" }],
+        }),
+        named("b-constraint", "constraint", "Use betaFn.", {
+          anchors: [{ path: "src/b.ts", symbol: "betaFn", role: "applies_to" }],
+        }),
+        named("c-finding", "finding", "Use gammaFn.", {
+          anchors: [{ path: "src/c.ts", symbol: "gammaFn", role: "applies_to" }],
+        }),
+        named("d-decision", "decision", "Use deltaFn.", {
+          anchors: [{ path: "src/d.ts", symbol: "deltaFn", role: "applies_to" }],
+        }),
+        named("e-constraint", "constraint", "Use epsFn.", {
+          anchors: [{ path: "src/e.ts", symbol: "epsFn", role: "applies_to" }],
+        }),
+      ],
+    });
+    const prompt = (text: string) =>
+      deliver(
+        { session_id: "sess", cwd: repo, hook_event_name: "UserPromptSubmit", prompt: text },
+        "claude-code",
+        db.file,
+      );
+    const keys = (text: string) => [...text.matchAll(/trace:ext-s1\/([\w-]+)/g)].map((x) => x[1]);
+
+    // Five named, three shown: by kind, then in the order saved
+    assert.deepEqual(keys(await prompt("alphaFn betaFn gammaFn deltaFn epsFn を見直したい")), [
+      "b-constraint",
+      "e-constraint",
+      "a-decision",
+    ]);
+
+    const m2 = message(db, p, {
+      id: "m2",
+      text: "Keep zetaFn and alefFn. Not the legacyQueue. Keep the jobs runner. No polling loop. No busy wait.",
+    });
+    await save(db, p, {
+      units: [
+        // Two anchors named: the first one saved is the one named in the line
+        decided("two-anchors", m2, "Keep zetaFn and alefFn.", {
+          anchors: [
+            { path: "src/z.ts", symbol: "zetaFn", role: "applies_to" },
+            { path: "src/a2.ts", symbol: "alefFn", role: "applies_to" },
+          ],
+        }),
+        // An anchor and an option named: the anchor is the one named
+        decided("anchor-first", m2, "Keep the jobs runner.", {
+          anchors: [{ path: "src/jobs.ts", symbol: "runJobs", role: "applies_to" }],
+          options: [{ text: "legacyQueue", outcome: "rejected" }],
+        }),
+        // Two options named: the first one saved is the one named
+        decided("two-options", m2, "No polling loop.", {
+          stance: "dont",
+          options: [
+            { text: "polling loop", outcome: "rejected" },
+            { text: "busy wait", outcome: "rejected" },
+          ],
+        }),
+      ],
+    });
+    assert.match(await prompt("alefFn と zetaFn を直す"), /two-anchors .*\[names zetaFn\]/);
+    assert.match(await prompt("legacyQueue を runJobs から外す"), /anchor-first .*\[names runJobs\]/);
+    assert.match(
+      await prompt("a busy wait or a polling loop?"),
+      /two-options .*\[names the rejected option polling loop\]/,
+    );
+
+    // Matching: NFKC for symbols and options, either separator for paths, and no partial words or paths
+    assert.match(await prompt("ｚｅｔａＦｎ を直す"), /two-anchors/);
+    assert.match(await prompt("A Busy Wait again"), /two-options/);
+    assert.match(await prompt("src\\jobs.ts を見て"), /anchor-first .*\[names src\/jobs\.ts\]/);
+    assert.match(await prompt("src/jobs.tsを見て"), /anchor-first/, "Japanese may touch a path");
+    assert.equal(await prompt("src/jobs.tsx を見て"), "", "a longer path is another file");
+    assert.equal(await prompt("old/src/jobs.ts を見て"), "", "a path inside another path is another file");
+    assert.equal(await prompt("xzetaFn と zetaFnx"), "", "a symbol inside another word is not named");
+
+    // A retired anchor is never matched, and records in an unresolved conflict are held back
+    db.owner
+      .prepare("update unit_anchor set retired_at = ? where symbol = 'runJobs'")
+      .run(new Date().toISOString());
+    assert.equal(await prompt("runJobs を直す"), "");
+    const m3 = message(db, p, { id: "m3", text: "Drop alefFn." });
+    await save(db, p, {
+      units: [decided("against", m3, "Drop alefFn.", { conflicts: ["trace:ext-s1/two-anchors"] })],
+    });
+    assert.equal(await prompt("zetaFn を直す"), "", "a record in an unresolved conflict is held back");
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
