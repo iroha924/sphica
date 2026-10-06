@@ -43,3 +43,7 @@ test("the pre-commit bundle glob covers every shipped input (stopping locally a 
   for (const prefix of PACKAGE_PREFIXES)
     assert.ok(glob.includes(`${prefix}**`), `${prefix}** is not in the bundle glob`);
 });
+
+test("the reader of the embedded package list is a package input, since it writes into the shipped notices", () => {
+  assert.equal(releaseKind(["scripts/lib/embedded.mjs"]), "plugin");
+});

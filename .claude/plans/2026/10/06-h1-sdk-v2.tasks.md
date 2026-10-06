@@ -119,6 +119,26 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
   - 結果: red: 直す前に `cd server && node --test test/embedded.test.ts` → 足した 1 件が落ちた（6 pass, 1 fail）
   - 結果: 直した後 `cd server && node --test test/embedded.test.ts` → 7 pass。`bun run verify` → exit 0
 
+- [x] T10: scripts/lib/embedded.mjs をパッケージの入力に数える
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（embedded.mjs が要る）
+  - 変更: `scripts/lib/release-scope.mjs`, `lefthook.yml`, `server/test/release-scope.test.ts`
+  - red: `cd server && node --test test/release-scope.test.ts` → 足した `releaseKind(["scripts/lib/embedded.mjs"])` が `none` で落ちる
+  - 完了条件: `cd server && node --test test/release-scope.test.ts` → 全件 pass（pre-commit の bundle の glob が入力を覆うテストを含む）
+  - コミット: `fix(release): count the embedded package list's reader as a package input (T10)`
+  - 結果: red: 直す前に `cd server && node --test test/release-scope.test.ts` → 足したテストが `none` で落ちた（3 pass, 1 fail）
+  - 結果: 直した後 `cd server && node --test test/release-scope.test.ts` → 4 pass（lefthook の bundle の glob が入力を覆うテストも通る）。`bun run verify` → exit 0
+
+- [ ] T11: Windows の CI で、両サーバーのハンドラーが自分の返答を返したことを確かめる
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T06（Windows のループが要る）
+  - 変更: `.github/workflows/check.yml`
+  - red: 手元で同じ送り方の返答を `TypeError` の isError に書き換えて今の照合 `grep -qE '"result":.*"id":3'` → 0 で終わる（ハンドラーが落ちても通る）
+  - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし。手元で同じループを流す → 読み取りは `not in a registered project`、記録は `did not say which workspace` を見て通り、別の文言に書き換えると落ちる
+  - コミット: `ci(check): check each packed server's own reply on Windows, not just any result (T11)`
+
 ## P4: structuredContent の注記を実測に合わせる
 
 両ホストで structuredContent を持つ返答の扱いを測り、`server/src/mcp.ts` の注記を確かめた範囲に書き直す。
@@ -145,3 +165,4 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
 - 2026-10-06 / T05 / Codex のタスクごとのレビューは指摘なし（syft 1.52.0 の実出力に足して notices と一致することも確かめた）/ そのまま
 - 2026-10-06 / T08 / Codex のタスクごとのレビューで P2 が 1 件（バックスラッシュ区切りの読めない region の行が検査を素通りする。今の SDK の dist はスラッシュ区切り）/ T09 を足して直す
 - 2026-10-06 / T09 / Codex のタスクごとのレビューは指摘なし / そのまま。T03（テストだけ）と T07（注記だけ）はタスクごとのレビューを省いた
+- 2026-10-06 / 全体 / review-shipping で 3 件。F1（SDK v2 が fast-uri 3.1.0 を同梱し既知の脆弱性 9 件、0.6.38 は 3.1.8）は持ち主の判断で保留して上流を待つ。F2（Windows の照合が isError でも通る）は T11、F3（embedded.mjs がパッケージの入力でない）は T10 で直す。Codex の差分全体のレビュー（high）は指摘なし / T10・T11 を追加

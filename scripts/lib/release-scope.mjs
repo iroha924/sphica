@@ -7,6 +7,8 @@ export const EXACT_PACKAGE_INPUTS = new Set([
   "server/tsconfig.json",
   "scripts/bundle.mjs",
   "scripts/third-party-notices.mjs",
+  // Reads the embedded package list into the shipped notices
+  "scripts/lib/embedded.mjs",
   // Changing the source (such as the npm package name) changes what users install
   ".claude-plugin/marketplace.json",
   // bundle copies it to plugin/README.md, and it shows on the npm package page

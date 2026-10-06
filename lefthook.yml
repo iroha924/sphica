@@ -32,7 +32,7 @@ pre-commit:
     # reads the bundle before it is rebuilt, and passes vacuously (measured: passed 4 out of 4).
     - name: bundle
       # Matches the package inputs in release-scope.mjs (stops here a commit that changes inputs without bumping the version)
-      glob: "{server/src/**,db/**,scripts/bundle.mjs,scripts/third-party-notices.mjs,scripts/licenses/**,server/package.json,server/bun.lock,server/tsconfig.json,plugin/**,.claude-plugin/**,README.md}"
+      glob: "{server/src/**,db/**,scripts/bundle.mjs,scripts/third-party-notices.mjs,scripts/lib/embedded.mjs,scripts/licenses/**,server/package.json,server/bun.lock,server/tsconfig.json,plugin/**,.claude-plugin/**,README.md}"
       # Without set -e, the later check's 0 would cancel a failed bundle.
       run: |
         set -e
