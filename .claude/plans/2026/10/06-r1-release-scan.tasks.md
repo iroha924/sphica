@@ -100,6 +100,16 @@ base: main
   - 完了条件: `grep -n "osv-scanner-action/osv-scanner-action@" .github/workflows/release.yml` → `@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0`。`actionlint .github/workflows/release.yml` → 出力なし。PR の zizmor のアラートが閉じる
   - コミット: `fix(release): pin the OSV scanner action to the v2.6.0 tag's commit (T12)`
   - 結果: 2 つのコミットの `osv-scanner-action/action.yml` は SHA-256 が一致（`7086e772…`）。固定を a345acff に直し、actionlint → exit 0。`bun run verify` → 下のコミットの前に exit 0。zizmor のアラートは push 後の CI で確かめる
+
+- [x] T13: テストが CLI を起動するとき、一時的な HOME だけの環境にする
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象のテストが要る）
+  - 変更: `server/test/osv-summary.test.ts`
+  - red: `grep -c '\.\.\.process\.env' server/test/osv-summary.test.ts` → 1（親の `SPHICA_HOME`・`SPHICA_DB`・`HOME` をそのまま子に渡す。AGENTS.md の temp-home）
+  - 完了条件: `grep -c '\.\.\.process\.env' server/test/osv-summary.test.ts` → 0。子の環境は PATH と一時ディレクトリの HOME・USERPROFILE と GITHUB_* だけ。`SPHICA_HOME=/nonexistent SPHICA_DB=/nonexistent/x.db node --test test/osv-summary.test.ts`（server で）→ pass
+  - コミット: `fix(test): run the OSV summary CLI with a temporary HOME only (T13)`
+  - 結果: red は 1 を実測、直した後 0。`SPHICA_HOME=/nonexistent SPHICA_DB=/nonexistent/x.db node --test test/osv-summary.test.ts` → 10 件 pass
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。
@@ -156,3 +166,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 - 2026-10-06 / T09, T10 / 差分全体の Codex のレビュー: [P2] 既存のバックスラッシュの後の `|` でセルを抜けられる（GFM の描画で再現）。[P2] checkout・setup-node の失敗で要約が飛ばされ、summary に unavailable が残らない / 2 件とも採った。T09 はエスケープを足すのをやめて許す文字に絞り、T10 は failure() の予備のステップを足した
 - 2026-10-06 / T11 / 差分全体の 2 回目の Codex のレビュー: [P3] 同じ package@version が複数の lockfile にあると表の行とパッケージ数が重なる（再現つき）。ほかの指摘は無い / 採って T11 を足した。レビューは P3 だけに収まったので、差分全体の 3 回目は頼まずに PR へ進む
 - 2026-10-06 / T12 / PR #293 の CI で zizmor が「固定したハッシュとバージョンのコメントが食い違う」を code scanning に出した / 中身が同じ v2.6.0 のタグのコミットに固定し直す T12 を足した
+\n- 2026-10-06 / T13, T14 / GitHub の Codex のレビュー（PR #293 の最初の head 2db22f0）: [P1] テストの子プロセスに親の環境をそのまま渡している（temp-home）。[P2] タグのコミットに results.json があると、scanner が書く前に落ちたとき古いファイルを要約し得る。[P2] scanner の action は書き換えられるイメージのタグを動かす / 3 件とも採った。T13 は子の環境を絞る、T14 は action をやめてチェックサムを固定した osv-scanner のバイナリを $RUNNER_TEMP の新しいディレクトリへ書かせる\n

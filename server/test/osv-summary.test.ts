@@ -177,7 +177,9 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
   try {
     const run = (file: string) => {
       const env = {
-        ...process.env,
+        PATH: process.env.PATH ?? "",
+        HOME: dir,
+        USERPROFILE: dir,
         GITHUB_STEP_SUMMARY: path.join(dir, "summary.md"),
         GITHUB_OUTPUT: path.join(dir, "output"),
       };
@@ -215,7 +217,7 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
     const bad = spawnSync(
       process.execPath,
       [path.join(ROOT, "scripts/osv-summary.mjs"), "x.json", "not-a-sha"],
-      { encoding: "utf8" },
+      { env: { PATH: process.env.PATH ?? "", HOME: dir, USERPROFILE: dir }, encoding: "utf8" },
     );
     assert.notEqual(bad.status, 0);
   } finally {
