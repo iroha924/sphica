@@ -340,8 +340,9 @@ async function lockTimes(
       const run = st.run.bind(st) as (...a: SQLInputValue[]) => StatementResultingChanges;
       st.run = ((...a: SQLInputValue[]) => {
         if (text === "begin immediate") {
-          beforeBegin();
+          // Taken before beforeBegin, so nothing it lets happen can come before the ask
           [at.asked, at.askedAt] = [performance.now(), Date.now()];
+          beforeBegin();
         }
         const out = run(...a);
         if (text === "begin immediate") [at.began, at.beganAt] = [performance.now(), Date.now()];
@@ -561,6 +562,7 @@ const c = new DatabaseSync(process.argv[1]);
 c.exec("begin immediate");
 process.stdout.write("held\\n");
 const fs = require("node:fs");
+setTimeout(() => process.exit(2), 30000).unref();
 const poll = setInterval(() => {
   if (!fs.existsSync(process.argv[2])) return;
   clearInterval(poll);

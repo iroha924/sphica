@@ -136,6 +136,16 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `test(record): let the lock holder go only after the check asks for the lock (T11)`
   - 結果: red は再現スクリプトで「asked 1791259237351 released 1791259237149 ... order holds false」。直した後 `cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0。`bun run verify` → 終了コード 0
 
+- [x] T12: lock を求めた時刻を合図の前に記録し、子に待つ時間の上限を付ける
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T11（直すテストが T11 の形）
+  - 変更: `server/test/reconcile.test.ts`
+  - red: `node <scratchpad>/signal-order.mjs` → 合図を書いてから時刻を記録する形で、その間に親が 1200 ms 止まると「order holds false」
+  - 完了条件: `cd server && node --test test/reconcile.test.ts` → pass。時刻を記録してから合図を書き、子は親が lock を求めないまま 30 秒たつと終了コード 2 で終わる
+  - コミット: `test(record): time the ask before signalling the lock holder, and bound its wait (T12)`
+  - 結果: red は再現スクリプトで「asked 1791259571121 released 1791259570428 ... order holds false」。直した後 `cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0（上限のタイマーを `unref` しないと子が 30 秒残ることを一度踏み、直した）。`bun run verify` → 終了コード 0
+
 ## 記録
 2026-10-06 / T02 / 変更欄と red を直した。変更: `server/src/extract.ts`, `server/test/extract.test.ts` → 4 ファイル（`server/test/record.test.ts` は呼び出し元のテストの置き場、`server/test/temp-db.ts` は全部の表を取り出す `dump`）。red: 3 つのテスト名 → 2 つ（glean の problems は今のコードでも check に出るので red にならない。成功のテストの中で確かめる）/ 欄を直して進めた
 2026-10-06 / T01 / Codex のレビュー（c247a0a7）: 指摘 0 件。Codex の環境では db.test.ts が一時ディレクトリを作れず流れなかったので、手元で流した pass 27 で確かめた / 直すものなし
@@ -149,3 +159,4 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
 2026-10-06 / T07 / Codex のレビュー（1ce324f1）: P2 1 件、同じファイルと symbol に役割の違う anchor が 2 つあると、lock の中の警告が check に 2 行出る（Codex が再現。save も同じく 2 行出す前からの動き）/ 採用。plan の「同じ警告は 2 回出ない」に合わせ、check の返答の中で重ねない。修正タスク T08 を足した
 2026-10-06 / 全体 / review-shipping（main...347a59c1）: 出してよい。指摘 1 件（低リスク）、Windows の手順は `--test-name-pattern` に一致するテストが無くても緑で通る（再現済み）/ 採用。修正タスク T10 を足した
 2026-10-06 / 全体 / Codex の全差分のレビュー（high、main...347a59c1）: P2 1 件、T09 の後も子が起動から 1500 ms で lock を外すので、CI で親が遅れると順序の確認が落ちる（Codex が縮めた形で再現）。ほかの check と save の食い違い、権限の問題は見つからなかった / 採用。修正タスク T11 を足した。プロセス間の合図はファイルにした（親は lock を待つ間ブロックするので、stdin への書き込みは届く保証が無い）
+2026-10-06 / T10, T11 / Codex の再レビュー（347a59c1..1ecbedbe）: T10 は直っている。T11 に P2 1 件、合図を書いてから時刻を記録しているので、その間に親が止まると順序の確認が落ちる（Codex が縮めた形で再現）。子に待つ時間の上限が無い / 採用。修正タスク T12 を足した。レビューの往復はここで閉じ、以降は GitHub の Codex と CI に任せる
