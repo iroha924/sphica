@@ -12,10 +12,11 @@ import {
   type Get,
   githubTarget,
   linkIssues,
-  pullSources,
+  pullSourceIds,
   readIssue,
   readPull,
   repoOf,
+  runSources,
   storeItems,
 } from "./github.ts";
 import { checkGlean, prepareGlean, saveGlean } from "./glean.ts";
@@ -194,7 +195,7 @@ export async function beginHarvest(
     const kept = (await storeItems(trx, projectId, pull.items)).filter((id) => id !== null).length;
     await linkIssues(trx, projectId, number, pull.closes);
     const run = newRunId();
-    await openRun(trx, {
+    const runId = await openRun(trx, {
       projectId,
       origin: "harvest",
       target: `pr:${number}`,
@@ -202,6 +203,9 @@ export async function beginHarvest(
       draftId: run,
       beginCall,
     });
+    // The run shows and cites these until it saves, whatever another harvest of the pull request stores meanwhile
+    for (const sourceId of await pullSourceIds(trx, projectId, number))
+      await trx.insertInto("harvest_run_source").values({ run_id: runId, source_id: sourceId }).execute();
     return { run, sources: kept };
   });
 }
@@ -283,10 +287,7 @@ async function scopeOf(
 }> {
   if (run.origin === "harvest") {
     const number = Number(run.target.slice("pr:".length));
-    // Only what was captured before the run began: a later revision waits for the next harvest
-    const sources = (await pullSources(db, run.project_id, number)).filter(
-      (x) => x.captured_at <= run.started_at,
-    );
+    const sources = await runSources(db, run.id);
     return {
       target: {
         projectId: run.project_id,

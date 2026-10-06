@@ -6,7 +6,7 @@
 --   captured sources   session, source, artifact_link, edit_observation: what was said or written, never rewritten
 --                      (the owner can forget chosen sources: forget_batch and source_forgotten keep what was removed, without its text)
 --   extracted units    unit and its option, evidence, adoption, link, state, anchor, alias tables: what was decided or implemented
---   processing         extraction_run, source_processing, harvest_run_source: what has been looked at and saved, so gaps are counted
+--   processing         extraction_run, source_processing: what has been looked at and saved, so gaps are counted
 --   work and delivery  work, delivery, delivery_unit: the current work status and what the hooks injected
 -- Every table is STRICT and every primary key is not null. Times are ISO 8601 UTC (`Date#toISOString()`); `strftime(...) is column` rejects others.
 -- Paths (a source's, an edit observation's, an anchor's) are repository-relative with forward slashes, in one form, so one place
@@ -292,15 +292,6 @@ create table source_processing (
   primary key (source_id, run_id)
 ) strict;
 create index source_processing_run on source_processing (run_id);
-
--- The sources a harvest run may show and cite, chosen when it begins, so another harvest of the same pull request cannot change them.
--- Ids only; a source the owner forgets leaves with its row
-create table harvest_run_source (
-  run_id integer not null references extraction_run (id) on delete cascade,
-  source_id integer not null references source (id) on delete cascade,
-  primary key (run_id, source_id)
-) strict;
-create index harvest_run_source_source on harvest_run_source (source_id);
 
 -- An extracted unit. Its text is never rewritten: corrections are successors, withdrawals, retractions, and anchor replacements.
 -- extraction: supported (every evidence span was found in retained text) or quarantined (with reason).
@@ -990,11 +981,6 @@ create trigger source_processing_project before insert on source_processing begi
   select raise(abort, 'source and run belong to different projects')
   where (select project_id from source where id = new.source_id) is not (select project_id from extraction_run where id = new.run_id);
 end;
-create trigger harvest_run_source_run before insert on harvest_run_source begin
-  select raise(abort, 'only a harvest run keeps sources, from its own project')
-  where (select origin from extraction_run where id = new.run_id) is not 'harvest'
-    or (select project_id from source where id = new.source_id) is not (select project_id from extraction_run where id = new.run_id);
-end;
 
 -- Every change to a unit's relations raises its revision (stale drafts are refused against it)
 create trigger unit_rev_evidence_i after insert on unit_evidence begin update unit set revision = revision + 1 where id = new.unit_id; end;
@@ -1225,4 +1211,4 @@ create trigger capture_delivery_prune_insert instead of insert on capture_delive
     order by d.at, d.id limit 200);
 end;
 
-pragma user_version = 11;
+pragma user_version = 10;

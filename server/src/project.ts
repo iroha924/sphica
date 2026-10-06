@@ -2,11 +2,10 @@
 //
 // The key is the normalized git remote (`git:github.com/owner/repo`), so it is the same on every machine.
 // Only projects without a remote are mapped to `local:<name>` through a per-machine table (~/.sphica/projects.json).
-// Local paths are not stored in the database. They differ per machine, and each machine finds them under ~/Projects when syncing.
+// Local paths are not stored in the database: they differ per machine, and the project is identified from the directory a command runs in.
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { leaves } from "./anchors.ts";
@@ -193,54 +192,6 @@ export function nameLocal(dir: string, name: string): Place {
 export async function projectId(db: Reads, key: string): Promise<number | null> {
   const r = await db.selectFrom("project").select("id").where("key", "=", key).executeTakeFirst();
   return r?.id ?? null;
-}
-
-/** p with a leading home directory written as ~, for showing; p itself when it is under none of homes */
-export function underHome(p: string, homes: string[], api: path.PlatformPath = path): string {
-  // relative() reads both separators on Windows (Git for Windows writes roots with forward slashes)
-  for (const h of homes) {
-    const rel = api.relative(h, p);
-    if (rel === "") return "~";
-    if (rel !== ".." && !rel.startsWith(`..${api.sep}`) && !api.isAbsolute(rel)) return `~${api.sep}${rel}`;
-  }
-  return p;
-}
-
-/** The one directory whose children doctor looks through for registered projects */
-export const projectsDir = (): string => path.join(os.homedir(), "Projects");
-
-/**
- * Finds registered projects on this machine. Looks only directly under ~/Projects and at named projects.
- * **When two places share a key, neither is chosen.** Never report whichever copy sorts first as the project.
- */
-export function localRoots(roots = [projectsDir()]): {
-  found: Map<string, string>;
-  ambiguous: Map<string, string[]>;
-} {
-  const seen = new Map<string, string[]>();
-  const add = (p: Place | null) => {
-    if (p) seen.set(p.key, [...new Set([...(seen.get(p.key) ?? []), p.root])]);
-  };
-  for (const r of roots) {
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(r, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries)
-      if (e.isDirectory() && !e.name.startsWith(".")) add(identify(path.join(r, e.name)));
-  }
-  for (const [root, name] of Object.entries(localMap())) {
-    if (LOCAL_KEY.test(name) && fs.existsSync(root)) add({ key: `local:${name}`, root, name });
-  }
-  const found = new Map<string, string>();
-  const ambiguous = new Map<string, string[]>();
-  for (const [key, dirs] of seen) {
-    if (dirs.length === 1 && dirs[0]) found.set(key, dirs[0]);
-    else ambiguous.set(key, dirs);
-  }
-  return { found, ambiguous };
 }
 
 /** A path relative to the project root, or null when it is outside the root or unreadable. */

@@ -115,6 +115,15 @@ test("the ingest connection can write rows but cannot change the schema", () => 
     attempt(ingest, "insert into project (key, name) values ('git:github.com/o/new', 'o/new')"),
     null,
   );
+  // A harvest keeps the sources it begins with
+  assert.equal(
+    attempt(
+      ingest,
+      "insert into harvest_run_source (run_id, source_id) values (?, (select min(id) from source))",
+      run(db, p, "harvest", "pr:1"),
+    ),
+    null,
+  );
   for (const ddl of [
     "create table x (a)",
     "drop table unit_anchor",
@@ -580,6 +589,8 @@ test("the ingest connection cannot remove a source or write a forget batch or to
 test("the forget connection removes a source with what cites it, and cannot write anything else", () => {
   const src = message(db, p, { id: "m-forget", text: "a secret to forget" });
   const r = run(db, p);
+  const harvest = run(db, p, "harvest", "pr:1");
+  db.owner.prepare("insert into harvest_run_source (run_id, source_id) values (?, ?)").run(harvest, src);
   const u = insert(db, "unit", {
     project_id: p,
     key: "trace:session:s1/forget",
@@ -635,6 +646,10 @@ test("the forget connection removes a source with what cites it, and cannot writ
   }
   assert.equal(db.owner.prepare("select lifecycle from unit where id = ?").get(u)?.lifecycle, "candidate");
   assert.equal(db.owner.prepare("select count(*) as n from unit_evidence where unit_id = ?").get(u)?.n, 0);
+  assert.equal(
+    db.owner.prepare("select count(*) as n from harvest_run_source where run_id = ?").get(harvest)?.n,
+    0,
+  );
   for (const write of [
     "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'pr_body', 'pr:1', 'x', 1, 'person', '2026-09-12T00:00:00.000Z', '2026-09-12T00:00:00.000Z', 'x', 1, zeroblob(32), 0)",
     "delete from unit",

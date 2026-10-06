@@ -74,7 +74,7 @@ In Codex, open `/hooks` and mark Sphica's hooks as trusted. Automatic recording 
 **3. Set up in your repository**
 
 ```bash
-cd ~/Projects/your-repo
+cd path/to/your-repo
 sphica init
 ```
 

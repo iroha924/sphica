@@ -6,7 +6,6 @@
 // fails at parse time. Usage text is built from these declarations and never written separately.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { confirm, isCancel } from "@clack/prompts";
 import {
@@ -39,15 +38,7 @@ import { dbFile, type Reads, SCHEMA_REVISION } from "./db.ts";
 import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
-import {
-  checkLocalName,
-  identify,
-  localRoots,
-  nameLocal,
-  projectsDir,
-  repositoryRoot,
-  underHome,
-} from "./project.ts";
+import { checkLocalName, identify, nameLocal, repositoryRoot } from "./project.ts";
 import { splitLine } from "./split-check.ts";
 import { requireRuntime, sphicaHome } from "./sqlite.ts";
 import { plural, reason } from "./text.ts";
@@ -356,19 +347,9 @@ async function doctor(cwd: string): Promise<void> {
             `${plural(twice.length, "set")} of live records hold the same words. Read them with Sphica's read and withdraw the extra ones with /sphica:glean`,
           );
         await adoptionStops(db, q.waiting, say);
-        const { found, ambiguous } = localRoots();
-        // git reports a repository's root through symlinks resolved (macOS's /var is /private/var), so both spellings of home count
-        const homes = [os.homedir()];
-        try {
-          homes.push(fs.realpathSync.native(os.homedir()));
-        } catch {
-          // home is gone; the plain spelling is all there is
-        }
-        const tilde = (p: string) => underHome(p, homes);
         const rows = await db
           .selectFrom("project as p")
           .select((eb) => [
-            "p.key",
             "p.name",
             eb
               .selectFrom("unit as u")
@@ -388,25 +369,14 @@ async function doctor(cwd: string): Promise<void> {
           .execute();
         if (rows.length) console.log(section("Projects", true));
         const column = Math.max(...rows.map((x) => width(inline(x.name)))) + 2;
-        for (const x of rows) {
-          // Doctor looks only in a few places, so a project it did not find may still be on this machine
-          const copies = ambiguous.get(x.key);
-          const where = copies
-            ? ` (${copies.length} copies: ${copies
-                .map((c) => inline(tilde(c)))
-                .sort()
-                .join(", ")})`
-            : found.get(x.key)
-              ? ""
-              : ` (not found in ${inline(tilde(projectsDir()))} or the named projects)`;
+        for (const x of rows)
           console.log(
             indent(
               `  ${mark("none")} ${pad(inline(x.name), column)}${plural(Number(x.records ?? 0), "record")}${
                 x.extracted ? ` / last extraction ${new Date(x.extracted).toLocaleString("sv-SE")}` : ""
-              }${where}`,
+              }`,
             ),
           );
-        }
       });
     } catch (e) {
       say("fail", "DB", `cannot read: ${plain(reason(e))}`);

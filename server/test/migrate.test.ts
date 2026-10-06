@@ -23,6 +23,7 @@ const REV6 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-
 const REV7 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev7.sql"), "utf8");
 const REV8 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev8.sql"), "utf8");
 const REV9 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev9.sql"), "utf8");
+const REV10 = fs.readFileSync(path.join(import.meta.dirname, "fixtures", "schema-rev10.sql"), "utf8");
 const CURRENT = fs.readFileSync(path.join(root, "db", "schema.sql"), "utf8");
 const now = new Date("2026-09-20T00:00:00Z").toISOString();
 
@@ -162,6 +163,7 @@ for (const [from, schema] of [
   [7, REV7],
   [8, REV8],
   [9, REV9],
+  [10, REV10],
 ] as const)
   test(`a migrated revision ${from} database has the same definitions as a fresh current database`, () => {
     const old = create("old.db", schema);
@@ -251,6 +253,7 @@ for (const [from, schema] of [
   [7, REV7],
   [8, REV8],
   [9, REV9],
+  [10, REV10],
 ] as const)
   test(`every capture view has the same columns at revision ${from} as now`, () => {
     const old = create("old.db", schema);
@@ -1735,4 +1738,46 @@ test("migrating revision 9 raises the revision of records whose replacement hist
   const [ra, rb] = [before(a), before(b)];
   migrate(raw);
   assert.ok(before(a) > ra && before(b) > rb, `${ra}→${before(a)}, ${rb}→${before(b)}`);
+});
+
+test("migrating revision 10 removes only harvest runs still running, says so, and keeps every other run, source, and call", () => {
+  const raw = create("old.db", REV10);
+  fill(raw);
+  const run = (sql: string, ...args: (string | number | Buffer | null)[]) => raw.prepare(sql).run(...args);
+  run(
+    "insert into source (project_id, kind, artifact, external_id, revision, author_kind, created_at, captured_at, text, original_bytes, content_hash, indexed) values (1, 'pr_comment', 'pr:7', 'comment:1', 1, 'person', ?, ?, 'x', 1, ?, 1)",
+    now,
+    now,
+    sha256("x"),
+  );
+  run(
+    "insert into record_call (project_id, tool, host, caller_session, mode, called_at) values (1, 'harvest_begin', 'claude-code', 'e1', 'interactive', ?)",
+    now,
+  );
+  const begun = (origin: string, target: string, status: string, draft: string) =>
+    run(
+      `insert into extraction_run (project_id, origin, target, status, draft_id, begin_call_id, started_at, finished_at) values (1, ?, ?, ?, ?, 1, ?, ${status === "saved" ? "?" : "null"})`,
+      origin,
+      target,
+      status,
+      draft,
+      now,
+      ...(status === "saved" ? [now] : []),
+    );
+  begun("harvest", "pr:7", "running", "h-running");
+  begun("harvest", "pr:8", "running", "h-running-2");
+  begun("harvest", "pr:7", "saved", "h-saved");
+  begun("trace", "session:s1", "running", "t-running");
+  begun("glean", "glean", "running", "g-running");
+  const said = migrate(raw);
+  const drafts = raw
+    .prepare("select draft_id from extraction_run where draft_id is not null order by id")
+    .all()
+    .map((r) => r.draft_id);
+  assert.deepEqual(drafts, ["h-saved", "t-running", "g-running"]);
+  assert.equal(Number((raw.prepare("select count(*) as n from source").get() as { n: number }).n), 2);
+  assert.equal(Number((raw.prepare("select count(*) as n from record_call").get() as { n: number }).n), 1);
+  assert.match(said, /a harvest run still running, begun before its sources were kept: 2 rows/);
+  assert.match(said, /run \d+ pr:7 begun [^\n]*removed; begin the harvest again/);
+  assert.match(said, /run \d+ pr:8 begun /);
 });

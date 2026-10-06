@@ -8,6 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { bindOwner } from "../src/admin.ts";
+import { openReader } from "../src/db.ts";
 import {
   beginGlean,
   beginHarvest,
@@ -280,6 +281,145 @@ test("harvest: context marks the sources an earlier run looked at, not a new com
     assert.doesNotMatch(heading("New comment."), /harvested before/);
     assert.match(heading("Keep notes and drafts out of CSV."), /^## s\d+ pr_body pr:3 revision 2 /);
     assert.doesNotMatch(heading("Keep notes and drafts out of CSV."), /harvested before/);
+  } finally {
+    await db.done();
+  }
+});
+
+// Another harvest of the same pull request stores new revisions and changes which issues it closes; a run already begun keeps
+// what it began with, so its citations stay valid until it saves
+test("harvest run keeps the sources it began with while another harvest of the pull request changes them", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const user = { login: "kai", id: 4, type: "User" };
+    const issue = (n: number, body: string) => ({
+      number: n,
+      body,
+      html_url: "u",
+      created_at: "2026-03-01T00:00:00Z",
+      user,
+      author_association: "MEMBER",
+    });
+    const pull =
+      (body: string, comment: string): Get =>
+      async (q) =>
+        (
+          ({
+            "pulls/3": {
+              number: 3,
+              title: "t",
+              body,
+              html_url: "u",
+              created_at: "2026-03-01T00:00:00Z",
+              merged_at: null,
+              user,
+              author_association: "MEMBER",
+            },
+            "issues/3/comments": [
+              {
+                id: 1,
+                body: comment,
+                html_url: "u",
+                created_at: "2026-03-02T00:00:00Z",
+                user,
+                author_association: "MEMBER",
+              },
+            ],
+            "pulls/3/reviews": [],
+            "pulls/3/comments": [],
+            "pulls/3/commits": [],
+            "issues/9": issue(9, "Notes must never be exported."),
+            "issues/9/comments": [],
+            "issues/12": issue(12, "Drafts are exported too."),
+            "issues/12/comments": [],
+          }) as Record<string, unknown>
+        )[q.split("?")[0] ?? ""];
+    const a = await beginHarvest(db.ingest, p, 3, pull("Closes #9. Keep notes out of CSV.", "Old words."));
+    const b = await beginHarvest(db.ingest, p, 3, pull("Closes #12. Keep notes out of CSV.", "New words."));
+    const id = (text: string) =>
+      Number((db.owner.prepare("select id from source where text = ?").get(text) as { id: number }).id);
+    const old = id("Old words.");
+    for (const reads of [db.reader, openReader(db.file)]) {
+      const ctx = await contextText(reads, a.run, p, null);
+      assert.match(ctx, new RegExp(`## s${old} pr_comment [^\n]*\nOld words.`));
+      assert.match(ctx, /Notes must never be exported\./);
+      assert.doesNotMatch(ctx, /New words\.|Drafts are exported too\./);
+      if (reads !== db.reader) await reads.destroy();
+    }
+    const bCtx = await contextText(db.reader, b.run, p, null);
+    assert.match(bCtx, /New words\./);
+    assert.match(bCtx, /Drafts are exported too\./);
+    assert.doesNotMatch(bCtx, /Old words\.|Notes must never be exported\./);
+    const record = {
+      units: [
+        {
+          key: "old-words",
+          kind: "finding",
+          text: "The comment said old words",
+          evidence: [{ source: `s${old}`, quote: "Old words.", role: "states" }],
+          aliases: ["old", "words", "comment", "コメント", "古い", "言葉", "harvest", "収穫"],
+        },
+      ],
+    };
+    const checked = await checkText(db.ingest, a.run, p, null, record);
+    assert.ok(checked.ok, checked.text);
+    assert.match(await saveText(db.ingest, a.run, p, null, record), /✓ harvest:3\/old-words active/);
+    await assert.rejects(checkText(db.ingest, "gone-run", p, null, record), /Begin again/);
+  } finally {
+    await db.done();
+  }
+});
+
+// Forgetting reaches a run already begun: the forgotten source leaves it, and so does an older revision of a forgotten one
+test("harvest run keeps the sources it began with, except what the owner forgets meanwhile", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const user = { login: "kai", id: 4, type: "User" };
+    const pull =
+      (body: string, comment: string): Get =>
+      async (q) =>
+        (
+          ({
+            "pulls/3": {
+              number: 3,
+              title: "t",
+              body,
+              html_url: "u",
+              created_at: "2026-03-01T00:00:00Z",
+              merged_at: null,
+              user,
+              author_association: "MEMBER",
+            },
+            "issues/3/comments": [
+              {
+                id: 1,
+                body: comment,
+                html_url: "u",
+                created_at: "2026-03-02T00:00:00Z",
+                user,
+                author_association: "MEMBER",
+              },
+            ],
+            "pulls/3/reviews": [],
+            "pulls/3/comments": [],
+            "pulls/3/commits": [],
+          }) as Record<string, unknown>
+        )[q.split("?")[0] ?? ""];
+    const a = await beginHarvest(db.ingest, p, 3, pull("Keep notes out of CSV.", "Old words."));
+    await beginHarvest(db.ingest, p, 3, pull("Keep notes and drafts out of CSV.", "Old words."));
+    const id = (text: string) =>
+      Number((db.owner.prepare("select id from source where text = ?").get(text) as { id: number }).id);
+    assert.match(await contextText(db.reader, a.run, p, null), /Keep notes out of CSV\.[\s\S]*Old words\./);
+    // The comment A holds itself
+    const comment = id("Old words.");
+    await applyForget(db.file, p, [comment], await previewForget(db.file, p, [comment]));
+    // The body's newer revision, which only B holds: A's older revision is not the body's current text either
+    const newer = id("Keep notes and drafts out of CSV.");
+    await applyForget(db.file, p, [newer], await previewForget(db.file, p, [newer]));
+    const ctx = await contextText(db.reader, a.run, p, null);
+    assert.doesNotMatch(ctx, /Old words\.|Keep notes out of CSV\.|drafts/);
   } finally {
     await db.done();
   }
