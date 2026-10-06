@@ -1,5 +1,10 @@
-// Blind grading of one evaluation loop: what the grader sees, how its output is accepted, and the table by model and condition.
-// A grade counts only from a zero exit and an exact shape; anything else stays apart as ungraded, and excluded runs stay in the denominator.
+// Blind grading of one evaluation loop: what the grader sees, how its output is accepted, the table by model and condition, and the
+// checkpoint that keeps each finished grader call. A grade counts only from a zero exit and an exact shape; anything else stays apart as
+// ungraded, and excluded runs stay in the denominator.
+import crypto from "node:crypto";
+import fs from "node:fs";
+import { z } from "zod";
+import { replaceFile } from "../../src/file-lock.ts";
 import type { Tri } from "./judge.ts";
 import { checkGrade, type Grade, parseOutput } from "./schema-check.ts";
 
@@ -177,4 +182,110 @@ export function tabulate(rows: (GradeRow & { grade?: Grade; ungraded?: string })
   return [...cells.values()].sort((a, b) =>
     `${a.model}${a.condition}`.localeCompare(`${b.model}${b.condition}`),
   );
+}
+
+export type Grader = "codex" | "claude";
+
+/** How each grader is started, apart from the paths of one call: grade.ts spawns with these and the checkpoint key holds them. */
+export const GRADER_ARGS: Record<Grader, readonly string[]> = {
+  codex: ["exec", "-s", "read-only", "--ephemeral", "--ignore-rules", "--skip-git-repo-check"],
+  claude: [
+    "-p",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--tools",
+    "",
+    "--disable-slash-commands",
+    "--no-session-persistence",
+    "--output-format",
+    "json",
+  ],
+};
+
+export type CheckpointInput = {
+  grader: Grader;
+  task: GradeTask;
+  row: GradeRow;
+  /** The exact text the grader is given */
+  prompt: string;
+  build: string | null;
+  bundle: string;
+  variant: string;
+  /** grade.schema.json as the grader gets it */
+  schema: string;
+  /** The model settings Codex is started with; null for Claude, whose default model cannot be read without starting it */
+  codexConfig: string | null;
+};
+
+/**
+ * Which saved grader call a rerun may reuse: every input of the call, raw. The prompt alone is not enough: it leaves out the task id and
+ * the run, and renders an empty answer the same as "(empty)".
+ */
+export function checkpointKey(i: CheckpointInput): string {
+  const sha = (text: string) => crypto.createHash("sha256").update(text).digest("hex");
+  const { row, task } = i;
+  return sha(
+    JSON.stringify([
+      i.grader,
+      GRADER_ARGS[i.grader],
+      [row.model, row.task, row.condition, row.run],
+      [task.id, task.prompt, task.expect, task.against ?? null, task.conflict ?? null],
+      i.prompt,
+      row.answer,
+      row.patch,
+      row.patch_truncated,
+      row.presented ?? null,
+      i.build,
+      i.bundle,
+      i.variant,
+      sha(i.schema),
+      i.codexConfig,
+    ]),
+  );
+}
+
+const checkpointSchema = z.strictObject({
+  version: z.literal(1),
+  entries: z.record(
+    z.string().regex(/^[0-9a-f]{64}$/),
+    z.strictObject({
+      grader: z.enum(["codex", "claude"]),
+      status: z.number().int().nullable(),
+      output: z.string(),
+      at: z.string(),
+    }),
+  ),
+});
+
+export type Checkpoint = z.infer<typeof checkpointSchema>;
+
+/** The saved grader calls; none when the file does not exist. Anything else unreadable is an error, and the file is left as it is. */
+export function loadCheckpoint(file: string): Checkpoint {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, entries: {} };
+    throw e;
+  }
+  const refuse = (why: string) =>
+    new Error(`${file} is not a grading checkpoint (${why}); move it aside to grade from scratch`);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw refuse("not JSON");
+  }
+  const r = checkpointSchema.safeParse(value);
+  if (!r.success) {
+    const first = r.error.issues[0];
+    throw refuse(`${first?.path.join(".") || "value"}: ${first?.message ?? "does not match"}`);
+  }
+  return r.data;
+}
+
+/** Replaces the checkpoint whole, so a stop at any point leaves either the previous file or the new one. */
+export function saveCheckpoint(file: string, checkpoint: Checkpoint): void {
+  replaceFile(file, `${JSON.stringify(checkpoint, null, 2)}\n`);
 }

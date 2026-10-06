@@ -70,7 +70,9 @@ Loop progress:
    never the model or the condition. Codex's grade is the one counted; Claude's is kept beside it for agreement. A grade that fails its schema, or
    answers `not_applicable` where it does not fit (`implements_rejected` and `proposes_rejected` without an `against`, `followed` without a record
    shown), is `ungraded`, not a score. build.ts drops the slot's "Before implementing" section (the owner's Go) and stops if a copy still asks for
-   it, so a stop at a plan is the model's own. The JSON schema files are written from the zod schemas: `node evals/cloud/schema-check.ts --write`
+   it, so a stop at a plan is the model's own. The JSON schema files are written from the zod schemas: `node evals/cloud/schema-check.ts --write`.
+   Each grader call that exits 0 is saved in `<build dir>/grades.checkpoint.json`, so rerunning the same command after a stop grades only what is
+   left or whose inputs changed. To grade from scratch, delete that file. A change of Claude's default model is not detected
 6. The counterfactual: `build.ts --variant swapped` builds only the tasks in `tasks.json`'s `swapped.tasks`, without the records the original gold
    came from and with the swapped record instead. Its runs are graded on whether they followed the record they were shown, not on the original expectation
 7. `node evals/cloud/report.ts <build dir>/grades.json [<swapped build dir>/grades.json]` prints the table by model and condition; the same by

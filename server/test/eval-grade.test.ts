@@ -8,7 +8,16 @@ import path from "node:path";
 import { test } from "node:test";
 import { claimRunDir, codexModelOf } from "../evals/cloud/codex-home.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
-import { blindPrompt, gradedTask, receiveGrade, tabulate } from "../evals/cloud/grading.ts";
+import {
+  blindPrompt,
+  type CheckpointInput,
+  checkpointKey,
+  gradedTask,
+  loadCheckpoint,
+  receiveGrade,
+  saveCheckpoint,
+  tabulate,
+} from "../evals/cloud/grading.ts";
 import {
   answerFormat,
   capPatch,
@@ -2407,4 +2416,407 @@ test("G6 needs every run to show the loading change, and a re-proposal rise show
     ).join("\n"),
     /re-proposals 0\.00 \(0 of 2 known, 3 unknown\) → 0\.50 \(1 of 2 known, 3 unknown\)/,
   );
+});
+
+test("the checkpoint key is the same for the same grader call and changes with any of its inputs", () => {
+  const base: CheckpointInput = {
+    grader: "codex",
+    task: { ...task, conflict: "two rules" },
+    row: { ...row, presented: "rec" },
+    prompt: "grade this",
+    build: "b",
+    bundle: "c",
+    variant: "original",
+    schema: "{}",
+    codexConfig: 'model = "m"',
+  };
+  const key = checkpointKey(base);
+  assert.match(key, /^[0-9a-f]{64}$/);
+  assert.equal(checkpointKey(structuredClone(base)), key);
+  const changes: [string, Partial<CheckpointInput>][] = [
+    ["grader", { grader: "claude" }],
+    ["task id", { task: { ...base.task, id: "other" } }],
+    ["task prompt", { task: { ...base.task, prompt: "other" } }],
+    ["expect", { task: { ...base.task, expect: "other" } }],
+    ["against", { task: { ...base.task, against: "other" } }],
+    ["no against", { task: { ...base.task, against: undefined } }],
+    ["conflict", { task: { ...base.task, conflict: "other" } }],
+    ["prompt text", { prompt: "grade this again" }],
+    ["answer", { row: { ...base.row, answer: "other" } }],
+    ["empty answer", { row: { ...base.row, answer: "" } }],
+    ["patch", { row: { ...base.row, patch: "other" } }],
+    ["patch cut", { row: { ...base.row, patch_truncated: true } }],
+    ["presented", { row: { ...base.row, presented: null } }],
+    ["model", { row: { ...base.row, model: "claude" } }],
+    ["row task", { row: { ...base.row, task: "other" } }],
+    ["condition", { row: { ...base.row, condition: "gold" } }],
+    ["run", { row: { ...base.row, run: "r2" } }],
+    ["build", { build: null }],
+    ["bundle", { bundle: "d" }],
+    ["variant", { variant: "swapped" }],
+    ["schema", { schema: '{"type":"object"}' }],
+    ["codex config", { codexConfig: 'model = "n"' }],
+  ];
+  for (const [what, change] of changes) assert.notEqual(checkpointKey({ ...base, ...change }), key, what);
+  // A swapped run's grader never sees the original expect and against, yet a change to them still grades again
+  const swapped = { ...base, variant: "swapped" };
+  for (const t of [{ expect: "other" }, { against: "other" }])
+    assert.notEqual(
+      checkpointKey({ ...swapped, task: { ...base.task, ...t } }),
+      checkpointKey(swapped),
+      JSON.stringify(t),
+    );
+});
+
+test("a checkpoint that is missing is empty, one saved reads back the same, and an unreadable one is refused untouched", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-checkpoint-"));
+  try {
+    const file = path.join(dir, "grades.checkpoint.json");
+    assert.deepEqual(loadCheckpoint(file), { version: 1, entries: {} });
+    const saved = {
+      version: 1 as const,
+      entries: {
+        ["a".repeat(64)]: {
+          grader: "codex" as const,
+          status: 0,
+          output: "{}",
+          at: "2026-10-06T00:00:00.000Z",
+        },
+      },
+    };
+    saveCheckpoint(file, saved);
+    assert.deepEqual(loadCheckpoint(file), saved);
+    assert.deepEqual(fs.readdirSync(dir), ["grades.checkpoint.json"], "no temporary file is left");
+    const entry = saved.entries["a".repeat(64)];
+    for (const [what, text] of [
+      ["not JSON", "{"],
+      ["no entries", JSON.stringify({ version: 1, entries: null })],
+      ["another version", JSON.stringify({ version: 2, entries: {} })],
+      ["a key that is not a digest", JSON.stringify({ version: 1, entries: { k: entry } })],
+      [
+        "output not a string",
+        JSON.stringify({ version: 1, entries: { ["a".repeat(64)]: { ...entry, output: 1 } } }),
+      ],
+      [
+        "an unknown grader",
+        JSON.stringify({ version: 1, entries: { ["a".repeat(64)]: { ...entry, grader: "x" } } }),
+      ],
+      ["an extra field", JSON.stringify({ version: 1, entries: {}, extra: 1 })],
+    ] as [string, string][]) {
+      fs.writeFileSync(file, text);
+      assert.throws(
+        () => loadCheckpoint(file),
+        (e: Error) => e.message.includes(file),
+        what,
+      );
+      assert.equal(fs.readFileSync(file, "utf8"), text, `${what}: the file is left as it was`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A build with loop.json of the given rows, fake codex and claude first on PATH, and a fake owner home. The fakes count their calls in
+ * a control directory outside the build, stop grade.ts with kill -9 on the call named by a `<grader>-kill-<n>` file there, exit 1 for a
+ * prompt holding "fail-me", and answer "Score: 2" for one holding "garble"; each grade's reason names its call.
+ */
+function gradeFixture(rows: (typeof row & { presented?: string | null })[]) {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
+  const owner = path.join(base, "owner");
+  const build = path.join(base, "build");
+  const ctl = path.join(base, "ctl");
+  const bin = path.join(base, "bin");
+  for (const d of [path.join(owner, ".codex"), build, ctl, bin]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(owner, ".codex", "auth.json"), "{}");
+  fs.writeFileSync(path.join(owner, ".codex", "config.toml"), 'model = "m"\n');
+  seedTasks(build);
+  const loop = path.join(build, "loop.json");
+  fs.writeFileSync(loop, JSON.stringify({ build: "b", bundle: "c", rows }));
+  const fake = (name: string, answer: string) =>
+    fs.writeFileSync(
+      path.join(bin, name),
+      `#!/bin/sh
+input=$(cat)
+echo x >> ${JSON.stringify(path.join(ctl, `${name}-calls`))}
+n=$(wc -l < ${JSON.stringify(path.join(ctl, `${name}-calls`))} | tr -d ' ')
+if [ -f ${JSON.stringify(ctl)}/${name}-kill-$n ]; then kill -9 $PPID; sleep 5; fi
+case "$input" in *fail-me*) exit 1;; esac
+${answer}
+`,
+      { mode: 0o755 },
+    );
+  fake(
+    "codex",
+    `while [ "$1" != "-o" ]; do shift; done
+case "$input" in *garble*) printf 'Score: 2' > "$2"; exit 0;; esac
+printf '%s' '${JSON.stringify({ ...grade, reason: "codex call NUM" })}' | sed "s/NUM/$n/" > "$2"`,
+  );
+  fake(
+    "claude",
+    `printf '%s' '${JSON.stringify({ type: "result", structured_output: { ...grade, score: 1, reason: "claude call NUM" } })}' | sed "s/NUM/$n/"`,
+  );
+  const calls = (name: string) => {
+    const file = path.join(ctl, `${name}-calls`);
+    return fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
+  };
+  return {
+    base,
+    build,
+    loop,
+    checkpoint: path.join(build, "grades.checkpoint.json"),
+    grades: () =>
+      JSON.parse(fs.readFileSync(path.join(build, "grades.json"), "utf8")).rows as {
+        run: string;
+        grade?: Grade;
+        ungraded?: string;
+        second?: { grade: Grade } | { ungraded: string };
+      }[],
+    killAt: (name: string, n: number) => fs.writeFileSync(path.join(ctl, `${name}-kill-${n}`), ""),
+    calls,
+    run: (...extra: string[]) =>
+      spawnSync(
+        process.execPath,
+        [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop, ...extra],
+        {
+          encoding: "utf8",
+          env: {
+            PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+            HOME: owner,
+            CODEX_HOME: path.join(base, "sentinel"),
+          },
+        },
+      ),
+    done: () => fs.rmSync(base, { recursive: true, force: true }),
+  };
+}
+
+const runs = (...answers: string[]) => answers.map((answer, i) => ({ ...row, run: `r${i + 1}`, answer }));
+
+test("checkpoint resumes a grading run stopped midway and grades only what was left", () => {
+  const f = gradeFixture(runs("a1", "a2", "a3"));
+  try {
+    f.killAt("codex", 2);
+    const stopped = f.run("--second", "none");
+    assert.equal(stopped.signal, "SIGKILL", "the first run was killed during its second grader call");
+    const saved = fs.existsSync(f.checkpoint) ? Object.keys(loadCheckpoint(f.checkpoint).entries).length : 0;
+    fs.rmSync(path.join(f.base, "ctl", "codex-kill-2"));
+    const rerun = f.run("--second", "none");
+    assert.equal(rerun.status, 0, rerun.stderr);
+    assert.equal(f.calls("codex") - 2, 2, "the rerun grades only the two rows left");
+    assert.equal(saved, 1, "the first run saved its finished grade before it was killed");
+    assert.deepEqual(
+      f.grades().map((r) => [r.run, r.grade?.reason]),
+      [
+        ["r1", "codex call 1"],
+        ["r2", "codex call 3"],
+        ["r3", "codex call 4"],
+      ],
+    );
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint: grading a finished build again calls no grader, and a changed answer grades only its row", () => {
+  const f = gradeFixture(runs("a1", "a2", "a3"));
+  try {
+    assert.equal(f.run().status, 0);
+    const first = f.grades();
+    assert.deepEqual([f.calls("codex"), f.calls("claude")], [3, 3]);
+    const again = f.run();
+    assert.equal(again.status, 0, again.stderr);
+    assert.deepEqual([f.calls("codex"), f.calls("claude")], [3, 3], "nothing is graded twice");
+    assert.deepEqual(f.grades(), first);
+    assert.match(again.stdout, /r1: score 2 \(reused\)/);
+    assert.match(again.stdout, /Grader calls: 0 made, 6 reused/);
+    const loop = JSON.parse(fs.readFileSync(f.loop, "utf8"));
+    loop.rows[1].answer = "a2, reworded";
+    fs.writeFileSync(f.loop, JSON.stringify(loop));
+    assert.equal(f.run().status, 0);
+    assert.deepEqual([f.calls("codex"), f.calls("claude")], [4, 4], "only the changed row");
+    assert.equal(f.grades()[1]?.grade?.reason, "codex call 4");
+    assert.equal(f.grades()[0]?.grade?.reason, "codex call 1");
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint: a grader call that failed is made again, and a malformed answer is kept as it was", () => {
+  const f = gradeFixture(runs("fail-me", "garble"));
+  try {
+    assert.equal(f.run("--second", "none").status, 0);
+    const ungraded = () => f.grades().map((r) => [r.run, r.ungraded]);
+    const first = ungraded();
+    assert.deepEqual(first, [
+      ["r1", "grader exit 1"],
+      ["r2", "not JSON"],
+    ]);
+    assert.equal(f.run("--second", "none").status, 0);
+    assert.equal(f.calls("codex"), 3, "only the failed call is made again");
+    assert.deepEqual(ungraded(), first);
+    assert.equal(Object.keys(loadCheckpoint(f.checkpoint).entries).length, 1, "a failed call is not saved");
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint keeps Codex's grade when grading stops during Claude's, and the rerun calls only Claude", () => {
+  const f = gradeFixture(runs("a1"));
+  try {
+    f.killAt("claude", 1);
+    assert.equal(f.run().signal, "SIGKILL");
+    assert.deepEqual(
+      Object.values(loadCheckpoint(f.checkpoint).entries).map((e) => e.grader),
+      ["codex"],
+      "Codex's grade was saved before Claude was called",
+    );
+    fs.rmSync(path.join(f.base, "ctl", "claude-kill-1"));
+    assert.equal(f.run().status, 0);
+    assert.deepEqual([f.calls("codex"), f.calls("claude")], [1, 2]);
+    const [r1] = f.grades();
+    assert.equal(r1?.grade?.reason, "codex call 1");
+    assert.deepEqual(r1?.second, { grade: { ...grade, score: 1, reason: "claude call 2" } });
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint that cannot be read stops grading before any grader call and is left as it was", () => {
+  for (const text of [
+    "{",
+    JSON.stringify({ version: 1, entries: [] }),
+    JSON.stringify({ version: 2, entries: {} }),
+  ]) {
+    const f = gradeFixture(runs("a1"));
+    try {
+      fs.writeFileSync(f.checkpoint, text);
+      const r = f.run("--second", "claude");
+      assert.notEqual(r.status, 0, text);
+      assert.ok(r.stderr.includes(f.checkpoint), `names the file: ${r.stderr}`);
+      assert.equal(fs.readFileSync(f.checkpoint, "utf8"), text);
+      assert.deepEqual([f.calls("codex"), f.calls("claude")], [0, 0]);
+      assert.equal(fs.existsSync(path.join(f.build, "grades.json")), false);
+    } finally {
+      f.done();
+    }
+  }
+});
+
+test("checkpoint keeps two runs apart when the grader is given the same text for both", () => {
+  const f = gradeFixture(runs("same", "same"));
+  try {
+    assert.equal(
+      blindPrompt(task, { ...row, answer: "same" }),
+      blindPrompt(task, { ...row, run: "r2", answer: "same" }),
+    );
+    assert.equal(f.run("--second", "none").status, 0);
+    assert.equal(f.calls("codex"), 2);
+    assert.equal(Object.keys(loadCheckpoint(f.checkpoint).entries).length, 2);
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint that cannot be saved stops grading before the next grader call and keeps what was saved", () => {
+  const f = gradeFixture(runs("a1", "a2", "a3"));
+  try {
+    // The second call's answer cannot be saved: the build directory is read-only from then on
+    const codex = path.join(f.base, "bin", "codex");
+    fs.writeFileSync(
+      codex,
+      fs
+        .readFileSync(codex, "utf8")
+        .replace(
+          "input=$(cat)\n",
+          `input=$(cat)\ncase "$input" in *a2*) chmod 555 ${JSON.stringify(f.build)};; esac\n`,
+        ),
+    );
+    const r = f.run("--second", "claude");
+    assert.notEqual(r.status, 0, "the failed save stops grading");
+    assert.ok(r.stderr.includes(f.checkpoint), `the error names the checkpoint: ${r.stderr}`);
+    assert.deepEqual(
+      [f.calls("codex"), f.calls("claude")],
+      [2, 1],
+      "no grader is called after the failed save",
+    );
+    fs.chmodSync(f.build, 0o755);
+    assert.deepEqual(
+      Object.values(loadCheckpoint(f.checkpoint).entries).map((e) => [e.grader, e.output.includes("call 1")]),
+      [
+        ["codex", true],
+        ["claude", true],
+      ],
+    );
+  } finally {
+    fs.chmodSync(f.build, 0o755);
+    f.done();
+  }
+});
+
+test("checkpoint starts Codex with the settings its key holds, even when the owner's config changes during grading", () => {
+  const f = gradeFixture(runs("a1", "a2"));
+  try {
+    const codex = path.join(f.base, "bin", "codex");
+    const seen = path.join(f.base, "ctl", "configs");
+    const ownerConfig = path.join(f.base, "owner", ".codex", "config.toml");
+    fs.writeFileSync(
+      codex,
+      fs
+        .readFileSync(codex, "utf8")
+        .replace(
+          "input=$(cat)\n",
+          `input=$(cat)\ngrep model "$CODEX_HOME/config.toml" >> ${JSON.stringify(seen)}\nprintf 'model = "n"\\n' > ${JSON.stringify(ownerConfig)}\n`,
+        ),
+    );
+    assert.equal(f.run("--second", "none").status, 0);
+    assert.deepEqual(fs.readFileSync(seen, "utf8").split("\n").filter(Boolean), [
+      'model = "m"',
+      'model = "m"',
+    ]);
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint gives Codex the schema text its key holds, in the call's own directory", () => {
+  const f = gradeFixture(runs("a1"));
+  try {
+    const codex = path.join(f.base, "bin", "codex");
+    const seen = path.join(f.base, "ctl", "schema");
+    fs.writeFileSync(
+      codex,
+      fs
+        .readFileSync(codex, "utf8")
+        .replace(
+          "input=$(cat)\n",
+          `input=$(cat)\nfor a in "$@"; do [ "$prev" = "--output-schema" ] && { echo "$a"; cat "$a"; } > ${JSON.stringify(seen)}; prev=$a; done\n`,
+        ),
+    );
+    assert.equal(f.run("--second", "none").status, 0);
+    const [given, ...text] = fs.readFileSync(seen, "utf8").split("\n");
+    const repo = path.join(import.meta.dirname, "..", "evals", "cloud");
+    assert.ok(given && !given.startsWith(repo), `not the repository's file: ${given}`);
+    assert.equal(text.join("\n"), fs.readFileSync(path.join(repo, "grade.schema.json"), "utf8"));
+  } finally {
+    f.done();
+  }
+});
+
+test("checkpoint marks a row reused only when its Codex grade was", () => {
+  const f = gradeFixture(runs("a1"));
+  try {
+    assert.equal(f.run().status, 0);
+    fs.writeFileSync(path.join(f.base, "owner", ".codex", "config.toml"), 'model = "n"\n');
+    const again = f.run();
+    assert.equal(again.status, 0, again.stderr);
+    assert.deepEqual(
+      [f.calls("codex"), f.calls("claude")],
+      [2, 1],
+      "Codex grades again, Claude's grade is reused",
+    );
+    assert.match(again.stdout, /r1: score 2\n/);
+  } finally {
+    f.done();
+  }
 });
