@@ -130,7 +130,7 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
   - 結果: red: 直す前に `cd server && node --test test/release-scope.test.ts` → 足したテストが `none` で落ちた（3 pass, 1 fail）
   - 結果: 直した後 `cd server && node --test test/release-scope.test.ts` → 4 pass（lefthook の bundle の glob が入力を覆うテストも通る）。`bun run verify` → exit 0
 
-- [ ] T11: Windows の CI で、両サーバーのハンドラーが自分の返答を返したことを確かめる
+- [x] T11: Windows の CI で、両サーバーのハンドラーが自分の返答を返したことを確かめる
   - 種別: 修正
   - 計画: S4
   - 依存: T06（Windows のループが要る）
@@ -138,6 +138,8 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
   - red: 手元で同じ送り方の返答を `TypeError` の isError に書き換えて今の照合 `grep -qE '"result":.*"id":3'` → 0 で終わる（ハンドラーが落ちても通る）
   - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし。手元で同じループを流す → 読み取りは `not in a registered project`、記録は `did not say which workspace` を見て通り、別の文言に書き換えると落ちる
   - コミット: `ci(check): check each packed server's own reply on Windows, not just any result (T11)`
+  - 結果: red: `TypeError` の isError に書き換えた返答に今の照合 `grep -qE '"result":.*"id":3[,}]'` → exit 0（落ちたハンドラーでも通る）
+  - 結果: 直した後の照合を同じ返答に `grep -E '"id":3[,}]' | grep -qF "did not say which workspace"` → exit 1。手元の梱包した両サーバーに新しいループ → mcp・mcp-record とも exit 0。`actionlint .github/workflows/check.yml` → 指摘なし。`bun run verify` → exit 0
 
 ## P4: structuredContent の注記を実測に合わせる
 

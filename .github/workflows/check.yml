@@ -176,8 +176,9 @@ jobs:
           grep -E "✗ Recording +the queue cannot be read" doctor-queue.out
           # Do both MCP servers start, list their tools, and answer a call? stdin stays open a while: the SDK drops a request still
           # running when stdin closes
-          for server in mcp:search:status mcp-record:record_save:trace_pending; do
-            IFS=: read -r entry tool call <<< "$server"
+          # Each call has to reach its handler's own reply: a handler that throws still answers id 3, as an error with another text
+          for server in "mcp:search:status:not in a registered project" "mcp-record:record_save:trace_pending:did not say which workspace"; do
+            IFS=: read -r entry tool call reply <<< "$server"
             {
               printf '%s\n' \
                 '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
@@ -189,7 +190,7 @@ jobs:
             cat "$entry.out"
             # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
             grep -q "\"$tool\"" "$entry.out"
-            grep -qE '"result":.*"id":3[,}]' "$entry.out"
+            grep -E '"id":3[,}]' "$entry.out" | grep -qF "$reply"
           done
           # The packed hooks, launched as hooks/hooks.json defines them, and every codex.json entry through each shell Codex can use
           node ../scripts/check-hooks-live.mjs "$out/package"
