@@ -118,3 +118,4 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 2026-10-06 / T03 / 結果欄の実測の行が「`<command>` → <観測>」の書式でなく tasks の検査に落ちていた / 中身は変えずに書式だけを直した
 2026-10-06 / T07 / 持ち主の追加の依頼で code scanning #19 を同じ PR で直す（plan の S7） / T07 を足した。#18 は PR の外で dismiss する
 2026-10-06 / T08 / 持ち主が #18 を dismiss ではなく overrides で上げるほうを選んだ（plan の S8）。0.18.11 は minimumReleaseAge（7 日）で入らなかった / T08 を足し、0.18.9 にした
+2026-10-06 / 全体 / Codex の全差分レビュー（high）で P3: proxy-addr の更新で tarball の THIRD_PARTY_NOTICES.md も変わる / 見送り。notices は lockfile に合わせて変わるのが正しく、依頼文の受け入れ条件が狭すぎた。review-shipping は指摘なし
