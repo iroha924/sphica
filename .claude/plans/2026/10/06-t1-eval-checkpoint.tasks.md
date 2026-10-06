@@ -49,13 +49,14 @@ base: main
 
 eval-loop Skill に checkpoint と、最初から採点し直す方法を書く。
 
-- [ ] T03: eval-loop Skill の 5 段目に checkpoint の 1 行を足す
+- [x] T03: eval-loop Skill の 5 段目に checkpoint の 1 行を足す
   - 種別: 変更
   - 計画: S3
   - 依存: T02（書く挙動が grade.ts に入っている必要がある）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → 通る。5 段目に `grades.checkpoint.json`、再実行は残りだけを採点すること、最初からやり直すには消すこと、Claude の既定のモデルの変化は検出しないことが書いてある
   - コミット: `docs(skills): say how grading resumes from its checkpoint (T03)`
+  - 結果: `bun run verify:ai` → exit 0（AI config と links の指摘なし）。5 段目に `<build dir>/grades.checkpoint.json`、止まった後の再実行は残りと入力の変わった分だけを採点すること、最初からやり直すにはファイルを消すこと、Claude の既定のモデルの変化は検出しないことを足した
 
 ## 記録
 
