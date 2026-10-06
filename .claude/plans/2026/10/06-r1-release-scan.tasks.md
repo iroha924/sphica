@@ -61,7 +61,7 @@ base: main
   - コミット: `fix(release): show OSV table cells as code spans (T06)`
   - 結果: red は上のとおり 5 件 fail を実測。直した後 `cd server && node --test test/osv-summary.test.ts` → 10 件 pass
 
-- [ ] T07: osv ジョブの失敗（イメージの取得・準備の失敗）で publish と dry run が止まらないようにする
+- [x] T07: osv ジョブの失敗（イメージの取得・準備の失敗）で publish と dry run が止まらないようにする
   - 種別: 修正
   - 計画: S1
   - 依存: T02（直す対象の osv ジョブが要る）
@@ -69,6 +69,7 @@ base: main
   - red: `awk '/^  osv:/,/^  prepare:/' .github/workflows/release.yml | grep -c '^    continue-on-error: true'` → 0（ジョブ単位の continue-on-error が無く、publish と notify-approval は osv の成功を既定の条件で求める）
   - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。osv にジョブ単位の `continue-on-error: true`、publish は `!cancelled()` と sbom・prepare の成功、notify-approval は `!cancelled()` と prepare の成功だけを条件にする。`bun run verify` → 成功
   - コミット: `fix(release): keep a failed OSV job from blocking publish or the dry run (T07)`
+  - 結果: red は T03 のコミットの release.yml で 0 を実測。直した後は 1。`actionlint .github/workflows/release.yml` → 出力なし（exit 0）。`bun run verify` → exit 0
 ## P2: merge の後のスキャン
 
 release の merge の後に、main の OSV と Scorecard の run を workflow_dispatch で起こし、その URL を summary に出す。

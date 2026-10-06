@@ -71,9 +71,10 @@ jobs:
           if-no-files-found: error
 
   # Scans the revision being released so the owner can read the result before approving. Findings and a failed scan are reported,
-  # not failed on: the scanner step may fail, and the summary then says the results are unavailable
+  # not failed on: a failed scanner step leaves the results unavailable, and a failed job (an image pull, setup) does not fail the run
   osv:
     name: "${{ github.event_name == 'push' && format('release {0}: osv', github.ref_name) || 'dry run: osv' }}"
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -263,7 +264,7 @@ jobs:
     # Runs only on a tag push. GitHub does not evaluate the name of a skipped job, so the name is plain text
     name: ask for approval
     needs: [prepare, osv]
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -280,6 +281,7 @@ jobs:
           PULL: ${{ needs.prepare.outputs.pull }}
           SHA512: ${{ needs.prepare.outputs.sha512 }}
           OSV: ${{ needs.osv.outputs.line }}
+          OSV_JOB: ${{ needs.osv.result }}
         run: |
           set -e
           {
@@ -287,15 +289,15 @@ jobs:
             echo
             echo "SHA-512 of the checked tarball: \`$SHA512\`"
             echo
-            echo "${OSV:-OSV scan: no result line (see the run summary)}"
+            echo "${OSV:-OSV scan: the osv job ended with $OSV_JOB and left no result (see the run)}"
           } > "$RUNNER_TEMP/comment.md"
           gh pr comment "$PULL" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
 
   publish:
     name: publish
-    # Waits for osv too, so the approval is not asked for before the scan result is in the summary
+    # Waits for osv to finish, whatever its result, so the approval is not asked for before the scan is in the summary
     needs: [sbom, prepare, osv]
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.sbom.result == 'success' && needs.prepare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Does not start until the owner approves. The trusted publisher is limited to this workflow and this environment
