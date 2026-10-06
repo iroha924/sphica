@@ -326,18 +326,20 @@ test("order: withdrawing the owner's successor and adopting the waiting proposal
  * How long a call holds the write lock on this process's connections, from begin immediate returning to its rollback or commit returning,
  * and how long it waited to take it
  */
-async function lockTimes(fn: () => Promise<unknown>): Promise<{ held: number; waited: number }> {
+async function lockTimes(
+  fn: () => Promise<unknown>,
+): Promise<{ held: number; waited: number; askedAt: number; beganAt: number }> {
   const prepare = DatabaseSync.prototype.prepare;
-  const at = { asked: 0, began: 0, ended: 0 };
+  const at = { asked: 0, began: 0, ended: 0, askedAt: 0, beganAt: 0 };
   DatabaseSync.prototype.prepare = function (this: DatabaseSync, ...args: Parameters<typeof prepare>) {
     const st = prepare.apply(this, args);
     const text = String(args[0]);
     if (["begin immediate", "rollback", "commit"].includes(text)) {
       const run = st.run.bind(st) as (...a: SQLInputValue[]) => StatementResultingChanges;
       st.run = ((...a: SQLInputValue[]) => {
-        if (text === "begin immediate") at.asked = performance.now();
+        if (text === "begin immediate") [at.asked, at.askedAt] = [performance.now(), Date.now()];
         const out = run(...a);
-        if (text === "begin immediate") at.began = performance.now();
+        if (text === "begin immediate") [at.began, at.beganAt] = [performance.now(), Date.now()];
         else at.ended = performance.now();
         return out;
       }) as typeof st.run;
@@ -349,7 +351,7 @@ async function lockTimes(fn: () => Promise<unknown>): Promise<{ held: number; wa
   } finally {
     DatabaseSync.prototype.prepare = prepare;
   }
-  return { held: at.ended - at.began, waited: at.began - at.asked };
+  return { held: at.ended - at.began, waited: at.began - at.asked, askedAt: at.askedAt, beganAt: at.beganAt };
 }
 
 const CHAINS = 150;
@@ -542,6 +544,7 @@ test("record_check waits for a write lock another process holds, as save does, a
       sessionId: "s1",
       draftId: draft,
     });
+    // The holder says when it lets go, so the wait is checked by order, not by how long either side took to get there
     const holder = spawn(
       process.execPath,
       [
@@ -550,22 +553,41 @@ test("record_check waits for a write lock another process holds, as save does, a
 const c = new DatabaseSync(process.argv[1]);
 c.exec("begin immediate");
 process.stdout.write("held\\n");
-setTimeout(() => { c.exec("rollback"); c.close(); }, 400);`,
+setTimeout(() => { process.stdout.write("released " + Date.now() + "\\n"); c.exec("rollback"); c.close(); }, 1500);`,
         db.file,
       ],
       { stdio: ["ignore", "pipe", "inherit"] },
     );
-    const exited = new Promise((resolve) => holder.on("exit", resolve));
-    await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
-    let checked = "";
-    const times = await lockTimes(async () => {
-      checked = (
-        await checkText(db.ingest, draft, p, null, { units: [decided("kept", m, "Keep it.", true)] })
-      ).text;
+    let out = "";
+    holder.stdout.on("data", (b: Buffer) => {
+      out += b.toString();
     });
-    await exited;
-    assert.match(checked, new RegExp(`✓ would be active: ${PREFIX}kept`));
-    assert.ok(times.waited > 200, `the check waited ${times.waited.toFixed(1)} ms for the lock`);
+    const exited = new Promise<number | null>((resolve) => holder.on("exit", resolve));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        holder.stdout.on("data", () => out.includes("held\n") && resolve());
+        holder.on("error", reject);
+        void exited.then((code) =>
+          reject(new Error(`the lock holder exited (${code}) before it held the lock`)),
+        );
+      });
+      let checked = "";
+      const times = await lockTimes(async () => {
+        checked = (
+          await checkText(db.ingest, draft, p, null, { units: [decided("kept", m, "Keep it.", true)] })
+        ).text;
+      });
+      assert.equal(await exited, 0);
+      const released = Number(/released (\d+)/.exec(out)?.[1]);
+      assert.match(checked, new RegExp(`✓ would be active: ${PREFIX}kept`));
+      assert.ok(
+        times.askedAt <= released && released <= times.beganAt,
+        `asked ${times.askedAt}, released ${released}, began ${times.beganAt}`,
+      );
+    } finally {
+      if (holder.exitCode === null) holder.kill();
+      await exited;
+    }
   } finally {
     await db.done();
   }

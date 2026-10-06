@@ -97,7 +97,7 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - コミット: `fix(record): show each anchor warning found under the lock once in record_check (T08)`
   - 結果: red は直す前のコードで落ちた（警告が 2 行、actual 2 / expected 1）。lock の中の警告だけでなく、準備の時点でファイルが変わっていた 2 回目の check では検証の problems の側にも同じ警告が 2 つ入るので、両方を重ねないようにした。`cd server && node --test test/extract.test.ts test/record.test.ts` → pass 102 / fail 0。`bun run verify` → 終了コード 0
 
-- [ ] T09: lock を持つ子プロセスのテストを、時間の長さではなく順序で確かめ、子の失敗でも止まらないようにする
+- [x] T09: lock を持つ子プロセスのテストを、時間の長さではなく順序で確かめ、子の失敗でも止まらないようにする
   - 種別: 修正
   - 計画: S4
   - 依存: T04（直すテストが T04 にある）
@@ -105,6 +105,7 @@ check が lock を持つ時間を測って予算に収め、acceptance の case 
   - red: `node <scratchpad>/held.mjs` → 今のテストと同じ spawn と準備待ちの形で子を準備の前に `process.exit(1)` させると、準備待ちの Promise が終わらず「pending」と出る
   - 完了条件: `cd server && node --test test/reconcile.test.ts` → pass。親が lock を求めた時刻 < 子が lock を外す時刻 <= 親が lock を取れた時刻 を確かめ、子が準備の前に終わるとテストは失敗で終わる
   - コミット: `test(record): check the lock wait by order, and never hang on the lock holder (T09)`
+  - 結果: red は scratchpad の再現（今の形で子が準備の前に `process.exit(1)` する）で「pending」と出た。直した後は、親が lock を求めた時刻 <= 子が外した時刻 <= 親が取れた時刻 を確かめ、子が準備の前に終わると準備待ちが失敗し、finally で子を止めて終了を待つ。`cd server && node --test test/reconcile.test.ts` → pass 7 / fail 0。`bun run verify` → 終了コード 0
 
 - [ ] T06: trace・harvest・glean の Skill と record_check のツールの説明を直す
   - 種別: 変更
