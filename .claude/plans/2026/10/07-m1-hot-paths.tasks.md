@@ -97,13 +97,14 @@ base: main
 
 次に照合のコードを変える人が、同じ計測を前後で流すようにする。
 
-- [ ] T07: `plugin-release` Skill の確認項目に計測の 1 行を足す
+- [x] T07: `plugin-release` Skill の確認項目に計測の 1 行を足す
   - 種別: 追加
   - 計画: S7
   - 依存: T01（スクリプトのパスが要る）
   - 変更: `.agents/skills/plugin-release/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる
   - コミット: `docs(plugin-release): run the scale benchmark when changing delivery matching`
+  - 結果: `bun run verify:ai` → exit 0（AI config と links がエラー 0）。発火条件に `server/src/deliver.ts` も足した（照合を変える人がこの Skill を開くように）
 
 ## 記録
 
