@@ -86,3 +86,4 @@ doctor と README から ~/Projects の前提が消える。
 - 2026-10-06 / T01 / Codex のタスクごとのレビュー（207dde87）は指摘なし。Codex はファイルの DB のテストを sandbox で流せなかったので、同じテストを手元で流して 123 pass を確かめた / 対応なし
 - 2026-10-06 / T02, T03 / Codex のタスクごとのレビュー（746d34be、6d8fb33c）はどちらも指摘なし。Codex は sandbox でファイルの DB のテストと sql:reach を流せなかったので、手元の `bun run verify`（sql:reach を含む）が 0 で終わることを確かめた / 対応なし
 - 2026-10-06 / T05 / `check_plan.py done` が「T05 のコミット 3772727 が .claude/plans/ の外を変えていない」で NG。T05 は .claude/plans/ の中のファイルを消すだけのタスクで、外を変える理由が無い / 検査の作りの上で通らないものとして残し、完了の報告に書く。ほかのタスク（T01〜T04）は done の対象で違反なし
+- 2026-10-06 / T04 / Codex のタスクごとのレビュー（f27156e0）は指摘なし。Codex は sandbox で子プロセスのテストを流せなかったので、手元で cli.test.ts と project.test.ts の 28 pass を確かめた / 対応なし
