@@ -86,13 +86,15 @@ ajv など SDK v2 の中に入って bundle に入る 6 パッケージを THIRD
 
 Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tools/list と tools/call に答えることを見る。
 
-- [ ] T06: Windows の job に梱包した mcp-record.js の起動と、両サーバーの tools/call を足す
+- [x] T06: Windows の job に梱包した mcp-record.js の起動と、両サーバーの tools/call を足す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（v2 で梱包したサーバーが要る）
   - 変更: `.github/workflows/check.yml`
-  - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし。PR の CI の Windows job のログで、両サーバーの tools/list と tools/call の返答の確かめが通る
+  - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし。同じ送り方を手元で梱包した `plugin/dist/mcp.js` と `plugin/dist/mcp-record.js` に流す → 両方で tools/list に目当てのツールがあり、id 3 の tools/call に result が返る（Windows の実際の結果は plan の A6 で見る）
   - コミット: `ci(check): start the packed record server on Windows and call a tool on both (T06)`
+  - 結果: `actionlint .github/workflows/check.yml` → 指摘なし
+  - 結果: 同じループを手元で `node plugin/dist/<entry>.js` → 読み取りは `This directory is not in a registered project`、記録は `The host did not say which workspace` の result が id 3 で返った。stdin をすぐ閉じても今回は 3 つとも返ったが、SDK の注記どおり処理中の要求は閉じると落ちるので 5 秒開けておく
 
 ## P4: structuredContent の注記を実測に合わせる
 
@@ -112,3 +114,4 @@ Windows の CI で、梱包した `mcp.js` と `mcp-record.js` の両方が tool
 - 2026-10-06 / T04 / @cfworker/json-schema は bundle に入らない（metafile で確認）。変更欄から `scripts/licenses/embedded/@cfworker+json-schema@4.1.1.txt` を外し、完了条件の 7 パッケージを 6 に / plan の方針と変更履歴も直した
 - 2026-10-06 / T04 / 変更欄: 前は `scripts/check-embedded.mjs`, `package.json` を含む。新しくは `scripts/licenses/embedded/index.json`, `scripts/lib/embedded.mjs`, `scripts/lib/embedded.d.mts`, `scripts/bundle.mjs`, `server/test/embedded.test.ts` を足し、その 2 つを外した。完了条件も `node scripts/check-embedded.mjs` から `bun run bundle` に / 照合を bundle の中で流すため（plan の変更履歴）
 - 2026-10-06 / T05 / 変更欄: 前は `scripts/sbom-embedded.mjs`, `server/test/sbom.test.ts`, `.github/workflows/release.yml`。新しくは `scripts/lib/sbom.mjs` と `scripts/lib/sbom.d.mts` を足した / 足す処理を CLI ではなく既存の SBOM の lib に置いてテストするため
+- 2026-10-06 / T06 / 完了条件: 前は「PR の CI の Windows job のログで…通る」。新しくは actionlint と手元での同じ送り方 / check の workflow は PR でしか走らず、Windows の結果は plan の A6 と重なるため

@@ -174,14 +174,23 @@ jobs:
           HOME="$qhome" USERPROFILE="$qhome" node "$out/package/dist/cli.js" doctor > doctor-queue.out || true
           cat doctor-queue.out
           grep -E "✗ Recording +the queue cannot be read" doctor-queue.out
-          # Does MCP start and return the tool list?
-          printf '%s\n' \
-            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
-            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-            | HOME="$home" USERPROFILE="$home" timeout 30 node "$out/package/dist/mcp.js" > mcp.out || true
-          # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
-          grep -q '"search"' mcp.out
+          # Do both MCP servers start, list their tools, and answer a call? stdin stays open a while: the SDK drops a request still
+          # running when stdin closes
+          for server in mcp:search:status mcp-record:record_save:trace_pending; do
+            IFS=: read -r entry tool call <<< "$server"
+            {
+              printf '%s\n' \
+                '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+                '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+                '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+                "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"$call\",\"arguments\":{\"cwd\":\"$home\"}}}"
+              sleep 5
+            } | HOME="$home" USERPROFILE="$home" timeout 60 node "$out/package/dist/$entry.js" > "$entry.out" || true
+            cat "$entry.out"
+            # Under pipefail, grep -q closing early makes the previous stage die of SIGPIPE, so write the output first and then check it.
+            grep -q "\"$tool\"" "$entry.out"
+            grep -qE '"result":.*"id":3[,}]' "$entry.out"
+          done
           # The packed hooks, launched as hooks/hooks.json defines them, and every codex.json entry through each shell Codex can use
           node ../scripts/check-hooks-live.mjs "$out/package"
           # doctor's Codex hooks row from the packed CLI, with npm's codex.cmd on PATH as Windows installs it
