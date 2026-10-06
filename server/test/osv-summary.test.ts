@@ -88,6 +88,33 @@ test("a table cell cannot break out of its row", () => {
   assert.match(s.markdown, /^\| a\\\|b \\\| x \\\| \| 1 \| npm \| ID\\\|1 \|$/m);
 });
 
+test("groups naming vulnerabilities the package does not list are unavailable, not none", () => {
+  for (const vulnerabilities of [undefined, null, []]) {
+    const text = JSON.stringify({
+      results: [
+        {
+          packages: [
+            {
+              package: { name: "a", version: "1", ecosystem: "npm" },
+              vulnerabilities,
+              groups: [{ ids: ["GHSA-1"] }],
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(osvSummary(text, SHA).status, "unavailable", String(vulnerabilities));
+  }
+});
+
+test("Markdown in a cell is shown as text", () => {
+  const s = osvSummary(report(pkg("![x](https://example.org/i)", "1.0.0", ["*ID*"])), SHA);
+  assert.match(
+    s.markdown,
+    /^\| \\!\\\[x\\\]\\\(https:\/\/example\.org\/i\\\) \| 1\.0\.0 \| npm \| \\\*ID\\\* \|$/m,
+  );
+});
+
 test("the approval comment's line names the status", () => {
   assert.equal(
     osvLine({ status: "found", count: 2 }, SHA),
@@ -139,6 +166,11 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
     const found = run(path.join(dir, "results.json"));
     assert.equal(found.status, 0, found.stderr);
     assert.match(found.output, /^status=found\ncount=1\nline=OSV scan of b{40}: 1 known vulnerability/);
+
+    const unreadable = run(dir);
+    assert.equal(unreadable.status, 0, unreadable.stderr);
+    assert.match(unreadable.summary, /Results unavailable: the results file could not be read \(EISDIR\)/);
+    assert.match(unreadable.output, /^status=unavailable\n/);
 
     const bad = spawnSync(
       process.execPath,

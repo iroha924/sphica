@@ -31,6 +31,16 @@ base: main
   - コミット: `feat(release): summarize OSV results as found, none, or unavailable (T01)`
   - 結果: `cd server && node --test test/osv-summary.test.ts` → 7 件 pass（unavailable の 7 通り、none の 2 通り、found 1 件、ID の重複を除いた 3 件、表のセルの `|` と改行、承認コメントの行、CLI が結果なしで exit 0 と出力 3 つ、SHA でない引数で 0 以外）
 
+- [x] T05: 部分的な結果・読めない結果ファイル・セルの Markdown を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の要約が要る）
+  - 変更: `scripts/lib/osv-summary.mjs`, `scripts/lib/osv-summary.d.mts`, `scripts/osv-summary.mjs`, `server/test/osv-summary.test.ts`
+  - red: `cd server && node --test test/osv-summary.test.ts` → 3 件 fail（groups だけ残った結果が none、セルの `![x](...)` がそのまま、CLI が EISDIR で summary を書く前に exit 1）
+  - 完了条件: `cd server && node --test test/osv-summary.test.ts` → pass。groups に ID があるのに vulnerabilities が無い・null・空なら unavailable、セルの Markdown の記号はバックスラッシュで無効、ENOENT 以外の読み取りエラーも unavailable で exit 0
+  - コミット: `fix(release): report partial or unreadable OSV results as unavailable and escape cells (T05)`
+  - 結果: red は上のとおり 3 件 fail（none、Markdown の残り、summary.md の ENOENT）を実測。直した後 `cd server && node --test test/osv-summary.test.ts` → 9 件 pass
+
 - [ ] T02: release.yml に osv ジョブを足し、notify-approval と publish に待たせ、paths に足す
   - 種別: 追加
   - 計画: S1
@@ -66,3 +76,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 ## 記録
 
 - 2026-10-06 / T01 / テストが TS から .mjs を読むのに型宣言が要り、pre-commit の typecheck で止まった / 変更欄に `scripts/lib/osv-summary.d.mts` を足した（前: 3 ファイル、後: 4 ファイル）
+- 2026-10-06 / T05 / T01 の Codex のレビューで 3 件（groups だけ残った結果が none、ENOENT 以外の読み取りエラーで CLI が落ちる、セルの Markdown）を再現つきで受けた / 3 件とも直すことにして修正タスク T05 を T01 の後に足した

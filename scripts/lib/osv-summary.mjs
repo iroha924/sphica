@@ -1,10 +1,11 @@
 // Summarizes osv-scanner's JSON output (`--format=json`) for the release run. A scan that left no readable results is
 // `unavailable`, never `none`: only a well-formed result with no vulnerabilities says there are none.
 
+// Backslash-escapes Markdown punctuation so names from the results file render as text
 const cell = (value) =>
   String(value)
     .replace(/[\r\n]+/g, " ")
-    .replaceAll("|", "\\|");
+    .replace(/[\\`*_{}[\]()<>#+!|~]/g, "\\$&");
 
 /** Packages with vulnerabilities, or null when the shape is not osv-scanner's. */
 function vulnerable(report) {
@@ -17,6 +18,10 @@ function vulnerable(report) {
       if (!pkg || typeof pkg.name !== "string" || typeof pkg.version !== "string") return null;
       const vulns = entry.vulnerabilities ?? [];
       if (!Array.isArray(vulns) || vulns.some((v) => typeof v?.id !== "string")) return null;
+      // Groups hold the IDs of the package's vulnerabilities, so groups without them mean a partial result
+      const grouped =
+        Array.isArray(entry.groups) && entry.groups.some((g) => Array.isArray(g?.ids) && g.ids.length > 0);
+      if (vulns.length === 0 && grouped) return null;
       if (vulns.length === 0) continue;
       rows.push({
         name: pkg.name,
@@ -30,14 +35,16 @@ function vulnerable(report) {
 }
 
 /**
- * `text` is the results file's contents, or null when the file is missing. `count` is the number of distinct vulnerability IDs
- * (aliases are not merged); the table has one row per package and version.
+ * `text` is the results file's contents, null when the file is missing, or `{ code }` when reading it failed. `count` is the
+ * number of distinct vulnerability IDs (aliases are not merged); the table has one row per package and version.
  */
 export function osvSummary(text, sha) {
   const head = `### OSV scan of \`${sha}\``;
   let report;
   let reason = "";
   if (text === null) reason = "the scan wrote no results file";
+  else if (typeof text !== "string")
+    reason = `the results file could not be read (${cell(text.code ?? "unknown error")})`;
   else if (text.trim() === "") reason = "the results file is empty";
   else {
     try {

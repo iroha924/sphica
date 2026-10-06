@@ -8,11 +8,11 @@ import { osvLine, osvSummary } from "./lib/osv-summary.mjs";
 const [file, sha] = process.argv.slice(2);
 if (!file || !/^[0-9a-f]{40}$/.test(sha ?? ""))
   throw new Error("pass the results path and the scanned commit's full SHA");
-let text = null;
+let text;
 try {
   text = fs.readFileSync(file, "utf8");
 } catch (error) {
-  if (error.code !== "ENOENT") throw error;
+  text = error.code === "ENOENT" ? null : { code: error.code };
 }
 const summary = osvSummary(text, sha);
 process.stdout.write(summary.markdown);
