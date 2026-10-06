@@ -41,13 +41,14 @@ base: main
   - コミット: `fix(release): report partial or unreadable OSV results as unavailable and escape cells (T05)`
   - 結果: red は上のとおり 3 件 fail（none、Markdown の残り、summary.md の ENOENT）を実測。直した後 `cd server && node --test test/osv-summary.test.ts` → 9 件 pass
 
-- [ ] T02: release.yml に osv ジョブを足し、notify-approval と publish に待たせ、paths に足す
+- [x] T02: release.yml に osv ジョブを足し、notify-approval と publish に待たせ、paths に足す
   - 種別: 追加
   - 計画: S1
   - 依存: T01（ジョブが呼ぶ CLI が要る）
   - 変更: `.github/workflows/release.yml`
   - 完了条件: `actionlint .github/workflows/release.yml` → 出力なし。`bun run verify` → 成功
   - コミット: `ci(release): scan the tagged revision with OSV before approval (T02)`
+  - 結果: `actionlint .github/workflows/release.yml` → 出力なし（exit 0）。`bun run verify` → exit 0（acceptance 130 件 pass を含む）。zizmor は手元に無く、CI で見る
 
 ## P2: merge の後のスキャン
 
@@ -77,3 +78,4 @@ plugin-release Skill が、スキャンの結果の読み方と、dispatch し�
 
 - 2026-10-06 / T01 / テストが TS から .mjs を読むのに型宣言が要り、pre-commit の typecheck で止まった / 変更欄に `scripts/lib/osv-summary.d.mts` を足した（前: 3 ファイル、後: 4 ファイル）
 - 2026-10-06 / T05 / T01 の Codex のレビューで 3 件（groups だけ残った結果が none、ENOENT 以外の読み取りエラーで CLI が落ちる、セルの Markdown）を再現つきで受けた / 3 件とも直すことにして修正タスク T05 を T01 の後に足した
+- 2026-10-06 / T02 / osv ジョブは contents: read だけで security-events を持たないので、osv-scanner.yml の fork PR の除外（security-events を fork に渡せないため）は理由が無くなった / plan にあった fork PR の除外は付けなかった

@@ -24,6 +24,8 @@ on:
       - scripts/lib/release-env.mjs
       - scripts/release-finish.mjs
       - scripts/lib/release-finish.mjs
+      - scripts/osv-summary.mjs
+      - scripts/lib/osv-summary.mjs
       # A PR that bumps the version is a release PR, so run the same steps before the tag is pushed
       - plugin/package.json
 
@@ -67,6 +69,41 @@ jobs:
           path: ${{ runner.temp }}/sbom.cdx.json
           retention-days: 7
           if-no-files-found: error
+
+  # Scans the revision being released so the owner can read the result before approving. Findings and a failed scan are reported,
+  # not failed on: the scanner step may fail, and the summary then says the results are unavailable
+  osv:
+    name: "${{ github.event_name == 'push' && format('release {0}: osv', github.ref_name) || 'dry run: osv' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      line: ${{ steps.summary.outputs.line }}
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The scanner the pinned osv-scanner reusable workflow (v2.6.0) runs, called directly so its failure does not fail the job
+      - name: Scan dependencies
+        uses: google/osv-scanner-action/osv-scanner-action@7f58dd6750d78fc29a900ba64b1a0f946f62fba4 # v2.6.0
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --output=results.json
+            --format=json
+            -r
+            ./
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+          package-manager-cache: false
+      - name: Summarize the scan
+        id: summary
+        run: node scripts/osv-summary.mjs results.json "$(git rev-parse HEAD)"
 
   prepare:
     name: "${{ github.event_name == 'push' && format('release {0}: prepare', github.ref_name) || 'dry run: prepare' }}"
@@ -225,7 +262,7 @@ jobs:
   notify-approval:
     # Runs only on a tag push. GitHub does not evaluate the name of a skipped job, so the name is plain text
     name: ask for approval
-    needs: prepare
+    needs: [prepare, osv]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -242,18 +279,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PULL: ${{ needs.prepare.outputs.pull }}
           SHA512: ${{ needs.prepare.outputs.sha512 }}
+          OSV: ${{ needs.osv.outputs.line }}
         run: |
           set -e
           {
             echo "$GITHUB_REF_NAME waits for the owner's approval of npm-release: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo
             echo "SHA-512 of the checked tarball: \`$SHA512\`"
+            echo
+            echo "${OSV:-OSV scan: no result line (see the run summary)}"
           } > "$RUNNER_TEMP/comment.md"
           gh pr comment "$PULL" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment.md"
 
   publish:
     name: publish
-    needs: [sbom, prepare]
+    # Waits for osv too, so the approval is not asked for before the scan result is in the summary
+    needs: [sbom, prepare, osv]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
