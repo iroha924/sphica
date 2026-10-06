@@ -54,13 +54,19 @@ review コマンド名と自動 trace の停止を、hook が `CLAUDE_PLUGIN_OPT
 
 plugin.json に userConfig を足し、対話の dialog の動きを実測して、README に設定のしかたを書く。
 
-- [ ] T03: plugin.json に review_commands と auto_trace の userConfig を足し、対話の dialog を実測する
+- [x] T03: plugin.json に review_commands と auto_trace の userConfig を足し、対話の dialog を実測する
   - 種別: 追加
   - 計画: S3
   - 依存: T01（実測で option の値が review に効くのを見る）, T02（実測で option の値が自動 trace に効くのを見る）
   - 変更: `plugin/.claude-plugin/plugin.json`
   - 完了条件: `claude plugin validate plugin` → `Validation passed`。`bun run verify` → exit 0。2.1.291 の対話（一時の CLAUDE_CONFIG_DIR とローカルの marketplace）で、新規と更新のそれぞれ、dialog を確定した後と取消した後の plugin の有効状態・hook・既存の env の効き方を結果欄に書く。既存の設定が消えるか設定を終えられないなら、ここで止めて持ち主に戻す
-  - コミット: `feat(plugin): declare review_commands and auto_trace as userConfig`
+  - コミット: `feat(plugin): declare review_commands and auto_trace as userConfig (T03)`
+  - 結果: `claude plugin validate plugin` → `Validation passed`。`bun run verify` → exit 0
+  - 結果: 実測は 2.1.291、一時の HOME と CLAUDE_CONFIG_DIR、ローカルの marketplace（directory source）、ダミーの API キー、userConfig の無い 0.0.1 と同じ形の userConfig を持つ 0.0.2 の probe plugin（SessionStart の exec form hook が `CLAUDE_PLUGIN_OPTION_*` と `SPHICA_*` を書き出す）、expect で対話を操作。settings.json の env に `SPHICA_AUTO_TRACE=off`（と `SPHICA_REVIEW_COMMANDS=deploy`）を置いた
+  - 結果: 新規（CLI の `claude plugin install`）: dialog は出ず「2 userConfig options not yet set」と出るだけ。plugin は有効、対話で起動しても dialog は出ず hook が走り、env はそのまま届く。`CLAUDE_PLUGIN_OPTION_*` は無い
+  - 結果: 更新（0.0.1 を入れて marketplace を 0.0.2 にし `claude plugin update`）: dialog は出ない。plugin は有効のまま、hook は 0.0.2 で走り、env はそのまま届く
+  - 結果: 新規（対話の `/plugin install`）: インストールの後に「Configure uctest」の dialog が出る。取消（Esc）: 「Installed uctest. Plugin is now active.」、plugin は有効、pluginConfigs は無し、env は残る。確定（空と default のまま Save configuration）: 「Installed and configured uctest.」、pluginConfigs は `{"auto_trace": true}` だけ（空の review_commands は保存されない）、次の起動の hook に `CLAUDE_PLUGIN_OPTION_AUTO_TRACE="true"` と env の `SPHICA_AUTO_TRACE=off` が両方届く（どちらかが off で止める読み方なので止まったまま）
+  - 結果: どの経路でも既存の設定は消えず、設定を終えられないことも無かったので release へ進める
 
 - [ ] T04: README.md と README.ja.md に /config での設定と env との関係を書く
   - 種別: 変更

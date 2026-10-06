@@ -16,5 +16,19 @@
     "decisions",
     "sqlite"
   ],
-  "mcpServers": "./mcp/claude.json"
+  "mcpServers": "./mcp/claude.json",
+  "userConfig": {
+    "review_commands": {
+      "type": "string",
+      "title": "Review commands",
+      "description": "Your own review commands whose names do not contain \"review\", comma-separated. Each gets the decisions your local change touches. When empty, SPHICA_REVIEW_COMMANDS is used",
+      "default": ""
+    },
+    "auto_trace": {
+      "type": "boolean",
+      "title": "Automatic trace",
+      "description": "At the start of a new session, ask the agent to trace earlier sessions that wait to be traced. SPHICA_AUTO_TRACE=off keeps it off either way",
+      "default": true
+    }
+  }
 }
