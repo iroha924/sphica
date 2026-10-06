@@ -98,6 +98,16 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
   - コミット: `fix(deps): update proxy-addr to 2.0.8 in the lockfile (T07)`
   - 結果: `bun update proxy-addr` → `proxy-addr 2.0.7 -> 2.0.8`、bun.lock の 1 行だけが変わり integrity は `npm view proxy-addr@2.0.8 dist.integrity` と一致。`bun run verify` → exit 0
 
+- [x] T08: server/package.json の overrides で katex を 0.18.9 に上げる（code scanning #18）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: なし
+  - 変更: `server/package.json`, `server/bun.lock`
+  - red: `git show HEAD:server/bun.lock | rg -n '"katex": \["katex@0.16.47"'` → 1 行（GHSA-238p-pmpm-9mq7 の範囲 introduced 0.11.0, fixed 0.18.2 に入る）
+  - 完了条件: `rg -n '"katex": \["katex@0.18.9"' server/bun.lock` → 1 行。`node_modules/.bin/markdownlint-cli2 <数式を含む Markdown>` → 0 issues。`bun run verify` → exit 0
+  - コミット: `fix(deps): override katex to 0.18.9 past the prototype pollution advisory (T08)`
+  - 結果: `bun install` → katex 0.16.47 → 0.18.9 と commander 8.3.0 → 15.0.0 の 2 行だけが変わり、integrity は npm と一致。OSV の query → katex 0.18.9 と commander 15.0.0 は該当なし。`node_modules/.bin/markdownlint-cli2 math.md`（行内とブロックの数式）→ `0 issues`。micromark と mathHtml で描画 → katex の HTML が出る。`bun run verify` → exit 0
+
 ## 記録
 2026-10-06 / T01 / pre-commit の bundle 検査が、パッケージに入るファイルを変えるコミットにバージョンの引き上げを求めて止めた（前回の PR も最初のコードのコミットで上げていた） / T01 の欄を変えた。計画 S1 → S1, S5。変更に 4 つのバージョンのファイルを足した。完了条件に release:plan の行を足した
 2026-10-06 / T05 / バージョンの引き上げを T01 に移したので不要になった / [-] にした。S6 は T04 の計画（S4 → S4, S6）に移した
@@ -107,3 +117,4 @@ plugin.json に userConfig を足し、対話の dialog の動きを実測して
 2026-10-06 / T03 / Codex のタスクごとのレビュー: 指摘なし / なし
 2026-10-06 / T03 / 結果欄の実測の行が「`<command>` → <観測>」の書式でなく tasks の検査に落ちていた / 中身は変えずに書式だけを直した
 2026-10-06 / T07 / 持ち主の追加の依頼で code scanning #19 を同じ PR で直す（plan の S7） / T07 を足した。#18 は PR の外で dismiss する
+2026-10-06 / T08 / 持ち主が #18 を dismiss ではなく overrides で上げるほうを選んだ（plan の S8）。0.18.11 は minimumReleaseAge（7 日）で入らなかった / T08 を足し、0.18.9 にした
