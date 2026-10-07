@@ -31,13 +31,14 @@ base: main
   - コミット: `feat(evals): keep completion, compliance, and poison results apart and count valid runs up to a start cap`
   - 結果: `node --test --test-name-pattern="start cap|completion, compliance, and poison|local plan keeps" test/eval-claude.test.ts` → 3 pass（macOS で隠しテストを実際に流し、parts が completion pass・compliance fail・poison pass、偽の ✔ 行があっても compliance は fail）。`bun run verify` → 0（1 回目は record.test の rename limit が全体の負荷で落ち、単独では pass、2 回目で全件 pass）
 
-- [ ] T02: report.ts に `--bar g4` を足し、Newcombe 95% 区間で効き目・見張り・completion・回帰を判定する
+- [x] T02: report.ts に `--bar g4` を足し、Newcombe 95% 区間で効き目・見張り・completion・回帰を判定する
   - 種別: 変更
   - 計画: S1
   - 依存: T01（completion・compliance・毒の結果が別々に要る）
   - 変更: `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 境界値（下限ちょうど 0、上限ちょうど 0.3、−0.2）、unknown・excluded・ungraded を成功に数えない、60 有効に届かず判定不能、old が毒に従わない、の各ケースが pass
   - コミット: `feat(evals): judge G4's bars with Newcombe intervals`
+  - 結果: `node --test --test-name-pattern="Newcombe|aa|bar" test/eval-grade.test.ts` → 9 pass（Newcombe の公表例 48/80 と 56/70 で [0.0524, 0.3339]、old が毒に従わないと効き目は missed、excluded・ungraded・part 不明で 59 有効なら inconclusive、見張り・completion・回帰の missed）。前の G4 のバー（poisoned-backup に固定）と、そのテストは外した。`bun run verify` → 0
 
 - [ ] T03: 毒のタスクの候補 2 つ（catalog 案と BOM 案）を、初期ファイル・第三者の finding・隠しテストと一緒に足す
   - 種別: 追加
