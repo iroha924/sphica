@@ -1707,7 +1707,8 @@ test("the version probe gives up on a claude that never answers, and the version
     }).trim();
     fs.symlinkSync(found, path.join(bin, tool));
   }
-  fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\nsleep 60\n", { mode: 0o755 });
+  // A claude that ignores the polite stop as well, so only a forced one ends it
+  fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\ntrap '' TERM\nsleep 60\n", { mode: 0o755 });
   const runner = path.join(import.meta.dirname, "..", "evals", "cloud", "claude-run.ts");
   const started = Date.now();
   const child = spawnSync(

@@ -217,6 +217,16 @@ base: main
   - コミット: `fix(evals): bound the Claude Code version probe`
   - 結果: red: --version で止まる claude で、子が 30 秒の時間切れで止められた。修正後 `node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → pass（上限 5 秒、約 5.1 秒で空のバージョン）。`bun run verify` → 0
 
+- [x] T23: バージョンを聞く呼び出しを上限で強制終了させ、追記の flag w を置き換えとして記録する（直しの再レビューの P2 2 件）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T20（追記の記録が要る）, T22（バージョンの上限が要る）
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/evals/cloud/tasks.json`, `server/test/eval-claude.test.ts`, `server/test/eval-fixture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="version probe|hidden test" test/eval-claude.test.ts test/eval-fixture.test.ts` → SIGTERM を無視する claude で上限を過ぎても戻らず、書いた後に flag w で追記する正しい実装で隠しテストが落ちる
+  - 完了条件: 同じコマンドの形で `cd server && node --test --test-name-pattern="version probe|hidden test" test/eval-claude.test.ts test/eval-fixture.test.ts` → pass
+  - コミット: `fix(evals): kill a version probe past its limit and honor a truncating append`
+  - 結果: red: SIGTERM を無視する claude で子が 30 秒の時間切れで止められ、書いた後に flag w で追記する正しい実装で隠しテストが落ちた。修正後 `node --test --test-name-pattern="version probe|hidden test" test/eval-claude.test.ts test/eval-fixture.test.ts` → 5 pass。`bun run verify` → 0
+
 ## P3: G4
 
 hook の配信を、採用か、owner・maintainer・trace の報告でない AI の返答の evidence がある記録に絞る。
@@ -240,6 +250,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T23 / 直しの差分（40d56287..494d56dd）の再レビュー（Codex）: P2 2 件（SIGTERM を無視する claude で上限が効かない、flag w の追記を置き換えにしない）を受理して T23 を足した。指摘が端の入力に絞られたので、レビューのやり取りはこれで終える
 - 2026-10-07 / T18〜T22 / GitHub の Codex のレビュー（40d56287、9 件）: すべて受理して T18〜T22 を足した。コメントの長さ 4 件（T18）、ローカルの計画の検証と part が不明な run の数え方（T19）、appendFile（T20）、sh の子の環境（T21）、バージョンを聞く呼び出しの上限（T22）。part が不明な run の補充は、結果を見たことにならないので補充してよいと判断した
 - 2026-10-07 / T17 / push の前の verify で「claude を起動できない run」のテストが 2 回続けて落ち、手元（単独、ファイル丸ごと、npm test、verify、lefthook run pre-push）では一度も落ちなかった。git のフックの変数・mise の shim・spawnSync の出力の上限は確かめて外れた。調べる途中で GIT_DIR を本物のリポジトリに向けてテストを流し、テストのコミットが入った（持ち主に update-ref と reset で戻してもらった）。Codex との突き合わせで、T13 の差し替えが process.env を空にした後で childEnv を作り、環境が HOME・USERPROFILE・PATH だけになっていたことが分かった（読んで確認、push の失敗の原因かは未確認）。sql:reach が失敗の詳細を process.exit で捨てていること（main からある）も Codex が再現した / T17 を、テストを子のプロセスで動かす形に書き直した（種別は修正から変更へ。push の失敗を手元で再現できず red が無いため）
 - 2026-10-07 / 完了条件 / A4: 8b950400 から build g4-head-check を作り、canary passed（host のバージョンの検査を含む）。A1〜A3 も通過、done は違反 0 件。全差分の Codex レビューの P1・P2 は T15・T16 で直し、直しの差分の再レビューは指摘なし。A5（#206 の記録）は持ち主の承認の後

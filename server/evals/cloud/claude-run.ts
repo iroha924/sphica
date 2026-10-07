@@ -151,7 +151,11 @@ export const runEnv = (parent: NodeJS.ProcessEnv): Record<string, string> =>
  */
 export function claudeVersion(): string {
   try {
-    return execFileSync("claude", ["--version"], { encoding: "utf8", timeout: 5_000 }).trim();
+    return execFileSync("claude", ["--version"], {
+      encoding: "utf8",
+      timeout: 5_000,
+      killSignal: "SIGKILL",
+    }).trim();
   } catch {
     return "";
   }
