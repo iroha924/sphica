@@ -115,6 +115,16 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
   - コミット: `refactor(record): take out the reference-file warning the owner's judgment did not adopt`
   - 結果: S7 の SQL の 1 本目 → 14 件（u1, u2, u32, u53, u54, u57, u59, u71, u76, u85, u132, u148, u165, u218）で、事前に数えた集合と同じ。持ち主の判定は「外す・付け直す」5 件（u1, u2, u76, u71, u54 の AGENTS.md）で過半数に届かず、不採用（2026-10-07、持ち主が Claude の案に同意）。#209 に結果をコメント（承認の後、issuecomment-6032717654）。T05 の警告をコードとテストと glean-20 から外した: `grep -rn "referenceFile\|referenceAnchorWarning\|glean-20" server/src server/test server/evals` → 0 件。T08 のテストを既存の「パスが作業ツリーに無い」警告で書き直し、まとめる処理を一時的に外すと 2 行出て落ちることを確かめた。delivery ビューと look ビューの締めの文を「trace か glean」に。`npm test`（server 全体）→ 964 pass / 0 fail。`bun run acceptance` → 132 pass。`bun run check` → exit 0
 
+- [x] T10: read の Retired anchors の見出しを、同じ path に live な anchor が残れば配信は続く、に直す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（見出しが T04 で入った）
+  - 変更: `server/src/read.ts`, `server/test/read.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="retired anchors" test/read.test.ts` → 失敗（見出しが「no longer delivered on their files」）
+  - 完了条件: 同じコマンド → pass。`npm test` → pass
+  - コミット: `fix(read): say a retired anchor stops counting, not that its file stops delivering`
+  - 結果: red: 新しい見出しを期待するテストを直す前に流す → fail。直した後 → pass。`npm test`（server 全体）→ 964 pass / 0 fail。`bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-07 / T01 / 新しい表を足すと、forget の接続が source の削除からの cascade を authorizer で拒否し、server のテスト 23 件が落ちた。ingest の revision の trigger 一覧（INGEST_TRIGGER_WRITES）も新しい trigger を求める / forget の削除許可と trigger 一覧の追加を T02 から T01 に移した。T01 の変更欄: 前 db-write.ts なし → 後 db-write.ts あり。T02 は ingest の挿入許可と forget の件数とテストを担う
@@ -126,3 +136,4 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
 - 2026-10-07 / T08 / Codex のレビュー（19378da3）の P2: 返答全体を Set でまとめたため、glean の別々の操作の同じ文面の ✓ 行が 1 行に減る（glean.ts は操作ごとに同じ文面を changed に足す）/ 採用。修正タスク T09 で、まとめる対象を警告の行だけにした
 - 2026-10-07 / T09 / Codex のレビュー（5252a8da）の P2: 先頭 80 文字が同じ 2 つの symbol がどちらも見つからないと警告が同じ文面になり、1 行にまとまる / 見送り。まとまる 2 行は文字まで同じで、失うのは回数だけ。80 文字を超える symbol が 2 つ同時に見つからない端の入力
 - 2026-10-07 / T06 / 警告は不採用になり、trace と harvest の Skill に書く警告の読み方は不要になった。look ビュー（overview.ts）にも同じ締めの文があり、対になる箇所として一緒に直した / T06 の変更欄: 前 glean・trace・harvest の SKILL.md と delivery-view.ts → 後 警告を外したファイル一式と delivery-view.ts・overview.ts と delivery-view.test.ts。コミットの件名も変えた
+- 2026-10-07 / 全差分 / Codex の全差分レビュー（6cc326a0、high）の P2: read の見出しが、同じ path に live な anchor が残っても「no longer delivered on their files」と書く / 採用。修正タスク T10。ほかの範囲（移行の定義の一致、拒否、実行順、rollback、forget 後の退去、権限、as-of、READ_BUDGET、バージョン）は指摘なし

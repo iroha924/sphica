@@ -310,7 +310,9 @@ async function describe(
   }
   const retired = anchors.filter((a) => a.retired_at);
   if (retired.length) {
-    out.push("Retired anchors (no longer delivered on their files; kept with the words that retired them):");
+    out.push(
+      "Retired anchors (they no longer count for delivery; a live anchor on the same path still does; kept with the words that retired them):",
+    );
     for (const a of retired) {
       const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
       const moved = a.to_path

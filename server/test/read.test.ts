@@ -467,7 +467,7 @@ test("read shows retired anchors with the words that retired them, a move's new 
     assert.match(
       out,
       new RegExp(
-        `Retired anchors \\(no longer delivered[^\\n]*\\n  - CLAUDE\\.md \\(applies_to\\): retired ${retiredAt}; s${said}, the owner, \\S+: "CLAUDE\\.md からは外して。"\\n  - AGENTS\\.md \\(applies_to\\): retired ${retiredAt}, moved to a\\.ts close; reason not recorded`,
+        `Retired anchors \\(they no longer count for delivery; a live anchor on the same path still does[^\\n]*\\n  - CLAUDE\\.md \\(applies_to\\): retired ${retiredAt}; s${said}, the owner, \\S+: "CLAUDE\\.md からは外して。"\\n  - AGENTS\\.md \\(applies_to\\): retired ${retiredAt}, moved to a\\.ts close; reason not recorded`,
       ),
     );
     // Before the retirement, both were live and nothing was retired
