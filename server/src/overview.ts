@@ -384,7 +384,7 @@ export async function lookOverview(
     stop
       ? `Partial: more follow. Call overview with view look and after: "${cursorText(stop)}". Pages are read at different times: a record or file that changed in between may be missed or shown twice.`
       : "Complete: every section was listed to its end. Not checked entries on any page still apply.",
-    "Read a record by its key before acting on it. Change a record only through /sphica:trace, with the owner's words.",
+    "Read a record by its key before acting on it. Change a record only with the owner's words, through /sphica:trace or /sphica:glean.",
   ].join("\n\n");
 }
 

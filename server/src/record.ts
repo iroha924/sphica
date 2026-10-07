@@ -28,7 +28,7 @@ import {
   symbolMasked,
   symbolMissing,
 } from "./repo-facts.ts";
-import { instructionFile, referenceFile } from "./rule-files.ts";
+import { instructionFile } from "./rule-files.ts";
 import { head, sha256 } from "./text.ts";
 
 const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
@@ -262,19 +262,6 @@ export function anchorProblem(
   if (kind === "file" && a.symbol && symbolMissing(facts, a.path, a.symbol))
     return `symbol ${JSON.stringify(inline(head(a.symbol, 80)))} is not found in ${at}; ${fix}`;
   return null;
-}
-
-/**
- * Why a path-only applies_to anchor on a file agents read for instructions or reference is likely wider than the record, or null. Reads and
- * edits are matched by path, so a symbol would not narrow it.
- */
-export function referenceAnchorWarning(a: {
-  path: string;
-  symbol?: string | null;
-  role: string;
-}): string | null {
-  if (a.role !== "applies_to" || a.symbol || !referenceFile(a.path)) return null;
-  return `anchor ${inline(a.path)} is a file agents read for instructions or reference, so the record is offered every time that file is read or edited; unless the record decides how that file itself changes, leave the anchor out (glean's retire_anchor retires a saved one) or anchor the code the decision governs`;
 }
 
 /** A repository-relative path with forward slashes, or null when it could leave the repository. */
@@ -644,8 +631,6 @@ export async function checkRecord(
         observed: observation !== null,
       });
       if (wrong) problems.push(`${key}: ${wrong}`);
-      const wide = referenceAnchorWarning({ path: p, symbol, role: a.role });
-      if (wide) problems.push(`${key}: ${wide}`);
     }
     // A masked symbol's fallback merges into a path-only anchor like it, in any order: identical rows could not be told apart by replace_anchor
     // Lines as saved (the end never before the start), so a reversed range meets the same place
@@ -1089,8 +1074,6 @@ export async function saveRecord(
         observed: a.observation !== null,
       });
       if (wrong) saved.anchorProblems.push(`${p.key}: ${wrong}`);
-      const wide = referenceAnchorWarning({ path: a.path, symbol, role: a.role });
-      if (wide) saved.anchorProblems.push(`${p.key}: ${wide}`);
       const at = a.lines ? null : symbol ? symbolAt(checked.facts, a.path, symbol) : null;
       const lines = a.lines ?? (at ? [at.line, at.line] : null);
       await trx

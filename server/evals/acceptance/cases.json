@@ -4593,54 +4593,6 @@
       ]
     },
     {
-      "id": "glean-20",
-      "layer": "glean",
-      "lang": "en",
-      "summary": "Anchoring a record to an instruction file by path alone is warned before saving, and the save still goes through",
-      "given": [
-        {
-          "case": "capture-01"
-        },
-        {
-          "session": {
-            "id": "s-en-glean20",
-            "at": "2026-04-03T09:00:00+09:00",
-            "turns": [
-              {
-                "owner": "The storage decision applies when CLAUDE.md is read.",
-                "assistant": "",
-                "edits": []
-              }
-            ]
-          }
-        }
-      ],
-      "when": {
-        "glean": {
-          "session": "s-en-glean20",
-          "record": {
-            "ops": [
-              {
-                "op": "anchor",
-                "unit": "trace:s-ja-storage/storage",
-                "path": "CLAUDE.md",
-                "role": "applies_to"
-              }
-            ]
-          }
-        }
-      },
-      "then": [
-        {
-          "check_notes_contain": "anchor CLAUDE.md is a file agents read for instructions or reference"
-        },
-        {
-          "unit": "trace:s-ja-storage/storage",
-          "lifecycle": "active"
-        }
-      ]
-    },
-    {
       "id": "reconcile-01",
       "layer": "reconcile",
       "lang": "ja",

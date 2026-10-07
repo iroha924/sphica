@@ -21,10 +21,6 @@ export function isRuleFile(rel: string): boolean {
   return i >= 0 && parts.length > i + 2 && name.endsWith(".md");
 }
 
-/** A file agents read for instructions or reference: an instruction file or a Skill. Every read of it offers what is anchored to it. */
-export const referenceFile = (rel: string): boolean =>
-  isRuleFile(rel) || rel.split("/").at(-1) === "SKILL.md";
-
 export type RuleFiles = {
   files: { path: string; text: string }[];
   /** Files found but not read: past the file cap, too large, not a regular file, binary, or leading outside the repository */

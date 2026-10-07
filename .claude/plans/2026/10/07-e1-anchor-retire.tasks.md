@@ -106,13 +106,14 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
   - コミット: `fix(extract): merge only repeated warnings in the save's reply, never two changes`
   - 結果: red: 直す前に同じテスト → fail。直した後、「both reported」と「said once」→ 2 pass。`npm test`（server 全体）→ 966 pass（1 回目は rename limit だけ落ち、流し直して 966 pass）。`bun run acceptance` → 133 pass。`bun run check` → exit 0
 
-- [ ] T06: 試しを持ち主が判定し、採否に合わせて Skill と案内を仕上げる
+- [x] T06: 試しを持ち主が判定し、採否に合わせて Skill と案内を仕上げる
   - 種別: 追加
   - 計画: S6, S7
   - 依存: T03（retire_anchor を Skill に書く）, T05（警告の採否を決める対象が要る）
-  - 変更: `plugin/skills/glean/SKILL.md`, `plugin/skills/trace/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `server/src/delivery-view.ts`
+  - 変更: `server/src/delivery-view.ts`, `server/src/overview.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/src/rule-files.ts`, `server/test/delivery-view.test.ts`, `server/test/extract.test.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: plan の S7 の SQL の 1 本目 → 対象の ID 集合を記録節に書く。持ち主の判定と採否を記録節と #209（文面は承認の後）に残す。不採用なら T05 の警告を外す（`git diff main -- server/src/record.ts | grep referenceAnchorWarning` → 何も出ない）。`bun run verify` → pass
-  - コミット: `docs(skills): describe retire_anchor and the reference-file warning`
+  - コミット: `refactor(record): take out the reference-file warning the owner's judgment did not adopt`
+  - 結果: S7 の SQL の 1 本目 → 14 件（u1, u2, u32, u53, u54, u57, u59, u71, u76, u85, u132, u148, u165, u218）で、事前に数えた集合と同じ。持ち主の判定は「外す・付け直す」5 件（u1, u2, u76, u71, u54 の AGENTS.md）で過半数に届かず、不採用（2026-10-07、持ち主が Claude の案に同意）。#209 に結果をコメント（承認の後、issuecomment-6032717654）。T05 の警告をコードとテストと glean-20 から外した: `grep -rn "referenceFile\|referenceAnchorWarning\|glean-20" server/src server/test server/evals` → 0 件。T08 のテストを既存の「パスが作業ツリーに無い」警告で書き直し、まとめる処理を一時的に外すと 2 行出て落ちることを確かめた。delivery ビューと look ビューの締めの文を「trace か glean」に。`npm test`（server 全体）→ 964 pass / 0 fail。`bun run acceptance` → 132 pass。`bun run check` → exit 0
 
 ## 記録
 
@@ -123,3 +124,5 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
 - 2026-10-07 / T03 / Codex のレビュー（0d0d517a）の P2: Skill が「1 本退かせればそのファイルでの配信が止まる」と書いていたが、配信は path で選ぶので、同じ path に live な applies_to が残れば続く（deliver.ts:261 で確認）/ 採用。修正タスク T07 を足して直した。ほかの観点（実行順・from の特定・理由の保存・touched）は指摘なし
 - 2026-10-07 / T05 / trace の保存の返答に同じ警告が 2 行出ることを、自分で一時スクリプトを流して見つけた。Codex のレビュー（9260e2dd）も同じ 1 件を指摘 / 採用。修正タスク T08 を足し、saveText の返答の同じ行を 1 つにまとめて直した。T04 のレビュー（9717fa60）は指摘 0 件
 - 2026-10-07 / T08 / Codex のレビュー（19378da3）の P2: 返答全体を Set でまとめたため、glean の別々の操作の同じ文面の ✓ 行が 1 行に減る（glean.ts は操作ごとに同じ文面を changed に足す）/ 採用。修正タスク T09 で、まとめる対象を警告の行だけにした
+- 2026-10-07 / T09 / Codex のレビュー（5252a8da）の P2: 先頭 80 文字が同じ 2 つの symbol がどちらも見つからないと警告が同じ文面になり、1 行にまとまる / 見送り。まとまる 2 行は文字まで同じで、失うのは回数だけ。80 文字を超える symbol が 2 つ同時に見つからない端の入力
+- 2026-10-07 / T06 / 警告は不採用になり、trace と harvest の Skill に書く警告の読み方は不要になった。look ビュー（overview.ts）にも同じ締めの文があり、対になる箇所として一緒に直した / T06 の変更欄: 前 glean・trace・harvest の SKILL.md と delivery-view.ts → 後 警告を外したファイル一式と delivery-view.ts・overview.ts と delivery-view.test.ts。コミットの件名も変えた
