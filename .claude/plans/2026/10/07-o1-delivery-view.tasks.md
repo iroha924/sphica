@@ -68,6 +68,16 @@ base: main
   - コミット: `feat(mcp): serve the delivery view from overview (T03)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern=mcp test/delivery-view.test.ts` → 2 件 pass。0・91・1.5・"7" は `Input validation error: ... at days`、live・look と days は `days: only with view delivery`、delivery と after は `after: not with view delivery, which is one page`。範囲内の days=7 は検証を通る。実 DB と git の origin を持つ一時リポジトリで days 省略・1・90 が枠付きで答える。`bun run verify` → 0 で終わる
 
+- [x] T09: 連続するドットの key を言及と数えない、除外の条件ごとにセッションを分けたテスト
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す言及の判定が要る）
+  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="written whole" test/delivery-view.test.ts` → `namesKey("trace:s/foo..bar", "trace:s/foo")` が true で落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 全件 pass。配信前の返信だけ・質問だけ・期間の後だけ・長い key だけのセッションがそれぞれ 0 件で印なし
+  - コミット: `fix(overview): keep a key with consecutive dots from counting as a shorter key's mention (T09)`
+  - 結果: red: `cd server && node --test --test-timeout=60000 --test-name-pattern="written whole" test/delivery-view.test.ts` → 直す前は `true !== false` で落ちた。直した後 `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 10 件 pass。質問の除外・配信の時刻の下限・期間の終わりの上限をそれぞれ外すと、組み直したテストが 1 件落ちることを確かめた（コードは戻した）。`bun run verify` → 0 で終わる
+
 ## P2: 計測と説明
 
 90 日分のログで 1 秒以内に返ることを、bundle した server を新しいプロセスで呼んで確かめ、README に載せる。
@@ -107,3 +117,4 @@ PR ブランチで持ち主が試し、採用なら同じバージョンに上�
 - 2026-10-07 / T07 / knowledge-schema Skill が新しい挙動には受け入れケースを先に足すよう求めている / overview の層に delivery のケースを足す T07 を T01 の後に追加
 - 2026-10-07 / T01 / Codex のタスクごとのレビュー（dac61df9）: P3 で、限界の節が id の無い行をすべて main と言い切り、reason subagent の開始を subagent, id unknown に数える集計と食い違う（delivery-view.ts で確認、受理） / 修正タスク T08 を足した
 - 2026-10-07 / T02 / 文末の句点（`trace:s/foo.`）を key の続きと見ると普通の文の言及を落とす / 右側の「.」は、後に key の文字が続くときだけ続きとみなす（`trace:s/foo.bar` は言及でない）。kysely に glob の演算子が無いので、AskUserQuestion の質問は取り出した external_id に `/:ask:.*:q:/` を当てて除いた
+- 2026-10-07 / T08, T02 / Codex のタスクごとのレビュー（db8c0d85, 02e69195）: T08 は指摘なし。T02 は P2 で `trace:s/foo..bar` を `trace:s/foo` の言及と数える（namesKey で再現、受理）、P3 で除外の条件を正しい返信と同じセッションに入れたテストは除外を外しても通る（受理） / 修正タスク T09 を足した

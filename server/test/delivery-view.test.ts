@@ -178,6 +178,7 @@ test("a key counts as named only when written whole, not inside a longer key or 
   assert.equal(namesKey("xtrace:s/foo", key), false);
   assert.equal(namesKey("trace:s/foo-bar", key), false);
   assert.equal(namesKey("trace:s/foo.bar", key), false);
+  assert.equal(namesKey("trace:s/foo..bar", key), false);
   assert.equal(namesKey("trace:s/foo/bar", key), false);
   // A longer key first, then the key itself
   assert.equal(namesKey("trace:s/foo-bar, then trace:s/foo", key), true);
@@ -186,27 +187,42 @@ test("a key counts as named only when written whole, not inside a longer key or 
 test("named later counts a session once, only from a captured reply after the delivery and before the period ends", async () => {
   const db = fresh();
   const p = project(db);
-  const [s1, s2] = [session(db, p, "s1"), session(db, p, "s2")];
   const foo = unit(db, p, "trace:s/foo");
-  delivery(db, s1, { at: ago(5), units: [foo] });
-  delivery(db, s2, { at: ago(4), units: [foo] });
-  const say = (s: string, id: string, hours: number, text: string) =>
-    message(db, p, { id, text, speaker: "assistant", sent: ago(hours), session: s });
-  say(s1, "t0:assistant:a", 6, "Before it: trace:s/foo."); // before the delivery
-  say(s1, "t1:ask:tu1:q:b", 4.5, "Keep trace:s/foo?"); // a question, not a reply
-  say(s1, "t1:assistant:c", 4, "Per xtrace:s/foo and trace:s/foo-bar."); // only longer text
-  say(s1, "t2:assistant:d", 3, "`trace:s/foo` applies here.");
-  say(s1, "t3:assistant:e", 2, "Again trace:s/foo.");
-  say(s2, "u1:assistant:f", 3.5, "Only trace:s/foo-bar.");
-  say(s2, "u2:assistant:g", -1, "After the period: trace:s/foo.");
+  // One session per case, each delivered the record once, so each exclusion is seen on its own
+  const cases = [
+    [
+      "valid",
+      [
+        ["t1:assistant:a", 3, "`trace:s/foo` applies here."],
+        ["t2:assistant:b", 2, "Again trace:s/foo."],
+      ],
+    ],
+    ["before", [["t1:assistant:c", 6, "Before it: trace:s/foo."]]],
+    ["question", [["t1:ask:tu1:q:d", 4, "Keep trace:s/foo?"]]],
+    ["afterEnd", [["t1:assistant:e", -1, "After the period: trace:s/foo."]]],
+    ["longer", [["t1:assistant:f", 4, "Per xtrace:s/foo, trace:s/foo-bar, and trace:s/foo..bar."]]],
+  ] as const;
+  const at = new Map<string, string>();
+  for (const [i, [name, replies]] of cases.entries()) {
+    const s = session(db, p, name);
+    at.set(name, ago(5 + i / 10));
+    delivery(db, s, { at: at.get(name) ?? "", units: [foo] });
+    for (const [id, hours, text] of replies)
+      message(db, p, { id, text, speaker: "assistant", sent: ago(hours), session: s });
+  }
 
   const out = await deliveryOverview(db.reader, p, 7, NOW);
   assert.ok(
-    out.includes(`: 2 sessions, 2 deliveries, via pre_read; named later in 1 of those sessions`),
+    out.includes(": 5 sessions, 5 deliveries, via pre_read; named later in 1 of those sessions"),
     out,
   );
-  assert.ok(out.includes(`- ${ago(5)} pre_read, main: trace:s/foo (u${foo}, named later)`), out);
-  assert.ok(out.includes(`- ${ago(4)} pre_read, main: trace:s/foo (u${foo})`), out);
+  for (const [name] of cases)
+    assert.ok(
+      out.includes(
+        `- ${at.get(name)} pre_read, main: trace:s/foo (u${foo}${name === "valid" ? ", named later" : ""})\n`,
+      ),
+      `${name}\n${out}`,
+    );
 });
 
 test("an example delivery is marked only by replies after its own time", async () => {

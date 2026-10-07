@@ -43,9 +43,10 @@ export const DELIVERY_LIMITS_TEXT = [
 const CLOSING =
   "Read a record by its key or u<id> before relying on it. Change a record only through /sphica:trace, with the owner's words.";
 
-/** Characters a key goes on with on its left, and on its right; a dot on the right ends a sentence unless a key character follows it */
+/** Characters a key goes on with on its left, and on its right; a dot on the right ends a sentence unless KEY_AFTER_DOT follows it */
 const BEFORE_KEY = /[A-Za-z0-9_./:-]/;
 const AFTER_KEY = /[A-Za-z0-9_/-]/;
+const KEY_AFTER_DOT = /[A-Za-z0-9_./-]/;
 /** A question asked with AskUserQuestion, captured as the assistant's message: not a reply */
 const QUESTION = /:ask:.*:q:/s;
 
@@ -57,7 +58,7 @@ export function namesKey(text: string, key: string): boolean {
     const next = text[i + key.length + 1];
     const goesOn =
       after !== undefined &&
-      (AFTER_KEY.test(after) || (after === "." && next !== undefined && AFTER_KEY.test(next)));
+      (AFTER_KEY.test(after) || (after === "." && next !== undefined && KEY_AFTER_DOT.test(next)));
     if ((before === undefined || !BEFORE_KEY.test(before)) && !goesOn) return true;
   }
   return false;
