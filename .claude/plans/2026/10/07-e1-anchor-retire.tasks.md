@@ -86,6 +86,16 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
   - コミット: `feat(record): warn on a path-only anchor on a file agents read for instructions`
   - 結果: `node --test test/record.test.ts`（新しいテスト）→ CLAUDE.md・sub/AGENTS.md・.claude/rules・.agents/skills と plugin/skills の SKILL.md で check と save に 1 件ずつ出て active で保存、伏せ字で symbol が落ちた CLAUDE.md にも出る、symbol 付き・evidence・plugin.json・.claude/plans・README.md・skills 配下の SKILL.md 以外には出ない。`node --test test/extract.test.ts`（新しいテスト）→ glean の anchor と replace_anchor で check と save の両方に出る、symbol 付き・evidence には出ない。acceptance glean-20（check に警告、保存は active のまま）pass。`npm test`（server 全体）→ 964 pass / 0 fail。`bun run acceptance` → 133 pass。`bun run check` → exit 0。harvest は trace と同じ checkRecord と saveRecord を通るので、harvest 専用のテストは足していない
 
+- [x] T08: trace と harvest の保存の返答で、check と save の両方が出す同じ警告を 1 行にする
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（2 行になる警告が T05 で入った）
+  - 変更: `server/src/extract.ts`, `server/test/extract.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="said once" test/extract.test.ts` → 失敗（CLAUDE.md の警告が 2 回）
+  - 完了条件: 同じコマンド → pass。`npm test` と `bun run acceptance` → pass
+  - コミット: `fix(extract): say a warning check and save both give once in the save's reply`
+  - 結果: red: 直す前に同じテスト → fail（警告が 2 行）。直した後 → pass。`npm test`（server 全体）→ 965 pass / 0 fail。`bun run acceptance` → 133 pass。`bun run check` → exit 0
+
 - [ ] T06: 試しを持ち主が判定し、採否に合わせて Skill と案内を仕上げる
   - 種別: 追加
   - 計画: S6, S7
@@ -101,3 +111,4 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
 - 2026-10-07 / T03 / pairs の検査が glean の Skill の op 表に retire_anchor を求めた / Skill の retire_anchor の行を T06 から T03 に移した。T03 の変更欄: 前 Skill なし → 後 `plugin/skills/glean/SKILL.md` あり
 - 2026-10-07 / T03 / server 全体のテストで record.test の「rename limit」が 5 回中 2 回失敗し、単独では毎回通った。git の rename 検出の時間が負荷で延びるためと推測（未検証）。今回の変更は read と rename の経路に触れていない / 直さずに残す
 - 2026-10-07 / T03 / Codex のレビュー（0d0d517a）の P2: Skill が「1 本退かせればそのファイルでの配信が止まる」と書いていたが、配信は path で選ぶので、同じ path に live な applies_to が残れば続く（deliver.ts:261 で確認）/ 採用。修正タスク T07 を足して直した。ほかの観点（実行順・from の特定・理由の保存・touched）は指摘なし
+- 2026-10-07 / T05 / trace の保存の返答に同じ警告が 2 行出ることを、自分で一時スクリプトを流して見つけた。Codex のレビュー（9260e2dd）も同じ 1 件を指摘 / 採用。修正タスク T08 を足し、saveText の返答の同じ行を 1 つにまとめて直した。T04 のレビュー（9717fa60）は指摘 0 件

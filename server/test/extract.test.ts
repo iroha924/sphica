@@ -3221,3 +3221,25 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
     await db.done();
   }
 });
+
+test("trace: a warning check gives and save repeats is said once in the save's reply", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "承認は持ち主だけ。" });
+    const out = await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, null, {
+      units: [
+        {
+          key: "approve",
+          kind: "finding",
+          text: "承認は持ち主だけ",
+          evidence: [{ source: `s${m}`, quote: "承認は持ち主だけ。", role: "states" }],
+          anchors: [{ path: "CLAUDE.md", role: "applies_to" }],
+        },
+      ],
+    });
+    assert.equal(out.match(/anchor CLAUDE\.md is a file agents read/g)?.length, 1, out);
+  } finally {
+    await db.done();
+  }
+});

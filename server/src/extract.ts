@@ -741,7 +741,8 @@ export async function saveText(
       throw new Error(`The record is not valid:\n${v.errors.map((e) => `  ${e}`).join("\n")}`);
     const { saved, changed } = await v.write(trx);
     await finishRun(trx, v.run.id);
-    return [
+    // A warning check gave and the save found again is one line
+    const lines = [
       ...saved.active.map((k) => `✓ ${k} active`),
       ...saved.superseded.map((k) => `✓ ${k} superseded`),
       ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
@@ -751,7 +752,8 @@ export async function saveText(
       ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
       ...changed.map((c) => `✓ ${c}`),
       "✓ saved",
-    ].join("\n");
+    ];
+    return [...new Set(lines)].join("\n");
   });
   // Forgotten only once the save committed: a failed commit leaves the run retryable with what it was shown
   shownTo.delete(id);
