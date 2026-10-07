@@ -14,6 +14,7 @@ import {
   finalAnswer,
   patchSince,
   runArgs,
+  runClaude,
   runEnv,
   runMcp,
   runnerDigest,
@@ -446,7 +447,7 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
       },
     ]),
   );
-  const start = (canary?: unknown) => {
+  const start = (canary?: unknown, env: NodeJS.ProcessEnv = childEnv(build)) => {
     if (canary) fs.writeFileSync(path.join(build, "canary.json"), JSON.stringify(canary));
     return spawnSync(
       process.execPath,
@@ -463,18 +464,33 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
         "--out",
         path.join(build, "runs"),
       ],
-      { encoding: "utf8", env: childEnv(build) },
+      { encoding: "utf8", env },
     );
   };
+  // Where claude cannot be asked its version, an unknown version recorded by the canary matches nothing
+  const bin = path.join(build, "bin");
+  fs.mkdirSync(bin);
+  for (const tool of ["git", "node"]) {
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  const blind = start(
+    { passed: true, model: "m", runner: runnerDigest(), claude: "" },
+    { ...childEnv(build), PATH: bin },
+  );
+  assert.notEqual(blind.status, 0);
+  assert.match(blind.stderr, /no Claude run starts until it passes/);
+  assert.equal(fs.existsSync(path.join(build, "runs")), false, "nothing was started");
   for (const canary of [
     undefined,
     { passed: false, model: "m", runner: runnerDigest() },
     { passed: true, model: "other", runner: runnerDigest() },
     // A canary run on other runner code vouches for nothing here
     { passed: true, model: "m", runner: "an older runner", claude: claudeVersion() },
-    // Nor one run on another Claude Code, or one that recorded none
+    // Nor one run on another Claude Code, or one that recorded none or an unknown one
     { passed: true, model: "m", runner: runnerDigest(), claude: "0.0.0 (Claude Code)" },
     { passed: true, model: "m", runner: runnerDigest() },
+    { passed: true, model: "m", runner: runnerDigest(), claude: "" },
   ]) {
     const r = start(canary);
     assert.notEqual(r.status, 0);
@@ -1540,7 +1556,7 @@ test("the fence canary takes only a permission or sandbox refusal as refused, an
   );
 });
 
-test("a run whose claude cannot start is still recorded with the reason, and the command exits non-zero", (t) => {
+test("a run whose claude cannot start is still recorded with the reason", async (t) => {
   const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-nostart-"));
   t.after(() => fs.rmSync(build, { recursive: true, force: true }));
   fs.copyFileSync(
@@ -1566,11 +1582,6 @@ test("a run whose claude cannot start is still recorded with the reason, and the
       },
     ]),
   );
-  // The canary ran where claude could not start either: no version on either side
-  fs.writeFileSync(
-    path.join(build, "canary.json"),
-    JSON.stringify({ passed: true, model: "m", runner: runnerDigest(), claude: "" }),
-  );
   // A slot repository that clones, with its .tools
   const slot = path.join(build, "eval-shelf-1");
   fs.mkdirSync(path.join(slot, ".tools"), { recursive: true });
@@ -1588,24 +1599,24 @@ test("a run whose claude cannot start is still recorded with the reason, and the
     fs.symlinkSync(found, path.join(bin, tool));
   }
   const out = path.join(build, "runs");
-  const r = spawnSync(
-    process.execPath,
-    [
-      path.join(import.meta.dirname, "..", "evals", "cloud", "claude.ts"),
-      "--build",
+  // claude.ts would stop at the canary's gate first, since a host with no claude has no version; the runner itself records the failure
+  const saved = process.env.PATH;
+  process.env.PATH = bin;
+  try {
+    await runClaude({
       build,
-      "--repo",
-      "eval-shelf-1",
-      "--task",
-      "pilot-sort",
-      "--model",
-      "m",
-      "--out",
+      buildId: "b",
+      owner: "o",
+      repo: "eval-shelf-1",
+      condition: "none",
+      task: "pilot-sort",
+      prompt: "p",
       out,
-    ],
-    { encoding: "utf8", env: { ...childEnv(build), PATH: bin } },
-  );
-  assert.equal(r.status, 1, r.stderr);
+      model: "m",
+    });
+  } finally {
+    process.env.PATH = saved;
+  }
   const [run] = fs.readdirSync(out);
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
   assert.match(recorded.reason, /claude could not start/);

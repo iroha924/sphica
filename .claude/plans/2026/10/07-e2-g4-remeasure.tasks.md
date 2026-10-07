@@ -102,6 +102,16 @@ base: main
   - コミット: `fix(evals): fence the canary through the read-before-write rule and tie it to the Claude Code version`
   - 結果: red: 修正前の canary で Write と Edit が「1 of 1 attempts were not refused」の 2 件で落ちた（実測）。修正後 `node --test --test-name-pattern="canary|Claude Code" test/eval-claude.test.ts` → pass（Read の拒否より前の Edit、通った Edit、read-before-write で止まった Write は不合格、canary.json のバージョン違い・未記録で claude.ts が止まる）。`node evals/cloud/canary.ts --build ~/.cache/sphica-eval/builds/g4-pilot-old` → canary passed（Write は権限で拒否、Read は権限で拒否、Edit は Read の拒否の後に read-before-write で停止、Bash は sandbox で拒否、番兵は不変、新しいファイルは無し）。canary.json を書く既存のテスト 2 件にバージョンを足した。`bun run verify` → 0
 
+- [x] T12: canary の Claude Code のバージョンを始めと終わりで取って一致を確かめ、空のバージョンでは run を始めない（T11 のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T11（直す対象のコードが要る）
+  - 変更: `server/evals/cloud/canary.ts`, `server/evals/cloud/claude.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node --test --test-name-pattern="Claude Code" test/eval-claude.test.ts` → canary.json の claude が "" で、claude を起動できない PATH の claude.ts が、ゲートを通って run を始めて失敗する
+  - 完了条件: `cd server && node --test --test-name-pattern="Claude Code|cannot start" test/eval-claude.test.ts` → 空のバージョンでは claude.ts が止まり、claude を起動できない run は runClaude が理由つきで記録する
+  - コミット: `fix(evals): take the canary's CLI version at its start and refuse an unknown one`
+  - 結果: red: canary.json の claude が "" で claude の無い PATH の claude.ts がゲートを通り、拒否の文言が出ずに失敗。修正後 `node --test --test-name-pattern="Claude Code|cannot start|could not be set up|canary" test/eval-claude.test.ts` → 11 pass。canary は始めにバージョンを取り、終わりにも同じかを host の検査で確かめる。claude を起動できない場合のテストは runClaude を直接呼ぶ形にした。`bun run verify` → 0（1 回目は rename limit、2 回目は judge budget の時間のテストが裏の評価の run の負荷で落ち、どちらも単独では pass、3 回目で全件 pass）
+
 - [ ] T04: 予備の run（old、両案 × 両モデル、各 10 有効、最大 14 開始）で案と主のモデルを選び、選ばなかった案を外して凍結する
   - 種別: 変更
   - 計画: S2
@@ -133,6 +143,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T12 / T11 のレビュー F1（バージョンを終わりの時点で取る、P2）と F2（空のバージョンどうしが一致してゲートを通る、P2）を受理して足した。claude を起動できない場合のテストは、CLI のゲートで止まるので runClaude を直接呼ぶ形にする
 - 2026-10-07 / T11 / 対照（checkout の中の未読の Edit は read-before-write で止まる）を入れて流すと、未読の Edit が通った。制約は、作業ディレクトリの中の読めるファイルには効かない。前に「Read なしの Edit は必ず止まる」と持ち主に伝えたのは誤りだった。Codex と突き合わせて対照を外し、厳密な B とバージョンの照合を残した / 完了条件を変えた。前:「run の中の対照（未読の Edit は read-before-write で止まり、Read の後の Edit は通る）が無いと不合格」、新:「Edit が通ったら不合格」
 - 2026-10-07 / T11 / 予備の run の build で canary が落ちた。Claude Code 2.1.292 で Write と Edit が権限の判定より先に read-before-write で止まり、canary が拒否と数えない（番兵は変わらず、Bash は sandbox で拒否）。Codex と突き合わせて、Write は新しいファイル、Edit は Read の拒否の後の read-before-write に限って拒否と数え、run の中の対照とバージョンの照合を足すことにした / T11 を足し、T04 の依存に T11 を足した（前: T02, T03）
 - 2026-10-07 / T10 / T03 のレビュー F1〜F3（隠しテストが書き込みの方法・file URL・キーの順番で誤判定する、P2、どれも再現あり）を受理して足した。T09 のレビューは指摘なし

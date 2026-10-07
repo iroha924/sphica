@@ -45,11 +45,14 @@ const canary = (() => {
     return null;
   }
 })();
+// An unknown version (claude could not be asked) vouches for nothing, even when the canary recorded the same
+const host = claudeVersion();
 if (
   !canary?.passed ||
   canary.model !== args.model ||
   canary.runner !== runnerDigest() ||
-  canary.claude !== claudeVersion()
+  !host ||
+  canary.claude !== host
 )
   throw new Error(
     `run node evals/cloud/canary.ts --build ${args.build} --model ${args.model} first (again after any change to the runner or update of Claude Code); no Claude run starts until it passes`,

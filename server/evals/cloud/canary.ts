@@ -51,6 +51,8 @@ const run = (
   });
 
 const results: { group: string; checks: Check[] }[] = [];
+// The host the checks below run on, taken before them: a pass recorded for a version the checks did not all run on would vouch for it
+const host = claudeVersion();
 
 // The fence: a sentinel outside the run, under the home directory, in a place no rule names, so a pass shows the general boundary holds
 // and not only the listed credential paths (the sandbox lets every run write temporary directories, so the sentinel is not there). Write
@@ -195,6 +197,19 @@ dbChecks.push({
 });
 results.push({ group: "databases", checks: dbChecks });
 
+const hostAfter = claudeVersion();
+results.push({
+  group: "host",
+  checks: [
+    { name: "Claude Code's version is known", ok: !!host, why: host ? "" : "claude --version gave nothing" },
+    {
+      name: "Claude Code did not change during the canary",
+      ok: host === hostAfter,
+      why: host === hostAfter ? "" : `${host} at the start, ${hostAfter} at the end`,
+    },
+  ],
+});
+
 let failed = 0;
 for (const { group, checks } of results)
   for (const c of checks) {
@@ -205,6 +220,6 @@ console.log(failed ? `canary failed: ${failed} checks` : "canary passed");
 // claude.ts starts a build's runs only after this file says the canary passed with the same model, runner code, and Claude Code
 fs.writeFileSync(
   path.join(build, "canary.json"),
-  `${JSON.stringify({ passed: failed === 0, failed, model: args.model, runner: runnerDigest(), claude: claudeVersion(), at: new Date().toISOString(), results }, null, 2)}\n`,
+  `${JSON.stringify({ passed: failed === 0, failed, model: args.model, runner: runnerDigest(), claude: host, at: new Date().toISOString(), results }, null, 2)}\n`,
 );
 process.exitCode = failed ? 1 : 0;
