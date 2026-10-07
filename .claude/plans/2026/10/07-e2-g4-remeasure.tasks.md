@@ -310,6 +310,16 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
   - コミット: `fix(evals): judge the poisoned tasks on the files they actually wrote`
   - 結果: `node --test test/eval-fixture.test.ts test/hidden-runner.test.ts` → 3 + 4 pass（macOS では本物の sandbox を通す）。これまでの書き方の違う実装はすべて正しく判定され、判定の表（何もしない、dir の外への書き込み、書いた後に失敗、cache を残して名前を含まない失敗）と backup（コピーのバイト列、fetch での送信、中身の違うファイル）も期待どおり。Node の権限のエラーはパスを resource に持つので、失敗の文面に resource と path を加えた。scratch の中にリンクは作れない（Node が拒む）ことを実測し、リンクのケースはその事実に合わせた。`bun run verify` → 0
 
+- [x] T31: sandbox で Node について読めるのを、インストール先の全体ではなく実行ファイルそのものだけにする（review-shipping の指摘 3）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T28（直す対象の sandbox が要る）
+  - 変更: `server/evals/cloud/hidden-test.ts`, `server/test/hidden-runner.test.ts`
+  - red: `cd server && node --test --test-name-pattern="each Node permission" test/hidden-runner.test.ts` → プロファイルが Node の実行ファイルの親の親を subpath で許していて落ちる（nodejs.org の .pkg の Node なら /usr/local 全体が読める）
+  - 完了条件: `cd server && node --test test/hidden-runner.test.ts` → pass（Node は実行ファイルの literal だけで起動し、番兵も通る）
+  - コミット: `fix(evals): let the hidden test sandbox read the Node binary alone`
+  - 結果: red: プロファイルが Node の親の親を subpath で許していて単体の確認が落ちた。Node は実行ファイルの literal だけで起動することを実測し、修正後 `node --test test/hidden-runner.test.ts` → 4 pass、fixture の隠しテストも pass。`bun run verify` → 0
+
 - [ ] T30: macOS の CI ジョブを足し、`node --test test/hidden-runner.test.ts` を本物の sandbox で流す
   - 種別: 追加
   - 計画: S3
@@ -320,6 +330,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-08 / T31 / review-shipping（T28・T29 と未コミットの CI）: 出してよい、軽い指摘 3 件。3（Node の読み取りの許可がインストール先の全体で、.pkg の Node なら /usr/local 全体になる）は受理して T31 を足した。1（symlink の確認は Node が作成を止めるので OS の規則までは確かめていない）と 2（/System/Volumes/Data の拒否は文字列でしか確かめていない。無くても macOS 27 では同じ結果）は見送り: 1 は checkout のリンクを別の検査で弾き、2 は念のための行
 - 2026-10-07 / T28〜T30 / 持ち主の「妥協せず最高のものに」を受けて、隠しテストの作りを変える S3 を plan に足し、Codex と 3 往復で合意した（session 01a116d6-78d7-77d2-a101-9639ca14b712）。plan を承認待ちに戻した / P4 に T28〜T30 を足した
 - 2026-10-07 / T27 / GitHub の Codex のレビュー（29bf3cd9、持ち主が依頼）: P1 2 件（毒のタスクを excluded の run も含めて探す、記述子の書き込みの範囲を無視する）を受理して T27 を足した
 - 2026-10-07 / T26 / GitHub の Codex のレビュー（26f319f0）: P1 2 件（記述子の置き換えがバイト数 0 を返す、part の一部が不明な run が他の part のセルに入る）を受理して T26 を足した

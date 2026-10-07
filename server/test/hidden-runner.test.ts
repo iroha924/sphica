@@ -25,7 +25,10 @@ test("the runner passes each Node permission as its own flag and gives the test 
     "test/hidden.test.ts",
   ]);
   assert.deepEqual(hiddenEnv("/c", "/s"), { PATH: "/usr/bin:/bin", HOME: "/c", HIDDEN_SCRATCH: "/s" });
-  const profile = hiddenProfile("/c", "/s", "/n");
+  const profile = hiddenProfile("/c", "/s", "/n/bin/node");
+  // Node itself is read as its binary alone, never its install directory (a .pkg Node's would be all of /usr/local)
+  assert.ok(profile.includes('(literal "/n/bin/node")'));
+  assert.doesNotMatch(profile, /subpath "\/n(\/bin)?"/);
   for (const rule of [
     "(deny network*)",
     "(deny file-write*)",

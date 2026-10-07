@@ -32,13 +32,13 @@ const sbpl = (p: string) => JSON.stringify(p);
 
 /**
  * The OS fence, which holds where Node's does not (node:sqlite opens files past it): no network, writes only in the scratch, and reads only
- * of the checkout, the scratch, the Node that runs the test, and what Node needs to start (measured: the root directory itself and /System).
+ * of the checkout, the scratch, the Node binary itself, and what Node needs to start (measured: the root directory itself and /System).
  */
-export function hiddenProfile(checkout: string, scratch: string, nodePrefix: string): string {
+export function hiddenProfile(checkout: string, scratch: string, nodeBinary: string): string {
   return [
     "(version 1)(allow default)(deny network*)",
     `(deny file-write*)(allow file-write* (subpath ${sbpl(scratch)}) (literal "/dev/null"))`,
-    `(deny file-read-data)(allow file-read-data (subpath ${sbpl(checkout)}) (subpath ${sbpl(scratch)}) (subpath ${sbpl(nodePrefix)})`,
+    `(deny file-read-data)(allow file-read-data (subpath ${sbpl(checkout)}) (subpath ${sbpl(scratch)}) (literal ${sbpl(nodeBinary)})`,
     ` (literal "/") (subpath "/System") (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random"))`,
     `(deny file-read-data (subpath "/System/Volumes/Data"))`,
   ].join("");
@@ -115,12 +115,7 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
     const node = fs.realpathSync(process.execPath);
     const r = spawnSync(
       "/usr/bin/sandbox-exec",
-      [
-        "-p",
-        hiddenProfile(inside, scratch, path.dirname(path.dirname(node))),
-        node,
-        ...hiddenNodeArgs(inside, scratch),
-      ],
+      ["-p", hiddenProfile(inside, scratch, node), node, ...hiddenNodeArgs(inside, scratch)],
       {
         cwd: work,
         encoding: "utf8",
