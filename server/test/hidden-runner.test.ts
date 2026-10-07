@@ -1,0 +1,147 @@
+// The hidden test runner's fences: Node's permission flags, and on macOS the OS sandbox that holds where Node's does not. Each check tries the
+// way out for real and expects it refused, so a weaker profile fails here rather than in an evaluation.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { test } from "node:test";
+import {
+  hiddenEnv,
+  hiddenNodeArgs,
+  hiddenProfile,
+  NO_PARTS,
+  runHiddenTest,
+} from "../evals/cloud/hidden-test.ts";
+
+test("the runner passes each Node permission as its own flag and gives the test nothing but its paths", () => {
+  assert.deepEqual(hiddenNodeArgs("/c", "/s"), [
+    "--permission",
+    "--allow-fs-read=/c",
+    "--allow-fs-read=/s",
+    "--allow-fs-write=/s",
+    "--test",
+    "--test-isolation=none",
+    "test/hidden.test.ts",
+  ]);
+  assert.deepEqual(hiddenEnv("/c", "/s"), { PATH: "/usr/bin:/bin", HOME: "/c", HIDDEN_SCRATCH: "/s" });
+  const profile = hiddenProfile("/c", "/s", "/n");
+  for (const rule of [
+    "(deny network*)",
+    "(deny file-write*)",
+    '(allow file-write* (subpath "/s") (literal "/dev/null"))',
+    "(deny file-read-data)",
+    '(deny file-read-data (subpath "/System/Volumes/Data"))',
+  ])
+    assert.ok(profile.includes(rule), rule);
+  assert.doesNotMatch(profile, /allow file-write\*[^)]*"\/c"/, "the checkout is never writable");
+});
+
+/** A checkout holding nothing but the hidden test, and a directory beside the scratch that a run must not reach */
+function fixture(t: { after: (fn: () => void) => void }) {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-runner-")));
+  const sibling = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-hidden-")));
+  t.after(() => {
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(sibling, { recursive: true, force: true });
+  });
+  const work = path.join(base, "work");
+  fs.mkdirSync(work);
+  fs.writeFileSync(path.join(sibling, "secret.txt"), "sibling-secret");
+  const db = new DatabaseSync(path.join(sibling, "other.db"));
+  db.exec("create table t (x text); insert into t values ('sibling-secret')");
+  db.close();
+  return { work, sibling };
+}
+
+test("on macOS the sandbox lets the test write its scratch and refuses every way out; elsewhere the run is recorded as not run", (t) => {
+  const { work, sibling } = fixture(t);
+  const source = `import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
+import { DatabaseSync } from "node:sqlite";
+const scratch = process.env.HIDDEN_SCRATCH ?? "";
+const sibling = ${JSON.stringify(sibling)};
+const refused = (fn) => {
+  try {
+    fn();
+  } catch {
+    return true;
+  }
+  return false;
+};
+test("completion: files and databases in the scratch work", () => {
+  fs.writeFileSync(path.join(scratch, "a.json"), "[1]");
+  assert.equal(fs.readFileSync(path.join(scratch, "a.json"), "utf8"), "[1]");
+  const db = new DatabaseSync(path.join(scratch, "own.db"));
+  db.exec("create table t (x)");
+  db.close();
+});
+test("completion: the checkout is not writable", () => {
+  assert.ok(refused(() => fs.writeFileSync("written.txt", "x")));
+  assert.ok(refused(() => new DatabaseSync("written.db").exec("create table t (x)")));
+});
+test("completion: the directory beside the scratch is neither readable nor writable", () => {
+  assert.ok(refused(() => fs.readFileSync(path.join(sibling, "secret.txt"), "utf8")));
+  assert.ok(refused(() => new DatabaseSync(path.join(sibling, "other.db")).prepare("select x from t").all()));
+  assert.ok(refused(() => new DatabaseSync(path.join(sibling, "made.db")).exec("create table t (x)")));
+});
+test("completion: a link in the scratch leads nowhere outside it", () => {
+  const link = path.join(scratch, "out");
+  // Making the link is refused today; were it allowed, going through it must still be
+  const made = !refused(() => fs.symlinkSync(sibling, link));
+  assert.ok(
+    !made ||
+      (refused(() => new DatabaseSync(path.join(link, "through.db")).exec("create table t (x)")) &&
+        refused(() => fs.readFileSync(path.join(link, "secret.txt"), "utf8"))),
+  );
+});
+test("completion: the network is closed", async () => {
+  await assert.rejects(fetch("http://1.1.1.1/", { signal: AbortSignal.timeout(5000) }));
+});
+`;
+  const r = runHiddenTest(work, source, 60_000);
+  if (process.platform === "darwin") {
+    assert.equal(r.tests, "5 passed, 0 failed", JSON.stringify(r));
+    assert.equal(r.parts.completion, "pass");
+    for (const made of ["written.txt", "written.db"])
+      assert.equal(fs.existsSync(path.join(work, made)), false, made);
+    assert.deepEqual(fs.readdirSync(sibling).sort(), ["other.db", "secret.txt"]);
+    assert.ok(r.scratch && !fs.existsSync(r.scratch), "the scratch is removed after the run");
+  } else {
+    assert.match(r.tests, /^not run to the end/);
+    assert.deepEqual(r.parts, NO_PARTS);
+  }
+});
+
+test("a test that ignores the polite stop is killed at the limit, its parts unknown and its scratch removed", (t) => {
+  const { work } = fixture(t);
+  const source = `import { test } from "node:test";
+process.on("SIGTERM", () => {});
+test("completion: never ends", async () => {
+  await new Promise(() => setInterval(() => {}, 1000));
+});
+`;
+  const started = Date.now();
+  const r = runHiddenTest(work, source, 3_000);
+  assert.match(r.tests, /^not run to the end/);
+  assert.deepEqual(r.parts, NO_PARTS);
+  assert.ok(Date.now() - started < 30_000);
+  if (r.scratch) assert.equal(fs.existsSync(r.scratch), false);
+});
+
+test("a scratch that would overlap the checkout is never used", (t) => {
+  const { work } = fixture(t);
+  const saved = process.env.TMPDIR;
+  process.env.TMPDIR = work;
+  try {
+    const r = runHiddenTest(work, 'import { test } from "node:test";\ntest("completion: x", () => {});\n');
+    assert.equal(r.tests, "not run (the scratch directory and the checkout overlap)");
+    assert.deepEqual(r.parts, NO_PARTS);
+    assert.ok(r.scratch && !fs.existsSync(r.scratch));
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+  }
+});

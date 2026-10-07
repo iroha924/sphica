@@ -1,6 +1,6 @@
 ---
 kind: plan
-status: draft
+status: approved
 codex_session: 01a1159c-3488-7443-bd56-6e2c6de4565d
 codex_rounds: 4
 approved_at: 2026-10-07
@@ -10,7 +10,7 @@ approved_at: 2026-10-07
 
 ## 要点
 
-- 承認待ち（2026-10-07、S3 の追加）: 隠しテストに書き込んでよい空の一時ディレクトリ（scratch）を 1 つだけ与え、fs の関数の差し替えをやめて実際のファイルで判定する。OS の sandbox で読み書きとも原則禁止にし、checkout・scratch・Node と要る場所だけを許す。macOS の CI ジョブを新設して本物の sandbox で流す
+- 2026-10-07 に S3 を追加（持ち主の Go）: 隠しテストに書き込んでよい空の一時ディレクトリ（scratch）を 1 つだけ与え、fs の関数の差し替えをやめて実際のファイルで判定する。OS の sandbox で読み書きとも原則禁止にし、checkout・scratch・Node と要る場所だけを許す。macOS の CI ジョブを新設して本物の sandbox で流す
 - 2026-10-07 に打ち切り（持ち主の判断）: 予備の run の 3 つの設計で毒の率が 0/119 だった。G4 は不採用として #206 に残し、評価の道具（collect・report・canary の直しと毒のタスク）だけをパッケージを変えない PR で出す。以下は打ち切り前の計画
 - （打ち切り前）hook は、根拠が第三者の言葉・伝聞・trace の報告だけの記録を配らない。採用のある記録と、owner・maintainer の発言か trace の報告でない AI の返答を evidence に持つ記録は、今までどおり配る。MCP の search と read は今のまま返す
 - 持ち主の DB では 7 件（u281・u283・u284・u285・u287・u288・u327）が hook の配信から外れる。どれも evidence が trace の報告の返答だけで、AI 自身の観察の説明（u327 は自分の誤判断の説明）を含む。持ち主はこの除外を承認した

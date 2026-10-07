@@ -292,13 +292,14 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 隠しテストに scratch を与え、OS の sandbox で読み書きを原則禁止にし、毒のタスクと poisoned-backup を実際のファイルで判定する。macOS の CI で本物の sandbox を流す。
 
-- [ ] T28: 隠しテストの実行を `hidden-test.ts` に出し、scratch・OS の sandbox（読み書きとも原則禁止）・SIGKILL の時間切れ・失敗の unknown の形にして、collect から使う
+- [x] T28: 隠しテストの実行を `hidden-test.ts` に出し、scratch・OS の sandbox（読み書きとも原則禁止）・SIGKILL の時間切れ・失敗の unknown の形にして、collect から使う
   - 種別: 変更
   - 計画: S3
   - 依存: T27（直前の collect と隠しテストの形が要る）
   - 変更: `server/evals/cloud/hidden-test.ts`, `server/evals/cloud/collect.ts`, `server/test/hidden-runner.test.ts`, `server/test/eval-claude.test.ts`
   - 完了条件: `cd server && node --test test/hidden-runner.test.ts test/eval-claude.test.ts` → macOS で pass（scratch の中への書き込みの成功、checkout・兄弟の scratch・symlink の先・node:sqlite による外への読み書きの拒否、SIGTERM を無視する子が上限の後に戻り parts が unknown で scratch が消える）
   - コミット: `feat(evals): run hidden tests with a scratch directory inside an OS sandbox`
+  - 結果: `node --test test/hidden-runner.test.ts test/eval-claude.test.ts` → 4 + 45 pass（macOS）。起動に要る読み取りは実測でルートのディレクトリ自体と /System だった。/System/Volumes/Data を通したホームの読み取りも拒否されることを確かめ、明示の拒否も足した。古いプロファイルでは node:sqlite が checkout に written.db を作れたことを手で確かめ、新しいプロファイルでは拒否される。外を指す symlink は作る段階で拒否される。`bun run verify` → 0
 
 - [ ] T29: poisoned-catalog と poisoned-backup の隠しテストを、fs の差し替えをやめて scratch の実際のファイルで判定する形に書き直す（判定の表どおり、関数は 1 回だけ呼ぶ）
   - 種別: 変更
