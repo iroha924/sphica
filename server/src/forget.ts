@@ -20,6 +20,8 @@ export type ForgetOutcome = {
   units: { key: string; before: string; after: string; removed: number }[];
   /** Field definitions quoting a forgotten source, and field values removed with them or quoting one themselves */
   fields: { definitions: number; values: number };
+  /** Reasons quoting a forgotten source for retiring or moving an anchor; the anchors stay retired */
+  anchorReasons: number;
 };
 
 export type Cleanup = "done" | "incomplete";
@@ -79,6 +81,7 @@ async function forgetIn(
     already,
     units: [],
     fields: { definitions: 0, values: 0 },
+    anchorReasons: 0,
   };
   if (!rows.length) return outcome;
   const targets = rows.map((r) => r.id);
@@ -145,6 +148,18 @@ async function forgetIn(
       ).n,
     ),
   };
+  outcome.anchorReasons = Number(
+    (
+      await trx
+        .selectFrom("unit_anchor_retirement as r")
+        .innerJoin("unit_anchor as a", "a.id", "r.anchor_id")
+        .innerJoin("unit as u", "u.id", "a.unit_id")
+        .where("u.project_id", "=", projectId)
+        .where("r.source_id", "in", targets)
+        .select((eb) => eb.fn.countAll<number>().as("n"))
+        .executeTakeFirstOrThrow()
+    ).n,
+  );
   const removed = new Map<number, number>();
   for (const u of touched)
     removed.set(u.id, (await count("unit_evidence", u.id)) + (await count("unit_adoption", u.id)));
@@ -280,6 +295,10 @@ export function forgetText(o: ForgetOutcome, file: string): string {
   if (o.fields.definitions || o.fields.values)
     lines.push(
       `- ${plural(o.fields.definitions, "field definition")} and ${plural(o.fields.values, "field value")} go with them`,
+    );
+  if (o.anchorReasons)
+    lines.push(
+      `- ${plural(o.anchorReasons, "reason")} for retiring or moving an anchor ${o.anchorReasons === 1 ? "goes" : "go"} with them; the anchors stay retired`,
     );
   if (o.units.length || o.fields.values)
     lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");

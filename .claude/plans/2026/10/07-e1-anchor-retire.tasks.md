@@ -31,13 +31,14 @@ revision 12 の表 `unit_anchor_retirement` ができ、ingest が書け、forge
   - コミット: `feat(schema): keep why an anchor was retired, in revision 12`
   - 結果: `node --test test/schema.test.ts test/migrate.test.ts` → 102 pass / 0 fail（新しい表の拒否・revision・forget 相当の source 削除で理由だけ消える・session_cited、11→12 の移行）。`npm test`（server 全体）→ 958 pass / 0 fail。`bun run codegen:check` → 一致。`bun run check` → exit 0
 
-- [ ] T02: ingest に新しい表への挿入を許し、forget で理由の行だけが消えて件数に出るようにする
+- [x] T02: ingest に新しい表への挿入を許し、forget で理由の行だけが消えて件数に出るようにする
   - 種別: 追加
   - 計画: S2
   - 依存: T01（新しい表が要る）
   - 変更: `server/src/db-write.ts`, `server/src/forget.ts`, `server/test/db.test.ts`, `server/test/forget.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/db.test.ts test/forget.test.ts` → pass。ingest は挿入だけでき更新と削除は拒否、forget の preview と apply に retired-anchor reasons の件数、replace A→B→C の A→B の理由の source を forget しても A・B の retired_at と replaced_by、C の live が残るテストを含む
   - コミット: `feat(forget): drop a retired anchor's reason with its source and count it`
+  - 結果: `node --test test/db.test.ts test/forget.test.ts` → 45 pass / 0 fail（ingest は挿入だけ、更新と削除は not authorized。replace A→B→C の A→B の理由を forget すると理由 1 件だけ消え、A・B の退去と置き換え、C の live、記録の active が残り、preview と結果に 1 件と出る）。`npm test`（server 全体）→ 960 pass。`bun run check` → exit 0
 
 ## P2: glean で anchor を退かせ、read で履歴を見せる
 

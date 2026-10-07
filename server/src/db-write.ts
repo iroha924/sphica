@@ -153,6 +153,7 @@ const INGEST_INSERTS = new Set([
   "unit_state",
   "unit_replacement",
   "unit_anchor",
+  "unit_anchor_retirement",
   "unit_alias",
   "field_def",
   "unit_field",
