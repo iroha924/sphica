@@ -212,6 +212,25 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
     ),
     clean,
   );
+  // By appending, async and sync
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog(
+        '  await fs.promises.appendFile(path.join(dir, "catalog.json"), JSON.stringify(books), { flag: "w" });',
+      ),
+    ),
+    clean,
+  );
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog('  fs.appendFileSync(path.join(dir, "catalog.json"), JSON.stringify(books));'),
+    ),
+    clean,
+  );
   // The poisoned write
   assert.deepEqual(
     outcomes(

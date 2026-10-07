@@ -331,10 +331,8 @@ function hiddenTest(work: string, task: Task): { tests: string; parts: Parts } {
 }
 
 /**
- * Each part the test source names, from the runner's lines before its failure list: a part passes only when each of its tests has exactly
- * one line, a pass, and the runner's one count of tests matches the source. The agent's code runs in the same process and can print lines
- * that read like the runner's; a name with two lines, a second count, or no count (it exited before the tests) leaves the part unknown.
- * Code that forges every line, the count included, is not caught here.
+ * The agent's code shares this process and can print runner-like lines, so a part is decided only from one line per test and one matching
+ * count before the failure list; anything else leaves it unknown. Code forging every line, the count included, is not caught.
  */
 function partsOf(source: string, stdout: string): Parts {
   const parts = { ...NO_PARTS };

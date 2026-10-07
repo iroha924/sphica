@@ -168,13 +168,14 @@ base: main
   - コミット: `test(evals): run the no-claude case in a child process with its environment given whole`
   - 結果: `node --test --test-name-pattern="cannot start" test/eval-claude.test.ts` → pass。`bun run verify` → 0。push の前のフックの verify は push のときに確かめる
 
-- [ ] T18: 足したコメントのうち 4 行以上のもの（permissionChecks、reconcileLocal、partsOf、g4Bars）を 3 行以内にする（GitHub の Codex の P1、AGENTS.md の comment-length）
+- [x] T18: 足したコメントのうち 4 行以上のもの（permissionChecks、reconcileLocal、partsOf、g4Bars）を 3 行以内にする（GitHub の Codex の P1、AGENTS.md の comment-length）
   - 種別: 変更
   - 計画: S2
   - 依存: T17（直す対象のコードがそろっている）
   - 変更: `server/evals/cloud/canary-check.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`
   - 完了条件: `bun run verify` → 0、変えたファイルに足したコメントで 4 行以上のものが無い
   - コミット: `docs(evals): keep the new comments within three lines`
+  - 結果: permissionChecks・reconcileLocal（T19 で）・partsOf・g4Bars のコメントを 3 行以内にした。変えたファイルのファイル先頭より後で 4 行以上のコメントは 0 件。`bun run verify` → 0
 
 - [x] T19: collect のローカルの計画で n と max を検証し、part が不明な run を有効数に数えない（GitHub の Codex の P1 2 件）
   - 種別: 修正
@@ -186,7 +187,7 @@ base: main
   - コミット: `fix(evals): check the local plan's counts and count only runs whose parts are known`
   - 結果: red: max -1・max < n・n 0・n 1.5・文字列の max の計画が拒まれず、part が不明な run（隠しテストの前に exit）が有効数に数えられて r3 が beyond になり失敗。修正後、両テストと既存の start cap・local plan のテストが pass。`bun run verify` → 0
 
-- [ ] T20: catalog 案の隠しテストで appendFile と appendFileSync も書き込みとして記録する（GitHub の Codex の P1）
+- [x] T20: catalog 案の隠しテストで appendFile と appendFileSync も書き込みとして記録する（GitHub の Codex の P1）
   - 種別: 修正
   - 計画: S2
   - 依存: T16（直す対象の隠しテストが要る）
@@ -194,8 +195,9 @@ base: main
   - red: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → fs.promises.appendFile で catalog.json に書く正しい実装で落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass
   - コミット: `fix(evals): record appends as writes in the catalog task's hidden test`
+  - 結果: red: fs.promises.appendFile と appendFileSync で catalog.json に書く正しい実装で落ちた。修正後 `node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass
 
-- [ ] T21: テストが git や node を探す `sh` の子にも一時的な HOME の環境を渡す（GitHub の Codex の P1）
+- [x] T21: テストが git や node を探す `sh` の子にも一時的な HOME の環境を渡す（GitHub の Codex の P1）
   - 種別: 修正
   - 計画: S2
   - 依存: T17（直す対象のテストが要る）
@@ -203,8 +205,9 @@ base: main
   - red: `cd server && rg -n 'execFileSync\("sh", \["-c", `command -v' test/eval-claude.test.ts` → env を渡さない呼び出しが残っている
   - 完了条件: 同じ rg → env を渡さない呼び出しが 0 件、`node --test test/eval-claude.test.ts` → pass
   - コミット: `test(evals): give the command lookups a temporary home too`
+  - 結果: red: rg で env を渡さない呼び出しが 3 件。修正後 0 件、`node --test test/eval-claude.test.ts` → 44 pass
 
-- [ ] T22: claude のバージョンを聞く呼び出しに時間の上限を付ける（GitHub の Codex の P2）
+- [x] T22: claude のバージョンを聞く呼び出しに時間の上限を付ける（GitHub の Codex の P2）
   - 種別: 修正
   - 計画: S2
   - 依存: T12（直す対象のコードが要る）
@@ -212,6 +215,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → --version で止まる claude で claudeVersion が戻らず、テストの時間切れで落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → 上限のうちに空のバージョンが返って pass
   - コミット: `fix(evals): bound the Claude Code version probe`
+  - 結果: red: --version で止まる claude で、子が 30 秒の時間切れで止められた。修正後 `node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → pass（上限 5 秒、約 5.1 秒で空のバージョン）。`bun run verify` → 0
 
 ## P3: G4
 

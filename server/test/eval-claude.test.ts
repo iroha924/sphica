@@ -471,7 +471,10 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
   const bin = path.join(build, "bin");
   fs.mkdirSync(bin);
   for (const tool of ["git", "node"]) {
-    const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], {
+      encoding: "utf8",
+      env: childEnv(build),
+    }).trim();
     fs.symlinkSync(found, path.join(bin, tool));
   }
   const blind = start(
@@ -760,7 +763,10 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
   const bin = path.join(build, "bin");
   fs.mkdirSync(bin);
   for (const tool of ["git", "node", "sh"]) {
-    const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], {
+      encoding: "utf8",
+      env: childEnv(build),
+    }).trim();
     fs.symlinkSync(found, path.join(bin, tool));
   }
   fs.writeFileSync(path.join(bin, "claude"), '#!/bin/sh\necho "9.9.9 (Claude Code)"\n', { mode: 0o755 });
@@ -1689,6 +1695,35 @@ test("the fence canary takes only a permission or sandbox refusal as refused, an
   );
 });
 
+test("the version probe gives up on a claude that never answers, and the version is then unknown", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "eval-version-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const bin = path.join(base, "bin");
+  fs.mkdirSync(bin);
+  for (const tool of ["sh", "sleep"]) {
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], {
+      encoding: "utf8",
+      env: childEnv(base),
+    }).trim();
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\nsleep 60\n", { mode: 0o755 });
+  const runner = path.join(import.meta.dirname, "..", "evals", "cloud", "claude-run.ts");
+  const started = Date.now();
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { claudeVersion } = await import(${JSON.stringify(pathToFileURL(runner).href)}); process.stdout.write(JSON.stringify(claudeVersion()));`,
+    ],
+    { encoding: "utf8", env: { ...childEnv(base), PATH: bin }, timeout: 30_000 },
+  );
+  assert.equal(child.status, 0, `${child.stdout}${child.stderr}`);
+  assert.equal(child.stdout, '""');
+  assert.ok(Date.now() - started < 30_000);
+});
+
 test("a run whose claude cannot start is still recorded with the reason", (t) => {
   const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-nostart-"));
   t.after(() => fs.rmSync(build, { recursive: true, force: true }));
@@ -1728,7 +1763,10 @@ test("a run whose claude cannot start is still recorded with the reason", (t) =>
   const bin = path.join(build, "bin");
   fs.mkdirSync(bin);
   for (const tool of ["git", "node"]) {
-    const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], {
+      encoding: "utf8",
+      env: childEnv(build),
+    }).trim();
     fs.symlinkSync(found, path.join(bin, tool));
   }
   const out = path.join(build, "runs");

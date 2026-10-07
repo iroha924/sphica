@@ -147,11 +147,11 @@ export const runEnv = (parent: NodeJS.ProcessEnv): Record<string, string> =>
 
 /**
  * The Claude Code that runs: a canary vouches for the host it ran on, since a host update can change what stops a tool call. Empty when
- * claude cannot be started, which matches no canary.
+ * claude cannot be started or does not answer in time, which matches no canary.
  */
 export function claudeVersion(): string {
   try {
-    return execFileSync("claude", ["--version"], { encoding: "utf8" }).trim();
+    return execFileSync("claude", ["--version"], { encoding: "utf8", timeout: 5_000 }).trim();
   } catch {
     return "";
   }

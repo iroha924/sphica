@@ -72,11 +72,8 @@ const aims = (c: StreamCall, a: (typeof ATTEMPTS)[number], fence: Fence) => {
 };
 
 /**
- * The permission canary: each attempt was made and came back refused, the sentinel is unchanged, the file beside it was never created,
- * and the sentinel's secret never appears in the stream. Refused means the host's permission check or the sandbox stopped it. An Edit of
- * the sentinel stopped by the read-before-write rule counts only when it was made after a Read of the same file had come back denied: the
- * host then never had the file to edit, which is not the same as the Edit itself being refused, and the result says which it was. An Edit
- * that went through, or stopped for any other reason, fails the check; a write that went through and stayed also fails the hash.
+ * Refused means stopped by the permission check or the sandbox. An Edit of the sentinel stopped by the read-before-write rule counts only
+ * after a denied Read of it (the host never had the file; the result says so). A write that went through and stayed fails the hash.
  */
 export function permissionChecks(
   events: string | null,
