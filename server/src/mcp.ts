@@ -9,6 +9,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
+import { DELIVERY_DAYS, deliveryOverview } from "./delivery-view.ts";
 import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "./export.ts";
 import { fieldsText } from "./fields.ts";
 import { framed } from "./frame.ts";
@@ -327,23 +328,36 @@ const notChecked = (e: unknown) =>
 server.registerTool(
   "overview",
   {
-    title: "Live decisions, and records that need a look",
+    title: "Live decisions, records that need a look, and what Sphica showed",
     description:
       "On request, not before every change. view live lists every active decision and constraint of the project, grouped by the directory it " +
       "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
       "is not found, written conditions for reconsidering an option (for you to judge, never applied), and lines in CLAUDE.md, AGENTS.md, or " +
       ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn, a page at a time until one says Complete (pass the after it gives). " +
+      "view delivery shows what Sphica's hooks showed the agent over the last days (default 7): logged rows by event, the records delivered most, " +
+      "and example sessions; use it when the user asks what Sphica has been showing. " +
       "Read a record by its key before relying on it.",
     inputSchema: z
       .object({
         view: z
-          .enum(["live", "look"])
-          .describe("live: every active decision and constraint; look: records that need a look"),
+          .enum(["live", "look", "delivery"])
+          .describe(
+            "live: every active decision and constraint; look: records that need a look; delivery: what the hooks showed the agent",
+          ),
         after: z
           .union([z.number().int().min(0), z.string().min(1).max(8192)])
           .optional()
           .describe(
             "With live: the id the previous page said to continue after. With look: the cursor the previous page gave, as it is",
+          ),
+        days: z
+          .number()
+          .int()
+          .min(DELIVERY_DAYS.min)
+          .max(DELIVERY_DAYS.max)
+          .optional()
+          .describe(
+            `With delivery: how many days back to look, ending now (default ${DELIVERY_DAYS.default})`,
           ),
         cwd: CWD,
       })
@@ -351,6 +365,9 @@ server.registerTool(
     annotations: READ_ONLY,
   },
   async (a, extra) => {
+    if (a.view !== "delivery" && a.days !== undefined) return text("days: only with view delivery", true);
+    if (a.view === "delivery" && a.after !== undefined)
+      return text("after: not with view delivery, which is one page", true);
     if (a.view === "live" && typeof a.after === "string")
       return text("after: with view live, pass the id the previous page gave", true);
     if (a.view === "look" && typeof a.after === "number")
@@ -362,9 +379,11 @@ server.registerTool(
       if (typeof p === "string") return text(p);
       return text(
         framed(
-          typeof a.after === "string" || a.view === "look"
-            ? await lookOverview(db, p.id, p.root, typeof a.after === "string" ? a.after : undefined)
-            : await liveOverview(db, p.id, a.after ?? null),
+          a.view === "delivery"
+            ? await deliveryOverview(db, p.id, a.days ?? DELIVERY_DAYS.default)
+            : typeof a.after === "string" || a.view === "look"
+              ? await lookOverview(db, p.id, p.root, typeof a.after === "string" ? a.after : undefined)
+              : await liveOverview(db, p.id, a.after ?? null),
         ),
       );
     } catch (e) {

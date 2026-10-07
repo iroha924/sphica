@@ -19,7 +19,7 @@
     "inject": "run the delivery hook for an event (session_start | pre_edit | pre_read | prompt), or a sequence of them in one session, and capture each additional context",
     "review_select": "run the decision-check selection for a diff and return the applicable units and the lane state",
     "as_of": "export the evaluation snapshot as of a time and query it",
-    "overview": "call the MCP overview tool (view live or look) in the temp repository",
+    "overview": "call the MCP overview tool (view live, look, or delivery) in the temp repository",
     "export": "check the save path and build the export document of the chosen decisions, as the read server's export tool does",
     "set_remote": "point the temp repository's origin at another spelling of its remote"
   },
@@ -3967,6 +3967,36 @@
           "overview_contains": [
             "- CLAUDE.md:1: trace:s-ja-storage/storage was superseded by trace:s-ja-postgres/postgres"
           ]
+        }
+      ]
+    },
+    {
+      "id": "overview-06",
+      "layer": "overview",
+      "lang": "ja",
+      "summary": "The delivery view counts what the hooks logged and names the record shown, with the log's limits",
+      "given": [
+        {
+          "case": "injection-01"
+        }
+      ],
+      "when": {
+        "overview": {
+          "view": "delivery"
+        }
+      },
+      "then": [
+        {
+          "overview_contains": [
+            "## Logged delivery rows",
+            "| pre_edit | emitted | 1 | 0 | 0 |",
+            "- trace:s-ja-storage/storage (u",
+            ": 1 session, 1 delivery, via pre_edit",
+            "## Example sessions, the most recent first",
+            "## Limits",
+            "a read or edit that showed nothing is not logged"
+          ],
+          "overview_lacks": ["No delivery was logged"]
         }
       ]
     },

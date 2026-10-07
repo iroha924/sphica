@@ -1,18 +1,35 @@
-// How long each delivery hook (the bundled deliver.js, a fresh process per call as the hosts run it) and capture's drain take as records grow.
-// Every reply is checked for the records it must name, so a hook that fails quietly with an empty reply never passes as fast.
-// node server/evals/scale/run.ts [--sizes 359,1000] [--no-stress] [--no-drain]; timings belong to the machine printed first.
+// How long each delivery hook (the bundled deliver.js, a fresh process per call as the hosts run it), capture's drain, and overview's delivery
+// view over a 90-day log take as records grow. Every reply is checked for what it must hold, so one that fails quietly never passes as fast.
+// node server/evals/scale/run.ts [--sizes 359,1000] [--no-stress] [--no-drain] [--no-delivery-view]; timings belong to the machine printed first.
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { inTransaction } from "../../src/db.ts";
+import { deliveryOverview } from "../../src/delivery-view.ts";
+import { READ_BUDGET } from "../../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../../src/record.ts";
+import { bytes } from "../../src/text.ts";
 import { openRun } from "../../src/trace.ts";
-import { insert, message, project, session, type TempDb, tempDb } from "../../test/temp-db.ts";
+import {
+  hash,
+  insert,
+  manyAdopted,
+  message,
+  plan,
+  project,
+  session,
+  statements,
+  type TempDb,
+  tempDb,
+} from "../../test/temp-db.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
 const HOOK = path.join(ROOT, "plugin", "dist", "deliver.js");
+const MCP = path.join(ROOT, "plugin", "dist", "mcp.js");
 const RUNS = 5;
 const BAR_MS = 1000;
 const PER_SAVE = 50;
@@ -459,11 +476,158 @@ async function drain(k: number): Promise<Drain> {
   }
 }
 
+/** The 90-day log the delivery view reads: records, sessions, delivery rows with their records, and assistant replies of a few KB, besides
+ * the replies that name a record delivered just before */
+const VIEW_LOG = { records: 2000, sessions: 500, deliveries: 20_000, replies: 5000, popular: 50 } as const;
+
+/**
+ * overview's delivery view over VIEW_LOG through the bundled read server, a fresh process per run, timing the tool call. The reply must
+ * frame the 90-day page within READ_BUDGET, rank records, and find the replies that name popular keys. Also returns each query's plan.
+ */
+async function deliveryView(): Promise<{ row: Row; plans: string[] }> {
+  const db = tempDb();
+  const repo = checkout(["README.md"], "");
+  try {
+    const p = project(db, KEY, "o/r");
+    manyAdopted(db, p, VIEW_LOG.records, (i) => ({
+      key: `trace:ext-v/k${i}`,
+      kind: "constraint",
+      stance: "do",
+    }));
+    const units = db.owner.prepare("select id, key from unit where project_id = ? order by id").all(p) as {
+      id: number;
+      key: string;
+    }[];
+    const key = (i: number) => units[i % units.length] ?? { id: 0, key: "" };
+    // Spread so a row's records do not follow its event, outcome, or session
+    const spread = (n: number, m: number) => Math.floor((((n * 2654435761) % 2 ** 32) / 2 ** 32) * m);
+    const span = 90 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000;
+    const end = Date.now();
+    const o = db.owner;
+    const delivery = o.prepare(
+      "insert into delivery (session_id, agent_id, event, outcome, reason, path, eligible, omitted, chars, at) values (?, ?, ?, ?, ?, ?, ?, ?, 0, ?) returning id",
+    );
+    const unit = o.prepare("insert into delivery_unit (delivery_id, unit_id) values (?, ?)");
+    const filler = "Checked the module and ran the tests; nothing else changed here. ".repeat(48);
+    o.exec("begin");
+    for (let s = 0; s < VIEW_LOG.sessions; s++) session(db, p, `v${s}`);
+    const mentions: { session: string; at: string; key: string }[] = [];
+    const events = ["pre_read", "pre_read", "pre_edit", "prompt", "session_start"];
+    for (let d = 0; d < VIEW_LOG.deliveries; d++) {
+      const event = events[d % events.length] ?? "pre_read";
+      const emitted = d % 5 !== 3;
+      const id = Number(
+        delivery.get(
+          `v${d % VIEW_LOG.sessions}`,
+          d % 7 === 0 ? `agent-${d % 13}` : null,
+          event,
+          emitted ? "emitted" : "nothing",
+          event === "session_start" ? (d % 7 === 0 ? "subagent" : "startup") : null,
+          event === "pre_read" || event === "pre_edit" ? `src/mod${d % 300}/a.ts` : null,
+          d % 3,
+          d % 3,
+          new Date(end - (d * span) / VIEW_LOG.deliveries).toISOString(),
+        )?.id,
+      );
+      if (emitted && d % 4 !== 0) {
+        // Every 40th row's popular record is named a minute later in the same session
+        if (d % 40 === 1)
+          mentions.push({
+            session: `v${d % VIEW_LOG.sessions}`,
+            at: new Date(end - (d * span) / VIEW_LOG.deliveries + 60_000).toISOString(),
+            key: key(spread(d, VIEW_LOG.popular)).key,
+          });
+        unit.run(id, key(spread(d, VIEW_LOG.popular)).id);
+        unit.run(id, key(VIEW_LOG.popular + spread(d + 1, VIEW_LOG.records - VIEW_LOG.popular)).id);
+      }
+    }
+    const replies = [
+      ...Array.from({ length: VIEW_LOG.replies }, (_, r) => ({
+        session: `v${r % VIEW_LOG.sessions}`,
+        at: new Date(end - (r * span) / VIEW_LOG.replies).toISOString(),
+        text: filler,
+      })),
+      ...mentions.map((m) => ({ session: m.session, at: m.at, text: `${filler} That follows ${m.key}.` })),
+    ];
+    for (const [r, m] of replies.entries())
+      insert(db, "source", {
+        project_id: p,
+        kind: "session_message",
+        artifact: `session:${m.session}`,
+        external_id: `t${r}:assistant:${r}`,
+        revision: 1,
+        session_id: m.session,
+        author_kind: "assistant",
+        created_at: m.at,
+        available_at: m.at,
+        captured_at: m.at,
+        text: m.text,
+        original_bytes: Buffer.byteLength(m.text),
+        content_hash: hash(r % 256),
+        indexed: 0,
+      });
+    o.exec("commit");
+    const times: number[] = [];
+    const problems: string[] = [];
+    for (let r = 0; r < RUNS; r++) {
+      const client = new Client({ name: "scale", version: "0" });
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [MCP],
+          env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
+          stderr: "ignore",
+        }),
+      );
+      try {
+        const start = performance.now();
+        const got = await client.callTool({
+          name: "overview",
+          arguments: { view: "delivery", days: 90, cwd: repo },
+        });
+        times.push(performance.now() - start);
+        const text = (got.content as { text: string }[])[0]?.text ?? "";
+        if (got.isError) problems.push(`error: ${text.slice(0, 120)}`);
+        if (bytes(text) > READ_BUDGET) problems.push(`${bytes(text)} bytes`);
+        if (!text.includes("# Delivery log of the last 90 days")) problems.push("no heading");
+        const first = /## Records delivered most\n- trace:ext-v\/k(\d+) \(u/.exec(text)?.[1];
+        if (first === undefined || Number(first) >= VIEW_LOG.popular)
+          problems.push("a popular record not ranked first");
+        if (!/named later in [1-9]\d* of those sessions/.test(text))
+          problems.push("no reply named a popular key");
+      } finally {
+        await client.close();
+      }
+    }
+    times.sort((a, b) => a - b);
+    // The log is one fixture, so the bar applies to it as it is
+    if ((times.at(-1) ?? 0) > BAR_MS) problems.push(`over the ${BAR_MS} ms bar`);
+    const seen = await statements(() => deliveryOverview(db.reader, p, 90));
+    const plans = [...new Set(seen)]
+      .filter((q) => /from "(delivery|delivery_unit|source)"/.test(q))
+      .map((q) => `${q.slice(0, 160)}\n    ${plan(db, q)}`);
+    return {
+      row: {
+        fixture: `delivery log ${VIEW_LOG.deliveries} rows, ${VIEW_LOG.replies} replies, 90 days`,
+        case: "overview delivery",
+        median: Math.round(times[Math.floor(times.length / 2)] ?? 0),
+        max: Math.round(times.at(-1) ?? 0),
+        problems: [...new Set(problems)],
+      },
+      plans,
+    };
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+}
+
 const { values } = parseArgs({
   options: {
     sizes: { type: "string", default: "359,1000,3000,10000,30000" },
     "no-stress": { type: "boolean", default: false },
     "no-drain": { type: "boolean", default: false },
+    "no-delivery-view": { type: "boolean", default: false },
   },
 });
 const sizes = values.sizes.split(",").map(Number);
@@ -496,9 +660,19 @@ for (const [name, n, kind] of fixtures) {
   }
 }
 
+let plans: string[] = [];
+if (!values["no-delivery-view"]) {
+  const v = await deliveryView();
+  rows.push(v.row);
+  plans = v.plans;
+}
+
 console.log("\n| fixture | case | median ms | max ms | problems |\n|---|---|---|---|---|");
 for (const r of rows)
   console.log(`| ${r.fixture} | ${r.case} | ${r.median} | ${r.max} | ${r.problems.join("; ") || "none"} |`);
+
+if (plans.length)
+  console.log(`\nQuery plans of the delivery view:\n${plans.map((q) => `- ${q}`).join("\n")}`);
 
 let failed = rows.some((r) => r.problems.length);
 if (!values["no-drain"]) {
