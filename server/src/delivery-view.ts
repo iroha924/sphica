@@ -280,7 +280,7 @@ export async function deliveryOverview(
   const sessionParts: string[] = [];
   let sessionsShown = 0;
   for (const s of shown) {
-    const heading = `### ${inline(s.session.host)} session ${head(inline(s.session.external_id), DELIVERY_LIMITS.session)}${s.session.branch ? ` (branch ${head(inline(s.session.branch), DELIVERY_LIMITS.path)})` : ""}, last delivery ${s.session.last}`;
+    const heading = `### ${inline(s.session.host)} session ${head(inline(s.session.external_id), DELIVERY_LIMITS.session)}${s.session.branch ? ` (branch ${head(inline(s.session.branch), DELIVERY_LIMITS.path)})` : ""}, last delivery with a record ${s.session.last}`;
     const replies = later.get(s.session.id) ?? [];
     const lines = s.list.map((d) =>
       deliveryLine(d, byDelivery.get(d.id) ?? [], (key) =>

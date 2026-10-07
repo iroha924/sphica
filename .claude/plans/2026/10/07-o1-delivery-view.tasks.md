@@ -126,6 +126,16 @@ base: main
   - コミット: `fix(overview): name 0.6.16 as the version that stopped logging empty reads (T14)`
   - 結果: red: テストの期待を 0.6.16 にして `cd server && node --test --test-timeout=60000 --test-name-pattern="counts the project" test/delivery-view.test.ts` → 0.6.17 の文で落ちた。直した後 `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 11 件 pass。`bun run verify` → 0 で終わる
 
+- [x] T16: 例のセッションの時刻を「記録を見せた最後の配信」と表示する
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す見出しの行が要る）
+  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="most recent sessions" test/delivery-view.test.ts` → 見出しが `last delivery with a record` でないことで落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 全件 pass
+  - コミット: `fix(overview): label an example session's time as its last delivery with a record (T16)`
+  - 結果: red: `cd server && node --test --test-timeout=60000 --test-name-pattern="most recent sessions" test/delivery-view.test.ts` → 直す前は見出しが合わずに落ちた。直した後 `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 11 件 pass。`bun run verify` → 0 で終わる
+
 ## P2: 計測と説明
 
 90 日分のログで 1 秒以内に返ることを、bundle した server を新しいプロセスで呼んで確かめ、README に載せる。
@@ -147,6 +157,16 @@ base: main
   - 完了条件: `rg -n 'view: "delivery"' README.md README.ja.md` → それぞれ overview の説明の次に 1 件
   - コミット: `docs(readme): describe the delivery view (T05)`
   - 結果: `rg -n 'view: "delivery"' README.md README.ja.md` → README.md:31 と README.ja.md:30 に 1 件ずつ。`bun run verify` → 0 で終わる（Markdown とリンクの検査を含む）
+
+- [x] T15: delivery のビューの行が 1,000 ms を超えたら計測を失敗にする
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T04（直す計測のケースが要る）
+  - 変更: `server/evals/scale/run.ts`
+  - red: `node server/evals/scale/run.ts --sizes 359 --no-stress --no-drain` → 直す前は、BAR_MS を一時的に 1 にしても delivery の行の problems が none で 0 で終わる
+  - 完了条件: `node server/evals/scale/run.ts --sizes 359 --no-stress --no-drain` → 0 で終わり delivery の行は none。BAR_MS を一時的に 1 にすると 0 以外で終わる
+  - コミット: `fix(evals): fail the delivery view row over its 1,000 ms bar (T15)`
+  - 結果: red: BAR_MS を 1 にして `node server/evals/scale/run.ts --sizes 359 --no-stress --no-drain` → 直す前は delivery の行が none で 0 で終わった。直した後、BAR_MS 1 で `over the 1 ms bar` が出て 1 で終わり、BAR_MS 1000 に戻すと none（最大 169 ms）で 0 で終わる
 
 ## P3: 試用と出荷
 
@@ -175,3 +195,4 @@ PR ブランチで持ち主が試し、採用なら同じバージョンに上�
 - 2026-10-07 / 全体 / Codex の全差分レビュー（main..628fd5e7、high）: P2 で、配信と同じ時刻の返信を `>=` で named later に数える（再現、受理） / 修正タスク T11 を足し、plan の方針の「基準の時刻以上」を「より後」に直した
 - 2026-10-07 / T13 / 持ち主の DB で試用の返答を作ると、限界の節は「空の read・edit は残らない」と言うのに、表に pre_read nothing 523 行・pre_edit nothing 21 行が出た。読み取りで数えると 2026-10-01 までの行で、0.6.17（2026-10-02、4e0f37c4）より前のバージョンが残したもの / 修正タスク T13 を足した
 - 2026-10-07 / T13 / Codex の再レビュー（5a369fdb）: P2 で、空の read・edit を残さなくしたのは 44ae063c（最初のタグ v0.6.16）で、4e0f37c4 はその条件を keep に移しただけ（git show と git tag --contains で確認、受理） / 修正タスク T14 を足した。T13 の記録の「0.6.17」は誤り
+- 2026-10-07 / 全体 / GitHub の Codex（PR #296、32e9ea25）: P2 で、delivery のビューの行が基準を超えても失敗しない（読んで確認、受理）。P2 で、例のセッションの last delivery は記録を見せた配信の最後で、後の記録の無い配信を含まない（読んで確認、受理。表示を直し、並びはそのまま） / 修正タスク T15・T16 を足した

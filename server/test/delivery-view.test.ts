@@ -172,8 +172,12 @@ test("shows the most recent sessions with each delivery's time, event, agent, pa
     examples.includes(`- ${ago(2)} session_start, subagent agent-7: trace:s/k1 (u${units[1]})`),
     examples,
   );
-  // A delivery that logged no record is counted, not listed
+  // A delivery that logged no record is counted, not listed, so the time shown is the last delivery with a record
   assert.ok(!examples.includes(ago(1)), examples);
+  assert.ok(
+    examples.includes(`### claude-code session ext-recent, last delivery with a record ${ago(2)}`),
+    examples,
+  );
 });
 
 test("a key counts as named only when written whole, not inside a longer key or word", () => {

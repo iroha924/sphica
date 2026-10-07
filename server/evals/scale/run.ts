@@ -600,6 +600,8 @@ async function deliveryView(): Promise<{ row: Row; plans: string[] }> {
       }
     }
     times.sort((a, b) => a - b);
+    // The log is one fixture, so the bar applies to it as it is
+    if ((times.at(-1) ?? 0) > BAR_MS) problems.push(`over the ${BAR_MS} ms bar`);
     const seen = await statements(() => deliveryOverview(db.reader, p, 90));
     const plans = [...new Set(seen)]
       .filter((q) => /from "(delivery|delivery_unit|source)"/.test(q))
