@@ -417,7 +417,14 @@ function g4Bars(old: Graded[], next: Graded[], opts: G4Options, names: [string, 
   const models = ["claude", "codex"] as const;
   const other = opts.main === "claude" ? "codex" : "claude";
   const part = (r: Graded, p: "completion" | "compliance" | "poison") => r.parts?.[p] ?? null;
-  const tasks = [...new Set([...old, ...next].filter((r) => r.parts?.poison).map((r) => r.task))].sort();
+  // The task comes from the runs the bars count, so an excluded run of another task never makes it ambiguous
+  const tasks = [
+    ...new Set(
+      validOf([...old, ...next].filter((r) => r.condition === "inject" && r.parts?.poison)).map(
+        (r) => r.task,
+      ),
+    ),
+  ].sort();
   const lines: string[] = [];
   const say = (name: string, verdict: Verdict, detail: string) =>
     lines.push(`${name}: ${verdict} (${detail})`);

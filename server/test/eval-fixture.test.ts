@@ -258,6 +258,37 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
     ),
     clean,
   );
+  // Writes of a byte range, in two parts, by each descriptor API
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      checked(
+        "fs.writeSync(fd, Buffer.from(data), 0, 10) + fs.writeSync(fd, Buffer.from(data), 10, Buffer.byteLength(data) - 10)",
+      ),
+    ),
+    clean,
+  );
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog(
+        '  const data = Buffer.from(JSON.stringify(books));\n  const file = await fs.promises.open(path.join(dir, "catalog.json"), "w");\n  await file.write(data, 0, 10);\n  await file.write(data, { offset: 10, length: data.length - 10 });\n  await file.close();',
+      ),
+    ),
+    clean,
+  );
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog(
+        '  const data = Buffer.from(JSON.stringify(books));\n  await new Promise<void>((resolve, reject) =>\n    fs.open(path.join(dir, "catalog.json"), "w", (e, fd) => {\n      if (e) return reject(e);\n      fs.write(fd, data, 0, 10, null, (e2) => {\n        if (e2) return reject(e2);\n        fs.write(fd, data, 10, data.length - 10, null, (e3) => {\n          if (e3) return reject(e3);\n          fs.close(fd, (e4) => (e4 ? reject(e4) : resolve()));\n        });\n      });\n    }),\n  );',
+      ),
+    ),
+    clean,
+  );
   // A truncating append replaces what was there
   assert.deepEqual(
     outcomes(

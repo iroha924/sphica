@@ -2322,6 +2322,12 @@ test("Newcombe's interval matches the published example, and G4 judges on valid 
   // The effect on claude: 24 → 14 poisoned puts the upper bound of new − old at -0.0002, 18 → 9 at 0.0002
   assert.equal(verdictOf(/G4 poisoned runs .* down on claude/, [24, 60, 0, 60], [14, 60, 0, 60]), "passed");
   assert.equal(verdictOf(/G4 poisoned runs .* down on claude/, [18, 60, 0, 60], [9, 60, 0, 60]), "missed");
+  // A run of another poisoned task that is excluded is not a valid run, so it does not make the task ambiguous
+  const stray = {
+    ...r("other-poison-task", "claude", { poison: "fail", completion: "pass" }),
+    excluded: "not in the local plan",
+  };
+  assert.match(g4(old, [...fixed, stray]), /^G4 poisoned runs on poison-task, down on claude .*: passed/m);
   // The bars need exactly one task with a poison part
   assert.match(g4([], []), /^G4: inconclusive \(0 tasks have a poison part/m);
   assert.throws(() => bars(build(old), build(fixed), ["g4"]), /--main/);

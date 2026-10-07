@@ -257,6 +257,16 @@ base: main
   - コミット: `fix(evals): return written byte counts and exclude runs with any unknown part`
   - 結果: red: writeSync と FileHandle.write のバイト数を確かめる正しい実装で隠しテストが落ち、completion だけ不明な run が excluded にならずに残った。修正後 `node --test --test-name-pattern="hidden test|only runs whose hidden test parts|start cap|local plan" test/eval-fixture.test.ts test/eval-claude.test.ts` → 7 pass（--skip-hidden-tests の part を持つタスクの run も excluded になる）。`bun run verify` → 0（1 回目は rename limit の既知の不安定なテストで落ち、2 回目で全件 pass）
 
+- [x] T27: G4 の判定で毒のタスクを有効な inject の run から探し、記述子への書き込みで offset と length を守る（GitHub の Codex の P1 2 件、29bf3cd9）
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T02（G4 の判定が要る）, T26（記述子の置き換えが要る）
+  - 変更: `server/evals/cloud/report.ts`, `server/evals/cloud/tasks.json`, `server/test/eval-grade.test.ts`, `server/test/eval-fixture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="Newcombe|hidden test" test/eval-grade.test.ts test/eval-fixture.test.ts` → 別の毒のタスクの excluded の run が 1 本あると G4 が判定不能になり、offset と length を指定して 2 回に分けて書く正しい実装で隠しテストが落ちる
+  - 完了条件: 同じ形で `cd server && node --test --test-name-pattern="Newcombe|hidden test" test/eval-grade.test.ts test/eval-fixture.test.ts` → pass
+  - コミット: `fix(evals): find G4's task among valid runs and honor descriptor write ranges`
+  - 結果: red: 別の毒のタスクの excluded の run 1 本で G4 が判定不能になり、offset と length を指定して 2 回に分けて書く正しい実装（writeSync、FileHandle.write、コールバックの fs.write）で隠しテストが落ちた。修正後 `node --test --test-name-pattern="Newcombe|hidden test" test/eval-grade.test.ts test/eval-fixture.test.ts` → 5 pass。`bun run verify` → 0
+
 ## P3: G4
 
 hook の配信を、採用か、owner・maintainer・trace の報告でない AI の返答の evidence がある記録に絞る。
@@ -280,6 +290,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T27 / GitHub の Codex のレビュー（29bf3cd9、持ち主が依頼）: P1 2 件（毒のタスクを excluded の run も含めて探す、記述子の書き込みの範囲を無視する）を受理して T27 を足した
 - 2026-10-07 / T26 / GitHub の Codex のレビュー（26f319f0）: P1 2 件（記述子の置き換えがバイト数 0 を返す、part の一部が不明な run が他の part のセルに入る）を受理して T26 を足した
 - 2026-10-07 / T25 / GitHub の Codex のレビュー（aa3a4a53）: P1 1 件（コールバック型の記述子の書き込みを記録しない）を受理して T25 を足した
 - 2026-10-07 / T24 / e367ff41 の push の前の verify で「the version probe gives up」（30 秒）と「the Codex hook entry point ... Stop」（26 秒、触っていないテスト）が落ちた。前者は偽の claude の孫が残る作りの弱点として T24 で直した。後者は push で再び確かめる
