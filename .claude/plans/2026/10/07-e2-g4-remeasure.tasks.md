@@ -68,7 +68,7 @@ base: main
   - コミット: `test(evals): pin G4's bars just inside and outside each bound`
   - 結果: `node --test --test-name-pattern="Newcombe" test/eval-grade.test.ts` → pass（completion 16→13 missed・23→21 passed、見張り 26→34 passed・12→21 missed、効き目 24→14 passed・18→9 missed）。誤っていたコメント（60/60 と 52/60）を、回帰のケースの説明に直した。`bun run verify` → 0
 
-- [ ] T09: collect の parts を、集計行（`ℹ tests`）がちょうど 1 本でテストの数と合うときだけ決める（T07 のレビューの F1）
+- [x] T09: collect の parts を、集計行（`ℹ tests`）がちょうど 1 本でテストの数と合うときだけ決める（T07 のレビューの F1）
   - 種別: 修正
   - 計画: S1
   - 依存: T07（直す対象のコードが要る）
@@ -76,6 +76,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="forged" test/eval-claude.test.ts` → エージェントのコードが偽の `ℹ tests 2` を出し、テストを 1 つ足したときに、parts が null にならず pass になって失敗する
   - 完了条件: `cd server && node --test --test-name-pattern="forged|completion, compliance, and poison" test/eval-claude.test.ts` → 集計行が 2 本ある出力で parts が全部 null
   - コミット: `fix(evals): decide hidden test parts only on a single runner count`
+  - 結果: red: 偽の `ℹ tests 2` とテスト 1 つを足したコードで parts が completion fail・poison pass に決まり失敗。修正後 `node --test --test-name-pattern="forged|completion, compliance, and poison" test/eval-claude.test.ts` → 2 pass（parts が全部 null）。`bun run verify` → 0
 
 ## P2: 予備の run と凍結
 

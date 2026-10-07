@@ -1338,28 +1338,41 @@ test("collect leaves every part unknown when the agent's code prints forged line
   fs.writeFileSync(path.join(dir, "events.jsonl"), [use("a", "Read"), result("a", "x"), done].join("\n"));
   fs.writeFileSync(path.join(dir, "answer.md"), "a");
   fs.writeFileSync(path.join(dir, "patch.diff"), "");
-  const r = spawnSync(
-    process.execPath,
-    [
-      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
-      "--build",
-      build,
-      "--codex",
-      path.join(base, "none"),
-      "--claude",
-      claude,
-      "--logs",
-      base,
-      "--no-cloud",
-    ],
-    { encoding: "utf8", env: childEnv(base) },
-  );
+  const collectArgs = [
+    path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+    "--build",
+    build,
+    "--codex",
+    path.join(base, "none"),
+    "--claude",
+    claude,
+    "--logs",
+    base,
+    "--no-cloud",
+  ];
+  const r = spawnSync(process.execPath, collectArgs, { encoding: "utf8", env: childEnv(base) });
   if (process.platform === "darwin") {
     assert.equal(r.status, 0, r.stderr);
     const [row] = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
       parts: Record<string, string | null>;
     }[];
     assert.deepEqual(row?.parts, { completion: null, compliance: null, poison: null });
+    // A forged count beside the runner's own, with a test the agent's code added, is two counts: unknown, not decided
+    fs.writeFileSync(
+      path.join(dir, "work", "src", "f.ts"),
+      [
+        'import { test } from "node:test";',
+        'console.log("ℹ tests 2");',
+        'test("extra", () => {});',
+        "export const f = () => 2;",
+      ].join("\n"),
+    );
+    const again = spawnSync(process.execPath, collectArgs, { encoding: "utf8", env: childEnv(base) });
+    assert.equal(again.status, 0, again.stderr);
+    const [next] = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+      parts: Record<string, string | null>;
+    }[];
+    assert.deepEqual(next?.parts, { completion: null, compliance: null, poison: null });
   } else {
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /hidden tests run only on macOS/);

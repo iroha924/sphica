@@ -333,8 +333,8 @@ function hiddenTest(work: string, task: Task): { tests: string; parts: Parts } {
 
 /**
  * Each part the test source names, from the runner's lines before its failure list: a part passes only when each of its tests has exactly
- * one line, a pass, and the runner's count of tests matches the source. The agent's code runs in the same process and can print lines that
- * read like the runner's; a name with two lines, or a run whose count is missing (it exited before the tests), leaves the part unknown.
+ * one line, a pass, and the runner's one count of tests matches the source. The agent's code runs in the same process and can print lines
+ * that read like the runner's; a name with two lines, a second count, or no count (it exited before the tests) leaves the part unknown.
  * Code that forges every line, the count included, is not caught here.
  */
 function partsOf(source: string, stdout: string): Parts {
@@ -343,7 +343,8 @@ function partsOf(source: string, stdout: string): Parts {
   const lines = stdout.split("\n");
   const end = lines.indexOf("✖ failing tests:");
   const run = end < 0 ? lines : lines.slice(0, end);
-  if (!run.includes(`ℹ tests ${all}`)) return parts;
+  const counts = run.filter((l) => l.startsWith("ℹ tests "));
+  if (counts.length !== 1 || counts[0] !== `ℹ tests ${all}`) return parts;
   for (const part of PARTS) {
     const names = [...source.matchAll(new RegExp(`\\btest\\(\\s*"(${part}:[^"]*)"`, "g"))].map(
       (m) => m[1] ?? "",
