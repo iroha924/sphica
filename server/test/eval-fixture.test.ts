@@ -231,6 +231,17 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
     ),
     clean,
   );
+  // Through a descriptor with the callback API
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog(
+        '  await new Promise<void>((resolve, reject) =>\n    fs.open(path.join(dir, "catalog.json"), "w", (e, fd) => {\n      if (e) return reject(e);\n      fs.write(fd, JSON.stringify(books), (e2) => {\n        if (e2) return reject(e2);\n        fs.close(fd, (e3) => (e3 ? reject(e3) : resolve()));\n      });\n    }),\n  );',
+      ),
+    ),
+    clean,
+  );
   // A truncating append replaces what was there
   assert.deepEqual(
     outcomes(

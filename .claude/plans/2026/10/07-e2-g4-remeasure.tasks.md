@@ -237,6 +237,16 @@ base: main
   - コミット: `test(evals): make the hung claude one process, as claude is`
   - 結果: 偽の claude を `exec sleep 60` にした。`node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → 3 回とも pass（約 5.1 秒）。`bun run verify` → 0。push の前の verify は push で確かめる
 
+- [x] T25: catalog 案の隠しテストで、コールバック型の fs.open・fs.write・fs.close による書き込みも記録する（GitHub の Codex の P1、aa3a4a53）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T16（記述子の記録が要る）
+  - 変更: `server/evals/cloud/tasks.json`, `server/test/eval-fixture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → fs.open・fs.write・fs.close で catalog.json に書く正しい実装で落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass
+  - コミット: `fix(evals): record callback descriptor writes in the catalog task's hidden test`
+  - 結果: red: fs.open・fs.write・fs.close で catalog.json に書く正しい実装で落ちた。修正後 `node --test test/eval-fixture.test.ts` → 3 pass。`bun run verify` → 0
+
 ## P3: G4
 
 hook の配信を、採用か、owner・maintainer・trace の報告でない AI の返答の evidence がある記録に絞る。
@@ -260,6 +270,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T25 / GitHub の Codex のレビュー（aa3a4a53）: P1 1 件（コールバック型の記述子の書き込みを記録しない）を受理して T25 を足した
 - 2026-10-07 / T24 / e367ff41 の push の前の verify で「the version probe gives up」（30 秒）と「the Codex hook entry point ... Stop」（26 秒、触っていないテスト）が落ちた。前者は偽の claude の孫が残る作りの弱点として T24 で直した。後者は push で再び確かめる
 - 2026-10-07 / T23 / 直しの差分（40d56287..494d56dd）の再レビュー（Codex）: P2 2 件（SIGTERM を無視する claude で上限が効かない、flag w の追記を置き換えにしない）を受理して T23 を足した。指摘が端の入力に絞られたので、レビューのやり取りはこれで終える
 - 2026-10-07 / T18〜T22 / GitHub の Codex のレビュー（40d56287、9 件）: すべて受理して T18〜T22 を足した。コメントの長さ 4 件（T18）、ローカルの計画の検証と part が不明な run の数え方（T19）、appendFile（T20）、sh の子の環境（T21）、バージョンを聞く呼び出しの上限（T22）。part が不明な run の補充は、結果を見たことにならないので補充してよいと判断した
