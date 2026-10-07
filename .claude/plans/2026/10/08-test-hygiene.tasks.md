@@ -76,4 +76,14 @@ base: main
   - コミット: `fix(scripts): keep the live checks' temp files in their own directory and report an unreadable run directory`
   - 結果: red は 2 つとも確認。`node --test test/test-run.test.ts` → 6 件 pass。hooks:live・sql:live・codex-trust:live を空の TMPDIR で流す → 何も残らない。hooks:live は Bash ツールの前景で流すと 3 回止まり（record tool hook が 30 秒と 930 秒、直す前の版でも Codex SubagentStart が ETIMEDOUT）、裏で流した 6 回はすべて 8 秒で通った。原因は未検証。verify の後に共有の TMPDIR の印が 6 個増えたので追い、acceptance の driver も同じ形に直した（空の TMPDIR で acceptance → 直す前は印 6 個、直した後は 0 個、132 件 pass）。ケースが止まっても次のケースが入れ子にならないよう、置き場は読み込み時の os.tmpdir() に固定
 
+- [x] T06: CI と GitHub の Codex の指摘を直す。rename limit のテストの git で自動メンテナンスを止める（1001 個の commit の後に裏で repack が動き、リポジトリに書き続ける）。読めない TMPDIR のテストを、権限ではなくファイルへの置き換えで起こす（root では権限 000 でも読める）
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T05（直すのは T05 で変えたテストと、T03 の残骸の検査が CI で見つけたもの）
+  - 変更: `server/test/record.test.ts`, `server/test/test-run.test.ts`
+  - red: `gh run view 37687086693 --log-failed` → check (26) で `the tests left 1 entry in their temp directory: sphica-limit-88uZVS`。同じジョブを流し直すと通り、手元でも 8 回中 0 回で再現しなかった。`GIT_TRACE=1 git commit`（1001 個）→ `git maintenance run --auto --quiet --detach` が起動し、約 1 秒 pack-objects と multi-pack-index を書く
+  - 完了条件: `GIT_TRACE=1 git -c maintenance.auto=false commit` → maintenance を起動しない。`cd server && node --test test/test-run.test.ts` → 6 件 pass
+  - コミット: `fix(test): stop git's background repack in the rename limit test and fail the scan without permissions`
+  - 結果: maintenance の起動 0 件。test-run.test.ts 6 件 pass。CI の残骸の原因が裏の repack だというのは推測（Linux では確かめていない）
+
 ## 記録

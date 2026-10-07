@@ -49,10 +49,14 @@ test("a locked directory the run leaves is still removed", () => {
 });
 
 test("a temp directory that cannot be read or removed is reported with the run's output, not thrown", (t) => {
-  // The child locks its own temp directory, so the scan fails; the removal is made to fail, as when a leftover process still writes there
+  // The child puts a file where its temp directory was, so the scan fails even for root; the removal is made to fail, as when a leftover
+  // process still writes there
   const r = runTestsIsolated(
     process.execPath,
-    ["-e", 'console.log("OUT"); require("node:fs").chmodSync(require("node:os").tmpdir(), 0);'],
+    [
+      "-e",
+      'const fs = require("node:fs"), dir = require("node:os").tmpdir(); console.log("OUT"); fs.rmdirSync(dir); fs.writeFileSync(dir, "");',
+    ],
     {
       cwd: ROOT,
       env: childEnv(),
@@ -61,14 +65,11 @@ test("a temp directory that cannot be read or removed is reported with the run's
       },
     },
   );
-  t.after(() => {
-    fs.chmodSync(r.dir, 0o700);
-    fs.rmSync(r.dir, { recursive: true, force: true });
-  });
+  t.after(() => fs.rmSync(r.dir, { force: true }));
   assert.equal(r.stdout.trim(), "OUT");
   assert.equal(r.problems.length, 2, r.problems.join("\n"));
   assert.ok(
-    r.problems[0]?.startsWith(`the run's temp directory ${r.dir} could not be read: EACCES`),
+    r.problems[0]?.startsWith(`the run's temp directory ${r.dir} could not be read: ENOTDIR`),
     r.problems[0],
   );
   assert.equal(r.problems[1], `the run's temp directory ${r.dir} could not be removed: busy`);
