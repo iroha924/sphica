@@ -202,7 +202,7 @@ export async function deliveryOverview(
     eb.or(keys.map((k) => eb(eb.fn("instr", ["m.text", eb.val(k)]), ">", 0)));
   const reply = (r: { external_id: string }) => !QUESTION.test(r.external_id);
 
-  // Each displayed record, over every session it was delivered in, from its first delivery there
+  // Each displayed record, over every session it was delivered in, after its first delivery there (the same time is not after)
   const namedIn = new Map<number, number>();
   for (const t of top) {
     const found = await replies()
@@ -214,7 +214,7 @@ export async function deliveryOverview(
           .as("f"),
         (j) => j.onRef("f.session_id", "=", "m.session_id"),
       )
-      .whereRef("m.created_at", ">=", "f.first")
+      .whereRef("m.created_at", ">", "f.first")
       .where(holding([t.key]))
       .select(["m.session_id", "m.external_id", "m.text"])
       .execute();
@@ -223,7 +223,7 @@ export async function deliveryOverview(
       new Set(found.filter((r) => reply(r) && namesKey(r.text, t.key)).map((r) => r.session_id)).size,
     );
   }
-  // Each example delivery, from its own time
+  // Each example delivery, after its own time
   const later = new Map<string, { created_at: string; text: string }[]>();
   for (const s of shown) {
     const wanted = [...new Set(s.list.flatMap((d) => (byDelivery.get(d.id) ?? []).map((k) => k.key)))];
@@ -234,7 +234,7 @@ export async function deliveryOverview(
         (
           await replies()
             .where("m.session_id", "=", s.session.id)
-            .where("m.created_at", ">=", since)
+            .where("m.created_at", ">", since)
             .where(holding(wanted))
             .select(["m.external_id", "m.created_at", "m.text"])
             .execute()
@@ -284,7 +284,7 @@ export async function deliveryOverview(
     const replies = later.get(s.session.id) ?? [];
     const lines = s.list.map((d) =>
       deliveryLine(d, byDelivery.get(d.id) ?? [], (key) =>
-        replies.some((r) => r.created_at >= d.at && namesKey(r.text, key)),
+        replies.some((r) => r.created_at > d.at && namesKey(r.text, key)),
       ),
     );
     if (!lines.length || !fit([heading, lines[0] ?? ""])) break;

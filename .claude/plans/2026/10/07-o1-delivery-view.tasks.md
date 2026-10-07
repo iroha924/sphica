@@ -87,6 +87,25 @@ base: main
   - コミット: `test(overview): give the delivery view's MCP server a temporary home (T10)`
   - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern=mcp test/delivery-view.test.ts` → 2 件 pass。`rg -n nonexistent server/test/delivery-view.test.ts` → 0 件。`bun run verify` → 0 で終わる
 
+- [x] T11: 配信と同じ時刻の返信を named later に数えない
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す言及の判定が要る）
+  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="same time" test/delivery-view.test.ts` → 同じ時刻の返信で `named later in 1` と `named later` の印が出て落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 全件 pass、同じ時刻の返信は数えない
+  - コミット: `fix(overview): count only replies after the delivery as naming its record (T11)`
+  - 結果: red: `cd server && node --test --test-timeout=60000 --test-name-pattern="same time" test/delivery-view.test.ts` → 直す前は同じ時刻の返信で落ちた。直した後 `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 11 件 pass。`bun run verify` → 0 で終わる
+
+- [x] T12: overview の title に delivery を足す
+  - 種別: 変更
+  - 計画: S3
+  - 依存: T03（直す overview の登録が要る）
+  - 変更: `server/src/mcp.ts`
+  - 完了条件: `rg -n 'title: "Live decisions, records that need a look, and what Sphica showed"' server/src/mcp.ts` → 1 件
+  - コミット: `fix(overview): count only replies after the delivery as naming its record (T11, T12)`
+  - 結果: `rg -n 'title: "Live decisions, records that need a look, and what Sphica showed"' server/src/mcp.ts` → 1 件。`bun run verify` → 0 で終わる
+
 ## P2: 計測と説明
 
 90 日分のログで 1 秒以内に返ることを、bundle した server を新しいプロセスで呼んで確かめ、README に載せる。
@@ -132,3 +151,5 @@ PR ブランチで持ち主が試し、採用なら同じバージョンに上�
 - 2026-10-07 / T03, T09 / Codex のタスクごとのレビュー（ed65305f, 9cf52946）: P3 で、MCP の子プロセスに HOME=/nonexistent を固定で渡すのは .claude/rules/verification.md の temp-home の考え方に沿わない（受理。既存の overview.test.ts・read.test.ts の同じ書き方はこのタスクの範囲外として触らない）。T09 は指摘なし / タスク T10 を足した
 - 2026-10-07 / T05 / README.ja.md が README.md の overview の説明を日本語で持っている / T05 の変更欄に README.ja.md を足した（前: `README.md`）。完了条件も両方を見る形に変えた（前: `rg -n 'view: "delivery"' README.md` → 30 行目付近の overview の説明に 1 件）
 - 2026-10-07 / T04 / 最初の生成データでは人気の記録を `d % 50` で選び、outcome・記録を付けるか・セッションと相関して、言及を入れた key が上位から外れた（ビューは正しかった） / 選び方を相関しない形にし、言及は配信の 1 分後に同じセッションでその記録の key を書く返信として作った
+- 2026-10-07 / 全体 / review-shipping（main..628fd5e7）: 指摘なし。overview の title が delivery に触れていないという補足 / 受理し、変更タスク T12 を足した
+- 2026-10-07 / 全体 / Codex の全差分レビュー（main..628fd5e7、high）: P2 で、配信と同じ時刻の返信を `>=` で named later に数える（再現、受理） / 修正タスク T11 を足し、plan の方針の「基準の時刻以上」を「より後」に直した

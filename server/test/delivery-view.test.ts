@@ -225,6 +225,25 @@ test("named later counts a session once, only from a captured reply after the de
     );
 });
 
+test("a reply at the same time as the delivery is not after it, so it does not count as naming the record", async () => {
+  const db = fresh();
+  const p = project(db);
+  const s1 = session(db, p, "s1");
+  const foo = unit(db, p, "trace:s/foo");
+  message(db, p, {
+    id: "t1:assistant:a",
+    text: "trace:s/foo holds.",
+    speaker: "assistant",
+    sent: ago(5),
+    session: s1,
+  });
+  delivery(db, s1, { at: ago(5), units: [foo] });
+
+  const out = await deliveryOverview(db.reader, p, 7, NOW);
+  assert.ok(out.includes("; named later in 0 of those sessions"), out);
+  assert.ok(out.includes(`- ${ago(5)} pre_read, main: trace:s/foo (u${foo})\n`), out);
+});
+
 test("an example delivery is marked only by replies after its own time", async () => {
   const db = fresh();
   const p = project(db);

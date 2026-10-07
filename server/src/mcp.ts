@@ -328,7 +328,7 @@ const notChecked = (e: unknown) =>
 server.registerTool(
   "overview",
   {
-    title: "Live decisions, and records that need a look",
+    title: "Live decisions, records that need a look, and what Sphica showed",
     description:
       "On request, not before every change. view live lists every active decision and constraint of the project, grouped by the directory it " +
       "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
