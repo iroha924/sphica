@@ -96,6 +96,16 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
   - コミット: `fix(extract): say a warning check and save both give once in the save's reply`
   - 結果: red: 直す前に同じテスト → fail（警告が 2 行）。直した後 → pass。`npm test`（server 全体）→ 965 pass / 0 fail。`bun run acceptance` → 133 pass。`bun run check` → exit 0
 
+- [x] T09: 保存の返答で 1 つにまとめるのを警告の行だけにし、同じ文面の変更の行は操作ごとに残す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T08（まとめすぎが T08 で入った）
+  - 変更: `server/src/extract.ts`, `server/test/extract.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="both reported" test/extract.test.ts` → 失敗（glean の 2 つの anchor 操作の「anchor added」が 1 行）
+  - 完了条件: 同じコマンドと「said once」のテスト → pass。`npm test` と `bun run acceptance` → pass
+  - コミット: `fix(extract): merge only repeated warnings in the save's reply, never two changes`
+  - 結果: red: 直す前に同じテスト → fail。直した後、「both reported」と「said once」→ 2 pass。`npm test`（server 全体）→ 966 pass（1 回目は rename limit だけ落ち、流し直して 966 pass）。`bun run acceptance` → 133 pass。`bun run check` → exit 0
+
 - [ ] T06: 試しを持ち主が判定し、採否に合わせて Skill と案内を仕上げる
   - 種別: 追加
   - 計画: S6, S7
@@ -112,3 +122,4 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
 - 2026-10-07 / T03 / server 全体のテストで record.test の「rename limit」が 5 回中 2 回失敗し、単独では毎回通った。git の rename 検出の時間が負荷で延びるためと推測（未検証）。今回の変更は read と rename の経路に触れていない / 直さずに残す
 - 2026-10-07 / T03 / Codex のレビュー（0d0d517a）の P2: Skill が「1 本退かせればそのファイルでの配信が止まる」と書いていたが、配信は path で選ぶので、同じ path に live な applies_to が残れば続く（deliver.ts:261 で確認）/ 採用。修正タスク T07 を足して直した。ほかの観点（実行順・from の特定・理由の保存・touched）は指摘なし
 - 2026-10-07 / T05 / trace の保存の返答に同じ警告が 2 行出ることを、自分で一時スクリプトを流して見つけた。Codex のレビュー（9260e2dd）も同じ 1 件を指摘 / 採用。修正タスク T08 を足し、saveText の返答の同じ行を 1 つにまとめて直した。T04 のレビュー（9717fa60）は指摘 0 件
+- 2026-10-07 / T08 / Codex のレビュー（19378da3）の P2: 返答全体を Set でまとめたため、glean の別々の操作の同じ文面の ✓ 行が 1 行に減る（glean.ts は操作ごとに同じ文面を changed に足す）/ 採用。修正タスク T09 で、まとめる対象を警告の行だけにした

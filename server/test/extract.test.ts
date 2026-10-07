@@ -3243,3 +3243,39 @@ test("trace: a warning check gives and save repeats is said once in the save's r
     await db.done();
   }
 });
+
+test("glean: two operations that report the same line are both reported in the save's reply", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const m = message(db, p, { id: "o1", text: "メモは書き出さない。", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      units: [
+        {
+          key: "notes",
+          kind: "finding",
+          text: "メモは書き出さない",
+          evidence: [{ source: `s${m}`, quote: "メモは書き出さない。", role: "states" }],
+        },
+      ],
+    });
+    const rev = Number(
+      db.owner.prepare("select revision from unit where key = 'glean:notes'").get()?.revision,
+    );
+    const out = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      ops: ["src.ts", "docs/note.md"].map((path) => ({
+        op: "anchor",
+        unit: "glean:notes",
+        revision: rev,
+        path,
+        role: "applies_to",
+      })),
+    });
+    assert.equal(out.match(/✓ glean:notes: anchor added/g)?.length, 2, out);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
