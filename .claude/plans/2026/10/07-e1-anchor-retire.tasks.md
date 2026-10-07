@@ -77,13 +77,14 @@ revision 12 の表 `unit_anchor_retirement` ができ、ingest が書け、forge
 
 CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies_to anchor に check と save で警告し、持ち主の判定で採否を決める。
 
-- [ ] T05: referenceFile と警告を足し、trace・harvest・glean の check と save に出す
+- [x] T05: referenceFile と警告を足し、trace・harvest・glean の check と save に出す
   - 種別: 追加
   - 計画: S5
   - 依存: T03（glean の検査と保存の流れを T03 で組み替えるので、その上に警告を載せる）
   - 変更: `server/src/rule-files.ts`, `server/src/record.ts`, `server/src/glean.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/record.test.ts test/extract.test.ts` → pass。trace・harvest・glean の check と save の両方で同じ警告が出て保存は成功、伏せ字で symbol が落ちた anchor にも出る、symbol 付き・evidence・対象外のファイル（plugin.json、.claude/plans/）には出ない、のテストを含む。`bun run acceptance` → pass
   - コミット: `feat(record): warn on a path-only anchor on a file agents read for instructions`
+  - 結果: `node --test test/record.test.ts`（新しいテスト）→ CLAUDE.md・sub/AGENTS.md・.claude/rules・.agents/skills と plugin/skills の SKILL.md で check と save に 1 件ずつ出て active で保存、伏せ字で symbol が落ちた CLAUDE.md にも出る、symbol 付き・evidence・plugin.json・.claude/plans・README.md・skills 配下の SKILL.md 以外には出ない。`node --test test/extract.test.ts`（新しいテスト）→ glean の anchor と replace_anchor で check と save の両方に出る、symbol 付き・evidence には出ない。acceptance glean-20（check に警告、保存は active のまま）pass。`npm test`（server 全体）→ 964 pass / 0 fail。`bun run acceptance` → 133 pass。`bun run check` → exit 0。harvest は trace と同じ checkRecord と saveRecord を通るので、harvest 専用のテストは足していない
 
 - [ ] T06: 試しを持ち主が判定し、採否に合わせて Skill と案内を仕上げる
   - 種別: 追加

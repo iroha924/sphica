@@ -2369,6 +2369,70 @@ test("glean: anchor problem on a missing path or a symbol not in the file, and t
   }
 });
 
+test("glean: anchoring or moving a record onto an instruction file or a Skill by path alone is warned at check and save", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const m = message(db, p, { id: "o1", text: "リリースの承認は持ち主だけ。", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      units: [
+        {
+          key: "approve",
+          kind: "finding",
+          text: "リリースの承認は持ち主だけ",
+          evidence: [{ source: `s${m}`, quote: "リリースの承認は持ち主だけ。", role: "states" }],
+          anchors: [{ path: "src.ts", symbol: "openStore", role: "applies_to" }],
+        },
+      ],
+    });
+    const rev = () =>
+      Number(db.owner.prepare("select revision from unit where key = 'glean:approve'").get()?.revision);
+    const said = message(db, p, { id: "o2", text: "場所を移す。", session: "g1" });
+    const wide = /is a file agents read for instructions or reference/;
+    const both = async (ops: () => unknown[]) => {
+      const checked = (
+        await checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: ops() })
+      ).text;
+      const saved = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: ops() });
+      return [checked, saved];
+    };
+    for (const text of await both(() => [
+      { op: "anchor", unit: "glean:approve", revision: rev(), path: "docs/SKILL.md", role: "applies_to" },
+    ]))
+      assert.match(text, new RegExp(`glean:approve: anchor docs/SKILL\\.md ${wide.source}`));
+    for (const text of await both(() => [
+      {
+        op: "replace_anchor",
+        unit: "glean:approve",
+        revision: rev(),
+        from: { path: "src.ts", symbol: "openStore" },
+        to: { path: "CLAUDE.md", role: "applies_to" },
+        source: `s${said}`,
+        quote: "場所を移す。",
+      },
+    ]))
+      assert.match(text, new RegExp(`anchor CLAUDE\\.md ${wide.source}`));
+    // A symbol on the file, or evidence, is not warned
+    for (const text of await both(() => [
+      {
+        op: "anchor",
+        unit: "glean:approve",
+        revision: rev(),
+        path: "AGENTS.md",
+        symbol: "x",
+        role: "applies_to",
+      },
+      { op: "anchor", unit: "glean:approve", revision: rev(), path: "docs/SKILL.md", role: "evidence" },
+    ]))
+      assert.doesNotMatch(text, wide);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("glean: unsourced cannot become active, adding evidence or adoption says so, and a successor replaces it", async () => {
   const db = tempDb();
   const root = repo();

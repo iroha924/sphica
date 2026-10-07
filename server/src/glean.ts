@@ -15,6 +15,7 @@ import {
   type Checked,
   checkRecord,
   prepareRecord,
+  referenceAnchorWarning,
   repoPath,
   saveRecord,
   settleSaved,
@@ -520,14 +521,11 @@ export async function checkGlean(
               .where("path", "=", rel)
               .executeTakeFirst()) !== undefined
           : false;
-      const wrong = anchorProblem(facts, {
-        path: rel,
-        symbol: dest.symbol && !symbolMasked(facts, rel, dest.symbol) ? dest.symbol : null,
-        role: dest.role,
-        held,
-        observed,
-      });
+      const kept = dest.symbol && !symbolMasked(facts, rel, dest.symbol) ? dest.symbol : null;
+      const wrong = anchorProblem(facts, { path: rel, symbol: kept, role: dest.role, held, observed });
       if (wrong) problems.push(`${what}: ${wrong}`);
+      const wide = referenceAnchorWarning({ path: rel, symbol: kept, role: dest.role });
+      if (wide) problems.push(`${what}: ${wide}`);
       places.push({
         what,
         unit: u.id,
@@ -837,6 +835,8 @@ export async function saveGlean(
           : false;
       const wrong = anchorProblem(c.units.facts, { path: rel, symbol, role: to.role, held, observed });
       if (wrong) units.anchorProblems.push(`${op.unit}: ${wrong}`);
+      const wide = referenceAnchorWarning({ path: rel, symbol, role: to.role });
+      if (wide) units.anchorProblems.push(`${op.unit}: ${wide}`);
       const at = symbol ? symbolAt(c.units.facts, rel, symbol) : null;
       const added = await trx
         .insertInto("unit_anchor")
