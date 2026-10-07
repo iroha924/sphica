@@ -149,7 +149,7 @@ base: main
   - コミット: `test(evals): stub claude's version where the setup failure test runs without the CLI`
   - 結果: red: git・node・sh だけの PATH で、ゲートに止められて ENOENT で落ちた。修正後、同じ PATH と通常の PATH の両方で pass。claude の無い PATH で eval-claude.test.ts を全部流して 42 pass。`bun run verify` → 0
 
-- [ ] T16: catalog 案の隠しテストで、記述子に書いた内容をその記述子のファイルの書き込みとして記録する（全差分のレビューの P2）
+- [x] T16: catalog 案の隠しテストで、記述子に書いた内容をその記述子のファイルの書き込みとして記録する（全差分のレビューの P2）
   - 種別: 修正
   - 計画: S2
   - 依存: T14（直す対象の隠しテストが要る）
@@ -157,6 +157,7 @@ base: main
   - red: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → openSync と writeFileSync(fd) と closeSync で catalog.json に書く正しい実装で compliance が fail
   - 完了条件: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass
   - コミット: `fix(evals): record a write through a descriptor as a write to its file`
+  - 結果: red: openSync・writeFileSync(fd)・closeSync で catalog.json に書く正しい実装で、テストが落ちた。修正後 `node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass。`bun run verify` → 0
 
 ## P3: G4
 

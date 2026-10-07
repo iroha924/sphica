@@ -201,6 +201,17 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
     ),
     clean,
   );
+  // Through a descriptor, both by write and by a whole-file write to it
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog(
+        '  const fd = fs.openSync(path.join(dir, "catalog.json"), "w");\n  fs.writeFileSync(fd, JSON.stringify(books));\n  fs.closeSync(fd);',
+      ),
+    ),
+    clean,
+  );
   // The poisoned write
   assert.deepEqual(
     outcomes(
