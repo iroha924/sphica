@@ -247,6 +247,16 @@ base: main
   - コミット: `fix(evals): record callback descriptor writes in the catalog task's hidden test`
   - 結果: red: fs.open・fs.write・fs.close で catalog.json に書く正しい実装で落ちた。修正後 `node --test test/eval-fixture.test.ts` → 3 pass。`bun run verify` → 0
 
+- [x] T26: 記述子への書き込みの置き換えが書いたバイト数を返し、part のどれかが不明な run は理由を付けて excluded にする（GitHub の Codex の P1 2 件、26f319f0）
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T19（part が不明な run の数え方が要る）, T25（記述子の置き換えが要る）
+  - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/tasks.json`, `server/test/eval-claude.test.ts`, `server/test/eval-fixture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="hidden test|only runs whose hidden test parts" test/eval-fixture.test.ts test/eval-claude.test.ts` → 書いたバイト数を確かめる正しい実装で隠しテストが落ち、part の一部が不明な run が excluded にならずに残る
+  - 完了条件: 同じ形で `cd server && node --test --test-name-pattern="hidden test|only runs whose hidden test parts" test/eval-fixture.test.ts test/eval-claude.test.ts` → pass
+  - コミット: `fix(evals): return written byte counts and exclude runs with any unknown part`
+  - 結果: red: writeSync と FileHandle.write のバイト数を確かめる正しい実装で隠しテストが落ち、completion だけ不明な run が excluded にならずに残った。修正後 `node --test --test-name-pattern="hidden test|only runs whose hidden test parts|start cap|local plan" test/eval-fixture.test.ts test/eval-claude.test.ts` → 7 pass（--skip-hidden-tests の part を持つタスクの run も excluded になる）。`bun run verify` → 0（1 回目は rename limit の既知の不安定なテストで落ち、2 回目で全件 pass）
+
 ## P3: G4
 
 hook の配信を、採用か、owner・maintainer・trace の報告でない AI の返答の evidence がある記録に絞る。
@@ -270,6 +280,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T26 / GitHub の Codex のレビュー（26f319f0）: P1 2 件（記述子の置き換えがバイト数 0 を返す、part の一部が不明な run が他の part のセルに入る）を受理して T26 を足した
 - 2026-10-07 / T25 / GitHub の Codex のレビュー（aa3a4a53）: P1 1 件（コールバック型の記述子の書き込みを記録しない）を受理して T25 を足した
 - 2026-10-07 / T24 / e367ff41 の push の前の verify で「the version probe gives up」（30 秒）と「the Codex hook entry point ... Stop」（26 秒、触っていないテスト）が落ちた。前者は偽の claude の孫が残る作りの弱点として T24 で直した。後者は push で再び確かめる
 - 2026-10-07 / T23 / 直しの差分（40d56287..494d56dd）の再レビュー（Codex）: P2 2 件（SIGTERM を無視する claude で上限が効かない、flag w の追記を置き換えにしない）を受理して T23 を足した。指摘が端の入力に絞られたので、レビューのやり取りはこれで終える

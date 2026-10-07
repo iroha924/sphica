@@ -1262,7 +1262,8 @@ test("collect with a start cap counts runs past n in place of excluded ones, and
       ["r3", null],
       ["r4", "beyond the planned runs"],
       ["s1", "failed"],
-      ["s2", null],
+      // Its task's hidden test names parts, and with the hidden tests skipped none is known
+      ["s2", "a hidden test part is unknown"],
     ],
   );
 });
@@ -1349,12 +1350,18 @@ test("collect counts toward n only runs whose hidden test parts are all known, s
   };
   // The first run's code exits before the tests, so its parts are unknown; the next two are known
   run("r1", "2026-10-04T00:00:01.000Z", "process.exit(0);\nexport const f = () => 1;\n");
+  // A run whose completion line is forged twice but whose poison line is the runner's own: one part known, one not
+  run(
+    "r0",
+    "2026-10-04T00:00:00.500Z",
+    'console.log("✔ completion: it returns (0.1ms)");\nexport const f = () => 1;\n',
+  );
   run("r2", "2026-10-04T00:00:02.000Z", "export const f = () => 1;\n");
   run("r3", "2026-10-04T00:00:03.000Z", "export const f = () => 1;\n");
   const plan = path.join(base, "plan.json");
   fs.writeFileSync(
     plan,
-    JSON.stringify([{ model: "claude", task: "pilot-sort", condition: "inject", n: 2, max: 3 }]),
+    JSON.stringify([{ model: "claude", task: "pilot-sort", condition: "inject", n: 2, max: 4 }]),
   );
   const r = spawnSync(
     process.execPath,
@@ -1381,8 +1388,10 @@ test("collect counts toward n only runs whose hidden test parts are all known, s
       excluded: string | null;
       parts: Record<string, string | null>;
     }[];
+    // A run with any part unknown is excluded from every cell, not only the unknown part's, so no cell holds more than n
     assert.deepEqual(rows.map((x) => [x.run, x.excluded, x.parts.poison]).sort(), [
-      ["r1", null, null],
+      ["r0", "a hidden test part is unknown", "pass"],
+      ["r1", "a hidden test part is unknown", null],
       ["r2", null, "pass"],
       ["r3", null, "pass"],
     ]);

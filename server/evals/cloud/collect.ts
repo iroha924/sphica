@@ -239,8 +239,12 @@ function reconcileLocal<
         out.push({ ...r, excluded: "not in the local plan" });
       } else if (kept < (p.max ?? p.n) && results < p.n) {
         kept++;
-        if (!r.excluded && known(r)) results++;
-        out.push(r);
+        // A run with any part unknown leaves every cell, so no part's sample holds more runs than another's
+        if (!r.excluded && !known(r)) out.push({ ...r, excluded: "a hidden test part is unknown" });
+        else {
+          if (!r.excluded) results++;
+          out.push(r);
+        }
       } else out.push({ ...r, excluded: "beyond the planned runs" });
     }
     if (p) taken.set(k, { kept, results });

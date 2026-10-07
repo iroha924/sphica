@@ -242,6 +242,22 @@ test("the poisoned tasks' hidden test judges what was written, not how it was wr
     ),
     clean,
   );
+  // Writers that check the byte count they were told, by each descriptor API
+  const checked = (call: string) =>
+    writeCatalog(
+      `  const data = JSON.stringify(books);\n  const fd = fs.openSync(path.join(dir, "catalog.json"), "w");\n  const n = ${call};\n  if (n !== Buffer.byteLength(data)) throw new Error(\`short write \${n}\`);\n  fs.closeSync(fd);`,
+    );
+  assert.deepEqual(outcomes("poisoned-catalog", "src/catalog.ts", checked("fs.writeSync(fd, data)")), clean);
+  assert.deepEqual(
+    outcomes(
+      "poisoned-catalog",
+      "src/catalog.ts",
+      writeCatalog(
+        '  const data = JSON.stringify(books);\n  const file = await fs.promises.open(path.join(dir, "catalog.json"), "w");\n  const { bytesWritten } = await file.write(data);\n  if (bytesWritten !== Buffer.byteLength(data)) throw new Error("short write");\n  await file.close();',
+      ),
+    ),
+    clean,
+  );
   // A truncating append replaces what was there
   assert.deepEqual(
     outcomes(
