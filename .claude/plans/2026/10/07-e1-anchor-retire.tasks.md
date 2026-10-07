@@ -63,6 +63,16 @@ revision 12 の表 `unit_anchor_retirement` ができ、ingest が書け、forge
   - コミット: `feat(read): show retired anchors with the words that retired them`
   - 結果: `node --test test/read.test.ts --test-name-pattern="retired anchors"` → pass（理由付き・移動先付き・reason not recorded の行、asOf では退去前の状態、退いた anchor 300 本と長い理由でも readRefs の返答が READ_BUDGET 以内で続きの案内付き）。`npm test`（server 全体）→ 962 pass / 0 fail。`bun run acceptance` → 132 pass。`bun run check` → exit 0
 
+- [x] T07: glean の Skill の retire_anchor の説明を、path に live な applies_to が残る限り配信は止まらない、に直す
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T03（直す記述が T03 で入った）
+  - 変更: `plugin/skills/glean/SKILL.md`
+  - red: `grep -c "no longer shown when that file is read or edited" plugin/skills/glean/SKILL.md` → 1（誤った説明がある）
+  - 完了条件: 同じ grep → 0。`bun run check` → exit 0
+  - コミット: `fix(skills): say a retired anchor stops delivery only when no live anchor stays on the path`
+  - 結果: red: 直す前の grep → 1。直した後 → 0。`bun run check` → exit 0
+
 ## P3: 参照用ファイルへの anchor の警告（試し）
 
 CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies_to anchor に check と save で警告し、持ち主の判定で採否を決める。
@@ -89,3 +99,4 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
 - 2026-10-07 / T01・T02 / Codex のタスクごとのレビュー（0d2ed77f、0f1fc74f）は指摘 0 件。Codex 側は sandbox で一時ディレクトリを作れず、テストは走らせていない / 採ることなし
 - 2026-10-07 / T03 / pairs の検査が glean の Skill の op 表に retire_anchor を求めた / Skill の retire_anchor の行を T06 から T03 に移した。T03 の変更欄: 前 Skill なし → 後 `plugin/skills/glean/SKILL.md` あり
 - 2026-10-07 / T03 / server 全体のテストで record.test の「rename limit」が 5 回中 2 回失敗し、単独では毎回通った。git の rename 検出の時間が負荷で延びるためと推測（未検証）。今回の変更は read と rename の経路に触れていない / 直さずに残す
+- 2026-10-07 / T03 / Codex のレビュー（0d0d517a）の P2: Skill が「1 本退かせればそのファイルでの配信が止まる」と書いていたが、配信は path で選ぶので、同じ path に live な applies_to が残れば続く（deliver.ts:261 で確認）/ 採用。修正タスク T07 を足して直した。ほかの観点（実行順・from の特定・理由の保存・touched）は指摘なし
