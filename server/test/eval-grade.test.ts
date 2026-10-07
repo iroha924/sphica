@@ -37,6 +37,7 @@ import {
   jsonSchemaOf,
   SCHEMA_FILES,
 } from "../evals/cloud/schema-check.ts";
+import { tmpEnv } from "./temp-dir.ts";
 
 const TASKS = path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json");
 // A build holds a copy of the task definitions it was made from
@@ -515,6 +516,7 @@ printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output:
       {
         encoding: "utf8",
         env: {
+          ...tmpEnv(),
           PATH: `${bin}${path.delimiter}${process.env.PATH}`,
           HOME: owner,
           CODEX_HOME: path.join(base, "sentinel"),
@@ -2569,7 +2571,9 @@ function gradeFixture(rows: (typeof row & { presented?: string | null })[]) {
   const build = path.join(base, "build");
   const ctl = path.join(base, "ctl");
   const bin = path.join(base, "bin");
-  for (const d of [path.join(owner, ".codex"), build, ctl, bin]) fs.mkdirSync(d, { recursive: true });
+  // A grading run killed midway skips its own cleanup, so its temp directories go under base
+  const tmp = path.join(base, "tmp");
+  for (const d of [path.join(owner, ".codex"), build, ctl, bin, tmp]) fs.mkdirSync(d, { recursive: true });
   fs.writeFileSync(path.join(owner, ".codex", "auth.json"), "{}");
   fs.writeFileSync(path.join(owner, ".codex", "config.toml"), 'model = "m"\n');
   seedTasks(build);
@@ -2623,6 +2627,9 @@ printf '%s' '${JSON.stringify({ ...grade, reason: "codex call NUM" })}' | sed "s
         {
           encoding: "utf8",
           env: {
+            TMPDIR: tmp,
+            TMP: tmp,
+            TEMP: tmp,
             PATH: `${bin}${path.delimiter}${process.env.PATH}`,
             HOME: owner,
             CODEX_HOME: path.join(base, "sentinel"),

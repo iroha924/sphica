@@ -30,6 +30,10 @@ import {
   type TempDb,
   tempDb,
 } from "./temp-db.ts";
+import { ownTmpdir, tmpEnv } from "./temp-dir.ts";
+
+// The hook marks a session once in the shared temp directory; these marks go to a directory of this file's own
+ownTmpdir("sphica-deliver-tmp-");
 
 const ISOLATED = [
   "SPHICA_PARENT_SESSION",
@@ -920,6 +924,7 @@ test("the delivery hook process answers with additionalContext, and prints nothi
       execFileSync(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
         input: JSON.stringify({ session_id: `proc-${Date.now()}`, cwd: repo, ...input }),
         env: {
+          ...tmpEnv(),
           PATH: process.env.PATH ?? "",
           HOME: repo,
           USERPROFILE: repo,
@@ -1629,7 +1634,7 @@ test("retention timing: a read that prunes behind 10,000 kept rows answers withi
     // The whole hook is timed, from the process start on, as the host's 5 seconds are
     const started = performance.now();
     const kid = spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
       stdio: ["pipe", "pipe", "inherit"],
     });
     let out = "";
@@ -1782,7 +1787,7 @@ test("a delivery answers within a second while another connection holds the writ
 async function together(file: string, home: string, inputs: Record<string, unknown>[]): Promise<string[]> {
   const kids = inputs.map(() =>
     spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "deliver.ts")], {
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: file },
       stdio: ["pipe", "pipe", "inherit"],
     }),
   );

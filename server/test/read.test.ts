@@ -13,6 +13,7 @@ import { READ_BUDGET, readRefs, readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { tmpEnv } from "./temp-dir.ts";
 
 async function save(db: TempDb, p: number, root: string | null, record: unknown) {
   const t: Target = {
@@ -45,7 +46,7 @@ async function server(db: TempDb, root: string) {
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );

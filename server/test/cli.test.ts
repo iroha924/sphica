@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { SAMPLES, splitLine } from "../src/split-check.ts";
 import { fakeCodex } from "./fake-codex.ts";
 import { fakeGhPath } from "./fake-gh.ts";
+import { tmpEnv } from "./temp-dir.ts";
 
 const signedOut = fakeGhPath();
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "cli.ts");
@@ -23,7 +24,7 @@ function runIn(home: string, ...args: string[]): { code: number; out: string } {
     const out = execFileSync(process.execPath, [CLI, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
-      env: { PATH: signedOut, HOME: home, USERPROFILE: home },
+      env: { ...tmpEnv(), PATH: signedOut, HOME: home, USERPROFILE: home },
       // Keep a hanging regression from stalling the test run (--test-timeout does not apply to sync calls).
       timeout: 30_000,
     });
@@ -143,7 +144,13 @@ test("uninstall refuses while SPHICA_HOME is set and deletes nothing", () => {
       out = execFileSync(process.execPath, [CLI, "uninstall", "--yes"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
-        env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_HOME: project },
+        env: {
+          ...tmpEnv(),
+          PATH: process.env.PATH ?? "",
+          HOME: home,
+          USERPROFILE: home,
+          SPHICA_HOME: project,
+        },
         timeout: 30_000,
       });
     } catch (e) {
@@ -167,7 +174,7 @@ test("uninstall names a SPHICA_DB in a sibling of ~/.sphica as outside it", () =
     const sibling = path.join(home, ".sphica-old", "db.sqlite");
     const out = execFileSync(process.execPath, [CLI, "uninstall", "--yes"], {
       encoding: "utf8",
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: sibling },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: sibling },
       timeout: 30_000,
     });
     assert.match(out, /SPHICA_DB points outside it/, out);
@@ -185,6 +192,7 @@ test("doctor as a child process shows Codex's trust in the installed hooks, and 
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         env: {
+          ...tmpEnv(),
           PATH: `${codex.bin}${path.delimiter}${signedOut}`,
           HOME: home,
           USERPROFILE: home,

@@ -18,6 +18,7 @@ import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { aiDecided, message, project, run, statements, type TempDb, tempDb } from "./temp-db.ts";
+import { tmpEnv } from "./temp-dir.ts";
 
 async function save(db: TempDb, p: number, units: unknown[], root: string | null = null) {
   const t: Target = {
@@ -683,7 +684,12 @@ test("overview refuses a cursor for the other view, and a broken one, before rea
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+      env: {
+        ...tmpEnv(),
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: "/nonexistent/sphica.db",
+      },
       stderr: "ignore",
     }),
   );

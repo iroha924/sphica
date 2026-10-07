@@ -1,15 +1,15 @@
 // A CODEX_HOME holding an installed Sphica 0.6.30 and the config.toml Codex 0.160.0 wrote after trusting its hooks, and a codex first
 // on PATH that prints a version and records the CODEX_HOME it was given. POSIX only (a shebang script); verify does not run on Windows.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { tempDir } from "./temp-dir.ts";
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures", "codex-trust");
 
 export type FakeCodex = { home: string; config: string; bin: string; seen: string };
 
 export function fakeCodex(version = "0.160.0"): FakeCodex {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-codex-"));
+  const dir = tempDir("sphica-fake-codex-");
   const home = path.join(dir, "codex-home");
   const root = path.join(home, "plugins", "cache", "sphica", "sphica", "0.6.30");
   for (const d of [".claude-plugin", ".codex-plugin", "hooks"])

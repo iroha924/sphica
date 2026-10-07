@@ -12,6 +12,10 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { localChange } from "../src/review-bridge.ts";
 import { openRun } from "../src/trace.ts";
 import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { ownTmpdir } from "./temp-dir.ts";
+
+// The review hook marks a session once in the shared temp directory; these marks go to a directory of this file's own
+ownTmpdir("sphica-deliver-tmp-");
 
 const saved = {
   parent: process.env.SPHICA_PARENT_SESSION,
