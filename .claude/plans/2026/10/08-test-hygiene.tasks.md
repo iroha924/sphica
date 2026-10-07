@@ -84,6 +84,6 @@ base: main
   - red: `gh run view 37687086693 --log-failed` → check (26) で `the tests left 1 entry in their temp directory: sphica-limit-88uZVS`。同じジョブを流し直すと通り、手元でも 8 回中 0 回で再現しなかった。`GIT_TRACE=1 git commit`（1001 個）→ `git maintenance run --auto --quiet --detach` が起動し、約 1 秒 pack-objects と multi-pack-index を書く
   - 完了条件: `GIT_TRACE=1 git -c maintenance.auto=false commit` → maintenance を起動しない。`cd server && node --test test/test-run.test.ts` → 6 件 pass
   - コミット: `fix(test): stop git's background repack in the rename limit test and fail the scan without permissions`
-  - 結果: maintenance の起動 0 件。test-run.test.ts 6 件 pass。CI の残骸の原因が裏の repack だというのは推測（Linux では確かめていない）
+  - 結果: `GIT_TRACE=1 git -c maintenance.auto=false commit`（1001 個）→ maintenance の起動 0 件。`node --test test/test-run.test.ts` → 6 件 pass。`bun run verify` → 0。CI の残骸の原因が裏の repack だというのは推測（Linux では確かめていない）
 
 ## 記録
