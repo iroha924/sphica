@@ -54,13 +54,14 @@ revision 12 の表 `unit_anchor_retirement` ができ、ingest が書け、forge
   - コミット: `feat(glean): retire an anchor on the owner's words, and keep the reason`
   - 結果: red: glean-19 を足して実装前に流すと、save が「ops.0.op: Invalid discriminator value」で拒否され失敗。実装後 `node --test test/extract.test.ts` → 38 pass / 0 fail（新しいテストで、owner 以外・引用の不一致・no live anchor・2 本ある組の内訳付き拒否・同じ anchor への二重操作の拒否、replace→retire の入力順でも通る、理由の保存、唯一の evidence を退かせて candidate、保存時の理由の拒否で退去も rollback）。`bun run acceptance` → 132 pass。`npm test`（server 全体）→ 961 pass（下の記録の 1 件を除く）。`bun run check` → exit 0
 
-- [ ] T04: read で退いた anchor を理由付きの履歴として出す
+- [x] T04: read で退いた anchor を理由付きの履歴として出す
   - 種別: 追加
   - 計画: S4
   - 依存: T01（理由の表が要る）
   - 変更: `server/src/read.ts`, `server/test/read.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/read.test.ts` → pass。Retired anchors の節（置き換え先、引用、理由が無いときの reason not recorded）、asOf ではその時点で退いていたものだけ、返答が READ_BUDGET 以内、のテストを含む
   - コミット: `feat(read): show retired anchors with the words that retired them`
+  - 結果: `node --test test/read.test.ts --test-name-pattern="retired anchors"` → pass（理由付き・移動先付き・reason not recorded の行、asOf では退去前の状態、退いた anchor 300 本と長い理由でも readRefs の返答が READ_BUDGET 以内で続きの案内付き）。`npm test`（server 全体）→ 962 pass / 0 fail。`bun run acceptance` → 132 pass。`bun run check` → exit 0
 
 ## P3: 参照用ファイルへの anchor の警告（試し）
 
