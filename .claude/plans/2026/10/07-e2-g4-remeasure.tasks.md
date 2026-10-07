@@ -232,7 +232,7 @@ base: main
   - 計画: S2
   - 依存: T23（直す対象のテストが要る）
   - 変更: `server/test/eval-claude.test.ts`
-  - red: `git push` の前のフックの verify → 「the version probe gives up」が 30 秒の時間切れで落ちた（e367ff41、1 回。手元では通っていた）。偽の claude が sleep を子として起動するため、claude を強制終了しても孫が出力のパイプを開いたまま残り得る
+  - red: `git push` → 前のフックの verify で「the version probe gives up」が 30 秒の時間切れで落ちた（e367ff41、1 回。手元では通っていた）。偽の claude が sleep を子として起動するため、claude を強制終了しても孫が出力のパイプを開いたまま残り得る
   - 完了条件: `cd server && node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → pass、push の前のフックの verify が通る
   - コミット: `test(evals): make the hung claude one process, as claude is`
   - 結果: 偽の claude を `exec sleep 60` にした。`node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → 3 回とも pass（約 5.1 秒）。`bun run verify` → 0。push の前の verify は push で確かめる
