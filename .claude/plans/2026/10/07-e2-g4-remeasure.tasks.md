@@ -159,6 +159,15 @@ base: main
   - コミット: `fix(evals): record a write through a descriptor as a write to its file`
   - 結果: red: openSync・writeFileSync(fd)・closeSync で catalog.json に書く正しい実装で、テストが落ちた。修正後 `node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass。`bun run verify` → 0
 
+- [x] T17: claude を起動できない run のテストを、環境を明示した子の node プロセスで動かし、テストのプロセスの環境を差し替えない
+  - 種別: 変更
+  - 計画: S2
+  - 依存: T13（直す対象のテストが要る）
+  - 変更: `server/test/eval-claude.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="cannot start" test/eval-claude.test.ts` → pass。`git push` の前のフックの verify が通る
+  - コミット: `test(evals): run the no-claude case in a child process with its environment given whole`
+  - 結果: `node --test --test-name-pattern="cannot start" test/eval-claude.test.ts` → pass。`bun run verify` → 0。push の前のフックの verify は push のときに確かめる
+
 ## P3: G4
 
 hook の配信を、採用か、owner・maintainer・trace の報告でない AI の返答の evidence がある記録に絞る。
@@ -182,6 +191,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T17 / push の前の verify で「claude を起動できない run」のテストが 2 回続けて落ち、手元（単独、ファイル丸ごと、npm test、verify、lefthook run pre-push）では一度も落ちなかった。git のフックの変数・mise の shim・spawnSync の出力の上限は確かめて外れた。調べる途中で GIT_DIR を本物のリポジトリに向けてテストを流し、テストのコミットが入った（持ち主に update-ref と reset で戻してもらった）。Codex との突き合わせで、T13 の差し替えが process.env を空にした後で childEnv を作り、環境が HOME・USERPROFILE・PATH だけになっていたことが分かった（読んで確認、push の失敗の原因かは未確認）。sql:reach が失敗の詳細を process.exit で捨てていること（main からある）も Codex が再現した / T17 を、テストを子のプロセスで動かす形に書き直した（種別は修正から変更へ。push の失敗を手元で再現できず red が無いため）
 - 2026-10-07 / 完了条件 / A4: 8b950400 から build g4-head-check を作り、canary passed（host のバージョンの検査を含む）。A1〜A3 も通過、done は違反 0 件。全差分の Codex レビューの P1・P2 は T15・T16 で直し、直しの差分の再レビューは指摘なし。A5（#206 の記録）は持ち主の承認の後
 - 2026-10-07 / T15, T16 / 全差分のレビュー（Codex、head 8b950400）: P1 の CLI の無い CI で落ちるテストと、P2 の記述子への書き込みの誤判定を受理して足した。P1 の「結果の行と集計行を全部偽造して終了するコードを見分けられない」は見送り: 評価を意図して欺く攻撃で、同じプロセスの中では見分けられず（partsOf のコメントに明記）、既存の pass/fail の件数も同じ出力を信じている。canary が外への成功した書き込みを見ていない点は main からある穴なので、PR に既知の問題として書く
 - 2026-10-07 / T05, T06 / 打ち切りで plan の S3〜S5 を外したので、取りやめたタスクの計画欄を直した。T05 は前: S3, S5、新: S2。T06 は前: S4、新: S2

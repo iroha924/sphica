@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { shippedCodexMatcher } from "../evals/cloud/build-lib.ts";
 import { contextChecks, permissionChecks, SPHICA_TOOLS, statusCounts } from "../evals/cloud/canary-check.ts";
 import {
@@ -14,7 +15,6 @@ import {
   finalAnswer,
   patchSince,
   runArgs,
-  runClaude,
   runEnv,
   runMcp,
   runnerDigest,
@@ -1564,7 +1564,7 @@ test("the fence canary takes only a permission or sandbox refusal as refused, an
   );
 });
 
-test("a run whose claude cannot start is still recorded with the reason", async (t) => {
+test("a run whose claude cannot start is still recorded with the reason", (t) => {
   const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-nostart-"));
   t.after(() => fs.rmSync(build, { recursive: true, force: true }));
   fs.copyFileSync(
@@ -1608,26 +1608,31 @@ test("a run whose claude cannot start is still recorded with the reason", async 
   }
   const out = path.join(build, "runs");
   // claude.ts would stop at the canary's gate first, since a host with no claude has no version; the runner itself records the failure.
-  // The runner reads this process's environment, so it gets the child's: a temporary home and none of the owner's Sphica paths
-  const saved = { ...process.env };
-  for (const k of Object.keys(process.env)) delete process.env[k];
-  Object.assign(process.env, childEnv(build), { PATH: bin });
-  try {
-    await runClaude({
-      build,
-      buildId: "b",
-      owner: "o",
-      repo: "eval-shelf-1",
-      condition: "none",
-      task: "pilot-sort",
-      prompt: "p",
-      out,
-      model: "m",
-    });
-  } finally {
-    for (const k of Object.keys(process.env)) delete process.env[k];
-    Object.assign(process.env, saved);
-  }
+  // It runs in a child Node process with its environment given whole (a temporary home, none of the owner's Sphica paths, a PATH without
+  // claude), so this process's environment is never swapped while the runner's asynchronous work is still going
+  const runner = path.join(import.meta.dirname, "..", "evals", "cloud", "claude-run.ts");
+  const options = {
+    build,
+    buildId: "b",
+    owner: "o",
+    repo: "eval-shelf-1",
+    condition: "none",
+    task: "pilot-sort",
+    prompt: "p",
+    out,
+    model: "m",
+  };
+  const child = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { runClaude } = await import(${JSON.stringify(pathToFileURL(runner).href)}); await runClaude(JSON.parse(process.argv[1]));`,
+      JSON.stringify(options),
+    ],
+    { encoding: "utf8", env: { ...childEnv(build), PATH: bin } },
+  );
+  assert.equal(child.status, 0, `${child.stdout}${child.stderr}`);
   const [run] = fs.readdirSync(out);
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
   assert.match(recorded.reason, /claude could not start/);
