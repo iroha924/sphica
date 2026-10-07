@@ -87,3 +87,5 @@ base: main
   - 結果: `GIT_TRACE=1 git -c maintenance.auto=false commit`（1001 個）→ maintenance の起動 0 件。`node --test test/test-run.test.ts` → 6 件 pass。`bun run verify` → 0。CI の残骸の原因が裏の repack だというのは推測（Linux では確かめていない）
 
 ## 記録
+
+- 2026-10-08 T01・T03・T04: チェックと結果行を、実装のコミット（f1429cb5・4346ed94）ではなく T02 のコミット 74d405e9 で付けた。tasks の変更を最後のコミットにまとめたため。push 済みなので履歴は書き換えず、`check_plan.py done` の違反 3 件はこのまま残す
