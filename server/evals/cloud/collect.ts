@@ -205,10 +205,8 @@ function streamSignals(events: string): NonNullable<Row["signals"]> {
 type LocalPlan = { model: "claude" | "codex"; task: string; condition: string; n: number; max?: number }[];
 
 /**
- * Local runs against the runs asked for: each planned task, condition, and model keeps its runs by start until n of them are results or
- * max have started, a run past that or one the plan did not ask for is kept as excluded, and up to n planned runs that never started are
- * added as excluded, so the denominator is the plan. The cap is fixed before any run is seen, so a short sample is never topped up by
- * looking at its outcome.
+ * Each planned cell keeps its runs by start until n are results (not excluded, every hidden test part known) or max have started; the
+ * rest are excluded, and runs still owed join the denominator. The cap is fixed in advance, so no sample is topped up after its outcome.
  */
 function reconcileLocal<
   R extends { model: string; task: string; condition: string; run: string; excluded: string | null },
@@ -216,6 +214,7 @@ function reconcileLocal<
   rows: R[],
   plan: LocalPlan,
   startedOf: (r: R) => string,
+  known: (r: R) => boolean,
   missing: (model: "claude" | "codex", task: string, condition: string, n: number) => R = (
     model,
     task,
@@ -240,7 +239,7 @@ function reconcileLocal<
         out.push({ ...r, excluded: "not in the local plan" });
       } else if (kept < (p.max ?? p.n) && results < p.n) {
         kept++;
-        if (!r.excluded) results++;
+        if (!r.excluded && known(r)) results++;
         out.push(r);
       } else out.push({ ...r, excluded: "beyond the planned runs" });
     }
@@ -634,6 +633,12 @@ function main() {
     if (!args["no-cloud"])
       throw new Error("--local-plan reconciles local runs only; pass --no-cloud with it");
     const asked = JSON.parse(fs.readFileSync(args["local-plan"], "utf8")) as LocalPlan;
+    const whole = (x: unknown, least: number) => Number.isInteger(x) && (x as number) >= least;
+    for (const p of asked)
+      if (!whole(p.n, 1) || (p.max !== undefined && !whole(p.max, p.n)))
+        throw new Error(
+          `the local plan's ${p.task} ${p.condition}: n must be a whole number from 1, and max one from n`,
+        );
     const startedOf = (r: Row) => {
       const file = path.join(
         r.model === "codex" ? (args.codex ?? "") : (args.claude ?? ""),
@@ -646,7 +651,12 @@ function main() {
         return "";
       }
     };
-    const reconciled = reconcileLocal(rows, asked, startedOf);
+    // A part the task's hidden test names but the run left unknown makes the run no result, so another run may stand in for it
+    const named = (r: Row) =>
+      PARTS.filter((p) => plan.tasks.find((t) => t.id === r.task)?.test?.includes(`"${p}:`));
+    const reconciled = reconcileLocal(rows, asked, startedOf, (r) =>
+      named(r).every((p) => r.parts[p] !== null),
+    );
     rows.length = 0;
     rows.push(...reconciled);
   }

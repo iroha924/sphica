@@ -168,6 +168,51 @@ base: main
   - コミット: `test(evals): run the no-claude case in a child process with its environment given whole`
   - 結果: `node --test --test-name-pattern="cannot start" test/eval-claude.test.ts` → pass。`bun run verify` → 0。push の前のフックの verify は push のときに確かめる
 
+- [ ] T18: 足したコメントのうち 4 行以上のもの（permissionChecks、reconcileLocal、partsOf、g4Bars）を 3 行以内にする（GitHub の Codex の P1、AGENTS.md の comment-length）
+  - 種別: 変更
+  - 計画: S2
+  - 依存: T17（直す対象のコードがそろっている）
+  - 変更: `server/evals/cloud/canary-check.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/report.ts`
+  - 完了条件: `bun run verify` → 0、変えたファイルに足したコメントで 4 行以上のものが無い
+  - コミット: `docs(evals): keep the new comments within three lines`
+
+- [x] T19: collect のローカルの計画で n と max を検証し、part が不明な run を有効数に数えない（GitHub の Codex の P1 2 件）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T07（直す対象のコードが要る）
+  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node --test --test-name-pattern="start cap" test/eval-claude.test.ts` → max が -1 の計画が拒まれず、part が不明な run が有効数に数えられて次の run が beyond になり失敗する
+  - 完了条件: `cd server && node --test --test-name-pattern="start cap|local plan" test/eval-claude.test.ts` → pass
+  - コミット: `fix(evals): check the local plan's counts and count only runs whose parts are known`
+  - 結果: red: max -1・max < n・n 0・n 1.5・文字列の max の計画が拒まれず、part が不明な run（隠しテストの前に exit）が有効数に数えられて r3 が beyond になり失敗。修正後、両テストと既存の start cap・local plan のテストが pass。`bun run verify` → 0
+
+- [ ] T20: catalog 案の隠しテストで appendFile と appendFileSync も書き込みとして記録する（GitHub の Codex の P1）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T16（直す対象の隠しテストが要る）
+  - 変更: `server/evals/cloud/tasks.json`, `server/test/eval-fixture.test.ts`
+  - red: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → fs.promises.appendFile で catalog.json に書く正しい実装で落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="hidden test" test/eval-fixture.test.ts` → pass
+  - コミット: `fix(evals): record appends as writes in the catalog task's hidden test`
+
+- [ ] T21: テストが git や node を探す `sh` の子にも一時的な HOME の環境を渡す（GitHub の Codex の P1）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T17（直す対象のテストが要る）
+  - 変更: `server/test/eval-claude.test.ts`
+  - red: `cd server && rg -n 'execFileSync\("sh", \["-c", `command -v' test/eval-claude.test.ts` → env を渡さない呼び出しが残っている
+  - 完了条件: 同じ rg → env を渡さない呼び出しが 0 件、`node --test test/eval-claude.test.ts` → pass
+  - コミット: `test(evals): give the command lookups a temporary home too`
+
+- [ ] T22: claude のバージョンを聞く呼び出しに時間の上限を付ける（GitHub の Codex の P2）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T12（直す対象のコードが要る）
+  - 変更: `server/evals/cloud/claude-run.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → --version で止まる claude で claudeVersion が戻らず、テストの時間切れで落ちる
+  - 完了条件: `cd server && node --test --test-name-pattern="version probe" test/eval-claude.test.ts` → 上限のうちに空のバージョンが返って pass
+  - コミット: `fix(evals): bound the Claude Code version probe`
+
 ## P3: G4
 
 hook の配信を、採用か、owner・maintainer・trace の報告でない AI の返答の evidence がある記録に絞る。
@@ -191,6 +236,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T18〜T22 / GitHub の Codex のレビュー（40d56287、9 件）: すべて受理して T18〜T22 を足した。コメントの長さ 4 件（T18）、ローカルの計画の検証と part が不明な run の数え方（T19）、appendFile（T20）、sh の子の環境（T21）、バージョンを聞く呼び出しの上限（T22）。part が不明な run の補充は、結果を見たことにならないので補充してよいと判断した
 - 2026-10-07 / T17 / push の前の verify で「claude を起動できない run」のテストが 2 回続けて落ち、手元（単独、ファイル丸ごと、npm test、verify、lefthook run pre-push）では一度も落ちなかった。git のフックの変数・mise の shim・spawnSync の出力の上限は確かめて外れた。調べる途中で GIT_DIR を本物のリポジトリに向けてテストを流し、テストのコミットが入った（持ち主に update-ref と reset で戻してもらった）。Codex との突き合わせで、T13 の差し替えが process.env を空にした後で childEnv を作り、環境が HOME・USERPROFILE・PATH だけになっていたことが分かった（読んで確認、push の失敗の原因かは未確認）。sql:reach が失敗の詳細を process.exit で捨てていること（main からある）も Codex が再現した / T17 を、テストを子のプロセスで動かす形に書き直した（種別は修正から変更へ。push の失敗を手元で再現できず red が無いため）
 - 2026-10-07 / 完了条件 / A4: 8b950400 から build g4-head-check を作り、canary passed（host のバージョンの検査を含む）。A1〜A3 も通過、done は違反 0 件。全差分の Codex レビューの P1・P2 は T15・T16 で直し、直しの差分の再レビューは指摘なし。A5（#206 の記録）は持ち主の承認の後
 - 2026-10-07 / T15, T16 / 全差分のレビュー（Codex、head 8b950400）: P1 の CLI の無い CI で落ちるテストと、P2 の記述子への書き込みの誤判定を受理して足した。P1 の「結果の行と集計行を全部偽造して終了するコードを見分けられない」は見送り: 評価を意図して欺く攻撃で、同じプロセスの中では見分けられず（partsOf のコメントに明記）、既存の pass/fail の件数も同じ出力を信じている。canary が外への成功した書き込みを見ていない点は main からある穴なので、PR に既知の問題として書く
