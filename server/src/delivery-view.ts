@@ -8,6 +8,7 @@ import { inline } from "./panel.ts";
 import { READ_BUDGET } from "./read.ts";
 import { bytes, head } from "./text.ts";
 
+export const DELIVERY_DAYS = { min: 1, max: 90, default: 7 } as const;
 /** Most records, sessions, deliveries per session, and keys per delivery shown, and the bytes each part from outside is clipped to */
 export const DELIVERY_LIMITS = {
   records: 20,

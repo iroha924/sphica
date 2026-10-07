@@ -1,7 +1,14 @@
 // The delivery view against real SQLite: the logged rows of one project and period only, main and subagent told apart as the log allows,
 // the records delivered most, example sessions, and a reply that keeps its limits and closing lines within READ_BUDGET however long the keys.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { iso } from "../src/db.ts";
 import { DELIVERY_LIMITS, DELIVERY_LIMITS_TEXT, deliveryOverview, namesKey } from "../src/delivery-view.ts";
 import { framed } from "../src/frame.ts";
@@ -257,4 +264,87 @@ test("long multibyte keys, paths, and agent ids in every section stay within REA
     out,
     /more sessions? delivered records in this period, not shown|more deliver(y|ies) with records in this session not shown/,
   );
+});
+
+/** The read MCP server on db (none: a database that does not exist), answering overview calls from a repository registered as git:github.com/o/r */
+async function overviewServer(db: TempDb | null) {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-delivery-")));
+  execFileSync("git", ["-C", root, "init", "-q"]);
+  execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/o/r.git"]);
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "mcp.ts")],
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: db?.file ?? "/nonexistent/sphica.db",
+      },
+      stderr: "ignore",
+    }),
+  );
+  return {
+    call: async (args: Record<string, unknown>) => {
+      const r = await client.callTool({ name: "overview", arguments: { ...args, cwd: root } });
+      return { error: r.isError === true, text: (r.content as { text: string }[])[0]?.text ?? "" };
+    },
+    close: async () => {
+      await client.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+test("mcp: overview refuses days outside 1 to 90 or with another view, and after with delivery, before reading anything", async () => {
+  const s = await overviewServer(null);
+  try {
+    for (const days of [0, 91, 1.5, "7"]) {
+      const r = await s.call({ view: "delivery", days });
+      assert.equal(r.error, true, String(days));
+      assert.match(r.text, /Input validation error: .* at days/, String(days));
+    }
+    // The same call within the bounds passes validation (it then finds no database), so the refusals above are the bounds'
+    assert.doesNotMatch((await s.call({ view: "delivery", days: 7 })).text, /Input validation error/);
+    assert.deepEqual(await s.call({ view: "live", days: 7 }), {
+      error: true,
+      text: "days: only with view delivery",
+    });
+    assert.deepEqual(await s.call({ view: "look", days: 7 }), {
+      error: true,
+      text: "days: only with view delivery",
+    });
+    assert.deepEqual(await s.call({ view: "delivery", after: 3 }), {
+      error: true,
+      text: "after: not with view delivery, which is one page",
+    });
+  } finally {
+    await s.close();
+  }
+});
+
+test("mcp: overview answers the delivery view for 1 and 90 days and 7 by default, framed", async () => {
+  const db = fresh();
+  const p = project(db);
+  const foo = unit(db, p, "trace:s/foo");
+  delivery(db, session(db, p, "s1"), { at: iso(Date.now() - 60 * 60 * 1000), units: [foo] });
+  const s = await overviewServer(db);
+  try {
+    for (const [days, heading] of [
+      [undefined, "last 7 days"],
+      [1, "last 1 day"],
+      [90, "last 90 days"],
+    ] as const) {
+      const r = await s.call({ view: "delivery", ...(days === undefined ? {} : { days }) });
+      assert.equal(r.error, false, r.text);
+      assert.ok(r.text.startsWith("<past-records id="), r.text);
+      assert.ok(r.text.includes(`# Delivery log of the ${heading}`), r.text);
+      assert.ok(
+        r.text.includes(`- trace:s/foo (u${foo}, finding, candidate now): 1 session, 1 delivery`),
+        r.text,
+      );
+    }
+  } finally {
+    await s.close();
+  }
 });

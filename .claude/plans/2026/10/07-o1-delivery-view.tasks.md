@@ -59,13 +59,14 @@ base: main
   - コミット: `feat(overview): mark record keys named in a later captured reply (T02)`
   - 結果: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 8 件 pass（単独・バッククォート・文末の句点は言及、`xtrace:s/foo`・`trace:s/foo-bar`・`trace:s/foo.bar` は言及でない、配信より前・質問・期間の後は数えない、同じセッションは 1 回）。`bun run verify` → 0 で終わる
 
-- [ ] T03: `overview` の `view: "delivery"` と `days`、引数の誤り、description
+- [x] T03: `overview` の `view: "delivery"` と `days`、引数の誤り、description
   - 種別: 追加
   - 計画: S3
   - 依存: T01（呼び出す `deliveryOverview` が要る）
   - 変更: `server/src/mcp.ts`, `server/test/delivery-view.test.ts`
   - 完了条件: `cd server && node --test --test-timeout=60000 --test-name-pattern=mcp test/delivery-view.test.ts` → `days` の省略・1・90 が通り、0・91・1.5・"7"・live や look と `days`・delivery と `after` が誤りを返す
   - コミット: `feat(mcp): serve the delivery view from overview (T03)`
+  - 結果: `cd server && node --test --test-timeout=60000 --test-name-pattern=mcp test/delivery-view.test.ts` → 2 件 pass。0・91・1.5・"7" は `Input validation error: ... at days`、live・look と days は `days: only with view delivery`、delivery と after は `after: not with view delivery, which is one page`。範囲内の days=7 は検証を通る。実 DB と git の origin を持つ一時リポジトリで days 省略・1・90 が枠付きで答える。`bun run verify` → 0 で終わる
 
 ## P2: 計測と説明
 
