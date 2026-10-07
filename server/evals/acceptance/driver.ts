@@ -16,6 +16,7 @@ import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { connectWriter, openWriter } from "../../src/db-write.ts";
 import { deliver } from "../../src/deliver.ts";
+import { deliveryOverview } from "../../src/delivery-view.ts";
 import { exportDecisions, exportPath } from "../../src/export.ts";
 import {
   beginGlean,
@@ -607,16 +608,22 @@ export async function createDriver(world: World): Promise<Driver> {
         return;
       }
       if (step.overview && typeof step.overview === "object") {
-        const o = step.overview as { view: "live" | "look"; after?: number | string };
+        const o = step.overview as {
+          view: "live" | "look" | "delivery";
+          after?: number | string;
+          days?: number;
+        };
         overview =
           o.view === "live"
             ? await liveOverview(db(), await projectId(), typeof o.after === "number" ? o.after : null)
-            : await lookOverview(
-                db(),
-                await projectId(),
-                repo,
-                typeof o.after === "string" ? o.after : undefined,
-              );
+            : o.view === "delivery"
+              ? await deliveryOverview(db(), await projectId(), o.days ?? 7)
+              : await lookOverview(
+                  db(),
+                  await projectId(),
+                  repo,
+                  typeof o.after === "string" ? o.after : undefined,
+                );
         return;
       }
       if (step.export && typeof step.export === "object") {

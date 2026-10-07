@@ -31,13 +31,14 @@ base: main
   - コミット: `feat(overview): add a bounded delivery view over the delivery log (T01)`
   - 結果: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 5 件 pass。全節を埋めた返答は framed の後に 30,595 バイト（上限 32,768）。`bun run verify` → 0 で終わる（sql:reach 込み、acceptance 130 件 pass）
 
-- [ ] T07: overview の受け入れケースに delivery のビューを足す
+- [x] T07: overview の受け入れケースに delivery のビューを足す
   - 種別: 追加
   - 計画: S1
   - 依存: T01（ケースが呼ぶ `deliveryOverview` が要る）
   - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
   - 完了条件: `bun run acceptance` → 新しい delivery のケースを含めて全件 pass
   - コミット: `test(acceptance): cover the delivery view (T07)`
+  - 結果: `SPHICA_ACCEPTANCE_LAYER=overview bun run acceptance` → driver を直す前は overview-06 が `overview lacks "## Logged delivery rows"` で落ち（delivery を look として呼んでいた）、直した後は overview-01〜06 が pass。`bun run verify` → 0 で終わる
 
 - [ ] T02: 言及の判定（Stop の返信の候補を取り、key の前後の境界を確かめる）
   - 種別: 追加
