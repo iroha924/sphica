@@ -2,6 +2,7 @@
 // way out for real and expects it refused, so a weaker profile fails here rather than in an evaluation.
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -57,8 +58,17 @@ function fixture(t: { after: (fn: () => void) => void }) {
   return { work, sibling };
 }
 
-test("on macOS the sandbox lets the test write its scratch and refuses every way out; elsewhere the run is recorded as not run", (t) => {
+test("on macOS the sandbox lets the test write its scratch and refuses every way out; elsewhere the run is recorded as not run", async (t) => {
   const { work, sibling } = fixture(t);
+  // A listener the run is asked to reach: the OS must refuse the connection, so it never sees one
+  let connections = 0;
+  const server = net.createServer((c) => {
+    connections++;
+    c.destroy();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const port = (server.address() as net.AddressInfo).port;
   const source = `import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -100,11 +110,19 @@ test("completion: a link in the scratch leads nowhere outside it", () => {
         refused(() => fs.readFileSync(path.join(link, "secret.txt"), "utf8"))),
   );
 });
-test("completion: the network is closed", async () => {
-  await assert.rejects(fetch("http://1.1.1.1/", { signal: AbortSignal.timeout(5000) }));
+test("completion: the network is closed by the OS", async () => {
+  const e = await fetch("http://127.0.0.1:" + process.env.PROBE_PORT + "/", { signal: AbortSignal.timeout(5000) }).then(
+    () => null,
+    (x) => x,
+  );
+  assert.equal(e?.cause?.code, "EPERM");
 });
 `;
-  const r = runHiddenTest(work, source, 60_000);
+  const r = runHiddenTest(
+    work,
+    source.replace("process.env.PROBE_PORT", JSON.stringify(String(port))),
+    60_000,
+  );
   if (process.platform === "darwin") {
     assert.equal(r.tests, "5 passed, 0 failed", JSON.stringify(r));
     assert.equal(r.parts.completion, "pass");
@@ -112,6 +130,9 @@ test("completion: the network is closed", async () => {
       assert.equal(fs.existsSync(path.join(work, made)), false, made);
     assert.deepEqual(fs.readdirSync(sibling).sort(), ["other.db", "secret.txt"]);
     assert.ok(r.scratch && !fs.existsSync(r.scratch), "the scratch is removed after the run");
+    // A connection the kernel accepted while this process was blocked surfaces now
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(connections, 0);
   } else {
     assert.match(r.tests, /^not run to the end/);
     assert.deepEqual(r.parts, NO_PARTS);
@@ -128,10 +149,14 @@ test("completion: never ends", async () => {
 `;
   const started = Date.now();
   const r = runHiddenTest(work, source, 3_000);
-  assert.match(r.tests, /^not run to the end/);
+  const took = Date.now() - started;
   assert.deepEqual(r.parts, NO_PARTS);
-  assert.ok(Date.now() - started < 30_000);
-  if (r.scratch) assert.equal(fs.existsSync(r.scratch), false);
+  if (process.platform === "darwin") {
+    // The limit itself ended it: the run lasted the limit, and the error is the time-out, not an early death
+    assert.match(r.tests, /^not run to the end \(.*ETIMEDOUT/);
+    assert.ok(took >= 3_000 && took < 30_000, `${took} ms`);
+    assert.ok(r.scratch && !fs.existsSync(r.scratch));
+  } else assert.match(r.tests, /^not run to the end/);
 });
 
 test("a scratch that would overlap the checkout is never used", (t) => {
@@ -147,4 +172,21 @@ test("a scratch that would overlap the checkout is never used", (t) => {
     if (saved === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = saved;
   }
+});
+
+test("a test that locks its own scratch still gets its result back, and the scratch is removed", (t) => {
+  const { work } = fixture(t);
+  const source = `import fs from "node:fs";
+import { test } from "node:test";
+test("completion: locks the scratch", () => {
+  fs.mkdirSync(process.env.HIDDEN_SCRATCH + "/inner");
+  fs.chmodSync(process.env.HIDDEN_SCRATCH + "/inner", 0o000);
+  fs.chmodSync(process.env.HIDDEN_SCRATCH ?? "", 0o000);
+});
+`;
+  const r = runHiddenTest(work, source, 60_000);
+  if (process.platform === "darwin") {
+    assert.equal(r.tests, "1 passed, 0 failed");
+    assert.ok(r.scratch && !fs.existsSync(r.scratch));
+  } else assert.match(r.tests, /^not run to the end/);
 });

@@ -134,6 +134,19 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
     const fail = /^ℹ fail (\d+)/m.exec(r.stdout)?.[1] ?? "?";
     return { tests: `${pass} passed, ${fail} failed`, parts: partsOf(test, r.stdout), scratch };
   } finally {
-    fs.rmSync(scratch, { recursive: true, force: true });
+    removeScratch(scratch);
   }
+}
+
+/** The test may lock directories it made, or the scratch itself: open each one again (links are never followed), then remove it all */
+function removeScratch(dir: string): void {
+  const open = (d: string) => {
+    fs.chmodSync(d, 0o700);
+    for (const name of fs.readdirSync(d)) {
+      const full = path.join(d, name);
+      if (fs.lstatSync(full).isDirectory()) open(full);
+    }
+  };
+  open(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
 }

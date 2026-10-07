@@ -320,6 +320,16 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
   - コミット: `fix(evals): let the hidden test sandbox read the Node binary alone`
   - 結果: red: プロファイルが Node の親の親を subpath で許していて単体の確認が落ちた。Node は実行ファイルの literal だけで起動することを実測し、修正後 `node --test test/hidden-runner.test.ts` → 4 pass、fixture の隠しテストも pass。`bun run verify` → 0
 
+- [x] T32: scratch の権限を戻してから片付け、ネットワークと時間切れのテストを OS の拒否と上限の到達で確かめる（S3 の差分の Codex のレビューの P2 3 件）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T31（直す対象のコードが要る）
+  - 変更: `server/evals/cloud/hidden-test.ts`, `server/test/hidden-runner.test.ts`
+  - red: `cd server && node --test test/hidden-runner.test.ts` → scratch を chmod 0 にする隠しテストで runHiddenTest が例外を投げ、ネットワークのテストが手元のサーバーへの接続と EPERM を確かめず、時間切れのテストが ETIMEDOUT と経過時間を確かめずに落ちる
+  - 完了条件: `cd server && node --test test/hidden-runner.test.ts` → pass（chmod 0 でも片付いて結果が返る、ネットワークは EPERM で拒否されサーバーへの接続は 0、時間切れは ETIMEDOUT で上限の時間の後）
+  - コミット: `fix(evals): clean up a locked scratch and prove the network and time-out fences`
+  - 結果: red: scratch を chmod 0 にする隠しテストで、片付けの EACCES が外に出て落ちた（ネットワークと時間切れは確かめる中身を強めたもので、今のコードでも通る: 手元のサーバーへの fetch は EPERM で拒否され接続は 0、時間切れは ETIMEDOUT で約 3 秒）。修正後 `node --test test/hidden-runner.test.ts` → 5 pass。`bun run verify` → 0
+
 - [x] T30: macOS の CI ジョブを足し、`node --test test/hidden-runner.test.ts` を本物の sandbox で流す
   - 種別: 追加
   - 計画: S3
@@ -331,6 +341,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-08 / T32 / S3 の差分（c241a9b2..da2f4206）の Codex のレビュー: P2 3 件（scratch の権限を変えられると片付けで例外、ネットワークのテストが OS の拒否を証明しない、時間切れのテストが即死でも通る）を受理して T32 を足した
 - 2026-10-08 / T31 / review-shipping（T28・T29 と未コミットの CI）: 出してよい、軽い指摘 3 件。3（Node の読み取りの許可がインストール先の全体で、.pkg の Node なら /usr/local 全体になる）は受理して T31 を足した。1（symlink の確認は Node が作成を止めるので OS の規則までは確かめていない）と 2（/System/Volumes/Data の拒否は文字列でしか確かめていない。無くても macOS 27 では同じ結果）は見送り: 1 は checkout のリンクを別の検査で弾き、2 は念のための行
 - 2026-10-07 / T28〜T30 / 持ち主の「妥協せず最高のものに」を受けて、隠しテストの作りを変える S3 を plan に足し、Codex と 3 往復で合意した（session 01a116d6-78d7-77d2-a101-9639ca14b712）。plan を承認待ちに戻した / P4 に T28〜T30 を足した
 - 2026-10-07 / T27 / GitHub の Codex のレビュー（29bf3cd9、持ち主が依頼）: P1 2 件（毒のタスクを excluded の run も含めて探す、記述子の書き込みの範囲を無視する）を受理して T27 を足した
