@@ -32,7 +32,7 @@ const who = (named: boolean, event: string, reason: string | null): Who =>
   named ? "subagent" : event === "session_start" && reason === "subagent" ? "subagent, id unknown" : "main";
 
 export const DELIVERY_LIMITS_TEXT = [
-  "Counted are the logged delivery rows only: since 0.6.17 a read or edit that showed nothing is not logged (older rows show it as nothing), and a delivery answered while the write lock was busy, or whose log write failed, is not either.",
+  "Counted are the logged delivery rows only: since 0.6.16 a read or edit that showed nothing is not logged (older rows show it as nothing), and a delivery answered while the write lock was busy, or whose log write failed, is not either.",
   "A session's rows are dropped once its last delivery is older than 90 days, so a long period is not a rolling window.",
   "The text delivered then is not kept, only the record ids: a record shown now may have changed since.",
   "Outcomes suppressed and unavailable are not written today, so only emitted and nothing appear.",
