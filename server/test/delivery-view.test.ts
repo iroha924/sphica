@@ -282,11 +282,12 @@ test("long multibyte keys, paths, and agent ids in every section stay within REA
   );
 });
 
-/** The read MCP server on db (none: a database that does not exist), answering overview calls from a repository registered as git:github.com/o/r */
+/** The read MCP server on db (none: a database that does not exist), with a home of its own, answering overview calls from a repository registered as git:github.com/o/r */
 async function overviewServer(db: TempDb | null) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-delivery-")));
   execFileSync("git", ["-C", root, "init", "-q"]);
   execFileSync("git", ["-C", root, "remote", "add", "origin", "https://github.com/o/r.git"]);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-delivery-home-"));
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StdioClientTransport({
@@ -294,8 +295,8 @@ async function overviewServer(db: TempDb | null) {
       args: [path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "mcp.ts")],
       env: {
         PATH: process.env.PATH ?? "",
-        HOME: "/nonexistent",
-        SPHICA_DB: db?.file ?? "/nonexistent/sphica.db",
+        HOME: home,
+        SPHICA_DB: db?.file ?? path.join(home, "missing", "sphica.db"),
       },
       stderr: "ignore",
     }),
@@ -308,6 +309,7 @@ async function overviewServer(db: TempDb | null) {
     close: async () => {
       await client.close();
       fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
     },
   };
 }
