@@ -106,6 +106,16 @@ base: main
   - コミット: `fix(overview): count only replies after the delivery as naming its record (T11, T12)`
   - 結果: `rg -n 'title: "Live decisions, records that need a look, and what Sphica showed"' server/src/mcp.ts` → 1 件。`bun run verify` → 0 で終わる
 
+- [x] T13: 限界の節で、空の read・edit を残さないのは 0.6.17 からだと書く
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す限界の文が要る）
+  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="counts the project" test/delivery-view.test.ts` → 限界の行に 0.6.17 が無いことで落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 全件 pass、限界の行が 0.6.17 より前の行に触れている
+  - コミット: `fix(overview): say empty reads and edits are unlogged only since 0.6.17 (T13)`
+  - 結果: red: `cd server && node --test --test-timeout=60000 --test-name-pattern="counts the project" test/delivery-view.test.ts` → 直す前は限界の行が見つからず落ちた。直した後 `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 11 件 pass。`bun run verify` → 0 で終わる（overview-06 を含む）
+
 ## P2: 計測と説明
 
 90 日分のログで 1 秒以内に返ることを、bundle した server を新しいプロセスで呼んで確かめ、README に載せる。
@@ -153,3 +163,4 @@ PR ブランチで持ち主が試し、採用なら同じバージョンに上�
 - 2026-10-07 / T04 / 最初の生成データでは人気の記録を `d % 50` で選び、outcome・記録を付けるか・セッションと相関して、言及を入れた key が上位から外れた（ビューは正しかった） / 選び方を相関しない形にし、言及は配信の 1 分後に同じセッションでその記録の key を書く返信として作った
 - 2026-10-07 / 全体 / review-shipping（main..628fd5e7）: 指摘なし。overview の title が delivery に触れていないという補足 / 受理し、変更タスク T12 を足した
 - 2026-10-07 / 全体 / Codex の全差分レビュー（main..628fd5e7、high）: P2 で、配信と同じ時刻の返信を `>=` で named later に数える（再現、受理） / 修正タスク T11 を足し、plan の方針の「基準の時刻以上」を「より後」に直した
+- 2026-10-07 / T13 / 持ち主の DB で試用の返答を作ると、限界の節は「空の read・edit は残らない」と言うのに、表に pre_read nothing 523 行・pre_edit nothing 21 行が出た。読み取りで数えると 2026-10-01 までの行で、0.6.17（2026-10-02、4e0f37c4）より前のバージョンが残したもの / 修正タスク T13 を足した

@@ -102,6 +102,13 @@ test("counts the project's logged rows in the period by event, outcome, and main
     "| session_start | emitted | 1 | 0 | 1 | 1 | 2 |",
   ]);
   assert.ok(!out.includes("elsewhere"), out);
+  // Versions before 0.6.17 logged empty reads and edits, so the limits say when that stopped
+  assert.ok(
+    out.includes(
+      "- Counted are the logged delivery rows only: since 0.6.17 a read or edit that showed nothing is not logged (older rows show it as nothing), and a delivery answered while the write lock was busy, or whose log write failed, is not either.",
+    ),
+    out,
+  );
   // The limits say how rows without an agent id were counted, the subagent start included
   assert.ok(
     out.includes(
