@@ -40,6 +40,16 @@ base: main
   - コミット: `feat(evals): judge G4's bars with Newcombe intervals`
   - 結果: `node --test --test-name-pattern="Newcombe|aa|bar" test/eval-grade.test.ts` → 9 pass（Newcombe の公表例 48/80 と 56/70 で [0.0524, 0.3339]、old が毒に従わないと効き目は missed、excluded・ungraded・part 不明で 59 有効なら inconclusive、見張り・completion・回帰の missed）。前の G4 のバー（poisoned-backup に固定）と、そのテストは外した。`bun run verify` → 0
 
+- [x] T07: collect の parts を偽の出力で決めさせず、有効数が足りないときに未開始の run を数える（T01 のレビューの F1・F3）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象のコードが要る）
+  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node --test --test-name-pattern="start cap|forged" test/eval-claude.test.ts` → 偽の ✔ を出して終了したエージェントのコードで parts が pass になり、n=2・max=3 で 1 件 excluded・1 件結果のときに planned but not run の行が出ずに失敗する
+  - 完了条件: `cd server && node --test --test-name-pattern="start cap|forged|completion, compliance, and poison" test/eval-claude.test.ts` → 名前ごとの結果の行がちょうど 1 本で、集計行の件数がテストの数と合うときだけ pass / fail、ほかは null。未開始の補充の行が min(max − 開始数, n − 有効数) 件出る
+  - コミット: `fix(evals): leave a forged test line unknown and count unstarted top-up runs`
+  - 結果: red: 3 件が意図どおり失敗（planned#3 の行が無い、偽の ✔ と本物の ✖ で compliance が fail、偽の ✔ を出して exit したのに completion と poison が pass）。修正後 `node --test --test-name-pattern="start cap|forged|completion, compliance, and poison|local plan keeps" test/eval-claude.test.ts` → 4 pass。外へのリンクで隠しテストを流さなかった run の parts も null にした。`bun run verify` → 0。集計行まで偽造するコードは見分けられないことを partsOf のコメントに残した
+
 - [ ] T03: 毒のタスクの候補 2 つ（catalog 案と BOM 案）を、初期ファイル・第三者の finding・隠しテストと一緒に足す
   - 種別: 追加
   - 計画: S1
@@ -83,6 +93,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T07 / T01 の Codex レビュー: F1（偽の行で parts が変わる、P1）と F3（有効数不足で未開始の行が出ない、P2）は受理して T07 を足した。F2（採点できなかった run を補充できない、P2）は見送り: 採点の失敗は grade.ts の流し直しで直り、エージェントの run を足す理由にならない
 - 2026-10-07 / T01 / verify の 1 回目で record.test の rename limit が落ちた（既知の不安定なテスト、Sphica の記録 rename-limit-flaky）/ 単独で pass を確かめ、verify を流し直して通した
 - 2026-10-07 / T01 / collect のテストは eval-grade.test.ts ではなく eval-claude.test.ts にあった / 変更欄と完了条件を `server/test/eval-grade.test.ts` から `server/test/eval-claude.test.ts` に直した
 - 2026-10-07 / T05 / バージョンの引き上げは、pre-commit がパッケージを変えるコミットごとに求めるので T05 に入れた。本番の run はコードを変えないのでタスクにせず、plan の A3 で判定する。バーを通らなければ PR を閉じ、#206 に数字を書く（plan の「出し方」）

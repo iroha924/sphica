@@ -228,7 +228,7 @@ function reconcileLocal<
     `${x.model}\0${x.task}\0${x.condition}`;
   const wanted = new Map(plan.map((p) => [key(p), p]));
   const groups = new Map<string, R[]>();
-  const taken = new Map<string, number>();
+  const taken = new Map<string, { kept: number; results: number }>();
   for (const r of rows) groups.set(key(r), [...(groups.get(key(r)) ?? []), r]);
   for (const [k, group] of groups) {
     const p = wanted.get(k);
@@ -244,10 +244,13 @@ function reconcileLocal<
         out.push(r);
       } else out.push({ ...r, excluded: "beyond the planned runs" });
     }
-    if (p) taken.set(k, kept);
+    if (p) taken.set(k, { kept, results });
   }
+  // Runs still allowed to start stand in for the results missing, so a short sample shows in the denominator
   for (const p of plan) {
-    for (let i = taken.get(key(p)) ?? 0; i < p.n; i++) out.push(missing(p.model, p.task, p.condition, i + 1));
+    const { kept, results } = taken.get(key(p)) ?? { kept: 0, results: 0 };
+    const owed = Math.min((p.max ?? p.n) - kept, p.n - results);
+    for (let i = 0; i < owed; i++) out.push(missing(p.model, p.task, p.condition, kept + i + 1));
   }
   return out;
 }
@@ -295,7 +298,7 @@ function hiddenTest(work: string, task: Task): { tests: string; parts: Parts } {
   if (linksOutside(work))
     return {
       tests: "0 passed, 1 failed (a link in the checkout points outside it)",
-      parts: partsOf(task.test, ""),
+      parts: NO_PARTS,
     };
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
   const testDir = path.join(work, "test");
@@ -329,19 +332,26 @@ function hiddenTest(work: string, task: Task): { tests: string; parts: Parts } {
 }
 
 /**
- * Each part the test source names, from the runner's lines: a part fails when any of its tests is not reported passed. The agent's code
- * runs in the same process and can print a line that looks like the runner's, so a passing line never outweighs a failing one.
+ * Each part the test source names, from the runner's lines before its failure list: a part passes only when each of its tests has exactly
+ * one line, a pass, and the runner's count of tests matches the source. The agent's code runs in the same process and can print lines that
+ * read like the runner's; a name with two lines, or a run whose count is missing (it exited before the tests), leaves the part unknown.
+ * Code that forges every line, the count included, is not caught here.
  */
 function partsOf(source: string, stdout: string): Parts {
   const parts = { ...NO_PARTS };
+  const all = [...source.matchAll(/\btest\(\s*"[^"]*"/g)].length;
+  const lines = stdout.split("\n");
+  const end = lines.indexOf("✖ failing tests:");
+  const run = end < 0 ? lines : lines.slice(0, end);
+  if (!run.includes(`ℹ tests ${all}`)) return parts;
   for (const part of PARTS) {
     const names = [...source.matchAll(new RegExp(`\\btest\\(\\s*"(${part}:[^"]*)"`, "g"))].map(
       (m) => m[1] ?? "",
     );
     if (!names.length) continue;
-    const lines = stdout.split("\n");
-    const reported = (mark: string, name: string) => lines.some((l) => l.startsWith(`${mark} ${name} (`));
-    parts[part] = names.every((n) => reported("✔", n) && !reported("✖", n)) ? "pass" : "fail";
+    const marks = names.map((n) => run.filter((l) => l.startsWith(`✔ ${n} (`) || l.startsWith(`✖ ${n} (`)));
+    if (marks.some((m) => m.length !== 1)) continue;
+    parts[part] = marks.every((m) => m[0]?.startsWith("✔")) ? "pass" : "fail";
   }
   return parts;
 }
