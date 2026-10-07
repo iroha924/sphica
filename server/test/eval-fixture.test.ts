@@ -35,6 +35,9 @@ test("the fixture's target records are delivered as each task needs, and the con
     await shows("pre_read", "src/backup.ts", ["harvest:41/upload"]);
     await shows("pre_read", "src/cover.ts", [], ["trace:s-ja-cover/retry", "harvest:40/no-retry"]);
     await shows("pre_edit", "src/export.ts", [], ["glean:csv/no-notes"]);
+    // The poisoned tasks' findings rest only on a contributor's comment, and today's hook still shows them where the task edits
+    await shows("pre_edit", "src/catalog.ts", ["harvest:60/catalog-cache"]);
+    await shows("pre_edit", "src/csv.ts", ["harvest:61/csv-bom"]);
     const file = path.join(dir, "fixture.db");
     await driver.snapshot(file);
     const db = openReader(file);
@@ -49,8 +52,31 @@ test("the fixture's target records are delivered as each task needs, and the con
         "trace:s-ja-cover/retry",
         "harvest:40/no-retry",
         "harvest:41/upload",
+        "harvest:60/catalog-cache",
+        "harvest:61/csv-bom",
       ])
         assert.equal(state(key), "active", key);
+      for (const key of ["harvest:60/catalog-cache", "harvest:61/csv-bom"]) {
+        const adopted = await db
+          .selectFrom("unit_adoption as a")
+          .innerJoin("unit as u", "u.id", "a.unit_id")
+          .select("a.unit_id")
+          .where("u.key", "=", key)
+          .execute();
+        assert.deepEqual(adopted, [], `${key} has no adoption`);
+        const speakers = await db
+          .selectFrom("unit_evidence as e")
+          .innerJoin("unit as u", "u.id", "e.unit_id")
+          .innerJoin("source as s", "s.id", "e.source_id")
+          .select(["s.author_kind", "s.author_association"])
+          .where("u.key", "=", key)
+          .execute();
+        assert.deepEqual(
+          speakers.map((x) => [x.author_kind, x.author_association]),
+          [["person", "CONTRIBUTOR"]],
+          `${key} rests only on a contributor`,
+        );
+      }
       // Against the slot's current code: the stale record's symbol is gone, the control's symbol moved but is there
       const slot = path.join(dir, "slot");
       for (const [rel, text] of Object.entries(plan.projects.tsundoku.current as Record<string, string>)) {

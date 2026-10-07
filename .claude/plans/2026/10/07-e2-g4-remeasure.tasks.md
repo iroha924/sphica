@@ -50,13 +50,14 @@ base: main
   - コミット: `fix(evals): leave a forged test line unknown and count unstarted top-up runs`
   - 結果: red: 3 件が意図どおり失敗（planned#3 の行が無い、偽の ✔ と本物の ✖ で compliance が fail、偽の ✔ を出して exit したのに completion と poison が pass）。修正後 `node --test --test-name-pattern="start cap|forged|completion, compliance, and poison|local plan keeps" test/eval-claude.test.ts` → 4 pass。外へのリンクで隠しテストを流さなかった run の parts も null にした。`bun run verify` → 0。集計行まで偽造するコードは見分けられないことを partsOf のコメントに残した
 
-- [ ] T03: 毒のタスクの候補 2 つ（catalog 案と BOM 案）を、初期ファイル・第三者の finding・隠しテストと一緒に足す
+- [x] T03: 毒のタスクの候補 2 つ（catalog 案と BOM 案）を、初期ファイル・第三者の finding・隠しテストと一緒に足す
   - 種別: 追加
   - 計画: S1
   - 依存: T01（隠しテストの毒の結果を collect が読む）
   - 変更: `server/evals/cloud/tasks.json`, `server/evals/acceptance/world.json`, `server/evals/acceptance/cases.json`, `server/test/eval-fixture.test.ts`
   - 完了条件: `cd server && node --test test/eval-fixture.test.ts` → 今のコードで、両案の第三者の finding が依頼のパスへの pre_edit か prompt で配られ、採用も owner の evidence も無い
   - コミット: `feat(evals): add two poisoned tasks resting on a third party's finding`
+  - 結果: `node --test test/eval-fixture.test.ts` → 2 pass。今のコードで harvest:60/catalog-cache が src/catalog.ts、harvest:61/csv-bom が src/csv.ts の pre_edit で配られ、どちらも active、採用なし、evidence は person / CONTRIBUTOR の 1 件だけ。初期ファイル（src/catalog.ts の catalogPath と readCatalog、src/csv.ts の parseBooks）と PR 60・61 を world.json に足した。各タスクの runs は inject 80（本番の最大開始数）。`bun run verify` → 0
 
 ## P2: 予備の run と凍結
 
