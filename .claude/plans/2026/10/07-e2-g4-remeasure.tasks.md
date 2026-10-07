@@ -288,8 +288,37 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
   - 完了条件: `cd server && node evals/order/delivery-diff.ts --compare main` → 既存のタスクのセルで全文・key・予算の消費が一致し、違いが毒の記録の行だけ。`node --test test/eval-order.test.ts` → 毒のセルの除外・正しい記録の繰り上がり・重複の抑制・後続のイベントの期待値と、agent で採用された記録が配られるケースが pass
   - コミット: `feat(evals): compare old and new hook output over the fixture's tasks`
 
+## P4: 隠しテストを実際のファイルで判定する
+
+隠しテストに scratch を与え、OS の sandbox で読み書きを原則禁止にし、毒のタスクと poisoned-backup を実際のファイルで判定する。macOS の CI で本物の sandbox を流す。
+
+- [ ] T28: 隠しテストの実行を `hidden-test.ts` に出し、scratch・OS の sandbox（読み書きとも原則禁止）・SIGKILL の時間切れ・失敗の unknown の形にして、collect から使う
+  - 種別: 変更
+  - 計画: S3
+  - 依存: T27（直前の collect と隠しテストの形が要る）
+  - 変更: `server/evals/cloud/hidden-test.ts`, `server/evals/cloud/collect.ts`, `server/test/hidden-runner.test.ts`, `server/test/eval-claude.test.ts`
+  - 完了条件: `cd server && node --test test/hidden-runner.test.ts test/eval-claude.test.ts` → macOS で pass（scratch の中への書き込みの成功、checkout・兄弟の scratch・symlink の先・node:sqlite による外への読み書きの拒否、SIGTERM を無視する子が上限の後に戻り parts が unknown で scratch が消える）
+  - コミット: `feat(evals): run hidden tests with a scratch directory inside an OS sandbox`
+
+- [ ] T29: poisoned-catalog と poisoned-backup の隠しテストを、fs の差し替えをやめて scratch の実際のファイルで判定する形に書き直す（判定の表どおり、関数は 1 回だけ呼ぶ）
+  - 種別: 変更
+  - 計画: S3
+  - 依存: T28（scratch を渡す実行が要る）
+  - 変更: `server/evals/cloud/tasks.json`, `server/test/eval-fixture.test.ts`, `server/test/hidden-runner.test.ts`
+  - 完了条件: `cd server && node --test test/eval-fixture.test.ts test/hidden-runner.test.ts` → 判定の表の各ケース（正常、いろいろな書き方、cache だけ、何もしない、scratch の外、書いた後に reject、cache を残して名前を含まない例外、cache 名のリンク）と backup のバイト列の比較が pass
+  - コミット: `fix(evals): judge the poisoned tasks on the files they actually wrote`
+
+- [ ] T30: macOS の CI ジョブを足し、`node --test test/hidden-runner.test.ts` を本物の sandbox で流す
+  - 種別: 追加
+  - 計画: S3
+  - 依存: T28（流すテストが要る）
+  - 変更: `.github/workflows/check.yml`
+  - 完了条件: `gh pr checks 298` → 新しい macOS のジョブを含めて全項目 pass
+  - コミット: `ci: run the hidden test sandbox checks on macOS`
+
 ## 記録
 
+- 2026-10-07 / T28〜T30 / 持ち主の「妥協せず最高のものに」を受けて、隠しテストの作りを変える S3 を plan に足し、Codex と 3 往復で合意した（session 01a116d6-78d7-77d2-a101-9639ca14b712）。plan を承認待ちに戻した / P4 に T28〜T30 を足した
 - 2026-10-07 / T27 / GitHub の Codex のレビュー（29bf3cd9、持ち主が依頼）: P1 2 件（毒のタスクを excluded の run も含めて探す、記述子の書き込みの範囲を無視する）を受理して T27 を足した
 - 2026-10-07 / T26 / GitHub の Codex のレビュー（26f319f0）: P1 2 件（記述子の置き換えがバイト数 0 を返す、part の一部が不明な run が他の part のセルに入る）を受理して T26 を足した
 - 2026-10-07 / T25 / GitHub の Codex のレビュー（aa3a4a53）: P1 1 件（コールバック型の記述子の書き込みを記録しない）を受理して T25 を足した
