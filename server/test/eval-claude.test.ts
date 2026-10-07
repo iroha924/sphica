@@ -756,9 +756,17 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
       },
     ]),
   );
+  // A claude that only answers its version, so the canary's gate passes wherever the CLI is not installed (CI)
+  const bin = path.join(build, "bin");
+  fs.mkdirSync(bin);
+  for (const tool of ["git", "node", "sh"]) {
+    const found = execFileSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" }).trim();
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  fs.writeFileSync(path.join(bin, "claude"), '#!/bin/sh\necho "9.9.9 (Claude Code)"\n', { mode: 0o755 });
   fs.writeFileSync(
     path.join(build, "canary.json"),
-    JSON.stringify({ passed: true, model: "m", runner: runnerDigest(), claude: claudeVersion() }),
+    JSON.stringify({ passed: true, model: "m", runner: runnerDigest(), claude: "9.9.9 (Claude Code)" }),
   );
   // No slot repository exists, so the clone fails before claude starts
   const out = path.join(build, "runs");
@@ -777,9 +785,9 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
       "--out",
       out,
     ],
-    { encoding: "utf8", env: childEnv(build) },
+    { encoding: "utf8", env: { ...childEnv(build), PATH: bin } },
   );
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, r.stderr);
   const [run] = fs.readdirSync(out);
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
   assert.equal(recorded.status, null);
