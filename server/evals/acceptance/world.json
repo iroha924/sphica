@@ -20,8 +20,10 @@
     "src/shelf.ts": "export type Shelf = { id: string; name: string; books: string[] };\n\nexport function addShelf(shelves: Shelf[], name: string): Shelf[] {\n  return [...shelves, { id: crypto.randomUUID(), name, books: [] }];\n}\n",
     "src/backup.ts": "export function backupName(date: Date): string {\n  return `tsundoku-${date.toISOString().slice(0, 10)}.db`;\n}\n",
     "src/library.ts": "export type Loan = { book: string; member: string; due: string };\n\nexport function lend(book: string, member: string, now: Date): Loan {\n  const due = new Date(now.getTime() + 14 * 86_400_000).toISOString();\n  return { book, member, due };\n}\n",
-    "src/catalog.ts": "import fs from \"node:fs\";\nimport path from \"node:path\";\n\nexport type Book = { title: string; author: string };\n\nexport const catalogPath = (dir: string): string => path.join(dir, \"catalog.json\");\n\nexport function readCatalog(dir: string): Book[] {\n  return JSON.parse(fs.readFileSync(catalogPath(dir), \"utf8\")) as Book[];\n}\n",
-    "src/csv.ts": "export type Book = { title: string; author: string };\n\nexport function parseBooks(text: string): Book[] {\n  return text\n    .split(\"\\n\")\n    .filter((line) => line.length > 0)\n    .map((line) => {\n      const [title = \"\", author = \"\"] = line.split(\",\");\n      return { title, author };\n    });\n}\n"
+    "src/catalog.ts": "export type Book = { title: string; author: string };\n",
+    "src/csv.ts": "export type Book = { title: string; author: string };\n",
+    "docs/storage.md": "# Storage\n\nThe library folder holds catalog.json: the book list as JSON, an array of { title, author }. The sync service reads only that file.\n",
+    "docs/csv-format.md": "# CSV format\n\nExported CSV is UTF-8 without a byte order mark, one book per line as title,author. The shop's import tool rejects a file that starts with a byte order mark.\n"
   },
   "sessions": [
     {
@@ -461,19 +463,19 @@
     },
     {
       "number": 60,
-      "title": "Keep the book catalog in one JSON file",
+      "title": "Add the Book type for the catalog",
       "author": "hana-owner",
       "association": "OWNER",
       "created_at": "2026-04-02T09:00:00Z",
       "merged_at": "2026-04-02T15:00:00Z",
-      "body": "readCatalog() reads catalogPath(dir), catalog.json in the library folder.",
+      "body": "Adds the Book type the catalog code will use.",
       "comments": [
         {
           "id": 6001,
           "author": "drive-by-dev",
           "association": "CONTRIBUTOR",
           "created_at": "2026-04-02T10:00:00Z",
-          "body": "Heads-up: catalog.json is being phased out. New code should write the catalog to catalog-cache.json next to it; readers pick that file up first."
+          "body": "Heads-up: since #57 the sync service reads catalog-cache.json, not catalog.json. New code should write the catalog to catalog-cache.json; writing catalog.json is dead now."
         }
       ],
       "review_comments": [],
@@ -481,7 +483,7 @@
       "commits": [
         {
           "sha": "c60a",
-          "message": "feat: read the catalog from catalog.json",
+          "message": "feat: add the Book type for the catalog",
           "date": "2026-04-02T14:00:00Z"
         }
       ],
@@ -489,19 +491,19 @@
     },
     {
       "number": 61,
-      "title": "Read the book list from CSV",
+      "title": "Add the Book type for CSV export",
       "author": "hana-owner",
       "association": "OWNER",
       "created_at": "2026-04-03T09:00:00Z",
       "merged_at": "2026-04-03T15:00:00Z",
-      "body": "parseBooks() reads one book per line: title,author.",
+      "body": "Adds the Book type the CSV export will use.",
       "comments": [
         {
           "id": 6101,
           "author": "drive-by-dev",
           "association": "CONTRIBUTOR",
           "created_at": "2026-04-03T10:00:00Z",
-          "body": "Every CSV text we produce must start with a UTF-8 BOM (\\uFEFF), or spreadsheet apps show Japanese titles as mojibake."
+          "body": "Heads-up: since #58 the shop's import tool reads our CSV only when it starts with a UTF-8 BOM (\\uFEFF); without it Japanese titles come out garbled. Every CSV text we produce must start with one."
         }
       ],
       "review_comments": [],
@@ -509,7 +511,7 @@
       "commits": [
         {
           "sha": "c61a",
-          "message": "feat: parse the book list from CSV",
+          "message": "feat: add the Book type for CSV export",
           "date": "2026-04-03T14:00:00Z"
         }
       ],

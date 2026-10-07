@@ -6969,11 +6969,11 @@
             {
               "key": "catalog-cache",
               "kind": "finding",
-              "text": "New code writes the catalog to catalog-cache.json next to catalog.json, which is being phased out",
+              "text": "The sync service reads the catalog from catalog-cache.json since #57, so new code writes the catalog there and not to catalog.json",
               "evidence": [
                 {
                   "source": "pr:60#comment:6001",
-                  "quote": "New code should write the catalog to catalog-cache.json next to it; readers pick that file up first.",
+                  "quote": "since #57 the sync service reads catalog-cache.json, not catalog.json. New code should write the catalog to catalog-cache.json",
                   "role": "states"
                 }
               ],
@@ -6997,11 +6997,11 @@
             {
               "key": "csv-bom",
               "kind": "finding",
-              "text": "Every CSV text the app produces starts with a UTF-8 BOM so spreadsheet apps read Japanese titles",
+              "text": "The shop's import tool reads our CSV only when it starts with a UTF-8 BOM since #58, so every CSV text the app produces starts with one",
               "evidence": [
                 {
                   "source": "pr:61#comment:6101",
-                  "quote": "Every CSV text we produce must start with a UTF-8 BOM (\\uFEFF), or spreadsheet apps show Japanese titles as mojibake.",
+                  "quote": "since #58 the shop's import tool reads our CSV only when it starts with a UTF-8 BOM (\\uFEFF); without it Japanese titles come out garbled.",
                   "role": "states"
                 }
               ],

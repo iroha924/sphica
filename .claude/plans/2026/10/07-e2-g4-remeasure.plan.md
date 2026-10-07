@@ -10,6 +10,7 @@ approved_at: 2026-10-07
 
 ## 要点
 
+- 2026-10-07 に打ち切り（持ち主の判断）: 予備の run の 3 つの設計で毒の率が 0/119 だった。G4 は不採用として #206 に残し、評価の道具（collect・report・canary の直しと毒のタスク）だけをパッケージを変えない PR で出す。以下は打ち切り前の計画
 - hook（session_start / subagent_start / pre_read / pre_edit / prompt / Bash の名指し / review）は、根拠が第三者の言葉・伝聞・trace の報告だけの記録を配らない。MCP の search と read は今のまま返す
 - 採用（owner_statement / explicit / agent）のある記録と、owner・maintainer の発言か trace の報告でない AI の返答を evidence に持つ記録は、今までどおり配る
 - 持ち主の DB では 7 件（u281・u283・u284・u285・u287・u288・u327）が hook の配信から外れる。どれも evidence が trace の報告の返答だけで、AI 自身の観察の説明（u327 は自分の誤判断の説明）を含む。持ち主はこの除外を承認した
@@ -112,20 +113,17 @@ trace の報告 = record ツール（trace_begin・harvest_begin・glean_begin�
 ## 手順
 
 - S1: 評価の変更（毒のタスク 2 案と fixture のケース、隠しテストの 3 つの結果の保存、collect の開始数と有効数、report.ts の区間のバーとそのテスト）
-- S2: old で予備の run、案とモデルの選定、凍結
-- S3: G4 の定義と hook の全経路への適用、単体テスト（red を先に確かめる）
-- S4: オフラインの回帰の比較
-- S5: npm と 3 つの manifest のバージョンの引き上げ（パッケージを変える最初のコミットに入れる）
+- S2: old で予備の run、案の直し（最大 4 回）、毒のタスクを最後の形で残すことと結果の記録
 
-本番の run（各セル 60 有効、最大 80 開始）と判定、#206 と PR への記録は、実装の後に完了条件の A3 と A5 で行う。
+G4 の実装（旧 S3）、オフラインの比較（旧 S4）、本番の run（旧 S5）は打ち切りで取りやめた（変更履歴）。
 
 ## 完了条件
 
 - A1: `bun run verify` → 0 で終わる
-- A2: `cd server && node --test test/deliver.test.ts` → 定義のテスト（方針の「テスト」の全ケース）が pass
-- A3: `cd server && node evals/cloud/report.ts --compare <old>/grades.json <new>/grades.json --bar g4` → 効き目・見張り・completion のバーの判定が、標本数と区間つきで出る
-- A4: `cd server && node evals/order/delivery-diff.ts --compare <old ref>` → 既存のタスクのセルで全文・key・予算が一致し、違いが毒の記録の行だけ（スクリプトは S4 で作る）
-- A5: `gh issue view 206 --comments` → 項目 4 に採用か不採用が数字つきで書かれている
+- A2: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts test/eval-fixture.test.ts` → 全件 pass
+- A3: `bun run release:plan -- --base v0.6.41` → release kind: none
+- A4: `cd server && node evals/cloud/canary.ts --build <このブランチの HEAD で作った build>` → canary passed
+- A5: `gh issue view 206 --comments` → 項目 4 に不採用と予備の run の数字（0/119 と各設計）が書かれている
 
 ## リスク
 
@@ -139,3 +137,4 @@ trace の報告 = record ツール（trace_begin・harvest_begin・glean_begin�
 なし
 
 ## 変更履歴
+- 2026-10-07 / G4 を打ち切り、評価の道具だけを出す。手順の S3〜S5 を外し、完了条件を評価の道具のテスト・release:plan の none・canary・#206 の記録に差し替えた / 予備の run の 3 つの設計（コードと食い違う毒、コードからは分からない毒、docs と食い違う誤った事実の報告）で毒の率が 0/119、毒の finding はほぼ全 run で配られ、両モデルとも出どころを読んで退けていた。Codex も「この条件では G4 の改善を数字で示すタスクを作れなかった」と見た / 持ち主の選択「打ち切り、評価の道具だけ出す」がこの範囲の Go
