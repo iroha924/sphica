@@ -741,14 +741,20 @@ export async function saveText(
       throw new Error(`The record is not valid:\n${v.errors.map((e) => `  ${e}`).join("\n")}`);
     const { saved, changed } = await v.write(trx);
     await finishRun(trx, v.run.id);
+    // A warning check gave and the save found again is one line; each change stays its own line, even when two read the same
+    const warnings = [
+      ...new Set([
+        ...saved.anchorProblems.map((a) => `△ ${a}`),
+        // What check would warn about is said at save too: what was left out, and why a record stays a candidate
+        ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
+      ]),
+    ];
     return [
       ...saved.active.map((k) => `✓ ${k} active`),
       ...saved.superseded.map((k) => `✓ ${k} superseded`),
       ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
       ...saved.quarantined.map((q) => `△ ${q} quarantined`),
-      ...saved.anchorProblems.map((a) => `△ ${a}`),
-      // What check would warn about is said at save too: what was left out, and why a record stays a candidate
-      ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
+      ...warnings,
       ...changed.map((c) => `✓ ${c}`),
       "✓ saved",
     ].join("\n");

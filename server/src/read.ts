@@ -145,11 +145,33 @@ async function describe(
       .orderBy("a.id")
       .execute(),
     db
-      .selectFrom("unit_anchor")
-      .select(["path", "symbol", "role", "commit_sha", "line_start", "retired_at"])
-      .where("unit_id", "=", u.id)
-      .where("added_at", "<=", asOf ?? "9999")
-      .orderBy("id")
+      .selectFrom("unit_anchor as a")
+      .leftJoin("unit_anchor as to", "to.id", "a.replaced_by")
+      .leftJoin("unit_anchor_retirement as r", (j) =>
+        j.onRef("r.anchor_id", "=", "a.id").on("r.added_at", "<=", asOf ?? "9999"),
+      )
+      .leftJoin("source as s", "s.id", "r.source_id")
+      .select([
+        "a.path",
+        "a.symbol",
+        "a.role",
+        "a.commit_sha",
+        "a.line_start",
+        "a.retired_at",
+        "to.path as to_path",
+        "to.symbol as to_symbol",
+        "r.span_start",
+        "r.span_end",
+        "s.id as source",
+        "s.author_kind",
+        "s.author_login",
+        "s.author_association",
+        "s.created_at",
+        "s.text",
+      ])
+      .where("a.unit_id", "=", u.id)
+      .where("a.added_at", "<=", asOf ?? "9999")
+      .orderBy("a.id")
       .execute(),
     db
       .selectFrom("unit_link as l")
@@ -283,6 +305,29 @@ async function describe(
       const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
       out.push(
         `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames, used)}` : ""}`,
+      );
+    }
+  }
+  const retired = anchors.filter((a) => a.retired_at);
+  if (retired.length) {
+    out.push(
+      "Retired anchors (they no longer count for delivery; a live anchor on the same path still does; kept with the words that retired them):",
+    );
+    for (const a of retired) {
+      const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
+      const moved = a.to_path
+        ? `, moved to ${inline(`${a.to_path}${a.to_symbol ? ` ${a.to_symbol}` : ""}`)}`
+        : "";
+      const why =
+        a.source !== null &&
+        a.text !== null &&
+        a.author_kind !== null &&
+        a.span_start !== null &&
+        a.span_end !== null
+          ? `s${a.source}, ${speaker({ author_kind: a.author_kind, author_login: a.author_login, author_association: a.author_association })}, ${a.created_at}: "${inline(cut(a.text, a.span_start, a.span_end))}"`
+          : "reason not recorded";
+      out.push(
+        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): retired ${a.retired_at}${moved}; ${why}`,
       );
     }
   }

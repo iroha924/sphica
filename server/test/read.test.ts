@@ -402,3 +402,110 @@ test("read hidden csi: a control sequence with a long parameter list is never cu
     await db.done();
   }
 });
+
+test("read shows retired anchors with the words that retired them, a move's new place, and none of those retired after an as-of time", async () => {
+  const db = tempDb();
+  const { root, git } = repo();
+  try {
+    fs.writeFileSync(path.join(root, "a.ts"), "export function open() {}\n");
+    git("add", "-A");
+    git("commit", "-qm", "a");
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "a.ts の open を使う。" });
+    await save(db, p, root, {
+      units: [
+        {
+          key: "open",
+          kind: "finding",
+          text: "open を使う",
+          evidence: [{ source: `s${m}`, quote: "a.ts の open を使う。", role: "states" }],
+          anchors: [
+            { path: "a.ts", symbol: "open", role: "applies_to" },
+            { path: "CLAUDE.md", role: "applies_to" },
+            { path: "AGENTS.md", role: "applies_to" },
+          ],
+        },
+      ],
+    });
+    const said = message(db, p, { id: "m2", text: "CLAUDE.md からは外して。" });
+    const u = Number(
+      db.owner.prepare("select id, run_id from unit where key = 'trace:ext-s1/open'").get()?.id,
+    );
+    const runId = Number(db.owner.prepare("select run_id from unit where id = ?").get(u)?.run_id);
+    const anchorId = (p2: string) =>
+      Number(
+        db.owner.prepare("select id from unit_anchor where path = ? and retired_at is null").get(p2)?.id,
+      );
+    // After the save (anchors are added now), so an as-of time between the two sees them live
+    const retiredAt = new Date(Date.now() + 86_400_000).toISOString();
+    // Retired with the owner's words, moved with nothing kept (as before revision 12), and one left live
+    const claude = anchorId("CLAUDE.md");
+    db.owner.prepare("update unit_anchor set retired_at = ? where id = ?").run(retiredAt, claude);
+    insert(db, "unit_anchor_retirement", {
+      anchor_id: claude,
+      run_id: runId,
+      source_id: said,
+      span_start: 0,
+      span_end: Buffer.byteLength("CLAUDE.md からは外して。"),
+      added_at: retiredAt,
+    });
+    const agents = anchorId("AGENTS.md");
+    const moved = insert(db, "unit_anchor", {
+      unit_id: u,
+      path: "a.ts",
+      symbol: "close",
+      role: "applies_to",
+      run_id: runId,
+      added_at: retiredAt,
+    });
+    db.owner
+      .prepare("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?")
+      .run(retiredAt, moved, agents);
+    const out = (await readUnit(db.reader, p, "trace:ext-s1/open", root)) ?? "";
+    assert.match(out, /Code \(checked[^\n]*\n {2}- a\.ts open \(applies_to\): located/);
+    assert.match(out, /\n {2}- a\.ts close \(applies_to\)/);
+    assert.match(
+      out,
+      new RegExp(
+        `Retired anchors \\(they no longer count for delivery; a live anchor on the same path still does[^\\n]*\\n  - CLAUDE\\.md \\(applies_to\\): retired ${retiredAt}; s${said}, the owner, \\S+: "CLAUDE\\.md からは外して。"\\n  - AGENTS\\.md \\(applies_to\\): retired ${retiredAt}, moved to a\\.ts close; reason not recorded`,
+      ),
+    );
+    // Before the retirement, both were live and nothing was retired
+    const before =
+      (await readUnit(
+        db.reader,
+        p,
+        "trace:ext-s1/open",
+        root,
+        new Date(Date.now() + 3_600_000).toISOString(),
+      )) ?? "";
+    assert.doesNotMatch(before, /Retired anchors/);
+    assert.match(before, /- CLAUDE\.md \(applies_to\)/);
+    // Many retired anchors with long reasons still come back within the reply budget, with a way to read on
+    const long = message(db, p, { id: "m3", text: `${"外す理由 ".repeat(2_000)}end` });
+    for (let i = 0; i < 300; i++) {
+      const id = insert(db, "unit_anchor", {
+        unit_id: u,
+        path: `old/f${i}.ts`,
+        role: "applies_to",
+        run_id: runId,
+        added_at: retiredAt,
+      });
+      db.owner.prepare("update unit_anchor set retired_at = ? where id = ?").run(retiredAt, id);
+      insert(db, "unit_anchor_retirement", {
+        anchor_id: id,
+        run_id: runId,
+        source_id: long,
+        span_start: 0,
+        span_end: Buffer.byteLength("外す理由 ".repeat(200)),
+        added_at: retiredAt,
+      });
+    }
+    const page = await readRefs(db.reader, p, ["trace:ext-s1/open"], root);
+    assert.ok(Buffer.byteLength(page) <= READ_BUDGET, `${Buffer.byteLength(page)} bytes`);
+    assert.match(page, /Call read with refs/);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -137,6 +137,44 @@ test("the ingest connection can write rows but cannot change the schema", () => 
     assert.match(attempt(ingest, ddl) ?? "", /not authorized/, ddl);
 });
 
+test("the ingest connection writes a retired anchor's reason but never changes or removes one", () => {
+  const r = run(db, p);
+  const u = insert(db, "unit", {
+    project_id: p,
+    key: "retire-reason",
+    kind: "finding",
+    text: "retire-reason",
+    extraction: "supported",
+    run_id: r,
+    created_at: now,
+    content_hash: sha256("retire-reason"),
+  });
+  const a = insert(db, "unit_anchor", {
+    unit_id: u,
+    path: "CLAUDE.md",
+    role: "applies_to",
+    run_id: r,
+    added_at: now,
+  });
+  db.owner.prepare("update unit_anchor set retired_at = ? where id = ?").run(now, a);
+  const said = Number(
+    (db.owner.prepare("select id from source where external_id = 'm-1'").get() as { id: number }).id,
+  );
+  assert.equal(
+    attempt(
+      ingest,
+      "insert into unit_anchor_retirement (anchor_id, run_id, source_id, span_start, span_end, added_at) values (?, ?, ?, 0, 3, ?)",
+      a,
+      r,
+      said,
+      now,
+    ),
+    null,
+  );
+  assert.match(attempt(ingest, "update unit_anchor_retirement set span_end = 6") ?? "", /not authorized/);
+  assert.match(attempt(ingest, "delete from unit_anchor_retirement") ?? "", /not authorized/);
+});
+
 // The record server reads text anyone wrote. Its connection writes only what its code writes: anything else is refused before it runs
 test("the ingest connection is refused every write its code never makes", () => {
   const r = run(db, p);

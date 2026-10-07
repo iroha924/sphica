@@ -41,7 +41,7 @@ export const DELIVERY_LIMITS_TEXT = [
 ];
 
 const CLOSING =
-  "Read a record by its key or u<id> before relying on it. Change a record only through /sphica:trace, with the owner's words.";
+  "Read a record by its key or u<id> before relying on it. Change a record only with the owner's words, through /sphica:trace or /sphica:glean.";
 
 /** Characters a key goes on with on its left, and on its right; a dot on the right ends a sentence unless KEY_AFTER_DOT follows it */
 const BEFORE_KEY = /[A-Za-z0-9_./:-]/;

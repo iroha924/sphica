@@ -1,6 +1,6 @@
 // glean: evidence and corrections added to existing records later, and records written from what the owner points to. Every change cites
 // retained text: an owner message, a pull request or issue source, or a file excerpt the CLI reads from git itself. Nothing is rewritten:
-// evidence and adoption are added or retracted, anchors are replaced, and a correction is a successor.
+// evidence and adoption are added or retracted, anchors are replaced or retired, and a correction is a successor.
 import type { Kysely } from "kysely";
 import { z } from "zod";
 import { iso, type Reads } from "./db.ts";
@@ -48,6 +48,14 @@ const File = z
     lines: z.tuple([z.number().int().positive(), z.number().int().positive()]),
   })
   .strict();
+/** The live anchor a move or a retirement acts on: role and symbol narrow it when the path holds more than one */
+const From = z
+  .object({
+    path: z.string().min(1),
+    symbol: z.string().min(1).optional(),
+    role: z.enum(["applies_to", "evidence"]).optional(),
+  })
+  .strict();
 const Op = z.discriminatedUnion("op", [
   z
     .object({
@@ -83,7 +91,7 @@ const Op = z.discriminatedUnion("op", [
       op: z.literal("replace_anchor"),
       unit,
       revision,
-      from: z.object({ path: z.string().min(1), symbol: z.string().min(1).optional() }).strict(),
+      from: From,
       to: z
         .object({
           path: z.string().min(1).max(500),
@@ -94,6 +102,10 @@ const Op = z.discriminatedUnion("op", [
       source: SOURCE_REF,
       quote,
     })
+    .strict(),
+  // Nothing takes its place: the record is no longer delivered on that file
+  z
+    .object({ op: z.literal("retire_anchor"), unit, revision, from: From, source: SOURCE_REF, quote })
     .strict(),
   z
     .object({
@@ -218,6 +230,8 @@ type Planned = {
   retracts: [number, number] | null;
   /** The live anchor a replacement retires */
   replaces: number | null;
+  /** The live anchor a retirement retires */
+  retires: number | null;
   /** The alias set a replacement writes, trimmed and without repeats */
   aliases: string[] | null;
 };
@@ -337,6 +351,8 @@ export async function checkGlean(
   };
   // Anchors an operation in this batch replaces, and which operation: a second replacement would leave both new anchors live
   const replaced = new Map<number, number>();
+  // Anchors an operation in this batch retires; retirements run before every replacement and every new anchor
+  const retired = new Set<number>();
   // Anchors added earlier in this batch, by unit, path, symbol, and role
   const anchored = new Set<string>();
   const places: {
@@ -428,43 +444,61 @@ export async function checkGlean(
       if (rel && !commitHeld(facts, op.commit, rel))
         errors.push(`${what}: commit ${op.commit.slice(0, 12)} does not hold ${rel} in the repository`);
     }
-    // A replacement retires exactly the one live anchor its from names
+    // A replacement or a retirement retires exactly the one live anchor its from names
     let replaces: number | null = null;
-    if (op.op === "replace_anchor") {
-      if (!repoPath(op.to.path)) errors.push(`${what}: the path is not inside the repository`);
-      // Moving a location redirects where the record is delivered, so third-party text cannot do it
+    let retires: number | null = null;
+    if (op.op === "replace_anchor" || op.op === "retire_anchor") {
+      if (op.op === "replace_anchor" && !repoPath(op.to.path))
+        errors.push(`${what}: the path is not inside the repository`);
+      // Moving or retiring a location redirects where the record is delivered, so third-party text cannot do it
       const said = await span(op.source, op.quote, what);
       if (said && said.s.author_kind !== "owner")
-        errors.push(`${what}: only the owner's words can move an anchor`);
+        errors.push(
+          `${what}: only the owner's words can ${op.op === "retire_anchor" ? "retire" : "move"} an anchor`,
+        );
       const from = repoPath(op.from.path);
       if (!from) errors.push(`${what}: the from path is not inside the repository`);
       else {
         let q = db
           .selectFrom("unit_anchor")
-          .select(["id", "path", "symbol", "role", "commit_sha"])
+          .select(["id", "path", "symbol", "role", "commit_sha", "line_start", "line_end"])
           .where("unit_id", "=", u.id)
           .where("path", "=", from)
           .where("retired_at", "is", null);
         if (op.from.symbol) q = q.where("symbol", "=", op.from.symbol);
-        const live = await q.execute();
-        const name = `${from}${op.from.symbol ? ` ${op.from.symbol}` : ""}`;
-        if (live.length === 1) {
-          replaces = live[0]?.id ?? null;
+        if (op.from.role) q = q.where("role", "=", op.from.role);
+        const live = await q.orderBy("id").execute();
+        const name = `${from}${op.from.symbol ? ` ${op.from.symbol}` : ""}${op.from.role ? ` (${op.from.role})` : ""}`;
+        const held = live.length === 1 ? live[0] : undefined;
+        if (held) {
           // Two live anchors on one place cannot both exist, and replacing a place with itself moves nothing
-          const held = live[0];
           if (
-            held &&
+            op.op === "replace_anchor" &&
             held.commit_sha === null &&
             held.path === repoPath(op.to.path) &&
             held.symbol === (op.to.symbol ?? null) &&
             held.role === op.to.role
           )
             errors.push(`${what}: the anchor on ${name} is already that place`);
-          if (replaces !== null && replaced.has(replaces))
-            errors.push(`${what}: another operation in this batch already replaces ${name}`);
-          if (replaces !== null) replaced.set(replaces, i);
+          if (replaced.has(held.id) || retired.has(held.id))
+            errors.push(`${what}: another operation in this batch already retires or replaces ${name}`);
+          if (op.op === "replace_anchor") {
+            replaces = held.id;
+            replaced.set(held.id, i);
+          } else {
+            retires = held.id;
+            retired.add(held.id);
+          }
         } else if (!live.length) errors.push(`${what}: no live anchor on ${name}`);
-        else errors.push(`${what}: ${live.length} live anchors on ${name}; give from.symbol`);
+        else {
+          const which = live.map(
+            (a) =>
+              `${a.role}${a.symbol ? ` ${inline(head(a.symbol, 80))}` : ""}${a.commit_sha ? ` at ${a.commit_sha.slice(0, 12)}` : ""}${!a.symbol && a.line_start ? ` lines ${a.line_start}-${a.line_end ?? a.line_start}` : ""}`,
+          );
+          errors.push(
+            `${what}: ${live.length} live anchors on ${name} (${which.join("; ")}); give from.symbol or from.role`,
+          );
+        }
       }
     }
     // A second live anchor on the same place (and commit) could not be told apart from the first by replace_anchor
@@ -572,12 +606,24 @@ export async function checkGlean(
           `${what}: aliases must be 1 to 40 characters; ${bad.map((a) => JSON.stringify(inline(head(a, 60)))).join(", ")}`,
         );
     }
-    ops.push({ input: op, unitId: u.id, lifecycle: u.lifecycle, excerpt, retracts, replaces, aliases });
+    ops.push({
+      input: op,
+      unitId: u.id,
+      lifecycle: u.lifecycle,
+      excerpt,
+      retracts,
+      replaces,
+      retires,
+      aliases,
+    });
   }
-  // Checked after every op is read. Replacements run first, in their order, each placing its new anchor before retiring the old one, and
-  // plain anchors after them: an anchor retired by then no longer counts as live
+  // Checked after every op is read, in the order the save runs them: retirements first, then replacements in their order, each placing
+  // its new anchor before retiring the old one, and plain anchors last. An anchor retired by then no longer counts as live
   for (const x of places) {
-    const gone = [...replaced].filter(([, by]) => x.replacing === null || by < x.replacing).map(([id]) => id);
+    const gone = [
+      ...retired,
+      ...[...replaced].filter(([, by]) => x.replacing === null || by < x.replacing).map(([id]) => id),
+    ];
     let q = db
       .selectFrom("unit_anchor")
       .select("id")
@@ -699,11 +745,29 @@ export async function saveGlean(
   const withdraw = new Map<number, Hint>();
   // Units the owner adopts in this batch
   const adopted = new Set<number>();
-  // Replacements retire before new anchors land, so a batch that anchors a place another op moves off never holds two live anchors on it
+  // Retirements, then replacements, retire before new anchors land, so a batch never holds two live anchors on one place; checkGlean
+  // judged them in this order
+  const moves = ["retire_anchor", "replace_anchor"];
   const ordered = [
+    ...c.ops.filter((p) => p.input.op === "retire_anchor"),
     ...c.ops.filter((p) => p.input.op === "replace_anchor"),
-    ...c.ops.filter((p) => p.input.op !== "replace_anchor"),
+    ...c.ops.filter((p) => !moves.includes(p.input.op)),
   ];
+  // The owner's words that retired or moved an anchor, kept with it
+  const reason = async (anchorId: number | null, ref: string, q: string) => {
+    const s = await spanOf(ref, q);
+    await trx
+      .insertInto("unit_anchor_retirement")
+      .values({
+        anchor_id: anchorId ?? -1,
+        run_id: runId,
+        source_id: s.id,
+        span_start: s.start,
+        span_end: s.end,
+        added_at: now,
+      })
+      .execute();
+  };
   for (const p of ordered) {
     const op = p.input;
     touched.set(p.unitId, op.unit);
@@ -790,14 +854,25 @@ export async function saveGlean(
         })
         .returning("id")
         .executeTakeFirstOrThrow();
-      if (op.op === "replace_anchor")
+      if (op.op === "replace_anchor") {
         await trx
           .updateTable("unit_anchor")
           .set({ retired_at: now, replaced_by: added.id })
           .where("id", "=", p.replaces ?? -1)
           .where("retired_at", "is", null)
           .execute();
+        await reason(p.replaces, op.source, op.quote);
+      }
       changed.push(`${op.unit}: anchor ${op.op === "anchor" ? "added" : "replaced"}`);
+    } else if (op.op === "retire_anchor") {
+      await trx
+        .updateTable("unit_anchor")
+        .set({ retired_at: now })
+        .where("id", "=", p.retires ?? -1)
+        .where("retired_at", "is", null)
+        .execute();
+      await reason(p.retires, op.source, op.quote);
+      changed.push(`${op.unit}: anchor retired`);
     } else if (op.op === "replace_aliases") {
       const { content_hash } = await trx
         .selectFrom("unit")

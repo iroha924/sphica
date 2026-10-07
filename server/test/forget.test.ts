@@ -280,6 +280,7 @@ test("an unknown id or another project's id is refused, and an id already forgot
     already: [src],
     units: [],
     fields: { definitions: 0, values: 0 },
+    anchorReasons: 0,
   });
   assert.equal(again.cleanup, "done");
 });
@@ -502,4 +503,60 @@ test("the preview and the result name the backups made before migrating, and say
   } finally {
     fs.chmodSync(dir, 0o700);
   }
+});
+
+test("forgetting the words that moved an anchor removes only that reason: the chain of moves and the live anchor stay", async () => {
+  const kept = message(db, p, { id: "m1", text: "Decided: keep it." });
+  const moved = message(db, p, { id: "m2", text: "Move it to b.ts." });
+  const again = message(db, p, { id: "m3", text: "Move it to c.ts." });
+  const u = unit("u1", "decision");
+  evidence(u, kept);
+  adoption(u, kept);
+  activate(u, kept);
+  const anchor = (path: string) =>
+    insert(db, "unit_anchor", { unit_id: u, path, role: "applies_to", run_id: runOf(u), added_at: now });
+  const reason = (id: number, source: number) =>
+    insert(db, "unit_anchor_retirement", {
+      anchor_id: id,
+      run_id: runOf(u),
+      source_id: source,
+      span_start: 0,
+      span_end: 4,
+      added_at: now,
+    });
+  const [a, b] = [anchor("a.ts"), anchor("b.ts")];
+  sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, b, a);
+  reason(a, moved);
+  const c = anchor("c.ts");
+  sql("update unit_anchor set retired_at = ?, replaced_by = ? where id = ?", now, c, b);
+  reason(b, again);
+  const seen = await previewForget(db.file, p, [moved]);
+  assert.equal(seen.anchorReasons, 1);
+  assert.match(
+    forgetText(seen, db.file),
+    /1 reason for retiring or moving an anchor goes with them; the anchors stay retired/,
+  );
+  const before = revision(u);
+  const { outcome } = await applyForget(db.file, p, [moved], seen);
+  assert.equal(outcome.anchorReasons, 1);
+  const anchors = db.owner
+    .prepare(
+      "select id, retired_at is not null as retired, replaced_by from unit_anchor where unit_id = ? order by id",
+    )
+    .all(u)
+    .map((r) => ({ ...r }));
+  assert.deepEqual(anchors, [
+    { id: a, retired: 1, replaced_by: b },
+    { id: b, retired: 1, replaced_by: c },
+    { id: c, retired: 0, replaced_by: null },
+  ]);
+  assert.deepEqual(
+    db.owner
+      .prepare("select anchor_id from unit_anchor_retirement order by anchor_id")
+      .all()
+      .map((r) => r.anchor_id),
+    [b],
+  );
+  assert.equal(lifecycle(u), "active");
+  assert.ok(revision(u) > before);
 });

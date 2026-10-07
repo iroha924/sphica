@@ -411,7 +411,7 @@ test("the record server writes a source through a view that cannot take a sessio
 
 test("the database carries its generation and revision", () => {
   assert.deepEqual({ ...one("select generation from sphica_generation") }, { generation: 2 });
-  assert.equal(one("pragma user_version").user_version, 11);
+  assert.equal(one("pragma user_version").user_version, 12);
 });
 
 test("capture writes only owner or assistant messages into a session's own project, and refuses a changed resend", () => {
@@ -1303,6 +1303,25 @@ test("a delete takes what belongs to the deleted row: a whole project, or a sess
       added_at: now,
     });
   });
+  cited("retirement", (m) => {
+    const runId = Number(one("select run_id from unit where id = ?", other).run_id);
+    const a = insert(db, "unit_anchor", {
+      unit_id: other,
+      path: "src/c.ts",
+      role: "applies_to",
+      run_id: runId,
+      added_at: now,
+    });
+    sql("update unit_anchor set retired_at = ? where id = ?", now, a);
+    insert(db, "unit_anchor_retirement", {
+      anchor_id: a,
+      run_id: runId,
+      source_id: m,
+      span_start: 0,
+      span_end: 3,
+      added_at: now,
+    });
+  });
   sql("delete from session where id = 's2'");
   assert.equal(one("select count(*) as n from source where session_id = 's2'").n, 0);
   assert.equal(one("select count(*) as n from edit_observation where session_id = 's2'").n, 0);
@@ -1778,4 +1797,55 @@ test("a harvest run keeps only sources of its own project, and only a harvest ru
     /only a harvest run keeps sources, from its own project/,
   );
   assert.equal(one("select count(*) as n from harvest_run_source").n, 1);
+});
+
+test("a retirement reason quotes the owner, in the anchor's project, on a retired anchor, and goes only with its anchor or its source", () => {
+  const said = message(db, p, { id: "m1", text: "Drop the SKILL.md anchor — 外して" });
+  const reply = message(db, p, { id: "m2", text: "I will drop it", speaker: "assistant" });
+  const elsewhere = message(db, other, { id: "m3", text: "Drop it there", session: "s2" });
+  const u = unit({ key: "u1", kind: "decision" });
+  const runId = Number(one("select run_id from unit where id = ?", u).run_id);
+  const anchor = (path: string) =>
+    insert(db, "unit_anchor", { unit_id: u, path, role: "applies_to", run_id: runId, added_at: now });
+  const retire = (id: number) => sql("update unit_anchor set retired_at = ? where id = ?", now, id);
+  const reason = (anchorId: number, sourceId: number, v: Values = {}) =>
+    insert(db, "unit_anchor_retirement", {
+      anchor_id: anchorId,
+      run_id: runId,
+      source_id: sourceId,
+      span_start: 0,
+      span_end: 4,
+      added_at: now,
+      ...v,
+    });
+  const live = anchor("a.ts");
+  refuses(() => reason(live, said), /written for a retired anchor/);
+  const gone = anchor("b.ts");
+  retire(gone);
+  refuses(() => reason(gone, reply), /only the owner's words retire an anchor/);
+  refuses(() => reason(gone, elsewhere), /different projects/);
+  refuses(() => reason(gone, said, { run_id: run(db, other) }), /different projects/);
+  refuses(() => reason(gone, said, { span_end: 999 }), /outside the source text/);
+  // "—" is three bytes from 25: a span ending at 26 cuts it
+  refuses(() => reason(gone, said, { span_start: 0, span_end: 26 }), /inside a character/);
+  refuses(() => reason(gone, said, { span_end: 0 }), /constraint failed/);
+  const before = Number(one("select revision from unit where id = ?", u).revision);
+  reason(gone, said);
+  assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 1);
+  refuses(() => reason(gone, said), /UNIQUE constraint failed/);
+  refuses(() => sql("update unit_anchor_retirement set span_end = 3"), /never changed/);
+  refuses(() => sql("delete from unit_anchor_retirement"), /goes only with its anchor or its source/);
+  // Forgetting the source takes the reason, never the retired anchor
+  sql("delete from source where id = ?", said);
+  assert.equal(one("select count(*) as n from unit_anchor_retirement").n, 0);
+  assert.ok(one("select retired_at from unit_anchor where id = ?", gone).retired_at);
+  assert.equal(Number(one("select revision from unit where id = ?", u).revision), before + 2);
+  // The unit's deletion takes its anchors and their reasons
+  const again = message(db, p, { id: "m4", text: "Drop this one too" });
+  const other2 = anchor("c.ts");
+  retire(other2);
+  reason(other2, again);
+  sql("delete from unit where id = ?", u);
+  assert.equal(one("select count(*) as n from unit_anchor_retirement").n, 0);
+  assert.deepEqual(db.owner.prepare("pragma foreign_key_check").all(), []);
 });

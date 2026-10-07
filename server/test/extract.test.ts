@@ -8,7 +8,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { bindOwner } from "../src/admin.ts";
-import { openReader } from "../src/db.ts";
+import { inTransaction, openReader } from "../src/db.ts";
 import {
   beginGlean,
   beginHarvest,
@@ -21,6 +21,7 @@ import {
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
 import { type Get, gh } from "../src/github.ts";
+import { checkGlean, saveGlean } from "../src/glean.ts";
 import { readRefs, readUnit } from "../src/read.ts";
 import { PROBE, type Probe } from "../src/repo-facts.ts";
 import { searchUnits } from "../src/search.ts";
@@ -1352,7 +1353,7 @@ test("glean: sourced additions, adoption, anchors, retractions, and withdrawal, 
     };
     await assert.rejects(
       ops([twice, twice]),
-      /ops\.1 .*another operation in this batch already replaces src\.ts openStore/,
+      /ops\.1 .*another operation in this batch already retires or replaces src\.ts openStore/,
     );
     // A chain of moves: each lands before the one after it retires its old anchor, so the move off a place comes first
     const offOther = {
@@ -2150,6 +2151,142 @@ test("glean: replacing an implementation's only code proof puts it back to candi
         ["evidence", 0],
         ["applies_to", 1],
       ],
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("glean: the owner's words retire an anchor with nothing in its place, keep the reason, and name or refuse every target", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "o1", text: "openStore を実装した。" });
+    const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, root, {
+      units: [
+        {
+          key: "open",
+          kind: "implementation",
+          text: "openStore",
+          evidence: [{ source: `s${m}`, quote: "openStore を実装した。", role: "states" }],
+          anchors: [
+            { path: "src.ts", symbol: "openStore", role: "evidence", commit: head },
+            { path: "src.ts", symbol: "openStore", role: "applies_to" },
+            { path: "docs/note.md", role: "applies_to" },
+          ],
+        },
+      ],
+    });
+    const key = "trace:ext-s1/open";
+    const state = () => db.owner.prepare("select lifecycle, revision from unit where key = ?").get(key);
+    assert.equal(state()?.lifecycle, "active");
+    session(db, p, "g1");
+    const text = "その場所は外して。";
+    const said = message(db, p, { id: "g", text, session: "g1" });
+    const reply = message(db, p, { id: "g-a", text, speaker: "assistant", session: "g1" });
+    const retire = (from: Record<string, unknown>, v: Record<string, unknown> = {}) => ({
+      op: "retire_anchor",
+      unit: key,
+      revision: state()?.revision,
+      from,
+      source: `s${said}`,
+      quote: text,
+      ...v,
+    });
+    const checked = async (ops: unknown[]) =>
+      checkText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops });
+    const refused = async (ops: unknown[], want: RegExp) => {
+      const c = await checked(ops);
+      assert.equal(c.ok, false, c.text);
+      assert.match(c.text, want);
+    };
+    await refused(
+      [retire({ path: "docs/note.md" }, { source: `s${reply}` })],
+      /only the owner's words can retire an anchor/,
+    );
+    await refused([retire({ path: "docs/note.md" }, { quote: "外さない" })], /quote not found/);
+    await refused([retire({ path: "gone.ts" })], /no live anchor on gone\.ts/);
+    await refused(
+      [retire({ path: "src.ts", symbol: "openStore" })],
+      /2 live anchors on src\.ts openStore \(evidence openStore at [0-9a-f]{12}; applies_to openStore\); give from\.symbol or from\.role/,
+    );
+    await refused(
+      [retire({ path: "docs/note.md" }), retire({ path: "docs/note.md" })],
+      /ops\.1 .*another operation in this batch already retires or replaces docs\/note\.md/,
+    );
+    await refused(
+      [
+        retire({ path: "docs/note.md" }),
+        {
+          ...retire({ path: "docs/note.md" }),
+          op: "replace_anchor",
+          to: { path: "src.ts", role: "applies_to" },
+        },
+      ],
+      /ops\.1 .*another operation in this batch already retires or replaces docs\/note\.md/,
+    );
+    // The save retires first: moving onto a place a later op retires is not two live anchors, whatever the input order
+    const moveThenRetire = [
+      {
+        ...retire({ path: "src.ts", symbol: "openStore", role: "applies_to" }),
+        op: "replace_anchor",
+        to: { path: "docs/note.md", role: "applies_to" },
+      },
+      retire({ path: "docs/note.md" }),
+    ];
+    assert.equal((await checked(moveThenRetire)).ok, true);
+    assert.match(
+      await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, { ops: moveThenRetire }),
+      /anchor retired[\s\S]*anchor replaced|anchor replaced[\s\S]*anchor retired/,
+    );
+    const anchors = () =>
+      db.owner
+        .prepare(
+          "select a.path, a.symbol, a.role, a.retired_at is null as live, a.replaced_by is not null as moved, r.source_id from unit_anchor a left join unit_anchor_retirement r on r.anchor_id = a.id order by a.id",
+        )
+        .all()
+        .map((r) => ({ ...r }));
+    assert.deepEqual(anchors(), [
+      { path: "src.ts", symbol: "openStore", role: "evidence", live: 1, moved: 0, source_id: null },
+      { path: "src.ts", symbol: "openStore", role: "applies_to", live: 0, moved: 1, source_id: said },
+      { path: "docs/note.md", symbol: null, role: "applies_to", live: 0, moved: 0, source_id: said },
+      { path: "docs/note.md", symbol: null, role: "applies_to", live: 1, moved: 0, source_id: null },
+    ]);
+    assert.equal(state()?.lifecycle, "active");
+    // Retiring the only code proof judges the implementation again
+    assert.match(
+      await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+        ops: [retire({ path: "src.ts", role: "evidence" })],
+      }),
+      /anchor retired/,
+    );
+    assert.equal(state()?.lifecycle, "candidate");
+    // A reason the schema refuses at save takes the retirement back with it
+    const run = await beginGlean(db.ingest, p, "g1");
+    const runId = Number(db.owner.prepare("select id from extraction_run where draft_id = ?").get(run)?.id);
+    const target = {
+      projectId: p,
+      origin: "glean" as const,
+      prefix: "glean:",
+      sessionId: "g1",
+      root,
+      sources: null,
+    };
+    const c = await checkGlean(db.ingest, target, { ops: [retire({ path: "docs/note.md" })] });
+    assert.deepEqual(c.errors, []);
+    Object.assign(c.ops[0]?.input ?? {}, { source: `s${reply}` });
+    await assert.rejects(
+      inTransaction(db.ingest, (trx) => saveGlean(trx, target, runId, c)),
+      /only the owner's words retire an anchor/,
+    );
+    assert.equal(
+      db.owner
+        .prepare("select count(*) as n from unit_anchor where path = 'docs/note.md' and retired_at is null")
+        .get()?.n,
+      1,
     );
   } finally {
     await db.done();
@@ -3018,5 +3155,65 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
   } finally {
     await db.done();
+  }
+});
+
+test("trace: a warning check gives and save repeats is said once in the save's reply", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "承認は持ち主だけ。" });
+    const out = await saveText(db.ingest, await beginTrace(db.ingest, p, "s1"), p, root, {
+      units: [
+        {
+          key: "approve",
+          kind: "finding",
+          text: "承認は持ち主だけ",
+          evidence: [{ source: `s${m}`, quote: "承認は持ち主だけ。", role: "states" }],
+          anchors: [{ path: "gone.ts", role: "applies_to" }],
+        },
+      ],
+    });
+    assert.equal(out.match(/anchor path gone\.ts is not in the working tree/g)?.length, 1, out);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("glean: two operations that report the same line are both reported in the save's reply", async () => {
+  const db = tempDb();
+  const root = repo();
+  try {
+    const p = project(db);
+    session(db, p, "g1");
+    const m = message(db, p, { id: "o1", text: "メモは書き出さない。", session: "g1" });
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      units: [
+        {
+          key: "notes",
+          kind: "finding",
+          text: "メモは書き出さない",
+          evidence: [{ source: `s${m}`, quote: "メモは書き出さない。", role: "states" }],
+        },
+      ],
+    });
+    const rev = Number(
+      db.owner.prepare("select revision from unit where key = 'glean:notes'").get()?.revision,
+    );
+    const out = await saveText(db.ingest, await beginGlean(db.ingest, p, "g1"), p, root, {
+      ops: ["src.ts", "docs/note.md"].map((path) => ({
+        op: "anchor",
+        unit: "glean:notes",
+        revision: rev,
+        path,
+        role: "applies_to",
+      })),
+    });
+    assert.equal(out.match(/✓ glean:notes: anchor added/g)?.length, 2, out);
+  } finally {
+    await db.done();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

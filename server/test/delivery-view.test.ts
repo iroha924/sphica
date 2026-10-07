@@ -304,7 +304,10 @@ test("long multibyte keys, paths, and agent ids in every section stay within REA
   const out = await deliveryOverview(db.reader, p, 30, NOW);
   assert.ok(bytes(framed(out)) <= READ_BUDGET, `${bytes(framed(out))} bytes`);
   for (const l of DELIVERY_LIMITS_TEXT) assert.ok(out.includes(l), out);
-  assert.ok(out.endsWith("Change a record only through /sphica:trace, with the owner's words."), out);
+  assert.ok(
+    out.endsWith("Change a record only with the owner's words, through /sphica:trace or /sphica:glean."),
+    out,
+  );
   assert.match(out, /more delivered records? not shown/);
   assert.match(
     out,

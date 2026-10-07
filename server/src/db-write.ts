@@ -153,6 +153,7 @@ const INGEST_INSERTS = new Set([
   "unit_state",
   "unit_replacement",
   "unit_anchor",
+  "unit_anchor_retirement",
   "unit_alias",
   "field_def",
   "unit_field",
@@ -208,6 +209,8 @@ export const INGEST_TRIGGER_WRITES: Record<string, string[]> = {
       "alias_i",
       "field_i",
       "field_d",
+      "retirement_i",
+      "retirement_d",
     ].map((t) => [`unit_rev_${t}`, ["update unit"]]),
   ),
   unit_fts_ai: ["insert unit_fts"],
@@ -271,7 +274,7 @@ function ingestAuthorizer(
 
 /**
  * What the forget connection may change: forget.ts runs fixed SQL, and this is the coarse guard around it. Deletes cascade to evidence,
- * adoption, processing, a harvest run's kept sources, field definition, and field value rows, clear unit_state.source_id, raise unit revisions, and reindex units that
+ * adoption, processing, a harvest run's kept sources, a retired anchor's reason, field definition, and field value rows, clear unit_state.source_id, raise unit revisions, and reindex units that
  * lose a field value; the authorizer sees those as plain writes.
  */
 const FORGET_WRITES: Record<number, Set<string>> = {
@@ -289,6 +292,7 @@ const FORGET_WRITES: Record<number, Set<string>> = {
     "unit_adoption",
     "source_processing",
     "harvest_run_source",
+    "unit_anchor_retirement",
     "source_fts",
     "field_def",
     "unit_field",
