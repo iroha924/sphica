@@ -48,20 +48,30 @@ test("a locked directory the run leaves is still removed", () => {
   assert.equal(fs.existsSync(r.dir), false);
 });
 
-test("a process the run leaves writing in its temp directory is reported with the run's output, not thrown", async (t) => {
-  // The grandchild keeps making files after the run ends, so removing the directory fails; it stops itself after 1.5 seconds
-  const r = node(
-    'const { spawn } = require("node:child_process"); spawn(process.execPath, ["-e", "const fs = require(\\"node:fs\\"), os = require(\\"node:os\\"), path = require(\\"node:path\\"); const d = path.join(os.tmpdir(), \\"busy\\"); fs.mkdirSync(d); let i = 0; const t = setInterval(() => { try { fs.writeFileSync(path.join(d, String(i++)), \\"x\\"); } catch {} }, 0); setTimeout(() => clearInterval(t), 1500);"], { detached: true, stdio: "ignore" }).unref(); setTimeout(() => console.log("OUT"), 200);',
+test("a temp directory that cannot be read or removed is reported with the run's output, not thrown", (t) => {
+  // The child locks its own temp directory, so the scan fails; the removal is made to fail, as when a leftover process still writes there
+  const r = runTestsIsolated(
+    process.execPath,
+    ["-e", 'console.log("OUT"); require("node:fs").chmodSync(require("node:os").tmpdir(), 0);'],
+    {
+      cwd: ROOT,
+      env: childEnv(),
+      remove: () => {
+        throw new Error("busy");
+      },
+    },
   );
-  t.after(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+  t.after(() => {
+    fs.chmodSync(r.dir, 0o700);
     fs.rmSync(r.dir, { recursive: true, force: true });
   });
   assert.equal(r.stdout.trim(), "OUT");
+  assert.equal(r.problems.length, 2, r.problems.join("\n"));
   assert.ok(
-    r.problems.some((p) => p.startsWith(`the run's temp directory ${r.dir} could not be removed`)),
-    r.problems.join("\n"),
+    r.problems[0]?.startsWith(`the run's temp directory ${r.dir} could not be read: EACCES`),
+    r.problems[0],
   );
+  assert.equal(r.problems[1], `the run's temp directory ${r.dir} could not be removed: busy`);
 });
 
 test("output past the limit is a problem of its own, not a silent cut", () => {

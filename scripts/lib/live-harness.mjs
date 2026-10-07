@@ -63,6 +63,7 @@ function childEnv(dir, covDir, extra = {}) {
   // 4 unsent items to the throwaway database and removed them from the spool). Changing only the database path does not close this.
   env.HOME = dir;
   env.USERPROFILE = dir;
+  Object.assign(env, tempVars(dir));
   // If the parent's SPHICA_DB, SPHICA_HOME, or CODEX_HOME remained, the child would use those files instead of the temp HOME
   // (doctor starts the Codex it finds there, which writes under its CODEX_HOME)
   for (const k of ["SPHICA_DB", "SPHICA_HOME", "CODEX_HOME", "GITHUB_TOKEN"]) delete env[k];
@@ -114,6 +115,16 @@ export function runHook(input, dir, covDir, extra = {}) {
     stdio: ["pipe", "pipe", "pipe"],
   });
   return { status: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
+/**
+ * TMPDIR, TMP, and TEMP for a child, under dir: the hooks keep once-per-session marks in the temp directory, and the owner's must not
+ * fill with a check's
+ */
+export function tempVars(dir) {
+  const tmp = path.join(dir, "tmp");
+  fs.mkdirSync(tmp, { recursive: true });
+  return { TMPDIR: tmp, TMP: tmp, TEMP: tmp };
 }
 
 /** Creates a temp directory and deletes it afterwards. */

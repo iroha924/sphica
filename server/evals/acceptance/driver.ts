@@ -82,12 +82,23 @@ const LEAKY = [
   "CODEX_SESSION_ID",
 ];
 
+/** Where each case's directory goes, read once: a case that never finishes keeps its own TMPDIR set, and the next must not nest in it */
+const BASE_TMP = os.tmpdir();
+
 export async function createDriver(world: World): Promise<Driver> {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-acceptance-")));
-  const saved = Object.fromEntries(["HOME", "USERPROFILE", "PATH", ...LEAKY].map((k) => [k, process.env[k]]));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(BASE_TMP, "sphica-acceptance-")));
+  const saved = Object.fromEntries(
+    ["HOME", "USERPROFILE", "PATH", "TMPDIR", "TMP", "TEMP", ...LEAKY].map((k) => [k, process.env[k]]),
+  );
   for (const k of LEAKY) delete process.env[k];
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
+  // The hooks keep once-per-session marks in the temp directory; the owner's must not fill with the cases'
+  const tmp = path.join(dir, "tmp");
+  fs.mkdirSync(tmp);
+  process.env.TMPDIR = tmp;
+  process.env.TMP = tmp;
+  process.env.TEMP = tmp;
   const file = path.join(dir, ".sphica", "sphica.db");
   const repo = path.join(dir, "tsundoku");
   const git = (...args: string[]) =>

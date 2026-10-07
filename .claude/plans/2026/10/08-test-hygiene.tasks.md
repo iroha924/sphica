@@ -66,4 +66,14 @@ base: main
   - コミット: `fix(scripts): report a temp directory a leftover process keeps busy, and run the output test on macOS CI`
   - 結果: `node --test --test-name-pattern="left writing" test/test-run.test.ts` → 8 回とも pass、TMPDIR に増えたもの 0。`actionlint` → 0。`bun run verify` → 0、前後で TMPDIR に増えたもの 0
 
+- [x] T05: Codex のレビューの指摘 3 件を直す。live の 3 本の子の TMPDIR・TMP・TEMP を自分の一時ディレクトリの下に向ける（hooks:live の印が共有の TMPDIR に残り、名前の決まったディレクトリの中なので前後の比較に出なかった）。残骸を調べる読み取りの失敗も problems に出し、出力を捨てない。削除の失敗のテストを、削除を差し替えて確実に起こす形にする
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T04（直すのは T04 で変えた削除の失敗の扱いとそのテスト）
+  - 変更: `scripts/lib/test-run.mjs`, `scripts/lib/test-run.d.mts`, `server/test/test-run.test.ts`, `scripts/lib/live-harness.mjs`, `scripts/check-hooks-live.mjs`, `scripts/check-codex-trust-live.mjs`, `server/evals/acceptance/driver.ts`
+  - red: `TMPDIR=<空のディレクトリ> node <直す前の check-hooks-live.mjs>` → そのディレクトリに sphica-5b0718b022fa が残る。直す前の runTestsIsolated に、自分の TMPDIR を読めなくする子を渡す → EACCES で例外になり出力が失われる
+  - 完了条件: `cd server && node --test test/test-run.test.ts` → 6 件 pass。`TMPDIR=<空のディレクトリ> node scripts/check-hooks-live.mjs` → そのディレクトリが空のまま
+  - コミット: `fix(scripts): keep the live checks' temp files in their own directory and report an unreadable run directory`
+  - 結果: red は 2 つとも確認。`node --test test/test-run.test.ts` → 6 件 pass。hooks:live・sql:live・codex-trust:live を空の TMPDIR で流す → 何も残らない。hooks:live は Bash ツールの前景で流すと 3 回止まり（record tool hook が 30 秒と 930 秒、直す前の版でも Codex SubagentStart が ETIMEDOUT）、裏で流した 6 回はすべて 8 秒で通った。原因は未検証。verify の後に共有の TMPDIR の印が 6 個増えたので追い、acceptance の driver も同じ形に直した（空の TMPDIR で acceptance → 直す前は印 6 個、直した後は 0 個、132 件 pass）。ケースが止まっても次のケースが入れ子にならないよう、置き場は読み込み時の os.tmpdir() に固定
+
 ## 記録

@@ -12,7 +12,7 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
-import { root, withTempDir } from "./lib/live-harness.mjs";
+import { root, tempVars, withTempDir } from "./lib/live-harness.mjs";
 
 const windows = process.platform === "win32";
 const source = path.resolve(process.argv[2] ?? path.join(root, "plugin"));
@@ -53,18 +53,9 @@ await withTempDir(async (dir) => {
   env.GIT_CONFIG_GLOBAL = gitConfig;
   env.CODEX_HOME = path.join(home, ".codex");
   env.CLAUDE_CONFIG_DIR = path.join(home, ".claude");
-  for (const k of [
-    "SystemRoot",
-    "SYSTEMROOT",
-    "windir",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "PATHEXT",
-    "ComSpec",
-    "LANG",
-  ])
+  for (const k of ["SystemRoot", "SYSTEMROOT", "windir", "PATHEXT", "ComSpec", "LANG"])
     if (process.env[k]) env[k] = process.env[k];
+  Object.assign(env, tempVars(dir));
   const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT;
   if (windows && systemRoot) dirs.push(path.join(systemRoot, "System32"));
   env.PATH = dirs.join(path.delimiter);
