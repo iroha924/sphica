@@ -358,6 +358,15 @@ export interface UnitAnchor {
   unit_id: number;
 }
 
+export interface UnitAnchorRetirement {
+  added_at: string;
+  anchor_id: Generated<number>;
+  run_id: number;
+  source_id: number;
+  span_end: number;
+  span_start: number;
+}
+
 export interface UnitEvidence {
   added_at: string;
   id: Generated<number>;
@@ -496,6 +505,7 @@ export interface DB {
   unit_adoption: UnitAdoption;
   unit_alias: UnitAlias;
   unit_anchor: UnitAnchor;
+  unit_anchor_retirement: UnitAnchorRetirement;
   unit_evidence: UnitEvidence;
   unit_field: UnitField;
   unit_link: UnitLink;

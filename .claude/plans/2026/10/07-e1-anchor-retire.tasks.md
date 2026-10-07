@@ -22,13 +22,14 @@ base: main
 
 revision 12 の表 `unit_anchor_retirement` ができ、ingest が書け、forget で理由だけが消える。
 
-- [ ] T01: schema revision 12 で unit_anchor_retirement を足し、バージョンを 0.6.41 に上げる
+- [x] T01: schema revision 12 で unit_anchor_retirement を足し、バージョンを 0.6.41 に上げる
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `db/schema.sql`, `db/migrations/0012.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/test/fixtures/schema-rev11.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `db/schema.sql`, `db/migrations/0012.sql`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/db-write.ts`, `server/test/fixtures/schema-rev11.sql`, `server/test/schema.test.ts`, `server/test/migrate.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/schema.test.ts test/migrate.test.ts` → pass。挿入の拒否（退いていない anchor、別 project の source と run、範囲外と文字境界でない span、owner 以外の source）、更新の拒否、revision の増加、session_cited による削除の拒否、11→12 の移行が新規作成と一致のテストを含む。`bun run codegen:check` → pass
   - コミット: `feat(schema): keep why an anchor was retired, in revision 12`
+  - 結果: `node --test test/schema.test.ts test/migrate.test.ts` → 102 pass / 0 fail（新しい表の拒否・revision・forget 相当の source 削除で理由だけ消える・session_cited、11→12 の移行）。`npm test`（server 全体）→ 958 pass / 0 fail。`bun run codegen:check` → 一致。`bun run check` → exit 0
 
 - [ ] T02: ingest に新しい表への挿入を許し、forget で理由の行だけが消えて件数に出るようにする
   - 種別: 追加
@@ -80,3 +81,5 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
   - コミット: `docs(skills): describe retire_anchor and the reference-file warning`
 
 ## 記録
+
+- 2026-10-07 / T01 / 新しい表を足すと、forget の接続が source の削除からの cascade を authorizer で拒否し、server のテスト 23 件が落ちた。ingest の revision の trigger 一覧（INGEST_TRIGGER_WRITES）も新しい trigger を求める / forget の削除許可と trigger 一覧の追加を T02 から T01 に移した。T01 の変更欄: 前 db-write.ts なし → 後 db-write.ts あり。T02 は ingest の挿入許可と forget の件数とテストを担う
