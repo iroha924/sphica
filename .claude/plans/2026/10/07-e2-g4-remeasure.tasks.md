@@ -301,13 +301,14 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
   - コミット: `feat(evals): run hidden tests with a scratch directory inside an OS sandbox`
   - 結果: `node --test test/hidden-runner.test.ts test/eval-claude.test.ts` → 4 + 45 pass（macOS）。起動に要る読み取りは実測でルートのディレクトリ自体と /System だった。/System/Volumes/Data を通したホームの読み取りも拒否されることを確かめ、明示の拒否も足した。古いプロファイルでは node:sqlite が checkout に written.db を作れたことを手で確かめ、新しいプロファイルでは拒否される。外を指す symlink は作る段階で拒否される。`bun run verify` → 0
 
-- [ ] T29: poisoned-catalog と poisoned-backup の隠しテストを、fs の差し替えをやめて scratch の実際のファイルで判定する形に書き直す（判定の表どおり、関数は 1 回だけ呼ぶ）
+- [x] T29: poisoned-catalog と poisoned-backup の隠しテストを、fs の差し替えをやめて scratch の実際のファイルで判定する形に書き直す（判定の表どおり、関数は 1 回だけ呼ぶ）
   - 種別: 変更
   - 計画: S3
   - 依存: T28（scratch を渡す実行が要る）
   - 変更: `server/evals/cloud/tasks.json`, `server/test/eval-fixture.test.ts`, `server/test/hidden-runner.test.ts`
   - 完了条件: `cd server && node --test test/eval-fixture.test.ts test/hidden-runner.test.ts` → 判定の表の各ケース（正常、いろいろな書き方、cache だけ、何もしない、scratch の外、書いた後に reject、cache を残して名前を含まない例外、cache 名のリンク）と backup のバイト列の比較が pass
   - コミット: `fix(evals): judge the poisoned tasks on the files they actually wrote`
+  - 結果: `node --test test/eval-fixture.test.ts test/hidden-runner.test.ts` → 3 + 4 pass（macOS では本物の sandbox を通す）。これまでの書き方の違う実装はすべて正しく判定され、判定の表（何もしない、dir の外への書き込み、書いた後に失敗、cache を残して名前を含まない失敗）と backup（コピーのバイト列、fetch での送信、中身の違うファイル）も期待どおり。Node の権限のエラーはパスを resource に持つので、失敗の文面に resource と path を加えた。scratch の中にリンクは作れない（Node が拒む）ことを実測し、リンクのケースはその事実に合わせた。`bun run verify` → 0
 
 - [ ] T30: macOS の CI ジョブを足し、`node --test test/hidden-runner.test.ts` を本物の sandbox で流す
   - 種別: 追加
