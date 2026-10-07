@@ -92,3 +92,5 @@ approved_at: 2026-10-08
 なし
 
 ## 変更履歴
+
+- 2026-10-08: review-shipping の指摘で、#299 の回帰テストを CI の macos ジョブにも足した（Linux のパイプは同期で書かれ、直す前の形でも落ちないため）。対象のファイルに `.github/workflows/check.yml` が加わる

@@ -497,8 +497,9 @@ await withTempDir(async (dir) => {
 
 if (failures.length) {
   console.error(`hooks: ${failures.length} failure(s)\n${failures.map((f) => `- ${f}`).join("\n")}`);
-  process.exit(1);
-}
-console.log(
-  `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
-);
+  // Exiting at once would drop output still in the pipe
+  process.exitCode = 1;
+} else
+  console.log(
+    `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
+  );

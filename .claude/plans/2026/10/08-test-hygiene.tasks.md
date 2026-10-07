@@ -22,7 +22,7 @@ base: main
 
 テストやチェックが落ちたとき、失敗したテストの名前と詳細が切れずに出る。
 
-- [ ] T01: テストの起動・残骸の検査・後片付けを `scripts/lib/test-run.mjs` に切り出し、sql:reach から使う。失敗は出力してから exitCode = 1 で return し、maxBuffer と r.error・r.signal を出す
+- [x] T01: テストの起動・残骸の検査・後片付けを `scripts/lib/test-run.mjs` に切り出し、sql:reach から使う。失敗は出力してから exitCode = 1 で return し、maxBuffer と r.error・r.signal を出す
   - 種別: 修正
   - 計画: S1, S2
   - 依存: なし
@@ -30,8 +30,9 @@ base: main
   - red: `cd server && node --test test/test-run.test.ts` → 偽の bun が 200 KB の stdout と stderr を出して失敗すると、本物の check-sql-reach.mjs の出力の末尾が届かずに落ちる
   - 完了条件: `cd server && node --test test/test-run.test.ts` → pass（漏れなし、漏れあり、失敗と漏れ、出力の上限、後片付け、偽の bun での出力の末尾）
   - コミット: `fix(scripts): keep a failed test run's whole output and check its temp directory`
+  - 結果: `cd server && node --test test/test-run.test.ts` → 直す前は sql:reach の 1 件が落ち（ 200 KB の出力の末尾 TAIL-OUT が届かない）、直した後 5 件 pass。npm の node-compile-cache はツールのキャッシュとして名前で除く（NODE_DISABLE_COMPILE_CACHE は環境を組み直した子に届かなかった）
 
-- [ ] T02: sql:live と hooks:live の失敗の経路を、出力してから exitCode = 1 で return する形にする
+- [x] T02: sql:live と hooks:live の失敗の経路を、出力してから exitCode = 1 で return する形にする
   - 種別: 修正
   - 計画: S1
   - 依存: なし
@@ -39,18 +40,30 @@ base: main
   - red: `rg -n "process\.exit\(1\)" scripts/check-sql-live.mjs scripts/check-hooks-live.mjs` → 出力の直後の process.exit(1) がある
   - 完了条件: 同じ rg → 0 件、`bun run sql:live` と `bun run hooks:live` → 通る
   - コミット: `fix(scripts): let the live checks finish their output and cleanup before failing`
+  - 結果: `rg -n "process\.exit\(1\)" scripts/check-sql-live.mjs scripts/check-hooks-live.mjs` → 直す前 2 件、直した後 0 件。`bun run sql:live` と `bun run hooks:live` → 通った
 
 ## P2: テストに残骸を作らせない
 
 テストの実行が一時ディレクトリに何も残さない。
 
-- [ ] T03: 一時ディレクトリを残すテストを、作成の直後に削除を登録する形に直し、子の環境を組み直すテストに TMPDIR・TMP・TEMP を渡す
+- [x] T03: 一時ディレクトリを残すテストを、作成の直後に削除を登録する形に直し、子の環境を組み直すテストに TMPDIR・TMP・TEMP を渡す
   - 種別: 修正
   - 計画: S3
   - 依存: T01（残骸の検査で、直したことを確かめる）
-  - 変更: `server/test/admin.test.ts`, `server/test/file-lock.test.ts`, `server/test/assets.test.ts`, `server/test/fake-gh.ts`, `server/test/fake-codex.ts`, `server/test/plugin.test.ts`, `server/test/extract.test.ts`, `server/test/cli.test.ts`
+  - 変更: `server/test/temp-dir.ts`, `server/test/admin.test.ts`, `server/test/file-lock.test.ts`, `server/test/assets.test.ts`, `server/test/fake-gh.ts`, `server/test/fake-codex.ts`, `server/test/plugin.test.ts`, `server/test/db.test.ts`, `server/test/deliver.test.ts`, `server/test/review-bridge.test.ts`, `server/test/eval-grade.test.ts`, 環境を組み直す子があるテスト
   - red: `bun run sql:reach` → 実行用の TMPDIR に残骸が残り、名前つきで落ちる
   - 完了条件: `bun run sql:reach` → 残骸 0 で通る、`bun run verify` → 0
   - コミット: `fix(test): remove every temp directory a test makes`
+  - 結果: `bun run sql:reach` → 直す前は残骸 99 個を名前つきで出して落ち、直した後は残骸 0 で通った（37 秒。持ち主の TMPDIR では 15 分を超えても終わらなかった）。作り手は admin・file-lock・assets・fake-gh・fake-codex・db・plugin と、deliver の印（deliver・review-bridge のテスト）、強制終了される grade.ts（eval-grade）。共有のヘルパーは server/test/temp-dir.ts の tempDir（プロセスの終了時に消す）と ownTmpdir、環境を組み直す子 33 か所に tmpEnv
+
+- [x] T04: review-shipping の指摘 2 件を直す。テストが残したプロセスが書き続けて削除が失敗したら、例外にせず problems に出す。#299 の回帰テストを CI の macos ジョブでも流す（Linux のパイプは同期で書かれ、直す前の形でも落ちない）
+  - 種別: 修正
+  - 計画: S1, S2
+  - 依存: T01（直すのは T01 で足した runTestsIsolated とその回帰テスト）
+  - 変更: `scripts/lib/test-run.mjs`, `server/test/test-run.test.ts`, `.github/workflows/check.yml`
+  - red: `cd server && node --test --test-name-pattern="left writing" test/test-run.test.ts` → 直す前の runTestsIsolated は ENOTEMPTY を投げて落ちる（review-shipping が書き続ける孫プロセスで 5 回中 5 回再現）
+  - 完了条件: `cd server && node --test test/test-run.test.ts` → 6 件 pass、`actionlint .github/workflows/check.yml` → 0
+  - コミット: `fix(scripts): report a temp directory a leftover process keeps busy, and run the output test on macOS CI`
+  - 結果: `node --test --test-name-pattern="left writing" test/test-run.test.ts` → 8 回とも pass、TMPDIR に増えたもの 0。`actionlint` → 0。`bun run verify` → 0、前後で TMPDIR に増えたもの 0
 
 ## 記録
