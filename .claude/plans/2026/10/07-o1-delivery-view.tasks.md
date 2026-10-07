@@ -22,13 +22,22 @@ base: main
 
 期間の配信ログを、件数・多く配信された記録・例のセッション・限界の 1 回の返答にして、32 KiB に収める。
 
-- [ ] T01: 件数・多く配信された記録・例のセッション・限界と締めを、バイトで組み立てる `deliveryOverview`
+- [x] T01: 件数・多く配信された記録・例のセッション・限界と締めを、バイトで組み立てる `deliveryOverview`
   - 種別: 追加
-  - 計画: S1
+  - 計画: S1, S6
   - 依存: なし
-  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`
+  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 他のプロジェクトと期間外の行が出ない、event × outcome × main / subagent の件数（reason が subagent で id の無い開始を subagent に数える）、no logged record key の数と left out の合計、多く配信された記録の並び、例のセッションの行、全節を長い多バイトの key と path で埋めた返答が framed の後に `READ_BUDGET` 以内で限界と締めの行を含む、が通る
   - コミット: `feat(overview): add a bounded delivery view over the delivery log (T01)`
+  - 結果: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 5 件 pass。全節を埋めた返答は framed の後に 30,595 バイト（上限 32,768）。`bun run verify` → 0 で終わる（sql:reach 込み、acceptance 130 件 pass）
+
+- [ ] T07: overview の受け入れケースに delivery のビューを足す
+  - 種別: 追加
+  - 計画: S1
+  - 依存: T01（ケースが呼ぶ `deliveryOverview` が要る）
+  - 変更: `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`
+  - 完了条件: `bun run acceptance` → 新しい delivery のケースを含めて全件 pass
+  - コミット: `test(acceptance): cover the delivery view (T07)`
 
 - [ ] T02: 言及の判定（Stop の返信の候補を取り、key の前後の境界を確かめる）
   - 種別: 追加
@@ -70,12 +79,16 @@ base: main
 
 PR ブランチで持ち主が試し、採用なら同じバージョンに上げて出す。不採用ならこのタスクを取りやめ、PR を閉じる。
 
-- [ ] T06: 試用の結果を #258 に残し、採用ならバージョンを上げる
+- [-] T06: 試用の結果を #258 に残し、採用ならバージョンを上げる
   - 種別: 変更
-  - 計画: S6, S7
+  - 計画: S6
   - 依存: T04（試用の前に 90 日分のログで時間を確かめる）, T05（merge する差分に README が要る）
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run verify` → 0 で終わり、4 つのファイルのバージョンがそろっている
   - コミット: `chore(release): bump to the next version for the delivery view (T06)`
 
 ## 記録
+
+- 2026-10-07 / T01 / reader の接続は sum と group_concat を呼べない（`server/src/sqlite.ts` の READER_FUNCTIONS） / 件数は SQL で値ごとにまとめ、合計は TypeScript で出した
+- 2026-10-07 / T01, T06 / pre-commit の bundle の検査が、パッケージの入力を変えるコミットにバージョンの更新を同じコミットで求める（過去のブランチも最初のコミットで上げている） / T01 の変更欄に 4 つのマニフェストを足し（前: delivery-view の 2 ファイル）、計画欄を S1 から S1, S6 にして 0.6.40 に上げた。plan の S6・S7 を直した（plan の変更履歴）。T06 の計画欄は S6, S7 から S6。ブランチで上げても npm には出ない（出すのは tag の release だけ）。T06 は変えるファイルが無くなったので取りやめ、S6・S7 の試用・merge・release は 12 段目で完了条件 A5・A6 として確かめる
+- 2026-10-07 / T07 / knowledge-schema Skill が新しい挙動には受け入れケースを先に足すよう求めている / overview の層に delivery のケースを足す T07 を T01 の後に追加

@@ -81,7 +81,7 @@ MCP（`server/src/mcp.ts` の `overview`）:
 
 テスト `server/test/delivery-view.test.ts`（`temp-db.ts` の本物の SQLite）と、`server/test/overview.test.ts` と同じ形の stdio の MCP のテスト。`sql:reach` が新しい呼び出し箇所を全部通ること。
 
-release: 採用の後に `bun run release:plan` で種別を確かめ、npm と 3 つの plugin manifest を同じバージョンに上げる。README.md:30 の overview の説明に delivery を足す。
+release: `bun run release:plan` で種別を確かめ（plugin）、パッケージの入力を変える最初のコミットで npm と 3 つの plugin manifest を同じバージョンに上げる。PR を作り、持ち主の試用を PR ブランチで行って結果を #258 に残し（文面は持ち主の承認の後）、採用なら Codex のレビューを経て tag で release、不採用なら PR を閉じる。これは実装の後の 12 段目で、完了条件 A5・A6 で確かめる。README.md:30 の overview の説明に delivery を足す。
 
 同じ誤りを次に止めるもの: 返答の大きさと限界の行は、全節を長い多バイトの key と path で埋めたテストで、framed の後に `READ_BUDGET` 以内、限界と締めの行が残ることを見る。言及の境界はテストで見る。
 
@@ -102,8 +102,7 @@ release: 採用の後に `bun run release:plan` で種別を確かめ、npm と 
 - S3: `server/src/mcp.ts` の `overview` の view と `days`、引数の誤り、description
 - S4: 規模の計測のケースを `server/evals/scale/run.ts` に足し、流す
 - S5: README.md の overview の説明
-- S6: PR を作り、持ち主の試用を PR ブランチで行い、結果を #258 に残す（文面は持ち主の承認の後）
-- S7: 採用ならバージョンを上げ、Codex のレビュー、merge と release。不採用なら PR を閉じる
+- S6: npm と 3 つの plugin manifest を 0.6.40 に上げる。パッケージの入力を変える最初のコミットで（pre-commit の bundle の検査が同じコミットを求める）。上げても npm には出ず、出すのは採用の後の tag の release だけ
 
 ## 完了条件
 
@@ -125,3 +124,5 @@ release: 採用の後に `bun run release:plan` で種別を確かめ、npm と 
 なし
 
 ## 変更履歴
+
+- 2026-10-07 / バージョンを上げるのを採用の後から最初のパッケージのコミットへ移し、試用・merge・release を手順から外して完了条件 A5・A6 だけで確かめる / pre-commit の bundle の検査がパッケージの入力を変えるコミットに同じコミットでのバージョンの更新を求め、試用と出荷はコードを変えるタスクにならないため / Go 不要（範囲・公開インターフェース・依存・データは変わらず、npm に出すのは採用の後のまま）
