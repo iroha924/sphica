@@ -320,13 +320,14 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
   - コミット: `fix(evals): let the hidden test sandbox read the Node binary alone`
   - 結果: red: プロファイルが Node の親の親を subpath で許していて単体の確認が落ちた。Node は実行ファイルの literal だけで起動することを実測し、修正後 `node --test test/hidden-runner.test.ts` → 4 pass、fixture の隠しテストも pass。`bun run verify` → 0
 
-- [ ] T30: macOS の CI ジョブを足し、`node --test test/hidden-runner.test.ts` を本物の sandbox で流す
+- [x] T30: macOS の CI ジョブを足し、`node --test test/hidden-runner.test.ts` を本物の sandbox で流す
   - 種別: 追加
   - 計画: S3
   - 依存: T28（流すテストが要る）
   - 変更: `.github/workflows/check.yml`
   - 完了条件: `gh pr checks 298` → 新しい macOS のジョブを含めて全項目 pass
   - コミット: `ci: run the hidden test sandbox checks on macOS`
+  - 結果: 同じ手順を手元で流して runner 4 pass・fixture 1 pass、TAP の判定も通過。`actionlint` → 0。review-shipping は出してよい（指摘 3 件、T31 と記録節）。CI での実走は push の後に `gh pr checks 298` で確かめる。`bun run verify` → 0
 
 ## 記録
 

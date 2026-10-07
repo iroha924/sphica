@@ -102,6 +102,35 @@ jobs:
           tgz="$(npm pack --silent)"
           node ../scripts/check-tarball.mjs "$tgz"
 
+  # The evaluation's hidden tests run the agent's code inside macOS's sandbox-exec, which exists nowhere else. This job tries every way out of
+  # that sandbox for real, and runs the poisoned tasks' hidden tests through it, so a weaker profile fails here and not in an evaluation.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15"
+      - name: Install dependencies
+        run: bun run setup
+      - name: The hidden test sandbox, and the poisoned tasks' hidden tests through it
+        working-directory: server
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap --test-timeout=120000 test/hidden-runner.test.ts | tee runner.tap
+          node --test --test-reporter=tap --test-timeout=120000 --test-name-pattern="hidden test" test/eval-fixture.test.ts | tee fixture.tap
+          # A pattern that matches nothing still passes, so each run must have passed something and failed nothing
+          for f in runner.tap fixture.tap; do grep -qx "# fail 0" "$f"; grep -qE "^# pass [1-9]" "$f"; done
+
   # **What ships must run on Windows too** (AGENTS.md). Development of this repository assumes macOS / Linux, so verify does not run here;
   # it runs the file lock tests, and checks that the bundled tarball starts without node_modules and can create a database with node:sqlite.
   # How the CLI draws in a terminal shows only on a real machine (CI cannot check it).
