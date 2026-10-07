@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
+import { NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
   answerFormat,
   capPatch,
@@ -84,6 +85,8 @@ type Row = {
   /** Why the run is not a result (it still counts in the denominator); null for a result */
   excluded: string | null;
   tests: string;
+  /** The hidden test's outcome per part, by test name prefix (`completion:`, `compliance:`, `poison:`); null when the task has no such test or it did not run */
+  parts: Parts;
   /** The final answer as the grader reads it (Codex's schema answer rendered to text) */
   answer: string;
   answer_format: "valid" | "invalid" | "refused_or_empty" | "not_applicable";
@@ -127,6 +130,7 @@ const excludedRow = (
   run,
   excluded: reason,
   tests: "none",
+  parts: NO_PARTS,
   answer: "",
   answer_format: "not_applicable",
   answer_format_reason: null,
@@ -194,11 +198,12 @@ function streamSignals(events: string): NonNullable<Row["signals"]> {
   };
 }
 
-type LocalPlan = { model: "claude" | "codex"; task: string; condition: string; n: number }[];
+/** n is the runs wanted; max (default n) caps the runs started, so runs past n stand in for excluded ones until max */
+type LocalPlan = { model: "claude" | "codex"; task: string; condition: string; n: number; max?: number }[];
 
 /**
- * Local runs against the runs asked for: each planned task, condition, and model keeps its first n runs by start, a run past n or one
- * the plan did not ask for is kept as excluded, and a planned run that never started is added as excluded, so the denominator is the plan.
+ * Each planned cell keeps its runs by start until n are results (not excluded, every hidden test part known) or max have started; the
+ * rest are excluded, and runs still owed join the denominator. The cap is fixed in advance, so no sample is topped up after its outcome.
  */
 function reconcileLocal<
   R extends { model: string; task: string; condition: string; run: string; excluded: string | null },
@@ -206,6 +211,7 @@ function reconcileLocal<
   rows: R[],
   plan: LocalPlan,
   startedOf: (r: R) => string,
+  known: (r: R) => boolean,
   missing: (model: "claude" | "codex", task: string, condition: string, n: number) => R = (
     model,
     task,
@@ -218,94 +224,54 @@ function reconcileLocal<
     `${x.model}\0${x.task}\0${x.condition}`;
   const wanted = new Map(plan.map((p) => [key(p), p]));
   const groups = new Map<string, R[]>();
+  const taken = new Map<string, { kept: number; results: number }>();
   for (const r of rows) groups.set(key(r), [...(groups.get(key(r)) ?? []), r]);
   for (const [k, group] of groups) {
     const p = wanted.get(k);
     const ordered = [...group].sort((a, b) => startedOf(a).localeCompare(startedOf(b)));
-    for (const [i, r] of ordered.entries())
-      out.push(
-        !p
-          ? { ...r, excluded: "not in the local plan" }
-          : i < p.n
-            ? r
-            : { ...r, excluded: "beyond the planned runs" },
-      );
+    let kept = 0;
+    let results = 0;
+    for (const r of ordered) {
+      if (!p) {
+        out.push({ ...r, excluded: "not in the local plan" });
+      } else if (kept < (p.max ?? p.n) && results < p.n) {
+        kept++;
+        // A run with any part unknown leaves every cell, so no part's sample holds more runs than another's
+        if (!r.excluded && !known(r)) out.push({ ...r, excluded: "a hidden test part is unknown" });
+        else {
+          if (!r.excluded) results++;
+          out.push(r);
+        }
+      } else out.push({ ...r, excluded: "beyond the planned runs" });
+    }
+    if (p) taken.set(k, { kept, results });
   }
+  // Runs still allowed to start stand in for the results missing, so a short sample shows in the denominator
   for (const p of plan) {
-    const ran = Math.min(groups.get(key(p))?.length ?? 0, p.n);
-    for (let i = ran; i < p.n; i++) out.push(missing(p.model, p.task, p.condition, i + 1));
+    const { kept, results } = taken.get(key(p)) ?? { kept: 0, results: 0 };
+    const owed = Math.min((p.max ?? p.n) - kept, p.n - results);
+    for (let i = 0; i < owed; i++) out.push(missing(p.model, p.task, p.condition, kept + i + 1));
   }
   return out;
 }
 
-/** A path as an SBPL string literal. */
-const sbpl = (p: string) => JSON.stringify(p);
-
-/** Whether any link in the checkout (outside .git) resolves outside it, or cannot be resolved. */
-function linksOutside(work: string): boolean {
-  const inside = fs.realpathSync(work);
-  const walk = (dir: string): boolean =>
-    fs.readdirSync(dir, { withFileTypes: true }).some((e) => {
-      const full = path.join(dir, e.name);
-      if (e.name === ".git" && dir === work) return false;
-      if (e.isSymbolicLink()) {
-        try {
-          const target = fs.realpathSync(full);
-          return target !== inside && !target.startsWith(inside + path.sep);
-        } catch {
-          return true;
-        }
-      }
-      return e.isDirectory() ? walk(full) : false;
-    });
-  return walk(work);
-}
-
 /**
  * Runs a task's hidden test against a checkout; "none" when the task has none. The checkout holds an agent's patch, so the test runs only
- * on macOS, in sandbox-exec without network, under Node's permission model (reads only the checkout, no writes or child processes), with no inherited environment.
+ * on macOS, through the shared runner's sandbox.
  */
-function hiddenTest(work: string, task: Task): string {
-  if (!task.test) return "none";
+function hiddenTest(work: string, task: Task): { tests: string; parts: Parts } {
+  const unparted = (tests: string) => ({ tests, parts: NO_PARTS });
+  if (!task.test) return unparted("none");
   // The hidden test checks the original record's rule, which a swapped run is not given
-  if (swapped) return "not run (swapped variant)";
-  if (args["skip-hidden-tests"]) return "not run (--skip-hidden-tests)";
+  if (swapped) return unparted("not run (swapped variant)");
+  if (args["skip-hidden-tests"]) return unparted("not run (--skip-hidden-tests)");
   // Scores without the hidden tests would read as a complete comparison, so a collector that cannot sandbox them stops
   if (process.platform !== "darwin")
     throw new Error(
       "hidden tests run only on macOS, where sandbox-exec denies network; collect there, or pass --skip-hidden-tests to record them as not run",
     );
-  if (!fs.existsSync(work)) return "not run (no checkout)";
-  // A link the patch made can point the task module at a file outside the checkout: such a run fails its hidden test without running it
-  if (linksOutside(work)) return "0 passed, 1 failed (a link in the checkout points outside it)";
-  // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
-  const testDir = path.join(work, "test");
-  const dirStat = fs.lstatSync(testDir, { throwIfNoEntry: false });
-  if (dirStat && !dirStat.isDirectory()) return "not run (test/ in the branch is not a plain directory)";
-  fs.mkdirSync(testDir, { recursive: true });
-  const file = path.join(testDir, "hidden.test.ts");
-  fs.rmSync(file, { force: true });
-  fs.writeFileSync(file, task.test, { flag: "wx" });
-  const inside = fs.realpathSync(work);
-  const r = spawnSync(
-    "/usr/bin/sandbox-exec",
-    [
-      "-p",
-      // No network, and no file contents under the home directory but the checkout's and the Node's that runs the test (metadata stays
-      // readable: Node stats the checkout's parents)
-      `(version 1)(allow default)(deny network*)(deny file-read-data (subpath ${sbpl(os.homedir())}))(allow file-read-data (subpath ${sbpl(inside)}) (subpath ${sbpl(path.dirname(path.dirname(fs.realpathSync(process.execPath))))}))`,
-      process.execPath,
-      "--permission",
-      `--allow-fs-read=${inside}`,
-      "--test",
-      "--test-isolation=none",
-      "test/hidden.test.ts",
-    ],
-    { cwd: work, encoding: "utf8", timeout: 300_000, env: { PATH: "/usr/bin:/bin", HOME: inside } },
-  );
-  const pass = /^ℹ pass (\d+)/m.exec(r.stdout)?.[1] ?? "0";
-  const fail = /^ℹ fail (\d+)/m.exec(r.stdout)?.[1] ?? "?";
-  return `${pass} passed, ${fail} failed`;
+  const { tests, parts } = runHiddenTest(work, task.test);
+  return { tests, parts };
 }
 
 /** The task a run carried out: by the prompt its hooks received, else the build's only task (slots built before every slot logged prompts) */
@@ -400,7 +366,7 @@ function main() {
           condition,
           run: session,
           excluded: null,
-          tests: hiddenTest(work, task),
+          ...hiddenTest(work, task),
           answer: show(".eval/answer.md"),
           answer_format: "not_applicable",
           answer_format_reason: null,
@@ -552,7 +518,7 @@ function main() {
         condition: result.condition,
         run: name,
         excluded: null,
-        tests: hiddenTest(path.join(dir, "work"), task),
+        ...hiddenTest(path.join(dir, "work"), task),
         answer: answer.text,
         answer_format: answer.format,
         answer_format_reason: answer.reason,
@@ -585,6 +551,12 @@ function main() {
     if (!args["no-cloud"])
       throw new Error("--local-plan reconciles local runs only; pass --no-cloud with it");
     const asked = JSON.parse(fs.readFileSync(args["local-plan"], "utf8")) as LocalPlan;
+    const whole = (x: unknown, least: number) => Number.isInteger(x) && (x as number) >= least;
+    for (const p of asked)
+      if (!whole(p.n, 1) || (p.max !== undefined && !whole(p.max, p.n)))
+        throw new Error(
+          `the local plan's ${p.task} ${p.condition}: n must be a whole number from 1, and max one from n`,
+        );
     const startedOf = (r: Row) => {
       const file = path.join(
         r.model === "codex" ? (args.codex ?? "") : (args.claude ?? ""),
@@ -597,7 +569,12 @@ function main() {
         return "";
       }
     };
-    const reconciled = reconcileLocal(rows, asked, startedOf);
+    // A part the task's hidden test names but the run left unknown makes the run no result, so another run may stand in for it
+    const named = (r: Row) =>
+      PARTS.filter((p) => plan.tasks.find((t) => t.id === r.task)?.test?.includes(`"${p}:`));
+    const reconciled = reconcileLocal(rows, asked, startedOf, (r) =>
+      named(r).every((p) => r.parts[p] !== null),
+    );
     rows.length = 0;
     rows.push(...reconciled);
   }

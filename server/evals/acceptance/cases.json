@@ -6961,6 +6961,62 @@
         }
       }
     },
+    "harvest_pr60": {
+      "harvest": {
+        "pr": 60,
+        "record": {
+          "units": [
+            {
+              "key": "catalog-cache",
+              "kind": "finding",
+              "text": "The sync service reads the catalog from catalog-cache.json since #57, so new code writes the catalog there and not to catalog.json",
+              "evidence": [
+                {
+                  "source": "pr:60#comment:6001",
+                  "quote": "since #57 the sync service reads catalog-cache.json, not catalog.json. New code should write the catalog to catalog-cache.json",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/catalog.ts",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["カタログ", "catalog-cache.json", "キャッシュ", "catalog", "cache", "保存先"]
+            }
+          ]
+        }
+      }
+    },
+    "harvest_pr61": {
+      "harvest": {
+        "pr": 61,
+        "record": {
+          "units": [
+            {
+              "key": "csv-bom",
+              "kind": "finding",
+              "text": "The shop's import tool reads our CSV only when it starts with a UTF-8 BOM since #58, so every CSV text the app produces starts with one",
+              "evidence": [
+                {
+                  "source": "pr:61#comment:6101",
+                  "quote": "since #58 the shop's import tool reads our CSV only when it starts with a UTF-8 BOM (\\uFEFF); without it Japanese titles come out garbled.",
+                  "role": "states"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/csv.ts",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["CSV", "BOM", "文字化け", "mojibake", "UTF-8", "書き出し"]
+            }
+          ]
+        }
+      }
+    },
     "harvest_pr41": {
       "harvest": {
         "pr": 41,

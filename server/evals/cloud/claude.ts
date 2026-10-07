@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { runClaude, runnerDigest } from "./claude-run.ts";
+import { claudeVersion, runClaude, runnerDigest } from "./claude-run.ts";
 import { readPlan, readTasks } from "./firing.ts";
 
 const { values: args } = parseArgs({
@@ -39,14 +39,23 @@ const canary = (() => {
       passed?: boolean;
       model?: string;
       runner?: string;
+      claude?: string;
     };
   } catch {
     return null;
   }
 })();
-if (!canary?.passed || canary.model !== args.model || canary.runner !== runnerDigest())
+// An unknown version (claude could not be asked) vouches for nothing, even when the canary recorded the same
+const host = claudeVersion();
+if (
+  !canary?.passed ||
+  canary.model !== args.model ||
+  canary.runner !== runnerDigest() ||
+  !host ||
+  canary.claude !== host
+)
   throw new Error(
-    `run node evals/cloud/canary.ts --build ${args.build} --model ${args.model} first (again after any change to the runner); no Claude run starts until it passes`,
+    `run node evals/cloud/canary.ts --build ${args.build} --model ${args.model} first (again after any change to the runner or update of Claude Code); no Claude run starts until it passes`,
   );
 
 const { dir, result } = await runClaude({
