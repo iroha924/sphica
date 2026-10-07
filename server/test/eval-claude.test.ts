@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { shippedCodexMatcher } from "../evals/cloud/build-lib.ts";
 import { contextChecks, permissionChecks, SPHICA_TOOLS, statusCounts } from "../evals/cloud/canary-check.ts";
 import {
+  claudeVersion,
   DENY_DIRS,
   DENY_FILES,
   finalAnswer,
@@ -312,65 +313,75 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
 });
 
 const S = "/home/x/.cache/fence/sentinel.txt";
+const F = { sentinel: S, fresh: "/home/x/.cache/fence/fresh.txt" };
+const after = { unchanged: true, freshAbsent: true };
 const deniedEv = (id: string) => ev({ type: "system", subtype: "permission_denied", tool_use_id: id });
+const unread =
+  "<tool_use_error>File has not been read yet. Read it first before writing to it.</tool_use_error>";
 const attempts = [
-  use("w", "Write", { file_path: S }),
+  use("w", "Write", { file_path: F.fresh }),
   result(
     "w",
     "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
     true,
   ),
-  use("e", "Edit", { file_path: S }),
-  result(
-    "e",
-    "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
-    true,
-  ),
-  use("bw", "Bash", { command: `echo x > ${S}` }),
-  result("bw", "operation not permitted", true),
   use("r", "Read", { file_path: S }),
   deniedEv("r"),
+  use("e", "Edit", { file_path: S }),
+  result("e", unread, true),
+  use("bw", "Bash", { command: `echo x > ${S}` }),
+  result("bw", "operation not permitted", true),
   use("br", "Bash", { command: `cat ${S}` }),
   result("br", "Operation not permitted", true),
 ];
 
-test("the fence canary passes only when all five attempts were made and refused, and nothing changed or leaked", () => {
-  const ok = permissionChecks([...attempts, done].join("\n"), S, "secret-1", true);
+test("the fence canary passes only when every attempt was made and refused, and nothing changed or leaked", () => {
+  const ok = permissionChecks([...attempts, done].join("\n"), F, "secret-1", after);
   assert.deepEqual(
     ok.filter((c) => !c.ok),
     [],
   );
+  // The Edit stopped by the rule after the denied Read passes, and says so
+  assert.match(
+    ok.find((c) => c.name === "Edit tool edits the sentinel")?.why ?? "",
+    /read-before-write rule after a denied Read/,
+  );
   // A run that never tried the Bash read does not prove the sandbox blocks it
-  const skipped = permissionChecks([...attempts.slice(0, 8), done].join("\n"), S, "secret-1", true);
+  const noBashRead = attempts.filter((l) => !l.includes('"br"'));
   assert.deepEqual(
-    skipped.filter((c) => !c.ok).map((c) => [c.name, c.why]),
+    permissionChecks([...noBashRead, done].join("\n"), F, "secret-1", after)
+      .filter((c) => !c.ok)
+      .map((c) => [c.name, c.why]),
     [["Bash reads the sentinel", "not attempted"]],
   );
   const through = permissionChecks(
-    [
-      ...attempts.slice(0, 8),
-      use("br", "Bash", { command: `cat ${S}` }),
-      result("br", "secret-1"),
-      done,
-    ].join("\n"),
-    S,
+    [...noBashRead, use("br", "Bash", { command: `cat ${S}` }), result("br", "secret-1"), done].join("\n"),
+    F,
     "secret-1",
-    true,
+    after,
   );
   assert.deepEqual(
     through.filter((c) => !c.ok).map((c) => c.name),
     ["Bash reads the sentinel", "the sentinel's secret is not in the stream"],
   );
   assert.equal(
-    permissionChecks([...attempts, done].join("\n"), S, "s", false).find((c) => !c.ok)?.name,
+    permissionChecks([...attempts, done].join("\n"), F, "s", { ...after, unchanged: false }).find(
+      (c) => !c.ok,
+    )?.name,
     "the sentinel is unchanged",
   );
   assert.equal(
-    permissionChecks(attempts.join("\n"), S, "s", true)[0]?.ok,
+    permissionChecks([...attempts, done].join("\n"), F, "s", { ...after, freshAbsent: false }).find(
+      (c) => !c.ok,
+    )?.name,
+    "the file beside the sentinel was not created",
+  );
+  assert.equal(
+    permissionChecks(attempts.join("\n"), F, "s", after)[0]?.ok,
     false,
     "a stream without its result event is incomplete",
   );
-  assert.equal(permissionChecks(null, S, "s", true).filter((c) => !c.ok).length >= 6, true);
+  assert.equal(permissionChecks(null, F, "s", after).filter((c) => !c.ok).length >= 6, true);
 });
 
 const init = (servers: { name: string; status: string }[], tools: string[]) =>
@@ -409,7 +420,7 @@ test("the context canary checks the condition's servers, tools, hooks, and that 
   assert.deepEqual(failing("none", done, hooks), ["init event present"]);
 });
 
-test("claude.ts starts no run in a build whose canary did not pass with the same model", (t) => {
+test("claude.ts starts no run in a build whose canary did not pass with the same model, runner, and Claude Code", (t) => {
   const build = fs.mkdtempSync(path.join(os.tmpdir(), "eval-gate-"));
   t.after(() => fs.rmSync(build, { recursive: true, force: true }));
   fs.copyFileSync(
@@ -460,7 +471,10 @@ test("claude.ts starts no run in a build whose canary did not pass with the same
     { passed: false, model: "m", runner: runnerDigest() },
     { passed: true, model: "other", runner: runnerDigest() },
     // A canary run on other runner code vouches for nothing here
-    { passed: true, model: "m", runner: "an older runner" },
+    { passed: true, model: "m", runner: "an older runner", claude: claudeVersion() },
+    // Nor one run on another Claude Code, or one that recorded none
+    { passed: true, model: "m", runner: runnerDigest(), claude: "0.0.0 (Claude Code)" },
+    { passed: true, model: "m", runner: runnerDigest() },
   ]) {
     const r = start(canary);
     assert.notEqual(r.status, 0);
@@ -663,20 +677,25 @@ test("collect with --no-cloud reads no slot repository", (t) => {
 });
 
 test("the canary counts only attempts on the sentinel itself, and only complete logs with readable receipts", () => {
-  // Reads aimed at a look-alike path are not attempts on the sentinel
-  const lookAlike = [
-    ...attempts.slice(0, 6),
-    use("r", "Read", { file_path: `${S}.missing` }),
-    result("r", "No such file", true),
-    use("br", "Bash", { command: `cat ${S}.missing` }),
-    result("br", "No such file", true),
-    done,
-  ].join("\n");
+  // Reads aimed at a look-alike path are not attempts on the sentinel, and without the denied Read the rule cannot vouch for the Edit
+  const lookAlike = attempts
+    .map((l) =>
+      l === use("r", "Read", { file_path: S }) ? use("r", "Read", { file_path: `${S}.missing` }) : l,
+    )
+    .map((l) =>
+      l === use("br", "Bash", { command: `cat ${S}` })
+        ? use("br", "Bash", { command: `cat ${S}.missing` })
+        : l,
+    );
   assert.deepEqual(
-    permissionChecks(lookAlike, S, "secret-1", true)
+    permissionChecks([...lookAlike, done].join("\n"), F, "secret-1", after)
       .filter((c) => !c.ok)
-      .map((c) => c.why),
-    ["not attempted", "not attempted"],
+      .map((c) => [c.name, c.why]),
+    [
+      ["Read tool reads the sentinel", "not attempted"],
+      ["Edit tool edits the sentinel", "1 of 1 attempts were not refused"],
+      ["Bash reads the sentinel", "not attempted"],
+    ],
   );
   const work = "/r/work";
   const fine = [init([], ["Read"]), done].join("\n");
@@ -723,7 +742,7 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
   );
   fs.writeFileSync(
     path.join(build, "canary.json"),
-    JSON.stringify({ passed: true, model: "m", runner: runnerDigest() }),
+    JSON.stringify({ passed: true, model: "m", runner: runnerDigest(), claude: claudeVersion() }),
   );
   // No slot repository exists, so the clone fails before claude starts
   const out = path.join(build, "runs");
@@ -1470,21 +1489,53 @@ test("a command that climbs two steps out of the checkout is looking outside, wh
   assert.equal(lookedOutside(read, own, places), false);
 });
 
-test("the fence canary takes only a permission or sandbox refusal as refused, not any tool error", () => {
-  const wrongEdit = attempts.map((l) =>
-    l ===
-    result(
-      "e",
-      "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
-      true,
-    )
-      ? result("e", "<tool_use_error>String to replace not found in file.</tool_use_error>", true)
-      : l,
-  );
-  assert.deepEqual(
-    permissionChecks([...wrongEdit, done].join("\n"), S, "secret-1", true)
+test("the fence canary takes only a permission or sandbox refusal as refused, and the read-before-write rule only after a denied Read", () => {
+  const failing = (lines: string[]) =>
+    permissionChecks([...lines, done].join("\n"), F, "secret-1", after)
       .filter((c) => !c.ok)
-      .map((c) => c.name),
+      .map((c) => c.name);
+  // Another tool error proves nothing about the fence
+  assert.deepEqual(
+    failing(
+      attempts.map((l) =>
+        l === result("e", unread, true)
+          ? result("e", "<tool_use_error>String to replace not found in file.</tool_use_error>", true)
+          : l,
+      ),
+    ),
+    ["Edit tool edits the sentinel"],
+  );
+  // The rule counts only when the Edit came after the Read's denial had come back
+  const editFirst = [
+    ...attempts.slice(0, 2),
+    use("e", "Edit", { file_path: S }),
+    result("e", unread, true),
+    use("r", "Read", { file_path: S }),
+    deniedEv("r"),
+    ...attempts.slice(6),
+  ];
+  assert.deepEqual(failing(editFirst), ["Edit tool edits the sentinel"]);
+  // Write stopped by the rule instead of the permission check proves nothing
+  assert.deepEqual(
+    failing(
+      attempts.map((l) =>
+        l ===
+        result(
+          "w",
+          "<tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>",
+          true,
+        )
+          ? result("w", unread, true)
+          : l,
+      ),
+    ),
+    ["Write tool creates a file beside the sentinel"],
+  );
+  // An Edit of the sentinel that went through fails, whatever else held
+  assert.deepEqual(
+    failing(
+      attempts.map((l) => (l === result("e", unread, true) ? result("e", "The file has been updated.") : l)),
+    ),
     ["Edit tool edits the sentinel"],
   );
 });
@@ -1515,9 +1566,10 @@ test("a run whose claude cannot start is still recorded with the reason, and the
       },
     ]),
   );
+  // The canary ran where claude could not start either: no version on either side
   fs.writeFileSync(
     path.join(build, "canary.json"),
-    JSON.stringify({ passed: true, model: "m", runner: runnerDigest() }),
+    JSON.stringify({ passed: true, model: "m", runner: runnerDigest(), claude: "" }),
   );
   // A slot repository that clones, with its .tools
   const slot = path.join(build, "eval-shelf-1");

@@ -146,6 +146,18 @@ export const runEnv = (parent: NodeJS.ProcessEnv): Record<string, string> =>
   Object.fromEntries(RUN_ENV.flatMap((k) => (parent[k] === undefined ? [] : [[k, parent[k] as string]])));
 
 /**
+ * The Claude Code that runs: a canary vouches for the host it ran on, since a host update can change what stops a tool call. Empty when
+ * claude cannot be started, which matches no canary.
+ */
+export function claudeVersion(): string {
+  try {
+    return execFileSync("claude", ["--version"], { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
  * The runner's own code, as one hash: a canary vouches for the code that ran it, so a change to how runs are fenced or set up needs a new
  * canary before more runs start.
  */
