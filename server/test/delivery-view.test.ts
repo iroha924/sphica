@@ -95,6 +95,13 @@ test("counts the project's logged rows in the period by event, outcome, and main
     "| session_start | emitted | 1 | 0 | 1 | 1 | 2 |",
   ]);
   assert.ok(!out.includes("elsewhere"), out);
+  // The limits say how rows without an agent id were counted, the subagent start included
+  assert.ok(
+    out.includes(
+      "- Rows without an agent id count as main, as the host reported them, except a subagent start logged without one: subagent, id unknown.",
+    ),
+    out,
+  );
 });
 
 test("ranks records by sessions, then deliveries, and names the events they came through", async () => {

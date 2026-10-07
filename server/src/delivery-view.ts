@@ -33,7 +33,7 @@ export const DELIVERY_LIMITS_TEXT = [
   "A session's rows are dropped once its last delivery is older than 90 days, so a long period is not a rolling window.",
   "The text delivered then is not kept, only the record ids: a record shown now may have changed since.",
   "Outcomes suppressed and unavailable are not written today, so only emitted and nothing appear.",
-  "Rows without an agent id count as main, as the host reported them.",
+  "Rows without an agent id count as main, as the host reported them, except a subagent start logged without one: subagent, id unknown.",
 ];
 
 const CLOSING =

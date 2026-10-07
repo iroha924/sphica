@@ -40,6 +40,16 @@ base: main
   - コミット: `test(acceptance): cover the delivery view (T07)`
   - 結果: `SPHICA_ACCEPTANCE_LAYER=overview bun run acceptance` → driver を直す前は overview-06 が `overview lacks "## Logged delivery rows"` で落ち（delivery を look として呼んでいた）、直した後は overview-01〜06 が pass。`bun run verify` → 0 で終わる
 
+- [x] T08: 限界の節の main / subagent の説明を、id の無い subagent の開始の例外に合わせる
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す限界の文が要る）
+  - 変更: `server/src/delivery-view.ts`, `server/test/delivery-view.test.ts`
+  - red: `cd server && node --test --test-timeout=60000 --test-name-pattern="counts the project" test/delivery-view.test.ts` → 限界の行が「subagent, id unknown」の例外に触れていないことで落ちる
+  - 完了条件: `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 全件 pass、限界の行が例外を書いている
+  - コミット: `fix(overview): state the subagent-start exception in the delivery view's limits (T08)`
+  - 結果: red: `cd server && node --test --test-timeout=60000 --test-name-pattern="counts the project" test/delivery-view.test.ts` → 直す前は限界の行が見つからず AssertionError で落ちた。直した後 `cd server && node --test --test-timeout=60000 test/delivery-view.test.ts` → 5 件 pass。`bun run verify` → 0 で終わる
+
 - [ ] T02: 言及の判定（Stop の返信の候補を取り、key の前後の境界を確かめる）
   - 種別: 追加
   - 計画: S2
@@ -93,3 +103,4 @@ PR ブランチで持ち主が試し、採用なら同じバージョンに上�
 - 2026-10-07 / T01 / reader の接続は sum と group_concat を呼べない（`server/src/sqlite.ts` の READER_FUNCTIONS） / 件数は SQL で値ごとにまとめ、合計は TypeScript で出した
 - 2026-10-07 / T01, T06 / pre-commit の bundle の検査が、パッケージの入力を変えるコミットにバージョンの更新を同じコミットで求める（過去のブランチも最初のコミットで上げている） / T01 の変更欄に 4 つのマニフェストを足し（前: delivery-view の 2 ファイル）、計画欄を S1 から S1, S6 にして 0.6.40 に上げた。plan の S6・S7 を直した（plan の変更履歴）。T06 の計画欄は S6, S7 から S6。ブランチで上げても npm には出ない（出すのは tag の release だけ）。T06 は変えるファイルが無くなったので取りやめ、S6・S7 の試用・merge・release は 12 段目で完了条件 A5・A6 として確かめる
 - 2026-10-07 / T07 / knowledge-schema Skill が新しい挙動には受け入れケースを先に足すよう求めている / overview の層に delivery のケースを足す T07 を T01 の後に追加
+- 2026-10-07 / T01 / Codex のタスクごとのレビュー（dac61df9）: P3 で、限界の節が id の無い行をすべて main と言い切り、reason subagent の開始を subagent, id unknown に数える集計と食い違う（delivery-view.ts で確認、受理） / 修正タスク T08 を足した
