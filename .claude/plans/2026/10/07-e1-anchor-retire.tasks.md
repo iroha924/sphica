@@ -44,14 +44,15 @@ revision 12 の表 `unit_anchor_retirement` ができ、ingest が書け、forge
 
 持ち主の引用で anchor を退かせられ、read が退いた anchor を理由付きで出す。
 
-- [ ] T03: glean に retire_anchor と from.role を足し、検査を実行順で行い、retire と replace の理由を保存する
+- [x] T03: glean に retire_anchor と from.role を足し、検査を実行順で行い、retire と replace の理由を保存する
   - 種別: 追加
   - 計画: S3
   - 依存: T02（ingest が理由を書ける権限が要る）
-  - 変更: `server/src/glean.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
+  - 変更: `server/src/glean.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `plugin/skills/glean/SKILL.md`
   - red: 受け入れのケースを先に足して `bun run acceptance` → retire_anchor のケースが未知の op の拒否で失敗
   - 完了条件: `cd server && node --test --test-timeout=60000 test/extract.test.ts` → pass。retire の成功、owner 以外の引用の拒否、引用の不一致、再退去の拒否、role での特定と曖昧な組の拒否、同じ anchor への二重の操作の拒否、入力が replace A→B・retire B の順でも通る、理由の挿入の失敗で退去も rollback、唯一の evidence anchor を退かせたら candidate、replace_anchor も理由を残す、のテストを含む。`bun run acceptance` → pass
   - コミット: `feat(glean): retire an anchor on the owner's words, and keep the reason`
+  - 結果: red: glean-19 を足して実装前に流すと、save が「ops.0.op: Invalid discriminator value」で拒否され失敗。実装後 `node --test test/extract.test.ts` → 38 pass / 0 fail（新しいテストで、owner 以外・引用の不一致・no live anchor・2 本ある組の内訳付き拒否・同じ anchor への二重操作の拒否、replace→retire の入力順でも通る、理由の保存、唯一の evidence を退かせて candidate、保存時の理由の拒否で退去も rollback）。`bun run acceptance` → 132 pass。`npm test`（server 全体）→ 961 pass（下の記録の 1 件を除く）。`bun run check` → exit 0
 
 - [ ] T04: read で退いた anchor を理由付きの履歴として出す
   - 種別: 追加
@@ -84,3 +85,6 @@ CLAUDE.md・AGENTS.md・`.claude/rules`・SKILL.md へのパスだけの applies
 ## 記録
 
 - 2026-10-07 / T01 / 新しい表を足すと、forget の接続が source の削除からの cascade を authorizer で拒否し、server のテスト 23 件が落ちた。ingest の revision の trigger 一覧（INGEST_TRIGGER_WRITES）も新しい trigger を求める / forget の削除許可と trigger 一覧の追加を T02 から T01 に移した。T01 の変更欄: 前 db-write.ts なし → 後 db-write.ts あり。T02 は ingest の挿入許可と forget の件数とテストを担う
+- 2026-10-07 / T01・T02 / Codex のタスクごとのレビュー（0d2ed77f、0f1fc74f）は指摘 0 件。Codex 側は sandbox で一時ディレクトリを作れず、テストは走らせていない / 採ることなし
+- 2026-10-07 / T03 / pairs の検査が glean の Skill の op 表に retire_anchor を求めた / Skill の retire_anchor の行を T06 から T03 に移した。T03 の変更欄: 前 Skill なし → 後 `plugin/skills/glean/SKILL.md` あり
+- 2026-10-07 / T03 / server 全体のテストで record.test の「rename limit」が 5 回中 2 回失敗し、単独では毎回通った。git の rename 検出の時間が負荷で延びるためと推測（未検証）。今回の変更は read と rename の経路に触れていない / 直さずに残す

@@ -4538,6 +4538,61 @@
       ]
     },
     {
+      "id": "glean-19",
+      "layer": "glean",
+      "lang": "ja",
+      "summary": "The owner's words retire an anchor with nothing in its place, and the record keeps its state",
+      "given": [
+        {
+          "case": "capture-01"
+        },
+        {
+          "session": {
+            "id": "s-ja-glean19",
+            "at": "2026-04-02T09:00:00+09:00",
+            "turns": [
+              {
+                "owner": "保存先の決定は open に付けなくていい。外して。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "glean": {
+          "session": "s-ja-glean19",
+          "record": {
+            "ops": [
+              {
+                "op": "retire_anchor",
+                "unit": "trace:s-ja-storage/storage",
+                "from": {
+                  "path": "src/db.ts",
+                  "symbol": "open"
+                },
+                "source": "session:s-ja-glean19#1.owner",
+                "quote": "保存先の決定は open に付けなくていい。外して。"
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "retired_anchor_kept": {
+            "of": "trace:s-ja-storage/storage",
+            "symbol": "open"
+          }
+        },
+        {
+          "unit": "trace:s-ja-storage/storage",
+          "lifecycle": "active"
+        }
+      ]
+    },
+    {
       "id": "reconcile-01",
       "layer": "reconcile",
       "lang": "ja",
