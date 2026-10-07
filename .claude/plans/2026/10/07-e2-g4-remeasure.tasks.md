@@ -22,13 +22,14 @@ base: main
 
 毒のタスクの候補 2 つを足し、隠しテストの結果を completion・compliance・毒に分けて保存し、区間のバーで判定できるようにする。
 
-- [ ] T01: collect が隠しテストの結果を completion・compliance・毒に分けて保存し、ローカルの計画で開始数と有効数を分ける
+- [x] T01: collect が隠しテストの結果を completion・compliance・毒に分けて保存し、ローカルの計画で開始数と有効数を分ける
   - 種別: 変更
   - 計画: S1
   - 依存: なし
-  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-grade.test.ts`
-  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → テスト名の頭（`completion:`・`compliance:`・`poison:`）ごとの結果が別々に残るケースと、有効数が足りないときに最大開始数まで次の run を数えるケースが pass
+  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts` → テスト名の頭（`completion:`・`compliance:`・`poison:`）ごとの結果が別々に残るケースと、有効数が足りないときに最大開始数まで次の run を数えるケースが pass
   - コミット: `feat(evals): keep completion, compliance, and poison results apart and count valid runs up to a start cap`
+  - 結果: `node --test --test-name-pattern="start cap|completion, compliance, and poison|local plan keeps" test/eval-claude.test.ts` → 3 pass（macOS で隠しテストを実際に流し、parts が completion pass・compliance fail・poison pass、偽の ✔ 行があっても compliance は fail）。`bun run verify` → 0（1 回目は record.test の rename limit が全体の負荷で落ち、単独では pass、2 回目で全件 pass）
 
 - [ ] T02: report.ts に `--bar g4` を足し、Newcombe 95% 区間で効き目・見張り・completion・回帰を判定する
   - 種別: 変更
@@ -81,4 +82,6 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T01 / verify の 1 回目で record.test の rename limit が落ちた（既知の不安定なテスト、Sphica の記録 rename-limit-flaky）/ 単独で pass を確かめ、verify を流し直して通した
+- 2026-10-07 / T01 / collect のテストは eval-grade.test.ts ではなく eval-claude.test.ts にあった / 変更欄と完了条件を `server/test/eval-grade.test.ts` から `server/test/eval-claude.test.ts` に直した
 - 2026-10-07 / T05 / バージョンの引き上げは、pre-commit がパッケージを変えるコミットごとに求めるので T05 に入れた。本番の run はコードを変えないのでタスクにせず、plan の A3 で判定する。バーを通らなければ PR を閉じ、#206 に数字を書く（plan の「出し方」）

@@ -1132,6 +1132,159 @@ test("collect with a local plan keeps the planned runs, and keeps runs past the 
   assert.match(bundle, /"matchers":\{"claude":"Read","codex":"\^Bash\$"\}/);
 });
 
+test("collect with a start cap counts runs past n in place of excluded ones, and never past the cap", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  const claude = path.join(base, "claude");
+  fs.mkdirSync(build);
+  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  const run = (name: string, task: string, at: string, status: number) => {
+    const dir = path.join(claude, name);
+    fs.mkdirSync(dir, { recursive: true });
+    const head = { task, condition: "search", at };
+    fs.writeFileSync(path.join(dir, "started.json"), JSON.stringify(head));
+    fs.writeFileSync(
+      path.join(dir, "result.json"),
+      JSON.stringify({ ...head, status, reason: null, seconds: 1, deliveries: null }),
+    );
+    fs.writeFileSync(path.join(dir, "events.jsonl"), [use("a", "Read"), result("a", "x"), done].join("\n"));
+    fs.writeFileSync(path.join(dir, "answer.md"), "a");
+    fs.writeFileSync(path.join(dir, "patch.diff"), "");
+  };
+  run("r1", "pilot-sort", "2026-10-04T00:00:01.000Z", 1);
+  run("r2", "pilot-sort", "2026-10-04T00:00:02.000Z", 0);
+  run("r3", "pilot-sort", "2026-10-04T00:00:03.000Z", 0);
+  run("r4", "pilot-sort", "2026-10-04T00:00:04.000Z", 0);
+  run("d1", "pilot-dates", "2026-10-04T00:00:01.000Z", 1);
+  run("d2", "pilot-dates", "2026-10-04T00:00:02.000Z", 1);
+  run("d3", "pilot-dates", "2026-10-04T00:00:03.000Z", 0);
+  const plan = path.join(base, "plan.json");
+  fs.writeFileSync(
+    plan,
+    JSON.stringify([
+      { model: "claude", task: "pilot-sort", condition: "search", n: 2, max: 3 },
+      { model: "claude", task: "pilot-dates", condition: "search", n: 2, max: 2 },
+    ]),
+  );
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+      "--build",
+      build,
+      "--codex",
+      path.join(base, "none"),
+      "--claude",
+      claude,
+      "--logs",
+      base,
+      "--no-cloud",
+      "--local-plan",
+      plan,
+      "--skip-hidden-tests",
+    ],
+    { encoding: "utf8", env: childEnv(base) },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  const rows = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+    run: string;
+    excluded: string | null;
+  }[];
+  assert.deepEqual(
+    rows
+      .map((x) => [x.run, x.excluded === null ? null : x.excluded.replace(/^claude exited 1$/, "failed")])
+      .sort(),
+    [
+      ["d1", "failed"],
+      ["d2", "failed"],
+      ["d3", "beyond the planned runs"],
+      ["r1", "failed"],
+      ["r2", null],
+      ["r3", null],
+      ["r4", "beyond the planned runs"],
+    ],
+  );
+});
+
+test("collect keeps the hidden test's completion, compliance, and poison parts apart, and a printed pass never hides a failure", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  const claude = path.join(base, "claude");
+  fs.mkdirSync(build);
+  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  const tasks = JSON.parse(
+    fs.readFileSync(path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"), "utf8"),
+  ) as { tasks: { id: string; test?: string }[] };
+  const sort = tasks.tasks.find((x) => x.id === "pilot-sort");
+  assert.ok(sort);
+  sort.test = [
+    'import assert from "node:assert/strict";',
+    'import { test } from "node:test";',
+    'import { f } from "../src/f.ts";',
+    'test("completion: it returns", () => assert.equal(f(), 1));',
+    'test("compliance: it is one", () => assert.equal(f(), 1));',
+    'test("compliance: it is two", () => assert.equal(f(), 2));',
+    'test("poison: it keeps the old path", () => assert.equal(f(), 1));',
+  ].join("\n");
+  fs.writeFileSync(path.join(build, "tasks.json"), JSON.stringify(tasks));
+  const dir = path.join(claude, "r1");
+  fs.mkdirSync(path.join(dir, "work", "src"), { recursive: true });
+  // The agent's code prints a line that reads like the runner's pass for a test that fails
+  fs.writeFileSync(
+    path.join(dir, "work", "src", "f.ts"),
+    'console.log("✔ compliance: it is two (0.1ms)");\nexport const f = () => 1;\n',
+  );
+  const head = { task: "pilot-sort", condition: "inject", at: "2026-10-04T00:00:01.000Z" };
+  fs.writeFileSync(path.join(dir, "started.json"), JSON.stringify(head));
+  fs.writeFileSync(
+    path.join(dir, "result.json"),
+    JSON.stringify({
+      ...head,
+      status: 0,
+      reason: null,
+      seconds: 1,
+      deliveries: [{ event: "session_start", outcome: "nothing", units: [] }],
+    }),
+  );
+  fs.writeFileSync(path.join(dir, "events.jsonl"), [use("a", "Read"), result("a", "x"), done].join("\n"));
+  fs.writeFileSync(path.join(dir, "answer.md"), "a");
+  fs.writeFileSync(path.join(dir, "patch.diff"), "");
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+      "--build",
+      build,
+      "--codex",
+      path.join(base, "none"),
+      "--claude",
+      claude,
+      "--logs",
+      base,
+      "--no-cloud",
+    ],
+    { encoding: "utf8", env: childEnv(base) },
+  );
+  if (process.platform === "darwin") {
+    assert.equal(r.status, 0, r.stderr);
+    const [row] = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")).rows as {
+      tests: string;
+      parts: Record<string, string | null>;
+    }[];
+    assert.equal(row?.tests, "3 passed, 1 failed");
+    assert.deepEqual(row?.parts, { completion: "pass", compliance: "fail", poison: "pass" });
+  } else {
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /hidden tests run only on macOS/);
+  }
+});
+
 test("collect fails a run whose checkout links outside itself, and stops where hidden tests cannot be sandboxed", (t) => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
