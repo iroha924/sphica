@@ -112,6 +112,16 @@ base: main
   - コミット: `fix(evals): take the canary's CLI version at its start and refuse an unknown one`
   - 結果: red: canary.json の claude が "" で claude の無い PATH の claude.ts がゲートを通り、拒否の文言が出ずに失敗。修正後 `node --test --test-name-pattern="Claude Code|cannot start|could not be set up|canary" test/eval-claude.test.ts` → 11 pass。canary は始めにバージョンを取り、終わりにも同じかを host の検査で確かめる。claude を起動できない場合のテストは runClaude を直接呼ぶ形にした。`bun run verify` → 0（1 回目は rename limit、2 回目は judge budget の時間のテストが裏の評価の run の負荷で落ち、どちらも単独では pass、3 回目で全件 pass）
 
+- [x] T13: claude を起動できない場合のテストで、HOME も一時ディレクトリにする（T12 のレビューの F1）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T12（直す対象のテストが要る）
+  - 変更: `server/test/eval-claude.test.ts`
+  - red: `cd server && HOME=<失敗する post-checkout フックを core.hooksPath に置いた一時ディレクトリ> node --test --test-name-pattern="cannot start" test/eval-claude.test.ts` → 中の git clone がフックで失敗し、理由が「claude could not start」にならずに落ちる
+  - 完了条件: `cd server && HOME=<同じ一時ディレクトリ> node --test --test-name-pattern="cannot start" test/eval-claude.test.ts` → pass
+  - コミット: `test(evals): keep the no-claude run's HOME temporary`
+  - 結果: red: 失敗する post-checkout フックを core.hooksPath に置いた HOME で、中の git clone が失敗してテストが落ちた。修正後、同じ HOME で pass（テストの間だけ process.env を childEnv に差し替え、終わったら戻す）。`bun run verify` → 0
+
 - [ ] T04: 予備の run（old、両案 × 両モデル、各 10 有効、最大 14 開始）で案と主のモデルを選び、選ばなかった案を外して凍結する
   - 種別: 変更
   - 計画: S2
@@ -143,6 +153,7 @@ hook の配信を、採用か、owner・maintainer・trace の報告でない AI
 
 ## 記録
 
+- 2026-10-07 / T13 / T12 のレビュー F1（runClaude を直接呼ぶテストが持ち主の HOME のまま、P2）を受理して足した
 - 2026-10-07 / T12 / T11 のレビュー F1（バージョンを終わりの時点で取る、P2）と F2（空のバージョンどうしが一致してゲートを通る、P2）を受理して足した。claude を起動できない場合のテストは、CLI のゲートで止まるので runClaude を直接呼ぶ形にする
 - 2026-10-07 / T11 / 対照（checkout の中の未読の Edit は read-before-write で止まる）を入れて流すと、未読の Edit が通った。制約は、作業ディレクトリの中の読めるファイルには効かない。前に「Read なしの Edit は必ず止まる」と持ち主に伝えたのは誤りだった。Codex と突き合わせて対照を外し、厳密な B とバージョンの照合を残した / 完了条件を変えた。前:「run の中の対照（未読の Edit は read-before-write で止まり、Read の後の Edit は通る）が無いと不合格」、新:「Edit が通ったら不合格」
 - 2026-10-07 / T11 / 予備の run の build で canary が落ちた。Claude Code 2.1.292 で Write と Edit が権限の判定より先に read-before-write で止まり、canary が拒否と数えない（番兵は変わらず、Bash は sandbox で拒否）。Codex と突き合わせて、Write は新しいファイル、Edit は Read の拒否の後の read-before-write に限って拒否と数え、run の中の対照とバージョンの照合を足すことにした / T11 を足し、T04 の依存に T11 を足した（前: T02, T03）

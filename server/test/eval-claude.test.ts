@@ -1599,9 +1599,11 @@ test("a run whose claude cannot start is still recorded with the reason", async 
     fs.symlinkSync(found, path.join(bin, tool));
   }
   const out = path.join(build, "runs");
-  // claude.ts would stop at the canary's gate first, since a host with no claude has no version; the runner itself records the failure
-  const saved = process.env.PATH;
-  process.env.PATH = bin;
+  // claude.ts would stop at the canary's gate first, since a host with no claude has no version; the runner itself records the failure.
+  // The runner reads this process's environment, so it gets the child's: a temporary home and none of the owner's Sphica paths
+  const saved = { ...process.env };
+  for (const k of Object.keys(process.env)) delete process.env[k];
+  Object.assign(process.env, childEnv(build), { PATH: bin });
   try {
     await runClaude({
       build,
@@ -1615,7 +1617,8 @@ test("a run whose claude cannot start is still recorded with the reason", async 
       model: "m",
     });
   } finally {
-    process.env.PATH = saved;
+    for (const k of Object.keys(process.env)) delete process.env[k];
+    Object.assign(process.env, saved);
   }
   const [run] = fs.readdirSync(out);
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
