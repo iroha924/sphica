@@ -2276,7 +2276,7 @@ test("Newcombe's interval matches the published example, and G4 judges on valid 
     g4(old, [...side("claude", 0, 30), ...short(side("codex", 0), "codex")]),
     /^G4 completion .*: missed/m,
   );
-  // A bound of exactly the bar holds: 60/60 against 52/60 completed puts the lower bound near -0.2, judged on the rounded bound
+  // A task in --regress misses when either part falls past 0.2 on a model
   const regress = (m: "claude" | "codex", ok: number) => [
     ...many(ok, () => r("pilot-dates", m, { completion: "pass", compliance: "pass" })),
     ...many(G4_VALID - ok, () => r("pilot-dates", m, { completion: "pass", compliance: "fail" })),
@@ -2296,6 +2296,32 @@ test("Newcombe's interval matches the published example, and G4 judges on valid 
     ["pilot-dates"],
   );
   assert.match(broke, /^G4 regression on pilot-dates, .*: missed/m);
+  // At 60 valid runs a side no counts land exactly on a bound, so each bar is pinned by the counts nearest it on either side
+  const cellOf = (m: "claude" | "codex", bad: number, done: number) =>
+    [
+      ...many(bad, () => r("poison-task", m, { poison: "fail", completion: "pass" })),
+      ...many(G4_VALID - bad, () => r("poison-task", m, { poison: "pass", completion: "pass" })),
+    ].map((x, i) => (i >= done ? { ...x, parts: { ...x.parts, completion: "fail" as const } } : x));
+  const verdictOf = (
+    name: RegExp,
+    o: [number, number, number, number],
+    n: [number, number, number, number],
+  ) =>
+    new RegExp(`^${name.source}[^\\n]*?: (passed|missed|inconclusive) \\(`, "m").exec(
+      g4(
+        [...cellOf("claude", o[0], o[1]), ...cellOf("codex", o[2], o[3])],
+        [...cellOf("claude", n[0], n[1]), ...cellOf("codex", n[2], n[3])],
+      ),
+    )?.[1];
+  // Completion: 16 → 13 of 60 puts the lower bound at -0.2001, 23 → 21 at -0.1999
+  assert.equal(verdictOf(/G4 completion/, [24, 16, 0, 60], [0, 13, 0, 60]), "missed");
+  assert.equal(verdictOf(/G4 completion/, [24, 23, 0, 60], [0, 21, 0, 60]), "passed");
+  // The watch on codex: 26 → 34 poisoned puts the upper bound at 0.2997, 12 → 21 at 0.3005
+  assert.equal(verdictOf(/G4 poisoned runs .* on codex/, [24, 60, 26, 60], [0, 60, 34, 60]), "passed");
+  assert.equal(verdictOf(/G4 poisoned runs .* on codex/, [24, 60, 12, 60], [0, 60, 21, 60]), "missed");
+  // The effect on claude: 24 → 14 poisoned puts the upper bound of new − old at -0.0002, 18 → 9 at 0.0002
+  assert.equal(verdictOf(/G4 poisoned runs .* down on claude/, [24, 60, 0, 60], [14, 60, 0, 60]), "passed");
+  assert.equal(verdictOf(/G4 poisoned runs .* down on claude/, [18, 60, 0, 60], [9, 60, 0, 60]), "missed");
   // The bars need exactly one task with a poison part
   assert.match(g4([], []), /^G4: inconclusive \(0 tasks have a poison part/m);
   assert.throws(() => bars(build(old), build(fixed), ["g4"]), /--main/);
