@@ -444,3 +444,45 @@ test("a review is never given a superseded or withdrawn record, while an active 
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("review selection keeps delivery's own rule: a location-free record in a conflict is selected but not delivered", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "No mongoClient. No rabbitClient. Use rabbitClient." });
+    const dont = (key: string, quote: string, option: string) =>
+      decided(key, m, quote, { stance: "dont", options: [{ text: option, outcome: "rejected" }] });
+    await save(db, p, {
+      units: [
+        dont("no-mongo", "No mongoClient.", "mongoClient"),
+        dont("no-rabbit", "No rabbitClient.", "rabbitClient"),
+      ],
+    });
+    await save(db, p, {
+      units: [decided("use-rabbit", m, "Use rabbitClient.", { conflicts: ["trace:ext-s1/no-rabbit"] })],
+    });
+    fs.writeFileSync(
+      path.join(repo, "src", "db.ts"),
+      "export const open = () => mongoClient ?? rabbitClient;\n",
+    );
+    const text = await deliver(
+      {
+        session_id: crypto.randomUUID(),
+        cwd: repo,
+        hook_event_name: "UserPromptExpansion",
+        expansion_type: "slash_command",
+        command_name: "review",
+        command_args: "",
+        prompt: "/review",
+      },
+      "claude-code",
+      db.file,
+    );
+    assert.match(text, /trace:ext-s1\/no-mongo/);
+    assert.doesNotMatch(text, /no-rabbit/);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

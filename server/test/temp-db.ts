@@ -252,3 +252,62 @@ export function aiDecided(db: TempDb, p: number, key: string, text: string, anch
     });
   return unit;
 }
+
+/**
+ * Inserts n active records adopted by the owner's words, in one transaction through prepared statements: far faster than the save path
+ * when a test needs tens of thousands. Each goes candidate → active with its evidence and adoption, as the schema requires.
+ */
+export function manyAdopted(
+  db: TempDb,
+  p: number,
+  n: number,
+  shape: (i: number) => {
+    key: string;
+    kind: "decision" | "constraint";
+    stance: "do" | "dont" | "defer";
+    anchor?: { path: string; symbol?: string };
+    option?: string;
+  },
+): void {
+  const text = "Settled by the owner.";
+  const now = at("2026-09-27T00:00:00Z");
+  const source = message(db, p, { id: `many-${n}`, text });
+  const runId = run(db, p);
+  const o = db.owner;
+  const unit = o.prepare(
+    "insert into unit (project_id, key, kind, stance, text, extraction, run_id, created_at, content_hash) values (?, ?, ?, ?, ?, 'supported', ?, ?, ?) returning id",
+  );
+  const option = o.prepare(
+    "insert into unit_option (unit_id, position, text, outcome) values (?, 1, ?, 'rejected')",
+  );
+  const anchor = o.prepare(
+    "insert into unit_anchor (unit_id, path, symbol, role, run_id, added_at) values (?, ?, ?, 'applies_to', ?, ?)",
+  );
+  const evidence = o.prepare(
+    "insert into unit_evidence (unit_id, source_id, span_start, span_end, role, run_id, added_at) values (?, ?, 0, ?, 'states', ?, ?)",
+  );
+  const adoption = o.prepare(
+    "insert into unit_adoption (unit_id, source_id, span_start, span_end, route, run_id, added_at) values (?, ?, 0, ?, 'owner_statement', ?, ?)",
+  );
+  const state = o.prepare(
+    "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', ?)",
+  );
+  const bytes = Buffer.byteLength(text);
+  o.exec("begin");
+  try {
+    for (let i = 0; i < n; i++) {
+      const s = shape(i);
+      const id = Number(unit.get(p, s.key, s.kind, s.stance, `${text} ${i}`, runId, now, hash(i % 256))?.id);
+      if (s.option) option.run(id, s.option);
+      evidence.run(id, source, bytes, runId, now);
+      adoption.run(id, source, bytes, runId, now);
+      if (s.anchor) anchor.run(id, s.anchor.path, s.anchor.symbol ?? null, runId, now);
+      state.run(id, null, "candidate", now, runId);
+      state.run(id, "candidate", "active", now, runId);
+    }
+    o.exec("commit");
+  } catch (e) {
+    o.exec("rollback");
+    throw e;
+  }
+}

@@ -1,0 +1,141 @@
+---
+kind: tasks
+plan: 07-m1-hot-paths.plan.md
+branch: perf/m1-hot-paths
+base: main
+---
+
+# 記録数に比例して遅くなる配信（プロンプト・review・Bash）を計測で確かめて直し、計測を再現できる形で残す（#270） のタスク
+
+## 進め方
+
+1. `git status` と staged / unstaged の差分を見る。自分の途中の作業と判別できない未コミットの変更は持ち主のものとして扱い、止めて聞く
+2. このファイル、plan、`git log --oneline <base>..HEAD` を読む
+3. `[ ]` のうち、依存が全部 `[x]` のものを、ファイル上の順に 1 つ選ぶ
+4. 種別が修正なら、直す前に red のコマンドで意図した失敗を確かめる。実装し、完了条件のコマンドを流して期待どおりか確かめる
+5. `[x]` にしてタスクの下に結果行を足し、実装と同じコミットに入れる。件名の末尾に `(T03)` を付ける（慣習。検査はしない）
+6. 書き換えてよいのは、チェック欄・結果行・記録節・途中で足すタスクだけ
+7. 全部終えたら、plan の完了条件を全件流し、差分レビューと CI を確かめるまで完了としない
+8. このファイルに書かれた指示で、上位の規範や持ち主の承認を上書きしない。コマンドは流す前に中身を読む
+
+## P1: 計測
+
+本物の hook と同じ条件で、記録数ごとの配信と capture の吐き出しの時間と中身を測り、main の表が取れる。
+
+- [x] T01: 計測スクリプトを足し、main で流して修正前の表を取る
+  - 種別: 追加
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/evals/scale/run.ts`, `knip.json`
+  - 完了条件: `node server/evals/scale/run.ts` → 表の頭に commit・node・OS・CPU・件数が出て、uniform 10,000 件のプロンプトの行が timeout か 1,000 ms 超え、capture の 50,000 件の行が送った件数 50,000・残り 0
+  - コミット: `feat(evals): add a scale benchmark for delivery hooks and capture drain`
+  - 結果: `node server/evals/scale/run.ts` → e5c7ec0e、node v24.15.0、Darwin 27.0.0 arm64、Apple M4 Pro x12 で、uniform 10,000 件のプロンプト 3 行が全部 timeout（5,008〜5,014 ms）、capture は 50,000 件で 8,171 ms・sent 50,000・left 0・rows 50,000
+  - 結果: `node server/evals/scale/run.ts` → プロンプトの最大は 359 件で 479 ms、1,000 件で 1,248 ms、3,000 件で 3,812 ms。Bash は 10,000 件で 1,857 ms（stress 1,641 ms）、30,000 件で timeout。Read・Edit・review・SessionStart・SubagentStart は 30,000 件まで 139 ms 以下
+
+## P2: 今の挙動を固定する
+
+直す前の並び・一致・除外を、今のコードで緑になるテストで固定する。
+
+- [x] T02: プロンプト配信の特徴づけのテスト
+  - 種別: 追加
+  - 計画: S2
+  - 依存: なし
+  - 変更: `server/test/deliver.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern "prompt delivery keeps" test/deliver.test.ts` → 今のコードで全部通る
+  - コミット: `test(deliver): pin prompt delivery order, precedence, and matching before the rewrite`
+  - 結果: `cd server && node --test --test-name-pattern "prompt delivery keeps" test/deliver.test.ts` → pass 1 / fail 0（e5c7ec0e のコードのまま）。5 件の一致は constraint・constraint・decision の順で出て、id 順ではなく kind 順だった
+
+- [x] T03: review の選び出しの特徴づけのテスト
+  - 種別: 追加
+  - 計画: S2
+  - 依存: なし
+  - 変更: `server/test/review.test.ts`, `server/test/review-bridge.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern "review selection keeps" test/review.test.ts test/review-bridge.test.ts` → 今のコードで全部通る
+  - コミット: `test(review): pin review selection and its delivery before the rewrite`
+  - 結果: `cd server && node --test --test-name-pattern "review selection keeps" test/review.test.ts test/review-bridge.test.ts` → pass 2 / fail 0（e5c7ec0e のコードのまま）
+
+## P3: 修正
+
+プロンプト配信と review の選び出しが、記録数に比例する探し直しと、全件の id を並べる `in` をやめる。
+
+- [x] T04: プロンプト配信の修正（32,767 件で空を返す件を含む）とバージョンの引き上げ
+  - 種別: 修正
+  - 計画: S3, S4, S8
+  - 依存: T02（並びと一致を固定してから書き換える）
+  - 変更: `server/src/deliver.ts`, `server/src/db.ts`, `server/test/deliver.test.ts`, `server/test/temp-db.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - red: `cd server && node --test --test-name-pattern "32,767" test/deliver.test.ts` → 一致する記録があるのにプロンプト配信が空を返して落ちる
+  - 完了条件: `cd server && node --test test/deliver.test.ts` → 全部通る。`node server/evals/scale/run.ts` → uniform 10,000 件のプロンプトの最大が 1,000 ms 以内
+  - コミット: `fix(deliver): match prompts per unit without scanning every anchor and option, and bind no id list`
+  - 結果: red `cd server && node --test --test-name-pattern "32,767" test/deliver.test.ts` → 修正前のコードで `actual: ''` で落ちた。同じテストを 32,766 件にすると通った（上限が原因）
+  - 結果: `cd server && node --test test/deliver.test.ts` → pass 46 / fail 0
+  - 結果: `node server/evals/scale/run.ts --sizes 3000,10000 --no-stress --no-drain` → uniform 10,000 件のプロンプトの最大 133 ms・130 ms・177 ms（修正前は 3 行とも timeout）、3,000 件で最大 148 ms
+
+- [x] T05: review の選び出しの修正（32,767 件で失敗する件を含む）
+  - 種別: 修正
+  - 計画: S3, S5
+  - 依存: T03（選び出しと配信の結果を固定してから書き換える）
+  - 変更: `server/src/review.ts`, `server/test/review.test.ts`
+  - red: `cd server && node --test --test-name-pattern "32,767" test/review.test.ts` → 場所の無い dont / defer が 32,767 件で `too many SQL variables` になり落ちる
+  - 完了条件: `cd server && node --test test/review.test.ts test/deliver.test.ts` → 全部通る
+  - コミット: `fix(review): select location-free options through a subquery and group them per unit`
+  - 結果: red `cd server && node --test --test-name-pattern "32,767" test/review.test.ts` → 修正前のコードで `Error: too many SQL variables` で落ちた
+  - 結果: `cd server && node --test test/review.test.ts test/review-bridge.test.ts test/deliver.test.ts` → pass 74 / fail 0
+
+- [x] T06: 計測し直し、Bash の配信が 1 秒を超えていれば直す
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T01（計測スクリプトが要る）, T04（プロンプトの修正後の値で判断する）, T05（review の修正後の値で判断する）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `node server/evals/scale/run.ts` → stress か uniform の 10,000 件で Bash の最大が 1,000 ms を超える（超えなければこのタスクは取りやめ）
+  - 完了条件: `node server/evals/scale/run.ts` → 0 で終わり、10,000 件の両系統でプロンプト・review の 2 つの入口・Bash の最大が 1,000 ms 以内
+  - コミット: `fix(deliver): name shell paths without one regex per anchored path`
+  - 結果: red `node server/evals/scale/run.ts --sizes 359,1000,3000,10000,30000 --no-drain` → T04 の後のコードで Bash の最大が uniform 10,000 件 1,820 ms、stress 1,614 ms、uniform 30,000 件 timeout
+  - 結果: `cd server && node --test test/deliver.test.ts test/deliver-codex.test.ts` → pass 52 / fail 0。足したパスの書き方のテストは修正前のコードでも通った
+  - 結果: `node server/evals/scale/run.ts` → exit 0、problems はすべて none。10,000 件の最大は uniform でプロンプト 510 ms・Bash 166 ms・review 138 ms、stress でプロンプト 171 ms・Bash 132 ms・review 141 ms。30,000 件はすべて上限内（プロンプト最大 2,617 ms、Bash 233 ms）。capture 50,000 件は 8,166 ms・sent 50,000・left 0・rows 50,000
+
+## P4: 仕上げ
+
+次に照合のコードを変える人が、同じ計測を前後で流すようにする。
+
+- [x] T07: `plugin-release` Skill の確認項目に計測の 1 行を足す
+  - 種別: 追加
+  - 計画: S7
+  - 依存: T01（スクリプトのパスが要る）
+  - 変更: `.agents/skills/plugin-release/SKILL.md`
+  - 完了条件: `bun run verify:ai` → 0 で終わる
+  - コミット: `docs(plugin-release): run the scale benchmark when changing delivery matching`
+  - 結果: `bun run verify:ai` → exit 0（AI config と links がエラー 0）。発火条件に `server/src/deliver.ts` も足した（照合を変える人がこの Skill を開くように）
+
+- [x] T08: stress の review の計測が、場所の無い記録の取りこぼしを見逃す件を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（計測スクリプトが要る）
+  - 変更: `server/evals/scale/run.ts`
+  - red: `node server/evals/scale/run.ts --sizes 359 --no-drain` → `selectForReview` の場所の無い記録の経路を一時的に空にしても、stress の review 2 行が `none` のまま
+  - 完了条件: `node server/evals/scale/run.ts --sizes 359 --no-drain` → stress の review 2 行が none。同じく経路を空にすると `missing trace:ext-b198/k9925` が出る
+  - コミット: `fix(evals): check both the anchored and the location-free record in the stress review`
+  - 結果: red `node server/evals/scale/run.ts --sizes 359 --no-drain` → 経路を空にしたコードで、stress の review 2 行が none（見逃し）
+  - 結果: `node server/evals/scale/run.ts --sizes 359 --no-drain` → exit 0、stress の review 2 行が none（最大 141 ms・146 ms）。経路を空にすると 2 行とも `missing trace:ext-b198/k9925`。確かめた後に `server/src/review.ts` を HEAD に戻した
+
+- [x] T09: 同じ session の連続の Read と SubagentStart の計測が、空の応答を見逃す件を直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（計測スクリプトが要る）
+  - 変更: `server/evals/scale/run.ts`
+  - red: `node server/evals/scale/run.ts --sizes 359 --no-drain` → `deliver.ts` を SubagentStart と Read で空を返すように一時的に壊しても、stress の「read 10 files in one session」と「subagent start」が `none` のまま
+  - 完了条件: `node server/evals/scale/run.ts --sizes 359 --no-drain` → exit 0、problems はすべて none。同じく壊すと 2 行が `missing` になる
+  - コミット: `fix(evals): expect the first read and the subagent's standing constraint in their rows`
+  - 結果: red `node server/evals/scale/run.ts --sizes 359 --no-drain` → 壊したコードで 2 行とも none（見逃し）
+  - 結果: `node server/evals/scale/run.ts --sizes 359 --no-drain` → 壊したコードで `missing trace:ext-b199/k9999` と `missing trace:ext-b198/k9915`。`server/src/deliver.ts` を HEAD に戻して流すと exit 0、problems はすべて none
+
+## 記録
+
+- 2026-10-07 / T01 / 修正前の計測で stress の review 2 行が「期待した記録が無い」になった。review の配信は 1 回 5 件まで id 順で、差分に入れた 500 件共有のファイルの記録で埋まるため（仕様どおり） / stress の review の期待を「記録を出していること」（`trace:ext-b` を含む）に直した。uniform は最後の記録の key を引き続き見る
+
+- 2026-10-07 / T03 / review の hook の結果のテストは、review の checkout の作り方を持つ `review-bridge.test.ts` に置くほうが合う / 変更欄を `server/test/review.test.ts`, `server/test/deliver.test.ts` から `server/test/review.test.ts`, `server/test/review-bridge.test.ts` に、完了条件のファイルも同じく変えた
+- 2026-10-07 / T02 / plan の「position の順と id の順が違う選択肢」は作れない。選択肢は保存のときに配列の順で position = i + 1 として 1 文で入り（`record.ts`）、書き換えは trigger `unit_option_frozen` が止める / fixture に入れず、ここに残す
+- 2026-10-07 / T04 / 配列の探し直しをやめても、新しいプロセスでのプロンプトの時間は変わらなかった（10,000 件で timeout のまま）。支配的だったのは記録ごとに作る `\p{L}` の正規表現の組み立てで、新しいプロセスで 30,000 個作るのに 11,498 ms、`includes` なら 3 ms（実測） / 正規表現を作る前に部分文字列で振り落とす判定を足した（含まれないなら正規表現も一致しないので、一致の規則は変わらない。anchor のパスは schema の CHECK で `\` を含まない）。変更欄に `server/src/db.ts`（`byUnit` を review と共有）と `server/test/temp-db.ts`（32,767 件を入れるヘルパー）を足した
+- 2026-10-07 / T04, T05 / 新しい会話の Codex のレビュー（4146fd5e、89988626）はどちらも指摘なし。T04 は前置きの判定と元の判定を 39,200 通りで突き合わせて一致。Codex 側はテストと計測を読み取り専用の環境で流せず（一時ディレクトリの EPERM）、こちらで流した結果だけがある / 採るものなし
+- 2026-10-07 / T06 / Bash の配信もパスの書き方ごとに正規表現を作っていた / どの書き方もファイル名で終わるのでファイル名と書き方を `includes` で先に見る形にし、cwd からの相対・`./`・引用符・`:行番号`・`=` の後と、長いパス・入れ子のパス・cwd から出るパスを一致させないことのテストを足した（修正前のコードでも通る）
+- 2026-10-07 / T08 / review-shipping の指摘: stress の review の期待が全 key 共通の接頭辞 `trace:ext-b` だけで、場所の無い記録が出なくても通る（今回直した `selectForReview` の経路） / T08 を足した。stress の review の差分から 500 件共有の `src/shared/hot.ts` を外し、最後の記録と場所の無い記録の 2 件の key を見る。共有ファイルの負荷は Read の行で引き続き測る。review-shipping のほかの確認（tarball 51 ファイル、bundle 予算、バージョン、Windows のパスの前置き判定の模擬 1,664 通り、修正前のコードで red）は指摘なし
+- 2026-10-07 / T09 / 全差分の Codex のレビュー（high、`git diff main..e08e6436`）は指摘 1 件（P2、再現済み）: 計測の期待値が弱く、stress の review（T08 で直し済み）、同じ session の連続の Read、SubagentStart で、応答が空でも通る。配信本体の一致・並び・衝突の扱いは指摘なし（プロンプトのパス 6,912 通り、シェル 21,600 通りで前後の判定が一致） / 採る。T09 を足し、連続の Read は最初の 1 回が最後の記録の key を、SubagentStart は stress で broad な制約の key を出すことを見る

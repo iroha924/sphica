@@ -2,7 +2,7 @@
 // A record applies when the diff changes a path it is anchored to, or, for a record with no code location that says not to do something
 // (or to defer it), when an added line names one of its options. Candidates and superseded records never apply.
 import { authorityOf } from "./authority.ts";
-import type { Reads } from "./db.ts";
+import { byUnit, type Reads } from "./db.ts";
 import { inline } from "./panel.ts";
 import { head, sha256 } from "./text.ts";
 
@@ -159,7 +159,7 @@ export async function selectForReview(
   const added = files.flatMap((f) =>
     f.added.map((l) => ({ path: f.path, text: l.normalize("NFKC").toLowerCase() })),
   );
-  const free = await live
+  const locationFree = live
     .where("u.stance", "in", ["dont", "defer"])
     .where(({ not, exists, selectFrom }) =>
       not(
@@ -170,23 +170,21 @@ export async function selectForReview(
             .where("a.retired_at", "is", null),
         ),
       ),
-    )
-    .select(["u.id", "u.revision", "u.key", "u.kind", "u.stance", "u.text"])
-    .execute();
-  const options = free.length
-    ? await db
-        .selectFrom("unit_option")
-        .select(["unit_id", "text"])
-        .where(
-          "unit_id",
-          "in",
-          free.map((u) => u.id),
-        )
-        .execute()
-    : [];
+    );
+  // Their options by subquery, grouped per record: a list of every location-free id would pass SQLite's limit on bound values
+  const [free, options] = await Promise.all([
+    locationFree.select(["u.id", "u.revision", "u.key", "u.kind", "u.stance", "u.text"]).execute(),
+    db
+      .selectFrom("unit_option")
+      .select(["unit_id", "text"])
+      .where("unit_id", "in", locationFree.select("u.id"))
+      .orderBy("id")
+      .execute()
+      .then(byUnit),
+  ]);
   for (const u of free) {
     if (out.has(u.id)) continue;
-    for (const o of options.filter((x) => x.unit_id === u.id && x.text.trim().length >= 3)) {
+    for (const o of (options.get(u.id) ?? []).filter((x) => x.text.trim().length >= 3)) {
       const name = o.text.normalize("NFKC").toLowerCase();
       const hit = added.find((l) => l.text.includes(name));
       if (hit) {

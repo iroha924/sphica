@@ -7,7 +7,7 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { AI_DEPARTURE, parseDiff, reviewBatch, selectedText, selectForReview } from "../src/review.ts";
 import { checkedText, checkFindings } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
-import { aiDecided, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
+import { aiDecided, manyAdopted, message, project, run, type TempDb, tempDb } from "./temp-db.ts";
 
 async function save(db: TempDb, p: number, record: unknown) {
   const t: Target = {
@@ -665,6 +665,118 @@ test("review_select marks an AI's decision and says a departure from it needs on
     } finally {
       await owner.done();
     }
+  } finally {
+    await db.done();
+  }
+});
+
+test("review selection keeps which location-free records apply, in id order, and which option and line it names", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "No mongoClient. No kafkaClient. No natsClient. No rabbitClient. Use rabbitClient. Keep one SQLite file.",
+    });
+    const dont = (key: string, quote: string, options: string[], extra = {}) => ({
+      key,
+      kind: "decision",
+      stance: "dont",
+      text: quote,
+      evidence: [{ source: `s${m}`, quote, role: "states" }],
+      adoption: [{ source: `s${m}`, quote }],
+      options: options.map((text) => ({ text, outcome: "rejected" })),
+      ...extra,
+    });
+    await save(db, p, {
+      units: [
+        // Two options on the added lines: the first one saved is named
+        dont("two-options", "No mongoClient.", ["mongoClient", "redisClient"]),
+        // Any live anchor, even one that only shows where it was done, takes a record out of the location-free set
+        dont("evidence-anchor", "No kafkaClient.", ["kafkaClient"], {
+          anchors: [{ path: "src/queue.ts", role: "evidence" }],
+        }),
+        // A record whose only anchor is retired is location-free again
+        dont("retired-anchor", "No natsClient.", ["natsClient"], {
+          anchors: [{ path: "src/bus.ts", role: "applies_to" }],
+        }),
+        dont("conflicted", "No rabbitClient.", ["rabbitClient"]),
+        {
+          key: "storage",
+          kind: "decision",
+          stance: "do",
+          text: "Keep one SQLite file.",
+          evidence: [{ source: `s${m}`, quote: "Keep one SQLite file.", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "Keep one SQLite file." }],
+          anchors: [{ path: "src/db.ts", role: "applies_to" }],
+        },
+      ],
+    });
+    // Selection does not hold back records in a conflict: that is delivery's rule, applied after it
+    await save(db, p, {
+      units: [
+        {
+          key: "use-rabbit",
+          kind: "decision",
+          stance: "do",
+          text: "Use rabbitClient.",
+          evidence: [{ source: `s${m}`, quote: "Use rabbitClient.", role: "states" }],
+          adoption: [{ source: `s${m}`, quote: "Use rabbitClient." }],
+          conflicts: ["trace:ext-s1/conflicted"],
+        },
+      ],
+    });
+    db.owner
+      .prepare("update unit_anchor set retired_at = ? where path = 'src/bus.ts'")
+      .run(new Date().toISOString());
+    const files = [
+      {
+        path: "src/a.ts",
+        added: ["const c = redisClient ?? mongoClient;", "natsClient.connect();"],
+        lines: [1, 2],
+      },
+      { path: "src/b.ts", added: ["kafkaClient(); rabbitClient(); natsClient();"], lines: [1] },
+      { path: "src/db.ts", added: ["open();"], lines: [1] },
+    ];
+    assert.deepEqual(
+      (await selectForReview(db.reader, p, files)).map((u) => [u.key, u.because]),
+      [
+        ["trace:ext-s1/two-options", "an added line in src/a.ts names the option mongoClient"],
+        ["trace:ext-s1/retired-anchor", "an added line in src/a.ts names the option natsClient"],
+        ["trace:ext-s1/conflicted", "an added line in src/b.ts names the option rabbitClient"],
+        ["trace:ext-s1/storage", "anchored to src/db.ts"],
+      ],
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("review selection still finds a location-free record when 32,767 of them exist, past SQLite's limit on bound values", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const n = 32_767;
+    // Only the last one has an option: the list that overflowed held every location-free record, with or without options
+    manyAdopted(db, p, n, (i) => ({
+      key: `trace:ext-s1/r${i}`,
+      kind: "decision",
+      stance: i % 2 ? "dont" : "defer",
+      ...(i === n - 1 ? { option: "lastVendorClient" } : {}),
+    }));
+    const free = db.owner
+      .prepare(
+        "select count(*) as n from unit u where project_id = ? and lifecycle = 'active' and stance in ('dont', 'defer') and not exists (select 1 from unit_anchor a where a.unit_id = u.id and a.retired_at is null)",
+      )
+      .get(p)?.n;
+    assert.equal(free, n);
+    const hits = await selectForReview(db.reader, p, [
+      { path: "src/x.ts", added: ["const c = lastVendorClient();"], lines: [1] },
+    ]);
+    assert.deepEqual(
+      hits.map((u) => [u.key, u.because]),
+      [[`trace:ext-s1/r${n - 1}`, "an added line in src/x.ts names the option lastVendorClient"]],
+    );
   } finally {
     await db.done();
   }

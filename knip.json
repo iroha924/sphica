@@ -24,7 +24,8 @@
         "evals/cloud/report.ts",
         "evals/asked/run.ts",
         "evals/order/run.ts",
-        "evals/retrieval/run.ts"
+        "evals/retrieval/run.ts",
+        "evals/scale/run.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
       "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook", "markdownlint-cli2"],

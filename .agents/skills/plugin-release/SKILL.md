@@ -7,7 +7,7 @@ description: Ships changes to Sphica's MCP servers, CLI, capture and delivery ho
 
 ## Triggers
 
-- Changing `server/src/mcp.ts`, `server/src/cli.ts`, `server/src/capture.ts`, or modules they import
+- Changing `server/src/mcp.ts`, `server/src/cli.ts`, `server/src/capture.ts`, `server/src/deliver.ts`, or modules they import
 - Changing `plugin/hooks/hooks.json`
 - Changing `plugin/skills/`
 - Bumping the shipped version, or publishing to npm
@@ -40,6 +40,11 @@ named `mcp__plugin_sphica_<server>__<tool>`, and a Skill's `allowed-tools` lists
 `plugin/mcp/codex.json`.
 
 npm's `bin` is for the `sphica` command users get from `npm i -g`; **there is no contract that exposes it on the PATH inside the plugin**.
+
+## Delivery hook speed
+
+A delivery hook runs in a fresh `node` process per call under a 5-second limit, and there building a pattern costs far more than matching one.
+A change to the matching in `server/src/deliver.ts` or `server/src/review.ts` runs `node server/evals/scale/run.ts` before and after the change and puts both tables in the PR body.
 
 ## Adding dependencies
 
