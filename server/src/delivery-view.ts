@@ -1,6 +1,8 @@
 // The delivery view of MCP overview: what the delivery hooks logged for one project over a period, for the owner to judge each record shown.
 // The log keeps record ids, never the text delivered then, so records are named by key and read as they are now.
+import type { ExpressionBuilder } from "kysely";
 import { iso, type Reads } from "./db.ts";
+import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
 import { READ_BUDGET } from "./read.ts";
@@ -34,10 +36,31 @@ export const DELIVERY_LIMITS_TEXT = [
   "The text delivered then is not kept, only the record ids: a record shown now may have changed since.",
   "Outcomes suppressed and unavailable are not written today, so only emitted and nothing appear.",
   "Rows without an agent id count as main, as the host reported them, except a subagent start logged without one: subagent, id unknown.",
+  "named later: a captured reply of the same session, after the delivery, writes the key whole (questions asked with AskUserQuestion are not counted). An agent may use a record without naming it, naming it does not mean it helped, a reply may be missing, cut, or redacted in capture, and it may come from any agent of the session.",
 ];
 
 const CLOSING =
   "Read a record by its key or u<id> before relying on it. Change a record only through /sphica:trace, with the owner's words.";
+
+/** Characters a key goes on with on its left, and on its right; a dot on the right ends a sentence unless a key character follows it */
+const BEFORE_KEY = /[A-Za-z0-9_./:-]/;
+const AFTER_KEY = /[A-Za-z0-9_/-]/;
+/** A question asked with AskUserQuestion, captured as the assistant's message: not a reply */
+const QUESTION = /:ask:.*:q:/s;
+
+/** Whether text writes key whole: not as part of a longer key or word on either side. */
+export function namesKey(text: string, key: string): boolean {
+  for (let i = text.indexOf(key); i !== -1 && key; i = text.indexOf(key, i + 1)) {
+    const before = text[i - 1];
+    const after = text[i + key.length];
+    const next = text[i + key.length + 1];
+    const goesOn =
+      after !== undefined &&
+      (AFTER_KEY.test(after) || (after === "." && next !== undefined && AFTER_KEY.test(next)));
+    if ((before === undefined || !BEFORE_KEY.test(before)) && !goesOn) return true;
+  }
+  return false;
+}
 
 /** The delivery view's body for overview, held with its frame within READ_BUDGET. now is the end of the period. */
 export async function deliveryOverview(
@@ -164,6 +187,59 @@ export async function deliveryOverview(
         .execute()
     : [];
 
+  const byDelivery = new Map<number, { id: number; key: string }[]>();
+  for (const k of keys) byDelivery.set(k.delivery_id, [...(byDelivery.get(k.delivery_id) ?? []), k]);
+  // Replies are fetched only when they hold a key's text; whether one names the key whole is judged here
+  const replies = () =>
+    db
+      .selectFrom("source as m")
+      .where("m.kind", "=", "session_message")
+      .where("m.author_kind", "=", "assistant")
+      .where("m.created_at", "<", to);
+  const holding = (keys: string[]) => (eb: ExpressionBuilder<DB & { m: DB["source"] }, "m">) =>
+    eb.or(keys.map((k) => eb(eb.fn("instr", ["m.text", eb.val(k)]), ">", 0)));
+  const reply = (r: { external_id: string }) => !QUESTION.test(r.external_id);
+
+  // Each displayed record, over every session it was delivered in, from its first delivery there
+  const namedIn = new Map<number, number>();
+  for (const t of top) {
+    const found = await replies()
+      .innerJoin(
+        delivered()
+          .where("du.unit_id", "=", t.id)
+          .select((f) => ["d.session_id", f.fn.min<string>("d.at").as("first")])
+          .groupBy("d.session_id")
+          .as("f"),
+        (j) => j.onRef("f.session_id", "=", "m.session_id"),
+      )
+      .whereRef("m.created_at", ">=", "f.first")
+      .where(holding([t.key]))
+      .select(["m.session_id", "m.external_id", "m.text"])
+      .execute();
+    namedIn.set(
+      t.id,
+      new Set(found.filter((r) => reply(r) && namesKey(r.text, t.key)).map((r) => r.session_id)).size,
+    );
+  }
+  // Each example delivery, from its own time
+  const later = new Map<string, { created_at: string; text: string }[]>();
+  for (const s of shown) {
+    const wanted = [...new Set(s.list.flatMap((d) => (byDelivery.get(d.id) ?? []).map((k) => k.key)))];
+    const since = s.list[0]?.at;
+    if (since && wanted.length)
+      later.set(
+        s.session.id,
+        (
+          await replies()
+            .where("m.session_id", "=", s.session.id)
+            .where("m.created_at", ">=", since)
+            .where(holding(wanted))
+            .select(["m.external_id", "m.created_at", "m.text"])
+            .execute()
+        ).filter(reply),
+      );
+  }
+
   const counts = countTable(groups);
   const fixedTop = [
     `# Delivery log of the last ${days} day${days === 1 ? "" : "s"}`,
@@ -193,19 +269,22 @@ export async function deliveryOverview(
   for (const v of via) events.set(v.unit_id, [...(events.get(v.unit_id) ?? []), v.event]);
   const topLines: string[] = [];
   for (const t of top) {
-    const line = `- ${head(inline(t.key), DELIVERY_LIMITS.key)} (u${t.id}, ${t.kind}, ${t.lifecycle} now): ${t.sessions} session${Number(t.sessions) === 1 ? "" : "s"}, ${t.deliveries} deliver${Number(t.deliveries) === 1 ? "y" : "ies"}, via ${(events.get(t.id) ?? []).join(", ")}`;
+    const line = `- ${head(inline(t.key), DELIVERY_LIMITS.key)} (u${t.id}, ${t.kind}, ${t.lifecycle} now): ${t.sessions} session${Number(t.sessions) === 1 ? "" : "s"}, ${t.deliveries} deliver${Number(t.deliveries) === 1 ? "y" : "ies"}, via ${(events.get(t.id) ?? []).join(", ")}; named later in ${namedIn.get(t.id) ?? 0} of those sessions`;
     if (!fit([line])) break;
     topLines.push(line);
   }
   const recordsLeft = Number(units?.n ?? 0) - topLines.length;
 
-  const byDelivery = new Map<number, { id: number; key: string }[]>();
-  for (const k of keys) byDelivery.set(k.delivery_id, [...(byDelivery.get(k.delivery_id) ?? []), k]);
   const sessionParts: string[] = [];
   let sessionsShown = 0;
   for (const s of shown) {
     const heading = `### ${inline(s.session.host)} session ${head(inline(s.session.external_id), DELIVERY_LIMITS.session)}${s.session.branch ? ` (branch ${head(inline(s.session.branch), DELIVERY_LIMITS.path)})` : ""}, last delivery ${s.session.last}`;
-    const lines = s.list.map((d) => deliveryLine(d, byDelivery.get(d.id) ?? []));
+    const replies = later.get(s.session.id) ?? [];
+    const lines = s.list.map((d) =>
+      deliveryLine(d, byDelivery.get(d.id) ?? [], (key) =>
+        replies.some((r) => r.created_at >= d.at && namesKey(r.text, key)),
+      ),
+    );
     if (!lines.length || !fit([heading, lines[0] ?? ""])) break;
     const part = [heading, lines[0] ?? ""];
     let n = 1;
@@ -282,12 +361,16 @@ function countTable(
 function deliveryLine(
   d: { at: string; event: string; agent_id: string | null; reason: string | null; path: string | null },
   units: { id: number; key: string }[],
+  namedLater: (key: string) => boolean,
 ): string {
   const w = who(d.agent_id !== null, d.event, d.reason);
   const agent = w === "subagent" && d.agent_id ? ` ${head(inline(d.agent_id), DELIVERY_LIMITS.agent)}` : "";
   const named = units
     .slice(0, DELIVERY_LIMITS.keys)
-    .map((u) => `${head(inline(u.key), DELIVERY_LIMITS.key)} (u${u.id})`)
+    .map(
+      (u) =>
+        `${head(inline(u.key), DELIVERY_LIMITS.key)} (u${u.id}${namedLater(u.key) ? ", named later" : ""})`,
+    )
     .join(", ");
   const more = units.length > DELIVERY_LIMITS.keys ? ` (+${units.length - DELIVERY_LIMITS.keys} more)` : "";
   return `- ${d.at} ${d.event}, ${w}${agent}${d.path ? ` ${head(inline(d.path), DELIVERY_LIMITS.path)}` : ""}: ${named}${more}`;

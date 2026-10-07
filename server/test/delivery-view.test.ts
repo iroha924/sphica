@@ -3,11 +3,11 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { iso } from "../src/db.ts";
-import { DELIVERY_LIMITS, DELIVERY_LIMITS_TEXT, deliveryOverview } from "../src/delivery-view.ts";
+import { DELIVERY_LIMITS, DELIVERY_LIMITS_TEXT, deliveryOverview, namesKey } from "../src/delivery-view.ts";
 import { framed } from "../src/frame.ts";
 import { READ_BUDGET } from "../src/read.ts";
 import { bytes } from "../src/text.ts";
-import { hash, insert, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
+import { hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
 
 const NOW = new Date("2026-10-07T00:00:00Z");
 const ago = (hours: number) => iso(NOW.getTime() - hours * 60 * 60 * 1000);
@@ -120,9 +120,9 @@ test("ranks records by sessions, then deliveries, and names the events they came
   const out = await deliveryOverview(db.reader, p, 7, NOW);
   const lines = out.split("\n").filter((l) => l.startsWith("- trace:"));
   assert.deepEqual(lines.slice(0, 3), [
-    `- trace:s1/wide (u${wide}, decision, candidate now): 2 sessions, 2 deliveries, via pre_edit, pre_read`,
-    `- trace:s1/often (u${often}, finding, candidate now): 1 session, 3 deliveries, via pre_read, prompt`,
-    `- trace:s1/once (u${once}, finding, candidate now): 1 session, 1 delivery, via pre_read`,
+    `- trace:s1/wide (u${wide}, decision, candidate now): 2 sessions, 2 deliveries, via pre_edit, pre_read; named later in 0 of those sessions`,
+    `- trace:s1/often (u${often}, finding, candidate now): 1 session, 3 deliveries, via pre_read, prompt; named later in 0 of those sessions`,
+    `- trace:s1/once (u${once}, finding, candidate now): 1 session, 1 delivery, via pre_read; named later in 0 of those sessions`,
   ]);
 });
 
@@ -160,6 +160,66 @@ test("shows the most recent sessions with each delivery's time, event, agent, pa
   );
   // A delivery that logged no record is counted, not listed
   assert.ok(!examples.includes(ago(1)), examples);
+});
+
+test("a key counts as named only when written whole, not inside a longer key or word", () => {
+  const key = "trace:s/foo";
+  assert.equal(namesKey("trace:s/foo", key), true);
+  assert.equal(namesKey("See `trace:s/foo` first.", key), true);
+  assert.equal(namesKey("It follows trace:s/foo.", key), true);
+  assert.equal(namesKey("(trace:s/foo), and so on", key), true);
+  assert.equal(namesKey("xtrace:s/foo", key), false);
+  assert.equal(namesKey("trace:s/foo-bar", key), false);
+  assert.equal(namesKey("trace:s/foo.bar", key), false);
+  assert.equal(namesKey("trace:s/foo/bar", key), false);
+  // A longer key first, then the key itself
+  assert.equal(namesKey("trace:s/foo-bar, then trace:s/foo", key), true);
+});
+
+test("named later counts a session once, only from a captured reply after the delivery and before the period ends", async () => {
+  const db = fresh();
+  const p = project(db);
+  const [s1, s2] = [session(db, p, "s1"), session(db, p, "s2")];
+  const foo = unit(db, p, "trace:s/foo");
+  delivery(db, s1, { at: ago(5), units: [foo] });
+  delivery(db, s2, { at: ago(4), units: [foo] });
+  const say = (s: string, id: string, hours: number, text: string) =>
+    message(db, p, { id, text, speaker: "assistant", sent: ago(hours), session: s });
+  say(s1, "t0:assistant:a", 6, "Before it: trace:s/foo."); // before the delivery
+  say(s1, "t1:ask:tu1:q:b", 4.5, "Keep trace:s/foo?"); // a question, not a reply
+  say(s1, "t1:assistant:c", 4, "Per xtrace:s/foo and trace:s/foo-bar."); // only longer text
+  say(s1, "t2:assistant:d", 3, "`trace:s/foo` applies here.");
+  say(s1, "t3:assistant:e", 2, "Again trace:s/foo.");
+  say(s2, "u1:assistant:f", 3.5, "Only trace:s/foo-bar.");
+  say(s2, "u2:assistant:g", -1, "After the period: trace:s/foo.");
+
+  const out = await deliveryOverview(db.reader, p, 7, NOW);
+  assert.ok(
+    out.includes(`: 2 sessions, 2 deliveries, via pre_read; named later in 1 of those sessions`),
+    out,
+  );
+  assert.ok(out.includes(`- ${ago(5)} pre_read, main: trace:s/foo (u${foo}, named later)`), out);
+  assert.ok(out.includes(`- ${ago(4)} pre_read, main: trace:s/foo (u${foo})`), out);
+});
+
+test("an example delivery is marked only by replies after its own time", async () => {
+  const db = fresh();
+  const p = project(db);
+  const s1 = session(db, p, "s1");
+  const foo = unit(db, p, "trace:s/foo");
+  delivery(db, s1, { at: ago(5), units: [foo] });
+  delivery(db, s1, { at: ago(2), event: "pre_edit", units: [foo] });
+  message(db, p, {
+    id: "t1:assistant:a",
+    text: "trace:s/foo holds.",
+    speaker: "assistant",
+    sent: ago(3),
+    session: s1,
+  });
+
+  const out = await deliveryOverview(db.reader, p, 7, NOW);
+  assert.ok(out.includes(`- ${ago(5)} pre_read, main: trace:s/foo (u${foo}, named later)`), out);
+  assert.ok(out.includes(`- ${ago(2)} pre_edit, main: trace:s/foo (u${foo})`), out);
 });
 
 test("an empty period says so, with its limits", async () => {
