@@ -101,6 +101,16 @@ diff で決着しない記録を質問として返す本文に変え、同じ回
   - コミット: `feat(rules): draft a Biome import check for decisions that forbid a direct dependency`
   - 結果: `bun run verify:ai` → 0。M1（m1b、Skill の例を fixture と関係の無い名前にした後、両ホスト各 10 run）→ `node evals/review/rules-grade.ts --report ~/.cache/sphica-eval/review/m1b` で 20 run すべて graded、下書きすべきでない記録への下書き 0・marker の欠け 0・誤った失敗 0・見逃し 0。Claude の 10 run は全部 override に全体の禁止を写し、admin を `!src/ui/admin.ts` で外した。M1 は基準に届いた（採用）。`bun run verify` → exit 0
 
+- [x] T12: 下書きが全体の paths を落とし、module の禁止をファイル名の glob で書く誤りを直す
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T08（直す対象の Skill の節）
+  - 変更: `plugin/skills/rules/SKILL.md`, `server/evals/review/rules-cases.json`, `server/test/review-eval.test.ts`
+  - red: `cd server && node evals/review/rules-grade.ts --report ~/.cache/sphica-eval/review/m1b` → M1 のケース（全体の `paths`・同じ名前の別 module・tsconfig の別名）を足した後、直す前の下書きに誤った失敗（`src/ui/legacy.ts`）と見逃し（`src/ui/alias.ts`、`src/ui/pad.ts`）が出る
+  - 完了条件: `cd server && node evals/review/rules-grade.ts --report ~/.cache/sphica-eval/review/m1c` → 両ホスト各 10 run で、下書きすべきでない記録への下書き・誤った失敗・見逃しが 0
+  - コミット: `fix(rules): copy project-wide bans into overrides and list the imports a module ban covers`
+  - 結果: red: ケースを足した後の `node evals/review/rules-grade.ts --report ~/.cache/sphica-eval/review/m1b` → 直す前の 20 run すべてで誤った失敗 src/ui/legacy.ts、見逃し src/ui/alias.ts・src/ui/pad.ts（と、当時の fixture に paths が無かった src/pad.ts）。直した後の m1c（両ホスト各 10 run）→ 20 run すべて graded、下書きすべきでない記録への下書き 0・marker の欠け 0・誤った失敗 0・見逃し 0。`node --test test/review-eval.test.ts` → pass。`bun run verify` → exit 0
+
 ## P5: #257 の Lifecycle と変更タスクでの比較（M1 が基準に届いたときだけ）
 
 overview が持ち主の挙げた検査ファイルの marker を読み、変更タスクで「ルール文だけ」と比べる。
@@ -113,6 +123,15 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - 完了条件: `cd server && node --test test/overview.test.ts test/rule-files.test.ts` → 一覧のファイルだけを読み、`//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出し、読めなかった・無かった・範囲外の件数と上限・ページ送り・READ_BUDGET を守る
   - コミット: `feat(overview): flag check files whose marker names a replaced record`
   - 結果: `node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass（新しく: 名指した biome.jsonc と checks.toml の `//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出す、名指さないファイルは読まない、無い 1 件・外 2 件を数える、カーソルは別の checks の一覧では続かない、MCP で checks を live に渡すと拒否、symlink で外へ出る検査ファイルと上限を超えるファイルは読まない）。`bun run verify` → exit 0
+- [ ] T13: 検査ファイルの marker を文字列や別の言語のコメントから拾い、instruction ファイルの走査を変え、checks のハッシュが衝突する誤りを直す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T09（直す対象の look の checks）
+  - 変更: `server/src/overview.ts`, `server/src/rule-files.ts`, `server/test/overview.test.ts`, `plugin/skills/rules/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="marker lines only" test/overview.test.ts` → 直す前のコードで、JSON の文字列の中の `// sphica:` と JSONC の HTML コメントを marker として拾い、checks に入れた AGENTS.md のコード例の `// sphica:` を拾い、`["a\u0000b", "c"]` と `["a", "b", "c"]` のカーソルを同じと見なして失敗する
+  - 完了条件: `cd server && node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass
+  - コミット: `fix(overview): read a check file's marker only from a comment line of its own language`
+
 - [ ] T10: M2 のタスク、隠しテスト、patch の違反の判定
   - 種別: 追加
   - 計画: S5
@@ -156,3 +175,6 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T08 / 変更欄に 4 つの manifest を足した（前: rules/SKILL.md、後: それと npm・Claude・Codex・marketplace の版）/ plugin に入るファイルを変えるコミットは pre-commit が版の同期を求める。`release:plan --base v0.6.42` は plugin、0.6.43 に上げた。T11 は最後に版がそろっていることを確かめる
 - 2026-10-08 / T09 / 変更欄に rules/SKILL.md を足した（「Later」に checks の渡し方を書く）/ look が検査ファイルを読むのは checks で名指したときだけなので、Skill に書かないと使われない
 - 2026-10-08 / T08 / Codex のタスクごとのレビュー（8b5ac133）: F1（override に patterns だけを写すと全体の paths の禁止が消える）と F2（module の禁止をファイル名の glob にすると同じ名前の別 module まで禁止し、tsconfig の別名の import を見逃す）を受け入れ、修正タスク T12 を足す
+- 2026-10-08 / T12 / 修正タスクを足した（T08 のレビューの F1・F2）。Biome 2.5.14 で確かめた: import の書き方そのもの（`../db`、`../db.ts`、`@db`）を並べればそれだけが落ち、`../legacy/db.ts` と `./db.ts` は落ちない。写した `paths` は override でも効く。`includes` の `src/ui/*` はすぐ下だけに当たる / M1 のケースを足して流し直す（m1c、各 10 run）
+- 2026-10-08 / T09 / Codex のタスクごとのレビュー（b4b0823c）: F2（文字列の中や別の言語のコメントの marker を拾う）・F3（checks に入れた instruction ファイルの走査が変わる）・F4（NUL で checks のハッシュが衝突する）を受け入れ、修正タスク T13 を足した。F1（複数行のブロックコメントの中の marker を拾えない）は見送る: marker の形を行頭の 1 行のコメントと決めて Skill に書く。言語ごとのコメントの解析を自前で書くと読み落としが出やすい
+- 2026-10-08 / T12 / コミット欄を短くした（前: keep every project-wide ban in an override and name the imports a module ban covers、後: copy project-wide bans into overrides and list the imports a module ban covers）/ 件名の上限 100 文字を超えた

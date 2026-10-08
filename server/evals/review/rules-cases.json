@@ -1,9 +1,11 @@
 {
   "note": "M1 of the E3 plan: whether /sphica:rules drafts a Biome check only for records that forbid a direct dependency, and whether each draft fails on the held-out violations and passes on the harmless files. The records come from cases.json's fixture plus the steps here; picks are what the owner chose; draft must carry a marker, may_mark may (the exception shapes the ui-no-db check); held-out files are never shown to the run.",
   "files": {
-    "biome.json": "{\n  \"linter\": {\n    \"enabled\": true,\n    \"rules\": { \"preset\": \"none\" }\n  }\n}\n",
+    "biome.json": "{\n  \"linter\": {\n    \"enabled\": true,\n    \"rules\": {\n      \"preset\": \"none\",\n      \"style\": {\n        \"noRestrictedImports\": {\n          \"level\": \"error\",\n          \"options\": { \"paths\": { \"left-pad\": \"Use String.prototype.padStart\" } }\n        }\n      }\n    }\n  }\n}\n",
     "src/widgets/badge.ts": "export const badge = (n: number): string => `${n}`;\n",
-    "src/ui/admin.ts": "export const adminTitle = \"Backups\";\n"
+    "src/ui/admin.ts": "export const adminTitle = \"Backups\";\n",
+    "src/legacy/db.ts": "export const legacy = \"the old export format\";\n",
+    "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"baseUrl\": \".\",\n    \"paths\": { \"@db\": [\"./src/db.ts\"] }\n  }\n}\n"
   },
   "steps": [
     {
@@ -163,6 +165,26 @@
       "path": "docs/layers.md",
       "text": "The UI never writes `import { open } from \"../db.ts\"`.\n",
       "fails": false
+    },
+    {
+      "path": "src/ui/legacy.ts",
+      "text": "import { legacy } from \"../legacy/db.ts\";\nexport const old = legacy;\n",
+      "fails": false
+    },
+    {
+      "path": "src/ui/alias.ts",
+      "text": "import { open } from \"@db\";\nexport const viaAlias = open;\n",
+      "fails": true
+    },
+    {
+      "path": "src/ui/pad.ts",
+      "text": "import pad from \"left-pad\";\nexport const padded = pad;\n",
+      "fails": true
+    },
+    {
+      "path": "src/pad.ts",
+      "text": "import pad from \"left-pad\";\nexport const padAll = pad;\n",
+      "fails": true
     }
   ]
 }

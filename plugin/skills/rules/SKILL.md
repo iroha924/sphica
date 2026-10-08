@@ -63,10 +63,14 @@ Print the whole `biome.jsonc` the owner would end up with, in one `jsonc` block:
 
 - **A package anywhere**: `linter.rules.style.noRestrictedImports` with `options.patterns`, each `{ "group": [...], "message": "..." }`.
   The group lists the import and its subpaths (`"moment"`, `"moment/**"`); a package with another name (`moment-timezone`) needs its own entry
-- **Module A must not import module B**: an entry in `overrides` whose `includes` are A (`"src/views/**"`) and `"!<path>"` for each recorded
-  exception, with the same rule and B's patterns (`"**/store.ts"`, `"**/store"`)
-- **An override's options replace the project-wide ones; they do not merge.** Repeat every project-wide pattern in each override, or the
-  files under A lose the project-wide bans
+- **Module A must not import module B**: an entry in `overrides` whose `includes` are A's files (`"src/views/*"`) and `"!<path>"` for each
+  recorded exception, with the same rule and a group of every way a file of A writes the import of B: the relative paths (`"../store"`,
+  `"../store.ts"`) and each alias that points at B (tsconfig `paths`, package.json `imports`; read them). Biome matches the import as
+  written, not the file it resolves to, so a file-name glob (`"**/store.ts"`) also bans every other module of that name. A relative path
+  differs by depth: give each depth of A its own override (`"src/views/*"` with `"../store"`, `"src/views/*/*"` with `"../../store"`).
+  When the ways cannot all be listed, draft none and say why
+- **An override's options replace the project-wide ones; they do not merge.** Copy the project-wide `options` whole (`paths` and
+  `patterns`) into each override, then add to them, or the files under A lose the project-wide bans
 - A line `// sphica: <record key>` right before each pattern or override, for the record it comes from. A record whose exception shapes an
   override gets its own marker before that override
 

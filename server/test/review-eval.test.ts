@@ -368,17 +368,21 @@ test("M1 grades a drafted Biome check on held-out files the run never saw, and c
   }
   const lodash =
     '// sphica: trace:s-rv-ui/no-lodash\n    { "group": ["lodash", "lodash/**"], "message": "Use the standard library" }';
+  // Every way a file directly under src/ui writes the import of src/db.ts: the relative paths and the tsconfig alias
   const db =
+    '// sphica: trace:s-rv-ui/ui-no-db\n    { "group": ["../db", "../db.ts", "@db"], "message": "Go through src/library.ts" }';
+  const byName =
     '// sphica: trace:s-rv-ui/ui-no-db\n    { "group": ["**/db.ts", "**/db"], "message": "Go through src/library.ts" }';
+  const pad = '"paths": { "left-pad": "Use String.prototype.padStart" }';
   const config = (overrides: string, extraMarker = "") => `{
-  "linter": { "enabled": true, "rules": { "preset": "none", "style": { "noRestrictedImports": { "level": "error", "options": { "patterns": [
+  "linter": { "enabled": true, "rules": { "preset": "none", "style": { "noRestrictedImports": { "level": "error", "options": { ${pad}, "patterns": [
     ${lodash}
   ] } } } } },
   "overrides": [${overrides}]${extraMarker}
 }`;
-  const ui = (patterns: string) =>
+  const ui = (patterns: string, paths = `${pad}, `) =>
     `// sphica: trace:s-rl-admin/admin-db-exception
-  { "includes": ["src/ui/**", "!src/ui/admin.ts"], "linter": { "rules": { "style": { "noRestrictedImports": { "level": "error", "options": { "patterns": [
+  { "includes": ["src/ui/*", "!src/ui/admin.ts"], "linter": { "rules": { "style": { "noRestrictedImports": { "level": "error", "options": { ${paths}"patterns": [
     ${patterns}
   ] } } } } } }`;
   const reply = (draft: string) =>
@@ -394,9 +398,15 @@ test("M1 grades a drafted Biome check on held-out files the run never saw, and c
     falseFailures: [],
     missedViolations: [],
   });
-  // An override that does not repeat the project-wide ban lets lodash into src/ui
-  const replaced = grade(draftOf(reply(config(ui(db)))));
-  assert.deepEqual(replaced.missedViolations, ["src/ui/sort.ts"]);
+  // An override that does not copy the project-wide options lets lodash and left-pad into src/ui
+  const replaced = grade(draftOf(reply(config(ui(db, "")))));
+  assert.deepEqual(replaced.missedViolations, ["src/ui/sort.ts", "src/ui/pad.ts"]);
+  // A file-name glob bans another module named db and misses the alias
+  const named = grade(draftOf(reply(config(ui(`${lodash},\n    ${byName}`)))));
+  assert.deepEqual(
+    [named.falseFailures, named.missedViolations],
+    [["src/ui/legacy.ts"], ["src/ui/alias.ts"]],
+  );
   // No exception for the admin screen: a false failure there
   const strict = grade(
     draftOf(reply(config(ui(`${lodash},\n    ${db}`).replace(', "!src/ui/admin.ts"', "")))),
