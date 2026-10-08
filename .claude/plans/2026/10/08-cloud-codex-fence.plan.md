@@ -92,7 +92,7 @@ approved_at: 2026-10-08
    - 残す場所: `node` と `bun` を、link を辿って解決した実体から決める。HOME の下なら、`<HOME>/.local/share/mise/installs/<name>/<version>`（実体が `<root>/bin/<tool>`）か `<HOME>/.bun`（実体が `<HOME>/.bun/bin/bun`）の形のときだけ、その根を丸ごと残す。それ以外の形なら止まる。HOME の外なら根は要らない。見つからない、link の先が無い、読めない、のどれでも止まる
    - deny: HOME から残す根へ向かう途中のディレクトリごとに、残す根でもその祖先でもない項目を全部 deny する（dot-file を含む）。`codexDenies` は `[...repoPlaces(), cache, ...homeDenies]` になる。`DENY_DIRS`・`DENY_FILES` は Claude の run にだけ残す
    - run に渡す PATH: 持ち主の PATH のうち HOME の外の項目と、`node`・`bun` の実体のディレクトリだけにする
-   - 指紋: repo・cache・codex-home・run の auth を役割の名前に置き換えてから、残った `<home>/...` の deny の行を 1 行の `<home-denied>` にまとめ、`policy: home-allowlist-v1` と HOME からの相対で並べた残す根の行を足して hash する。deny の一覧と指紋は run ごとに 1 回だけ作り、設定・result.json・記録で同じものを使う
+   - 指紋: repo・cache・codex-home・run の auth を役割の名前に置き換えてから、残った `<home>/...` の deny の行は落とし（HOME の項目の有無で変わらないように）、`policy: home-allowlist-v1` と HOME からの相対で並べた残す根の行を足して hash する。deny の一覧と指紋は run ごとに 1 回だけ作り、設定・result.json・記録で同じものを使う
    - probe の対象: 走らせる前に HOME の直下に作る token（DENIED。終わったら消す）、deny されたディレクトリを 1 つ（`~/.ssh`・`~/.aws`・`~/.config` のうち最初にあるもの。無ければ walk が deny した最初のディレクトリ）、解決した `node` の実体の先頭 1 バイト（READ。残す根が読めることの対照）
 9. review の評価（`server/evals/review/`）
    - Codex の lane（run.ts・m2.ts）は `codexDenies` と出力先を deny し、checkout・HOME・TMPDIR を 1 つの一時の木に置く。CODEX_HOME・DB・ログは run ディレクトリに置き、`keepCheckout` が一時の木を戻す
@@ -147,3 +147,4 @@ approved_at: 2026-10-08
 
 ## 変更履歴
 - 2026-10-08 / 方針 8・9、手順 S8・S9、完了条件 A7・A8 を足し、対象外から review の評価を外した / PR #306 の GitHub の Codex のレビューで、資格情報を deny の一覧で隠す限界と review の runner のロックが指摘され、持ち主がこの PR で直すと決めた。設計は Codex と 3 往復で合意した（session 01a11bb5-e438-75c1-ae9f-f2e3a3172a4d） / Go: 持ち主の決定（AskUserQuestion）で取得済み
+- 2026-10-08 / 方針 8 の指紋で、HOME の deny の行を 1 行にまとめず落とす形にした / HOME が空のときは行が無く、項目があるときと指紋が食い違った（T19） / Go 不要（方針の範囲の中の作り方）
