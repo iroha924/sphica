@@ -286,7 +286,7 @@ export function oneConfiguration(runs: string, names: string[]): void {
     const file = path.join(runs, n, "result.json");
     if (!fs.existsSync(file)) continue;
     const r = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
-    const config = ["model", "cli", "body_sha256", "server_sha256", "cases_sha256"]
+    const config = ["model", "cli", "body_sha256", "server_sha256", "cases_sha256", "runner_sha256"]
       .map((k) => String(r[k] ?? ""))
       .join(" ");
     const host = String(r.host);

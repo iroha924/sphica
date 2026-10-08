@@ -25,7 +25,14 @@ import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { lookedOutside, oneConfiguration } from "./grade.ts";
 import { loadRulesCases } from "./rules-grade.ts";
-import { codexProfile, evalDenies, outsideCheckout } from "./runner.ts";
+import {
+  codexProfile,
+  evalDenies,
+  keepCheckout,
+  managedCodexSettings,
+  outsideCheckout,
+  runnerDigest,
+} from "./runner.ts";
 
 type Task = { id: string; tempts: "lodash" | "db" | "none"; prompt: string; test: string };
 type M2Cases = { rules: string; check: string; conditions: string[]; tasks: Task[] };
@@ -213,6 +220,7 @@ async function runOne(o: {
     host: o.host,
     condition: o.condition,
     task: o.task.id,
+    runner_sha256: runnerDigest(),
     // The tasks, rule lines, and check the run was given: a later edit of them makes a different measurement
     cases_sha256: crypto.createHash("sha256").update(fs.readFileSync(CASES)).digest("hex"),
   };
@@ -252,6 +260,11 @@ async function runOne(o: {
       );
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
+      const managed = managedCodexSettings();
+      if (managed.length)
+        throw new Error(
+          `administrator settings for Codex can replace the lane's profile: ${managed.join(", ")}`,
+        );
       const codexHome = path.join(dir, "codex-home");
       isolatedCodexHome(
         codexHome,
@@ -295,6 +308,7 @@ async function runOne(o: {
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
+    keepCheckout(work, dir);
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -377,7 +391,7 @@ async function main() {
       condition: { type: "string" },
       task: { type: "string", default: "all" },
       runs: { type: "string", default: "1" },
-      jobs: { type: "string", default: "3" },
+      jobs: { type: "string", default: "1" },
       model: { type: "string", default: "claude-opus-5-5" },
       out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "review", "m2") },
     },
@@ -395,6 +409,8 @@ async function main() {
   // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
   if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
+  // Every M2 lane has a shell, which can read the temp directory where another run's checkout sits while it runs
+  if (jobs > 1) throw new Error("--jobs is 1 for M2: concurrent runs could read each other's checkout");
   const out = path.resolve(args.out ?? "");
   fs.mkdirSync(out, { recursive: true });
   const fixture = await fixtureIn(out);

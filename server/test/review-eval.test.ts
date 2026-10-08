@@ -20,6 +20,7 @@ import {
   codexMcp,
   codexProfile,
   evalDenies,
+  managedCodexSettings,
   READ_TOOLS,
   RULES_BODY,
   reviewPrompt,
@@ -158,12 +159,12 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   const denies = evalDenies("/out");
   assert.ok(denies.includes(path.resolve(import.meta.dirname, "..", "evals")) && denies.includes("/out"));
   assert.ok(denies.includes(path.join(os.homedir(), ".codex")));
-  assert.deepEqual(
-    (
-      claudeSettings(READ_TOOLS, denies) as { sandbox: { filesystem: { denyRead: string[] } } }
-    ).sandbox.filesystem.denyRead.slice(-3),
-    denies,
-  );
+  const denyRead = (claudeSettings(READ_TOOLS, denies) as { sandbox: { filesystem: { denyRead: string[] } } })
+    .sandbox.filesystem.denyRead;
+  assert.ok(denies.every((d) => denyRead.includes(d)));
+  // Codex's profiles read the whole disk unless told otherwise: the owner's other credentials are denied to it too
+  for (const credential of [".aws", ".ssh", ".npmrc"])
+    assert.ok(denies.includes(path.join(os.homedir(), credential)), credential);
   const prompt = reviewPrompt("BODY\n", { ...p, model: "codex" });
   assert.ok(prompt.startsWith("BODY\n"), "the aspect body comes first, in full");
   assert.match(prompt, /Read the file \/w\/\.git\/review\.diff/);
@@ -838,4 +839,45 @@ test("M1 counts a marker only as the comment line the Skill asks for, never insi
   ] } } } } } }`;
   const g = gradeDraft(draftOf(`\`\`\`jsonc\n${draft}\n\`\`\``), repo, cases, tempDir("rules-msg-graded-"));
   assert.deepEqual(g.unmarked, ["trace:s-rv-ui/no-lodash", "trace:s-rv-ui/ui-no-db"]);
+});
+
+test("a Codex lane does not start where an administrator's settings could replace its profile", () => {
+  const etc = tempDir("codex-etc-");
+  const prefs = tempDir("codex-prefs-");
+  assert.deepEqual(managedCodexSettings({ etc, prefs }), []);
+  fs.writeFileSync(path.join(etc, "requirements.toml"), "");
+  fs.mkdirSync(path.join(prefs, "someone"));
+  fs.writeFileSync(path.join(prefs, "someone", "com.openai.codex.plist"), "");
+  assert.equal(managedCodexSettings({ etc, prefs }).length, 2);
+});
+
+test("runs made by different runner code are not tallied as one measurement, and shell lanes run one at a time", () => {
+  const runs = tempDir("review-mixed-");
+  const made: [string, string][] = [
+    ["postgres-codex-2026-10-08T00-00-01-000Z-aaaaaaaa", "r1"],
+    ["postgres-codex-2026-10-08T00-00-02-000Z-bbbbbbbb", "r2"],
+  ];
+  for (const [name, runner] of made) {
+    fs.mkdirSync(path.join(runs, name));
+    fs.writeFileSync(
+      path.join(runs, name, "result.json"),
+      JSON.stringify({ host: "codex", diff: "postgres", runner_sha256: runner }),
+    );
+  }
+  assert.throws(() => gradeAll(runs), /2 settings/);
+  const out = tempDir("review-cli2-");
+  const run = (script: string, ...args: string[]) =>
+    spawnSync(
+      process.execPath,
+      [path.join(import.meta.dirname, "..", "evals", "review", script), ...args, "--out", out],
+      { encoding: "utf8" },
+    );
+  assert.match(
+    run("run.ts", "--host", "codex", "--diff", "all", "--jobs", "2").stderr,
+    /--jobs is 1 for Codex/,
+  );
+  assert.match(
+    run("m2.ts", "--host", "claude", "--condition", "rules", "--jobs", "2").stderr,
+    /--jobs is 1 for M2/,
+  );
 });

@@ -21,13 +21,16 @@ import {
   codexMcp,
   codexProfile,
   evalDenies,
+  keepCheckout,
   type LanePaths,
+  managedCodexSettings,
   outsideCheckout,
   READ_TOOLS,
   RULES_BODY,
   RULES_TOOLS,
   reviewPrompt,
   rulesPrompt,
+  runnerDigest,
 } from "./runner.ts";
 
 const ROOT = path.join(import.meta.dirname, "..", "..", "..");
@@ -44,6 +47,7 @@ type LaneResult = {
   cli: string;
   body_sha256: string;
   server_sha256: string;
+  runner_sha256: string;
   status: number | null;
   reason: string | null;
   seconds: number;
@@ -131,6 +135,7 @@ async function runLane(o: {
     cli: "",
     body_sha256: "",
     server_sha256: "",
+    runner_sha256: runnerDigest(),
     status: null,
     reason: null,
     seconds: 0,
@@ -191,6 +196,11 @@ async function runLane(o: {
       });
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
+      const managed = managedCodexSettings();
+      if (managed.length)
+        throw new Error(
+          `administrator settings for Codex can replace the lane's profile: ${managed.join(", ")}`,
+        );
       const codexHome = path.join(dir, "codex-home");
       isolatedCodexHome(
         codexHome,
@@ -221,6 +231,7 @@ async function runLane(o: {
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
+    keepCheckout(p.work, dir);
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -332,7 +343,7 @@ async function main() {
       diff: { type: "string" },
       runs: { type: "string", default: "1" },
       body: { type: "string" },
-      jobs: { type: "string", default: "4" },
+      jobs: { type: "string", default: "1" },
       model: { type: "string", default: "claude-opus-5-5" },
       out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "review") },
     },
@@ -357,6 +368,9 @@ async function main() {
   // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
   if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
+  // A Codex command can read the temp directory, where another run's checkout sits while it runs; Claude's lanes here have no shell
+  if (host === "codex" && jobs > 1)
+    throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
   if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
   fs.mkdirSync(out, { recursive: true });
   const fixture = await fixtureIn(out, args.rules);

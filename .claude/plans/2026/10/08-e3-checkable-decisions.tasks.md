@@ -228,6 +228,16 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `fix(eval): fence what runs may read, refuse mixed settings, count comment markers only`
   - 結果: Codex の lane は permission profile（`:read-only`、M2 は `:workspace`）で server/evals・出力先・~/.codex・run の auth.json を deny にし、`-s` を外した。checkout は出力先の外（一時ディレクトリ）。Claude の M2 の shell の sandbox にも同じ拒否を足した。`..` の文字列の判定は外した。preflight → ✓（Codex の probe は DENIED cases・outside・auth、READ は 0、MCP は DB に届いた）。M2 を両ホスト 1 run ずつ（check、count）→ 両方 completed、違反 0、Codex は check.mjs を流せた。条件の混在を拒む検査を入れ、予備測定の各ディレクトリはホストごとに 1 つの条件で、これまでどおり採点できた。`node --test test/review-eval.test.ts` → 18 件 pass。`bun run verify` → exit 0
 
+- [x] T22: Codex に持ち主のほかの資格情報と並列の別 run の checkout が読め、管理者の設定で profile が外れ、runner の違う run が混ざる誤りを直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T21（直す対象の囲い）
+  - 変更: `server/evals/review/runner.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/evals/review/grade.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test test/review-eval.test.ts` → T21 のコードでは managedCodexSettings などが無くファイル全体が落ちる（中身: T21 の evalDenies に ~/.aws・~/.ssh・~/.npmrc が無い、--jobs 2 の Codex と M2 を受け付ける、runner の違う run を混ぜて集計する）
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass。`node evals/review/run.ts --preflight` → ✓
+  - コミット: `fix(eval): deny owner credentials, run shell lanes one at a time, refuse managed Codex`
+  - 結果: evalDenies に Claude 側と同じ資格情報の一覧を足した。/etc/codex/requirements.toml か Managed Preferences の com.openai.codex があれば Codex の lane を始めない（この Mac には無い）。shell を持つ lane（Codex の全 lane、M2）は --jobs 1 だけ、終わった checkout は出力先の run のディレクトリへ移す。runner のソースのハッシュを結果に残し、条件の混在の検査に入れた。`node --test test/review-eval.test.ts` → 20 件 pass。preflight → ✓。M2 を両ホスト 1 run ずつ → 両方 completed、違反 0、checkout は run のディレクトリに移った。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-08 / T05 / 欄を変えた。変更（前: plan.json、後: run.ts・cases.json・grade.ts・review-eval.test.ts）、完了条件（前: baseline の本測定と plan.json の回数、後: 予備測定 A と B の report）/ 予備測定で #220 の打ち切りが決まり（plan の変更履歴、持ち主の Go）、本測定の回数を固定するファイルは要らなくなった。予備測定で見つけた直しをこのタスクに入れた: duplicate-names の正解をどの判定でも可に（あいまい）、grade.ts の missed を「正解が violation だけ」のときに限定、run.ts の時間切れでプロセスのグループごと止めて上限を 10 分に
@@ -275,3 +285,4 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T21 / GitHub の Codex（c94bfcd1 のレビュー、持ち主が共有）の 5 件をすべて直した（持ち主の判断「全部直してから merge」）。Codex の読み取りを止める方法は researcher と Codex に並行で調べ、両方とも permission profile の deny と答えた（rust-v0.160.1 のソース）。手元で確かめた: `:root` を deny して必要な場所だけ read にする形は、codex が自分の実行ファイルを起動できず失敗した（親を deny すると子の read が効かない、issue #21081 と同じ形）。deny だけを並べる形で効いた。TOML では default_permissions を表より前に書く必要がある
 - 2026-10-08 / T21 / 気づいたこと: #220 の予備測定の A と A/A で Claude Code が 2.1.293 と 2.1.294 で違っていた（#220 のコメントには書いていない）。main の cloud の評価の Codex の runner（evals/cloud/codex.ts）にも、ログイン情報を読める同じ形が残っている。どちらも持ち主に相談する
 - 2026-10-08 / T21 / M2 の smoke で、2 つのプロセスが同じ出力先に fixture を同時に作ってぶつかった（table sphica_generation already exists）。fixture ができるまで 1 つずつ始める
+- 2026-10-08 / T22 / Codex の T21 のレビュー（c94bfcd1..553e6940、high、資格情報と測定の P1 に絞って依頼）: 4 件とも受け入れた。並列の run どうしを OS の囲いで分ける方法は見つからず（親の deny の下で子を読ませる形が macOS で効かない）、shell を持つ lane を 1 本ずつにした。持ち主から「判断は任せる」をもらい、この直しの後に merge する

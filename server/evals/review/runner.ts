@@ -1,6 +1,7 @@
 // How one precedent lane of the review evaluation is started on each host: the reviewer gets the aspect body as its prompt, Read / Grep /
 // Glob and Sphica's read MCP server on the run's copy of the fixture database, and nothing else of the owner's (settings, hooks, plugins,
 // MCP servers). Claude's reads are fenced to the checkout; Codex has no read fence, so its runs are graded on what they named instead.
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,8 +19,52 @@ export const outsideCheckout = (prefix: string): string =>
 export const evalDenies = (out: string): string[] => [
   path.resolve(import.meta.dirname, ".."),
   out,
-  path.join(os.homedir(), ".codex"),
+  // The owner's credentials, Codex's login among them: Codex's own profiles read the whole disk unless told otherwise
+  ...DENY_DIRS,
+  ...DENY_FILES,
 ];
+
+/**
+ * Settings an administrator set for every Codex on this machine. They can replace the profile a lane selects, and the lane's denies with
+ * it, so a Codex lane does not start while any is present.
+ */
+export function managedCodexSettings(
+  roots = { etc: "/etc/codex", prefs: "/Library/Managed Preferences" },
+): string[] {
+  const found: string[] = [];
+  const requirements = path.join(roots.etc, "requirements.toml");
+  if (fs.existsSync(requirements)) found.push(requirements);
+  const visit = (dir: string, depth: number) => {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.name.startsWith("com.openai.codex")) found.push(full);
+      else if (e.isDirectory() && depth < 2) visit(full, depth + 1);
+    }
+  };
+  visit(roots.prefs, 0);
+  return found;
+}
+
+/** The code that starts and fences a run, as one hash: runs made by different runner code are different measurements */
+export function runnerDigest(): string {
+  const hash = crypto.createHash("sha256");
+  for (const file of ["runner.ts", "run.ts", "m2.ts", "fixture.ts", "biome.ts"])
+    hash.update(`${file}\0`).update(fs.readFileSync(path.join(import.meta.dirname, file)));
+  return hash.digest("hex");
+}
+
+/** Moves a finished run's checkout into its run directory, which every later run is denied: a checkout left in the temp directory is not */
+export function keepCheckout(work: string, dir: string): void {
+  if (!fs.existsSync(work)) return;
+  fs.cpSync(path.dirname(work), path.join(dir, "checkout"), { recursive: true, verbatimSymlinks: true });
+  fs.rmSync(path.dirname(work), { recursive: true, force: true });
+}
 
 /** The /sphica:rules body M1 measured, with its Biome check drafting: the shipped Skill does not draft checks */
 export const RULES_BODY = path.join(import.meta.dirname, "rules-body.md");
