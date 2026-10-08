@@ -188,6 +188,16 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `fix(eval): run M2's hidden test without the macOS sandbox in tests on other hosts`
   - 結果: judge が隠しテストの runner を受け取るようにし、テストは eval-fixture と同じく macOS 以外では Node の囲いだけで流す。sandbox なしの経路を手元で流して確かめた（count の違反ありの patch で violations [src/ui/detail.ts]、completed true。実際のパスを渡さないと Node の囲いの外になり、隠しテストが走らなかった）。`node --test test/review-eval.test.ts` → 8 件 pass、`bun run verify` → exit 0
 
+- [x] T18: GitHub の Codex のレビューの 7 件を直す（M2 が run の git の設定を持ち主の権限で実行する穴を含む）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T17（直す対象の評価の仕組み）
+  - 変更: `server/evals/review/m2.ts`, `server/evals/review/grade.ts`, `server/evals/review/rules-grade.ts`, `server/evals/review/run.ts`, `server/test/review-eval.test.ts`
+  - red: `node filter-red.ts` → 直す前の m2.ts で、checkout の .git/config に仕込んだ clean filter と .gitattributes を置いて judge を呼ぶと filter ran on the host: true（スクリプトはこの会話の scratchpad にあり、同じことをテスト「M2 judges through a git directory the run cannot write」が確かめる）
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): judge M2 through a pinned git dir and tighten the graders`
+  - 結果: red を確かめた（filter ran on the host: true）。直した後 `node --test test/review-eval.test.ts` → 12 件 pass（仕込んだ filter が走らない、走らなかった隠しテストは失敗、正解の外の判定を数える、報告されない違反で失敗、precedent の run だけを数える、held-out のケースを名指した rules の run を除外、run が 0 本になる引数を拒む）。予備測定を採点し直した: pilot-a は Claude 40 graded・誤った violation 1・食い違い 1、Codex 37 graded・3 failed、pilot-b は両モデル 40 graded・0、m1c は 20 graded・全項目 0、m2-pilot は違反 0・完了 18。数字は元のとおり。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-08 / T05 / 欄を変えた。変更（前: plan.json、後: run.ts・cases.json・grade.ts・review-eval.test.ts）、完了条件（前: baseline の本測定と plan.json の回数、後: 予備測定 A と B の report）/ 予備測定で #220 の打ち切りが決まり（plan の変更履歴、持ち主の Go）、本測定の回数を固定するファイルは要らなくなった。予備測定で見つけた直しをこのタスクに入れた: duplicate-names の正解をどの判定でも可に（あいまい）、grade.ts の missed を「正解が violation だけ」のときに限定、run.ts の時間切れでプロセスのグループごと止めて上限を 10 分に
@@ -229,3 +239,4 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T14 / 結果（feat/e3-checkable-decisions で）: red を確かめた（TypeError: openers.map is not a function）。表を Map にして `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass。Skill に、module の禁止は今ある深さだけを守ると書いた（T12 のレビューの F1 を見送った代わり）。`bun run verify` → exit 0
 - 2026-10-08 / T15 / Codex の全差分のレビュー（main..c05d5484、high）: 3 件とも受け入れ T16 を足した。M2 の判定が外を指すリンクを通して書く（高）、採点器が completion 行の未確認の範囲・件数・重複を見ない（中）、result.json の無い run を分母に入れない（中）。厳しくした件数の照合が Codex の `findings: 1 (informational)` を読めず 8 run を落としたので、件数の後ろの説明を許した
 - 2026-10-08 / T17 / PR #304 の CI の check（Linux、Node 24.15 と 26）で M2 の判定のテストが sandbox-exec の ENOENT で落ちた。この PR で入ったもので、Linux に sandbox-exec が無いという決まった原因なので、ジョブの流し直しはしなかった
+- 2026-10-08 / T18 / GitHub の Codex（chatgpt-codex-connector、aeea56e のレビュー）の 9 件: 7 件を受け入れた（正解の外の判定、報告されない違反、gradeAll が precedent 以外の run を数える、Codex の rules の run の外の読み取り、sandbox-exec の無いホストの隠しテスト、M2 の judge が run の書ける .git を通す（セキュリティ。持ち主に報告して Go を得てから直した。予備の 18 run の checkout に filter・hooksPath・fsmonitor・hook・.gitattributes は無かった）、run が 0 本になる引数）。2 件は見送った: Claude の lane が持ち主の HOME を使う（ログインに要り、cloud の runner と同じ。ファイルのツールは checkout の外を読めず資格情報のディレクトリも拒む）、質問の一覧の形が prompt に無い（#220 の新しい本文で足す予定の形で、#220 は不採用）

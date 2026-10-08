@@ -319,10 +319,10 @@ async function main() {
     },
   });
   const out = path.resolve(args.out ?? "");
-  fs.mkdirSync(out, { recursive: true });
-  if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
   if (args.preflight) {
-    const problems = await preflight(out, args.model ?? "");
+    if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
+    // Its probe runs go apart from the measured ones, which the grader counts by directory name
+    const problems = await preflight(path.join(out, "preflight"), args.model ?? "");
     for (const p of problems) console.log(`✗ ${p}`);
     if (problems.length) process.exitCode = 1;
     else console.log("✓ preflight passed");
@@ -330,14 +330,20 @@ async function main() {
   }
   const host = args.host;
   if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
+  const known = loadReviewCases().diffs.map((d) => d.id);
+  if (!args.rules && args.diff !== "all" && !known.includes(args.diff ?? ""))
+    throw new Error(`--diff is all or one of ${known.join(", ")}`);
+  const runs = Number(args.runs);
+  const jobs = Number(args.jobs);
+  // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
+  if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
+  if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
+  if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
+  fs.mkdirSync(out, { recursive: true });
   const fixture = await fixtureIn(out, args.rules);
   const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
-  const ids = args.rules
-    ? ["rules"]
-    : args.diff === "all"
-      ? loadReviewCases().diffs.map((d) => d.id)
-      : [args.diff ?? ""];
-  const queue = ids.flatMap((diff) => Array.from({ length: Number(args.runs) }, () => diff));
+  const ids = args.rules ? ["rules"] : args.diff === "all" ? known : [args.diff ?? ""];
+  const queue = ids.flatMap((diff) => Array.from({ length: runs }, () => diff));
   const worker = async () => {
     for (let diff = queue.shift(); diff; diff = queue.shift()) {
       const { dir, result } = await runLane({
@@ -355,7 +361,7 @@ async function main() {
       console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Number(args.jobs)) }, worker));
+  await Promise.all(Array.from({ length: jobs }, worker));
 }
 
 await main();

@@ -11,7 +11,14 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, DENY_DIRS, DENY_FILES, finalAnswer, runEnv } from "../cloud/claude-run.ts";
-import { claimRunDir, codexModelOf, isolatedCodexHome } from "../cloud/codex-home.ts";
+import {
+  type Checkout,
+  checkoutGit,
+  claimRunDir,
+  codexModelOf,
+  isolatedCodexHome,
+  pinCheckout,
+} from "../cloud/codex-home.ts";
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { buildReviewFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
@@ -61,9 +68,15 @@ const git = (work: string, ...args: string[]) =>
 
 /**
  * The checkout a run starts from: the fixture, the rule lines in CLAUDE.md and AGENTS.md, a check script that runs the pinned Biome, and,
- * under check, the drafted check as biome.jsonc in place of the project's biome.json. Committed, so the patch is what the agent changed.
+ * under check, the drafted check as biome.jsonc in place of the project's biome.json. Committed, so the patch is what the agent changed,
+ * and its git directory copied to `gitDir` before the run starts: the run can write the checkout's own, and its config would run on the host.
  */
-export function prepare(repo: string, work: string, condition: string): string {
+export function prepare(
+  repo: string,
+  work: string,
+  condition: string,
+  gitDir: string,
+): { start: string; checkout: Checkout } {
   execFileSync("git", ["clone", "-q", repo, work]);
   git(work, "remote", "set-url", "origin", ORIGIN);
   fs.writeFileSync(path.join(work, "CLAUDE.md"), cases.rules);
@@ -79,13 +92,13 @@ export function prepare(repo: string, work: string, condition: string): string {
   }
   git(work, "add", "-A");
   git(work, "commit", "-q", "-m", `the ${condition} condition`);
-  return git(work, "rev-parse", "HEAD").trim();
+  return { start: git(work, "rev-parse", "HEAD").trim(), checkout: pinCheckout(work, gitDir) };
 }
 
-/** The files a run changed since start, tracked or not. */
-const changed = (work: string, start: string) => {
-  git(work, "add", "-A");
-  return git(work, "diff", "--cached", "--name-only", start).split("\n").filter(Boolean);
+/** The files a run changed since start, tracked or not, read through the pinned git directory. */
+const changed = (c: Checkout, start: string) => {
+  checkoutGit(c, ["add", "-A"]);
+  return checkoutGit(c, ["diff", "--cached", "--name-only", start]).split("\n").filter(Boolean);
 };
 
 export type M2Judgement = {
@@ -102,7 +115,7 @@ export type M2Judgement = {
  * installed in the run itself flags the exception, and the hidden test.
  */
 export function judge(
-  work: string,
+  c: Checkout,
   start: string,
   task: Task,
   scratch: string,
@@ -112,9 +125,10 @@ export function judge(
     test: string,
   ) => { tests: string; parts: { completion: string | null } } = runHiddenTest,
 ): M2Judgement {
+  const work = c.work;
   // The run wrote this checkout: a link out of it would let the judge read or write the owner's files
   if (linksOutside(work)) throw new Error("a link in the checkout leads outside it; the run is not judged");
-  const files = changed(work, start);
+  const files = changed(c, start);
   fs.cpSync(work, scratch, { recursive: true, filter: (src) => path.basename(src) !== ".git" });
   const installed = fs.existsSync(path.join(scratch, "biome.jsonc"))
     ? restrictedImports(scratch).map((r) => r.path)
@@ -124,6 +138,8 @@ export function judge(
   fs.writeFileSync(path.join(scratch, "biome.jsonc"), cases.check, { flag: "wx" });
   const flagged = new Set(restrictedImports(scratch).map((r) => r.path));
   const result = hidden(scratch, task.test);
+  // A test that never ran says nothing about completion: the run is a failure, not an unfinished task
+  if (result.parts.completion === null) throw new Error(`the hidden test did not run: ${result.tests}`);
   return {
     violations: files.filter((f) => flagged.has(f)),
     falseFailure: task.tempts === "none" && (installed ?? []).some((f) => f === "src/ui/admin.ts"),
@@ -195,7 +211,7 @@ async function runOne(o: {
   const work = path.join(dir, "work");
   const result: Record<string, unknown> = { run, host: o.host, condition: o.condition, task: o.task.id };
   try {
-    const start = prepare(o.fixture.repo, work, o.condition);
+    const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"));
     let r: Awaited<ReturnType<typeof runChild>>;
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
@@ -268,7 +284,7 @@ async function runOne(o: {
     fs.writeFileSync(path.join(dir, "stderr.log"), r.stderr);
     result.status = r.status;
     result.reason = r.error ?? (r.status === 0 ? null : `${o.host} exited ${r.status}`);
-    result.judgement = judge(work, start, o.task, path.join(dir, "judged"));
+    result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
@@ -338,18 +354,24 @@ async function main() {
   if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
   if (!cases.conditions.includes(condition))
     throw new Error(`--condition is one of ${cases.conditions.join(", ")}`);
+  const tasks = cases.tasks.filter((t) => args.task === "all" || t.id === args.task);
+  if (!tasks.length) throw new Error(`--task is all or one of ${cases.tasks.map((t) => t.id).join(", ")}`);
+  const runs = Number(args.runs);
+  const jobs = Number(args.jobs);
+  // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
+  if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
+  if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
   const out = path.resolve(args.out ?? "");
   fs.mkdirSync(out, { recursive: true });
   const fixture = await fixtureIn(out);
-  const tasks = cases.tasks.filter((t) => args.task === "all" || t.id === args.task);
-  const queue = tasks.flatMap((task) => Array.from({ length: Number(args.runs) }, () => task));
+  const queue = tasks.flatMap((task) => Array.from({ length: runs }, () => task));
   const worker = async () => {
     for (let task = queue.shift(); task; task = queue.shift()) {
       const { dir, result } = await runOne({ fixture, host, condition, task, out, model: args.model ?? "" });
       console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Number(args.jobs)) }, worker));
+  await Promise.all(Array.from({ length: jobs }, worker));
 }
 
 if (process.argv[1] === import.meta.filename) await main();

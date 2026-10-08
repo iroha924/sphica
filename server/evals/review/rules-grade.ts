@@ -6,8 +6,9 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import type { Step } from "../acceptance/load.ts";
 import { restrictedImports } from "./biome.ts";
+import { lookedOutside } from "./grade.ts";
 
-type RulesCases = {
+export type RulesCases = {
   files: Record<string, string>;
   steps: Step[];
   picks: string[];
@@ -38,7 +39,7 @@ function markersOf(draft: string): string[] {
 }
 
 export type DraftGrade = {
-  state: "graded" | "failed";
+  state: "graded" | "failed" | "excluded";
   reason: string | null;
   /** Marked records that should have no check */
   unwanted: string[];
@@ -87,6 +88,37 @@ export function gradeDraft(
   return { ...grade, state: "graded" };
 }
 
+/**
+ * One rules run graded: a run that named the repository holding the held-out cases, or another run, is excluded (Codex has no read fence),
+ * and a run without its result, or that did not exit 0, is failed.
+ */
+export function gradeRulesRun(
+  dir: string,
+  repo: string,
+  cases: RulesCases,
+  runs: string,
+): DraftGrade & { host: string } {
+  const name = path.basename(dir);
+  const result = (
+    fs.existsSync(path.join(dir, "result.json"))
+      ? JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"))
+      : { host: /-(claude|codex)-/.exec(name)?.[1] ?? "unknown", status: null, reason: "no result.json" }
+  ) as { host: string; status: number | null; reason: string | null };
+  const none = { unwanted: [], unmarked: [], falseFailures: [], missedViolations: [] };
+  const read = (f: string) =>
+    fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8") : "";
+  const outside = lookedOutside(read("events.jsonl"), {
+    forbidden: [path.resolve(import.meta.dirname, "..", "..", "..")],
+    runs,
+    run: name,
+  });
+  if (outside) return { host: result.host, state: "excluded", reason: outside, ...none };
+  if (result.status !== 0) return { host: result.host, state: "failed", reason: result.reason, ...none };
+  const scratch = path.join(dir, "graded");
+  fs.rmSync(scratch, { recursive: true, force: true });
+  return { host: result.host, ...gradeDraft(draftOf(read("final.md")), repo, cases, scratch) };
+}
+
 function main() {
   const { values: args } = parseArgs({ options: { report: { type: "string" } } });
   if (!args.report) throw new Error("--report <runs dir> names the rules runs to grade");
@@ -97,38 +129,10 @@ function main() {
   const cases = loadRulesCases();
   const rows: string[] = [];
   for (const name of fs.readdirSync(runs).sort()) {
-    const dir = path.join(runs, name);
     if (!name.startsWith("rules-")) continue;
-    // A run directory without its result counts as a failed run
-    const result = (
-      fs.existsSync(path.join(dir, "result.json"))
-        ? JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"))
-        : { host: /-(claude|codex)-/.exec(name)?.[1] ?? "unknown", status: null, reason: "no result.json" }
-    ) as {
-      host: string;
-      status: number | null;
-      reason: string | null;
-    };
-    const scratch = path.join(dir, "graded");
-    fs.rmSync(scratch, { recursive: true, force: true });
-    const g =
-      result.status === 0
-        ? gradeDraft(
-            draftOf(fs.readFileSync(path.join(dir, "final.md"), "utf8")),
-            fixture.repo,
-            cases,
-            scratch,
-          )
-        : {
-            state: "failed",
-            reason: result.reason,
-            unwanted: [],
-            unmarked: [],
-            falseFailures: [],
-            missedViolations: [],
-          };
+    const g = gradeRulesRun(path.join(runs, name), fixture.repo, cases, runs);
     rows.push(
-      `| ${name} | ${result.host} | ${g.state} | ${g.unwanted.join(" ")} | ${g.unmarked.join(" ")} | ${g.falseFailures.join(" ")} | ${g.missedViolations.join(" ")} | ${g.reason ?? ""} |`,
+      `| ${name} | ${g.host} | ${g.state} | ${g.unwanted.join(" ")} | ${g.unmarked.join(" ")} | ${g.falseFailures.join(" ")} | ${g.missedViolations.join(" ")} | ${g.reason ?? ""} |`,
     );
   }
   console.log(

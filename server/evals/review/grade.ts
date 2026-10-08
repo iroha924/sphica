@@ -17,6 +17,8 @@ type RecordGrade = {
   got: Outcome | null;
   falseViolation: boolean;
   missed: boolean;
+  /** A verdict none of the expected outcomes allow, violation or not */
+  mismatch: boolean;
   /** Whether the report lists the record as a question */
   asked: boolean;
   question: boolean;
@@ -204,6 +206,13 @@ export function gradeRun(
     };
 
   const verdicts = new Map([...backed.values()].flat().map((f) => [f.unit, f.outcome]));
+  // A violation backed but left out of the report never reached the reader
+  const violations = [...verdicts.values()].filter((o) => o === "violation").length;
+  if (violations > Number(listed))
+    return {
+      ...grade,
+      reason: `${violations} violations backed, ${listed} findings reported: some were not reported`,
+    };
   const asked = new Set(questionsOf(report)?.keys ?? []);
   for (const [key, e] of Object.entries(expect)) {
     const got = verdicts.get(key) ?? null;
@@ -214,6 +223,7 @@ export function gradeRun(
       falseViolation: got === "violation" && !e.outcomes.includes("violation"),
       // Missed only where violation is the one right verdict: a record that allows any verdict cannot be missed
       missed: e.outcomes.every((x) => x === "violation") && got !== "violation",
+      mismatch: !e.outcomes.includes(got),
       asked: asked.has(key),
       question: e.question,
     });
@@ -228,6 +238,7 @@ type Tally = {
   excluded: number;
   falseViolations: number;
   missed: number;
+  mismatches: number;
   questionsAsked: number;
   questionsExpected: number;
   extraQuestions: number;
@@ -239,6 +250,7 @@ const empty = (): Tally => ({
   excluded: 0,
   falseViolations: 0,
   missed: 0,
+  mismatches: 0,
   questionsAsked: 0,
   questionsExpected: 0,
   extraQuestions: 0,
@@ -259,6 +271,7 @@ export function tally(grades: RunGrade[]): Map<string, Tally> {
     for (const r of g.records) {
       if (r.falseViolation) t.falseViolations++;
       if (r.missed) t.missed++;
+      if (r.mismatch) t.mismatches++;
       if (r.question) t.questionsExpected++;
       if (r.question && r.asked) t.questionsAsked++;
       if (!r.question && r.asked) t.extraQuestions++;
@@ -285,21 +298,20 @@ const unfinished = (name: string): RunGrade => ({
 export function gradeAll(runs: string): RunGrade[] {
   const diffs = new Map(loadReviewCases().diffs.map((d) => [d.id, d.expect]));
   const forbidden = [path.resolve(import.meta.dirname, "..", "..", "..")];
-  return (
-    fs
-      .readdirSync(runs, { withFileTypes: true })
-      // Every directory but the fixture is a run
-      .filter((e) => e.isDirectory() && !e.name.startsWith("fixture"))
-      .map((e) => e.name)
-      .sort()
-      .map((n) => {
-        const dir = path.join(runs, n);
-        if (!fs.existsSync(path.join(dir, "result.json"))) return unfinished(n);
-        const diff = (JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { diff: string })
-          .diff;
-        return gradeRun(dir, diffs.get(diff) ?? {}, { forbidden, runs });
-      })
-  );
+  // A precedent run's directory, as runLane names it: rules runs, M2, the preflight, and the fixture share the output root
+  const lane = new RegExp(`^(?:${[...diffs.keys()].join("|")})-(?:claude|codex)-\\d{4}-`);
+  return fs
+    .readdirSync(runs, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && lane.test(e.name))
+    .map((e) => e.name)
+    .sort()
+    .map((n) => {
+      const dir = path.join(runs, n);
+      if (!fs.existsSync(path.join(dir, "result.json"))) return unfinished(n);
+      const diff = (JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { diff: string })
+        .diff;
+      return gradeRun(dir, diffs.get(diff) ?? {}, { forbidden, runs });
+    });
 }
 
 function main() {
@@ -316,6 +328,7 @@ function main() {
     "excluded",
     "falseViolations",
     "missed",
+    "mismatches",
     "questionsAsked",
     "questionsExpected",
     "extraQuestions",

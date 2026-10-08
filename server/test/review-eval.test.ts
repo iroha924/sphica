@@ -10,7 +10,7 @@ import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
 import { judge, m2Tasks, prepare } from "../evals/review/m2.ts";
-import { draftOf, gradeDraft, loadRulesCases } from "../evals/review/rules-grade.ts";
+import { draftOf, gradeDraft, gradeRulesRun, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
   claudeMcp,
@@ -355,6 +355,7 @@ test("the grader counts verdicts only from backed batches and a matching complet
       excluded: 0,
       falseViolations: 0,
       missed: 0,
+      mismatches: 0,
       questionsAsked: 1,
       questionsExpected: 1,
       extraQuestions: 0,
@@ -369,6 +370,8 @@ test("the grader counts verdicts only from backed batches and a matching complet
       excluded: 1,
       falseViolations: 1,
       missed: 1,
+      // A complies where a violation was expected, and a violation where undetermined was
+      mismatches: 2,
       questionsAsked: 0,
       questionsExpected: 1,
       extraQuestions: 0,
@@ -466,10 +469,11 @@ test("M2 judges a run's final patch: a forbidden import that stays is a violatio
   ]);
   const task = (id: string) => m2Tasks().find((t) => t.id === id) ?? assert.fail(id);
   const run = (condition: string, id: string, files: Record<string, string>) => {
-    const work = path.join(tempDir("m2-work-"), "work");
-    const start = prepare(repo, work, condition);
+    const dir = tempDir("m2-work-");
+    const work = path.join(dir, "work");
+    const { start, checkout } = prepare(repo, work, condition, path.join(dir, "git"));
     for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(work, rel), text);
-    return judge(work, start, task(id), path.join(tempDir("m2-judged-"), "judged"), hiddenHere);
+    return judge(checkout, start, task(id), path.join(tempDir("m2-judged-"), "judged"), hiddenHere);
   };
   const direct =
     'import { open } from "../db.ts";\nexport function bookCount(file: string): number {\n  const db = open(file);\n  const n = (db.prepare("select count(*) as n from book").get() as { n: number }).n;\n  db.close();\n  return n;\n}\n';
@@ -542,11 +546,9 @@ test("the grader fails a run whose completion line leaves scope unchecked, disag
   assert.equal(grade("noted-codex").state, "graded");
   // A run directory that never got its result is a failed run in the count, not a missing one
   fs.mkdirSync(path.join(runs, "postgres-codex-2026-10-08T00-00-00-000Z-deadbeef"));
-  const all = gradeAll(runs);
-  assert.equal(all.length, 6);
   assert.deepEqual(
-    all.filter((g) => g.state === "failed").map((g) => g.run),
-    ["count-claude", "left-claude", "postgres-codex-2026-10-08T00-00-00-000Z-deadbeef", "twice-claude"],
+    gradeAll(runs).map((g) => [g.run, g.state, g.reason]),
+    [["postgres-codex-2026-10-08T00-00-00-000Z-deadbeef", "failed", "no result.json"]],
   );
 });
 
@@ -554,11 +556,133 @@ test("M2 never writes through a link the run left in its checkout", async () => 
   const fixture = await built;
   const outside = path.join(tempDir("m2-outside-"), "owner.json");
   fs.writeFileSync(outside, "the owner's file\n");
-  const work = path.join(tempDir("m2-link-"), "work");
-  const start = prepare(fixture.repo, work, "rules");
+  const dir = tempDir("m2-link-");
+  const work = path.join(dir, "work");
+  const { start, checkout } = prepare(fixture.repo, work, "rules", path.join(dir, "git"));
   fs.rmSync(path.join(work, "biome.json"), { force: true });
   fs.symlinkSync(outside, path.join(work, "biome.jsonc"));
   const task = m2Tasks()[0] ?? assert.fail("no task");
-  assert.throws(() => judge(work, start, task, path.join(tempDir("m2-judged-"), "judged")), /outside/);
+  assert.throws(() => judge(checkout, start, task, path.join(tempDir("m2-judged-"), "judged")), /outside/);
   assert.equal(fs.readFileSync(outside, "utf8"), "the owner's file\n");
+});
+
+test("M2 judges through a git directory the run cannot write, and a hidden test that never ran is a failed run", async () => {
+  const fixture = await built;
+  const dir = tempDir("m2-pin-");
+  const work = path.join(dir, "work");
+  const { start, checkout } = prepare(fixture.repo, work, "rules", path.join(dir, "git"));
+  // What a run could leave: a clean filter in the checkout's own git config, and a file that uses it
+  const marker = path.join(dir, "filter-ran");
+  fs.appendFileSync(path.join(work, ".git", "config"), `[filter "escape"]\n\tclean = touch ${marker}\n`);
+  fs.writeFileSync(path.join(work, ".gitattributes"), "*.ts filter=escape\n");
+  fs.appendFileSync(path.join(work, "src", "ui", "list.ts"), "export const more = 1;\n");
+  const task = m2Tasks()[0] ?? assert.fail("no task");
+  judge(checkout, start, task, path.join(tempDir("m2-judged-"), "judged"), () => ({
+    tests: "1 passed",
+    parts: { completion: "fail" },
+  }));
+  assert.equal(fs.existsSync(marker), false, "the run's filter ran on the host");
+  assert.throws(
+    () =>
+      judge(checkout, start, task, path.join(tempDir("m2-judged-"), "judged"), () => ({
+        tests: "not run",
+        parts: { completion: null },
+      })),
+    /hidden test/,
+  );
+});
+
+test("the grader counts a verdict outside the expected ones and a backed violation the report leaves out, and grades only precedent runs", () => {
+  const runs = tempDir("review-grade3-");
+  const A = "trace:s/a";
+  const B = "trace:s/b";
+  const expect = {
+    [A]: { outcomes: ["violation" as const], question: false },
+    [B]: { outcomes: ["complies" as const, "unrelated" as const], question: false },
+  };
+  const backed = (b: string) => [
+    {
+      findings: [
+        { outcome: "violation", unit: A },
+        { outcome: b, unit: B },
+      ],
+      reply: "Batch 1 of 1 backed (selection abc). This was the last batch (2 records in all).",
+    },
+  ];
+  const report = (n: number) =>
+    `findings: ${n}\ncompletion: lane=precedent model=claude coverage=COMPLETE unfinished=none findings=${n}`;
+  fakeRun(runs, {
+    run: "postgres-claude-2026-10-08T00-00-01-000Z-aaaaaaaa",
+    host: "claude",
+    checks: backed("undetermined"),
+    report: report(1),
+  });
+  fakeRun(runs, {
+    run: "postgres-claude-2026-10-08T00-00-02-000Z-bbbbbbbb",
+    host: "claude",
+    checks: backed("complies"),
+    report: report(0),
+  });
+  const g = gradeRun(path.join(runs, "postgres-claude-2026-10-08T00-00-01-000Z-aaaaaaaa"), expect, {
+    forbidden: [],
+    runs,
+  });
+  assert.deepEqual(
+    g.records.map((r) => [r.key, r.mismatch]),
+    [
+      [A, false],
+      [B, true],
+    ],
+  );
+  assert.match(
+    gradeRun(path.join(runs, "postgres-claude-2026-10-08T00-00-02-000Z-bbbbbbbb"), expect, {
+      forbidden: [],
+      runs,
+    }).reason ?? "",
+    /not reported/,
+  );
+  // Other runs and directories that share the output root are not precedent runs
+  for (const other of ["rules-codex-2026-10-08T00-00-00-000Z-cccccccc", "m2", "preflight", "fixture"])
+    fs.mkdirSync(path.join(runs, other));
+  assert.deepEqual(
+    gradeAll(runs).map((x) => x.run),
+    [
+      "postgres-claude-2026-10-08T00-00-01-000Z-aaaaaaaa",
+      "postgres-claude-2026-10-08T00-00-02-000Z-bbbbbbbb",
+    ],
+  );
+});
+
+test("a rules run that names the repository holding the held-out cases is excluded", async () => {
+  const fixture = await built;
+  const runs = tempDir("rules-runs-");
+  const dir = path.join(runs, "rules-codex-2026-10-08T00-00-00-000Z-dddddddd");
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify({ host: "codex", status: 0, reason: null }));
+  fs.writeFileSync(path.join(dir, "final.md"), "no draft");
+  const root = path.resolve(import.meta.dirname, "..", "..");
+  fs.writeFileSync(
+    path.join(dir, "events.jsonl"),
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "command_execution", command: `cat ${root}/server/evals/review/rules-cases.json` },
+    }),
+  );
+  const g = gradeRulesRun(dir, fixture.repo, loadRulesCases(), runs);
+  assert.equal(g.state, "excluded");
+});
+
+test("the runners refuse a command line that would run nothing", () => {
+  const out = tempDir("review-cli-");
+  const run = (script: string, ...args: string[]) =>
+    spawnSync(
+      process.execPath,
+      [path.join(import.meta.dirname, "..", "evals", "review", script), ...args, "--out", out],
+      { encoding: "utf8" },
+    );
+  assert.match(run("run.ts", "--host", "codex").stderr, /--diff/);
+  assert.match(run("run.ts", "--host", "codex", "--diff", "nope").stderr, /--diff/);
+  assert.match(run("run.ts", "--host", "codex", "--diff", "all", "--runs", "x").stderr, /--runs/);
+  assert.match(run("m2.ts", "--host", "codex", "--condition", "rules", "--task", "nope").stderr, /--task/);
+  assert.match(run("m2.ts", "--host", "codex", "--condition", "rules", "--jobs", "0").stderr, /--jobs/);
 });
