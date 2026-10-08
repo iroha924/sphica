@@ -16,9 +16,13 @@ const sphicaEnv = (p: LanePaths) => ({ SPHICA_DB: p.db, SPHICA_HOME: p.home, HOM
 
 /**
  * The prompt a launcher gives the precedent lane: the aspect body in full, then the scope as review's Step 3 passes it (the committed
- * change as a file, the other two layers empty), then the one-call output order peer-model.md asks for.
+ * change as a file, the other two layers empty), then the one-call output order peer-model.md asks for and the completion line of
+ * review's Step 4.
  */
-export function reviewPrompt(body: string, p: Pick<LanePaths, "work" | "diff">): string {
+export function reviewPrompt(
+  body: string,
+  p: Pick<LanePaths, "work" | "diff"> & { model: "claude" | "codex" },
+): string {
   return `${body.trimEnd()}
 
 ## Scope
@@ -32,6 +36,12 @@ Repository root (pass it as \`cwd\`): ${p.work}
 | Untracked | empty |
 
 Give the list first, then the full text of every finding in number order, in this one reply: nobody can ask you for more afterwards.
+
+End the report with this line as its last non-empty block, with nothing after it:
+
+\`\`\`
+completion: lane=precedent model=${p.model} coverage=<COMPLETE|PARTIAL> unfinished=<unchecked scope | none> findings=<count>
+\`\`\`
 `;
 }
 

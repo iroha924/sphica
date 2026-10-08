@@ -46,13 +46,14 @@ precedent の lane を Claude と Codex で隔離して流し、正解と機械�
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → runner の settings・引数・MCP 設定が plan の方針どおり（Read / Grep / Glob と読み取り MCP だけ、hook なし、`EVAL_SPHICA_DB` を MCP の子プロセスへ明示、Codex は read-only と隔離した CODEX_HOME）。`node evals/review/run.ts --preflight` → Claude で checkout の外の無害なファイルが読めず、両ホストで本文の hash と fixture の DB が MCP の呼び出しログに出る
   - コミット: `feat(eval): run the precedent lane on Claude and Codex against the review fixture`
   - 結果: `node --test --test-name-pattern="a lane starts" test/review-eval.test.ts` → pass。`node evals/review/run.ts --preflight` → ✓ preflight passed（Claude は外のファイルへ Read を試して blockReadsOutsideWorkingDirectories で拒否、両ホストとも fixture の DB で review_select が trace:s-ja-storage/storage を選択、Claude の init は Read / Grep / Glob と sphica の MCP だけ、プラグインは Claude Code 組み込みのものだけ。1 run は Claude 36 秒、Codex 50 秒）。`bun run verify` → exit 0
-- [ ] T04: 採点器と、既知のログでの検証
+- [x] T04: 採点器と、既知のログでの検証
   - 種別: 追加
   - 計画: S1
   - 依存: T03（runner の残すログの形が要る）
-  - 変更: `server/evals/review/grade.ts`, `server/test/fixtures/review-eval/`, `server/test/review-eval.test.ts`
+  - 変更: `server/evals/review/grade.ts`, `server/evals/review/runner.ts`, `server/evals/review/run.ts`, `server/test/review-eval.test.ts`
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → 既知の成功・失敗・未完了・欠落・外を読んだログで、誤った violation、見逃し、質問、除外の件数が期待どおり（未完了と欠落は失敗、0 件扱いにならない）
   - コミット: `feat(eval): grade precedent runs against the expected verdicts`
+  - 結果: `node --test test/review-eval.test.ts` → 4 件 pass（合成のログで、拒否された check を数えず後の backed を採る、束の欠け・completion 行の欠け・exit 1 は failed、`../..` を上がる Codex は excluded、質問の一覧を拾う、failed と excluded は違反の件数に足さない）。preflight の実際のログに `node evals/review/grade.ts --report` → Claude は probe の外のファイルを名指して excluded、Codex は completion 行が無く failed（どちらも期待どおり）。`bun run verify` → exit 0
 
 ## P2: 今の本文での基準
 
@@ -129,6 +130,8 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `chore(release): keep the adopted E3 changes and bump the version`
 
 ## 記録
+
+- 2026-10-08 / T04 / 変更欄を直した（前: grade.ts・`server/test/fixtures/review-eval/`・review-eval.test.ts、後: grade.ts・runner.ts・run.ts・review-eval.test.ts）/ 既知のログはテストの中で合成した。preflight の run に completion 行が無く、review の Step 4 で launcher が付ける指示を runner の prompt に足した
 
 - 2026-10-08 / T03 / 変更欄に `knip.json` を足した（前: run.ts・runner.ts・review-eval.test.ts、後: それに knip.json）/ 評価のスクリプトは knip の entry に並べる決まりのため
 - 2026-10-08 / T03 / MCP の子プロセスへは EVAL_SPHICA_DB ではなく SPHICA_DB と SPHICA_HOME を直接渡した / slot の sphica.sh を通さず node で mcp.js を起動するので、変換する層が無い

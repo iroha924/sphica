@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
+import { gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
 import {
   claudeArgs,
   claudeMcp,
@@ -139,8 +140,208 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   const codex = codexArgs("/w", "/r/final.md");
   assert.equal(codex[codex.indexOf("-s") + 1], "read-only");
   assert.ok(codex.includes("--ephemeral") && codex.includes("--ignore-rules"));
-  const prompt = reviewPrompt("BODY\n", p);
+  const prompt = reviewPrompt("BODY\n", { ...p, model: "codex" });
   assert.ok(prompt.startsWith("BODY\n"), "the aspect body comes first, in full");
   assert.match(prompt, /Read the file \/w\/\.git\/review\.diff/);
   assert.match(prompt, /\| Uncommitted, tracked \| empty \|\n\| Untracked \| empty \|/);
+  assert.match(prompt, /completion: lane=precedent model=codex coverage=/);
+});
+
+/** A run directory as runLane leaves it, with events in the host's own shape: review_check calls and their replies, and Codex's commands */
+function fakeRun(
+  runs: string,
+  o: {
+    run: string;
+    host: "claude" | "codex";
+    status?: number;
+    checks: { findings: { outcome: string; unit: string }[]; reply: string }[];
+    commands?: string[];
+    report: string;
+  },
+): void {
+  const dir = path.join(runs, o.run);
+  fs.mkdirSync(dir, { recursive: true });
+  const result = {
+    run: o.run,
+    host: o.host,
+    diff: "d",
+    status: o.status ?? 0,
+    reason: o.status ? "exit 1" : null,
+  };
+  fs.writeFileSync(path.join(dir, "result.json"), JSON.stringify(result));
+  fs.writeFileSync(path.join(dir, "final.md"), o.report);
+  const events: unknown[] = o.checks.flatMap((c, i): unknown[] =>
+    o.host === "claude"
+      ? [
+          {
+            type: "assistant",
+            message: {
+              content: [
+                {
+                  type: "tool_use",
+                  id: `t${i}`,
+                  name: "mcp__sphica__review_check",
+                  input: { findings: c.findings },
+                },
+              ],
+            },
+          },
+          {
+            type: "user",
+            message: {
+              content: [
+                { type: "tool_result", tool_use_id: `t${i}`, content: [{ type: "text", text: c.reply }] },
+              ],
+            },
+          },
+        ]
+      : [
+          {
+            type: "item.completed",
+            item: {
+              type: "mcp_tool_call",
+              server: "sphica",
+              tool: "review_check",
+              arguments: { findings: c.findings },
+              result: { content: [{ type: "text", text: c.reply }] },
+            },
+          },
+        ],
+  );
+  for (const command of o.commands ?? [])
+    events.push({ type: "item.completed", item: { type: "command_execution", command } });
+  fs.writeFileSync(path.join(dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n"));
+}
+
+test("the grader counts verdicts only from backed batches and a matching completion line, and never reads a failed run as clean", () => {
+  const runs = tempDir("review-grade-");
+  const A = "trace:s/a";
+  const B = "trace:s/b";
+  const expect = {
+    [A]: { outcomes: ["violation" as const], question: false },
+    [B]: { outcomes: ["undetermined" as const], question: true },
+  };
+  const ok = (n = 2) => `Batch 1 of 1 backed (selection abc). This was the last batch (${n} records in all).`;
+  const done = (host: string) =>
+    `completion: lane=precedent model=${host} coverage=COMPLETE unfinished=none findings=1`;
+  const both = (a: string, b: string) => [
+    { outcome: a, unit: A },
+    { outcome: b, unit: B },
+  ];
+  // A rejected check is not a verdict: the later backed one is
+  fakeRun(runs, {
+    run: "good-claude",
+    host: "claude",
+    checks: [
+      { findings: both("complies", "undetermined"), reply: "1 problems:\n- x" },
+      { findings: both("violation", "undetermined"), reply: ok() },
+    ],
+    report: `verdict: changes_required\nquestions: 1\n- ${B}: whether the grid loads in 2 s\n\n1. [high] src/x.ts:1 — y\n\n\`\`\`\n${done("claude")}\n\`\`\``,
+  });
+  fakeRun(runs, {
+    run: "flip-codex",
+    host: "codex",
+    checks: [{ findings: both("complies", "violation"), reply: ok() }],
+    report: done("codex"),
+  });
+  fakeRun(runs, {
+    run: "short-claude",
+    host: "claude",
+    checks: [
+      {
+        findings: both("violation", "undetermined"),
+        reply: "Batch 1 of 2 backed (selection abc). Not judged in this call: 1 records",
+      },
+    ],
+    report: done("claude"),
+  });
+  fakeRun(runs, {
+    run: "nolast-claude",
+    host: "claude",
+    checks: [{ findings: both("violation", "undetermined"), reply: ok() }],
+    report: "verdict: pass",
+  });
+  fakeRun(runs, { run: "exit-codex", host: "codex", status: 1, checks: [], report: "" });
+  fakeRun(runs, {
+    run: "peek-codex",
+    host: "codex",
+    checks: [{ findings: both("violation", "undetermined"), reply: ok() }],
+    commands: ["/bin/zsh -lc 'cat ../../cases.json'"],
+    report: done("codex"),
+  });
+  const grade = (run: string) =>
+    gradeRun(path.join(runs, run), expect, { forbidden: ["/nowhere/sphica"], runs });
+
+  const good = grade("good-claude");
+  assert.equal(good.state, "graded", good.reason ?? "");
+  assert.deepEqual(
+    good.records.map((r) => [r.key, r.got, r.falseViolation, r.missed, r.asked]),
+    [
+      [A, "violation", false, false, false],
+      [B, "undetermined", false, false, true],
+    ],
+  );
+  const flip = grade("flip-codex");
+  assert.deepEqual(
+    flip.records.map((r) => [r.falseViolation, r.missed]),
+    [
+      [false, true],
+      [true, false],
+    ],
+  );
+  assert.match(grade("short-claude").reason ?? "", /batch 2 of 2 not backed/);
+  assert.match(grade("nolast-claude").reason ?? "", /completion line/);
+  assert.equal(grade("exit-codex").state, "failed");
+  const peek = grade("peek-codex");
+  assert.equal(peek.state, "excluded");
+  assert.match(peek.reason ?? "", /climbed out/);
+  // Naming another run of the same directory, or the repository the expected verdicts live in, excludes a run too
+  assert.match(
+    lookedOutside(`read ${runs}/good-claude/final.md`, { forbidden: [], runs, run: "flip-codex" }) ?? "",
+    /named/,
+  );
+  assert.equal(
+    lookedOutside(`read ${runs}/flip-codex/work/a.ts`, { forbidden: [], runs, run: "flip-codex" }),
+    null,
+  );
+  assert.match(
+    lookedOutside("cat /nowhere/sphica/server/evals/review/cases.json", {
+      forbidden: ["/nowhere/sphica"],
+      runs,
+      run: "x",
+    }) ?? "",
+    /named/,
+  );
+
+  const t = tally(
+    ["good-claude", "flip-codex", "short-claude", "nolast-claude", "exit-codex", "peek-codex"].map(grade),
+  );
+  assert.deepEqual(
+    { ...t.get("claude") },
+    {
+      runs: 3,
+      graded: 1,
+      failed: 2,
+      excluded: 0,
+      falseViolations: 0,
+      missed: 0,
+      questionsAsked: 1,
+      questionsExpected: 1,
+      extraQuestions: 0,
+    },
+  );
+  assert.deepEqual(
+    { ...t.get("codex") },
+    {
+      runs: 3,
+      graded: 1,
+      failed: 1,
+      excluded: 1,
+      falseViolations: 1,
+      missed: 1,
+      questionsAsked: 0,
+      questionsExpected: 1,
+      extraQuestions: 0,
+    },
+  );
 });

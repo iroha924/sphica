@@ -150,7 +150,7 @@ async function runLane(o: {
     fs.mkdirSync(path.dirname(p.db), { recursive: true });
     fs.copyFileSync(o.fixture.db, p.db);
     fs.mkdirSync(p.home, { recursive: true });
-    const prompt = `${reviewPrompt(body, p)}${o.extra ?? ""}`;
+    const prompt = `${reviewPrompt(body, { ...p, model: o.host })}${o.extra ?? ""}`;
     fs.writeFileSync(path.join(dir, "prompt.md"), prompt);
 
     let r: Awaited<ReturnType<typeof runChild>>;
