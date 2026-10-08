@@ -365,6 +365,12 @@ test("look reads a check file's marker lines only: a comment of the file's own l
     ]);
     // A file whose comments are not known by its extension is counted, never read as having no markers
     assert.match(look, /- 1 check files whose comments are not known here by their extension/);
+    // An extension that names a property every object has is still just not known
+    fs.writeFileSync(path.join(root, "checks.constructor"), `// sphica: ${old}\n`);
+    assert.match(
+      await lookOverview(db.reader, p, root, undefined, ["checks.constructor"]),
+      /- 1 check files whose comments are not known here by their extension/,
+    );
     assert.deepEqual(
       [...look.matchAll(/^- (\S+): trace:ext-s1\/old-check was superseded/gm)].map((x) => x[1]),
       ["biome.jsonc:3", "checks.toml:3"],

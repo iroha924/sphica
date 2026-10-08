@@ -133,6 +133,16 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `fix(overview): read a check file's marker only from a comment line of its own language`
   - 結果: red: 直す前のコードで `--test-name-pattern="marker lines only"` → 失敗（AGENTS.md:3、biome.jsonc:2 の HTML コメント、checks.toml:2 の `//` を拾った）。直した後: `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass（行頭のその言語のコメントだけを拾う、checks に入れた AGENTS.md は Markdown として読む、拡張子の分からないファイルは件数を出す、NUL を含む一覧と区切りの違う一覧はカーソルを共有しない）。T09 のテストの行末コメントと JSONC の HTML コメントを、行頭のコメントに直した（意図した挙動の変更）。`bun run verify` → exit 0
 
+- [x] T14: 拡張子が Object の継承プロパティ名（constructor）の検査ファイルで look が例外で落ちる誤りを直す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T13（直す対象のコメントの表）
+  - 変更: `server/src/overview.ts`, `server/test/overview.test.ts`, `plugin/skills/rules/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="marker lines only" test/overview.test.ts` → 直す前のコードで `checks.constructor` を渡すと TypeError: openers.map is not a function
+  - 完了条件: `cd server && node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass
+  - コミット: `fix(overview): treat a check file's unknown extension as unknown, whatever its name`
+  - 結果: red を確かめた（TypeError: openers.map is not a function）。表を Map にして `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass。Skill に、module の禁止は今ある深さだけを守ると書いた（T12 のレビューの F1 を見送った代わり）。`bun run verify` → exit 0
+
 - [ ] T10: M2 のタスク、隠しテスト、patch の違反の判定
   - 種別: 追加
   - 計画: S5
@@ -179,3 +189,5 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T12 / 修正タスクを足した（T08 のレビューの F1・F2）。Biome 2.5.14 で確かめた: import の書き方そのもの（`../db`、`../db.ts`、`@db`）を並べればそれだけが落ち、`../legacy/db.ts` と `./db.ts` は落ちない。写した `paths` は override でも効く。`includes` の `src/ui/*` はすぐ下だけに当たる / M1 のケースを足して流し直す（m1c、各 10 run）
 - 2026-10-08 / T09 / Codex のタスクごとのレビュー（b4b0823c）: F2（文字列の中や別の言語のコメントの marker を拾う）・F3（checks に入れた instruction ファイルの走査が変わる）・F4（NUL で checks のハッシュが衝突する）を受け入れ、修正タスク T13 を足した。F1（複数行のブロックコメントの中の marker を拾えない）は見送る: marker の形を行頭の 1 行のコメントと決めて Skill に書く。言語ごとのコメントの解析を自前で書くと読み落としが出やすい
 - 2026-10-08 / T12 / コミット欄を短くした（前: keep every project-wide ban in an override and name the imports a module ban covers、後: copy project-wide bans into overrides and list the imports a module ban covers）/ 件名の上限 100 文字を超えた
+- 2026-10-08 / T10 / M2 の予備の run を本測定の前に流す: ルール文だけ（rules）、タスク 3 つ × 両ホスト × 3 回。ルール文だけで違反が出なければ、基準 (1)「違反がルール文だけより減る」を測れないので持ち主に戻す
+- 2026-10-08 / T12・T13 / Codex のタスクごとのレビュー（d3b28eae、e5836e20）: T13-F2（拡張子が constructor だと look が例外で落ちる）を受け入れて T14 を足した。T12-F1（下書きの後に足された深いディレクトリを M1 で測っていない）は見送り、import の書き方で禁止する方式の限界として下書きに書くよう Skill に足した。T13-F1（複数行の文字列の中の marker らしい行を拾う）は見送り: 言語ごとの文字列の解析が要り、起きても look が余計な知らせを 1 行出すだけ。同じ箇所の 2 巡目なので、ここからは例外で落ちる・誤った結果を返す不具合だけを直す

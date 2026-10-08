@@ -125,17 +125,14 @@ const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: READ_BUDGET - 4 * 1024 }
 const CONDITION_ROWS = Math.ceil(LOOK_LIMITS.bytes / 28);
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
 const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
-/** How a comment opens in a check file's language, by extension */
-const COMMENTS: Record<string, string[]> = {
-  ...Object.fromEntries(
-    ["json", "jsonc", "json5", "js", "cjs", "mjs", "ts", "cts", "mts", "jsx", "tsx"].map((x) => [
-      x,
-      ["//", "/*"],
-    ]),
+/** How a comment opens in a check file's language, by extension; a Map, so `constructor` is an unknown extension, not a property */
+const COMMENTS = new Map<string, string[]>([
+  ...["json", "jsonc", "json5", "js", "cjs", "mjs", "ts", "cts", "mts", "jsx", "tsx"].map(
+    (x): [string, string[]] => [x, ["//", "/*"]],
   ),
-  ...Object.fromEntries(["toml", "yaml", "yml", "py", "sh", "cfg"].map((x) => [x, ["#"]])),
-  ...Object.fromEntries(["html", "xml", "md"].map((x) => [x, ["<!--"]])),
-};
+  ...["toml", "yaml", "yml", "py", "sh", "cfg"].map((x): [string, string[]] => [x, ["#"]]),
+  ...["html", "xml", "md"].map((x): [string, string[]] => [x, ["<!--"]]),
+]);
 const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
@@ -143,7 +140,7 @@ const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * as a marker. Null when the extension's comments are not known here.
  */
 function commentMarker(file: string): RegExp | null {
-  const openers = COMMENTS[path.extname(file).slice(1).toLowerCase()];
+  const openers = COMMENTS.get(path.extname(file).slice(1).toLowerCase());
   return openers
     ? new RegExp(
         `^\\s*(?:${openers.map(literal).join("|")})\\s*sphica:\\s*((?:trace|harvest|glean):[\\w.:/-]{1,1000}?)(?=\\s|\\*/|-->|$)`,

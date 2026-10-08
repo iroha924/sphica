@@ -76,7 +76,8 @@ Print the whole `biome.jsonc` the owner would end up with, in one `jsonc` block:
   multi-line comment or after code on the same line is not read
 
 Under the block, for each check: its scope, its exceptions, one import line that must fail, and one file that must pass. Say what it does
-not see: Biome checks `import`, `export ... from`, `import type`, and `import()`, but not `require()`.
+not see: Biome checks `import`, `export ... from`, `import type`, and `import()`, but not `require()`; and a module ban covers only the
+depths of A that exist now, so a directory added deeper under A later needs its own override.
 
 ```jsonc
 {
