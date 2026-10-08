@@ -1167,7 +1167,8 @@ test("review_select keeps each reply within the reply budget: long options, a hu
         findings: keys.map((unit) => ({ outcome: "unrelated", unit, reason: "a test" })),
       },
     });
-    assert.doesNotMatch(JSON.stringify(checked.content), /problem/i);
+    assert.notEqual(checked.isError, true);
+    assert.match((checked.content as { text: string }[])[0]?.text ?? "", /Batch 1 of 1 backed/);
   } finally {
     await client.close();
     await db.done();

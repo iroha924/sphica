@@ -32,7 +32,7 @@ Pass the diff under review and the root of the repository under review (`cwd`) t
 |---|---|---|
 | The tool call fails, or it says "Decision lane: not checked" | MCP does not connect, the database is unreachable, or the project is not registered | **`blocked_unknown`** + the reason it gave |
 | "Decision lane: checked" with no record | No active record applies | Continue to Step 3; 0 records may be treated as a **grounded negative** |
-| "Decision lane: checked" with records | One batch of at most 50 records, `Batch k of n`, and a `selection`. Each record says why it applies (anchored to a changed path, or an added line names an option it rejected); an AI's decision is marked `decided by an AI` | Continue |
+| "Decision lane: checked" with records | One batch of at most 50 records, `Batch k of n`, and a `selection`. Each record says why it applies (anchored to a changed path, or an added line names an option it rejected), cut short with `…` when long; an AI's decision is marked `decided by an AI`. A batch whose keys are too long to show lists `u<id>` alone and says so | Continue |
 
 **When returning `blocked_unknown`, state concretely what was missing.** Silently returning 0 results makes the caller read it as "no findings".
 **This step is deterministic and can claim coverage.** It selects only active records; candidates and superseded records never apply.
