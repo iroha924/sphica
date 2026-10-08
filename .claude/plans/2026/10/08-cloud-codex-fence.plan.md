@@ -11,17 +11,19 @@ approved_at: 2026-10-08
 ## 要点
 
 - `server/evals/cloud/codex.ts`（評価される Codex）と `grade.ts`（Codex の採点者）から `-s` を外し、PR #304 と同じ permission profile の deny で囲う。隠すのは、持ち主の資格情報（Codex のログインを含む）、`server/evals`、評価の出力先 `~/.cache/sphica-eval` の全体、run 自身の `auth.json`、run の DB
-- 評価の出力先を `~/.cache/sphica-eval` の下に限る。codex.ts は `--build` と `--out` がその外なら止まり、grade.ts はビルドか、collect が記録した run の置き場がその外なら止まる
-- Codex の run の checkout・HOME・TMPDIR は、隠す場所の外の一時ディレクトリで動かす。終わったら今と同じ `<run>/work` などへ移す。Codex を使う評価のプロセスは、共有のロックで 1 つずつしか動かさない
+- 評価の出力先を `~/.cache/sphica-eval` の下に限る。codex.ts は `--build` と `--out` がその外なら止まり、grade.ts はビルドか、collect が記録した run の置き場がその外なら止まる Codex の run の checkout・HOME・TMPDIR は、隠す場所の外の一時ディレクトリで動かす。終わったら今と同じ `<run>/work` などへ移す。Codex を使う評価のプロセスは、共有のロックで 1 つずつしか動かさない
 - 囲いの指紋（`fence`）を run と採点の checkpoint、loop.json、grades.json に残す。囲いの前の run は collect で除外し、report は fence の違う結果どうしを比べない
 - 実際の Codex で読めないことを確かめる probe（`codex.ts --probe`、`grade.ts --probe`）を足す。Codex のバージョンか runner を変えたら、測る前に流す
-- 変えないもの: パッケージ（release なし）、Claude の run、条件ごとに checkout が渡す中身（`.tools` の fixture.db や gold.json）
+- 持ち主の HOME の下は、許可の一覧で絞る。囲った Codex に残すのは node と bun のインストール先（決まった形のものだけ）で、ほかの HOME の項目は全部 deny する。run に渡す PATH も、HOME の外の項目と node・bun だけにする
+- review の評価（`server/evals/review/`）も同じ囲い・共有のロック・一時の木を使う。M2 のチェックは run ごとの Biome の写しで動かし、写しが変わった run は除外する
+- 変えないもの: パッケージ（release なし）、Claude の cloud の run、Claude の review の lane の HOME（持ち主のログイン）、条件ごとに checkout が渡す中身（`.tools` の fixture.db や gold.json）
 
 ## 持ち主の決定
 
 - 次の作業を #305 にし、その後に E4（#213・#219）へ進む（2026-10-08、「OK、それで進めよう」）
 - 直し方は PR #304 の review の評価と同じ permission profile の deny にする（#305 の本文。持ち主の依頼の範囲）
 - 評価はローカルの claude と codex で回し、費用の上限は当面設けない（記録 trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/eval-local-no-cap）
+- PR #306 の GitHub の Codex のレビューの後に持ち主が追加（2026-10-08、AskUserQuestion）: 資格情報は決まった deny の一覧ではなく HOME の下の許可の一覧で絞る（この PR で直す）。review の評価の共有のロックとリポジトリの deny もこの PR で直す。測る run ごとに probe の合格を必須にするのは見送る
 
 ## 目的
 
@@ -34,8 +36,9 @@ approved_at: 2026-10-08
 ## 対象外
 
 - checkout が条件ごとに持つ足場（search・inject の `.tools/fixture.db`、gold の `.tools/gold.json`）。その条件がもともと渡す情報で、Claude の cloud の run も同じ checkout を使う。隠すと条件の中身が変わり、#305 とは別の変更になる。既知の限界として eval-loop Skill に書く
-- Claude の run（`claude-run.ts` は `blockReadsOutsideWorkingDirectories` と sandbox の `denyRead` で囲ってある）と `claude.ts` の出力先
-- review の評価の挙動（共通の関数を移すことと、runnerDigest に移した先を足すことだけ）
+- Claude の cloud の run（`claude-run.ts` は `blockReadsOutsideWorkingDirectories` と sandbox の `denyRead` で囲ってある）と `claude.ts` の出力先
+- 測る run ごとに probe の合格を必須にすること（持ち主が見送った）
+- 走らせた後に HOME に増えた項目の deny（許可の一覧は run の直前に HOME を読んで作る。既知の限界として eval-loop Skill に書く）
 - CI で実際の Codex を起動すること
 
 ## 前提
@@ -85,6 +88,18 @@ approved_at: 2026-10-08
      - 判定は、events.jsonl の完了した `command_execution` の出力で行う。モデルの答えは見ない。search の slot では、エラーの無い完了した `mcp_tool_call` の結果に fixture の記録のキーがあること。inject の slot では、選んだキーを含む emitted の `pre_read` の行があること
    - `grade.ts --probe --loop <build>/loop.json`: 採点と同じ囲いで、採点者の空のディレクトリに probe.sh を置いて 1 回流す。`--json` は probe のときだけ付け、同じ形で判定する。checkpoint と grades.json を読み書きする前に終わる
 7. eval-loop Skill: Codex のバージョンか runner を変えたら、測る前に両方の probe を流す。Codex を使う評価は 1 つずつ動かす（ロックが止める）。出力先は `~/.cache/sphica-eval` の下に限る。checkout の足場は既知の限界として書く
+8. HOME の許可の一覧（`codex-home.ts`）
+   - 残す場所: `node` と `bun` を、link を辿って解決した実体から決める。HOME の下なら、`<HOME>/.local/share/mise/installs/<name>/<version>`（実体が `<root>/bin/<tool>`）か `<HOME>/.bun`（実体が `<HOME>/.bun/bin/bun`）の形のときだけ、その根を丸ごと残す。それ以外の形なら止まる。HOME の外なら根は要らない。見つからない、link の先が無い、読めない、のどれでも止まる
+   - deny: HOME から残す根へ向かう途中のディレクトリごとに、残す根でもその祖先でもない項目を全部 deny する（dot-file を含む）。`codexDenies` は `[...repoPlaces(), cache, ...homeDenies]` になる。`DENY_DIRS`・`DENY_FILES` は Claude の run にだけ残す
+   - run に渡す PATH: 持ち主の PATH のうち HOME の外の項目と、`node`・`bun` の実体のディレクトリだけにする
+   - 指紋: repo・cache・codex-home・run の auth を役割の名前に置き換えてから、残った `<home>/...` の deny の行を 1 行の `<home-denied>` にまとめ、`policy: home-allowlist-v1` と HOME からの相対で並べた残す根の行を足して hash する。deny の一覧と指紋は run ごとに 1 回だけ作り、設定・result.json・記録で同じものを使う
+   - probe の対象: 走らせる前に HOME の直下に作る token（DENIED。終わったら消す）、deny されたディレクトリを 1 つ（`~/.ssh`・`~/.aws`・`~/.config` のうち最初にあるもの。無ければ walk が deny した最初のディレクトリ）、解決した `node` の実体の先頭 1 バイト（READ。残す根が読めることの対照）
+9. review の評価（`server/evals/review/`）
+   - Codex の lane（run.ts・m2.ts）は `codexDenies` と出力先を deny し、checkout・HOME・TMPDIR を 1 つの一時の木に置く。CODEX_HOME・DB・ログは run ディレクトリに置き、`keepCheckout` が一時の木を戻す
+   - Claude の lane は HOME を変えない（持ち主のログイン）。deny に `repoPlaces()` を足す
+   - run.ts と m2.ts は、一時の状態を作る前に共有のロックを取り、作った一時の木を全部消せたときだけ外す。後片付けに失敗したらロックを残す。grade.ts の exit のハンドラも、`gradeOne` の削除が成功したときだけ外す
+   - M2 の `scripts/check.mjs` は、run ごとに一時の木へ写した固定版の Biome（`@biomejs/biome` と、それが解決する platform のパッケージ）を動かす。写しの sha256（全ファイルをパスの順に）を run の前と後に取り、変わった run は「changed the Biome it was given」で除外する。採点の judge はリポジトリの Biome を使う
+   - `RUNNER_FILES` に `../cloud/codex-run.ts` を足す
 
 ## 採った案と棄却した案
 
@@ -105,6 +120,8 @@ approved_at: 2026-10-08
 - S5: report の fence の比較
 - S6: `codex.ts --probe` と `grade.ts --probe`
 - S7: eval-loop Skill
+- S8: HOME の許可の一覧、run の PATH、指紋の方針、probe の対象
+- S9: review の評価の囲い・ロック・一時の木・M2 の Biome の写し
 
 ## 完了条件
 
@@ -114,6 +131,8 @@ approved_at: 2026-10-08
 - A4: `node server/evals/cloud/grade.ts --probe --loop <build>/loop.json` → 秘密の対象がすべて `DENIED`、checkpoint と grades.json が変わらない
 - A5: 1 つのタスクについて none・search・inject・gold の各条件で `codex.ts` を 1 回ずつ流し、`collect.ts --build <build> --no-cloud --local-plan <plan>` → 4 行とも excluded でない。`answer_format` が valid で、隠しテストの結果は実際に流れたもの（not run でない）。gold の行には gold の receipt がある
 - A6: `gh pr checks <PR>` → 全項目 pass。merge の前の Codex の全差分のレビューで、未対応の指摘が 0
+- A7: `node server/evals/review/run.ts --preflight` → passed（Codex の lane の probe で、ログイン・評価・出力先・リポジトリの `.git`・HOME の直下の token が DENIED）
+- A8: `node server/evals/review/m2.ts --host <claude|codex> --condition check --runs 1` → claude と codex の両方で、除外されずに終わり、events に `scripts/check.mjs` の Biome の出力がある
 
 ## リスク
 
@@ -127,3 +146,4 @@ approved_at: 2026-10-08
 なし
 
 ## 変更履歴
+- 2026-10-08 / 方針 8・9、手順 S8・S9、完了条件 A7・A8 を足し、対象外から review の評価を外した / PR #306 の GitHub の Codex のレビューで、資格情報を deny の一覧で隠す限界と review の runner のロックが指摘され、持ち主がこの PR で直すと決めた。設計は Codex と 3 往復で合意した（session 01a11bb5-e438-75c1-ae9f-f2e3a3172a4d） / Go: 持ち主の決定（AskUserQuestion）で取得済み

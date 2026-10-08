@@ -221,6 +221,58 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 直す前は新しい 5 件が失敗した。改行を含む worktree は、読み方だけを古い形に戻して失敗することも確かめた
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 161 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip`・`bun run english` → 0 で終わった
 
+## P5: HOME の許可の一覧と review の評価（PR #306 のレビューの後に持ち主が追加）
+
+囲った Codex が HOME の下で読めるのを node と bun のインストール先だけにし、review の評価も同じ囲いとロックで動かす
+
+- [ ] T19: HOME の許可の一覧と run の PATH を作り、cloud の run と採点者の deny と指紋をそれに替える
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T18（今の codexDenies と指紋が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-grade.test.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node --test --test-name-pattern="allowlist" test/eval-codex.test.ts` → 仮の HOME の `.git-credentials`・`.kube`・`.local/share/atuin` が deny に無く、run の PATH に HOME の `.local/bin` が残って失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 全件 pass
+  - コミット: `fix(eval): deny all of HOME but the node and bun installs to the fenced Codex (T19)`
+- [ ] T20: probe の対象を HOME の許可の一覧に合わせる（HOME の直下の token、deny されたディレクトリ、node の実体の対照）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T19（許可の一覧が要る）
+  - 変更: `server/evals/cloud/probe.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="probe" test/eval-codex.test.ts` → 対象に HOME の直下の token と node の対照が無く失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): probe HOME as the allowlist fences it (T20)`
+- [ ] T21: 採点者のロックを、一時のディレクトリを消せたときだけ外す
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T19（grade.ts の変更が要る）
+  - 変更: `server/evals/cloud/grade.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="grader keeps the lock" test/eval-codex.test.ts` → 採点者の一時のディレクトリが消せなくてもロックを外して失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): keep the grader's lock while its temp directories remain (T21)`
+- [ ] T22: review の評価の Codex の lane を、同じ囲い・一時の木・共有のロックで動かし、Claude の lane にリポジトリの deny を足す
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T19（codexDenies が要る）
+  - 変更: `server/evals/review/runner.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="review lanes" test/review-eval.test.ts` → Codex の lane の deny にリポジトリの `.git` と HOME の許可の一覧が無く、HOME と TMPDIR が出力先の中にあり、ロックを取らずに失敗する
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): fence the review evaluation's lanes like the cloud runs (T22)`
+- [ ] T23: M2 のチェックを run ごとの Biome の写しで動かし、写しが変わった run を除外する
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T22（M2 の一時の木が要る）
+  - 変更: `server/evals/review/m2.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="Biome copy" test/review-eval.test.ts` → check.mjs がリポジトリの Biome を指し、写しを書き換えた run が除外されずに失敗する
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): run M2's check on a per-run Biome copy and exclude runs that changed it (T23)`
+- [ ] T24: eval-loop Skill に HOME の許可の一覧・run の PATH・review の評価の囲いと、既知の限界を書く
+  - 種別: 変更
+  - 計画: S8, S9
+  - 依存: T23（書く中身が要る）
+  - 変更: `.claude/skills/eval-loop/SKILL.md`
+  - 完了条件: `bun run verify:ai` → 0 で終わる
+  - コミット: `docs(eval-loop): describe the HOME allowlist and the review evaluation's fence (T24)`
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -243,3 +295,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / 全差分 / Codex の全差分のレビュー（high）で P2 が 3 件。採点者の fence が残らない（Codex が再現）、probe.sh を書き換えて流してから戻すと判定を偽れる、採点者の probe が対象ごとの判定を残さない / 1 件目と 3 件目を採用し T16 で直した。2 件目は見送る（probe は囲いの設定の誤りを見つける確認で、わざと欺くモデルまでは相手にしない。塞ぐにはスクリプトを書けない場所に置く作り直しと実機の確認が要る。スクリプトの改ざんが見えたら見直す）
 - 2026-10-08 / T17 / PR #306 の check (26) が落ち、失敗したジョブだけの再実行でも再現した。review の fixture の組み立て（acceptance の driver）が HOME を差し替えている最中に、テストが `os.homedir()` と比べていた。main にもあった順番への依存で、テストを足したことでランダムな並びが変わって表に出た / T17 で直した
 - 2026-10-08 / T18 / GitHub の Codex のレビュー（5f9caf9）で P1 が 7 件、P2 が 3 件。7 件を T18 で直した（probe.sh の書き換えは前に見送ったが、渡す記録から指示され得るという理由で採用した）。残る 3 件（資格情報を許可の一覧で絞る、review の runner にも共有のロック、組織が管理する設定を測る run ごとの probe で確かめる）は、範囲か方針が変わるので持ち主に聞く
+- 2026-10-08 / P5 / 持ち主の決定（資格情報は許可の一覧で絞る、review の評価もこの PR で直す、probe の必須化は見送る）を受け、plan の方針 8・9 を足して T19〜T24 を足した。設計は Codex と 3 往復で合意した
