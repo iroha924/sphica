@@ -75,7 +75,12 @@ const shield = shieldNow();
 const denies = codexDenies(cache, shield);
 const graderFence = currentFence(":read-only", cache, shield);
 const release = codexLock(cache);
-process.on("exit", release);
+// A grader directory left in the temp directory is readable to the next fenced Codex: the lock stays until the owner clears it
+const leftBehind: string[] = [];
+process.on("exit", () => {
+  if (!leftBehind.length) release();
+  else console.error(`could not remove ${leftBehind.join(", ")}; remove it, then codex.lock in ${cache}`);
+});
 
 /**
  * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
@@ -119,8 +124,12 @@ function gradeOne(
       events: r.stdout ?? "",
     };
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.rmSync(home, { recursive: true, force: true });
+    for (const d of [dir, home])
+      try {
+        fs.rmSync(d, { recursive: true, force: true });
+      } catch {
+        leftBehind.push(d);
+      }
   }
 }
 

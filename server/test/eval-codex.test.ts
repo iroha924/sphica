@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -123,6 +124,7 @@ prompt=$(cat)
 [ -f "$here/block-copy" ] && touch "$(dirname "$CODEX_HOME")/work"
 if [ -f "$here/unreadable" ]; then mkdir "$TMPDIR/unreadable"; touch "$TMPDIR/unreadable/x"; chmod 000 "$TMPDIR/unreadable"; fi
 [ -f "$here/link" ] && ln -s "$work/README.md" "$work/link"
+if [ -f "$here/stuck" ]; then mkdir -p "$work/stuck/x"; chmod 000 "$work/stuck"; fi
 if [ -f "$here/run-probe" ]; then
   script=$(printf '%s' "$prompt" | sed -n 's/.*Run \\([^ ]*\\) once.*/\\1/p' | head -n 1)
   node -e 'const out = require("node:child_process").execFileSync("sh", [process.argv[2]], { cwd: process.argv[1] }).toString(); console.log(JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, command: process.argv[2], aggregated_output: out } }))' "$work" "$script"
@@ -212,7 +214,7 @@ function codexBuild(condition: string) {
   });
   const fail = () => fs.writeFileSync(path.join(bin, "fail"), "");
   /** Makes the fake codex leave something behind: an unreadable directory in its TMPDIR, or an absolute link in its checkout */
-  const leave = (what: "unreadable" | "link" | "run-probe" | "block-copy") =>
+  const leave = (what: "unreadable" | "link" | "run-probe" | "block-copy" | "stuck") =>
     fs.writeFileSync(path.join(bin, what), "");
   const probePath = () => fs.readFileSync(path.join(bin, "probe-path"), "utf8").trim();
   return { root, home, cache, build, env, start, seen, fail, leave, probePath };
@@ -767,4 +769,41 @@ test("the probe reads HOME as the run's fence sees it: a token at its root and a
   );
   assert.equal(by("owner-login")?.path, path.join(home, ".codex", "auth.json"));
   assert.equal(by("home-token")?.expect, "DENIED");
+});
+
+test("the grader keeps the lock while a temp directory it made cannot be removed", () => {
+  const b = codexBuild("none");
+  b.leave("stuck");
+  const loop = path.join(b.build, "loop.json");
+  const row = {
+    model: "codex",
+    task: "pilot-sort",
+    condition: "none",
+    run: "r1",
+    excluded: null,
+    answer: "a",
+    answer_format: "valid",
+    patch: "",
+    patch_truncated: false,
+  };
+  fs.writeFileSync(
+    loop,
+    JSON.stringify({ build: "b", bundle: "c", run_roots: [path.join(b.cache, "codex-runs")], rows: [row] }),
+  );
+  const r = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop, "--second", "none"],
+    { encoding: "utf8", env: b.env },
+  );
+  try {
+    assert.ok(fs.existsSync(path.join(b.cache, "codex.lock")), `the lock stays (${r.stderr})`);
+    assert.match(r.stderr, /could not remove /);
+  } finally {
+    // Only what this run left: other test files may have their own grader directories in the same temp directory
+    const left = /could not remove (.*); remove it/.exec(r.stderr)?.[1]?.split(", ") ?? [];
+    for (const d of left) {
+      if (fs.existsSync(path.join(d, "stuck"))) fs.chmodSync(path.join(d, "stuck"), 0o700);
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  }
 });

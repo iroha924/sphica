@@ -245,7 +245,7 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): probe HOME as the allowlist fences it (T20)`
   - 結果: `cd server && node --test --test-name-pattern="probe" test/eval-codex.test.ts` → 直す前は対象を作る関数（`homeToken`）が無く、新しいテストが読み込みで失敗した（対象に HOME の直下の token と node の対照が無いことは、`probeTargets` が `DENY_DIRS` と `DENY_FILES` しか見ないことで分かる）
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 164 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
-- [ ] T21: 採点者のロックを、一時のディレクトリを消せたときだけ外す
+- [x] T21: 採点者のロックを、一時のディレクトリを消せたときだけ外す
   - 種別: 修正
   - 計画: S9
   - 依存: T19（grade.ts の変更が要る）
@@ -253,6 +253,8 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - red: `cd server && node --test --test-name-pattern="grader keeps the lock" test/eval-codex.test.ts` → 採点者の一時のディレクトリが消せなくてもロックを外して失敗する
   - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
   - コミット: `fix(eval): keep the grader's lock while its temp directories remain (T21)`
+  - 結果: `cd server && node --test --test-name-pattern="grader keeps the lock" test/eval-codex.test.ts` → 直す前は、消せない一時のディレクトリが残ったままロックが外れて失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 98 件 pass。テストの後に os.tmpdir() に `sphica-grade-*` が残っていない。`bun run typecheck`・`bun run lint` → 0 で終わった
 - [ ] T22: review の評価の Codex の lane を、同じ囲い・一時の木・共有のロックで動かし、Claude の lane にリポジトリの deny を足す
   - 種別: 修正
   - 計画: S9
@@ -301,3 +303,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T18 / GitHub の Codex のレビュー（5f9caf9）で P1 が 7 件、P2 が 3 件。7 件を T18 で直した（probe.sh の書き換えは前に見送ったが、渡す記録から指示され得るという理由で採用した）。残る 3 件（資格情報を許可の一覧で絞る、review の runner にも共有のロック、組織が管理する設定を測る run ごとの probe で確かめる）は、範囲か方針が変わるので持ち主に聞く
 - 2026-10-08 / P5 / 持ち主の決定（資格情報は許可の一覧で絞る、review の評価もこの PR で直す、probe の必須化は見送る）を受け、plan の方針 8・9 を足して T19〜T24 を足した。設計は Codex と 3 往復で合意した
 - 2026-10-08 / T19 / HOME の deny の行を 1 行にまとめる形では、HOME が空のとき（行が無い）と項目があるときで指紋が変わった / HOME の deny の行は指紋から落とし、方針の行と残す根の行で表した（plan の方針 8 の「1 行の `<home-denied>` にまとめる」から変えた）
+- 2026-10-08 / T20 / HOME の許可の一覧を probe に渡すため、`HomeFence` に解決した道具の実体（`tools`）を、`ProbePaths` に `home` を足した / T20 の変更欄には無い codex-home.ts と codex-run.ts も変えた（前: probe.ts・codex.ts・grade.ts・eval-codex.test.ts）
