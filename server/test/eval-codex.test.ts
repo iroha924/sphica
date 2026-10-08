@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -110,6 +111,15 @@ test("review's runner identity covers the shared fence", () => {
   assert.ok(RUNNER_FILES.includes("../cloud/codex-home.ts"));
 });
 
+/** Git for the fixtures with none of the owner's config (hooks, templates, signing) and none of the owner's Sphica paths */
+const GIT_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_GLOBAL: os.devNull,
+};
+delete GIT_ENV.SPHICA_DB;
+delete GIT_ENV.SPHICA_HOME;
+
 /** A fake `codex` that records its arguments, environment, and config, and answers like `codex exec -o` */
 const FAKE_CODEX = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
@@ -147,7 +157,9 @@ function codexBuild(condition: string) {
   fs.writeFileSync(path.join(slot, ".tools", "hook.sh"), "");
   fs.writeFileSync(path.join(slot, "README.md"), "slot\n");
   const git = (...a: string[]) =>
-    execFileSync("git", ["-C", slot, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a]);
+    execFileSync("git", ["-C", slot, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
+      env: GIT_ENV,
+    });
   git("init", "-q");
   git("add", "-A");
   git("commit", "-q", "-m", "slot");
@@ -245,6 +257,10 @@ test("the Codex run under test reads through a read fence and keeps its files wh
   const outside = b.start(path.join(b.root, "runs"));
   assert.notEqual(outside.status, 0);
   assert.match(outside.stderr, /must be inside/);
+  assert.ok(
+    !fs.existsSync(path.join(b.root, "runs")),
+    "nothing is made outside the cache before it is refused",
+  );
   const out = path.join(cache, "codex-runs");
   const r = b.start(out);
   assert.equal(r.status, 0, r.stderr);
@@ -262,7 +278,7 @@ test("the Codex run under test reads through a read fence and keeps its files wh
     );
   denied(fs.realpathSync(path.join(import.meta.dirname, "..", "..")));
   denied(fs.realpathSync(cache));
-  denied(path.join(fs.realpathSync(b.home), ".codex"));
+  denied(fs.realpathSync(b.home));
   denied(path.join(dir, "codex-home", "auth.json"));
   // The run's checkout, homes, and temp directory sit outside everything denied, and come back into the run directory afterwards
   const env = seen.env;
@@ -568,7 +584,9 @@ test("the fence denies every worktree of the repository and the git directory th
   const main = path.join(base, "main");
   fs.mkdirSync(main);
   const git = (cwd: string, ...a: string[]) =>
-    execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a]);
+    execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
+      env: GIT_ENV,
+    });
   git(main, "init", "-q");
   fs.writeFileSync(path.join(main, "f"), "x");
   git(main, "add", "-A");
@@ -669,8 +687,9 @@ test("the fenced Codex is denied all of HOME but the tool installs it needs (all
   const denied = (p: string) =>
     new RegExp(`^${JSON.stringify(p).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "deny"$`, "m");
   const { config, env } = b.seen();
-  for (const p of [".git-credentials", ".kube", ".local", "Projects"])
-    assert.match(config, denied(path.join(home, p)), p);
+  // HOME as a whole, so its credentials and anything made in it later are denied with it
+  assert.match(config, denied(home));
+  assert.doesNotMatch(config, /\.git-credentials/);
   // The run's PATH holds nothing under HOME but the tools' own directories
   const runPath = /^PATH=(.*)$/m.exec(env)?.[1]?.split(path.delimiter) ?? [];
   assert.deepEqual(
@@ -679,7 +698,7 @@ test("the fenced Codex is denied all of HOME but the tool installs it needs (all
   );
 });
 
-test("HOME keeps only a mise or Bun install root, denies everything beside the way to it, and refuses any other shape", () => {
+test("HOME is denied whole with only a mise or Bun install root read back, and any other shape refuses", () => {
   const home = fs.realpathSync(tempDir("home-fence-"));
   const file = (rel: string) => {
     fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
@@ -704,13 +723,13 @@ test("HOME keeps only a mise or Bun install root, denies everything beside the w
   ];
   const f = homeFence({ home, path: toolPath.join(path.delimiter) });
   assert.deepEqual(f.roots, [path.join(home, ".bun"), node].sort());
-  const rel = f.denies.map((d) => path.relative(home, d)).sort();
-  assert.deepEqual(rel, [
-    ".git-credentials",
-    ".local/bin",
-    ".local/share/atuin",
-    ".local/share/mise/installs/node/22.0.0",
-  ]);
+  // HOME is denied whole and the kept roots are read back under it
+  assert.deepEqual(f.denies, [home]);
+  const profile = codexProfile(":workspace", f.denies, f.roots);
+  assert.match(
+    profile,
+    new RegExp(`^${JSON.stringify(node).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "read"$`, "m"),
+  );
   // The run's PATH: the tools' directories and what lies outside HOME, never ~/.local/bin
   assert.deepEqual(f.path.split(path.delimiter), [
     path.join(node, "bin"),
@@ -733,7 +752,7 @@ test("HOME keeps only a mise or Bun install root, denies everything beside the w
   const fence = (shieldHome: ReturnType<typeof homeFence>) => {
     const s = { places: [REPO], home: shieldHome };
     return codexFence(
-      codexProfile(":workspace", [...codexDenies(cache, s), path.join(codexHome, "auth.json")]),
+      codexProfile(":workspace", [...codexDenies(cache, s), path.join(codexHome, "auth.json")], s.home.roots),
       cache,
       codexHome,
       s,
@@ -764,7 +783,10 @@ test("the probe reads HOME as the run's fence sees it: a token at its root and a
       path.delimiter,
     ),
   });
-  assert.ok(fence.denies.includes(token.path), "a token made before the fence is denied by it");
+  assert.ok(
+    fence.denies.some((d) => token.path.startsWith(`${d}${path.sep}`)),
+    "HOME is denied whole, its token with it",
+  );
   const targets = probeTargets([token], fence);
   const by = (label: string) => targets.find((t) => t.label === label);
   assert.deepEqual([by("home-dir")?.path, by("home-dir")?.expect], [path.join(home, ".ssh"), "DENIED"]);
@@ -849,7 +871,7 @@ test("a link under HOME is never denied, since a deny follows it to what it poin
   const fence = () => {
     const s = { places: [REPO], home: homeFence({ home, path: toolPath }) };
     return codexFence(
-      codexProfile(":workspace", [...codexDenies(cache, s), path.join(codexHome, "auth.json")]),
+      codexProfile(":workspace", [...codexDenies(cache, s), path.join(codexHome, "auth.json")], s.home.roots),
       cache,
       codexHome,
       s,

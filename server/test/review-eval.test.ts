@@ -952,30 +952,26 @@ test("M2's check runs a Biome copy of the run's own, and a run that changed its 
   const work = path.join(tree, "work");
   const fixtureRepo = path.join(tree, "repo");
   fs.mkdirSync(fixtureRepo);
-  execFileSync("git", ["-C", fixtureRepo, "init", "-q"]);
+  // None of the owner's git config (hooks, templates, signing) and none of the owner's Sphica paths
+  const gitEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: os.devNull,
+  };
+  delete gitEnv.SPHICA_DB;
+  delete gitEnv.SPHICA_HOME;
+  execFileSync("git", ["-C", fixtureRepo, "init", "-q"], { env: gitEnv });
   fs.writeFileSync(path.join(fixtureRepo, "biome.json"), "{}");
-  execFileSync("git", [
-    "-C",
-    fixtureRepo,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@example.invalid",
-    "add",
-    "-A",
-  ]);
-  execFileSync("git", [
-    "-C",
-    fixtureRepo,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@example.invalid",
-    "commit",
-    "-q",
-    "-m",
-    "c",
-  ]);
+  execFileSync(
+    "git",
+    ["-C", fixtureRepo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A"],
+    { env: gitEnv },
+  );
+  execFileSync(
+    "git",
+    ["-C", fixtureRepo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "c"],
+    { env: gitEnv },
+  );
   prepare(fixtureRepo, work, "rules", path.join(tree, "git"), copy.bin);
   assert.ok(
     fs.readFileSync(path.join(work, "scripts", "check.mjs"), "utf8").includes(JSON.stringify(copy.bin)),

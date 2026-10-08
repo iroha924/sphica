@@ -38,7 +38,6 @@ approved_at: 2026-10-08
 - checkout が条件ごとに持つ足場（search・inject の `.tools/fixture.db`、gold の `.tools/gold.json`）。その条件がもともと渡す情報で、Claude の cloud の run も同じ checkout を使う。隠すと条件の中身が変わり、#305 とは別の変更になる。既知の限界として eval-loop Skill に書く
 - Claude の cloud の run（`claude-run.ts` は `blockReadsOutsideWorkingDirectories` と sandbox の `denyRead` で囲ってある）と `claude.ts` の出力先
 - 測る run ごとに probe の合格を必須にすること（持ち主が見送った）
-- 走らせた後に HOME に増えた項目の deny（許可の一覧は run の直前に HOME を読んで作る。既知の限界として eval-loop Skill に書く）
 - CI で実際の Codex を起動すること
 
 ## 前提
@@ -90,7 +89,7 @@ approved_at: 2026-10-08
 7. eval-loop Skill: Codex のバージョンか runner を変えたら、測る前に両方の probe を流す。Codex を使う評価は 1 つずつ動かす（ロックが止める）。出力先は `~/.cache/sphica-eval` の下に限る。checkout の足場は既知の限界として書く
 8. HOME の許可の一覧（`codex-home.ts`）
    - 残す場所: `node` と `bun` を、link を辿って解決した実体から決める。HOME の下なら、`<HOME>/.local/share/mise/installs/<name>/<version>`（実体が `<root>/bin/<tool>`）か `<HOME>/.bun`（実体が `<HOME>/.bun/bin/bun`）の形のときだけ、その根を丸ごと残す。それ以外の形なら止まる。HOME の外なら根は要らない。見つからない、link の先が無い、読めない、のどれでも止まる
-   - deny: HOME から残す根へ向かう途中のディレクトリごとに、残す根でもその祖先でもない項目を全部 deny する（dot-file を含む）。`codexDenies` は `[...repoPlaces(), cache, ...homeDenies]` になる。`DENY_DIRS`・`DENY_FILES` は Claude の run にだけ残す
+   - deny: HOME を丸ごと deny し、残す根だけを `read` で読めるように戻す（起動した後に HOME に増えた項目も deny される）。残す根へ向かう途中と HOME の直下で、HOME の外を指すリンクや先の無いリンクがあれば止まる。`codexDenies` は `[...repoPlaces(), cache, HOME]` になる。`DENY_DIRS`・`DENY_FILES` は Claude の run にだけ残す
    - run に渡す PATH: 持ち主の PATH のうち HOME の外の項目と、`node`・`bun` の実体のディレクトリだけにする
    - 指紋: repo・cache・codex-home・run の auth を役割の名前に置き換えてから、残った `<home>/...` の deny の行は落とし（HOME の項目の有無で変わらないように）、`policy: home-allowlist-v1` と HOME からの相対で並べた残す根の行を足して hash する。deny の一覧と指紋は run ごとに 1 回だけ作り、設定・result.json・記録で同じものを使う
    - probe の対象: 走らせる前に HOME の直下に作る token（DENIED。終わったら消す）、deny されたディレクトリを 1 つ（`~/.ssh`・`~/.aws`・`~/.config` のうち最初にあるもの。無ければ walk が deny した最初のディレクトリ）、解決した `node` の実体の先頭 1 バイト（READ。残す根が読めることの対照）
@@ -148,3 +147,4 @@ approved_at: 2026-10-08
 ## 変更履歴
 - 2026-10-08 / 方針 8・9、手順 S8・S9、完了条件 A7・A8 を足し、対象外から review の評価を外した / PR #306 の GitHub の Codex のレビューで、資格情報を deny の一覧で隠す限界と review の runner のロックが指摘され、持ち主がこの PR で直すと決めた。設計は Codex と 3 往復で合意した（session 01a11bb5-e438-75c1-ae9f-f2e3a3172a4d） / Go: 持ち主の決定（AskUserQuestion）で取得済み
 - 2026-10-08 / 方針 8 の指紋で、HOME の deny の行を 1 行にまとめず落とす形にした / HOME が空のときは行が無く、項目があるときと指紋が食い違った（T19） / Go 不要（方針の範囲の中の作り方）
+- 2026-10-09 / 方針 8 の deny を、HOME の項目を列挙して deny する形から、HOME を丸ごと deny して残す根を `read` で戻す形に変えた。対象外にあった「走らせた後に HOME に増えた項目」は塞がった / GitHub の Codex のレビュー（aa095eca）の P1。実機（codex-cli 0.160.1）で、HOME を deny しても Codex が起動し、`read` で戻した node が動き、直前に作ったファイルが読めないことを確かめた / Go 不要（持ち主が決めた許可の一覧の、より強い作り方）

@@ -12,7 +12,7 @@ import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
 import { claimRunDir, codexModelOf, evalCache, fencedCodexHome, holdingLock } from "../cloud/codex-home.ts";
 import { REPO, shieldNow } from "../cloud/codex-run.ts";
-import { homeToken, type ProbeTarget } from "../cloud/probe.ts";
+import { homeToken, type ProbeTarget, probeProblems, probeScript } from "../cloud/probe.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
@@ -202,7 +202,12 @@ async function runLane(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      fencedCodexHome(codexHome, { base: ":read-only", deny: denies, extraConfig: codexMcp(p) });
+      fencedCodexHome(codexHome, {
+        base: ":read-only",
+        deny: denies,
+        read: o.env.shield.home.roots,
+        extraConfig: codexMcp(p),
+      });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied; Sphica's own home stays in the run
@@ -323,17 +328,26 @@ async function preflight(
     REPO,
     execFileSync("git", ["-C", REPO, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(),
   );
-  const probeScript = `#!/bin/sh\nfor pair in "cases|${cases}" "outside|${outside}" "auth|$CODEX_HOME/auth.json" "git|${path.join(gitDir, "HEAD")}" "home|${ownerToken.path}"; do\n  label=\${pair%%|*}; file=\${pair#*|}\n  if head -c 1 "$file" >/dev/null 2>&1; then echo "READ $label"; else echo "DENIED $label"; fi\ndone\n`;
+  const targets: ProbeTarget[] = [
+    { label: "cases", path: cases, expect: "DENIED" },
+    { label: "outside", path: outside, expect: "DENIED" },
+    { label: "auth", path: "$CODEX_HOME/auth.json", shell: true, expect: "DENIED" },
+    { label: "git", path: path.join(gitDir, "HEAD"), expect: "DENIED" },
+    ownerToken,
+  ];
   const codex = await runLane({
     ...review("codex", "postgres"),
-    plant: (work) => fs.writeFileSync(path.join(work, "probe.sh"), probeScript, { mode: 0o755 }),
+    plant: (work) => {
+      fs.writeFileSync(path.join(work, "probe-control.txt"), "control\n");
+      targets.push({ label: "control", path: path.join(work, "probe-control.txt"), expect: "READ" });
+      fs.writeFileSync(path.join(work, "probe.sh"), probeScript(targets, null), { mode: 0o755 });
+    },
     prompt: (body, p) =>
       `${reviewPrompt(body, { ...p, model: "codex" })}\nBefore reviewing, run ./probe.sh once and quote its output in your reply.\n`,
   });
+  // Judged from the run of ./probe.sh itself, never from what the reviewer wrote about it
   const fence = everything(codex.dir);
-  for (const label of ["cases", "outside", "auth", "git", "home"])
-    if (!fence.includes(`DENIED ${label}`))
-      problems.push(`codex: the probe did not show ${label} denied (${codex.dir})`);
+  for (const p of probeProblems(fence, targets)) problems.push(`codex: ${p} (${codex.dir})`);
   if (fence.includes(token)) problems.push(`codex read ${outside}`);
   const lanes = [probe, codex];
   for (const lane of lanes) {

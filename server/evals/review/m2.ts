@@ -73,8 +73,11 @@ const git = (work: string, ...args: string[]) =>
       "commit.gpgsign=false",
       ...args,
     ],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: ownGit },
   );
+
+/** Git with none of the owner's own config: a global hooks path or template would run the owner's code on the fixture */
+const ownGit = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull };
 
 /**
  * The checkout a run starts from: the fixture, the rule lines in CLAUDE.md and AGENTS.md, a check script that runs the pinned Biome, and,
@@ -120,7 +123,7 @@ export function prepare(
   gitDir: string,
   biome = BIOME,
 ): { start: string; checkout: Checkout } {
-  execFileSync("git", ["clone", "-q", repo, work]);
+  execFileSync("git", ["clone", "-q", repo, work], { env: ownGit });
   git(work, "remote", "set-url", "origin", ORIGIN);
   fs.writeFileSync(path.join(work, "CLAUDE.md"), cases.rules);
   fs.writeFileSync(path.join(work, "AGENTS.md"), cases.rules);
@@ -302,7 +305,7 @@ async function runOne(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      fencedCodexHome(codexHome, { base: ":workspace", deny: denies });
+      fencedCodexHome(codexHome, { base: ":workspace", deny: denies, read: o.env.shield.home.roots });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied

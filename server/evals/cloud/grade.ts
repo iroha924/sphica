@@ -97,7 +97,12 @@ function gradeOne(
   let result: { status: number | null; output: string; events: string } | undefined;
   let failure: unknown;
   try {
-    fencedCodexHome(path.join(home, ".codex"), { base: ":read-only", deny: denies, settings });
+    fencedCodexHome(path.join(home, ".codex"), {
+      base: ":read-only",
+      deny: denies,
+      read: shield.home.roots,
+      settings,
+    });
     // The schema text the checkpoint key holds, not the file, which may change while grading runs
     const schemaFile = path.join(home, "grade.schema.json");
     fs.writeFileSync(schemaFile, schema);

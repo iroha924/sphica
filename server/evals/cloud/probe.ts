@@ -138,14 +138,13 @@ export function readReturned(events: string, key: string): boolean {
 /**
  * The targets every probe reads, as the owner sees them: each that must be denied has to exist first, or a missing file would pass for
  * a denial. `extra` adds the caller's own (tokens, the build's tasks, the run's database, a control file). `home` is the HOME fence the
- * run was given: a denied directory of it is listed, and the first tool it keeps is read as the control that kept roots stay readable.
+ * run was given: a directory under it is listed, and the first tool it keeps is read as the control that kept roots stay readable.
  */
 export function probeTargets(extra: ProbeTarget[], home: HomeFence): ProbeTarget[] {
   const ownerAuth = path.join(home.home, ".codex", "auth.json");
   const credentials = [".ssh", ".aws", ".config"].map((d) => path.join(home.home, d));
-  const dir =
-    credentials.find((d) => home.denies.includes(d)) ??
-    home.denies.find((d) => fs.statSync(d, { throwIfNoEntry: false })?.isDirectory());
+  // HOME is denied whole: a credentials directory if there is one, else HOME itself, shows it
+  const dir = credentials.find((d) => fs.existsSync(d)) ?? home.home;
   // The repository's history holds the gold too: a file of the shared git directory shows it is denied as well as the working tree
   const gitDir = path.resolve(
     REPO,
@@ -160,7 +159,7 @@ export function probeTargets(extra: ProbeTarget[], home: HomeFence): ProbeTarget
       expect: "DENIED",
     },
     { label: "repo-git", path: path.join(gitDir, "HEAD"), expect: "DENIED" },
-    ...(dir ? [{ label: "home-dir", path: dir, dir: true, expect: "DENIED" as const }] : []),
+    { label: "home-dir", path: dir, dir: true, expect: "DENIED" },
     ...(home.tools[0] ? [{ label: "tool", path: home.tools[0], expect: "READ" as const }] : []),
     ...extra,
   ];

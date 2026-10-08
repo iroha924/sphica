@@ -27,9 +27,12 @@ function isolatedCodexHome(codexHome: string, extraConfig = "", settings = owner
  * the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay hidden is
  * denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
  */
-export function codexProfile(base: ":read-only" | ":workspace", deny: string[]): string {
+export function codexProfile(base: ":read-only" | ":workspace", deny: string[], read: string[] = []): string {
   // A path given twice (the repository directly under HOME) would be a key written twice, which TOML refuses
-  const lines = [...new Set(deny)].map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
+  const lines = [
+    ...[...new Set(deny)].map((d) => `${JSON.stringify(d)} = "deny"`),
+    ...[...new Set(read)].filter((r) => !deny.includes(r)).map((r) => `${JSON.stringify(r)} = "read"`),
+  ].join("\n");
   return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
 }
 
@@ -69,6 +72,8 @@ export function fencedCodexHome(
   o: {
     base: ":read-only" | ":workspace";
     deny: string[];
+    /** Places under a denied one that stay readable (the tools' installs under a denied HOME) */
+    read?: string[];
     extraConfig?: string;
     settings?: string;
     managed?: string[];
@@ -78,7 +83,7 @@ export function fencedCodexHome(
   if (managed.length)
     throw new Error(`administrator settings for Codex can replace the run's profile: ${managed.join(", ")}`);
   const denied = [...o.deny, path.join(codexHome, "auth.json")];
-  const profile = codexProfile(o.base, denied);
+  const profile = codexProfile(o.base, denied, o.read);
   isolatedCodexHome(codexHome, `${profile}${o.extraConfig ?? ""}`, o.settings);
   return { profile, denied };
 }
@@ -125,8 +130,9 @@ function installRoot(home: string, real: string, tool: string): string {
 }
 
 /**
- * Denies every entry of HOME that is neither a kept root nor on the way to one, made right before a run: entries made later are not
- * denied. A missing tool, a link to nothing, or an unreadable directory refuses instead of leaving something readable.
+ * HOME denied as a whole, with only the tools' install roots read back: an entry made in HOME after the run starts is denied too. A
+ * missing tool refuses. A link on the way to a kept root, or at HOME's top, that leads out of HOME or nowhere yet refuses as well: a read
+ * through it is judged where it leads, which the fence does not cover.
  */
 export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
   const home = fs.realpathSync(o.home ?? os.homedir());
@@ -143,13 +149,10 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
   const outside = entries.filter(
     (d) => !isInside(home, fs.existsSync(d) ? fs.realpathSync(d) : path.resolve(d)),
   );
-  const denies: string[] = [];
-  const walk = (dir: string) => {
+  const look = (dir: string) => {
     for (const name of fs.readdirSync(dir)) {
       const full = path.join(dir, name);
       if (roots.includes(full)) continue;
-      // A deny follows a link to what it points at, so a link is never denied: one to a place under HOME (a version alias beside
-      // a kept install) is judged where that place really is; one that leads out of HOME, or nowhere yet, could not be fenced
       if (fs.lstatSync(full).isSymbolicLink()) {
         let real: string;
         try {
@@ -163,17 +166,14 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
           throw new Error(
             `${full} is a link that leads out of HOME (${real}); the fence cannot deny it alone`,
           );
-        continue;
-      }
-      if (roots.some((r) => isInside(full, r))) walk(full);
-      else denies.push(full);
+      } else if (roots.some((r) => isInside(full, r))) look(full);
     }
   };
-  walk(home);
+  look(home);
   return {
     home,
     roots: [...new Set(roots)].sort(),
-    denies,
+    denies: [home],
     path: [...new Set([...tools.map((t) => path.dirname(t)), ...outside])].join(path.delimiter),
     tools,
   };

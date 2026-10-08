@@ -328,6 +328,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `gh run view 37799791258 --log-failed` → CI（aa095eca）の check (24.15)・check (26) が、本物の HOME を使う 2 件で失敗していた（`/home/runner/.ghcup is a link that leads out of HOME`）
   - 結果: `cd server && HOME=<外を指すリンクを置いた一時の HOME> node --test test/eval-codex.test.ts test/review-eval.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 174 件 pass
 
+- [x] T29: GitHub の Codex のレビュー（aa095eca）の 5 件を直す（起動した後に HOME に増えた項目が読める、review の preflight の probe がモデルの出力から文字列を探す、テストと M2 の fixture の git が持ち主の git 設定を引き継ぐ、`--out` を拒む前に作る）
+  - 種別: 修正
+  - 計画: S8, S9
+  - 依存: T28（テストの直しが要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/probe.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/test/eval-codex.test.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="allowlist|reads through a read fence and keeps" test/eval-codex.test.ts` → profile に HOME そのものの deny が無い、`--out` を拒む前に外へディレクトリを作る、で失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): deny HOME whole with the tool installs read back, and close the review's gaps (T29)`
+  - 結果: `cd server && node --test --test-name-pattern="reads through a read fence and keeps" test/eval-codex.test.ts` → 直す前の codex-run.ts では、拒んだ `--out` のディレクトリが残って失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 174 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -360,3 +371,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / 完了条件 / T25 の後に実機で流し直した（codex-cli 0.160.1、Claude Code は手元の版）。bun run verify は 0、cloud の probe 4 件と採点者の probe は ✓、4 条件の通常の run と collect は 4 行とも除外なし、review の preflight は ✓、M2 は両方の host で除外されず、events に写しの Biome の出力（Checked 18 files）がある
 - 2026-10-08 / T25 / T25 の差分の再レビューで P2 が 1 件（後片付けの失敗で終わった採点を保存せずに止まる） / 採用して T26 で直した
 - 2026-10-09 / T27 / GitHub の Codex のレビュー（d7636910）で P1 が 2 件、P2 が 2 件。4 件とも採用して T27 で直した。T25 のテストにあった「HOME の外へのリンクを deny しない」場合は、止まる形に変えたのでテストから外した。持ち主の指示で、P1 が出なくなるまで push のたびに再レビューを頼む
+- 2026-10-09 / T29 / GitHub の Codex のレビュー（aa095eca）で P1 が 4 件、P2 が 1 件。5 件とも採用した。HOME に増えた項目の件は、HOME を丸ごと deny して残す根を `read` で戻す形を実機で試して動いたので、それに変えた（plan の方針 8 を直した）

@@ -63,8 +63,7 @@ export function codexDenies(cache: string, s: Shield = shieldNow()): string[] {
 
 /**
  * The fence as one digest that names each place by its role, comparable across machines and runs. Other worktrees count as the
- * repository, and HOME's denied entries are left to the policy line, so entries coming and going (or none) do not change it; the roots
- * HOME keeps do.
+ * repository; HOME is one denied line, and the roots read back under it are part of the profile, so another Node version is another fence.
  */
 export function codexFence(
   profile: string,
@@ -76,16 +75,10 @@ export function codexFence(
   let text = profile;
   for (const p of s.places.filter((p) => p !== REPO).sort((a, b) => b.length - a.length))
     text = text.split(toml(p)).join(toml(REPO));
-  const roots = s.home.roots.map((r) => path.relative(s.home.home, r)).sort();
   return fenceDigest(
     text,
     { "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
-    (t) =>
-      [
-        ...new Set(t.split("\n").filter((l) => !/^"<home>[\\/](?:[^"\\]|\\.)*" = "deny"$/.test(l))),
-        "policy: home-allowlist-v1",
-        `allow-roots: ${JSON.stringify(roots)}`,
-      ].join("\n"),
+    (t) => [...new Set(t.split("\n"))].join("\n"),
   );
 }
 
@@ -97,7 +90,7 @@ export function currentFence(
 ): string {
   const codexHome = path.join(cache, "<run>", "codex-home");
   return codexFence(
-    codexProfile(base, [...codexDenies(cache, s), path.join(codexHome, "auth.json")]),
+    codexProfile(base, [...codexDenies(cache, s), path.join(codexHome, "auth.json")], s.home.roots),
     cache,
     codexHome,
     s,
@@ -137,8 +130,9 @@ export async function runCodex(o: {
       throw new Error(`the ${what} ${JSON.stringify(name)} is not one plain name`);
   const cache = evalCache();
   const build = requireInside(cache, o.build, "--build");
-  fs.mkdirSync(o.out, { recursive: true });
+  // Checked before it is made: an --out outside the cache is refused without creating anything there
   const out = requireInside(cache, o.out, "--out");
+  fs.mkdirSync(out, { recursive: true });
   const release = codexLock(cache);
   let tree = "";
   let run: Awaited<ReturnType<typeof fencedRun>>;
@@ -212,7 +206,12 @@ async function fencedRun(
       o.condition === "search" || o.condition === "inject"
         ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
         : "";
-    const fence = fencedCodexHome(codexHome, { base: ":workspace", deny: denies, extraConfig: mcp });
+    const fence = fencedCodexHome(codexHome, {
+      base: ":workspace",
+      deny: denies,
+      read: shield.home.roots,
+      extraConfig: mcp,
+    });
     result.fence = codexFence(fence.profile, cache, codexHome, shield);
     result.fence_roots = fence.denied;
     // Recorded so a comparison can refuse two builds run by different Codex models
