@@ -26,7 +26,14 @@ type Graded = GradeRow & {
   /** Codex runs only: the read fence the run was made under */
   fence?: string;
 };
-export type Build = { build?: string | null; variant: string; bundle?: string; rows: Graded[] };
+export type Build = {
+  build?: string | null;
+  variant: string;
+  bundle?: string;
+  /** The read fence the Codex grader ran under */
+  grader_fence?: string;
+  rows: Graded[];
+};
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
@@ -274,6 +281,14 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
     if (f.length > 1)
       throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} read fences`);
   }
+  // Every grade counted is the Codex grader's, whatever model ran: grades given under another fence are not compared either
+  for (const s of [old, next])
+    if (!s.build.grader_fence)
+      throw new Error(`the ${s.label} build records no grader fence; grade it again`);
+  if (old.build.grader_fence !== next.build.grader_fence)
+    throw new Error(
+      "the builds were graded by Codex graders under different read fences; grade both under the same one",
+    );
   const [oldFence, nextFence] = [fences(old)[0], fences(next)[0]];
   if (oldFence && nextFence && oldFence !== nextFence)
     throw new Error(

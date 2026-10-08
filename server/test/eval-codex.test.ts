@@ -513,6 +513,8 @@ test("grade.ts --probe fails when the grader reads what the fence must hide, and
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stdout, /✗ owner-login .*: READ, expected DENIED/);
   assert.match(r.stdout, /✗ cache-token .*: READ, expected DENIED/);
+  // Each target's line is printed whatever the verdict, as the evidence of what the grader could read
+  assert.match(r.stdout, /^READ control$/m);
   assert.doesNotMatch(r.stdout, /✗ control/);
   assert.ok(b.seen().args.includes("--json"));
   for (const f of ["grades.json", "grades.checkpoint.json"])

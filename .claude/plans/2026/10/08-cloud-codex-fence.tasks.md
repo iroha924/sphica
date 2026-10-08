@@ -189,6 +189,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: 直す前の probe.ts・codex.ts で `node --test --test-name-pattern="probe script tells|refuses a target" test/eval-codex.test.ts` → 2 件失敗した（偽の行で actual ''、not found の read が真）
   - 結果: `cd server && node --test test/eval-codex.test.ts` → 18 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T16: 全差分のレビューの指摘を直す（採点者の fence が grades.json に残らず別の囲いの採点を比べられる、採点者の probe が対象ごとの判定を残さない）
+  - 種別: 修正
+  - 計画: S4, S5, S6
+  - 依存: T06（report の fence の比較が要る）, T15（probe の判定が要る）
+  - 変更: `server/evals/cloud/grade.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/probe.ts`, `server/evals/cloud/codex.ts`, `server/test/eval-grade.test.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="compare puts|read fence" test/eval-grade.test.ts` → grades.json に `grader_fence` が無く、採点者の fence の無い・違う結果の `compare` が止まらずに失敗する。`node --test --test-name-pattern="grade.ts --probe" test/eval-codex.test.ts` → 採点者の probe が `READ control` の行を出さずに失敗する
+  - 完了条件: `cd server && node --test test/eval-grade.test.ts test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): record the grader's fence with the grades and print every probe line (T16)`
+  - 結果: `cd server && node --test --test-name-pattern="compare puts|read fence" test/eval-grade.test.ts` → 直す前は Missing expected exception と grader_fence が undefined で 2 件失敗、`grade.ts --probe` のテストも READ control の行が無く失敗した
+  - 結果: `cd server && node --test test/eval-grade.test.ts test/eval-codex.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 158 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -207,3 +218,5 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T11 / Codex のレビュー（high）で P1 が 2 件。別の worktree と共通の git ディレクトリが deny から漏れる、run の後に残ったプロセスがリンクを差し替えると後片付けの chmod が木の外を辿り得る / 前者を採用し T13 を足した。後者は見送る（Codex も推測。残ったプロセスは sandbox を引き継ぐので隠したものは読めず、後片付けが辿った先は持ち主の権限を持ち主のファイルに足すか、後の run から隠した run ディレクトリへ写すだけで、モデルに中身が届かない）
 - 2026-10-08 / T07 / Codex のレビュー（high）で P1 が 1 件、P2 が 6 件。モデルの出力で probe を偽れる（Codex が再現）、.git と 2 つ目以降の資格情報のファイルを見ない、not found の read を成功と数える、gold の probe で hook が gold を返さない、anchor のパスの引用と読み取りの完了、候補の 10 件の打ち切り / 7 件とも採用し、T15 を足して直した
 - 2026-10-08 / 完了条件 / 実際の Codex（codex-cli 0.160.1）で、ビルド g4-head-check の写し（builds/fence-305-check）に T14 までのコードで流した。inject・search・none の probe は ✓、gold の probe は T07 の指摘どおり「gold hook returned nothing」で ✗、4 条件の通常の run と collect は 4 行とも除外なし、採点者の probe は ✓ / T15 の後に全部流し直す
+- 2026-10-08 / 完了条件 / T15 の後に、実際の Codex で inject・search・gold・none の probe と採点者の probe を流し直し、全部 ✓。gold の probe も gold の receipt（582 バイト）が返った
+- 2026-10-08 / 全差分 / Codex の全差分のレビュー（high）で P2 が 3 件。採点者の fence が残らない（Codex が再現）、probe.sh を書き換えて流してから戻すと判定を偽れる、採点者の probe が対象ごとの判定を残さない / 1 件目と 3 件目を採用し T16 で直した。2 件目は見送る（probe は囲いの設定の誤りを見つける確認で、わざと欺くモデルまでは相手にしない。塞ぐにはスクリプトを書けない場所に置く作り直しと実機の確認が要る。スクリプトの改ざんが見えたら見直す）

@@ -25,7 +25,14 @@ import {
   saveCheckpoint,
   tabulate,
 } from "./grading.ts";
-import { cacheToken, type ProbeTarget, probeProblems, probeScript, probeTargets } from "./probe.ts";
+import {
+  cacheToken,
+  type ProbeTarget,
+  probeLines,
+  probeProblems,
+  probeScript,
+  probeTargets,
+} from "./probe.ts";
 import type { Grade } from "./schema-check.ts";
 
 const schema = fs.readFileSync(path.join(import.meta.dirname, "grade.schema.json"), "utf8");
@@ -161,6 +168,7 @@ if (args.probe) {
         fs.writeFileSync(path.join(dir, "probe.sh"), probeScript(targets, null), { mode: 0o755 });
       },
     );
+    console.log(probeLines(r.events));
     problems.push(...probeProblems(r.events, targets));
     if (r.status !== 0) problems.push(`the grader exited ${r.status}`);
   } finally {
@@ -263,7 +271,7 @@ for (const row of loop.rows) {
 const table = tabulate(graded);
 replaceFile(
   out,
-  `${JSON.stringify({ build: loop.build ?? null, variant, bundle: loop.bundle, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
+  `${JSON.stringify({ build: loop.build ?? null, variant, bundle: loop.bundle, grader_fence: graderFence, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
 );
 
 const fmt = (c: Cell) =>

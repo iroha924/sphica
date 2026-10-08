@@ -46,6 +46,7 @@ const TASKS = path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json
 const seedTasks = (build: string) => fs.copyFileSync(TASKS, path.join(build, "tasks.json"));
 // The read fence a Codex run made now records; it names places by role, so any HOME gives the same
 const FENCE = currentFence(":workspace", evalCache(tempDir("grade-fence-")));
+const GRADER_FENCE = currentFence(":read-only", evalCache(tempDir("grade-fence-")));
 
 /** A child's environment: a temporary home, and none of the owner's Sphica paths. */
 function childEnv(home: string): NodeJS.ProcessEnv {
@@ -1709,6 +1710,7 @@ test("compare puts old and new side by side only for the same fixture and tasks,
       build: "a",
       variant: "original",
       bundle: 'c1 {"deliver.js":"old"}',
+      grader_fence: GRADER_FENCE as string | undefined,
       rows: [
         graded("o1", 0),
         graded("o2", 1),
@@ -1727,6 +1729,7 @@ test("compare puts old and new side by side only for the same fixture and tasks,
       build: "b",
       variant: "original",
       bundle: 'c2 {"deliver.js":"new"}',
+      grader_fence: GRADER_FENCE as string | undefined,
       rows: [
         { ...graded("n1", 2), search_before_edit: "yes" as const },
         { ...graded("n2", 2, { proposes_rejected: "yes" }), search_before_edit: "unknown" as const },
@@ -1767,6 +1770,13 @@ test("compare puts old and new side by side only for the same fixture and tasks,
     build: { ...old.build, rows: [...old.build.rows, { ...graded("o9", 1), fence: "1".repeat(64) }] },
   };
   assert.throws(() => compare(mixed, next, []), /read fence/);
+  // Grades given by a grader under another fence, or none recorded, are not compared either
+  const graderFenced = <S extends typeof old | typeof next>(side: S, grader_fence: string | undefined) => ({
+    ...side,
+    build: { ...side.build, grader_fence },
+  });
+  assert.throws(() => compare(graderFenced(old, undefined), next, []), /grader/);
+  assert.throws(() => compare(old, graderFenced(next, "0".repeat(64)), []), /grader/);
   // An excluded run was never measured, whatever fence it ran under
   const leftOut = {
     ...old,
@@ -1908,7 +1918,7 @@ test("an A/A comparison takes one bundle run twice and refuses two different one
     label,
     fixture: "f",
     tasks: "{}",
-    build: { build: label, variant: "original", bundle, rows: [] },
+    build: { build: label, variant: "original", bundle, grader_fence: GRADER_FENCE, rows: [] },
   });
   const lines = compare(
     side("first", 'c1 {"deliver.js":"a"}'),
@@ -1949,7 +1959,7 @@ test("report --compare --aa runs from the command line with first/second on ever
       seedTasks(dir);
       fs.writeFileSync(
         path.join(dir, "grades.json"),
-        JSON.stringify({ build: name, variant: "original", bundle, rows }),
+        JSON.stringify({ build: name, variant: "original", bundle, grader_fence: GRADER_FENCE, rows }),
       );
       return path.join(dir, "grades.json");
     };
@@ -1993,6 +2003,7 @@ test("compare refuses two builds run by different models of the same family", ()
       build: label,
       variant: "original",
       bundle,
+      grader_fence: GRADER_FENCE,
       rows: [
         {
           ...row,
@@ -2162,7 +2173,7 @@ test("compare checks the models task by task, so swapping which model ran which 
     label,
     fixture: "f",
     tasks: "{}",
-    build: { build: label, variant: "original", bundle, rows },
+    build: { build: label, variant: "original", bundle, grader_fence: GRADER_FENCE, rows },
   });
   assert.throws(
     () =>
@@ -2988,6 +2999,7 @@ printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
     assert.match(got, /codex", "auth\.json" = "deny"|\.codex\/auth\.json" = "deny"$/m);
     const graded = JSON.parse(fs.readFileSync(path.join(build, "grades.json"), "utf8"));
     assert.equal(graded.rows[0].fence, "f".repeat(64));
+    assert.equal(graded.grader_fence, GRADER_FENCE);
     assert.ok(!fs.existsSync(path.join(cache, "codex.lock")), "the lock is released");
     // Runs kept where the fenced runs could read them, or a loop that does not say where its runs were, are not graded
     assert.match(start({ rows }).stderr, /run_roots/);

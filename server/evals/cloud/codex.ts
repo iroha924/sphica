@@ -14,6 +14,7 @@ import {
   cacheToken,
   deliveredOnRead,
   type ProbeTarget,
+  probeLines,
   probeProblems,
   probeScript,
   probeTargets,
@@ -119,6 +120,7 @@ if (args.probe) {
     const events = fs.existsSync(path.join(dir, "events.jsonl"))
       ? fs.readFileSync(path.join(dir, "events.jsonl"), "utf8")
       : "";
+    console.log(probeLines(events));
     problems.push(...probeProblems(events, targets));
     // The model can write its checkout: a probe.sh it changed reports whatever it was changed to report
     const ranScript = path.join(dir, "work", "probe.sh");

@@ -91,12 +91,16 @@ const ran = (events: string, command: string) =>
 /** Whether the model ran exactly this command and it finished without error */
 export const ranCleanly = (events: string, command: string) => ran(events, command).length > 0;
 
+/** What `./probe.sh` itself printed: a line printed by another command, or one naming probe.sh in a comment, does not count */
+export const probeLines = (events: string) =>
+  ran(events, "./probe.sh")
+    .map((i) => i.aggregated_output ?? "")
+    .join("\n")
+    .trim();
+
 /** Every target whose read did not end as expected, was reported twice over, or that the probe never reported */
 export function probeProblems(events: string, targets: ProbeTarget[]): string[] {
-  // Only the output of `./probe.sh` itself: a line printed by another command, or one naming probe.sh in a comment, does not count
-  const out = ran(events, "./probe.sh")
-    .map((i) => i.aggregated_output ?? "")
-    .join("\n");
+  const out = probeLines(events);
   return targets.flatMap((t) => {
     const got = [...out.matchAll(new RegExp(`^(DENIED|MISSING|READ|ERROR) ${t.label}$`, "gm"))].map(
       (m) => m[1],
