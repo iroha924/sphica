@@ -235,7 +235,7 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): deny all of HOME but the node and bun installs to the fenced Codex (T19)`
   - 結果: `cd server && node --test --test-name-pattern="allowlist" test/eval-codex.test.ts` → 直す前は仮の HOME の `.git-credentials` が deny に無く失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 163 件 pass（mise と `.bun` の形だけを残し、`~/.local/bin` の形と bun の欠けで止まり、根の祖先を deny せず、HOME の項目が増えても fence が変わらず、Node のバージョンで変わる）。`bun run typecheck`・`bun run lint`・`bun run knip`・`bun run english` → 0 で終わった
-- [ ] T20: probe の対象を HOME の許可の一覧に合わせる（HOME の直下の token、deny されたディレクトリ、node の実体の対照）
+- [x] T20: probe の対象を HOME の許可の一覧に合わせる（HOME の直下の token、deny されたディレクトリ、node の実体の対照）
   - 種別: 修正
   - 計画: S8
   - 依存: T19（許可の一覧が要る）
@@ -243,6 +243,8 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - red: `cd server && node --test --test-name-pattern="probe" test/eval-codex.test.ts` → 対象に HOME の直下の token と node の対照が無く失敗する
   - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
   - コミット: `fix(eval): probe HOME as the allowlist fences it (T20)`
+  - 結果: `cd server && node --test --test-name-pattern="probe" test/eval-codex.test.ts` → 直す前は対象を作る関数（`homeToken`）が無く、新しいテストが読み込みで失敗した（対象に HOME の直下の token と node の対照が無いことは、`probeTargets` が `DENY_DIRS` と `DENY_FILES` しか見ないことで分かる）
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 164 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 - [ ] T21: 採点者のロックを、一時のディレクトリを消せたときだけ外す
   - 種別: 修正
   - 計画: S9

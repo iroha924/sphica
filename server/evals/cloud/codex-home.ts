@@ -99,7 +99,7 @@ export function fenceDigest(
 }
 
 /** What a fenced Codex may reach under the owner's HOME: the tools' install roots, every other entry denied, and the PATH to give it */
-export type HomeFence = { home: string; roots: string[]; denies: string[]; path: string };
+export type HomeFence = { home: string; roots: string[]; denies: string[]; path: string; tools: string[] };
 
 /** The tools an evaluation run uses; nothing else under HOME is kept */
 const TOOLS = ["node", "bun"];
@@ -131,12 +131,12 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
   const home = fs.realpathSync(o.home ?? os.homedir());
   const entries = (o.path ?? process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
   const roots: string[] = [];
-  const toolDirs: string[] = [];
+  const tools: string[] = [];
   for (const tool of TOOLS) {
     const found = entries.map((d) => path.join(d, tool)).find((f) => fs.existsSync(f));
     if (!found) throw new Error(`${tool} is not on PATH`);
     const real = fs.realpathSync(found);
-    toolDirs.push(path.dirname(real));
+    tools.push(real);
     if (isInside(home, real)) roots.push(installRoot(home, real, tool));
   }
   const outside = entries.filter(
@@ -156,7 +156,8 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
     home,
     roots: [...new Set(roots)].sort(),
     denies,
-    path: [...new Set([...toolDirs, ...outside])].join(path.delimiter),
+    path: [...new Set([...tools.map((t) => path.dirname(t)), ...outside])].join(path.delimiter),
+    tools,
   };
 }
 

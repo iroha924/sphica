@@ -26,6 +26,7 @@ import {
 } from "./grading.ts";
 import {
   cacheToken,
+  homeToken,
   type ProbeTarget,
   probeLines,
   probeProblems,
@@ -68,6 +69,8 @@ if (
 )
   throw new Error(`${args.loop} does not say where its runs were (run_roots); collect it again`);
 for (const root of loop.run_roots as string[]) requireInside(cache, root, "a run root");
+// The probe's HOME token is made before the HOME fence, which must deny it
+const ownerToken = args.probe ? homeToken() : null;
 const shield = shieldNow();
 const denies = codexDenies(cache, shield);
 const graderFence = currentFence(":read-only", cache, shield);
@@ -156,15 +159,19 @@ if (args.probe) {
       (dir) => {
         const control = path.join(dir, "probe-control.txt");
         fs.writeFileSync(control, "control\n");
-        targets = probeTargets([
-          token,
-          {
-            label: "build-tasks",
-            path: path.join(path.dirname(args.loop ?? ""), "tasks.json"),
-            expect: "DENIED",
-          },
-          { label: "control", path: control, expect: "READ" },
-        ]);
+        targets = probeTargets(
+          [
+            ...(ownerToken ? [ownerToken] : []),
+            token,
+            {
+              label: "build-tasks",
+              path: path.join(path.dirname(args.loop ?? ""), "tasks.json"),
+              expect: "DENIED",
+            },
+            { label: "control", path: control, expect: "READ" },
+          ],
+          shield.home,
+        );
         fs.writeFileSync(path.join(dir, "probe.sh"), probeScript(targets, null), { mode: 0o755 });
       },
     );
@@ -173,6 +180,7 @@ if (args.probe) {
     if (r.status !== 0) problems.push(`the grader exited ${r.status}`);
   } finally {
     fs.rmSync(token.path, { force: true });
+    if (ownerToken) fs.rmSync(ownerToken.path, { force: true });
   }
   for (const p of problems) console.log(`✗ ${p}`);
   if (!problems.length) console.log("✓ probe passed: every fenced target was denied to the grader");

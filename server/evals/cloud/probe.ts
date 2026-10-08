@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openReader } from "../../src/db.ts";
-import { DENY_DIRS, DENY_FILES } from "./claude-run.ts";
+import type { HomeFence } from "./codex-home.ts";
 import { REPO } from "./codex-run.ts";
 
 /**
@@ -137,12 +137,15 @@ export function readReturned(events: string, key: string): boolean {
 
 /**
  * The targets every probe reads, as the owner sees them: each that must be denied has to exist first, or a missing file would pass for
- * a denial. `extra` adds the caller's own (a token in the cache, the build's tasks, the run's database, a control file).
+ * a denial. `extra` adds the caller's own (tokens, the build's tasks, the run's database, a control file). `home` is the HOME fence the
+ * run was given: a denied directory of it is listed, and the first tool it keeps is read as the control that kept roots stay readable.
  */
-export function probeTargets(extra: ProbeTarget[]): ProbeTarget[] {
-  const home = os.homedir();
-  const ownerAuth = path.join(home, ".codex", "auth.json");
-  const dir = DENY_DIRS.find((d) => fs.existsSync(d));
+export function probeTargets(extra: ProbeTarget[], home: HomeFence): ProbeTarget[] {
+  const ownerAuth = path.join(home.home, ".codex", "auth.json");
+  const credentials = [".ssh", ".aws", ".config"].map((d) => path.join(home.home, d));
+  const dir =
+    credentials.find((d) => home.denies.includes(d)) ??
+    home.denies.find((d) => fs.statSync(d, { throwIfNoEntry: false })?.isDirectory());
   // The repository's history holds the gold too: a file of the shared git directory shows it is denied as well as the working tree
   const gitDir = path.resolve(
     REPO,
@@ -157,21 +160,23 @@ export function probeTargets(extra: ProbeTarget[]): ProbeTarget[] {
       expect: "DENIED",
     },
     { label: "repo-git", path: path.join(gitDir, "HEAD"), expect: "DENIED" },
-    ...(dir ? [{ label: "credential-dir", path: dir, dir: true, expect: "DENIED" as const }] : []),
-    ...DENY_FILES.filter((f) => fs.existsSync(f)).map((f, i) => ({
-      label: `credential-file-${i + 1}`,
-      path: f,
-      expect: "DENIED" as const,
-    })),
+    ...(dir ? [{ label: "home-dir", path: dir, dir: true, expect: "DENIED" as const }] : []),
+    ...(home.tools[0] ? [{ label: "tool", path: home.tools[0], expect: "READ" as const }] : []),
     ...extra,
   ];
-  // The run's own login is a link to the owner's, so the owner's has to be there for either to show a denial
   for (const t of targets)
     if (!t.shell && !t.write && !fs.existsSync(t.path) && t.label !== "run-db")
       throw new Error(
         `the probe target ${t.label} does not exist (${t.path}); a missing file cannot show a denial`,
       );
   return targets;
+}
+
+/** A token file at the root of HOME, made before the run's HOME fence is, so it must come out denied; the caller removes it */
+export function homeToken(home = os.homedir()): ProbeTarget {
+  const file = path.join(home, `.sphica-probe-${crypto.randomUUID()}`);
+  fs.writeFileSync(file, "token\n");
+  return { label: "home-token", path: file, expect: "DENIED" };
 }
 
 /** A token file in the cache, which every fenced Codex is denied; the caller removes it */

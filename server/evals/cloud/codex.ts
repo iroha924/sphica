@@ -13,6 +13,7 @@ import {
   anyKey,
   cacheToken,
   deliveredOnRead,
+  homeToken,
   type ProbeTarget,
   probeLines,
   probeProblems,
@@ -67,6 +68,8 @@ const run = {
 if (args.probe) {
   const build = args.build;
   const token = cacheToken(evalCache());
+  // Made before the run builds its HOME fence, which must deny it
+  const ownerToken = homeToken();
   const problems: string[] = [];
   try {
     let targets: ProbeTarget[] = [];
@@ -84,15 +87,19 @@ if (args.probe) {
         const scripts = path.join(path.dirname(p.work), "probe");
         fs.mkdirSync(scripts);
         script = path.join(scripts, "probe.sh");
-        targets = probeTargets([
-          { label: "probe-dir", path: path.join(scripts, "written"), write: true, expect: "DENIED" },
-          token,
-          { label: "build-tasks", path: path.join(build, "tasks.json"), expect: "DENIED" },
-          ...(condition === "search" || condition === "inject"
-            ? [{ label: "run-db", path: p.db, expect: "DENIED" as const }]
-            : []),
-          { label: "control", path: control, expect: "READ" },
-        ]);
+        targets = probeTargets(
+          [
+            ownerToken,
+            { label: "probe-dir", path: path.join(scripts, "written"), write: true, expect: "DENIED" },
+            token,
+            { label: "build-tasks", path: path.join(build, "tasks.json"), expect: "DENIED" },
+            ...(condition === "search" || condition === "inject"
+              ? [{ label: "run-db", path: p.db, expect: "DENIED" as const }]
+              : []),
+            { label: "control", path: control, expect: "READ" },
+          ],
+          p.home,
+        );
         // The gold hook picks its record by the task's prompt, so the gold probe carries it, with the task itself called off
         let prompt =
           condition === "gold"
@@ -139,6 +146,7 @@ if (args.probe) {
     console.log(`probe run → ${dir}`);
   } finally {
     fs.rmSync(token.path, { force: true });
+    fs.rmSync(ownerToken.path, { force: true });
   }
   for (const p of problems) console.log(`✗ ${p}`);
   if (problems.length) process.exitCode = 1;

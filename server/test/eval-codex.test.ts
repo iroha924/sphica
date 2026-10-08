@@ -19,6 +19,7 @@ import { codexDenies, codexFence, REPO, repoPlaces } from "../evals/cloud/codex-
 import {
   anchoredTarget,
   deliveredOnRead,
+  homeToken,
   type ProbeTarget,
   probeProblems,
   probeScript,
@@ -424,7 +425,7 @@ test("the probe script tells a denial from a missing file and any other error, a
 
 test("the probe refuses a target that does not exist before any run, and reads Sphica's results only from completed calls", async () => {
   assert.throws(
-    () => probeTargets([{ label: "gone", path: "/nonexistent/x", expect: "DENIED" }]),
+    () => probeTargets([{ label: "gone", path: "/nonexistent/x", expect: "DENIED" }], homeFence()),
     /does not exist/,
   );
   const call = (status: string, error: unknown, text: string) =>
@@ -736,4 +737,34 @@ test("HOME keeps only a mise or Bun install root, denies everything beside the w
   assert.equal(fence(homeFence({ home, path: toolPath.join(path.delimiter) })), before);
   const older = [path.join(home, ".local/share/mise/installs/node/22.0.0/bin"), path.join(home, ".bun/bin")];
   assert.notEqual(fence(homeFence({ home, path: older.join(path.delimiter) })), before);
+});
+
+test("the probe reads HOME as the run's fence sees it: a token at its root and a denied directory denied, a kept tool readable", () => {
+  const home = fs.realpathSync(tempDir("probe-home-"));
+  for (const rel of [
+    ".codex/auth.json",
+    ".ssh/id",
+    ".local/share/mise/installs/node/24.0.0/bin/node",
+    ".bun/bin/bun",
+  ]) {
+    fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+    fs.writeFileSync(path.join(home, rel), "x");
+  }
+  const token = homeToken(home);
+  const fence = homeFence({
+    home,
+    path: [path.join(home, ".local/share/mise/installs/node/24.0.0/bin"), path.join(home, ".bun/bin")].join(
+      path.delimiter,
+    ),
+  });
+  assert.ok(fence.denies.includes(token.path), "a token made before the fence is denied by it");
+  const targets = probeTargets([token], fence);
+  const by = (label: string) => targets.find((t) => t.label === label);
+  assert.deepEqual([by("home-dir")?.path, by("home-dir")?.expect], [path.join(home, ".ssh"), "DENIED"]);
+  assert.deepEqual(
+    [by("tool")?.path, by("tool")?.expect],
+    [path.join(home, ".local/share/mise/installs/node/24.0.0/bin/node"), "READ"],
+  );
+  assert.equal(by("owner-login")?.path, path.join(home, ".codex", "auth.json"));
+  assert.equal(by("home-token")?.expect, "DENIED");
 });
