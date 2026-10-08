@@ -130,6 +130,14 @@ jobs:
           node --test --test-reporter=tap --test-timeout=120000 --test-name-pattern="hidden test" test/eval-fixture.test.ts | tee fixture.tap
           # A pattern that matches nothing still passes, so each run must have passed something and failed nothing
           for f in runner.tap fixture.tap; do grep -qx "# fail 0" "$f"; grep -qE "^# pass [1-9]" "$f"; done
+      # A pipe on Linux is written synchronously, so output a check drops by exiting at once is lost only here
+      - name: A failed check's whole output reaches its reader
+        working-directory: server
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap --test-timeout=120000 test/test-run.test.ts | tee test-run.tap
+          grep -qx "# fail 0" test-run.tap
+          grep -qE "^# pass [1-9]" test-run.tap
 
   # **What ships must run on Windows too** (AGENTS.md). Development of this repository assumes macOS / Linux, so verify does not run here;
   # it runs the file lock tests, and checks that the bundled tarball starts without node_modules and can create a database with node:sqlite.

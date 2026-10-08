@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { envProblems } from "../../scripts/lib/release-env.mjs";
+import { tmpEnv } from "./temp-dir.ts";
 
 const OWNER_ID = 85755290;
 const owner = { type: "User", reviewer: { id: OWNER_ID, login: "iroha924" } };
@@ -103,6 +104,7 @@ function runScript(ghBody: string) {
       {
         encoding: "utf8",
         env: {
+          ...tmpEnv(),
           PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}`,
           // A temporary HOME, so nothing a child runs can reach the owner's home (USERPROFILE on Windows)
           HOME: dir,

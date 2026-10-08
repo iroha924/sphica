@@ -28,6 +28,7 @@ import {
 import { checkedText } from "../src/review-findings.ts";
 import { fakeCodex } from "./fake-codex.ts";
 import { message, project, tempDb } from "./temp-db.ts";
+import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 const REPO_PLUGIN = path.join(SRC, "..", "..", "plugin");
@@ -506,7 +507,7 @@ test("on Windows, codex is started the way PATH resolves it: codex.exe as is, np
 test("sphica --version prints the npm package version", () => {
   const out = execFileSync(process.execPath, [path.join(SRC, "cli.ts"), "--version"], {
     encoding: "utf8",
-    env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent" },
+    env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent" },
   });
   assert.equal(out.trim().split(/\s+/)[0], packageVersionAt(REPO_PLUGIN));
 });
@@ -518,7 +519,7 @@ test("MCP serverInfo reports the manifest version", async () => {
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent" },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent" },
       stderr: "ignore",
     }),
   );
@@ -538,6 +539,7 @@ test("MCP tools return failures with isError and a non-empty reason", async () =
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
       env: {
+        ...tmpEnv(),
         PATH: process.env.PATH ?? "",
         HOME: "/nonexistent",
         SPHICA_DB: "/nonexistent/sphica.db",
@@ -596,7 +598,12 @@ test("MCP server instructions keep their rules in the first 512 characters and f
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+      env: {
+        ...tmpEnv(),
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: "/nonexistent/sphica.db",
+      },
       stderr: "ignore",
     }),
   );
@@ -658,7 +665,12 @@ test("the record MCP server starts without a database and lists the trace, harve
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp-record.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+      env: {
+        ...tmpEnv(),
+        PATH: process.env.PATH ?? "",
+        HOME: "/nonexistent",
+        SPHICA_DB: "/nonexistent/sphica.db",
+      },
       stderr: "ignore",
     }),
   );
@@ -699,7 +711,7 @@ test("the record MCP server starts without a database and lists the trace, harve
 test("the record MCP server writes to the workspace the host names in the call, not where it was started", async () => {
   const db = tempDb();
   const repo = (name: string) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sphica-${name}-`));
+    const dir = tempDir(`sphica-${name}-`);
     execFileSync("git", ["init", "-q"], { cwd: dir });
     execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: dir });
     fs.mkdirSync(path.join(dir, "sub"));
@@ -717,7 +729,7 @@ test("the record MCP server writes to the workspace the host names in the call, 
       command: process.execPath,
       args: [path.join(SRC, "mcp-record.ts")],
       cwd: started,
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );
@@ -744,7 +756,7 @@ test("the record MCP server writes to the workspace the host names in the call, 
 test("the read MCP server answers for the host's workspace when a call omits cwd", async () => {
   const db = tempDb();
   const repo = (name: string) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sphica-${name}-`));
+    const dir = tempDir(`sphica-${name}-`);
     execFileSync("git", ["init", "-q"], { cwd: dir });
     execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: dir });
     fs.mkdirSync(path.join(dir, "sub"));
@@ -822,7 +834,7 @@ test("the read MCP server answers for the host's workspace when a call omits cwd
 // An unregistered project name comes from the remote spelling. Copying it without a length cap goes over the limit.
 test("the response fits the limit even with a long unregistered project name", async () => {
   const db = tempDb();
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-unreg-"));
+  const repo = tempDir("sphica-unreg-");
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", `https://example.test/o/${"r".repeat(9000)}.git`], {
     cwd: repo,
@@ -832,7 +844,7 @@ test("the response fits the limit even with a long unregistered project name", a
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );
@@ -851,7 +863,7 @@ test("the response fits the limit even with a long unregistered project name", a
 test("the record MCP server prefers Codex's _meta over an inherited CLAUDE_PROJECT_DIR", async () => {
   const db = tempDb();
   const repo = (name: string) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `sphica-${name}-`));
+    const dir = tempDir(`sphica-${name}-`);
     execFileSync("git", ["init", "-q"], { cwd: dir });
     execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: dir });
     fs.mkdirSync(path.join(dir, "sub"));
@@ -873,6 +885,7 @@ test("the record MCP server prefers Codex's _meta over an inherited CLAUDE_PROJE
       args: [path.join(SRC, "mcp-record.ts")],
       // os.homedir() reads USERPROFILE on Windows, so both point at a temporary directory
       env: {
+        ...tmpEnv(),
         PATH: process.env.PATH ?? "",
         HOME: home,
         USERPROFILE: home,
@@ -925,6 +938,7 @@ test("forget_apply removes sources only when the owner types the count in the ho
         command: process.execPath,
         args: [path.join(SRC, "mcp-record.ts")],
         env: {
+          ...tmpEnv(),
           PATH: process.env.PATH ?? "",
           HOME: "/nonexistent",
           SPHICA_DB: db.file,
@@ -1020,7 +1034,7 @@ test("forget_apply removes sources only when the owner types the count in the ho
 // A search that stopped at its cap must not read as "nothing matches"
 test("search says when it stopped before reading every candidate", async () => {
   const db = tempDb();
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-scan-"));
+  const repo = tempDir("sphica-scan-");
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/o/scan.git"], { cwd: repo });
   const p = project(db, "git:github.com/o/scan", "o/scan");
@@ -1031,7 +1045,7 @@ test("search says when it stopped before reading every candidate", async () => {
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );
@@ -1060,7 +1074,7 @@ test("search says when it stopped before reading every candidate", async () => {
 // (codex-cli 0.157.1), so the agent passes it; without one, the result says this session may be included
 test("search with asked leaves out the session it is given and says when it cannot tell the current session", async () => {
   const db = tempDb();
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-"));
+  const repo = tempDir("sphica-asked-");
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-asked-home-"));
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", "https://github.com/o/asked.git"], { cwd: repo });
@@ -1080,7 +1094,7 @@ test("search with asked leaves out the session it is given and says when it cann
     new StdioClientTransport({
       command: process.execPath,
       args: [path.join(SRC, "mcp.ts")],
-      env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, SPHICA_DB: db.file },
       stderr: "ignore",
     }),
   );
@@ -1202,7 +1216,12 @@ test("every tool of both MCP servers refuses an unknown argument by name", async
       new StdioClientTransport({
         command: process.execPath,
         args: [path.join(SRC, entry)],
-        env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: "/nonexistent/sphica.db" },
+        env: {
+          ...tmpEnv(),
+          PATH: process.env.PATH ?? "",
+          HOME: "/nonexistent",
+          SPHICA_DB: "/nonexistent/sphica.db",
+        },
         stderr: "ignore",
       }),
     );

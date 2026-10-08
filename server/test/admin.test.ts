@@ -13,11 +13,12 @@ import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { fakeGhPath } from "./fake-gh.ts";
 import { type Child, childEnv, runUntilSignal } from "./race.ts";
 import { at, hash } from "./temp-db.ts";
+import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const signedOut = fakeGhPath();
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "cli.ts");
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "sphica-admin-"));
+const tmp = () => tempDir("sphica-admin-");
 
 /** Runs fn with admin output (console.log) silenced. */
 async function quiet<T>(fn: () => T | Promise<T>): Promise<T> {
@@ -221,7 +222,7 @@ test("reindex that fails rolls back and rethrows", async () => {
 test("sphica init creates the database in .sphica under HOME", () => {
   const home = tmp();
   execFileSync(process.execPath, [CLI, "init"], {
-    env: { PATH: signedOut, HOME: home, USERPROFILE: home },
+    env: { ...tmpEnv(), PATH: signedOut, HOME: home, USERPROFILE: home },
     stdio: "ignore",
     timeout: 30_000,
   });
@@ -239,7 +240,7 @@ test("old command forms are rejected and create no database", () => {
   ]) {
     const home = tmp();
     const r = spawnSync(process.execPath, [CLI, ...args], {
-      env: { PATH: signedOut, HOME: home, USERPROFILE: home },
+      env: { ...tmpEnv(), PATH: signedOut, HOME: home, USERPROFILE: home },
       encoding: "utf8",
       timeout: 30_000,
     });
@@ -252,7 +253,7 @@ test("old command forms are rejected and create no database", () => {
 test("a boxed command that fails prints its heading once and closes with Stopped", () => {
   const home = tmp();
   const r = spawnSync(process.execPath, [CLI, "doctor", "--reindex"], {
-    env: { PATH: signedOut, HOME: home, USERPROFILE: home },
+    env: { ...tmpEnv(), PATH: signedOut, HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 30_000,
   });
@@ -268,7 +269,7 @@ function cli(home: string, ...args: string[]) {
 }
 function cliWith(PATH: string, home: string, ...args: string[]) {
   const r = spawnSync(process.execPath, [CLI, ...args], {
-    env: { PATH, HOME: home, USERPROFILE: home },
+    env: { ...tmpEnv(), PATH, HOME: home, USERPROFILE: home },
     encoding: "utf8",
     timeout: 60_000,
   });

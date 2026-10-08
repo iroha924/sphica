@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { tmpEnv } from "./temp-dir.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "plugin/package.json"), "utf8")).version;
@@ -65,6 +66,7 @@ function runGate(env: Record<string, string>) {
       {
         encoding: "utf8",
         env: {
+          ...tmpEnv(),
           PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
           // A temporary HOME, so nothing a child runs can reach the owner's home (USERPROFILE on Windows)
           HOME: dir,

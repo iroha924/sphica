@@ -12,6 +12,7 @@ import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { connectReader } from "../src/sqlite.ts";
 import { sha256 } from "../src/text.ts";
 import { at, hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
+import { tempDir } from "./temp-dir.ts";
 
 let db: TempDb;
 let p: number;
@@ -51,7 +52,7 @@ test("the schema revision the code expects equals user_version in db/schema.sql"
 });
 
 test("a database of an older generation, a newer revision, or no schema is refused and left unchanged", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-old-"));
+  const dir = tempDir("sphica-old-");
   const old = path.join(dir, "old.db");
   const raw = new DatabaseSync(old);
   raw.exec("create table project (id integer primary key); pragma user_version = 7");

@@ -260,7 +260,9 @@ await withTempDir(async (dir) => {
   if (failures.length) {
     console.error(`${failures.length} failures in the real database lane.\n`);
     for (const f of failures) console.error(`  ${f}\n`);
-    process.exit(1);
+    // Exiting at once would drop output still in the pipe and skip removing the temp directory
+    process.exitCode = 1;
+    return;
   }
   console.log(
     `real database: ran the CLI as a child process and ran ${covered.size} / ${sites.length} SQL sites`,

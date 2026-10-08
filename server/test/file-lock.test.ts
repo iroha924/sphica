@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { replaceFile, withFileLock } from "../src/file-lock.ts";
+import { tempDir } from "./temp-dir.ts";
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "sphica-lock-"));
+const tmp = () => tempDir("sphica-lock-");
 
 /** A pid that has exited: a child that ran and finished */
 const deadPid = (): number => {
@@ -27,7 +27,7 @@ test("the lock is held while fn runs and removed after, also when fn throws", ()
   assert.equal(fs.existsSync(lock), false);
 });
 
-test("a waiter takes the lock once its holder releases it", async () => {
+test("a waiter takes the lock once its holder releases it", async (t) => {
   const dir = tmp();
   const lock = path.join(dir, "x.lock");
   const ready = path.join(dir, "ready");
@@ -39,6 +39,11 @@ test("a waiter takes the lock once its holder releases it", async () => {
     ready,
   ]);
   const exited = new Promise((resolve) => holder.on("exit", resolve));
+  // A failed check must not leave the holder writing into a directory being removed
+  t.after(async () => {
+    holder.kill();
+    await exited;
+  });
   const until = Date.now() + 10_000;
   while (!fs.existsSync(ready)) {
     assert.ok(Date.now() < until, "the holder never took the lock");

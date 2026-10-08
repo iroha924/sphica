@@ -15,6 +15,7 @@ import { framed } from "../src/frame.ts";
 import { READ_BUDGET } from "../src/read.ts";
 import { bytes } from "../src/text.ts";
 import { hash, insert, message, project, run, session, type TempDb, tempDb } from "./temp-db.ts";
+import { tmpEnv } from "./temp-dir.ts";
 
 const NOW = new Date("2026-10-07T00:00:00Z");
 const ago = (hours: number) => iso(NOW.getTime() - hours * 60 * 60 * 1000);
@@ -327,6 +328,7 @@ async function overviewServer(db: TempDb | null) {
       command: process.execPath,
       args: [path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "mcp.ts")],
       env: {
+        ...tmpEnv(),
         PATH: process.env.PATH ?? "",
         HOME: home,
         SPHICA_DB: db?.file ?? path.join(home, "missing", "sphica.db"),

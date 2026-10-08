@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { releaseMerge, releaseNotes } from "../../scripts/lib/release-finish.mjs";
+import { tmpEnv } from "./temp-dir.ts";
 
 const SCRIPT = path.resolve(import.meta.dirname, "..", "..", "scripts/release-finish.mjs");
 const COMMIT = "a".repeat(40);
@@ -82,6 +83,7 @@ function finish(args: string[], env: Record<string, string> = {}) {
     const result = spawnSync(process.execPath, [SCRIPT, ...args], {
       encoding: "utf8",
       env: {
+        ...tmpEnv(),
         PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
         // A temporary HOME, so nothing a child runs can reach the owner's home (USERPROFILE on Windows)
         HOME: dir,

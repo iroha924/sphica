@@ -1490,10 +1490,23 @@ test("rename limit: when git skips rename detection for too many files, read say
   const db = tempDb();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-limit-")));
   try {
+    // A commit of 1001 files starts a detached repack, which then writes into the repository while git add runs and after it is removed
     const git = (...args: string[]) =>
-      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
-        encoding: "utf8",
-      }).trim();
+      execFileSync(
+        "git",
+        [
+          "-C",
+          root,
+          "-c",
+          "maintenance.auto=false",
+          "-c",
+          "user.name=t",
+          "-c",
+          "user.email=t@example.invalid",
+          ...args,
+        ],
+        { encoding: "utf8" },
+      ).trim();
     git("init", "-q");
     fs.mkdirSync(path.join(root, "a"));
     const body = (i: number) => `file ${i}\nline two\nline three\nline four\n`;

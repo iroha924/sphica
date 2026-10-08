@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { osvLine, osvSummary } from "../../scripts/lib/osv-summary.mjs";
+import { tmpEnv } from "./temp-dir.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..", "..");
 const SHA = "b".repeat(40);
@@ -243,7 +244,7 @@ test("the CLI writes the summary and outputs, and exits 0 when results are missi
     const bad = spawnSync(
       process.execPath,
       [path.join(ROOT, "scripts/osv-summary.mjs"), "x.json", "not-a-sha"],
-      { env: { PATH: process.env.PATH ?? "", HOME: dir, USERPROFILE: dir }, encoding: "utf8" },
+      { env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: dir, USERPROFILE: dir }, encoding: "utf8" },
     );
     assert.notEqual(bad.status, 0);
   } finally {
