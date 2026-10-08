@@ -102,6 +102,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test test/eval-codex.test.ts` → 直す前は新しい 3 件が失敗した（deny の正規表現に合わない、一時の木が残る、リンクの解決先が違う）
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 152 件 pass。テストの後に os.tmpdir() に `sphica-codex-*` が残っていないことを確かめた。`bun run typecheck`・`bun run lint` → 0 で終わった
 
+- [x] T10: T04 のレビューの指摘を直す（除外した Codex の行に記録した fence を写す）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（直す対象の collect の除外が要る）
+  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - red: `cd server && node --test --test-name-pattern="read fence" test/eval-claude.test.ts` → 違う fence で除外した run の行に `fence` が無く失敗する
+  - 完了条件: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts` → 全件 pass
+  - コミット: `fix(eval): keep the recorded fence on excluded Codex rows (T10)`
+  - 結果: `cd server && node --test --test-name-pattern="read fence" test/eval-claude.test.ts` → 直す前は `other` の行の fence が undefined で失敗した
+  - 結果: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts` → 119 件 pass。`bun run typecheck`・`bun run lint` → 0 で終わった
+
 - [ ] T06: report が fence の無い・混ざる・違う Codex の結果を比べない
   - 種別: 修正
   - 計画: S5

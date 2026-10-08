@@ -462,29 +462,26 @@ function main() {
         rows.push(excludedRow(model, head.task, head.condition, name, "unreadable result.json"));
         continue;
       }
+      // An excluded Codex run keeps the fence it recorded, so a later look can tell which fence it ran under
+      const excluded = (task: string, condition: string, reason: string): Row => ({
+        ...excludedRow(model, task, condition, name, reason),
+        ...(model === "codex" && result.fence ? { fence: result.fence } : {}),
+      });
       // A run whose agent process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
       if (result.status !== 0 || result.reason) {
         rows.push(
-          excludedRow(
-            model,
-            result.task,
-            result.condition,
-            name,
-            result.reason ?? `${model} exited ${result.status}`,
-          ),
+          excluded(result.task, result.condition, result.reason ?? `${model} exited ${result.status}`),
         );
         continue;
       }
       // A Codex run made under another fence, or none, could read what the current fence hides
       if (model === "codex" && result.fence !== runFence) {
-        rows.push(
-          excludedRow(model, result.task, result.condition, name, "run without the current read fence"),
-        );
+        rows.push(excluded(result.task, result.condition, "run without the current read fence"));
         continue;
       }
       // An inject run whose hooks logged nothing at all never had Sphica delivering
       if (result.condition === "inject" && !result.deliveries?.length) {
-        rows.push(excludedRow(model, result.task, result.condition, name, "inject run with no delivery log"));
+        rows.push(excluded(result.task, result.condition, "inject run with no delivery log"));
         continue;
       }
       // A run that reached another run, the build, or the evaluation cache may have read answers or gold records it was not given
@@ -495,11 +492,9 @@ function main() {
       );
       if (lookedOutside(read("events.jsonl"), own, places)) {
         rows.push(
-          excludedRow(
-            model,
+          excluded(
             result.task,
             result.condition,
-            name,
             "looked outside its checkout (other runs, the build, or the evaluation cache)",
           ),
         );
@@ -507,12 +502,12 @@ function main() {
       }
       const task = plan.tasks.find((t) => t.id === result.task);
       if (!task) {
-        rows.push(excludedRow(model, result.task, result.condition, name, "unknown task"));
+        rows.push(excluded(result.task, result.condition, "unknown task"));
         continue;
       }
       const gold = goldOf(task);
       if (goldNotGiven(result.condition, gold, read("gold-receipt.txt"))) {
-        rows.push(excludedRow(model, task.id, result.condition, name, NO_GOLD));
+        rows.push(excluded(task.id, result.condition, NO_GOLD));
         continue;
       }
       const events = read("events.jsonl");

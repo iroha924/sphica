@@ -1947,6 +1947,9 @@ test("collect counts only Codex runs made under the current read fence, and reco
   assert.equal(row("fenced")?.fence, current);
   assert.equal(row("unfenced")?.excluded, "run without the current read fence");
   assert.equal(row("other")?.excluded, "run without the current read fence");
+  // An excluded run keeps the fence it recorded, so a later look can tell which fence it ran under
+  assert.equal(row("other")?.fence, "0".repeat(64));
+  assert.equal(row("unfenced")?.fence, undefined);
   assert.deepEqual(
     loop.run_roots,
     [codex, claude, base].map((p) => path.resolve(p)),
