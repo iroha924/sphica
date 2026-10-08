@@ -10,8 +10,15 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
-import { claimRunDir, codexModelOf, evalCache, fencedCodexHome, holdingLock } from "../cloud/codex-home.ts";
-import { REPO, shieldNow } from "../cloud/codex-run.ts";
+import {
+  claimRunDir,
+  codexModelOf,
+  evalCache,
+  fencedCodexHome,
+  holdingLock,
+  requireInside,
+} from "../cloud/codex-home.ts";
+import { codexFence, REPO, shieldNow } from "../cloud/codex-run.ts";
 import { homeToken, type ProbeTarget, probeProblems, probeScript } from "../cloud/probe.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
@@ -51,6 +58,8 @@ type LaneResult = {
   body_sha256: string;
   server_sha256: string;
   runner_sha256: string;
+  /** Codex lanes only: the read fence the lane ran under */
+  fence?: string;
   status: number | null;
   reason: string | null;
   seconds: number;
@@ -202,12 +211,14 @@ async function runLane(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      fencedCodexHome(codexHome, {
+      const fence = fencedCodexHome(codexHome, {
         base: ":read-only",
         deny: denies,
         read: o.env.shield.home.roots,
         extraConfig: codexMcp(p),
       });
+      // Runs under another fence (another Node or Bun install kept, another policy) are another measurement
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield);
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied; Sphica's own home stays in the run
@@ -389,8 +400,10 @@ async function main() {
     if (host === "codex" && jobs > 1)
       throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
   }
-  if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
   const cache = evalCache();
+  // Outputs outlive the lock: one outside the cache would be readable to every later fenced Codex
+  requireInside(cache, out, "--out");
+  if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
   // The preflight's HOME token is made before the run's HOME fence, which must deny it
   const ownerToken = args.preflight ? homeToken() : null;
   try {

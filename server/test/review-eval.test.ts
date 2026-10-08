@@ -1038,3 +1038,40 @@ test("a queue of lanes starts no lane once a temp tree was left behind", async (
   );
   assert.deepEqual(started, [1]);
 });
+
+test("review runs made under different read fences are not tallied as one measurement, and outputs stay in the cache", () => {
+  const runs = tempDir("review-fences-");
+  const made: [string, string][] = [
+    ["postgres-codex-2026-10-09T00-00-01-000Z-aaaaaaaa", "f1"],
+    ["postgres-codex-2026-10-09T00-00-02-000Z-bbbbbbbb", "f2"],
+  ];
+  for (const [name, fence] of made) {
+    fs.mkdirSync(path.join(runs, name));
+    fs.writeFileSync(
+      path.join(runs, name, "result.json"),
+      JSON.stringify({ host: "codex", diff: "postgres", runner_sha256: "r", fence }),
+    );
+  }
+  assert.throws(() => gradeAll(runs), /2 settings/);
+  // An output outside the evaluation cache would outlive the lock where later fenced runs are not denied it
+  const home = tempDir("review-out-home-");
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.SPHICA_DB;
+  delete env.SPHICA_HOME;
+  for (const [script, ...rest] of [
+    ["run.ts", "--host", "codex", "--diff", "all"],
+    ["m2.ts", "--host", "codex", "--condition", "rules"],
+  ]) {
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "review", script ?? ""),
+        ...rest,
+        "--out",
+        tempDir("review-out-"),
+      ],
+      { encoding: "utf8", env },
+    );
+    assert.match(r.stderr, /must be inside/, script);
+  }
+});

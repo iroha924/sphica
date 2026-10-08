@@ -359,6 +359,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="repository slot" test/eval-codex.test.ts` → 直す前は `git clone .../builds/outside` を流して失敗した（ビルドの外）
   - 結果: `cd server && node --test test/eval-codex.test.ts` → 29 件 pass
 
+- [x] T32: GitHub の Codex のレビュー（d27e63f4）の 4 件を直す（M2 の Biome の写しを run の途中で書き換えて戻せる、review の評価の出力先が cache の外だと後の run から読める、review の評価の設定の照合に fence が無い、採点者の probe の HOME の token が準備の失敗で残る）
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T31（直す対象の囲いが要る）
+  - 変更: `server/evals/review/m2.ts`, `server/evals/review/run.ts`, `server/evals/review/grade.ts`, `server/evals/cloud/grade.ts`, `server/test/review-eval.test.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="different read fences are not tallied|leaves no token in HOME" test/review-eval.test.ts test/eval-codex.test.ts` → fence の違う run を 1 つの設定として数え、cache の外の `--out` を受け付け、ロックで止まった採点者の probe が HOME に token を残して、2 件とも失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): keep M2's Biome and review outputs in the cache, and tally review runs by fence (T32)`
+  - 結果: `cd server && node --test --test-name-pattern="different read fences are not tallied|leaves no token in HOME" test/review-eval.test.ts test/eval-codex.test.ts` → 直す前は 2 件とも失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 177 件 pass。HOME に `.sphica-probe-*` が残っていない
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -393,3 +404,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T27 / GitHub の Codex のレビュー（d7636910）で P1 が 2 件、P2 が 2 件。4 件とも採用して T27 で直した。T25 のテストにあった「HOME の外へのリンクを deny しない」場合は、止まる形に変えたのでテストから外した。持ち主の指示で、P1 が出なくなるまで push のたびに再レビューを頼む
 - 2026-10-09 / T29 / GitHub の Codex のレビュー（aa095eca）で P1 が 4 件、P2 が 1 件。5 件とも採用した。HOME に増えた項目の件は、HOME を丸ごと deny して残す根を `read` で戻す形を実機で試して動いたので、それに変えた（plan の方針 8 を直した）
 - 2026-10-09 / T31 / GitHub の Codex のレビュー（a539bd49）で P1 が 1 件。T29 の push の後にスレッドをまとめて resolve したとき、読む前に resolve していた / 中身を確かめて採用し、T31 で直した
+- 2026-10-09 / T32 / GitHub の Codex のレビュー（d27e63f4）で P1 が 2 件、P2 と P3 が 1 件ずつ。4 件とも採用した。Biome の写しは、どちらの host も書けない `~/.cache/sphica-eval/m2-biome/<run>` に置き、Codex には `read` で読み戻す（HOME と同じ、親を deny して子を読み戻す形）

@@ -21,8 +21,9 @@ import {
   fencedCodexHome,
   holdingLock,
   pinCheckout,
+  requireInside,
 } from "../cloud/codex-home.ts";
-import { repoPlaces, shieldNow } from "../cloud/codex-run.ts";
+import { codexFence, repoPlaces, shieldNow } from "../cloud/codex-run.ts";
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
@@ -267,7 +268,9 @@ async function runOne(o: {
     cases_sha256: crypto.createHash("sha256").update(fs.readFileSync(CASES)).digest("hex"),
   };
   try {
-    const biome = copyBiome(path.dirname(work));
+    // Under the evaluation cache, which neither host can write; Codex reads it back like a kept install
+    const biomeDir = path.join(o.env.cache, "m2-biome", run);
+    const biome = copyBiome(biomeDir);
     const pinned = biome.digest();
     const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"), biome.bin);
     let r: Awaited<ReturnType<typeof runChild>>;
@@ -305,7 +308,12 @@ async function runOne(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      fencedCodexHome(codexHome, { base: ":workspace", deny: denies, read: o.env.shield.home.roots });
+      const fence = fencedCodexHome(codexHome, {
+        base: ":workspace",
+        deny: denies,
+        read: [...o.env.shield.home.roots, biomeDir],
+      });
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield);
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied
@@ -348,6 +356,7 @@ async function runOne(o: {
     result.reason = (e as Error).message;
   } finally {
     if (!keepCheckout(work, dir)) o.env.leave(path.dirname(work));
+    fs.rmSync(path.join(o.env.cache, "m2-biome", run), { recursive: true, force: true });
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -459,6 +468,8 @@ async function main() {
   if (jobs > 1) throw new Error("--jobs is 1 for M2: concurrent runs could read each other's checkout");
   const out = path.resolve(args.out ?? "");
   const cache = evalCache();
+  // Outputs outlive the lock: one outside the cache would be readable to every later fenced Codex
+  requireInside(cache, out, "--out");
   await holdingLock(cache, async (leave) => {
     let left = false;
     const env: LaneEnv = {

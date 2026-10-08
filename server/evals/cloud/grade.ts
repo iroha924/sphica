@@ -69,8 +69,6 @@ if (
 )
   throw new Error(`${args.loop} does not say where its runs were (run_roots); collect it again`);
 for (const root of loop.run_roots as string[]) requireInside(cache, root, "a run root");
-// The probe's HOME token is made before the HOME fence, which must deny it
-const ownerToken = args.probe ? homeToken() : null;
 const shield = shieldNow();
 const denies = codexDenies(cache, shield);
 const graderFence = currentFence(":read-only", cache, shield);
@@ -179,6 +177,8 @@ function gradeClaude(prompt: string): { status: number | null; output: string } 
 
 if (args.probe) {
   const token = cacheToken(cache);
+  // HOME is denied whole, so a token made now is denied with it; made here, it is removed however the probe ends
+  const ownerToken: ProbeTarget | null = homeToken();
   const problems: string[] = [];
   try {
     let targets: ProbeTarget[] = [];

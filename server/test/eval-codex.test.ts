@@ -980,3 +980,26 @@ test("a repository slot that is not one plain name in the build is never cloned"
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /one plain name/);
 });
+
+test("grade.ts --probe leaves no token in HOME when the fence or the lock cannot be set up", () => {
+  const b = codexBuild("none");
+  const loop = path.join(b.build, "loop.json");
+  fs.writeFileSync(
+    loop,
+    JSON.stringify({ build: "b", bundle: "c", run_roots: [path.join(b.cache, "codex-runs")], rows: [] }),
+  );
+  fs.writeFileSync(path.join(b.cache, "codex.lock"), '{"pid":1}\n');
+  const r = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop, "--probe"],
+    {
+      encoding: "utf8",
+      env: b.env,
+    },
+  );
+  assert.notEqual(r.status, 0);
+  assert.deepEqual(
+    fs.readdirSync(b.home).filter((f) => f.startsWith(".sphica-probe-")),
+    [],
+  );
+});
