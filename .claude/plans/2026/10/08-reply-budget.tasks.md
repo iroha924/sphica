@@ -57,7 +57,7 @@ overview live と review_select のどの応答も、枠込みで READ_BUDGET �
 
 ## P3: 出す
 
-- [ ] T04: release:plan を流し、npm と 3 つのマニフェストのバージョンを揃え、npm pack で配布物を確かめる
+- [-] T04: release:plan を流し、npm と 3 つのマニフェストのバージョンを揃え、npm pack で配布物を確かめる
   - 種別: 変更
   - 計画: S4
   - 依存: T01（パッケージに入る変更）, T02（同）, T03（同）
@@ -68,3 +68,4 @@ overview live と review_select のどの応答も、枠込みで READ_BUDGET �
 ## 記録
 
 - 2026-10-08 T01・T04: pre-commit がパッケージに入る変更ごとにバージョンを揃えることを求めたので、0.6.42 への更新を T01 のコミットに前倒しした。T04 では release:plan と npm pack の確認を行う
+- 2026-10-08 T04: バージョンの更新は T01 に入れたので、このタスクで変えるファイルは無く、取りやめた。確認は済んでいる: `bun run release:plan -- --base v0.6.41` → `plugin`、npm と 3 つのマニフェストは 0.6.42。`npm pack` の tarball を `node scripts/check-tarball.mjs` で調べる → 52 ファイル、CLI 0.6.42 が外で起動し、DB の作成・移行・書き込みロック中の配信・SubagentStart まで通った。THIRD_PARTY_NOTICES の SDK は 1.31.0
