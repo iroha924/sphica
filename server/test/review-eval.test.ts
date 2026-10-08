@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { codexProfile, managedCodexSettings } from "../evals/cloud/codex-home.ts";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
@@ -18,9 +19,7 @@ import {
   claudeSettings,
   codexArgs,
   codexMcp,
-  codexProfile,
   evalDenies,
-  managedCodexSettings,
   READ_TOOLS,
   RULES_BODY,
   reviewPrompt,
@@ -849,6 +848,13 @@ test("a Codex lane does not start where an administrator's settings could replac
   fs.mkdirSync(path.join(prefs, "someone"));
   fs.writeFileSync(path.join(prefs, "someone", "com.openai.codex.plist"), "");
   assert.equal(managedCodexSettings({ etc, prefs }).length, 2);
+});
+
+test("a Codex lane does not start where the system config could select the old sandbox", () => {
+  const etc = tempDir("codex-etc-");
+  const prefs = tempDir("codex-prefs-");
+  fs.writeFileSync(path.join(etc, "config.toml"), 'sandbox_mode = "danger-full-access"\n');
+  assert.deepEqual(managedCodexSettings({ etc, prefs }), [path.join(etc, "config.toml")]);
 });
 
 test("runs made by different runner code are not tallied as one measurement, and shell lanes run one at a time", () => {

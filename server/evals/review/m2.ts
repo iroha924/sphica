@@ -17,7 +17,7 @@ import {
   checkoutGit,
   claimRunDir,
   codexModelOf,
-  isolatedCodexHome,
+  fencedCodexHome,
   pinCheckout,
 } from "../cloud/codex-home.ts";
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
@@ -25,14 +25,7 @@ import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { lookedOutside, oneConfiguration } from "./grade.ts";
 import { loadRulesCases } from "./rules-grade.ts";
-import {
-  codexProfile,
-  evalDenies,
-  keepCheckout,
-  managedCodexSettings,
-  outsideCheckout,
-  runnerDigest,
-} from "./runner.ts";
+import { evalDenies, keepCheckout, outsideCheckout, runnerDigest } from "./runner.ts";
 
 type Task = { id: string; tempts: "lodash" | "db" | "none"; prompt: string; test: string };
 type M2Cases = { rules: string; check: string; conditions: string[]; tasks: Task[] };
@@ -260,16 +253,8 @@ async function runOne(o: {
       );
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
-      const managed = managedCodexSettings();
-      if (managed.length)
-        throw new Error(
-          `administrator settings for Codex can replace the lane's profile: ${managed.join(", ")}`,
-        );
       const codexHome = path.join(dir, "codex-home");
-      isolatedCodexHome(
-        codexHome,
-        codexProfile(":workspace", [...evalDenies(o.out), path.join(codexHome, "auth.json")]),
-      );
+      fencedCodexHome(codexHome, { base: ":workspace", deny: evalDenies(o.out) });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       const home = path.join(dir, "home");
@@ -326,7 +311,7 @@ type Row = {
 
 /**
  * Counts per host and condition, and per task too. A run without its result, or that did not exit 0, is failed; a run whose events name
- * the repository holding the hidden tests and the reference check, or another run, is excluded (Codex has no read fence).
+ * the repository holding the hidden tests and the reference check, or another run, is excluded, as a check behind the read fence.
  */
 export function m2Rows(runs: string): Map<string, Row> {
   const rows = new Map<string, Row>();

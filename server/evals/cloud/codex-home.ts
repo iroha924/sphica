@@ -26,6 +26,117 @@ export function isolatedCodexHome(
   fs.writeFileSync(path.join(codexHome, "config.toml"), `${settings}\n${extraConfig}`);
 }
 
+/**
+ * The permission profile a CODEX_HOME config selects: `:read-only` or `:workspace`, with every path in `deny` unreadable to the commands
+ * the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay hidden is
+ * denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
+ */
+export function codexProfile(base: ":read-only" | ":workspace", deny: string[]): string {
+  const lines = deny.map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
+  return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
+}
+
+/**
+ * Settings an administrator set for every Codex on this machine. They can replace the profile a run selects, and its denies with it
+ * (a `sandbox_mode` in any loaded config selects the old sandbox), so a fenced Codex does not start while any is present.
+ */
+export function managedCodexSettings(
+  roots = { etc: "/etc/codex", prefs: "/Library/Managed Preferences" },
+): string[] {
+  const found = ["requirements.toml", "config.toml"]
+    .map((f) => path.join(roots.etc, f))
+    .filter((f) => fs.existsSync(f));
+  const visit = (dir: string, depth: number) => {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.name.startsWith("com.openai.codex")) found.push(full);
+      else if (e.isDirectory() && depth < 2) visit(full, depth + 1);
+    }
+  };
+  visit(roots.prefs, 0);
+  return found;
+}
+
+/**
+ * An isolated CODEX_HOME whose config selects the profile, with the run's own link to the login denied too. The profile goes before
+ * `extraConfig`: default_permissions is a top-level key, and after a table TOML would read it as part of that table.
+ */
+export function fencedCodexHome(
+  codexHome: string,
+  o: {
+    base: ":read-only" | ":workspace";
+    deny: string[];
+    extraConfig?: string;
+    settings?: string;
+    managed?: string[];
+  },
+): { profile: string; denied: string[] } {
+  const managed = o.managed ?? managedCodexSettings();
+  if (managed.length)
+    throw new Error(`administrator settings for Codex can replace the run's profile: ${managed.join(", ")}`);
+  const denied = [...o.deny, path.join(codexHome, "auth.json")];
+  const profile = codexProfile(o.base, denied);
+  isolatedCodexHome(codexHome, `${profile}${o.extraConfig ?? ""}`, o.settings);
+  return { profile, denied };
+}
+
+/**
+ * The profile as one digest that names each denied place by its role, so runs on other machines or in other directories under the same
+ * policy compare equal. `roles` maps a placeholder to the path it stands for; longer paths are replaced first.
+ */
+export function fenceDigest(profile: string, roles: Record<string, string>): string {
+  let text = profile;
+  for (const [role, p] of Object.entries(roles).sort((a, b) => b[1].length - a[1].length))
+    text = text.split(p).join(role);
+  return crypto.createHash("sha256").update(text).digest("hex");
+}
+
+/** Where every evaluation output lives; the fenced Codex runs and graders are denied all of it */
+export function evalCache(home = os.homedir()): string {
+  const cache = path.join(home, ".cache", "sphica-eval");
+  fs.mkdirSync(cache, { recursive: true });
+  return fs.realpathSync(cache);
+}
+
+/** `p` resolved through links, or an error when it is not inside `root` (compared by path components, not by string prefix). */
+export function requireInside(root: string, p: string, what: string): string {
+  const real = fs.realpathSync(p);
+  const rel = path.relative(root, real);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel))
+    throw new Error(`${what} must be inside ${root}, which fenced Codex runs cannot read: ${real}`);
+  return real;
+}
+
+/**
+ * One lock for every process that starts a fenced Codex: two at once could read each other's checkout in the temp directory, whatever
+ * output directory each was given. A lock left by a process that died is not taken over: whoever removes it checks that it is gone.
+ */
+export function codexLock(cache: string): () => void {
+  const file = path.join(cache, "codex.lock");
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "wx");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    let held = "";
+    try {
+      held = fs.readFileSync(file, "utf8").trim();
+    } catch {}
+    throw new Error(
+      `another fenced Codex evaluation holds ${file} (${held}); remove it only once that process is gone`,
+    );
+  }
+  fs.writeSync(fd, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
+  fs.closeSync(fd);
+  return () => fs.rmSync(file, { force: true });
+}
+
 /** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */
 export function codexModelOf(codexHome: string): string | null {
   const config = fs.readFileSync(path.join(codexHome, "config.toml"), "utf8");

@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
-import { claimRunDir, codexModelOf, isolatedCodexHome } from "../cloud/codex-home.ts";
+import { claimRunDir, codexModelOf, fencedCodexHome } from "../cloud/codex-home.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
@@ -19,11 +19,9 @@ import {
   claudeSettings,
   codexArgs,
   codexMcp,
-  codexProfile,
   evalDenies,
   keepCheckout,
   type LanePaths,
-  managedCodexSettings,
   outsideCheckout,
   READ_TOOLS,
   RULES_BODY,
@@ -196,17 +194,8 @@ async function runLane(o: {
       });
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
-      const managed = managedCodexSettings();
-      if (managed.length)
-        throw new Error(
-          `administrator settings for Codex can replace the lane's profile: ${managed.join(", ")}`,
-        );
       const codexHome = path.join(dir, "codex-home");
-      isolatedCodexHome(
-        codexHome,
-        // default_permissions is a top-level key: it goes before the MCP server's table, or TOML reads it as part of that table
-        `${codexProfile(":read-only", [...evalDenies(o.out), path.join(codexHome, "auth.json")])}${codexMcp(p)}`,
-      );
+      fencedCodexHome(codexHome, { base: ":read-only", deny: evalDenies(o.out), extraConfig: codexMcp(p) });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       const tmp = path.join(dir, "tmp");

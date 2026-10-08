@@ -22,7 +22,7 @@ base: main
 
 review と cloud の両方が、同じ関数で Codex を囲えるようになる。管理者のシステム設定で囲いが外れる経路も塞ぐ
 
-- [ ] T01: codex-home.ts に共通の囲い（profile、管理者の設定の検査、fencedCodexHome、EVAL_CACHE、fenceDigest、ロック）を置き、review を切り替える
+- [x] T01: codex-home.ts に共通の囲い（profile、管理者の設定の検査、fencedCodexHome、EVAL_CACHE、fenceDigest、ロック）を置き、review を切り替える
   - 種別: 修正
   - 計画: S1
   - 依存: なし
@@ -30,6 +30,7 @@ review と cloud の両方が、同じ関数で Codex を囲えるようにな�
   - red: `cd server && node --test --test-name-pattern="system config" test/review-eval.test.ts` → 仮の root に `etc/config.toml` を置いても `managedCodexSettings` が空を返して失敗する
   - 完了条件: `cd server && node --test test/review-eval.test.ts test/eval-codex.test.ts` → 全件 pass。`/etc/codex/config.toml` の検出、`fencedCodexHome` が `default_permissions` を表より前に書くこと、run の auth.json を deny すること、渡した settings をそのまま使うこと、`fenceDigest` が役割の名前で同じ値になること、ロックが 2 つ目を拒むこと、`runnerDigest` が codex-home.ts の変更で変わることを確かめる
   - コミット: `fix(eval): share the Codex read fence and refuse a system Codex config (T01)`
+  - 結果: red は `node --test --test-name-pattern="system config" test/review-eval.test.ts` で `actual: []`、期待は `.../codex-etc-*/config.toml` で失敗した。実装の後、`node --test test/review-eval.test.ts test/eval-codex.test.ts` が 25 件 pass。`bun run typecheck`・`bun run lint`・`bun run english` は 0 で終わった
 
 ## P2: 評価される Codex の囲い
 

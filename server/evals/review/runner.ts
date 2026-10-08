@@ -1,6 +1,6 @@
 // How one precedent lane of the review evaluation is started on each host: the reviewer gets the aspect body as its prompt, Read / Grep /
 // Glob and Sphica's read MCP server on the run's copy of the fixture database, and nothing else of the owner's (settings, hooks, plugins,
-// MCP servers). Claude's reads are fenced to the checkout; Codex has no read fence, so its runs are graded on what they named instead.
+// MCP servers). Claude's reads are fenced to the checkout; Codex's commands are fenced by a permission profile's denies.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -24,37 +24,20 @@ export const evalDenies = (out: string): string[] => [
   ...DENY_FILES,
 ];
 
-/**
- * Settings an administrator set for every Codex on this machine. They can replace the profile a lane selects, and the lane's denies with
- * it, so a Codex lane does not start while any is present.
- */
-export function managedCodexSettings(
-  roots = { etc: "/etc/codex", prefs: "/Library/Managed Preferences" },
-): string[] {
-  const found: string[] = [];
-  const requirements = path.join(roots.etc, "requirements.toml");
-  if (fs.existsSync(requirements)) found.push(requirements);
-  const visit = (dir: string, depth: number) => {
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.name.startsWith("com.openai.codex")) found.push(full);
-      else if (e.isDirectory() && depth < 2) visit(full, depth + 1);
-    }
-  };
-  visit(roots.prefs, 0);
-  return found;
-}
+/** The code that starts and fences a run, relative to this directory */
+export const RUNNER_FILES = [
+  "runner.ts",
+  "run.ts",
+  "m2.ts",
+  "fixture.ts",
+  "biome.ts",
+  "../cloud/codex-home.ts",
+];
 
 /** The code that starts and fences a run, as one hash: runs made by different runner code are different measurements */
 export function runnerDigest(): string {
   const hash = crypto.createHash("sha256");
-  for (const file of ["runner.ts", "run.ts", "m2.ts", "fixture.ts", "biome.ts"])
+  for (const file of RUNNER_FILES)
     hash.update(`${file}\0`).update(fs.readFileSync(path.join(import.meta.dirname, file)));
   return hash.digest("hex");
 }
@@ -184,16 +167,6 @@ export function codexMcp(p: LanePaths): string {
     .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
     .join(", ");
   return `\n[mcp_servers.sphica]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(p.server)}]\nenv = { ${env} }\n`;
-}
-
-/**
- * The permission profile a lane's CODEX_HOME config selects: `:read-only` or `:workspace`, with every path in `deny` unreadable to the
- * commands the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay
- * hidden is denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
- */
-export function codexProfile(base: ":read-only" | ":workspace", deny: string[]): string {
-  const lines = deny.map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
-  return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
 }
 
 /** codex exec for a lane: ephemeral, the prompt on stdin, the final answer to a file; the sandbox comes from the profile. */
