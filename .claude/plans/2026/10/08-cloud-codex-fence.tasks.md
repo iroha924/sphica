@@ -381,6 +381,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `node evals/review/m2.ts --host claude --condition check --runs 1 --task count` → 直す前は Biome が読み込めず（Claude Code の sandbox は HOME の下を既定で読ませない）、それでも完了と数えられた。Claude の sandbox の `allowRead` に足すと読めて、書き込みは止まることを別に試して確かめた
   - 結果: `cd server && node --test test/review-eval.test.ts` → 26 件 pass
 
+- [x] T34: GitHub の Codex のセキュリティのレビュー（0e1bb91f）の P2 を直す（build.ts の inject の smoke check が、ロックを取らずに一時ディレクトリへ fixture の DB の写しを作る）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T32（cache の囲いが要る）
+  - 変更: `server/evals/cloud/build.ts`
+  - red: `grep -n 'os.tmpdir(), "sphica-smoke-"' server/evals/cloud/build.ts` → smoke の写しを一時ディレクトリに作る行が見つかる（build.ts を流すテストは無いので、コードで確かめる）
+  - 完了条件: `grep -n 'evalCache(), "smoke-"' server/evals/cloud/build.ts` → 写しを cache の下に作る行が見つかる。`bun run typecheck` → 0 で終わる
+  - コミット: `fix(eval): make the build's smoke copy under the denied cache (T34)`
+  - 結果: `grep -n 'os.tmpdir(), "sphica-smoke-"' server/evals/cloud/build.ts` → 直す前は 189 行目にあった
+  - 結果: `grep -n 'evalCache(), "smoke-"' server/evals/cloud/build.ts` → 1 行。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した

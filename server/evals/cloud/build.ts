@@ -16,6 +16,7 @@ import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher } from "./build-lib.ts";
+import { evalCache } from "./codex-home.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
 
@@ -186,7 +187,8 @@ function files(dir: string): void {
 
 /** Runs the slot's session start hook as the host would and requires a delivery row, so a hook that never runs fails the build. */
 async function smokeDelivery(dir: string): Promise<void> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-smoke-"));
+  // Under the evaluation cache, which every fenced Codex is denied: in the temp directory a run going on meanwhile could read the copy
+  const tmp = fs.mkdtempSync(path.join(evalCache(), "smoke-"));
   try {
     // A reused container can hold another fixture's copy; the hook must not pick it up
     fs.mkdirSync(path.join(tmp, "eval-sphica"), { recursive: true });
