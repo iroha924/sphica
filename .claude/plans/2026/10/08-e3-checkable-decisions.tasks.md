@@ -92,13 +92,14 @@ diff で決着しない記録を質問として返す本文に変え、同じ回
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → 既知の正しい下書き・誤った下書き・下書きすべきでない記録への下書きで、M1 の 3 つの基準の判定が期待どおり
   - コミット: `test(eval): grade drafted Biome checks against held-out cases`
   - 結果: `node --test test/review-eval.test.ts` → 5 件 pass（正しい下書きは全項目 0、全体の禁止を写さない override は src/ui/sort.ts を見逃す、admin の例外が無いと src/ui/admin.ts で誤った失敗、到達の禁止への marker は unwanted、下書きが無い返答と読めない JSONC は failed）。`bun run verify` → exit 0
-- [ ] T08: rules の Skill の検査の下書き
+- [x] T08: rules の Skill の検査の下書き
   - 種別: 変更
   - 計画: S4
   - 依存: T07（M1 で測る）
-  - 変更: `plugin/skills/rules/SKILL.md`
+  - 変更: `plugin/skills/rules/SKILL.md`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run verify:ai` → 0 で終わる。`cd server && node evals/review/rules-grade.ts --report <M1 の run ディレクトリ>` → モデル別に、下書きすべきでない記録への下書き・誤った失敗・見逃しの件数が出る
   - コミット: `feat(rules): draft a Biome import check for decisions that forbid a direct dependency`
+  - 結果: `bun run verify:ai` → 0。M1（m1b、Skill の例を fixture と関係の無い名前にした後、両ホスト各 10 run）→ `node evals/review/rules-grade.ts --report ~/.cache/sphica-eval/review/m1b` で 20 run すべて graded、下書きすべきでない記録への下書き 0・marker の欠け 0・誤った失敗 0・見逃し 0。Claude の 10 run は全部 override に全体の禁止を写し、admin を `!src/ui/admin.ts` で外した。M1 は基準に届いた（採用）。`bun run verify` → exit 0
 
 ## P5: #257 の Lifecycle と変更タスクでの比較（M1 が基準に届いたときだけ）
 
@@ -149,3 +150,6 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T02 / Biome の `overrides` の options は全体の options を置き換え、合わさらない（全体の lodash の禁止を繰り返さない override では src/ui に lodash が通る）/ T02 のテストに入れ、T08 の下書きの書式で全体の禁止を各 override に写すと決める
 - 2026-10-08 / T02 / `--config-path` と cwd の綴りが違う（macOS の /var と /private/var）と override の includes が当たらない / restrictedImports で realpath を使う
 - 2026-10-08 / T05 / 計画欄を変えた（前: S2、後: S2, S3）/ S3 を「#220 の採否の記録」に直し、採否は T05 の予備測定で決まったため
+- 2026-10-08 / T08 / M1 の回数を測る前に固定した: 両ホスト各 10 run（`run.ts --rules --runs 10`）。基準は plan のとおり（下書きすべきでない記録への下書き 0、誤った失敗 0、本物の違反の見逃し 0）をモデル別に全 run で満たすこと
+- 2026-10-08 / T08 / 1 回目の M1（~/.cache/sphica-eval/review/m1、両ホスト各 10 run、全項目 0）は無効にした / Skill の例（lodash、lodash-es、src/ui/**、**/db.ts）が M1 の fixture の記録と同じ名前で、例を写せば正解できた。例を関係の無い名前（moment、src/views/**、**/store.ts）に変え、同じ回数（各 10 run）で m1b として流し直す
+- 2026-10-08 / T08 / 変更欄に 4 つの manifest を足した（前: rules/SKILL.md、後: それと npm・Claude・Codex・marketplace の版）/ plugin に入るファイルを変えるコミットは pre-commit が版の同期を求める。`release:plan --base v0.6.42` は plugin、0.6.43 に上げた。T11 は最後に版がそろっていることを確かめる
