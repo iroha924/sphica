@@ -1,7 +1,11 @@
 // How one precedent lane of the review evaluation is started on each host: the reviewer gets the aspect body as its prompt, Read / Grep /
 // Glob and Sphica's read MCP server on the run's copy of the fixture database, and nothing else of the owner's (settings, hooks, plugins,
 // MCP servers). Claude's reads are fenced to the checkout; Codex has no read fence, so its runs are graded on what they named instead.
+import path from "node:path";
 import { DENY_DIRS, DENY_FILES } from "../cloud/claude-run.ts";
+
+/** The /sphica:rules body M1 measured, with its Biome check drafting: the shipped Skill does not draft checks */
+export const RULES_BODY = path.join(import.meta.dirname, "rules-body.md");
 
 const sphicaTools = (names: string[]) => names.map((t) => `mcp__sphica__${t}`);
 /** The read server's tools a precedent lane gets, as Claude names them for a server called sphica */

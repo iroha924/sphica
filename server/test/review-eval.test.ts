@@ -7,9 +7,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { restrictedImports } from "../evals/review/biome.ts";
-import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
+import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
-import { judge, m2Tasks, prepare } from "../evals/review/m2.ts";
+import { judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, gradeRulesRun, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
@@ -18,7 +18,9 @@ import {
   codexArgs,
   codexMcp,
   READ_TOOLS,
+  RULES_BODY,
   reviewPrompt,
+  rulesPrompt,
 } from "../evals/review/runner.ts";
 import { openReader } from "../src/db.ts";
 import { parseDiff, selectForReview } from "../src/review.ts";
@@ -742,4 +744,61 @@ test("a run that steps out of its checkout one directory at a time is excluded t
     ) ?? "",
     /climbed/,
   );
+});
+
+test("a cached fixture is reused only for the inputs it was built from", async () => {
+  const cases = loadReviewCases();
+  const dir = path.join(tempDir("review-cache-"), "fixture");
+  const first = await cachedFixture(dir, cases);
+  assert.deepEqual(await cachedFixture(dir, cases), first);
+  const changed = {
+    ...cases,
+    diffs: cases.diffs.map((d, i) => (i === 0 ? { ...d, summary: `${d.summary}.` } : d)),
+  };
+  await assert.rejects(cachedFixture(dir, changed), /built from other inputs/);
+});
+
+test("an M2 run that names the repository holding the hidden tests is excluded from the counts", () => {
+  const runs = tempDir("m2-runs-");
+  const root = path.resolve(import.meta.dirname, "..", "..");
+  const put = (name: string, events: string) => {
+    fs.mkdirSync(path.join(runs, name));
+    fs.writeFileSync(
+      path.join(runs, name, "result.json"),
+      JSON.stringify({
+        host: "codex",
+        condition: "rules",
+        task: "count",
+        status: 0,
+        judgement: { violations: [], falseFailure: false, completed: true, tests: "1 passed" },
+      }),
+    );
+    fs.writeFileSync(path.join(runs, name, "events.jsonl"), events);
+  };
+  put(
+    "count-rules-codex-2026-10-08T00-00-00-000Z-aaaaaaaa",
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "command_execution", command: `cat ${root}/server/evals/review/m2-cases.json` },
+    }),
+  );
+  // Running the check script the condition installs names the pinned Biome inside the repository: that is not looking at the cases
+  put(
+    "count-rules-codex-2026-10-08T00-00-01-000Z-bbbbbbbb",
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: `node ${root}/server/node_modules/@biomejs/biome/bin/biome lint .`,
+      },
+    }),
+  );
+  const t = m2Rows(runs).get("codex rules");
+  assert.deepEqual([t?.runs, t?.excluded, t?.completed], [2, 1, 1]);
+});
+
+test("the rules lane runs on the body M1 measured, which asks for a Biome check", () => {
+  const prompt = rulesPrompt(fs.readFileSync(RULES_BODY, "utf8"), ["trace:s/k"]);
+  assert.match(prompt, /noRestrictedImports/);
+  assert.ok(!prompt.includes("$ARGUMENTS"));
 });

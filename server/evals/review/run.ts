@@ -11,7 +11,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
 import { claimRunDir, codexModelOf, isolatedCodexHome } from "../cloud/codex-home.ts";
-import { buildReviewFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
+import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
   claudeArgs,
@@ -21,6 +21,7 @@ import {
   codexMcp,
   type LanePaths,
   READ_TOOLS,
+  RULES_BODY,
   RULES_TOOLS,
   reviewPrompt,
   rulesPrompt,
@@ -29,7 +30,6 @@ import {
 const ROOT = path.join(import.meta.dirname, "..", "..", "..");
 const SERVER = path.join(ROOT, "plugin", "dist", "mcp.js");
 const BODY = path.join(ROOT, "plugin", "skills", "review", "reviewers", "precedent.md");
-const RULES_BODY = path.join(ROOT, "plugin", "skills", "rules", "SKILL.md");
 const ORIGIN = "https://github.com/example/tsundoku.git";
 
 type Host = "claude" | "codex";
@@ -49,21 +49,15 @@ type LaneResult = {
 const sha256 = (data: string | Buffer) => crypto.createHash("sha256").update(data).digest("hex");
 
 /** The fixture under out, built once and reused by every run of the same out directory; rules adds M1's records and files. */
-async function fixtureIn(out: string, rules = false): Promise<ReviewFixture> {
-  const dir = path.join(out, rules ? "fixture-rules" : "fixture");
-  const manifest = path.join(dir, "fixture.json");
-  if (fs.existsSync(manifest)) return JSON.parse(fs.readFileSync(manifest, "utf8")) as ReviewFixture;
-  fs.mkdirSync(dir, { recursive: true });
+function fixtureIn(out: string, rules = false): Promise<ReviewFixture> {
   const cases = loadReviewCases();
   const m1 = loadRulesCases();
-  const built = await buildReviewFixture(
-    dir,
+  return cachedFixture(
+    path.join(out, rules ? "fixture-rules" : "fixture"),
     rules
       ? { files: { ...cases.files, ...m1.files }, steps: [...cases.steps, ...m1.steps], diffs: [] }
       : cases,
   );
-  fs.writeFileSync(manifest, `${JSON.stringify(built, null, 2)}\n`);
-  return built;
 }
 
 /** Spawns a command with the input on stdin and resolves with its exit status and output; never rejects on a non-zero exit. */

@@ -1,6 +1,7 @@
 // The review evaluation's fixture: the tsundoku fixture database with the records cases.json adds, the project's files as a git
 // repository, and each case's diff against it, written where a run can read them and the expected verdicts cannot be.
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createDriver } from "../acceptance/driver.ts";
@@ -93,4 +94,34 @@ export async function buildReviewFixture(
     git(repo, "reset", "-q", "--hard", "HEAD");
   }
   return { db, repo, diffs };
+}
+
+/** Everything a fixture is built from besides the cases: the acceptance world and steps, the cloud fixture plan, and the schema */
+const INPUTS = [
+  "../acceptance/world.json",
+  "../acceptance/cases.json",
+  "../cloud/tasks.json",
+  "../../../db/schema.sql",
+];
+
+/**
+ * The fixture built in dir, built once and reused while its inputs stay the same. A manifest from other inputs fails rather than being
+ * rebuilt: runs already in that output directory were made on it, and mixing them with new ones would grade them against expectations
+ * they never saw.
+ */
+export async function cachedFixture(dir: string, cases: ReviewCases): Promise<ReviewFixture> {
+  const hash = crypto.createHash("sha256").update(JSON.stringify(cases));
+  for (const rel of INPUTS) hash.update("\0").update(fs.readFileSync(path.join(HERE, rel)));
+  const inputs = hash.digest("hex");
+  const manifest = path.join(dir, "fixture.json");
+  if (fs.existsSync(manifest)) {
+    const built = JSON.parse(fs.readFileSync(manifest, "utf8")) as ReviewFixture & { inputs?: string };
+    if (built.inputs !== inputs)
+      throw new Error(`${dir} was built from other inputs: measure into a new --out directory`);
+    return { db: built.db, repo: built.repo, diffs: built.diffs };
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  const built = await buildReviewFixture(dir, cases);
+  fs.writeFileSync(manifest, `${JSON.stringify({ ...built, inputs }, null, 2)}\n`);
+  return built;
 }
