@@ -26,16 +26,44 @@ const HERE = import.meta.dirname;
 export const REPO = fs.realpathSync(path.resolve(HERE, "..", "..", ".."));
 
 /**
- * What no fenced Codex may read, whatever it runs: the owner's credentials (Codex's login among them), the repository, and every
- * evaluation output (builds, other runs, logs). Each run works in a temp tree outside all of them.
+ * Every place that holds the repository's files or history: the repository, its other worktrees (an old/new comparison checks one out),
+ * and the git directory they share, which sits outside a linked worktree. A place inside another is left to its parent's deny.
  */
-export function codexDenies(cache: string): string[] {
-  return [REPO, cache, ...DENY_DIRS, ...DENY_FILES];
+export function repoPlaces(repo = REPO): string[] {
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-C", repo, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull },
+    });
+  const trees = git("worktree", "list", "--porcelain")
+    .split("\n")
+    .filter((l) => l.startsWith("worktree "))
+    .map((l) => l.slice("worktree ".length));
+  const common = path.resolve(repo, git("rev-parse", "--git-common-dir").trim());
+  const places = [
+    ...new Set([repo, ...trees, common].filter((p) => fs.existsSync(p)).map((p) => fs.realpathSync(p))),
+  ];
+  return places.filter((p) => !places.some((q) => q !== p && isInside(q, p)));
 }
 
-/** The fence as one digest that names each place by its role, comparable across machines and runs */
-export function codexFence(profile: string, cache: string, codexHome: string): string {
-  return fenceDigest(profile, {
+/**
+ * What no fenced Codex may read, whatever it runs: the owner's credentials (Codex's login among them), the repository wherever its
+ * files or history are, and every evaluation output (builds, other runs, logs). Each run works in a temp tree outside all of them.
+ */
+export function codexDenies(cache: string, places = repoPlaces()): string[] {
+  return [...places, cache, ...DENY_DIRS, ...DENY_FILES];
+}
+
+/**
+ * The fence as one digest that names each place by its role, comparable across machines and runs. Every other worktree and a shared git
+ * directory outside the repository count as the repository, so worktrees coming and going do not change the fence.
+ */
+export function codexFence(profile: string, cache: string, codexHome: string, places = repoPlaces()): string {
+  const toml = (p: string) => JSON.stringify(p).slice(1, -1);
+  let text = profile;
+  for (const p of places.filter((p) => p !== REPO).sort((a, b) => b.length - a.length))
+    text = text.split(toml(p)).join(toml(REPO));
+  return fenceDigest([...new Set(text.split("\n"))].join("\n"), {
     "<codex-home>": codexHome,
     "<repo>": REPO,
     "<cache>": cache,

@@ -14,6 +14,7 @@ import {
   fencedCodexHome,
   requireInside,
 } from "../evals/cloud/codex-home.ts";
+import { codexDenies, codexFence, REPO, repoPlaces } from "../evals/cloud/codex-run.ts";
 import {
   anchoredTarget,
   deliveredOnRead,
@@ -521,4 +522,32 @@ test("containment resolves links before parent steps, and a link that points now
     requireInside(cache, path.join(cache, "new", "runs"), "a run root"),
     path.join(cache, "new", "runs"),
   );
+});
+
+test("the fence denies every worktree of the repository and the git directory they share, and counts them as the repository", () => {
+  const base = fs.realpathSync(tempDir("fence-worktrees-"));
+  const main = path.join(base, "main");
+  fs.mkdirSync(main);
+  const git = (cwd: string, ...a: string[]) =>
+    execFileSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a]);
+  git(main, "init", "-q");
+  fs.writeFileSync(path.join(main, "f"), "x");
+  git(main, "add", "-A");
+  git(main, "commit", "-q", "-m", "c");
+  const linked = path.join(base, "linked");
+  git(main, "worktree", "add", "-q", linked);
+  // From either side, both worktrees; the shared .git sits inside the main one and goes with it
+  assert.deepEqual(repoPlaces(main).sort(), [linked, main].sort());
+  assert.deepEqual(repoPlaces(linked).sort(), [linked, main].sort());
+  const cache = evalCache(base);
+  const codexHome = path.join(cache, "r", "codex-home");
+  const fence = (places: string[]) =>
+    codexFence(
+      codexProfile(":workspace", [...codexDenies(cache, places), path.join(codexHome, "auth.json")]),
+      cache,
+      codexHome,
+      places,
+    );
+  assert.equal(fence([REPO, linked]), fence([REPO]));
+  assert.ok(codexDenies(cache, [REPO, linked]).includes(linked));
 });

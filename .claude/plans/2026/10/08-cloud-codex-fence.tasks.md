@@ -157,6 +157,16 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `docs(eval-loop): run the Codex probes before measuring and keep outputs under the cache (T08)`
   - 結果: `bun run verify:ai` → 0 で終わった（AI config と lychee のリンク検査）
 
+- [x] T13: T09・T11 のレビューの指摘を直す（リポジトリの別の worktree と、linked worktree の外にある共通の git ディレクトリを deny から漏らす）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T11（リポジトリの deny が要る）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test test/eval-codex.test.ts` → 直す前は worktree と共通の git ディレクトリを数える関数が無く、新しいテストが読み込みで失敗する（deny に入らないことは `codexDenies` が REPO しか返さないことで分かる）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): deny every worktree of the repository and the git directory they share (T13)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 158 件 pass（一時のリポジトリと linked worktree で、どちらから見ても両方の worktree を数え、worktree の有無で fence が変わらない）。`bun run typecheck`・`bun run lint` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -172,3 +182,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T11 / review の評価の `evalDenies` も `server/evals` だけを deny していて、同じくリポジトリの .git から読める / plan の対象外（review の挙動は変えない）なので直さず、持ち主に聞く
 - 2026-10-08 / T07 / `gradeOne` が probe のためにイベントも返すようになり、checkpoint に `events` まで保存して既存の checkpoint のテストが落ちた / 保存する欄を status と output に限った
 - 2026-10-08 / T05 / Codex のレビュー（high）で P1 が 1 件、P2 が 1 件。`..` を symlink の解決より先に畳むので cache の外を内側と判定する（Codex が再現）、空の `run_roots` が素通りになる / 2 件とも採用し、T12 を足して直した
+- 2026-10-08 / T11 / Codex のレビュー（high）で P1 が 2 件。別の worktree と共通の git ディレクトリが deny から漏れる、run の後に残ったプロセスがリンクを差し替えると後片付けの chmod が木の外を辿り得る / 前者を採用し T13 を足した。後者は見送る（Codex も推測。残ったプロセスは sandbox を引き継ぐので隠したものは読めず、後片付けが辿った先は持ち主の権限を持ち主のファイルに足すか、後の run から隠した run ディレクトリへ写すだけで、モデルに中身が届かない）
