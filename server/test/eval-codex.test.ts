@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
   codexLock,
@@ -13,7 +14,17 @@ import {
   fencedCodexHome,
   requireInside,
 } from "../evals/cloud/codex-home.ts";
+import {
+  anchoredTarget,
+  deliveredOnRead,
+  type ProbeTarget,
+  probeProblems,
+  probeScript,
+  probeTargets,
+  readReturned,
+} from "../evals/cloud/probe.ts";
 import { RUNNER_FILES } from "../evals/review/runner.ts";
+import { tempDb } from "./temp-db.ts";
 import { tempDir } from "./temp-dir.ts";
 
 test("a fenced CODEX_HOME selects the profile before any table, denies its own login, and keeps the given settings", () => {
@@ -108,6 +119,10 @@ for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; [ "$prev" = "-C" ] && work="$a
 cat > /dev/null
 if [ -f "$here/unreadable" ]; then mkdir "$TMPDIR/unreadable"; touch "$TMPDIR/unreadable/x"; chmod 000 "$TMPDIR/unreadable"; fi
 [ -f "$here/link" ] && ln -s "$work/README.md" "$work/link"
+if [ -f "$here/run-probe" ]; then
+  node -e 'const out = require("node:child_process").execFileSync("sh", ["./probe.sh"], { cwd: process.argv[1] }).toString(); console.log(JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", command: "./probe.sh", aggregated_output: out } }))' "$work"
+  cp "$work/probe.sh" "$here/probe.sh"
+fi
 printf '{}' > "$out"
 echo '{"type":"thread.started"}'
 `;
@@ -192,8 +207,8 @@ function codexBuild(condition: string) {
   });
   const fail = () => fs.writeFileSync(path.join(bin, "fail"), "");
   /** Makes the fake codex leave something behind: an unreadable directory in its TMPDIR, or an absolute link in its checkout */
-  const leave = (what: "unreadable" | "link") => fs.writeFileSync(path.join(bin, what), "");
-  return { root, home, cache, build, start, seen, fail, leave };
+  const leave = (what: "unreadable" | "link" | "run-probe") => fs.writeFileSync(path.join(bin, what), "");
+  return { root, home, cache, build, env, start, seen, fail, leave };
 }
 
 test("codex.ts replays a task with codex exec in the run's own homes and records the run", () => {
@@ -336,4 +351,155 @@ test("a link the run made to a file in its checkout still points into the checko
   const [run] = fs.readdirSync(out);
   const work = fs.realpathSync(path.join(out, run ?? "", "work"));
   assert.equal(fs.realpathSync(path.join(work, "link")), path.join(work, "README.md"));
+});
+
+const event = (output: string, command = "/bin/zsh -lc ./probe.sh") =>
+  JSON.stringify({
+    type: "item.completed",
+    item: { type: "command_execution", status: "completed", command, aggregated_output: output },
+  });
+
+test("the probe script tells a denial from a missing file and any other error, and prints the next command without running it", () => {
+  const dir = tempDir("probe-script-");
+  const readable = path.join(dir, "readable.txt");
+  const locked = path.join(dir, "locked.txt");
+  fs.writeFileSync(readable, "x");
+  fs.writeFileSync(locked, "x");
+  fs.chmodSync(locked, 0);
+  const marker = path.join(dir, "ran");
+  const targets: ProbeTarget[] = [
+    { label: "readable", path: readable, expect: "READ" },
+    { label: "locked", path: locked, expect: "DENIED" },
+    { label: "missing", path: path.join(dir, "missing.txt"), expect: "DENIED" },
+    { label: "a-directory", path: dir, expect: "READ" },
+    { label: "listed", path: dir, dir: true, expect: "READ" },
+    { label: "expanded", path: "$PROBE_HOME/readable.txt", shell: true, expect: "READ" },
+  ];
+  const script = path.join(dir, "probe.sh");
+  fs.writeFileSync(script, probeScript(targets, `touch ${marker}`), { mode: 0o755 });
+  const out = execFileSync("sh", [script], { encoding: "utf8", env: { ...process.env, PROBE_HOME: dir } });
+  fs.chmodSync(locked, 0o600);
+  assert.deepEqual(out.trim().split("\n"), [
+    "READ readable",
+    "DENIED locked",
+    "MISSING missing",
+    "ERROR a-directory",
+    "READ listed",
+    "READ expanded",
+    `NEXT touch ${marker}`,
+  ]);
+  assert.ok(!fs.existsSync(marker), "the next command is printed, not run");
+  // Judged from probe.sh's own output in the event log: what the model echoes itself does not count
+  assert.deepEqual(probeProblems(event(out), targets), [
+    `missing (${path.join(dir, "missing.txt")}): MISSING, expected DENIED`,
+    `a-directory (${dir}): ERROR, expected READ`,
+  ]);
+  assert.match(
+    probeProblems(event("DENIED locked", "echo DENIED locked"), targets.slice(1, 2))[0] ?? "",
+    /reported nothing/,
+  );
+});
+
+test("the probe refuses a target that does not exist before any run, and reads Sphica's results only from completed calls", async () => {
+  assert.throws(
+    () => probeTargets([{ label: "gone", path: "/nonexistent/x", expect: "DENIED" }]),
+    /does not exist/,
+  );
+  const call = (status: string, error: unknown, text: string) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "mcp_tool_call",
+        server: "sphica",
+        tool: "read",
+        status,
+        error,
+        result: { content: [{ text }] },
+      },
+    });
+  assert.ok(readReturned(call("completed", null, "## trace:s/k"), "trace:s/k"));
+  assert.ok(!readReturned(call("failed", { message: "x" }, "trace:s/k"), "trace:s/k"));
+  assert.ok(!readReturned(call("completed", null, "nothing"), "trace:s/k"));
+  const emitted = [{ event: "pre_read", outcome: "emitted", units: ["trace:s/k"] }];
+  assert.ok(deliveredOnRead(emitted, "trace:s/k"));
+  assert.ok(!deliveredOnRead([{ ...emitted[0], event: "prompt" }] as never, "trace:s/k"));
+  // A slot whose records anchor nothing gives no target, and the probe stops there instead of passing without one
+  const db = tempDb();
+  try {
+    const tools = tempDir("probe-tools-");
+    // A whole copy: the schema may still sit in the write-ahead log beside the file
+    const src = new DatabaseSync(db.file, { readOnly: true });
+    src.exec(`vacuum into '${path.join(tools, "fixture.db")}'`);
+    src.close();
+    assert.equal(
+      await anchoredTarget({
+        tools,
+        work: tempDir("probe-work-"),
+        scratch: tempDir("probe-scratch-"),
+        prompt: "p",
+      }),
+      null,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("codex.ts --probe fails when the run reads what the fence must hide, and keeps its runs apart from the measured ones", () => {
+  const b = codexBuild("none");
+  fs.writeFileSync(path.join(b.home, ".codex", "auth.json"), "{}");
+  b.leave("run-probe");
+  const out = path.join(b.cache, "codex-runs");
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "codex.ts"),
+      "--build",
+      b.build,
+      "--repo",
+      "eval-shelf-1",
+      "--task",
+      "pilot-sort",
+      "--out",
+      out,
+      "--probe",
+    ],
+    { encoding: "utf8", env: b.env },
+  );
+  // The fake codex has no sandbox: every target reads, so the probe must fail on each one it should deny
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stdout, /✗ owner-login .*: READ, expected DENIED/);
+  assert.match(r.stdout, /✗ build-tasks .*: READ, expected DENIED/);
+  assert.doesNotMatch(r.stdout, /✗ control/);
+  assert.deepEqual(fs.readdirSync(out), ["probe"]);
+  assert.match(b.seen().args.join(" "), /exec/);
+  assert.deepEqual(
+    fs.readdirSync(b.cache).filter((f) => f.startsWith("probe-")),
+    [],
+    "the cache token is removed",
+  );
+});
+
+test("grade.ts --probe fails when the grader reads what the fence must hide, and grades nothing", () => {
+  const b = codexBuild("none");
+  fs.writeFileSync(path.join(b.home, ".codex", "auth.json"), "{}");
+  b.leave("run-probe");
+  const loop = path.join(b.build, "loop.json");
+  fs.writeFileSync(
+    loop,
+    JSON.stringify({ build: "b", bundle: "c", run_roots: [path.join(b.cache, "codex-runs")], rows: [] }),
+  );
+  const r = spawnSync(
+    process.execPath,
+    [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop, "--probe"],
+    { encoding: "utf8", env: b.env },
+  );
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stdout, /✗ owner-login .*: READ, expected DENIED/);
+  assert.match(r.stdout, /✗ cache-token .*: READ, expected DENIED/);
+  assert.doesNotMatch(r.stdout, /✗ control/);
+  assert.ok(b.seen().args.includes("--json"));
+  for (const f of ["grades.json", "grades.checkpoint.json"])
+    assert.ok(!fs.existsSync(path.join(b.build, f)), f);
+  assert.ok(!fs.existsSync(path.join(b.cache, "codex.lock")));
 });

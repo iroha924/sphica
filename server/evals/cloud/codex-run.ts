@@ -74,6 +74,8 @@ export async function runCodex(o: {
   out: string;
   /** The delivery matcher the build recorded for Codex, so old and new builds deliver on the tools each was built with */
   codexMatcher: string | undefined;
+  /** A probe run: plants its files in the checkout before Codex starts and gives the prompt in place of the task's */
+  probe?: (p: ProbePaths) => Promise<string>;
 }): Promise<{ dir: string; result: Record<string, unknown> }> {
   const cache = evalCache();
   const build = requireInside(cache, o.build, "--build");
@@ -93,6 +95,9 @@ export async function runCodex(o: {
     throw new Error(`could not remove ${tree}; remove it, then codex.lock in ${cache}`);
   return run;
 }
+
+/** Where a run's pieces are while it runs: its directory, the checkout in the temp tree, the tools copy, and its database */
+export type ProbePaths = { dir: string; work: string; tools: string; db: string };
 
 async function fencedRun(
   o: Parameters<typeof runCodex>[0],
@@ -139,6 +144,7 @@ async function fencedRun(
     fs.cpSync(path.join(work, ".tools"), tools, { recursive: true });
     // The patch is read through a git directory Codex cannot write, so the checkout's own .git config never runs here
     const checkout = pinCheckout(work, path.join(dir, "git"));
+    const prompt = o.probe ? await o.probe({ dir, work, tools, db }) : o.task.prompt;
     const mcp =
       o.condition === "search" || o.condition === "inject"
         ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
@@ -196,7 +202,7 @@ async function fencedRun(
         "-",
       ],
       {
-        input: o.task.prompt,
+        input: prompt,
         env: {
           PATH: process.env.PATH ?? "",
           HOME: home,

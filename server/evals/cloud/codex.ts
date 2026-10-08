@@ -1,11 +1,24 @@
-// Replays one evaluation task with Codex on this machine (see runCodex in codex-run.ts).
-// Run: node evals/cloud/codex.ts --repo eval-shelf-2 --task pilot-dates [--build <dir>] [--out <dir>]
+// Replays one evaluation task with Codex on this machine (see runCodex in codex-run.ts). With --probe, it instead shows that the run's
+// commands cannot read what the fence hides, on the same slot, before any measured run.
+// Run: node evals/cloud/codex.ts --build <dir> --repo eval-shelf-2 --task pilot-dates [--out <dir>] [--probe]
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { evalCache } from "./codex-home.ts";
 import { runCodex } from "./codex-run.ts";
 import { readPlan, readTasks } from "./firing.ts";
+import {
+  anchoredTarget,
+  anyKey,
+  cacheToken,
+  deliveredOnRead,
+  type ProbeTarget,
+  probeProblems,
+  probeScript,
+  probeTargets,
+  readReturned,
+} from "./probe.ts";
 
 const { values: args } = parseArgs({
   options: {
@@ -13,6 +26,7 @@ const { values: args } = parseArgs({
     out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "codex-runs") },
     repo: { type: "string" },
     task: { type: "string" },
+    probe: { type: "boolean", default: false },
   },
 });
 
@@ -36,7 +50,7 @@ if (!task || !condition) throw new Error(`unknown task ${args.task} or repositor
 if (!readPlan(args.build).some((r) => r.task === task.id && r.condition === condition))
   throw new Error(`${task.id} under ${condition} is not in the build's firing plan`);
 
-const { dir, result } = await runCodex({
+const run = {
   build: args.build,
   buildId: manifest.build,
   owner: manifest.owner ?? "iroha924",
@@ -45,7 +59,79 @@ const { dir, result } = await runCodex({
   task,
   out: path.resolve(args.out ?? ""),
   codexMatcher: manifest.matchers?.codex,
-});
-const calls = (result.mcp_calls as string[] | undefined) ?? [];
-const patch = fs.statSync(path.join(dir, "patch.diff")).size;
-console.log(`${result.run}: exit ${result.status}, ${calls.length} MCP calls, patch ${patch} bytes → ${dir}`);
+};
+
+if (args.probe) {
+  const build = args.build;
+  const token = cacheToken(evalCache());
+  const problems: string[] = [];
+  try {
+    let targets: ProbeTarget[] = [];
+    let key: string | null = null;
+    const { dir, result } = await runCodex({
+      ...run,
+      // Apart from the measured runs: collect reads only run directories directly under --out
+      out: path.join(run.out, "probe"),
+      probe: async (p) => {
+        const control = path.join(p.work, "probe-control.txt");
+        fs.writeFileSync(control, "control\n");
+        targets = probeTargets([
+          token,
+          { label: "build-tasks", path: path.join(build, "tasks.json"), expect: "DENIED" },
+          ...(condition === "search" || condition === "inject"
+            ? [{ label: "run-db", path: p.db, expect: "DENIED" as const }]
+            : []),
+          { label: "control", path: control, expect: "READ" },
+        ]);
+        let prompt = "Run ./probe.sh once and quote its whole output.";
+        let next: string | null = null;
+        if (condition === "search") {
+          key = await anyKey(p.tools);
+          if (!key) throw new Error("no eligible probe target: the slot's database has no live record");
+          prompt += ` Then call the sphica MCP server's read tool with refs ["${key}"] and cwd "${p.work}", and quote what it returns.`;
+        }
+        if (condition === "inject") {
+          // The anchored path stays out of the prompt: the prompt's own delivery would show the record before the read could
+          prompt += " Then run the command probe.sh printed after NEXT, exactly as printed.";
+          const target = await anchoredTarget({
+            tools: p.tools,
+            work: p.work,
+            scratch: path.join(p.dir, "probe-scratch"),
+            prompt: `${prompt} Do nothing else.`,
+          });
+          if (!target)
+            throw new Error("no eligible probe target: no anchored read delivers a record in this slot");
+          key = target.key;
+          next = `head -c 1 ${target.path}`;
+        }
+        fs.writeFileSync(path.join(p.work, "probe.sh"), probeScript(targets, next), { mode: 0o755 });
+        return `${prompt} Do nothing else.`;
+      },
+    });
+    const events = fs.existsSync(path.join(dir, "events.jsonl"))
+      ? fs.readFileSync(path.join(dir, "events.jsonl"), "utf8")
+      : "";
+    problems.push(...probeProblems(events, targets));
+    if (result.reason) problems.push(`the run did not finish cleanly: ${result.reason}`);
+    if (condition === "inject" && key && !deliveredOnRead(result.deliveries as never, key))
+      problems.push(`the anchored read did not deliver ${key} under the fence`);
+    if (condition === "search" && key && !readReturned(events, key))
+      problems.push(`no error-free read through the MCP server returned ${key}`);
+    const receipt = path.join(dir, "gold-receipt.txt");
+    if (condition === "gold" && !(fs.existsSync(receipt) && fs.readFileSync(receipt, "utf8").trim()))
+      problems.push("the gold hook returned nothing under the fence");
+    console.log(`probe run → ${dir}`);
+  } finally {
+    fs.rmSync(token.path, { force: true });
+  }
+  for (const p of problems) console.log(`✗ ${p}`);
+  if (problems.length) process.exitCode = 1;
+  else console.log("✓ probe passed: every fenced target was denied, and the run still reached Sphica");
+} else {
+  const { dir, result } = await runCodex(run);
+  const calls = (result.mcp_calls as string[] | undefined) ?? [];
+  const patch = fs.statSync(path.join(dir, "patch.diff")).size;
+  console.log(
+    `${result.run}: exit ${result.status}, ${calls.length} MCP calls, patch ${patch} bytes → ${dir}`,
+  );
+}

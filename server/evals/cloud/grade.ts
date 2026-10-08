@@ -1,6 +1,7 @@
 // Grades one evaluation loop blind (eval-loop Skill step 5): each result row goes to Codex with only the task, answer, and patch, in an empty
 // directory, through grade.schema.json; the table counts every started run. Each finished call is kept in grades.checkpoint.json, and a rerun
-// calls the graders only for what it lacks. Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none]
+// calls the graders only for what it lacks. With --probe, it instead shows that the grader's commands cannot read what the fence hides.
+// Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none] [--probe]
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -24,6 +25,7 @@ import {
   saveCheckpoint,
   tabulate,
 } from "./grading.ts";
+import { cacheToken, type ProbeTarget, probeProblems, probeScript, probeTargets } from "./probe.ts";
 import type { Grade } from "./schema-check.ts";
 
 const schema = fs.readFileSync(path.join(import.meta.dirname, "grade.schema.json"), "utf8");
@@ -33,6 +35,7 @@ const { values: args } = parseArgs({
     loop: { type: "string" },
     // The second grader: Claude grades the same runs with the same prompt and schema, for agreement only; "none" skips it
     second: { type: "string", default: "claude" },
+    probe: { type: "boolean", default: false },
   },
 });
 
@@ -67,7 +70,12 @@ process.on("exit", release);
  * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
  * loop for it to read nearby, and none of the owner's hooks or plugins can add context to a blind grade.
  */
-function gradeOne(prompt: string, settings: string): { status: number | null; output: string } {
+function gradeOne(
+  prompt: string,
+  settings: string,
+  /** A probe: plants its files in the grader's directory, and the call answers freely with its events kept */
+  plant?: (dir: string) => void,
+): { status: number | null; output: string; events: string } {
   const dir = outsideTree("sphica-grade-", denies);
   const home = outsideTree("sphica-grade-home-", denies);
   try {
@@ -76,9 +84,12 @@ function gradeOne(prompt: string, settings: string): { status: number | null; ou
     const schemaFile = path.join(home, "grade.schema.json");
     fs.writeFileSync(schemaFile, schema);
     const out = path.join(dir, "grade.json");
+    plant?.(dir);
     const r = spawnSync(
       "codex",
-      [...GRADER_ARGS.codex, "-C", dir, "--output-schema", schemaFile, "-o", out, "-"],
+      plant
+        ? [...GRADER_ARGS.codex, "--json", "-C", dir, "-o", out, "-"]
+        : [...GRADER_ARGS.codex, "-C", dir, "--output-schema", schemaFile, "-o", out, "-"],
       {
         input: prompt,
         encoding: "utf8",
@@ -91,7 +102,11 @@ function gradeOne(prompt: string, settings: string): { status: number | null; ou
         },
       },
     );
-    return { status: r.status, output: fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "" };
+    return {
+      status: r.status,
+      output: fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "",
+      events: r.stdout ?? "",
+    };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
@@ -120,6 +135,40 @@ function gradeClaude(prompt: string): { status: number | null; output: string } 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+if (args.probe) {
+  const token = cacheToken(cache);
+  const problems: string[] = [];
+  try {
+    let targets: ProbeTarget[] = [];
+    const r = gradeOne(
+      "Run ./probe.sh once and quote its whole output. Do nothing else.",
+      ownerCodexSettings(),
+      (dir) => {
+        const control = path.join(dir, "probe-control.txt");
+        fs.writeFileSync(control, "control\n");
+        targets = probeTargets([
+          token,
+          {
+            label: "build-tasks",
+            path: path.join(path.dirname(args.loop ?? ""), "tasks.json"),
+            expect: "DENIED",
+          },
+          { label: "control", path: control, expect: "READ" },
+        ]);
+        fs.writeFileSync(path.join(dir, "probe.sh"), probeScript(targets, null), { mode: 0o755 });
+      },
+    );
+    problems.push(...probeProblems(r.events, targets));
+    if (r.status !== 0) problems.push(`the grader exited ${r.status}`);
+  } finally {
+    fs.rmSync(token.path, { force: true });
+  }
+  for (const p of problems) console.log(`✗ ${p}`);
+  if (!problems.length) console.log("✓ probe passed: every fenced target was denied to the grader");
+  // Nothing is graded and no checkpoint or grades file is read or written
+  process.exit(problems.length ? 1 : 0);
 }
 
 const checkpoint = loadCheckpoint(checkpointFile);
@@ -159,7 +208,12 @@ function graderRun(
   called++;
   const run = settings !== null ? gradeOne(prompt, settings) : gradeClaude(prompt);
   if (run.status === 0) {
-    checkpoint.entries[key] = { grader, ...run, at: new Date().toISOString() };
+    checkpoint.entries[key] = {
+      grader,
+      status: run.status,
+      output: run.output,
+      at: new Date().toISOString(),
+    };
     saveCheckpoint(checkpointFile, checkpoint);
   }
   return run;

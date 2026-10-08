@@ -128,13 +128,15 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 
 測る前に、実際の Codex で囲いが効いていることを確かめられる
 
-- [ ] T07: codex.ts --probe と grade.ts --probe を足す
+- [x] T07: codex.ts --probe と grade.ts --probe を足す
   - 種別: 追加
   - 計画: S6
   - 依存: T03（run の囲いが要る）, T05（採点者の囲いが要る）
   - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/probe.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-codex.test.ts`
   - 完了条件: `cd server && node --test test/eval-codex.test.ts` → pass。probe.sh の分類（`LC_ALL=C` で DENIED・MISSING・READ・ERROR）、対象が無いときに走らせる前に止まること、対象の記録が選べないときの「no eligible probe target」、prompt に anchor のパスが出ないこと、完了した `command_execution` の出力だけで判定すること、grade の probe が checkpoint と grades.json に触れないことを、偽の events で確かめる
   - コミット: `feat(eval): add probes that show the Codex run and grader cannot read what is fenced (T07)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 16 件 pass（probe.sh の分類と NEXT を流さないこと、probe.sh 以外の出力を数えないこと、無い対象で走らせる前に止まること、anchor の無い slot で対象が無いこと、codex.ts と grade.ts の `--probe` が囲いの無い偽の codex で READ を拾って 1 で終わり、run を `<out>/probe` に分け、cache の token・checkpoint・grades.json を残さないこと）
+  - 結果: `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/eval-codex.test.ts` → 156 件 pass。`bun run typecheck`・`bun run lint`・`bun run english`・`bun run architecture` → 0 で終わった
 - [ ] T08: eval-loop Skill に probe・1 つずつ・出力先・既知の限界を書く
   - 種別: 変更
   - 計画: S7
@@ -156,3 +158,5 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T03 / Codex のレビュー（high）で P1 が 2 件、P2 が 1 件。リポジトリの .git から `git show` で tasks.json を読める、後片付けのコピーの失敗で一時の木を残したままロックを外す、絶対リンクが移した後に切れる / 3 件とも採用し、T11 を足して直した。deny を `server/evals` からリポジトリのルートに広げた（plan の方針 2 の deny の対象が変わる）
 - 2026-10-08 / T04 / Codex のレビューで P2 が 2 件。パスに引用符があると指紋が食い違う（T09 で塞がっていた）、除外した Codex の行に fence が残らない / 後者を採用し、T10 を足す
 - 2026-10-08 / T11 / review の評価の `evalDenies` も `server/evals` だけを deny していて、同じくリポジトリの .git から読める / plan の対象外（review の挙動は変えない）なので直さず、持ち主に聞く
+
+- 2026-10-08 / T07 / `gradeOne` が probe のためにイベントも返すようになり、checkpoint に `events` まで保存して既存の checkpoint のテストが落ちた / 保存する欄を status と output に限った
