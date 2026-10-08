@@ -37,13 +37,14 @@ review と cloud の両方が、同じ関数で Codex を囲えるようにな�
 
 codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・run の DB を読めない形で動き、今と同じ配置で結果を残す
 
-- [ ] T02: codex.ts の組み立てを codex-run.ts に出す（挙動は変えない）
+- [x] T02: codex.ts の組み立てを codex-run.ts に出す（挙動は変えない）
   - 種別: 変更
   - 計画: S2
   - 依存: なし
   - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/codex.ts`, `server/test/eval-codex.test.ts`
   - 完了条件: `cd server && node --test test/eval-codex.test.ts` → pass。今の引数（`-s workspace-write` を含む）、設定、フックの組み立てを、codex-run.ts の関数から読んで確かめる
   - コミット: `refactor(eval): move the Codex run setup out of the CLI wrapper (T02)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 5 件 pass（偽の codex で codex.ts を流し、`-s workspace-write`、run の HOME、設定の model、result.json などの成果物を確かめた）。`bun run typecheck`・`bun run lint`・`bun run english` → 0 で終わった
 - [ ] T03: codex-run.ts に囲いを当てる（出力先の制限、一時の場所、DB の置き場、profile、片付け、fence と fence_roots、ロック）
   - 種別: 修正
   - 計画: S2
@@ -102,3 +103,6 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `docs(eval-loop): run the Codex probes before measuring and keep outputs under the cache (T08)`
 
 ## 記録
+
+- 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
+- 2026-10-08 / T02 / 変更欄の `server/test/eval-codex.test.ts` に、codex.ts を偽の codex で流すテストを足した / 欄は変えていない
