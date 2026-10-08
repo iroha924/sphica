@@ -250,7 +250,7 @@ export async function anchoredTarget(o: {
     const session = crypto.randomUUID();
     const hook = (input: Record<string, unknown>) =>
       execFileSync(
-        "sh",
+        "/bin/sh",
         [path.join(o.tools, "sphica.sh"), path.join(o.tools, "dist", "deliver.js"), "codex"],
         {
           input: JSON.stringify({ session_id: session, cwd: o.work, ...input }),

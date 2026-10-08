@@ -15,6 +15,7 @@ import {
   fencedCodexHome,
   homeFence,
   requireInside,
+  volumeDenies,
 } from "../evals/cloud/codex-home.ts";
 import { codexDenies, codexFence, REPO, repoPlaces } from "../evals/cloud/codex-run.ts";
 import {
@@ -1002,4 +1003,63 @@ test("grade.ts --probe leaves no token in HOME when the fence or the lock cannot
     fs.readdirSync(b.home).filter((f) => f.startsWith(".sphica-probe-")),
     [],
   );
+});
+
+test("the fenced PATH holds only absolute entries that still find node, bun, and codex by name", () => {
+  const home = fs.realpathSync(tempDir("home-path-"));
+  const root = path.join(home, ".local/share/mise/installs/node/24.0.0");
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "bin/node"), "x");
+  fs.mkdirSync(path.join(home, ".bun/bin"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".bun/bin/bun"), "x");
+  // codex installed apart, in a directory of HOME that is neither install
+  fs.mkdirSync(path.join(home, ".local/bin"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".local/bin/codex"), "x");
+  const base = [path.join(root, "bin"), path.join(home, ".bun/bin"), path.join(home, ".local/bin")];
+  const f = homeFence({ home, path: [".", "bin", ...base, "/usr/bin"].join(path.delimiter) });
+  const entries = f.path.split(path.delimiter);
+  assert.ok(
+    entries.every((e) => path.isAbsolute(e)),
+    f.path,
+  );
+  for (const tool of ["node", "bun", "codex"])
+    assert.ok(
+      entries.some((e) => fs.existsSync(path.join(e, tool))),
+      tool,
+    );
+  // The directory holding codex is read back under the denied HOME, alone
+  assert.ok(f.roots.includes(path.join(home, ".local/bin")));
+  // A shim whose target has another name would not be found by that name in the PATH built from its target
+  const outside = fs.realpathSync(tempDir("shim-targets-"));
+  fs.writeFileSync(path.join(outside, "node-launcher"), "x");
+  fs.mkdirSync(path.join(home, "bin"));
+  fs.symlinkSync(path.join(outside, "node-launcher"), path.join(home, "bin/node"));
+  assert.throws(
+    () => homeFence({ home, path: [path.join(home, "bin"), ...base.slice(1)].join(path.delimiter) }),
+    /not found by its name/,
+  );
+});
+
+test("external volumes are denied, a link to the root volume is not, and the fence does not change with a per-run copy's path", () => {
+  const volumes = fs.realpathSync(tempDir("volumes-"));
+  fs.mkdirSync(path.join(volumes, "Backup"));
+  fs.symlinkSync("/", path.join(volumes, "Macintosh HD"));
+  assert.deepEqual(volumeDenies(volumes), [path.join(volumes, "Backup")]);
+  const home = fs.realpathSync(tempDir("fence-biome-home-"));
+  const cache = evalCache(home);
+  const codexHome = path.join(cache, "r", "codex-home");
+  const s = { places: [REPO], home: homeFence({ home }) };
+  const fence = (copy: string) =>
+    codexFence(
+      codexProfile(
+        ":workspace",
+        [...codexDenies(cache, s), path.join(codexHome, "auth.json")],
+        [...s.home.roots, copy],
+      ),
+      cache,
+      codexHome,
+      s,
+      { "<biome>": copy },
+    );
+  assert.equal(fence(path.join(cache, "m2-biome", "run-a")), fence(path.join(cache, "m2-biome", "run-b")));
 });

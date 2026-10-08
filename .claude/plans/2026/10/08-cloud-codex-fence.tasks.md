@@ -392,6 +392,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `grep -n 'os.tmpdir(), "sphica-smoke-"' server/evals/cloud/build.ts` → 直す前は 189 行目にあった
   - 結果: `grep -n 'evalCache(), "smoke-"' server/evals/cloud/build.ts` → 1 行。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T35: GitHub の Codex のレビュー（0e1bb91f・e4dc34af）の 5 件を直す（名前の違う先を指す shim の node・bun が PATH で見つからない、PATH の相対の項目とフックの `sh`、M2 の Biome の写しのパスで指紋が run ごとに変わる、HOME の中の codex が PATH から外れて起動できない、HOME の外の私的なデータ）
+  - 種別: 修正
+  - 計画: S2, S8, S9
+  - 依存: T34（直す対象の囲いが要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/probe.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="fenced PATH holds only|external volumes" test/eval-codex.test.ts` → 直す前は `volumeDenies` が無く読み込みで失敗する（PATH に `.` が残る・codex のディレクトリが落ちる・shim を見逃すことも同じテストが見る）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): keep the fenced PATH absolute and whole, deny external volumes (T35)`
+  - 結果: `cd server && node --test --test-name-pattern="fenced PATH holds only|external volumes" test/eval-codex.test.ts` → 直す前は読み込みで失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 179 件 pass。codex を PATH から外し、HOME に外向きのリンクを置いた CI と同じ環境でも 179 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -427,3 +438,5 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T29 / GitHub の Codex のレビュー（aa095eca）で P1 が 4 件、P2 が 1 件。5 件とも採用した。HOME に増えた項目の件は、HOME を丸ごと deny して残す根を `read` で戻す形を実機で試して動いたので、それに変えた（plan の方針 8 を直した）
 - 2026-10-09 / T31 / GitHub の Codex のレビュー（a539bd49）で P1 が 1 件。T29 の push の後にスレッドをまとめて resolve したとき、読む前に resolve していた / 中身を確かめて採用し、T31 で直した
 - 2026-10-09 / T32 / GitHub の Codex のレビュー（d27e63f4）で P1 が 2 件、P2 と P3 が 1 件ずつ。4 件とも採用した。Biome の写しは、どちらの host も書けない `~/.cache/sphica-eval/m2-biome/<run>` に置き、Codex には `read` で読み戻す（HOME と同じ、親を deny して子を読み戻す形）
+- 2026-10-09 / T35 / GitHub の Codex のレビュー（0e1bb91f・e4dc34af）の未解決の 5 件。HOME の奥の外向きのリンクの件は、HOME 全体を辿って確かめた（18 秒、リンク約 6.9 万本、外向きの先はすべて /opt/homebrew・/Applications・/Library/Developer などの誰でも読める場所）。リンク経由の読み取りは先のパスで判定されるので、リンクは読める範囲を広げない。穴は HOME の外の私的なデータの側にあるとして、外部ボリューム（/Volumes の下の実体のディレクトリ）を deny した
+- 2026-10-09 / 進め方 / 持ち主の指示: 前の `@codex review` が返る前に続けて頼まない。直しを全部 push し終えてから 1 回だけ頼む

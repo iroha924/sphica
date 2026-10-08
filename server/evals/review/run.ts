@@ -13,6 +13,7 @@ import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
 import {
   claimRunDir,
   codexModelOf,
+  codexOf,
   evalCache,
   fencedCodexHome,
   holdingLock,
@@ -227,7 +228,7 @@ async function runLane(o: {
       const home = path.join(tree, "home");
       fs.mkdirSync(tmp);
       fs.mkdirSync(home);
-      r = await runChild("codex", codexArgs(p.work, path.join(dir, "final.md")), {
+      r = await runChild(codexOf(o.env.shield.home), codexArgs(p.work, path.join(dir, "final.md")), {
         cwd: p.work,
         env: {
           PATH: o.env.shield.home.path,

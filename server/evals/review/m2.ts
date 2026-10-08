@@ -17,6 +17,7 @@ import {
   checkoutGit,
   claimRunDir,
   codexModelOf,
+  codexOf,
   evalCache,
   fencedCodexHome,
   holdingLock,
@@ -314,7 +315,7 @@ async function runOne(o: {
         deny: denies,
         read: [...o.env.shield.home.roots, biomeDir],
       });
-      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield);
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield, { "<biome>": biomeDir });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied
@@ -323,7 +324,7 @@ async function runOne(o: {
       fs.mkdirSync(home);
       fs.mkdirSync(tmp);
       r = await runChild(
-        "codex",
+        codexOf(o.env.shield.home),
         [
           "exec",
           "--json",

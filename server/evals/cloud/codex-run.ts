@@ -11,6 +11,7 @@ import {
   claimRunDir,
   codexLock,
   codexModelOf,
+  codexOf,
   codexProfile,
   evalCache,
   fenceDigest,
@@ -20,6 +21,7 @@ import {
   isInside,
   pinCheckout,
   requireInside,
+  volumeDenies,
 } from "./codex-home.ts";
 
 const HERE = import.meta.dirname;
@@ -49,16 +51,16 @@ export function repoPlaces(repo = REPO): string[] {
 }
 
 /** Where the repository lives and what HOME keeps: made once per run, and shared by its deny list, its PATH, and its fence */
-export type Shield = { places: string[]; home: HomeFence };
+export type Shield = { places: string[]; home: HomeFence; volumes?: string[] };
 
-export const shieldNow = (): Shield => ({ places: repoPlaces(), home: homeFence() });
+export const shieldNow = (): Shield => ({ places: repoPlaces(), home: homeFence(), volumes: volumeDenies() });
 
 /**
  * What no fenced Codex may read, whatever it runs: the repository wherever its files or history are, every evaluation output (builds,
  * other runs, logs), and all of HOME but the tools' installs. Each run works in a temp tree outside all of them.
  */
 export function codexDenies(cache: string, s: Shield = shieldNow()): string[] {
-  return [...s.places, cache, ...s.home.denies];
+  return [...s.places, cache, ...s.home.denies, ...(s.volumes ?? [])];
 }
 
 /**
@@ -70,15 +72,19 @@ export function codexFence(
   cache: string,
   codexHome: string,
   s: Shield = shieldNow(),
+  /** More places named by role: a per-run copy read back (M2's Biome) is the same policy in every run */
+  roles: Record<string, string> = {},
 ): string {
   const toml = (p: string) => JSON.stringify(p).slice(1, -1);
   let text = profile;
   for (const p of s.places.filter((p) => p !== REPO).sort((a, b) => b.length - a.length))
     text = text.split(toml(p)).join(toml(REPO));
+  // The external volumes mounted come and go: they are one policy line
+  for (const v of s.volumes ?? []) text = text.split(`${JSON.stringify(v)} = "deny"\n`).join("");
   return fenceDigest(
     text,
-    { "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
-    (t) => [...new Set(t.split("\n"))].join("\n"),
+    { ...roles, "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
+    (t) => [...new Set(t.split("\n")), "policy: volumes-denied"].join("\n"),
   );
 }
 
@@ -206,7 +212,7 @@ async function fencedRun(
     const prompt = o.probe ? await o.probe({ dir, work, tools, db, home: shield.home }) : o.task.prompt;
     const mcp =
       o.condition === "search" || o.condition === "inject"
-        ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
+        ? `\n[mcp_servers.sphica]\ncommand = "/bin/sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
         : "";
     const fence = fencedCodexHome(codexHome, {
       base: ":workspace",
@@ -228,7 +234,13 @@ async function fencedRun(
     const hook = (args: string[], timeout: number) => ({
       hooks: [{ type: "command", command: args.map((a) => JSON.stringify(a)).join(" "), timeout }],
     });
-    const deliver = ["sh", path.join(tools, "sphica.sh"), path.join(tools, "dist", "deliver.js"), "codex"];
+    // An absolute shell: the PATH the hooks inherit is the fenced Codex's
+    const deliver = [
+      "/bin/sh",
+      path.join(tools, "sphica.sh"),
+      path.join(tools, "dist", "deliver.js"),
+      "codex",
+    ];
     const hooks =
       o.condition === "inject"
         ? {
@@ -237,19 +249,19 @@ async function fencedRun(
             PreToolUse: [{ matcher: matcherOf(), ...hook(deliver, 10) }],
           }
         : o.condition === "gold"
-          ? { UserPromptSubmit: [hook(["sh", path.join(dir, "gold-hook.sh")], 10)] }
+          ? { UserPromptSubmit: [hook(["/bin/sh", path.join(dir, "gold-hook.sh")], 10)] }
           : null;
     // The gold record arrives as hook context, not as a delivery row: keep what the hook returned as the run's receipt
     if (o.condition === "gold")
       fs.writeFileSync(
         path.join(dir, "gold-hook.sh"),
-        `out=$(sh ${JSON.stringify(path.join(tools, "gold.sh"))})\ncode=$?\nprintf '%s' "$out" >> ${JSON.stringify(path.join(dir, "gold-receipt.txt"))}\nprintf '%s' "$out"\nexit $code\n`,
+        `out=$(/bin/sh ${JSON.stringify(path.join(tools, "gold.sh"))})\ncode=$?\nprintf '%s' "$out" >> ${JSON.stringify(path.join(dir, "gold-receipt.txt"))}\nprintf '%s' "$out"\nexit $code\n`,
       );
     if (hooks)
       fs.writeFileSync(path.join(codexHome, "hooks.json"), `${JSON.stringify({ hooks }, null, 2)}\n`);
 
     const r = spawnSync(
-      "codex",
+      codexOf(shield.home),
       [
         "exec",
         "--json",

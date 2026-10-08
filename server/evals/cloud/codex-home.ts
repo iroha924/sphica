@@ -105,7 +105,15 @@ export function fenceDigest(
 }
 
 /** What a fenced Codex may reach under the owner's HOME: the tools' install roots, every other entry denied, and the PATH to give it */
-export type HomeFence = { home: string; roots: string[]; denies: string[]; path: string; tools: string[] };
+export type HomeFence = {
+  home: string;
+  roots: string[];
+  denies: string[];
+  path: string;
+  tools: string[];
+  /** The codex the runners start, by absolute path (null where none is on PATH): the PATH given to the fenced Codex need not hold it */
+  codex: string | null;
+};
 
 /** The tools an evaluation run uses; nothing else under HOME is kept */
 const TOOLS = ["node", "bun"];
@@ -136,19 +144,38 @@ function installRoot(home: string, real: string, tool: string): string {
  */
 export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
   const home = fs.realpathSync(o.home ?? os.homedir());
-  const entries = (o.path ?? process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  // Only absolute entries: a relative one (".") would let a hook find a command the model put in its checkout
+  const entries = (o.path ?? process.env.PATH ?? "")
+    .split(path.delimiter)
+    .filter((d) => d && path.isAbsolute(d));
+  const find = (name: string, dirs: string[]) =>
+    dirs.map((d) => path.join(d, name)).find((f) => fs.existsSync(f));
   const roots: string[] = [];
   const tools: string[] = [];
   for (const tool of TOOLS) {
-    const found = entries.map((d) => path.join(d, tool)).find((f) => fs.existsSync(f));
+    const found = find(tool, entries);
     if (!found) throw new Error(`${tool} is not on PATH`);
     const real = fs.realpathSync(found);
     tools.push(real);
     if (isInside(home, real)) roots.push(installRoot(home, real, tool));
   }
+  const codex = find("codex", entries) ?? null;
+  // Codex may run its own binary inside the sandbox: one installed under HOME outside the tool installs is read back, alone
+  const codexReal = codex && fs.realpathSync(codex);
+  if (codexReal && isInside(home, codexReal) && !roots.some((r) => isInside(r, codexReal)))
+    roots.push(path.dirname(codexReal));
   const outside = entries.filter(
     (d) => !isInside(home, fs.existsSync(d) ? fs.realpathSync(d) : path.resolve(d)),
   );
+  const fenced = [
+    ...new Set([...tools.map((t) => path.dirname(t)), ...(codex ? [path.dirname(codex)] : []), ...outside]),
+  ];
+  // The fenced Codex and its hooks find the tools by name: a shim whose target has another name is not found that way
+  for (const [i, tool] of TOOLS.entries()) {
+    const named = find(tool, fenced);
+    if (!named || fs.realpathSync(named) !== tools[i])
+      throw new Error(`${tool} resolves to ${tools[i]}, which is not found by its name in the fenced PATH`);
+  }
   const look = (dir: string) => {
     for (const name of fs.readdirSync(dir)) {
       const full = path.join(dir, name);
@@ -174,9 +201,35 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
     home,
     roots: [...new Set(roots)].sort(),
     denies: [home],
-    path: [...new Set([...tools.map((t) => path.dirname(t)), ...outside])].join(path.delimiter),
+    path: fenced.join(path.delimiter),
     tools,
+    codex,
   };
+}
+
+/**
+ * External volumes: private data outside HOME that a fenced Codex would otherwise read. Only real directories: the boot volume's entry
+ * is a link to `/`, and a deny follows a link to what it points at.
+ */
+export function volumeDenies(volumes = "/Volumes"): string[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(volumes);
+  } catch {
+    return [];
+  }
+  return names
+    .map((n) => path.join(volumes, n))
+    .filter((p) => {
+      const st = fs.lstatSync(p, { throwIfNoEntry: false });
+      return st?.isDirectory() === true && !st.isSymbolicLink();
+    });
+}
+
+/** The codex a runner starts: a fence made where none is on PATH (collect, report) needs none */
+export function codexOf(home: HomeFence): string {
+  if (!home.codex) throw new Error("codex is not on PATH");
+  return home.codex;
 }
 
 /** Where every evaluation output lives; the fenced Codex runs and graders are denied all of it */

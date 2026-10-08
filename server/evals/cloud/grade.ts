@@ -7,7 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { replaceFile } from "../../src/file-lock.ts";
-import { codexLock, evalCache, fencedCodexHome, ownerCodexSettings, requireInside } from "./codex-home.ts";
+import {
+  codexLock,
+  codexOf,
+  evalCache,
+  fencedCodexHome,
+  ownerCodexSettings,
+  requireInside,
+} from "./codex-home.ts";
 import { codexDenies, currentFence, outsideTree, shieldNow } from "./codex-run.ts";
 import { readTasks } from "./firing.ts";
 import {
@@ -107,7 +114,7 @@ function gradeOne(
     const out = path.join(dir, "grade.json");
     plant?.(dir);
     const r = spawnSync(
-      "codex",
+      codexOf(shield.home),
       plant
         ? [...GRADER_ARGS.codex, "--json", "-C", dir, "-o", out, "-"]
         : [...GRADER_ARGS.codex, "-C", dir, "--output-schema", schemaFile, "-o", out, "-"],
