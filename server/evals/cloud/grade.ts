@@ -133,10 +133,7 @@ function gradeOne(
   return result;
 }
 
-/**
- * Removes a grader's temp directories, and stops grading when one stays: the next grader would run beside it without a deny for it.
- * The lock is kept on exit while any stays.
- */
+/** Removes a grader's temp directories; one that stays is kept in leftBehind, which holds the lock and stops grading */
 function clear(...dirs: string[]): void {
   for (const d of dirs)
     try {
@@ -144,7 +141,6 @@ function clear(...dirs: string[]): void {
     } catch {
       leftBehind.push(d);
     }
-  if (leftBehind.length) throw new Error(`could not remove ${leftBehind.join(", ")}; grading stops here`);
 }
 
 /**
@@ -261,6 +257,8 @@ function graderRun(
     };
     saveCheckpoint(checkpointFile, checkpoint);
   }
+  // Only after the finished grade is saved: the next grader would run beside the directory left, without a deny for it
+  if (leftBehind.length) throw new Error(`could not remove ${leftBehind.join(", ")}; grading stops here`);
   return run;
 }
 

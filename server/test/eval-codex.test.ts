@@ -812,6 +812,11 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
       1,
     );
     assert.notEqual(r.status, 0);
+    // The grade it finished is kept, so a rerun after the owner clears the directory does not grade it again
+    const saved = JSON.parse(fs.readFileSync(path.join(b.build, "grades.checkpoint.json"), "utf8")) as {
+      entries: object;
+    };
+    assert.equal(Object.keys(saved.entries).length, 1);
   } finally {
     // Only what this run left: other test files may have their own grader directories in the same temp directory
     const left = /could not remove (.*); remove it/.exec(r.stderr)?.[1]?.split(", ") ?? [];
