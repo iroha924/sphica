@@ -19,7 +19,7 @@ import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/clou
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
-import { copyBiome, judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
+import { biomeChanged, copyBiome, judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, gradeRulesRun, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
@@ -35,6 +35,7 @@ import {
   RUNNER_FILES,
   reviewPrompt,
   rulesPrompt,
+  settleAll,
 } from "../evals/review/runner.ts";
 import { openReader } from "../src/db.ts";
 import { parseDiff, selectForReview } from "../src/review.ts";
@@ -997,4 +998,27 @@ test("M2's check runs a Biome copy of the run's own, and a run that changed its 
   );
   const row = m2Rows(runs).get("codex check");
   assert.deepEqual([row?.runs, row?.excluded, row?.completed], [1, 1, 0]);
+});
+
+test("a lane that throws does not end the run while another lane still has its temp tree, and a deleted Biome copy counts as changed", async () => {
+  const order: string[] = [];
+  await assert.rejects(
+    settleAll([
+      async () => {
+        throw new Error("first lane failed");
+      },
+      async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        order.push("second lane finished");
+      },
+    ]),
+    /first lane failed/,
+  );
+  assert.deepEqual(order, ["second lane finished"]);
+  const tree = fs.realpathSync(tempDir("m2-biome-gone-"));
+  const copy = copyBiome(tree);
+  const pinned = copy.digest();
+  assert.equal(biomeChanged(copy, pinned), false);
+  fs.rmSync(path.join(tree, "biome"), { recursive: true, force: true });
+  assert.equal(biomeChanged(copy, pinned), true);
 });

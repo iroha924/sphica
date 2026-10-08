@@ -32,6 +32,16 @@ export const codexLaneDenies = (out: string, cache: string, shield: Shield): str
 export const outsideCheckout = (prefix: string, denies: string[]): string =>
   path.join(outsideTree(prefix, denies), "work");
 
+/**
+ * Runs every worker to its end before failing with the first error: a run that stopped early while another still had its temp tree
+ * would release the lock under that tree.
+ */
+export async function settleAll(workers: (() => Promise<void>)[]): Promise<void> {
+  const ends = await Promise.allSettled(workers.map((w) => w()));
+  const failed = ends.find((e): e is PromiseRejectedResult => e.status === "rejected");
+  if (failed) throw failed.reason;
+}
+
 /** The code that starts and fences a run, relative to this directory */
 export const RUNNER_FILES = [
   "runner.ts",

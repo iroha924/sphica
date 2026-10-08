@@ -80,7 +80,7 @@ function completed(events: string): NonNullable<CodexEvent["item"]>[] {
 
 /** The command as the model gave it, without the shell Codex wraps it in */
 const bare = (command: string) =>
-  /^\S+ -lc (.*)$/s.exec(command)?.[1]?.replace(/^(['"])(.*)\1$/s, "$2") ?? command;
+  /^\S+ -l?c (.*)$/s.exec(command)?.[1]?.replace(/^(['"])(.*)\1$/s, "$2") ?? command;
 
 /** Completed runs of exactly this command that exited 0 */
 const ran = (events: string, command: string) =>

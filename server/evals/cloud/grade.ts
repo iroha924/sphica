@@ -94,6 +94,8 @@ function gradeOne(
 ): { status: number | null; output: string; events: string } {
   const dir = outsideTree("sphica-grade-", denies);
   const home = outsideTree("sphica-grade-home-", denies);
+  let result: { status: number | null; output: string; events: string } | undefined;
+  let failure: unknown;
   try {
     fencedCodexHome(path.join(home, ".codex"), { base: ":read-only", deny: denies, settings });
     // The schema text the checkpoint key holds, not the file, which may change while grading runs
@@ -118,19 +120,31 @@ function gradeOne(
         },
       },
     );
-    return {
+    result = {
       status: r.status,
       output: fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "",
       events: r.stdout ?? "",
     };
-  } finally {
-    for (const d of [dir, home])
-      try {
-        fs.rmSync(d, { recursive: true, force: true });
-      } catch {
-        leftBehind.push(d);
-      }
+  } catch (e) {
+    failure = e;
   }
+  clear(dir, home);
+  if (!result) throw failure;
+  return result;
+}
+
+/**
+ * Removes a grader's temp directories, and stops grading when one stays: the next grader would run beside it without a deny for it.
+ * The lock is kept on exit while any stays.
+ */
+function clear(...dirs: string[]): void {
+  for (const d of dirs)
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      leftBehind.push(d);
+    }
+  if (leftBehind.length) throw new Error(`could not remove ${leftBehind.join(", ")}; grading stops here`);
 }
 
 /**
@@ -139,6 +153,8 @@ function gradeOne(
  */
 function gradeClaude(prompt: string): { status: number | null; output: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
+  let result: { status: number | null; output: string } | undefined;
+  let failure: unknown;
   try {
     const r = spawnSync("claude", [...GRADER_ARGS.claude, "--json-schema", schema], {
       cwd: dir,
@@ -151,10 +167,13 @@ function gradeClaude(prompt: string): { status: number | null; output: string } 
       const structured = (JSON.parse(r.stdout) as { structured_output?: unknown }).structured_output;
       output = structured === undefined ? "" : JSON.stringify(structured);
     } catch {}
-    return { status: r.status, output };
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    result = { status: r.status, output };
+  } catch (e) {
+    failure = e;
   }
+  clear(dir);
+  if (!result) throw failure;
+  return result;
 }
 
 if (args.probe) {

@@ -82,7 +82,7 @@ export function codexFence(
     { "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
     (t) =>
       [
-        ...new Set(t.split("\n").filter((l) => !/^"<home>[\\/][^"]*" = "deny"$/.test(l))),
+        ...new Set(t.split("\n").filter((l) => !/^"<home>[\\/](?:[^"\\]|\\.)*" = "deny"$/.test(l))),
         "policy: home-allowlist-v1",
         `allow-roots: ${JSON.stringify(roots)}`,
       ].join("\n"),

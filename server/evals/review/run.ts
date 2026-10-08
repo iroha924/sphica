@@ -33,6 +33,7 @@ import {
   reviewPrompt,
   rulesPrompt,
   runnerDigest,
+  settleAll,
 } from "./runner.ts";
 
 const ROOT = path.join(import.meta.dirname, "..", "..", "..");
@@ -413,7 +414,7 @@ async function main() {
           console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
         }
       };
-      await Promise.all(Array.from({ length: jobs }, worker));
+      await settleAll(Array.from({ length: jobs }, () => worker));
     });
   } finally {
     if (ownerToken) fs.rmSync(ownerToken.path, { force: true });

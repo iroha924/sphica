@@ -146,7 +146,9 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
   const walk = (dir: string) => {
     for (const name of fs.readdirSync(dir)) {
       const full = path.join(dir, name);
-      if (roots.includes(full)) continue;
+      // A deny follows a link to what it points at: a version alias would deny the install kept beside it, a link out of HOME
+      // what lies outside. What it points at under HOME is judged where it really is
+      if (roots.includes(full) || fs.lstatSync(full).isSymbolicLink()) continue;
       if (roots.some((r) => isInside(full, r))) walk(full);
       else denies.push(full);
     }

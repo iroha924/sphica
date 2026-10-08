@@ -113,6 +113,7 @@ test("review's runner identity covers the shared fence", () => {
 /** A fake `codex` that records its arguments, environment, and config, and answers like `codex exec -o` */
 const FAKE_CODEX = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
+echo x >> "$here/calls"
 [ -f "$here/fail" ] && exit 3
 printf '%s\\n' "$@" > "$here/args"
 env > "$here/env"
@@ -787,7 +788,12 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
   };
   fs.writeFileSync(
     loop,
-    JSON.stringify({ build: "b", bundle: "c", run_roots: [path.join(b.cache, "codex-runs")], rows: [row] }),
+    JSON.stringify({
+      build: "b",
+      bundle: "c",
+      run_roots: [path.join(b.cache, "codex-runs")],
+      rows: [row, { ...row, run: "r2" }],
+    }),
   );
   const r = spawnSync(
     process.execPath,
@@ -797,9 +803,103 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
   try {
     assert.ok(fs.existsSync(path.join(b.cache, "codex.lock")), `the lock stays (${r.stderr})`);
     assert.match(r.stderr, /could not remove /);
+    // Grading stops at the first directory left: a later grader would run beside it, undenied
+    assert.equal(
+      fs
+        .readFileSync(path.join(b.root, "bin", "calls"), "utf8")
+        .trim()
+        .split("\n").length,
+      1,
+    );
+    assert.notEqual(r.status, 0);
   } finally {
     // Only what this run left: other test files may have their own grader directories in the same temp directory
     const left = /could not remove (.*); remove it/.exec(r.stderr)?.[1]?.split(", ") ?? [];
+    for (const d of left) {
+      if (fs.existsSync(path.join(d, "stuck"))) fs.chmodSync(path.join(d, "stuck"), 0o700);
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a link in HOME is never denied, since a deny follows it to what it points at, and a quoted name does not change the fence", () => {
+  const home = fs.realpathSync(tempDir("home-links-"));
+  const root = path.join(home, ".local/share/mise/installs/node/24.0.0");
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "bin/node"), "x");
+  fs.mkdirSync(path.join(home, ".bun/bin"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".bun/bin/bun"), "x");
+  // mise's version aliases: denying `24` would deny the 24.0.0 kept beside it
+  fs.symlinkSync("./24.0.0", path.join(home, ".local/share/mise/installs/node/24"));
+  fs.symlinkSync("/usr", path.join(home, "system"));
+  const toolPath = [path.join(root, "bin"), path.join(home, ".bun/bin")].join(path.delimiter);
+  const f = homeFence({ home, path: toolPath });
+  assert.ok(!f.denies.includes(path.join(home, ".local/share/mise/installs/node/24")));
+  assert.ok(!f.denies.includes(path.join(home, "system")), "a link out of HOME would deny what it points at");
+  const cache = evalCache(home);
+  const codexHome = path.join(cache, "r", "codex-home");
+  const fence = () => {
+    const s = { places: [REPO], home: homeFence({ home, path: toolPath }) };
+    return codexFence(
+      codexProfile(":workspace", [...codexDenies(cache, s), path.join(codexHome, "auth.json")]),
+      cache,
+      codexHome,
+      s,
+    );
+  };
+  const before = fence();
+  fs.writeFileSync(path.join(home, 'quote"name'), "x");
+  assert.equal(fence(), before);
+});
+
+test("the probe's output counts whichever shell form Codex wrapped the command in", () => {
+  const targets: ProbeTarget[] = [{ label: "locked", path: "/x", expect: "DENIED" }];
+  for (const command of ["/bin/zsh -lc ./probe.sh", "/bin/zsh -c ./probe.sh", "/bin/bash -lc './probe.sh'"])
+    assert.deepEqual(probeProblems(event("DENIED locked", command), targets), [], command);
+});
+
+test("the grader keeps the lock while the Claude grader's directory cannot be removed either", () => {
+  const b = codexBuild("none");
+  fs.writeFileSync(
+    path.join(b.root, "bin", "claude"),
+    `#!/bin/sh\nmkdir -p stuck/x\nchmod 000 stuck\ncat > /dev/null\nprintf '%s' '{"type":"result","structured_output":{}}'\n`,
+    { mode: 0o755 },
+  );
+  const loop = path.join(b.build, "loop.json");
+  const row = {
+    model: "codex",
+    task: "pilot-sort",
+    condition: "none",
+    run: "r1",
+    excluded: null,
+    answer: "a",
+    answer_format: "valid",
+    patch: "",
+    patch_truncated: false,
+  };
+  fs.writeFileSync(
+    loop,
+    JSON.stringify({ build: "b", bundle: "c", run_roots: [path.join(b.cache, "codex-runs")], rows: [row] }),
+  );
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"),
+      "--loop",
+      loop,
+      "--second",
+      "claude",
+    ],
+    {
+      encoding: "utf8",
+      env: b.env,
+    },
+  );
+  const left = /could not remove (.*); remove it/.exec(r.stderr)?.[1]?.split(", ") ?? [];
+  try {
+    assert.ok(fs.existsSync(path.join(b.cache, "codex.lock")), `the lock stays (${r.stderr})`);
+    assert.equal(left.length, 1);
+  } finally {
     for (const d of left) {
       if (fs.existsSync(path.join(d, "stuck"))) fs.chmodSync(path.join(d, "stuck"), 0o700);
       fs.rmSync(d, { recursive: true, force: true });

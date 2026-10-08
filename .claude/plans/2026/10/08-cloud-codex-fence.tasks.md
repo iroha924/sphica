@@ -284,6 +284,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `docs(eval-loop): describe the HOME allowlist and the review evaluation's fence (T24)`
   - 結果: `bun run verify:ai` → 0 で終わった
 
+- [x] T25: P5 の差分のレビュー（5 件）と、実機の検査で見つけた 2 件を直す（採点者の削除の失敗の後も採点が続く、Claude の採点者の一時のディレクトリを数えない、並行の lane の片方の例外でロックが外れる、消した Biome の写しを数える、引用符を含む HOME の項目で指紋が変わる、HOME の symlink の deny がその先の残す根まで隠す、`zsh -c` の形の probe の出力を数えない）
+  - 種別: 修正
+  - 計画: S6, S8, S9
+  - 依存: T19（HOME の許可の一覧が要る）, T21（採点者のロックが要る）, T22（review の lane が要る）, T23（Biome の写しが要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/probe.ts`, `server/evals/cloud/grade.ts`, `server/evals/review/runner.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/test/eval-codex.test.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test test/eval-codex.test.ts test/review-eval.test.ts` → 新しいテストが失敗する（symlink の deny、引用符の名前、`-c` の形、削除の失敗の後の 2 回目の採点、Claude の採点者のディレクトリ、並行の lane、消した写し）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): never deny a link in HOME, and keep the lock and stop when a temp tree stays (T25)`
+  - 結果: `cd server && node --test --test-name-pattern="link in HOME|shell form|Claude grader's directory|grader keeps the lock while a temp" test/eval-codex.test.ts` → 直す前は 4 件とも失敗した（mise の版の別名の symlink を deny、`zsh -c` の出力を数えない、Claude の採点者のディレクトリが残ってもロックが外れる、2 回目の採点が始まる）。`settleAll` と `biomeChanged` のテストは関数が無く読み込みで失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 171 件 pass。os.tmpdir() に `sphica-grade-*`・`sphica-codex-*` が残っていない
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -311,3 +322,5 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T20 / HOME の許可の一覧を probe に渡すため、`HomeFence` に解決した道具の実体（`tools`）を、`ProbePaths` に `home` を足した / T20 の変更欄には無い codex-home.ts と codex-run.ts も変えた（前: probe.ts・codex.ts・grade.ts・eval-codex.test.ts）
 - 2026-10-08 / T22 / 共有のロックを両方の main で同じ形で使うため、`holdingLock` を codex-home.ts に置いた。検証のエラーは、本物の HOME でロックを取る前に出す形にした（既存のテストが本物の HOME のまま検証のエラーを確かめている） / T22 の変更欄に codex-home.ts を足した
 - 2026-10-08 / T23 / M2 の「外を見た」判定は、check.mjs がリポジトリの Biome を指すため評価のディレクトリだけを禁じていた。写しを使う形になって前提が無くなったので、リポジトリの場所全体を禁じる形に変え、テストもそれに合わせた / 欄は変えていない
+- 2026-10-08 / 完了条件 / T24 の後に実機で流した。review の preflight は ✓、M2 は両方の host で 0 で終わった。cloud の probe 4 件と採点者の probe は、残した node が DENIED で ✗（mise の版の別名 `24.15` が `24.15.0` を指す symlink で、その deny を Codex が先まで辿った）、none の probe は `zsh -c` の形を数えずに ✗。4 条件の通常の run と collect は 4 行とも除外なし / T25 で直し、流し直す
+- 2026-10-08 / P5 / P5 の差分の Codex のレビュー（high）で P1 が 3 件、P2 が 2 件。5 件とも採用して T25 で直した

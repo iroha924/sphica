@@ -35,6 +35,7 @@ import {
   type LaneEnv,
   outsideCheckout,
   runnerDigest,
+  settleAll,
 } from "./runner.ts";
 
 type Task = { id: string; tempts: "lodash" | "db" | "none"; prompt: string; test: string };
@@ -101,6 +102,15 @@ export function copyBiome(tree: string): { bin: string; digest: () => string } {
     return hash.digest("hex");
   };
   return { bin: path.join(dest, path.relative(scope, BIOME)), digest };
+}
+
+/** Whether the run's Biome copy differs from what it was given; a copy it removed or made unreadable has changed too */
+export function biomeChanged(copy: { digest: () => string }, pinned: string): boolean {
+  try {
+    return copy.digest() !== pinned;
+  } catch {
+    return true;
+  }
 }
 
 export function prepare(
@@ -328,9 +338,9 @@ async function runOne(o: {
     fs.writeFileSync(path.join(dir, "stderr.log"), r.stderr);
     result.status = r.status;
     result.reason = r.error ?? (r.status === 0 ? null : `${o.host} exited ${r.status}`);
-    result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
     // The run could write its copy: a check it changed says nothing about the rule lines or the check given
-    result.biome_changed = biome.digest() !== pinned;
+    result.biome_changed = biomeChanged(biome, pinned);
+    result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
@@ -465,7 +475,7 @@ async function main() {
         console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
       }
     };
-    await Promise.all(Array.from({ length: jobs }, worker));
+    await settleAll(Array.from({ length: jobs }, () => worker));
   });
 }
 
