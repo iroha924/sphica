@@ -206,7 +206,8 @@ export function gradeRun(
       key,
       got,
       falseViolation: got === "violation" && !e.outcomes.includes("violation"),
-      missed: e.outcomes.includes("violation") && got !== "violation",
+      // Missed only where violation is the one right verdict: a record that allows any verdict cannot be missed
+      missed: e.outcomes.every((x) => x === "violation") && got !== "violation",
       asked: asked.has(key),
       question: e.question,
     });

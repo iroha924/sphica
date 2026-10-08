@@ -73,13 +73,14 @@ function runChild(
   o: { cwd: string; env: Record<string, string>; input: string; timeoutMs: number },
 ): Promise<{ status: number | null; stdout: string; stderr: string; error: string | null }> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: o.cwd, env: o.env });
+    // Its own process group, so a timeout also ends the MCP server it started: that child keeps the pipes open and close never fires
+    const child = spawn(command, args, { cwd: o.cwd, env: o.env, detached: true });
     let stdout = "";
     let stderr = "";
     let error: string | null = null;
     const timer = setTimeout(() => {
       error = `timed out after ${o.timeoutMs / 60_000} minutes`;
-      child.kill("SIGKILL");
+      process.kill(-(child.pid ?? 0), "SIGKILL");
     }, o.timeoutMs);
     child.stdout.on("data", (d) => {
       stdout += d;
@@ -182,7 +183,7 @@ async function runLane(o: {
         cwd: p.work,
         env: runEnv(process.env),
         input: prompt,
-        timeoutMs: 30 * 60_000,
+        timeoutMs: 10 * 60_000,
       });
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
@@ -202,7 +203,7 @@ async function runLane(o: {
           LANG: process.env.LANG ?? "",
         },
         input: prompt,
-        timeoutMs: 30 * 60_000,
+        timeoutMs: 10 * 60_000,
       });
     }
     fs.writeFileSync(path.join(dir, "events.jsonl"), r.stdout);

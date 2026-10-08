@@ -488,7 +488,7 @@
           "question": false
         },
         "trace:s-ja-shelf/duplicate-names": {
-          "outcomes": ["unrelated", "complies", "undetermined"],
+          "outcomes": ["violation", "complies", "unrelated", "undetermined"],
           "question": false
         },
         "trace:s-rv-ai-shelf/keep-case": {
@@ -512,7 +512,7 @@
           "question": false
         },
         "trace:s-ja-shelf/duplicate-names": {
-          "outcomes": ["unrelated", "complies", "undetermined"],
+          "outcomes": ["violation", "complies", "unrelated", "undetermined"],
           "question": false
         },
         "trace:s-rv-ai-shelf/keep-case": {

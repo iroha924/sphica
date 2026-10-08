@@ -290,6 +290,16 @@ test("the grader counts verdicts only from backed batches and a matching complet
       [true, false],
     ],
   );
+  // A record any verdict fits is neither missed nor wrongly violated
+  const loose = gradeRun(
+    path.join(runs, "flip-codex"),
+    { ...expect, [A]: { outcomes: ["violation", "complies"], question: false } },
+    { forbidden: [], runs },
+  );
+  assert.deepEqual(loose.records[0] && [loose.records[0].falseViolation, loose.records[0].missed], [
+    false,
+    false,
+  ]);
   assert.match(grade("short-claude").reason ?? "", /batch 2 of 2 not backed/);
   assert.match(grade("nolast-claude").reason ?? "", /completion line/);
   assert.equal(grade("exit-codex").state, "failed");

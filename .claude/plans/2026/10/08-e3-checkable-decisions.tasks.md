@@ -59,19 +59,20 @@ precedent の lane を Claude と Codex で隔離して流し、正解と機械�
 
 回数を固定し、今の precedent の本文での誤った violation と見逃しを測る。
 
-- [ ] T05: 予備測定（k=5、A/A）と本測定の回数の固定、今の本文での本測定
+- [x] T05: 予備測定（k=5、A/A）と本測定の回数の固定、今の本文での本測定
   - 種別: 追加
-  - 計画: S2
+  - 計画: S2, S3
   - 依存: T04（採点器が要る）
-  - 変更: `server/evals/review/plan.json`
-  - 完了条件: `cd server && node evals/review/grade.ts --report <baseline の run ディレクトリ>` → モデル別・diff 別の誤った violation と見逃しの件数、除外の数が出て、plan.json に固定した回数と本文の hash がある
+  - 変更: `server/evals/review/run.ts`, `server/evals/review/cases.json`, `server/evals/review/grade.ts`, `server/test/review-eval.test.ts`
+  - 完了条件: `cd server && node evals/review/grade.ts --report ~/.cache/sphica-eval/review/pilot-a` → モデル別・diff 別の誤った violation と見逃しの件数、failed と除外の数が出る（pilot-b も同じ）
   - コミット: `test(eval): fix the review measurement runs after the pilot`
+  - 結果: 今の本文（body sha256 7a1ac6dd…）で diff 8 × 両モデル × 5 回 × 2 組 = 160 run。pilot-a: Claude 40 graded・誤った violation 1（thumb-quality の grid-3g）・見逃し 0、Codex 37 graded・3 failed（Codex 側の停止で時間切れ）・0・0。pilot-b: Claude 40 graded・0・0、Codex 40 graded・0・0。本測定は打ち切り（plan の変更履歴、持ち主の Go）。`node --test test/review-eval.test.ts` → 5 件 pass、`bun run verify` → exit 0
 
 ## P3: #220 の質問
 
 diff で決着しない記録を質問として返す本文に変え、同じ回数で測って採否を決める。
 
-- [ ] T06: precedent の判定と質問の出力、launcher の照合と Questions の節
+- [-] T06: precedent の判定と質問の出力、launcher の照合と Questions の節
   - 種別: 変更
   - 計画: S3
   - 依存: T05（本文を変える前に baseline と回数を固定する）
@@ -125,12 +126,17 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - [ ] T11: 不採用の差分の除去と版の同期
   - 種別: 変更
   - 計画: S6
-  - 依存: T06（#220 の採否）, T08（#257 の M1 の採否）
+  - 依存: T05（#220 の採否は予備測定で決まった）, T08（#257 の M1 の採否）
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base <前の release のコミット>` → 採用があれば `plugin` で 4 か所の版が同じ、無ければ `none`。`bun run verify` → 0 で終わる
   - コミット: `chore(release): keep the adopted E3 changes and bump the version`
 
 ## 記録
+
+- 2026-10-08 / T05 / 欄を変えた。変更（前: plan.json、後: run.ts・cases.json・grade.ts・review-eval.test.ts）、完了条件（前: baseline の本測定と plan.json の回数、後: 予備測定 A と B の report）/ 予備測定で #220 の打ち切りが決まり（plan の変更履歴、持ち主の Go）、本測定の回数を固定するファイルは要らなくなった。予備測定で見つけた直しをこのタスクに入れた: duplicate-names の正解をどの判定でも可に（あいまい）、grade.ts の missed を「正解が violation だけ」のときに限定、run.ts の時間切れでプロセスのグループごと止めて上限を 10 分に
+- 2026-10-08 / T06 / 取りやめ / #220 は予備測定で打ち切り、本文の変更をしない（plan の変更履歴、持ち主の Go）。S3 を担うのは T06 だけだったので、plan の変更履歴で S3 を行わないと決めた
+- 2026-10-08 / T11 / 依存を変えた（前: T06（#220 の採否）、後: T05（#220 の採否は予備測定で決まった））/ T06 の取りやめ
+- 2026-10-08 / T05 / Codex の ui-indirect の 3 run が 03:39〜03:40 に別々の場所で止まり、30 分の上限の後も子の MCP サーバーがパイプを開いたまま約 59 分続いた / プロセスのグループごと止める修正を入れた。止まった原因は分かっていない（同じ時刻の 3 run だけで、pilot-b では 0 件）
 
 - 2026-10-08 / T07 / 予備測定（T05）を流している間に、依存（T02・T03）を満たした T07 を先に終えた。変更欄に run.ts・runner.ts を足した（rules の lane を runner に足すため）/ 予備測定の node は読み込み済みのコードで動くので結果は混ざらない
 
@@ -142,3 +148,4 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 
 - 2026-10-08 / T02 / Biome の `overrides` の options は全体の options を置き換え、合わさらない（全体の lodash の禁止を繰り返さない override では src/ui に lodash が通る）/ T02 のテストに入れ、T08 の下書きの書式で全体の禁止を各 override に写すと決める
 - 2026-10-08 / T02 / `--config-path` と cwd の綴りが違う（macOS の /var と /private/var）と override の includes が当たらない / restrictedImports で realpath を使う
+- 2026-10-08 / T05 / 計画欄を変えた（前: S2、後: S2, S3）/ S3 を「#220 の採否の記録」に直し、採否は T05 の予備測定で決まったため
