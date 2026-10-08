@@ -3,11 +3,59 @@
 // owner's rules, memories, and MCP servers never reach it. The cost comes from the owner's ChatGPT plan, not the cloud credits.
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { openReader } from "../../src/db.ts";
-import { checkoutGit, claimRunDir, codexModelOf, isolatedCodexHome, pinCheckout } from "./codex-home.ts";
+import { DENY_DIRS, DENY_FILES } from "./claude-run.ts";
+import {
+  checkoutGit,
+  claimRunDir,
+  codexLock,
+  codexModelOf,
+  evalCache,
+  fenceDigest,
+  fencedCodexHome,
+  pinCheckout,
+  requireInside,
+} from "./codex-home.ts";
 
 const HERE = import.meta.dirname;
+/** The evaluations: tasks with their gold, hidden tests, fixtures */
+export const EVALS = fs.realpathSync(path.resolve(HERE, ".."));
+
+/**
+ * What no fenced Codex may read, whatever it runs: the owner's credentials (Codex's login among them), the evaluations, and every
+ * evaluation output (builds, other runs, logs). Each run works in a temp tree outside all of them.
+ */
+export function codexDenies(cache: string): string[] {
+  return [EVALS, cache, ...DENY_DIRS, ...DENY_FILES];
+}
+
+/** The fence as one digest that names each place by its role, comparable across machines and runs */
+export function codexFence(profile: string, cache: string, codexHome: string): string {
+  return fenceDigest(profile, {
+    "<codex-home>": codexHome,
+    "<evals>": EVALS,
+    "<cache>": cache,
+    "<home>": os.homedir(),
+  });
+}
+
+const inside = (root: string, p: string) => {
+  const rel = path.relative(root, p);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+};
+
+/** A temp tree for what the model must reach; under a denied parent it would be unreadable, so that refuses to start */
+export function outsideTree(prefix: string, denied: string[]): string {
+  const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const under = denied.find((d) => inside(d, tree));
+  if (under) {
+    fs.rmSync(tree, { recursive: true, force: true });
+    throw new Error(`the temp directory ${tree} is under ${under}, which the fence denies`);
+  }
+  return tree;
+}
 
 export async function runCodex(o: {
   build: string;
@@ -20,11 +68,30 @@ export async function runCodex(o: {
   /** The delivery matcher the build recorded for Codex, so old and new builds deliver on the tools each was built with */
   codexMatcher: string | undefined;
 }): Promise<{ dir: string; result: Record<string, unknown> }> {
+  const cache = evalCache();
+  const build = requireInside(cache, o.build, "--build");
+  fs.mkdirSync(o.out, { recursive: true });
+  const out = requireInside(cache, o.out, "--out");
+  const release = codexLock(cache);
+  try {
+    return await fencedRun({ ...o, build, out }, cache);
+  } finally {
+    release();
+  }
+}
+
+async function fencedRun(
+  o: Parameters<typeof runCodex>[0],
+  cache: string,
+): Promise<{ dir: string; result: Record<string, unknown> }> {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}`);
-  const work = path.join(dir, "work");
-  const home = path.join(dir, "home");
   const codexHome = path.join(dir, "codex-home");
-  const tmp = path.join(dir, "tmp");
+  const db = path.join(dir, "db", "sphica.db");
+  const denies = codexDenies(cache);
+  const tree = outsideTree("sphica-codex-", denies);
+  const work = path.join(tree, "work");
+  const home = path.join(tree, "home");
+  const tmp = path.join(tree, "tmp");
   for (const d of [home, codexHome, tmp]) fs.mkdirSync(d, { recursive: true });
   // The run counts from here: collect takes started.json as the denominator, and result.json is written whatever happens below
   fs.writeFileSync(
@@ -60,9 +127,11 @@ export async function runCodex(o: {
     const checkout = pinCheckout(work, path.join(dir, "git"));
     const mcp =
       o.condition === "search" || o.condition === "inject"
-        ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)} }\n`
+        ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
         : "";
-    isolatedCodexHome(codexHome, mcp);
+    const fence = fencedCodexHome(codexHome, { base: ":workspace", deny: denies, extraConfig: mcp });
+    result.fence = codexFence(fence.profile, cache, codexHome);
+    result.fence_roots = fence.denied;
     // Recorded so a comparison can refuse two builds run by different Codex models
     result.codex_model = codexModelOf(codexHome);
 
@@ -103,8 +172,6 @@ export async function runCodex(o: {
         // Only the hooks written above, which this script vets, are in this CODEX_HOME
         ...(hooks ? ["--dangerously-bypass-hook-trust"] : []),
         "--ignore-rules",
-        "-s",
-        "workspace-write",
         "-C",
         work,
         // The final answer comes back in a fixed shape (implemented, past decisions, unverified); collect checks it
@@ -122,6 +189,8 @@ export async function runCodex(o: {
           CODEX_HOME: codexHome,
           TMPDIR: tmp,
           LANG: process.env.LANG ?? "",
+          // The hooks read the run's database copy under the denied run directory, never in the temp the model writes
+          EVAL_SPHICA_DB: db,
         },
         encoding: "utf8",
         timeout: 30 * 60_000,
@@ -149,18 +218,17 @@ export async function runCodex(o: {
         return [];
       }
     });
-    // What the delivery hooks logged, from the slot's database copy (keyed by its fixture, as sphica.sh keys it)
+    // What the delivery hooks logged, from the run's database copy
     let deliveries: { event: string; outcome: string; units: string[] }[] | null = null;
     if (o.condition === "inject") {
-      const id = fs.readFileSync(path.join(tools, "fixture.id"), "utf8").trim();
-      const db = openReader(path.join(tmp, "eval-sphica", id, "sphica.db"));
+      const reader = openReader(db);
       try {
-        const rows = await db
+        const rows = await reader
           .selectFrom("delivery as d")
           .select(["d.id", "d.event", "d.outcome"])
           .orderBy("d.id")
           .execute();
-        const units = await db
+        const units = await reader
           .selectFrom("delivery_unit as x")
           .innerJoin("unit as u", "u.id", "x.unit_id")
           .select(["x.delivery_id", "u.key"])
@@ -171,7 +239,7 @@ export async function runCodex(o: {
           units: units.filter((u) => u.delivery_id === d.id).map((u) => u.key),
         }));
       } finally {
-        await db.destroy();
+        await reader.destroy();
       }
     }
     Object.assign(result, {
@@ -184,6 +252,11 @@ export async function runCodex(o: {
     result.reason = (e as Error).message;
     throw e;
   } finally {
+    // Back into the run directory, where collect and the hidden tests look and every later run is denied
+    for (const d of ["work", "home", "tmp"])
+      if (fs.existsSync(path.join(tree, d)))
+        fs.cpSync(path.join(tree, d), path.join(dir, d), { recursive: true, verbatimSymlinks: true });
+    fs.rmSync(tree, { recursive: true, force: true });
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }

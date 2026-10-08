@@ -97,6 +97,7 @@ test("review's runner identity covers the shared fence", () => {
 /** A fake `codex` that records its arguments, environment, and config, and answers like `codex exec -o` */
 const FAKE_CODEX = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
+[ -f "$here/fail" ] && exit 3
 printf '%s\\n' "$@" > "$here/args"
 env > "$here/env"
 cp "$CODEX_HOME/config.toml" "$here/config.toml"
@@ -113,7 +114,8 @@ function codexBuild(condition: string) {
   const home = path.join(root, "home");
   fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
   fs.writeFileSync(path.join(home, ".codex", "config.toml"), 'model = "m"\nmodel_reasoning_effort = "low"\n');
-  const build = path.join(root, "build");
+  const cache = path.join(home, ".cache", "sphica-eval");
+  const build = path.join(cache, "builds", "b");
   const slot = path.join(build, "eval-shelf-1");
   fs.mkdirSync(path.join(slot, ".tools"), { recursive: true });
   fs.writeFileSync(path.join(slot, ".tools", "hook.sh"), "");
@@ -184,12 +186,13 @@ function codexBuild(condition: string) {
     env: fs.readFileSync(path.join(bin, "env"), "utf8"),
     config: fs.readFileSync(path.join(bin, "config.toml"), "utf8"),
   });
-  return { root, home, build, start, seen };
+  const fail = () => fs.writeFileSync(path.join(bin, "fail"), "");
+  return { root, home, cache, build, start, seen, fail };
 }
 
 test("codex.ts replays a task with codex exec in the run's own homes and records the run", () => {
   const b = codexBuild("none");
-  const out = path.join(b.root, "runs");
+  const out = path.join(b.cache, "codex-runs");
   const r = b.start(out);
   assert.equal(r.status, 0, r.stderr);
   const [run] = fs.readdirSync(out);
@@ -202,7 +205,61 @@ test("codex.ts replays a task with codex exec in the run's own homes and records
   const seen = b.seen();
   assert.equal(seen.args[0], "exec");
   assert.ok(seen.args.includes("--ignore-rules"));
-  assert.equal(seen.args[seen.args.indexOf("-s") + 1], "workspace-write");
   assert.match(seen.config, /^model = "m"$/m);
-  assert.match(seen.env, new RegExp(`^HOME=${path.join(dir, "home")}$`, "m"));
+});
+
+test("the Codex run under test reads through a read fence and keeps its files where collect looks", () => {
+  const b = codexBuild("none");
+  const cache = fs.realpathSync(b.cache);
+  // Outputs outside the cache would sit where the fence does not reach
+  const outside = b.start(path.join(b.root, "runs"));
+  assert.notEqual(outside.status, 0);
+  assert.match(outside.stderr, /must be inside/);
+  const out = path.join(cache, "codex-runs");
+  const r = b.start(out);
+  assert.equal(r.status, 0, r.stderr);
+  const [run] = fs.readdirSync(out);
+  const dir = path.join(out, run ?? "");
+  const seen = b.seen();
+  assert.ok(!seen.args.includes("-s") && !seen.args.includes("--sandbox"), "the profile is the sandbox");
+  assert.match(seen.config, /^default_permissions = "eval"$/m);
+  assert.match(seen.config, /^extends = ":workspace"$/m);
+  const denied = (p: string) =>
+    assert.match(
+      seen.config,
+      new RegExp(`^${JSON.stringify(p).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "deny"$`, "m"),
+      p,
+    );
+  denied(fs.realpathSync(path.join(import.meta.dirname, "..", "evals")));
+  denied(fs.realpathSync(cache));
+  denied(path.join(b.home, ".codex"));
+  denied(path.join(b.home, ".ssh"));
+  denied(path.join(dir, "codex-home", "auth.json"));
+  // The run's checkout, homes, and temp directory sit outside everything denied, and come back into the run directory afterwards
+  const env = seen.env;
+  const home = /^HOME=(.*)$/m.exec(env)?.[1] ?? "";
+  assert.ok(!home.startsWith(fs.realpathSync(cache)), home);
+  assert.ok(!fs.existsSync(path.dirname(home)), "the temp tree is removed");
+  assert.match(env, new RegExp(`^EVAL_SPHICA_DB=${path.join(dir, "db", "sphica.db")}$`, "m"));
+  for (const d of ["work", "home", "tmp"]) assert.ok(fs.existsSync(path.join(dir, d)), d);
+  assert.ok(fs.existsSync(path.join(dir, "work", "README.md")));
+  const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"));
+  assert.match(result.fence, /^[0-9a-f]{64}$/);
+  assert.ok(result.fence_roots.includes(fs.realpathSync(cache)));
+  assert.ok(!fs.existsSync(path.join(cache, "codex.lock")), "the lock is released");
+});
+
+test("a Codex run that fails still comes back into its run directory and releases the lock", () => {
+  const b = codexBuild("none");
+  b.fail();
+  const out = path.join(b.cache, "codex-runs");
+  const r = b.start(out);
+  assert.equal(r.status, 0, r.stderr);
+  const [run] = fs.readdirSync(out);
+  const dir = path.join(out, run ?? "");
+  const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"));
+  assert.equal(result.status, 3);
+  assert.match(result.reason, /codex exited 3/);
+  assert.ok(fs.existsSync(path.join(dir, "work", "README.md")));
+  assert.ok(!fs.existsSync(path.join(b.cache, "codex.lock")));
 });

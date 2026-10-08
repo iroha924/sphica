@@ -45,7 +45,7 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 完了条件: `cd server && node --test test/eval-codex.test.ts` → pass。今の引数（`-s workspace-write` を含む）、設定、フックの組み立てを、codex-run.ts の関数から読んで確かめる
   - コミット: `refactor(eval): move the Codex run setup out of the CLI wrapper (T02)`
   - 結果: `cd server && node --test test/eval-codex.test.ts` → 5 件 pass（偽の codex で codex.ts を流し、`-s workspace-write`、run の HOME、設定の model、result.json などの成果物を確かめた）。`bun run typecheck`・`bun run lint`・`bun run english` → 0 で終わった
-- [ ] T03: codex-run.ts に囲いを当てる（出力先の制限、一時の場所、DB の置き場、profile、片付け、fence と fence_roots、ロック）
+- [x] T03: codex-run.ts に囲いを当てる（出力先の制限、一時の場所、DB の置き場、profile、片付け、fence と fence_roots、ロック）
   - 種別: 修正
   - 計画: S2
   - 依存: T01（fencedCodexHome・EVAL_CACHE・fenceDigest・ロックが要る）, T02（組み立てを関数として呼べることが要る）
@@ -53,6 +53,8 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - red: `cd server && node --test --test-name-pattern="read fence" test/eval-codex.test.ts` → 引数に `-s` があり、設定に `default_permissions` も auth.json の deny も無いので失敗する
   - 完了条件: `cd server && node --test test/eval-codex.test.ts` → pass。偽の `codex` を PATH の先頭に置いた run で、引数に `-s` が無いこと、deny に `server/evals`・`EVAL_CACHE`・`DENY_DIRS`・`DENY_FILES`・run の auth.json があること、`--out` が `EVAL_CACHE` の外なら止まること、`EVAL_SPHICA_DB` が run のディレクトリを指すこと、成功でも失敗でも `<run>/work`・`home`・`tmp` に移って一時の親が消えること、result.json に `fence` と `fence_roots` があることを確かめる
   - コミット: `fix(eval): fence what the Codex run under test can read (T03)`
+  - 結果: `cd server && node --test --test-name-pattern="read fence" test/eval-codex.test.ts` → 直す前は `--out` が `EVAL_CACHE` の外でも run が始まり（status 0）、失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 7 件 pass（`-s` なし、deny の各項目、外の `--out` の拒否、`EVAL_SPHICA_DB`、一時の場所からの移動と後片付け、失敗した run の移動、ロックの解放、`fence` と `fence_roots`）。`bun run typecheck`・`bun run lint`・`bun run english` → 0 で終わった
 
 ## P3: 集計と採点
 
@@ -106,3 +108,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
 - 2026-10-08 / T02 / 変更欄の `server/test/eval-codex.test.ts` に、codex.ts を偽の codex で流すテストを足した / 欄は変えていない
+- 2026-10-08 / T03 / 偽の codex のテストを動かすため、テストのビルドを一時 HOME の `.cache/sphica-eval/builds` に置き、T02 のテストから `-s workspace-write` と HOME の確認を外した / T03 のテストが代わりに確かめる
