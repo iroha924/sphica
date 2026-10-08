@@ -35,7 +35,7 @@ SDK が脆弱でない 1.31.0 になり、両サーバーが今までどおり�
 
 overview live と review_select のどの応答も、枠込みで READ_BUDGET 以下になる。
 
-- [ ] T02: overview live を、候補の応答全体のバイト数で 1 件ずつ足して切る
+- [x] T02: overview live を、候補の応答全体のバイト数で 1 件ずつ足して切る
   - 種別: 修正
   - 計画: S1
   - 依存: なし
@@ -43,6 +43,7 @@ overview live と review_select のどの応答も、枠込みで READ_BUDGET �
   - red: `cd server && node --test --test-name-pattern="live" test/overview.test.ts` → 長いキー・本文・パスの 50 件のページが READ_BUDGET を超えて落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="live" test/overview.test.ts` → pass（予算内、after で全件が 1 回ずつ、グループの並び、最後のページ、境界の前後）
   - コミット: `fix(overview): keep each live page within the reply budget`
+  - 結果: `node --test --test-name-pattern="reply budget with its frame" test/overview.test.ts` → 直す前は 1 ページ目が枠込みで 49,800 B になって落ち、直した後は全ページが READ_BUDGET 以下で 121 件が 1 回ずつ出た。`node --test test/overview.test.ts` → 18 件 pass。`bun run verify` → 0
 
 - [ ] T03: review_select の理由を構造で持ち、表示のときだけ切り、u<id> と代替の経路で枠込み 32 KiB に収める。review Skill の reviewer を u<id> で読む形にする
   - 種別: 修正

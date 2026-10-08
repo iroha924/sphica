@@ -5,12 +5,13 @@ import { z } from "zod";
 import { checkAnchor, fileState } from "./anchors.ts";
 import { AI_DECIDED, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
+import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
 import { READ_BUDGET, UNSUPPORTED } from "./read.ts";
 import { pathHash, ruleFiles } from "./rule-files.ts";
 import { bytes, head } from "./text.ts";
 
-/** One page: 50 records whose key, text, paths, and heading are each clipped, so a page stays under 64 KiB. Past it the reply says where to go on. */
+/** One page: at most 50 records, each part of a line clipped, and as many as fit READ_BUDGET with the frame. Past it the reply says where to go on. */
 export const OVERVIEW_LIMITS = { records: 50, key: 200, text: 300, paths: 520, heading: 120 } as const;
 
 const PROJECT_WIDE = "Project-wide (no code location)";
@@ -85,25 +86,36 @@ export async function liveOverview(db: Reads, projectId: number, after: number |
       ? "No active decision or constraint is recorded for this project. status says whether sessions are still untraced."
       : `No active decision or constraint after id ${after}. ${n} in all.`;
 
-  const groups = [...new Set(shown.map((s) => s.group))].sort((a, b) =>
-    a === PROJECT_WIDE ? 1 : b === PROJECT_WIDE ? -1 : a.localeCompare(b),
-  );
-  const last = shown.at(-1)?.id ?? 0;
-  const more = rows.length > shown.length;
-  return [
-    // Grouped by the whole directory; only the heading shown is clipped, so two directories never merge
-    ...groups.flatMap((g) => [
-      `## ${head(inline(g), OVERVIEW_LIMITS.heading)}`,
-      ...shown.filter((s) => s.group === g).map((s) => s.line),
-      "",
-    ]),
-    `${shown.length} shown of ${n} active decisions and constraints${after === null ? "" : ` (ids after ${after})`}.`,
-    more
-      ? `More follow: call overview again with after: ${last}. Pages are read at different times: a record that became active in between, with a lower id, is not on a later page.`
-      : "That is the end of the list.",
-    "Read a record by its key or u<id> before relying on it.",
-    ...(shown.some((x) => whose.get(x.id) === "agent") ? [AI_DECIDED] : []),
-  ].join("\n");
+  const page = (taken: typeof shown): string => {
+    const groups = [...new Set(taken.map((s) => s.group))].sort((a, b) =>
+      a === PROJECT_WIDE ? 1 : b === PROJECT_WIDE ? -1 : a.localeCompare(b),
+    );
+    const last = taken.at(-1)?.id ?? 0;
+    return [
+      // Grouped by the whole directory; only the heading shown is clipped, so two directories never merge
+      ...groups.flatMap((g) => [
+        `## ${head(inline(g), OVERVIEW_LIMITS.heading)}`,
+        ...taken.filter((s) => s.group === g).map((s) => s.line),
+        "",
+      ]),
+      `${taken.length} shown of ${n} active decisions and constraints${after === null ? "" : ` (ids after ${after})`}.`,
+      rows.length > taken.length
+        ? `More follow: call overview again with after: ${last}. Pages are read at different times: a record that became active in between, with a lower id, is not on a later page.`
+        : "That is the end of the list.",
+      "Read a record by its key or u<id> before relying on it.",
+      ...(taken.some((x) => whose.get(x.id) === "agent") ? [AI_DECIDED] : []),
+    ].join("\n");
+  };
+  // Records in id order, one more at a time, while the whole reply with its frame fits; the first that does not ends the page, so the
+  // cursor skips nothing. One record always fits: each part of a line is clipped
+  const frame = bytes(framed(""));
+  let best = page(shown.slice(0, 1));
+  for (let k = 2; k <= shown.length; k++) {
+    const candidate = page(shown.slice(0, k));
+    if (frame + bytes(candidate) > READ_BUDGET) break;
+    best = candidate;
+  }
+  return best;
 }
 
 /** Anchors checked per page, bytes per line, and bytes for all the lines of a page together: the rest of a reply's budget holds the frame,
