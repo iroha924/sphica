@@ -25,6 +25,7 @@
         "evals/asked/run.ts",
         "evals/order/run.ts",
         "evals/retrieval/run.ts",
+        "evals/review/run.ts",
         "evals/scale/run.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],

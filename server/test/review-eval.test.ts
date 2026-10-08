@@ -6,6 +6,15 @@ import path from "node:path";
 import { test } from "node:test";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
+import {
+  claudeArgs,
+  claudeMcp,
+  claudeSettings,
+  codexArgs,
+  codexMcp,
+  READ_TOOLS,
+  reviewPrompt,
+} from "../evals/review/runner.ts";
 import { openReader } from "../src/db.ts";
 import { parseDiff, selectForReview } from "../src/review.ts";
 import { tempDir } from "./temp-dir.ts";
@@ -97,4 +106,41 @@ test("the pinned Biome enforces a direct import ban and a module ban on the fixt
   // A config Biome cannot read is a failure, never an empty report
   write("biome.json", "{ not json");
   assert.throws(() => restrictedImports(dir), /biome/);
+});
+
+test("a lane starts with only the read tools, no hooks, its own database, and the reviewer cannot write", () => {
+  const p = {
+    work: "/w",
+    diff: "/w/.git/review.diff",
+    db: "/r/db/sphica.db",
+    home: "/r/home",
+    server: "/s/mcp.js",
+  };
+  const settings = claudeSettings() as {
+    permissions: { blockReadsOutsideWorkingDirectories: boolean; allow: string[] };
+    hooks: Record<string, unknown>;
+  };
+  assert.equal(settings.permissions.blockReadsOutsideWorkingDirectories, true);
+  assert.deepEqual(settings.permissions.allow, READ_TOOLS);
+  assert.deepEqual(settings.hooks, {});
+  const args = claudeArgs({ settings: "/r/settings.json", mcp: "/r/mcp.json" }, "m");
+  const after = (flag: string) => args[args.indexOf(flag) + 1];
+  assert.equal(after("--tools"), "Read,Grep,Glob");
+  assert.equal(after("--setting-sources"), "project");
+  assert.ok(args.includes("--strict-mcp-config") && args.includes("--no-session-persistence"));
+  assert.ok(!args.includes("--permission-mode"), "no mode that accepts edits");
+  // The database reaches the MCP child itself, never through the reviewer's environment
+  assert.deepEqual(claudeMcp(p).mcpServers.sphica, {
+    command: process.execPath,
+    args: ["/s/mcp.js"],
+    env: { SPHICA_DB: "/r/db/sphica.db", SPHICA_HOME: "/r/home", HOME: "/r/home" },
+  });
+  assert.match(codexMcp(p), /SPHICA_DB = "\/r\/db\/sphica\.db"/);
+  const codex = codexArgs("/w", "/r/final.md");
+  assert.equal(codex[codex.indexOf("-s") + 1], "read-only");
+  assert.ok(codex.includes("--ephemeral") && codex.includes("--ignore-rules"));
+  const prompt = reviewPrompt("BODY\n", p);
+  assert.ok(prompt.startsWith("BODY\n"), "the aspect body comes first, in full");
+  assert.match(prompt, /Read the file \/w\/\.git\/review\.diff/);
+  assert.match(prompt, /\| Uncommitted, tracked \| empty \|\n\| Untracked \| empty \|/);
 });

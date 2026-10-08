@@ -38,13 +38,14 @@ precedent の lane を Claude と Codex で隔離して流し、正解と機械�
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → 型 1（直接の import の禁止）と型 2（`overrides` の `includes` で絞った module 間の禁止）が本物の import で落ち、コメント・文字列・文書での言及では通る
   - コミット: `test(eval): check that the pinned Biome enforces both import templates on the fixture`
   - 結果: `node --test --test-timeout=120000 test/review-eval.test.ts` → 2 件 pass。型 1 は本物の import 2 か所だけを落とし、コメント・文字列・docs は通る。型 2 は src/ui から src/db.ts への直接の import を落とし、src/library.ts 経由は通る。読めない biome.json は例外になる。`bun run verify` → exit 0
-- [ ] T03: review 用の runner（Claude と Codex）と流す前の検証
+- [x] T03: review 用の runner（Claude と Codex）と流す前の検証
   - 種別: 追加
   - 計画: S1
   - 依存: T01（runner は fixture に向けて流す）
-  - 変更: `server/evals/review/run.ts`, `server/evals/review/runner.ts`, `server/test/review-eval.test.ts`
+  - 変更: `server/evals/review/run.ts`, `server/evals/review/runner.ts`, `server/test/review-eval.test.ts`, `knip.json`
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → runner の settings・引数・MCP 設定が plan の方針どおり（Read / Grep / Glob と読み取り MCP だけ、hook なし、`EVAL_SPHICA_DB` を MCP の子プロセスへ明示、Codex は read-only と隔離した CODEX_HOME）。`node evals/review/run.ts --preflight` → Claude で checkout の外の無害なファイルが読めず、両ホストで本文の hash と fixture の DB が MCP の呼び出しログに出る
   - コミット: `feat(eval): run the precedent lane on Claude and Codex against the review fixture`
+  - 結果: `node --test --test-name-pattern="a lane starts" test/review-eval.test.ts` → pass。`node evals/review/run.ts --preflight` → ✓ preflight passed（Claude は外のファイルへ Read を試して blockReadsOutsideWorkingDirectories で拒否、両ホストとも fixture の DB で review_select が trace:s-ja-storage/storage を選択、Claude の init は Read / Grep / Glob と sphica の MCP だけ、プラグインは Claude Code 組み込みのものだけ。1 run は Claude 36 秒、Codex 50 秒）。`bun run verify` → exit 0
 - [ ] T04: 採点器と、既知のログでの検証
   - 種別: 追加
   - 計画: S1
@@ -128,6 +129,10 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `chore(release): keep the adopted E3 changes and bump the version`
 
 ## 記録
+
+- 2026-10-08 / T03 / 変更欄に `knip.json` を足した（前: run.ts・runner.ts・review-eval.test.ts、後: それに knip.json）/ 評価のスクリプトは knip の entry に並べる決まりのため
+- 2026-10-08 / T03 / MCP の子プロセスへは EVAL_SPHICA_DB ではなく SPHICA_DB と SPHICA_HOME を直接渡した / slot の sphica.sh を通さず node で mcp.js を起動するので、変換する層が無い
+- 2026-10-08 / T03 / Claude の init に Claude Code 組み込みのプラグイン（path: builtin）が 3 つ載る / 持ち主の review でも同じく載るので、preflight は組み込み以外のプラグインだけを落とす
 
 - 2026-10-08 / T02 / Biome の `overrides` の options は全体の options を置き換え、合わさらない（全体の lodash の禁止を繰り返さない override では src/ui に lodash が通る）/ T02 のテストに入れ、T08 の下書きの書式で全体の禁止を各 override に写すと決める
 - 2026-10-08 / T02 / `--config-path` と cwd の綴りが違う（macOS の /var と /private/var）と override の includes が当たらない / restrictedImports で realpath を使う
