@@ -167,6 +167,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): deny every worktree of the repository and the git directory they share (T13)`
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 158 件 pass（一時のリポジトリと linked worktree で、どちらから見ても両方の worktree を数え、worktree の有無で fence が変わらない）。`bun run typecheck`・`bun run lint` → 0 で終わった
 
+- [x] T14: `bun run verify` の knip が指摘した未使用の export（`isolatedCodexHome`、`probeOutput`）を外す
+  - 種別: 修正
+  - 計画: S1, S6
+  - 依存: T07（probeOutput が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/probe.ts`
+  - red: `bun run verify` → knip が「Unused exports (2)」で 1 を返す
+  - 完了条件: `bun run knip` → 0 で終わる
+  - コミット: `fix(eval): stop exporting helpers only their own files use (T14)`
+  - 結果: `bun run verify` → 直す前は knip が `isolatedCodexHome` と `probeOutput` を未使用の export として 1 で終わった
+  - 結果: `bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した

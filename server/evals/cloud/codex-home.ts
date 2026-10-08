@@ -16,11 +16,7 @@ export function ownerCodexSettings(): string {
     .join("\n");
 }
 
-export function isolatedCodexHome(
-  codexHome: string,
-  extraConfig = "",
-  settings = ownerCodexSettings(),
-): void {
+function isolatedCodexHome(codexHome: string, extraConfig = "", settings = ownerCodexSettings()): void {
   fs.mkdirSync(codexHome, { recursive: true });
   fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
   fs.writeFileSync(path.join(codexHome, "config.toml"), `${settings}\n${extraConfig}`);

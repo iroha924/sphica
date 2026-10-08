@@ -71,7 +71,7 @@ function completed(events: string): NonNullable<CodexEvent["item"]>[] {
 }
 
 /** What the probe printed: the output of completed commands that ran probe.sh, so a line the model typed itself does not count */
-export function probeOutput(events: string): string {
+function probeOutput(events: string): string {
   return completed(events)
     .filter(
       (i) => i.type === "command_execution" && i.status === "completed" && /probe\.sh/.test(i.command ?? ""),
