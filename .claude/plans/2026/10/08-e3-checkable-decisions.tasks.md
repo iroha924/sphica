@@ -30,13 +30,14 @@ precedent の lane を Claude と Codex で隔離して流し、正解と機械�
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → fixture が一時ディレクトリに作られ、cases.json の全 diff で `review_select` が正解の「選ばれるか」と一致する
   - コミット: `test(eval): add the review evaluation fixture and expected verdicts`
   - 結果: `node --test --test-timeout=120000 test/review-eval.test.ts` → pass（8 diff、記録 6 件を足し、AI の決定 keep-case も active）。`bun run verify` → exit 0
-- [ ] T02: Biome を fixture の `biome.json` に向けて流す経路の確認
+- [x] T02: Biome を fixture の `biome.json` に向けて流す経路の確認
   - 種別: 追加
   - 計画: S1
   - 依存: T01（fixture の repo が要る）
   - 変更: `server/evals/review/biome.ts`, `server/test/review-eval.test.ts`
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → 型 1（直接の import の禁止）と型 2（`overrides` の `includes` で絞った module 間の禁止）が本物の import で落ち、コメント・文字列・文書での言及では通る
   - コミット: `test(eval): check that the pinned Biome enforces both import templates on the fixture`
+  - 結果: `node --test --test-timeout=120000 test/review-eval.test.ts` → 2 件 pass。型 1 は本物の import 2 か所だけを落とし、コメント・文字列・docs は通る。型 2 は src/ui から src/db.ts への直接の import を落とし、src/library.ts 経由は通る。読めない biome.json は例外になる。`bun run verify` → exit 0
 - [ ] T03: review 用の runner（Claude と Codex）と流す前の検証
   - 種別: 追加
   - 計画: S1
@@ -127,3 +128,6 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `chore(release): keep the adopted E3 changes and bump the version`
 
 ## 記録
+
+- 2026-10-08 / T02 / Biome の `overrides` の options は全体の options を置き換え、合わさらない（全体の lodash の禁止を繰り返さない override では src/ui に lodash が通る）/ T02 のテストに入れ、T08 の下書きの書式で全体の禁止を各 override に写すと決める
+- 2026-10-08 / T02 / `--config-path` と cwd の綴りが違う（macOS の /var と /private/var）と override の includes が当たらない / restrictedImports で realpath を使う
