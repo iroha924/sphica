@@ -348,6 +348,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `docs(eval-loop): describe HOME denied whole with the tool installs read back (T30)`
   - 結果: `bun run verify:ai` → 0 で終わった
 
+- [x] T31: GitHub の Codex のレビュー（a539bd49）の P1 を直す（manifest の repository の名前に `../` があると、ビルドの外のリポジトリを checkout に clone する）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T29（run の名前の検査が要る）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="repository slot" test/eval-codex.test.ts` → `../outside` のまま `builds/outside` を clone しにいって失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): clone only a slot named by one plain name inside the build (T31)`
+  - 結果: `cd server && node --test --test-name-pattern="repository slot" test/eval-codex.test.ts` → 直す前は `git clone .../builds/outside` を流して失敗した（ビルドの外）
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 29 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -381,3 +392,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T25 / T25 の差分の再レビューで P2 が 1 件（後片付けの失敗で終わった採点を保存せずに止まる） / 採用して T26 で直した
 - 2026-10-09 / T27 / GitHub の Codex のレビュー（d7636910）で P1 が 2 件、P2 が 2 件。4 件とも採用して T27 で直した。T25 のテストにあった「HOME の外へのリンクを deny しない」場合は、止まる形に変えたのでテストから外した。持ち主の指示で、P1 が出なくなるまで push のたびに再レビューを頼む
 - 2026-10-09 / T29 / GitHub の Codex のレビュー（aa095eca）で P1 が 4 件、P2 が 1 件。5 件とも採用した。HOME に増えた項目の件は、HOME を丸ごと deny して残す根を `read` で戻す形を実機で試して動いたので、それに変えた（plan の方針 8 を直した）
+- 2026-10-09 / T31 / GitHub の Codex のレビュー（a539bd49）で P1 が 1 件。T29 の push の後にスレッドをまとめて resolve したとき、読む前に resolve していた / 中身を確かめて採用し、T31 で直した

@@ -956,3 +956,27 @@ test("a link on the way through HOME that leads out of it, or nowhere, stops the
   const profile = codexProfile(":workspace", ["/a", "/b", "/a"]);
   assert.equal(profile.split("\n").filter((l) => l === '"/a" = "deny"').length, 1);
 });
+
+test("a repository slot that is not one plain name in the build is never cloned", () => {
+  const b = codexBuild("none");
+  const manifest = JSON.parse(fs.readFileSync(path.join(b.build, "manifest.json"), "utf8"));
+  manifest.repositories = { "../outside": { condition: "none" } };
+  fs.writeFileSync(path.join(b.build, "manifest.json"), JSON.stringify(manifest));
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "codex.ts"),
+      "--build",
+      b.build,
+      "--repo",
+      "../outside",
+      "--task",
+      "pilot-sort",
+      "--out",
+      path.join(b.cache, "codex-runs"),
+    ],
+    { encoding: "utf8", env: b.env },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /one plain name/);
+});

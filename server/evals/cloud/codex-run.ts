@@ -121,10 +121,12 @@ export async function runCodex(o: {
   /** A probe run: plants its files in the checkout before Codex starts and gives the prompt in place of the task's */
   probe?: (p: ProbePaths) => Promise<string>;
 }): Promise<{ dir: string; result: Record<string, unknown> }> {
-  // Both name the run directory: anything but one plain name could put it outside the output directory
+  // The task and condition name the run directory, and the repository the slot cloned from the build: anything but one plain name
+  // could reach outside the output directory or the build
   for (const [what, name] of [
     ["task", o.task.id],
     ["condition", o.condition],
+    ["repository", o.repo],
   ])
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name ?? ""))
       throw new Error(`the ${what} ${JSON.stringify(name)} is not one plain name`);
