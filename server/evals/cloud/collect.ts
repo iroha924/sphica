@@ -9,10 +9,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { evalCache } from "./codex-home.ts";
+import { codexLock, evalCache } from "./codex-home.ts";
 import { currentFence } from "./codex-run.ts";
 import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
-import { NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
+import { liveScratch, NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
   answerFormat,
   capPatch,
@@ -324,6 +324,7 @@ function main() {
       const task = taskOf(receipts, firing);
       if (!task) continue;
       const work = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+      liveWorks.add(work);
       try {
         execFileSync("git", ["-C", dir, "worktree", "add", "-q", "--detach", work, branch]);
         // A reused container keeps an earlier run's database copy: count only deliveries after this session's first receipt
@@ -393,6 +394,7 @@ function main() {
         });
       } finally {
         execFileSync("git", ["-C", dir, "worktree", "remove", "--force", work]);
+        if (!fs.existsSync(work)) liveWorks.delete(work);
       }
     }
   }
@@ -613,4 +615,15 @@ function main() {
     );
 }
 
-main();
+// Branches are checked out, and hidden tests written, in the temp directory, which a fenced Codex running meanwhile could read: collect
+// holds the same lock, and keeps it while anything it made there stays
+const liveWorks = new Set<string>();
+const release = codexLock(evalCache());
+try {
+  main();
+} finally {
+  const left = [...liveWorks, ...liveScratch].filter((d) => fs.existsSync(d));
+  if (left.length)
+    console.error(`could not remove ${left.join(", ")}; remove it, then codex.lock in ${evalCache()}`);
+  else release();
+}

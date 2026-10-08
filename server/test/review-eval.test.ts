@@ -28,6 +28,7 @@ import {
   codexArgs,
   codexLaneDenies,
   codexMcp,
+  drainLanes,
   evalDenies,
   outsideCheckout,
   READ_TOOLS,
@@ -1021,4 +1022,22 @@ test("a lane that throws does not end the run while another lane still has its t
   assert.equal(biomeChanged(copy, pinned), false);
   fs.rmSync(path.join(tree, "biome"), { recursive: true, force: true });
   assert.equal(biomeChanged(copy, pinned), true);
+});
+
+test("a queue of lanes starts no lane once a temp tree was left behind", async () => {
+  const started: number[] = [];
+  let left = false;
+  await assert.rejects(
+    drainLanes(
+      [1, 2, 3],
+      1,
+      async (n) => {
+        started.push(n);
+        if (n === 1) left = true;
+      },
+      () => left,
+    ),
+    /left behind/,
+  );
+  assert.deepEqual(started, [1]);
 });

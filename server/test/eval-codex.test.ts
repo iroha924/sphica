@@ -827,7 +827,7 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
   }
 });
 
-test("a link in HOME is never denied, since a deny follows it to what it points at, and a quoted name does not change the fence", () => {
+test("a link under HOME is never denied, since a deny follows it to what it points at, and a quoted name does not change the fence", () => {
   const home = fs.realpathSync(tempDir("home-links-"));
   const root = path.join(home, ".local/share/mise/installs/node/24.0.0");
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
@@ -836,11 +836,9 @@ test("a link in HOME is never denied, since a deny follows it to what it points 
   fs.writeFileSync(path.join(home, ".bun/bin/bun"), "x");
   // mise's version aliases: denying `24` would deny the 24.0.0 kept beside it
   fs.symlinkSync("./24.0.0", path.join(home, ".local/share/mise/installs/node/24"));
-  fs.symlinkSync("/usr", path.join(home, "system"));
   const toolPath = [path.join(root, "bin"), path.join(home, ".bun/bin")].join(path.delimiter);
   const f = homeFence({ home, path: toolPath });
   assert.ok(!f.denies.includes(path.join(home, ".local/share/mise/installs/node/24")));
-  assert.ok(!f.denies.includes(path.join(home, "system")), "a link out of HOME would deny what it points at");
   const cache = evalCache(home);
   const codexHome = path.join(cache, "r", "codex-home");
   const fence = () => {
@@ -910,4 +908,24 @@ test("the grader keeps the lock while the Claude grader's directory cannot be re
       fs.rmSync(d, { recursive: true, force: true });
     }
   }
+});
+
+test("a link on the way through HOME that leads out of it, or nowhere, stops the run, and a path denied twice is written once", () => {
+  const home = fs.realpathSync(tempDir("home-out-links-"));
+  const root = path.join(home, ".local/share/mise/installs/node/24.0.0");
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "bin/node"), "x");
+  fs.mkdirSync(path.join(home, ".bun/bin"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".bun/bin/bun"), "x");
+  const toolPath = [path.join(root, "bin"), path.join(home, ".bun/bin")].join(path.delimiter);
+  const outside = fs.realpathSync(tempDir("home-out-target-"));
+  fs.symlinkSync(outside, path.join(home, "backup"));
+  assert.throws(() => homeFence({ home, path: toolPath }), /leads out of HOME/);
+  fs.rmSync(path.join(home, "backup"));
+  fs.symlinkSync(path.join(home, "not-there"), path.join(home, ".local", "gone"));
+  assert.throws(() => homeFence({ home, path: toolPath }), /leads out of HOME|leads nowhere/);
+  fs.rmSync(path.join(home, ".local", "gone"));
+  assert.doesNotThrow(() => homeFence({ home, path: toolPath }));
+  const profile = codexProfile(":workspace", ["/a", "/b", "/a"]);
+  assert.equal(profile.split("\n").filter((l) => l === '"/a" = "deny"').length, 1);
 });

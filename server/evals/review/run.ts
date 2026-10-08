@@ -22,6 +22,7 @@ import {
   codexArgs,
   codexLaneDenies,
   codexMcp,
+  drainLanes,
   evalDenies,
   keepCheckout,
   type LaneEnv,
@@ -33,7 +34,6 @@ import {
   reviewPrompt,
   rulesPrompt,
   runnerDigest,
-  settleAll,
 } from "./runner.ts";
 
 const ROOT = path.join(import.meta.dirname, "..", "..", "..");
@@ -381,7 +381,15 @@ async function main() {
   const ownerToken = args.preflight ? homeToken() : null;
   try {
     await holdingLock(cache, async (leave) => {
-      const env: LaneEnv = { cache, shield: shieldNow(), leave };
+      let left = false;
+      const env: LaneEnv = {
+        cache,
+        shield: shieldNow(),
+        leave: (tree) => {
+          left = true;
+          leave(tree);
+        },
+      };
       if (ownerToken) {
         // Its probe runs go apart from the measured ones, which the grader counts by directory name
         const problems = await preflight(path.join(out, "preflight"), args.model ?? "", env, ownerToken);
@@ -396,8 +404,10 @@ async function main() {
       const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
       const ids = args.rules ? ["rules"] : args.diff === "all" ? known : [args.diff ?? ""];
       const queue = ids.flatMap((diff) => Array.from({ length: runs }, () => diff));
-      const worker = async () => {
-        for (let diff = queue.shift(); diff; diff = queue.shift()) {
+      await drainLanes(
+        queue,
+        jobs,
+        async (diff) => {
           const { dir, result } = await runLane({
             fixture,
             host,
@@ -412,9 +422,9 @@ async function main() {
             env,
           });
           console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
-        }
-      };
-      await settleAll(Array.from({ length: jobs }, () => worker));
+        },
+        () => left,
+      );
     });
   } finally {
     if (ownerToken) fs.rmSync(ownerToken.path, { force: true });

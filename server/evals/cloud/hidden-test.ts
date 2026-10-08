@@ -108,6 +108,7 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
   fs.writeFileSync(file, test, { flag: "wx" });
   const inside = fs.realpathSync(work);
   const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-hidden-")));
+  liveScratch.add(scratch);
   try {
     const under = (a: string, b: string) => a === b || a.startsWith(b + path.sep);
     if (under(scratch, inside) || under(inside, scratch))
@@ -135,8 +136,12 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
     return { tests: `${pass} passed, ${fail} failed`, parts: partsOf(test, r.stdout), scratch };
   } finally {
     removeScratch(scratch);
+    liveScratch.delete(scratch);
   }
 }
+
+/** Scratch directories made and not yet removed: the caller holding the evaluation lock keeps it while any stays */
+export const liveScratch = new Set<string>();
 
 /** The test may lock directories it made, or the scratch itself: open each one again (links are never followed), then remove it all */
 function removeScratch(dir: string): void {

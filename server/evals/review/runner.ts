@@ -42,6 +42,26 @@ export async function settleAll(workers: (() => Promise<void>)[]): Promise<void>
   if (failed) throw failed.reason;
 }
 
+/**
+ * Runs the queued lanes `jobs` at a time, and starts no lane once `stopped` says a temp tree was left behind: the next lane would run
+ * beside it without a deny for it. Every started lane runs to its end before the first failure is thrown.
+ */
+export async function drainLanes<T>(
+  queue: T[],
+  jobs: number,
+  run: (item: T) => Promise<void>,
+  stopped: () => boolean,
+): Promise<void> {
+  const worker = async () => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
+      if (stopped()) throw new Error("a temp tree was left behind; no further lane starts");
+      await run(item);
+      if (stopped()) throw new Error("a temp tree was left behind; no further lane starts");
+    }
+  };
+  await settleAll(Array.from({ length: jobs }, () => worker));
+}
+
 /** The code that starts and fences a run, relative to this directory */
 export const RUNNER_FILES = [
   "runner.ts",

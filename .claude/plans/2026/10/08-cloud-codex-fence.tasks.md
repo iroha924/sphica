@@ -306,6 +306,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="grader keeps the lock while a temp" test/eval-codex.test.ts` → 直す前は grades.checkpoint.json が無く（ENOENT）失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 101 件 pass。os.tmpdir() に `sphica-grade-*` が残っていない
 
+- [x] T27: GitHub の Codex のレビュー（d7636910）の 4 件を直す（HOME の外を指す・先の無いリンクを素通しにする、collect がロックを取らずに隠しテストを一時の checkout に書く、リポジトリが HOME の直下だと deny の行が重なり TOML が壊れる、review の lane の片付けに失敗しても次の lane が始まる）
+  - 種別: 修正
+  - 計画: S3, S8, S9
+  - 依存: T25（HOME の walk と review の lane の列が要る）, T26（採点者の止め方が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/hidden-test.ts`, `server/evals/review/runner.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-claude.test.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="leads out of it|queue of lanes|collect does not start while" test/eval-codex.test.ts test/review-eval.test.ts test/eval-claude.test.ts` → 3 件とも失敗する（HOME の外へのリンクで止まらず deny の行が 2 回出る、ロックを持たれていても collect が始まる、列の関数が無い）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): stop on links out of HOME, lock collect, stop lanes after a tree is left (T27)`
+  - 結果: `cd server && node --test --test-name-pattern="leads out of it|queue of lanes|collect does not start while" test/eval-codex.test.ts test/review-eval.test.ts test/eval-claude.test.ts` → 直す前は 3 件とも失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 174 件 pass。手元の本物の HOME で `homeFence()` は止まらず、node と `.bun` を残して 106 項目を deny した
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -337,3 +348,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / P5 / P5 の差分の Codex のレビュー（high）で P1 が 3 件、P2 が 2 件。5 件とも採用して T25 で直した
 - 2026-10-08 / 完了条件 / T25 の後に実機で流し直した（codex-cli 0.160.1、Claude Code は手元の版）。bun run verify は 0、cloud の probe 4 件と採点者の probe は ✓、4 条件の通常の run と collect は 4 行とも除外なし、review の preflight は ✓、M2 は両方の host で除外されず、events に写しの Biome の出力（Checked 18 files）がある
 - 2026-10-08 / T25 / T25 の差分の再レビューで P2 が 1 件（後片付けの失敗で終わった採点を保存せずに止まる） / 採用して T26 で直した
+- 2026-10-09 / T27 / GitHub の Codex のレビュー（d7636910）で P1 が 2 件、P2 が 2 件。4 件とも採用して T27 で直した。T25 のテストにあった「HOME の外へのリンクを deny しない」場合は、止まる形に変えたのでテストから外した。持ち主の指示で、P1 が出なくなるまで push のたびに再レビューを頼む

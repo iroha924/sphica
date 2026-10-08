@@ -30,12 +30,12 @@ import { lookedOutside, oneConfiguration } from "./grade.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
   codexLaneDenies,
+  drainLanes,
   evalDenies,
   keepCheckout,
   type LaneEnv,
   outsideCheckout,
   runnerDigest,
-  settleAll,
 } from "./runner.ts";
 
 type Task = { id: string; tempts: "lodash" | "db" | "none"; prompt: string; test: string };
@@ -457,12 +457,22 @@ async function main() {
   const out = path.resolve(args.out ?? "");
   const cache = evalCache();
   await holdingLock(cache, async (leave) => {
-    const env: LaneEnv = { cache, shield: shieldNow(), leave };
+    let left = false;
+    const env: LaneEnv = {
+      cache,
+      shield: shieldNow(),
+      leave: (tree) => {
+        left = true;
+        leave(tree);
+      },
+    };
     fs.mkdirSync(out, { recursive: true });
     const fixture = await fixtureIn(out);
     const queue = tasks.flatMap((task) => Array.from({ length: runs }, () => task));
-    const worker = async () => {
-      for (let task = queue.shift(); task; task = queue.shift()) {
+    await drainLanes(
+      queue,
+      jobs,
+      async (task) => {
         const { dir, result } = await runOne({
           fixture,
           host,
@@ -473,9 +483,9 @@ async function main() {
           env,
         });
         console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
-      }
-    };
-    await settleAll(Array.from({ length: jobs }, () => worker));
+      },
+      () => left,
+    );
   });
 }
 

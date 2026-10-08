@@ -28,7 +28,8 @@ function isolatedCodexHome(codexHome: string, extraConfig = "", settings = owner
  * denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
  */
 export function codexProfile(base: ":read-only" | ":workspace", deny: string[]): string {
-  const lines = deny.map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
+  // A path given twice (the repository directly under HOME) would be a key written twice, which TOML refuses
+  const lines = [...new Set(deny)].map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
   return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
 }
 
@@ -146,9 +147,24 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
   const walk = (dir: string) => {
     for (const name of fs.readdirSync(dir)) {
       const full = path.join(dir, name);
-      // A deny follows a link to what it points at: a version alias would deny the install kept beside it, a link out of HOME
-      // what lies outside. What it points at under HOME is judged where it really is
-      if (roots.includes(full) || fs.lstatSync(full).isSymbolicLink()) continue;
+      if (roots.includes(full)) continue;
+      // A deny follows a link to what it points at, so a link is never denied: one to a place under HOME (a version alias beside
+      // a kept install) is judged where that place really is; one that leads out of HOME, or nowhere yet, could not be fenced
+      if (fs.lstatSync(full).isSymbolicLink()) {
+        let real: string;
+        try {
+          real = fs.realpathSync(full);
+        } catch {
+          throw new Error(
+            `${full} is a link that leads nowhere yet; the fence cannot deny what it may lead to`,
+          );
+        }
+        if (!isInside(home, real))
+          throw new Error(
+            `${full} is a link that leads out of HOME (${real}); the fence cannot deny it alone`,
+          );
+        continue;
+      }
       if (roots.some((r) => isInside(full, r))) walk(full);
       else denies.push(full);
     }

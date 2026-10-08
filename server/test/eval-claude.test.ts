@@ -1957,3 +1957,34 @@ test("collect counts only Codex runs made under the current read fence, and reco
     [codex, claude, base].map((p) => path.resolve(p)),
   );
 });
+
+test("collect does not start while another fenced Codex evaluation holds the lock", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-lock-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  fs.mkdirSync(build);
+  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  // Collecting writes hidden tests into checkouts in the temp directory, which a running fenced Codex could read
+  fs.writeFileSync(path.join(evalCache(base), "codex.lock"), '{"pid":1}\n');
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+      "--build",
+      build,
+      "--codex",
+      path.join(base, "none"),
+      "--logs",
+      base,
+      "--skip-hidden-tests",
+    ],
+    { encoding: "utf8", env: childEnv(base) },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /another fenced Codex evaluation/);
+  assert.ok(!fs.existsSync(path.join(build, "loop.json")));
+});
