@@ -1,0 +1,525 @@
+{
+  "note": "The review evaluation: the tsundoku fixture (tasks.json's fixture steps) plus the records below, and diffs to review against them. expect lists every record review_select selects for a diff, with the outcomes that count as right and whether the diff leaves the record to a question. A run never reads this file: it lives outside the checkout the reviewer works in.",
+  "files": {
+    "src/ui/list.ts": "import { lend } from \"../library.ts\";\n\nexport function lendButton(book: string, member: string): () => void {\n  return () => {\n    lend(book, member, new Date());\n  };\n}\n",
+    "src/ui/detail.ts": "export function title(book: { title: string; author: string }): string {\n  return `${book.title} (${book.author})`;\n}\n",
+    ".github/workflows/release.yml": "name: release\non:\n  workflow_dispatch:\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    environment: npm-release\n    steps:\n      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0\n      - run: npm ci\n      - run: npm publish\n"
+  },
+  "steps": [
+    {
+      "session": {
+        "id": "s-rv-ui",
+        "host": "claude-code",
+        "at": "2026-06-01T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "Files under src/ui/ must not import src/db.ts directly. Go through src/library.ts so the UI never holds a database handle.",
+            "assistant": "Understood. src/ui/list.ts and src/ui/detail.ts go through src/library.ts.",
+            "edits": ["src/ui/list.ts", "src/ui/detail.ts"]
+          },
+          {
+            "owner": "And do not pull in lodash. The standard library is enough for what we do.",
+            "assistant": "OK, no lodash.",
+            "edits": []
+          }
+        ]
+      }
+    },
+    {
+      "trace": {
+        "session": "s-rv-ui",
+        "record": {
+          "units": [
+            {
+              "key": "ui-no-db",
+              "kind": "constraint",
+              "stance": "dont",
+              "text": "Files under src/ui/ do not import src/db.ts directly; they go through src/library.ts",
+              "why": "The UI never holds a database handle",
+              "evidence": [
+                {
+                  "source": "session:s-rv-ui#1.owner",
+                  "quote": "Files under src/ui/ must not import src/db.ts directly.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rv-ui#1.owner",
+                  "quote": "Files under src/ui/ must not import src/db.ts directly."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/ui/list.ts",
+                  "role": "applies_to"
+                },
+                {
+                  "path": "src/ui/detail.ts",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": [
+                "UI",
+                "画面",
+                "データベース",
+                "database",
+                "import",
+                "依存",
+                "dependency",
+                "layer",
+                "層"
+              ]
+            },
+            {
+              "key": "no-lodash",
+              "kind": "decision",
+              "stance": "dont",
+              "text": "Do not depend on lodash; use the standard library",
+              "why": "The standard library is enough for what tsundoku does",
+              "options": [
+                {
+                  "text": "lodash",
+                  "outcome": "rejected",
+                  "why": "the standard library is enough"
+                }
+              ],
+              "evidence": [
+                {
+                  "source": "session:s-rv-ui#2.owner",
+                  "quote": "do not pull in lodash. The standard library is enough for what we do.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rv-ui#2.owner",
+                  "quote": "do not pull in lodash."
+                }
+              ],
+              "no_code_surface": "a dependency the whole project avoids",
+              "aliases": [
+                "依存",
+                "dependency",
+                "ライブラリ",
+                "library",
+                "標準ライブラリ",
+                "standard library",
+                "パッケージ",
+                "package"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "session": {
+        "id": "s-rv-release",
+        "host": "claude-code",
+        "at": "2026-06-02T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "npm への公開は手動の release ワークフローからだけにして。push で CI が公開することはしない。私が承認してから出す。",
+            "assistant": "release.yml は workflow_dispatch だけで動き、npm-release の承認を待ってから npm publish します。",
+            "edits": [".github/workflows/release.yml"]
+          }
+        ]
+      }
+    },
+    {
+      "trace": {
+        "session": "s-rv-release",
+        "record": {
+          "units": [
+            {
+              "key": "release-by-owner",
+              "kind": "constraint",
+              "stance": "do",
+              "text": "npm への公開は手動の release ワークフローからだけ行い、push で CI が公開しない",
+              "why": "持ち主が承認してから出す",
+              "evidence": [
+                {
+                  "source": "session:s-rv-release#1.owner",
+                  "quote": "npm への公開は手動の release ワークフローからだけにして。push で CI が公開することはしない。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rv-release#1.owner",
+                  "quote": "npm への公開は手動の release ワークフローからだけにして。"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": ".github/workflows/release.yml",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": [
+                "リリース",
+                "release",
+                "公開",
+                "publish",
+                "npm",
+                "CI",
+                "承認",
+                "approval",
+                "workflow"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "session": {
+        "id": "s-rv-iphone",
+        "host": "claude-code",
+        "at": "2026-06-03T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "src/library.ts を変えたら、出す前に必ず iPhone の実機で貸し出しの画面を確かめること。",
+            "assistant": "わかりました。src/library.ts を変えたときは、出す前に iPhone の実機で貸し出しの画面を確かめます。",
+            "edits": []
+          }
+        ]
+      }
+    },
+    {
+      "trace": {
+        "session": "s-rv-iphone",
+        "record": {
+          "units": [
+            {
+              "key": "iphone-check",
+              "kind": "decision",
+              "stance": "do",
+              "text": "src/library.ts を変えたら、出す前に iPhone の実機で貸し出しの画面を確かめる",
+              "evidence": [
+                {
+                  "source": "session:s-rv-iphone#1.owner",
+                  "quote": "src/library.ts を変えたら、出す前に必ず iPhone の実機で貸し出しの画面を確かめること。",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rv-iphone#1.owner",
+                  "quote": "src/library.ts を変えたら、出す前に必ず iPhone の実機で貸し出しの画面を確かめること。"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/library.ts",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": [
+                "実機",
+                "device",
+                "iPhone",
+                "確認",
+                "manual check",
+                "貸し出し",
+                "loan",
+                "手順",
+                "process"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "session": {
+        "id": "s-rv-grid",
+        "host": "claude-code",
+        "at": "2026-06-04T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "The book grid has to show up within 2 seconds on a slow 3G phone. Keep that in mind whenever thumbUrl changes.",
+            "assistant": "Noted: the grid shows up within 2 seconds on slow 3G.",
+            "edits": []
+          }
+        ]
+      }
+    },
+    {
+      "trace": {
+        "session": "s-rv-grid",
+        "record": {
+          "units": [
+            {
+              "key": "grid-3g",
+              "kind": "constraint",
+              "stance": "do",
+              "text": "The book grid shows up within 2 seconds on a slow 3G phone",
+              "evidence": [
+                {
+                  "source": "session:s-rv-grid#1.owner",
+                  "quote": "The book grid has to show up within 2 seconds on a slow 3G phone.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rv-grid#1.owner",
+                  "quote": "The book grid has to show up within 2 seconds on a slow 3G phone."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/thumb.ts",
+                  "symbol": "thumbUrl",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": [
+                "表示速度",
+                "performance",
+                "3G",
+                "回線",
+                "network",
+                "グリッド",
+                "grid",
+                "サムネイル",
+                "thumbnail"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "session": {
+        "id": "s-rv-ai-shelf",
+        "host": "claude-code",
+        "at": "2026-06-05T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "本棚の名前の扱いを見ておいて。",
+            "assistant": "addShelf は名前の大文字と小文字を区別したままにします。大文字と小文字だけが違う本棚を分けて使う人がいるためです。",
+            "edits": ["src/shelf.ts"]
+          }
+        ]
+      }
+    },
+    {
+      "trace": {
+        "session": "s-rv-ai-shelf",
+        "caller": {
+          "entrypoint": "cli"
+        },
+        "record": {
+          "units": [
+            {
+              "key": "keep-case",
+              "kind": "decision",
+              "stance": "do",
+              "text": "addShelf は本棚の名前の大文字と小文字を区別したままにする",
+              "why": "大文字と小文字だけが違う本棚を分けて使う人がいる",
+              "evidence": [
+                {
+                  "source": "session:s-rv-ai-shelf#1.assistant",
+                  "quote": "addShelf は名前の大文字と小文字を区別したままにします。",
+                  "role": "decides"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rv-ai-shelf#1.assistant",
+                  "quote": "addShelf は名前の大文字と小文字を区別したままにします。"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/shelf.ts",
+                  "symbol": "addShelf",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": ["本棚", "shelf", "名前", "name", "大文字", "小文字", "case", "case-sensitive"]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "diffs": [
+    {
+      "id": "postgres",
+      "summary": "A real violation in code: the store moves to Postgres",
+      "edits": [
+        {
+          "path": "src/db.ts",
+          "content": "import pg from \"pg\";\n\n// Shared server so several devices see one library.\nexport function open(url: string) {\n  return new pg.Pool({ connectionString: url });\n}\n\nexport function close(db: pg.Pool) {\n  return db.end();\n}\n"
+        }
+      ],
+      "expect": {
+        "trace:s-ja-storage/storage": {
+          "outcomes": ["violation"],
+          "question": false
+        }
+      }
+    },
+    {
+      "id": "telemetry-docs",
+      "summary": "A harmless mention: the docs say telemetry is not sent",
+      "edits": [
+        {
+          "path": "docs/storage.md",
+          "replace": [
+            "The sync service reads only that file.\n",
+            "The sync service reads only that file.\n\nTsundoku sends no telemetry: nothing about your library leaves this machine.\n"
+          ]
+        }
+      ],
+      "expect": {
+        "trace:s-ja-telemetry/no-telemetry": {
+          "outcomes": ["complies", "unrelated"],
+          "question": false
+        }
+      }
+    },
+    {
+      "id": "ui-indirect",
+      "summary": "An indirect import: the UI reaches the database only through src/library.ts",
+      "edits": [
+        {
+          "path": "src/library.ts",
+          "replace": [
+            "export type Loan",
+            "import { open } from \"./db.ts\";\n\nexport function countBooks(file: string): number {\n  const db = open(file);\n  const row = db.prepare(\"select count(*) as n from book\").get() as { n: number };\n  db.close();\n  return row.n;\n}\n\nexport type Loan"
+          ]
+        },
+        {
+          "path": "src/ui/list.ts",
+          "replace": [
+            "import { lend } from \"../library.ts\";",
+            "import { countBooks, lend } from \"../library.ts\";\n\nexport const shelfTitle = (file: string): string => `${countBooks(file)} books`;"
+          ]
+        }
+      ],
+      "expect": {
+        "trace:s-rv-ui/ui-no-db": {
+          "outcomes": ["complies"],
+          "question": false
+        },
+        "trace:s-rv-iphone/iphone-check": {
+          "outcomes": ["undetermined"],
+          "question": true
+        }
+      }
+    },
+    {
+      "id": "ui-direct",
+      "summary": "Two real violations: the UI imports src/db.ts directly and pulls in lodash",
+      "edits": [
+        {
+          "path": "src/ui/detail.ts",
+          "content": "import debounce from \"lodash/debounce\";\nimport { open } from \"../db.ts\";\n\nexport function title(book: { title: string; author: string }): string {\n  return `${book.title} (${book.author})`;\n}\n\nexport const saveTitle = debounce((file: string, id: string, text: string) => {\n  open(file).prepare(\"update book set title = ? where id = ?\").run(text, id);\n}, 300);\n"
+        }
+      ],
+      "expect": {
+        "trace:s-rv-ui/ui-no-db": {
+          "outcomes": ["violation"],
+          "question": false
+        },
+        "trace:s-rv-ui/no-lodash": {
+          "outcomes": ["violation"],
+          "question": false
+        }
+      }
+    },
+    {
+      "id": "release-on-push",
+      "summary": "A violation the CI configuration settles: npm publish runs on every push to main",
+      "edits": [
+        {
+          "path": ".github/workflows/release.yml",
+          "content": "name: release\non:\n  push:\n    branches: [main]\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0\n      - run: npm ci\n      - run: npm publish\n"
+        }
+      ],
+      "expect": {
+        "trace:s-rv-release/release-by-owner": {
+          "outcomes": ["violation"],
+          "question": false
+        }
+      }
+    },
+    {
+      "id": "thumb-quality",
+      "summary": "A code location the diff cannot settle: thumbUrl asks for a higher quality, and whether the grid still shows up in 2 seconds on 3G is not in the diff",
+      "edits": [
+        {
+          "path": "src/thumb.ts",
+          "replace": ["&fm=webp`", "&fm=webp&q=90`"]
+        }
+      ],
+      "expect": {
+        "trace:s-en-thumb/width": {
+          "outcomes": ["complies", "unrelated"],
+          "question": false
+        },
+        "trace:s-en-thumb/webp": {
+          "outcomes": ["complies"],
+          "question": false
+        },
+        "trace:s-rv-grid/grid-3g": {
+          "outcomes": ["undetermined"],
+          "question": true
+        }
+      }
+    },
+    {
+      "id": "shelf-case-reason",
+      "summary": "A diff that departs from an AI's decision and gives its reason in an added comment",
+      "edits": [
+        {
+          "path": "src/shelf.ts",
+          "content": "export type Shelf = { id: string; name: string; books: string[] };\n\nexport function addShelf(shelves: Shelf[], name: string): Shelf[] {\n  // Names compare without case: owners kept making \"Manga\" and \"manga\" by mistake\n  const key = name.toLowerCase();\n  if (shelves.some((s) => s.name.toLowerCase() === key)) return shelves;\n  return [...shelves, { id: crypto.randomUUID(), name, books: [] }];\n}\n"
+        }
+      ],
+      "expect": {
+        "trace:s-ja-shelf/nesting": {
+          "outcomes": ["unrelated", "complies"],
+          "question": false
+        },
+        "trace:s-ja-shelf/duplicate-names": {
+          "outcomes": ["violation", "complies", "unrelated", "undetermined"],
+          "question": false
+        },
+        "trace:s-rv-ai-shelf/keep-case": {
+          "outcomes": ["undetermined"],
+          "question": false
+        }
+      }
+    },
+    {
+      "id": "shelf-case-silent",
+      "summary": "A diff that departs from an AI's decision and says nothing about why",
+      "edits": [
+        {
+          "path": "src/shelf.ts",
+          "content": "export type Shelf = { id: string; name: string; books: string[] };\n\nexport function addShelf(shelves: Shelf[], name: string): Shelf[] {\n  const key = name.toLowerCase();\n  if (shelves.some((s) => s.name.toLowerCase() === key)) return shelves;\n  return [...shelves, { id: crypto.randomUUID(), name, books: [] }];\n}\n"
+        }
+      ],
+      "expect": {
+        "trace:s-ja-shelf/nesting": {
+          "outcomes": ["unrelated", "complies"],
+          "question": false
+        },
+        "trace:s-ja-shelf/duplicate-names": {
+          "outcomes": ["violation", "complies", "unrelated", "undetermined"],
+          "question": false
+        },
+        "trace:s-rv-ai-shelf/keep-case": {
+          "outcomes": ["violation"],
+          "question": false
+        }
+      }
+    }
+  ]
+}
