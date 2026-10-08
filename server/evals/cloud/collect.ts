@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { evalCache } from "./codex-home.ts";
-import { currentRunFence } from "./codex-run.ts";
+import { currentFence } from "./codex-run.ts";
 import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
 import { NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
@@ -58,7 +58,7 @@ const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[
 const out = path.join(build, "loop.json");
 // Where the runs came from: grade refuses a loop whose runs sat where the fenced Codex could read them
 const runRoots = [args.codex, args.claude, args.logs].map((p) => path.resolve(p ?? ""));
-const runFence = currentRunFence(evalCache());
+const runFence = currentFence(":workspace", evalCache());
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;
   variant?: string;

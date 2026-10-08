@@ -6,12 +6,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { claimRunDir, codexModelOf } from "../evals/cloud/codex-home.ts";
+import { claimRunDir, codexModelOf, evalCache } from "../evals/cloud/codex-home.ts";
+import { currentFence } from "../evals/cloud/codex-run.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
 import {
   blindPrompt,
   type CheckpointInput,
   checkpointKey,
+  GRADER_ARGS,
   gradedTask,
   loadCheckpoint,
   receiveGrade,
@@ -37,11 +39,13 @@ import {
   jsonSchemaOf,
   SCHEMA_FILES,
 } from "../evals/cloud/schema-check.ts";
-import { tmpEnv } from "./temp-dir.ts";
+import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const TASKS = path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json");
 // A build holds a copy of the task definitions it was made from
 const seedTasks = (build: string) => fs.copyFileSync(TASKS, path.join(build, "tasks.json"));
+// The read fence a Codex run made now records; it names places by role, so any HOME gives the same
+const FENCE = currentFence(":workspace", evalCache(tempDir("grade-fence-")));
 
 /** A child's environment: a temporary home, and none of the owner's Sphica paths. */
 function childEnv(home: string): NodeJS.ProcessEnv {
@@ -243,7 +247,15 @@ test("collect keeps a started run without a result, and a failed run, as exclude
     });
     run("noevents", {
       "started.json": { ...head, condition: "none" },
-      "result.json": { ...head, condition: "none", status: 0, reason: null, seconds: 1, deliveries: null },
+      "result.json": {
+        ...head,
+        condition: "none",
+        status: 0,
+        reason: null,
+        seconds: 1,
+        deliveries: null,
+        fence: FENCE,
+      },
     });
     const out = path.join(build, "loop.json");
     execFileSync(
@@ -507,9 +519,19 @@ printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output:
 `,
       { mode: 0o755 },
     );
-    const loop = path.join(base, "loop.json");
-    fs.writeFileSync(loop, JSON.stringify({ bundle: "c", rows: [{ ...row, answer_format: "valid" }] }));
-    seedTasks(base);
+    const cache = path.join(owner, ".cache", "sphica-eval");
+    const build = path.join(cache, "builds", "b");
+    fs.mkdirSync(build, { recursive: true });
+    const loop = path.join(build, "loop.json");
+    fs.writeFileSync(
+      loop,
+      JSON.stringify({
+        bundle: "c",
+        run_roots: [path.join(cache, "codex-runs")],
+        rows: [{ ...row, answer_format: "valid" }],
+      }),
+    );
+    seedTasks(build);
     const r = spawnSync(
       process.execPath,
       [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop],
@@ -541,7 +563,7 @@ printf '%s' ${JSON.stringify(JSON.stringify({ type: "result", structured_output:
       "[--disable-slash-commands]",
     ])
       assert.ok(started.includes(a), a);
-    const out = JSON.parse(fs.readFileSync(path.join(base, "grades.json"), "utf8"));
+    const out = JSON.parse(fs.readFileSync(path.join(build, "grades.json"), "utf8"));
     assert.equal(out.rows[0].grade.score, 2, "the table keeps Codex's grade");
     assert.equal(out.rows[0].second.grade.score, 1);
   } finally {
@@ -761,7 +783,7 @@ test("collect excludes a gold run when the gold hook returned no record, and kee
       fs.writeFileSync(path.join(codex, name, "started.json"), JSON.stringify(head));
       fs.writeFileSync(
         path.join(codex, name, "result.json"),
-        JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+        JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null, fence: FENCE }),
       );
       if (receipt !== null) fs.writeFileSync(path.join(codex, name, "gold-receipt.txt"), receipt);
     };
@@ -820,7 +842,7 @@ test("collect reads a swapped build's gold from the swapped record and does not 
     fs.writeFileSync(path.join(codex, "sw", "started.json"), JSON.stringify(head));
     fs.writeFileSync(
       path.join(codex, "sw", "result.json"),
-      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null, fence: FENCE }),
     );
     fs.writeFileSync(
       path.join(codex, "sw", "gold-receipt.txt"),
@@ -1209,9 +1231,10 @@ test("the report refuses builds of different bundles or task definitions", () =>
 test("collect and grade refuse --out and write beside the build's tasks.json", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-out-"));
   try {
-    const build = path.join(base, "build");
+    const cache = path.join(base, ".cache", "sphica-eval");
+    const build = path.join(cache, "builds", "b");
     const elsewhere = path.join(base, "elsewhere");
-    fs.mkdirSync(build);
+    fs.mkdirSync(build, { recursive: true });
     fs.mkdirSync(elsewhere);
     fs.writeFileSync(
       path.join(build, "manifest.json"),
@@ -1223,7 +1246,14 @@ test("collect and grade refuse --out and write beside the build's tasks.json", (
         encoding: "utf8",
         env: childEnv(base),
       });
-    const collectArgs = ["--build", build, "--codex", path.join(base, "none"), "--logs", base];
+    const collectArgs = [
+      "--build",
+      build,
+      "--codex",
+      path.join(cache, "none"),
+      "--logs",
+      path.join(cache, "logs"),
+    ];
     const collected = cloud("collect.ts", ...collectArgs, "--out", path.join(elsewhere, "loop.json"));
     assert.notEqual(collected.status, 0, "collect refuses --out");
     assert.match(collected.stderr, /Unknown option '--out'/);
@@ -1294,7 +1324,7 @@ test("collect judges runs by the task definitions of their build, not the checko
     fs.writeFileSync(path.join(codex, "r", "started.json"), JSON.stringify(head));
     fs.writeFileSync(
       path.join(codex, "r", "result.json"),
-      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null }),
+      JSON.stringify({ ...head, status: 0, reason: null, seconds: 1, deliveries: null, fence: FENCE }),
     );
     const out = path.join(build, "loop.json");
     execFileSync(
@@ -2473,6 +2503,7 @@ test("the checkpoint key is the same for the same grader call and changes with a
     variant: "original",
     schema: "{}",
     codexConfig: 'model = "m"',
+    codexFence: "f",
   };
   const key = checkpointKey(base);
   assert.match(key, /^[0-9a-f]{64}$/);
@@ -2500,6 +2531,7 @@ test("the checkpoint key is the same for the same grader call and changes with a
     ["variant", { variant: "swapped" }],
     ["schema", { schema: '{"type":"object"}' }],
     ["codex config", { codexConfig: 'model = "n"' }],
+    ["codex fence", { codexFence: "g" }],
   ];
   for (const [what, change] of changes) assert.notEqual(checkpointKey({ ...base, ...change }), key, what);
   // A swapped run's grader never sees the original expect and against, yet a change to them still grades again
@@ -2568,7 +2600,8 @@ test("a checkpoint that is missing is empty, one saved reads back the same, and 
 function gradeFixture(rows: (typeof row & { presented?: string | null })[]) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
   const owner = path.join(base, "owner");
-  const build = path.join(base, "build");
+  const cache = path.join(owner, ".cache", "sphica-eval");
+  const build = path.join(cache, "builds", "b");
   const ctl = path.join(base, "ctl");
   const bin = path.join(base, "bin");
   // A grading run killed midway skips its own cleanup, so its temp directories go under base
@@ -2578,7 +2611,10 @@ function gradeFixture(rows: (typeof row & { presented?: string | null })[]) {
   fs.writeFileSync(path.join(owner, ".codex", "config.toml"), 'model = "m"\n');
   seedTasks(build);
   const loop = path.join(build, "loop.json");
-  fs.writeFileSync(loop, JSON.stringify({ build: "b", bundle: "c", rows }));
+  fs.writeFileSync(
+    loop,
+    JSON.stringify({ build: "b", bundle: "c", run_roots: [path.join(cache, "codex-runs")], rows }),
+  );
   const fake = (name: string, answer: string) =>
     fs.writeFileSync(
       path.join(bin, name),
@@ -2620,8 +2656,8 @@ printf '%s' '${JSON.stringify({ ...grade, reason: "codex call NUM" })}' | sed "s
       }[],
     killAt: (name: string, n: number) => fs.writeFileSync(path.join(ctl, `${name}-kill-${n}`), ""),
     calls,
-    run: (...extra: string[]) =>
-      spawnSync(
+    run: (...extra: string[]) => {
+      const r = spawnSync(
         process.execPath,
         [path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"), "--loop", loop, ...extra],
         {
@@ -2635,7 +2671,11 @@ printf '%s' '${JSON.stringify({ ...grade, reason: "codex call NUM" })}' | sed "s
             CODEX_HOME: path.join(base, "sentinel"),
           },
         },
-      ),
+      );
+      // A run killed midway leaves its lock; the owner removes it once the process is gone
+      if (r.signal) fs.rmSync(path.join(cache, "codex.lock"), { force: true });
+      return r;
+    },
     done: () => fs.rmSync(base, { recursive: true, force: true }),
   };
 }
@@ -2867,5 +2907,77 @@ test("checkpoint marks a row reused only when its Codex grade was", () => {
     assert.match(again.stdout, /r1: score 2\n/);
   } finally {
     f.done();
+  }
+});
+
+test("the Codex grader reads through the read fence, and grading refuses runs kept where the fence does not reach", () => {
+  assert.ok(
+    !GRADER_ARGS.codex.includes("-s") && !GRADER_ARGS.codex.includes("--sandbox"),
+    "the profile is the sandbox",
+  );
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-fence-"));
+  try {
+    const owner = path.join(base, "owner");
+    fs.mkdirSync(path.join(owner, ".codex"), { recursive: true });
+    fs.writeFileSync(path.join(owner, ".codex", "config.toml"), 'model = "m"\n');
+    const cache = path.join(fs.realpathSync(owner), ".cache", "sphica-eval");
+    const build = path.join(cache, "builds", "b");
+    fs.mkdirSync(build, { recursive: true });
+    seedTasks(build);
+    const bin = path.join(base, "bin");
+    fs.mkdirSync(bin);
+    const seen = path.join(base, "seen");
+    fs.writeFileSync(
+      path.join(bin, "codex"),
+      `#!/bin/sh
+{ printf '%s\\n' "$@"; cat "$CODEX_HOME/config.toml"; } > ${JSON.stringify(seen)}
+while [ "$1" != "-o" ]; do shift; done
+printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
+`,
+      { mode: 0o755 },
+    );
+    const roots = ["codex-runs", "claude-runs", "logs"].map((d) => path.join(cache, d));
+    const loop = path.join(build, "loop.json");
+    const start = (loopJson: Record<string, unknown>, file = loop) => {
+      fs.writeFileSync(file, JSON.stringify({ build: "b", bundle: "c", ...loopJson }));
+      return spawnSync(
+        process.execPath,
+        [
+          path.join(import.meta.dirname, "..", "evals", "cloud", "grade.ts"),
+          "--loop",
+          file,
+          "--second",
+          "none",
+        ],
+        { encoding: "utf8", env: { ...childEnv(owner), PATH: `${bin}${path.delimiter}${process.env.PATH}` } },
+      );
+    };
+    const rows = [{ ...row, fence: "f".repeat(64) }];
+    const r = start({ run_roots: roots, rows });
+    assert.equal(r.status, 0, r.stderr);
+    const got = fs.readFileSync(seen, "utf8");
+    assert.ok(!got.split("\n").includes("-s"));
+    assert.match(got, /^default_permissions = "eval"$/m);
+    assert.match(got, /^extends = ":read-only"$/m);
+    assert.match(
+      got,
+      new RegExp(`^${JSON.stringify(cache).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "deny"$`, "m"),
+    );
+    assert.match(got, /codex", "auth\.json" = "deny"|\.codex\/auth\.json" = "deny"$/m);
+    const graded = JSON.parse(fs.readFileSync(path.join(build, "grades.json"), "utf8"));
+    assert.equal(graded.rows[0].fence, "f".repeat(64));
+    assert.ok(!fs.existsSync(path.join(cache, "codex.lock")), "the lock is released");
+    // Runs kept where the fenced runs could read them, or a loop that does not say where its runs were, are not graded
+    assert.match(start({ rows }).stderr, /run_roots/);
+    assert.match(
+      start({ run_roots: [...roots, path.join(base, "elsewhere")], rows }).stderr,
+      /must be inside/,
+    );
+    const outside = path.join(base, "build");
+    fs.mkdirSync(outside);
+    seedTasks(outside);
+    assert.match(start({ run_roots: roots, rows }, path.join(outside, "loop.json")).stderr, /must be inside/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });

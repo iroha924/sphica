@@ -16,6 +16,7 @@ import {
   evalCache,
   fenceDigest,
   fencedCodexHome,
+  isInside,
   pinCheckout,
   requireInside,
 } from "./codex-home.ts";
@@ -42,25 +43,20 @@ export function codexFence(profile: string, cache: string, codexHome: string): s
   });
 }
 
-/** The fence a run started now records: collect counts only runs made under it */
-export function currentRunFence(cache: string): string {
-  const codexHome = path.join(cache, "codex-runs", "<run>", "codex-home");
+/** The fence a fenced Codex started now records with this base: collect and grade count only what was made under it */
+export function currentFence(base: ":read-only" | ":workspace", cache: string): string {
+  const codexHome = path.join(cache, "<run>", "codex-home");
   return codexFence(
-    codexProfile(":workspace", [...codexDenies(cache), path.join(codexHome, "auth.json")]),
+    codexProfile(base, [...codexDenies(cache), path.join(codexHome, "auth.json")]),
     cache,
     codexHome,
   );
 }
 
-const inside = (root: string, p: string) => {
-  const rel = path.relative(root, p);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-};
-
 /** A temp tree for what the model must reach; under a denied parent it would be unreadable, so that refuses to start */
 export function outsideTree(prefix: string, denied: string[]): string {
   const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  const under = denied.find((d) => inside(d, tree));
+  const under = denied.find((d) => isInside(d, tree));
   if (under) {
     fs.rmSync(tree, { recursive: true, force: true });
     throw new Error(`the temp directory ${tree} is under ${under}, which the fence denies`);

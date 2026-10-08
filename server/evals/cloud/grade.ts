@@ -7,7 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { replaceFile } from "../../src/file-lock.ts";
-import { isolatedCodexHome, ownerCodexSettings } from "./codex-home.ts";
+import { codexLock, evalCache, fencedCodexHome, ownerCodexSettings, requireInside } from "./codex-home.ts";
+import { codexDenies, currentFence, outsideTree } from "./codex-run.ts";
 import { readTasks } from "./firing.ts";
 import {
   blindPrompt,
@@ -45,18 +46,32 @@ const loop = JSON.parse(fs.readFileSync(args.loop, "utf8")) as {
   build?: string | null;
   variant?: string;
   bundle: string;
+  run_roots?: unknown;
   rows: GradeRow[];
 };
+// The Codex runs were denied the evaluation cache as a whole; a build or run kept elsewhere may have been read by one of them
+const cache = evalCache();
+requireInside(cache, path.dirname(args.loop), "the build");
+if (
+  !Array.isArray(loop.run_roots) ||
+  !loop.run_roots.every((r) => typeof r === "string" && path.isAbsolute(r))
+)
+  throw new Error(`${args.loop} does not say where its runs were (run_roots); collect it again`);
+for (const root of loop.run_roots as string[]) requireInside(cache, root, "a run root");
+const denies = codexDenies(cache);
+const graderFence = currentFence(":read-only", cache);
+const release = codexLock(cache);
+process.on("exit", release);
 
 /**
  * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
  * loop for it to read nearby, and none of the owner's hooks or plugins can add context to a blind grade.
  */
 function gradeOne(prompt: string, settings: string): { status: number | null; output: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-"));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-grade-home-"));
+  const dir = outsideTree("sphica-grade-", denies);
+  const home = outsideTree("sphica-grade-home-", denies);
   try {
-    isolatedCodexHome(path.join(home, ".codex"), "", settings);
+    fencedCodexHome(path.join(home, ".codex"), { base: ":read-only", deny: denies, settings });
     // The schema text the checkpoint key holds, not the file, which may change while grading runs
     const schemaFile = path.join(home, "grade.schema.json");
     fs.writeFileSync(schemaFile, schema);
@@ -134,6 +149,7 @@ function graderRun(
     variant,
     schema,
     codexConfig: settings,
+    codexFence: grader === "codex" ? graderFence : null,
   });
   const saved = checkpoint.entries[key];
   if (saved) {

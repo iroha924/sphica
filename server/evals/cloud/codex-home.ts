@@ -111,9 +111,20 @@ export function isInside(root: string, p: string): boolean {
   return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
 }
 
+/** `p` resolved through links; a part that does not exist yet is kept as written under its nearest existing parent */
+function resolved(p: string): string {
+  const rest: string[] = [];
+  let at = path.resolve(p);
+  while (!fs.existsSync(at) && path.dirname(at) !== at) {
+    rest.unshift(path.basename(at));
+    at = path.dirname(at);
+  }
+  return path.join(fs.realpathSync(at), ...rest);
+}
+
 /** `p` resolved through links, or an error when it is not strictly inside `root`. */
 export function requireInside(root: string, p: string, what: string): string {
-  const real = fs.realpathSync(p);
+  const real = resolved(p);
   if (real === root || !isInside(root, real))
     throw new Error(`${what} must be inside ${root}, which fenced Codex runs cannot read: ${real}`);
   return real;

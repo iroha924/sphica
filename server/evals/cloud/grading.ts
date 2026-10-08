@@ -188,7 +188,7 @@ export type Grader = "codex" | "claude";
 
 /** How each grader is started, apart from the paths of one call: grade.ts spawns with these and the checkpoint key holds them. */
 export const GRADER_ARGS: Record<Grader, readonly string[]> = {
-  codex: ["exec", "-s", "read-only", "--ephemeral", "--ignore-rules", "--skip-git-repo-check"],
+  codex: ["exec", "--ephemeral", "--ignore-rules", "--skip-git-repo-check"],
   claude: [
     "-p",
     "--setting-sources",
@@ -216,6 +216,8 @@ export type CheckpointInput = {
   schema: string;
   /** The model settings Codex is started with; null for Claude, whose default model cannot be read without starting it */
   codexConfig: string | null;
+  /** The read fence Codex is started with; null for Claude, whose keys stay as they were */
+  codexFence: string | null;
 };
 
 /**
@@ -241,6 +243,7 @@ export function checkpointKey(i: CheckpointInput): string {
       i.variant,
       sha(i.schema),
       i.codexConfig,
+      ...(i.codexFence === null ? [] : [i.codexFence]),
     ]),
   );
 }
