@@ -72,7 +72,8 @@ Print the whole `biome.jsonc` the owner would end up with, in one `jsonc` block:
 - **An override's options replace the project-wide ones; they do not merge.** Copy the project-wide `options` whole (`paths` and
   `patterns`) into each override, then add to them, or the files under A lose the project-wide bans
 - A line `// sphica: <record key>` right before each pattern or override, for the record it comes from. A record whose exception shapes an
-  override gets its own marker before that override
+  override gets its own marker before that override. Keep each marker a line of its own that starts with the comment: a marker inside a
+  multi-line comment or after code on the same line is not read
 
 Under the block, for each check: its scope, its exceptions, one import line that must fail, and one file that must pass. Say what it does
 not see: Biome checks `import`, `export ... from`, `import type`, and `import()`, but not `require()`.

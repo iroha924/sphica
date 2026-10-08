@@ -125,9 +125,32 @@ const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: READ_BUDGET - 4 * 1024 }
 const CONDITION_ROWS = Math.ceil(LOOK_LIMITS.bytes / 28);
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
 const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
-/** The same key in a check file, inside a comment of the file's language: `//`, `#`, a block comment, or an HTML comment */
-const COMMENT_MARKER =
-  /(?:\/\/|#|\/\*|<!--)\s*sphica:\s*((?:trace|harvest|glean):[\w.:/-]{1,1000}?)(?=\s|\*\/|-->|$)/g;
+/** How a comment opens in a check file's language, by extension */
+const COMMENTS: Record<string, string[]> = {
+  ...Object.fromEntries(
+    ["json", "jsonc", "json5", "js", "cjs", "mjs", "ts", "cts", "mts", "jsx", "tsx"].map((x) => [
+      x,
+      ["//", "/*"],
+    ]),
+  ),
+  ...Object.fromEntries(["toml", "yaml", "yml", "py", "sh", "cfg"].map((x) => [x, ["#"]])),
+  ...Object.fromEntries(["html", "xml", "md"].map((x) => [x, ["<!--"]])),
+};
+const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The same key in a check file: a line that starts with a comment of the file's language, so text in a string or after code is never read
+ * as a marker. Null when the extension's comments are not known here.
+ */
+function commentMarker(file: string): RegExp | null {
+  const openers = COMMENTS[path.extname(file).slice(1).toLowerCase()];
+  return openers
+    ? new RegExp(
+        `^\\s*(?:${openers.map(literal).join("|")})\\s*sphica:\\s*((?:trace|harvest|glean):[\\w.:/-]{1,1000}?)(?=\\s|\\*/|-->|$)`,
+        "g",
+      )
+    : null;
+}
 
 /**
  * Where a look page goes on from: the stage, and the last item of it already dealt with, by a position that does not move when other items
@@ -166,8 +189,9 @@ export function lookCursor(after: string): Cursor | null {
 
 const cursorText = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString("base64url");
 
-const checksHash = (checks: string[]) =>
-  checks.length ? pathHash([...checks].sort().join("\0")) : undefined;
+// JSON keeps each path whole whatever it holds, so two lists never hash alike by where a separator falls
+export const checksHash = (checks: string[]) =>
+  checks.length ? pathHash(JSON.stringify([...checks].sort())) : undefined;
 
 /** Whether a look cursor goes on with the same check files it was given for: another list would skip or repeat files. */
 export function cursorFitsChecks(after: string, checks: string[]): boolean {
@@ -338,10 +362,16 @@ export async function lookOverview(
       const resume = from.s === "markers" && from.file ? from : null;
       const scan = ruleFiles(root, resume?.file, checks);
       const todo: { file: string; line: number; n: number; key: string }[] = [];
+      let unknownSyntax = 0;
       for (const f of scan.files) {
         const same = resume !== null && pathHash(f.path) === resume.file;
+        const marker = f.check ? commentMarker(f.path) : MARKER;
+        if (!marker) {
+          unknownSyntax++;
+          continue;
+        }
         for (const [i, text] of f.text.split(/\r?\n/).entries())
-          for (const [n, m] of [...text.matchAll(f.check ? COMMENT_MARKER : MARKER)].entries())
+          for (const [n, m] of [...text.matchAll(marker)].entries())
             if (!same || i + 1 > resume.line || (i + 1 === resume.line && n > resume.n))
               todo.push({ file: f.path, line: i + 1, n, key: m[1] ?? "" });
       }
@@ -397,6 +427,8 @@ export async function lookOverview(
       if (scan.incomplete) notChecked.push(`instruction files: the listing ${scan.incomplete}`);
       if (scan.missing) notChecked.push(`${scan.missing} check files named that are not there`);
       if (scan.outside) notChecked.push(`${scan.outside} check files named outside the repository`);
+      if (unknownSyntax)
+        notChecked.push(`${unknownSyntax} check files whose comments are not known here by their extension`);
     }
   }
 

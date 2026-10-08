@@ -13,6 +13,7 @@ import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
 import { framed } from "../src/frame.ts";
 import {
+  checksHash,
   cursorFitsChecks,
   liveOverview,
   lookCursor,
@@ -283,8 +284,9 @@ test("look reads the check files the owner names for sphica markers in their own
         '{ "overrides": [',
         "  // sphica: trace:ext-s1/kept-check",
         "  // sphica: trace:ext-s1/old-check",
-        '  { "includes": ["src/**"] }, /* sphica: trace:ext-s1/dropped-check */',
-        "  <!-- sphica: trace:ext-s1/nothing -->",
+        "  /* sphica: trace:ext-s1/dropped-check */",
+        "  // sphica: trace:ext-s1/nothing",
+        '  { "includes": ["src/**"] },',
         "] }",
       ].join("\n"),
     );
@@ -327,6 +329,54 @@ test("look reads the check files the owner names for sphica markers in their own
       lookOverview(db.reader, p, root, cursor(), ["biome.jsonc"]),
       /another list of checks/,
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("look reads a check file's marker lines only: a comment of the file's own language at the start of a line", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [record(m, "old-check", "constraint")]);
+    await save(db, p, [record(m, "new-check", "constraint", { supersedes: "trace:ext-s1/old-check" })]);
+    const old = "trace:ext-s1/old-check";
+    fs.writeFileSync(
+      path.join(root, "biome.jsonc"),
+      [`{ "description": "// sphica: ${old}",`, `  <!-- sphica: ${old} -->`, `  // sphica: ${old}`, "}"].join(
+        "\n",
+      ),
+    );
+    fs.writeFileSync(
+      path.join(root, "checks.toml"),
+      `x = "# sphica: ${old}"\n// sphica: ${old}\n# sphica: ${old}\n`,
+    );
+    // An instruction file named as a check is still read as Markdown: a code example is not a marker
+    fs.writeFileSync(path.join(root, "AGENTS.md"), `Example:\n\n    // sphica: ${old}\n`);
+    fs.writeFileSync(path.join(root, "rules.unknown"), `// sphica: ${old}\n`);
+    const look = await lookOverview(db.reader, p, root, undefined, [
+      "biome.jsonc",
+      "checks.toml",
+      "AGENTS.md",
+      "rules.unknown",
+    ]);
+    // A file whose comments are not known by its extension is counted, never read as having no markers
+    assert.match(look, /- 1 check files whose comments are not known here by their extension/);
+    assert.deepEqual(
+      [...look.matchAll(/^- (\S+): trace:ext-s1\/old-check was superseded/gm)].map((x) => x[1]),
+      ["biome.jsonc:3", "checks.toml:3"],
+    );
+    // Lists that differ only where a path holds the separator do not share a cursor
+    const cursor = (c: string) =>
+      Buffer.from(JSON.stringify({ s: "markers", file: "0123456789abcdef", line: 1, n: 0, c })).toString(
+        "base64url",
+      );
+    const given = cursor(checksHash(["a\u0000b", "c"]) ?? "");
+    assert.equal(cursorFitsChecks(given, ["a\u0000b", "c"]), true);
+    assert.equal(cursorFitsChecks(given, ["a", "b", "c"]), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     await db.done();

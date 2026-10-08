@@ -123,7 +123,7 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - 完了条件: `cd server && node --test test/overview.test.ts test/rule-files.test.ts` → 一覧のファイルだけを読み、`//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出し、読めなかった・無かった・範囲外の件数と上限・ページ送り・READ_BUDGET を守る
   - コミット: `feat(overview): flag check files whose marker names a replaced record`
   - 結果: `node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass（新しく: 名指した biome.jsonc と checks.toml の `//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出す、名指さないファイルは読まない、無い 1 件・外 2 件を数える、カーソルは別の checks の一覧では続かない、MCP で checks を live に渡すと拒否、symlink で外へ出る検査ファイルと上限を超えるファイルは読まない）。`bun run verify` → exit 0
-- [ ] T13: 検査ファイルの marker を文字列や別の言語のコメントから拾い、instruction ファイルの走査を変え、checks のハッシュが衝突する誤りを直す
+- [x] T13: 検査ファイルの marker を文字列や別の言語のコメントから拾い、instruction ファイルの走査を変え、checks のハッシュが衝突する誤りを直す
   - 種別: 修正
   - 計画: S5
   - 依存: T09（直す対象の look の checks）
@@ -131,6 +131,7 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - red: `cd server && node --test --test-name-pattern="marker lines only" test/overview.test.ts` → 直す前のコードで、JSON の文字列の中の `// sphica:` と JSONC の HTML コメントを marker として拾い、checks に入れた AGENTS.md のコード例の `// sphica:` を拾い、`["a\u0000b", "c"]` と `["a", "b", "c"]` のカーソルを同じと見なして失敗する
   - 完了条件: `cd server && node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass
   - コミット: `fix(overview): read a check file's marker only from a comment line of its own language`
+  - 結果: red: 直す前のコードで `--test-name-pattern="marker lines only"` → 失敗（AGENTS.md:3、biome.jsonc:2 の HTML コメント、checks.toml:2 の `//` を拾った）。直した後: `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass（行頭のその言語のコメントだけを拾う、checks に入れた AGENTS.md は Markdown として読む、拡張子の分からないファイルは件数を出す、NUL を含む一覧と区切りの違う一覧はカーソルを共有しない）。T09 のテストの行末コメントと JSONC の HTML コメントを、行頭のコメントに直した（意図した挙動の変更）。`bun run verify` → exit 0
 
 - [ ] T10: M2 のタスク、隠しテスト、patch の違反の判定
   - 種別: 追加

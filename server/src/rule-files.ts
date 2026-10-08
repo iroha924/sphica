@@ -76,7 +76,8 @@ export function ruleFiles(root: string, from?: string, checks: string[] = []): R
       continue;
     }
     if (text === undefined) out.skipped++;
-    else out.files.push({ path: rel, text, check: named.has(rel) });
+    // An instruction file named as a check is still read as one, by its HTML comment markers
+    else out.files.push({ path: rel, text, check: named.has(rel) && !isRuleFile(rel) });
   }
   return out;
 }
