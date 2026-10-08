@@ -178,6 +178,16 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `fix(eval): refuse links out of a judged checkout and grade only complete reports`
   - 結果: red を確かめた（未確認の範囲を残した報告で reason が空、リンクの先を Biome が読んで parse の失敗）。`node --test test/review-eval.test.ts` → 8 件 pass。直した採点器で予備測定を採点し直した: `node evals/review/grade.ts --report ~/.cache/sphica-eval/review/pilot-a` → Claude 40 graded・誤った violation 1、Codex 37 graded・3 failed（時間切れ）。pilot-b → 両モデル 40 graded・0。数字は元のとおり。`bun run verify` → exit 0
 
+- [x] T17: M2 の判定のテストが macOS 以外で sandbox-exec を呼んで落ちる誤りを直す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T16（直す対象の M2 の判定）
+  - 変更: `server/evals/review/m2.ts`, `server/test/review-eval.test.ts`
+  - red: `gh run view 37741122318 --log-failed` → PR #304 の CI の check（Linux）で「M2 judges」が AssertionError: not run to the end (spawnSync /usr/bin/sandbox-exec ENOENT)
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass。PR #304 の CI の check が pass
+  - コミット: `fix(eval): run M2's hidden test without the macOS sandbox in tests on other hosts`
+  - 結果: judge が隠しテストの runner を受け取るようにし、テストは eval-fixture と同じく macOS 以外では Node の囲いだけで流す。sandbox なしの経路を手元で流して確かめた（count の違反ありの patch で violations [src/ui/detail.ts]、completed true。実際のパスを渡さないと Node の囲いの外になり、隠しテストが走らなかった）。`node --test test/review-eval.test.ts` → 8 件 pass、`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-08 / T05 / 欄を変えた。変更（前: plan.json、後: run.ts・cases.json・grade.ts・review-eval.test.ts）、完了条件（前: baseline の本測定と plan.json の回数、後: 予備測定 A と B の report）/ 予備測定で #220 の打ち切りが決まり（plan の変更履歴、持ち主の Go）、本測定の回数を固定するファイルは要らなくなった。予備測定で見つけた直しをこのタスクに入れた: duplicate-names の正解をどの判定でも可に（あいまい）、grade.ts の missed を「正解が violation だけ」のときに限定、run.ts の時間切れでプロセスのグループごと止めて上限を 10 分に
@@ -218,3 +228,4 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T13 / 結果（feat/e3-checkable-decisions で）: red: 直す前のコードで `--test-name-pattern="marker lines only"` → 失敗（AGENTS.md:3、biome.jsonc:2 の HTML コメント、checks.toml:2 の `//` を拾った）。直した後: `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass（行頭のその言語のコメントだけを拾う、checks に入れた AGENTS.md は Markdown として読む、拡張子の分からないファイルは件数を出す、NUL を含む一覧と区切りの違う一覧はカーソルを共有しない）。T09 のテストの行末コメントと JSONC の HTML コメントを、行頭のコメントに直した（意図した挙動の変更）。`bun run verify` → exit 0
 - 2026-10-08 / T14 / 結果（feat/e3-checkable-decisions で）: red を確かめた（TypeError: openers.map is not a function）。表を Map にして `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass。Skill に、module の禁止は今ある深さだけを守ると書いた（T12 のレビューの F1 を見送った代わり）。`bun run verify` → exit 0
 - 2026-10-08 / T15 / Codex の全差分のレビュー（main..c05d5484、high）: 3 件とも受け入れ T16 を足した。M2 の判定が外を指すリンクを通して書く（高）、採点器が completion 行の未確認の範囲・件数・重複を見ない（中）、result.json の無い run を分母に入れない（中）。厳しくした件数の照合が Codex の `findings: 1 (informational)` を読めず 8 run を落としたので、件数の後ろの説明を許した
+- 2026-10-08 / T17 / PR #304 の CI の check（Linux、Node 24.15 と 26）で M2 の判定のテストが sandbox-exec の ENOENT で落ちた。この PR で入ったもので、Linux に sandbox-exec が無いという決まった原因なので、ジョブの流し直しはしなかった

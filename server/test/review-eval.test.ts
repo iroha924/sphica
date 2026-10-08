@@ -1,10 +1,11 @@
 // The review evaluation's fixture and expected verdicts: every record a case expects is the set review_select selects for its diff, so a
 // run is graded on the records it was asked about. The pinned Biome is checked on the fixture's files before any drafted check is judged by it.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
@@ -149,6 +150,22 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   assert.match(prompt, /\| Uncommitted, tracked \| empty \|\n\| Untracked \| empty \|/);
   assert.match(prompt, /completion: lane=precedent model=codex coverage=/);
 });
+
+/** The hidden test as collect runs it: on macOS inside its sandbox, elsewhere (no sandbox-exec) with the same Node fence and scratch alone */
+function hiddenHere(given: string, source: string) {
+  if (process.platform === "darwin") return runHiddenTest(given, source, 60_000);
+  // Node's fence compares real paths: a temp directory reached through a link would be outside it
+  const work = fs.realpathSync(given);
+  fs.mkdirSync(path.join(work, "test"), { recursive: true });
+  fs.writeFileSync(path.join(work, "test", "hidden.test.ts"), source);
+  const scratch = fs.realpathSync(tempDir("m2-hidden-"));
+  const r = spawnSync(process.execPath, hiddenNodeArgs(work, scratch), {
+    cwd: work,
+    encoding: "utf8",
+    env: hiddenEnv(work, scratch),
+  });
+  return { tests: r.stdout, parts: partsOf(source, r.stdout) };
+}
 
 /** A run directory as runLane leaves it, with events in the host's own shape: review_check calls and their replies, and Codex's commands */
 function fakeRun(
@@ -452,7 +469,7 @@ test("M2 judges a run's final patch: a forbidden import that stays is a violatio
     const work = path.join(tempDir("m2-work-"), "work");
     const start = prepare(repo, work, condition);
     for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(work, rel), text);
-    return judge(work, start, task(id), path.join(tempDir("m2-judged-"), "judged"));
+    return judge(work, start, task(id), path.join(tempDir("m2-judged-"), "judged"), hiddenHere);
   };
   const direct =
     'import { open } from "../db.ts";\nexport function bookCount(file: string): number {\n  const db = open(file);\n  const n = (db.prepare("select count(*) as n from book").get() as { n: number }).n;\n  db.close();\n  return n;\n}\n';
