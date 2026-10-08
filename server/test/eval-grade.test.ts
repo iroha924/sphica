@@ -2991,6 +2991,7 @@ printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
     assert.ok(!fs.existsSync(path.join(cache, "codex.lock")), "the lock is released");
     // Runs kept where the fenced runs could read them, or a loop that does not say where its runs were, are not graded
     assert.match(start({ rows }).stderr, /run_roots/);
+    assert.match(start({ run_roots: [], rows }).stderr, /run_roots/);
     assert.match(
       start({ run_roots: [...roots, path.join(base, "elsewhere")], rows }).stderr,
       /must be inside/,

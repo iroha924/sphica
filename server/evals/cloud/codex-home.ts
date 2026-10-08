@@ -111,15 +111,36 @@ export function isInside(root: string, p: string): boolean {
   return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
 }
 
-/** `p` resolved through links; a part that does not exist yet is kept as written under its nearest existing parent */
+/**
+ * `p` resolved one part at a time, so each link is followed before a `..` after it steps up; the parts that do not exist yet are kept as
+ * written under the last one that does. A link that points nowhere is refused: what it names could be made anywhere later.
+ */
 function resolved(p: string): string {
-  const rest: string[] = [];
-  let at = path.resolve(p);
-  while (!fs.existsSync(at) && path.dirname(at) !== at) {
-    rest.unshift(path.basename(at));
-    at = path.dirname(at);
+  const abs = path.isAbsolute(p) ? p : `${process.cwd()}${path.sep}${p}`;
+  const root = path.parse(abs).root;
+  const parts = abs
+    .slice(root.length)
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  let at = fs.realpathSync(root);
+  for (const [i, part] of parts.entries()) {
+    if (part === ".") continue;
+    if (part === "..") {
+      at = path.dirname(at);
+      continue;
+    }
+    const next = path.join(at, part);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(next);
+    } catch {
+      return path.join(next, ...parts.slice(i + 1));
+    }
+    if (!st.isSymbolicLink()) at = next;
+    else if (fs.existsSync(next)) at = fs.realpathSync(next);
+    else throw new Error(`${next} is a link to nothing`);
   }
-  return path.join(fs.realpathSync(at), ...rest);
+  return at;
 }
 
 /** `p` resolved through links, or an error when it is not strictly inside `root`. */

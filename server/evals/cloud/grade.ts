@@ -57,6 +57,7 @@ const cache = evalCache();
 requireInside(cache, path.dirname(args.loop), "the build");
 if (
   !Array.isArray(loop.run_roots) ||
+  !loop.run_roots.length ||
   !loop.run_roots.every((r) => typeof r === "string" && path.isAbsolute(r))
 )
   throw new Error(`${args.loop} does not say where its runs were (run_roots); collect it again`);

@@ -137,6 +137,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `feat(eval): add probes that show the Codex run and grader cannot read what is fenced (T07)`
   - 結果: `cd server && node --test test/eval-codex.test.ts` → 16 件 pass（probe.sh の分類と NEXT を流さないこと、probe.sh 以外の出力を数えないこと、無い対象で走らせる前に止まること、anchor の無い slot で対象が無いこと、codex.ts と grade.ts の `--probe` が囲いの無い偽の codex で READ を拾って 1 で終わり、run を `<out>/probe` に分け、cache の token・checkpoint・grades.json を残さないこと）
   - 結果: `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/eval-codex.test.ts` → 156 件 pass。`bun run typecheck`・`bun run lint`・`bun run english`・`bun run architecture` → 0 で終わった
+- [x] T12: T05 のレビューの指摘を直す（`..` を symlink の解決より先に畳んで cache の外を内側と判定する、空の `run_roots` で置き場の確認が素通りになる）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T05（直す対象の検査が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test --test-name-pattern="resolves links" test/eval-codex.test.ts` → `cache/hop/../new`（hop は外へのリンク）を内側として受け付けて失敗する。`node --test --test-name-pattern="read fence" test/eval-grade.test.ts` → `run_roots: []` の loop を採点に進めて失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 全件 pass
+  - コミット: `fix(eval): resolve each link before stepping up, and refuse a loop with no run roots (T12)`
+  - 結果: 直す前の codex-home.ts で `node --test --test-name-pattern="resolves links" test/eval-codex.test.ts` → 失敗（Missing expected exception）。`node --test --test-name-pattern="read fence" test/eval-grade.test.ts` → 空の run_roots で stderr が空になり失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 90 件 pass。`bun run typecheck`・`bun run lint` → 0 で終わった
+
 - [ ] T08: eval-loop Skill に probe・1 つずつ・出力先・既知の限界を書く
   - 種別: 変更
   - 計画: S7
@@ -158,5 +169,5 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T03 / Codex のレビュー（high）で P1 が 2 件、P2 が 1 件。リポジトリの .git から `git show` で tasks.json を読める、後片付けのコピーの失敗で一時の木を残したままロックを外す、絶対リンクが移した後に切れる / 3 件とも採用し、T11 を足して直した。deny を `server/evals` からリポジトリのルートに広げた（plan の方針 2 の deny の対象が変わる）
 - 2026-10-08 / T04 / Codex のレビューで P2 が 2 件。パスに引用符があると指紋が食い違う（T09 で塞がっていた）、除外した Codex の行に fence が残らない / 後者を採用し、T10 を足す
 - 2026-10-08 / T11 / review の評価の `evalDenies` も `server/evals` だけを deny していて、同じくリポジトリの .git から読める / plan の対象外（review の挙動は変えない）なので直さず、持ち主に聞く
-
 - 2026-10-08 / T07 / `gradeOne` が probe のためにイベントも返すようになり、checkpoint に `events` まで保存して既存の checkpoint のテストが落ちた / 保存する欄を status と output に限った
+- 2026-10-08 / T05 / Codex のレビュー（high）で P1 が 1 件、P2 が 1 件。`..` を symlink の解決より先に畳むので cache の外を内側と判定する（Codex が再現）、空の `run_roots` が素通りになる / 2 件とも採用し、T12 を足して直した

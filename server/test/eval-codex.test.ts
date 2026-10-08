@@ -503,3 +503,22 @@ test("grade.ts --probe fails when the grader reads what the fence must hide, and
     assert.ok(!fs.existsSync(path.join(b.build, f)), f);
   assert.ok(!fs.existsSync(path.join(b.cache, "codex.lock")));
 });
+
+test("containment resolves links before parent steps, and a link that points nowhere is not taken for a new directory", () => {
+  const base = fs.realpathSync(tempDir("fence-links-"));
+  const cache = evalCache(base);
+  const outside = path.join(base, "outside", "deep");
+  fs.mkdirSync(outside, { recursive: true });
+  // cache/hop -> base/outside/deep, so cache/hop/.. is base/outside, not the cache
+  fs.symlinkSync(outside, path.join(cache, "hop"));
+  assert.throws(() => requireInside(cache, `${cache}/hop/../new`, "a run root"), /must be inside/);
+  fs.symlinkSync(path.join(base, "not-yet"), path.join(cache, "dangling"));
+  assert.throws(
+    () => requireInside(cache, path.join(cache, "dangling", "runs"), "a run root"),
+    /must be inside|link/,
+  );
+  assert.equal(
+    requireInside(cache, path.join(cache, "new", "runs"), "a run root"),
+    path.join(cache, "new", "runs"),
+  );
+});
