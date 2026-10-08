@@ -12,7 +12,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, DENY_DIRS, DENY_FILES, finalAnswer, runEnv } from "../cloud/claude-run.ts";
 import { claimRunDir, codexModelOf, isolatedCodexHome } from "../cloud/codex-home.ts";
-import { runHiddenTest } from "../cloud/hidden-test.ts";
+import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { buildReviewFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
@@ -102,13 +102,16 @@ export type M2Judgement = {
  * installed in the run itself flags the exception, and the hidden test.
  */
 export function judge(work: string, start: string, task: Task, scratch: string): M2Judgement {
+  // The run wrote this checkout: a link out of it would let the judge read or write the owner's files
+  if (linksOutside(work)) throw new Error("a link in the checkout leads outside it; the run is not judged");
   const files = changed(work, start);
   fs.cpSync(work, scratch, { recursive: true, filter: (src) => path.basename(src) !== ".git" });
   const installed = fs.existsSync(path.join(scratch, "biome.jsonc"))
     ? restrictedImports(scratch).map((r) => r.path)
     : null;
   fs.rmSync(path.join(scratch, "biome.json"), { force: true });
-  fs.writeFileSync(path.join(scratch, "biome.jsonc"), cases.check);
+  fs.rmSync(path.join(scratch, "biome.jsonc"), { force: true });
+  fs.writeFileSync(path.join(scratch, "biome.jsonc"), cases.check, { flag: "wx" });
   const flagged = new Set(restrictedImports(scratch).map((r) => r.path));
   const hidden = runHiddenTest(scratch, task.test);
   return {
@@ -272,8 +275,14 @@ function report(runs: string) {
   >();
   for (const name of fs.readdirSync(runs).sort()) {
     const file = path.join(runs, name, "result.json");
-    if (!fs.existsSync(file)) continue;
-    const r = JSON.parse(fs.readFileSync(file, "utf8")) as {
+    if (name.startsWith("fixture") || !fs.statSync(path.join(runs, name)).isDirectory()) continue;
+    // A run directory without its result counts as a failed run
+    const [, task = "", condition = "", host = ""] = /^(\w+)-(rules|check)-(claude|codex)-/.exec(name) ?? [];
+    const r = (
+      fs.existsSync(file)
+        ? JSON.parse(fs.readFileSync(file, "utf8"))
+        : { host, condition, task, status: null }
+    ) as {
       host: string;
       condition: string;
       task: string;

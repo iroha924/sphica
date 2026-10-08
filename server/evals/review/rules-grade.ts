@@ -98,8 +98,13 @@ function main() {
   const rows: string[] = [];
   for (const name of fs.readdirSync(runs).sort()) {
     const dir = path.join(runs, name);
-    if (!name.startsWith("rules-") || !fs.existsSync(path.join(dir, "result.json"))) continue;
-    const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as {
+    if (!name.startsWith("rules-")) continue;
+    // A run directory without its result counts as a failed run
+    const result = (
+      fs.existsSync(path.join(dir, "result.json"))
+        ? JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"))
+        : { host: /-(claude|codex)-/.exec(name)?.[1] ?? "unknown", status: null, reason: "no result.json" }
+    ) as {
       host: string;
       status: number | null;
       reason: string | null;

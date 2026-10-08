@@ -168,6 +168,16 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `test(eval): add the review and rules evaluation for E3 (#220, #257)`
   - 結果: `git diff --quiet main -- plugin server/src server/test/overview.test.ts server/test/rule-files.test.ts .claude-plugin` → exit 0（製品側は main と同じ、版は 0.6.42）。`bun run release:plan -- --base v0.6.42 のコミット` → none。`bun run verify` → exit 0
 
+- [x] T16: M2 の判定が checkout の外へのリンクを通して書き、採点器が completion 行の中身を確かめず、結果の無い run を数えない誤りを直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T15（直す対象は最終の差分の評価の仕組み）
+  - 変更: `server/evals/review/m2.ts`, `server/evals/review/grade.ts`, `server/evals/review/rules-grade.ts`, `server/evals/review/run.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="completion line leaves|never writes through" test/review-eval.test.ts` → 直す前のコードで、未確認の範囲を残した COMPLETE の報告を graded にし、M2 の判定が外を指す biome.jsonc のリンクを拒まず先を読んで失敗する
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): refuse links out of a judged checkout and grade only complete reports`
+  - 結果: red を確かめた（未確認の範囲を残した報告で reason が空、リンクの先を Biome が読んで parse の失敗）。`node --test test/review-eval.test.ts` → 8 件 pass。直した採点器で予備測定を採点し直した: `node evals/review/grade.ts --report ~/.cache/sphica-eval/review/pilot-a` → Claude 40 graded・誤った violation 1、Codex 37 graded・3 failed（時間切れ）。pilot-b → 両モデル 40 graded・0。数字は元のとおり。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-08 / T05 / 欄を変えた。変更（前: plan.json、後: run.ts・cases.json・grade.ts・review-eval.test.ts）、完了条件（前: baseline の本測定と plan.json の回数、後: 予備測定 A と B の report）/ 予備測定で #220 の打ち切りが決まり（plan の変更履歴、持ち主の Go）、本測定の回数を固定するファイルは要らなくなった。予備測定で見つけた直しをこのタスクに入れた: duplicate-names の正解をどの判定でも可に（あいまい）、grade.ts の missed を「正解が violation だけ」のときに限定、run.ts の時間切れでプロセスのグループごと止めて上限を 10 分に
@@ -207,3 +217,4 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T09 / 結果（feat/e3-checkable-decisions で）: `node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass（新しく: 名指した biome.jsonc と checks.toml の `//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出す、名指さないファイルは読まない、無い 1 件・外 2 件を数える、カーソルは別の checks の一覧では続かない、MCP で checks を live に渡すと拒否、symlink で外へ出る検査ファイルと上限を超えるファイルは読まない）。`bun run verify` → exit 0
 - 2026-10-08 / T13 / 結果（feat/e3-checkable-decisions で）: red: 直す前のコードで `--test-name-pattern="marker lines only"` → 失敗（AGENTS.md:3、biome.jsonc:2 の HTML コメント、checks.toml:2 の `//` を拾った）。直した後: `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass（行頭のその言語のコメントだけを拾う、checks に入れた AGENTS.md は Markdown として読む、拡張子の分からないファイルは件数を出す、NUL を含む一覧と区切りの違う一覧はカーソルを共有しない）。T09 のテストの行末コメントと JSONC の HTML コメントを、行頭のコメントに直した（意図した挙動の変更）。`bun run verify` → exit 0
 - 2026-10-08 / T14 / 結果（feat/e3-checkable-decisions で）: red を確かめた（TypeError: openers.map is not a function）。表を Map にして `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass。Skill に、module の禁止は今ある深さだけを守ると書いた（T12 のレビューの F1 を見送った代わり）。`bun run verify` → exit 0
+- 2026-10-08 / T15 / Codex の全差分のレビュー（main..c05d5484、high）: 3 件とも受け入れ T16 を足した。M2 の判定が外を指すリンクを通して書く（高）、採点器が completion 行の未確認の範囲・件数・重複を見ない（中）、result.json の無い run を分母に入れない（中）。厳しくした件数の照合が Codex の `findings: 1 (informational)` を読めず 8 run を落としたので、件数の後ろの説明を許した

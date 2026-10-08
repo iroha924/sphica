@@ -7,7 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
-import { gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
+import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
 import { judge, m2Tasks, prepare } from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
@@ -239,13 +239,13 @@ test("the grader counts verdicts only from backed batches and a matching complet
       { findings: both("complies", "undetermined"), reply: "1 problems:\n- x" },
       { findings: both("violation", "undetermined"), reply: ok() },
     ],
-    report: `verdict: changes_required\nquestions: 1\n- ${B}: whether the grid loads in 2 s\n\n1. [high] src/x.ts:1 — y\n\n\`\`\`\n${done("claude")}\n\`\`\``,
+    report: `verdict: changes_required\nfindings: 1\nquestions: 1\n- ${B}: whether the grid loads in 2 s\n\n1. [high] src/x.ts:1 — y\n\n\`\`\`\n${done("claude")}\n\`\`\``,
   });
   fakeRun(runs, {
     run: "flip-codex",
     host: "codex",
     checks: [{ findings: both("complies", "violation"), reply: ok() }],
-    report: done("codex"),
+    report: `findings: 1\n${done("codex")}`,
   });
   fakeRun(runs, {
     run: "short-claude",
@@ -256,7 +256,7 @@ test("the grader counts verdicts only from backed batches and a matching complet
         reply: "Batch 1 of 2 backed (selection abc). Not judged in this call: 1 records",
       },
     ],
-    report: done("claude"),
+    report: `findings: 1\n${done("claude")}`,
   });
   fakeRun(runs, {
     run: "nolast-claude",
@@ -270,7 +270,7 @@ test("the grader counts verdicts only from backed batches and a matching complet
     host: "codex",
     checks: [{ findings: both("violation", "undetermined"), reply: ok() }],
     commands: ["/bin/zsh -lc 'cat ../../cases.json'"],
-    report: done("codex"),
+    report: `findings: 1\n${done("codex")}`,
   });
   const grade = (run: string) =>
     gradeRun(path.join(runs, run), expect, { forbidden: ["/nowhere/sphica"], runs });
@@ -472,4 +472,76 @@ test("M2 judges a run's final patch: a forbidden import that stays is a violatio
   assert.deepEqual([admin.violations, admin.falseFailure, admin.completed], [[], false, true], admin.tests);
   const unfinished = run("rules", "debounce", {});
   assert.equal(unfinished.completed, false);
+});
+
+test("the grader fails a run whose completion line leaves scope unchecked, disagrees with its count, or comes twice, and counts a run with no result", () => {
+  const runs = tempDir("review-grade2-");
+  const A = "trace:s/a";
+  const expect = { [A]: { outcomes: ["violation" as const], question: false } };
+  const backed = [
+    {
+      findings: [{ outcome: "violation", unit: A }],
+      reply: "Batch 1 of 1 backed (selection abc). This was the last batch (1 records in all).",
+    },
+  ];
+  const line = (unfinished: string, n: number) =>
+    `completion: lane=precedent model=claude coverage=COMPLETE unfinished=${unfinished} findings=${n}`;
+  fakeRun(runs, {
+    run: "left-claude",
+    host: "claude",
+    checks: backed,
+    report: `findings: 1\n1. x\n${line("src/x.ts", 1)}`,
+  });
+  fakeRun(runs, {
+    run: "count-claude",
+    host: "claude",
+    checks: backed,
+    report: `findings: 1\n1. x\n${line("none", 99)}`,
+  });
+  fakeRun(runs, {
+    run: "twice-claude",
+    host: "claude",
+    checks: backed,
+    report: `findings: 1\n1. x\n${line("none", 1)}\n${line("none", 1)}`,
+  });
+  fakeRun(runs, {
+    run: "fine-claude",
+    host: "claude",
+    checks: backed,
+    report: `findings: 1\n1. x\n${line("none", 1)}`,
+  });
+  // The count may carry a note after it, as Codex writes it
+  fakeRun(runs, {
+    run: "noted-codex",
+    host: "codex",
+    checks: backed,
+    report: `findings: 1 (informational)\n1. x\n${line("none", 1).replace("claude", "codex")}`,
+  });
+  const grade = (run: string) => gradeRun(path.join(runs, run), expect, { forbidden: [], runs });
+  assert.match(grade("left-claude").reason ?? "", /unfinished/);
+  assert.match(grade("count-claude").reason ?? "", /findings/);
+  assert.match(grade("twice-claude").reason ?? "", /2 completion lines/);
+  assert.equal(grade("fine-claude").state, "graded");
+  assert.equal(grade("noted-codex").state, "graded");
+  // A run directory that never got its result is a failed run in the count, not a missing one
+  fs.mkdirSync(path.join(runs, "postgres-codex-2026-10-08T00-00-00-000Z-deadbeef"));
+  const all = gradeAll(runs);
+  assert.equal(all.length, 6);
+  assert.deepEqual(
+    all.filter((g) => g.state === "failed").map((g) => g.run),
+    ["count-claude", "left-claude", "postgres-codex-2026-10-08T00-00-00-000Z-deadbeef", "twice-claude"],
+  );
+});
+
+test("M2 never writes through a link the run left in its checkout", async () => {
+  const fixture = await built;
+  const outside = path.join(tempDir("m2-outside-"), "owner.json");
+  fs.writeFileSync(outside, "the owner's file\n");
+  const work = path.join(tempDir("m2-link-"), "work");
+  const start = prepare(fixture.repo, work, "rules");
+  fs.rmSync(path.join(work, "biome.json"), { force: true });
+  fs.symlinkSync(outside, path.join(work, "biome.jsonc"));
+  const task = m2Tasks()[0] ?? assert.fail("no task");
+  assert.throws(() => judge(work, start, task, path.join(tempDir("m2-judged-"), "judged")), /outside/);
+  assert.equal(fs.readFileSync(outside, "utf8"), "the owner's file\n");
 });

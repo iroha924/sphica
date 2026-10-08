@@ -124,20 +124,23 @@ async function runLane(o: {
     home: path.join(dir, "home"),
     server: SERVER,
   };
-  const body = fs.readFileSync(o.body, "utf8");
   const result: LaneResult = {
     run,
     host: o.host,
     diff: name,
     model: null,
     cli: "",
-    body_sha256: sha256(body),
-    server_sha256: sha256(fs.readFileSync(SERVER)),
+    body_sha256: "",
+    server_sha256: "",
     status: null,
     reason: null,
     seconds: 0,
   };
+  // Everything that can fail is inside, so a run that stops early still leaves its result
   try {
+    const body = fs.readFileSync(o.body, "utf8");
+    result.body_sha256 = sha256(body);
+    result.server_sha256 = sha256(fs.readFileSync(SERVER));
     execFileSync("git", ["clone", "-q", o.fixture.repo, p.work]);
     const git = (...args: string[]) =>
       execFileSync(

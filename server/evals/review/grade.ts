@@ -184,18 +184,24 @@ export function gradeRun(
     if (!backed.has(k)) return { ...grade, reason: `batch ${k} of ${total} not backed` };
 
   // The line may come inside a fence of its own: the fence lines are not text after it
-  const completion =
-    report
-      .split("\n")
-      .filter((l) => l.trim() && !/^```\w*$/.test(l.trim()))
-      .at(-1)
-      ?.trim() ?? "";
+  const lines = report.split("\n").filter((l) => l.trim() && !/^```\w*$/.test(l.trim()));
+  const completion = lines.at(-1)?.trim() ?? "";
+  const count = lines.filter((l) => l.trim().startsWith("completion:")).length;
+  if (count > 1) return { ...grade, reason: `the report has ${count} completion lines` };
   const done = /^completion: lane=precedent model=(\w+) coverage=(\w+) unfinished=(.+) findings=(\d+)$/.exec(
     completion,
   );
   if (!done) return { ...grade, reason: "the report does not end with a completion line" };
   if (done[1] !== result.host) return { ...grade, reason: `the completion line names model ${done[1]}` };
   if (done[2] !== "COMPLETE") return { ...grade, reason: `coverage ${done[2]}: ${done[3]}` };
+  if (done[3]?.trim() !== "none") return { ...grade, reason: `COMPLETE with unfinished scope: ${done[3]}` };
+  // The count may carry a note after it ("findings: 1 (informational)")
+  const listed = /^findings:\s*(\d+)\b/m.exec(report)?.[1];
+  if (listed !== done[4])
+    return {
+      ...grade,
+      reason: `the completion line says findings=${done[4]}, the list says ${listed ?? "nothing"}`,
+    };
 
   const verdicts = new Map([...backed.values()].flat().map((f) => [f.unit, f.outcome]));
   const asked = new Set(questionsOf(report)?.keys ?? []);
@@ -266,19 +272,34 @@ export function tally(grades: RunGrade[]): Map<string, Tally> {
 }
 
 /** Every run directory under runs, graded. */
-function gradeAll(runs: string): RunGrade[] {
+/** A run directory that never got its result: runLane always writes one, so its absence is a failure, never a run that did not happen */
+const unfinished = (name: string): RunGrade => ({
+  run: name,
+  host: /-(claude|codex)-/.exec(name)?.[1] ?? "unknown",
+  diff: name.replace(/-(claude|codex)-.*$/, ""),
+  state: "failed",
+  reason: "no result.json",
+  records: [],
+});
+
+export function gradeAll(runs: string): RunGrade[] {
   const diffs = new Map(loadReviewCases().diffs.map((d) => [d.id, d.expect]));
   const forbidden = [path.resolve(import.meta.dirname, "..", "..", "..")];
-  return fs
-    .readdirSync(runs)
-    .filter((n) => fs.existsSync(path.join(runs, n, "result.json")))
-    .sort()
-    .map((n) => {
-      const dir = path.join(runs, n);
-      const diff = (JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { diff: string })
-        .diff;
-      return gradeRun(dir, diffs.get(diff) ?? {}, { forbidden, runs });
-    });
+  return (
+    fs
+      .readdirSync(runs, { withFileTypes: true })
+      // Every directory but the fixture is a run
+      .filter((e) => e.isDirectory() && !e.name.startsWith("fixture"))
+      .map((e) => e.name)
+      .sort()
+      .map((n) => {
+        const dir = path.join(runs, n);
+        if (!fs.existsSync(path.join(dir, "result.json"))) return unfinished(n);
+        const diff = (JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { diff: string })
+          .diff;
+        return gradeRun(dir, diffs.get(diff) ?? {}, { forbidden, runs });
+      })
+  );
 }
 
 function main() {
