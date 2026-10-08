@@ -6,7 +6,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { codexProfile, managedCodexSettings } from "../evals/cloud/codex-home.ts";
+import {
+  codexLock,
+  codexProfile,
+  evalCache,
+  holdingLock,
+  homeFence,
+  managedCodexSettings,
+} from "../evals/cloud/codex-home.ts";
+import { REPO, repoPlaces } from "../evals/cloud/codex-run.ts";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
@@ -18,10 +26,13 @@ import {
   claudeMcp,
   claudeSettings,
   codexArgs,
+  codexLaneDenies,
   codexMcp,
   evalDenies,
+  outsideCheckout,
   READ_TOOLS,
   RULES_BODY,
+  RUNNER_FILES,
   reviewPrompt,
   rulesPrompt,
 } from "../evals/review/runner.ts";
@@ -156,9 +167,9 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   assert.match(profile, /^default_permissions = "eval"$/m);
   assert.match(profile, /^extends = ":read-only"$/m);
   assert.match(profile, /^"\/evals" = "deny"\n"\/r\/codex-home\/auth\.json" = "deny"$/m);
-  // Every run is denied the evaluations, the output directory, and the owner's Codex home, and works outside them
+  // Every run is denied the repository, the output directory, and the owner's Codex home, and works outside them
   const denies = evalDenies("/out");
-  assert.ok(denies.includes(path.resolve(import.meta.dirname, "..", "evals")) && denies.includes("/out"));
+  assert.ok(denies.includes(REPO) && denies.includes("/out"));
   assert.ok(denies.includes(path.join(HOME, ".codex")));
   const denyRead = (claudeSettings(READ_TOOLS, denies) as { sandbox: { filesystem: { denyRead: string[] } } })
     .sandbox.filesystem.denyRead;
@@ -888,4 +899,28 @@ test("runs made by different runner code are not tallied as one measurement, and
     run("m2.ts", "--host", "claude", "--condition", "rules", "--jobs", "2").stderr,
     /--jobs is 1 for M2/,
   );
+});
+
+test("review lanes: both hosts are denied the repository wherever it lives, Codex's lanes all of HOME but the tools, and one lock holds", async () => {
+  const shield = { places: repoPlaces(), home: homeFence() };
+  const out = tempDir("review-out-");
+  const cache = evalCache(tempDir("review-cache-home-"));
+  // Claude keeps the owner's HOME for its login; the repository, not only the evaluations, is what it is denied
+  for (const place of shield.places) assert.ok(evalDenies(out).includes(place), place);
+  const codex = codexLaneDenies(out, cache, shield);
+  assert.ok(codex.includes(out) && codex.includes(cache));
+  for (const d of shield.home.denies) assert.ok(codex.includes(d), d);
+  // A checkout, HOME, and TMPDIR outside everything denied, in one tree
+  const work = outsideCheckout("review-work-", codex);
+  assert.ok(!codex.some((d) => work.startsWith(`${d}${path.sep}`)));
+  // The lock is held for the whole run and kept when a temp tree could not be removed
+  await holdingLock(cache, async () => {
+    assert.throws(() => codexLock(cache), /another fenced Codex evaluation/);
+  });
+  codexLock(cache)();
+  await holdingLock(cache, async (leave) => leave(work));
+  assert.throws(() => codexLock(cache), /another fenced Codex evaluation/);
+  fs.rmSync(path.join(cache, "codex.lock"));
+  fs.rmSync(path.dirname(work), { recursive: true, force: true });
+  assert.ok(RUNNER_FILES.includes("../cloud/codex-run.ts"));
 });

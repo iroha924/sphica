@@ -17,15 +17,25 @@ import {
   checkoutGit,
   claimRunDir,
   codexModelOf,
+  evalCache,
   fencedCodexHome,
+  holdingLock,
   pinCheckout,
 } from "../cloud/codex-home.ts";
+import { shieldNow } from "../cloud/codex-run.ts";
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { lookedOutside, oneConfiguration } from "./grade.ts";
 import { loadRulesCases } from "./rules-grade.ts";
-import { evalDenies, keepCheckout, outsideCheckout, runnerDigest } from "./runner.ts";
+import {
+  codexLaneDenies,
+  evalDenies,
+  keepCheckout,
+  type LaneEnv,
+  outsideCheckout,
+  runnerDigest,
+} from "./runner.ts";
 
 type Task = { id: string; tempts: "lodash" | "db" | "none"; prompt: string; test: string };
 type M2Cases = { rules: string; check: string; conditions: string[]; tasks: Task[] };
@@ -204,10 +214,12 @@ async function runOne(o: {
   task: Task;
   out: string;
   model: string;
+  env: LaneEnv;
 }) {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}-${o.host}`);
   const started = Date.now();
-  const work = outsideCheckout("m2-work-");
+  const denies = o.host === "codex" ? codexLaneDenies(o.out, o.env.cache, o.env.shield) : evalDenies(o.out);
+  const work = outsideCheckout("m2-work-", denies);
   const result: Record<string, unknown> = {
     run,
     host: o.host,
@@ -254,11 +266,12 @@ async function runOne(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      fencedCodexHome(codexHome, { base: ":workspace", deny: evalDenies(o.out) });
+      fencedCodexHome(codexHome, { base: ":workspace", deny: denies });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
-      const home = path.join(dir, "home");
-      const tmp = path.join(dir, "tmp");
+      // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied
+      const home = path.join(path.dirname(work), "home");
+      const tmp = path.join(path.dirname(work), "tmp");
       fs.mkdirSync(home);
       fs.mkdirSync(tmp);
       r = await runChild(
@@ -276,7 +289,7 @@ async function runOne(o: {
         ],
         work,
         {
-          PATH: process.env.PATH ?? "",
+          PATH: o.env.shield.home.path,
           HOME: home,
           CODEX_HOME: codexHome,
           TMPDIR: tmp,
@@ -293,7 +306,7 @@ async function runOne(o: {
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
-    keepCheckout(work, dir);
+    if (!keepCheckout(work, dir)) o.env.leave(path.dirname(work));
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -397,16 +410,28 @@ async function main() {
   // Every M2 lane has a shell, which can read the temp directory where another run's checkout sits while it runs
   if (jobs > 1) throw new Error("--jobs is 1 for M2: concurrent runs could read each other's checkout");
   const out = path.resolve(args.out ?? "");
-  fs.mkdirSync(out, { recursive: true });
-  const fixture = await fixtureIn(out);
-  const queue = tasks.flatMap((task) => Array.from({ length: runs }, () => task));
-  const worker = async () => {
-    for (let task = queue.shift(); task; task = queue.shift()) {
-      const { dir, result } = await runOne({ fixture, host, condition, task, out, model: args.model ?? "" });
-      console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
-    }
-  };
-  await Promise.all(Array.from({ length: jobs }, worker));
+  const cache = evalCache();
+  await holdingLock(cache, async (leave) => {
+    const env: LaneEnv = { cache, shield: shieldNow(), leave };
+    fs.mkdirSync(out, { recursive: true });
+    const fixture = await fixtureIn(out);
+    const queue = tasks.flatMap((task) => Array.from({ length: runs }, () => task));
+    const worker = async () => {
+      for (let task = queue.shift(); task; task = queue.shift()) {
+        const { dir, result } = await runOne({
+          fixture,
+          host,
+          condition,
+          task,
+          out,
+          model: args.model ?? "",
+          env,
+        });
+        console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
+      }
+    };
+    await Promise.all(Array.from({ length: jobs }, worker));
+  });
 }
 
 if (process.argv[1] === import.meta.filename) await main();

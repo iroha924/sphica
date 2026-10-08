@@ -10,7 +10,9 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
-import { claimRunDir, codexModelOf, fencedCodexHome } from "../cloud/codex-home.ts";
+import { claimRunDir, codexModelOf, evalCache, fencedCodexHome, holdingLock } from "../cloud/codex-home.ts";
+import { REPO, shieldNow } from "../cloud/codex-run.ts";
+import { homeToken, type ProbeTarget } from "../cloud/probe.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
@@ -18,9 +20,11 @@ import {
   claudeMcp,
   claudeSettings,
   codexArgs,
+  codexLaneDenies,
   codexMcp,
   evalDenies,
   keepCheckout,
+  type LaneEnv,
   type LanePaths,
   outsideCheckout,
   READ_TOOLS,
@@ -114,12 +118,14 @@ async function runLane(o: {
   tools: string[];
   /** Writes files into the checkout before the host starts, untracked (the preflight's probe) */
   plant?: (work: string) => void;
+  env: LaneEnv;
 }): Promise<{ dir: string; result: LaneResult }> {
   const name = o.diff ?? "rules";
   const { run, dir } = claimRunDir(o.out, `${name}-${o.host}`);
   const started = Date.now();
+  const denies = o.host === "codex" ? codexLaneDenies(o.out, o.env.cache, o.env.shield) : evalDenies(o.out);
   const p: LanePaths = {
-    work: outsideCheckout("review-work-"),
+    work: outsideCheckout("review-work-", denies),
     diff: "",
     db: path.join(dir, "db", "sphica.db"),
     home: path.join(dir, "home"),
@@ -195,16 +201,20 @@ async function runLane(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      fencedCodexHome(codexHome, { base: ":read-only", deny: evalDenies(o.out), extraConfig: codexMcp(p) });
+      fencedCodexHome(codexHome, { base: ":read-only", deny: denies, extraConfig: codexMcp(p) });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
-      const tmp = path.join(dir, "tmp");
+      // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied; Sphica's own home stays in the run
+      const tree = path.dirname(p.work);
+      const tmp = path.join(tree, "tmp");
+      const home = path.join(tree, "home");
       fs.mkdirSync(tmp);
+      fs.mkdirSync(home);
       r = await runChild("codex", codexArgs(p.work, path.join(dir, "final.md")), {
         cwd: p.work,
         env: {
-          PATH: process.env.PATH ?? "",
-          HOME: p.home,
+          PATH: o.env.shield.home.path,
+          HOME: home,
           CODEX_HOME: codexHome,
           TMPDIR: tmp,
           LANG: process.env.LANG ?? "",
@@ -220,7 +230,7 @@ async function runLane(o: {
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
-    keepCheckout(p.work, dir);
+    if (!keepCheckout(p.work, dir)) o.env.leave(path.dirname(p.work));
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -248,9 +258,15 @@ const everything = (dir: string) => fs.readFileSync(path.join(dir, "events.jsonl
  * read server on the run's database (review_select selects the fixture's record), and Claude starts with no tool, MCP server, or plugin
  * beyond the lane's.
  */
-async function preflight(out: string, model: string): Promise<string[]> {
+async function preflight(
+  out: string,
+  model: string,
+  env: LaneEnv,
+  ownerToken: ProbeTarget,
+): Promise<string[]> {
   const fixture = await fixtureIn(out);
   const review = (host: Host, diff: string) => ({
+    env,
     fixture,
     host,
     diff,
@@ -301,7 +317,12 @@ async function preflight(out: string, model: string): Promise<string[]> {
   }
   // Codex reads with its permission profile: a script in the checkout tries what every run must not read, and each must be denied
   const cases = path.join(import.meta.dirname, "cases.json");
-  const probeScript = `#!/bin/sh\nfor pair in "cases|${cases}" "outside|${outside}" "auth|$CODEX_HOME/auth.json"; do\n  label=\${pair%%|*}; file=\${pair#*|}\n  if head -c 1 "$file" >/dev/null 2>&1; then echo "READ $label"; else echo "DENIED $label"; fi\ndone\n`;
+  // The repository's history and a file at the root of HOME made before the fence: both hold what the lane must not reach
+  const gitDir = path.resolve(
+    REPO,
+    execFileSync("git", ["-C", REPO, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(),
+  );
+  const probeScript = `#!/bin/sh\nfor pair in "cases|${cases}" "outside|${outside}" "auth|$CODEX_HOME/auth.json" "git|${path.join(gitDir, "HEAD")}" "home|${ownerToken.path}"; do\n  label=\${pair%%|*}; file=\${pair#*|}\n  if head -c 1 "$file" >/dev/null 2>&1; then echo "READ $label"; else echo "DENIED $label"; fi\ndone\n`;
   const codex = await runLane({
     ...review("codex", "postgres"),
     plant: (work) => fs.writeFileSync(path.join(work, "probe.sh"), probeScript, { mode: 0o755 }),
@@ -309,7 +330,7 @@ async function preflight(out: string, model: string): Promise<string[]> {
       `${reviewPrompt(body, { ...p, model: "codex" })}\nBefore reviewing, run ./probe.sh once and quote its output in your reply.\n`,
   });
   const fence = everything(codex.dir);
-  for (const label of ["cases", "outside", "auth"])
+  for (const label of ["cases", "outside", "auth", "git", "home"])
     if (!fence.includes(`DENIED ${label}`))
       problems.push(`codex: the probe did not show ${label} denied (${codex.dir})`);
   if (fence.includes(token)) problems.push(`codex read ${outside}`);
@@ -338,52 +359,65 @@ async function main() {
     },
   });
   const out = path.resolve(args.out ?? "");
-  if (args.preflight) {
-    if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
-    // Its probe runs go apart from the measured ones, which the grader counts by directory name
-    const problems = await preflight(path.join(out, "preflight"), args.model ?? "");
-    for (const p of problems) console.log(`✗ ${p}`);
-    if (problems.length) process.exitCode = 1;
-    else console.log("✓ preflight passed");
-    return;
-  }
   const host = args.host;
-  if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
   const known = loadReviewCases().diffs.map((d) => d.id);
-  if (!args.rules && args.diff !== "all" && !known.includes(args.diff ?? ""))
-    throw new Error(`--diff is all or one of ${known.join(", ")}`);
   const runs = Number(args.runs);
   const jobs = Number(args.jobs);
-  // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
-  if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
-  if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
-  // A Codex command can read the temp directory, where another run's checkout sits while it runs; Claude's lanes here have no shell
-  if (host === "codex" && jobs > 1)
-    throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
+  if (!args.preflight) {
+    if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
+    if (!args.rules && args.diff !== "all" && !known.includes(args.diff ?? ""))
+      throw new Error(`--diff is all or one of ${known.join(", ")}`);
+    // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
+    if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
+    if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
+    // A Codex command can read the temp directory, where another run's checkout sits while it runs; Claude's lanes here have no shell
+    if (host === "codex" && jobs > 1)
+      throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
+  }
   if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
-  fs.mkdirSync(out, { recursive: true });
-  const fixture = await fixtureIn(out, args.rules);
-  const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
-  const ids = args.rules ? ["rules"] : args.diff === "all" ? known : [args.diff ?? ""];
-  const queue = ids.flatMap((diff) => Array.from({ length: runs }, () => diff));
-  const worker = async () => {
-    for (let diff = queue.shift(); diff; diff = queue.shift()) {
-      const { dir, result } = await runLane({
-        fixture,
-        host,
-        diff: args.rules ? null : diff,
-        body,
-        out,
-        model: args.model ?? "",
-        prompt: args.rules
-          ? (b) => rulesPrompt(b, loadRulesCases().picks)
-          : (b, p) => reviewPrompt(b, { ...p, model: host }),
-        tools: args.rules ? RULES_TOOLS : READ_TOOLS,
-      });
-      console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
-    }
-  };
-  await Promise.all(Array.from({ length: jobs }, worker));
+  const cache = evalCache();
+  // The preflight's HOME token is made before the run's HOME fence, which must deny it
+  const ownerToken = args.preflight ? homeToken() : null;
+  try {
+    await holdingLock(cache, async (leave) => {
+      const env: LaneEnv = { cache, shield: shieldNow(), leave };
+      if (ownerToken) {
+        // Its probe runs go apart from the measured ones, which the grader counts by directory name
+        const problems = await preflight(path.join(out, "preflight"), args.model ?? "", env, ownerToken);
+        for (const p of problems) console.log(`✗ ${p}`);
+        if (problems.length) process.exitCode = 1;
+        else console.log("✓ preflight passed");
+        return;
+      }
+      if (host !== "claude" && host !== "codex") return;
+      fs.mkdirSync(out, { recursive: true });
+      const fixture = await fixtureIn(out, args.rules);
+      const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
+      const ids = args.rules ? ["rules"] : args.diff === "all" ? known : [args.diff ?? ""];
+      const queue = ids.flatMap((diff) => Array.from({ length: runs }, () => diff));
+      const worker = async () => {
+        for (let diff = queue.shift(); diff; diff = queue.shift()) {
+          const { dir, result } = await runLane({
+            fixture,
+            host,
+            diff: args.rules ? null : diff,
+            body,
+            out,
+            model: args.model ?? "",
+            prompt: args.rules
+              ? (b) => rulesPrompt(b, loadRulesCases().picks)
+              : (b, p) => reviewPrompt(b, { ...p, model: host }),
+            tools: args.rules ? RULES_TOOLS : READ_TOOLS,
+            env,
+          });
+          console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
+        }
+      };
+      await Promise.all(Array.from({ length: jobs }, worker));
+    });
+  } finally {
+    if (ownerToken) fs.rmSync(ownerToken.path, { force: true });
+  }
 }
 
 await main();

@@ -3,26 +3,34 @@
 // MCP servers). Claude's reads are fenced to the checkout; Codex's commands are fenced by a permission profile's denies.
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { DENY_DIRS, DENY_FILES } from "../cloud/claude-run.ts";
+import { codexDenies, outsideTree, repoPlaces, type Shield } from "../cloud/codex-run.ts";
+
+/** Where a lane's pieces stay out of reach: the evaluation cache, what the repository and HOME fences are, and a way to report a tree left */
+export type LaneEnv = { cache: string; shield: Shield; leave: (tree: string) => void };
 
 /**
- * What no run may read, whatever it runs: the evaluations (the expected verdicts, the held-out cases, M2's hidden tests and reference
- * check), the output directory (the other runs, and each run's own CODEX_HOME), and the owner's Codex home with its login. Each run works
- * in a checkout outside all of them.
+ * What a Claude lane may not read: the repository wherever its files or history are (the expected verdicts, the held-out cases, M2's
+ * hidden tests and reference check), the output directory (the other runs, each run's own CODEX_HOME), and the owner's credentials.
+ * Claude keeps the owner's HOME for its login; its file tools are fenced to the checkout besides.
  */
-/** A fresh checkout location outside the output directory, so denying the output directory never hides the checkout itself */
-export const outsideCheckout = (prefix: string): string =>
-  path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix))), "work");
-
-export const evalDenies = (out: string): string[] => [
-  path.resolve(import.meta.dirname, ".."),
+export const evalDenies = (out: string, places = repoPlaces()): string[] => [
+  ...places,
   out,
-  // The owner's credentials, Codex's login among them: Codex's own profiles read the whole disk unless told otherwise
   ...DENY_DIRS,
   ...DENY_FILES,
 ];
+
+/** What a Codex lane may not read: what every fenced Codex is denied (all of HOME but the tools), and the output directory */
+export const codexLaneDenies = (out: string, cache: string, shield: Shield): string[] => [
+  ...codexDenies(cache, shield),
+  out,
+];
+
+/** A fresh checkout in a temp tree outside everything denied, so denying the output directory never hides the checkout itself */
+export const outsideCheckout = (prefix: string, denies: string[]): string =>
+  path.join(outsideTree(prefix, denies), "work");
 
 /** The code that starts and fences a run, relative to this directory */
 export const RUNNER_FILES = [
@@ -32,6 +40,7 @@ export const RUNNER_FILES = [
   "fixture.ts",
   "biome.ts",
   "../cloud/codex-home.ts",
+  "../cloud/codex-run.ts",
 ];
 
 /** The code that starts and fences a run, as one hash: runs made by different runner code are different measurements */
@@ -42,11 +51,18 @@ export function runnerDigest(): string {
   return hash.digest("hex");
 }
 
-/** Moves a finished run's checkout into its run directory, which every later run is denied: a checkout left in the temp directory is not */
-export function keepCheckout(work: string, dir: string): void {
-  if (!fs.existsSync(work)) return;
-  fs.cpSync(path.dirname(work), path.join(dir, "checkout"), { recursive: true, verbatimSymlinks: true });
-  fs.rmSync(path.dirname(work), { recursive: true, force: true });
+/**
+ * Moves a finished run's temp tree into its run directory, which every later run is denied: a tree left in the temp directory is not.
+ * False when the tree could not be removed, so the caller keeps the lock.
+ */
+export function keepCheckout(work: string, dir: string): boolean {
+  const tree = path.dirname(work);
+  if (!fs.existsSync(tree)) return true;
+  try {
+    fs.cpSync(tree, path.join(dir, "checkout"), { recursive: true, verbatimSymlinks: true });
+    fs.rmSync(tree, { recursive: true, force: true });
+  } catch {}
+  return !fs.existsSync(tree);
 }
 
 /** The /sphica:rules body M1 measured, with its Biome check drafting: the shipped Skill does not draft checks */

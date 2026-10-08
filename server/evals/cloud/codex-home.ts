@@ -249,6 +249,24 @@ export function codexLock(cache: string): () => void {
   };
 }
 
+/**
+ * Runs `run` holding the shared lock, and releases it only when no temp tree was left behind: `leave` names one that could not be
+ * removed, which the next fenced Codex could read.
+ */
+export async function holdingLock<T>(
+  cache: string,
+  run: (leave: (tree: string) => void) => Promise<T>,
+): Promise<T> {
+  const release = codexLock(cache);
+  const left: string[] = [];
+  try {
+    return await run((tree) => left.push(tree));
+  } finally {
+    if (!left.length) release();
+    else console.error(`could not remove ${left.join(", ")}; remove it, then codex.lock in ${cache}`);
+  }
+}
+
 /** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */
 export function codexModelOf(codexHome: string): string | null {
   const config = fs.readFileSync(path.join(codexHome, "config.toml"), "utf8");
