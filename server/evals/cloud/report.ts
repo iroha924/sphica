@@ -238,6 +238,32 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   return lines;
 }
 
+/**
+ * Results read through another fence, or none, may have seen what the others could not, and every grade counted is the Codex grader's,
+ * whatever model ran: builds shown or compared together must share one run fence and one grader fence.
+ */
+function sameFences(sides: { label: string; build: Build }[]): void {
+  const runs = sides.map((s) => {
+    const f = [
+      ...new Set(s.build.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r.fence ?? null)),
+    ];
+    if (f.includes(null))
+      throw new Error(`the ${s.label} build has Codex results with no read fence recorded`);
+    if (f.length > 1)
+      throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} read fences`);
+    return f[0];
+  });
+  for (const s of sides)
+    if (!s.build.grader_fence)
+      throw new Error(`the ${s.label} build records no grader fence; grade it again`);
+  if (new Set(sides.map((s) => s.build.grader_fence)).size > 1)
+    throw new Error(
+      "the builds were graded by Codex graders under different read fences; grade them under the same one",
+    );
+  if (new Set(runs.filter(Boolean)).size > 1)
+    throw new Error("the builds ran Codex under different read fences; use results made under the same one");
+}
+
 type Side = { label: string; build: Build; fixture: string | undefined; tasks: string };
 
 /**
@@ -270,30 +296,7 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
   // A swapped build sets up other records and runs only its gold rows: against an original one, it is not run-to-run variation
   if (same && old.build.variant !== next.build.variant)
     throw new Error("an A/A comparison needs the same variant on both sides");
-  // A Codex result read through another fence, or none, may have seen what the other side could not: only one fence is compared
-  const fences = (s: Side) => [
-    ...new Set(s.build.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r.fence ?? null)),
-  ];
-  for (const s of [old, next]) {
-    const f = fences(s);
-    if (f.includes(null))
-      throw new Error(`the ${s.label} build has Codex results with no read fence recorded`);
-    if (f.length > 1)
-      throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} read fences`);
-  }
-  // Every grade counted is the Codex grader's, whatever model ran: grades given under another fence are not compared either
-  for (const s of [old, next])
-    if (!s.build.grader_fence)
-      throw new Error(`the ${s.label} build records no grader fence; grade it again`);
-  if (old.build.grader_fence !== next.build.grader_fence)
-    throw new Error(
-      "the builds were graded by Codex graders under different read fences; grade both under the same one",
-    );
-  const [oldFence, nextFence] = [fences(old)[0], fences(next)[0]];
-  if (oldFence && nextFence && oldFence !== nextFence)
-    throw new Error(
-      "the builds ran Codex under different read fences; compare results made under the same one",
-    );
+  sameFences([old, next]);
   // A different model behind "claude" or "codex" in any task and condition would read as a difference in the bundle, so each group the
   // report compares must have run the same models on both sides
   const modelsOf = (b: Build, group: string) =>
@@ -730,6 +733,7 @@ if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare")
     throw new Error(
       `the builds come from different bundles (${[...bundles].join(", ")}); report one loop at a time`,
     );
+  sameFences(builds.map((build, i) => ({ label: files[i] ?? "", build })));
   const defs = files.map((f) => fs.readFileSync(path.join(path.dirname(f), "tasks.json"), "utf8"));
   if (new Set(defs).size > 1)
     throw new Error("the builds were made from different task definitions; report one loop at a time");

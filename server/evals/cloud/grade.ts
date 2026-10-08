@@ -1,6 +1,5 @@
-// Grades one evaluation loop blind (eval-loop Skill step 5): each result row goes to Codex with only the task, answer, and patch, in an empty
-// directory, through grade.schema.json; the table counts every started run. Each finished call is kept in grades.checkpoint.json, and a rerun
-// calls the graders only for what it lacks. With --probe, it instead shows that the grader's commands cannot read what the fence hides.
+// Grades one evaluation loop blind: each row goes to Codex with only the task, answer, and patch, through grade.schema.json; finished
+// calls are kept in grades.checkpoint.json so a rerun grades only what it lacks. --probe instead shows what the grader cannot read.
 // Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none] [--probe]
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

@@ -117,12 +117,14 @@ env > "$here/env"
 cp "$CODEX_HOME/config.toml" "$here/config.toml"
 out=""; work=""; prev=""
 for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; [ "$prev" = "-C" ] && work="$a"; prev="$a"; done
-cat > /dev/null
+prompt=$(cat)
+[ -f "$here/block-copy" ] && touch "$(dirname "$CODEX_HOME")/work"
 if [ -f "$here/unreadable" ]; then mkdir "$TMPDIR/unreadable"; touch "$TMPDIR/unreadable/x"; chmod 000 "$TMPDIR/unreadable"; fi
 [ -f "$here/link" ] && ln -s "$work/README.md" "$work/link"
 if [ -f "$here/run-probe" ]; then
-  node -e 'const out = require("node:child_process").execFileSync("sh", ["./probe.sh"], { cwd: process.argv[1] }).toString(); console.log(JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, command: "./probe.sh", aggregated_output: out } }))' "$work"
-  cp "$work/probe.sh" "$here/probe.sh"
+  script=$(printf '%s' "$prompt" | sed -n 's/.*Run \\([^ ]*\\) once.*/\\1/p' | head -n 1)
+  node -e 'const out = require("node:child_process").execFileSync("sh", [process.argv[2]], { cwd: process.argv[1] }).toString(); console.log(JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, command: process.argv[2], aggregated_output: out } }))' "$work" "$script"
+  printf '%s\\n' "$script" > "$here/probe-path"
 fi
 printf '{}' > "$out"
 echo '{"type":"thread.started"}'
@@ -208,8 +210,10 @@ function codexBuild(condition: string) {
   });
   const fail = () => fs.writeFileSync(path.join(bin, "fail"), "");
   /** Makes the fake codex leave something behind: an unreadable directory in its TMPDIR, or an absolute link in its checkout */
-  const leave = (what: "unreadable" | "link" | "run-probe") => fs.writeFileSync(path.join(bin, what), "");
-  return { root, home, cache, build, env, start, seen, fail, leave };
+  const leave = (what: "unreadable" | "link" | "run-probe" | "block-copy") =>
+    fs.writeFileSync(path.join(bin, what), "");
+  const probePath = () => fs.readFileSync(path.join(bin, "probe-path"), "utf8").trim();
+  return { root, home, cache, build, env, start, seen, fail, leave, probePath };
 }
 
 test("codex.ts replays a task with codex exec in the run's own homes and records the run", () => {
@@ -384,7 +388,10 @@ test("the probe script tells a denial from a missing file and any other error, a
   ];
   const script = path.join(dir, "probe.sh");
   fs.writeFileSync(script, probeScript(targets, `touch ${marker}`), { mode: 0o755 });
-  const out = execFileSync("sh", [script], { encoding: "utf8", env: { ...process.env, PROBE_HOME: dir } });
+  const out = execFileSync("sh", [script], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "", HOME: dir, PROBE_HOME: dir },
+  });
   fs.chmodSync(locked, 0o600);
   assert.deepEqual(out.trim().split("\n"), [
     "READ readable",
@@ -453,6 +460,7 @@ test("the probe refuses a target that does not exist before any run, and reads S
         work: tempDir("probe-work-"),
         scratch: tempDir("probe-scratch-"),
         prompt: "p",
+        script: "./probe.sh",
       }),
       null,
     );
@@ -488,6 +496,12 @@ test("codex.ts --probe fails when the run reads what the fence must hide, and ke
   assert.match(r.stdout, /✗ build-tasks .*: READ, expected DENIED/);
   assert.doesNotMatch(r.stdout, /✗ control/);
   assert.deepEqual(fs.readdirSync(out), ["probe"]);
+  // The script sits outside every place the model can write, and the probe shows that it cannot write there
+  assert.ok(
+    path.isAbsolute(b.probePath()) && !b.probePath().includes(`${path.sep}work${path.sep}`),
+    b.probePath(),
+  );
+  assert.match(r.stdout, /✗ probe-dir .*: READ, expected DENIED/);
   assert.match(b.seen().args.join(" "), /exec/);
   assert.deepEqual(
     fs.readdirSync(b.cache).filter((f) => f.startsWith("probe-")),
@@ -553,9 +567,12 @@ test("the fence denies every worktree of the repository and the git directory th
   git(main, "commit", "-q", "-m", "c");
   const linked = path.join(base, "linked");
   git(main, "worktree", "add", "-q", linked);
+  // A name with a line break in it, which a line-by-line reading of the worktree list would cut short
+  const odd = path.join(base, "odd\nname");
+  git(main, "worktree", "add", "-q", "--detach", odd);
   // From either side, both worktrees; the shared .git sits inside the main one and goes with it
-  assert.deepEqual(repoPlaces(main).sort(), [linked, main].sort());
-  assert.deepEqual(repoPlaces(linked).sort(), [linked, main].sort());
+  assert.deepEqual(repoPlaces(main).sort(), [linked, main, odd].sort());
+  assert.deepEqual(repoPlaces(linked).sort(), [linked, main, odd].sort());
   const cache = evalCache(base);
   const codexHome = path.join(cache, "r", "codex-home");
   const fence = (places: string[]) =>
@@ -567,4 +584,66 @@ test("the fence denies every worktree of the repository and the git directory th
     );
   assert.equal(fence([REPO, linked]), fence([REPO]));
   assert.ok(codexDenies(cache, [REPO, linked]).includes(linked));
+});
+
+test("a run whose files cannot be moved back keeps its temp tree and the lock, so nothing is lost or left readable", () => {
+  const b = codexBuild("none");
+  b.leave("block-copy");
+  const r = b.start(path.join(b.cache, "codex-runs"));
+  const tree = path.dirname(/^HOME=(.*)$/m.exec(b.seen().env)?.[1] ?? "");
+  try {
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /still in/);
+    assert.ok(fs.existsSync(path.join(tree, "work", "README.md")), "the checkout is kept");
+    assert.ok(fs.existsSync(path.join(b.cache, "codex.lock")), "the lock stays");
+  } finally {
+    fs.rmSync(tree, { recursive: true, force: true });
+  }
+});
+
+test("a task or condition that is not one plain name never names a run directory", () => {
+  const b = codexBuild("none");
+  const defs = JSON.parse(fs.readFileSync(path.join(b.build, "tasks.json"), "utf8")) as {
+    tasks: { id: string }[];
+  };
+  const first = defs.tasks[0];
+  if (first) first.id = "../escaped";
+  fs.writeFileSync(path.join(b.build, "tasks.json"), JSON.stringify(defs));
+  fs.writeFileSync(
+    path.join(b.build, "plan.json"),
+    JSON.stringify([
+      {
+        build: "b",
+        variant: "original",
+        task: "../escaped",
+        condition: "none",
+        slot: "eval-shelf-1",
+        try: 1,
+        prompt: "p",
+        fired_at: null,
+      },
+    ]),
+  );
+  const out = path.join(b.cache, "codex-runs");
+  const r = spawnSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "codex.ts"),
+      "--build",
+      b.build,
+      "--repo",
+      "eval-shelf-1",
+      "--task",
+      "../escaped",
+      "--out",
+      out,
+    ],
+    { encoding: "utf8", env: b.env },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /one plain name/);
+  assert.deepEqual(
+    fs.readdirSync(b.cache).filter((f) => f.startsWith("escaped")),
+    [],
+  );
 });

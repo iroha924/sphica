@@ -210,6 +210,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `test(eval): compare the deny list with the home it was built from (T17)`
   - 結果: `cd server && $(mise where node@26.10.0)/bin/node --test --test-randomize --test-random-seed=515 test/review-eval.test.ts` → 直す前は 1 件失敗（CI の check (26) と同じ。失敗したジョブだけの再実行でも再現）、直した後は 21 件 pass。seed 515・516・1・42 で eval の 4 ファイルが 158 件 pass
 
+- [x] T18: GitHub の Codex のレビューの指摘のうち 7 件を直す（後片付けのコピーの失敗で一時の木を消す、テストの子プロセスの環境、grade.ts の冒頭のコメントの行数、改行を含む worktree のパス、`../` を含むタスク名、通常の report で fence の違う結果が混ざる、probe.sh を run の最中に書き換えられる）
+  - 種別: 修正
+  - 計画: S2, S5, S6
+  - 依存: T16（report と probe の直しが要る）, T17（テストの直しが要る）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/probe.ts`, `server/evals/cloud/report.ts`, `server/evals/cloud/grade.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-grade.test.ts`
+  - red: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → コピーの失敗で一時の木が消える、`../escaped` のタスクで run が始まる、改行を含む worktree を数えない、fence の違う 2 つのビルドを report が並べる、probe.sh が checkout の中にあり書けるかを見ない、の 5 件で失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): keep a run that cannot move back, and close the gaps the PR review found (T18)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 直す前は新しい 5 件が失敗した。改行を含む worktree は、読み方だけを古い形に戻して失敗することも確かめた
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 161 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip`・`bun run english` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -231,3 +242,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / 完了条件 / T15 の後に、実際の Codex で inject・search・gold・none の probe と採点者の probe を流し直し、全部 ✓。gold の probe も gold の receipt（582 バイト）が返った
 - 2026-10-08 / 全差分 / Codex の全差分のレビュー（high）で P2 が 3 件。採点者の fence が残らない（Codex が再現）、probe.sh を書き換えて流してから戻すと判定を偽れる、採点者の probe が対象ごとの判定を残さない / 1 件目と 3 件目を採用し T16 で直した。2 件目は見送る（probe は囲いの設定の誤りを見つける確認で、わざと欺くモデルまでは相手にしない。塞ぐにはスクリプトを書けない場所に置く作り直しと実機の確認が要る。スクリプトの改ざんが見えたら見直す）
 - 2026-10-08 / T17 / PR #306 の check (26) が落ち、失敗したジョブだけの再実行でも再現した。review の fixture の組み立て（acceptance の driver）が HOME を差し替えている最中に、テストが `os.homedir()` と比べていた。main にもあった順番への依存で、テストを足したことでランダムな並びが変わって表に出た / T17 で直した
+- 2026-10-08 / T18 / GitHub の Codex のレビュー（5f9caf9）で P1 が 7 件、P2 が 3 件。7 件を T18 で直した（probe.sh の書き換えは前に見送ったが、渡す記録から指示され得るという理由で採用した）。残る 3 件（資格情報を許可の一覧で絞る、review の runner にも共有のロック、組織が管理する設定を測る run ごとの probe で確かめる）は、範囲か方針が変わるので持ち主に聞く

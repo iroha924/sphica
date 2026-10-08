@@ -9,11 +9,15 @@ import { openReader } from "../../src/db.ts";
 import { DENY_DIRS, DENY_FILES } from "./claude-run.ts";
 import { REPO } from "./codex-run.ts";
 
-/** One place the probe reads: `shell` paths are expanded by the script's shell (`$CODEX_HOME`), others are taken as written */
+/**
+ * One place the probe tries: `shell` paths are expanded by the script's shell (`$CODEX_HOME`), others are taken as written; `dir` lists a
+ * directory, `write` creates a file there, and anything else reads the first byte
+ */
 export type ProbeTarget = {
   label: string;
   path: string;
   dir?: boolean;
+  write?: boolean;
   shell?: boolean;
   expect: "DENIED" | "READ";
 };
@@ -30,7 +34,7 @@ export const readCommand = (p: string) => `head -c 1 ${sq(p)}`;
 export function probeScript(targets: ProbeTarget[], next: string | null): string {
   const lines = targets.map((t) => {
     const p = t.shell ? `"${t.path}"` : sq(t.path);
-    return `classify ${t.label} ${t.dir ? "ls" : "head -c 1"} ${p}`;
+    return `classify ${t.label} ${t.write ? "touch" : t.dir ? "ls" : "head -c 1"} ${p}`;
   });
   return `#!/bin/sh
 export LC_ALL=C
@@ -92,15 +96,15 @@ const ran = (events: string, command: string) =>
 export const ranCleanly = (events: string, command: string) => ran(events, command).length > 0;
 
 /** What `./probe.sh` itself printed: a line printed by another command, or one naming probe.sh in a comment, does not count */
-export const probeLines = (events: string) =>
-  ran(events, "./probe.sh")
+export const probeLines = (events: string, command = "./probe.sh") =>
+  ran(events, command)
     .map((i) => i.aggregated_output ?? "")
     .join("\n")
     .trim();
 
 /** Every target whose read did not end as expected, was reported twice over, or that the probe never reported */
-export function probeProblems(events: string, targets: ProbeTarget[]): string[] {
-  const out = probeLines(events);
+export function probeProblems(events: string, targets: ProbeTarget[], command = "./probe.sh"): string[] {
+  const out = probeLines(events, command);
   return targets.flatMap((t) => {
     const got = [...out.matchAll(new RegExp(`^(DENIED|MISSING|READ|ERROR) ${t.label}$`, "gm"))].map(
       (m) => m[1],
@@ -163,7 +167,7 @@ export function probeTargets(extra: ProbeTarget[]): ProbeTarget[] {
   ];
   // The run's own login is a link to the owner's, so the owner's has to be there for either to show a denial
   for (const t of targets)
-    if (!t.shell && !fs.existsSync(t.path) && t.label !== "run-db")
+    if (!t.shell && !t.write && !fs.existsSync(t.path) && t.label !== "run-db")
       throw new Error(
         `the probe target ${t.label} does not exist (${t.path}); a missing file cannot show a denial`,
       );
@@ -212,6 +216,8 @@ export async function anchoredTarget(o: {
   work: string;
   scratch: string;
   prompt: string;
+  /** How the run is asked to start the probe script */
+  script: string;
 }): Promise<{ path: string; key: string } | null> {
   const fixture = openReader(path.join(o.tools, "fixture.db"));
   let candidates: { key: string; path: string }[];
@@ -250,7 +256,7 @@ export async function anchoredTarget(o: {
       );
     hook({ hook_event_name: "SessionStart", source: "startup" });
     hook({ hook_event_name: "UserPromptSubmit", prompt: o.prompt });
-    hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "./probe.sh" } });
+    hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: o.script } });
     const before = (await deliveriesIn(db)).flatMap((d) => (d.outcome === "emitted" ? d.units : []));
     hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: readCommand(p) } });
     const read = (await deliveriesIn(db)).filter((d) => d.event === "pre_read" && d.outcome === "emitted");

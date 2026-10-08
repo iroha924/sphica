@@ -35,8 +35,9 @@ export function repoPlaces(repo = REPO): string[] {
       encoding: "utf8",
       env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull },
     });
-  const trees = git("worktree", "list", "--porcelain")
-    .split("\n")
+  // NUL-separated: a path may hold a line break
+  const trees = git("worktree", "list", "--porcelain", "-z")
+    .split("\0")
     .filter((l) => l.startsWith("worktree "))
     .map((l) => l.slice("worktree ".length));
   const common = path.resolve(repo, git("rev-parse", "--git-common-dir").trim());
@@ -105,6 +106,13 @@ export async function runCodex(o: {
   /** A probe run: plants its files in the checkout before Codex starts and gives the prompt in place of the task's */
   probe?: (p: ProbePaths) => Promise<string>;
 }): Promise<{ dir: string; result: Record<string, unknown> }> {
+  // Both name the run directory: anything but one plain name could put it outside the output directory
+  for (const [what, name] of [
+    ["task", o.task.id],
+    ["condition", o.condition],
+  ])
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name ?? ""))
+      throw new Error(`the ${what} ${JSON.stringify(name)} is not one plain name`);
   const cache = evalCache();
   const build = requireInside(cache, o.build, "--build");
   fs.mkdirSync(o.out, { recursive: true });
@@ -120,7 +128,9 @@ export async function runCodex(o: {
     if (!tree || !fs.existsSync(tree)) release();
   }
   if (fs.existsSync(tree))
-    throw new Error(`could not remove ${tree}; remove it, then codex.lock in ${cache}`);
+    throw new Error(
+      `the run's files are still in ${tree}; move what is needed into ${run.dir}, remove the tree, then codex.lock in ${cache}`,
+    );
   return run;
 }
 
@@ -133,6 +143,7 @@ async function fencedRun(
   tree: string,
 ): Promise<{ dir: string; result: Record<string, unknown> }> {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}`);
+  requireInside(o.out, dir, "the run directory");
   const codexHome = path.join(dir, "codex-home");
   const db = path.join(dir, "db", "sphica.db");
   const denies = codexDenies(cache);
@@ -328,9 +339,11 @@ function retarget(p: string, tree: string, dir: string): void {
   } else if (st.isDirectory()) for (const name of fs.readdirSync(p)) retarget(path.join(p, name), tree, dir);
 }
 
-/** Moves work, home, and tmp back into the run directory, where collect and the hidden tests look and every later run is denied */
+/**
+ * Moves work, home, and tmp back into the run directory, where collect and the hidden tests look and every later run is denied. The temp
+ * tree is removed only once every copy succeeded: otherwise it is the only whole copy of the run, and it stays (with the lock) for the owner.
+ */
 function bringBack(tree: string, dir: string): { error: string | null } {
-  let error: string | null = null;
   try {
     openUp(tree);
     for (const d of ["work", "home", "tmp"]) {
@@ -339,12 +352,12 @@ function bringBack(tree: string, dir: string): { error: string | null } {
       retarget(path.join(dir, d), tree, dir);
     }
   } catch (e) {
-    error = (e as Error).message;
+    return { error: (e as Error).message };
   }
   try {
     fs.rmSync(tree, { recursive: true, force: true });
+    return { error: null };
   } catch (e) {
-    error ??= (e as Error).message;
+    return { error: (e as Error).message };
   }
-  return { error };
 }

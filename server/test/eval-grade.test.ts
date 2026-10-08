@@ -1228,6 +1228,38 @@ test("the report refuses builds of different bundles or task definitions", () =>
   }
 });
 
+test("the report refuses builds of one loop whose Codex runs or grades were made under different read fences", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-fence-"));
+  try {
+    const write = (name: string, variant: string, fence: string, grader: string) => {
+      fs.mkdirSync(path.join(base, name));
+      seedTasks(path.join(base, name));
+      const file = path.join(base, name, "grades.json");
+      const rows = [{ ...row, fence, grade }];
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ build: name, variant, bundle: "c {}", grader_fence: grader, rows }),
+      );
+      return file;
+    };
+    const report = (...files: string[]) =>
+      spawnSync(
+        process.execPath,
+        [path.join(import.meta.dirname, "..", "evals", "cloud", "report.ts"), ...files],
+        {
+          encoding: "utf8",
+          env: childEnv(base),
+        },
+      );
+    const a = write("a", "original", FENCE, GRADER_FENCE);
+    assert.match(report(a, write("b", "swapped", "0".repeat(64), GRADER_FENCE)).stderr, /read fence/);
+    assert.match(report(a, write("c", "swapped", FENCE, "1".repeat(64))).stderr, /grader/);
+    assert.equal(report(a, write("d", "swapped", FENCE, GRADER_FENCE)).status, 0);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 // The next stage reads tasks.json beside its input, so collect and grade write only into the build directory
 test("collect and grade refuse --out and write beside the build's tasks.json", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-out-"));
