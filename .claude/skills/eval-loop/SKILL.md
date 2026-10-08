@@ -125,8 +125,11 @@ Local loop progress:
 - Hidden tests run only on macOS, under sandbox-exec with no network and no file contents under the home directory but the checkout's and
   Node's; a checkout holding a link that points outside it fails its hidden test unrun. Elsewhere collect stops unless
   `--skip-hidden-tests` records them as not run
-- The Codex run under test and the Codex grader start with a permission profile (no `-s`) that denies the repository (its git history
-  holds the gold and hidden tests), `~/.cache/sphica-eval` as a whole, the owner's credentials, and the run's own login. So every build,
+- The Codex run under test and the Codex grader start with a permission profile (no `-s`) that denies the repository with every
+  worktree and its git directory (its history holds the gold and hidden tests), `~/.cache/sphica-eval` as a whole, the run's own login,
+  and all of HOME but the `node` and `bun` installs: a mise install (`~/.local/share/mise/installs/<name>/<version>`) or `~/.bun`. A tool
+  found anywhere else under HOME stops the run. The run's PATH holds only those tools' directories and the owner's PATH entries outside
+  HOME. The deny list is read from HOME right before each run, so an entry made in HOME after that is not denied. So every build,
   run directory, and log stays under `~/.cache/sphica-eval`: codex.ts refuses `--build` or `--out` elsewhere, and grade.ts refuses a loop
   whose build or run roots are elsewhere. The checkout, HOME, and TMPDIR live in a temp tree during the run and move back into the run
   directory after it. A Codex process holds `~/.cache/sphica-eval/codex.lock`; one left by a killed process is removed by hand once that
@@ -135,6 +138,10 @@ Local loop progress:
   whose commands or output name another run, the build, or the evaluation cache is still excluded as having looked outside
 - Known limit: the checkout carries its slot's own `.tools` (the fixture database in search and inject, the gold record in gold), which
   is what that condition gives the agent anyway
+- The review evaluation (`server/evals/review/run.ts`, `m2.ts`) takes the same lock, and its Codex lanes the same denies plus the output
+  directory, with the checkout, HOME, and TMPDIR in a temp tree. Its Claude lanes keep HOME for the owner's login and are denied the
+  repository. M2's check runs a Biome copy in each run's temp tree; a run that changed its copy is excluded. Run
+  `node evals/review/run.ts --preflight` after a Codex or Claude Code update, or a change to the runner
 - `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two
 - Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
   delivers. No agent run is needed

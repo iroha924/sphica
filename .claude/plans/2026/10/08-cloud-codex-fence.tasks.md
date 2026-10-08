@@ -275,13 +275,14 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): run M2's check on a per-run Biome copy and exclude runs that changed it (T23)`
   - 結果: `cd server && node --test --test-name-pattern="Biome copy" test/review-eval.test.ts` → 直す前は `copyBiome` が無く読み込みで失敗した（check.mjs がリポジトリの Biome を指していたことも同じテストが見る）
   - 結果: `cd server && node --test test/review-eval.test.ts test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 167 件 pass（写しの Biome が動き、書き換えで digest が変わり、check.mjs が写しを指し、写しが変わった run とリポジトリの Biome を指す run が除外される）。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
-- [ ] T24: eval-loop Skill に HOME の許可の一覧・run の PATH・review の評価の囲いと、既知の限界を書く
+- [x] T24: eval-loop Skill に HOME の許可の一覧・run の PATH・review の評価の囲いと、既知の限界を書く
   - 種別: 変更
   - 計画: S8, S9
   - 依存: T23（書く中身が要る）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる
   - コミット: `docs(eval-loop): describe the HOME allowlist and the review evaluation's fence (T24)`
+  - 結果: `bun run verify:ai` → 0 で終わった
 
 ## 記録
 
