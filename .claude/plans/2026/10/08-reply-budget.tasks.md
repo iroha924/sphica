@@ -71,7 +71,7 @@ overview live と review_select のどの応答も、枠込みで READ_BUDGET �
   - 依存: T03（直すのは T03 のテストと reviewer の手順）
   - 変更: `server/test/plugin.test.ts`, `plugin/skills/review/reviewers/precedent.md`
   - red: `cd server && node --test --test-name-pattern="review_select keeps each reply" test/plugin.test.ts` → review_check の cwd を存在しない場所にしても通る（review-shipping が再現）
-  - 完了条件: 同じテストを、review_check の cwd を存在しない場所にしたコピーで流す → 落ちる。元のテスト → pass
+  - 完了条件: `cd server && node --test --test-name-pattern="review_select keeps each reply" test/plugin.test.ts` → pass。review_check の cwd を存在しない場所にしたコピーでは fail
   - コミット: `test(review): require review_check to back the u<id> batch, and describe it to the reviewer`
   - 結果: `node --test --test-name-pattern="review_select keeps each reply" test/plugin-red.test.ts`（cwd を変えたコピー）→ fail 1。`node --test --test-name-pattern="review_select keeps each reply" test/plugin.test.ts` → pass 1。`bun run verify` → 0
 
