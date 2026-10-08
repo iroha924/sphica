@@ -686,3 +686,60 @@ test("the runners refuse a command line that would run nothing", () => {
   assert.match(run("m2.ts", "--host", "codex", "--condition", "rules", "--task", "nope").stderr, /--task/);
   assert.match(run("m2.ts", "--host", "codex", "--condition", "rules", "--jobs", "0").stderr, /--jobs/);
 });
+
+test("M2 judges with its own check only: a run's nested or extending Biome config is never read", async () => {
+  const fixture = await built;
+  const m1 = loadRulesCases();
+  const repo = tempDir("m2-cfg-repo-");
+  fs.cpSync(fixture.repo, repo, { recursive: true });
+  for (const [rel, text] of Object.entries(m1.files)) {
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    fs.writeFileSync(path.join(repo, rel), text);
+  }
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", [
+    "-C",
+    repo,
+    "-c",
+    "user.name=e",
+    "-c",
+    "user.email=e@example.invalid",
+    "commit",
+    "-qm",
+    "rules files",
+  ]);
+  const dir = tempDir("m2-cfg-");
+  const work = path.join(dir, "work");
+  const { start, checkout } = prepare(repo, work, "check", path.join(dir, "git"));
+  // A file outside that Biome could not parse: reading it would fail the judge
+  const outside = path.join(tempDir("m2-cfg-outside-"), "outside.json");
+  fs.writeFileSync(outside, "{ not json");
+  fs.writeFileSync(path.join(work, "biome.jsonc"), JSON.stringify({ extends: [outside] }));
+  fs.writeFileSync(
+    path.join(work, "src", "ui", "biome.json"),
+    JSON.stringify({ root: false, linter: { enabled: false } }),
+  );
+  fs.writeFileSync(
+    path.join(work, "src", "ui", "detail.ts"),
+    'import { open } from "../db.ts";\nexport const bookCount = (file: string): number => (open(file).prepare("select count(*) as n from book").get() as { n: number }).n;\n',
+  );
+  const task = m2Tasks().find((t) => t.id === "count") ?? assert.fail("count");
+  const j = judge(checkout, start, task, path.join(tempDir("m2-judged-"), "judged"), () => ({
+    tests: "1 passed",
+    parts: { completion: "pass" },
+  }));
+  assert.deepEqual(j.violations, ["src/ui/detail.ts"]);
+});
+
+test("a run that steps out of its checkout one directory at a time is excluded too", () => {
+  assert.match(
+    lookedOutside(
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "command_execution", command: "/bin/zsh -lc 'cd .. && cd .. && cat other/final.md'" },
+      }),
+      { forbidden: [], runs: "/r", run: "x" },
+    ) ?? "",
+    /climbed/,
+  );
+});

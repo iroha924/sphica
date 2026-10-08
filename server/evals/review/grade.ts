@@ -120,7 +120,8 @@ export function lookedOutside(
   const other = new RegExp(`${o.runs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/(?!${o.run}\\b)[\\w.-]+`);
   const m = other.exec(events);
   if (m) return `named ${m[0]}`;
-  const climb = commands(events).find((c) => /\.\.[\\/]\.\./.test(c));
+  // Any parent step counts: two `cd ..` in a row climb as far as one `../..`
+  const climb = commands(events).find((c) => /(^|[\s/\\'"=;&|(])\.\.($|[\s/\\'";&|)])/.test(c));
   return climb ? `climbed out of the checkout: ${climb}` : null;
 }
 

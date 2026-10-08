@@ -198,6 +198,16 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `fix(eval): judge M2 through a pinned git dir and tighten the graders`
   - 結果: red を確かめた（filter ran on the host: true）。直した後 `node --test test/review-eval.test.ts` → 12 件 pass（仕込んだ filter が走らない、走らなかった隠しテストは失敗、正解の外の判定を数える、報告されない違反で失敗、precedent の run だけを数える、held-out のケースを名指した rules の run を除外、run が 0 本になる引数を拒む）。予備測定を採点し直した: pilot-a は Claude 40 graded・誤った violation 1・食い違い 1、Codex 37 graded・3 failed、pilot-b は両モデル 40 graded・0、m1c は 20 graded・全項目 0、m2-pilot は違反 0・完了 18。数字は元のとおり。`bun run verify` → exit 0
 
+- [x] T19: M2 の判定が run の書いた Biome の設定（入れ子と extends）を読み、外を読んだ run の判定が 1 段ずつの `cd ..` を見逃す誤りを直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T18（直す対象の M2 の判定と外の読み取りの判定）
+  - 変更: `server/evals/review/m2.ts`, `server/evals/review/grade.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="own check only|one directory at a time" test/review-eval.test.ts` → 直す前のコードで、run の biome.jsonc の extends の先を Biome が読んで失敗し、`cd .. && cd .. && cat` を除外しない
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): judge M2 with its own Biome config only and catch any parent step`
+  - 結果: red を確かめた（biome printed no report、climbed が出ない）。直した後 `node --test test/review-eval.test.ts` → 14 件 pass。予備測定を採点し直して数字は元のとおり（pilot-a・pilot-b・m1c）。M2 の予備の 18 run は、ルートの biome.json が fixture と同じで入れ子の設定も無かったので、保存された判定（違反 0）は変わらない。`bun run verify` → exit 0
+
 ## 記録
 
 - 2026-10-08 / T05 / 欄を変えた。変更（前: plan.json、後: run.ts・cases.json・grade.ts・review-eval.test.ts）、完了条件（前: baseline の本測定と plan.json の回数、後: 予備測定 A と B の report）/ 予備測定で #220 の打ち切りが決まり（plan の変更履歴、持ち主の Go）、本測定の回数を固定するファイルは要らなくなった。予備測定で見つけた直しをこのタスクに入れた: duplicate-names の正解をどの判定でも可に（あいまい）、grade.ts の missed を「正解が violation だけ」のときに限定、run.ts の時間切れでプロセスのグループごと止めて上限を 10 分に
@@ -240,3 +250,4 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T15 / Codex の全差分のレビュー（main..c05d5484、high）: 3 件とも受け入れ T16 を足した。M2 の判定が外を指すリンクを通して書く（高）、採点器が completion 行の未確認の範囲・件数・重複を見ない（中）、result.json の無い run を分母に入れない（中）。厳しくした件数の照合が Codex の `findings: 1 (informational)` を読めず 8 run を落としたので、件数の後ろの説明を許した
 - 2026-10-08 / T17 / PR #304 の CI の check（Linux、Node 24.15 と 26）で M2 の判定のテストが sandbox-exec の ENOENT で落ちた。この PR で入ったもので、Linux に sandbox-exec が無いという決まった原因なので、ジョブの流し直しはしなかった
 - 2026-10-08 / T18 / GitHub の Codex（chatgpt-codex-connector、aeea56e のレビュー）の 9 件: 7 件を受け入れた（正解の外の判定、報告されない違反、gradeAll が precedent 以外の run を数える、Codex の rules の run の外の読み取り、sandbox-exec の無いホストの隠しテスト、M2 の judge が run の書ける .git を通す（セキュリティ。持ち主に報告して Go を得てから直した。予備の 18 run の checkout に filter・hooksPath・fsmonitor・hook・.gitattributes は無かった）、run が 0 本になる引数）。2 件は見送った: Claude の lane が持ち主の HOME を使う（ログインに要り、cloud の runner と同じ。ファイルのツールは checkout の外を読めず資格情報のディレクトリも拒む）、質問の一覧の形が prompt に無い（#220 の新しい本文で足す予定の形で、#220 は不採用）
+- 2026-10-08 / T19 / Codex の T17・T18 の再レビュー（aeea56e3..63d18c89、high）: 4 件。run の Biome の設定の extends（高）と入れ子の設定（中）、1 段ずつの `cd ..`（中）を受け入れ T19 を足した。報告の本文に違反が載ったかを見ない（中）は前回と同じ理由で見送った。同じ評価コードへのレビューは 4 巡目で、ここで打ち切る
