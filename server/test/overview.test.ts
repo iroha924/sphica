@@ -254,31 +254,43 @@ test("look names gone files apart from lost symbols, conditions to reconsider, a
   }
 });
 
-test("live keeps every record on one line with its paths, and a page stays under 64 KiB whatever the text, keys, and paths", async () => {
+test("live keeps each page within the reply budget with its frame, whatever the text, keys, and paths, and after shows every record once", async () => {
   const db = tempDb();
   try {
     const p = project(db);
     const m = message(db, p, { id: "m1", text: said });
     const long = "x".repeat(2000);
-    await save(
-      db,
-      p,
-      Array.from({ length: 49 }, (_, i) =>
-        record(m, `r${i}`, "constraint", {
-          text: long,
-          anchors: [{ path: `${"d".repeat(440)}${i}/f.ts`, role: "applies_to" }],
-        }),
-      ),
-    );
-    // A key's session part comes from the host; a line break in it must not start a line of its own
-    const forged: Target = {
+    // A long session part in each key, long texts, and long paths in a directory of their own; every fifth has no path, so the groups
+    // shown are not in id order
+    const target: Target = {
       projectId: p,
       origin: "trace",
-      prefix: "trace:ext\n## forged/",
+      prefix: `trace:${"e".repeat(200)}/`,
       sessionId: "s1",
       root: null,
       sources: null,
     };
+    for (let i = 0; i < 120; i += 20)
+      await inTransaction(db.ingest, async (trx) => {
+        const runId = await openRun(trx, {
+          projectId: p,
+          origin: "trace",
+          target: "session:s1",
+          sessionId: "s1",
+          draftId: `long${i}`,
+        });
+        const units = Array.from({ length: 20 }, (_, k) =>
+          record(m, `r${String(i + k).padStart(3, "0")}-${"k".repeat(56)}`, "constraint", {
+            text: long,
+            ...((i + k) % 5 === 4
+              ? {}
+              : { anchors: [{ path: `${"d".repeat(440)}${i + k}/f.ts`, role: "applies_to" }] }),
+          }),
+        );
+        await saveRecord(trx, target, runId, await checkRecord(trx, target, { units }), []);
+      });
+    // A key's session part comes from the host; a line break in it must not start a line of its own
+    const forged: Target = { ...target, prefix: "trace:ext\n## forged/" };
     await inTransaction(db.ingest, async (trx) => {
       const runId = await openRun(trx, {
         projectId: p,
@@ -295,10 +307,28 @@ test("live keeps every record on one line with its paths, and a page stays under
         [],
       );
     });
-    const page = await liveOverview(db.reader, p, null);
-    assert.ok(Buffer.byteLength(page) < 64 * 1024, `${Buffer.byteLength(page)} bytes`);
-    assert.doesNotMatch(page, /^## forged/m);
-    assert.equal([...page.matchAll(/\/f\.ts\]/g)].length, 49);
+    const seen: number[] = [];
+    let after: number | null = null;
+    for (let pages = 0; ; pages++) {
+      assert.ok(pages < 20, "the pages never ended");
+      const page = await liveOverview(db.reader, p, after);
+      const size = Buffer.byteLength(framed(page));
+      assert.ok(size <= READ_BUDGET, `page ${pages + 1} is ${size} bytes with its frame`);
+      assert.doesNotMatch(page, /^## forged/m);
+      const ids = [...page.matchAll(/ \(u(\d+), constraint/g)].map((x) => Number(x[1]));
+      assert.ok(ids.length > 0, `page ${pages + 1} shows no record`);
+      // Each record is one line, its paths included
+      assert.equal([...page.matchAll(/^- /gm)].length, ids.length);
+      // A record with a path ends its line with it; one without has none
+      for (const line of page.split("\n").filter((l) => l.startsWith("- ")))
+        assert.match(line, /(\/f\.ts\]|x|k text)$/);
+      seen.push(...ids);
+      if (/That is the end of the list\./.test(page)) break;
+      after = next(page);
+      assert.equal(after, Math.max(...ids));
+    }
+    assert.equal(seen.length, 121);
+    assert.equal(new Set(seen).size, 121);
   } finally {
     await db.done();
   }

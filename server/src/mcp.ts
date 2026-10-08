@@ -19,7 +19,7 @@ import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
 import { READ_BUDGET, readRefs } from "./read.ts";
-import { parseDiff, REVIEW_BATCH, reviewBatch, selectedText } from "./review.ts";
+import { parseDiff, REVIEW_BATCH, reviewBatch, selectReply } from "./review.ts";
 import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsText, searchSources, searchUnits } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
@@ -431,10 +431,7 @@ server.registerTool(
         return text(
           `Decision lane: checked. No record after id ${a.after}: ${b.all.length} records apply in all (selection ${b.selection}).`,
         );
-      const from = b.all.length - b.all.filter((u) => u.id > (a.after ?? 0)).length + 1;
-      return text(
-        `Decision lane: checked. ${b.all.length} records apply. Batch ${b.k} of ${b.n} (records ${from}-${from + b.records.length - 1}), selection ${b.selection}; read each before judging it.\n${framed(await selectedText(db, b.records))}\n${b.next === null ? "This is the last batch." : `Next batch: after checking this one, call review_select with after: ${b.next}.`}`,
-      );
+      return text(await selectReply(db, b, a.after ?? null));
     } catch (e) {
       return notChecked(e);
     }
