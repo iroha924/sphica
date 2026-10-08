@@ -105,13 +105,14 @@ diff で決着しない記録を質問として返す本文に変え、同じ回
 
 overview が持ち主の挙げた検査ファイルの marker を読み、変更タスクで「ルール文だけ」と比べる。
 
-- [ ] T09: overview look の `checks` と、コメントの marker の読み取り
+- [x] T09: overview look の `checks` と、コメントの marker の読み取り
   - 種別: 追加
   - 計画: S5
   - 依存: T08（M1 が基準に届いたときだけ作る）
-  - 変更: `server/src/overview.ts`, `server/src/rule-files.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`, `server/test/rule-files.test.ts`
+  - 変更: `server/src/overview.ts`, `server/src/rule-files.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`, `server/test/rule-files.test.ts`, `plugin/skills/rules/SKILL.md`
   - 完了条件: `cd server && node --test test/overview.test.ts test/rule-files.test.ts` → 一覧のファイルだけを読み、`//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出し、読めなかった・無かった・範囲外の件数と上限・ページ送り・READ_BUDGET を守る
   - コミット: `feat(overview): flag check files whose marker names a replaced record`
+  - 結果: `node --test test/overview.test.ts test/rule-files.test.ts` → 全件 pass（新しく: 名指した biome.jsonc と checks.toml の `//`・`/* */`・`#`・`<!-- -->` の marker を拾い、superseded（後継付き）・withdrawn・別プロジェクトを出す、名指さないファイルは読まない、無い 1 件・外 2 件を数える、カーソルは別の checks の一覧では続かない、MCP で checks を live に渡すと拒否、symlink で外へ出る検査ファイルと上限を超えるファイルは読まない）。`bun run verify` → exit 0
 - [ ] T10: M2 のタスク、隠しテスト、patch の違反の判定
   - 種別: 追加
   - 計画: S5
@@ -153,3 +154,5 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T08 / M1 の回数を測る前に固定した: 両ホスト各 10 run（`run.ts --rules --runs 10`）。基準は plan のとおり（下書きすべきでない記録への下書き 0、誤った失敗 0、本物の違反の見逃し 0）をモデル別に全 run で満たすこと
 - 2026-10-08 / T08 / 1 回目の M1（~/.cache/sphica-eval/review/m1、両ホスト各 10 run、全項目 0）は無効にした / Skill の例（lodash、lodash-es、src/ui/**、**/db.ts）が M1 の fixture の記録と同じ名前で、例を写せば正解できた。例を関係の無い名前（moment、src/views/**、**/store.ts）に変え、同じ回数（各 10 run）で m1b として流し直す
 - 2026-10-08 / T08 / 変更欄に 4 つの manifest を足した（前: rules/SKILL.md、後: それと npm・Claude・Codex・marketplace の版）/ plugin に入るファイルを変えるコミットは pre-commit が版の同期を求める。`release:plan --base v0.6.42` は plugin、0.6.43 に上げた。T11 は最後に版がそろっていることを確かめる
+- 2026-10-08 / T09 / 変更欄に rules/SKILL.md を足した（「Later」に checks の渡し方を書く）/ look が検査ファイルを読むのは checks で名指したときだけなので、Skill に書かないと使われない
+- 2026-10-08 / T08 / Codex のタスクごとのレビュー（8b5ac133）: F1（override に patterns だけを写すと全体の paths の禁止が消える）と F2（module の禁止をファイル名の glob にすると同じ名前の別 module まで禁止し、tsconfig の別名の import を見逃す）を受け入れ、修正タスク T12 を足す

@@ -14,13 +14,14 @@ import { EXPORT_LIMITS, exportDecisions, exportPath, exportReply } from "./expor
 import { fieldsText } from "./fields.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
-import { liveOverview, lookCursor, lookOverview } from "./overview.ts";
+import { cursorFitsChecks, liveOverview, lookCursor, lookOverview } from "./overview.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
 import { READ_BUDGET, readRefs } from "./read.ts";
 import { parseDiff, REVIEW_BATCH, reviewBatch, selectReply } from "./review.ts";
 import { checkedText, checkFindings } from "./review-findings.ts";
+import { CHECK_LIMITS } from "./rule-files.ts";
 import { hitsText, searchSources, searchUnits } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
@@ -334,6 +335,7 @@ server.registerTool(
       "applies to, a page at a time (pass after from the previous page). view look lists live records whose code file is gone or whose symbol " +
       "is not found, written conditions for reconsidering an option (for you to judge, never applied), and lines in CLAUDE.md, AGENTS.md, or " +
       ".claude/rules marked <!-- sphica: key --> whose record was replaced or withdrawn, a page at a time until one says Complete (pass the after it gives). " +
+      "With checks, look also reads those files (a linter config the owner pasted a Sphica check into) for a comment marked sphica: key. " +
       "view delivery shows what Sphica's hooks showed the agent over the last days (default 7): logged rows by event, the records delivered most, " +
       "and example sessions; use it when the user asks what Sphica has been showing. " +
       "Read a record by its key before relying on it.",
@@ -349,6 +351,13 @@ server.registerTool(
           .optional()
           .describe(
             "With live: the id the previous page said to continue after. With look: the cursor the previous page gave, as it is",
+          ),
+        checks: z
+          .array(z.string().min(1).max(CHECK_LIMITS.path))
+          .max(CHECK_LIMITS.files)
+          .optional()
+          .describe(
+            "With look: repository-relative paths of check files (such as biome.jsonc) to read for sphica markers in comments; pass the same list on every page",
           ),
         days: z
           .number()
@@ -366,6 +375,12 @@ server.registerTool(
   },
   async (a, extra) => {
     if (a.view !== "delivery" && a.days !== undefined) return text("days: only with view delivery", true);
+    if (a.view !== "look" && a.checks !== undefined) return text("checks: only with view look", true);
+    if (typeof a.after === "string" && !cursorFitsChecks(a.after, a.checks ?? []))
+      return text(
+        "after: given for another list of checks; pass the same checks, or call look without after",
+        true,
+      );
     if (a.view === "delivery" && a.after !== undefined)
       return text("after: not with view delivery, which is one page", true);
     if (a.view === "live" && typeof a.after === "string")
@@ -382,7 +397,13 @@ server.registerTool(
           a.view === "delivery"
             ? await deliveryOverview(db, p.id, a.days ?? DELIVERY_DAYS.default)
             : typeof a.after === "string" || a.view === "look"
-              ? await lookOverview(db, p.id, p.root, typeof a.after === "string" ? a.after : undefined)
+              ? await lookOverview(
+                  db,
+                  p.id,
+                  p.root,
+                  typeof a.after === "string" ? a.after : undefined,
+                  a.checks ?? [],
+                )
               : await liveOverview(db, p.id, a.after ?? null),
         ),
       );

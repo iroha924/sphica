@@ -1,5 +1,6 @@
 // The instruction files an owner may paste Sphica's draft rule lines into (CLAUDE.md, AGENTS.md, AGENTS.override.md, .claude/rules/**/*.md),
-// read from the working tree with bounds, so a stale-marker check can look at every one it lists and say how many it could not.
+// and the check files (a linter config) the owner names, read from the working tree with bounds, so a stale-marker check can look at every
+// one it lists and say how many it could not.
 import fs from "node:fs";
 import path from "node:path";
 import { leaves } from "./anchors.ts";
@@ -7,6 +8,8 @@ import { cleanGit } from "./git.ts";
 import { sha256 } from "./text.ts";
 
 export const RULE_LIMITS = { files: 200, bytes: 256 * 1024, depth: 8, entries: 5000 } as const;
+/** Check files one look names at most, and the length of each path */
+export const CHECK_LIMITS = { files: 20, path: 500 } as const;
 
 const RULE_NAMES = new Set(["CLAUDE.md", "AGENTS.md", "AGENTS.override.md"]);
 /** git pathspecs for the same set; `**` also matches the top directory. */
@@ -22,9 +25,14 @@ export function isRuleFile(rel: string): boolean {
 }
 
 export type RuleFiles = {
-  files: { path: string; text: string }[];
+  /** check: a file the owner named, whose markers are comments of its own language */
+  files: { path: string; text: string; check: boolean }[];
   /** Files found but not read: past the file cap, too large, not a regular file, binary, or leading outside the repository */
   skipped: number;
+  /** Check files named that are not there */
+  missing: number;
+  /** Check files named by a path that is absolute or climbs out of the repository */
+  outside: number;
   /** Why the listing itself may have missed files, or null when it looked everywhere it should */
   incomplete: string | null;
 };
@@ -33,14 +41,22 @@ export type RuleFiles = {
 export const pathHash = (rel: string): string => sha256(rel).toString("hex").slice(0, 16);
 
 /**
- * The instruction files under root, in path order. In a git work tree, tracked and untracked files git does not ignore; elsewhere, a
- * bounded walk. With `from` (a pathHash), the files before that one are not read again.
+ * The instruction files under root and the check files named in `checks` (repository-relative), in path order. In a git work tree, tracked
+ * and untracked files git does not ignore; elsewhere, a bounded walk. With `from` (a pathHash), the files before that one are not read again.
  */
-export function ruleFiles(root: string, from?: string): RuleFiles {
+export function ruleFiles(root: string, from?: string, checks: string[] = []): RuleFiles {
   const listed = gitList(root) ?? walk(root);
-  const out: RuleFiles = { files: [], skipped: 0, incomplete: listed.incomplete };
+  const out: RuleFiles = { files: [], skipped: 0, missing: 0, outside: 0, incomplete: listed.incomplete };
   const realRoot = fs.realpathSync(root);
-  const paths = [...new Set(listed.paths)].sort();
+  const named = new Set<string>();
+  for (const c of checks) {
+    const rel = path.posix.normalize(c.replaceAll("\\", "/"));
+    // Forward slashes on every host, so the climb is checked by hand rather than by path.sep
+    if (path.posix.isAbsolute(rel) || path.win32.isAbsolute(c) || rel === ".." || rel.startsWith("../"))
+      out.outside++;
+    else named.add(rel);
+  }
+  const paths = [...new Set([...listed.paths, ...named])].sort();
   const start = from
     ? Math.max(
         paths.findIndex((rel) => pathHash(rel) === from),
@@ -55,9 +71,12 @@ export function ruleFiles(root: string, from?: string): RuleFiles {
       continue;
     }
     const text = readBounded(root, realRoot, rel);
-    if (text === null) continue;
+    if (text === null) {
+      if (named.has(rel)) out.missing++;
+      continue;
+    }
     if (text === undefined) out.skipped++;
-    else out.files.push({ path: rel, text });
+    else out.files.push({ path: rel, text, check: named.has(rel) });
   }
   return out;
 }

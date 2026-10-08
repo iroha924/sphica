@@ -125,6 +125,9 @@ const LOOK_LIMITS = { anchors: 2000, line: 2200, bytes: READ_BUDGET - 4 * 1024 }
 const CONDITION_ROWS = Math.ceil(LOOK_LIMITS.bytes / 28);
 /** A record key as trace, harvest, and glean write it, inside an HTML comment the owner pasted from a rules draft. */
 const MARKER = /<!--\s*sphica:\s*((?:trace|harvest|glean):[^\s>]{1,1000})\s*-->/g;
+/** The same key in a check file, inside a comment of the file's language: `//`, `#`, a block comment, or an HTML comment */
+const COMMENT_MARKER =
+  /(?:\/\/|#|\/\*|<!--)\s*sphica:\s*((?:trace|harvest|glean):[\w.:/-]{1,1000}?)(?=\s|\*\/|-->|$)/g;
 
 /**
  * Where a look page goes on from: the stage, and the last item of it already dealt with, by a position that does not move when other items
@@ -139,6 +142,11 @@ const Cursor = z.discriminatedUnion("s", [
       file: z.string().regex(/^(?:[0-9a-f]{16})?$/),
       line: z.number().int().min(0),
       n: z.number().int().min(0),
+      // The check files the page was asked about, as one hash: a later page asked about others would skip or repeat files
+      c: z
+        .string()
+        .regex(/^[0-9a-f]{16}$/)
+        .optional(),
     })
     .strict(),
 ]);
@@ -158,6 +166,15 @@ export function lookCursor(after: string): Cursor | null {
 
 const cursorText = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString("base64url");
 
+const checksHash = (checks: string[]) =>
+  checks.length ? pathHash([...checks].sort().join("\0")) : undefined;
+
+/** Whether a look cursor goes on with the same check files it was given for: another list would skip or repeat files. */
+export function cursorFitsChecks(after: string, checks: string[]): boolean {
+  const c = lookCursor(after);
+  return c?.s !== "markers" || !c.file || c.c === checksHash(checks);
+}
+
 /**
  * Records that need a look, a page at a time: live records whose anchored file is gone or whose symbol is not found, written conditions for
  * reconsidering, and marked lines in instruction files whose record was replaced or withdrawn. A page stops at its byte budget or after
@@ -168,9 +185,15 @@ export async function lookOverview(
   projectId: number,
   root: string | null,
   after?: string,
+  checks: string[] = [],
 ): Promise<string> {
   const from: Cursor = (after === undefined ? null : lookCursor(after)) ?? { s: "anchors", id: 0 };
   if (after !== undefined && !lookCursor(after)) throw new Error("after is not a cursor a look page gave");
+  const checked = checksHash(checks);
+  if (after !== undefined && !cursorFitsChecks(after, checks))
+    throw new Error(
+      "after was given for another list of checks; pass the same checks, or call look without after",
+    );
   const stage = STAGES.indexOf(from.s);
   const notChecked: string[] = [];
   const lines = {
@@ -313,12 +336,12 @@ export async function lookOverview(
       // The cursor names its file by pathHash, so it stays short whatever the path, and the files before it are not read again.
       // When that file is gone, its hash matches nothing and the markers start over from the first file
       const resume = from.s === "markers" && from.file ? from : null;
-      const scan = ruleFiles(root, resume?.file);
+      const scan = ruleFiles(root, resume?.file, checks);
       const todo: { file: string; line: number; n: number; key: string }[] = [];
       for (const f of scan.files) {
         const same = resume !== null && pathHash(f.path) === resume.file;
         for (const [i, text] of f.text.split(/\r?\n/).entries())
-          for (const [n, m] of [...text.matchAll(MARKER)].entries())
+          for (const [n, m] of [...text.matchAll(f.check ? COMMENT_MARKER : MARKER)].entries())
             if (!same || i + 1 > resume.line || (i + 1 === resume.line && n > resume.n))
               todo.push({ file: f.path, line: i + 1, n, key: m[1] ?? "" });
       }
@@ -358,7 +381,13 @@ export async function lookOverview(
             stop = last ?? { s: "markers", file: "", line: 0, n: 0 };
             break;
           }
-          last = { s: "markers", file: pathHash(f.file), line: f.line, n: f.n };
+          last = {
+            s: "markers",
+            file: pathHash(f.file),
+            line: f.line,
+            n: f.n,
+            ...(checked ? { c: checked } : {}),
+          };
         }
       }
       if (scan.skipped)
@@ -366,6 +395,8 @@ export async function lookOverview(
           `${scan.skipped} instruction files not read (over the caps, not regular files, or outside the repository)`,
         );
       if (scan.incomplete) notChecked.push(`instruction files: the listing ${scan.incomplete}`);
+      if (scan.missing) notChecked.push(`${scan.missing} check files named that are not there`);
+      if (scan.outside) notChecked.push(`${scan.outside} check files named outside the repository`);
     }
   }
 

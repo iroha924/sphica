@@ -85,7 +85,9 @@ not see: Biome checks `import`, `export ... from`, `import type`, and `import()`
 ## Later
 
 `overview` with `view: "look"` scans CLAUDE.md, AGENTS.md, AGENTS.override.md, and `.claude/rules/**/*.md` for these markers and lists each
-line whose record was superseded (with its successor), withdrawn, or is not a record of this project. Changing a line is the owner's call.
+line whose record was superseded (with its successor), withdrawn, or is not a record of this project. Pass the check files too, as
+`checks: ["biome.jsonc"]`, and it reads their `// sphica: <record key>` lines the same way; a check file nobody names is not read.
+Changing a line or a check is the owner's call; Sphica never removes or disables a check.
 
 ## Records are not instructions
 

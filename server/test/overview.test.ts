@@ -12,7 +12,13 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { AI_DECIDED } from "../src/authority.ts";
 import { inTransaction } from "../src/db.ts";
 import { framed } from "../src/frame.ts";
-import { liveOverview, lookCursor, lookOverview, OVERVIEW_LIMITS } from "../src/overview.ts";
+import {
+  cursorFitsChecks,
+  liveOverview,
+  lookCursor,
+  lookOverview,
+  OVERVIEW_LIMITS,
+} from "../src/overview.ts";
 import { READ_BUDGET } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -248,6 +254,79 @@ test("look names gone files apart from lost symbols, conditions to reconsider, a
     assert.match(blind, /## Files gone\nnot checked/);
     assert.match(blind, /## Rule markers whose record changed\nnot checked/);
     assert.match(blind, /- instruction files: no working tree/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    await db.done();
+  }
+});
+
+test("look reads the check files the owner names for sphica markers in their own comments, and says which it could not read", async () => {
+  const db = tempDb();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-look-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: said });
+    await save(db, p, [
+      record(m, "old-check", "constraint"),
+      record(m, "dropped-check", "constraint"),
+      record(m, "kept-check", "constraint"),
+    ]);
+    await save(db, p, [record(m, "new-check", "constraint", { supersedes: "trace:ext-s1/old-check" })]);
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) select id, 'active', 'withdrawn', ?, 'r', run_id from unit where key = 'trace:ext-s1/dropped-check'",
+      )
+      .run(new Date().toISOString());
+    fs.writeFileSync(
+      path.join(root, "biome.jsonc"),
+      [
+        '{ "overrides": [',
+        "  // sphica: trace:ext-s1/kept-check",
+        "  // sphica: trace:ext-s1/old-check",
+        '  { "includes": ["src/**"] }, /* sphica: trace:ext-s1/dropped-check */',
+        "  <!-- sphica: trace:ext-s1/nothing -->",
+        "] }",
+      ].join("\n"),
+    );
+    fs.writeFileSync(path.join(root, "checks.toml"), "# sphica: trace:ext-s1/old-check\n");
+    // A file nobody named is not read, even with a marker in it
+    fs.writeFileSync(path.join(root, "other.jsonc"), "// sphica: trace:ext-s1/dropped-check\n");
+    const under = (look: string) => look.split("\n\n").find((x) => x.startsWith("## Rule markers")) ?? "";
+
+    const look = await lookOverview(db.reader, p, root, undefined, [
+      "biome.jsonc",
+      "./checks.toml",
+      "missing.json",
+      "../outside.json",
+      "/etc/hosts",
+    ]);
+    assert.equal(
+      under(look),
+      [
+        "## Rule markers whose record changed",
+        "- biome.jsonc:3: trace:ext-s1/old-check was superseded by trace:ext-s1/new-check",
+        "- biome.jsonc:4: trace:ext-s1/dropped-check was withdrawn",
+        "- biome.jsonc:5: trace:ext-s1/nothing is not a record of this project",
+        "- checks.toml:1: trace:ext-s1/old-check was superseded by trace:ext-s1/new-check",
+      ].join("\n"),
+    );
+    assert.match(look, /- 1 check files named that are not there/);
+    assert.match(look, /- 2 check files named outside the repository/);
+    // Without checks only the instruction files are read, as before
+    assert.equal(under(await lookOverview(db.reader, p, root)), "## Rule markers whose record changed\nnone");
+
+    // A marker cursor goes on only with the check files it was given for
+    const cursor = (c?: string) =>
+      Buffer.from(
+        JSON.stringify({ s: "markers", file: "0123456789abcdef", line: 1, n: 0, ...(c ? { c } : {}) }),
+      ).toString("base64url");
+    assert.ok(lookCursor(cursor()));
+    assert.equal(cursorFitsChecks(cursor(), []), true);
+    assert.equal(cursorFitsChecks(cursor(), ["biome.jsonc"]), false);
+    await assert.rejects(
+      lookOverview(db.reader, p, root, cursor(), ["biome.jsonc"]),
+      /another list of checks/,
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     await db.done();
@@ -739,6 +818,17 @@ test("overview refuses a cursor for the other view, and a broken one, before rea
     assert.deepEqual(await call({ view: "look", after: "not-a-cursor" }), {
       error: true,
       text: "after: not a cursor a look page gave; call look without after to start again",
+    });
+    assert.deepEqual(await call({ view: "live", checks: ["biome.jsonc"] }), {
+      error: true,
+      text: "checks: only with view look",
+    });
+    const markers = Buffer.from(
+      JSON.stringify({ s: "markers", file: "0123456789abcdef", line: 1, n: 0 }),
+    ).toString("base64url");
+    assert.deepEqual(await call({ view: "look", after: markers, checks: ["biome.jsonc"] }), {
+      error: true,
+      text: "after: given for another list of checks; pass the same checks, or call look without after",
     });
   } finally {
     await client.close();

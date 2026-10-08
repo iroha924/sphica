@@ -201,3 +201,24 @@ test("outside git, a branch past the depth cap does not stop the walk from readi
   );
   assert.match(String(r.incomplete), /did not look deeper than/);
 });
+
+test("check files the owner names are read with the same caps, and a path that leaves the repository is never read", () => {
+  put("biome.jsonc", "// sphica: trace:s/k\n");
+  put("big.json", "x".repeat(RULE_LIMITS.bytes + 1));
+  fs.writeFileSync(path.join(outside, "secret.json"), "// sphica: trace:s/k\n");
+  fs.symlinkSync(path.join(outside, "secret.json"), path.join(root, "linked.json"));
+  const scan = ruleFiles(root, undefined, [
+    "biome.jsonc",
+    "big.json",
+    "linked.json",
+    "gone.json",
+    "../x.json",
+    outside,
+  ]);
+  assert.deepEqual(
+    scan.files.map((f) => [f.path, f.check]),
+    [["biome.jsonc", true]],
+  );
+  // Too large and a link out are skipped; the missing one and the two outside are counted apart
+  assert.deepEqual([scan.skipped, scan.missing, scan.outside], [2, 1, 2]);
+});
