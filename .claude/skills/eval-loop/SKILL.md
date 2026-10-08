@@ -127,9 +127,9 @@ Local loop progress:
   `--skip-hidden-tests` records them as not run
 - The Codex run under test and the Codex grader start with a permission profile (no `-s`) that denies the repository with every
   worktree and its git directory (its history holds the gold and hidden tests), `~/.cache/sphica-eval` as a whole, the run's own login,
-  and all of HOME but the `node` and `bun` installs: a mise install (`~/.local/share/mise/installs/<name>/<version>`) or `~/.bun`. A tool
-  found anywhere else under HOME stops the run. The run's PATH holds only those tools' directories and the owner's PATH entries outside
-  HOME. The deny list is read from HOME right before each run, so an entry made in HOME after that is not denied. So every build,
+  and all of HOME, with only the `node` and `bun` installs read back: a mise install (`~/.local/share/mise/installs/<name>/<version>`)
+  or `~/.bun`. A tool found anywhere else under HOME, or a link at HOME's top or on the way to a kept install that leads out of HOME,
+  stops the run. The run's PATH holds only those tools' directories and the owner's PATH entries outside HOME. So every build,
   run directory, and log stays under `~/.cache/sphica-eval`: codex.ts refuses `--build` or `--out` elsewhere, and grade.ts refuses a loop
   whose build or run roots are elsewhere. The checkout, HOME, and TMPDIR live in a temp tree during the run and move back into the run
   directory after it. A Codex process holds `~/.cache/sphica-eval/codex.lock`; one left by a killed process is removed by hand once that

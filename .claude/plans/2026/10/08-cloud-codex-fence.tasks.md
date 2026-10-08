@@ -339,6 +339,15 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="reads through a read fence and keeps" test/eval-codex.test.ts` → 直す前の codex-run.ts では、拒んだ `--out` のディレクトリが残って失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 174 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T30: eval-loop Skill を、HOME を丸ごと deny して残す根を読み戻す形に合わせて直す
+  - 種別: 変更
+  - 計画: S8
+  - 依存: T29（書く中身が要る）
+  - 変更: `.claude/skills/eval-loop/SKILL.md`
+  - 完了条件: `bun run verify:ai` → 0 で終わる
+  - コミット: `docs(eval-loop): describe HOME denied whole with the tool installs read back (T30)`
+  - 結果: `bun run verify:ai` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
