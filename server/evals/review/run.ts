@@ -19,7 +19,10 @@ import {
   claudeSettings,
   codexArgs,
   codexMcp,
+  codexProfile,
+  evalDenies,
   type LanePaths,
+  outsideCheckout,
   READ_TOOLS,
   RULES_BODY,
   RULES_TOOLS,
@@ -107,12 +110,14 @@ async function runLane(o: {
   model: string;
   prompt: (body: string, p: LanePaths) => string;
   tools: string[];
+  /** Writes files into the checkout before the host starts, untracked (the preflight's probe) */
+  plant?: (work: string) => void;
 }): Promise<{ dir: string; result: LaneResult }> {
   const name = o.diff ?? "rules";
   const { run, dir } = claimRunDir(o.out, `${name}-${o.host}`);
   const started = Date.now();
   const p: LanePaths = {
-    work: path.join(dir, "work"),
+    work: outsideCheckout("review-work-"),
     diff: "",
     db: path.join(dir, "db", "sphica.db"),
     home: path.join(dir, "home"),
@@ -165,14 +170,16 @@ async function runLane(o: {
     fs.mkdirSync(path.dirname(p.db), { recursive: true });
     fs.copyFileSync(o.fixture.db, p.db);
     fs.mkdirSync(p.home, { recursive: true });
+    o.plant?.(p.work);
     const prompt = o.prompt(body, p);
     fs.writeFileSync(path.join(dir, "prompt.md"), prompt);
+    fs.writeFileSync(path.join(dir, "checkout.txt"), `${p.work}\n`);
 
     let r: Awaited<ReturnType<typeof runChild>>;
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
       const mcp = path.join(dir, "mcp.json");
-      fs.writeFileSync(settings, `${JSON.stringify(claudeSettings(o.tools), null, 2)}\n`);
+      fs.writeFileSync(settings, `${JSON.stringify(claudeSettings(o.tools, evalDenies(o.out)), null, 2)}\n`);
       fs.writeFileSync(mcp, `${JSON.stringify(claudeMcp(p), null, 2)}\n`);
       result.model = o.model;
       result.cli = claudeVersion();
@@ -185,7 +192,11 @@ async function runLane(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      isolatedCodexHome(codexHome, codexMcp(p));
+      isolatedCodexHome(
+        codexHome,
+        // default_permissions is a top-level key: it goes before the MCP server's table, or TOML reads it as part of that table
+        `${codexProfile(":read-only", [...evalDenies(o.out), path.join(codexHome, "auth.json")])}${codexMcp(p)}`,
+      );
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       const tmp = path.join(dir, "tmp");
@@ -288,7 +299,21 @@ async function preflight(out: string, model: string): Promise<string[]> {
     const owners = (init.plugins ?? []).filter((x) => (x as { path?: string }).path !== "builtin");
     if (owners.length) problems.push(`claude loaded plugins: ${JSON.stringify(owners)}`);
   }
-  const lanes = [probe, await runLane(review("codex", "postgres"))];
+  // Codex reads with its permission profile: a script in the checkout tries what every run must not read, and each must be denied
+  const cases = path.join(import.meta.dirname, "cases.json");
+  const probeScript = `#!/bin/sh\nfor pair in "cases|${cases}" "outside|${outside}" "auth|$CODEX_HOME/auth.json"; do\n  label=\${pair%%|*}; file=\${pair#*|}\n  if head -c 1 "$file" >/dev/null 2>&1; then echo "READ $label"; else echo "DENIED $label"; fi\ndone\n`;
+  const codex = await runLane({
+    ...review("codex", "postgres"),
+    plant: (work) => fs.writeFileSync(path.join(work, "probe.sh"), probeScript, { mode: 0o755 }),
+    prompt: (body, p) =>
+      `${reviewPrompt(body, { ...p, model: "codex" })}\nBefore reviewing, run ./probe.sh once and quote its output in your reply.\n`,
+  });
+  const fence = everything(codex.dir);
+  for (const label of ["cases", "outside", "auth"])
+    if (!fence.includes(`DENIED ${label}`))
+      problems.push(`codex: the probe did not show ${label} denied (${codex.dir})`);
+  if (fence.includes(token)) problems.push(`codex read ${outside}`);
+  const lanes = [probe, codex];
   for (const lane of lanes) {
     const text = everything(lane.dir);
     if (lane.result.status !== 0) problems.push(`${lane.result.host}: ${lane.result.reason}`);

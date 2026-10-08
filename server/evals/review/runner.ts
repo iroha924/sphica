@@ -1,8 +1,25 @@
 // How one precedent lane of the review evaluation is started on each host: the reviewer gets the aspect body as its prompt, Read / Grep /
 // Glob and Sphica's read MCP server on the run's copy of the fixture database, and nothing else of the owner's (settings, hooks, plugins,
 // MCP servers). Claude's reads are fenced to the checkout; Codex has no read fence, so its runs are graded on what they named instead.
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { DENY_DIRS, DENY_FILES } from "../cloud/claude-run.ts";
+
+/**
+ * What no run may read, whatever it runs: the evaluations (the expected verdicts, the held-out cases, M2's hidden tests and reference
+ * check), the output directory (the other runs, and each run's own CODEX_HOME), and the owner's Codex home with its login. Each run works
+ * in a checkout outside all of them.
+ */
+/** A fresh checkout location outside the output directory, so denying the output directory never hides the checkout itself */
+export const outsideCheckout = (prefix: string): string =>
+  path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix))), "work");
+
+export const evalDenies = (out: string): string[] => [
+  path.resolve(import.meta.dirname, ".."),
+  out,
+  path.join(os.homedir(), ".codex"),
+];
 
 /** The /sphica:rules body M1 measured, with its Biome check drafting: the shipped Skill does not draft checks */
 export const RULES_BODY = path.join(import.meta.dirname, "rules-body.md");
@@ -63,7 +80,7 @@ Rule lines go into CLAUDE.md. Print the whole draft in this one reply: nobody ca
 }
 
 /** Claude's settings for a lane: no hooks, reads fenced to the checkout, the owner's credentials and Sphica's home denied, the read tools allowed. */
-export function claudeSettings(tools: string[] = READ_TOOLS): Record<string, unknown> {
+export function claudeSettings(tools: string[] = READ_TOOLS, denies: string[] = []): Record<string, unknown> {
   return {
     permissions: {
       blockReadsOutsideWorkingDirectories: true,
@@ -71,7 +88,7 @@ export function claudeSettings(tools: string[] = READ_TOOLS): Record<string, unk
       deny: [
         "WebFetch",
         "WebSearch",
-        ...DENY_DIRS.map((d) => `Read(/${d}/**)`),
+        ...[...DENY_DIRS, ...denies].map((d) => `Read(/${d}/**)`),
         ...DENY_FILES.map((f) => `Read(/${f})`),
       ],
     },
@@ -79,7 +96,7 @@ export function claudeSettings(tools: string[] = READ_TOOLS): Record<string, unk
       enabled: true,
       allowUnsandboxedCommands: false,
       failIfUnavailable: true,
-      filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES] },
+      filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES, ...denies] },
     },
     hooks: {},
   };
@@ -124,19 +141,17 @@ export function codexMcp(p: LanePaths): string {
   return `\n[mcp_servers.sphica]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(p.server)}]\nenv = { ${env} }\n`;
 }
 
-/** codex exec as review's peer-model.md starts a lane: read-only and ephemeral, the prompt on stdin, the final answer to a file. */
+/**
+ * The permission profile a lane's CODEX_HOME config selects: `:read-only` or `:workspace`, with every path in `deny` unreadable to the
+ * commands the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay
+ * hidden is denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
+ */
+export function codexProfile(base: ":read-only" | ":workspace", deny: string[]): string {
+  const lines = deny.map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
+  return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
+}
+
+/** codex exec for a lane: ephemeral, the prompt on stdin, the final answer to a file; the sandbox comes from the profile. */
 export function codexArgs(work: string, answer: string): string[] {
-  return [
-    "exec",
-    "--json",
-    "--ignore-rules",
-    "--ephemeral",
-    "-s",
-    "read-only",
-    "-C",
-    work,
-    "-o",
-    answer,
-    "-",
-  ];
+  return ["exec", "--json", "--ignore-rules", "--ephemeral", "-C", work, "-o", answer, "-"];
 }

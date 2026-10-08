@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
@@ -17,6 +18,8 @@ import {
   claudeSettings,
   codexArgs,
   codexMcp,
+  codexProfile,
+  evalDenies,
   READ_TOOLS,
   RULES_BODY,
   reviewPrompt,
@@ -144,8 +147,23 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   });
   assert.match(codexMcp(p), /SPHICA_DB = "\/r\/db\/sphica\.db"/);
   const codex = codexArgs("/w", "/r/final.md");
-  assert.equal(codex[codex.indexOf("-s") + 1], "read-only");
+  // The permission profile is the sandbox: a --sandbox flag would select the old settings and drop its denies
+  assert.ok(!codex.includes("-s") && !codex.includes("--sandbox"));
   assert.ok(codex.includes("--ephemeral") && codex.includes("--ignore-rules"));
+  const profile = codexProfile(":read-only", ["/evals", "/r/codex-home/auth.json"]);
+  assert.match(profile, /^default_permissions = "eval"$/m);
+  assert.match(profile, /^extends = ":read-only"$/m);
+  assert.match(profile, /^"\/evals" = "deny"\n"\/r\/codex-home\/auth\.json" = "deny"$/m);
+  // Every run is denied the evaluations, the output directory, and the owner's Codex home, and works outside them
+  const denies = evalDenies("/out");
+  assert.ok(denies.includes(path.resolve(import.meta.dirname, "..", "evals")) && denies.includes("/out"));
+  assert.ok(denies.includes(path.join(os.homedir(), ".codex")));
+  assert.deepEqual(
+    (
+      claudeSettings(READ_TOOLS, denies) as { sandbox: { filesystem: { denyRead: string[] } } }
+    ).sandbox.filesystem.denyRead.slice(-3),
+    denies,
+  );
   const prompt = reviewPrompt("BODY\n", { ...p, model: "codex" });
   assert.ok(prompt.startsWith("BODY\n"), "the aspect body comes first, in full");
   assert.match(prompt, /Read the file \/w\/\.git\/review\.diff/);
@@ -288,7 +306,7 @@ test("the grader counts verdicts only from backed batches and a matching complet
     run: "peek-codex",
     host: "codex",
     checks: [{ findings: both("violation", "undetermined"), reply: ok() }],
-    commands: ["/bin/zsh -lc 'cat ../../cases.json'"],
+    commands: ["/bin/zsh -lc 'cat /nowhere/sphica/server/evals/review/cases.json'"],
     report: `findings: 1\n${done("codex")}`,
   });
   const grade = (run: string) =>
@@ -326,7 +344,7 @@ test("the grader counts verdicts only from backed batches and a matching complet
   assert.equal(grade("exit-codex").state, "failed");
   const peek = grade("peek-codex");
   assert.equal(peek.state, "excluded");
-  assert.match(peek.reason ?? "", /climbed out/);
+  assert.match(peek.reason ?? "", /named \/nowhere\/sphica/);
   // Naming another run of the same directory, or the repository the expected verdicts live in, excludes a run too
   assert.match(
     lookedOutside(`read ${runs}/good-claude/final.md`, { forbidden: [], runs, run: "flip-codex" }) ?? "",
@@ -733,17 +751,20 @@ test("M2 judges with its own check only: a run's nested or extending Biome confi
   assert.deepEqual(j.violations, ["src/ui/detail.ts"]);
 });
 
-test("a run that steps out of its checkout one directory at a time is excluded too", () => {
-  assert.match(
-    lookedOutside(
-      JSON.stringify({
-        type: "item.completed",
-        item: { type: "command_execution", command: "/bin/zsh -lc 'cd .. && cd .. && cat other/final.md'" },
-      }),
-      { forbidden: [], runs: "/r", run: "x" },
-    ) ?? "",
-    /climbed/,
-  );
+test("a parent step in a command is no reason to exclude a run: the sandbox stops the read, not the spelling", () => {
+  for (const command of ["rg 'from \"../db.ts\"' src/ui", "cd .. && cd .. && ls"])
+    assert.equal(
+      lookedOutside(
+        JSON.stringify({ type: "item.completed", item: { type: "command_execution", command } }),
+        {
+          forbidden: ["/nowhere/sphica"],
+          runs: "/r",
+          run: "x",
+        },
+      ),
+      null,
+      command,
+    );
 });
 
 test("a cached fixture is reused only for the inputs it was built from", async () => {
@@ -801,4 +822,20 @@ test("the rules lane runs on the body M1 measured, which asks for a Biome check"
   const prompt = rulesPrompt(fs.readFileSync(RULES_BODY, "utf8"), ["trace:s/k"]);
   assert.match(prompt, /noRestrictedImports/);
   assert.ok(!prompt.includes("$ARGUMENTS"));
+});
+
+test("M1 counts a marker only as the comment line the Skill asks for, never inside a message", async () => {
+  const fixture = await built;
+  const cases = loadRulesCases();
+  const repo = tempDir("rules-msg-");
+  fs.cpSync(fixture.repo, repo, { recursive: true });
+  for (const [rel, text] of Object.entries(cases.files)) {
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    fs.writeFileSync(path.join(repo, rel), text);
+  }
+  const draft = `{ "linter": { "enabled": true, "rules": { "preset": "none", "style": { "noRestrictedImports": { "level": "error", "options": { "patterns": [
+    { "group": ["lodash", "lodash/**"], "message": "sphica: trace:s-rv-ui/no-lodash" }
+  ] } } } } } }`;
+  const g = gradeDraft(draftOf(`\`\`\`jsonc\n${draft}\n\`\`\``), repo, cases, tempDir("rules-msg-graded-"));
+  assert.deepEqual(g.unmarked, ["trace:s-rv-ui/no-lodash", "trace:s-rv-ui/ui-no-db"]);
 });

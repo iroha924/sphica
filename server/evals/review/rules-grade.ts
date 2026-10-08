@@ -6,7 +6,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import type { Step } from "../acceptance/load.ts";
 import { restrictedImports } from "./biome.ts";
-import { lookedOutside } from "./grade.ts";
+import { lookedOutside, oneConfiguration } from "./grade.ts";
 
 export type RulesCases = {
   files: Record<string, string>;
@@ -31,9 +31,9 @@ export function draftOf(reply: string): string | null {
 
 /** The record keys a draft marks with `sphica: <key>`. */
 function markersOf(draft: string): string[] {
-  // A key holds slashes; a block comment's close and trailing punctuation are not part of it
-  const keys = [...draft.matchAll(/sphica:\s*((?:trace|harvest|glean):[^\s"]+)/g)].map((m) =>
-    (m[1] ?? "").replace(/\*\/$/, "").replace(/[.,;:]+$/, ""),
+  // Only the marker lines the Skill asks for: a `//` comment of its own; the same words in a message string are not a marker
+  const keys = [...draft.matchAll(/^\s*\/\/\s*sphica:\s*((?:trace|harvest|glean):[^\s"]+)/gm)].map((m) =>
+    (m[1] ?? "").replace(/[.,;:]+$/, ""),
   );
   return [...new Set(keys)];
 }
@@ -128,8 +128,12 @@ function main() {
   };
   const cases = loadRulesCases();
   const rows: string[] = [];
-  for (const name of fs.readdirSync(runs).sort()) {
-    if (!name.startsWith("rules-")) continue;
+  const names = fs
+    .readdirSync(runs)
+    .filter((n) => n.startsWith("rules-"))
+    .sort();
+  oneConfiguration(runs, names);
+  for (const name of names) {
     const g = gradeRulesRun(path.join(runs, name), fixture.repo, cases, runs);
     rows.push(
       `| ${name} | ${g.host} | ${g.state} | ${g.unwanted.join(" ")} | ${g.unmarked.join(" ")} | ${g.falseFailures.join(" ")} | ${g.missedViolations.join(" ")} | ${g.reason ?? ""} |`,

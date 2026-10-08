@@ -5,6 +5,7 @@
 //   node evals/review/m2.ts --host claude|codex --condition rules|check --task <id>|all --runs <n> [--jobs <n>] [--out <dir>]
 //   node evals/review/m2.ts --report <runs dir>
 import { execFileSync, spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
@@ -22,12 +23,14 @@ import {
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
-import { lookedOutside } from "./grade.ts";
+import { lookedOutside, oneConfiguration } from "./grade.ts";
 import { loadRulesCases } from "./rules-grade.ts";
+import { codexProfile, evalDenies, outsideCheckout } from "./runner.ts";
 
 type Task = { id: string; tempts: "lodash" | "db" | "none"; prompt: string; test: string };
 type M2Cases = { rules: string; check: string; conditions: string[]; tasks: Task[] };
-const cases = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "m2-cases.json"), "utf8")) as M2Cases;
+const CASES = path.join(import.meta.dirname, "m2-cases.json");
+const cases = JSON.parse(fs.readFileSync(CASES, "utf8")) as M2Cases;
 /** The change tasks, for the tests that judge hand-made patches */
 export const m2Tasks = (): Task[] => cases.tasks;
 const BIOME = createRequire(import.meta.url).resolve("@biomejs/biome/bin/biome");
@@ -173,22 +176,23 @@ function runChild(command: string, args: string[], cwd: string, env: Record<stri
 }
 
 /** Claude may edit its checkout and run commands inside the sandbox; nothing outside the checkout is readable to its file tools. */
-const claudeSettings = () => ({
+const claudeSettings = (denies: string[]) => ({
   permissions: {
     blockReadsOutsideWorkingDirectories: true,
     deny: [
       "WebFetch",
       "WebSearch",
-      ...DENY_DIRS.map((d) => `Read(/${d}/**)`),
+      ...[...DENY_DIRS, ...denies].map((d) => `Read(/${d}/**)`),
       ...DENY_FILES.map((f) => `Read(/${f})`),
     ],
   },
+  // The shell reads past the file tools' fence: the evaluations and the other runs are denied to it too
   sandbox: {
     enabled: true,
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: false,
     failIfUnavailable: true,
-    filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES] },
+    filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES, ...denies] },
   },
   hooks: {},
 });
@@ -203,15 +207,22 @@ async function runOne(o: {
 }) {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}-${o.host}`);
   const started = Date.now();
-  const work = path.join(dir, "work");
-  const result: Record<string, unknown> = { run, host: o.host, condition: o.condition, task: o.task.id };
+  const work = outsideCheckout("m2-work-");
+  const result: Record<string, unknown> = {
+    run,
+    host: o.host,
+    condition: o.condition,
+    task: o.task.id,
+    // The tasks, rule lines, and check the run was given: a later edit of them makes a different measurement
+    cases_sha256: crypto.createHash("sha256").update(fs.readFileSync(CASES)).digest("hex"),
+  };
   try {
     const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"));
     let r: Awaited<ReturnType<typeof runChild>>;
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
       const mcp = path.join(dir, "mcp.json");
-      fs.writeFileSync(settings, JSON.stringify(claudeSettings(), null, 2));
+      fs.writeFileSync(settings, JSON.stringify(claudeSettings(evalDenies(o.out)), null, 2));
       fs.writeFileSync(mcp, JSON.stringify({ mcpServers: {} }));
       result.model = o.model;
       result.cli = claudeVersion();
@@ -242,7 +253,10 @@ async function runOne(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
-      isolatedCodexHome(codexHome);
+      isolatedCodexHome(
+        codexHome,
+        codexProfile(":workspace", [...evalDenies(o.out), path.join(codexHome, "auth.json")]),
+      );
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       const home = path.join(dir, "home");
@@ -256,8 +270,6 @@ async function runOne(o: {
           "--json",
           "--ignore-rules",
           "--ephemeral",
-          "-s",
-          "workspace-write",
           "-C",
           work,
           "-o",
@@ -306,6 +318,10 @@ export function m2Rows(runs: string): Map<string, Row> {
   const rows = new Map<string, Row>();
   // The evaluations, not the whole repository: a run's check script names the Biome installed under server/node_modules
   const forbidden = [path.resolve(import.meta.dirname, "..")];
+  oneConfiguration(
+    runs,
+    fs.readdirSync(runs).filter((n) => /^\w+-(rules|check)-(claude|codex)-\d{4}-/.test(n)),
+  );
   for (const name of fs.readdirSync(runs).sort()) {
     const file = path.join(runs, name, "result.json");
     const [, task = "", condition = "", host = ""] =

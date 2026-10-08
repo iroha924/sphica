@@ -100,17 +100,10 @@ function mcpCalls(host: string, events: string): Call[] {
   return out;
 }
 
-/** The shell commands a run ran (Codex's; a Claude lane has no shell). */
-function commands(events: string): string[] {
-  return lines(events).flatMap((e) => {
-    const item = e.item as { type?: string; command?: string } | undefined;
-    return e.type === "item.completed" && item?.type === "command_execution" ? [item.command ?? ""] : [];
-  });
-}
-
 /**
  * Why a run looked outside its checkout, or null: its events name the repository the expected verdicts live in, or another run of the
- * same directory, or a command climbs two steps out of the checkout. Codex has no read fence, so this is how its runs are kept honest.
+ * same directory. Each host's sandbox denies those reads (runner.ts evalDenies), so this marks a run that tried, not one that succeeded;
+ * a parent step in a command (`rg 'from "../db.ts"'`) is not one.
  */
 export function lookedOutside(
   events: string,
@@ -119,10 +112,7 @@ export function lookedOutside(
   for (const f of o.forbidden) if (events.includes(f)) return `named ${f}`;
   const other = new RegExp(`${o.runs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/(?!${o.run}\\b)[\\w.-]+`);
   const m = other.exec(events);
-  if (m) return `named ${m[0]}`;
-  // Any parent step counts: two `cd ..` in a row climb as far as one `../..`
-  const climb = commands(events).find((c) => /(^|[\s/\\'"=;&|(])\.\.($|[\s/\\'";&|)])/.test(c));
-  return climb ? `climbed out of the checkout: ${climb}` : null;
+  return m ? `named ${m[0]}` : null;
 }
 
 const BACKED = /^Batch (\d+) of (\d+) backed \(selection (\w+)\)\./;
@@ -286,6 +276,29 @@ export function tally(grades: RunGrade[]): Map<string, Tally> {
 }
 
 /** Every run directory under runs, graded. */
+/**
+ * Throws when the runs of one host in a directory were made under different settings (body, read server, model, CLI, cases): a tally of
+ * them would mix two treatments. A directory is one measurement.
+ */
+export function oneConfiguration(runs: string, names: string[]): void {
+  const seen = new Map<string, Set<string>>();
+  for (const n of names) {
+    const file = path.join(runs, n, "result.json");
+    if (!fs.existsSync(file)) continue;
+    const r = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    const config = ["model", "cli", "body_sha256", "server_sha256", "cases_sha256"]
+      .map((k) => String(r[k] ?? ""))
+      .join(" ");
+    const host = String(r.host);
+    seen.set(host, (seen.get(host) ?? new Set()).add(config));
+  }
+  for (const [host, configs] of seen)
+    if (configs.size > 1)
+      throw new Error(
+        `${runs} holds ${host} runs made under ${configs.size} settings: grade each from its own directory`,
+      );
+}
+
 /** A run directory that never got its result: runLane always writes one, so its absence is a failure, never a run that did not happen */
 const unfinished = (name: string): RunGrade => ({
   run: name,
@@ -301,18 +314,19 @@ export function gradeAll(runs: string): RunGrade[] {
   const forbidden = [path.resolve(import.meta.dirname, "..", "..", "..")];
   // A precedent run's directory, as runLane names it: rules runs, M2, the preflight, and the fixture share the output root
   const lane = new RegExp(`^(?:${[...diffs.keys()].join("|")})-(?:claude|codex)-\\d{4}-`);
-  return fs
+  const names = fs
     .readdirSync(runs, { withFileTypes: true })
     .filter((e) => e.isDirectory() && lane.test(e.name))
     .map((e) => e.name)
-    .sort()
-    .map((n) => {
-      const dir = path.join(runs, n);
-      if (!fs.existsSync(path.join(dir, "result.json"))) return unfinished(n);
-      const diff = (JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { diff: string })
-        .diff;
-      return gradeRun(dir, diffs.get(diff) ?? {}, { forbidden, runs });
-    });
+    .sort();
+  oneConfiguration(runs, names);
+  return names.map((n) => {
+    const dir = path.join(runs, n);
+    if (!fs.existsSync(path.join(dir, "result.json"))) return unfinished(n);
+    const diff = (JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { diff: string })
+      .diff;
+    return gradeRun(dir, diffs.get(diff) ?? {}, { forbidden, runs });
+  });
 }
 
 function main() {
