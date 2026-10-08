@@ -994,8 +994,26 @@ test("M2's check runs a Biome copy of the run's own, and a run that changed its 
       cases_sha256: "c",
     }),
   );
+  // And a run whose check could not load its Biome had no check at all
+  const unloaded = "count-check-claude-2026-10-08T00-00-01-000Z-bbbbbbbb";
+  fs.mkdirSync(path.join(runs, unloaded));
+  fs.writeFileSync(
+    path.join(runs, unloaded, "result.json"),
+    JSON.stringify({
+      host: "claude",
+      condition: "check",
+      task: "count",
+      status: 0,
+      judgement,
+      check_unloaded: true,
+      runner_sha256: "r",
+      cases_sha256: "c",
+    }),
+  );
   const row = m2Rows(runs).get("codex check");
   assert.deepEqual([row?.runs, row?.excluded, row?.completed], [1, 1, 0]);
+  const claudeRow = m2Rows(runs).get("claude check");
+  assert.deepEqual([claudeRow?.runs, claudeRow?.excluded, claudeRow?.completed], [1, 1, 0]);
 });
 
 test("a lane that throws does not end the run while another lane still has its temp tree, and a deleted Biome copy counts as changed", async () => {

@@ -370,6 +370,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="different read fences are not tallied|leaves no token in HOME" test/review-eval.test.ts test/eval-codex.test.ts` → 直す前は 2 件とも失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 177 件 pass。HOME に `.sphica-probe-*` が残っていない
 
+- [x] T33: M2 の Claude の lane が cache に置いた Biome の写しを読めず、check が動かないまま完了と数えられた件を直す（実機の M2 で見つけた）
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T32（Biome の写しの置き場が要る）
+  - 変更: `server/evals/review/m2.ts`, `server/test/review-eval.test.ts`
+  - red: `node evals/review/m2.ts --host claude --condition check --runs 1 --task count` → events に `Cannot find module '~/.cache/sphica-eval/m2-biome/.../bin/biome'` が出て check が動かないのに、run は除外されず完了になる
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass。`node evals/review/m2.ts --host claude --condition check --runs 1 --task count` → events に写しの Biome の出力（Checked … files）がある
+  - コミット: `fix(eval): read M2's Biome copy back in Claude's sandbox, and exclude a check that never loaded (T33)`
+  - 結果: `node evals/review/m2.ts --host claude --condition check --runs 1 --task count` → 直す前は Biome が読み込めず（Claude Code の sandbox は HOME の下を既定で読ませない）、それでも完了と数えられた。Claude の sandbox の `allowRead` に足すと読めて、書き込みは止まることを別に試して確かめた
+  - 結果: `cd server && node --test test/review-eval.test.ts` → 26 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した

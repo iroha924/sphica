@@ -224,7 +224,7 @@ function runChild(command: string, args: string[], cwd: string, env: Record<stri
 }
 
 /** Claude may edit its checkout and run commands inside the sandbox; nothing outside the checkout is readable to its file tools. */
-const claudeSettings = (denies: string[]) => ({
+const claudeSettings = (denies: string[], biome: string) => ({
   permissions: {
     blockReadsOutsideWorkingDirectories: true,
     deny: [
@@ -240,7 +240,8 @@ const claudeSettings = (denies: string[]) => ({
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: false,
     failIfUnavailable: true,
-    filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES, ...denies] },
+    // The sandbox reads nothing under HOME by default: the run's Biome copy in the cache is read back, and stays unwritable
+    filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES, ...denies], allowRead: [biome] },
   },
   hooks: {},
 });
@@ -277,7 +278,7 @@ async function runOne(o: {
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
       const mcp = path.join(dir, "mcp.json");
-      fs.writeFileSync(settings, JSON.stringify(claudeSettings(evalDenies(o.out)), null, 2));
+      fs.writeFileSync(settings, JSON.stringify(claudeSettings(evalDenies(o.out), biomeDir), null, 2));
       fs.writeFileSync(mcp, JSON.stringify({ mcpServers: {} }));
       result.model = o.model;
       result.cli = claudeVersion();
@@ -351,6 +352,8 @@ async function runOne(o: {
     result.reason = r.error ?? (r.status === 0 ? null : `${o.host} exited ${r.status}`);
     // The run could write its copy: a check it changed says nothing about the rule lines or the check given
     result.biome_changed = biomeChanged(biome, pinned);
+    // A check that could not load its Biome never ran: the lane had no check, whatever it reported
+    result.check_unloaded = /Cannot find module[^\n]*@biomejs/.test(r.stdout);
     result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
   } catch (e) {
     result.reason = (e as Error).message;
@@ -400,6 +403,7 @@ export function m2Rows(runs: string): Map<string, Row> {
       status: number | null;
       judgement?: M2Judgement;
       biome_changed?: boolean;
+      check_unloaded?: boolean;
     };
     const events = path.join(runs, name, "events.jsonl");
     const outside = fs.existsSync(events)
@@ -416,7 +420,7 @@ export function m2Rows(runs: string): Map<string, Row> {
       };
       rows.set(key, t);
       t.runs++;
-      if (outside || r.biome_changed) t.excluded++;
+      if (outside || r.biome_changed || r.check_unloaded) t.excluded++;
       else if (r.status !== 0 || !r.judgement) t.failed++;
       else {
         if (r.judgement.violations.length) t.violations++;
