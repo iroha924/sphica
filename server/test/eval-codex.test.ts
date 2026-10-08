@@ -7,6 +7,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   codexLock,
+  codexProfile,
   evalCache,
   fenceDigest,
   fencedCodexHome,
@@ -27,6 +28,7 @@ test("a fenced CODEX_HOME selects the profile before any table, denies its own l
   const config = fs.readFileSync(path.join(home, "config.toml"), "utf8");
   assert.deepEqual(denied, ["/evals", "/cache", path.join(home, "auth.json")]);
   assert.ok(config.startsWith('model = "m"\n'), "the settings snapshot is written as given");
+  assert.match(config, /^default_permissions = "eval"$/m);
   assert.ok(config.indexOf("default_permissions") < config.indexOf("[permissions.eval]"));
   assert.ok(config.indexOf("[permissions.eval]") < config.indexOf("[mcp_servers.sphica]"));
   assert.match(config, new RegExp(`^${JSON.stringify(path.join(home, "auth.json"))} = "deny"$`, "m"));
@@ -262,4 +264,36 @@ test("a Codex run that fails still comes back into its run directory and release
   assert.match(result.reason, /codex exited 3/);
   assert.ok(fs.existsSync(path.join(dir, "work", "README.md")));
   assert.ok(!fs.existsSync(path.join(b.cache, "codex.lock")));
+});
+
+test("a released lock stays released: calling release again never removes the next holder's lock", () => {
+  const cache = evalCache(tempDir("fence-relock-"));
+  const first = codexLock(cache);
+  first();
+  const second = codexLock(cache);
+  first();
+  assert.throws(() => codexLock(cache), /another fenced Codex evaluation/);
+  second();
+});
+
+test("containment and the fence digest hold for names starting with dots and for Windows paths", () => {
+  const win = (user: string) => {
+    const home = `C:\\Users\\${user}`;
+    const codexHome = `${home}\\.cache\\sphica-eval\\run\\codex-home`;
+    const profile = codexProfile(":workspace", [
+      `${home}\\.cache\\sphica-eval`,
+      `${home}\\.ssh`,
+      `${codexHome}\\auth.json`,
+    ]);
+    return fenceDigest(profile, {
+      "<codex-home>": codexHome,
+      "<cache>": `${home}\\.cache\\sphica-eval`,
+      "<home>": home,
+    });
+  };
+  assert.equal(win("a"), win("b"));
+  const cache = evalCache(tempDir("fence-dots-"));
+  const dotted = path.join(cache, "..build");
+  fs.mkdirSync(dotted);
+  assert.equal(requireInside(cache, dotted, "--build"), dotted);
 });

@@ -70,6 +70,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): exclude Codex runs made without the current read fence (T04)`
   - 結果: `cd server && node --test --test-name-pattern="read fence" test/eval-claude.test.ts` → 直す前は今の fence の run の行に `fence` が無く（actual: undefined）、失敗した
   - 結果: `cd server && node --test test/eval-claude.test.ts` → 46 件 pass（今の fence の run は数え、fence の無い run と違う run は「run without the current read fence」で除外し、loop.json に `run_roots` がある）。`bun run typecheck`・`bun run lint`・`bun run english` → 0 で終わった
+- [x] T09: T01 のレビューの指摘を直す（ロックの二重解放、`..` で始まる名前の内側判定、Windows のパスの指紋、`default_permissions` の検査）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の関数が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test test/eval-codex.test.ts` → 解放を 2 回呼ぶと次の持ち主のロックが消えて 3 つ目の取得が通る、`..build` を外と判定する、Windows 形式のパスで同じ方針の指紋が食い違う、の 3 件で失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): release only the lock this holder took, and compare paths by components (T09)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 直す前は lock の再解放（Missing expected exception）、`..build`（must be inside）、Windows の指紋（c431…≠c2f9…）で失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 9 件 pass
+
 - [ ] T05: grade が採点者を囲う（-s を外す、出力先の制限、settings の写し、checkpoint の fence、ロック、行への fence）
   - 種別: 修正
   - 計画: S4
@@ -112,3 +123,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T02 / 変更欄の `server/test/eval-codex.test.ts` に、codex.ts を偽の codex で流すテストを足した / 欄は変えていない
 - 2026-10-08 / T03 / 偽の codex のテストを動かすため、テストのビルドを一時 HOME の `.cache/sphica-eval/builds` に置き、T02 のテストから `-s workspace-write` と HOME の確認を外した / T03 のテストが代わりに確かめる
 - 2026-10-08 / T04 / 今の fence を collect で求めるため、codex-run.ts に `currentRunFence` を足した / T04 の変更欄に `server/evals/cloud/codex-run.ts` を足した（前: collect.ts と eval-claude.test.ts のみ）
+- 2026-10-08 / T01 / Codex のレビュー（high）で P2 が 4 件。ロックの再解放、`default_permissions` の無い設定でも通るテスト、Windows のパスの指紋、`..build` の判定 / 4 件とも採用し、T09 を足して直した

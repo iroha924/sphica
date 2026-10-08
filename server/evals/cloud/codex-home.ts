@@ -92,8 +92,9 @@ export function fencedCodexHome(
  */
 export function fenceDigest(profile: string, roles: Record<string, string>): string {
   let text = profile;
+  // The profile holds each path as a TOML string, where a Windows path's backslashes are doubled
   for (const [role, p] of Object.entries(roles).sort((a, b) => b[1].length - a[1].length))
-    text = text.split(p).join(role);
+    text = text.split(JSON.stringify(p).slice(1, -1)).join(role).split(p).join(role);
   return crypto.createHash("sha256").update(text).digest("hex");
 }
 
@@ -104,11 +105,16 @@ export function evalCache(home = os.homedir()): string {
   return fs.realpathSync(cache);
 }
 
-/** `p` resolved through links, or an error when it is not inside `root` (compared by path components, not by string prefix). */
+/** Whether `p` is `root` or under it, by path components: a child named `..build` is inside, a sibling `root-other` is not */
+export function isInside(root: string, p: string): boolean {
+  const rel = path.relative(root, p);
+  return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+/** `p` resolved through links, or an error when it is not strictly inside `root`. */
 export function requireInside(root: string, p: string, what: string): string {
   const real = fs.realpathSync(p);
-  const rel = path.relative(root, real);
-  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel))
+  if (real === root || !isInside(root, real))
     throw new Error(`${what} must be inside ${root}, which fenced Codex runs cannot read: ${real}`);
   return real;
 }
@@ -132,9 +138,20 @@ export function codexLock(cache: string): () => void {
       `another fenced Codex evaluation holds ${file} (${held}); remove it only once that process is gone`,
     );
   }
-  fs.writeSync(fd, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
+  const held = `${JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token: crypto.randomUUID() })}\n`;
+  fs.writeSync(fd, held);
   fs.closeSync(fd);
-  return () => fs.rmSync(file, { force: true });
+  // Removes only this holder's lock, once: a second call must not remove whoever took the lock next
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    let now = "";
+    try {
+      now = fs.readFileSync(file, "utf8");
+    } catch {}
+    if (now === held) fs.rmSync(file, { force: true });
+  };
 }
 
 /** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */
