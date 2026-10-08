@@ -6,8 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { claimRunDir, codexModelOf, evalCache } from "../evals/cloud/codex-home.ts";
-import { currentFence } from "../evals/cloud/codex-run.ts";
+import { claimRunDir, codexModelOf, evalCache, homeFence } from "../evals/cloud/codex-home.ts";
+import { currentFence, repoPlaces } from "../evals/cloud/codex-run.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
 import {
   blindPrompt,
@@ -45,8 +45,11 @@ const TASKS = path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json
 // A build holds a copy of the task definitions it was made from
 const seedTasks = (build: string) => fs.copyFileSync(TASKS, path.join(build, "tasks.json"));
 // The read fence a Codex run made now records; it names places by role, so any HOME gives the same
-const FENCE = currentFence(":workspace", evalCache(tempDir("grade-fence-")));
-const GRADER_FENCE = currentFence(":read-only", evalCache(tempDir("grade-fence-")));
+// Under a temporary HOME, as the collect and grade children run: the tools sit outside it, so it keeps no root
+const fenceHome = tempDir("grade-fence-");
+const fenceShield = { places: repoPlaces(), home: homeFence({ home: fenceHome }) };
+const FENCE = currentFence(":workspace", evalCache(fenceHome), fenceShield);
+const GRADER_FENCE = currentFence(":read-only", evalCache(fenceHome), fenceShield);
 
 /** A child's environment: a temporary home, and none of the owner's Sphica paths. */
 function childEnv(home: string): NodeJS.ProcessEnv {

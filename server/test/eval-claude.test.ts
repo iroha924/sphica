@@ -23,8 +23,8 @@ import {
   treeState,
   treeWatcher,
 } from "../evals/cloud/claude-run.ts";
-import { type Checkout, codexProfile, evalCache, pinCheckout } from "../evals/cloud/codex-home.ts";
-import { codexDenies, codexFence } from "../evals/cloud/codex-run.ts";
+import { type Checkout, codexProfile, evalCache, homeFence, pinCheckout } from "../evals/cloud/codex-home.ts";
+import { codexDenies, codexFence, repoPlaces } from "../evals/cloud/codex-run.ts";
 import {
   claudeStreamCalls,
   foundInClaudeStream,
@@ -1891,10 +1891,12 @@ test("collect counts only Codex runs made under the current read fence, and reco
   // The fence a run under this HOME would record: the same policy digests the same wherever HOME is
   const cache = evalCache(base);
   const codexHome = path.join(cache, "codex-runs", "x", "codex-home");
+  const shield = { places: repoPlaces(), home: homeFence({ home: base }) };
   const current = codexFence(
-    codexProfile(":workspace", [...codexDenies(cache), path.join(codexHome, "auth.json")]),
+    codexProfile(":workspace", [...codexDenies(cache, shield), path.join(codexHome, "auth.json")]),
     cache,
     codexHome,
+    shield,
   );
   const head = { task: "pilot-sort", condition: "none" };
   const answer = { implemented: true, summary: "s", past_decisions: [], unverified: [] };

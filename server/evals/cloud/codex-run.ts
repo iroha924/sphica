@@ -6,7 +6,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openReader } from "../../src/db.ts";
-import { DENY_DIRS, DENY_FILES } from "./claude-run.ts";
 import {
   checkoutGit,
   claimRunDir,
@@ -16,6 +15,8 @@ import {
   evalCache,
   fenceDigest,
   fencedCodexHome,
+  type HomeFence,
+  homeFence,
   isInside,
   pinCheckout,
   requireInside,
@@ -47,38 +48,59 @@ export function repoPlaces(repo = REPO): string[] {
   return places.filter((p) => !places.some((q) => q !== p && isInside(q, p)));
 }
 
+/** Where the repository lives and what HOME keeps: made once per run, and shared by its deny list, its PATH, and its fence */
+export type Shield = { places: string[]; home: HomeFence };
+
+export const shieldNow = (): Shield => ({ places: repoPlaces(), home: homeFence() });
+
 /**
- * What no fenced Codex may read, whatever it runs: the owner's credentials (Codex's login among them), the repository wherever its
- * files or history are, and every evaluation output (builds, other runs, logs). Each run works in a temp tree outside all of them.
+ * What no fenced Codex may read, whatever it runs: the repository wherever its files or history are, every evaluation output (builds,
+ * other runs, logs), and all of HOME but the tools' installs. Each run works in a temp tree outside all of them.
  */
-export function codexDenies(cache: string, places = repoPlaces()): string[] {
-  return [...places, cache, ...DENY_DIRS, ...DENY_FILES];
+export function codexDenies(cache: string, s: Shield = shieldNow()): string[] {
+  return [...s.places, cache, ...s.home.denies];
 }
 
 /**
- * The fence as one digest that names each place by its role, comparable across machines and runs. Every other worktree and a shared git
- * directory outside the repository count as the repository, so worktrees coming and going do not change the fence.
+ * The fence as one digest that names each place by its role, comparable across machines and runs. Other worktrees count as the
+ * repository, and HOME's denied entries are left to the policy line, so entries coming and going (or none) do not change it; the roots
+ * HOME keeps do.
  */
-export function codexFence(profile: string, cache: string, codexHome: string, places = repoPlaces()): string {
+export function codexFence(
+  profile: string,
+  cache: string,
+  codexHome: string,
+  s: Shield = shieldNow(),
+): string {
   const toml = (p: string) => JSON.stringify(p).slice(1, -1);
   let text = profile;
-  for (const p of places.filter((p) => p !== REPO).sort((a, b) => b.length - a.length))
+  for (const p of s.places.filter((p) => p !== REPO).sort((a, b) => b.length - a.length))
     text = text.split(toml(p)).join(toml(REPO));
-  return fenceDigest([...new Set(text.split("\n"))].join("\n"), {
-    "<codex-home>": codexHome,
-    "<repo>": REPO,
-    "<cache>": cache,
-    "<home>": os.homedir(),
-  });
+  const roots = s.home.roots.map((r) => path.relative(s.home.home, r)).sort();
+  return fenceDigest(
+    text,
+    { "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
+    (t) =>
+      [
+        ...new Set(t.split("\n").filter((l) => !/^"<home>[\\/][^"]*" = "deny"$/.test(l))),
+        "policy: home-allowlist-v1",
+        `allow-roots: ${JSON.stringify(roots)}`,
+      ].join("\n"),
+  );
 }
 
 /** The fence a fenced Codex started now records with this base: collect and grade count only what was made under it */
-export function currentFence(base: ":read-only" | ":workspace", cache: string): string {
+export function currentFence(
+  base: ":read-only" | ":workspace",
+  cache: string,
+  s: Shield = shieldNow(),
+): string {
   const codexHome = path.join(cache, "<run>", "codex-home");
   return codexFence(
-    codexProfile(base, [...codexDenies(cache), path.join(codexHome, "auth.json")]),
+    codexProfile(base, [...codexDenies(cache, s), path.join(codexHome, "auth.json")]),
     cache,
     codexHome,
+    s,
   );
 }
 
@@ -121,8 +143,9 @@ export async function runCodex(o: {
   let tree = "";
   let run: Awaited<ReturnType<typeof fencedRun>>;
   try {
-    tree = outsideTree("sphica-codex-", codexDenies(cache));
-    run = await fencedRun({ ...o, build, out }, cache, tree);
+    const shield = shieldNow();
+    tree = outsideTree("sphica-codex-", codexDenies(cache, shield));
+    run = await fencedRun({ ...o, build, out }, cache, tree, shield);
   } finally {
     // A checkout left in the temp directory is readable to the next run: the lock stays until the owner clears it
     if (!tree || !fs.existsSync(tree)) release();
@@ -141,12 +164,13 @@ async function fencedRun(
   o: Parameters<typeof runCodex>[0],
   cache: string,
   tree: string,
+  shield: Shield,
 ): Promise<{ dir: string; result: Record<string, unknown> }> {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}`);
   requireInside(o.out, dir, "the run directory");
   const codexHome = path.join(dir, "codex-home");
   const db = path.join(dir, "db", "sphica.db");
-  const denies = codexDenies(cache);
+  const denies = codexDenies(cache, shield);
   const work = path.join(tree, "work");
   const home = path.join(tree, "home");
   const tmp = path.join(tree, "tmp");
@@ -189,7 +213,7 @@ async function fencedRun(
         ? `\n[mcp_servers.sphica]\ncommand = "sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
         : "";
     const fence = fencedCodexHome(codexHome, { base: ":workspace", deny: denies, extraConfig: mcp });
-    result.fence = codexFence(fence.profile, cache, codexHome);
+    result.fence = codexFence(fence.profile, cache, codexHome, shield);
     result.fence_roots = fence.denied;
     // Recorded so a comparison can refuse two builds run by different Codex models
     result.codex_model = codexModelOf(codexHome);
@@ -243,7 +267,8 @@ async function fencedRun(
       {
         input: prompt,
         env: {
-          PATH: process.env.PATH ?? "",
+          // The tools' directories and what lies outside HOME: a PATH entry under HOME would point into what is denied
+          PATH: shield.home.path,
           HOME: home,
           CODEX_HOME: codexHome,
           TMPDIR: tmp,

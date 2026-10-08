@@ -12,6 +12,7 @@ import {
   evalCache,
   fenceDigest,
   fencedCodexHome,
+  homeFence,
   requireInside,
 } from "../evals/cloud/codex-home.ts";
 import { codexDenies, codexFence, REPO, repoPlaces } from "../evals/cloud/codex-run.ts";
@@ -258,8 +259,7 @@ test("the Codex run under test reads through a read fence and keeps its files wh
     );
   denied(fs.realpathSync(path.join(import.meta.dirname, "..", "..")));
   denied(fs.realpathSync(cache));
-  denied(path.join(b.home, ".codex"));
-  denied(path.join(b.home, ".ssh"));
+  denied(path.join(fs.realpathSync(b.home), ".codex"));
   denied(path.join(dir, "codex-home", "auth.json"));
   // The run's checkout, homes, and temp directory sit outside everything denied, and come back into the run directory afterwards
   const env = seen.env;
@@ -575,15 +575,16 @@ test("the fence denies every worktree of the repository and the git directory th
   assert.deepEqual(repoPlaces(linked).sort(), [linked, main, odd].sort());
   const cache = evalCache(base);
   const codexHome = path.join(cache, "r", "codex-home");
+  const shield = (places: string[]) => ({ places, home: homeFence({ home: base }) });
   const fence = (places: string[]) =>
     codexFence(
-      codexProfile(":workspace", [...codexDenies(cache, places), path.join(codexHome, "auth.json")]),
+      codexProfile(":workspace", [...codexDenies(cache, shield(places)), path.join(codexHome, "auth.json")]),
       cache,
       codexHome,
-      places,
+      shield(places),
     );
   assert.equal(fence([REPO, linked]), fence([REPO]));
-  assert.ok(codexDenies(cache, [REPO, linked]).includes(linked));
+  assert.ok(codexDenies(cache, shield([REPO, linked])).includes(linked));
 });
 
 test("a run whose files cannot be moved back keeps its temp tree and the lock, so nothing is lost or left readable", () => {
@@ -646,4 +647,93 @@ test("a task or condition that is not one plain name never names a run directory
     fs.readdirSync(b.cache).filter((f) => f.startsWith("escaped")),
     [],
   );
+});
+
+test("the fenced Codex is denied all of HOME but the tool installs it needs (allowlist)", () => {
+  const b = codexBuild("none");
+  const home = fs.realpathSync(b.home);
+  for (const f of [".git-credentials", ".kube/config", ".local/share/atuin/history", "Projects/x"]) {
+    fs.mkdirSync(path.dirname(path.join(home, f)), { recursive: true });
+    fs.writeFileSync(path.join(home, f), "secret\n");
+  }
+  const r = b.start(path.join(b.cache, "codex-runs"));
+  assert.equal(r.status, 0, r.stderr);
+  const denied = (p: string) =>
+    new RegExp(`^${JSON.stringify(p).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "deny"$`, "m");
+  const { config, env } = b.seen();
+  for (const p of [".git-credentials", ".kube", ".local", "Projects"])
+    assert.match(config, denied(path.join(home, p)), p);
+  // The run's PATH holds nothing under HOME but the tools' own directories
+  const runPath = /^PATH=(.*)$/m.exec(env)?.[1]?.split(path.delimiter) ?? [];
+  assert.deepEqual(
+    runPath.filter((d) => d.startsWith(`${home}${path.sep}`)),
+    [],
+  );
+});
+
+test("HOME keeps only a mise or Bun install root, denies everything beside the way to it, and refuses any other shape", () => {
+  const home = fs.realpathSync(tempDir("home-fence-"));
+  const file = (rel: string) => {
+    fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+    fs.writeFileSync(path.join(home, rel), "x", { mode: 0o755 });
+  };
+  for (const f of [
+    ".local/share/mise/installs/node/24.0.0/bin/node",
+    ".local/share/mise/installs/node/24.0.0/lib/x",
+    ".local/share/mise/installs/node/22.0.0/bin/node",
+    ".local/share/atuin/history",
+    ".local/bin/node",
+    ".bun/bin/bun",
+    ".git-credentials",
+  ])
+    file(f);
+  const node = path.join(home, ".local/share/mise/installs/node/24.0.0");
+  const toolPath = [
+    path.join(node, "bin"),
+    path.join(home, ".bun/bin"),
+    path.join(home, ".local/bin"),
+    "/usr/bin",
+  ];
+  const f = homeFence({ home, path: toolPath.join(path.delimiter) });
+  assert.deepEqual(f.roots, [path.join(home, ".bun"), node].sort());
+  const rel = f.denies.map((d) => path.relative(home, d)).sort();
+  assert.deepEqual(rel, [
+    ".git-credentials",
+    ".local/bin",
+    ".local/share/atuin",
+    ".local/share/mise/installs/node/22.0.0",
+  ]);
+  // The run's PATH: the tools' directories and what lies outside HOME, never ~/.local/bin
+  assert.deepEqual(f.path.split(path.delimiter), [
+    path.join(node, "bin"),
+    path.join(home, ".bun/bin"),
+    "/usr/bin",
+  ]);
+  // A tool found where its directory holds more than the tool, or not found at all, refuses
+  assert.throws(
+    () =>
+      homeFence({
+        home,
+        path: [path.join(home, ".local/bin"), path.join(home, ".bun/bin")].join(path.delimiter),
+      }),
+    /not a known install/,
+  );
+  assert.throws(() => homeFence({ home, path: path.join(node, "bin") }), /bun is not on PATH/);
+  // The roots are part of the fence: another Node version is another fence, another unrelated entry is not
+  const cache = evalCache(home);
+  const codexHome = path.join(cache, "r", "codex-home");
+  const fence = (shieldHome: ReturnType<typeof homeFence>) => {
+    const s = { places: [REPO], home: shieldHome };
+    return codexFence(
+      codexProfile(":workspace", [...codexDenies(cache, s), path.join(codexHome, "auth.json")]),
+      cache,
+      codexHome,
+      s,
+    );
+  };
+  const before = fence(homeFence({ home, path: toolPath.join(path.delimiter) }));
+  file("new-entry");
+  assert.equal(fence(homeFence({ home, path: toolPath.join(path.delimiter) })), before);
+  const older = [path.join(home, ".local/share/mise/installs/node/22.0.0/bin"), path.join(home, ".bun/bin")];
+  assert.notEqual(fence(homeFence({ home, path: older.join(path.delimiter) })), before);
 });

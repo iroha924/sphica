@@ -225,7 +225,7 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 
 囲った Codex が HOME の下で読めるのを node と bun のインストール先だけにし、review の評価も同じ囲いとロックで動かす
 
-- [ ] T19: HOME の許可の一覧と run の PATH を作り、cloud の run と採点者の deny と指紋をそれに替える
+- [x] T19: HOME の許可の一覧と run の PATH を作り、cloud の run と採点者の deny と指紋をそれに替える
   - 種別: 修正
   - 計画: S8
   - 依存: T18（今の codexDenies と指紋が要る）
@@ -233,6 +233,8 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - red: `cd server && node --test --test-name-pattern="allowlist" test/eval-codex.test.ts` → 仮の HOME の `.git-credentials`・`.kube`・`.local/share/atuin` が deny に無く、run の PATH に HOME の `.local/bin` が残って失敗する
   - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 全件 pass
   - コミット: `fix(eval): deny all of HOME but the node and bun installs to the fenced Codex (T19)`
+  - 結果: `cd server && node --test --test-name-pattern="allowlist" test/eval-codex.test.ts` → 直す前は仮の HOME の `.git-credentials` が deny に無く失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 163 件 pass（mise と `.bun` の形だけを残し、`~/.local/bin` の形と bun の欠けで止まり、根の祖先を deny せず、HOME の項目が増えても fence が変わらず、Node のバージョンで変わる）。`bun run typecheck`・`bun run lint`・`bun run knip`・`bun run english` → 0 で終わった
 - [ ] T20: probe の対象を HOME の許可の一覧に合わせる（HOME の直下の token、deny されたディレクトリ、node の実体の対照）
   - 種別: 修正
   - 計画: S8
@@ -296,3 +298,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T17 / PR #306 の check (26) が落ち、失敗したジョブだけの再実行でも再現した。review の fixture の組み立て（acceptance の driver）が HOME を差し替えている最中に、テストが `os.homedir()` と比べていた。main にもあった順番への依存で、テストを足したことでランダムな並びが変わって表に出た / T17 で直した
 - 2026-10-08 / T18 / GitHub の Codex のレビュー（5f9caf9）で P1 が 7 件、P2 が 3 件。7 件を T18 で直した（probe.sh の書き換えは前に見送ったが、渡す記録から指示され得るという理由で採用した）。残る 3 件（資格情報を許可の一覧で絞る、review の runner にも共有のロック、組織が管理する設定を測る run ごとの probe で確かめる）は、範囲か方針が変わるので持ち主に聞く
 - 2026-10-08 / P5 / 持ち主の決定（資格情報は許可の一覧で絞る、review の評価もこの PR で直す、probe の必須化は見送る）を受け、plan の方針 8・9 を足して T19〜T24 を足した。設計は Codex と 3 往復で合意した
+- 2026-10-08 / T19 / HOME の deny の行を 1 行にまとめる形では、HOME が空のとき（行が無い）と項目があるときで指紋が変わった / HOME の deny の行は指紋から落とし、方針の行と残す根の行で表した（plan の方針 8 の「1 行の `<home-denied>` にまとめる」から変えた）

@@ -86,12 +86,78 @@ export function fencedCodexHome(
  * The profile as one digest that names each denied place by its role, so runs on other machines or in other directories under the same
  * policy compare equal. `roles` maps a placeholder to the path it stands for; longer paths are replaced first.
  */
-export function fenceDigest(profile: string, roles: Record<string, string>): string {
+export function fenceDigest(
+  profile: string,
+  roles: Record<string, string>,
+  normalize: (text: string) => string = (t) => t,
+): string {
   let text = profile;
   // The profile holds each path as a TOML string, where a Windows path's backslashes are doubled
   for (const [role, p] of Object.entries(roles).sort((a, b) => b[1].length - a[1].length))
     text = text.split(JSON.stringify(p).slice(1, -1)).join(role).split(p).join(role);
-  return crypto.createHash("sha256").update(text).digest("hex");
+  return crypto.createHash("sha256").update(normalize(text)).digest("hex");
+}
+
+/** What a fenced Codex may reach under the owner's HOME: the tools' install roots, every other entry denied, and the PATH to give it */
+export type HomeFence = { home: string; roots: string[]; denies: string[]; path: string };
+
+/** The tools an evaluation run uses; nothing else under HOME is kept */
+const TOOLS = ["node", "bun"];
+
+/**
+ * The install root a tool under HOME is kept by, by its exact shape: mise's `.local/share/mise/installs/<name>/<version>` or Bun's
+ * own `.bun`. Any other place under HOME (`~/.local/bin`, `~/bin`) would keep a directory that holds more than the tool, so it refuses.
+ */
+function installRoot(home: string, real: string, tool: string): string {
+  const parts = path.relative(home, real).split(path.sep);
+  if (
+    parts.length === 8 &&
+    parts.slice(0, 4).join("/") === ".local/share/mise/installs" &&
+    parts[6] === "bin" &&
+    parts[7] === tool
+  )
+    return path.join(home, ...parts.slice(0, 6));
+  if (parts.join("/") === ".bun/bin/bun" && tool === "bun") return path.join(home, ".bun");
+  throw new Error(
+    `${tool} resolves to ${real}, which is not a known install under HOME; the fence cannot keep it alone`,
+  );
+}
+
+/**
+ * Denies every entry of HOME that is neither a kept root nor on the way to one, made right before a run: entries made later are not
+ * denied. A missing tool, a link to nothing, or an unreadable directory refuses instead of leaving something readable.
+ */
+export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
+  const home = fs.realpathSync(o.home ?? os.homedir());
+  const entries = (o.path ?? process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const roots: string[] = [];
+  const toolDirs: string[] = [];
+  for (const tool of TOOLS) {
+    const found = entries.map((d) => path.join(d, tool)).find((f) => fs.existsSync(f));
+    if (!found) throw new Error(`${tool} is not on PATH`);
+    const real = fs.realpathSync(found);
+    toolDirs.push(path.dirname(real));
+    if (isInside(home, real)) roots.push(installRoot(home, real, tool));
+  }
+  const outside = entries.filter(
+    (d) => !isInside(home, fs.existsSync(d) ? fs.realpathSync(d) : path.resolve(d)),
+  );
+  const denies: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (roots.includes(full)) continue;
+      if (roots.some((r) => isInside(full, r))) walk(full);
+      else denies.push(full);
+    }
+  };
+  walk(home);
+  return {
+    home,
+    roots: [...new Set(roots)].sort(),
+    denies,
+    path: [...new Set([...toolDirs, ...outside])].join(path.delimiter),
+  };
 }
 
 /** Where every evaluation output lives; the fenced Codex runs and graders are denied all of it */

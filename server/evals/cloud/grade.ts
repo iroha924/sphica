@@ -8,7 +8,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { replaceFile } from "../../src/file-lock.ts";
 import { codexLock, evalCache, fencedCodexHome, ownerCodexSettings, requireInside } from "./codex-home.ts";
-import { codexDenies, currentFence, outsideTree } from "./codex-run.ts";
+import { codexDenies, currentFence, outsideTree, shieldNow } from "./codex-run.ts";
 import { readTasks } from "./firing.ts";
 import {
   blindPrompt,
@@ -68,8 +68,9 @@ if (
 )
   throw new Error(`${args.loop} does not say where its runs were (run_roots); collect it again`);
 for (const root of loop.run_roots as string[]) requireInside(cache, root, "a run root");
-const denies = codexDenies(cache);
-const graderFence = currentFence(":read-only", cache);
+const shield = shieldNow();
+const denies = codexDenies(cache, shield);
+const graderFence = currentFence(":read-only", cache, shield);
 const release = codexLock(cache);
 process.on("exit", release);
 
@@ -102,7 +103,7 @@ function gradeOne(
         encoding: "utf8",
         timeout: 15 * 60_000,
         env: {
-          PATH: process.env.PATH ?? "",
+          PATH: shield.home.path,
           HOME: home,
           CODEX_HOME: path.join(home, ".codex"),
           LANG: process.env.LANG ?? "",
