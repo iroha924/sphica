@@ -45,8 +45,10 @@ Changes to the working tree between batches (which code locations still exist) a
 
 ## Step 2 — Read every selected record
 
-`read([keys], cwd)` returns each record's text, its options, the exact words cited as evidence and adoption with who said them, what it
-superseded or conflicts with, and each code location checked in the working tree now. **Judge from this body, never from the key or the one line.**
+Read them by the `u<id>` each line gives: `read(["u12", "u40"], cwd)`. A batch whose keys are too long to show names its records by
+`u<id>` alone, and read shows each one's whole key, which its finding's `unit` takes. read returns each record's text, its options, the
+exact words cited as evidence and adoption with who said them, what it superseded or conflicts with, and each code location checked in
+the working tree now. **Judge from this body, never from the key or the one line**, which is cut short (`…`) to keep the batch whole.
 When a reply says some refs were not read or a record continues, call `read` again with exactly what it names until nothing is left.
 
 ## Step 3 — Search by the approach's meaning

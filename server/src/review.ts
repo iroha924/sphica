@@ -3,8 +3,10 @@
 // (or to defer it), when an added line names one of its options. Candidates and superseded records never apply.
 import { authorityOf } from "./authority.ts";
 import { byUnit, type Reads } from "./db.ts";
+import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
-import { head, sha256 } from "./text.ts";
+import { READ_BUDGET } from "./read.ts";
+import { bytes, head, sha256 } from "./text.ts";
 
 /** A changed path; gone when the file is no longer there (deleted, or renamed away), so it has no added lines to point at */
 export type FileDiff = { path: string; added: string[]; lines: number[]; gone?: true };
@@ -118,7 +120,10 @@ export type Applicable = {
   kind: string;
   stance: string | null;
   text: string;
+  /** Why it applies, as delivery shows it */
   because: string;
+  /** The same reason in parts, so a reply can clip each: the anchor, or the added line's file and the option it names */
+  why: { path: string; symbol: string | null } | { path: string; option: string };
 };
 
 /** Active, supported, sourced records the diff touches, each with why it applies, in id order. */
@@ -154,6 +159,7 @@ export async function selectForReview(
         stance: a.stance,
         text: a.text,
         because: `anchored to ${a.path}${a.symbol ? ` ${a.symbol}` : ""}`,
+        why: { path: a.path, symbol: a.symbol },
       });
   // Location-free don't and defer records: an added line naming one of their options (inside an identifier too: sendTelemetry)
   const added = files.flatMap((f) =>
@@ -196,6 +202,7 @@ export async function selectForReview(
           stance: u.stance,
           text: u.text,
           because: `an added line in ${hit.path} names the option ${o.text}`,
+          why: { path: hit.path, option: o.text },
         });
         break;
       }
@@ -256,18 +263,80 @@ export async function reviewBatch(
 export const AI_DEPARTURE =
   "A record marked decided by an AI was decided by an AI in an earlier session, not by the owner: a change that departs from it is a violation only when the change gives no reason for departing.";
 
-/** The records review_select returns, one line each, with the AI's decisions marked */
-export async function selectedText(db: Reads, hits: Applicable[]): Promise<string> {
+/** Bytes each part of a review_select line shows at most; a batch whose records leave less room shows less */
+const SHOWN = { text: 300, path: 160, symbol: 80, option: 160 } as const;
+/** Bytes a line's clipped parts need together; with less, the keys take the room and the records are named by u<id> alone */
+const LEAST = 24;
+
+type Caps = { text: number; path: number; symbol: number; option: number };
+const NONE: Caps = { text: 0, path: 0, symbol: 0, option: 0 };
+
+/** A part on one line within max bytes, its cut marked; 0 leaves it out, to count what the rest of the line takes */
+const part = (value: string, max: number): string => {
+  if (!max) return "";
+  const v = inline(value);
+  return bytes(v) <= max ? v : `${head(v, max - 3)}…`;
+};
+
+/** The records review_select returns, one line each and within room bytes, with the AI's decisions marked. byId when the keys left too
+ * little room and each record is named by u<id> alone */
+export async function selectedText(
+  db: Reads,
+  hits: Applicable[],
+  room: number,
+): Promise<{ text: string; byId: boolean }> {
   const whose = await authorityOf(
     db,
     hits.map((u) => u.id),
   );
-  const ai = hits.some((u) => whose.get(u.id) === "agent");
-  return [
-    ...hits.map(
-      (u) =>
-        `- ${u.key} (${u.kind}${u.stance ? ` ${u.stance}` : ""}${whose.get(u.id) === "agent" ? ", decided by an AI" : ""}): ${head(inline(u.text), 300)} [${u.because}]`,
-    ),
-    ...(ai ? [AI_DEPARTURE] : []),
-  ].join("\n");
+  const marked = (u: Applicable) => (whose.get(u.id) === "agent" ? ", decided by an AI" : "");
+  const tail = hits.some((u) => whose.get(u.id) === "agent") ? [AI_DEPARTURE] : [];
+  const line = (u: Applicable, c: Caps) => {
+    const why =
+      "option" in u.why
+        ? `an added line in ${part(u.why.path, c.path)} names the option ${part(u.why.option, c.option)}`
+        : `anchored to ${part(u.why.path, c.path)}${u.why.symbol ? ` ${part(u.why.symbol, c.symbol)}` : ""}`;
+    return `- ${inline(u.key)} (u${u.id}, ${u.kind}${u.stance ? ` ${u.stance}` : ""}${marked(u)}): ${part(u.text, c.text)} [${why}]`;
+  };
+  const join = (lines: string[]) => [...lines, ...tail].join("\n");
+  // What each record may add to its line once the fixed parts of every line are counted: half to the text, the rest to the reason
+  const each = Math.floor((room - bytes(join(hits.map((u) => line(u, NONE))))) / Math.max(1, hits.length));
+  if (each >= LEAST) {
+    const text = join(
+      hits.map((u) => {
+        const t = Math.min(SHOWN.text, Math.floor(each / 2));
+        const rest = each - t;
+        const two = "option" in u.why || u.why.symbol;
+        const path = Math.min(SHOWN.path, two ? Math.floor(rest / 2) : rest);
+        return line(u, {
+          text: t,
+          path,
+          symbol: Math.min(SHOWN.symbol, rest - path),
+          option: Math.min(SHOWN.option, rest - path),
+        });
+      }),
+    );
+    if (bytes(text) <= room) return { text, byId: false };
+  }
+  return {
+    text: join(hits.map((u) => `- u${u.id}${marked(u) ? ` (${marked(u).slice(2)})` : ""}`)),
+    byId: true,
+  };
+}
+
+/** Sphica's own words when a batch names its records by u<id> alone */
+const BY_ID =
+  "The keys are too long to show here: read each by u<id>, and pass the key read shows as the finding's unit.";
+
+/** review_select's whole reply for a batch, framed, within READ_BUDGET */
+export async function selectReply(db: Reads, b: Batch, after: number | null): Promise<string> {
+  const from = b.all.length - b.all.filter((u) => u.id > (after ?? 0)).length + 1;
+  const lead = `Decision lane: checked. ${b.all.length} records apply. Batch ${b.k} of ${b.n} (records ${from}-${from + b.records.length - 1}), selection ${b.selection}; read each before judging it.`;
+  const end =
+    b.next === null
+      ? "This is the last batch."
+      : `Next batch: after checking this one, call review_select with after: ${b.next}.`;
+  const room = READ_BUDGET - bytes(`${lead} ${BY_ID}\n${framed("")}\n${end}`);
+  const s = await selectedText(db, b.records, room);
+  return [s.byId ? `${lead} ${BY_ID}` : lead, framed(s.text), end].join("\n");
 }

@@ -10,6 +10,7 @@ import { Client, type ClientOptions } from "@modelcontextprotocol/sdk/client/ind
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { SPHICA_TOOLS } from "../evals/cloud/canary-check.ts";
+import { inTransaction } from "../src/db.ts";
 import { sessionId } from "../src/knowledge.ts";
 import {
   codexCommand,
@@ -25,7 +26,10 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
+import { READ_BUDGET } from "../src/read.ts";
+import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { checkedText } from "../src/review-findings.ts";
+import { openRun } from "../src/trace.ts";
 import { fakeCodex } from "./fake-codex.ts";
 import { message, project, tempDb } from "./temp-db.ts";
 import { tempDir, tmpEnv } from "./temp-dir.ts";
@@ -1064,6 +1068,106 @@ test("search says when it stopped before reading every candidate", async () => {
     const some = await search();
     assert.match(some, /retry budget and cache warm\./);
     assert.match(some, /Stopped after 600 candidates by rank; more may match\./);
+  } finally {
+    await client.close();
+    await db.done();
+  }
+});
+
+// Codex drops the middle of a reply past about 40,000 bytes without a word: each review_select reply holds its 50 records within the budget
+test("review_select keeps each reply within the reply budget: long options, a huge saved option, and keys too long to show", async () => {
+  const db = tempDb();
+  const repo = tempDir("sphica-budget-");
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/o/budget.git"], { cwd: repo });
+  const p = project(db, "git:github.com/o/budget", "o/budget");
+  const quote = "Not this one.";
+  const m = message(db, p, { id: "m1", text: quote });
+  const dont = (key: string, option: string) => ({
+    key,
+    kind: "decision",
+    stance: "dont",
+    text: `${quote} ${"t".repeat(1900)}`,
+    evidence: [{ source: `s${m}`, quote, role: "states" }],
+    adoption: [{ source: `s${m}`, quote }],
+    options: [{ text: option, outcome: "rejected" }],
+  });
+  const saveAll = (prefix: string, units: unknown[]) => {
+    const t: Target = { projectId: p, origin: "trace", prefix, sessionId: "s1", root: null, sources: null };
+    return inTransaction(db.ingest, async (trx) => {
+      const runId = await openRun(trx, {
+        projectId: p,
+        origin: "trace",
+        target: "session:s1",
+        sessionId: "s1",
+        draftId: `d${Math.random()}`,
+      });
+      await saveRecord(trx, t, runId, await checkRecord(trx, t, { units }), []);
+    });
+  };
+  // english-exempt: a multibyte option, as Japanese records hold, at the 500-character limit
+  const jp = (i: number) => `${"選択肢".repeat(160)}${String(i).padStart(3, "0")}`;
+  const ascii = (i: number) => `longkeyoption${String(i).padStart(3, "0")}`;
+  for (let i = 0; i < 50; i += 25)
+    await saveAll(
+      "trace:ext-s1/",
+      Array.from({ length: 25 }, (_, k) => dont(`jp${String(i + k).padStart(3, "0")}`, jp(i + k))),
+    );
+  await saveAll("trace:ext-s1/", [dont("huge", "hugeoptionplaceholder")]);
+  // A saved option the API would refuse today, as an older or edited database can hold
+  const huge = "h".repeat(40_000);
+  db.owner.exec("drop trigger unit_option_frozen");
+  db.owner.prepare("update unit_option set text = ? where text = 'hugeoptionplaceholder'").run(huge);
+  // A key's session part comes from the host and has no length limit
+  for (let i = 0; i < 50; i += 25)
+    await saveAll(
+      `trace:${"e".repeat(1000)}/`,
+      Array.from({ length: 25 }, (_, k) => dont(`long${String(i + k).padStart(3, "0")}`, ascii(i + k))),
+    );
+  const diff = (lines: string[]) =>
+    ["--- a/src/x.ts", "+++ b/src/x.ts", `@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => `+${l}`)].join(
+      "\n",
+    );
+  const client = new Client({ name: "test", version: "0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [path.join(SRC, "mcp.ts")],
+      env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+      stderr: "ignore",
+    }),
+  );
+  const select = async (d: string) => {
+    const r = await client.callTool({ name: "review_select", arguments: { cwd: repo, diff: d } });
+    const text = (r.content as { text: string }[])[0]?.text ?? "";
+    assert.ok(Buffer.byteLength(text) <= READ_BUDGET, `${Buffer.byteLength(text)} bytes`);
+    return text;
+  };
+  try {
+    const many = await select(diff(Array.from({ length: 50 }, (_, i) => `const a${i} = "${jp(i)}";`)));
+    assert.match(many, /Batch 1 of 1 \(records 1-50\)/);
+    assert.equal([...many.matchAll(/^- trace:ext-s1\/jp\d{3} \(u\d+, decision dont\): .*…\]$/gm)].length, 50);
+    const one = await select(diff([`call(${huge});`]));
+    assert.match(one, /^- trace:ext-s1\/huge \(u\d+, decision dont\): .* names the option h+…\]$/m);
+    const long = await select(diff(Array.from({ length: 50 }, (_, i) => `use(${ascii(i)});`)));
+    const ids = [...long.matchAll(/^- u(\d+)$/gm)].map((x) => Number(x[1]));
+    assert.equal(ids.length, 50);
+    assert.match(long, /read each by u<id>/);
+    // review_check still takes the whole key, which read gives for each u<id>
+    const selection = /selection ([0-9a-f]{16})/.exec(long)?.[1] ?? "";
+    const keys = ids.map((id) =>
+      String(db.owner.prepare("select key from unit where id = ?").get(id)?.key ?? ""),
+    );
+    const checked = await client.callTool({
+      name: "review_check",
+      arguments: {
+        cwd: repo,
+        diff: diff(Array.from({ length: 50 }, (_, i) => `use(${ascii(i)});`)),
+        selection,
+        findings: keys.map((unit) => ({ outcome: "unrelated", unit, reason: "a test" })),
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(checked.content), /problem/i);
   } finally {
     await client.close();
     await db.done();

@@ -45,14 +45,15 @@ overview live と review_select のどの応答も、枠込みで READ_BUDGET �
   - コミット: `fix(overview): keep each live page within the reply budget`
   - 結果: `node --test --test-name-pattern="reply budget with its frame" test/overview.test.ts` → 直す前は 1 ページ目が枠込みで 49,800 B になって落ち、直した後は全ページが READ_BUDGET 以下で 121 件が 1 回ずつ出た。`node --test test/overview.test.ts` → 18 件 pass。`bun run verify` → 0
 
-- [ ] T03: review_select の理由を構造で持ち、表示のときだけ切り、u<id> と代替の経路で枠込み 32 KiB に収める。review Skill の reviewer を u<id> で読む形にする
+- [x] T03: review_select の理由を構造で持ち、表示のときだけ切り、u<id> と代替の経路で枠込み 32 KiB に収める。review Skill の reviewer を u<id> で読む形にする
   - 種別: 修正
   - 計画: S2
   - 依存: なし
-  - 変更: `server/src/review.ts`, `server/src/mcp.ts`, `server/src/deliver.ts`, `server/test/review.test.ts`, `server/test/plugin.test.ts`, `plugin/skills/review/reviewers/precedent.md`
+  - 変更: `server/src/review.ts`, `server/src/mcp.ts`, `server/test/review.test.ts`, `server/test/plugin.test.ts`, `plugin/skills/review/reviewers/precedent.md`
   - red: `cd server && node --test --test-name-pattern="review_select" test/review.test.ts test/plugin.test.ts` → 40 KB の選択肢、日本語の選択肢 50 件、長いキーで、応答が READ_BUDGET を超えて落ちる
   - 完了条件: `cd server && node --test --test-name-pattern="review_select" test/review.test.ts test/plugin.test.ts` → pass（予算内、u<id> だけの経路、配信フックの出力・selection・境界・next が同じ、子プロセスでのバイト数）
   - コミット: `fix(review): keep each review_select reply within the reply budget`
+  - 結果: `node --test --test-name-pattern="review_select keeps each reply" test/plugin.test.ts` → 直す前は 500 文字の日本語の選択肢 50 件の応答が 91,762 B で落ち、直した後は 3 つの場合（日本語の選択肢 50 件、40,000 B の選択肢、キーの長い 50 件の u<id> だけの経路）とも READ_BUDGET 以下で、u<id> だけの経路でも全文のキーで review_check が通った。`node --test test/review.test.ts` → 16 件 pass。配信フックの because は変えていない（deliver.ts は触らない）。`bun run verify` → 0
 
 ## P3: 出す
 

@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
+import { READ_BUDGET } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { AI_DEPARTURE, parseDiff, reviewBatch, selectedText, selectForReview } from "../src/review.ts";
@@ -636,10 +637,10 @@ test("review_select marks an AI's decision and says a departure from it needs on
     const p = project(db);
     aiDecided(db, p, "pool", "I keep the connection pool small.", "src/db.ts");
     const files = parseDiff(DIFF);
-    const text = await selectedText(db.reader, await selectForReview(db.reader, p, files));
+    const { text } = await selectedText(db.reader, await selectForReview(db.reader, p, files), READ_BUDGET);
     assert.match(
       text,
-      /^- trace:ext-s1\/pool \(decision do, decided by an AI\): I keep the connection pool small\. \[anchored to src\/db\.ts\]$/m,
+      /^- trace:ext-s1\/pool \(u\d+, decision do, decided by an AI\): I keep the connection pool small\. \[anchored to src\/db\.ts\]$/m,
     );
     assert.ok(text.endsWith(AI_DEPARTURE));
     const owner = tempDb();
@@ -659,8 +660,12 @@ test("review_select marks an AI's decision and says a departure from it needs on
           },
         ],
       });
-      const plain = await selectedText(owner.reader, await selectForReview(owner.reader, q, files));
-      assert.match(plain, /^- trace:ext-s1\/sqlite \(constraint do\): Keep one SQLite file\./);
+      const { text: plain } = await selectedText(
+        owner.reader,
+        await selectForReview(owner.reader, q, files),
+        READ_BUDGET,
+      );
+      assert.match(plain, /^- trace:ext-s1\/sqlite \(u\d+, constraint do\): Keep one SQLite file\./);
       assert.ok(!plain.includes(AI_DEPARTURE));
     } finally {
       await owner.done();
