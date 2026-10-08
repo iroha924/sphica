@@ -168,6 +168,8 @@ test("a scratch that would overlap the checkout is never used", (t) => {
     assert.equal(r.tests, "not run (the scratch directory and the checkout overlap)");
     assert.deepEqual(r.parts, NO_PARTS);
     assert.ok(r.scratch && !fs.existsSync(r.scratch));
+    // The hidden test is not left in the checkout either, where a later run reading old runs could find it
+    assert.ok(!fs.existsSync(path.join(work, "test", "hidden.test.ts")));
   } finally {
     if (saved === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = saved;
@@ -189,4 +191,14 @@ test("completion: locks the scratch", () => {
     assert.equal(r.tests, "1 passed, 0 failed");
     assert.ok(r.scratch && !fs.existsSync(r.scratch));
   } else assert.match(r.tests, /^not run to the end/);
+});
+
+test("a checkout that is a link is never written into", (t) => {
+  const { work } = fixture(t);
+  const link = path.join(path.dirname(work), "work-link");
+  fs.symlinkSync(work, link);
+  t.after(() => fs.rmSync(link, { force: true }));
+  const r = runHiddenTest(link, 'import { test } from "node:test";\ntest("completion: x", () => {});\n');
+  assert.equal(r.tests, "not run (the checkout is a link)");
+  assert.ok(!fs.existsSync(path.join(work, "test", "hidden.test.ts")));
 });

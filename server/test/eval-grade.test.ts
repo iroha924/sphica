@@ -305,6 +305,7 @@ const task = {
 };
 const row = {
   model: "codex" as const,
+  fence: FENCE,
   answer_format: "valid" as "valid" | "invalid" | "refused_or_empty" | "not_applicable",
   task: task.id,
   condition: "inject",
@@ -3039,6 +3040,12 @@ printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
     // Runs kept where the fenced runs could read them, or a loop that does not say where its runs were, are not graded
     assert.match(start({ rows }).stderr, /run_roots/);
     assert.match(start({ run_roots: [], rows }).stderr, /run_roots/);
+    // Codex runs made under two fences, or none, are not graded into one table
+    assert.match(
+      start({ run_roots: roots, rows: [rows[0], { ...row, run: "r2", fence: "0".repeat(64) }] }).stderr,
+      /read fences/,
+    );
+    assert.match(start({ run_roots: roots, rows: [{ ...row, fence: undefined }] }).stderr, /read fences/);
     assert.match(
       start({ run_roots: [...roots, path.join(base, "elsewhere")], rows }).stderr,
       /must be inside/,

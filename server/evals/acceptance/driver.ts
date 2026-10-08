@@ -48,6 +48,8 @@ export type Driver = {
   /** What the delivery hooks returned for the last inject step, one entry per call (for the offline order bench). */
   delivered(): string[];
   done(): Promise<void>;
+  /** The temp directory the world lives in while the driver runs: the world's records, the gold among them, until done() removes it */
+  dir: string;
 };
 
 class NotBuilt extends Error {}
@@ -1448,6 +1450,7 @@ export async function createDriver(world: World): Promise<Driver> {
       }
       fs.rmSync(dir, { recursive: true, force: true });
     },
+    dir,
   };
 }
 

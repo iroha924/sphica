@@ -16,6 +16,8 @@ export type GradeRow = {
   condition: string;
   run: string;
   excluded: string | null;
+  /** Codex runs only: the read fence the run was made under */
+  fence?: string;
   answer: string;
   answer_format: "valid" | "invalid" | "refused_or_empty" | "not_applicable";
   patch: string;

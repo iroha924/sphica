@@ -403,6 +403,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="fenced PATH holds only|external volumes" test/eval-codex.test.ts` → 直す前は読み込みで失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 179 件 pass。codex を PATH から外し、HOME に外向きのリンクを置いた CI と同じ環境でも 179 件 pass
 
+- [x] T36: 手元の Codex の全差分のレビュー（25b49770）の 7 件を直す（codex の親ディレクトリを丸ごと読み戻す、リポジトリの git alternates の先、build の fixture 作りがロックを取らずに gold を一時ディレクトリへ書く、collect が隠しテストを run の checkout に残す・checkout が外向きのリンク、slot が外向きのリンク、フックのコマンドの `$(…)` が展開される、grade 自体が fence の違う行を集計する）
+  - 種別: 修正
+  - 計画: S2, S3, S4, S8
+  - 依存: T35（直す対象の囲いが要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/hidden-test.ts`, `server/evals/cloud/build.ts`, `server/evals/acceptance/driver.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-grade.test.ts`, `server/test/hidden-runner.test.ts`
+  - red: `cd server && node --test --test-name-pattern="slot that links out|a checkout that is a link|scratch that would overlap|read fence" test/eval-codex.test.ts test/hidden-runner.test.ts test/eval-grade.test.ts` → 直す前の本体で 4 件失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 全件 pass
+  - コミット: `fix(eval): close the gaps a full review found in alternates, slots, hooks, hidden tests, and grading (T36)`
+  - 結果: `cd server && node --test --test-name-pattern="slot that links out|a checkout that is a link|scratch that would overlap|read fence" test/eval-codex.test.ts test/hidden-runner.test.ts test/eval-grade.test.ts` → 直す前の本体で 4 件失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 全件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -440,3 +451,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T32 / GitHub の Codex のレビュー（d27e63f4）で P1 が 2 件、P2 と P3 が 1 件ずつ。4 件とも採用した。Biome の写しは、どちらの host も書けない `~/.cache/sphica-eval/m2-biome/<run>` に置き、Codex には `read` で読み戻す（HOME と同じ、親を deny して子を読み戻す形）
 - 2026-10-09 / T35 / GitHub の Codex のレビュー（0e1bb91f・e4dc34af）の未解決の 5 件。HOME の奥の外向きのリンクの件は、HOME 全体を辿って確かめた（18 秒、リンク約 6.9 万本、外向きの先はすべて /opt/homebrew・/Applications・/Library/Developer などの誰でも読める場所）。リンク経由の読み取りは先のパスで判定されるので、リンクは読める範囲を広げない。穴は HOME の外の私的なデータの側にあるとして、外部ボリューム（/Volumes の下の実体のディレクトリ）を deny した
 - 2026-10-09 / 進め方 / 持ち主の指示: 前の `@codex review` が返る前に続けて頼まない。直しを全部 push し終えてから 1 回だけ頼む
+- 2026-10-09 / T36 / GitHub に出す前に、手元の Codex（high）に全差分をもう一度レビューさせた。P1 が 6 件、P2 が 2 件。7 件を T36 で直した。残る 1 件はプロダクト側の問題で、評価の側では塞げない。SECURITY.md に従い、非公開の報告で扱う（持ち主が別の PR で直すと決めた）

@@ -44,11 +44,35 @@ export function repoPlaces(repo = REPO): string[] {
     .filter((l) => l.startsWith("worktree "))
     .map((l) => l.slice("worktree ".length));
   const common = path.resolve(repo, git("rev-parse", "--git-common-dir").trim());
+  // Objects borrowed from elsewhere (alternates, and theirs in turn) hold the same history
+  const borrowed: string[] = [];
+  const follow = (objects: string) => {
+    let lines: string[] = [];
+    try {
+      lines = fs.readFileSync(path.join(objects, "info", "alternates"), "utf8").split("\n");
+    } catch {
+      return;
+    }
+    for (const line of lines.map((l) => l.trim()).filter((l) => l && !l.startsWith("#"))) {
+      const alt = path.resolve(objects, line);
+      if (!fs.existsSync(alt)) continue;
+      const real = fs.realpathSync(alt);
+      if (borrowed.includes(real)) continue;
+      borrowed.push(real);
+      follow(real);
+    }
+  };
+  follow(path.join(common, "objects"));
   const places = [
-    ...new Set([repo, ...trees, common].filter((p) => fs.existsSync(p)).map((p) => fs.realpathSync(p))),
+    ...new Set(
+      [repo, ...trees, common, ...borrowed].filter((p) => fs.existsSync(p)).map((p) => fs.realpathSync(p)),
+    ),
   ];
   return places.filter((p) => !places.some((q) => q !== p && isInside(q, p)));
 }
+
+/** One shell word, quoted so nothing in it is expanded: a path may hold `$` or quotes */
+const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** Where the repository lives and what HOME keeps: made once per run, and shared by its deny list, its PATH, and its fence */
 export type Shield = { places: string[]; home: HomeFence; volumes?: string[] };
@@ -138,6 +162,8 @@ export async function runCodex(o: {
       throw new Error(`the ${what} ${JSON.stringify(name)} is not one plain name`);
   const cache = evalCache();
   const build = requireInside(cache, o.build, "--build");
+  // The slot itself, links followed: a slot that links to another build's would hand this run that build's material
+  requireInside(build, path.join(build, o.repo), "the repository slot");
   // Checked before it is made: an --out outside the cache is refused without creating anything there
   const out = requireInside(cache, o.out, "--out");
   fs.mkdirSync(out, { recursive: true });
@@ -232,7 +258,7 @@ async function fencedRun(
       return o.codexMatcher;
     };
     const hook = (args: string[], timeout: number) => ({
-      hooks: [{ type: "command", command: args.map((a) => JSON.stringify(a)).join(" "), timeout }],
+      hooks: [{ type: "command", command: args.map(shellQuote).join(" "), timeout }],
     });
     // An absolute shell: the PATH the hooks inherit is the fenced Codex's
     const deliver = [
@@ -255,7 +281,7 @@ async function fencedRun(
     if (o.condition === "gold")
       fs.writeFileSync(
         path.join(dir, "gold-hook.sh"),
-        `out=$(/bin/sh ${JSON.stringify(path.join(tools, "gold.sh"))})\ncode=$?\nprintf '%s' "$out" >> ${JSON.stringify(path.join(dir, "gold-receipt.txt"))}\nprintf '%s' "$out"\nexit $code\n`,
+        `out=$(/bin/sh ${shellQuote(path.join(tools, "gold.sh"))})\ncode=$?\nprintf '%s' "$out" >> ${shellQuote(path.join(dir, "gold-receipt.txt"))}\nprintf '%s' "$out"\nexit $code\n`,
       );
     if (hooks)
       fs.writeFileSync(path.join(codexHome, "hooks.json"), `${JSON.stringify({ hooks }, null, 2)}\n`);

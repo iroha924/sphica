@@ -160,10 +160,11 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
     if (isInside(home, real)) roots.push(installRoot(home, real, tool));
   }
   const codex = find("codex", entries) ?? null;
-  // Codex may run its own binary inside the sandbox: one installed under HOME outside the tool installs is read back, alone
+  // Codex may run its own binary inside the sandbox: one installed under HOME outside the tool installs is read back, the file alone
+  // (its directory may hold the owner's other files)
   const codexReal = codex && fs.realpathSync(codex);
   if (codexReal && isInside(home, codexReal) && !roots.some((r) => isInside(r, codexReal)))
-    roots.push(path.dirname(codexReal));
+    roots.push(codexReal);
   const outside = entries.filter(
     (d) => !isInside(home, fs.existsSync(d) ? fs.realpathSync(d) : path.resolve(d)),
   );

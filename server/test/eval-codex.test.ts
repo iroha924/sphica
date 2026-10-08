@@ -129,6 +129,7 @@ echo x >> "$here/calls"
 printf '%s\\n' "$@" > "$here/args"
 env > "$here/env"
 cp "$CODEX_HOME/config.toml" "$here/config.toml"
+[ -f "$CODEX_HOME/hooks.json" ] && cp "$CODEX_HOME/hooks.json" "$here/hooks.json"
 out=""; work=""; prev=""
 for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; [ "$prev" = "-C" ] && work="$a"; prev="$a"; done
 prompt=$(cat)
@@ -805,6 +806,7 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
   const loop = path.join(b.build, "loop.json");
   const row = {
     model: "codex",
+    fence: "f",
     task: "pilot-sort",
     condition: "none",
     run: "r1",
@@ -899,6 +901,7 @@ test("the grader keeps the lock while the Claude grader's directory cannot be re
   const loop = path.join(b.build, "loop.json");
   const row = {
     model: "codex",
+    fence: "f",
     task: "pilot-sort",
     condition: "none",
     run: "r1",
@@ -1028,7 +1031,10 @@ test("the fenced PATH holds only absolute entries that still find node, bun, and
       tool,
     );
   // The directory holding codex is read back under the denied HOME, alone
-  assert.ok(f.roots.includes(path.join(home, ".local/bin")));
+  assert.ok(
+    f.roots.includes(path.join(home, ".local/bin", "codex")) &&
+      !f.roots.includes(path.join(home, ".local/bin")),
+  );
   // A shim whose target has another name would not be found by that name in the PATH built from its target
   const outside = fs.realpathSync(tempDir("shim-targets-"));
   fs.writeFileSync(path.join(outside, "node-launcher"), "x");
@@ -1062,4 +1068,38 @@ test("external volumes are denied, a link to the root volume is not, and the fen
       { "<biome>": copy },
     );
   assert.equal(fence(path.join(cache, "m2-biome", "run-a")), fence(path.join(cache, "m2-biome", "run-b")));
+});
+
+test("a slot that links out of the build, objects borrowed from elsewhere, and a $ in a path are all handled", () => {
+  // A slot that is a link to another place is refused, though its name is plain
+  const b = codexBuild("none");
+  const elsewhere = fs.realpathSync(tempDir("slot-elsewhere-"));
+  fs.renameSync(path.join(b.build, "eval-shelf-1"), path.join(elsewhere, "slot"));
+  fs.symlinkSync(path.join(elsewhere, "slot"), path.join(b.build, "eval-shelf-1"));
+  const refused = b.start(path.join(b.cache, "codex-runs"));
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /must be inside/);
+  // The repository's borrowed objects are denied with it
+  const base = fs.realpathSync(tempDir("alternates-"));
+  const main = path.join(base, "main");
+  const borrowed = path.join(base, "borrowed.git");
+  execFileSync("git", ["init", "-q", "--bare", borrowed], { env: GIT_ENV });
+  execFileSync("git", ["init", "-q", main], { env: GIT_ENV });
+  fs.writeFileSync(
+    path.join(main, ".git", "objects", "info", "alternates"),
+    `${path.join(borrowed, "objects")}\n`,
+  );
+  assert.ok(repoPlaces(main).includes(path.join(borrowed, "objects")));
+  // A hook's command quotes each path whole: a $(...) in the output path is never run
+  const g = codexBuild("gold");
+  const out = path.join(g.cache, "runs$(touch MARKER)");
+  const r = g.start(out);
+  assert.equal(r.status, 0, r.stderr);
+  const hooks = JSON.parse(fs.readFileSync(path.join(g.root, "bin", "hooks.json"), "utf8")) as {
+    hooks: { UserPromptSubmit: { hooks: { command: string }[] }[] };
+  };
+  const command = hooks.hooks.UserPromptSubmit[0]?.hooks[0]?.command ?? "";
+  const cwd = tempDir("hook-cwd-");
+  spawnSync("/bin/sh", ["-c", command], { cwd, encoding: "utf8" });
+  assert.ok(!fs.existsSync(path.join(cwd, "MARKER")), command);
 });
