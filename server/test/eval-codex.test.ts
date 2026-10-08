@@ -103,9 +103,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 printf '%s\\n' "$@" > "$here/args"
 env > "$here/env"
 cp "$CODEX_HOME/config.toml" "$here/config.toml"
-out=""; prev=""
-for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+out=""; work=""; prev=""
+for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; [ "$prev" = "-C" ] && work="$a"; prev="$a"; done
 cat > /dev/null
+if [ -f "$here/unreadable" ]; then mkdir "$TMPDIR/unreadable"; touch "$TMPDIR/unreadable/x"; chmod 000 "$TMPDIR/unreadable"; fi
+[ -f "$here/link" ] && ln -s "$work/README.md" "$work/link"
 printf '{}' > "$out"
 echo '{"type":"thread.started"}'
 `;
@@ -189,7 +191,9 @@ function codexBuild(condition: string) {
     config: fs.readFileSync(path.join(bin, "config.toml"), "utf8"),
   });
   const fail = () => fs.writeFileSync(path.join(bin, "fail"), "");
-  return { root, home, cache, build, start, seen, fail };
+  /** Makes the fake codex leave something behind: an unreadable directory in its TMPDIR, or an absolute link in its checkout */
+  const leave = (what: "unreadable" | "link") => fs.writeFileSync(path.join(bin, what), "");
+  return { root, home, cache, build, start, seen, fail, leave };
 }
 
 test("codex.ts replays a task with codex exec in the run's own homes and records the run", () => {
@@ -232,7 +236,7 @@ test("the Codex run under test reads through a read fence and keeps its files wh
       new RegExp(`^${JSON.stringify(p).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "deny"$`, "m"),
       p,
     );
-  denied(fs.realpathSync(path.join(import.meta.dirname, "..", "evals")));
+  denied(fs.realpathSync(path.join(import.meta.dirname, "..", "..")));
   denied(fs.realpathSync(cache));
   denied(path.join(b.home, ".codex"));
   denied(path.join(b.home, ".ssh"));
@@ -296,4 +300,40 @@ test("containment and the fence digest hold for names starting with dots and for
   const dotted = path.join(cache, "..build");
   fs.mkdirSync(dotted);
   assert.equal(requireInside(cache, dotted, "--build"), dotted);
+});
+
+test("the Codex run under test is denied the whole repository, whose git history holds the evaluations", () => {
+  const b = codexBuild("none");
+  const r = b.start(path.join(b.cache, "codex-runs"));
+  assert.equal(r.status, 0, r.stderr);
+  const repo = fs.realpathSync(path.join(import.meta.dirname, "..", ".."));
+  assert.ok(fs.existsSync(path.join(repo, ".git")));
+  assert.match(
+    b.seen().config,
+    new RegExp(`^${JSON.stringify(repo).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "deny"$`, "m"),
+  );
+});
+
+test("what a run leaves unreadable in its temp tree is still cleared, so no later run can read its checkout", () => {
+  const b = codexBuild("none");
+  b.leave("unreadable");
+  const out = path.join(b.cache, "codex-runs");
+  const r = b.start(out);
+  assert.equal(r.status, 0, r.stderr);
+  const tree = path.dirname(/^HOME=(.*)$/m.exec(b.seen().env)?.[1] ?? "");
+  assert.ok(!fs.existsSync(tree), `${tree} is left behind`);
+  const [run] = fs.readdirSync(out);
+  assert.ok(fs.existsSync(path.join(out, run ?? "", "work", "README.md")));
+  assert.ok(!fs.existsSync(path.join(b.cache, "codex.lock")));
+});
+
+test("a link the run made to a file in its checkout still points into the checkout after it moves", () => {
+  const b = codexBuild("none");
+  b.leave("link");
+  const out = path.join(b.cache, "codex-runs");
+  const r = b.start(out);
+  assert.equal(r.status, 0, r.stderr);
+  const [run] = fs.readdirSync(out);
+  const work = fs.realpathSync(path.join(out, run ?? "", "work"));
+  assert.equal(fs.realpathSync(path.join(work, "link")), path.join(work, "README.md"));
 });

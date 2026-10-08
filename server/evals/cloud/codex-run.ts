@@ -22,22 +22,22 @@ import {
 } from "./codex-home.ts";
 
 const HERE = import.meta.dirname;
-/** The evaluations: tasks with their gold, hidden tests, fixtures */
-export const EVALS = fs.realpathSync(path.resolve(HERE, ".."));
+/** The repository: the evaluations' tasks, gold, and hidden tests, in the working tree and in its git history alike */
+export const REPO = fs.realpathSync(path.resolve(HERE, "..", "..", ".."));
 
 /**
- * What no fenced Codex may read, whatever it runs: the owner's credentials (Codex's login among them), the evaluations, and every
+ * What no fenced Codex may read, whatever it runs: the owner's credentials (Codex's login among them), the repository, and every
  * evaluation output (builds, other runs, logs). Each run works in a temp tree outside all of them.
  */
 export function codexDenies(cache: string): string[] {
-  return [EVALS, cache, ...DENY_DIRS, ...DENY_FILES];
+  return [REPO, cache, ...DENY_DIRS, ...DENY_FILES];
 }
 
 /** The fence as one digest that names each place by its role, comparable across machines and runs */
 export function codexFence(profile: string, cache: string, codexHome: string): string {
   return fenceDigest(profile, {
     "<codex-home>": codexHome,
-    "<evals>": EVALS,
+    "<repo>": REPO,
     "<cache>": cache,
     "<home>": os.homedir(),
   });
@@ -80,22 +80,29 @@ export async function runCodex(o: {
   fs.mkdirSync(o.out, { recursive: true });
   const out = requireInside(cache, o.out, "--out");
   const release = codexLock(cache);
+  let tree = "";
+  let run: Awaited<ReturnType<typeof fencedRun>>;
   try {
-    return await fencedRun({ ...o, build, out }, cache);
+    tree = outsideTree("sphica-codex-", codexDenies(cache));
+    run = await fencedRun({ ...o, build, out }, cache, tree);
   } finally {
-    release();
+    // A checkout left in the temp directory is readable to the next run: the lock stays until the owner clears it
+    if (!tree || !fs.existsSync(tree)) release();
   }
+  if (fs.existsSync(tree))
+    throw new Error(`could not remove ${tree}; remove it, then codex.lock in ${cache}`);
+  return run;
 }
 
 async function fencedRun(
   o: Parameters<typeof runCodex>[0],
   cache: string,
+  tree: string,
 ): Promise<{ dir: string; result: Record<string, unknown> }> {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}`);
   const codexHome = path.join(dir, "codex-home");
   const db = path.join(dir, "db", "sphica.db");
   const denies = codexDenies(cache);
-  const tree = outsideTree("sphica-codex-", denies);
   const work = path.join(tree, "work");
   const home = path.join(tree, "home");
   const tmp = path.join(tree, "tmp");
@@ -259,13 +266,51 @@ async function fencedRun(
     result.reason = (e as Error).message;
     throw e;
   } finally {
-    // Back into the run directory, where collect and the hidden tests look and every later run is denied
-    for (const d of ["work", "home", "tmp"])
-      if (fs.existsSync(path.join(tree, d)))
-        fs.cpSync(path.join(tree, d), path.join(dir, d), { recursive: true, verbatimSymlinks: true });
-    fs.rmSync(tree, { recursive: true, force: true });
+    const back = bringBack(tree, dir);
+    if (back.error) result.reason ??= `could not move the run's files back: ${back.error}`;
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
   return { dir, result };
+}
+
+/** Gives the owner back read and write on everything under `p`: a directory the run made unreadable would stop the copy and the removal */
+function openUp(p: string): void {
+  const st = fs.lstatSync(p);
+  if (st.isSymbolicLink()) return;
+  fs.chmodSync(p, st.mode | (st.isDirectory() ? 0o700 : 0o600));
+  if (st.isDirectory()) for (const name of fs.readdirSync(p)) openUp(path.join(p, name));
+}
+
+/** Points each absolute link under `p` that targets the temp tree at the same place under the run directory */
+function retarget(p: string, tree: string, dir: string): void {
+  const st = fs.lstatSync(p);
+  if (st.isSymbolicLink()) {
+    const target = fs.readlinkSync(p);
+    if (path.isAbsolute(target) && isInside(tree, target)) {
+      fs.unlinkSync(p);
+      fs.symlinkSync(path.join(dir, path.relative(tree, target)), p);
+    }
+  } else if (st.isDirectory()) for (const name of fs.readdirSync(p)) retarget(path.join(p, name), tree, dir);
+}
+
+/** Moves work, home, and tmp back into the run directory, where collect and the hidden tests look and every later run is denied */
+function bringBack(tree: string, dir: string): { error: string | null } {
+  let error: string | null = null;
+  try {
+    openUp(tree);
+    for (const d of ["work", "home", "tmp"]) {
+      if (!fs.existsSync(path.join(tree, d))) continue;
+      fs.cpSync(path.join(tree, d), path.join(dir, d), { recursive: true, verbatimSymlinks: true });
+      retarget(path.join(dir, d), tree, dir);
+    }
+  } catch (e) {
+    error = (e as Error).message;
+  }
+  try {
+    fs.rmSync(tree, { recursive: true, force: true });
+  } catch (e) {
+    error ??= (e as Error).message;
+  }
+  return { error };
 }

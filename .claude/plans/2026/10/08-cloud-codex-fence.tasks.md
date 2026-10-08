@@ -91,6 +91,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): fence the Codex grader and key its checkpoints by the fence (T05)`
   - 結果: `cd server && node --test --test-name-pattern="read fence" test/eval-grade.test.ts` → 直す前は `GRADER_ARGS.codex` に `-s` があり（the profile is the sandbox: actual false）、失敗した
   - 結果: `cd server && node --test test/eval-grade.test.ts` → 73 件 pass。`node --test test/eval-claude.test.ts test/eval-codex.test.ts test/review-eval.test.ts` → 76 件 pass。`bun run typecheck`・`bun run lint`・`bun run english` → 0 で終わった
+- [x] T11: T03 のレビューの指摘を直す（リポジトリの git の履歴から正解を読める、後片付けの失敗で一時の checkout を残したままロックを外す、checkout の中を指す絶対リンクが移した後に切れる）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T03（直す対象の run の囲いが要る）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test test/eval-codex.test.ts` → 設定にリポジトリのルートの deny が無い、読めないディレクトリを残すと一時の木が消えずに残る、`link` が消えた一時の木を指す、の 3 件で失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): deny the repository, clear what a run leaves, keep its links in the checkout (T11)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 直す前は新しい 3 件が失敗した（deny の正規表現に合わない、一時の木が残る、リンクの解決先が違う）
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 152 件 pass。テストの後に os.tmpdir() に `sphica-codex-*` が残っていないことを確かめた。`bun run typecheck`・`bun run lint` → 0 で終わった
+
 - [ ] T06: report が fence の無い・混ざる・違う Codex の結果を比べない
   - 種別: 修正
   - 計画: S5
@@ -129,3 +140,6 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T04 / T04 のコミット（edbb3d45）は eval-grade.test.ts の collect のテスト 3 件（fence の無い Codex の run を数える前提）を落としていた。完了条件で eval-claude.test.ts しか流さなかった / T05 のコミットで、それらの result.json に今の fence を足した
 - 2026-10-08 / T05 / 採点者の fence を求めるため `currentRunFence` を `currentFence(base, cache)` に広げ、collect の呼び出しを直した。存在しない run の置き場も判定できるよう `requireInside` が親までたどって解決する形にした。codex-run.ts の内側判定を codex-home.ts の `isInside` にそろえた / T05 の変更欄に codex-run.ts・codex-home.ts・collect.ts を足した（前: grade.ts・grading.ts・eval-grade.test.ts）
 - 2026-10-08 / T05 / 既存の採点のテストのビルドを一時 HOME の `.cache/sphica-eval/builds` に移し、loop.json に `run_roots` を足した。kill -9 で止めたテストは、残ったロックを持ち主の代わりに消してから再開する / 欄は変えていない
+- 2026-10-08 / T03 / Codex のレビュー（high）で P1 が 2 件、P2 が 1 件。リポジトリの .git から `git show` で tasks.json を読める、後片付けのコピーの失敗で一時の木を残したままロックを外す、絶対リンクが移した後に切れる / 3 件とも採用し、T11 を足して直した。deny を `server/evals` からリポジトリのルートに広げた（plan の方針 2 の deny の対象が変わる）
+- 2026-10-08 / T04 / Codex のレビューで P2 が 2 件。パスに引用符があると指紋が食い違う（T09 で塞がっていた）、除外した Codex の行に fence が残らない / 後者を採用し、T10 を足す
+- 2026-10-08 / T11 / review の評価の `evalDenies` も `server/evals` だけを deny していて、同じくリポジトリの .git から読める / plan の対象外（review の挙動は変えない）なので直さず、持ち主に聞く
