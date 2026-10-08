@@ -265,7 +265,7 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - コミット: `fix(eval): fence the review evaluation's lanes like the cloud runs (T22)`
   - 結果: `cd server && node --test --test-name-pattern="review lanes" test/review-eval.test.ts` → 直す前は `codexLaneDenies` が無く読み込みで失敗した（`evalDenies` がリポジトリを含まず `server/evals` だけだったことも同じテストが見る）
   - 結果: `cd server && node --test test/review-eval.test.ts test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 166 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
-- [ ] T23: M2 のチェックを run ごとの Biome の写しで動かし、写しが変わった run を除外する
+- [x] T23: M2 のチェックを run ごとの Biome の写しで動かし、写しが変わった run を除外する
   - 種別: 修正
   - 計画: S9
   - 依存: T22（M2 の一時の木が要る）
@@ -273,6 +273,8 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - red: `cd server && node --test --test-name-pattern="Biome copy" test/review-eval.test.ts` → check.mjs がリポジトリの Biome を指し、写しを書き換えた run が除外されずに失敗する
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
   - コミット: `fix(eval): run M2's check on a per-run Biome copy and exclude runs that changed it (T23)`
+  - 結果: `cd server && node --test --test-name-pattern="Biome copy" test/review-eval.test.ts` → 直す前は `copyBiome` が無く読み込みで失敗した（check.mjs がリポジトリの Biome を指していたことも同じテストが見る）
+  - 結果: `cd server && node --test test/review-eval.test.ts test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 167 件 pass（写しの Biome が動き、書き換えで digest が変わり、check.mjs が写しを指し、写しが変わった run とリポジトリの Biome を指す run が除外される）。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 - [ ] T24: eval-loop Skill に HOME の許可の一覧・run の PATH・review の評価の囲いと、既知の限界を書く
   - 種別: 変更
   - 計画: S8, S9
@@ -307,3 +309,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T19 / HOME の deny の行を 1 行にまとめる形では、HOME が空のとき（行が無い）と項目があるときで指紋が変わった / HOME の deny の行は指紋から落とし、方針の行と残す根の行で表した（plan の方針 8 の「1 行の `<home-denied>` にまとめる」から変えた）
 - 2026-10-08 / T20 / HOME の許可の一覧を probe に渡すため、`HomeFence` に解決した道具の実体（`tools`）を、`ProbePaths` に `home` を足した / T20 の変更欄には無い codex-home.ts と codex-run.ts も変えた（前: probe.ts・codex.ts・grade.ts・eval-codex.test.ts）
 - 2026-10-08 / T22 / 共有のロックを両方の main で同じ形で使うため、`holdingLock` を codex-home.ts に置いた。検証のエラーは、本物の HOME でロックを取る前に出す形にした（既存のテストが本物の HOME のまま検証のエラーを確かめている） / T22 の変更欄に codex-home.ts を足した
+- 2026-10-08 / T23 / M2 の「外を見た」判定は、check.mjs がリポジトリの Biome を指すため評価のディレクトリだけを禁じていた。写しを使う形になって前提が無くなったので、リポジトリの場所全体を禁じる形に変え、テストもそれに合わせた / 欄は変えていない

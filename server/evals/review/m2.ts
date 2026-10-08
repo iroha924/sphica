@@ -22,7 +22,7 @@ import {
   holdingLock,
   pinCheckout,
 } from "../cloud/codex-home.ts";
-import { shieldNow } from "../cloud/codex-run.ts";
+import { repoPlaces, shieldNow } from "../cloud/codex-run.ts";
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
@@ -80,11 +80,35 @@ const git = (work: string, ...args: string[]) =>
  * under check, the drafted check as biome.jsonc in place of the project's biome.json. Committed, so the patch is what the agent changed,
  * and its git directory copied to `gitDir` before the run starts: the run can write the checkout's own, and its config would run on the host.
  */
+/**
+ * The pinned Biome a run's check script runs: a copy beside the checkout in the run's temp tree, since the repository it is installed in
+ * is denied. Each run gets its own, and `digest` (every file, by path) shows whether the run changed it.
+ */
+export function copyBiome(tree: string): { bin: string; digest: () => string } {
+  const scope = path.dirname(path.dirname(path.dirname(BIOME)));
+  const dest = path.join(tree, "biome", "node_modules", path.basename(scope));
+  fs.cpSync(scope, dest, { recursive: true, verbatimSymlinks: true });
+  const digest = () => {
+    const hash = crypto.createHash("sha256");
+    const files = (fs.readdirSync(dest, { recursive: true, withFileTypes: true }) as fs.Dirent[])
+      .filter((e) => !e.isDirectory())
+      .map((e) => path.join(e.parentPath, e.name))
+      .sort();
+    for (const f of files)
+      hash
+        .update(`${path.relative(dest, f)}\0`)
+        .update(fs.lstatSync(f).isSymbolicLink() ? fs.readlinkSync(f) : fs.readFileSync(f));
+    return hash.digest("hex");
+  };
+  return { bin: path.join(dest, path.relative(scope, BIOME)), digest };
+}
+
 export function prepare(
   repo: string,
   work: string,
   condition: string,
   gitDir: string,
+  biome = BIOME,
 ): { start: string; checkout: Checkout } {
   execFileSync("git", ["clone", "-q", repo, work]);
   git(work, "remote", "set-url", "origin", ORIGIN);
@@ -93,7 +117,7 @@ export function prepare(
   fs.mkdirSync(path.join(work, "scripts"), { recursive: true });
   fs.writeFileSync(
     path.join(work, "scripts", "check.mjs"),
-    `// Lints the project with Biome and fails on what it reports\nimport { spawnSync } from "node:child_process";\nconst r = spawnSync(process.execPath, [${JSON.stringify(BIOME)}, "lint", "."], { stdio: "inherit" });\nprocess.exit(r.status ?? 1);\n`,
+    `// Lints the project with Biome and fails on what it reports\nimport { spawnSync } from "node:child_process";\nconst r = spawnSync(process.execPath, [${JSON.stringify(biome)}, "lint", "."], { stdio: "inherit" });\nprocess.exit(r.status ?? 1);\n`,
   );
   if (condition === "check") {
     fs.rmSync(path.join(work, "biome.json"));
@@ -230,7 +254,9 @@ async function runOne(o: {
     cases_sha256: crypto.createHash("sha256").update(fs.readFileSync(CASES)).digest("hex"),
   };
   try {
-    const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"));
+    const biome = copyBiome(path.dirname(work));
+    const pinned = biome.digest();
+    const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"), biome.bin);
     let r: Awaited<ReturnType<typeof runChild>>;
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
@@ -303,6 +329,8 @@ async function runOne(o: {
     result.status = r.status;
     result.reason = r.error ?? (r.status === 0 ? null : `${o.host} exited ${r.status}`);
     result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
+    // The run could write its copy: a check it changed says nothing about the rule lines or the check given
+    result.biome_changed = biome.digest() !== pinned;
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
@@ -324,12 +352,12 @@ type Row = {
 
 /**
  * Counts per host and condition, and per task too. A run without its result, or that did not exit 0, is failed; a run whose events name
- * the repository holding the hidden tests and the reference check, or another run, is excluded, as a check behind the read fence.
+ * the repository (which holds the hidden tests and the reference check), or another run, or whose Biome copy changed, is excluded.
  */
 export function m2Rows(runs: string): Map<string, Row> {
   const rows = new Map<string, Row>();
-  // The evaluations, not the whole repository: a run's check script names the Biome installed under server/node_modules
-  const forbidden = [path.resolve(import.meta.dirname, "..")];
+  // The whole repository wherever it lives: a run's check script names its own Biome copy, outside it
+  const forbidden = repoPlaces();
   oneConfiguration(
     runs,
     fs.readdirSync(runs).filter((n) => /^\w+-(rules|check)-(claude|codex)-\d{4}-/.test(n)),
@@ -343,7 +371,14 @@ export function m2Rows(runs: string): Map<string, Row> {
       fs.existsSync(file)
         ? JSON.parse(fs.readFileSync(file, "utf8"))
         : { host, condition, task, status: null }
-    ) as { host: string; condition: string; task: string; status: number | null; judgement?: M2Judgement };
+    ) as {
+      host: string;
+      condition: string;
+      task: string;
+      status: number | null;
+      judgement?: M2Judgement;
+      biome_changed?: boolean;
+    };
     const events = path.join(runs, name, "events.jsonl");
     const outside = fs.existsSync(events)
       ? lookedOutside(fs.readFileSync(events, "utf8"), { forbidden, runs, run: name })
@@ -359,7 +394,7 @@ export function m2Rows(runs: string): Map<string, Row> {
       };
       rows.set(key, t);
       t.runs++;
-      if (outside) t.excluded++;
+      if (outside || r.biome_changed) t.excluded++;
       else if (r.status !== 0 || !r.judgement) t.failed++;
       else {
         if (r.judgement.violations.length) t.violations++;

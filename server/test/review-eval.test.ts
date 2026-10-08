@@ -19,7 +19,7 @@ import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/clou
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
-import { judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
+import { copyBiome, judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, gradeRulesRun, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
@@ -792,7 +792,7 @@ test("a cached fixture is reused only for the inputs it was built from", async (
   await assert.rejects(cachedFixture(dir, changed), /built from other inputs/);
 });
 
-test("an M2 run that names the repository holding the hidden tests is excluded from the counts", () => {
+test("an M2 run that names the repository, which holds the hidden tests, is excluded from the counts", () => {
   const runs = tempDir("m2-runs-");
   const root = path.resolve(import.meta.dirname, "..", "..");
   const put = (name: string, events: string) => {
@@ -816,9 +816,20 @@ test("an M2 run that names the repository holding the hidden tests is excluded f
       item: { type: "command_execution", command: `cat ${root}/server/evals/review/m2-cases.json` },
     }),
   );
-  // Running the check script the condition installs names the pinned Biome inside the repository: that is not looking at the cases
+  // The check script the condition installs runs the run's own Biome copy beside its checkout: that is not looking at the cases
   put(
     "count-rules-codex-2026-10-08T00-00-01-000Z-bbbbbbbb",
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "node /tmp/m2-work-x/biome/node_modules/@biomejs/biome/bin/biome lint .",
+      },
+    }),
+  );
+  // Reaching into the repository for its Biome is reaching into the repository
+  put(
+    "count-rules-codex-2026-10-08T00-00-02-000Z-cccccccc",
     JSON.stringify({
       type: "item.completed",
       item: {
@@ -828,7 +839,7 @@ test("an M2 run that names the repository holding the hidden tests is excluded f
     }),
   );
   const t = m2Rows(runs).get("codex rules");
-  assert.deepEqual([t?.runs, t?.excluded, t?.completed], [2, 1, 1]);
+  assert.deepEqual([t?.runs, t?.excluded, t?.completed], [3, 2, 1]);
 });
 
 test("the rules lane runs on the body M1 measured, which asks for a Biome check", () => {
@@ -923,4 +934,67 @@ test("review lanes: both hosts are denied the repository wherever it lives, Code
   fs.rmSync(path.join(cache, "codex.lock"));
   fs.rmSync(path.dirname(work), { recursive: true, force: true });
   assert.ok(RUNNER_FILES.includes("../cloud/codex-run.ts"));
+});
+
+test("M2's check runs a Biome copy of the run's own, and a run that changed its copy is excluded", () => {
+  const tree = fs.realpathSync(tempDir("m2-biome-"));
+  const copy = copyBiome(tree);
+  assert.ok(copy.bin.startsWith(`${tree}${path.sep}`), copy.bin);
+  const version = execFileSync(process.execPath, [copy.bin, "--version"], { encoding: "utf8" });
+  assert.match(version, /\d+\.\d+\.\d+/);
+  const before = copy.digest();
+  fs.appendFileSync(copy.bin, "\n// changed\n");
+  assert.notEqual(copy.digest(), before);
+  // The check script a run gets points at the copy, never into the repository
+  const work = path.join(tree, "work");
+  const fixtureRepo = path.join(tree, "repo");
+  fs.mkdirSync(fixtureRepo);
+  execFileSync("git", ["-C", fixtureRepo, "init", "-q"]);
+  fs.writeFileSync(path.join(fixtureRepo, "biome.json"), "{}");
+  execFileSync("git", [
+    "-C",
+    fixtureRepo,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "add",
+    "-A",
+  ]);
+  execFileSync("git", [
+    "-C",
+    fixtureRepo,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@example.invalid",
+    "commit",
+    "-q",
+    "-m",
+    "c",
+  ]);
+  prepare(fixtureRepo, work, "rules", path.join(tree, "git"), copy.bin);
+  assert.ok(
+    fs.readFileSync(path.join(work, "scripts", "check.mjs"), "utf8").includes(JSON.stringify(copy.bin)),
+  );
+  // Counted as excluded, whatever its judgement
+  const runs = tempDir("m2-biome-runs-");
+  const name = "count-check-codex-2026-10-08T00-00-00-000Z-aaaaaaaa";
+  fs.mkdirSync(path.join(runs, name));
+  const judgement = { violations: [], falseFailure: false, completed: true, tests: "" };
+  fs.writeFileSync(
+    path.join(runs, name, "result.json"),
+    JSON.stringify({
+      host: "codex",
+      condition: "check",
+      task: "count",
+      status: 0,
+      judgement,
+      biome_changed: true,
+      runner_sha256: "r",
+      cases_sha256: "c",
+    }),
+  );
+  const row = m2Rows(runs).get("codex check");
+  assert.deepEqual([row?.runs, row?.excluded, row?.completed], [1, 1, 0]);
 });
