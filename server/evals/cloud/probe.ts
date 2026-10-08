@@ -20,6 +20,9 @@ export type ProbeTarget = {
 
 const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** The read the inject probe asks the model to run, quoted so a path with spaces stays one argument */
+export const readCommand = (p: string) => `head -c 1 ${sq(p)}`;
+
 /**
  * The script: `<DENIED|MISSING|READ|ERROR> <label>` per target, the read errors told apart in the C locale so another failure is never
  * taken for a denial; then, when given, the command the model is asked to run next, printed and not run.
@@ -52,10 +55,11 @@ type CodexEvent = {
     status?: string;
     command?: string;
     aggregated_output?: string;
+    exit_code?: number | null;
     server?: string;
     tool?: string;
     error?: unknown;
-    result?: { content?: { text?: string }[] };
+    result?: { content?: { text?: string }[]; isError?: boolean };
   };
 };
 
@@ -70,26 +74,39 @@ function completed(events: string): NonNullable<CodexEvent["item"]>[] {
   });
 }
 
-/** What the probe printed: the output of completed commands that ran probe.sh, so a line the model typed itself does not count */
-function probeOutput(events: string): string {
-  return completed(events)
-    .filter(
-      (i) => i.type === "command_execution" && i.status === "completed" && /probe\.sh/.test(i.command ?? ""),
-    )
+/** The command as the model gave it, without the shell Codex wraps it in */
+const bare = (command: string) =>
+  /^\S+ -lc (.*)$/s.exec(command)?.[1]?.replace(/^(['"])(.*)\1$/s, "$2") ?? command;
+
+/** Completed runs of exactly this command that exited 0 */
+const ran = (events: string, command: string) =>
+  completed(events).filter(
+    (i) =>
+      i.type === "command_execution" &&
+      i.status === "completed" &&
+      i.exit_code === 0 &&
+      bare(i.command ?? "") === command,
+  );
+
+/** Whether the model ran exactly this command and it finished without error */
+export const ranCleanly = (events: string, command: string) => ran(events, command).length > 0;
+
+/** Every target whose read did not end as expected, was reported twice over, or that the probe never reported */
+export function probeProblems(events: string, targets: ProbeTarget[]): string[] {
+  // Only the output of `./probe.sh` itself: a line printed by another command, or one naming probe.sh in a comment, does not count
+  const out = ran(events, "./probe.sh")
     .map((i) => i.aggregated_output ?? "")
     .join("\n");
-}
-
-/** Every target whose read did not end as expected, or that the probe never reported */
-export function probeProblems(events: string, targets: ProbeTarget[]): string[] {
-  const out = probeOutput(events);
   return targets.flatMap((t) => {
-    const got = new RegExp(`^(DENIED|MISSING|READ|ERROR) ${t.label}$`, "m").exec(out)?.[1];
-    if (!got)
+    const got = [...out.matchAll(new RegExp(`^(DENIED|MISSING|READ|ERROR) ${t.label}$`, "gm"))].map(
+      (m) => m[1],
+    );
+    if (!got.length)
       return [
         `the probe reported nothing for ${t.label}: probe.sh did not run, or its output is not in the event log`,
       ];
-    return got === t.expect ? [] : [`${t.label} (${t.path}): ${got}, expected ${t.expect}`];
+    if (new Set(got).size > 1) return [`${t.label} (${t.path}): reported as ${got.join(" and ")}`];
+    return got[0] === t.expect ? [] : [`${t.label} (${t.path}): ${got[0]}, expected ${t.expect}`];
   });
 }
 
@@ -102,7 +119,11 @@ export function readReturned(events: string, key: string): boolean {
       i.tool === "read" &&
       i.status === "completed" &&
       !i.error &&
-      (i.result?.content ?? []).some((c) => (c.text ?? "").includes(key)),
+      !i.result?.isError &&
+      (i.result?.content ?? []).some((c) => {
+        const text = c.text ?? "";
+        return text.includes(key) && !text.includes(`${key}: not found`);
+      }),
   );
 }
 
@@ -114,7 +135,11 @@ export function probeTargets(extra: ProbeTarget[]): ProbeTarget[] {
   const home = os.homedir();
   const ownerAuth = path.join(home, ".codex", "auth.json");
   const dir = DENY_DIRS.find((d) => fs.existsSync(d));
-  const file = DENY_FILES.find((f) => fs.existsSync(f));
+  // The repository's history holds the gold too: a file of the shared git directory shows it is denied as well as the working tree
+  const gitDir = path.resolve(
+    REPO,
+    execFileSync("git", ["-C", REPO, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(),
+  );
   const targets: ProbeTarget[] = [
     { label: "run-login", path: "$CODEX_HOME/auth.json", shell: true, expect: "DENIED" },
     { label: "owner-login", path: ownerAuth, expect: "DENIED" },
@@ -123,8 +148,13 @@ export function probeTargets(extra: ProbeTarget[]): ProbeTarget[] {
       path: path.join(REPO, "server", "evals", "cloud", "tasks.json"),
       expect: "DENIED",
     },
+    { label: "repo-git", path: path.join(gitDir, "HEAD"), expect: "DENIED" },
     ...(dir ? [{ label: "credential-dir", path: dir, dir: true, expect: "DENIED" as const }] : []),
-    ...(file ? [{ label: "credential-file", path: file, expect: "DENIED" as const }] : []),
+    ...DENY_FILES.filter((f) => fs.existsSync(f)).map((f, i) => ({
+      label: `credential-file-${i + 1}`,
+      path: f,
+      expect: "DENIED" as const,
+    })),
     ...extra,
   ];
   // The run's own login is a link to the owner's, so the owner's has to be there for either to show a denial
@@ -200,7 +230,7 @@ export async function anchoredTarget(o: {
   );
   const home = path.join(o.scratch, "home");
   fs.mkdirSync(home, { recursive: true });
-  for (const p of paths.slice(0, 10)) {
+  for (const p of paths) {
     const db = path.join(o.scratch, "sphica.db");
     fs.rmSync(db, { force: true });
     const session = crypto.randomUUID();
@@ -218,7 +248,7 @@ export async function anchoredTarget(o: {
     hook({ hook_event_name: "UserPromptSubmit", prompt: o.prompt });
     hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "./probe.sh" } });
     const before = (await deliveriesIn(db)).flatMap((d) => (d.outcome === "emitted" ? d.units : []));
-    hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: `head -c 1 ${p}` } });
+    hook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: readCommand(p) } });
     const read = (await deliveriesIn(db)).filter((d) => d.event === "pre_read" && d.outcome === "emitted");
     const key = candidates.find(
       (c) => c.path === p && !before.includes(c.key) && read.some((d) => d.units.includes(c.key)),

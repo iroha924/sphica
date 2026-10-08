@@ -178,6 +178,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `bun run verify` → 直す前は knip が `isolatedCodexHome` と `probeOutput` を未使用の export として 1 で終わった
   - 結果: `bun run knip` → 0 で終わった
 
+- [x] T15: T07 のレビューの指摘を直す（偽の probe の出力で通る、リポジトリの .git と 2 つ目以降の資格情報のファイルを見ない、not found の read を成功と数える、gold の probe で gold の hook が選ばない、anchor のパスを引用せず読み取りの完了も見ない、候補を 10 件で打ち切る）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（直す対象の probe が要る）
+  - 変更: `server/evals/cloud/probe.ts`, `server/evals/cloud/codex.ts`, `server/test/eval-codex.test.ts`
+  - red: `cd server && node --test --test-name-pattern="probe script tells|refuses a target" test/eval-codex.test.ts` → 直す前の probe.ts で、`printf 'DENIED locked' # probe.sh` の出力を probe の出力と数え、not found の read を成功と数えて 2 件失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts` → 全件 pass
+  - コミット: `fix(eval): judge only probe.sh's own run and close the probe's gaps (T15)`
+  - 結果: 直す前の probe.ts・codex.ts で `node --test --test-name-pattern="probe script tells|refuses a target" test/eval-codex.test.ts` → 2 件失敗した（偽の行で actual ''、not found の read が真）
+  - 結果: `cd server && node --test test/eval-codex.test.ts` → 18 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -194,3 +205,5 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T07 / `gradeOne` が probe のためにイベントも返すようになり、checkpoint に `events` まで保存して既存の checkpoint のテストが落ちた / 保存する欄を status と output に限った
 - 2026-10-08 / T05 / Codex のレビュー（high）で P1 が 1 件、P2 が 1 件。`..` を symlink の解決より先に畳むので cache の外を内側と判定する（Codex が再現）、空の `run_roots` が素通りになる / 2 件とも採用し、T12 を足して直した
 - 2026-10-08 / T11 / Codex のレビュー（high）で P1 が 2 件。別の worktree と共通の git ディレクトリが deny から漏れる、run の後に残ったプロセスがリンクを差し替えると後片付けの chmod が木の外を辿り得る / 前者を採用し T13 を足した。後者は見送る（Codex も推測。残ったプロセスは sandbox を引き継ぐので隠したものは読めず、後片付けが辿った先は持ち主の権限を持ち主のファイルに足すか、後の run から隠した run ディレクトリへ写すだけで、モデルに中身が届かない）
+- 2026-10-08 / T07 / Codex のレビュー（high）で P1 が 1 件、P2 が 6 件。モデルの出力で probe を偽れる（Codex が再現）、.git と 2 つ目以降の資格情報のファイルを見ない、not found の read を成功と数える、gold の probe で hook が gold を返さない、anchor のパスの引用と読み取りの完了、候補の 10 件の打ち切り / 7 件とも採用し、T15 を足して直した
+- 2026-10-08 / 完了条件 / 実際の Codex（codex-cli 0.160.1）で、ビルド g4-head-check の写し（builds/fence-305-check）に T14 までのコードで流した。inject・search・none の probe は ✓、gold の probe は T07 の指摘どおり「gold hook returned nothing」で ✗、4 条件の通常の run と collect は 4 行とも除外なし、採点者の probe は ✓ / T15 の後に全部流し直す

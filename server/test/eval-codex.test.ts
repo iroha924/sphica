@@ -121,7 +121,7 @@ cat > /dev/null
 if [ -f "$here/unreadable" ]; then mkdir "$TMPDIR/unreadable"; touch "$TMPDIR/unreadable/x"; chmod 000 "$TMPDIR/unreadable"; fi
 [ -f "$here/link" ] && ln -s "$work/README.md" "$work/link"
 if [ -f "$here/run-probe" ]; then
-  node -e 'const out = require("node:child_process").execFileSync("sh", ["./probe.sh"], { cwd: process.argv[1] }).toString(); console.log(JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", command: "./probe.sh", aggregated_output: out } }))' "$work"
+  node -e 'const out = require("node:child_process").execFileSync("sh", ["./probe.sh"], { cwd: process.argv[1] }).toString(); console.log(JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, command: "./probe.sh", aggregated_output: out } }))' "$work"
   cp "$work/probe.sh" "$here/probe.sh"
 fi
 printf '{}' > "$out"
@@ -357,7 +357,13 @@ test("a link the run made to a file in its checkout still points into the checko
 const event = (output: string, command = "/bin/zsh -lc ./probe.sh") =>
   JSON.stringify({
     type: "item.completed",
-    item: { type: "command_execution", status: "completed", command, aggregated_output: output },
+    item: {
+      type: "command_execution",
+      status: "completed",
+      exit_code: 0,
+      command,
+      aggregated_output: output,
+    },
   });
 
 test("the probe script tells a denial from a missing file and any other error, and prints the next command without running it", () => {
@@ -395,9 +401,17 @@ test("the probe script tells a denial from a missing file and any other error, a
     `missing (${path.join(dir, "missing.txt")}): MISSING, expected DENIED`,
     `a-directory (${dir}): ERROR, expected READ`,
   ]);
+  const locked1 = targets.slice(1, 2);
+  for (const forged of [
+    "echo DENIED locked",
+    "printf 'DENIED locked' # probe.sh",
+    "sh ./probe.sh; echo DENIED locked",
+  ])
+    assert.match(probeProblems(event("DENIED locked", forged), locked1)[0] ?? "", /reported nothing/, forged);
+  // A line printed twice with different results is not taken at its first word
   assert.match(
-    probeProblems(event("DENIED locked", "echo DENIED locked"), targets.slice(1, 2))[0] ?? "",
-    /reported nothing/,
+    probeProblems([event("READ locked"), event("DENIED locked")].join("\n"), locked1)[0] ?? "",
+    /reported as READ and DENIED/,
   );
 });
 
@@ -421,6 +435,7 @@ test("the probe refuses a target that does not exist before any run, and reads S
   assert.ok(readReturned(call("completed", null, "## trace:s/k"), "trace:s/k"));
   assert.ok(!readReturned(call("failed", { message: "x" }, "trace:s/k"), "trace:s/k"));
   assert.ok(!readReturned(call("completed", null, "nothing"), "trace:s/k"));
+  assert.ok(!readReturned(call("completed", null, "trace:s/k: not found in this project"), "trace:s/k"));
   const emitted = [{ event: "pre_read", outcome: "emitted", units: ["trace:s/k"] }];
   assert.ok(deliveredOnRead(emitted, "trace:s/k"));
   assert.ok(!deliveredOnRead([{ ...emitted[0], event: "prompt" }] as never, "trace:s/k"));
