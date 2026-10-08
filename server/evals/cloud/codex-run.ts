@@ -12,6 +12,7 @@ import {
   claimRunDir,
   codexLock,
   codexModelOf,
+  codexProfile,
   evalCache,
   fenceDigest,
   fencedCodexHome,
@@ -39,6 +40,16 @@ export function codexFence(profile: string, cache: string, codexHome: string): s
     "<cache>": cache,
     "<home>": os.homedir(),
   });
+}
+
+/** The fence a run started now records: collect counts only runs made under it */
+export function currentRunFence(cache: string): string {
+  const codexHome = path.join(cache, "codex-runs", "<run>", "codex-home");
+  return codexFence(
+    codexProfile(":workspace", [...codexDenies(cache), path.join(codexHome, "auth.json")]),
+    cache,
+    codexHome,
+  );
 }
 
 const inside = (root: string, p: string) => {

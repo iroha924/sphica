@@ -9,6 +9,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { evalCache } from "./codex-home.ts";
+import { currentRunFence } from "./codex-run.ts";
 import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
 import { NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
@@ -54,6 +56,9 @@ if (!build)
 const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[]> } }>(build);
 // grade reads tasks.json beside loop.json, so it is always written into the build
 const out = path.join(build, "loop.json");
+// Where the runs came from: grade refuses a loop whose runs sat where the fenced Codex could read them
+const runRoots = [args.codex, args.claude, args.logs].map((p) => path.resolve(p ?? ""));
+const runFence = currentRunFence(evalCache());
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;
   variant?: string;
@@ -100,6 +105,8 @@ type Row = {
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
   presented: string | null;
+  /** Codex runs only: the read fence the run was made under */
+  fence?: string;
   /** The concrete model a local run used (Claude's --model, Codex's configured model and effort); null when it was not recorded */
   agent_model: string | null;
   /** Local Claude runs only: whether a Sphica search came before the first change to the work tree */
@@ -448,6 +455,7 @@ function main() {
         deliveries?: { outcome: string; units: string[] }[] | null;
         claude_model?: string;
         codex_model?: string | null;
+        fence?: string;
       }>(resultText);
       // Cut off while it was written: the run started, so it stays in the denominator
       if (!result) {
@@ -464,6 +472,13 @@ function main() {
             name,
             result.reason ?? `${model} exited ${result.status}`,
           ),
+        );
+        continue;
+      }
+      // A Codex run made under another fence, or none, could read what the current fence hides
+      if (model === "codex" && result.fence !== runFence) {
+        rows.push(
+          excludedRow(model, result.task, result.condition, name, "run without the current read fence"),
         );
         continue;
       }
@@ -533,6 +548,7 @@ function main() {
           model === "claude" ? searchedBeforeEdit(events, read("edits.jsonl")) : "not_applicable",
         search_loading: model === "claude" ? searchLoading(events) : "not_applicable",
         agent_model: result.claude_model ?? result.codex_model ?? null,
+        ...(model === "codex" ? { fence: result.fence } : {}),
         gold_signals:
           model === "codex"
             ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
@@ -580,7 +596,7 @@ function main() {
   }
   fs.writeFileSync(
     out,
-    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify({ ...manifest.bundle, ...(manifest.matchers ? { matchers: manifest.matchers } : {}) })}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", run_roots: runRoots, bundle: `${manifest.commit} ${JSON.stringify({ ...manifest.bundle, ...(manifest.matchers ? { matchers: manifest.matchers } : {}) })}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(

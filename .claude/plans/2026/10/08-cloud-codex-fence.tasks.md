@@ -60,14 +60,16 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 
 囲いの前の run を数えず、採点者も同じ囲いで動き、fence の違う結果どうしを比べない
 
-- [ ] T04: collect が loop.json に run_roots を書き、Codex の行に fence を写し、囲いの無い run を除外する
+- [x] T04: collect が loop.json に run_roots を書き、Codex の行に fence を写し、囲いの無い run を除外する
   - 種別: 修正
   - 計画: S3
   - 依存: T01（fenceDigest で今の fence を求めるため）
-  - 変更: `server/evals/cloud/collect.ts`, `server/test/eval-claude.test.ts`
+  - 変更: `server/evals/cloud/collect.ts`, `server/evals/cloud/codex-run.ts`, `server/test/eval-claude.test.ts`
   - red: `cd server && node --test --test-name-pattern="read fence" test/eval-claude.test.ts` → `fence` の無い Codex の run が excluded にならずに数えられて失敗する
   - 完了条件: `cd server && node --test test/eval-claude.test.ts` → pass。loop.json に解決した `run_roots` があること、`fence` の無い run と違う run が「run without the current read fence」で excluded になること、今の fence の run が数えられることを確かめる
   - コミット: `fix(eval): exclude Codex runs made without the current read fence (T04)`
+  - 結果: `cd server && node --test --test-name-pattern="read fence" test/eval-claude.test.ts` → 直す前は今の fence の run の行に `fence` が無く（actual: undefined）、失敗した
+  - 結果: `cd server && node --test test/eval-claude.test.ts` → 46 件 pass（今の fence の run は数え、fence の無い run と違う run は「run without the current read fence」で除外し、loop.json に `run_roots` がある）。`bun run typecheck`・`bun run lint`・`bun run english` → 0 で終わった
 - [ ] T05: grade が採点者を囲う（-s を外す、出力先の制限、settings の写し、checkpoint の fence、ロック、行への fence）
   - 種別: 修正
   - 計画: S4
@@ -109,3 +111,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
 - 2026-10-08 / T02 / 変更欄の `server/test/eval-codex.test.ts` に、codex.ts を偽の codex で流すテストを足した / 欄は変えていない
 - 2026-10-08 / T03 / 偽の codex のテストを動かすため、テストのビルドを一時 HOME の `.cache/sphica-eval/builds` に置き、T02 のテストから `-s workspace-write` と HOME の確認を外した / T03 のテストが代わりに確かめる
+- 2026-10-08 / T04 / 今の fence を collect で求めるため、codex-run.ts に `currentRunFence` を足した / T04 の変更欄に `server/evals/cloud/codex-run.ts` を足した（前: collect.ts と eval-claude.test.ts のみ）

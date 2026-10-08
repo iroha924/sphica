@@ -23,7 +23,8 @@ import {
   treeState,
   treeWatcher,
 } from "../evals/cloud/claude-run.ts";
-import { type Checkout, pinCheckout } from "../evals/cloud/codex-home.ts";
+import { type Checkout, codexProfile, evalCache, pinCheckout } from "../evals/cloud/codex-home.ts";
+import { codexDenies, codexFence } from "../evals/cloud/codex-run.ts";
 import {
   claudeStreamCalls,
   foundInClaudeStream,
@@ -1873,5 +1874,81 @@ test("the inject canary needs the delivery hook before a tool to have fired, and
     ).hooks.PreToolUse.find((e: { hooks: { command: string }[] }) =>
       e.hooks.some((h) => h.command.includes("deliver.js")),
     ).matcher,
+  );
+});
+
+test("collect counts only Codex runs made under the current read fence, and records the run roots", (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-fence-"));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const build = path.join(base, "build");
+  const codex = path.join(base, "codex");
+  fs.mkdirSync(build);
+  fs.writeFileSync(path.join(build, "manifest.json"), JSON.stringify({ commit: "c", repositories: {} }));
+  fs.copyFileSync(
+    path.join(import.meta.dirname, "..", "evals", "cloud", "tasks.json"),
+    path.join(build, "tasks.json"),
+  );
+  // The fence a run under this HOME would record: the same policy digests the same wherever HOME is
+  const cache = evalCache(base);
+  const codexHome = path.join(cache, "codex-runs", "x", "codex-home");
+  const current = codexFence(
+    codexProfile(":workspace", [...codexDenies(cache), path.join(codexHome, "auth.json")]),
+    cache,
+    codexHome,
+  );
+  const head = { task: "pilot-sort", condition: "none" };
+  const answer = { implemented: true, summary: "s", past_decisions: [], unverified: [] };
+  for (const [name, fence] of [
+    ["fenced", current],
+    ["unfenced", undefined],
+    ["other", "0".repeat(64)],
+  ] as const) {
+    const run = path.join(codex, name);
+    fs.mkdirSync(run, { recursive: true });
+    fs.writeFileSync(path.join(run, "started.json"), JSON.stringify(head));
+    fs.writeFileSync(
+      path.join(run, "result.json"),
+      JSON.stringify({
+        ...head,
+        status: 0,
+        reason: null,
+        seconds: 1,
+        deliveries: null,
+        ...(fence ? { fence } : {}),
+      }),
+    );
+    fs.writeFileSync(path.join(run, "events.jsonl"), "");
+    fs.writeFileSync(path.join(run, "answer.json"), JSON.stringify(answer));
+    fs.writeFileSync(path.join(run, "patch.diff"), "");
+  }
+  const claude = path.join(base, "claude");
+  execFileSync(
+    process.execPath,
+    [
+      path.join(import.meta.dirname, "..", "evals", "cloud", "collect.ts"),
+      "--build",
+      build,
+      "--codex",
+      codex,
+      "--claude",
+      claude,
+      "--logs",
+      base,
+      "--skip-hidden-tests",
+    ],
+    { stdio: "ignore", env: childEnv(base) },
+  );
+  const loop = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")) as {
+    run_roots: string[];
+    rows: { run: string; excluded: string | null; fence?: string }[];
+  };
+  const row = (name: string) => loop.rows.find((r) => r.run === name);
+  assert.equal(row("fenced")?.excluded, null);
+  assert.equal(row("fenced")?.fence, current);
+  assert.equal(row("unfenced")?.excluded, "run without the current read fence");
+  assert.equal(row("other")?.excluded, "run without the current read fence");
+  assert.deepEqual(
+    loop.run_roots,
+    [codex, claude, base].map((p) => path.resolve(p)),
   );
 });
