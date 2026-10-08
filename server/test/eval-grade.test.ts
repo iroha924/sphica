@@ -1694,6 +1694,7 @@ test("compare puts old and new side by side only for the same fixture and tasks,
     excluded: null as string | null,
     patch: "",
     patch_truncated: false,
+    fence: FENCE as string | undefined,
     grade: { ...grade, score, ...extra },
   });
   const conflictGrade = (handled: "yes" | "no" | "unknown", named: "yes" | "no" = "yes") => ({
@@ -1754,6 +1755,27 @@ test("compare puts old and new side by side only for the same fixture and tasks,
   assert.throws(() => compare(old, same, []), /same bundle/);
   for (const bundle of [undefined, "", "c3 {}"])
     assert.throws(() => compare({ ...old, build: { ...old.build, bundle } }, next, []), /names no bundle/);
+  // Codex results read through another fence, or none, are not compared with the current ones
+  const fenced = <S extends typeof old | typeof next>(side: S, fence: string | undefined) => ({
+    ...side,
+    build: { ...side.build, rows: side.build.rows.map((r) => ({ ...r, fence })) },
+  });
+  assert.throws(() => compare(fenced(old, undefined), next, []), /read fence/);
+  assert.throws(() => compare(old, fenced(next, "0".repeat(64)), []), /read fence/);
+  const mixed = {
+    ...old,
+    build: { ...old.build, rows: [...old.build.rows, { ...graded("o9", 1), fence: "1".repeat(64) }] },
+  };
+  assert.throws(() => compare(mixed, next, []), /read fence/);
+  // An excluded run was never measured, whatever fence it ran under
+  const leftOut = {
+    ...old,
+    build: {
+      ...old.build,
+      rows: [...old.build.rows, { ...graded("o8", 1), excluded: "timed out", fence: undefined }],
+    },
+  };
+  assert.doesNotThrow(() => compare(leftOut, next, []));
 });
 
 test("each experiment's bar is judged per model on valid runs, and too few valid runs is inconclusive", () => {

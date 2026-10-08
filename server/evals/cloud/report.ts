@@ -23,6 +23,8 @@ type Graded = GradeRow & {
   ungraded?: string;
   second?: { grade: Grade } | { ungraded: string };
   gold_signals?: Record<string, GoldSignal>;
+  /** Codex runs only: the read fence the run was made under */
+  fence?: string;
 };
 export type Build = { build?: string | null; variant: string; bundle?: string; rows: Graded[] };
 
@@ -261,6 +263,22 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
   // A swapped build sets up other records and runs only its gold rows: against an original one, it is not run-to-run variation
   if (same && old.build.variant !== next.build.variant)
     throw new Error("an A/A comparison needs the same variant on both sides");
+  // A Codex result read through another fence, or none, may have seen what the other side could not: only one fence is compared
+  const fences = (s: Side) => [
+    ...new Set(s.build.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r.fence ?? null)),
+  ];
+  for (const s of [old, next]) {
+    const f = fences(s);
+    if (f.includes(null))
+      throw new Error(`the ${s.label} build has Codex results with no read fence recorded`);
+    if (f.length > 1)
+      throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} read fences`);
+  }
+  const [oldFence, nextFence] = [fences(old)[0], fences(next)[0]];
+  if (oldFence && nextFence && oldFence !== nextFence)
+    throw new Error(
+      "the builds ran Codex under different read fences; compare results made under the same one",
+    );
   // A different model behind "claude" or "codex" in any task and condition would read as a difference in the bundle, so each group the
   // report compares must have run the same models on both sides
   const modelsOf = (b: Build, group: string) =>

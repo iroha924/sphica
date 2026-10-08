@@ -113,7 +113,7 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="read fence" test/eval-claude.test.ts` → 直す前は `other` の行の fence が undefined で失敗した
   - 結果: `cd server && node --test test/eval-claude.test.ts test/eval-grade.test.ts` → 119 件 pass。`bun run typecheck`・`bun run lint` → 0 で終わった
 
-- [ ] T06: report が fence の無い・混ざる・違う Codex の結果を比べない
+- [x] T06: report が fence の無い・混ざる・違う Codex の結果を比べない
   - 種別: 修正
   - 計画: S5
   - 依存: T05（grades.json の行の fence が要る）
@@ -121,6 +121,8 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - red: `cd server && node --test --test-name-pattern="fence" test/eval-grade.test.ts` → fence の無い grades.json と有る grades.json の `compare` が止まらずに失敗する
   - 完了条件: `cd server && node --test test/eval-grade.test.ts` → pass。fence が無い、片側で混ざる、両側で違う場合に止まり、同じ fence なら今までどおり比べることを確かめる
   - コミット: `fix(eval): refuse to compare Codex results made under different read fences (T06)`
+  - 結果: `cd server && node --test --test-name-pattern="compare" test/eval-grade.test.ts` → 直す前は fence の無い Codex の結果との `compare` が止まらず（Missing expected exception）、失敗した
+  - 結果: `cd server && node --test test/eval-grade.test.ts test/eval-claude.test.ts` → 119 件 pass（fence が無い・片側で混ざる・両側で違う場合に止まり、除外した run の fence は見ない）。`bun run typecheck`・`bun run lint` → 0 で終わった
 
 ## P4: 実際の Codex で確かめる手段と手順
 
