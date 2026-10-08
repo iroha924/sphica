@@ -31,6 +31,8 @@ import { tempDir } from "./temp-dir.ts";
 
 const OUTCOMES = new Set(["violation", "complies", "unrelated", "undetermined"]);
 const cases = loadReviewCases();
+// The home the deny lists were built from: building the fixture swaps HOME while it runs, and another test may run meanwhile
+const HOME = os.homedir();
 const built = buildReviewFixture(tempDir("review-eval-"), cases);
 
 test("each review case expects exactly the records review_select selects for its diff", async () => {
@@ -157,13 +159,13 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   // Every run is denied the evaluations, the output directory, and the owner's Codex home, and works outside them
   const denies = evalDenies("/out");
   assert.ok(denies.includes(path.resolve(import.meta.dirname, "..", "evals")) && denies.includes("/out"));
-  assert.ok(denies.includes(path.join(os.homedir(), ".codex")));
+  assert.ok(denies.includes(path.join(HOME, ".codex")));
   const denyRead = (claudeSettings(READ_TOOLS, denies) as { sandbox: { filesystem: { denyRead: string[] } } })
     .sandbox.filesystem.denyRead;
   assert.ok(denies.every((d) => denyRead.includes(d)));
   // Codex's profiles read the whole disk unless told otherwise: the owner's other credentials are denied to it too
   for (const credential of [".aws", ".ssh", ".npmrc"])
-    assert.ok(denies.includes(path.join(os.homedir(), credential)), credential);
+    assert.ok(denies.includes(path.join(HOME, credential)), credential);
   const prompt = reviewPrompt("BODY\n", { ...p, model: "codex" });
   assert.ok(prompt.startsWith("BODY\n"), "the aspect body comes first, in full");
   assert.match(prompt, /Read the file \/w\/\.git\/review\.diff/);

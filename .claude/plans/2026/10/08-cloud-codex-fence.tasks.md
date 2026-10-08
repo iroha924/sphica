@@ -200,6 +200,16 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="compare puts|read fence" test/eval-grade.test.ts` → 直す前は Missing expected exception と grader_fence が undefined で 2 件失敗、`grade.ts --probe` のテストも READ control の行が無く失敗した
   - 結果: `cd server && node --test test/eval-grade.test.ts test/eval-codex.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 158 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T17: CI の Node 26（テストの順番をランダムにするジョブ）で落ちた review-eval のテストを、読み込み時点の home と比べる形に直す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（review-eval.test.ts の変更が要る）
+  - 変更: `server/test/review-eval.test.ts`
+  - red: `cd server && $(mise where node@26.10.0)/bin/node --test --test-randomize --test-random-seed=515 test/review-eval.test.ts` → 「a lane starts with only the read tools」が、fixture の組み立てが HOME を差し替えている最中に `os.homedir()` と比べて失敗する
+  - 完了条件: `cd server && $(mise where node@26.10.0)/bin/node --test --test-randomize --test-random-seed=515 test/review-eval.test.ts` → 全件 pass
+  - コミット: `test(eval): compare the deny list with the home it was built from (T17)`
+  - 結果: `cd server && $(mise where node@26.10.0)/bin/node --test --test-randomize --test-random-seed=515 test/review-eval.test.ts` → 直す前は 1 件失敗（CI の check (26) と同じ。失敗したジョブだけの再実行でも再現）、直した後は 21 件 pass。seed 515・516・1・42 で eval の 4 ファイルが 158 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -220,3 +230,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-08 / 完了条件 / 実際の Codex（codex-cli 0.160.1）で、ビルド g4-head-check の写し（builds/fence-305-check）に T14 までのコードで流した。inject・search・none の probe は ✓、gold の probe は T07 の指摘どおり「gold hook returned nothing」で ✗、4 条件の通常の run と collect は 4 行とも除外なし、採点者の probe は ✓ / T15 の後に全部流し直す
 - 2026-10-08 / 完了条件 / T15 の後に、実際の Codex で inject・search・gold・none の probe と採点者の probe を流し直し、全部 ✓。gold の probe も gold の receipt（582 バイト）が返った
 - 2026-10-08 / 全差分 / Codex の全差分のレビュー（high）で P2 が 3 件。採点者の fence が残らない（Codex が再現）、probe.sh を書き換えて流してから戻すと判定を偽れる、採点者の probe が対象ごとの判定を残さない / 1 件目と 3 件目を採用し T16 で直した。2 件目は見送る（probe は囲いの設定の誤りを見つける確認で、わざと欺くモデルまでは相手にしない。塞ぐにはスクリプトを書けない場所に置く作り直しと実機の確認が要る。スクリプトの改ざんが見えたら見直す）
+- 2026-10-08 / T17 / PR #306 の check (26) が落ち、失敗したジョブだけの再実行でも再現した。review の fixture の組み立て（acceptance の driver）が HOME を差し替えている最中に、テストが `os.homedir()` と比べていた。main にもあった順番への依存で、テストを足したことでランダムな並びが変わって表に出た / T17 で直した
