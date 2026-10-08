@@ -21,14 +21,15 @@ base: main
 
 SDK が脆弱でない 1.31.0 になり、両サーバーが今までどおり動く。
 
-- [ ] T01: @modelcontextprotocol/sdk を 1.31.0 に上げ、lockfile・bundle・notices を確かめる
+- [x] T01: @modelcontextprotocol/sdk を 1.31.0 に上げ、lockfile・bundle・notices を確かめる
   - 種別: 修正
   - 計画: S3
   - 依存: なし
-  - 変更: `server/package.json`, `server/bun.lock`
+  - 変更: `server/package.json`, `server/bun.lock`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `cd server && bun pm ls 2>/dev/null | grep modelcontextprotocol` → `@modelcontextprotocol/sdk@1.30.0`（脆弱な範囲）
   - 完了条件: 同じコマンド → `@modelcontextprotocol/sdk@1.31.0`。`bun run bundle` の後、`.build/meta-mcp.json` と `.build/meta-mcp-record.json` の inputs に client/auth・jose・pkce-challenge が 0 件。`bun run verify` → 0
   - コミット: `fix(deps): update the MCP SDK to 1.31.0 for CVE-2026-104850`
+  - 結果: `bun pm ls | grep modelcontextprotocol` → 直す前 1.30.0、直した後 1.31.0。lockfile の差分は SDK の 2 行だけ。`bun run bundle` → 両サーバーの metafile の inputs に OAuth のもの 0 件（SDK の inputs は 16 件ずつ）。`bun run verify` → 0
 
 ## P2: 応答を 32 KiB に収める
 
@@ -58,8 +59,10 @@ overview live と review_select のどの応答も、枠込みで READ_BUDGET �
   - 種別: 変更
   - 計画: S4
   - 依存: T01（パッケージに入る変更）, T02（同）, T03（同）
-  - 変更: `package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base v0.6.41` → `plugin`。`bun run verify` → 0。npm pack を外で展開して両サーバーが起動する
   - コミット: `chore(release): 0.6.42`
 
 ## 記録
+
+- 2026-10-08 T01・T04: pre-commit がパッケージに入る変更ごとにバージョンを揃えることを求めたので、0.6.42 への更新を T01 のコミットに前倒しした。T04 では release:plan と npm pack の確認を行う
