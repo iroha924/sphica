@@ -148,13 +148,14 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: 直す前の codex-home.ts で `node --test --test-name-pattern="resolves links" test/eval-codex.test.ts` → 失敗（Missing expected exception）。`node --test --test-name-pattern="read fence" test/eval-grade.test.ts` → 空の run_roots で stderr が空になり失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts` → 90 件 pass。`bun run typecheck`・`bun run lint` → 0 で終わった
 
-- [ ] T08: eval-loop Skill に probe・1 つずつ・出力先・既知の限界を書く
+- [x] T08: eval-loop Skill に probe・1 つずつ・出力先・既知の限界を書く
   - 種別: 変更
   - 計画: S7
   - 依存: T07（probe のコマンドが要る）
   - 変更: `.claude/skills/eval-loop/SKILL.md`
   - 完了条件: `bun run verify:ai` → 0 で終わる
   - コミット: `docs(eval-loop): run the Codex probes before measuring and keep outputs under the cache (T08)`
+  - 結果: `bun run verify:ai` → 0 で終わった（AI config と lychee のリンク検査）
 
 ## 記録
 
