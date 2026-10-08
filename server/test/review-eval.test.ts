@@ -915,7 +915,8 @@ test("runs made by different runner code are not tallied as one measurement, and
 });
 
 test("review lanes: both hosts are denied the repository wherever it lives, Codex's lanes all of HOME but the tools, and one lock holds", async () => {
-  const shield = { places: repoPlaces(), home: homeFence() };
+  // A temporary HOME: the runner's own may hold links out of it, which the fence refuses
+  const shield = { places: repoPlaces(), home: homeFence({ home: tempDir("review-lanes-home-") }) };
   const out = tempDir("review-out-");
   const cache = evalCache(tempDir("review-cache-home-"));
   // Claude keeps the owner's HOME for its login; the repository, not only the evaluations, is what it is denied

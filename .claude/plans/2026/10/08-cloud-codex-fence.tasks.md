@@ -317,6 +317,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="leads out of it|queue of lanes|collect does not start while" test/eval-codex.test.ts test/review-eval.test.ts test/eval-claude.test.ts` → 直す前は 3 件とも失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 174 件 pass。手元の本物の HOME で `homeFence()` は止まらず、node と `.bun` を残して 106 項目を deny した
 
+- [x] T28: 本物の HOME で `homeFence()` を呼んでいたテスト 2 件を、一時の HOME で作る形に直す（CI のランナーの `~/.ghcup` が HOME の外を指すリンクで、T27 の方針どおり止まった）
+  - 種別: 修正
+  - 計画: S8
+  - 依存: T27（リンクで止まる walk が要る）
+  - 変更: `server/test/eval-codex.test.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && H=$(mktemp -d) && ln -s /usr/local $H/.ghcup && HOME=$H node --test test/eval-codex.test.ts test/review-eval.test.ts` → CI と同じ 2 件が「leads out of HOME」で失敗する
+  - 完了条件: 同じ HOME で `cd server && node --test test/eval-codex.test.ts test/review-eval.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 全件 pass
+  - コミット: `test(eval): fence a temporary HOME, not the runner's own (T28)`
+  - 結果: `gh run view 37799791258 --log-failed` → CI（aa095eca）の check (24.15)・check (26) が、本物の HOME を使う 2 件で失敗していた（`/home/runner/.ghcup is a link that leads out of HOME`）
+  - 結果: `cd server && HOME=<外を指すリンクを置いた一時の HOME> node --test test/eval-codex.test.ts test/review-eval.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 174 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した

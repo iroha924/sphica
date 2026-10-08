@@ -427,7 +427,12 @@ test("the probe script tells a denial from a missing file and any other error, a
 
 test("the probe refuses a target that does not exist before any run, and reads Sphica's results only from completed calls", async () => {
   assert.throws(
-    () => probeTargets([{ label: "gone", path: "/nonexistent/x", expect: "DENIED" }], homeFence()),
+    // A temporary HOME: the runner's own may hold links out of it, which the fence refuses
+    () =>
+      probeTargets(
+        [{ label: "gone", path: "/nonexistent/x", expect: "DENIED" }],
+        homeFence({ home: tempDir("probe-gone-") }),
+      ),
     /does not exist/,
   );
   const call = (status: string, error: unknown, text: string) =>
