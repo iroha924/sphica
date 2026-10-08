@@ -22,13 +22,14 @@ base: main
 
 precedent の lane を Claude と Codex で隔離して流し、正解と機械で突き合わせられるようにする。Biome が fixture で使えることも先に確かめる。
 
-- [ ] T01: fixture の repo と DB、記録と diff、(diff, 記録) ごとの正解
+- [x] T01: fixture の repo と DB、記録と diff、(diff, 記録) ごとの正解
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/review/fixture.ts`, `server/evals/review/cases.json`, `server/test/review-eval.test.ts`
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → fixture が一時ディレクトリに作られ、cases.json の全 diff で `review_select` が正解の「選ばれるか」と一致する
   - コミット: `test(eval): add the review evaluation fixture and expected verdicts`
+  - 結果: `node --test --test-timeout=120000 test/review-eval.test.ts` → pass（8 diff、記録 6 件を足し、AI の決定 keep-case も active）。`bun run verify` → exit 0
 - [ ] T02: Biome を fixture の `biome.json` に向けて流す経路の確認
   - 種別: 追加
   - 計画: S1
