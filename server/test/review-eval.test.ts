@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
+import { draftOf, gradeDraft, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
   claudeMcp,
@@ -344,4 +345,60 @@ test("the grader counts verdicts only from backed batches and a matching complet
       extraQuestions: 0,
     },
   );
+});
+
+test("M1 grades a drafted Biome check on held-out files the run never saw, and counts unwanted drafts", async () => {
+  const cases = loadRulesCases();
+  const fixture = await built;
+  const repo = tempDir("rules-repo-");
+  fs.cpSync(fixture.repo, repo, { recursive: true });
+  for (const [rel, text] of Object.entries(cases.files)) {
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    fs.writeFileSync(path.join(repo, rel), text);
+  }
+  const lodash =
+    '// sphica: trace:s-rv-ui/no-lodash\n    { "group": ["lodash", "lodash/**"], "message": "Use the standard library" }';
+  const db =
+    '// sphica: trace:s-rv-ui/ui-no-db\n    { "group": ["**/db.ts", "**/db"], "message": "Go through src/library.ts" }';
+  const config = (overrides: string, extraMarker = "") => `{
+  "linter": { "enabled": true, "rules": { "preset": "none", "style": { "noRestrictedImports": { "level": "error", "options": { "patterns": [
+    ${lodash}
+  ] } } } } },
+  "overrides": [${overrides}]${extraMarker}
+}`;
+  const ui = (patterns: string) =>
+    `// sphica: trace:s-rl-admin/admin-db-exception
+  { "includes": ["src/ui/**", "!src/ui/admin.ts"], "linter": { "rules": { "style": { "noRestrictedImports": { "level": "error", "options": { "patterns": [
+    ${patterns}
+  ] } } } } } }`;
+  const reply = (draft: string) =>
+    `Rule lines:\n\n\`\`\`markdown\n- x <!-- sphica: trace:s-rv-ui/no-lodash -->\n\`\`\`\n\nChecks:\n\n\`\`\`jsonc\n${draft}\n\`\`\`\n`;
+  const grade = (draft: string | null) => gradeDraft(draft, repo, cases, tempDir("rules-graded-"));
+
+  const right = grade(draftOf(reply(config(ui(`${lodash},\n    ${db}`)))));
+  assert.deepEqual(right, {
+    state: "graded",
+    reason: null,
+    unwanted: [],
+    unmarked: [],
+    falseFailures: [],
+    missedViolations: [],
+  });
+  // An override that does not repeat the project-wide ban lets lodash into src/ui
+  const replaced = grade(draftOf(reply(config(ui(db)))));
+  assert.deepEqual(replaced.missedViolations, ["src/ui/sort.ts"]);
+  // No exception for the admin screen: a false failure there
+  const strict = grade(
+    draftOf(reply(config(ui(`${lodash},\n    ${db}`).replace(', "!src/ui/admin.ts"', "")))),
+  );
+  assert.deepEqual(strict.falseFailures, ["src/ui/admin.ts"]);
+  // A marker for a record Biome cannot check (reaching src/db.ts through other modules) is an unwanted draft
+  const reach = grade(
+    draftOf(
+      reply(config(ui(`${lodash},\n    ${db}`), "\n  // sphica: trace:s-rl-admin/widgets-never-reach-db")),
+    ),
+  );
+  assert.deepEqual(reach.unwanted, ["trace:s-rl-admin/widgets-never-reach-db"]);
+  assert.match(grade(draftOf("Only rule lines.\n")).reason ?? "", /drafts no Biome check/);
+  assert.equal(grade(draftOf(reply("{ not json noRestrictedImports"))).state, "failed");
 });

@@ -3,10 +3,11 @@
 // MCP servers). Claude's reads are fenced to the checkout; Codex has no read fence, so its runs are graded on what they named instead.
 import { DENY_DIRS, DENY_FILES } from "../cloud/claude-run.ts";
 
-/** The read server's tools, as Claude names them for a server called sphica */
-export const READ_TOOLS = ["status", "search", "read", "review_select", "review_check"].map(
-  (t) => `mcp__sphica__${t}`,
-);
+const sphicaTools = (names: string[]) => names.map((t) => `mcp__sphica__${t}`);
+/** The read server's tools a precedent lane gets, as Claude names them for a server called sphica */
+export const READ_TOOLS = sphicaTools(["status", "search", "read", "review_select", "review_check"]);
+/** The ones /sphica:rules allows */
+export const RULES_TOOLS = sphicaTools(["overview", "search", "read", "status"]);
 
 /** Where one run's pieces live: the checkout the reviewer works in, the diff it reviews, Sphica's files, and the built read server */
 export type LanePaths = { work: string; diff: string; db: string; home: string; server: string };
@@ -45,12 +46,24 @@ completion: lane=precedent model=${p.model} coverage=<COMPLETE|PARTIAL> unfinish
 `;
 }
 
+/**
+ * The prompt /sphica:rules runs on when the owner names the records: the Skill's body with its target filled in, and the owner's
+ * confirmation already given, since nobody can answer a question in the run.
+ */
+export function rulesPrompt(body: string, picks: string[]): string {
+  return `${body.replace("$ARGUMENTS", picks.join(", ")).trimEnd()}
+
+The owner picked exactly these records and has already confirmed the choice, so do not ask again: ${picks.join(", ")}.
+Rule lines go into CLAUDE.md. Print the whole draft in this one reply: nobody can answer a question afterwards.
+`;
+}
+
 /** Claude's settings for a lane: no hooks, reads fenced to the checkout, the owner's credentials and Sphica's home denied, the read tools allowed. */
-export function claudeSettings(): Record<string, unknown> {
+export function claudeSettings(tools: string[] = READ_TOOLS): Record<string, unknown> {
   return {
     permissions: {
       blockReadsOutsideWorkingDirectories: true,
-      allow: READ_TOOLS,
+      allow: tools,
       deny: [
         "WebFetch",
         "WebSearch",

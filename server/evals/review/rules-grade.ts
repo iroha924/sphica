@@ -1,0 +1,135 @@
+// Grades /sphica:rules runs for M1: the Biome config a run drafts goes into a copy of the fixture with held-out files it never saw, and the
+// pinned Biome decides which of them fail. Biome itself reads the draft, comments and all, so no JSONC parsing happens here.
+// Run from server/: node evals/review/rules-grade.ts --report <runs dir>
+import fs from "node:fs";
+import path from "node:path";
+import { parseArgs } from "node:util";
+import type { Step } from "../acceptance/load.ts";
+import { restrictedImports } from "./biome.ts";
+
+type RulesCases = {
+  files: Record<string, string>;
+  steps: Step[];
+  picks: string[];
+  draft: string[];
+  may_mark: string[];
+  held_out: { path: string; text: string; fails: boolean }[];
+};
+
+export function loadRulesCases(): RulesCases {
+  return JSON.parse(
+    fs.readFileSync(path.join(import.meta.dirname, "rules-cases.json"), "utf8"),
+  ) as RulesCases;
+}
+
+/** The last fenced block of a reply that configures noRestrictedImports, or null when the reply drafts no check. */
+export function draftOf(reply: string): string | null {
+  const blocks = [...reply.matchAll(/^```[^\n]*\n([\s\S]*?)^```\s*$/gm)].map((m) => m[1] ?? "");
+  return blocks.filter((b) => b.includes("noRestrictedImports")).at(-1) ?? null;
+}
+
+/** The record keys a draft marks with `sphica: <key>`. */
+function markersOf(draft: string): string[] {
+  // A key holds slashes; a block comment's close and trailing punctuation are not part of it
+  const keys = [...draft.matchAll(/sphica:\s*((?:trace|harvest|glean):[^\s"]+)/g)].map((m) =>
+    (m[1] ?? "").replace(/\*\/$/, "").replace(/[.,;:]+$/, ""),
+  );
+  return [...new Set(keys)];
+}
+
+export type DraftGrade = {
+  state: "graded" | "failed";
+  reason: string | null;
+  /** Marked records that should have no check */
+  unwanted: string[];
+  /** Records that should have a check and are not marked */
+  unmarked: string[];
+  falseFailures: string[];
+  missedViolations: string[];
+};
+
+/** A draft judged on a copy of repo: the draft replaces biome.json as biome.jsonc, and the held-out files are added. */
+export function gradeDraft(
+  draft: string | null,
+  repo: string,
+  cases: RulesCases,
+  scratch: string,
+): DraftGrade {
+  const grade: DraftGrade = {
+    state: "failed",
+    reason: null,
+    unwanted: [],
+    unmarked: [],
+    falseFailures: [],
+    missedViolations: [],
+  };
+  if (draft === null) return { ...grade, reason: "the reply drafts no Biome check" };
+  const marked = markersOf(draft);
+  grade.unwanted = marked.filter((k) => !cases.draft.includes(k) && !cases.may_mark.includes(k));
+  grade.unmarked = cases.draft.filter((k) => !marked.includes(k));
+  fs.cpSync(repo, scratch, { recursive: true, filter: (src) => path.basename(src) !== ".git" });
+  fs.rmSync(path.join(scratch, "biome.json"), { force: true });
+  fs.writeFileSync(path.join(scratch, "biome.jsonc"), draft);
+  for (const f of cases.held_out) {
+    fs.mkdirSync(path.dirname(path.join(scratch, f.path)), { recursive: true });
+    fs.writeFileSync(path.join(scratch, f.path), f.text);
+  }
+  let flagged: Set<string>;
+  try {
+    flagged = new Set(restrictedImports(scratch).map((r) => r.path));
+  } catch (e) {
+    return { ...grade, reason: (e as Error).message };
+  }
+  for (const f of cases.held_out) {
+    if (f.fails && !flagged.has(f.path)) grade.missedViolations.push(f.path);
+    if (!f.fails && flagged.has(f.path)) grade.falseFailures.push(f.path);
+  }
+  return { ...grade, state: "graded" };
+}
+
+function main() {
+  const { values: args } = parseArgs({ options: { report: { type: "string" } } });
+  if (!args.report) throw new Error("--report <runs dir> names the rules runs to grade");
+  const runs = path.resolve(args.report);
+  const fixture = JSON.parse(fs.readFileSync(path.join(runs, "fixture-rules", "fixture.json"), "utf8")) as {
+    repo: string;
+  };
+  const cases = loadRulesCases();
+  const rows: string[] = [];
+  for (const name of fs.readdirSync(runs).sort()) {
+    const dir = path.join(runs, name);
+    if (!name.startsWith("rules-") || !fs.existsSync(path.join(dir, "result.json"))) continue;
+    const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as {
+      host: string;
+      status: number | null;
+      reason: string | null;
+    };
+    const scratch = path.join(dir, "graded");
+    fs.rmSync(scratch, { recursive: true, force: true });
+    const g =
+      result.status === 0
+        ? gradeDraft(
+            draftOf(fs.readFileSync(path.join(dir, "final.md"), "utf8")),
+            fixture.repo,
+            cases,
+            scratch,
+          )
+        : {
+            state: "failed",
+            reason: result.reason,
+            unwanted: [],
+            unmarked: [],
+            falseFailures: [],
+            missedViolations: [],
+          };
+    rows.push(
+      `| ${name} | ${result.host} | ${g.state} | ${g.unwanted.join(" ")} | ${g.unmarked.join(" ")} | ${g.falseFailures.join(" ")} | ${g.missedViolations.join(" ")} | ${g.reason ?? ""} |`,
+    );
+  }
+  console.log(
+    "| run | host | state | unwanted | unmarked | false failures | missed violations | reason |\n|---|---|---|---|---|---|---|---|",
+  );
+  console.log(rows.join("\n"));
+}
+
+if (process.argv[1] === import.meta.filename) main();

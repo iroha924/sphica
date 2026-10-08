@@ -1,0 +1,168 @@
+{
+  "note": "M1 of the E3 plan: whether /sphica:rules drafts a Biome check only for records that forbid a direct dependency, and whether each draft fails on the held-out violations and passes on the harmless files. The records come from cases.json's fixture plus the steps here; picks are what the owner chose; draft must carry a marker, may_mark may (the exception shapes the ui-no-db check); held-out files are never shown to the run.",
+  "files": {
+    "biome.json": "{\n  \"linter\": {\n    \"enabled\": true,\n    \"rules\": { \"preset\": \"none\" }\n  }\n}\n",
+    "src/widgets/badge.ts": "export const badge = (n: number): string => `${n}`;\n",
+    "src/ui/admin.ts": "export const adminTitle = \"Backups\";\n"
+  },
+  "steps": [
+    {
+      "session": {
+        "id": "s-rl-admin",
+        "host": "claude-code",
+        "at": "2026-06-06T10:00:00+09:00",
+        "turns": [
+          {
+            "owner": "The backup screen in src/ui/admin.ts may open src/db.ts directly; it is the one exception to going through src/library.ts.",
+            "assistant": "Understood: src/ui/admin.ts is the exception.",
+            "edits": ["src/ui/admin.ts"]
+          },
+          {
+            "owner": "Nothing under src/widgets/ may depend on src/db.ts, not even through other modules. Widgets render only what they are given.",
+            "assistant": "OK: src/widgets/ never reaches src/db.ts.",
+            "edits": ["src/widgets/badge.ts"]
+          }
+        ]
+      }
+    },
+    {
+      "trace": {
+        "session": "s-rl-admin",
+        "record": {
+          "units": [
+            {
+              "key": "admin-db-exception",
+              "kind": "constraint",
+              "stance": "do",
+              "text": "src/ui/admin.ts may import src/db.ts directly; it is the one exception to src/ui going through src/library.ts",
+              "why": "The backup screen needs the database itself",
+              "evidence": [
+                {
+                  "source": "session:s-rl-admin#1.owner",
+                  "quote": "The backup screen in src/ui/admin.ts may open src/db.ts directly; it is the one exception to going through src/library.ts.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rl-admin#1.owner",
+                  "quote": "The backup screen in src/ui/admin.ts may open src/db.ts directly"
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/ui/admin.ts",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": [
+                "例外",
+                "exception",
+                "管理画面",
+                "admin",
+                "バックアップ",
+                "backup",
+                "データベース",
+                "database"
+              ]
+            },
+            {
+              "key": "widgets-never-reach-db",
+              "kind": "constraint",
+              "stance": "dont",
+              "text": "Nothing under src/widgets/ depends on src/db.ts, not even through other modules",
+              "why": "Widgets render only what they are given",
+              "evidence": [
+                {
+                  "source": "session:s-rl-admin#2.owner",
+                  "quote": "Nothing under src/widgets/ may depend on src/db.ts, not even through other modules.",
+                  "role": "states"
+                }
+              ],
+              "adoption": [
+                {
+                  "source": "session:s-rl-admin#2.owner",
+                  "quote": "Nothing under src/widgets/ may depend on src/db.ts, not even through other modules."
+                }
+              ],
+              "anchors": [
+                {
+                  "path": "src/widgets/badge.ts",
+                  "role": "applies_to"
+                }
+              ],
+              "aliases": [
+                "ウィジェット",
+                "widget",
+                "依存",
+                "dependency",
+                "推移",
+                "transitive",
+                "データベース",
+                "database"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "picks": [
+    "trace:s-rv-ui/no-lodash",
+    "trace:s-rv-ui/ui-no-db",
+    "trace:s-rl-admin/admin-db-exception",
+    "trace:s-rl-admin/widgets-never-reach-db",
+    "trace:s-rv-release/release-by-owner",
+    "trace:s-rv-iphone/iphone-check",
+    "trace:s-rv-ai-shelf/keep-case"
+  ],
+  "draft": ["trace:s-rv-ui/no-lodash", "trace:s-rv-ui/ui-no-db"],
+  "may_mark": ["trace:s-rl-admin/admin-db-exception"],
+  "held_out": [
+    {
+      "path": "src/sync.ts",
+      "text": "import debounce from \"lodash/debounce\";\nexport const later = debounce;\n",
+      "fails": true
+    },
+    {
+      "path": "src/merge.ts",
+      "text": "import _ from \"lodash\";\nexport const merge = _.merge;\n",
+      "fails": true
+    },
+    {
+      "path": "src/ui/edit.ts",
+      "text": "import { open } from \"../db.ts\";\nexport const edit = open;\n",
+      "fails": true
+    },
+    {
+      "path": "src/ui/sort.ts",
+      "text": "import { sortBy } from \"lodash\";\nexport const sort = sortBy;\n",
+      "fails": true
+    },
+    {
+      "path": "src/notes.ts",
+      "text": "// We dropped lodash; see the decision.\nexport const note = \"import _ from 'lodash'\";\n",
+      "fails": false
+    },
+    {
+      "path": "src/ui/count.ts",
+      "text": "import { countBooks } from \"../library.ts\";\nexport const count = countBooks;\n",
+      "fails": false
+    },
+    {
+      "path": "src/library-db.ts",
+      "text": "import { open } from \"./db.ts\";\nexport const reopen = open;\n",
+      "fails": false
+    },
+    {
+      "path": "src/ui/admin.ts",
+      "text": "import { open } from \"../db.ts\";\nexport const backups = open;\n",
+      "fails": false
+    },
+    {
+      "path": "docs/layers.md",
+      "text": "The UI never writes `import { open } from \"../db.ts\"`.\n",
+      "fails": false
+    }
+  ]
+}

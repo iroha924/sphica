@@ -2,6 +2,7 @@
 // Run from server/ after `bun run bundle`:
 //   node evals/review/run.ts --preflight [--out <dir>]
 //   node evals/review/run.ts --host claude|codex --diff <id>|all --runs <n> [--body <file>] [--jobs <n>] [--out <dir>]
+//   node evals/review/run.ts --rules --host claude|codex --runs <n> [--body <file>] [--jobs <n>] [--out <dir>]
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -11,6 +12,7 @@ import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
 import { claimRunDir, codexModelOf, isolatedCodexHome } from "../cloud/codex-home.ts";
 import { buildReviewFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
+import { loadRulesCases } from "./rules-grade.ts";
 import {
   claudeArgs,
   claudeMcp,
@@ -18,12 +20,16 @@ import {
   codexArgs,
   codexMcp,
   type LanePaths,
+  READ_TOOLS,
+  RULES_TOOLS,
   reviewPrompt,
+  rulesPrompt,
 } from "./runner.ts";
 
 const ROOT = path.join(import.meta.dirname, "..", "..", "..");
 const SERVER = path.join(ROOT, "plugin", "dist", "mcp.js");
 const BODY = path.join(ROOT, "plugin", "skills", "review", "reviewers", "precedent.md");
+const RULES_BODY = path.join(ROOT, "plugin", "skills", "rules", "SKILL.md");
 const ORIGIN = "https://github.com/example/tsundoku.git";
 
 type Host = "claude" | "codex";
@@ -42,13 +48,20 @@ type LaneResult = {
 
 const sha256 = (data: string | Buffer) => crypto.createHash("sha256").update(data).digest("hex");
 
-/** The fixture under out, built once and reused by every run of the same out directory. */
-async function fixtureIn(out: string): Promise<ReviewFixture> {
-  const dir = path.join(out, "fixture");
+/** The fixture under out, built once and reused by every run of the same out directory; rules adds M1's records and files. */
+async function fixtureIn(out: string, rules = false): Promise<ReviewFixture> {
+  const dir = path.join(out, rules ? "fixture-rules" : "fixture");
   const manifest = path.join(dir, "fixture.json");
   if (fs.existsSync(manifest)) return JSON.parse(fs.readFileSync(manifest, "utf8")) as ReviewFixture;
   fs.mkdirSync(dir, { recursive: true });
-  const built = await buildReviewFixture(dir);
+  const cases = loadReviewCases();
+  const m1 = loadRulesCases();
+  const built = await buildReviewFixture(
+    dir,
+    rules
+      ? { files: { ...cases.files, ...m1.files }, steps: [...cases.steps, ...m1.steps], diffs: [] }
+      : cases,
+  );
   fs.writeFileSync(manifest, `${JSON.stringify(built, null, 2)}\n`);
   return built;
 }
@@ -86,20 +99,22 @@ function runChild(
 }
 
 /**
- * One lane: a fresh clone of the fixture with the diff applied and committed (the tree the reviewer reads is the changed one), the diff
- * as a file inside the checkout's git directory, a copy of the database, and the host started on the precedent body.
+ * One lane: a fresh clone of the fixture, a copy of the database, and the host started on a body. A review lane has its diff applied and
+ * committed (the tree the reviewer reads is the changed one) and gets the diff as a file inside the checkout's git directory.
  */
 async function runLane(o: {
   fixture: ReviewFixture;
   host: Host;
-  diff: string;
+  /** The case's diff id, or null for a rules lane */
+  diff: string | null;
   body: string;
   out: string;
   model: string;
-  /** Text appended to the prompt, for the preflight's probes */
-  extra?: string;
+  prompt: (body: string, p: LanePaths) => string;
+  tools: string[];
 }): Promise<{ dir: string; result: LaneResult }> {
-  const { run, dir } = claimRunDir(o.out, `${o.diff}-${o.host}`);
+  const name = o.diff ?? "rules";
+  const { run, dir } = claimRunDir(o.out, `${name}-${o.host}`);
   const started = Date.now();
   const p: LanePaths = {
     work: path.join(dir, "work"),
@@ -112,7 +127,7 @@ async function runLane(o: {
   const result: LaneResult = {
     run,
     host: o.host,
-    diff: o.diff,
+    diff: name,
     model: null,
     cli: "",
     body_sha256: sha256(body),
@@ -122,8 +137,6 @@ async function runLane(o: {
     seconds: 0,
   };
   try {
-    const diffFile = o.fixture.diffs[o.diff];
-    if (!diffFile) throw new Error(`no diff ${o.diff}`);
     execFileSync("git", ["clone", "-q", o.fixture.repo, p.work]);
     const git = (...args: string[]) =>
       execFileSync(
@@ -143,21 +156,25 @@ async function runLane(o: {
       );
     // Sphica finds the records' project by origin
     git("remote", "set-url", "origin", ORIGIN);
-    git("apply", "--index", diffFile);
-    git("commit", "-q", "-m", "the change under review");
-    p.diff = path.join(git("rev-parse", "--absolute-git-dir").trim(), "review.diff");
-    fs.copyFileSync(diffFile, p.diff);
+    if (o.diff !== null) {
+      const diffFile = o.fixture.diffs[o.diff];
+      if (!diffFile) throw new Error(`no diff ${o.diff}`);
+      git("apply", "--index", diffFile);
+      git("commit", "-q", "-m", "the change under review");
+      p.diff = path.join(git("rev-parse", "--absolute-git-dir").trim(), "review.diff");
+      fs.copyFileSync(diffFile, p.diff);
+    }
     fs.mkdirSync(path.dirname(p.db), { recursive: true });
     fs.copyFileSync(o.fixture.db, p.db);
     fs.mkdirSync(p.home, { recursive: true });
-    const prompt = `${reviewPrompt(body, { ...p, model: o.host })}${o.extra ?? ""}`;
+    const prompt = o.prompt(body, p);
     fs.writeFileSync(path.join(dir, "prompt.md"), prompt);
 
     let r: Awaited<ReturnType<typeof runChild>>;
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
       const mcp = path.join(dir, "mcp.json");
-      fs.writeFileSync(settings, `${JSON.stringify(claudeSettings(), null, 2)}\n`);
+      fs.writeFileSync(settings, `${JSON.stringify(claudeSettings(o.tools), null, 2)}\n`);
       fs.writeFileSync(mcp, `${JSON.stringify(claudeMcp(p), null, 2)}\n`);
       result.model = o.model;
       result.cli = claudeVersion();
@@ -224,18 +241,24 @@ const everything = (dir: string) => fs.readFileSync(path.join(dir, "events.jsonl
  */
 async function preflight(out: string, model: string): Promise<string[]> {
   const fixture = await fixtureIn(out);
+  const review = (host: Host, diff: string) => ({
+    fixture,
+    host,
+    diff,
+    body: BODY,
+    out,
+    model,
+    prompt: (body: string, p: LanePaths) => reviewPrompt(body, { ...p, model: host }),
+    tools: READ_TOOLS,
+  });
   const problems: string[] = [];
   const token = crypto.randomUUID();
   const outside = path.join(out, "outside.txt");
   fs.writeFileSync(outside, `${token}\n`);
   const probe = await runLane({
-    fixture,
-    host: "claude",
-    diff: "postgres",
-    body: BODY,
-    out,
-    model,
-    extra: `\nBefore reviewing, use the Read tool on ${outside} and quote its first line in your reply.\n`,
+    ...review("claude", "postgres"),
+    prompt: (body, p) =>
+      `${reviewPrompt(body, { ...p, model: "claude" })}\nBefore reviewing, use the Read tool on ${outside} and quote its first line in your reply.\n`,
   });
   if (everything(probe.dir).includes(token)) problems.push(`claude read ${outside}, outside its checkout`);
   // A probe that never tried the read would pass without showing the fence
@@ -267,7 +290,7 @@ async function preflight(out: string, model: string): Promise<string[]> {
     const owners = (init.plugins ?? []).filter((x) => (x as { path?: string }).path !== "builtin");
     if (owners.length) problems.push(`claude loaded plugins: ${JSON.stringify(owners)}`);
   }
-  const lanes = [probe, await runLane({ fixture, host: "codex", diff: "postgres", body: BODY, out, model })];
+  const lanes = [probe, await runLane(review("codex", "postgres"))];
   for (const lane of lanes) {
     const text = everything(lane.dir);
     if (lane.result.status !== 0) problems.push(`${lane.result.host}: ${lane.result.reason}`);
@@ -281,10 +304,11 @@ async function main() {
   const { values: args } = parseArgs({
     options: {
       preflight: { type: "boolean", default: false },
+      rules: { type: "boolean", default: false },
       host: { type: "string" },
       diff: { type: "string" },
       runs: { type: "string", default: "1" },
-      body: { type: "string", default: BODY },
+      body: { type: "string" },
       jobs: { type: "string", default: "4" },
       model: { type: "string", default: "claude-opus-5-5" },
       out: { type: "string", default: path.join(os.homedir(), ".cache", "sphica-eval", "review") },
@@ -302,18 +326,27 @@ async function main() {
   }
   const host = args.host;
   if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
-  const fixture = await fixtureIn(out);
-  const ids = args.diff === "all" ? loadReviewCases().diffs.map((d) => d.id) : [args.diff ?? ""];
+  const fixture = await fixtureIn(out, args.rules);
+  const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
+  const ids = args.rules
+    ? ["rules"]
+    : args.diff === "all"
+      ? loadReviewCases().diffs.map((d) => d.id)
+      : [args.diff ?? ""];
   const queue = ids.flatMap((diff) => Array.from({ length: Number(args.runs) }, () => diff));
   const worker = async () => {
     for (let diff = queue.shift(); diff; diff = queue.shift()) {
       const { dir, result } = await runLane({
         fixture,
         host,
-        diff,
-        body: path.resolve(args.body ?? ""),
+        diff: args.rules ? null : diff,
+        body,
         out,
         model: args.model ?? "",
+        prompt: args.rules
+          ? (b) => rulesPrompt(b, loadRulesCases().picks)
+          : (b, p) => reviewPrompt(b, { ...p, model: host }),
+        tools: args.rules ? RULES_TOOLS : READ_TOOLS,
       });
       console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
     }

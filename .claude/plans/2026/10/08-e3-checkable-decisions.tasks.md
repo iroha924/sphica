@@ -83,13 +83,14 @@ diff で決着しない記録を質問として返す本文に変え、同じ回
 
 `/sphica:rules` に Biome の検査の下書きを足し、下書きの正しさ（M1）を測る。
 
-- [ ] T07: M1 の記録・正解・別のケースと、rules を流して下書きを採点する経路
+- [x] T07: M1 の記録・正解・別のケースと、rules を流して下書きを採点する経路
   - 種別: 追加
   - 計画: S4
   - 依存: T02（Biome の経路）, T03（runner）
-  - 変更: `server/evals/review/rules-cases.json`, `server/evals/review/rules-grade.ts`, `server/test/review-eval.test.ts`
+  - 変更: `server/evals/review/rules-cases.json`, `server/evals/review/rules-grade.ts`, `server/evals/review/run.ts`, `server/evals/review/runner.ts`, `server/test/review-eval.test.ts`
   - 完了条件: `cd server && node --test test/review-eval.test.ts` → 既知の正しい下書き・誤った下書き・下書きすべきでない記録への下書きで、M1 の 3 つの基準の判定が期待どおり
   - コミット: `test(eval): grade drafted Biome checks against held-out cases`
+  - 結果: `node --test test/review-eval.test.ts` → 5 件 pass（正しい下書きは全項目 0、全体の禁止を写さない override は src/ui/sort.ts を見逃す、admin の例外が無いと src/ui/admin.ts で誤った失敗、到達の禁止への marker は unwanted、下書きが無い返答と読めない JSONC は failed）。`bun run verify` → exit 0
 - [ ] T08: rules の Skill の検査の下書き
   - 種別: 変更
   - 計画: S4
@@ -130,6 +131,8 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `chore(release): keep the adopted E3 changes and bump the version`
 
 ## 記録
+
+- 2026-10-08 / T07 / 予備測定（T05）を流している間に、依存（T02・T03）を満たした T07 を先に終えた。変更欄に run.ts・runner.ts を足した（rules の lane を runner に足すため）/ 予備測定の node は読み込み済みのコードで動くので結果は混ざらない
 
 - 2026-10-08 / T04 / 変更欄を直した（前: grade.ts・`server/test/fixtures/review-eval/`・review-eval.test.ts、後: grade.ts・runner.ts・run.ts・review-eval.test.ts）/ 既知のログはテストの中で合成した。preflight の run に completion 行が無く、review の Step 4 で launcher が付ける指示を runner の prompt に足した
 
