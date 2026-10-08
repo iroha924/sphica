@@ -1,12 +1,14 @@
 // The review evaluation's fixture and expected verdicts: every record a case expects is the set review_select selects for its diff, so a
 // run is graded on the records it was asked about. The pinned Biome is checked on the fixture's files before any drafted check is judged by it.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
+import { judge, m2Tasks, prepare } from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
@@ -421,4 +423,53 @@ test("M1 grades a drafted Biome check on held-out files the run never saw, and c
   assert.deepEqual(reach.unwanted, ["trace:s-rl-admin/widgets-never-reach-db"]);
   assert.match(grade(draftOf("Only rule lines.\n")).reason ?? "", /drafts no Biome check/);
   assert.equal(grade(draftOf(reply("{ not json noRestrictedImports"))).state, "failed");
+});
+
+test("M2 judges a run's final patch: a forbidden import that stays is a violation, the exception is not, and the hidden test decides completion", async () => {
+  const fixture = await built;
+  const m1 = loadRulesCases();
+  // The rules fixture's files on top of the review fixture: what M2's runs start from
+  const repo = tempDir("m2-repo-");
+  fs.cpSync(fixture.repo, repo, { recursive: true });
+  for (const [rel, text] of Object.entries(m1.files)) {
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    fs.writeFileSync(path.join(repo, rel), text);
+  }
+  execFileSync("git", ["-C", repo, "add", "-A"]);
+  execFileSync("git", [
+    "-C",
+    repo,
+    "-c",
+    "user.name=e",
+    "-c",
+    "user.email=e@example.invalid",
+    "commit",
+    "-qm",
+    "rules files",
+  ]);
+  const task = (id: string) => m2Tasks().find((t) => t.id === id) ?? assert.fail(id);
+  const run = (condition: string, id: string, files: Record<string, string>) => {
+    const work = path.join(tempDir("m2-work-"), "work");
+    const start = prepare(repo, work, condition);
+    for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(work, rel), text);
+    return judge(work, start, task(id), path.join(tempDir("m2-judged-"), "judged"));
+  };
+  const direct =
+    'import { open } from "../db.ts";\nexport function bookCount(file: string): number {\n  const db = open(file);\n  const n = (db.prepare("select count(*) as n from book").get() as { n: number }).n;\n  db.close();\n  return n;\n}\n';
+  const viaLibrary = {
+    "src/library.ts": `${fs.readFileSync(path.join(repo, "src", "library.ts"), "utf8")}\nimport { open } from "./db.ts";\nexport function countRows(file: string, table: "book" | "backup"): number {\n  const db = open(file);\n  const n = (db.prepare(\`select count(*) as n from \${table}\`).get() as { n: number }).n;\n  db.close();\n  return n;\n}\n`,
+    "src/ui/detail.ts":
+      'import { countRows } from "../library.ts";\nexport const bookCount = (file: string): number => countRows(file, "book");\n',
+  };
+  const wrong = run("rules", "count", { "src/ui/detail.ts": direct });
+  assert.deepEqual([wrong.violations, wrong.completed], [["src/ui/detail.ts"], true], wrong.tests);
+  const right = run("check", "count", viaLibrary);
+  assert.deepEqual([right.violations, right.completed], [[], true], right.tests);
+  // The admin screen may open the database itself: the installed check passes it
+  const admin = run("check", "backups", {
+    "src/ui/admin.ts": direct.replace("bookCount", "backupCount").replace("from book", "from backup"),
+  });
+  assert.deepEqual([admin.violations, admin.falseFailure, admin.completed], [[], false, true], admin.tests);
+  const unfinished = run("rules", "debounce", {});
+  assert.equal(unfinished.completed, false);
 });

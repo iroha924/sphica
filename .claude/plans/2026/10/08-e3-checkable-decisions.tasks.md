@@ -143,13 +143,14 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
   - コミット: `fix(overview): treat a check file's unknown extension as unknown, whatever its name`
   - 結果: red を確かめた（TypeError: openers.map is not a function）。表を Map にして `node --test test/overview.test.ts test/rule-files.test.ts` → 33 件 pass。Skill に、module の禁止は今ある深さだけを守ると書いた（T12 のレビューの F1 を見送った代わり）。`bun run verify` → exit 0
 
-- [ ] T10: M2 のタスク、隠しテスト、patch の違反の判定
+- [x] T10: M2 のタスク、隠しテスト、patch の違反の判定
   - 種別: 追加
   - 計画: S5
-  - 依存: T09（Lifecycle の知らせを修理の手順数に使う）
-  - 変更: `server/evals/cloud/tasks.json`, `server/evals/cloud/grade.ts`, `server/test/eval-grade.test.ts`
-  - 完了条件: `cd server && node --test test/eval-grade.test.ts` → 禁止された import を残した patch と残さない patch を、同じ Biome の設定で違反あり・なしと判定する。M2 のケースの並びと回数が tasks.json に固定されている
+  - 依存: T07（M1 の rules の fixture とケースの上に作る）
+  - 変更: `server/evals/review/m2.ts`, `server/evals/review/m2-cases.json`, `server/test/review-eval.test.ts`
+  - 完了条件: `cd server && node --test --test-name-pattern="M2 judges" test/review-eval.test.ts` → 禁止された import を残した patch は違反あり、library 経由は違反なし、例外の admin は違反なし・誤った失敗なし、隠しテストで完了を判定する
   - コミット: `test(eval): add change tasks that compare rule lines with an installed Biome check`
+  - 結果: `node --test --test-name-pattern="M2 judges" test/review-eval.test.ts` → pass。M2 の予備の run（rules、タスク 3 つ × 両ホスト × 3 回）→ `node evals/review/m2.ts --report ~/.cache/sphica-eval/review/m2-pilot` で 18 run、failed 0、違反 0、誤った失敗 0、完了 18。基準 (1) を評価できず #257 は不採用（plan の変更履歴、持ち主の Go）。check の条件は流していない。`bun run verify` → exit 0
 
 ## P6: 採否の反映と出荷の準備
 
@@ -158,10 +159,10 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - [ ] T11: 不採用の差分の除去と版の同期
   - 種別: 変更
   - 計画: S6
-  - 依存: T05（#220 の採否は予備測定で決まった）, T08（#257 の M1 の採否）
-  - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base <前の release のコミット>` → 採用があれば `plugin` で 4 か所の版が同じ、無ければ `none`。`bun run verify` → 0 で終わる
-  - コミット: `chore(release): keep the adopted E3 changes and bump the version`
+  - 依存: T05（#220 の採否は予備測定で決まった）, T08（#257 の M1 の採否）, T10（#257 の M2 の採否）
+  - 変更: `plugin/skills/rules/SKILL.md`, `server/src/overview.ts`, `server/src/rule-files.ts`, `server/src/mcp.ts`, `server/test/overview.test.ts`, `server/test/rule-files.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `git diff main -- plugin server/src server/test/overview.test.ts server/test/rule-files.test.ts .claude-plugin` → 空。`bun run release:plan -- --base <前の release のコミット>` → `none`。`bun run verify` → 0 で終わる
+  - コミット: `revert(rules): drop the Biome check drafts and look checks that #257 did not adopt`
 
 ## 記録
 
@@ -191,3 +192,5 @@ overview が持ち主の挙げた検査ファイルの marker を読み、変更
 - 2026-10-08 / T12 / コミット欄を短くした（前: keep every project-wide ban in an override and name the imports a module ban covers、後: copy project-wide bans into overrides and list the imports a module ban covers）/ 件名の上限 100 文字を超えた
 - 2026-10-08 / T10 / M2 の予備の run を本測定の前に流す: ルール文だけ（rules）、タスク 3 つ × 両ホスト × 3 回。ルール文だけで違反が出なければ、基準 (1)「違反がルール文だけより減る」を測れないので持ち主に戻す
 - 2026-10-08 / T12・T13 / Codex のタスクごとのレビュー（d3b28eae、e5836e20）: T13-F2（拡張子が constructor だと look が例外で落ちる）を受け入れて T14 を足した。T12-F1（下書きの後に足された深いディレクトリを M1 で測っていない）は見送り、import の書き方で禁止する方式の限界として下書きに書くよう Skill に足した。T13-F1（複数行の文字列の中の marker らしい行を拾う）は見送り: 言語ごとの文字列の解析が要り、起きても look が余計な知らせを 1 行出すだけ。同じ箇所の 2 巡目なので、ここからは例外で落ちる・誤った結果を返す不具合だけを直す
+- 2026-10-08 / T10 / 欄を変えた。依存（前: T09、後: T07）、変更（前: cloud の tasks.json・grade.ts・eval-grade.test.ts、後: review の m2.ts・m2-cases.json・review-eval.test.ts）、完了条件（前: tasks.json に回数を固定、後: 判定のテスト）/ cloud の評価ループの条件（none・search・inject・gold）は「ルール文だけ」と「ルール文＋検査」の比較に合わず、M2 は review の評価の下に専用の変更タスクの lane として作った。M2 の予備の run で #257 の打ち切りが決まり、本測定の回数は固定しない
+- 2026-10-08 / T11 / 欄を変えた。依存に T10 を足し、変更に #257 の製品側の変更（rules/SKILL.md・overview・rule-files・mcp・関連テスト）を足し、完了条件を「main との差分が空で release:plan が none」に、コミットを revert に / #257 が不採用になり、下書きと Lifecycle を最終の差分から外す（plan の変更履歴、持ち主の Go）
