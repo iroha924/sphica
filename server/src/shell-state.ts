@@ -48,17 +48,18 @@ const same = (a: Signature, b: Signature) =>
 export function inside(root: string, rel: string): string | null {
   const real = fs.realpathSync.native(root);
   const file = path.resolve(root, rel);
-  if (path.relative(root, file).startsWith("..") || path.isAbsolute(path.relative(root, file))) return null;
+  if (leaves(path.relative(root, file))) return null;
   let probe = file;
   while (!fs.existsSync(probe)) {
     const up = path.dirname(probe);
     if (up === probe) return null;
     probe = up;
   }
-  const resolved = fs.realpathSync.native(probe);
-  const back = path.relative(real, resolved);
-  return back.startsWith("..") || path.isAbsolute(back) ? null : file;
+  return leaves(path.relative(real, fs.realpathSync.native(probe))) ? null : file;
 }
+
+/** Whether a relative path climbs out (`..` as a whole step, not a name that starts with two dots) or is on another root */
+const leaves = (rel: string) => rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
 
 type Cache = Map<string, { sig: Signature; hash: string }>;
 
@@ -85,9 +86,8 @@ export function loadCache(root: string): Cache {
 const validSig = (s: unknown): s is Signature =>
   !!s &&
   typeof s === "object" &&
-  ["dev", "ino", "size", "mtimeNs", "ctimeNs"].every((k) =>
-    /^\d+$/.test(String((s as Record<string, unknown>)[k])),
-  );
+  ["dev", "ino", "size"].every((k) => /^\d+$/.test(String((s as Record<string, unknown>)[k]))) &&
+  ["mtimeNs", "ctimeNs"].every((k) => /^-?\d+$/.test(String((s as Record<string, unknown>)[k])));
 
 /** Writes a file whole or not at all: another process reading it sees the old content or the new, never part */
 function publish(file: string, text: string): void {
@@ -101,39 +101,65 @@ export function saveCache(root: string, cache: Cache): void {
   publish(cacheFile(root), JSON.stringify(Object.fromEntries(cache)));
 }
 
+/** The sha256 of a file read in chunks, or "deadline" when the deadline passes before it is read through */
+function readHash(file: string, deadline: number): string | "deadline" {
+  const fd = fs.openSync(file, "r");
+  try {
+    const h = createHash("sha256");
+    const buf = Buffer.allocUnsafe(1 << 20);
+    for (
+      let n = fs.readSync(fd, buf, 0, buf.length, null);
+      n > 0;
+      n = fs.readSync(fd, buf, 0, buf.length, null)
+    ) {
+      h.update(buf.subarray(0, n));
+      if (Date.now() >= deadline) return "deadline";
+    }
+    return h.digest("hex");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+const failed = (e: unknown): State => {
+  const code = (e as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR"
+    ? { kind: "missing" }
+    : { kind: "unreadable", reason: String(code) };
+};
+
 /**
  * One file's state. The hash comes from the cache when the signature is unchanged; otherwise the file is read between two lstats, and
- * read again when they differ (it changed meanwhile), up to READS times.
+ * read again when they differ (it changed meanwhile), up to READS times. Every try checks the checkout's boundary again (a directory
+ * may have been swapped for a link meanwhile) and the deadline.
  */
-function stateOf(root: string, rel: string, cache: Cache): State {
-  const file = inside(root, rel);
-  if (!file) return { kind: "unreadable", reason: "outside the checkout" };
+function stateOf(root: string, rel: string, cache: Cache, deadline: number): State {
   for (let i = 0; i < READS; i++) {
+    if (Date.now() >= deadline) return { kind: "unknown", reason: "deadline" };
+    let file: string | null;
     let before: fs.BigIntStats;
     try {
+      file = inside(root, rel);
+      if (!file) return { kind: "unreadable", reason: "outside the checkout" };
       before = fs.lstatSync(file, { bigint: true });
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      return code === "ENOENT" || code === "ENOTDIR"
-        ? { kind: "missing" }
-        : { kind: "unreadable", reason: String(code) };
+      return failed(e);
     }
     if (!before.isFile()) return { kind: "unreadable", reason: "not a regular file" };
     const sig = signature(before);
     const cached = cache.get(rel);
     if (cached && same(cached.sig, sig)) return { kind: "ok", sig, hash: cached.hash };
-    let content: Buffer;
+    let hash: string;
     let after: fs.BigIntStats;
     try {
-      content = fs.readFileSync(file);
+      hash = readHash(file, deadline);
+      if (hash === "deadline") return { kind: "unknown", reason: "deadline" };
       after = fs.lstatSync(file, { bigint: true });
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") continue;
-      return { kind: "unreadable", reason: String(code) };
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+      return failed(e);
     }
     if (!same(sig, signature(after))) continue;
-    const hash = sha(content);
     cache.set(rel, { sig, hash });
     return { kind: "ok", sig, hash };
   }
@@ -147,9 +173,9 @@ export function takeStates(
   cache: Cache,
   deadline: number,
 ): Record<string, State> {
-  const out: Record<string, State> = {};
-  for (const rel of rels)
-    out[rel] = Date.now() >= deadline ? { kind: "unknown", reason: "deadline" } : stateOf(root, rel, cache);
+  // No prototype, so a file named __proto__ is a key like any other
+  const out = Object.create(null) as Record<string, State>;
+  for (const rel of rels) out[rel] = stateOf(root, rel, cache, deadline);
   return out;
 }
 
@@ -211,7 +237,15 @@ export function takeSnapshot(key: string): Snapshot | null {
   }
   fs.rmSync(file, { force: true });
   const s = raw as Partial<Snapshot>;
-  if (s?.v !== 1 || s.key !== key || typeof s.root !== "string" || typeof s.at !== "string" || !s.paths)
+  if (
+    s?.v !== 1 ||
+    s.key !== key ||
+    typeof s.root !== "string" ||
+    typeof s.at !== "string" ||
+    !s.paths ||
+    typeof s.paths !== "object" ||
+    Array.isArray(s.paths)
+  )
     return null;
   for (const v of Object.values(s.paths)) {
     const st = v as State;

@@ -123,7 +123,7 @@ test("the cache spares unchanged files a read, a broken cache is rebuilt, and a 
     const cache = loadCache(root);
     takeStates(root, ["a.ts"], cache, FAR());
     saveCache(root, cache);
-    const reads = mock.method(fs, "readFileSync");
+    const reads = mock.method(fs, "openSync");
     try {
       takeStates(root, ["a.ts"], loadCache(root), FAR());
       assert.equal(
@@ -138,15 +138,20 @@ test("the cache spares unchanged files a read, a broken cache is rebuilt, and a 
     fs.writeFileSync(path.join(home, "shell-state", "cache", String(cacheFile)), "{not json");
     assert.equal(loadCache(root).size, 0, "a broken cache is an empty one");
     // The file changes on every read: after three tries it is unknown, never a hash of a half-written file
-    const real = fs.readFileSync;
-    const churn = mock.method(fs, "readFileSync", (p: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
-      const out = (real as (...a: unknown[]) => Buffer)(p, ...rest);
-      if (String(p).endsWith("a.ts")) fs.writeFileSync(path.join(root, "a.ts"), `${Math.random()}\n`);
+    const realOpen = fs.openSync;
+    let opens = 0;
+    const churn = mock.method(fs, "openSync", (p: fs.PathLike, ...rest: unknown[]) => {
+      const out = (realOpen as (...a: unknown[]) => number)(p, ...rest);
+      if (String(p).endsWith("a.ts")) {
+        opens++;
+        fs.writeFileSync(path.join(root, "a.ts"), `${Math.random()}\n`);
+      }
       return out;
     });
     try {
       const s = takeStates(root, ["a.ts"], new Map(), FAR());
       assert.deepEqual(s["a.ts"], { kind: "unknown", reason: "changed while read" });
+      assert.equal(opens, 3, "read three times before giving up");
     } finally {
       churn.mock.restore();
     }
@@ -193,6 +198,107 @@ test("a path that is not a regular file, or leaves the checkout, is not compared
   }
 });
 
+test("reads stay inside the checkout and within the deadline on every try, and odd names and times keep their state", () => {
+  const root = checkout();
+  const outside = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
+  process.env.SPHICA_HOME = home;
+  try {
+    fs.mkdirSync(path.join(root, "d"));
+    fs.writeFileSync(path.join(root, "d", "a.ts"), "inside\n");
+    fs.writeFileSync(path.join(outside, "a.ts"), "outside secret\n");
+    // The first read finds the file changed and the directory swapped for a link out of the checkout: the retry must not follow it
+    const realOpen = fs.openSync;
+    let swapped = false;
+    const swap = mock.method(fs, "openSync", (p: fs.PathLike, ...rest: unknown[]) => {
+      const out = (realOpen as (...a: unknown[]) => number)(p, ...rest);
+      if (!swapped && String(p).endsWith(path.join("d", "a.ts"))) {
+        swapped = true;
+        fs.rmSync(path.join(root, "d"), { recursive: true });
+        fs.symlinkSync(outside, path.join(root, "d"), process.platform === "win32" ? "junction" : "dir");
+      }
+      return out;
+    });
+    try {
+      const st = takeStates(root, ["d/a.ts"], new Map(), FAR())["d/a.ts"];
+      assert.notEqual(st?.kind, "ok", "a file reached through a link out of the checkout is never hashed");
+    } finally {
+      swap.mock.restore();
+    }
+    // A read that changes once is read again and succeeds: two reads in all
+    fs.writeFileSync(path.join(root, "b.ts"), "b\n");
+    let once = false;
+    const reads: string[] = [];
+    const flip = mock.method(fs, "openSync", (p: fs.PathLike, ...rest: unknown[]) => {
+      const out = (realOpen as (...a: unknown[]) => number)(p, ...rest);
+      if (String(p).endsWith("b.ts")) {
+        reads.push(String(p));
+        if (!once) {
+          once = true;
+          fs.writeFileSync(path.join(root, "b.ts"), "b2\n");
+        }
+      }
+      return out;
+    });
+    try {
+      assert.equal(takeStates(root, ["b.ts"], new Map(), FAR())["b.ts"]?.kind, "ok");
+      assert.equal(reads.length, 2, "read again once after it changed");
+    } finally {
+      flip.mock.restore();
+    }
+    // A slow read past the deadline stops there, never three times over
+    let clock = 0;
+    const now = mock.method(Date, "now", () => clock);
+    const realRead = fs.readSync;
+    const slow = mock.method(fs, "readSync", (...a: unknown[]) => {
+      clock += 4000;
+      return (realRead as (...x: unknown[]) => number)(...a);
+    });
+    try {
+      assert.deepEqual(takeStates(root, ["b.ts"], new Map(), 3500)["b.ts"], {
+        kind: "unknown",
+        reason: "deadline",
+      });
+      assert.ok(clock <= 4000, `stopped after the read that passed the deadline (clock ${clock})`);
+    } finally {
+      slow.mock.restore();
+      now.mock.restore();
+    }
+    // A file that vanishes between the existence check and realpath is missing, not an error for the whole call
+    const realpath = fs.realpathSync.native;
+    const vanish = mock.method(fs.realpathSync, "native", (p: fs.PathLike, ...rest: unknown[]) => {
+      if (String(p).endsWith("gone.ts")) throw Object.assign(new Error("gone"), { code: "ENOENT" });
+      return (realpath as (...a: unknown[]) => string)(p, ...rest);
+    });
+    try {
+      fs.writeFileSync(path.join(root, "gone.ts"), "x");
+      const s = takeStates(root, ["gone.ts", "b.ts"], new Map(), FAR());
+      assert.equal(s["gone.ts"]?.kind, "missing");
+      assert.equal(s["b.ts"]?.kind, "ok", "the other paths still get their state");
+    } finally {
+      vanish.mock.restore();
+    }
+    // Names that only look like a parent or a prototype are ordinary files
+    fs.mkdirSync(path.join(root, "..settings"));
+    fs.writeFileSync(path.join(root, "..settings", "f.ts"), "f");
+    fs.writeFileSync(path.join(root, "__proto__"), "p");
+    assert.ok(inside(root, "..settings/f.ts"), "a name starting with two dots is inside");
+    const odd = takeStates(root, ["..settings/f.ts", "__proto__"], new Map(), FAR());
+    assert.deepEqual(Object.keys(odd).sort(), ["..settings/f.ts", "__proto__"]);
+    assert.equal(Object.getOwnPropertyDescriptor(odd, "__proto__")?.value?.kind, "ok");
+    // A time before 1970 is a valid signature that survives the cache
+    fs.writeFileSync(path.join(root, "old.ts"), "o");
+    fs.utimesSync(path.join(root, "old.ts"), new Date(-86_400_000), new Date(-86_400_000));
+    const cache = loadCache(root);
+    takeStates(root, ["old.ts"], cache, FAR());
+    saveCache(root, cache);
+    assert.equal(loadCache(root).has("old.ts"), true, "a negative time is kept");
+  } finally {
+    delete process.env.SPHICA_HOME;
+    for (const d of [root, outside, home]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test("a snapshot is taken once, checked as it is read, and removed when it outlives its call", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
   process.env.SPHICA_HOME = home;
@@ -216,6 +322,12 @@ test("a snapshot is taken once, checked as it is read, and removed when it outli
     assert.equal(takeSnapshot(key), null, "taken once");
     writeSnapshot({ ...s, paths: { "a.ts": { kind: "ok", sig: { dev: "x" }, hash: "h" } as never } });
     assert.equal(takeSnapshot(key), null, "a snapshot that does not hold together is refused");
+    writeSnapshot({ ...s, paths: true as never });
+    assert.equal(
+      takeSnapshot(key),
+      null,
+      "paths that are not a map are refused, never read as nothing changed",
+    );
     writeSnapshot(s);
     const file = path.join(home, "shell-state", "calls", `${key}.json`);
     const old = new Date(Date.now() - SNAPSHOT_LIFE_MS - 1000);

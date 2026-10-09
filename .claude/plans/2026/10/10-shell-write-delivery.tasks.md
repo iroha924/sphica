@@ -31,6 +31,16 @@ base: main
   - コミット: `feat(deliver): snapshot anchored files around a shell call by content`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-state.test.ts` → 5 pass（書き換え・作成・削除・atomic replace・同じサイズで時刻を戻した書き換えは変化、chmod・touch・同じ内容・呼び出しの中で戻した書き込みは変化でない、署名が同じならキャッシュで読まない、壊れたキャッシュは空として作り直す、読む間に変わり続けると unknown、期限を過ぎたら unknown、ディレクトリと外へ出る symlink は unreadable、控えは 1 回だけ取れて中身を検査し期限を過ぎたら消える、対象のパスは配れる decision / constraint の applies_to だけ）。namedInCommand は同じ問い合わせの `deliverablePaths` を使う形にした。`bun run verify` → exit 0
 
+- [x] T09: 変化の見分け方の穴を直す（T01 のレビューの F1〜F8）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象の部品）
+  - 変更: `server/src/shell-state.ts`, `server/test/shell-state.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/shell-state.test.ts` → 読み直しの途中でディレクトリが外への link に替わると外のファイルを hash する、paths がオブジェクトでない控えを受け取る
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/shell-state.test.ts` → 読み直しのたびに境界と期限を確かめ、1 MB ずつ読んで期限で止まり、境界の確かめの例外は missing / unreadable、`..settings` と `__proto__` は普通の名前、1970 年より前の時刻も署名として残り、読み直しは 1 回目だけ変わったら 2 回、変わり続けたら 3 回で止まる
+  - コミット: `fix(deliver): keep shell snapshots inside the checkout and the deadline on every read`
+  - 結果: red を直す前のコードで実測（F1 の外の hash、F4 の paths: true の受理）。ほかは同じテストの後ろにあったので、直した後に各直しを 1 つずつ戻してテストが落ちることを確かめた（F2・F3・F5・F6・F7・F8 すべて）。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-state.test.ts` → 6 pass。`bun run verify` → exit 0
+
 ## P2: 届け方
 
 設定がオンのとき、両ホストで shell の呼び出しの後に、まだ届いていない記録が次のモデルリクエストの前に入る。オフなら今と同じ。
@@ -104,3 +114,4 @@ base: main
 ## 記録
 - 2026-10-10 / T01 / SQL の呼び出し箇所は namedInCommand のものを deliverablePaths に移しただけで数が変わらず、台帳の変更は要らなかった / 変更欄から `scripts/lib/sql-call-sites.mjs` を外した
 - 2026-10-10 / T02, T03 / `bun run pairs` が、コードで読む plugin の設定が plugin.json に宣言されていることを求めた。Codex の形は deliver.test.ts の中で確かめた / userConfig の shell_write_delivery の宣言を T03 から T02 に移し（T03 の変更欄から plugin.json を外した）、T02 の変更欄を `deliver-codex.test.ts` から `plugin/.claude-plugin/plugin.json` に変えた
+- 2026-10-10 / T01 のレビュー / F1〜F8 は採用して T09 で直した。期限を守るため、読み取りをファイル全体の一括から 1 MB ずつに変えた
