@@ -6,10 +6,16 @@
 // connection is open, the authorizer allows that role's writes.
 
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import url from "node:url";
 
-const root = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
+const repo = path.join(path.dirname(url.fileURLToPath(import.meta.url)), "..");
+// --root points the check at a copy of the sources, so a test can show it failing
+const at = process.argv.indexOf("--root");
+const root = at > 0 ? path.resolve(process.argv[at + 1] ?? "") : repo;
+// js-tokens is a devDependency of server. Resolve it from there instead of adding a root dependency.
+const jsTokens = createRequire(path.join(repo, "server/package.json"))("js-tokens");
 /** Read-only interfaces. No module reachable from these may import the write connection. */
 const READERS = ["server/src/mcp.ts"];
 const WRITER = "server/src/db-write.ts";
@@ -70,14 +76,29 @@ for (const f of sources)
     fail.push(`${f} writes unit_state or unit_replacement; only ${RECONCILE} may`);
 
 // git runs outside the agent's sandbox in a repository whose config the agent writes: only these modules start it, with the options and
-// environment that keep that config from running a command. A call whose first argument is the string "git" counts as starting it.
+// environment that keep that config from running a command. Read as tokens, so comments do not count: a string that is the program
+// name ("git", "git.exe") counts anywhere, however it reaches a call, and in a module that starts processes so does a command line
+// that begins with it ("git status", `git ${sub}`).
 const GIT_STARTERS = new Set(["server/src/git.ts", "server/src/git-worker.ts"]);
-const STARTS_GIT = /\(\s*["'`]git["'`]\s*[,)]/;
+/** The text of each string and template piece in a source, without its quotes */
+const strings = (source) =>
+  [...jsTokens(source)]
+    .filter(
+      (t) => t.type === "StringLiteral" || t.type === "NoSubstitutionTemplate" || t.type === "TemplateHead",
+    )
+    .map((t) => t.value.slice(1, t.type === "TemplateHead" ? -2 : -1));
+const PROGRAM = /^git(?:\.exe)?$/i;
+const startsGit = (source) => {
+  const spawns = /from\s+["']node:child_process["']|require\(\s*["']node:child_process["']\s*\)/.test(source);
+  return strings(source).some((s) => PROGRAM.test(s) || (spawns && /^git(?:\.exe)?\s/i.test(s)));
+};
 for (const f of sources)
-  if (!GIT_STARTERS.has(f) && STARTS_GIT.test(fs.readFileSync(path.join(root, f), "utf8")))
+  if (!GIT_STARTERS.has(f) && startsGit(fs.readFileSync(path.join(root, f), "utf8")))
     fail.push(`${f} starts git; only ${[...GIT_STARTERS].join(" and ")} may`);
-if (!sources.some((f) => GIT_STARTERS.has(f) && STARTS_GIT.test(fs.readFileSync(path.join(root, f), "utf8"))))
-  fail.push("no module starts git where check-architecture.mjs looks; fix GIT_STARTERS or STARTS_GIT");
+// If the tokens stopped being read, the check would pass while looking at nothing: each starter must still name git
+for (const f of GIT_STARTERS)
+  if (!sources.includes(f) || !startsGit(fs.readFileSync(path.join(root, f), "utf8")))
+    fail.push(`${f} names no git to start where check-architecture.mjs looks; fix GIT_STARTERS`);
 
 if (fail.length) {
   console.error(`architecture:\n${fail.map((f) => `  ${f}`).join("\n")}`);
