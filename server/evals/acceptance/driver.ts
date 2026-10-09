@@ -328,23 +328,23 @@ export async function createDriver(world: World): Promise<Driver> {
     const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
     if (s.entrypoint) process.env.CLAUDE_CODE_ENTRYPOINT = s.entrypoint;
     try {
-      hook("start", { hook_event_name: "SessionStart" });
+      await hook("start", { hook_event_name: "SessionStart" });
       for (const [i, t] of s.turns.entries()) {
         const turn = turnId(i + 1);
-        hook(turn, { hook_event_name: "UserPromptSubmit", prompt: t.owner });
+        await hook(turn, { hook_event_name: "UserPromptSubmit", prompt: t.owner });
         for (const tool of t.record_tools ?? [])
           await recordCall(tool, { host, session: s.id, turn, entrypoint: s.entrypoint ?? "cli" });
         for (const [k, a] of (t.asks ?? []).entries())
-          hook(turn, {
+          await hook(turn, {
             hook_event_name: "PostToolUse",
             tool_use_id: `${turn}-ask-${k}`,
             tool_name: "AskUserQuestion",
             tool_input: { questions: [{ question: a.question }] },
             tool_response: { answers: { [a.question]: a.answer } },
           });
-        t.edits.forEach((rel, k) => {
+        for (const [k, rel] of t.edits.entries()) {
           const abs = touch(rel, i + 1);
-          hook(turn, {
+          await hook(turn, {
             hook_event_name: "PostToolUse",
             tool_use_id: `${turn}-edit-${k}`,
             ...(host === "codex"
@@ -354,12 +354,12 @@ export async function createDriver(world: World): Promise<Driver> {
                 }
               : { tool_name: "Edit", tool_input: { file_path: abs } }),
           });
-        });
+        }
         for (const rel of t.shell_edits ?? []) touch(rel, i + 1);
-        if (t.compact) hook(turn, { hook_event_name: "SessionStart", source: "compact" });
+        if (t.compact) await hook(turn, { hook_event_name: "SessionStart", source: "compact" });
         if (t.ends !== "interrupt")
-          hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
-        else if (host === "codex") hook(turn, { hook_event_name: "Interrupt" });
+          await hook(turn, { hook_event_name: "Stop", last_assistant_message: t.assistant });
+        else if (host === "codex") await hook(turn, { hook_event_name: "Interrupt" });
         for (const rel of t.owner_edits_after ?? []) touch(rel, i + 1);
       }
     } finally {

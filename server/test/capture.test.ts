@@ -1,3 +1,4 @@
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -38,7 +39,7 @@ import { pendingText } from "../src/extract.ts";
 import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
 import { callSession } from "../src/trace.ts";
-import { snapshot } from "../src/worktree.ts";
+import { changed, snapshot } from "../src/worktree.ts";
 import { at, insert, project, session, statements, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
@@ -335,12 +336,20 @@ test("splits AskUserQuestion into the model's questions and the owner's answers"
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-capture-home-")));
 const realHome = process.env.HOME;
+const realProfile = process.env.USERPROFILE;
+const realTemp = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
 const repoDir = path.join(home, "repo");
 before(() => {
   // Run from Claude Code's Bash, this test inherits the environment variables that point to the parent session (SPHICA_PARENT_SESSION and CLAUDE_CODE_ENTRYPOINT).
   delete process.env.SPHICA_PARENT_SESSION;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   process.env.HOME = home;
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = home;
+  // The work tree comparisons refuse an isolated directory inside the temp directory, which an agent can write: the temp directory
+  // moves under this HOME, beside its .sphica, as on a machine where HOME is not in the temp directory
+  fs.mkdirSync(path.join(home, "tmp"));
+  for (const k of ["TMPDIR", "TMP", "TEMP"] as const) process.env[k] = path.join(home, "tmp");
   // SPHICA_HOME would win over the swapped HOME and point the queue at the shell's directory
   delete process.env.SPHICA_HOME;
   execFileSync("git", ["init", "-q", repoDir], { stdio: "ignore" });
@@ -351,6 +360,11 @@ before(() => {
 });
 after(() => {
   process.env.HOME = realHome;
+  if (realProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = realProfile;
+  for (const [k, v] of Object.entries(realTemp))
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
   fs.rmSync(home, { recursive: true, force: true });
 });
 const spooled = (): Spooled[] => {
@@ -387,40 +401,40 @@ test("SPHICA_HOME moves the database, the queue, and the local project table", (
   }
 });
 
-test("owner messages, the last AI reply, and edited files go into the queue", () => {
+test("owner messages, the last AI reply, and edited files go into the queue", async () => {
   reset();
   const base = { session_id: "s1", prompt_id: "p1", cwd: path.join(repoDir, "server") };
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "UserPromptSubmit",
     prompt: "DB を作り直す。キーは sk-proj-abcdefghijklmnopqrstuvwxyz0123",
   });
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "PostToolUse",
     tool_name: "Edit",
     tool_input: { file_path: path.join(repoDir, "db", "schema.sql") },
   });
   // Files outside the repository and files only read (Read) are not kept.
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "PostToolUse",
     tool_name: "Edit",
     tool_input: { file_path: "/etc/hosts" },
   });
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "PostToolUse",
     tool_name: "Read",
     tool_input: { file_path: "README.md" },
   });
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "PostToolUse",
     tool_name: "Read",
     tool_input: { file_path: path.join(repoDir, ".sphica/changes/auth/design.md") },
   });
-  const r = onHook("claude-code", {
+  const r = await onHook("claude-code", {
     ...base,
     hook_event_name: "Stop",
     last_assistant_message: "作り直した。",
@@ -452,9 +466,9 @@ test("owner messages, the last AI reply, and edited files go into the queue", ()
   );
 });
 
-test("an AskUserQuestion answer is the owner's, its questions the assistant's, and the questions come first", () => {
+test("an AskUserQuestion answer is the owner's, its questions the assistant's, and the questions come first", async () => {
   reset();
-  onHook("claude-code", {
+  await onHook("claude-code", {
     session_id: "s1",
     prompt_id: "p2",
     cwd: repoDir,
@@ -475,25 +489,47 @@ test("an AskUserQuestion answer is the owner's, its questions the assistant's, a
 });
 
 // One odd entry in git status must not stop recording: the hook swallows the error and the whole turn would go unrecorded
-test("a self-referential symlink in the tree does not stop the snapshot", () => {
+test("a self-referential symlink in the tree does not stop the snapshot", async () => {
   const repo = fs.mkdtempSync(path.join(home, "loop-"));
   execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
   fs.symlinkSync("loop", path.join(repo, "loop"));
   fs.writeFileSync(path.join(repo, "a.txt"), "a");
-  const snap = snapshot(repo);
+  const snap = await snapshot(repo);
   assert.deepEqual(Object.keys(snap?.entries ?? {}).sort(), ["a.txt", "loop"]);
 });
 
+// A turn that commits many files still reports them: the commit-to-commit listing is not cut at git's default output size
+test("files committed in a turn are found even when their names fill more than a megabyte", () => {
+  const repo = fs.mkdtempSync(path.join(home, "many-"));
+  const git = (args: string[], input?: string) =>
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+      encoding: "utf8",
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+    }).trim();
+  git(["init", "-q"]);
+  git(["commit", "-q", "--allow-empty", "-m", "start"]);
+  const before = git(["rev-parse", "HEAD"]);
+  // 12,000 paths of 96 characters, all one blob, written to the index without touching the work tree
+  const blob = git(["hash-object", "-w", "--stdin"], "x\n");
+  const names = Array.from({ length: 12_000 }, (_, i) => `d/${String(i).padStart(6, "0")}-${"n".repeat(87)}`);
+  git(["update-index", "--index-info"], names.map((n) => `100644 ${blob}\t${n}`).join("\n"));
+  const tree = git(["write-tree"]);
+  const after = git(["commit-tree", tree, "-p", before, "-m", "many"]);
+  const got = changed(repo, { head: before, entries: {} }, { head: after, entries: {} });
+  assert.equal(got.length, 200, "the turn's cap, not nothing");
+});
+
 // The database refuses a path with a control character: such a file is left out, so it cannot make its turn's record rejected
-test("a file whose name holds a control character is left out of the snapshot", () => {
+test("a file whose name holds a control character is left out of the snapshot", async () => {
   const repo = fs.mkdtempSync(path.join(home, "bell-"));
   execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
   fs.writeFileSync(path.join(repo, "a.txt"), "a");
   fs.writeFileSync(path.join(repo, "b\u0007c.txt"), "b");
-  assert.deepEqual(Object.keys(snapshot(repo)?.entries ?? {}), ["a.txt"]);
+  assert.deepEqual(Object.keys((await snapshot(repo))?.entries ?? {}), ["a.txt"]);
 });
 
-test("a turn records the paths git status shows changing, including edits made outside the edit tools and files committed in the turn", () => {
+test("a turn records the paths git status shows changing, including edits made outside the edit tools and files committed in the turn", async () => {
   const repo = path.join(home, "status-repo");
   const git = (...args: string[]) =>
     execFileSync(
@@ -522,12 +558,12 @@ test("a turn records the paths git status shows changing, including edits made o
   fs.writeFileSync(path.join(repo, "dirty.ts"), "owner\n");
   reset();
   const base = { session_id: "st", prompt_id: "t1", cwd: repo };
-  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
   fs.writeFileSync(path.join(repo, "kept.ts"), "b\n"); // edited by a shell command
   fs.writeFileSync(path.join(repo, "新規 file.ts"), "c\n"); // untracked, with a space and non-ASCII
   fs.writeFileSync(path.join(repo, "later.ts"), "d\n");
   git("commit", "-qm", "turn", "--", "later.ts"); // committed within the turn, so clean again at the end
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
   const seen = spooled().flatMap((x) => (x.kind === "edit" ? [[x.path, x.via, x.turn]] : []));
   assert.deepEqual(seen.sort(), [
     ["kept.ts", "status", "t1"],
@@ -537,10 +573,10 @@ test("a turn records the paths git status shows changing, including edits made o
   // A message typed while the turn runs keeps the turn's starting point, and the next turn starts from the end of this one
   reset();
   const next = { ...base, prompt_id: "t2" };
-  onHook("claude-code", { ...next, hook_event_name: "UserPromptSubmit", prompt: "次" });
+  await onHook("claude-code", { ...next, hook_event_name: "UserPromptSubmit", prompt: "次" });
   fs.writeFileSync(path.join(repo, "kept.ts"), "e\n");
-  onHook("claude-code", { ...next, hook_event_name: "UserPromptSubmit", prompt: "追加で" });
-  onHook("claude-code", { ...next, hook_event_name: "Stop", last_assistant_message: "終えた。" });
+  await onHook("claude-code", { ...next, hook_event_name: "UserPromptSubmit", prompt: "追加で" });
+  await onHook("claude-code", { ...next, hook_event_name: "Stop", last_assistant_message: "終えた。" });
   assert.deepEqual(
     spooled().flatMap((x) => (x.kind === "edit" ? [x.path] : [])),
     ["kept.ts"],
@@ -565,16 +601,26 @@ function boundaryRepo(name: string) {
   };
 }
 
-test("turn boundary: a file the owner edits after interrupting a turn is not the next turn's (Claude Code)", () => {
+test("turn boundary: a file the owner edits after interrupting a turn is not the next turn's (Claude Code)", async () => {
   const { repo, edit, seen } = boundaryRepo("interrupt-claude");
   const base = { session_id: "ic", cwd: repo };
-  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "直して",
+  });
   edit("agent-a.ts");
   // Interrupted: Claude Code sends no Stop. The owner fixes a file by hand, then asks a question
   edit("owner-b.ts");
-  onHook("claude-code", { ...base, prompt_id: "t2", hook_event_name: "UserPromptSubmit", prompt: "なぜ？" });
+  await onHook("claude-code", {
+    ...base,
+    prompt_id: "t2",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "なぜ？",
+  });
   edit("agent-c.ts");
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     prompt_id: "t2",
     hook_event_name: "Stop",
@@ -583,26 +629,26 @@ test("turn boundary: a file the owner edits after interrupting a turn is not the
   assert.deepEqual(seen(), ["t2:agent-c.ts"]);
 });
 
-test("turn boundary: a file the owner edits after a Codex interrupt is not the next turn's", () => {
+test("turn boundary: a file the owner edits after a Codex interrupt is not the next turn's", async () => {
   const { repo, edit, seen } = boundaryRepo("interrupt-codex");
   const base = { session_id: "icx", cwd: repo };
-  onHook("codex", { ...base, turn_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("codex", { ...base, turn_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
   edit("agent-a.ts");
-  onHook("codex", { ...base, turn_id: "t1", hook_event_name: "Interrupt" });
+  await onHook("codex", { ...base, turn_id: "t1", hook_event_name: "Interrupt" });
   edit("owner-b.ts");
   // A notice starts the next turn: it is not the owner's words, but it still starts a turn
-  onHook("codex", {
+  await onHook("codex", {
     ...base,
     turn_id: "t2",
     hook_event_name: "UserPromptSubmit",
     prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
   });
   edit("agent-c.ts");
-  onHook("codex", { ...base, turn_id: "t2", hook_event_name: "Stop", last_assistant_message: "done" });
+  await onHook("codex", { ...base, turn_id: "t2", hook_event_name: "Stop", last_assistant_message: "done" });
   assert.deepEqual(seen(), ["t2:agent-c.ts"]);
 });
 
-test("turn boundary: compaction in the middle of a turn keeps the turn's starting point", () => {
+test("turn boundary: compaction in the middle of a turn keeps the turn's starting point", async () => {
   for (const host of ["claude-code", "codex"] as const) {
     const { repo, edit, seen } = boundaryRepo(`compact-${host}`);
     const base = {
@@ -610,36 +656,41 @@ test("turn boundary: compaction in the middle of a turn keeps the turn's startin
       cwd: repo,
       ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
     };
-    onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+    await onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
     edit("before.ts");
     // Hook input carries more fields than capture reads (source tells a compaction)
     const compact = { ...base, hook_event_name: "SessionStart", source: "compact" };
-    onHook(host, compact);
+    await onHook(host, compact);
     edit("after.ts");
-    onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+    await onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
     assert.deepEqual(seen(), ["t1:after.ts", "t1:before.ts"], host);
   }
 });
 
-test("turn boundary: a late Stop of an interrupted turn does not take the next turn's edits", () => {
+test("turn boundary: a late Stop of an interrupted turn does not take the next turn's edits", async () => {
   const { repo, edit, seen } = boundaryRepo("late-stop");
   const base = { session_id: "ls", cwd: repo };
-  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "直して" });
-  onHook("claude-code", {
+  await onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "UserPromptSubmit",
+    prompt: "直して",
+  });
+  await onHook("claude-code", {
     ...base,
     prompt_id: "t2",
     hook_event_name: "UserPromptSubmit",
     prompt: "やめて、こっち",
   });
   edit("t2-only.ts");
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     prompt_id: "t1",
     hook_event_name: "Stop",
     last_assistant_message: "late",
   });
   assert.deepEqual(seen(), []);
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     prompt_id: "t2",
     hook_event_name: "Stop",
@@ -648,136 +699,140 @@ test("turn boundary: a late Stop of an interrupted turn does not take the next t
   assert.deepEqual(seen(), ["t2:t2-only.ts"]);
 });
 
-test("turn boundary: a Stop hook that keeps the turn going gets the edits made after the first Stop", () => {
+test("turn boundary: a Stop hook that keeps the turn going gets the edits made after the first Stop", async () => {
   const { repo, edit, seen } = boundaryRepo("continued");
   const base = { session_id: "ct", cwd: repo, prompt_id: "t1" };
-  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
   edit("first.ts");
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
   // Another plugin's Stop hook blocks the stop: the same turn goes on without a new prompt
   edit("after-feedback.ts");
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "テストも直した。" });
+  await onHook("claude-code", {
+    ...base,
+    hook_event_name: "Stop",
+    last_assistant_message: "テストも直した。",
+  });
   assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
 });
 
-test("turn boundary: a kept-going Stop that finishes after the same id started again leaves the new start alone", () => {
+test("turn boundary: a kept-going Stop that finishes after the same id started again leaves the new start alone", async () => {
   const { repo, edit, seen } = boundaryRepo("continued-late");
   const dir = turnDir("claude-code", "cl");
   const base = { session_id: "cl", cwd: repo, prompt_id: "t1" };
-  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
-  const finishLate = closeTurn(dir, "t1", repo);
+  await onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  const finishLate = await closeTurn(dir, "t1", repo);
   edit("owner.ts");
   // A notice reuses the id and starts the turn again before the late Stop writes
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "UserPromptSubmit",
     prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
   });
   assert.deepEqual(finishLate?.(), []);
   edit("new-agent.ts");
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
   assert.deepEqual(seen(), ["t1:new-agent.ts"]);
 });
 
-test("turn boundary: a Stop whose snapshot fails leaves the start for the Stop that keeps the turn going", () => {
+test("turn boundary: a Stop whose snapshot fails leaves the start for the Stop that keeps the turn going", async () => {
   const { repo, edit, seen } = boundaryRepo("stop-fails");
   const base = { session_id: "sf", cwd: repo, prompt_id: "t1" };
-  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
   edit("first.ts");
   const index = path.join(repo, ".git", "index");
   const saved = fs.existsSync(index) ? fs.readFileSync(index) : null;
   fs.writeFileSync(index, "not an index");
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
   if (saved) fs.writeFileSync(index, saved);
   else fs.rmSync(index);
   edit("after-feedback.ts");
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
   assert.deepEqual(seen(), ["t1:after-feedback.ts", "t1:first.ts"]);
 });
 
-test("turn boundary: a turn whose start snapshot failed still ends at its Stop, so a reused id snapshots again", () => {
+test("turn boundary: a turn whose start snapshot failed still ends at its Stop, so a reused id snapshots again", async () => {
   const { repo, edit, seen } = boundaryRepo("start-fails");
   const base = { session_id: "sx", cwd: repo, prompt_id: "t1" };
   const index = path.join(repo, ".git", "index");
   const saved = fs.existsSync(index) ? fs.readFileSync(index) : null;
   fs.writeFileSync(index, "not an index");
-  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
+  await onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "直して" });
   if (saved) fs.writeFileSync(index, saved);
   else fs.rmSync(index);
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
-  onHook("claude-code", {
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "直した。" });
+  await onHook("claude-code", {
     ...base,
     hook_event_name: "UserPromptSubmit",
     prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
   });
   edit("later.ts");
-  onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
+  await onHook("claude-code", { ...base, hook_event_name: "Stop", last_assistant_message: "続けた。" });
   assert.deepEqual(seen(), ["t1:later.ts"]);
 });
 
-test("turn boundary: a start saved late, after a newer turn numbered itself, ties and gives neither turn the edits", () => {
+test("turn boundary: a start saved late, after a newer turn numbered itself, ties and gives neither turn the edits", async () => {
   const { repo, edit } = boundaryRepo("late-save");
   const dir = turnDir("claude-code", "lv");
-  const saveT1 = openTurn(dir, "t1", repo);
-  openTurn(dir, "t2", repo)?.();
+  const saveT1 = await openTurn(dir, "t1", repo);
+  (await openTurn(dir, "t2", repo))?.();
   edit("t2-only.ts");
   saveT1?.();
-  assert.deepEqual(closeTurn(dir, "t1", repo)?.(), []);
-  assert.deepEqual(closeTurn(dir, "t2", repo)?.(), []);
+  assert.deepEqual((await closeTurn(dir, "t1", repo))?.(), []);
+  assert.deepEqual((await closeTurn(dir, "t2", repo))?.(), []);
 });
 
-test("turn boundary: a turn that begins between another turn's end snapshot and its check takes the edits from that turn", () => {
+test("turn boundary: a turn that begins between another turn's end snapshot and its check takes the edits from that turn", async () => {
   const { repo, edit } = boundaryRepo("between");
   const dir = turnDir("claude-code", "bt");
-  openTurn(dir, "t1", repo)?.();
+  (await openTurn(dir, "t1", repo))?.();
   edit("a.ts");
-  const finishT1 = closeTurn(dir, "t1", repo);
-  openTurn(dir, "t2", repo)?.();
+  const finishT1 = await closeTurn(dir, "t1", repo);
+  (await openTurn(dir, "t2", repo))?.();
   assert.deepEqual(finishT1?.(), []);
 });
 
-test("turn boundary: the newest turn cannot be told with an unreadable or unnumbered start, and temporary files are not starts", () => {
+test("turn boundary: the newest turn cannot be told with an unreadable or unnumbered start, and temporary files are not starts", async () => {
   const { repo, edit } = boundaryRepo("unknown");
   for (const [name, body] of [
     ["unreadable.json", "{"],
     ["unnumbered.json", JSON.stringify({ head: null, entries: null, running: false, turn: "x", seq: null })],
   ] as const) {
     const dir = turnDir("claude-code", `un-${name}`);
-    openTurn(dir, "t1", repo)?.();
+    (await openTurn(dir, "t1", repo))?.();
     edit("a.ts");
     fs.writeFileSync(path.join(dir, name), body);
-    assert.deepEqual(closeTurn(dir, "t1", repo)?.(), [], name);
+    assert.deepEqual((await closeTurn(dir, "t1", repo))?.(), [], name);
     // A turn numbered while a start cannot be read is unnumbered itself
-    openTurn(dir, "t2", repo)?.();
+    (await openTurn(dir, "t2", repo))?.();
     edit("b.ts");
-    assert.deepEqual(closeTurn(dir, "t2", repo)?.(), [], `${name} then t2`);
+    assert.deepEqual((await closeTurn(dir, "t2", repo))?.(), [], `${name} then t2`);
   }
   const dir = turnDir("claude-code", "un-tmp");
-  openTurn(dir, "t1", repo)?.();
+  (await openTurn(dir, "t1", repo))?.();
   edit("c.ts");
   fs.writeFileSync(path.join(dir, ".half.json.1.tmp"), "{");
-  assert.deepEqual(closeTurn(dir, "t1", repo)?.(), ["c.ts"]);
+  assert.deepEqual((await closeTurn(dir, "t1", repo))?.(), ["c.ts"]);
 });
 
-test("turn boundary: a newer turn counts whether or not its snapshot failed or it already ended", () => {
+test("turn boundary: a newer turn counts whether or not its snapshot failed or it already ended", async () => {
   const { repo, edit } = boundaryRepo("newer");
   for (const [entries, running] of [
     [null, true],
     [{}, false],
   ] as const) {
     const dir = turnDir("claude-code", `nw-${running}`);
-    openTurn(dir, "t1", repo)?.();
+    (await openTurn(dir, "t1", repo))?.();
     edit("a.ts");
     fs.writeFileSync(
       path.join(dir, "t2.json"),
       JSON.stringify({ head: null, entries, running, turn: "t2", seq: 2 }),
     );
-    assert.deepEqual(closeTurn(dir, "t1", repo)?.(), [], `running ${running}`);
+    assert.deepEqual((await closeTurn(dir, "t1", repo))?.(), [], `running ${running}`);
   }
 });
 
-test("turn boundary: Stop and Interrupt keep a start's turn and number, and a reused id after a Stop starts again from there", () => {
+test("turn boundary: Stop and Interrupt keep a start's turn and number, and a reused id after a Stop starts again from there", async () => {
   const { repo, edit } = boundaryRepo("keep");
   const read = (dir: string) =>
     fs
@@ -787,25 +842,35 @@ test("turn boundary: Stop and Interrupt keep a start's turn and number, and a re
       .map(({ turn, seq, running }) => ({ turn, seq, running }));
   const base = { session_id: "kp", cwd: repo };
   const dir = turnDir("claude-code", "kp");
-  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "a" });
-  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "Stop", last_assistant_message: "b" });
+  await onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "UserPromptSubmit", prompt: "a" });
+  await onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "Stop",
+    last_assistant_message: "b",
+  });
   assert.deepEqual(read(dir), [{ turn: "t1", seq: 1, running: false }]);
   edit("owner.ts");
   // A notice that reuses the last turn's id starts that turn again
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     prompt_id: "t1",
     hook_event_name: "UserPromptSubmit",
     prompt: "<task-notification>\n<status>completed</status>\n</task-notification>",
   });
   edit("agent.ts");
-  onHook("claude-code", { ...base, prompt_id: "t1", hook_event_name: "Stop", last_assistant_message: "c" });
+  await onHook("claude-code", {
+    ...base,
+    prompt_id: "t1",
+    hook_event_name: "Stop",
+    last_assistant_message: "c",
+  });
   assert.deepEqual(seen(), ["t1:agent.ts"]);
   assert.deepEqual(read(dir), [{ turn: "t1", seq: 2, running: false }]);
 
   const cx = { session_id: "kpx", cwd: repo, turn_id: "t1" };
-  onHook("codex", { ...cx, hook_event_name: "UserPromptSubmit", prompt: "a" });
-  onHook("codex", { ...cx, hook_event_name: "Interrupt" });
+  await onHook("codex", { ...cx, hook_event_name: "UserPromptSubmit", prompt: "a" });
+  await onHook("codex", { ...cx, hook_event_name: "Interrupt" });
   assert.deepEqual(read(turnDir("codex", "kpx")), [{ turn: "t1", seq: 1, running: false }]);
   // An interrupted turn has nothing left to compare, so it keeps only its number
   const [cut] = fs
@@ -819,13 +884,13 @@ test("turn boundary: Stop and Interrupt keep a start's turn and number, and a re
   }
 });
 
-test("turn boundary: session start writes no start and passes over session directories and older single files", () => {
+test("turn boundary: session start writes no start and passes over session directories and older single files", async () => {
   const { repo } = boundaryRepo("start");
   const base = { session_id: "ss", cwd: repo, prompt_id: "t1" };
-  onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "a" });
+  await onHook("claude-code", { ...base, hook_event_name: "UserPromptSubmit", prompt: "a" });
   fs.writeFileSync(path.join(path.dirname(turnDir("claude-code", "ss")), "0123456789abcdef.json"), "{}");
   const startup = { ...base, hook_event_name: "SessionStart", source: "startup" };
-  onHook("claude-code", startup);
+  await onHook("claude-code", startup);
   const dir = turnDir("claude-code", "ss");
   assert.deepEqual(
     fs.readdirSync(dir).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).running),
@@ -833,12 +898,12 @@ test("turn boundary: session start writes no start and passes over session direc
   );
 });
 
-test("prune drops a session's starts only when all of them are old, and removes older single files", () => {
+test("prune drops a session's starts only when all of them are old, and removes older single files", async () => {
   const { repo } = boundaryRepo("prune");
   const old = new Date(Date.now() - (HOLD_DAYS + 10) * 24 * 60 * 60 * 1000);
-  const start = (session: string, turn: string, aged: boolean) => {
+  const start = async (session: string, turn: string, aged: boolean) => {
     const dir = turnDir("claude-code", session);
-    openTurn(dir, turn, repo)?.();
+    (await openTurn(dir, turn, repo))?.();
     const file = fs
       .readdirSync(dir)
       .map((f) => path.join(dir, f))
@@ -846,10 +911,10 @@ test("prune drops a session's starts only when all of them are old, and removes 
     if (aged && file) fs.utimesSync(file, old, old);
     return dir;
   };
-  const idle = start("idle", "t1", true);
-  start("idle", "t2", true);
-  const live = start("live", "t1", true);
-  start("live", "t2", false);
+  const idle = await start("idle", "t1", true);
+  await start("idle", "t2", true);
+  const live = await start("live", "t1", true);
+  await start("live", "t2", false);
   // A session whose first start is being written has an empty directory for a moment
   const opening = turnDir("claude-code", "opening");
   fs.mkdirSync(opening, { recursive: true });
@@ -859,7 +924,7 @@ test("prune drops a session's starts only when all of them are old, and removes 
   // A session still running the older hooks uses its single file until it reloads
   const current = path.join(path.dirname(idle), "fedcba9876543210.json");
   fs.writeFileSync(current, "{}");
-  onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
+  await onHook("claude-code", { session_id: "other", cwd: repo, hook_event_name: "SessionStart" });
   assert.equal(fs.existsSync(idle), false);
   assert.equal(fs.readdirSync(live).length, 2);
   assert.equal(fs.existsSync(opening), true, "an empty session directory is left alone");
@@ -867,7 +932,7 @@ test("prune drops a session's starts only when all of them are old, and removes 
   assert.equal(fs.existsSync(current), true);
 });
 
-test("a starting point that cannot be written costs only the status edits, not the messages or the send", () => {
+test("a starting point that cannot be written costs only the status edits, not the messages or the send", async () => {
   const { repo, edit } = boundaryRepo("unwritable");
   for (const host of ["claude-code", "codex"] as const) {
     const session = `uw-${host}`;
@@ -876,19 +941,22 @@ test("a starting point that cannot be written costs only the status edits, not t
       cwd: repo,
       ...(host === "codex" ? { turn_id: "t1" } : { prompt_id: "t1" }),
     };
-    onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "first" });
+    await onHook(host, { ...base, hook_event_name: "UserPromptSubmit", prompt: "first" });
     const dir = turnDir(host, session);
     const [name] = fs.readdirSync(dir);
     // The temporary file every write of this start goes through is a directory, so each write fails
     fs.mkdirSync(path.join(dir, `.${name}.${process.pid}.tmp`));
     edit(`${host}.ts`);
-    assert.deepEqual(onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "done" }), {
-      flush: true,
-    });
+    assert.deepEqual(
+      await onHook(host, { ...base, hook_event_name: "Stop", last_assistant_message: "done" }),
+      {
+        flush: true,
+      },
+    );
     if (host === "codex")
-      assert.deepEqual(onHook(host, { ...base, hook_event_name: "Interrupt" }), { flush: true });
+      assert.deepEqual(await onHook(host, { ...base, hook_event_name: "Interrupt" }), { flush: true });
     const next = { ...base, ...(host === "codex" ? { turn_id: "t2" } : { prompt_id: "t2" }) };
-    onHook(host, { ...next, hook_event_name: "UserPromptSubmit", prompt: "second" });
+    await onHook(host, { ...next, hook_event_name: "UserPromptSubmit", prompt: "second" });
     assert.ok(
       spooled().some((x) => x.kind === "message" && x.session === session && x.body === "second"),
       `${host}: the next prompt is still recorded`,
@@ -896,7 +964,7 @@ test("a starting point that cannot be written costs only the status edits, not t
   }
 });
 
-test("the owner's prompt is queued before the turn's start is taken, and a failing prune still shows the session notice", () => {
+test("the owner's prompt is queued before the turn's start is taken, and a failing prune still shows the session notice", async () => {
   const { repo } = boundaryRepo("order");
   const written: string[] = [];
   const write = fs.writeFileSync;
@@ -905,7 +973,7 @@ test("the owner's prompt is queued before the turn's start is taken, and a faili
     return (write as (...a: unknown[]) => void)(file, ...rest);
   });
   try {
-    onHook("claude-code", {
+    await onHook("claude-code", {
       session_id: "or",
       cwd: repo,
       prompt_id: "t1",
@@ -926,14 +994,18 @@ test("the owner's prompt is queued before the turn's start is taken, and a faili
     return (read as (...a: unknown[]) => unknown)(dir, ...rest);
   });
   try {
-    const started = onHook("claude-code", { session_id: "or", cwd: repo, hook_event_name: "SessionStart" });
+    const started = await onHook("claude-code", {
+      session_id: "or",
+      cwd: repo,
+      hook_event_name: "SessionStart",
+    });
     assert.ok("notice" in started);
   } finally {
     failing.mock.restore();
   }
 });
 
-test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", () => {
+test("notifications and relayed messages are not owner messages, and all messages and replies on one turn id are kept with per-body ids", async () => {
   reset();
   const base = { session_id: "s1", cwd: repoDir };
   const prompt = (prompt_id: string, prompt: string) =>
@@ -954,7 +1026,7 @@ test("notifications and relayed messages are not owner messages, and all message
       tool_input: { file_path: path.join(repoDir, file) },
     });
   // Edits are observations of their own; one before the owner has said anything is kept too.
-  edit("p0", "a.ts");
+  await edit("p0", "a.ts");
   // Messages that arrive mid-turn come with the running turn's id.
   for (const p of [
     "DB を作り直す",
@@ -973,16 +1045,16 @@ test("notifications and relayed messages are not owner messages, and all message
     "やっぱり role も分けて",
     "急ぎで",
   ])
-    prompt("p1", p);
+    await prompt("p1", p);
   // The same input arriving twice gets the same id (one row in the database).
-  prompt("p1", "急ぎで");
-  stop("作り直した。");
+  await prompt("p1", "急ぎで");
+  await stop("作り直した。");
   // A turn that starts with a message from another session reuses the previous turn's id.
-  prompt("p1", "Another Claude session sent a message while you were working:\n確認して");
-  stop("伝言も確かめた。");
+  await prompt("p1", "Another Claude session sent a message while you were working:\n確認して");
+  await stop("伝言も確かめた。");
   // Files touched in a turn started by a completion notice link to the owner's last message.
-  prompt("p2", "  <task-notification>\n</task-notification>");
-  edit("p2", "b.ts");
+  await prompt("p2", "  <task-notification>\n</task-notification>");
+  await edit("p2", "b.ts");
   const got = spooled();
   const messages = got.flatMap((m) => (m.kind === "message" ? [m] : []));
   assert.deepEqual(messages.map((m) => [shape(m.id), m.body]).sort(), [
@@ -1004,11 +1076,11 @@ test("notifications and relayed messages are not owner messages, and all message
   );
 });
 
-test("drops notifications with text after the closing tag, and keeps owner questions that start with the same words without a separator", () => {
+test("drops notifications with text after the closing tag, and keeps owner questions that start with the same words without a separator", async () => {
   reset();
   const base = { session_id: "s1", prompt_id: "p1", cwd: repoDir, hook_event_name: "UserPromptSubmit" };
   // A notice for a background shell waiting on input has its last output after the closing tag.
-  onHook("claude-code", {
+  await onHook("claude-code", {
     ...base,
     prompt: "<task-notification>\n<status>running</status>\n</task-notification>\nLast output: Password:",
   });
@@ -1016,7 +1088,7 @@ test("drops notifications with text after the closing tag, and keeps owner quest
     "Another Claude session sent a message と出たが、どこから来たか調べて",
     "3 background agents were stopped by the user って何？",
   ];
-  for (const prompt of asked) onHook("claude-code", { ...base, prompt });
+  for (const prompt of asked) await onHook("claude-code", { ...base, prompt });
   assert.deepEqual(
     spooled().flatMap((m) => (m.kind === "message" ? [m.body] : [])),
     asked,
@@ -1095,11 +1167,11 @@ test("writing to the database counts only new messages, records edits as observa
   }
 });
 
-test("children started by an agent and sessions outside a project write nothing", () => {
+test("children started by an agent and sessions outside a project write nothing", async () => {
   reset();
   process.env.SPHICA_PARENT_SESSION = "parent";
   try {
-    onHook("claude-code", {
+    await onHook("claude-code", {
       session_id: "child",
       prompt_id: "p",
       cwd: repoDir,
@@ -1109,7 +1181,7 @@ test("children started by an agent and sessions outside a project write nothing"
   } finally {
     delete process.env.SPHICA_PARENT_SESSION;
   }
-  onHook("claude-code", {
+  await onHook("claude-code", {
     session_id: "s2",
     prompt_id: "p",
     cwd: os.tmpdir(),
@@ -1339,38 +1411,39 @@ test("a newline in the home path cannot forge a line outside the notice box", ()
   }
 });
 
-test("SessionStart passes this session id down to children", () => {
+test("SessionStart passes this session id down to children", async () => {
   const file = path.join(home, "env-file");
   fs.writeFileSync(file, "");
   process.env.CLAUDE_ENV_FILE = file;
   try {
-    onHook("claude-code", { session_id: "abc-123", hook_event_name: "SessionStart" });
+    await onHook("claude-code", { session_id: "abc-123", hook_event_name: "SessionStart" });
     // An id of the wrong shape is not written for the shell (the shell reads CLAUDE_ENV_FILE).
-    onHook("claude-code", { session_id: "x; rm -rf ~", hook_event_name: "SessionStart" });
+    await onHook("claude-code", { session_id: "x; rm -rf ~", hook_event_name: "SessionStart" });
   } finally {
     delete process.env.CLAUDE_ENV_FILE;
   }
   assert.equal(fs.readFileSync(file, "utf8"), "export SPHICA_PARENT_SESSION=abc-123\n");
 });
 
-test("reads the edited file of a Codex apply_patch from its headers", () => {
+test("reads the edited file of a Codex apply_patch from its headers", async () => {
   reset();
   const base = { session_id: process.env.CODEX_THREAD_ID ?? "t1", turn_id: "turn-1", cwd: repoDir };
-  onHook("codex", { ...base, hook_event_name: "UserPromptSubmit", prompt: "a.ts を直して" });
-  onHook("codex", {
+  await onHook("codex", { ...base, hook_event_name: "UserPromptSubmit", prompt: "a.ts を直して" });
+  await onHook("codex", {
     ...base,
     hook_event_name: "PostToolUse",
     tool_name: "apply_patch",
     tool_input: { command: "*** Begin Patch\n*** Update File: server/src/a.ts\n@@\n+x\n*** End Patch" },
   });
-  const stopped = onHook("codex", {
+  const stopped = await onHook("codex", {
     ...base,
     hook_event_name: "Stop",
     last_assistant_message: "直した。",
   });
   assert.equal(stopped.flush, true);
   assert.equal(
-    onHook("codex", { ...base, cwd: path.join(home, "not-registered"), hook_event_name: "Interrupt" }).flush,
+    (await onHook("codex", { ...base, cwd: path.join(home, "not-registered"), hook_event_name: "Interrupt" }))
+      .flush,
     true,
   );
   assert.deepEqual(
@@ -1654,7 +1727,7 @@ test("a legacy key reaches the same project before and after the revision 8 migr
     db.owner.exec(
       "insert into project (key, name) values ('git:github.com/o/r', 'o/r'), ('git:GitHub.com/O/R', 'O/R')",
     );
-    said("移行の前", "p1");
+    await said("移行の前", "p1");
     assert.deepEqual(
       spooled().map((r) => r.project),
       ["git:GitHub.com/O/R"],
@@ -1674,7 +1747,7 @@ test("a legacy key reaches the same project before and after the revision 8 migr
         .map((r) => [r.id, r.key]),
       [[2, "git:github.com/o/r"]],
     );
-    said("移行の後", "p2");
+    await said("移行の後", "p2");
     assert.deepEqual(await flush(db.file), { sent: 1, deferred: 0, rejected: 0 });
     assert.deepEqual(where(), [
       [2, "移行の前"],

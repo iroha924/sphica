@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { leaves } from "./anchors.ts";
-import { cleanGit } from "./git.ts";
+import { insideWorkTree, listFiles } from "./git.ts";
 import { sha256 } from "./text.ts";
 
 export const RULE_LIMITS = { files: 200, bytes: 256 * 1024, depth: 8, entries: 5000 } as const;
@@ -81,18 +81,13 @@ function readBounded(root: string, realRoot: string, rel: string): string | null
 
 function gitList(root: string): { paths: string[]; incomplete: string | null } | null {
   try {
-    if (cleanGit(root, ["rev-parse", "--is-inside-work-tree"]).toString("utf8").trim() !== "true")
-      return null;
+    if (!insideWorkTree(root)) return null;
   } catch {
     return null;
   }
   try {
-    const out = cleanGit(
-      root,
-      ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", ...PATHSPECS],
-      16 * 1024 * 1024,
-    );
-    return { paths: out.toString("utf8").split("\0").filter(isRuleFile), incomplete: null };
+    const paths = listFiles(root, "tracked-and-untracked", { pathspecs: PATHSPECS, max: 16 * 1024 * 1024 });
+    return { paths: paths.filter(isRuleFile), incomplete: null };
   } catch {
     return { paths: [], incomplete: "git could not list the files" };
   }

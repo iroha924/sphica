@@ -1,4 +1,5 @@
 // Harvest's read of a pull request and how it is stored: what each source keeps, new revisions for edited text, and the closed issues.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -498,6 +499,46 @@ test("gh reads pull requests and the signed-in user from github.com only", async
   await withGh(JSON.stringify({ id: 44, login: "a".repeat(39) }), 0, async () => {
     assert.deepEqual(await ghUser(), { ok: true, id: 44, login: "a".repeat(39) });
   });
+});
+
+// gh runs outside the agent's sandbox: started in the agent's repository, or with its GIT_* variables, it could read that repository's config
+test("gh starts at HOME, outside the repository, without GIT_ variables", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const log = path.join(bin, "seen.json");
+  const saved = {
+    PATH: process.env.PATH,
+    GIT_DIR: process.env.GIT_DIR,
+    git_work_tree: process.env.git_work_tree,
+    TMPDIR: process.env.TMPDIR,
+    TMP: process.env.TMP,
+    TEMP: process.env.TEMP,
+  };
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nconst fs = require("node:fs");\nfs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), git: Object.keys(process.env).filter((k) => /^GIT_/i.test(k)) }));\nprocess.stdout.write(process.argv[3] === "user" ? '{"id":42,"login":"hana"}' : "{}");\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
+    process.env.GIT_DIR = path.join(bin, "elsewhere");
+    process.env.git_work_tree = bin;
+    // A temp directory that cannot be written plays no part: gh makes nothing there
+    process.env.TMPDIR = path.join(bin, "missing");
+    process.env.TMP = process.env.TMPDIR;
+    process.env.TEMP = process.env.TMPDIR;
+    assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana" });
+    for (const call of [() => ghUser(), () => gh("o/r")("pulls/1")]) {
+      await call();
+      const seen = JSON.parse(fs.readFileSync(log, "utf8")) as { cwd: string; git: string[] };
+      assert.equal(fs.realpathSync(seen.cwd), fs.realpathSync(os.homedir()));
+      assert.deepEqual(seen.git, []);
+    }
+  } finally {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
 });
 
 // CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97), which no longer parses

@@ -23,7 +23,7 @@ fs.mkdirSync(dist, { recursive: true });
 const build = path.join(root, ".build");
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
-const ENTRIES = ["mcp", "mcp-record", "capture", "deliver", "cli"];
+const ENTRIES = ["mcp", "mcp-record", "capture", "deliver", "cli", "git-worker"];
 for (const entry of ENTRIES) {
   run("bun", [
     "build",

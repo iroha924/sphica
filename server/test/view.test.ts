@@ -1,3 +1,4 @@
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { test } from "node:test";

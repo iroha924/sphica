@@ -7,6 +7,7 @@ import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { startDir } from "./git.ts";
 import type { SOURCE_KINDS } from "./knowledge.ts";
 import { sha256 } from "./text.ts";
 
@@ -56,8 +57,20 @@ const MAX_RESPONSE = 16 * 1024 * 1024;
 /** Project keys and owner_identity name github.com only, so GH_HOST or a configured enterprise host must not answer instead */
 const HOST = ["--hostname", "github.com"];
 
-/** CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97); "0" turns it back off */
-const plainEnv = () => ({ ...process.env, CLICOLOR_FORCE: "0" });
+/**
+ * CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97); "0" turns it back off. GIT_* variables are dropped
+ * (in any letter case): with them, the git gh may run could read a repository the caller's environment names.
+ */
+const plainEnv = () => ({
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k))),
+  CLICOLOR_FORCE: "0",
+});
+
+/**
+ * Where gh starts: where git starts (HOME), not the agent's repository, whose config gh's git would read. A repository at HOME is the
+ * owner's own, which a sandboxed agent cannot write; nothing is created, so nothing can fail to be made or removed.
+ */
+const ghCwd = startDir;
 
 export const gh =
   (repo: string, timeout = 60_000): Get =>
@@ -66,7 +79,14 @@ export const gh =
       "gh",
       ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
       // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
-      { encoding: "utf8", maxBuffer: MAX_RESPONSE, timeout, killSignal: "SIGKILL", env: plainEnv() },
+      {
+        encoding: "utf8",
+        maxBuffer: MAX_RESPONSE,
+        timeout,
+        killSignal: "SIGKILL",
+        env: plainEnv(),
+        cwd: ghCwd(),
+      },
     ).catch((e: NodeJS.ErrnoException & { killed?: boolean }) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
         throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
@@ -99,6 +119,7 @@ export async function ghUser(timeout = 15_000): Promise<SignedIn> {
       // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
       killSignal: "SIGKILL",
       env: plainEnv(),
+      cwd: ghCwd(),
     }));
   } catch (e) {
     // Once gh ran, execFile gives its exit status (null when a signal ended it); when it never started, an error name

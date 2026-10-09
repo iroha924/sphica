@@ -1,5 +1,6 @@
 // Search and read against real SQLite: a hit must hold most of the question's subject words, a superseded hit brings its successor,
 // and read shows the exact cited words with who said them and each anchor checked in a working tree.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

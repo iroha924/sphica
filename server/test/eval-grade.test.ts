@@ -1,5 +1,6 @@
 // The evaluation's structured grading: grades and Codex answers are counted only when they match their fixed shapes exactly,
 // and anything else is kept apart with the reason rather than read as a score or as "nothing found".
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";

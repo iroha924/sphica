@@ -1,6 +1,7 @@
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
 // fresh db/schema.sql. fixtures/schema-revN.sql is db/schema.sql as the last release at revision N shipped it.
 
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

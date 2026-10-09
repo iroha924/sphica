@@ -303,8 +303,9 @@ async function describe(
     for (const a of live) {
       const c = checkAnchor(root, a);
       const where = inline(`${a.path}${a.symbol ? ` ${a.symbol}` : ""}`);
+      const moved = c.state === "missing" ? await movedTo(root, a, renames, used) : "";
       out.push(
-        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${movedTo(root, a, renames, used)}` : ""}`,
+        `  - ${where} (${a.role}${a.commit_sha ? `, commit ${a.commit_sha.slice(0, 12)}` : ""}): ${c.state}${c.line ? ` at line ${c.line}` : ""}${c.state === "missing" ? ` — needs review: the code it points at is gone${moved}` : ""}`,
       );
     }
   }
@@ -438,20 +439,20 @@ async function replacements(
 }
 
 /** Where a gone file may have moved since the anchor's commit; empty when there is no commit to compare with or no rename was seen. */
-function movedTo(
+async function movedTo(
   root: string | null,
   a: { path: string; commit_sha: string | null },
   renames: Renames,
   /** The commits this record has looked up, cached ones included */
   used: Set<string>,
-): string {
+): Promise<string> {
   if (!root || !a.commit_sha || fileState(root, a.path) !== "gone") return "";
   if (!used.has(a.commit_sha)) {
     // Each lookup is a git run; a record with many anchor commits stays within the tool's time
     if (used.size >= RENAME_LOOKUPS) return "; rename not checked";
     used.add(a.commit_sha);
   }
-  if (!renames.has(a.commit_sha)) renames.set(a.commit_sha, renamesSince(root, a.commit_sha));
+  if (!renames.has(a.commit_sha)) renames.set(a.commit_sha, await renamesSince(root, a.commit_sha));
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
   const to = seen.get(a.path);

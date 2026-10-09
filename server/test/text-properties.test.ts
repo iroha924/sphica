@@ -1,5 +1,6 @@
 // Properties of the string code search and records rely on, over generated input (fast-check, fixed seed so a failure reruns the same),
 // and the growth of mask()'s time, which must stay linear: it runs on every captured message.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";

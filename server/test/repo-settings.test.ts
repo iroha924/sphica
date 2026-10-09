@@ -1,4 +1,5 @@
 // Settings a release relies on that only an admin can read: each is on, off, or unknown, and a failed read is never taken as off.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { observe, settingsState } from "../../scripts/lib/repo-settings.mjs";

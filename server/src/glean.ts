@@ -5,7 +5,7 @@ import type { Kysely } from "kysely";
 import { z } from "zod";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
-import { cleanGit } from "./git.ts";
+import { blobBytes, blobSize, commitOf, treeEntry } from "./git.ts";
 import { itemId } from "./github.ts";
 import { EVIDENCE_ROLES } from "./knowledge.ts";
 import { inline } from "./panel.ts";
@@ -165,30 +165,26 @@ type Excerpt = {
   text: string;
 };
 
-const git = (root: string, args: string[], max = MAX_FILE * 2) => cleanGit(root, args, max);
-
 /** Reads lines of a committed file. Throws with the reason for paths outside the repository, links, submodules, binary, and oversized files. */
 function readExcerpt(root: string, file: z.infer<typeof File>): Excerpt {
   const p = repoPath(file.path);
   if (!p) throw new Error(`${JSON.stringify(head(file.path, 80))} is not a path inside the repository`);
   let commit: string;
   try {
-    commit = git(root, ["rev-parse", "--verify", "-q", `${file.commit}^{commit}`])
-      .toString("utf8")
-      .trim();
+    commit = commitOf(root, file.commit);
   } catch {
     throw new Error(`${JSON.stringify(head(file.commit, 40))} is not a commit of this repository`);
   }
-  const entry = git(root, ["ls-tree", "-z", commit, "--", p]).toString("utf8").split("\0")[0] ?? "";
+  const entry = treeEntry(root, commit, p);
   const m = /^(\d{6}) (\w+) ([0-9a-f]{40})\t(.*)$/.exec(entry);
   if (!m || m[4] !== p) throw new Error(`${p} is not in commit ${commit.slice(0, 12)}`);
   const [, mode, type, blob = ""] = m;
   if (mode === "120000") throw new Error(`${p} is a symbolic link; cite the file it points to`);
   if (type !== "blob" || !["100644", "100755"].includes(mode ?? ""))
     throw new Error(`${p} is not a regular file (${type})`);
-  const size = Number(git(root, ["cat-file", "-s", blob]).toString("utf8").trim());
+  const size = blobSize(root, blob);
   if (size > MAX_FILE) throw new Error(`${p} is ${size} bytes, over the ${MAX_FILE}-byte limit`);
-  const buf = git(root, ["cat-file", "blob", blob]);
+  const buf = blobBytes(root, blob, MAX_FILE * 2);
   if (buf.includes(0)) throw new Error(`${p} is binary`);
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(buf);

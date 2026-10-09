@@ -1,5 +1,6 @@
 // Earlier owner messages against real SQLite: what records quote each one, whether a decision was recorded, the same turn as context,
 // and a matter asked across sessions with no recorded decision.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { askedBefore, askedText } from "../src/asked.ts";

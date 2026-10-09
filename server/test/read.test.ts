@@ -1,4 +1,5 @@
 // read against real SQLite and a real Git working tree: what one reply carries, and that a record reads the same whatever else is read.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

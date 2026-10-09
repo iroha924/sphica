@@ -1,5 +1,6 @@
 // The test suite's run inside its own temp directory: what it leaves there fails the run, the whole output of a failed run reaches the
 // person reading it, and the directory goes away. The real sql:reach check is driven by a fake bun, so no test suite runs inside a test.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

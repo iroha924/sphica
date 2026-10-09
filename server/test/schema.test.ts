@@ -1,6 +1,7 @@
 // Whether the constraints and triggers in db/schema.sql refuse what they should and accept what they should.
 // Writes use the owner connection (testing the schema itself, not the authorizer); the capture views are tested through their triggers.
 
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
 import { sha256, terms } from "../src/text.ts";

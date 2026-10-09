@@ -1,6 +1,7 @@
 // The full-text indexes hold terms() output from when each row was written. A change to its rules leaves every existing row indexed the old way,
 // so a search with the new rules misses them until the index is rebuilt. This pins the output for fixed inputs, so the change is noticed.
 
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SAMPLES, splitDrift } from "../src/split-check.ts";

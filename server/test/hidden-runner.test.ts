@@ -1,5 +1,6 @@
 // The hidden test runner's fences: Node's permission flags, and on macOS the OS sandbox that holds where Node's does not. Each check tries the
 // way out for real and expects it refused, so a weaker profile fails here rather than in an evaluation.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import net from "node:net";

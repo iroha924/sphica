@@ -1,5 +1,6 @@
 // The tsundoku fixture the evaluation runs on: each target task's records are saved as the task needs, and today's delivery hook shows them
 // (or, for the conflicting pair, does not), so a measured change has something to change.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

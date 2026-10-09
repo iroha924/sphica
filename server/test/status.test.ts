@@ -1,4 +1,5 @@
 // What status reports: captured and extracted counts, sessions still waiting for trace, and work in progress.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { askedBefore } from "../src/asked.ts";

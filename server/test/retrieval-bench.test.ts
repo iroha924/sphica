@@ -1,5 +1,6 @@
 // The offline retrieval benchmark must run in verify: experiments on search are judged with it, so one that cannot run, or runs with
 // fewer questions, fails here. Its numbers are compared by the experiment's own pull request, never gated here.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";

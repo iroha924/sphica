@@ -1,8 +1,8 @@
 // What changed in the working tree during a turn, from git status at the turn's start and end. Catches edits the edit-tool hooks
 // never see (shell commands, formatters) and files committed within the turn. An observation only: it never says who changed a file.
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { commitDiffNames, commitOf, isAncestor, worktreeStatus } from "./git.ts";
 
 /** The commit and a signature per changed path. A path missing from `entries` was clean. */
 export type Snapshot = { head: string | null; entries: Record<string, string> };
@@ -10,18 +10,9 @@ export type Snapshot = { head: string | null; entries: Record<string, string> };
 /** Paths reported per turn at most. A generated tree or a mass rename is not worth a row per file. */
 const MAX_PATHS = 200;
 
-const git = (root: string, args: string[]): string | null => {
-  try {
-    return execFileSync("git", ["-C", root, ...args], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5_000,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-  } catch {
-    return null;
-  }
-};
+const LIMITS = { timeout: 5_000, max: 16 * 1024 * 1024 };
+/** The status read, its isolated git directory included, ends within this or the snapshot fails */
+const STATUS_DEADLINE = 5_000;
 
 /**
  * Paths git prints relative to the root. Ones the edit table would refuse (a backslash in a POSIX name, a control character) are
@@ -33,8 +24,10 @@ const usable = (p: string): boolean => p !== "" && !p.includes("\\") && !/\p{Cc}
  * Reads `git status --porcelain=v2 -z`. The signature is the entry without its path plus the file's size and mtime, so a second edit
  * to a file that was already dirty still counts as a change.
  */
-export function snapshot(root: string): Snapshot | null {
-  const out = git(root, ["status", "--porcelain=v2", "-z", "--untracked-files=all"]);
+export async function snapshot(root: string): Promise<Snapshot | null> {
+  // One deadline for the status and the HEAD read after it
+  const until = Date.now() + STATUS_DEADLINE;
+  const out = await worktreeStatus(root, STATUS_DEADLINE);
   if (out === null) return null;
   const fields = out.split("\0");
   const entries: Record<string, string> = {};
@@ -56,7 +49,13 @@ export function snapshot(root: string): Snapshot | null {
     }
     entries[p] = `${parts.slice(0, skip).join(" ")} ${st ? `${st.size}:${st.mtimeMs}` : "gone"}`;
   }
-  const head = git(root, ["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
+  let head: string | null = null;
+  try {
+    const left = until - Date.now();
+    if (left > 0) head = commitOf(root, "HEAD", { ...LIMITS, timeout: left }) || null;
+  } catch {
+    // no commit yet
+  }
   return { head, entries };
 }
 
@@ -69,9 +68,15 @@ export function changed(root: string, before: Snapshot, after: Snapshot): string
     before.head &&
     after.head &&
     before.head !== after.head &&
-    git(root, ["merge-base", "--is-ancestor", before.head, after.head]) !== null
-  )
-    for (const p of (git(root, ["diff", "--name-only", "-z", before.head, after.head]) ?? "").split("\0"))
-      if (usable(p)) paths.add(p);
+    isAncestor(root, before.head, after.head, LIMITS)
+  ) {
+    let between: string[] = [];
+    try {
+      between = commitDiffNames(root, before.head, after.head, LIMITS);
+    } catch {
+      // the commits' files are not added
+    }
+    for (const p of between) if (usable(p)) paths.add(p);
+  }
   return [...paths].sort().slice(0, MAX_PATHS);
 }

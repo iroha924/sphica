@@ -8,9 +8,11 @@ const BUDGETS = {
   capture: 393_000,
   deliver: 429_000,
   cli: 625_000,
+  "git-worker": 13_000,
 };
 
-const HOOKS = new Set(["capture", "deliver"]);
+/** Entries that start on every prompt and tool call: the hooks, and the git worker they start to compare the work tree */
+const HOOKS = new Set(["capture", "deliver", "git-worker"]);
 
 /**
  * Problems with the built bundles. metas maps each entry to its parsed metafile, or null when the file was missing or unreadable.

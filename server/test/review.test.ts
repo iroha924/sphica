@@ -1,4 +1,5 @@
 // The decision lane of a review against real SQLite: which records a diff touches, and which verdicts are backed.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
