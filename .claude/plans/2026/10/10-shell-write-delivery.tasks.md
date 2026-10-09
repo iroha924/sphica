@@ -35,18 +35,19 @@ base: main
 
 設定がオンのとき、両ホストで shell の呼び出しの後に、まだ届いていない記録が次のモデルリクエストの前に入る。オフなら今と同じ。
 
-- [ ] T02: Post の配信（lockedPlan、文面、上限、pre_edit＋reason shell_write のログ、試用のログ）と設定の読み取り
+- [x] T02: Post の配信（lockedPlan、文面、上限、pre_edit＋reason shell_write のログ、試用のログ）と設定の読み取り
   - 種別: 追加
   - 計画: S2
   - 依存: T01（控えと比較の部品が要る）
-  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `plugin/.claude-plugin/plugin.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → オフなら Pre は控えを取らず Post は何も返さない。オンなら変わったパスのまだ届いていない記録だけを 5 件・1,500 字まで返し、読みの予算を使わない。compact の後は数え直し、subagent は別の会話。PostToolUseFailure でも届く。並行の 2 つの Post で同じ記録が 2 回出ない。ログを書けなくても本文は返り、試用のログは配信の有無によらず 1 呼び出し 1 行
   - コミット: `feat(deliver): deliver records on files a shell call changed, behind an option`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 --test-name-pattern="shell call" test/deliver.test.ts` → 2 pass（既定オフで控えを取らない、環境変数の off が plugin の設定に勝ち、plugin の設定だけでもオン、何も変えない呼び出しは何も出さない、名指さないスクリプトの書き換えで記録が届き pre_edit＋reason shell_write で記録される、同じ会話には 2 回出さない、subagent と別の会話・PostToolUseFailure・compact の後・Codex の Bash で届く、控えの無い Post は何も出さず snapshot_missing を残す、ロック中はログなしで本文を返す、試用のログは 1 呼び出し 1 行、並行の 2 つの Post でログに残る記録は 1 回）。読みの配信の「restart の後に届いた記録」を sinceRestart にくくり出して共有した。`bun run verify` → exit 0
 - [ ] T03: 両ホストの hook の登録と、userConfig の shell_write_delivery
   - 種別: 追加
   - 計画: S2
   - 依存: T02（Post の処理が要る）
-  - 変更: `plugin/hooks/hooks.json`, `plugin/hooks/codex.json`, `plugin/.claude-plugin/plugin.json`, `server/test/plugin.test.ts`, `scripts/check-hooks-live.mjs`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`
+  - 変更: `plugin/hooks/hooks.json`, `plugin/hooks/codex.json`, `server/test/plugin.test.ts`, `scripts/check-hooks-live.mjs`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/plugin.test.ts test/codex-trust.test.ts` → Claude Code の同期の PostToolUse と PostToolUseFailure（Bash|PowerShell）と Codex の PostToolUse（^Bash$、Windows は -EncodedCommand）の配信の entry があり、userConfig に既定 false の shell_write_delivery がある。`bun run hooks:live` → 足した entry を出荷する形で起動できる
   - コミット: `feat(plugin): register post-shell delivery hooks and the shell_write_delivery option`
 
@@ -102,3 +103,4 @@ base: main
 
 ## 記録
 - 2026-10-10 / T01 / SQL の呼び出し箇所は namedInCommand のものを deliverablePaths に移しただけで数が変わらず、台帳の変更は要らなかった / 変更欄から `scripts/lib/sql-call-sites.mjs` を外した
+- 2026-10-10 / T02, T03 / `bun run pairs` が、コードで読む plugin の設定が plugin.json に宣言されていることを求めた。Codex の形は deliver.test.ts の中で確かめた / userConfig の shell_write_delivery の宣言を T03 から T02 に移し（T03 の変更欄から plugin.json を外した）、T02 の変更欄を `deliver-codex.test.ts` から `plugin/.claude-plugin/plugin.json` に変えた

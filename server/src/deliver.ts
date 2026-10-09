@@ -20,7 +20,17 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
 import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
-import { RevisionMismatch } from "./sqlite.ts";
+import {
+  compare,
+  loadCache,
+  pruneSnapshots,
+  saveCache,
+  snapshotKey,
+  takeSnapshot,
+  takeStates,
+  writeSnapshot,
+} from "./shell-state.ts";
+import { RevisionMismatch, sphicaHome } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
 import { pendingSessions } from "./trace.ts";
@@ -356,19 +366,8 @@ const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery
 const START_SOURCES = new Set(["startup", "resume", "clear", "compact", "fork"]);
 const RESTARTS = ["compact", "clear"];
 
-/**
- * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
- * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
- * reads can repeat one, and a restart whose start could not be logged is not seen).
- */
-async function beforeRead(
-  db: Reads,
-  projectId: number,
-  rels: string[],
-  session: string,
-  agent: string | null,
-  how: "reading" | "named",
-): Promise<Plan> {
+/** Where this conversation's context last restarted (a delivery id, 0 for none), and the records emitted to it since */
+async function sinceRestart(db: Reads, session: string, agent: string | null) {
   const restart = await db
     .selectFrom("delivery as d")
     .where("d.session_id", "=", session)
@@ -387,6 +386,70 @@ async function beforeRead(
     .where("d.outcome", "=", "emitted")
     .select(["x.unit_id", "d.event"])
     .execute();
+  return { since, sent };
+}
+
+/**
+ * After a shell call: the decisions and constraints anchored to the files whose content the call changed that this conversation has not
+ * been shown since its context last restarted, within an edit's limits. It spends no read budget: a write is not a read.
+ */
+async function afterShellWrite(
+  db: Reads,
+  projectId: number,
+  rels: string[],
+  session: string,
+  agent: string | null,
+): Promise<Plan> {
+  const { sent } = await sinceRestart(db, session, agent);
+  const seen = new Set(sent.map((r) => r.unit_id));
+  const rows = (
+    await anchoredTo(db, projectId, rels).where("u.kind", "in", ["decision", "constraint"]).execute()
+  ).filter((u) => !seen.has(u.id));
+  const shown = rows.slice(0, LIMITS.pre_edit.units);
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const f = fitMarked(
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
+        : line(u, "", ai.has(u.id)),
+    ),
+    LIMITS.pre_edit.chars,
+    `Active decisions applying to ${named(rels)}, files whose content changed between before and after this call (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
+    ai,
+    shown.map((u) => u.id),
+  );
+  const omitted = rows.length - shown.length + f.omitted;
+  return {
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
+    eligible: rows.length,
+    omitted,
+    path: head(rels.join(" "), 500),
+    reason: SHELL_WRITE,
+  };
+}
+
+/**
+ * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
+ * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
+ * reads can repeat one, and a restart whose start could not be logged is not seen).
+ */
+async function beforeRead(
+  db: Reads,
+  projectId: number,
+  rels: string[],
+  session: string,
+  agent: string | null,
+  how: "reading" | "named",
+): Promise<Plan> {
+  const { since, sent } = await sinceRestart(db, session, agent);
   // Only reads that delivered records spend the budget; a read that carried only the omission note spends nothing
   const spent = await db
     .selectFrom("delivery as d")
@@ -658,6 +721,36 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     path: null,
     reason: null,
   };
+}
+
+/** The reason a delivery after a shell call is logged with, under the edit event */
+const SHELL_WRITE = "shell_write";
+/** How long a shell call's snapshot may take before the rest of its files are left unknown, inside the host's 5 seconds */
+const SNAPSHOT_MS = 3500;
+const SHELL_WRITE_ON = new Set(["on", "1", "true", "yes"]);
+
+/**
+ * Whether records are delivered after shell calls: SPHICA_SHELL_WRITE_DELIVERY turns it on or off for both hosts, and otherwise the
+ * plugin's shell_write_delivery setting (Claude Code) does; off when neither says on.
+ */
+function shellWriteDelivery(): boolean {
+  const env = (process.env.SPHICA_SHELL_WRITE_DELIVERY ?? "").trim().toLowerCase();
+  if (AUTO_TRACE_OFF.has(env)) return false;
+  if (SHELL_WRITE_ON.has(env)) return true;
+  return SHELL_WRITE_ON.has(
+    (process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY ?? "").trim().toLowerCase(),
+  );
+}
+
+/** One line per shell call to the trial log, delivered or not, so the trial can count what the delivery log may miss */
+function trialLog(line: Record<string, unknown>): void {
+  try {
+    const file = path.join(sphicaHome(), "shell-state", "trial.jsonl");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify({ at: iso(Date.now()), ...line })}\n`);
+  } catch {
+    // The trial log never stops delivery
+  }
 }
 
 /** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
@@ -934,22 +1027,116 @@ async function lockedPlan(
   e: Entry,
   make: () => Promise<Plan>,
   keep: (plan: Plan) => boolean,
+  logged: (written: boolean) => void = () => {},
 ): Promise<Plan> {
   const cap = openWriter("capture", file, LOG_WAIT_MS);
   let held = false;
+  let wrote = false;
   let plan = null as Plan | null;
   try {
     await inTransaction(cap, async (trx) => {
       held = true;
       plan = await make();
-      if (keep(plan)) await write(trx, e, plan);
+      if (keep(plan)) {
+        await write(trx, e, plan);
+        wrote = true;
+      }
     });
   } catch (err) {
+    wrote = false;
     if (held && !plan) throw err;
   } finally {
     await cap.destroy().catch(() => {});
   }
+  logged(wrote);
   return plan ?? make();
+}
+
+/** Takes a shell call's snapshot of every watched file before it runs; snapshots past their life are removed and logged as expired */
+async function snapshotCall(
+  db: Reads,
+  projectId: number,
+  root: string,
+  host: Host,
+  input: HookInput,
+  started: number,
+): Promise<void> {
+  const paths = await deliverablePaths(db, projectId);
+  const cache = loadCache(root);
+  const states = takeStates(root, paths, cache, started + SNAPSHOT_MS);
+  saveCache(root, cache);
+  const expired = pruneSnapshots();
+  if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
+  const key = snapshotKey(host, root, String(input.session_id), agentOf(input), String(input.tool_use_id));
+  writeSnapshot({ v: 1, key, at: iso(started), root, paths: states });
+}
+
+/**
+ * After a shell call (PostToolUse, and PostToolUseFailure in Claude Code: a failed command may have written before it failed): the
+ * records on the watched files whose content changed since its snapshot. Never says Sphica is unavailable: shell calls are frequent.
+ */
+async function afterShell(input: HookInput, host: Host, file: string, started: number): Promise<string> {
+  if (!shellWriteDelivery() || !input.session_id || !input.tool_use_id) return "";
+  const place = identify(input.cwd ?? process.cwd());
+  if (!place) return "";
+  const agent = agentOf(input);
+  const key = snapshotKey(host, place.root, input.session_id, agent, input.tool_use_id);
+  const base = { host, session: input.session_id, agent, call: input.tool_use_id };
+  const before = takeSnapshot(key);
+  if (!before) {
+    trialLog({ ...base, event: "snapshot_missing" });
+    return "";
+  }
+  const cache = loadCache(place.root);
+  for (const [rel, st] of Object.entries(before.paths))
+    if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
+  const after = takeStates(place.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
+  saveCache(place.root, cache);
+  const { changed, unknown } = compare(before.paths, after);
+  const line = { ...base, event: "post_shell", paths: Object.keys(before.paths).length, changed, unknown };
+  if (!changed.length) {
+    trialLog({ ...line, delivered: [] });
+    return "";
+  }
+  let db: ReadonlyKysely<DB> | null = null;
+  try {
+    if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
+    db = openReader(file);
+    const pid = await projectId(db, place.key);
+    if (pid === null) return "";
+    const reader = db;
+    const entry: Entry = {
+      projectId: pid,
+      host,
+      external: input.session_id,
+      agent,
+      event: "pre_edit",
+      branch: branchOf(place.root),
+    };
+    let logged = false;
+    const plan = await lockedPlan(
+      file,
+      entry,
+      () => afterShellWrite(reader, pid, changed, sessionId(pid, host, input.session_id as string), agent),
+      (p) => Boolean(p.text),
+      (w) => {
+        logged = w;
+      },
+    );
+    const keys = plan.units.length
+      ? (await reader.selectFrom("unit").select("key").where("id", "in", plan.units).execute()).map(
+          (u) => u.key,
+        )
+      : [];
+    // Whether the delivery log has the delivery; nothing to deliver has nothing to log
+    trialLog({ ...line, delivered: keys, logged: plan.text ? logged : null });
+    return plan.text;
+  } catch (e) {
+    trialLog({ ...line, delivered: [], error: head(reason(e), 200) });
+    return "";
+  } finally {
+    await db?.destroy().catch(() => {});
+  }
 }
 
 /** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
@@ -958,7 +1145,14 @@ export async function deliver(
   host: Host = "claude-code",
   file: string = dbFile(),
 ): Promise<string> {
+  const started = Date.now();
   const name = input.hook_event_name;
+  if (
+    (name === "PostToolUse" || name === "PostToolUseFailure") &&
+    SHELL_TOOLS.has(input.tool_name ?? "") &&
+    !(host === "codex" && shellPatch(input))
+  )
+    return afterShell(input, host, file, started);
   const call = reviewCall(input);
   const event: Event | null = call
     ? "review"
@@ -1014,6 +1208,8 @@ export async function deliver(
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
     if (shell) {
+      if (shellWriteDelivery() && input.tool_use_id && event === "pre_read")
+        await snapshotCall(db, pid, place.root, host, input, started).catch(() => {});
       rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
       if (!rels.length) return "";
     }

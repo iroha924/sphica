@@ -29,6 +29,12 @@
       "title": "Automatic trace",
       "description": "At the start of a new session, ask the agent to trace earlier sessions that wait to be traced. SPHICA_AUTO_TRACE=off keeps it off either way",
       "default": true
+    },
+    "shell_write_delivery": {
+      "type": "boolean",
+      "title": "Records after shell writes (trial)",
+      "description": "After a shell command changes a file that past decisions apply to, show those decisions right away. SPHICA_SHELL_WRITE_DELIVERY=on or off overrides it",
+      "default": false
     }
   }
 }
