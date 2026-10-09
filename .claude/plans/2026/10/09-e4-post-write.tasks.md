@@ -134,7 +134,7 @@ base: main
   - 計画: S1
   - 依存: T18（直す対象のテスト）
   - 変更: `server/test/deliver.test.ts`
-  - red: anchor の added_at・衝突の link の added_at・採用の retracted_at の条件を 1 つずつ外したコードで、T18 のテストが通ってしまう（Codex が再現）
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → anchor の added_at・衝突の link の added_at・採用の retracted_at の条件を 1 つずつ外したコードでも、T18 のテストは通ってしまう（Codex が再現）
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → 後で足した anchor・後で足した衝突・後で撤回した採用のそれぞれで、時点ごとの名指しが変わる
   - コミット: `test(deliver): check each as-of condition on its own`
   - 結果: 足したテストは今のコードで pass。3 つの条件をそれぞれ一時的に外すと、どれでも新しいテストが落ちた（外した後は `git checkout` で戻し、差分なしを確かめた）。`bun run verify` → exit 0
@@ -236,4 +236,5 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T03 / S2（M1a）と S4（採否の記録）を担うタスクが取りやめで無くなった / plan の S2・S4 を M0 での打ち切りの形に直し、T03 の計画欄を S1 から S1, S2, S4 にした（T03 で採否を決めたため）
 - 2026-10-10 / T18 / M0' の取りこぼし 20 組のうち 14 組が編集の後に作られた記録で、M0 も今の記録を過去の書き込みに当てていた / 時点付きの配信条件を T18 で足した。M0 と M0' の測り直しは Codex との合意（plan の変更履歴）に沿ってタスクを足す
 - 2026-10-10 / T19〜T23 / M0 と M0' の作り直しと測り直しを plan の変更履歴（Codex と合意）に沿って足した。T03 と T05 の判定は T23 と T22 で置き換える
-\n- 2026-10-10 / T18 のレビュー / F1（各時点の条件を個別に確かめるテストが無い）は採用して T24 で直した\n
+
+- 2026-10-10 / T18 のレビュー / F1（各時点の条件を個別に確かめるテストが無い）は採用して T24 で直した
