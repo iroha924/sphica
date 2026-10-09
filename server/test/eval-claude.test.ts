@@ -272,7 +272,12 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
   const stopped = path.join(claude, "r2");
   fs.mkdirSync(stopped);
   fs.writeFileSync(path.join(stopped, "started.json"), JSON.stringify(head));
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: base };
+  // A run kept through a link is not a run directory: it sits wherever the link points
+  const elsewhere = path.join(base, "elsewhere");
+  fs.cpSync(run, elsewhere, { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(claude, "r3"));
+  // A Claude-only collection needs no Codex tool layout: no bun on PATH here
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: base, PATH: "/usr/bin:/bin" };
   delete env.SPHICA_DB;
   delete env.SPHICA_HOME;
   execFileSync(
@@ -300,6 +305,7 @@ test("collect reads local Claude runs like Codex runs, with the answer and signa
     signals: { searches: number; empty_searches: number; turns: number; seconds: number } | null;
   }[];
   const r1 = rows.find((r) => r.run === "r1");
+  assert.ok(!rows.some((r) => r.run === "r3"), "a linked run is left out");
   assert.equal(r1?.model, "claude");
   assert.equal(r1?.excluded, null);
   assert.equal(r1?.answer, "final answer");

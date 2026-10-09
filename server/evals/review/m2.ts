@@ -25,7 +25,7 @@ import {
   requireInside,
 } from "../cloud/codex-home.ts";
 import { codexFence, repoPlaces, shieldNow, treeAccess } from "../cloud/codex-run.ts";
-import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
+import { linksOutside, liveScratch, runHiddenTest } from "../cloud/hidden-test.ts";
 import { bare } from "../cloud/probe.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
@@ -371,6 +371,8 @@ async function runOne(o: {
     result.reason = (e as Error).message;
   } finally {
     if (!keepCheckout(work, dir)) o.env.leave(path.dirname(work));
+    // A hidden test's scratch that could not be removed holds what the next lane's shell must not read
+    for (const s of liveScratch) o.env.leave(s);
     fs.rmSync(path.join(o.env.cache, "m2-biome", run), { recursive: true, force: true });
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);

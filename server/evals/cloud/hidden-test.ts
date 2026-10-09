@@ -96,7 +96,7 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
   const unparted = (tests: string): HiddenResult => ({ tests, parts: NO_PARTS, scratch: null });
   if (!fs.existsSync(work)) return unparted("not run (no checkout)");
   // The test is written into the checkout: a checkout that is a link would send it, and the hidden test with it, elsewhere
-  if (fs.lstatSync(work).isSymbolicLink()) return unparted("not run (the checkout is a link)");
+  if (fs.lstatSync(work).isSymbolicLink()) return unparted("0 passed, 1 failed (the checkout is a link)");
   // A link the patch made can point the task module at a file outside the checkout: such a run fails its hidden test without running it
   if (linksOutside(work)) return unparted("0 passed, 1 failed (a link in the checkout points outside it)");
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout

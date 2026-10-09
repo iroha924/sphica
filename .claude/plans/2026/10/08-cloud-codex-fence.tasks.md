@@ -447,6 +447,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="never from the model's text|external volumes are denied|scratch directory cannot be made" test/review-eval.test.ts test/eval-codex.test.ts test/hidden-runner.test.ts` → 直す前の本体で 3 件失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 188 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった。review の採点が他の worktree の名を見る直しは、実際のリポジトリに worktree を足さないと確かめられないため、テストを足していない
 
+- [x] T40: GitHub の Codex のレビュー（9f121528）の 6 件と、CI の `check (26)` の失敗を直す（テストのフックの子プロセスに持ち主の環境が渡る、引用された git alternates の行、checkout がリンクのときの隠しテストを走らせていない扱い、M2 で scratch を消せなかったときのロック、Claude だけの collect が Codex の道具の配置を要る、リンクの run のディレクトリ、review の fixture を 2 つ同時に作るテストの順番の依存）
+  - 種別: 修正
+  - 計画: S2, S4, S9
+  - 依存: T39（直す対象の囲いが要る）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/hidden-test.ts`, `server/evals/review/m2.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-codex.test.ts`, `server/test/hidden-runner.test.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="a slot that links out|collect reads local Claude runs like Codex runs|a checkout that is a link" test/eval-codex.test.ts test/eval-claude.test.ts test/hidden-runner.test.ts` → 直す前の本体（`unquoteGit` だけ仮に置いた状態）で 3 件失敗する。`cd server && <Node 26> --test --test-randomize --test-random-seed=528 test/review-eval.test.ts` → 直す前は 23 件失敗する（main でも、そのテストを単独で流すと落ちる）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 全件 pass、seed 528 の Node 26 でも review-eval が全件 pass
+  - コミット: `fix(eval): unquote git alternates, leave linked runs out, and fail linked checkouts (T40)`
+  - 結果: `cd server && node --test --test-name-pattern="a slot that links out|collect reads local Claude runs like Codex runs|a checkout that is a link" test/eval-codex.test.ts test/eval-claude.test.ts test/hidden-runner.test.ts` → 直す前の本体で 3 件失敗した。seed 528 の Node 26 で review-eval → 直す前に 23 件失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 188 件 pass。seed 528 の Node 26 で review-eval → 27 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった。M2 の scratch を消せなかったときのロックは、消せない scratch を作るのが難しいため、テストを足していない
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -488,3 +499,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T37 / GitHub の Codex のレビュー（dcd08217）。P1 が 2 件、P2 が 1 件。3 件とも直した。driver の world は、呼ぶ側すべてにロックを持たせる代わりに、一時ディレクトリを deny して塞いだ
 - 2026-10-09 / T38 / GitHub の Codex のセキュリティレビュー（push のたびに自動で走る）の P2。直した。run を外す判定はほかにも（リポジトリへの到達など）モデルの行動から立つが、それは違反として外す方針どおりで、`check_unloaded` は環境の故障を表すので集計を止める側に移した
 - 2026-10-09 / T39 / GitHub の Codex のレビュー（d94fc58d）。P1 が 1 件、P2 が 3 件。4 件とも直した。`/Volumes` を丸ごと deny しても Codex が動き、`/etc/hosts` が読めることを実機で確かめた
+- 2026-10-09 / T40 / GitHub の Codex のレビュー（9f121528）。P1 が 3 件、P2 が 3 件。6 件とも直した。CI の `check (26)` の失敗（seed 528）は、ブランチの前のコミットでも再現し、main でもそのテストを単独で流すと落ちる、前からある順番の依存だった。テストだけの直しなので、この PR で一緒に直した

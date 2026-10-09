@@ -199,7 +199,7 @@ test("a checkout that is a link is never written into", (t) => {
   fs.symlinkSync(work, link);
   t.after(() => fs.rmSync(link, { force: true }));
   const r = runHiddenTest(link, 'import { test } from "node:test";\ntest("completion: x", () => {});\n');
-  assert.equal(r.tests, "not run (the checkout is a link)");
+  assert.equal(r.tests, "0 passed, 1 failed (the checkout is a link)");
   assert.ok(!fs.existsSync(path.join(work, "test", "hidden.test.ts")));
 });
 

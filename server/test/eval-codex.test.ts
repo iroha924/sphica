@@ -17,7 +17,7 @@ import {
   requireInside,
   volumeDenies,
 } from "../evals/cloud/codex-home.ts";
-import { codexDenies, codexFence, REPO, repoPlaces } from "../evals/cloud/codex-run.ts";
+import { codexDenies, codexFence, REPO, repoPlaces, unquoteGit } from "../evals/cloud/codex-run.ts";
 import {
   anchoredTarget,
   deliveredOnRead,
@@ -1106,6 +1106,17 @@ test("a slot that links out of the build, objects borrowed from elsewhere, and a
     `${path.join(borrowed, "objects")}\n`,
   );
   assert.ok(repoPlaces(main).includes(path.join(borrowed, "objects")));
+  // Git reads a C-style quoted line too, as the path it spells
+  const spaced = path.join(base, "object store.git");
+  execFileSync("git", ["init", "-q", "--bare", spaced], { env: GIT_ENV });
+  fs.writeFileSync(
+    path.join(main, ".git", "objects", "info", "alternates"),
+    `"${path.join(spaced, "objects").replace(" ", "\\040")}"\n`,
+  );
+  assert.ok(repoPlaces(main).includes(path.join(spaced, "objects")));
+  assert.equal(unquoteGit('"a\\tb\\\\c\\"d\\303\\251"'), 'a\tb\\c"d\u00e9');
+  assert.throws(() => unquoteGit('"a\\qb"'), /not understood/);
+  assert.throws(() => unquoteGit('"open'), /not understood/);
   // A hook's command quotes each path whole: a $(...) in the output path is never run
   const g = codexBuild("gold");
   const out = path.join(g.cache, "runs$(touch MARKER)");
@@ -1116,6 +1127,6 @@ test("a slot that links out of the build, objects borrowed from elsewhere, and a
   };
   const command = hooks.hooks.UserPromptSubmit[0]?.hooks[0]?.command ?? "";
   const cwd = tempDir("hook-cwd-");
-  spawnSync("/bin/sh", ["-c", command], { cwd, encoding: "utf8" });
+  spawnSync("/bin/sh", ["-c", command], { cwd, encoding: "utf8", env: { PATH: "/usr/bin:/bin", HOME: cwd } });
   assert.ok(!fs.existsSync(path.join(cwd, "MARKER")), command);
 });

@@ -792,6 +792,8 @@ test("a parent step in a command is no reason to exclude a run: the sandbox stop
 });
 
 test("a cached fixture is reused only for the inputs it was built from", async () => {
+  // Building a fixture swaps HOME while it runs: two at once would each run in the other's
+  await built;
   const cases = loadReviewCases();
   const dir = path.join(tempDir("review-cache-"), "fixture");
   const first = await cachedFixture(dir, cases);

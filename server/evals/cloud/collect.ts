@@ -58,7 +58,12 @@ const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[
 const out = path.join(build, "loop.json");
 // Where the runs came from: grade refuses a loop whose runs sat where the fenced Codex could read them
 const runRoots = [args.codex, args.claude, args.logs].map((p) => path.resolve(p ?? ""));
-const runFence = currentFence(":workspace", evalCache());
+// Built only when a Codex run is judged: a Claude-only collection needs no Codex tool layout on this machine
+let fenceNow: string | undefined;
+const runFence = () => {
+  fenceNow ??= currentFence(":workspace", evalCache());
+  return fenceNow;
+};
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;
   variant?: string;
@@ -413,6 +418,11 @@ function main() {
     if (!fs.existsSync(runs)) continue;
     for (const name of fs.readdirSync(runs)) {
       const dir = path.join(runs, name);
+      // A run kept through a link sits where the link points, which the fence may not deny
+      if (fs.lstatSync(dir).isSymbolicLink()) {
+        console.log(`${name}: a link, not a run directory, left out`);
+        continue;
+      }
       const read = (file: string) =>
         fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), "utf8") : null;
       // started.json is the denominator: a run that started counts even when it left no result
@@ -477,7 +487,7 @@ function main() {
         continue;
       }
       // A Codex run made under another fence, or none, could read what the current fence hides
-      if (model === "codex" && result.fence !== runFence) {
+      if (model === "codex" && result.fence !== runFence()) {
         rows.push(excluded(result.task, result.condition, "run without the current read fence"));
         continue;
       }

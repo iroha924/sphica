@@ -32,6 +32,30 @@ export const REPO = fs.realpathSync(path.resolve(HERE, "..", "..", ".."));
  * Every place that holds the repository's files or history: the repository, its other worktrees (an old/new comparison checks one out),
  * and the git directory they share, which sits outside a linked worktree. A place inside another is left to its parent's deny.
  */
+/** Git's C-style quoted path (quote.c's unquote_c_style): a line it would read some other way stops the fence instead of passing it */
+export function unquoteGit(quoted: string): string {
+  const named: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+  const bytes: number[] = [];
+  let i = 1;
+  for (; i < quoted.length && quoted[i] !== '"'; i++) {
+    const c = quoted[i] ?? "";
+    if (c !== "\\") {
+      bytes.push(...Buffer.from(c, "utf8"));
+      continue;
+    }
+    const next = quoted[++i] ?? "";
+    const octal = /^[0-3][0-7]{2}$/.exec(quoted.slice(i, i + 3));
+    if (octal) {
+      bytes.push(Number.parseInt(octal[0], 8));
+      i += 2;
+    } else if (next in named) bytes.push(named[next] as number);
+    else throw new Error(`git alternates line not understood: ${quoted}`);
+  }
+  if (quoted[i] !== '"' || quoted.slice(i + 1).trim())
+    throw new Error(`git alternates line not understood: ${quoted}`);
+  return Buffer.from(bytes).toString("utf8");
+}
+
 export function repoPlaces(repo = REPO): string[] {
   const git = (...args: string[]) =>
     execFileSync("git", ["-C", repo, ...args], {
@@ -54,7 +78,7 @@ export function repoPlaces(repo = REPO): string[] {
       return;
     }
     for (const line of lines.map((l) => l.trim()).filter((l) => l && !l.startsWith("#"))) {
-      const alt = path.resolve(objects, line);
+      const alt = path.resolve(objects, line.startsWith('"') ? unquoteGit(line) : line);
       if (!fs.existsSync(alt)) continue;
       const real = fs.realpathSync(alt);
       if (borrowed.includes(real)) continue;
