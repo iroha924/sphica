@@ -38,6 +38,15 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 合成の会話記録（Edit・Write・MultiEdit・NotebookEdit、読めない行、compact）で、書き込みの前に emitted になった記録だけが除かれ、組が host・文書／コード・symbol／path／option 別に数えられ、読めなかった件数が出る
   - コミット: `feat(eval): replay past writes against current records for the post_write entry check`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 3 pass（失敗した編集と削除のセルは書き込みに数えない、old_string は見ない、再生自身が配った記録と compact の前に hook が配った記録を除き compact の後は数え直す、subagent は別の会話、プロジェクトの外は outside に数える、標本は seed で固定され文書とコードに分かれる）。`bun run verify` → exit 0
+- [x] T16: 消えた worktree での書き込みを、本体のチェックアウトのプロジェクトに数える
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の再生スクリプト）
+  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`
+  - red: `node server/evals/post-write/replay.ts --db ~/.sphica/sphica.db --out <file> ~/.claude/projects/-Users-shunichi-Projects-sphica` → 486 件が outside。そのうち 153 件は cwd が消えた `.claude/worktrees/<name>` の書き込み
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 消えた worktree の cwd が本体のプロジェクトと worktree の根に解決され、ほかの消えたディレクトリは外のまま
+  - コミット: `fix(eval): count writes from removed worktrees in their checkout's project`
+  - 結果: red を直す前のコードで実測（outside 486、うち 153 件が消えた worktree）。直した後の同じコマンド → outside 333（scratchpad 278、~/.claude/projects 22、別のクローン 17 ほか、どれもこのプロジェクトのチェックアウトの外）、配信が起きる書き込み 247。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 4 pass。`bun run verify` → exit 0
 - [ ] T03: M0 を持ち主のデータで流し、持ち主のラベルで作るかどうかを決める
   - 種別: 追加
   - 計画: S1
@@ -45,13 +54,14 @@ base: main
   - 変更: `server/evals/post-write/m0.json`
   - 完了条件: `cat server/evals/post-write/m0.json` → seed、標本（session・tool_use_id・記録の key・ラベルだけで本文を含まない）、集計、基準の判定（作る / 作らない）が入っている。会話ごとの予算の値を plan の変更履歴に書いた
   - コミット: `test(eval): record the post_write entry check and the owner's labels`
-- [ ] T04: M0' の抽出スクリプト（原因の内訳の 30 ターンと、組の母集団の無作為な並び）
+- [x] T04: M0' の抽出スクリプト（原因の内訳の 30 ターンと、組の母集団の無作為な並び）
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`, `knip.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 一時 DB で、via=status だけの anchor 付きの組が列挙され、同じ seed で同じ並び・同じ 30 ターンになり、次の持ち主のプロンプトまでの emitted の判定と Wilson 区間の判定（進む / 不採用 / 決まらない）が期待どおり
   - コミット: `feat(eval): sample shell-changed files to measure undelivered records`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 2 pass（同じターンに tool の行がある path・finding・anchor の無い path は数えない、compact の前と次のプロンプトの後の配信は数えない、次のプロンプトが無ければ窓は開いたまま、subagent への配信は別に出す、seed で 30 ターンと 150 組が固定、Wilson の判定が進む / 不採用 / 決まらない を返し、30 組目の確認で止まり 150 組を超えて数えない）。`bun run verify` → exit 0
 - [ ] T05: M0' を流して Claude と Codex でラベルを付け、#219 を判定する
   - 種別: 追加
   - 計画: S1, S6
@@ -150,3 +160,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-09 / T01 / pre-commit のバージョンの検査が、package の入力（deliver.ts）を変えるコミットにバージョンの同期を求めた / T01 のコミットで npm と 3 つの plugin manifest を 0.6.44 に上げた。不採用で出荷しないときの扱いは T15 で決める
 - 2026-10-09 / T02 / Codex のセッションの記録は sphica で 489 件あるが、対話のものは 1 件で、apply_patch の書き込みは 0 件（残りは codex exec のレビューと計画の議論）。再生できる過去の書き込みは Claude Code だけ / replay.ts は Claude Code の会話記録だけを読む形にし、変更欄の「apply_patch」を外した。M0 の結果は Claude Code だけの数字として書く
 - 2026-10-09 / T02 / 何で当たったか（symbol・path・option）を文字列から推すのはもろい / namedRecords が hit を返すようにした（変更欄に `server/src/deliver.ts` を足した）
+- 2026-10-09 / T16 / 実データで再生すると、消えた worktree の書き込み 153 件が outside に数えられていた / 修正タスク T16 を足した

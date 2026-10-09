@@ -168,6 +168,17 @@ async function emittedBefore(
 }
 
 /**
+ * The project and root of a write's working directory. A Claude Code worktree removed since (`<checkout>/.claude/worktrees/<name>`) is the
+ * checkout's project, with paths taken from the worktree's own root.
+ */
+export function placeOf(cwd: string): { key: string; root: string } | null {
+  if (fs.existsSync(cwd)) return identify(cwd);
+  const m = /^(.*?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+/.exec(cwd);
+  const main = m?.[1] && fs.existsSync(m[1]) ? identify(m[1]) : null;
+  return main && m ? { key: main.key, root: m[0] } : null;
+}
+
+/**
  * Each write matched as post_write would match it: records it names, less those emitted to the conversation since its last restart (by
  * the hooks that ran then, or by this replay's own earlier deliveries), the first PER_WRITE of them shown.
  */
@@ -180,7 +191,7 @@ export async function replay(file: string, writes: Write[], inputs: Replay["inpu
     const projects = new Map<string, { id: number; root: string } | null>();
     for (const w of writes) {
       if (!projects.has(w.cwd)) {
-        const place = fs.existsSync(w.cwd) ? identify(w.cwd) : null;
+        const place = placeOf(w.cwd);
         const id = place ? await projectId(db, place.key) : null;
         projects.set(w.cwd, place && id !== null ? { id, root: place.root } : null);
       }
@@ -238,7 +249,7 @@ function seeded(seed: number): () => number {
   };
 }
 
-function shuffled<T>(items: T[], seed: number): T[] {
+export function shuffled<T>(items: T[], seed: number): T[] {
   const r = seeded(seed);
   const out = [...items];
   for (let i = out.length - 1; i > 0; i--) {

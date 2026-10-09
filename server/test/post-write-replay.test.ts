@@ -7,7 +7,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { type Pair, readTranscripts, replay, sample, writtenText } from "../evals/post-write/replay.ts";
+import {
+  type Pair,
+  placeOf,
+  readTranscripts,
+  replay,
+  sample,
+  writtenText,
+} from "../evals/post-write/replay.ts";
 import { inTransaction } from "../src/db.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -212,6 +219,21 @@ test("the replay counts what a write names, less what the conversation was shown
     await db.done();
     fs.rmSync(repo, { recursive: true, force: true });
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a write from a removed worktree belongs to its checkout's project, with paths from the worktree's root", () => {
+  const repo = checkout();
+  try {
+    const gone = path.join(repo, ".claude", "worktrees", "f1");
+    assert.deepEqual(placeOf(path.join(gone, "server")), { key: "git:github.com/o/r", root: gone });
+    assert.equal(
+      placeOf(path.join(repo, "elsewhere", "missing")),
+      null,
+      "any other missing directory is outside",
+    );
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
   }
 });
 
