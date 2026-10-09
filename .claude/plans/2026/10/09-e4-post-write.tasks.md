@@ -30,13 +30,14 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → 既存のプロンプトの照合のテストが全部 pass し、切り出した関数を任意の本文に当てるテストが pass
   - コミット: `refactor(deliver): match records named in any text with the prompt's rules`
   - 結果: `namedRecords()` を export し onPrompt はそれを呼ぶだけにした。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 52 pass（コードの本文で toStored・却下した option・`open()` を名指し、`reopen` の中の open は名指さない）。`bun run verify` → exit 0
-- [ ] T02: M0 の再生スクリプト（Claude Code の会話記録と Codex のセッションの書き込みに、今の記録を当てる）
+- [x] T02: M0 の再生スクリプト（Claude Code の会話記録と Codex のセッションの書き込みに、今の記録を当てる）
   - 種別: 追加
   - 計画: S1
   - 依存: T01（post_write と同じ照合を使う）
-  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`, `knip.json`
-  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 合成の会話記録（Edit・Write・NotebookEdit・apply_patch、読めない行、compact）で、書き込みの前に emitted になった記録だけが除かれ、組が host・文書／コード・symbol／path／option 別に数えられ、読めなかった件数が出る
+  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`, `knip.json`, `server/src/deliver.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 合成の会話記録（Edit・Write・MultiEdit・NotebookEdit、読めない行、compact）で、書き込みの前に emitted になった記録だけが除かれ、組が host・文書／コード・symbol／path／option 別に数えられ、読めなかった件数が出る
   - コミット: `feat(eval): replay past writes against current records for the post_write entry check`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 3 pass（失敗した編集と削除のセルは書き込みに数えない、old_string は見ない、再生自身が配った記録と compact の前に hook が配った記録を除き compact の後は数え直す、subagent は別の会話、プロジェクトの外は outside に数える、標本は seed で固定され文書とコードに分かれる）。`bun run verify` → exit 0
 - [ ] T03: M0 を持ち主のデータで流し、持ち主のラベルで作るかどうかを決める
   - 種別: 追加
   - 計画: S1
@@ -147,3 +148,5 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 
 ## 記録
 - 2026-10-09 / T01 / pre-commit のバージョンの検査が、package の入力（deliver.ts）を変えるコミットにバージョンの同期を求めた / T01 のコミットで npm と 3 つの plugin manifest を 0.6.44 に上げた。不採用で出荷しないときの扱いは T15 で決める
+- 2026-10-09 / T02 / Codex のセッションの記録は sphica で 489 件あるが、対話のものは 1 件で、apply_patch の書き込みは 0 件（残りは codex exec のレビューと計画の議論）。再生できる過去の書き込みは Claude Code だけ / replay.ts は Claude Code の会話記録だけを読む形にし、変更欄の「apply_patch」を外した。M0 の結果は Claude Code だけの数字として書く
+- 2026-10-09 / T02 / 何で当たったか（symbol・path・option）を文字列から推すのはもろい / namedRecords が hit を返すようにした（変更欄に `server/src/deliver.ts` を足した）

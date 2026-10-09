@@ -532,7 +532,11 @@ export async function namedRecords(
   root: string,
   prompt: string,
 ): Promise<
-  { u: { id: number; key: string; kind: string; stance: string | null; text: string }; why: string }[]
+  {
+    u: { id: number; key: string; kind: string; stance: string | null; text: string };
+    why: string;
+    hit: "symbol" | "path" | "option";
+  }[]
 > {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
@@ -582,12 +586,13 @@ export async function namedRecords(
       .execute()
       .then(byUnit),
   ]);
-  const hits: { u: (typeof units)[number]; why: string }[] = [];
+  const hits: { u: (typeof units)[number]; why: string; hit: "symbol" | "path" | "option" }[] = [];
   for (const u of units) {
     const a = anchors.get(u.id)?.find((x) => (x.symbol && named(x.symbol)) || pathIn(x.path));
     const o = options.get(u.id)?.find((x) => optionIn(x.text));
-    if (a) hits.push({ u, why: ` [names ${a.symbol && named(a.symbol) ? a.symbol : a.path}]` });
-    else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
+    const symbol = a?.symbol && named(a.symbol) ? a.symbol : null;
+    if (a) hits.push({ u, why: ` [names ${symbol ?? a.path}]`, hit: symbol ? "symbol" : "path" });
+    else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]`, hit: "option" });
   }
   return hits;
 }
