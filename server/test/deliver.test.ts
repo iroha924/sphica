@@ -2570,6 +2570,79 @@ test("records named as of a past time follow the state, anchor, conflict, and ad
   }
 });
 
+test("each as-of condition alone decides: an anchor added later, a conflict added later, and an adoption retracted later", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep beta. Keep eps. Keep psi. Keep eta. Keep chi." });
+    await save(db, p, {
+      units: [
+        decided("beta", m, "Keep beta.", {
+          anchors: [{ path: "src/b.ts", symbol: "betaFn", role: "applies_to" }],
+        }),
+        decided("eps", m, "Keep eps.", {
+          anchors: [{ path: "src/e.ts", symbol: "epsFn", role: "applies_to" }],
+        }),
+        decided("psi", m, "Keep psi."),
+        decided("eta", m, "Keep eta.", {
+          anchors: [{ path: "src/h.ts", symbol: "etaFn", role: "applies_to" }],
+        }),
+        decided("chi", m, "Keep chi."),
+      ],
+    });
+    const id = (key: string) =>
+      Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+    const run = Number(db.owner.prepare("select run_id from unit_anchor limit 1").get()?.run_id);
+    db.owner
+      .prepare(
+        "insert into unit_anchor (unit_id, path, symbol, role, run_id, added_at) values (?, 'src/b2.ts', 'betaLater', 'applies_to', ?, ?)",
+      )
+      .run(id("beta"), run, "2099-01-01T00:00:00.000Z");
+    // Both ends are the owner's from the start: only the link's own time decides
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'conflicts', ?, ?)",
+      )
+      .run(id("eps"), id("psi"), run, "2099-01-01T00:00:00.000Z");
+    // A conflict in place from the start: only chi's adoption being retracted lets eta through
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'conflicts', ?, ?)",
+      )
+      .run(id("eta"), id("chi"), run, "2000-01-01T00:00:00.000Z");
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'changed mind', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ?",
+      )
+      .run("2099-05-01T00:00:00.000Z", m, id("chi"));
+    const names = async (text: string, asOf: string) =>
+      (await namedRecords(db.reader, p, repo, text, asOf)).map(
+        (h) => `${h.u.key.replace("trace:ext-s1/", "")}${h.why}`,
+      );
+    assert.deepEqual(
+      await names("betaLater()", "2098-01-01T00:00:00.000Z"),
+      [],
+      "the anchor did not exist yet",
+    );
+    assert.deepEqual(await names("betaLater()", "2099-02-01T00:00:00.000Z"), ["beta [names betaLater]"]);
+    assert.deepEqual(
+      await names("epsFn()", "2098-01-01T00:00:00.000Z"),
+      ["eps [names epsFn]"],
+      "the conflict did not exist yet",
+    );
+    assert.deepEqual(await names("epsFn()", "2099-02-01T00:00:00.000Z"), []);
+    assert.deepEqual(await names("etaFn()", "2099-04-01T00:00:00.000Z"), [], "chi is still the owner's");
+    assert.deepEqual(
+      await names("etaFn()", "2099-06-01T00:00:00.000Z"),
+      ["eta [names etaFn]"],
+      "chi's adoption was retracted",
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("prompt delivery keeps its order, which anchor or option it names, and what it never matches", async () => {
   const db = tempDb();
   const repo = checkout();
