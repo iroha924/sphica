@@ -145,6 +145,16 @@ base: main
   - コミット: `fix(eval): treat a line of no origin as a possible prompt only when the model answers it`
   - 結果: red を直す前のコードで実測（nextHuman が 8 ではなく unknown）。M0' の試算で決まらなかった 5 組は、すべてこの行が原因だった（/reload-plugins など）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-transcript.test.ts test/post-write-shell-miss.test.ts` → 7 pass。`bun run verify` → exit 0
 
+- [x] T28: 判定器と母集団の残りの偏りを直す（T25・T26 のレビューの F1〜F4）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T26（直す対象の M0' のスクリプト）
+  - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 配れた時刻と anchor のあった時刻が重ならない組が母集団に入る、疑い 9 組と取りこぼし 30 組で決まらないになる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 同じ時点で配れて anchor があった組だけが候補、疑いの解決を (測れた数, 取りこぼし数) の到達できる状態で全部たどり上限を置かない、報告の件数は疑いを数えない 1 つの読み方でそろう、結果の後の読めない行は unknown
+  - コミット: `fix(eval): require deliverable and anchored at once, and resolve doubt exactly`
+  - 結果: red を直す前のコードで実測（late が母集団に入る、9 unknown＋30 missed で undecided）。F1 は他と同時に直したので、結果の後の読めない行の検査を一時的に外してテストが落ちることを確かめ、戻した。F4 はレビューで Codex が再現した（drawn 150・apart {}）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass。`bun run verify` → exit 0
+
 - [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S6
@@ -273,3 +283,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T25 / ラベル付けの途中で、測る呼び出しをラベルの書き順で選んでいたと気付いた。材料の出力も大きすぎた / 修正タスク T25 を足した
 - 2026-10-10 / T21 のレビュー / F1・F3・F4・F5・F6 は採用して T26 で直した。F2（呼び出しの選ぶ順）は T25 で直し済み
 - 2026-10-10 / T27 / Claude のラベルで試算すると決まらない組が 5 組あり、どれも次のプロンプトの前の origin の無い行（ローカルのコマンドなど）が原因だった / 修正タスク T27 を足した
+- 2026-10-10 / T25・T26 のレビュー / F1〜F4 は採用して T28 で直した。8 組の上限は列挙をやめて状態をたどる形にしたので無くした

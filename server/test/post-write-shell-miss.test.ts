@@ -91,6 +91,7 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
         }),
         unit("sqlite", m, "Keep one SQLite file.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
         unit("mid", m, "Dates are tricky.", { anchors: [{ path: "src/mid.ts", role: "applies_to" }] }),
+        unit("late", m, "Keep one SQLite file.", { anchors: [{ path: "src/late.ts", role: "applies_to" }] }),
         {
           key: "tricky",
           kind: "finding",
@@ -122,6 +123,15 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
     state.run(mid, "active", "candidate", "2099-01-01T03:19:00.000Z", run);
     message(db, p, { id: "o3", text: "mid", sent: "2099-01-01T03:00:00Z" });
     seen("t3", "src/mid.ts", "status", "2099-01-01T03:20:00.000Z");
+    // late is deliverable only after its anchor on the path was retired: never both at once inside turn t4
+    const late = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/late'").get()?.id);
+    state.run(late, "active", "candidate", "2098-06-01T00:00:00.000Z", run);
+    state.run(late, "candidate", "active", "2099-01-01T04:10:00.000Z", run);
+    db.owner
+      .prepare("update unit_anchor set retired_at = ? where unit_id = ?")
+      .run("2099-01-01T04:05:00.000Z", late);
+    message(db, p, { id: "o4", text: "late", sent: "2099-01-01T04:00:00Z" });
+    seen("t4", "src/late.ts", "status", "2099-01-01T04:20:00.000Z");
 
     const pairs = await population(db.reader, p);
     assert.deepEqual(
@@ -185,6 +195,14 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       human("2099-01-01T00:30:00.000Z"),
     ];
     fs.writeFileSync(path.join(dir, "broken.jsonl"), `${broken.join("\n")}\n`);
+    const tail = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      call("2099-01-01T00:05:00.000Z", "y1"),
+      result("2099-01-01T00:06:00.000Z", "y1"),
+      "{the owner's next prompt, perhaps",
+    ];
+    fs.writeFileSync(path.join(dir, "tail.jsonl"), `${tail.join("\n")}\n`);
     const conversations = readConversations(dir);
     const [utc, , sqlite] = pairs as [Candidate, Candidate, Candidate];
     // The same pair over a turn wide enough for every call above
@@ -197,7 +215,7 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
           pair,
           { index: 0, calls },
           conversations.filter((c) =>
-            only ? c.file === only : !["quiet.jsonl", "broken.jsonl"].includes(c.file),
+            only ? c.file === only : !["quiet.jsonl", "broken.jsonl", "tail.jsonl"].includes(c.file),
           ),
         )
       ).outcome;
@@ -230,6 +248,11 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       await of(utc, ["z1"], "broken.jsonl"),
       "unknown",
       "a line that could not be read may have been a delivery",
+    );
+    assert.equal(
+      await of(utc, ["y1"], "tail.jsonl"),
+      "unknown",
+      "a line that could not be read may have been the next prompt",
     );
   } finally {
     await db.done();
@@ -280,6 +303,21 @@ test("the bar counts doubt both ways, sets apart what it cannot measure, and ref
       .verdict,
     "undecided",
     "a pair that may not count cannot complete the 30 and settle the verdict",
+  );
+  assert.equal(
+    decide([...Array<Outcome>(9).fill("unknown"), ...Array<Outcome>(30).fill("missed")]).verdict,
+    "proceed",
+    "however many pairs are doubtful, a verdict every resolution agrees on stands",
+  );
+  const reported = decide([
+    ...Array<Outcome>(29).fill("shown"),
+    "unknown",
+    ...Array<Outcome>(120).fill("ineligible"),
+  ]);
+  assert.deepEqual(
+    [reported.drawn, reported.measured, reported.doubtful, reported.apart],
+    [150, 29, 1, { ineligible: 120 }],
+    "the reported numbers come from one reading of the draw",
   );
   assert.throws(
     () =>
