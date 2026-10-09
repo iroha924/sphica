@@ -2473,6 +2473,103 @@ test("decided by an AI: the evaluation's gold lines carry the mark and the AI wo
   }
 });
 
+test("records named as of a past time follow the state, anchor, conflict, and adoption history of that time", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Keep alpha. Keep beta. Keep gamma. Keep delta. Keep eps. Use phi.",
+    });
+    await save(db, p, {
+      units: [
+        decided("alpha", m, "Keep alpha.", {
+          anchors: [{ path: "src/a.ts", symbol: "alphaFn", role: "applies_to" }],
+        }),
+        decided("beta", m, "Keep beta.", {
+          anchors: [{ path: "src/b.ts", symbol: "betaFn", role: "applies_to" }],
+        }),
+        decided("gamma", m, "Keep gamma.", {
+          anchors: [{ path: "src/g.ts", symbol: "gammaFn", role: "applies_to" }],
+        }),
+        decided("eps", m, "Keep eps.", {
+          anchors: [{ path: "src/e.ts", symbol: "epsFn", role: "applies_to" }],
+        }),
+        {
+          key: "phi",
+          kind: "constraint",
+          stance: "do",
+          text: "Use phi.",
+          evidence: [{ source: `s${m}`, quote: "Use phi.", role: "states" }],
+        },
+      ],
+    });
+    const id = (key: string) =>
+      Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+    const run = Number(db.owner.prepare("select run_id from unit_anchor limit 1").get()?.run_id);
+    const saved = String(db.owner.prepare("select min(at) from unit_state").get()?.["min(at)"]);
+    // alpha leaves active later; beta gains an anchor later; gamma's anchor is retired later
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, 'active', 'candidate', ?, 'r', ?)",
+      )
+      .run(id("alpha"), "2099-01-01T00:00:00.000Z", run);
+    db.owner
+      .prepare(
+        "insert into unit_anchor (unit_id, path, symbol, role, run_id, added_at) values (?, 'src/b2.ts', 'betaLater', 'applies_to', ?, ?)",
+      )
+      .run(id("beta"), run, "2099-01-01T00:00:00.000Z");
+    db.owner
+      .prepare("update unit_anchor set retired_at = ? where symbol = 'gammaFn'")
+      .run("2099-01-01T00:00:00.000Z");
+    // eps is the owner's; a conflict with phi counts only once phi is the owner's too, and stops counting once resolved
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'conflicts', ?, ?)",
+      )
+      .run(id("eps"), id("phi"), run, "2099-01-01T00:00:00.000Z");
+    db.owner
+      .prepare(
+        "insert into unit_adoption (unit_id, source_id, span_start, span_end, route, run_id, added_at) values (?, ?, 0, 8, 'owner_statement', ?, ?)",
+      )
+      .run(id("phi"), m, run, "2099-06-01T00:00:00.000Z");
+    db.owner
+      .prepare("update unit_link set resolved_at = ?, resolution = 'settled' where from_unit = ?")
+      .run("2099-12-01T00:00:00.000Z", id("eps"));
+    const names = async (asOf?: string) =>
+      (await namedRecords(db.reader, p, repo, "alphaFn() betaFn() betaLater() gammaFn() epsFn()", asOf))
+        .map((h) => `${h.u.key.replace("trace:ext-s1/", "")}${h.why}`)
+        .sort();
+    assert.deepEqual(await names("2000-01-01T00:00:00.000Z"), [], "nothing was active before it was saved");
+    assert.ok(saved < "2099");
+    assert.deepEqual(await names("2098-01-01T00:00:00.000Z"), [
+      "alpha [names alphaFn]",
+      "beta [names betaFn]",
+      "eps [names epsFn]",
+      "gamma [names gammaFn]",
+    ]);
+    assert.deepEqual(
+      await names("2099-03-01T00:00:00.000Z"),
+      ["beta [names betaFn]", "eps [names epsFn]"],
+      "alpha left active, gamma's anchor is retired, and the conflict does not count while phi is no one's",
+    );
+    assert.deepEqual(
+      await names("2099-07-01T00:00:00.000Z"),
+      ["beta [names betaFn]"],
+      "once phi is the owner's, the unresolved conflict holds eps back",
+    );
+    assert.deepEqual(await names("2100-01-01T00:00:00.000Z"), ["beta [names betaFn]", "eps [names epsFn]"]);
+    assert.deepEqual(
+      await names(),
+      ["beta [names betaFn]", "eps [names epsFn]"],
+      "without a time, the current state: the same as after every change",
+    );
+  } finally {
+    await db.done();
+  }
+});
+
 test("prompt delivery keeps its order, which anchor or option it names, and what it never matches", async () => {
   const db = tempDb();
   const repo = checkout();

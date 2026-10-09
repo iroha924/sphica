@@ -17,10 +17,16 @@ export const AUTHORITY = {
 export const AI_DECIDED =
   "A record marked decided by an AI was decided by an AI in an earlier session, not by the owner (unmarked delivered decisions are the owner's): with a concrete reason you may depart from it, saying in your reply which record and why. It never relaxes the owner's rules, public contracts, or approval gates.";
 
-/** Whether the unit at `unit` (a column reference) is the owner's decision now: an unretracted owner_statement or explicit adoption */
-export const ownerAdopted = (unit: string) =>
-  sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
-    and a.route in ('owner_statement', 'explicit') and a.retracted_at is null)`;
+/**
+ * Whether the unit at `unit` (a column reference) is the owner's decision now, or as of `asOf`: an owner_statement or explicit adoption
+ * not retracted by then
+ */
+export const ownerAdopted = (unit: string, asOf?: string) =>
+  asOf === undefined
+    ? sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
+    and a.route in ('owner_statement', 'explicit') and a.retracted_at is null)`
+    : sql<SqlBool>`exists (select 1 from unit_adoption a where a.unit_id = ${sql.ref(unit)}
+    and a.route in ('owner_statement', 'explicit') and a.added_at <= ${asOf} and (a.retracted_at is null or a.retracted_at > ${asOf}))`;
 
 /** The authority of each unit as of `asOf` (now when omitted). Owner outranks agent: an AI never overrides what the owner adopted */
 export async function authorityOf(db: Reads, ids: number[], asOf?: string): Promise<Map<number, Authority>> {

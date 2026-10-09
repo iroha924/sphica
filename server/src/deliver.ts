@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExpressionBuilder, Kysely } from "kysely";
+import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
@@ -86,12 +86,20 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
 /**
  * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. The owner's decision is held back
  * only by a conflict with another record the owner adopted: a proposal nobody adopted, or the AI's own decision, never hides it.
+ * With `asOf`, the same as of that time, read from the state, link, and adoption history (extraction and sources never change after a save).
  */
-const deliverable = (db: Reads, projectId: number) =>
+const deliverable = (db: Reads, projectId: number, asOf?: string) =>
   db
     .selectFrom("unit as u")
     .where("u.project_id", "=", projectId)
-    .where("u.lifecycle", "=", "active")
+    .$call((q) =>
+      asOf === undefined
+        ? q.where("u.lifecycle", "=", "active")
+        : q.where(
+            sql<SqlBool>`(select s.to_state from unit_state s where s.unit_id = u.id and s.at <= ${asOf}
+              order by s.at desc, s.id desc limit 1) = 'active'`,
+          ),
+    )
     .where("u.extraction", "=", "supported")
     .where("u.unsourced", "=", 0)
     .where(({ not, exists, selectFrom }) =>
@@ -100,16 +108,22 @@ const deliverable = (db: Reads, projectId: number) =>
           selectFrom("unit_link as l")
             .select("l.from_unit")
             .where("l.kind", "=", "conflicts")
-            .where("l.resolved_at", "is", null)
+            .$call((q) =>
+              asOf === undefined
+                ? q.where("l.resolved_at", "is", null)
+                : q
+                    .where("l.added_at", "<=", asOf)
+                    .where((eb) => eb.or([eb("l.resolved_at", "is", null), eb("l.resolved_at", ">", asOf)])),
+            )
             .where((eb) =>
               eb.or([
                 eb.and([
                   eb("l.from_unit", "=", eb.ref("u.id")),
-                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.to_unit")]),
+                  eb.or([eb.not(ownerAdopted("u.id", asOf)), ownerAdopted("l.to_unit", asOf)]),
                 ]),
                 eb.and([
                   eb("l.to_unit", "=", eb.ref("u.id")),
-                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.from_unit")]),
+                  eb.or([eb.not(ownerAdopted("u.id", asOf)), ownerAdopted("l.from_unit", asOf)]),
                 ]),
               ]),
             ),
@@ -531,6 +545,7 @@ export async function namedRecords(
   projectId: number,
   root: string,
   prompt: string,
+  asOf?: string,
 ): Promise<
   {
     u: { id: number; key: string; kind: string; stance: string | null; text: string };
@@ -562,19 +577,25 @@ export async function namedRecords(
     (option: string) => option.length >= 3 && word(option.normalize("NFKC").toLowerCase(), lower),
   );
   // Kind, then id: the order prompts show records in, written out rather than left to whichever index the query plan walks
-  const units = await deliverable(db, projectId)
+  const units = await deliverable(db, projectId, asOf)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .orderBy("u.kind")
     .orderBy("u.id")
     .execute();
   // The children of the same deliverable set by subquery: a list of every id would pass SQLite's limit on bound values
-  const ids = deliverable(db, projectId).select("u.id");
+  const ids = deliverable(db, projectId, asOf).select("u.id");
   const [anchors, options] = await Promise.all([
     db
       .selectFrom("unit_anchor")
       .select(["unit_id", "path", "symbol"])
       .where("unit_id", "in", ids)
-      .where("retired_at", "is", null)
+      .$call((q) =>
+        asOf === undefined
+          ? q.where("retired_at", "is", null)
+          : q
+              .where("added_at", "<=", asOf)
+              .where((eb) => eb.or([eb("retired_at", "is", null), eb("retired_at", ">", asOf)])),
+      )
       .orderBy("id")
       .execute()
       .then(byUnit),

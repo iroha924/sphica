@@ -81,6 +81,15 @@ base: main
   - コミット: `test(eval): record the shell-change miss rate for #219`
   - 結果: 母集団 2,842 組、seed 20261009。33 組を引いて shell の編集と確かめた 30 組のうち 20 組が次のプロンプトまでに配られず（67%、95% Wilson 49〜81%）→ 判定「進む」（`node server/evals/post-write/shell-miss.ts --decide server/evals/post-write/m0-shell.json` → proceed）。Claude と Codex のラベルの食い違い 3 組（1・24・31）は Claude の見落としで、会話記録で Codex が正しいと確かめた。#219 に持ち主が承認した文面でコメントした（issuecomment-6083349101）。#219 の配信は別の計画と Go が要るので、ここで止める
 
+- [x] T18: 配信の条件を過去の時点で判定できるようにする（`deliverable`・`namedRecords`・`ownerAdopted` の asOf）
+  - 種別: 追加
+  - 計画: S1
+  - 依存: T01（照合の関数が要る）
+  - 変更: `server/src/deliver.ts`, `server/src/authority.ts`, `server/test/deliver.test.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → asOf を渡すと、その時点の状態・anchor の追加と取り外し・衝突の追加と解決・採用の時刻で名指しの記録が決まり、渡さなければ今と同じ
+  - コミット: `feat(deliver): decide deliverable records as of a past time for replays`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 53 pass（新しいテスト: 保存より前は 0 件、後で active を外れた記録・後で外した anchor・後で足した anchor・後で採用が付いて効く衝突・後で解決した衝突を時点ごとに確かめ、時点なしは今の状態）。hook は asOf を渡さない。`bun run verify` → exit 0
+
 ## P2: 今のバンドルでの基準
 
 今の配信では記録が届かない評価タスクと、post_write の hook を流せる runner を用意し、作る前に基準値と揺れを測る。
@@ -176,3 +185,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T06, T07, T08, T09, T10, T11, T12, T13, T14 / M0 が基準に届かず post_write を作らない / M1a・M1・実装・出荷のタスクを取りやめた。T15（不採用時の扱い）は T01 の切り出しとバージョンをどうするかを持ち主に聞いてから
 - 2026-10-10 / T03 / 持ち主の指示でラベルを Claude と Codex が付けた / 完了条件の「持ち主のラベル」を「標本とラベル」に読み替え、件名の owner's を外した
 - 2026-10-10 / T03 / S2（M1a）と S4（採否の記録）を担うタスクが取りやめで無くなった / plan の S2・S4 を M0 での打ち切りの形に直し、T03 の計画欄を S1 から S1, S2, S4 にした（T03 で採否を決めたため）
+- 2026-10-10 / T18 / M0' の取りこぼし 20 組のうち 14 組が編集の後に作られた記録で、M0 も今の記録を過去の書き込みに当てていた / 時点付きの配信条件を T18 で足した。M0 と M0' の測り直しは Codex との合意（plan の変更履歴）に沿ってタスクを足す
