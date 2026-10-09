@@ -66,6 +66,8 @@ export function readConversation(dir: string, file: string): Conversation {
   const raw = fs.readFileSync(path.join(dir, file));
   const events: Event[] = [];
   const unreadableLines: number[] = [];
+  /** Where each user and assistant message line is, so a user line's answer (or the lack of one) can be found */
+  const messages: { n: number; type: string }[] = [];
   let session = "";
   let agent: string | null = null;
   raw
@@ -101,6 +103,7 @@ export function readConversation(dir: string, file: string): Conversation {
         events.push({ kind: "compact", n, at });
         return;
       }
+      if (d.type === "user" || d.type === "assistant") messages.push({ n, type: d.type });
       const content = isObject(d.message) ? d.message.content : undefined;
       if (d.type === "assistant" && Array.isArray(content)) {
         for (const c of content)
@@ -128,11 +131,15 @@ export function readConversation(dir: string, file: string): Conversation {
       if (origin === "human") events.push({ kind: "human", n, at });
       else if (origin === undefined) events.push({ kind: "unknown prompt", n, at });
     });
+  // A user line of no known origin may be the owner's prompt only when the model answers it next: a local command, the owner's own
+  // shell command, or an interruption marker gets no answer
+  const answered = (n: number) => messages.find((m) => m.n > n)?.type === "assistant";
+  const kept = events.filter((e) => e.kind !== "unknown prompt" || answered(e.n));
   return {
     file,
     session,
     agent,
-    events,
+    events: kept,
     unreadable: unreadableLines.length,
     unreadableLines,
     sha256: createHash("sha256").update(raw).digest("hex"),

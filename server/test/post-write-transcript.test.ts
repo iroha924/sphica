@@ -93,6 +93,7 @@ test("a conversation reads in line order: turns, compactions, the next human pro
       delivery("PreToolUse", "Sphica: Legacy record: trace:s/b (decision do): B"), // 12
       result("c3"), // 13
       line({ type: "user", message: { content: "no origin" } }), // 14
+      line({ type: "assistant", message: { content: [{ type: "text", text: "answering it" }] } }), // 15
     ];
     fs.writeFileSync(path.join(dir, "s.jsonl"), `${main.join("\n")}\n`);
     fs.mkdirSync(path.join(dir, "s", "subagents"), { recursive: true });
@@ -132,6 +133,40 @@ test("a conversation reads in line order: turns, compactions, the next human pro
     assert.equal(shown(c, 5, 10, "trace:s/a"), "not shown", "only between the two points");
     assert.equal(shown(c, 10, 14, "trace:s/b"), "unknown", "an incomplete delivery leaves it unknown");
     assert.match(readConversation(dir, "s.jsonl").sha256, /^[0-9a-f]{64}$/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a user line with no origin is a possible prompt only when the model answers it", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-transcript-"));
+  try {
+    const answer = line({ type: "assistant", message: { content: [{ type: "text", text: "ok" }] } });
+    const plain = (text: string) => line({ type: "user", message: { content: text } });
+    const lines = [
+      human("go"), // 0
+      call("c1"), // 1
+      result("c1"), // 2
+      plain("<command-name>/reload-plugins</command-name>"), // 3: a local command
+      plain("<local-command-stdout>Reloaded</local-command-stdout>"), // 4
+      plain("<bash-input>git status</bash-input>"), // 5: the owner's own shell command
+      plain("<bash-stdout>clean</bash-stdout>"), // 6
+      plain("[Request interrupted by user]"), // 7
+      human("next"), // 8
+      answer, // 9
+      call("c2"), // 10
+      result("c2"), // 11
+      plain("/sphica:harvest 232"), // 12: an older transcript's prompt, which the model answers
+      answer, // 13
+    ];
+    fs.writeFileSync(path.join(dir, "s.jsonl"), `${lines.join("\n")}\n`);
+    const c = readConversation(dir, "s.jsonl");
+    assert.equal(
+      nextHuman(c, 2),
+      8,
+      "local commands, the owner's shell commands, and interruptions are not prompts",
+    );
+    assert.equal(nextHuman(c, 11), "unknown", "a line the model answers may be the owner's prompt");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
