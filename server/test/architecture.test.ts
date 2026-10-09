@@ -19,9 +19,10 @@ function check(extra: Record<string, string>) {
   });
 }
 
-test("only git.ts and the git worker start git, however the program name reaches the call", () => {
+test("only git.ts and the git worker start git, and only a few modules start processes at all", () => {
   assert.equal(check({}).status, 0);
-  const spawns =
+  // A module that may start processes (github.ts starts gh) still may not start git, however the name reaches the call
+  const loads =
     'import { exec, execFile, execFileSync, spawn } from "node:child_process";\nimport { promisify } from "node:util";\n';
   for (const call of [
     'execFileSync("git", ["status"]);',
@@ -35,15 +36,37 @@ test("only git.ts and the git worker start git, however the program name reaches
     'spawn(`${"git"}`, ["status"]);',
     'spawn("git" /* the program */, ["status"]);',
     'execFileSync("git.exe", ["status"]);',
+    'spawn("\\x67it", []);',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the source under check holds a template
+    "const prefix = '';\nexec(`${prefix}git status`);",
   ]) {
-    const r = check({ "stray.ts": `${spawns}${call}\n` });
+    const r = check({ "github.ts": `${loads}${call}\n` });
     assert.equal(r.status, 1, call);
-    assert.match(r.stderr, /server\/src\/stray\.ts starts git/, call);
+    assert.match(r.stderr, /server\/src\/github\.ts starts git/, call);
   }
-  // A message that only begins with the word, in a module that starts nothing, is not a start
-  assert.equal(check({ "stray.ts": 'export const why = "git could not list the files";\n' }).status, 0);
-  // A starter that names git only in a comment has stopped being looked at
-  for (const text of ['// execFileSync("git", ["status"]);\nexport {};\n', "export {};\n"]) {
+  // Any other module may not load node:child_process at all, in whatever form
+  for (const load of [
+    'import { exec } from "child_process";\nexec("ls");',
+    'const { exec } = await import("node:child_process");\nexec("ls");',
+    'const cp = require("node:child_process");',
+  ]) {
+    const r = check({ "stray.ts": `${load}\n` });
+    assert.equal(r.status, 1, load);
+    assert.match(r.stderr, /server\/src\/stray\.ts loads node:child_process/, load);
+  }
+  // Words in comments and messages are not starts
+  assert.equal(
+    check({
+      "stray.ts": '// import { exec } from "node:child_process";\nexport const message = "git failed";\n',
+    }).status,
+    0,
+  );
+  // A starter that no longer loads node:child_process, or names git only in a comment, has stopped being looked at
+  for (const text of [
+    '// execFileSync("git", ["status"]);\nexport {};\n',
+    'export const tool = "git";\n',
+    "export {};\n",
+  ]) {
     const r = check({ "git.ts": text });
     assert.equal(r.status, 1, text);
     assert.match(r.stderr, /server\/src\/git\.ts names no git to start/);

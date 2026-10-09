@@ -123,6 +123,17 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --test test/git-worker.test.ts` → T04 の git.ts と git-worker.ts（HEAD から戻して確認）で 7 件失敗した（6 件の指摘と、引数の形を変えた掃除のテスト）
   - 結果: `cd server && node --test test/git-worker.test.ts` → 11 件 pass
 
+- [x] T14: T11 のレビューの指摘を直す（node:child_process を読み込めるモジュールを一覧に限り、その中で git を起動するのを git.ts と git-worker.ts に限る。文字列はエスケープを戻し、テンプレートの各部分も見る）
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T11（直す対象）
+  - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
+  - red: `cd server && node --test test/architecture.test.ts` → T11 の検査で失敗する（`spawn("\x67it", [])` を通す）
+  - 完了条件: `cd server && node --test test/architecture.test.ts` → pass。`bun run architecture` → exit 0
+  - コミット: `test(architecture): allow child processes in five modules and git in two (T14)`
+  - 結果: `cd server && node --test test/architecture.test.ts` → T11 の検査（HEAD から戻して確認）で 1 件失敗した（`spawn("\x67it", [])` で exit 0）
+  - 結果: `cd server && node --test test/architecture.test.ts` → 1 件 pass。`bun run architecture` → exit 0（5 つのモジュールが子プロセスを起動し、git は 2 つだけ）
+
 ## P3: 攻撃テストを広げ、CI の全 OS と Git 2.34 で流す
 
 残りの経路と互換の形式をテストに入れ、macOS・Windows・ubuntu:22.04 の job で流す。
@@ -174,3 +185,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T05 / 締め切りのテストが並行の実行でときどき落ちた（worker と親の締め切りが同じで、親が先に worker を止めると孫の git が残る）。worker の締め切りを親の 8 割にし、POSIX ではプロセスグループごと止める
 - 2026-10-09 / T05 / 変更欄に `server/evals/acceptance/driver.ts` を足した。onHook が非同期になり、driver の呼び出しを lint（noFloatingPromises）が見つけたので await した
 - 2026-10-09 / T06 / hook の陽性対照で、テスト用の素の git（update-index）が hook を走らせて印が付き、Sphica が走らせたように見えた。index を作り直した後に印を消してから測る形にした
+- 2026-10-09 / T11 / Codex のタスクレビュー（dac3b908）: F1〜F3（P2）を採用し、T14 を足した。字句の検査では実行時に組み立てる名前まで捕まえられないので、子プロセスを起動できるモジュールを 5 つに絞り、残りはレビューで見る、と検査のコメントに書いた
