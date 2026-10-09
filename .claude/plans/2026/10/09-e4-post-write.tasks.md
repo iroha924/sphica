@@ -115,6 +115,16 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 資格の無い組・subagent の組・次のプロンプトの無い組が別に数えられ、窓が会話記録で閉じ、判定器が不正なラベルを拒み、原因の内訳がターンを一様に引く
   - コミット: `fix(eval): measure shell-change misses on records deliverable at the edit, from transcripts`
   - 結果: red は直す前のコードで実測（旧 decide に missed の無い 30 件を渡すと verdict が not adopted。旧 M0' の取りこぼし 20 組のうち 14 組が編集の後に active になった記録）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass（候補はターンと path ごと、tool の行がある path・finding・記録より前のターンは候補にしない、呼び出しの結果の時点で資格を決め最初に資格のある呼び出しを測る、別の記録の配信は数えない、subagent・差し込みの未観測・次のプロンプト無し・決着しないラベル・shell の編集でないは別に数える、失敗した呼び出しは拒む、判定器は疑いを両方向に数え 150 組で止まり番号の欠けを拒む、原因の内訳はターンを一様に引く）。資格の判定に使う `deliverableIds` を deliver.ts から出し、時点のテストで確かめた。`bun run verify` → exit 0
+- [x] T25: 測る呼び出しを、ラベルの書き順ではなく結果の時刻の順で選ぶ（材料の出力はファイル名を含む呼び出しだけにする）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T21（直す対象の M0' のスクリプト）
+  - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → ラベルが後の呼び出しを先に書くと、後の呼び出しの結果（no next prompt）が返る
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 書き順によらず、最初に返った資格のある呼び出しが測られる
+  - コミット: `fix(eval): measure the earliest eligible call whatever order a label lists`
+  - 結果: red を直す前のコードで実測（`["b4", "b1"]` で no next prompt）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass。`bun run verify` → exit 0
+
 - [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S6
@@ -240,3 +250,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 
 - 2026-10-10 / T18 のレビュー / F1（各時点の条件を個別に確かめるテストが無い）は採用して T24 で直した
 - 2026-10-10 / T21 / 資格の判定に時点付きの deliverable の結果が要った / `deliverableIds` を deliver.ts から出し、変更欄に deliver.ts と deliver.test.ts を足した
+- 2026-10-10 / T25 / ラベル付けの途中で、測る呼び出しをラベルの書き順で選んでいたと気付いた。材料の出力も大きすぎた / 修正タスク T25 を足した

@@ -175,6 +175,11 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       "missed",
       "the first call at which the pair is eligible is measured",
     );
+    assert.equal(
+      await of(utc, ["b4", "b1"]),
+      "missed",
+      "the earliest eligible call counts, whatever order the label lists",
+    );
     assert.equal(await of(utc, ["k1"]), "subagent");
     assert.equal(await of(utc, ["b4"]), "no next prompt");
     assert.equal(await of(utc, ["q1"], "quiet.jsonl"), "not observed");

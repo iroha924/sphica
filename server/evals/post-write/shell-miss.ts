@@ -192,7 +192,8 @@ export async function outcome(
   if (label.calls === null) return { outcome: "unresolved" };
   if (!label.calls.length) return { outcome: "not a shell edit" };
   const at = deliverableAt(db, projectId);
-  for (const id of label.calls) {
+  // The calls in the order they returned, so the earliest eligible one is measured whatever order the label lists them in
+  const named = label.calls.map((id) => {
     const c = conversations.find((x) => x.events.some((e) => e.kind === "call" && e.id === id));
     const call = c?.events.find((e) => e.kind === "call" && e.id === id);
     const result = c?.events.find((e) => e.kind === "result" && e.id === id);
@@ -200,9 +201,12 @@ export async function outcome(
       throw new Error(
         `label for pair ${label.index}: call ${id} has no successful result in the session's transcripts`,
       );
-    if (!(await at(result.at)).has(pair.unit) || !(await anchoredAt(db, pair.unit, pair.path, result.at)))
-      continue;
-    const measured = { call: id, at: result.at };
+    return { id, c, call, result, when: result.at as string };
+  });
+  named.sort((a, b) => a.when.localeCompare(b.when) || a.result.n - b.result.n);
+  for (const { id, c, call, result, when } of named) {
+    if (!(await at(when)).has(pair.unit) || !(await anchoredAt(db, pair.unit, pair.path, when))) continue;
+    const measured = { call: id, at: when };
     if (c.agent !== null) return { outcome: "subagent", ...measured };
     if (!deliveryObserved(c, result.n)) return { outcome: "not observed", ...measured };
     const end = nextHuman(c, result.n);
@@ -310,6 +314,9 @@ async function main(): Promise<void> {
     for (let i = Number(values.from); i < Math.min(Number(values.to), d.order.length); i++) {
       const p = d.order[i] as Candidate;
       console.log(`### ${i} ${p.path} record ${p.key} turn ${p.start} .. ${p.end}`);
+      // The calls that name the file are shown whole; the rest of the turn's shell calls are only counted
+      const name = path.basename(p.path);
+      let others = 0;
       for (const f of sessionFiles(dir, p.external)) {
         const c = readConversation(dir, f);
         for (const e of c.events) {
@@ -321,13 +328,17 @@ async function main(): Promise<void> {
             e.at > p.end
           )
             continue;
+          const command = String(e.input.command ?? "");
+          if (!command.includes(name)) {
+            others++;
+            continue;
+          }
           const r = c.events.find((x) => x.kind === "result" && x.id === e.id);
           const ok = r?.kind === "result" && r.ok ? "ok" : "failed";
-          console.log(
-            `  ${e.id} ${c.agent ?? "main"} ${e.at} ${ok}: ${String(e.input.command ?? "").slice(0, 2000)}`,
-          );
+          console.log(`  ${e.id} ${c.agent ?? "main"} ${e.at} ${ok}: ${command.slice(0, 4000)}`);
         }
       }
+      console.log(`  (${others} other shell calls in the turn do not name ${name})`);
     }
     return;
   }
