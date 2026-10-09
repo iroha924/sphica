@@ -166,20 +166,22 @@ base: main
   - コミット: `fix(eval): keep turns of unclear start and lines after the call as unknown`
   - 結果: red を直す前のコードで実測（not observed）。F2 は F1 と同時に直したので、`call.n` を `result.n` に一時的に戻してテストが落ちることを確かめ、戻した。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass。`bun run verify` → exit 0
 
-- [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
+- [x] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S6
   - 依存: T21（作り直した M0' が要る）
   - 変更: `server/evals/post-write/m0-shell.json`
   - 完了条件: `node server/evals/post-write/shell-miss.ts --decide server/evals/post-write/m0-shell.json` → 保存した判定と同じ。ファイルにコミット・スナップショットの sha256・会話記録の hash・別に数えた件数・両者のラベルと決着が入っている。#219 へのコメントを出した
   - コミット: `test(eval): remeasure the shell-change misses for #219`
-- [ ] T23: M0 を測り直して #213 を判定し直す（Claude と Codex のラベル）
+  - 結果: `node server/evals/post-write/shell-miss.ts --measure …` → コミット 30e1efc9、スナップショット sha256 a5c82713…、会話記録 70 ファイルで、母集団 1,353 組、seed 20261010、42 組を引いて測れた 30 組のうち 17 組が取りこぼし（57%、95% Wilson 39〜73%）、疑い 2 組はどちらに解いても同じ → 判定「進む」。shell の編集の定義（エージェントが組み立てた内容を書くもの、git の戻し・formatter・ほかの AI・写しの中は除く）で Claude と Codex が独立にラベルを付け、食い違った 14 組は呼び出しの全文で決着させた（どれも書き込みだったので和集合）。原因の内訳（30 ターン、報告だけ）: shell の編集 25、git 9、formatter 3、不明 3。#219 に持ち主が承認した文面でコメントした（issuecomment-6086589029）。#219 の配信は別の計画と Go で進める
+- [x] T23: M0 を測り直して #213 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S2, S4
   - 依存: T20（作り直した M0 が要る）
-  - 変更: `server/evals/post-write/m0.json`
+  - 変更: `server/evals/post-write/m0.json`, `server/evals/post-write/replay.ts`
   - 完了条件: `cat server/evals/post-write/m0.json` → コミット・スナップショットの sha256・会話記録の hash・集計・40 組の両者のラベルと決着・境界式での判定が入っている。#213 へのコメントを出した
   - コミット: `test(eval): remeasure the post_write entry check for #213`
+  - 結果: `node server/evals/post-write/replay.ts …` → T22 と同じ DB のスナップショットで、書き込み 1,079 件、差し込みが観測された会話の 485 件のうち 149 件で配信が起き、出る組は 358（文書の path が 264）。標本 40 組（seed 20261010）を Claude と Codex が独立にラベル付けし、食い違った 3 組（H と N）は H で決着 → R 0・H 6・N 34 で判定「作らない」（`node server/evals/post-write/replay.ts --decide …` → not built）。ラベルの材料は名指した語の前後を出す形に直してから付けた（変更欄に replay.ts を足した）。#213 に持ち主が承認した文面でコメントした（issuecomment-6086589413）
 
 - [x] T24: 時点の条件を 1 つずつ確かめるテストを足す（T18 のレビューの F1）
   - 種別: 修正
@@ -296,3 +298,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T27 / Claude のラベルで試算すると決まらない組が 5 組あり、どれも次のプロンプトの前の origin の無い行（ローカルのコマンドなど）が原因だった / 修正タスク T27 を足した
 - 2026-10-10 / T25・T26 のレビュー / F1〜F4 は採用して T28 で直した。8 組の上限は列挙をやめて状態をたどる形にしたので無くした
 - 2026-10-10 / T27・T28 のレビュー / F1・F2 は採用して T29 で直した
+- 2026-10-10 / T23 / 先頭 4,000 字のシートでは長い文書の名指した箇所が見えなかった / `--sheet` を名指した語の前後を出す形に直し、そのシートで Codex のラベル付けをやり直した（変更欄に replay.ts を足した）

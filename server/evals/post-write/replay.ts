@@ -253,6 +253,23 @@ export function decide(labels: Label[]): {
   return { n, R, H, N, U, verdict };
 }
 
+/** What a pair's hit named: the symbol, path, or option text inside `[names …]` */
+const named = (why: string) => /^\[names (?:the \w+ option )?(.*)\]$/.exec(why)?.[1] ?? "";
+
+/** Up to three windows of the written text around the name (case and width folded as the matching folds them), or its start */
+function around(text: string, name: string): string[] {
+  const folded = text.normalize("NFKC").toLowerCase();
+  const target = name.normalize("NFKC").toLowerCase();
+  const out: string[] = [];
+  for (
+    let i = target ? folded.indexOf(target) : -1;
+    i >= 0 && out.length < 3;
+    i = folded.indexOf(target, i + target.length)
+  )
+    out.push(text.slice(Math.max(0, i - 500), i + target.length + 500));
+  return out.length ? out : [head(text, 1000)];
+}
+
 /** The labelling material for one sampled pair: the record as it stood then, the write, and the owner's prompt that opened the turn */
 async function sheetEntry(
   db: ReadonlyKysely<DB>,
@@ -293,8 +310,8 @@ async function sheetEntry(
     "the owner's prompt that opened the turn:",
     `  ${head(prompt, 1500).replaceAll("\n", "\n  ")}`,
     ...(old ? ["replaced text (old_string):", `  ${head(old, 1500).replaceAll("\n", "\n  ")}`] : []),
-    "written text:",
-    `  ${head(written, 4000).replaceAll("\n", "\n  ")}`,
+    "written text, around what it named:",
+    ...around(written, named(p.why)).map((w) => `  …${w.replaceAll("\n", "\n  ")}…`),
     "label: R (proposes or carries out what the record rejected or rules out) / H (same subject, harmless) / N (unrelated) / unknown",
     "",
   ].join("\n");
