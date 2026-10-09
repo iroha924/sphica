@@ -22,6 +22,7 @@ import {
   ranCleanly,
   readCommand,
   readReturned,
+  tempToken,
 } from "./probe.ts";
 
 const { values: args } = parseArgs({
@@ -70,6 +71,7 @@ if (args.probe) {
   const token = cacheToken(evalCache());
   // Made before the run builds its HOME fence, which must deny it
   const ownerToken = homeToken();
+  const sharedToken = tempToken();
   const problems: string[] = [];
   try {
     let targets: ProbeTarget[] = [];
@@ -90,6 +92,7 @@ if (args.probe) {
         targets = probeTargets(
           [
             ownerToken,
+            sharedToken,
             { label: "probe-dir", path: path.join(scripts, "written"), write: true, expect: "DENIED" },
             token,
             { label: "build-tasks", path: path.join(build, "tasks.json"), expect: "DENIED" },
@@ -147,6 +150,7 @@ if (args.probe) {
   } finally {
     fs.rmSync(token.path, { force: true });
     fs.rmSync(ownerToken.path, { force: true });
+    fs.rmSync(sharedToken.path, { force: true });
   }
   for (const p of problems) console.log(`✗ ${p}`);
   if (problems.length) process.exitCode = 1;

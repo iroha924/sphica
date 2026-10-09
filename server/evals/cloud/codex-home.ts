@@ -27,11 +27,19 @@ function isolatedCodexHome(codexHome: string, extraConfig = "", settings = owner
  * the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay hidden is
  * denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
  */
-export function codexProfile(base: ":read-only" | ":workspace", deny: string[], read: string[] = []): string {
+export function codexProfile(
+  base: ":read-only" | ":workspace",
+  deny: string[],
+  read: string[] = [],
+  write: string[] = [],
+): string {
   // A path given twice (the repository directly under HOME) would be a key written twice, which TOML refuses
   const lines = [
     ...[...new Set(deny)].map((d) => `${JSON.stringify(d)} = "deny"`),
     ...[...new Set(read)].filter((r) => !deny.includes(r)).map((r) => `${JSON.stringify(r)} = "read"`),
+    ...[...new Set(write)]
+      .filter((w) => !deny.includes(w) && !read.includes(w))
+      .map((w) => `${JSON.stringify(w)} = "write"`),
   ].join("\n");
   return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
 }
@@ -72,8 +80,10 @@ export function fencedCodexHome(
   o: {
     base: ":read-only" | ":workspace";
     deny: string[];
-    /** Places under a denied one that stay readable (the tools' installs under a denied HOME) */
+    /** Places under a denied one that stay readable (the tools' installs under a denied HOME, the run's own temp tree) */
     read?: string[];
+    /** Places under a denied one the model may write (the checkout and TMPDIR in its temp tree) */
+    write?: string[];
     extraConfig?: string;
     settings?: string;
     managed?: string[];
@@ -83,7 +93,7 @@ export function fencedCodexHome(
   if (managed.length)
     throw new Error(`administrator settings for Codex can replace the run's profile: ${managed.join(", ")}`);
   const denied = [...o.deny, path.join(codexHome, "auth.json")];
-  const profile = codexProfile(o.base, denied, o.read);
+  const profile = codexProfile(o.base, denied, o.read, o.write);
   isolatedCodexHome(codexHome, `${profile}${o.extraConfig ?? ""}`, o.settings);
   return { profile, denied };
 }
@@ -287,8 +297,8 @@ export function requireInside(root: string, p: string, what: string): string {
 }
 
 /**
- * One lock for every process that starts a fenced Codex: two at once could read each other's checkout in the temp directory, whatever
- * output directory each was given. A lock left by a process that died is not taken over: whoever removes it checks that it is gone.
+ * One lock for every process that starts a fenced Codex or puts hidden material in the temp directory. Each Codex is denied that
+ * directory but its own tree; the lock also keeps one from running beside another's checkout, whatever output directory each was given. A lock left by a process that died is not taken over: whoever removes it checks that it is gone.
  */
 export function codexLock(cache: string): () => void {
   const file = path.join(cache, "codex.lock");

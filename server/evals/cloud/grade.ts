@@ -15,7 +15,7 @@ import {
   ownerCodexSettings,
   requireInside,
 } from "./codex-home.ts";
-import { codexDenies, currentFence, outsideTree, shieldNow } from "./codex-run.ts";
+import { codexDenies, currentFence, outsideTree, shieldNow, treeAccess } from "./codex-run.ts";
 import { readTasks } from "./firing.ts";
 import {
   blindPrompt,
@@ -39,6 +39,7 @@ import {
   probeProblems,
   probeScript,
   probeTargets,
+  tempToken,
 } from "./probe.ts";
 import type { Grade } from "./schema-check.ts";
 
@@ -105,15 +106,20 @@ function gradeOne(
   /** A probe: plants its files in the grader's directory, and the call answers freely with its events kept */
   plant?: (dir: string) => void,
 ): { status: number | null; output: string; events: string } {
-  const dir = outsideTree("sphica-grade-", denies);
-  const home = outsideTree("sphica-grade-home-", denies);
+  const tree = outsideTree("sphica-grade-", denies);
+  const dir = path.join(tree, "work");
+  const home = path.join(tree, "home");
   let result: { status: number | null; output: string; events: string } | undefined;
   let failure: unknown;
   try {
+    fs.mkdirSync(dir);
+    fs.mkdirSync(home);
+    const access = treeAccess(":read-only", tree);
     fencedCodexHome(path.join(home, ".codex"), {
       base: ":read-only",
       deny: denies,
-      read: shield.home.roots,
+      read: [...shield.home.roots, ...access.read],
+      write: access.write,
       settings,
     });
     // The schema text the checkpoint key holds, not the file, which may change while grading runs
@@ -146,7 +152,7 @@ function gradeOne(
   } catch (e) {
     failure = e;
   }
-  clear(dir, home);
+  clear(tree);
   if (!result) throw failure;
   return result;
 }
@@ -194,6 +200,7 @@ if (args.probe) {
   const token = cacheToken(cache);
   // HOME is denied whole, so a token made now is denied with it; made here, it is removed however the probe ends
   const ownerToken: ProbeTarget | null = homeToken();
+  const sharedToken = tempToken();
   const problems: string[] = [];
   try {
     let targets: ProbeTarget[] = [];
@@ -206,6 +213,7 @@ if (args.probe) {
         targets = probeTargets(
           [
             ...(ownerToken ? [ownerToken] : []),
+            sharedToken,
             token,
             {
               label: "build-tasks",
@@ -225,6 +233,7 @@ if (args.probe) {
   } finally {
     fs.rmSync(token.path, { force: true });
     if (ownerToken) fs.rmSync(ownerToken.path, { force: true });
+    fs.rmSync(sharedToken.path, { force: true });
   }
   for (const p of problems) console.log(`✗ ${p}`);
   if (!problems.length) console.log("✓ probe passed: every fenced target was denied to the grader");

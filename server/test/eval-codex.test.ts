@@ -286,6 +286,19 @@ test("the Codex run under test reads through a read fence and keeps its files wh
   const env = seen.env;
   const home = /^HOME=(.*)$/m.exec(env)?.[1] ?? "";
   assert.ok(!home.startsWith(fs.realpathSync(cache)), home);
+  // The shared temp directory is denied whole; only the run's own tree is read back, with the checkout and TMPDIR writable
+  const tree = path.dirname(home);
+  const line = (p: string, access: string) =>
+    assert.match(
+      seen.config,
+      new RegExp(`^${JSON.stringify(p).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} = "${access}"$`, "m"),
+      `${p} ${access}`,
+    );
+  denied(path.dirname(tree));
+  line(tree, "read");
+  line(path.join(tree, "work"), "write");
+  line(path.join(tree, "tmp"), "write");
+  assert.ok(!seen.config.includes(`${JSON.stringify(home)} = "write"`), "HOME is not writable");
   assert.ok(!fs.existsSync(path.dirname(home)), "the temp tree is removed");
   assert.match(env, new RegExp(`^EVAL_SPHICA_DB=${path.join(dir, "db", "sphica.db")}$`, "m"));
   for (const d of ["work", "home", "tmp"]) assert.ok(fs.existsSync(path.join(dir, d)), d);
@@ -851,7 +864,7 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
     // Only what this run left: other test files may have their own grader directories in the same temp directory
     const left = /could not remove (.*); remove it/.exec(r.stderr)?.[1]?.split(", ") ?? [];
     for (const d of left) {
-      if (fs.existsSync(path.join(d, "stuck"))) fs.chmodSync(path.join(d, "stuck"), 0o700);
+      if (fs.existsSync(path.join(d, "work", "stuck"))) fs.chmodSync(path.join(d, "work", "stuck"), 0o700);
       fs.rmSync(d, { recursive: true, force: true });
     }
   }

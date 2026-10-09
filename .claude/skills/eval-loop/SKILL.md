@@ -129,12 +129,15 @@ Local loop progress:
   worktree and its git directory (its history holds the gold and hidden tests), `~/.cache/sphica-eval` as a whole, the run's own login,
   and all of HOME, with only the `node` and `bun` installs read back: a mise install (`~/.local/share/mise/installs/<name>/<version>`)
   or `~/.bun`. A tool found anywhere else under HOME, or a link at HOME's top or on the way to a kept install that leads out of HOME,
-  stops the run. The run's PATH holds only those tools' directories and the owner's PATH entries outside HOME. So every build,
-  run directory, and log stays under `~/.cache/sphica-eval`: codex.ts refuses `--build` or `--out` elsewhere, and grade.ts refuses a loop
-  whose build or run roots are elsewhere. The checkout, HOME, and TMPDIR live in a temp tree during the run and move back into the run
-  directory after it. A Codex process holds `~/.cache/sphica-eval/codex.lock`; one left by a killed process is removed by hand once that
+  stops the run. The run's PATH holds only absolute entries: those tools' directories, codex's, and the owner's entries outside HOME.
+  External volumes and the shared temp directories (the system's and `/tmp`, where the acceptance driver and tests build their worlds)
+  are denied too. So every build, run directory, and log stays under `~/.cache/sphica-eval`: build.ts and codex.ts refuse `--out` (and
+  codex.ts `--build`) elsewhere, and grade.ts refuses a loop whose build or run roots are elsewhere. The checkout, HOME, and TMPDIR live
+  in the run's own temp tree, the one place in the temp directory read back (only the checkout and TMPDIR writable), and move back into
+  the run directory after it. A Codex process holds `~/.cache/sphica-eval/codex.lock`; one left by a killed process is removed by hand once that
   process is gone. The probes are the evidence the fence holds on the Codex installed: each fenced target must print DENIED
-- A Codex run made under another fence (or none) is excluded by collect, and report refuses to compare Codex results across fences. A run
+- A Codex run made under another fence (or none) is excluded by collect, grade refuses a loop whose Codex rows carry more than one, and
+  report refuses to compare Codex results across fences. A run
   whose commands or output name another run, the build, or the evaluation cache is still excluded as having looked outside
 - Known limit: the checkout carries its slot's own `.tools` (the fixture database in search and inject, the gold record in gold), which
   is what that condition gives the agent anyway

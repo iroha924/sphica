@@ -24,7 +24,7 @@ import {
   pinCheckout,
   requireInside,
 } from "../cloud/codex-home.ts";
-import { codexFence, repoPlaces, shieldNow } from "../cloud/codex-run.ts";
+import { codexFence, repoPlaces, shieldNow, treeAccess } from "../cloud/codex-run.ts";
 import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
@@ -310,12 +310,17 @@ async function runOne(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
+      const access = treeAccess(":workspace", path.dirname(work));
       const fence = fencedCodexHome(codexHome, {
         base: ":workspace",
         deny: denies,
-        read: [...o.env.shield.home.roots, biomeDir],
+        read: [...o.env.shield.home.roots, biomeDir, ...access.read],
+        write: access.write,
       });
-      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield, { "<biome>": biomeDir });
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield, {
+        "<biome>": biomeDir,
+        "<tree>": path.dirname(work),
+      });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied
@@ -469,7 +474,7 @@ async function main() {
   // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
   if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
-  // Every M2 lane has a shell, which can read the temp directory where another run's checkout sits while it runs
+  // A Claude lane's shell can read the temp directory, where another run's checkout sits while it runs
   if (jobs > 1) throw new Error("--jobs is 1 for M2: concurrent runs could read each other's checkout");
   const out = path.resolve(args.out ?? "");
   const cache = evalCache();

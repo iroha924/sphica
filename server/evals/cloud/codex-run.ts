@@ -75,16 +75,44 @@ export function repoPlaces(repo = REPO): string[] {
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /** Where the repository lives and what HOME keeps: made once per run, and shared by its deny list, its PATH, and its fence */
-export type Shield = { places: string[]; home: HomeFence; volumes?: string[] };
+export type Shield = { places: string[]; home: HomeFence; volumes?: string[]; temp?: string[] };
 
-export const shieldNow = (): Shield => ({ places: repoPlaces(), home: homeFence(), volumes: volumeDenies() });
+/**
+ * The shared temp directories: anything else on this machine (the acceptance driver's worlds, a test's fixtures, other tools) may put
+ * hidden material there, so they are denied whole and each run's own tree is read back
+ */
+export const tempRoots = (): string[] => [
+  ...new Set(
+    [os.tmpdir(), ...(process.platform === "win32" ? [] : ["/tmp"])]
+      .filter((d) => fs.existsSync(d))
+      .map((d) => fs.realpathSync(d)),
+  ),
+];
+
+export const shieldNow = (): Shield => ({
+  places: repoPlaces(),
+  home: homeFence(),
+  volumes: volumeDenies(),
+  temp: tempRoots(),
+});
+
+/** What the model may reach in its own temp tree: read all of it, and write only the checkout and TMPDIR where it may write at all */
+export function treeAccess(
+  base: ":read-only" | ":workspace",
+  tree: string,
+): { read: string[]; write: string[] } {
+  return {
+    read: [tree],
+    write: base === ":workspace" ? [path.join(tree, "work"), path.join(tree, "tmp")] : [],
+  };
+}
 
 /**
  * What no fenced Codex may read, whatever it runs: the repository wherever its files or history are, every evaluation output (builds,
- * other runs, logs), and all of HOME but the tools' installs. Each run works in a temp tree outside all of them.
+ * other runs, logs), all of HOME but the tools' installs, and the shared temp directories. Each run works in its own temp tree, read back.
  */
 export function codexDenies(cache: string, s: Shield = shieldNow()): string[] {
-  return [...s.places, cache, ...s.home.denies, ...(s.volumes ?? [])];
+  return [...s.places, cache, ...s.home.denies, ...(s.volumes ?? []), ...(s.temp ?? [])];
 }
 
 /**
@@ -96,7 +124,7 @@ export function codexFence(
   cache: string,
   codexHome: string,
   s: Shield = shieldNow(),
-  /** More places named by role: a per-run copy read back (M2's Biome) is the same policy in every run */
+  /** More places named by role: the run's temp tree (`<tree>`) and a per-run copy read back (M2's Biome) are the same policy in every run */
   roles: Record<string, string> = {},
 ): string {
   const toml = (p: string) => JSON.stringify(p).slice(1, -1);
@@ -105,9 +133,10 @@ export function codexFence(
     text = text.split(toml(p)).join(toml(REPO));
   // The external volumes mounted come and go: they are one policy line
   for (const v of s.volumes ?? []) text = text.split(`${JSON.stringify(v)} = "deny"\n`).join("");
+  const temp = Object.fromEntries((s.temp ?? []).map((t, i) => [`<temp-${i}>`, t]));
   return fenceDigest(
     text,
-    { ...roles, "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
+    { ...temp, ...roles, "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
     (t) => [...new Set(t.split("\n")), "policy: volumes-denied"].join("\n"),
   );
 }
@@ -119,18 +148,28 @@ export function currentFence(
   s: Shield = shieldNow(),
 ): string {
   const codexHome = path.join(cache, "<run>", "codex-home");
+  const tree = path.join(cache, "<run>", "tree");
+  const access = treeAccess(base, tree);
   return codexFence(
-    codexProfile(base, [...codexDenies(cache, s), path.join(codexHome, "auth.json")], s.home.roots),
+    codexProfile(
+      base,
+      [...codexDenies(cache, s), path.join(codexHome, "auth.json")],
+      [...s.home.roots, ...access.read],
+      access.write,
+    ),
     cache,
     codexHome,
     s,
+    { "<tree>": tree },
   );
 }
 
-/** A temp tree for what the model must reach; under a denied parent it would be unreadable, so that refuses to start */
+/** A temp tree for what the model must reach; under a denied place other than the temp directory it refuses to start */
 export function outsideTree(prefix: string, denied: string[]): string {
   const tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
-  const under = denied.find((d) => isInside(d, tree));
+  // The shared temp directories are denied with the tree read back inside them
+  const temp = tempRoots();
+  const under = denied.filter((d) => !temp.includes(d)).find((d) => isInside(d, tree));
   if (under) {
     fs.rmSync(tree, { recursive: true, force: true });
     throw new Error(`the temp directory ${tree} is under ${under}, which the fence denies`);
@@ -240,13 +279,15 @@ async function fencedRun(
       o.condition === "search" || o.condition === "inject"
         ? `\n[mcp_servers.sphica]\ncommand = "/bin/sh"\nargs = [${JSON.stringify(path.join(tools, "sphica.sh"))}, ${JSON.stringify(path.join(tools, "dist", "mcp.js"))}]\nenv = { TMPDIR = ${JSON.stringify(tmp)}, EVAL_SPHICA_DB = ${JSON.stringify(db)} }\n`
         : "";
+    const access = treeAccess(":workspace", tree);
     const fence = fencedCodexHome(codexHome, {
       base: ":workspace",
       deny: denies,
-      read: shield.home.roots,
+      read: [...shield.home.roots, ...access.read],
+      write: access.write,
       extraConfig: mcp,
     });
-    result.fence = codexFence(fence.profile, cache, codexHome, shield);
+    result.fence = codexFence(fence.profile, cache, codexHome, shield, { "<tree>": tree });
     result.fence_roots = fence.denied;
     // Recorded so a comparison can refuse two builds run by different Codex models
     result.codex_model = codexModelOf(codexHome);

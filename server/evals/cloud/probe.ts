@@ -178,6 +178,13 @@ export function homeToken(home = os.homedir()): ProbeTarget {
   return { label: "home-token", path: file, expect: "DENIED" };
 }
 
+/** A token file in the shared temp directory, outside every run's own tree, which every fenced Codex is denied; the caller removes it */
+export function tempToken(): ProbeTarget {
+  const file = path.join(fs.realpathSync(os.tmpdir()), `sphica-probe-${crypto.randomUUID()}.txt`);
+  fs.writeFileSync(file, "token\n");
+  return { label: "temp-token", path: file, expect: "DENIED" };
+}
+
 /** A token file in the cache, which every fenced Codex is denied; the caller removes it */
 export function cacheToken(cache: string): ProbeTarget {
   const file = path.join(cache, `probe-${crypto.randomUUID()}.txt`);

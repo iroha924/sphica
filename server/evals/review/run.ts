@@ -19,8 +19,8 @@ import {
   holdingLock,
   requireInside,
 } from "../cloud/codex-home.ts";
-import { codexFence, REPO, shieldNow } from "../cloud/codex-run.ts";
-import { homeToken, type ProbeTarget, probeProblems, probeScript } from "../cloud/probe.ts";
+import { codexFence, REPO, shieldNow, treeAccess } from "../cloud/codex-run.ts";
+import { homeToken, type ProbeTarget, probeProblems, probeScript, tempToken } from "../cloud/probe.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
@@ -212,14 +212,18 @@ async function runLane(o: {
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
       const codexHome = path.join(dir, "codex-home");
+      const access = treeAccess(":read-only", path.dirname(p.work));
       const fence = fencedCodexHome(codexHome, {
         base: ":read-only",
         deny: denies,
-        read: o.env.shield.home.roots,
+        read: [...o.env.shield.home.roots, ...access.read],
+        write: access.write,
         extraConfig: codexMcp(p),
       });
       // Runs under another fence (another Node or Bun install kept, another policy) are another measurement
-      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield);
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield, {
+        "<tree>": path.dirname(p.work),
+      });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
       // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied; Sphica's own home stays in the run
@@ -280,7 +284,8 @@ async function preflight(
   out: string,
   model: string,
   env: LaneEnv,
-  ownerToken: ProbeTarget,
+  /** Files planted before the fence where the lane must not reach: the root of HOME, the shared temp directory */
+  planted: ProbeTarget[],
 ): Promise<string[]> {
   const fixture = await fixtureIn(out);
   const review = (host: Host, diff: string) => ({
@@ -345,7 +350,7 @@ async function preflight(
     { label: "outside", path: outside, expect: "DENIED" },
     { label: "auth", path: "$CODEX_HOME/auth.json", shell: true, expect: "DENIED" },
     { label: "git", path: path.join(gitDir, "HEAD"), expect: "DENIED" },
-    ownerToken,
+    ...planted,
   ];
   const codex = await runLane({
     ...review("codex", "postgres"),
@@ -397,7 +402,7 @@ async function main() {
     // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
     if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
     if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
-    // A Codex command can read the temp directory, where another run's checkout sits while it runs; Claude's lanes here have no shell
+    // Codex lanes run one at a time, so no other run's checkout sits beside one should its temp directory deny miss; Claude's have no shell
     if (host === "codex" && jobs > 1)
       throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
   }
@@ -406,7 +411,7 @@ async function main() {
   requireInside(cache, out, "--out");
   if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
   // The preflight's HOME token is made before the run's HOME fence, which must deny it
-  const ownerToken = args.preflight ? homeToken() : null;
+  const planted = args.preflight ? [homeToken(), tempToken()] : null;
   try {
     await holdingLock(cache, async (leave) => {
       let left = false;
@@ -418,9 +423,9 @@ async function main() {
           leave(tree);
         },
       };
-      if (ownerToken) {
+      if (planted) {
         // Its probe runs go apart from the measured ones, which the grader counts by directory name
-        const problems = await preflight(path.join(out, "preflight"), args.model ?? "", env, ownerToken);
+        const problems = await preflight(path.join(out, "preflight"), args.model ?? "", env, planted);
         for (const p of problems) console.log(`✗ ${p}`);
         if (problems.length) process.exitCode = 1;
         else console.log("✓ preflight passed");
@@ -455,7 +460,7 @@ async function main() {
       );
     });
   } finally {
-    if (ownerToken) fs.rmSync(ownerToken.path, { force: true });
+    for (const t of planted ?? []) fs.rmSync(t.path, { force: true });
   }
 }
 

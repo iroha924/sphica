@@ -16,7 +16,7 @@ import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher } from "./build-lib.ts";
-import { evalCache, holdingLock } from "./codex-home.ts";
+import { evalCache, holdingLock, requireInside } from "./codex-home.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
 
@@ -46,7 +46,9 @@ const runs = Number(args.runs);
 if (!Number.isInteger(runs) || runs < 1)
   throw new Error("--runs takes a whole number of Claude runs per task and condition");
 const buildId = `${args.project}-${variant}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
-const out = path.resolve(args.out ?? path.join(os.homedir(), ".cache", "sphica-eval", "builds", buildId));
+const out = path.resolve(args.out ?? path.join(evalCache(), "builds", buildId));
+// The build holds the gold, the tasks, and the slots' records long after the lock is released: only the cache is denied to every fenced Codex
+requireInside(evalCache(), out, "--out");
 // A build is never rebuilt in place: its firing plan and collected results belong to what was pushed from it
 if (fs.existsSync(out))
   throw new Error(`${out} already exists; give a new --out, or leave it out for a new build id`);
@@ -97,8 +99,11 @@ async function fixture(file: string, leave: (tree: string) => void): Promise<voi
     for (const step of fixtureSteps(plan, args.variant === "swapped")) await driver.run(step);
     await driver.snapshot(file);
   } finally {
-    await driver.done();
-    if (fs.existsSync(driver.dir)) leave(driver.dir);
+    try {
+      await driver.done();
+    } finally {
+      if (fs.existsSync(driver.dir)) leave(driver.dir);
+    }
   }
 }
 

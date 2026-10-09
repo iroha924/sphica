@@ -414,6 +414,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="slot that links out|a checkout that is a link|scratch that would overlap|read fence" test/eval-codex.test.ts test/hidden-runner.test.ts test/eval-grade.test.ts` → 直す前の本体で 4 件失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 全件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T37: GitHub の Codex のレビュー（dcd08217）の 3 件を直す（build の `--out` がキャッシュの外でも通る、acceptance の driver の world がロックなしで一時ディレクトリに置かれる、`driver.done()` が失敗すると残りを記録せずにロックを外す）。一時ディレクトリを deny して、run ごとの tree だけを読み戻す
+  - 種別: 修正
+  - 計画: S2, S3, S8
+  - 依存: T36（直す対象の囲いが要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/codex.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/probe.ts`, `server/evals/cloud/build.ts`, `server/evals/review/run.ts`, `server/evals/review/m2.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-grade.test.ts`, `server/test/eval-claude.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="the Codex run under test reads through a read fence|the Codex grader reads through the read fence|outside the cache" test/eval-codex.test.ts test/eval-grade.test.ts` → 直す前の本体（`tempRoots` だけ足した状態）で 3 件失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 全件 pass
+  - コミット: `fix(eval): deny the shared temp directories and keep builds in the cache (T37)`
+  - 結果: `cd server && node --test --test-name-pattern="the Codex run under test reads through a read fence|the Codex grader reads through the read fence|outside the cache" test/eval-codex.test.ts test/eval-grade.test.ts` → 直す前の本体で 3 件失敗した（一時ディレクトリの deny がない、外の `--out` が通る、採点者の tree の行がない）
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 186 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -452,3 +463,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T35 / GitHub の Codex のレビュー（0e1bb91f・e4dc34af）の未解決の 5 件。HOME の奥の外向きのリンクの件は、HOME 全体を辿って確かめた（18 秒、リンク約 6.9 万本、外向きの先はすべて /opt/homebrew・/Applications・/Library/Developer などの誰でも読める場所）。リンク経由の読み取りは先のパスで判定されるので、リンクは読める範囲を広げない。穴は HOME の外の私的なデータの側にあるとして、外部ボリューム（/Volumes の下の実体のディレクトリ）を deny した
 - 2026-10-09 / 進め方 / 持ち主の指示: 前の `@codex review` が返る前に続けて頼まない。直しを全部 push し終えてから 1 回だけ頼む
 - 2026-10-09 / T36 / GitHub に出す前に、手元の Codex（high）に全差分をもう一度レビューさせた。P1 が 6 件、P2 が 2 件。7 件を T36 で直した。残る 1 件はプロダクト側の問題で、評価の側では塞げない。SECURITY.md に従い、非公開の報告で扱う（持ち主が別の PR で直すと決めた）
+- 2026-10-09 / T37 / GitHub の Codex のレビュー（dcd08217）。P1 が 2 件、P2 が 1 件。3 件とも直した。driver の world は、呼ぶ側すべてにロックを持たせる代わりに、一時ディレクトリを deny して塞いだ

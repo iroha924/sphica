@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { claimRunDir, codexModelOf, evalCache, homeFence } from "../evals/cloud/codex-home.ts";
-import { currentFence, repoPlaces } from "../evals/cloud/codex-run.ts";
+import { currentFence, repoPlaces, tempRoots } from "../evals/cloud/codex-run.ts";
 import { type FiringRow, pair, planRows, taskFromReceipts } from "../evals/cloud/firing.ts";
 import {
   blindPrompt,
@@ -47,7 +47,7 @@ const seedTasks = (build: string) => fs.copyFileSync(TASKS, path.join(build, "ta
 // The read fence a Codex run made now records; it names places by role, so any HOME gives the same
 // Under a temporary HOME, as the collect and grade children run: the tools sit outside it, so it keeps no root
 const fenceHome = tempDir("grade-fence-");
-const fenceShield = { places: repoPlaces(), home: homeFence({ home: fenceHome }) };
+const fenceShield = { places: repoPlaces(), home: homeFence({ home: fenceHome }), temp: tempRoots() };
 const FENCE = currentFence(":workspace", evalCache(fenceHome), fenceShield);
 const GRADER_FENCE = currentFence(":read-only", evalCache(fenceHome), fenceShield);
 
@@ -896,12 +896,12 @@ test("a run's task comes from the prompt the build planned, even after tasks.jso
   assert.equal(taskFromReceipts("{}", [row], [{ id: "t", prompt: "the current wording" }]), undefined);
 });
 
-test("collect leaves out Codex runs of another build, and build refuses an output directory that already exists", () => {
+test("collect leaves out Codex runs of another build, and build refuses an output directory that already exists or is outside the cache", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
   try {
-    const build = path.join(base, "build");
+    const build = path.join(base, ".cache", "sphica-eval", "builds", "b");
     const codex = path.join(base, "codex");
-    fs.mkdirSync(build);
+    fs.mkdirSync(build, { recursive: true });
     fs.writeFileSync(
       path.join(build, "manifest.json"),
       JSON.stringify({ build: "b", commit: "c", repositories: {} }),
@@ -948,6 +948,20 @@ test("collect leaves out Codex runs of another build, and build refuses an outpu
     );
     assert.match(again.stderr, /already exists/);
     assert.ok(fs.existsSync(path.join(build, "manifest.json")), "the earlier build is kept");
+    // A build outside the cache would outlive the lock where a fenced Codex can read it
+    const outside = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "cloud", "build.ts"),
+        "--project",
+        "tsundoku",
+        "--out",
+        path.join(base, "elsewhere"),
+      ],
+      { encoding: "utf8", env: childEnv(base) },
+    );
+    assert.match(outside.stderr, /--out must be inside/);
+    assert.ok(!fs.existsSync(path.join(base, "elsewhere")));
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -3026,6 +3040,12 @@ printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
     assert.equal(r.status, 0, r.stderr);
     const got = fs.readFileSync(seen, "utf8");
     assert.ok(!got.split("\n").includes("-s"));
+    // The grader reads back only its own tree in the denied temp directory, and writes nowhere
+    const lines = got.split("\n");
+    const tree = path.dirname(lines[lines.indexOf("-C") + 1] ?? "");
+    assert.ok(lines.includes(`${JSON.stringify(path.dirname(tree))} = "deny"`), got);
+    assert.ok(lines.includes(`${JSON.stringify(tree)} = "read"`), got);
+    assert.ok(!lines.some((l) => l.endsWith(' = "write"')), got);
     assert.match(got, /^default_permissions = "eval"$/m);
     assert.match(got, /^extends = ":read-only"$/m);
     assert.match(
