@@ -131,6 +131,20 @@ const deliverable = (db: Reads, projectId: number, asOf?: string) =>
       ),
     );
 
+/** The applies_to paths of the decisions and constraints deliverable now: what a shell command may name, and what its snapshot watches */
+export async function deliverablePaths(db: Reads, projectId: number): Promise<string[]> {
+  const rows = await deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .where("u.kind", "in", ["decision", "constraint"])
+    .select("a.path")
+    .distinct()
+    .orderBy("a.path")
+    .execute();
+  return rows.map((r) => r.path);
+}
+
 /** The units deliverable now, or as of `asOf`: what a replay of past hook calls may count. The hooks never pass a time */
 export async function deliverableIds(db: Reads, projectId: number, asOf?: string): Promise<Set<number>> {
   return new Set((await deliverable(db, projectId, asOf).select("u.id").execute()).map((r) => r.id));
@@ -482,14 +496,7 @@ async function namedInCommand(
   cwd: string,
   command: string,
 ): Promise<string[]> {
-  const paths = await deliverable(db, projectId)
-    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
-    .where("a.role", "=", "applies_to")
-    .where("a.retired_at", "is", null)
-    .where("u.kind", "in", ["decision", "constraint"])
-    .select("a.path")
-    .distinct()
-    .execute();
+  const paths = (await deliverablePaths(db, projectId)).map((p) => ({ path: p }));
   const edge = `\\s'"=(){}<>|;&,`;
   const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const forms = (p: string) => {

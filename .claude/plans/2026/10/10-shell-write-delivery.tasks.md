@@ -22,13 +22,14 @@ base: main
 
 配れる記録の anchor のファイル全部について、呼び出しの前後で内容の変化を確かに見分けられる。
 
-- [ ] T01: 対象のパス・状態・署名・hash のキャッシュ・控え・期限・寿命を持つ部品と、そのテスト
+- [x] T01: 対象のパス・状態・署名・hash のキャッシュ・控え・期限・寿命を持つ部品と、そのテスト
   - 種別: 追加
   - 計画: S1
   - 依存: なし
-  - 変更: `server/src/shell-state.ts`, `server/src/deliver.ts`, `server/test/shell-state.test.ts`, `scripts/lib/sql-call-sites.mjs`
+  - 変更: `server/src/shell-state.ts`, `server/src/deliver.ts`, `server/test/shell-state.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/shell-state.test.ts` → 書き換え・作成・削除・atomic replace・同じサイズで mtime を戻した書き換えを変化とし、chmod・touch・同じ内容・書いて戻すを変化としない。読む間に変わると 3 回まで取り直し、だめなら unknown。unreadable・根の外へ出る symlink の扱い、壊れたキャッシュの作り直し、控えの検査・期限切れ・欠け、期限での打ち切りが期待どおり
   - コミット: `feat(deliver): snapshot anchored files around a shell call by content`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-state.test.ts` → 5 pass（書き換え・作成・削除・atomic replace・同じサイズで時刻を戻した書き換えは変化、chmod・touch・同じ内容・呼び出しの中で戻した書き込みは変化でない、署名が同じならキャッシュで読まない、壊れたキャッシュは空として作り直す、読む間に変わり続けると unknown、期限を過ぎたら unknown、ディレクトリと外へ出る symlink は unreadable、控えは 1 回だけ取れて中身を検査し期限を過ぎたら消える、対象のパスは配れる decision / constraint の applies_to だけ）。namedInCommand は同じ問い合わせの `deliverablePaths` を使う形にした。`bun run verify` → exit 0
 
 ## P2: 届け方
 
@@ -100,3 +101,4 @@ base: main
   - コミット: `test(eval): record the shell_write_delivery trial and its decision`
 
 ## 記録
+- 2026-10-10 / T01 / SQL の呼び出し箇所は namedInCommand のものを deliverablePaths に移しただけで数が変わらず、台帳の変更は要らなかった / 変更欄から `scripts/lib/sql-call-sites.mjs` を外した
