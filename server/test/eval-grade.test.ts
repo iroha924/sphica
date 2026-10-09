@@ -52,6 +52,8 @@ const FENCE = currentFence(":workspace", evalCache(fenceHome), fenceShield);
 const GRADER_FENCE = currentFence(":read-only", evalCache(fenceHome), fenceShield);
 // The runner code and Codex CLI a Codex run made now records
 const HARNESS = codexHarness(fenceShield.home.codex);
+// The Codex grader's settings, CLI, and code, as grades.json records it; report only compares it
+const GRADER_HARNESS = "a".repeat(64);
 
 /** A child's environment: a temporary home, and none of the owner's Sphica paths. */
 function childEnv(home: string): NodeJS.ProcessEnv {
@@ -511,6 +513,7 @@ test("the grader runs with its own HOME and CODEX_HOME holding only the login an
     fs.writeFileSync(
       path.join(bin, "codex"),
       `#!/bin/sh
+[ "$1" = "--version" ] && { echo "codex-cli 0"; exit 0; }
 { echo "HOME=$HOME"; echo "CODEX_HOME=$CODEX_HOME"; ls "$CODEX_HOME"; cat "$CODEX_HOME/config.toml"; } > ${JSON.stringify(seen)}
 while [ "$1" != "-o" ]; do shift; done
 printf '%s' ${JSON.stringify(JSON.stringify({ ...grade }))} > "$2"
@@ -1269,14 +1272,28 @@ test("the report refuses builds of different bundles or task definitions", () =>
 test("the report refuses builds of one loop whose Codex runs or grades were made under different read fences", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-report-fence-"));
   try {
-    const write = (name: string, variant: string, fence: string, grader: string, harness = HARNESS) => {
+    const write = (
+      name: string,
+      variant: string,
+      fence: string,
+      grader: string,
+      harness = HARNESS,
+      graderHarness = GRADER_HARNESS,
+    ) => {
       fs.mkdirSync(path.join(base, name));
       seedTasks(path.join(base, name));
       const file = path.join(base, name, "grades.json");
       const rows = [{ ...row, fence, harness, grade }];
       fs.writeFileSync(
         file,
-        JSON.stringify({ build: name, variant, bundle: "c {}", grader_fence: grader, rows }),
+        JSON.stringify({
+          build: name,
+          variant,
+          bundle: "c {}",
+          grader_fence: grader,
+          grader_harness: graderHarness,
+          rows,
+        }),
       );
       return file;
     };
@@ -1293,6 +1310,11 @@ test("the report refuses builds of one loop whose Codex runs or grades were made
     assert.match(report(a, write("b", "swapped", "0".repeat(64), GRADER_FENCE)).stderr, /read fence/);
     assert.match(report(a, write("c", "swapped", FENCE, "1".repeat(64))).stderr, /grader/);
     assert.match(report(a, write("e", "swapped", FENCE, GRADER_FENCE, "0".repeat(64))).stderr, /harness/);
+    // Grades by a Codex grader with other settings, another CLI, or other grading code, under the same fence, are not compared either
+    assert.match(
+      report(a, write("f", "swapped", FENCE, GRADER_FENCE, HARNESS, "1".repeat(64))).stderr,
+      /grader harness/,
+    );
     assert.equal(report(a, write("d", "swapped", FENCE, GRADER_FENCE)).status, 0);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
@@ -1791,6 +1813,7 @@ test("compare puts old and new side by side only for the same fixture and tasks,
       variant: "original",
       bundle: 'c1 {"deliver.js":"old"}',
       grader_fence: GRADER_FENCE as string | undefined,
+      grader_harness: GRADER_HARNESS as string | undefined,
       rows: [
         graded("o1", 0),
         graded("o2", 1),
@@ -1810,6 +1833,7 @@ test("compare puts old and new side by side only for the same fixture and tasks,
       variant: "original",
       bundle: 'c2 {"deliver.js":"new"}',
       grader_fence: GRADER_FENCE as string | undefined,
+      grader_harness: GRADER_HARNESS as string | undefined,
       rows: [
         { ...graded("n1", 2), search_before_edit: "yes" as const },
         { ...graded("n2", 2, { proposes_rejected: "yes" }), search_before_edit: "unknown" as const },
@@ -1864,6 +1888,12 @@ test("compare puts old and new side by side only for the same fixture and tasks,
   });
   assert.throws(() => compare(graderFenced(old, undefined), next, []), /grader/);
   assert.throws(() => compare(old, graderFenced(next, "0".repeat(64)), []), /grader/);
+  const graderMade = <S extends typeof old | typeof next>(side: S, grader_harness: string | undefined) => ({
+    ...side,
+    build: { ...side.build, grader_harness },
+  });
+  assert.throws(() => compare(graderMade(old, undefined), next, []), /grader harness/);
+  assert.throws(() => compare(old, graderMade(next, "0".repeat(64)), []), /grader harness/);
   // An excluded run was never measured, whatever fence it ran under
   const leftOut = {
     ...old,
@@ -2005,7 +2035,14 @@ test("an A/A comparison takes one bundle run twice and refuses two different one
     label,
     fixture: "f",
     tasks: "{}",
-    build: { build: label, variant: "original", bundle, grader_fence: GRADER_FENCE, rows: [] },
+    build: {
+      build: label,
+      variant: "original",
+      bundle,
+      grader_fence: GRADER_FENCE,
+      grader_harness: GRADER_HARNESS,
+      rows: [],
+    },
   });
   const lines = compare(
     side("first", 'c1 {"deliver.js":"a"}'),
@@ -2046,7 +2083,14 @@ test("report --compare --aa runs from the command line with first/second on ever
       seedTasks(dir);
       fs.writeFileSync(
         path.join(dir, "grades.json"),
-        JSON.stringify({ build: name, variant: "original", bundle, grader_fence: GRADER_FENCE, rows }),
+        JSON.stringify({
+          build: name,
+          variant: "original",
+          bundle,
+          grader_fence: GRADER_FENCE,
+          grader_harness: GRADER_HARNESS,
+          rows,
+        }),
       );
       return path.join(dir, "grades.json");
     };
@@ -2091,6 +2135,7 @@ test("compare refuses two builds run by different models of the same family", ()
       variant: "original",
       bundle,
       grader_fence: GRADER_FENCE,
+      grader_harness: GRADER_HARNESS,
       rows: [
         {
           ...row,
@@ -2260,7 +2305,14 @@ test("compare checks the models task by task, so swapping which model ran which 
     label,
     fixture: "f",
     tasks: "{}",
-    build: { build: label, variant: "original", bundle, grader_fence: GRADER_FENCE, rows },
+    build: {
+      build: label,
+      variant: "original",
+      bundle,
+      grader_fence: GRADER_FENCE,
+      grader_harness: GRADER_HARNESS,
+      rows,
+    },
   });
   assert.throws(
     () =>
@@ -2739,6 +2791,7 @@ function gradeFixture(rows: (typeof row & { presented?: string | null })[]) {
     fs.writeFileSync(
       path.join(bin, name),
       `#!/bin/sh
+[ "$1" = "--version" ] && { echo "codex-cli 0"; exit 0; }
 input=$(cat)
 echo x >> ${JSON.stringify(path.join(ctl, `${name}-calls`))}
 n=$(wc -l < ${JSON.stringify(path.join(ctl, `${name}-calls`))} | tr -d ' ')
@@ -3050,6 +3103,7 @@ test("the Codex grader reads through the read fence, and grading refuses runs ke
     fs.writeFileSync(
       path.join(bin, "codex"),
       `#!/bin/sh
+[ "$1" = "--version" ] && { echo "codex-cli 0"; exit 0; }
 { printf '%s\\n' "$@"; cat "$CODEX_HOME/config.toml"; } > ${JSON.stringify(seen)}
 while [ "$1" != "-o" ]; do shift; done
 printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
@@ -3093,6 +3147,7 @@ printf '%s' ${JSON.stringify(JSON.stringify(grade))} > "$2"
     const graded = JSON.parse(fs.readFileSync(path.join(build, "grades.json"), "utf8"));
     assert.equal(graded.rows[0].fence, "f".repeat(64));
     assert.equal(graded.grader_fence, GRADER_FENCE);
+    assert.match(graded.grader_harness, /^[0-9a-f]{64}$/);
     assert.ok(!fs.existsSync(path.join(cache, "codex.lock")), "the lock is released");
     // Runs kept where the fenced runs could read them, or a loop that does not say where its runs were, are not graded
     assert.match(start({ rows }).stderr, /run_roots/);

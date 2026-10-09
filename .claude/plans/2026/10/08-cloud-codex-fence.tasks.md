@@ -491,6 +491,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 直す前の本体で 7 件失敗した（alternates、Codex の run の記録、collect、grade、report、compare、Claude の run の出力先）
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 182 件 pass
 
+- [x] T44: GitHub の Codex のレビュー（cac75631）の P2 を直す。grades.json に Codex の採点者の設定・CLI・採点コードのハッシュ（grader_harness）を記録し、report は grader_fence と同じく違うビルドどうしを並べない
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T43（harness の関数を使う）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/report.ts`, `server/test/eval-grade.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - red: `cd server && node --test test/eval-grade.test.ts` → 直す前の本体で 3 件失敗する（grades.json に grader_harness が無い、report と compare が違う採点者を通す）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): record the Codex grader's settings, CLI, and code, and compare only alike (T44)`
+  - 結果: `cd server && node --test test/eval-grade.test.ts` → 直す前の本体で 3 件失敗した（the Codex grader reads through、the report refuses builds、compare puts old and new）
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 182 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -536,3 +547,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T41 / GitHub の Codex のセキュリティレビュー（20bbbf1d）の P2。モデルが出力を作れる限り、この判定で run を外す・集計を止める形は塞ぐたびに抜け道が出るので、数字を動かさない形に変えた（T38 と T39 の「集計を止める」を取り下げた）
 - 2026-10-09 / T42 / GitHub の Codex のレビュー（5f7493f5）の P1・P2。検査に codex 本体も入れたら、偽の codex を temp に置く既存のテスト 15 件が落ちた。指摘の範囲の `node` と `bun` に絞った
 - 2026-10-09 / T43 / GitHub の Codex のレビュー（56754bb4）の P1 3 件。harness は fence に混ぜず別の項目にした。除外の理由と、grade・report の拒否の文面で、どちらが違うのかを分けて言えるようにするため
+- 2026-10-09 / T44 / GitHub の Codex のレビュー（cac75631）は P1 が 0 件、P2 が 1 件。`codex --version` を標準入力を開けたまま呼ぶと、標準入力を読む偽の codex が待ち続けて grade のテストが 10 秒で打ち切られた。標準入力を閉じて呼ぶ形にした

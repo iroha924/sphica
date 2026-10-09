@@ -140,14 +140,20 @@ export function reachableTools(s: Shield): Shield {
 const RUNNER_FILES = ["codex.ts", "codex-run.ts", "codex-home.ts", "probe.ts"];
 
 /**
- * The runner code and the Codex CLI a run is made by, as one hash: runs by another runner or CLI are another measurement, even under the
- * same fence and model
+ * The code and the Codex CLI a run is made by, with any settings it was given, as one hash: runs by other code, another CLI, or other
+ * settings are another measurement, even under the same fence
  */
-export function codexHarness(codex: string | null): string {
+export function codexHarness(codex: string | null, files = RUNNER_FILES, settings = ""): string {
   const hash = crypto.createHash("sha256");
-  for (const file of RUNNER_FILES) hash.update(`${file}\0`).update(fs.readFileSync(path.join(HERE, file)));
-  const cli = codex ? execFileSync(codex, ["--version"], { encoding: "utf8", timeout: 10_000 }).trim() : "";
-  return hash.update(`cli\0${cli}`).digest("hex");
+  for (const file of files) hash.update(`${file}\0`).update(fs.readFileSync(path.join(HERE, file)));
+  const cli = codex
+    ? execFileSync(codex, ["--version"], {
+        encoding: "utf8",
+        timeout: 10_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      }).trim()
+    : "";
+  return hash.update(`cli\0${cli}\0settings\0${settings}`).digest("hex");
 }
 
 export const shieldNow = (): Shield =>

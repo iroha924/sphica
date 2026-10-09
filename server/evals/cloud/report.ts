@@ -33,6 +33,8 @@ export type Build = {
   bundle?: string;
   /** The read fence the Codex grader ran under */
   grader_fence?: string;
+  /** The Codex grader's settings, CLI, and grading code */
+  grader_harness?: string;
   rows: Graded[];
 };
 
@@ -242,7 +244,7 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
 /**
  * Results read through another fence, or none, may have seen what the others could not, results by other runner code or another Codex
  * CLI are another measurement, and every grade counted is the Codex grader's, whatever model ran: builds shown or compared together must
- * share one run fence, one harness, and one grader fence.
+ * share one run fence, one harness, one grader fence, and one grader harness.
  */
 function sameFences(sides: { label: string; build: Build }[]): void {
   for (const [field, what, many] of [
@@ -270,6 +272,13 @@ function sameFences(sides: { label: string; build: Build }[]): void {
   if (new Set(sides.map((s) => s.build.grader_fence)).size > 1)
     throw new Error(
       "the builds were graded by Codex graders under different read fences; grade them under the same one",
+    );
+  for (const s of sides)
+    if (!s.build.grader_harness)
+      throw new Error(`the ${s.label} build records no grader harness; grade it again`);
+  if (new Set(sides.map((s) => s.build.grader_harness)).size > 1)
+    throw new Error(
+      "the builds were graded under different grader harnesses (Codex settings, CLI, or grading code); grade them with the same one",
     );
 }
 

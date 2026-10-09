@@ -139,7 +139,7 @@ Local loop progress:
   process is gone. The probes are the evidence the fence holds on the Codex installed: each fenced target must print DENIED
 - A Codex run made under another fence, or by other runner code or another Codex CLI version (or with either not recorded), is excluded
   by collect; grade refuses a loop whose Codex rows carry more than one of either, and report refuses to compare Codex results across
-  them. A run
+  them, or grades given by a Codex grader under another fence or with other settings, CLI, or grading code. A run
   whose commands or output name another run, the build, or the evaluation cache is still excluded as having looked outside
 - Known limit: the checkout carries its slot's own `.tools` (the fixture database in search and inject, the gold record in gold), which
   is what that condition gives the agent anyway

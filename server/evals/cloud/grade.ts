@@ -15,7 +15,7 @@ import {
   ownerCodexSettings,
   requireInside,
 } from "./codex-home.ts";
-import { codexDenies, currentFence, outsideTree, shieldNow, treeAccess } from "./codex-run.ts";
+import { codexDenies, codexHarness, currentFence, outsideTree, shieldNow, treeAccess } from "./codex-run.ts";
 import { readTasks } from "./firing.ts";
 import {
   blindPrompt,
@@ -100,6 +100,17 @@ process.on("exit", () => {
   if (!leftBehind.length) release();
   else console.error(`could not remove ${leftBehind.join(", ")}; remove it, then codex.lock in ${cache}`);
 });
+
+/**
+ * The Codex grader's settings, CLI, and grading code: grades given by another are not compared with these. Settings are those the
+ * Codex grades were given; none when no Codex grade was asked for
+ */
+const graderHarness = () =>
+  codexHarness(
+    shield.home.codex,
+    ["grade.ts", "grading.ts", "codex-run.ts", "codex-home.ts"],
+    codexConfig ?? "",
+  );
 
 /**
  * One grader run in a fresh empty directory, with its own HOME and CODEX_HOME: the prompt carries everything, so there is nothing of the
@@ -339,7 +350,7 @@ for (const row of loop.rows) {
 const table = tabulate(graded);
 replaceFile(
   out,
-  `${JSON.stringify({ build: loop.build ?? null, variant, bundle: loop.bundle, grader_fence: graderFence, graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
+  `${JSON.stringify({ build: loop.build ?? null, variant, bundle: loop.bundle, grader_fence: graderFence, grader_harness: graderHarness(), graded: new Date().toISOString(), rows: graded, table }, null, 2)}\n`,
 );
 
 const fmt = (c: Cell) =>
