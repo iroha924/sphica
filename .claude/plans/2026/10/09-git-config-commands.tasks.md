@@ -225,6 +225,17 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --test --test-name-pattern="isolated config" test/git-worker.test.ts` → T18 の git-worker.ts（HEAD から戻して確認）で 1 件失敗、直した後は pass
   - 結果: `node --test test/zz-leak.test.ts`（temp にディレクトリを残す使い捨てのテスト、コミットしていない）→ `the test file left 1 in its temp directory: leak-RAVqrY` で 1 件失敗。`node --import ./test/isolate-home.ts --test test/*.test.ts` → 1070 件 pass、残しもの無し
 
+- [x] T20: T19 の再レビューの指摘を直す（core.autocrlf を git に真偽値として読ませ、値の無いキーや 2・00 のような書き方も git と同じに扱う）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T19（直す対象）
+  - 変更: `server/src/git.ts`, `server/src/git-worker.ts`, `server/test/git-worker.test.ts`
+  - red: `cd server && node --test --test-name-pattern="autocrlf in any" test/git-worker.test.ts` → T19 の git.ts と git-worker.ts で失敗する（`2` を拒む）
+  - 完了条件: `cd server && node --test test/git-worker.test.ts` → 全件 pass
+  - コミット: `fix(git): let git read core.autocrlf as a boolean before copying it (T20)`
+  - 結果: `cd server && node --test --test-name-pattern="autocrlf in any" test/git-worker.test.ts` → T19 の版（HEAD から戻して確認）で 1 件失敗した（`2` で worker が失敗）
+  - 結果: `cd server && node --test test/git-worker.test.ts` → 12 件 pass（YES・2・00・Input・値の無いキー）
+
 ## P4: リリース
 
 - [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
@@ -262,3 +273,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T07 / Codex のタスクレビュー（92185015）: F1（テストの無いファイルでも pass が数えられ空振りで通る、P2）を採用し T18 を足した。F2（Windows で hook の陽性対照を省く、P2）は T15 で直し済み
 - 2026-10-09 / T17 / tasks の書式の検査が失敗したまま df727d78 をコミットした（検査の結果でコミットを止めていなかった）。T18 のコミットで書式を直した
 - 2026-10-09 / 全差分 / Codex の全差分のレビュー（main..9cd40961、high）: F1（git が認める別の書き方の値で比較が失敗する、P2）、F2（テストの準備が temp の残しものの検査を空振りさせる、P2）、F3（snapshot と localChange が締め切りを共有しない、P2）を採用し、T19 を足した。T15〜T18 はタスクごとのレビューを別に頼まず、この全差分のレビューで見てもらった（観点に明記した）。コマンドが走る経路の残りは見つからなかった
+- 2026-10-09 / T19 / Codex の再レビュー（a49a8636）: F1（値の無い core.autocrlf を false にする、P2）と F2（2・00 のような真偽値の書き方を拒む、P2）を採用し、T20 を足した

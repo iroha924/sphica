@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { inIsolation, repoFiles } from "../src/git.ts";
+import { configGet, inIsolation, repoFiles } from "../src/git.ts";
 import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import { tempDir } from "./temp-dir.ts";
 
@@ -99,10 +99,10 @@ test("the isolated config holds only checked values in one fixed form", () => {
     isolatedConfig({ "extensions.objectFormat": "sha256", "index.sparse": "false" }),
     /repositoryformatversion = 1[\s\S]*\[index\]\n\tsparse = false\n\[extensions\]\n\tobjectFormat = sha256\n$/,
   );
-  // Git's own spellings in any letter case are written in one form
+  // Words git reads in any letter case are written in one form
   assert.equal(
-    isolatedConfig({ "core.autocrlf": "YES", "core.eol": "LF", "core.checkStat": "MINIMAL" }),
-    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tquotePath = false\n\tautocrlf = true\n\teol = lf\n\tcheckStat = minimal\n",
+    isolatedConfig({ "core.autocrlf": "Input", "core.eol": "LF", "core.checkStat": "MINIMAL" }),
+    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tquotePath = false\n\tautocrlf = input\n\teol = lf\n\tcheckStat = minimal\n",
   );
   // A value carrying a new section is refused, not written
   assert.throws(() => isolatedConfig({ "core.eol": 'lf\n[filter "evil"]\n\tclean = x' }), /does not copy/);
@@ -249,5 +249,23 @@ test("a git that stalls is killed with the worker at the deadline, and nothing o
       .split("\n")
       .filter((l) => l.includes(marker));
     assert.deepEqual(left, []);
+  });
+});
+
+test("core.autocrlf in any of git's spellings, a bare key included, is read as git reads it", async () => {
+  const { root, git } = repo();
+  fs.writeFileSync(path.join(root, "u.txt"), "u");
+  await withHome(async () => {
+    for (const spelling of ["YES", "2", "00", "Input"]) {
+      git("config", "core.autocrlf", spelling);
+      const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 });
+      assert.equal(out?.[0], "? u.txt\0", spelling);
+    }
+    // A key with no value is true to git
+    git("config", "--unset", "core.autocrlf");
+    fs.appendFileSync(path.join(root, ".git", "config"), "[core]\n\tautocrlf\n");
+    assert.equal(configGet(root, "core.autocrlf"), "true");
+    const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 });
+    assert.equal(out?.[0], "? u.txt\0");
   });
 });

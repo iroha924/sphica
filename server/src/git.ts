@@ -202,7 +202,7 @@ export const SAFE_KEYS = {
   "core.sparseCheckout": "bool",
   "core.sparseCheckoutCone": "bool",
   "index.sparse": "bool",
-  "core.autocrlf": "text",
+  "core.autocrlf": "bool-or-input",
   "core.eol": "text",
   "core.checkStat": "text",
   "extensions.objectFormat": "text",
@@ -212,10 +212,17 @@ export const SAFE_KEYS = {
 /** A config value as git reads it (local, global, and system), typed by git where it can; null when unset or unreadable */
 export function configGet(root: string, key: keyof typeof SAFE_KEYS, limits?: Limits): string | null {
   const type = SAFE_KEYS[key];
+  // core.autocrlf is a boolean git reads in any of its spellings (a bare key is true, 2 is true), or the word input
+  if (type === "bool-or-input")
+    try {
+      return text(root, ["config", "--type=bool", "--get", key], limits).replace(/\n$/, "");
+    } catch {
+      // not a boolean: input, or unset
+    }
   try {
     return text(
       root,
-      ["config", ...(type === "text" ? [] : [`--type=${type}`]), "--get", key],
+      ["config", ...(type === "bool" || type === "path" ? [`--type=${type}`] : []), "--get", key],
       limits,
     ).replace(/\n$/, "");
   } catch {
