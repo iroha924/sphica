@@ -10,7 +10,15 @@ import { after, before, test } from "node:test";
 import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { AUTO_TRACE, CONFIRM, deliver, leadFor, namedRecords, recordLines } from "../src/deliver.ts";
+import {
+  AUTO_TRACE,
+  CONFIRM,
+  deliver,
+  deliverableIds,
+  leadFor,
+  namedRecords,
+  recordLines,
+} from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { readUnit } from "../src/read.ts";
@@ -2637,6 +2645,11 @@ test("each as-of condition alone decides: an anchor added later, a conflict adde
       await names("etaFn()", "2099-06-01T00:00:00.000Z"),
       ["eta [names etaFn]"],
       "chi's adoption was retracted",
+    );
+    const ids = async (asOf: string) => (await deliverableIds(db.reader, p, asOf)).has(id("eps"));
+    assert.deepEqual(
+      [await ids("2098-01-01T00:00:00.000Z"), await ids("2099-02-01T00:00:00.000Z")],
+      [true, false],
     );
   } finally {
     await db.done();

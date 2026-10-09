@@ -106,14 +106,15 @@ base: main
   - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの後に active になった記録が当たりに入る（新しいテストが落ちる）
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの時点で配れなかった記録は当たらず、会話記録の差し込みで届いた記録は除かれ、差し込みが観測されていない会話は別に数え、判定が R・H・N・unknown の境界式どおり
   - コミット: `fix(eval): replay past writes against the records deliverable then, and what reached the conversation`
-- [ ] T21: M0' を作り直す（重複の無い母集団、呼び出しの列挙からの資格と窓、判定器の検査、ターンを一様に引く原因の内訳）
+- [x] T21: M0' を作り直す（重複の無い母集団、呼び出しの列挙からの資格と窓、判定器の検査、ターンを一様に引く原因の内訳）
   - 種別: 修正
   - 計画: S1
   - 依存: T18（時点付きの資格が要る）, T19（会話記録の読み取りが要る）
-  - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`
+  - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`, `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 編集の後に作られた記録が取りこぼしに入る、missed の無いラベルを配った扱いにする（新しいテストが落ちる）
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 資格の無い組・subagent の組・次のプロンプトの無い組が別に数えられ、窓が会話記録で閉じ、判定器が不正なラベルを拒み、原因の内訳がターンを一様に引く
   - コミット: `fix(eval): measure shell-change misses on records deliverable at the edit, from transcripts`
+  - 結果: red は直す前のコードで実測（旧 decide に missed の無い 30 件を渡すと verdict が not adopted。旧 M0' の取りこぼし 20 組のうち 14 組が編集の後に active になった記録）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass（候補はターンと path ごと、tool の行がある path・finding・記録より前のターンは候補にしない、呼び出しの結果の時点で資格を決め最初に資格のある呼び出しを測る、別の記録の配信は数えない、subagent・差し込みの未観測・次のプロンプト無し・決着しないラベル・shell の編集でないは別に数える、失敗した呼び出しは拒む、判定器は疑いを両方向に数え 150 組で止まり番号の欠けを拒む、原因の内訳はターンを一様に引く）。資格の判定に使う `deliverableIds` を deliver.ts から出し、時点のテストで確かめた。`bun run verify` → exit 0
 - [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S6
@@ -238,3 +239,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T19〜T23 / M0 と M0' の作り直しと測り直しを plan の変更履歴（Codex と合意）に沿って足した。T03 と T05 の判定は T23 と T22 で置き換える
 
 - 2026-10-10 / T18 のレビュー / F1（各時点の条件を個別に確かめるテストが無い）は採用して T24 で直した
+- 2026-10-10 / T21 / 資格の判定に時点付きの deliverable の結果が要った / `deliverableIds` を deliver.ts から出し、変更欄に deliver.ts と deliver.test.ts を足した

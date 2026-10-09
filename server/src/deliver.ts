@@ -131,6 +131,11 @@ const deliverable = (db: Reads, projectId: number, asOf?: string) =>
       ),
     );
 
+/** The units deliverable now, or as of `asOf`: what a replay of past hook calls may count. The hooks never pass a time */
+export async function deliverableIds(db: Reads, projectId: number, asOf?: string): Promise<Set<number>> {
+  return new Set((await deliverable(db, projectId, asOf).select("u.id").execute()).map((r) => r.id));
+}
+
 const line = (
   u: { key: string; kind: string; stance: string | null; text: string },
   extra = "",
