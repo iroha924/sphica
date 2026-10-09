@@ -500,6 +500,44 @@ test("gh reads pull requests and the signed-in user from github.com only", async
   });
 });
 
+// gh runs outside the agent's sandbox: started in the agent's repository, or with its GIT_* variables, it could read that repository's config
+test("gh starts outside the repository, without GIT_ variables", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
+  const log = path.join(bin, "seen.json");
+  const saved = {
+    PATH: process.env.PATH,
+    GIT_DIR: process.env.GIT_DIR,
+    git_work_tree: process.env.git_work_tree,
+  };
+  try {
+    fs.writeFileSync(
+      path.join(bin, "gh"),
+      `#!${process.execPath}\nconst fs = require("node:fs");\nfs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), git: Object.keys(process.env).filter((k) => /^GIT_/i.test(k)) }));\nprocess.stdout.write(process.argv[3] === "user" ? '{"id":42,"login":"hana"}' : "{}");\n`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
+    process.env.GIT_DIR = path.join(bin, "elsewhere");
+    process.env.git_work_tree = bin;
+    for (const call of [() => ghUser(), () => gh("o/r")("pulls/1")]) {
+      await call();
+      const seen = JSON.parse(fs.readFileSync(log, "utf8")) as {
+        cwd: string;
+        entries: string[];
+        git: string[];
+      };
+      assert.ok(!seen.cwd.startsWith(fs.realpathSync(process.cwd())), seen.cwd);
+      assert.deepEqual(seen.entries, [], "an empty directory");
+      assert.deepEqual(seen.git, []);
+      assert.equal(fs.existsSync(seen.cwd), false, "removed after the call");
+    }
+  } finally {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
 // CLICOLOR_FORCE makes gh color its JSON even into a pipe (measured with gh 2.97), which no longer parses
 test("gh is asked for plain JSON even when the owner forces color", async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));

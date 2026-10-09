@@ -33,7 +33,7 @@ base: main
   - 結果: `cd server && node --test test/git-safety.test.ts` → 直す前の本体で 2 件失敗した（`repoFiles` が仕込んだ fsmonitor を走らせた、glean の読み取りが promisor remote から fetch した）
   - 結果: `cd server && node --test test/git-safety.test.ts test/project.test.ts test/capture.test.ts test/review-bridge.test.ts test/rule-files.test.ts test/plugin.test.ts test/read.test.ts test/record.test.ts` → 228 件 pass
 
-- [ ] T02: gh と ghUser を空の一時ディレクトリで、GIT_* を除いた環境で起動する
+- [x] T02: gh と ghUser を空の一時ディレクトリで、GIT_* を除いた環境で起動する
   - 種別: 修正
   - 計画: S4
   - 依存: なし
@@ -41,6 +41,8 @@ base: main
   - red: `cd server && node --test --test-name-pattern="gh starts outside the repository" test/github.test.ts` → 直す前の本体で、偽の `gh` が記録した cwd が呼び出し元の作業ディレクトリで、環境に `GIT_DIR` が残って失敗する
   - 完了条件: `cd server && node --test test/github.test.ts` → 全件 pass
   - コミット: `fix(github): start gh outside the repository without GIT_ variables (T02)`
+  - 結果: `cd server && node --test --test-name-pattern="gh starts outside the repository" test/github.test.ts` → 直す前の本体で 1 件失敗した（偽の gh の cwd が `/Users/shunichi/Projects/sphica/server`）
+  - 結果: `cd server && node --test test/github.test.ts` → 16 件 pass
 
 - [ ] T03: check-architecture.mjs で、git を起動するのが git.ts と git-worker.ts だけであることを検査する
   - 種別: 追加
