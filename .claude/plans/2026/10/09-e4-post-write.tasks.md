@@ -90,13 +90,14 @@ base: main
   - コミット: `feat(deliver): decide deliverable records as of a past time for replays`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 53 pass（新しいテスト: 保存より前は 0 件、後で active を外れた記録・後で外した anchor・後で足した anchor・後で採用が付いて効く衝突・後で解決した衝突を時点ごとに確かめ、時点なしは今の状態）。hook は asOf を渡さない。`bun run verify` → exit 0
 
-- [ ] T19: 会話記録を一次資料として読む部分（会話ごとの行の順、成功した呼び出しと結果、人間のプロンプト、compact、Sphica の差し込みの key の解析と不完全の判定）と、入力の固定（未コミットの拒否、DB のスナップショット、会話記録の hash の一覧、forget の検査）
+- [x] T19: 会話記録を一次資料として読む部分（会話ごとの行の順、成功した呼び出しと結果、人間のプロンプト、compact、Sphica の差し込みの key の解析と不完全の判定）と、入力の固定（未コミットの拒否、DB のスナップショット、会話記録の hash の一覧、forget の検査）
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `server/evals/post-write/transcript.ts`, `server/test/post-write-transcript.test.ts`, `knip.json`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-transcript.test.ts` → 合成の会話記録で、両形式の記録の行の key の完全一致、本文での言及を key にしない、未知の形式の行を含む差し込みを不完全にする、origin が human の行だけを人間のプロンプトにする、compact の後だけを窓にする、subagent を別の会話にする。dirty tree と forget_batch の行で止まる
   - コミット: `feat(eval): read what reached each conversation from Claude Code transcripts`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-transcript.test.ts` → 3 pass（両形式の記録の行の key、記録の本文にある別の key は key にしない、未知の形式の行で不完全、タスク通知は人間のプロンプトにしない、origin の無い行は unknown、compact の前後、subagent は別の会話でターンの始まりは最初の呼び出し、一時的な git リポジトリで dirty な server/ と forget_batch の行で止まる）。`bun run verify` → exit 0
 - [ ] T20: M0 を作り直す（時点の資格、会話記録での届いたか、対象の規則、unknown、ラベルの材料、C22 の判定）
   - 種別: 修正
   - 計画: S1
