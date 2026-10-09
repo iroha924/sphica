@@ -15,6 +15,8 @@ export type ReviewInput = HookInput & {
 
 const NAME = /^[\w.:/-]{1,100}$/;
 const MAX_DIFF = 4 * 1024 * 1024;
+/** The diff read, its isolated git directory included, ends within this or the review is told the change could not be read */
+const DIFF_DEADLINE = 5_000;
 const MAX_FILES = 500;
 const MAX_UNTRACKED_BYTES = 256 * 1024;
 
@@ -52,7 +54,7 @@ export type Change = { base: string; files: FileDiff[]; digest: string } | { pro
  * The local change a review covers: the working tree against the merge base with the default branch (origin/HEAD, else the upstream),
  * plus untracked files. When the base or the whole change cannot be read, says why instead of checking a smaller range.
  */
-export function localChange(root: string, args: string): Change {
+export async function localChange(root: string, args: string): Promise<Change> {
   if (/^\s*#?\d+\s*$|(^|\s)#\d+\b|\/pull\/\d+/.test(args))
     return { problem: "it names a pull request, and Sphica sees only the local change" };
   let base = "";
@@ -71,17 +73,20 @@ export function localChange(root: string, args: string): Change {
   } catch {
     return { problem: `HEAD shares no history with ${base}` };
   }
-  let diff: string;
-  let names: string[];
+  // Prefixes and quoting pinned against settings that change what diff prints; names hold every changed path, including binary and
+  // empty files that print no ---/+++ lines
+  const got = await worktreeDiff(root, from, { max: MAX_DIFF, deadline: DIFF_DEADLINE });
   let untracked: string[];
   try {
-    // Prefixes and quoting pinned against settings that change what diff prints; names hold every changed path, including binary and
-    // empty files that print no ---/+++ lines
-    ({ patch: diff, names } = worktreeDiff(root, from, MAX_DIFF));
+    if (!got) throw new Error("no diff");
     untracked = listFiles(root, "untracked", { max: MAX_DIFF });
   } catch {
-    return { problem: "the change is too large to read (over 4 MB of diff or file names)" };
+    return {
+      problem:
+        "the change could not be read in time, or is too large to read (over 4 MB of diff or file names)",
+    };
   }
+  const { patch: diff, names } = got;
   const files = parseDiff(diff);
   for (const name of names)
     if (!files.some((f) => f.path === name)) files.push({ path: name, added: [], lines: [] });

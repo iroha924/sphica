@@ -7,9 +7,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { repoFiles } from "../src/git.ts";
+import { renamesSince, repoFiles } from "../src/git.ts";
 import { prepareGlean } from "../src/glean.ts";
+import { localChange } from "../src/review-bridge.ts";
 import { ruleFiles } from "../src/rule-files.ts";
+import { snapshot } from "../src/worktree.ts";
 import { tempDir } from "./temp-dir.ts";
 
 /** git for building fixtures: none of the owner's or the runner's config */
@@ -60,23 +62,42 @@ function trap() {
 }
 
 /** Runs the plain-git control, then Sphica's call, and returns the marks each left */
-function compare(t: ReturnType<typeof trap>, control: () => unknown, sphica: () => unknown) {
+async function compare(t: ReturnType<typeof trap>, control: () => unknown, sphica: () => unknown) {
   t.clear();
   control();
   const plain = t.read();
   t.clear();
-  const result = sphica();
+  const result = await sphica();
   return { plain, sphica: t.read(), result };
 }
 
-test("core.fsmonitor in the repository's config, or in a file it includes, runs nothing when Sphica lists files", () => {
+/**
+ * HOME and the temp directory moved to fresh directories apart from each other for the duration: Sphica's work tree comparisons keep
+ * their isolated git directory under HOME, never in the owner's own, and apart from the temp directory
+ */
+async function withHome<T>(fn: () => Promise<T>): Promise<T> {
+  const home = fs.realpathSync(tempDir("git-safety-home-"));
+  const tmp = fs.realpathSync(tempDir("git-safety-tmp-"));
+  const keys = ["HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP"] as const;
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, { HOME: home, USERPROFILE: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp });
+  try {
+    return await fn();
+  } finally {
+    for (const k of keys)
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+  }
+}
+
+test("core.fsmonitor in the repository's config, or in a file it includes, runs nothing when Sphica lists files", async () => {
   const t = trap();
   t.git("config", "core.fsmonitor", t.command("fsmonitor"));
   for (const [what, call] of [
     ["repoFiles", () => repoFiles(t.repo)],
     ["ruleFiles", () => ruleFiles(t.repo)],
   ] as const) {
-    const got = compare(t, () => t.plain("ls-files", "-z"), call);
+    const got = await compare(t, () => t.plain("ls-files", "-z"), call);
     assert.deepEqual(got.plain, ["fsmonitor"], "plain git runs the planted fsmonitor");
     assert.deepEqual(got.sphica, [], `${what} runs it`);
     assert.ok(got.result, `${what} still answers`);
@@ -92,7 +113,7 @@ test("core.fsmonitor in the repository's config, or in a file it includes, runs 
     `[core]\n\tfsmonitor = ${t.command("fsmonitor").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}\n`,
   );
   t.git("config", "include.path", included);
-  const got = compare(
+  const got = await compare(
     t,
     () => t.plain("ls-files", "-z"),
     () => repoFiles(t.repo),
@@ -102,7 +123,7 @@ test("core.fsmonitor in the repository's config, or in a file it includes, runs 
   assert.deepEqual((got.result as string[] | null)?.sort(), ["CLAUDE.md", "a.txt"]);
 });
 
-test("a missing object never fetches from a promisor remote the repository names", () => {
+test("a missing object never fetches from a promisor remote the repository names", async () => {
   const t = trap();
   const blob = t.git("rev-parse", "HEAD:a.txt").trim();
   fs.rmSync(path.join(t.repo, ".git", "objects", blob.slice(0, 2), blob.slice(2)));
@@ -119,7 +140,7 @@ test("a missing object never fetches from a promisor remote the repository names
     quote: "hi",
     role: "states",
   };
-  const got = compare(
+  const got = await compare(
     t,
     () => t.plain("cat-file", "-s", blob),
     () => prepareGlean(t.repo, { ops: [op] }),
@@ -129,4 +150,74 @@ test("a missing object never fetches from a promisor remote the repository names
   // The excerpt is a read failure, not a fetched file
   const excerpts = [...(got.result as ReturnType<typeof prepareGlean>).excerpts.values()];
   assert.ok(excerpts.length === 1 && excerpts[0] instanceof Error);
+});
+
+/**
+ * A.txt changed in the work tree, its index entry rewritten with no stat data so git must read the file to compare it, and an
+ * origin/main at the commit for a review to compare against
+ */
+function unstat(t: ReturnType<typeof trap>) {
+  const blob = t.git("rev-parse", "HEAD:a.txt").trim();
+  fs.writeFileSync(path.join(t.repo, "a.txt"), "changed\n");
+  t.git("update-index", "--cacheinfo", `100644,${blob},a.txt`);
+}
+
+test("filters, diff drivers, and textconv the repository names run nothing when Sphica compares the work tree", async () => {
+  const cases: [string, (t: ReturnType<typeof trap>) => void][] = [
+    [
+      "clean",
+      (t) => {
+        fs.writeFileSync(path.join(t.repo, ".gitattributes"), "*.txt filter=evil\n");
+        t.git("config", "filter.evil.clean", t.command("clean"));
+      },
+    ],
+    [
+      "process",
+      (t) => {
+        fs.writeFileSync(path.join(t.repo, ".gitattributes"), "*.txt filter=evil\n");
+        t.git("config", "filter.evil.process", t.command("process"));
+      },
+    ],
+    [
+      "info-attributes",
+      (t) => {
+        fs.mkdirSync(path.join(t.repo, ".git", "info"), { recursive: true });
+        fs.writeFileSync(path.join(t.repo, ".git", "info", "attributes"), "*.txt filter=evil\n");
+        t.git("config", "filter.evil.clean", t.command("info-attributes"));
+      },
+    ],
+    [
+      "extdiff",
+      (t) => {
+        fs.writeFileSync(path.join(t.repo, ".gitattributes"), "*.txt diff=evil\n");
+        t.git("config", "diff.evil.command", t.command("extdiff"));
+      },
+    ],
+  ];
+  await withHome(async () => {
+    for (const [name, plant] of cases) {
+      const t = trap();
+      t.git("update-ref", "refs/remotes/origin/main", "HEAD");
+      t.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      const head = t.git("rev-parse", "HEAD").trim();
+      plant(t);
+      const calls: [string, () => unknown][] = [
+        ["snapshot", () => snapshot(t.repo)],
+        ["renamesSince", () => renamesSince(t.repo, head)],
+        ["localChange", () => localChange(t.repo, "")],
+      ];
+      for (const [what, call] of calls) {
+        unstat(t);
+        const control = () =>
+          name === "extdiff" ? t.plain("diff", "HEAD") : t.plain("status", "--porcelain");
+        const got = await compare(t, control, () => {
+          unstat(t);
+          return call();
+        });
+        assert.ok(got.plain.includes(name), `plain git runs the planted ${name} (${what})`);
+        assert.deepEqual(got.sphica, [], `${what} runs the planted ${name}`);
+        assert.ok(got.result, `${what} still answers with ${name} planted`);
+      }
+    }
+  });
 });

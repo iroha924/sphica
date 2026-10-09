@@ -14,13 +14,16 @@ import {
   gitOptions,
   gitPath,
   SAFE_KEYS,
+  startDir,
+  unbornHead,
 } from "./git.ts";
 
 export type WorktreeOp =
   | { kind: "status" }
   | { kind: "diff"; from: string }
   | { kind: "renames"; commit: string };
-export type WorkerRequest = { root: string; ops: WorktreeOp[]; max: number };
+/** until: the time (ms since the epoch) by which every git the worker starts has ended or been killed */
+export type WorkerRequest = { root: string; ops: WorktreeOp[]; max: number; until: number };
 export type WorkerResult = { ok: true; out: string[] } | { ok: false; error: string };
 
 const INDEX_LIMIT = 256 * 1024 * 1024;
@@ -47,7 +50,7 @@ function ownDir(parent: string, name: string): string {
  * The isolated directory and the empty hooks folder, under HOME's real path, each step a plain directory, and apart from the work tree
  * and the temp directory, both of which a sandboxed agent can write
  */
-export function isolatedHome(root: string): { iso: string; hooks: string } {
+export function isolatedHome(root: string): { git: string; iso: string; hooks: string } {
   const home = fs.realpathSync(os.homedir());
   const git = ownDir(ownDir(home, ".sphica"), "git");
   const hooks = ownDir(git, "hooks");
@@ -62,12 +65,14 @@ export function isolatedHome(root: string): { iso: string; hooks: string } {
     if (overlap(real, otherReal) || overlap(git, otherReal))
       throw new Error(`${git} overlaps ${otherReal}, which an agent can write`);
   }
-  return { iso, hooks };
+  return { git, iso, hooks };
 }
 
-/** Removes isolated directories older than STALE_MS: a worker cut off at its deadline cannot remove its own */
-export function sweep(now = Date.now()): void {
-  const git = path.join(os.homedir(), ".sphica", "git");
+/**
+ * Removes isolated directories older than STALE_MS from git, the directory isolatedHome checked: a worker cut off at its deadline cannot
+ * remove its own
+ */
+export function sweep(git: string, now = Date.now()): void {
   let names: string[];
   try {
     names = fs.readdirSync(git).filter((n) => n.startsWith("iso-"));
@@ -95,6 +100,11 @@ const NON_BLOCK = fs.constants.O_NONBLOCK ?? 0;
  * the path is checked first and the descriptor is held to the same file.
  */
 export function readLimited(file: string, limit: number): Buffer | null {
+  return readStamped(file, limit)?.bytes ?? null;
+}
+
+/** readLimited, with the file's modification time */
+function readStamped(file: string, limit: number): { bytes: Buffer; mtime: Date } | null {
   let before: fs.Stats | undefined;
   if (!NO_FOLLOW) {
     before = fs.lstatSync(file, { throwIfNoEntry: false });
@@ -123,7 +133,7 @@ export function readLimited(file: string, limit: number): Buffer | null {
       got += n;
       if (got > limit) throw new Error(`${file} is over ${limit} bytes`);
     }
-    return buf.subarray(0, got);
+    return { bytes: buf.subarray(0, got), mtime: st.mtime };
   } finally {
     fs.closeSync(fd);
   }
@@ -161,49 +171,64 @@ export function isolatedConfig(values: Partial<Record<keyof typeof SAFE_KEYS, st
 }
 
 /** The global ignore file git would read: core.excludesFile, else git/ignore under XDG_CONFIG_HOME or ~/.config */
-function excludesFile(root: string): string {
-  const set = configGet(root, "core.excludesFile");
+function excludesFile(root: string, limits: { timeout: number }): string | null {
+  const set = configGet(root, "core.excludesFile", limits);
+  // Set but empty: git reads no global ignore file at all
+  if (set === "") return null;
   if (set) return set.startsWith("~/") ? path.join(os.homedir(), set.slice(2)) : path.resolve(root, set);
   const xdg = process.env.XDG_CONFIG_HOME;
   return path.join(xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), ".config"), "git", "ignore");
 }
 
 /** Writes the isolated git directory for root's work tree into iso and returns the environment and options git runs with there */
-function prepare(root: string, iso: string, hooks: string): { env: NodeJS.ProcessEnv; options: string[] } {
+function prepare(
+  root: string,
+  iso: string,
+  hooks: string,
+  remaining: () => { timeout: number },
+): { env: NodeJS.ProcessEnv; options: string[] } {
   for (const dir of ["refs", "objects", "info"]) fs.mkdirSync(path.join(iso, dir));
   let head: string;
   try {
-    head = commitOf(root, "HEAD");
-  } catch {
-    // A repository with no commit yet: HEAD names a branch that does not exist, as git's own unborn HEAD does
+    head = commitOf(root, "HEAD", remaining());
+  } catch (e) {
+    // A repository with no commit yet: HEAD names a branch that does not exist, as git's own unborn HEAD does. A HEAD that names a
+    // missing or broken commit is a failure, not a new repository.
+    if (!unbornHead(root, remaining())) throw e;
     head = "ref: refs/heads/sphica-unborn";
   }
   fs.writeFileSync(path.join(iso, "HEAD"), `${head}\n`);
   const values = Object.fromEntries(
-    (Object.keys(SAFE_KEYS) as (keyof typeof SAFE_KEYS)[]).map((k) => [k, configGet(root, k)]),
+    (Object.keys(SAFE_KEYS) as (keyof typeof SAFE_KEYS)[]).map((k) => [k, configGet(root, k, remaining())]),
   );
   fs.writeFileSync(path.join(iso, "config"), isolatedConfig(values));
-  const index = gitPath(root, "index");
-  const indexBytes = readLimited(index, INDEX_LIMIT);
-  if (indexBytes) fs.writeFileSync(path.join(iso, "index"), indexBytes);
+  const index = gitPath(root, "index", remaining());
+  // The copy keeps the index's modification time: git trusts an entry as unchanged only when the file is older than the index, and a
+  // copy stamped now would hide a change made just before it
+  const copyIndex = (from: string, name: string) => {
+    const got = readStamped(from, INDEX_LIMIT);
+    if (!got) return;
+    fs.writeFileSync(path.join(iso, name), got.bytes);
+    fs.utimesSync(path.join(iso, name), got.mtime, got.mtime);
+  };
+  copyIndex(index, "index");
   // A split index keeps its shared part beside the index
   for (const name of fs
     .readdirSync(path.dirname(index))
-    .filter((n) => /^sharedindex\.[0-9a-f]{40,64}$/.test(n))) {
-    const bytes = readLimited(path.join(path.dirname(index), name), INDEX_LIMIT);
-    if (bytes) fs.writeFileSync(path.join(iso, name), bytes);
-  }
+    .filter((n) => /^sharedindex\.[0-9a-f]{40,64}$/.test(n)))
+    copyIndex(path.join(path.dirname(index), name), name);
   for (const name of ["info/exclude", "info/attributes", "info/sparse-checkout"] as const) {
-    const bytes = readLimited(gitPath(root, name), FILE_LIMIT);
+    const bytes = readLimited(gitPath(root, name, remaining()), FILE_LIMIT);
     if (bytes) fs.writeFileSync(path.join(iso, name), bytes);
   }
   const ignore = path.join(iso, "global-ignore");
-  fs.writeFileSync(ignore, readLimited(excludesFile(root), FILE_LIMIT) ?? "");
+  const global = excludesFile(root, remaining());
+  fs.writeFileSync(ignore, (global && readLimited(global, FILE_LIMIT)) ?? "");
   return {
     env: gitEnv({
       GIT_DIR: iso,
       GIT_WORK_TREE: root,
-      GIT_OBJECT_DIRECTORY: path.join(commonDir(root), "objects"),
+      GIT_OBJECT_DIRECTORY: path.join(commonDir(root, remaining()), "objects"),
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: os.devNull,
     }),
@@ -235,14 +260,19 @@ function argsOf(op: WorktreeOp): string[] {
 /** Runs the request's operations in one isolated directory, removed after */
 function work(request: WorkerRequest): WorkerResult {
   try {
-    sweep();
-    const { iso, hooks } = isolatedHome(request.root);
+    const { git, iso, hooks } = isolatedHome(request.root);
+    sweep(git);
+    // Each git gets what is left of the deadline, so none outlives the worker the caller stopped waiting for
+    const remaining = () => ({ timeout: Math.max(1, request.until - Date.now()) });
     try {
-      const { env, options } = prepare(request.root, iso, hooks);
+      const { env, options } = prepare(request.root, iso, hooks, remaining);
       const out = request.ops.flatMap((op) => {
         const run = (args: string[]) =>
           execFileSync("git", ["-C", request.root, ...options, ...args], {
+            cwd: startDir(),
             env,
+            ...remaining(),
+            killSignal: "SIGKILL",
             encoding: "utf8",
             maxBuffer: request.max,
             stdio: ["ignore", "pipe", "ignore"],

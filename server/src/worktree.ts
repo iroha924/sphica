@@ -11,6 +11,8 @@ export type Snapshot = { head: string | null; entries: Record<string, string> };
 const MAX_PATHS = 200;
 
 const LIMITS = { timeout: 5_000, max: 16 * 1024 * 1024 };
+/** The status read, its isolated git directory included, ends within this or the snapshot fails */
+const STATUS_DEADLINE = 5_000;
 
 /**
  * Paths git prints relative to the root. Ones the edit table would refuse (a backslash in a POSIX name, a control character) are
@@ -22,8 +24,8 @@ const usable = (p: string): boolean => p !== "" && !p.includes("\\") && !/\p{Cc}
  * Reads `git status --porcelain=v2 -z`. The signature is the entry without its path plus the file's size and mtime, so a second edit
  * to a file that was already dirty still counts as a change.
  */
-export function snapshot(root: string): Snapshot | null {
-  const out = worktreeStatus(root, LIMITS);
+export async function snapshot(root: string): Promise<Snapshot | null> {
+  const out = await worktreeStatus(root, STATUS_DEADLINE);
   if (out === null) return null;
   const fields = out.split("\0");
   const entries: Record<string, string> = {};

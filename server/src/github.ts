@@ -2,12 +2,12 @@
 // comments, reviews, review comments with their code position, commits, the merge, and the issues the body closes.
 // Each source keeps its author's GitHub association, which decides who can adopt a proposal; the text is someone else's and is never trusted.
 import { execFile } from "node:child_process";
-import os from "node:os";
 import { promisify } from "node:util";
 import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
 import { iso, type Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
+import { startDir } from "./git.ts";
 import type { SOURCE_KINDS } from "./knowledge.ts";
 import { sha256 } from "./text.ts";
 
@@ -67,10 +67,10 @@ const plainEnv = () => ({
 });
 
 /**
- * Where gh starts: HOME, not the agent's repository, whose config gh's git would read. A repository at HOME is the owner's own, which a
- * sandboxed agent cannot write; nothing is created, so nothing can fail to be made or removed.
+ * Where gh starts: where git starts (HOME), not the agent's repository, whose config gh's git would read. A repository at HOME is the
+ * owner's own, which a sandboxed agent cannot write; nothing is created, so nothing can fail to be made or removed.
  */
-const ghCwd = () => os.homedir();
+const ghCwd = startDir;
 
 export const gh =
   (repo: string, timeout = 60_000): Get =>

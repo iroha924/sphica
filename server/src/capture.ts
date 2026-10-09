@@ -405,14 +405,14 @@ function writeStart(dir: string, s: Start, file = startFile(dir, s.turn)): void 
  * Takes a turn's starting point and returns the step that saves it, or null when the turn is already running (a message typed while
  * it works). Split in two so tests can run another turn's hooks in between. A failed snapshot still saves the turn as the newest.
  */
-export function openTurn(dir: string, turn: string, root: string): (() => void) | null {
+export async function openTurn(dir: string, turn: string, root: string): Promise<(() => void) | null> {
   if (readStart(startFile(dir, turn))?.running) return null;
   const starts = readStarts(dir);
   const seq =
     starts && !starts.some((s) => s.seq === null)
       ? Math.max(0, ...starts.map((s) => s.seq as number)) + 1
       : null;
-  const now = snapshot(root);
+  const now = await snapshot(root);
   return () =>
     writeStart(dir, { head: now?.head ?? null, entries: now?.entries ?? null, running: true, turn, seq });
 }
@@ -421,11 +421,11 @@ export function openTurn(dir: string, turn: string, root: string): (() => void) 
  * Takes a turn's end snapshot and returns the step that gives the paths changed since its start (null: nothing to compare against).
  * The step reads the starts again after the snapshot, since a newer turn that began before it may have edits in the snapshot.
  */
-export function closeTurn(dir: string, turn: string, root: string): (() => string[]) | null {
+export async function closeTurn(dir: string, turn: string, root: string): Promise<(() => string[]) | null> {
   const own = readStart(startFile(dir, turn));
   if (!own?.entries) return null;
   const before = { head: own.head, entries: own.entries };
-  const now = snapshot(root);
+  const now = await snapshot(root);
   return () => {
     // A prompt that reused the id while this Stop ran saved a new start: leave it, and its turn, alone
     if (
@@ -482,8 +482,20 @@ function attempt<T>(fn: () => T): T | undefined {
   }
 }
 
+/** attempt for a step that waits on git */
+async function attemptAsync<T>(fn: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await fn();
+  } catch {
+    return undefined;
+  }
+}
+
 /** One hook call. Whatever happens, work is never stopped (callers catch exceptions). */
-export function onHook(host: Host, input: HookInput): { flush: boolean; notice?: string | null } {
+export async function onHook(
+  host: Host,
+  input: HookInput,
+): Promise<{ flush: boolean; notice?: string | null }> {
   const event = input.hook_event_name;
   const owner = () =>
     isOwnerTurn(input, undefined, undefined, host === "codex" ? process.env.CODEX_THREAD_ID : undefined);
@@ -534,13 +546,14 @@ export function onHook(host: Host, input: HookInput): { flush: boolean; notice?:
     if (!INJECTED.some((r) => r.test(prompt))) say(`${turn}:owner`, "owner", prompt);
   }
   // Any prompt, a notice too, starts a turn unless its turn is already running. Between turns, the owner's own edits are not the turn's.
-  // After the message is queued: this hook is synchronous, and a slow git status past its timeout must not cost the owner's words.
-  if (event === "UserPromptSubmit") attempt(() => openTurn(dir, turn, place.root)?.());
+  // After the message is queued: a slow git status past its deadline must not cost the owner's words.
+  if (event === "UserPromptSubmit")
+    await attemptAsync(async () => (await openTurn(dir, turn, place.root))?.());
   if (event === "Stop") {
     if (input.last_assistant_message) say(`${turn}:assistant`, "assistant", input.last_assistant_message);
     // A turn whose start snapshot failed has nothing to compare, but still ends here so a reused id snapshots again
-    const paths = attempt(() => {
-      const finish = closeTurn(dir, turn, place.root);
+    const paths = await attemptAsync(async () => {
+      const finish = await closeTurn(dir, turn, place.root);
       if (finish) return finish();
       stopTurn(dir, turn);
       return [];
@@ -1283,7 +1296,7 @@ async function main(): Promise<void> {
   }
   // Stop needs JSON on success. Return it first so a failed recording never breaks the hook contract.
   if (host === "codex" && input.hook_event_name === "Stop") process.stdout.write("{}");
-  const { flush: send, notice } = onHook(host, input);
+  const { flush: send, notice } = await onHook(host, input);
   // systemMessage is a warning you see; it does not enter the model's context.
   if (notice) process.stdout.write(JSON.stringify({ systemMessage: notice }));
   // Sending happens in a process detached from the session. As the hook's own process, the host would kill it at session end

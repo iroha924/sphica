@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { inIsolation } from "../src/git.ts";
+import { inIsolation, repoFiles } from "../src/git.ts";
 import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import { tempDir } from "./temp-dir.ts";
 
@@ -128,7 +128,120 @@ test("isolated directories left by a cut-off worker are removed once they are an
     const hour = 60 * 60 * 1000;
     const old = new Date(Date.now() - 2 * hour);
     fs.utimesSync(path.join(git, "iso-old"), old, old);
-    sweep();
+    sweep(git);
     assert.deepEqual(fs.readdirSync(git).sort(), ["iso-new"]);
+  });
+});
+
+test("git and the worker start in HOME, not in the caller's directory, where Windows would look for git.exe first", async () => {
+  // A git first on PATH that records where it started, then runs git
+  const bin = fs.realpathSync(tempDir("git-worker-bin-"));
+  const log = path.join(bin, "cwd.log");
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  fs.writeFileSync(
+    path.join(bin, "git"),
+    `#!/bin/sh\npwd >> ${JSON.stringify(log)}\nexec ${JSON.stringify(real)} "$@"\n`,
+    {
+      mode: 0o755,
+    },
+  );
+  const { root } = repo();
+  const saved = { PATH: process.env.PATH, cwd: process.cwd() };
+  await withHome(async (home) => {
+    process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
+    process.chdir(root);
+    try {
+      assert.ok(repoFiles(root));
+      assert.ok(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }));
+    } finally {
+      process.chdir(saved.cwd);
+      process.env.PATH = saved.PATH;
+    }
+    const dirs = fs.readFileSync(log, "utf8").trim().split("\n");
+    assert.ok(dirs.length > 2);
+    assert.deepEqual([...new Set(dirs.map((d) => fs.realpathSync(d)))], [home]);
+  });
+});
+
+test("a cut-off worker's leftovers are swept only from a checked directory, never through a link", async () => {
+  const { root } = repo();
+  await withHome(async (home) => {
+    const elsewhere = fs.realpathSync(tempDir("git-worker-elsewhere-"));
+    const owned = path.join(elsewhere, "git", "iso-owner-data");
+    fs.mkdirSync(owned, { recursive: true });
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(owned, old, old);
+    fs.symlinkSync(elsewhere, path.join(home, ".sphica"));
+    assert.equal(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }), null);
+    assert.ok(fs.existsSync(owned), "the directory behind the link is left alone");
+  });
+});
+
+test("a HEAD that names a missing commit fails instead of passing for a new repository", async () => {
+  const { root, git } = repo();
+  fs.writeFileSync(path.join(root, "a.txt"), "a");
+  git("add", "a.txt");
+  git("commit", "-qm", "one");
+  const head = git("rev-parse", "HEAD").trim();
+  fs.rmSync(path.join(root, ".git", "objects", head.slice(0, 2), head.slice(2)));
+  await withHome(async () => {
+    assert.equal(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }), null);
+  });
+});
+
+test("core.excludesFile set empty reads no global ignore file, as git does", async () => {
+  const { root, git } = repo();
+  fs.writeFileSync(path.join(root, "u.txt"), "u");
+  await withHome(async (home) => {
+    fs.mkdirSync(path.join(home, ".config", "git"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".config", "git", "ignore"), "u.txt\n");
+    const status = async () =>
+      ((await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 })) ?? [])[0];
+    assert.equal(await status(), "", "the default global ignore file hides u.txt");
+    git("config", "core.excludesFile", "");
+    assert.equal(await status(), "? u.txt\0");
+  });
+});
+
+test("names whose control characters JSON writes six times longer still come back within the output limit", async () => {
+  const { root } = repo();
+  // 400 names of 100 bytes, each control character six bytes once written as JSON: about 40 KB raw, far more as JSON
+  for (let i = 0; i < 400; i++)
+    fs.writeFileSync(path.join(root, `${String(i).padStart(4, "0")}${"\u0001".repeat(96)}`), "");
+  await withHome(async () => {
+    const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 64 * 1024 });
+    assert.equal(out?.[0]?.split("\0").filter(Boolean).length, 400);
+  });
+});
+
+test("a git that stalls is killed with the worker at the deadline, and nothing of the call is left running", async () => {
+  // A git first on PATH that never answers status, under a name ps can find
+  const bin = fs.realpathSync(tempDir("git-worker-stall-"));
+  const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+  const marker = `sphica-stall-${process.pid}`;
+  fs.writeFileSync(
+    path.join(bin, "git"),
+    `#!/bin/sh\ncase " $* " in *" status "*) exec ${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 30000)" ${marker};; esac\nexec ${JSON.stringify(real)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const { root } = repo();
+  const saved = process.env.PATH;
+  await withHome(async () => {
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    try {
+      const started = Date.now();
+      assert.equal(
+        await inIsolation(root, [{ kind: "status" }], { deadline: 1_500, max: 1024 * 1024 }),
+        null,
+      );
+      assert.ok(Date.now() - started < 3_000);
+    } finally {
+      process.env.PATH = saved;
+    }
+    await new Promise((r) => setTimeout(r, 1_000));
+    const left = execFileSync("ps", ["-A", "-o", "args="], { encoding: "utf8" })
+      .split("\n")
+      .filter((l) => l.includes(marker));
+    assert.deepEqual(left, []);
   });
 });

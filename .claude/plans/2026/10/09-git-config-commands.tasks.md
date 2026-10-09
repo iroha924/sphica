@@ -101,14 +101,27 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --test test/git-worker.test.ts` → 5 件 pass（隔離先: HOME の外へのリンク・hooks が空でない・作業ツリーや temp との重なりで失敗。読み取り: リンク・ディレクトリ・FIFO・上限超えで失敗。config: 改行で節を足す値と型に合わない値で失敗。unborn HEAD と index 無しで未追跡とステージ済みが出る。締め切り 1 ms で null。1 時間より古い残りだけ消える）
   - 結果: `bun run bundle` → `plugin/dist/git-worker.js` 10.94 KB。`echo '{"root":…,"ops":[{"kind":"status"}],"max":1048576}' | node plugin/dist/git-worker.js` → `{"ok":true,"out":["? a\u0000"]}`
 
-- [ ] T05: 作業ツリーの比較（snapshot の status、renamesSince、localChange の diff）を子プロセスの入口へ置き換え、capture と read の呼び出しを非同期にする
+- [x] T05: 作業ツリーの比較（snapshot の status、renamesSince、localChange の diff）を子プロセスの入口へ置き換え、capture と read の呼び出しを非同期にする
   - 種別: 修正
   - 計画: S3
   - 依存: T04（子プロセスの入口が要る）
-  - 変更: `server/src/worktree.ts`, `server/src/git.ts`, `server/src/review-bridge.ts`, `server/src/capture.ts`, `server/src/read.ts`, `server/src/deliver.ts`, `server/test/git-safety.test.ts`, `server/test/capture.test.ts`
+  - 変更: `server/src/worktree.ts`, `server/src/git.ts`, `server/src/review-bridge.ts`, `server/src/capture.ts`, `server/src/read.ts`, `server/src/deliver.ts`, `server/src/github.ts`, `server/package.json`, `server/test/isolate-home.ts`, `server/test/git-safety.test.ts`, `server/test/capture.test.ts`, `server/test/review-bridge.test.ts`, `server/evals/acceptance/driver.ts`
   - red: `cd server && node --test test/git-safety.test.ts` → 直す前の本体で、`filter.<名前>.clean`・`filter.<名前>.process`・`.git/info/attributes` だけのフィルタ・`diff.<名前>.command` を仕込んだリポジトリの `snapshot`・`renamesSince`・`localChange` が印を付けて失敗する
   - 完了条件: `cd server && node --test test/git-safety.test.ts test/capture.test.ts` → 全件 pass。`bun run verify` → exit 0
   - コミット: `fix(git): compare the worktree only through the isolated git worker (T05)`
+  - 結果: `cd server && node --test test/git-safety.test.ts` → 直す前の本体で 1 件失敗した（`snapshot runs the planted clean`）
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/*.test.ts` → 1068 件中 1066 件 pass の段階で、残る 2 件（review-bridge）は index のコピーの更新時刻が新しく、直前の変更を git が見落としたためと分かった。コピーに元の index の更新時刻を付けて直し、`test/review-bridge.test.ts test/git-worker.test.ts test/git-safety.test.ts test/capture.test.ts` を 3 回続けて 97 件 pass
+
+- [x] T12: T04 のレビューの指摘を直す（git と worker を HOME で起動する、掃除を隔離先の検査の後にする、worker の git に締め切りを渡しプロセスグループごと止める、HEAD の commit が欠けたら失敗を返す、JSON の膨らみを上限に数える、空の `core.excludesFile` を区別する）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T04（直す対象）
+  - 変更: `server/src/git.ts`, `server/src/git-worker.ts`, `server/test/git-worker.test.ts`
+  - red: `cd server && node --test test/git-worker.test.ts` → T04 の git.ts と git-worker.ts で 6 件失敗する（起動場所、リンクの先の掃除、残る git、欠けた HEAD、空の excludesFile、制御文字の名前）
+  - 完了条件: `cd server && node --test test/git-worker.test.ts` → 全件 pass
+  - コミット: `fix(git): compare the worktree only through the isolated git worker (T05, T12)`
+  - 結果: `cd server && node --test test/git-worker.test.ts` → T04 の git.ts と git-worker.ts（HEAD から戻して確認）で 7 件失敗した（6 件の指摘と、引数の形を変えた掃除のテスト）
+  - 結果: `cd server && node --test test/git-worker.test.ts` → 11 件 pass
 
 ## P3: 攻撃テストを広げ、CI の全 OS と Git 2.34 で流す
 
@@ -152,3 +165,9 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T04 / 変更欄の `scripts/check-tarball.mjs` を `scripts/lib/bundle-budget.mjs` に替えた。tarball は dist を丸ごと載せるので一覧の変更は要らず、新しい entry には予算（13,000 バイト）と hook と同じ zod の禁止が要った
 - 2026-10-09 / T04 / 変更欄に `knip.json`（git-worker.ts を entry に、mkfifo をテストの外部コマンドに）と `server/test/architecture.test.ts`（git を起動するのが 2 ファイルになったので、両方を空にして検査が落ちるのを見る）を足した
 - 2026-10-09 / T03 / Codex のタスクレビュー（50d2f5ac）: F1（`exec("git status")`・変数・テンプレート経由の起動を取りこぼす、P2）と F2（コメントや無関係な呼び出しで空振り防止が通る、P2）を採用し、T11 を足した。T09・T10 のレビュー（7931d317）は指摘なし
+- 2026-10-09 / T04 / Codex のタスクレビュー（160c7cba）: F1（Windows で作業ツリーの git.exe が先に走る、P1）、F2〜F6（P2）を採用し、T12 を足した。F1 は T01 の元のリポジトリでの git にもあった
+- 2026-10-09 / T05 / 隔離先と temp の重なりの検査（計画の子プロセス節 1 の (3)）で、HOME を temp の中に作るテストの作業ツリーの比較が全部失敗した。新しい会話で Codex に相談し、検査は残す（外すと TMPDIR が `~/.sphica` にある構成を拒めない）、テストの配置を直す、で決めた。テストは `--import ./test/isolate-home.ts` で、どのテストも HOME と temp を別の一時ディレクトリに向けて始める
+- 2026-10-09 / T05 / review-bridge などのテストが HOME を差し替えずに作業ツリーの比較を流し、持ち主の `~/.sphica/git/hooks`（空）を作っていた。最初に作ったのは手で流した `plugin/dist/git-worker.js`。空であることを確かめて消し、上の isolate-home で再発を止めた
+- 2026-10-09 / T05 / HOME が無いテスト（`HOME=/nonexistent`）で git が起動できなくなった。起動場所は HOME が無ければ Node の置き場所にした。gh も同じ起動場所にした
+- 2026-10-09 / T05 / 締め切りのテストが並行の実行でときどき落ちた（worker と親の締め切りが同じで、親が先に worker を止めると孫の git が残る）。worker の締め切りを親の 8 割にし、POSIX ではプロセスグループごと止める
+- 2026-10-09 / T05 / 変更欄に `server/evals/acceptance/driver.ts` を足した。onHook が非同期になり、driver の呼び出しを lint（noFloatingPromises）が見つけたので await した

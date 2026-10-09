@@ -730,7 +730,7 @@ async function beforeReview(
   root: string,
   call: { name: string; args: string },
 ): Promise<Plan> {
-  const change = localChange(root, call.args);
+  const change = await localChange(root, call.args);
   const said = (text: string, why: string | null): Plan => ({
     text,
     note: "",

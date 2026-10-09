@@ -56,8 +56,19 @@ export const DIFF_OPTIONS = [
 
 type Limits = { max?: number; timeout?: number };
 
+/**
+ * Where git and the worker start: HOME, not the caller's directory. Windows looks for a program in the current directory before PATH,
+ * so a git.exe the agent put in its work tree would run instead of git; -C moves git only after it has started. Without a HOME on disk,
+ * the folder Node itself runs from, which an agent cannot write either.
+ */
+export function startDir(): string {
+  const home = os.homedir();
+  return fs.statSync(home, { throwIfNoEntry: false })?.isDirectory() ? home : path.dirname(process.execPath);
+}
+
 function run(root: string, args: string[], { max = 1024 * 1024, timeout = 10_000 }: Limits = {}): Buffer {
   return execFileSync("git", ["-C", root, ...gitOptions(), ...args], {
+    cwd: startDir(),
     env: gitEnv(),
     maxBuffer: max,
     stdio: ["ignore", "pipe", "ignore"],
@@ -156,11 +167,29 @@ export function listFiles(
 export const gitPath = (
   root: string,
   name: "index" | "info/exclude" | "info/attributes" | "info/sparse-checkout",
-): string => path.resolve(root, text(root, ["rev-parse", "--git-path", name]).replace(/\n$/, ""));
+  limits?: Limits,
+): string => path.resolve(root, text(root, ["rev-parse", "--git-path", name], limits).replace(/\n$/, ""));
 
 /** The git directory linked work trees share, which holds the objects */
-export const commonDir = (root: string): string =>
-  path.resolve(root, text(root, ["rev-parse", "--git-common-dir"]).replace(/\n$/, ""));
+export const commonDir = (root: string, limits?: Limits): string =>
+  path.resolve(root, text(root, ["rev-parse", "--git-common-dir"], limits).replace(/\n$/, ""));
+
+/** Whether HEAD names a branch that has no commit yet; false when HEAD is detached, its branch exists, or git cannot tell */
+export function unbornHead(root: string, limits?: Limits): boolean {
+  let ref: string;
+  try {
+    ref = text(root, ["symbolic-ref", "-q", "HEAD"], limits).trim();
+  } catch {
+    return false;
+  }
+  try {
+    run(root, ["show-ref", "--verify", "-q", "--", revision(ref)], limits);
+    return false;
+  } catch (e) {
+    // show-ref exits 1 for a ref that does not exist; anything else (a timeout, a signal) tells nothing
+    return (e as { status?: number | null }).status === 1;
+  }
+}
 
 /** Config keys whose values only change how files are read or listed, never what runs, by the type git checks them as */
 export const SAFE_KEYS = {
@@ -180,13 +209,14 @@ export const SAFE_KEYS = {
 } as const;
 
 /** A config value as git reads it (local, global, and system), typed by git where it can; null when unset or unreadable */
-export function configGet(root: string, key: keyof typeof SAFE_KEYS): string | null {
+export function configGet(root: string, key: keyof typeof SAFE_KEYS, limits?: Limits): string | null {
   const type = SAFE_KEYS[key];
   try {
-    return text(root, ["config", ...(type === "text" ? [] : [`--type=${type}`]), "--get", key]).replace(
-      /\n$/,
-      "",
-    );
+    return text(
+      root,
+      ["config", ...(type === "text" ? [] : [`--type=${type}`]), "--get", key],
+      limits,
+    ).replace(/\n$/, "");
   } catch {
     return null;
   }
@@ -219,29 +249,26 @@ export function repoFiles(root: string): string[] | null {
   }
 }
 
-/** `git status --porcelain=v2 -z --untracked-files=all` of the work tree, or null when git cannot give it */
-export function worktreeStatus(root: string, limits: Limits = {}): string | null {
-  try {
-    return text(
-      root,
-      ["status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=dirty"],
-      {
-        max: 16 * 1024 * 1024,
-        ...limits,
-      },
-    );
-  } catch {
-    return null;
-  }
+/**
+ * `git status --porcelain=v2 -z --untracked-files=all` of the work tree, read in the git worker; null when it fails or misses the
+ * deadline
+ */
+export async function worktreeStatus(root: string, deadline: number): Promise<string | null> {
+  const out = await inIsolation(root, [{ kind: "status" }], { deadline, max: 16 * 1024 * 1024 });
+  return out?.[0] ?? null;
 }
 
-/** The work tree's diff against a commit: the patch text (no renames, a/ and b/ prefixes) and every changed path */
-export function worktreeDiff(root: string, from: string, max: number): { patch: string; names: string[] } {
-  const base = ["diff", ...DIFF_OPTIONS, "--no-renames"];
-  return {
-    patch: text(root, [...base, "--src-prefix=a/", "--dst-prefix=b/", objectId(from), "--"], { max }),
-    names: list(text(root, [...base, "--name-only", "-z", objectId(from), "--"], { max })),
-  };
+/**
+ * The work tree's diff against a commit, read in the git worker: the patch text (no renames, a/ and b/ prefixes) and every changed
+ * path. Null when it fails, misses the deadline, or an output is over max.
+ */
+export async function worktreeDiff(
+  root: string,
+  from: string,
+  { max, deadline }: { max: number; deadline: number },
+): Promise<{ patch: string; names: string[] } | null> {
+  const out = await inIsolation(root, [{ kind: "diff", from: objectId(from) }], { deadline, max });
+  return out && out.length === 2 ? { patch: out[0] ?? "", names: list(out[1] ?? "") } : null;
 }
 
 /**
@@ -249,38 +276,43 @@ export function worktreeDiff(root: string, from: string, max: number): { patch: 
  * looking for its rename (too many files). Null when git cannot tell at all (no such commit, too slow, too much output). A move to a file
  * git does not track is not seen.
  */
-export function renamesSince(root: string, commit: string): Map<string, string | null> | null {
+export async function renamesSince(
+  root: string,
+  commit: string,
+  deadline = 10_000,
+): Promise<Map<string, string | null> | null> {
   const limit = 1000;
+  let oid: string;
   try {
-    const out = text(
-      root,
-      ["diff", ...DIFF_OPTIONS, "-M", `-l${limit}`, "--name-status", "-z", revision(commit), "--"],
-      {
-        max: 32 * 1024 * 1024,
-      },
-    );
-    const parts = out.split("\0");
-    const renames = new Map<string, string | null>();
-    const deleted: string[] = [];
-    let added = 0;
-    // "R<score>\0<old>\0<new>" for a rename or copy, "<status>\0<path>" otherwise
-    for (let i = 0; i < parts.length; ) {
-      const status = parts[i] ?? "";
-      if (/^[RC]\d*$/.test(status)) {
-        if (status.startsWith("R")) renames.set(parts[i + 1] ?? "", parts[i + 2] ?? "");
-        i += 3;
-      } else {
-        if (status === "D") deleted.push(parts[i + 1] ?? "");
-        if (status === "A") added++;
-        i += 2;
-      }
-    }
-    // git pairs what is left only while sources times destinations stays within the limit squared; beyond it, it only warns on stderr
-    if (deleted.length * added > limit * limit) for (const d of deleted) renames.set(d, null);
-    return renames;
+    oid = commitOf(root, commit);
   } catch {
     return null;
   }
+  const out = await inIsolation(root, [{ kind: "renames", commit: oid }], {
+    deadline,
+    max: 32 * 1024 * 1024,
+  });
+  const names = out?.[0];
+  if (names === undefined) return null;
+  const parts = names.split("\0");
+  const renames = new Map<string, string | null>();
+  const deleted: string[] = [];
+  let added = 0;
+  // "R<score>\0<old>\0<new>" for a rename or copy, "<status>\0<path>" otherwise
+  for (let i = 0; i < parts.length; ) {
+    const status = parts[i] ?? "";
+    if (/^[RC]\d*$/.test(status)) {
+      if (status.startsWith("R")) renames.set(parts[i + 1] ?? "", parts[i + 2] ?? "");
+      i += 3;
+    } else {
+      if (status === "D") deleted.push(parts[i + 1] ?? "");
+      if (status === "A") added++;
+      i += 2;
+    }
+  }
+  // git pairs what is left only while sources times destinations stays within the limit squared; beyond it, it only warns on stderr
+  if (deleted.length * added > limit * limit) for (const d of deleted) renames.set(d, null);
+  return renames;
 }
 
 /** The worker beside this module: the bundle's git-worker.js, or the source when run from the source */
@@ -302,9 +334,12 @@ export function inIsolation(
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
+      // A process group of its own on POSIX, so the git it started goes with it when it is killed
       child = spawn(process.execPath, [workerFile()], {
+        cwd: startDir(),
         stdio: ["pipe", "pipe", "ignore"],
         windowsHide: true,
+        detached: process.platform !== "win32",
       });
     } catch {
       resolve(null);
@@ -318,7 +353,12 @@ export function inIsolation(
       done = true;
       clearTimeout(timer);
       if (out === null) {
-        child.kill("SIGKILL");
+        try {
+          if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+          else child.kill("SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
         child.stdin?.destroy();
         child.stdout?.destroy();
         child.unref();
@@ -326,8 +366,8 @@ export function inIsolation(
       resolve(out);
     };
     const timer = setTimeout(() => finish(null), deadline);
-    // Room for every output at its own limit, plus the JSON around them
-    const cap = max * Math.max(1, ops.length * 2) + 64 * 1024;
+    // Room for every output at its own limit, as JSON may write each byte as six (\u0001), plus the JSON around them
+    const cap = 6 * max * Math.max(1, ops.length * 2) + 64 * 1024;
     child.stdout?.on("data", (c: Buffer) => {
       size += c.length;
       if (size > cap) finish(null);
@@ -343,6 +383,9 @@ export function inIsolation(
       }
     });
     child.stdin?.on("error", () => finish(null));
-    child.stdin?.end(JSON.stringify({ root, ops, max } satisfies WorkerRequest));
+    child.stdin?.end(
+      // The worker's own deadline comes first, so it kills its git before it is killed (Windows has no group to kill)
+      JSON.stringify({ root, ops, max, until: Date.now() + deadline * 0.8 } satisfies WorkerRequest),
+    );
   });
 }

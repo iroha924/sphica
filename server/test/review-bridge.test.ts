@@ -178,7 +178,7 @@ test("an untracked symlink counts as a path without reading what it points to", 
   try {
     fs.writeFileSync(path.join(outside, "note.txt"), "send telemetry\n");
     fs.symlinkSync(path.join(outside, "note.txt"), path.join(w.repo, "link.txt"));
-    const change = localChange(w.repo, "");
+    const change = await localChange(w.repo, "");
     assert.ok(!("problem" in change));
     const files = "files" in change ? change.files : [];
     assert.deepEqual(
