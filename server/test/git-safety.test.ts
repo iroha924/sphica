@@ -270,24 +270,28 @@ test("hooks, a submodule's config, per-worktree config, and the owner's global f
     const marksOf = async (run: () => unknown) => {
       restat(t);
       t.clear();
-      await run();
-      return t.read();
+      const result = await run();
+      return { marks: t.read(), result };
     };
     const plainStatus = () => t.plain("status", "--porcelain");
     const sphicaStatus = () => snapshot(t.repo);
-    if (process.platform !== "win32")
-      assert.ok((await marksOf(plainStatus)).includes("hook"), "plain git runs the hook");
-    assert.deepEqual(await marksOf(sphicaStatus), []);
+    // Git for Windows runs a hook through its own shell, so the control holds there too
+    assert.ok((await marksOf(plainStatus)).marks.includes("hook"), "plain git runs the hook");
+    let seen = await marksOf(sphicaStatus);
+    assert.deepEqual(seen.marks, []);
+    assert.ok(seen.result && typeof seen.result === "object" && "entries" in seen.result, "snapshot answers");
     fs.rmSync(path.join(t.repo, ".git", "hooks", "post-index-change"));
     t.git("config", "hook.evil.event", "post-index-change");
     t.git("config", "hook.evil.command", t.command("config-hook"));
     // Hooks defined in config came in a later git than the oldest one Sphica supports; 2.54 has them
-    if (!(await marksOf(plainStatus)).includes("config-hook"))
+    if (!(await marksOf(plainStatus)).marks.includes("config-hook"))
       assert.ok(!atLeast(gitVersion(), [2, 54]), "plain git runs the config hook");
-    assert.deepEqual(await marksOf(sphicaStatus), []);
+    seen = await marksOf(sphicaStatus);
+    assert.deepEqual(seen.marks, []);
+    assert.ok(seen.result && typeof seen.result === "object" && "entries" in seen.result, "snapshot answers");
   });
   await withHome(async () => {
-    // A submodule whose own config names an fsmonitor, with a change inside it
+    // A submodule whose own config names an fsmonitor and a filter its attributes pick, with a change inside it
     const t = trap();
     const sub = path.join(t.base, "sub");
     execFileSync("git", ["init", "-q", sub], { env: FIXTURE_ENV });
@@ -302,21 +306,24 @@ test("hooks, a submodule's config, per-worktree config, and the owner's global f
     );
     t.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "sub");
     t.git("commit", "-qm", "sub");
-    execFileSync(
-      "git",
-      ["-C", path.join(t.repo, "sub"), "config", "core.fsmonitor", t.command("submodule")],
-      {
-        env: FIXTURE_ENV,
-      },
-    );
+    const inSub = (...a: string[]) =>
+      execFileSync("git", ["-C", path.join(t.repo, "sub"), ...a], { encoding: "utf8", env: FIXTURE_ENV });
+    inSub("config", "core.fsmonitor", t.command("submodule"));
+    fs.writeFileSync(path.join(t.repo, "sub", ".gitattributes"), "*.txt filter=sub\n");
+    inSub("config", "filter.sub.clean", t.command("submodule-filter"));
+    // s.txt's entry without stat data, so the submodule's own status reads the file through the filter
+    const blob = inSub("rev-parse", "HEAD:s.txt").trim();
     fs.appendFileSync(path.join(t.repo, "sub", "s.txt"), "more\n");
+    inSub("update-index", "--cacheinfo", `100644,${blob},s.txt`);
     const got = await compare(
       t,
       () => t.plain("status", "--porcelain"),
       () => snapshot(t.repo),
     );
     assert.ok(got.plain.includes("submodule"), "plain git runs the submodule's fsmonitor");
+    assert.ok(got.plain.includes("submodule-filter"), "plain git runs the submodule's filter");
     assert.deepEqual(got.sphica, []);
+    assert.ok(got.result && typeof got.result === "object" && "entries" in got.result, "snapshot answers");
   });
   await withHome(async () => {
     // core.fsmonitor in the work tree's own config
@@ -330,6 +337,7 @@ test("hooks, a submodule's config, per-worktree config, and the owner's global f
     );
     assert.ok(got.plain.includes("worktree-config"), "plain git runs the per-worktree fsmonitor");
     assert.deepEqual(got.sphica, []);
+    assert.deepEqual((got.result as string[] | null)?.sort(), ["CLAUDE.md", "a.txt"]);
   });
   await withHome(async () => {
     // The owner's global config defines a filter; the agent picks it in .gitattributes, and the command it runs is the agent's
@@ -355,6 +363,8 @@ test("hooks, a submodule's config, per-worktree config, and the owner's global f
     );
     assert.ok(got.plain.includes("global"), "plain git runs the owner's global filter");
     assert.deepEqual(got.sphica, []);
+    const snap = got.result as Awaited<ReturnType<typeof snapshot>>;
+    assert.ok(snap && "a.txt" in snap.entries, "snapshot sees a.txt changed");
   });
 });
 

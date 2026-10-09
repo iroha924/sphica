@@ -169,6 +169,17 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - コミット: `ci: run the git safety tests on macOS, Windows, and Git 2.34 (T07)`
   - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。macOS の job に git-safety と git-worker、Windows の job に git-safety（worker のテストは FIFO・POSIX シェルの偽の git・制御文字のファイル名に頼るので macOS と Linux だけ）、ubuntu:22.04（ダイジェストで固定）の job に両方を足した。CI での実走は、持ち主の決定（全部終えてから push）により push の後に確かめる
 
+- [x] T15: T06 のレビューの指摘を直す（足した攻撃のケースで Sphica の答えの中身も確かめる、submodule の中のフィルタの経路を足す、Windows でも hook の陽性対照を必須にする）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（直す対象）
+  - 変更: `server/test/git-safety.test.ts`
+  - red: worktreeStatus を一時的に null を返す形にして `cd server && node --test --test-name-pattern="hooks, a submodule" test/git-safety.test.ts` → T06 のテストは通るが、直したテストは失敗する
+  - 完了条件: `cd server && node --test test/git-safety.test.ts` → 全件 pass（submodule の fsmonitor とフィルタの両方の陽性対照を含む）
+  - コミット: `test(git): check answers and cover a submodule's filter in the attack tests (T15)`
+  - 結果: worktreeStatus を一時的に null にして `node --test --test-name-pattern="hooks, a submodule" test/git-safety.test.ts` → 1 件失敗した（`snapshot answers`）。元に戻して確かめた
+  - 結果: `cd server && node --test test/git-safety.test.ts` → 5 件 pass
+
 ## P4: リリース
 
 - [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
@@ -200,3 +211,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T06 / hook の陽性対照で、テスト用の素の git（update-index）が hook を走らせて印が付き、Sphica が走らせたように見えた。index を作り直した後に印を消してから測る形にした
 - 2026-10-09 / T05 / Codex のタスクレビュー（9fb9740c）: F1（rename の検出の事前処理が締め切りの外、P2）、F2（テストを直接流すと HOME が隔離されない、P2）、F3（攻撃テストが失敗の答えでも通る、P2）を採用し、T13 を足した。F3 を直したテストが、締め切りの 8 割が小数になって worker が失敗する不具合を見つけた
 - 2026-10-09 / T11 / Codex のタスクレビュー（dac3b908）: F1〜F3（P2）を採用し、T14 を足した。字句の検査では実行時に組み立てる名前まで捕まえられないので、子プロセスを起動できるモジュールを 5 つに絞り、残りはレビューで見る、と検査のコメントに書いた
+- 2026-10-09 / T06 / Codex のタスクレビュー（f91611bc）: F1（足したケースが失敗の答えでも通る、P2）、F2（submodule の中のフィルタが未テスト、P2）、F3（Windows で hook の陽性対照を省く、P2）を採用し、T15 を足した
