@@ -20,6 +20,8 @@ if (!process.env.SPHICA_TEST_ISOLATED) {
     TMPDIR: tmp,
     TMP: tmp,
     TEMP: tmp,
+    // git reads its global config and ignore file under XDG_CONFIG_HOME before HOME, and runners set it to the real one
+    XDG_CONFIG_HOME: path.join(home, ".config"),
     SPHICA_TEST_ISOLATED: base,
   });
   // Either would point Sphica past the swapped HOME at the owner's database or queue

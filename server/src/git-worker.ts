@@ -237,7 +237,8 @@ function prepare(
       GIT_WORK_TREE: root,
       GIT_OBJECT_DIRECTORY: path.join(commonDir(root, remaining()), "objects"),
       GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_GLOBAL: os.devNull,
+      // Git for Windows opens /dev/null as nul but cannot open \\.\nul, what os.devNull gives there
+      GIT_CONFIG_GLOBAL: "/dev/null",
     }),
     options: [...gitOptions(hooks), "-c", `core.excludesFile=${ignore}`],
   };

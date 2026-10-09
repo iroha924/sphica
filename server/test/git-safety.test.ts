@@ -20,7 +20,8 @@ const FIXTURE_ENV: NodeJS.ProcessEnv = (() => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k)));
   delete env.SPHICA_DB;
   delete env.SPHICA_HOME;
-  return { ...env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull };
+  // Git for Windows opens /dev/null as nul but cannot open \\.\nul, what os.devNull gives there
+  return { ...env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
 })();
 
 /** A path git can put in a shell command or an ext:: URL on every platform */
@@ -79,9 +80,17 @@ async function compare(t: ReturnType<typeof trap>, control: () => unknown, sphic
 async function withHome<T>(fn: () => Promise<T>): Promise<T> {
   const home = fs.realpathSync(tempDir("git-safety-home-"));
   const tmp = fs.realpathSync(tempDir("git-safety-tmp-"));
-  const keys = ["HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP"] as const;
+  const keys = ["HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP", "XDG_CONFIG_HOME"] as const;
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  Object.assign(process.env, { HOME: home, USERPROFILE: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp });
+  Object.assign(process.env, {
+    HOME: home,
+    USERPROFILE: home,
+    TMPDIR: tmp,
+    TMP: tmp,
+    TEMP: tmp,
+    // git reads its global ignore file and config under XDG_CONFIG_HOME before HOME (runners set it)
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+  });
   try {
     return await fn();
   } finally {

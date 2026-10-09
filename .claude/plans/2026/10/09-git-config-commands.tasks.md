@@ -236,6 +236,17 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --test --test-name-pattern="autocrlf in any" test/git-worker.test.ts` → T19 の版（HEAD から戻して確認）で 1 件失敗した（`2` で worker が失敗）
   - 結果: `cd server && node --test test/git-worker.test.ts` → 12 件 pass（YES・2・00・Input・値の無いキー）
 
+- [x] T21: PR #307 の CI の失敗を直す（worker と攻撃テストの `GIT_CONFIG_GLOBAL` を Git for Windows でも開ける `/dev/null` にする、テストの準備と withHome で `XDG_CONFIG_HOME` も一時 HOME の下へ向ける）
+  - 種別: 修正
+  - 計画: S2, S6
+  - 依存: T20（CI で落ちた版）
+  - 変更: `server/src/git-worker.ts`, `server/test/isolate-home.ts`, `server/test/git-worker.test.ts`, `server/test/git-safety.test.ts`
+  - red: `cd server && XDG_CONFIG_HOME=<一時> node --test --test-name-pattern="excludesFile set empty" test/git-worker.test.ts` → T20 のテストで失敗する（`the default global ignore file hides u.txt`）
+  - 完了条件: `cd server && XDG_CONFIG_HOME=<一時> node --test test/git-worker.test.ts test/git-safety.test.ts` → 全件 pass。push の後の Windows の job が pass
+  - コミット: `fix(git): pass /dev/null to Git for Windows and keep tests off XDG_CONFIG_HOME (T21)`
+  - 結果: `gh run view 37926502170 --log-failed` → 30389ff0 の CI の Windows の job で `git init` が `fatal: unable to access '\\.\nul': Invalid argument`（os.devNull を GIT_CONFIG_GLOBAL に渡していた。worker も同じ値を渡していたので、Windows では作業ツリーの比較がすべて失敗していた）。check（24.15・26）と dry run: prepare で `the default global ignore file hides u.txt`（ランナーの XDG_CONFIG_HOME）
+  - 結果: `XDG_CONFIG_HOME=<一時> node --test --test-name-pattern="excludesFile set empty" test/git-worker.test.ts` → T20 のテストで 1 件失敗、直した後は `test/git-worker.test.ts test/git-safety.test.ts` が 17 件 pass。Windows は push の後の CI で確かめる
+
 ## P4: リリース
 
 - [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
@@ -274,3 +285,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T17 / tasks の書式の検査が失敗したまま df727d78 をコミットした（検査の結果でコミットを止めていなかった）。T18 のコミットで書式を直した
 - 2026-10-09 / 全差分 / Codex の全差分のレビュー（main..9cd40961、high）: F1（git が認める別の書き方の値で比較が失敗する、P2）、F2（テストの準備が temp の残しものの検査を空振りさせる、P2）、F3（snapshot と localChange が締め切りを共有しない、P2）を採用し、T19 を足した。T15〜T18 はタスクごとのレビューを別に頼まず、この全差分のレビューで見てもらった（観点に明記した）。コマンドが走る経路の残りは見つからなかった
 - 2026-10-09 / T19 / Codex の再レビュー（a49a8636）: F1（値の無い core.autocrlf を false にする、P2）と F2（2・00 のような真偽値の書き方を拒む、P2）を採用し、T20 を足した
+- 2026-10-09 / T21 / PR #307 の CI で Windows の job と check が落ちた。Windows の失敗は製品の worker にもある不具合（os.devNull は Windows で `\\.\nul` で、Git for Windows はそれを開けない）で、手元の macOS では見えなかった
