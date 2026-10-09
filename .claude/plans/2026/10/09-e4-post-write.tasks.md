@@ -71,13 +71,14 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 一時 DB で、via=status だけの anchor 付きの組が列挙され、同じ seed で同じ並び・同じ 30 ターンになり、次の持ち主のプロンプトまでの emitted の判定と Wilson 区間の判定（進む / 不採用 / 決まらない）が期待どおり
   - コミット: `feat(eval): sample shell-changed files to measure undelivered records`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 2 pass（同じターンに tool の行がある path・finding・anchor の無い path は数えない、compact の前と次のプロンプトの後の配信は数えない、次のプロンプトが無ければ窓は開いたまま、subagent への配信は別に出す、seed で 30 ターンと 150 組が固定、Wilson の判定が進む / 不採用 / 決まらない を返し、30 組目の確認で止まり 150 組を超えて数えない）。`bun run verify` → exit 0
-- [ ] T05: M0' を流して Claude と Codex でラベルを付け、#219 を判定する
+- [x] T05: M0' を流して Claude と Codex でラベルを付け、#219 を判定する
   - 種別: 追加
   - 計画: S1, S6
   - 依存: T04（抽出スクリプトが要る）
   - 変更: `server/evals/post-write/m0-shell.json`
   - 完了条件: `cat server/evals/post-write/m0-shell.json` → seed、原因の内訳、引いた組と確かめられた組の数、取りこぼしの区間、Claude と Codex の食い違いの決着、判定が入っている。#219 へのコメントの文面を持ち主に見せた
   - コミット: `test(eval): record the shell-change miss rate for #219`
+  - 結果: 母集団 2,842 組、seed 20261009。33 組を引いて shell の編集と確かめた 30 組のうち 20 組が次のプロンプトまでに配られず（67%、95% Wilson 49〜81%）→ 判定「進む」（`node server/evals/post-write/shell-miss.ts --decide server/evals/post-write/m0-shell.json` → proceed）。Claude と Codex のラベルの食い違い 3 組（1・24・31）は Claude の見落としで、会話記録で Codex が正しいと確かめた。#219 に持ち主が承認した文面でコメントした（issuecomment-6083349101）。#219 の配信は別の計画と Go が要るので、ここで止める
 
 ## P2: 今のバンドルでの基準
 

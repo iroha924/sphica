@@ -1,0 +1,290 @@
+{
+  "note": "M0' for #219: current records replayed on past inputs (owner database read only, 2026-10-09). Labels by Claude and Codex independently from the transcripts; they differed on pairs 1, 24, and 31, where Claude missed a python write and Codex's label was confirmed in the transcript. Interval: 95% Wilson on confirmed pairs, an approximation for sampling without replacement from a finite population.",
+  "seed": 20261009,
+  "population": 2842,
+  "turns": {
+    "sampled": 30,
+    "withKind": {
+      "shell write command": 28,
+      "git checkout/merge/pull/stash and the like": 26,
+      "formatter or codex": 29,
+      "subagent": 18,
+      "edit tool on the path": 2
+    },
+    "how": "presence of each kind of command in the turn, counted mechanically; report only"
+  },
+  "labels": [
+    {
+      "index": 0,
+      "path": "server/evals/cloud/grading.ts",
+      "key": "trace:e72fe6bd-3b20-4ccd-8d2c-c8f135f384c9/t1-checkpoint-plan",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 1,
+      "path": "plugin/skills/harvest/SKILL.md",
+      "key": "trace:b65ea0e0-74a8-4710-ab51-b1f5828cf242/harvest-fork-adopted",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 2,
+      "path": "server/src/deliver.ts",
+      "key": "trace:1506deee-17f8-407f-bf41-ec2f985cb891/revive-rejected-option",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 3,
+      "path": "db/schema.sql",
+      "key": "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/delivery-retention-90d",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 4,
+      "path": "server/src/github.ts",
+      "key": "trace:af73d0c3-60b2-4d93-9cf3-3cd7e22fb908/closing-refs-ignore-comments",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 5,
+      "path": ".claude-plugin/marketplace.json",
+      "key": "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/rebuild-pr-without-bump",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 6,
+      "path": "server/src/record.ts",
+      "key": "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/agent-own-decisions",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 7,
+      "path": "server/src/record.ts",
+      "key": "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/agent-own-decisions",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 8,
+      "path": "server/src/deliver.ts",
+      "key": "trace:20818a01-d0eb-4a17-a082-2658190d7e46/per-agent-delivery-count",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 9,
+      "path": "server/src/glean.ts",
+      "key": "trace:88e10cd3-817e-41df-a3f4-d53a44e7b83d/e1-plan",
+      "shellEdit": null,
+      "cause": "unknown"
+    },
+    {
+      "index": 10,
+      "path": "scripts/check-ai-config.mjs",
+      "key": "trace:dea5e6cc-0ebb-495f-94a3-21511a3772e2/exec-form-gated",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 11,
+      "path": "db/schema.sql",
+      "key": "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/custom-fields-plan",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 12,
+      "path": "server/src/extract.ts",
+      "key": "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/cut-message-counts-looked",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 13,
+      "path": "README.ja.md",
+      "key": "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/readme-current-only",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 14,
+      "path": "server/src/record.ts",
+      "key": "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/value-rule-edge-declined",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 15,
+      "path": "db/schema.sql",
+      "key": "trace:bc419495-37de-4ca8-90f6-7914ad52c991/declined-edge-findings",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 16,
+      "path": ".claude/skills/eval-loop/SKILL.md",
+      "key": "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/eval-local-no-cap",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 17,
+      "path": "server/evals/cloud/grade.ts",
+      "key": "trace:e72fe6bd-3b20-4ccd-8d2c-c8f135f384c9/t1-checkpoint-plan",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 18,
+      "path": "server/evals/scale/run.ts",
+      "key": "trace:77f97b60-5970-412b-a043-1b4ac23ea65a/m1-plan",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 19,
+      "path": "README.md",
+      "key": "trace:dea5e6cc-0ebb-495f-94a3-21511a3772e2/claude-code-min-2-1-139",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 20,
+      "path": ".claude/skills/eval-loop/SKILL.md",
+      "key": "trace:913af8a9-e6e3-4165-a76b-38f6a3422f57/eval-local-no-cap",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 21,
+      "path": "server/src/record.ts",
+      "key": "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/agent-own-decisions",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 22,
+      "path": "README.ja.md",
+      "key": "trace:eda6bd24-a2dc-4d18-b1be-9489edcf3838/bundle-readme-into-f6",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 23,
+      "path": "server/src/glean.ts",
+      "key": "trace:88e10cd3-817e-41df-a3f4-d53a44e7b83d/e1-plan",
+      "shellEdit": null,
+      "cause": "unknown"
+    },
+    {
+      "index": 24,
+      "path": "server/src/mcp.ts",
+      "key": "trace:2b12445e-90b6-46e0-9382-7efc7bd9b9e0/read-workspace-order",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 25,
+      "path": "server/evals/cloud/grade.ts",
+      "key": "trace:094a20bb-ac97-49cf-a0f6-dc455e6ef499/remove-out-option",
+      "shellEdit": null,
+      "cause": "unknown"
+    },
+    {
+      "index": 26,
+      "path": "server/src/admin.ts",
+      "key": "trace:f30ad30c-d966-4c9a-9719-4b32e51ad33e/migrate-failure-three-way",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 27,
+      "path": "server/src/record.ts",
+      "key": "trace:fddc1eb4-e29e-4fc4-8b2a-6a2886f0c0ec/held-refusal-after-judge",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 28,
+      "path": "plugin/skills/rules/SKILL.md",
+      "key": "trace:c26c6849-61ee-40a5-90ac-aec92acebda4/allowed-tools-read",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": false
+    },
+    {
+      "index": 29,
+      "path": "server/src/deliver.ts",
+      "key": "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/claude-bash-delivery",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 30,
+      "path": "server/src/extract.ts",
+      "key": "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/cut-message-counts-looked",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 31,
+      "path": "server/src/review.ts",
+      "key": "trace:77f97b60-5970-412b-a043-1b4ac23ea65a/m1-plan",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    },
+    {
+      "index": 32,
+      "path": "server/src/deliver.ts",
+      "key": "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/confirm-before-override",
+      "shellEdit": true,
+      "agent": "main",
+      "missed": true
+    }
+  ],
+  "decision": {
+    "drawn": 33,
+    "confirmed": 30,
+    "missed": 20,
+    "interval": {
+      "low": 0.4878,
+      "high": 0.8077
+    },
+    "bar": "lower bound >= 0.2 proceeds; upper bound < 0.2 is not adopted; otherwise undecided",
+    "verdict": "proceed"
+  }
+}
