@@ -24,7 +24,7 @@ import {
   treeWatcher,
 } from "../evals/cloud/claude-run.ts";
 import { type Checkout, evalCache, homeFence, pinCheckout } from "../evals/cloud/codex-home.ts";
-import { currentFence, repoPlaces, tempRoots } from "../evals/cloud/codex-run.ts";
+import { codexHarness, currentFence, repoPlaces, tempRoots } from "../evals/cloud/codex-run.ts";
 import {
   claudeStreamCalls,
   foundInClaudeStream,
@@ -782,7 +782,7 @@ test("claude.ts exits non-zero when the run could not be set up, after recording
     JSON.stringify({ passed: true, model: "m", runner: runnerDigest(), claude: "9.9.9 (Claude Code)" }),
   );
   // No slot repository exists, so the clone fails before claude starts
-  const out = path.join(build, "runs");
+  const out = path.join(evalCache(build), "runs");
   const r = spawnSync(
     process.execPath,
     [
@@ -1786,7 +1786,9 @@ test("a run whose claude cannot start is still recorded with the reason", (t) =>
     }).trim();
     fs.symlinkSync(found, path.join(bin, tool));
   }
-  const out = path.join(build, "runs");
+  // Outside the evaluation cache, where a fenced Codex lane could read the clone, the runner refuses before it makes anything
+  const outside = path.join(build, "runs");
+  const out = path.join(evalCache(build), "claude-runs");
   // claude.ts would stop at the canary's gate first, since a host with no claude has no version; the runner itself records the failure.
   // It runs in a child Node process with its environment given whole (a temporary home, none of the owner's Sphica paths, a PATH without
   // claude), so this process's environment is never swapped while the runner's asynchronous work is still going
@@ -1802,16 +1804,22 @@ test("a run whose claude cannot start is still recorded with the reason", (t) =>
     out,
     model: "m",
   };
-  const child = spawnSync(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `const { runClaude } = await import(${JSON.stringify(pathToFileURL(runner).href)}); await runClaude(JSON.parse(process.argv[1]));`,
-      JSON.stringify(options),
-    ],
-    { encoding: "utf8", env: { ...childEnv(build), PATH: bin } },
-  );
+  const start = (o: typeof options) =>
+    spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const { runClaude } = await import(${JSON.stringify(pathToFileURL(runner).href)}); await runClaude(JSON.parse(process.argv[1]));`,
+        JSON.stringify(o),
+      ],
+      { encoding: "utf8", env: { ...childEnv(build), PATH: bin } },
+    );
+  const refused = start({ ...options, out: outside });
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /--out .*must be inside/);
+  assert.equal(fs.existsSync(outside), false);
+  const child = start(options);
   assert.equal(child.status, 0, `${child.stdout}${child.stderr}`);
   const [run] = fs.readdirSync(out);
   const recorded = JSON.parse(fs.readFileSync(path.join(out, run ?? "", "result.json"), "utf8"));
@@ -1896,17 +1904,17 @@ test("collect counts only Codex runs made under the current read fence, and reco
   );
   // The fence a run under this HOME would record: the same policy digests the same wherever HOME is
   const cache = evalCache(base);
-  const current = currentFence(":workspace", cache, {
-    places: repoPlaces(),
-    home: homeFence({ home: base }),
-    temp: tempRoots(),
-  });
+  const home = homeFence({ home: base });
+  const current = currentFence(":workspace", cache, { places: repoPlaces(), home, temp: tempRoots() });
+  const harness = codexHarness(home.codex);
   const head = { task: "pilot-sort", condition: "none" };
   const answer = { implemented: true, summary: "s", past_decisions: [], unverified: [] };
-  for (const [name, fence] of [
-    ["fenced", current],
-    ["unfenced", undefined],
-    ["other", "0".repeat(64)],
+  for (const [name, fence, made] of [
+    ["fenced", current, harness],
+    ["unfenced", undefined, harness],
+    ["other", "0".repeat(64), harness],
+    ["rerun", current, "0".repeat(64)],
+    ["unmarked", current, undefined],
   ] as const) {
     const run = path.join(codex, name);
     fs.mkdirSync(run, { recursive: true });
@@ -1920,6 +1928,7 @@ test("collect counts only Codex runs made under the current read fence, and reco
         seconds: 1,
         deliveries: null,
         ...(fence ? { fence } : {}),
+        ...(made ? { harness: made } : {}),
       }),
     );
     fs.writeFileSync(path.join(run, "events.jsonl"), "");
@@ -1945,7 +1954,7 @@ test("collect counts only Codex runs made under the current read fence, and reco
   );
   const loop = JSON.parse(fs.readFileSync(path.join(build, "loop.json"), "utf8")) as {
     run_roots: string[];
-    rows: { run: string; excluded: string | null; fence?: string }[];
+    rows: { run: string; excluded: string | null; fence?: string; harness?: string }[];
   };
   const row = (name: string) => loop.rows.find((r) => r.run === name);
   assert.equal(row("fenced")?.excluded, null);
@@ -1955,6 +1964,10 @@ test("collect counts only Codex runs made under the current read fence, and reco
   // An excluded run keeps the fence it recorded, so a later look can tell which fence it ran under
   assert.equal(row("other")?.fence, "0".repeat(64));
   assert.equal(row("unfenced")?.fence, undefined);
+  // A run by another runner or Codex CLI under the same fence is another measurement
+  assert.equal(row("fenced")?.harness, harness);
+  assert.equal(row("rerun")?.excluded, "run by another runner or Codex CLI");
+  assert.equal(row("unmarked")?.excluded, "run by another runner or Codex CLI");
   assert.deepEqual(
     loop.run_roots,
     [codex, claude, base].map((p) => path.resolve(p)),

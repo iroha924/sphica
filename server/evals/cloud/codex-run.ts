@@ -2,6 +2,7 @@
 // bootstrap repository, a temporary HOME, and a CODEX_HOME holding only a link to the owner's auth.json plus the model settings, so the
 // owner's rules, memories, and MCP servers never reach it. The cost comes from the owner's ChatGPT plan, not the cloud credits.
 import { execFileSync, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -67,7 +68,7 @@ export function repoPlaces(repo = REPO): string[] {
     .split("\0")
     .filter((l) => l.startsWith("worktree "))
     .map((l) => l.slice("worktree ".length));
-  const common = path.resolve(repo, git("rev-parse", "--git-common-dir").trim());
+  const common = path.resolve(repo, git("rev-parse", "--git-common-dir").replace(/\n$/, ""));
   // Objects borrowed from elsewhere (alternates, and theirs in turn) hold the same history
   const borrowed: string[] = [];
   const follow = (objects: string) => {
@@ -77,7 +78,8 @@ export function repoPlaces(repo = REPO): string[] {
     } catch {
       return;
     }
-    for (const line of lines.map((l) => l.trim()).filter((l) => l && !l.startsWith("#"))) {
+    // Git takes each line whole, so a path's own leading or trailing spaces stay part of it
+    for (const line of lines.filter((l) => l && !l.startsWith("#"))) {
       const alt = path.resolve(objects, line.startsWith('"') ? unquoteGit(line) : line);
       if (!fs.existsSync(alt)) continue;
       const real = fs.realpathSync(alt);
@@ -132,6 +134,20 @@ export function reachableTools(s: Shield): Shield {
     }
   }
   return s;
+}
+
+/** The code that starts and fences a cloud Codex run, relative to this directory */
+const RUNNER_FILES = ["codex.ts", "codex-run.ts", "codex-home.ts", "probe.ts"];
+
+/**
+ * The runner code and the Codex CLI a run is made by, as one hash: runs by another runner or CLI are another measurement, even under the
+ * same fence and model
+ */
+export function codexHarness(codex: string | null): string {
+  const hash = crypto.createHash("sha256");
+  for (const file of RUNNER_FILES) hash.update(`${file}\0`).update(fs.readFileSync(path.join(HERE, file)));
+  const cli = codex ? execFileSync(codex, ["--version"], { encoding: "utf8", timeout: 10_000 }).trim() : "";
+  return hash.update(`cli\0${cli}`).digest("hex");
 }
 
 export const shieldNow = (): Shield =>
@@ -335,8 +351,9 @@ async function fencedRun(
     });
     result.fence = codexFence(fence.profile, cache, codexHome, shield, { "<tree>": tree });
     result.fence_roots = fence.denied;
-    // Recorded so a comparison can refuse two builds run by different Codex models
+    // Recorded so a comparison can refuse two builds run by different Codex models, runner code, or Codex CLIs
     result.codex_model = codexModelOf(codexHome);
+    result.harness = codexHarness(codexOf(shield.home));
 
     // Inject runs the shipped delivery hooks against the slot's database copy; gold goes through a prompt hook too, so both arrive as the
     // developer context a plugin hook gives (plugin/hooks/codex.json), not as part of the prompt

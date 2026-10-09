@@ -480,6 +480,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="HOME is denied whole with only|a tool the run starts by name" test/eval-codex.test.ts` → 直す前の本体で 2 件失敗した（どちらも Missing expected exception）
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 155 件 pass
 
+- [x] T43: GitHub の Codex のレビュー（56754bb4）の P1 3 件を直す。alternates の行は前後の空白を削らずにそのまま読む。Claude の run の出力先を評価のキャッシュの中に限る。Codex の run に実行コードと Codex CLI のハッシュ（harness）を記録し、collect・grade・report で fence と同じく混ぜない
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T42（同じ囲いの検査の続き）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/collect.ts`, `server/evals/cloud/grade.ts`, `server/evals/cloud/grading.ts`, `server/evals/cloud/report.ts`, `server/test/eval-codex.test.ts`, `server/test/eval-grade.test.ts`, `server/test/eval-claude.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - red: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 直す前の本体（`codexHarness` は空文字を返す仮の関数）で 7 件失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): keep alternate paths whole, Claude runs in the cache, and Codex rows per harness (T43)`
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 直す前の本体で 7 件失敗した（alternates、Codex の run の記録、collect、grade、report、compare、Claude の run の出力先）
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts` → 182 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -524,3 +535,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T40 / GitHub の Codex のレビュー（9f121528）。P1 が 3 件、P2 が 3 件。6 件とも直した。CI の `check (26)` の失敗（seed 528）は、ブランチの前のコミットでも再現し、main でもそのテストを単独で流すと落ちる、前からある順番の依存だった。テストだけの直しなので、この PR で一緒に直した
 - 2026-10-09 / T41 / GitHub の Codex のセキュリティレビュー（20bbbf1d）の P2。モデルが出力を作れる限り、この判定で run を外す・集計を止める形は塞ぐたびに抜け道が出るので、数字を動かさない形に変えた（T38 と T39 の「集計を止める」を取り下げた）
 - 2026-10-09 / T42 / GitHub の Codex のレビュー（5f7493f5）の P1・P2。検査に codex 本体も入れたら、偽の codex を temp に置く既存のテスト 15 件が落ちた。指摘の範囲の `node` と `bun` に絞った
+- 2026-10-09 / T43 / GitHub の Codex のレビュー（56754bb4）の P1 3 件。harness は fence に混ぜず別の項目にした。除外の理由と、grade・report の拒否の文面で、どちらが違うのかを分けて言えるようにするため

@@ -20,6 +20,7 @@ import {
 import {
   codexDenies,
   codexFence,
+  codexHarness,
   REPO,
   reachableTools,
   repoPlaces,
@@ -131,6 +132,7 @@ delete GIT_ENV.SPHICA_HOME;
 /** A fake `codex` that records its arguments, environment, and config, and answers like `codex exec -o` */
 const FAKE_CODEX = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
+[ "$1" = "--version" ] && { echo "codex-cli $(cat "$here/version" 2>/dev/null || echo 0)"; exit 0; }
 echo x >> "$here/calls"
 [ -f "$here/fail" ] && exit 3
 printf '%s\\n' "$@" > "$here/args"
@@ -251,6 +253,11 @@ test("codex.ts replays a task with codex exec in the run's own homes and records
   const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8"));
   assert.equal(result.status, 0);
   assert.equal(result.codex_model, "m, low");
+  // The runner code and the CLI that made the run, so a later runner or CLI is not counted as the same measurement
+  const fake = path.join(b.root, "bin", "codex");
+  assert.equal(result.harness, codexHarness(fake));
+  fs.writeFileSync(path.join(b.root, "bin", "version"), "1");
+  assert.notEqual(codexHarness(fake), result.harness);
   for (const f of ["started.json", "answer.json", "events.jsonl", "patch.diff"])
     assert.ok(fs.existsSync(path.join(dir, f)), f);
   const seen = b.seen();
@@ -866,6 +873,7 @@ test("the grader keeps the lock while a temp directory it made cannot be removed
   const row = {
     model: "codex",
     fence: "f",
+    harness: "h",
     task: "pilot-sort",
     condition: "none",
     run: "r1",
@@ -961,6 +969,7 @@ test("the grader keeps the lock while the Claude grader's directory cannot be re
   const row = {
     model: "codex",
     fence: "f",
+    harness: "h",
     task: "pilot-sort",
     condition: "none",
     run: "r1",
@@ -1160,6 +1169,11 @@ test("a slot that links out of the build, objects borrowed from elsewhere, and a
     `"${path.join(spaced, "objects").replace(" ", "\\040")}"\n`,
   );
   assert.ok(repoPlaces(main).includes(path.join(spaced, "objects")));
+  // An unquoted line is the whole path, a trailing space included
+  const loose = path.join(base, "loose ");
+  fs.mkdirSync(loose);
+  fs.writeFileSync(path.join(main, ".git", "objects", "info", "alternates"), `${loose}\n`);
+  assert.ok(repoPlaces(main).includes(loose));
   assert.equal(unquoteGit('"a\\tb\\\\c\\"d\\303\\251"'), 'a\tb\\c"d\u00e9');
   assert.throws(() => unquoteGit('"a\\qb"'), /not understood/);
   assert.throws(() => unquoteGit('"open'), /not understood/);

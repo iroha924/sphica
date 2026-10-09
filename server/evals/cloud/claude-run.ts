@@ -7,7 +7,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openReader } from "../../src/db.ts";
-import { type Checkout, checkoutGit, claimRunDir, pinCheckout } from "./codex-home.ts";
+import {
+  type Checkout,
+  checkoutGit,
+  claimRunDir,
+  evalCache,
+  pinCheckout,
+  requireInside,
+} from "./codex-home.ts";
 
 type Hook = { type: "command"; command: string; args: string[]; timeout: number };
 type HookEntry = { matcher?: string; hooks: Hook[] };
@@ -260,7 +267,9 @@ export async function runClaude(o: {
   /** Files committed into the clone before the run starts (the canary's positive control) */
   plant?: Record<string, string>;
 }): Promise<{ dir: string; result: RunResult }> {
-  const { run, dir } = claimRunDir(o.out, `${o.task}-${o.condition}`);
+  // The clone, its .tools, and its database copy stay where every fenced Codex run is denied
+  const out = requireInside(evalCache(), o.out, "--out");
+  const { run, dir } = claimRunDir(out, `${o.task}-${o.condition}`);
   const work = path.join(dir, "work");
   const tools = path.join(dir, "tools");
   const db = path.join(dir, "db", "sphica.db");

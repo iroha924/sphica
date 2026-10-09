@@ -77,14 +77,19 @@ if (
 )
   throw new Error(`${args.loop} does not say where its runs were (run_roots); collect it again`);
 for (const root of loop.run_roots as string[]) requireInside(cache, root, "a run root");
-// The table counts every measured Codex run together: runs made under different fences, or none, are not one measurement
-const runFences = new Set(
-  loop.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r.fence ?? null),
-);
-if (runFences.has(null) || runFences.size > 1)
-  throw new Error(
-    `${args.loop} has Codex runs made under ${runFences.size} read fences (or none); collect it again`,
-  );
+// The table counts every measured Codex run together: runs made under different fences, or by different runner code or Codex CLIs, or
+// with either not recorded, are not one measurement
+const measured = loop.rows.filter((r) => r.model === "codex" && !r.excluded);
+for (const [field, what] of [
+  ["fence", "read fences"],
+  ["harness", "harnesses (runner code and Codex CLI)"],
+] as const) {
+  const seen = new Set(measured.map((r) => r[field] ?? null));
+  if (seen.has(null) || seen.size > 1)
+    throw new Error(
+      `${args.loop} has Codex runs made under ${seen.size} ${what} (or none); collect it again`,
+    );
+}
 const shield = shieldNow();
 const denies = codexDenies(cache, shield);
 const graderFence = currentFence(":read-only", cache, shield);

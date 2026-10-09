@@ -23,8 +23,9 @@ type Graded = GradeRow & {
   ungraded?: string;
   second?: { grade: Grade } | { ungraded: string };
   gold_signals?: Record<string, GoldSignal>;
-  /** Codex runs only: the read fence the run was made under */
+  /** Codex runs only: the read fence the run was made under, and the runner code and Codex CLI that made it */
   fence?: string;
+  harness?: string;
 };
 export type Build = {
   build?: string | null;
@@ -239,20 +240,30 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
 }
 
 /**
- * Results read through another fence, or none, may have seen what the others could not, and every grade counted is the Codex grader's,
- * whatever model ran: builds shown or compared together must share one run fence and one grader fence.
+ * Results read through another fence, or none, may have seen what the others could not, results by other runner code or another Codex
+ * CLI are another measurement, and every grade counted is the Codex grader's, whatever model ran: builds shown or compared together must
+ * share one run fence, one harness, and one grader fence.
  */
 function sameFences(sides: { label: string; build: Build }[]): void {
-  const runs = sides.map((s) => {
-    const f = [
-      ...new Set(s.build.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r.fence ?? null)),
-    ];
-    if (f.includes(null))
-      throw new Error(`the ${s.label} build has Codex results with no read fence recorded`);
-    if (f.length > 1)
-      throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} read fences`);
-    return f[0];
-  });
+  for (const [field, what, many] of [
+    ["fence", "read fence", "read fences"],
+    ["harness", "harness (runner code and Codex CLI)", "harnesses"],
+  ] as const) {
+    const each = sides.map((s) => {
+      const f = [
+        ...new Set(
+          s.build.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r[field] ?? null),
+        ),
+      ];
+      if (f.includes(null))
+        throw new Error(`the ${s.label} build has Codex results with no ${what} recorded`);
+      if (f.length > 1)
+        throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} ${many}`);
+      return f[0];
+    });
+    if (new Set(each.filter(Boolean)).size > 1)
+      throw new Error(`the builds ran Codex under different ${many}; use results made under the same one`);
+  }
   for (const s of sides)
     if (!s.build.grader_fence)
       throw new Error(`the ${s.label} build records no grader fence; grade it again`);
@@ -260,8 +271,6 @@ function sameFences(sides: { label: string; build: Build }[]): void {
     throw new Error(
       "the builds were graded by Codex graders under different read fences; grade them under the same one",
     );
-  if (new Set(runs.filter(Boolean)).size > 1)
-    throw new Error("the builds ran Codex under different read fences; use results made under the same one");
 }
 
 type Side = { label: string; build: Build; fixture: string | undefined; tasks: string };

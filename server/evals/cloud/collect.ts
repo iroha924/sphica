@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { codexLock, evalCache } from "./codex-home.ts";
-import { currentFence } from "./codex-run.ts";
+import { codexHarness, currentFence, shieldNow } from "./codex-run.ts";
 import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
 import { liveScratch, NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
@@ -59,10 +59,16 @@ const out = path.join(build, "loop.json");
 // Where the runs came from: grade refuses a loop whose runs sat where the fenced Codex could read them
 const runRoots = [args.codex, args.claude, args.logs].map((p) => path.resolve(p ?? ""));
 // Built only when a Codex run is judged: a Claude-only collection needs no Codex tool layout on this machine
-let fenceNow: string | undefined;
-const runFence = () => {
-  fenceNow ??= currentFence(":workspace", evalCache());
-  return fenceNow;
+let runNow: { fence: string; harness: string } | undefined;
+const runNowOf = () => {
+  if (!runNow) {
+    const shield = shieldNow();
+    runNow = {
+      fence: currentFence(":workspace", evalCache(), shield),
+      harness: codexHarness(shield.home.codex),
+    };
+  }
+  return runNow;
 };
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;
@@ -110,8 +116,9 @@ type Row = {
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
   presented: string | null;
-  /** Codex runs only: the read fence the run was made under */
+  /** Codex runs only: the read fence the run was made under, and the runner code and Codex CLI that made it */
   fence?: string;
+  harness?: string;
   /** The concrete model a local run used (Claude's --model, Codex's configured model and effort); null when it was not recorded */
   agent_model: string | null;
   /** Local Claude runs only: whether a Sphica search came before the first change to the work tree */
@@ -468,6 +475,7 @@ function main() {
         claude_model?: string;
         codex_model?: string | null;
         fence?: string;
+        harness?: string;
       }>(resultText);
       // Cut off while it was written: the run started, so it stays in the denominator
       if (!result) {
@@ -478,6 +486,7 @@ function main() {
       const excluded = (task: string, condition: string, reason: string): Row => ({
         ...excludedRow(model, task, condition, name, reason),
         ...(model === "codex" && result.fence ? { fence: result.fence } : {}),
+        ...(model === "codex" && result.harness ? { harness: result.harness } : {}),
       });
       // A run whose agent process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
       if (result.status !== 0 || result.reason) {
@@ -487,8 +496,12 @@ function main() {
         continue;
       }
       // A Codex run made under another fence, or none, could read what the current fence hides
-      if (model === "codex" && result.fence !== runFence()) {
+      if (model === "codex" && result.fence !== runNowOf().fence) {
         rows.push(excluded(result.task, result.condition, "run without the current read fence"));
+        continue;
+      }
+      if (model === "codex" && result.harness !== runNowOf().harness) {
+        rows.push(excluded(result.task, result.condition, "run by another runner or Codex CLI"));
         continue;
       }
       // An inject run whose hooks logged nothing at all never had Sphica delivering
@@ -555,7 +568,7 @@ function main() {
           model === "claude" ? searchedBeforeEdit(events, read("edits.jsonl")) : "not_applicable",
         search_loading: model === "claude" ? searchLoading(events) : "not_applicable",
         agent_model: result.claude_model ?? result.codex_model ?? null,
-        ...(model === "codex" ? { fence: result.fence } : {}),
+        ...(model === "codex" ? { fence: result.fence, harness: result.harness } : {}),
         gold_signals:
           model === "codex"
             ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
