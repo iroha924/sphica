@@ -219,22 +219,15 @@ export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
 }
 
 /**
- * External volumes: private data outside HOME that a fenced Codex would otherwise read. Only real directories: the boot volume's entry
- * is a link to `/`, and a deny follows a link to what it points at.
+ * Where external volumes are mounted: private data outside HOME. Each root is denied whole, so a volume mounted during a run is denied
+ * too; the boot volume's entry under `/Volumes` is a link to `/`, which stays readable by its own path. A root that is a link is left out,
+ * since a deny follows a link to what it points at.
  */
-export function volumeDenies(volumes = "/Volumes"): string[] {
-  let names: string[];
-  try {
-    names = fs.readdirSync(volumes);
-  } catch {
-    return [];
-  }
-  return names
-    .map((n) => path.join(volumes, n))
-    .filter((p) => {
-      const st = fs.lstatSync(p, { throwIfNoEntry: false });
-      return st?.isDirectory() === true && !st.isSymbolicLink();
-    });
+export function volumeDenies(roots = ["/Volumes", "/media", "/mnt", "/run/media"]): string[] {
+  return roots.filter((p) => {
+    const st = fs.lstatSync(p, { throwIfNoEntry: false });
+    return st?.isDirectory() === true && !st.isSymbolicLink();
+  });
 }
 
 /** The codex a runner starts: a fence made where none is on PATH (collect, report) needs none */

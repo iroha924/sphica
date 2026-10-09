@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { Step } from "../acceptance/load.ts";
+import { repoPlaces } from "../cloud/codex-run.ts";
 import { restrictedImports } from "./biome.ts";
 import { lookedOutside, oneConfiguration } from "./grade.ts";
 
@@ -89,7 +90,7 @@ export function gradeDraft(
 }
 
 /**
- * One rules run graded: a run that named the repository holding the held-out cases, or another run, is excluded (Codex has no read fence),
+ * One rules run graded: a run that named the repository holding the held-out cases (any worktree or its git directory), or another run, is excluded,
  * and a run without its result, or that did not exit 0, is failed.
  */
 export function gradeRulesRun(
@@ -108,7 +109,7 @@ export function gradeRulesRun(
   const read = (f: string) =>
     fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8") : "";
   const outside = lookedOutside(read("events.jsonl"), {
-    forbidden: [path.resolve(import.meta.dirname, "..", "..", "..")],
+    forbidden: repoPlaces(),
     runs,
     run: name,
   });

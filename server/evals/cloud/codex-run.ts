@@ -131,7 +131,7 @@ export function codexFence(
   let text = profile;
   for (const p of s.places.filter((p) => p !== REPO).sort((a, b) => b.length - a.length))
     text = text.split(toml(p)).join(toml(REPO));
-  // The external volumes mounted come and go: they are one policy line
+  // Which mount roots exist differs by machine: they are one policy line
   for (const v of s.volumes ?? []) text = text.split(`${JSON.stringify(v)} = "deny"\n`).join("");
   const temp = Object.fromEntries((s.temp ?? []).map((t, i) => [`<temp-${i}>`, t]));
   return fenceDigest(

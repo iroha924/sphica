@@ -202,3 +202,18 @@ test("a checkout that is a link is never written into", (t) => {
   assert.equal(r.tests, "not run (the checkout is a link)");
   assert.ok(!fs.existsSync(path.join(work, "test", "hidden.test.ts")));
 });
+
+test("the hidden test is removed from the checkout even when its scratch directory cannot be made", (t) => {
+  const { work } = fixture(t);
+  const saved = process.env.TMPDIR;
+  process.env.TMPDIR = path.join(work, "no-such-dir", "tmp");
+  try {
+    assert.throws(() =>
+      runHiddenTest(work, 'import { test } from "node:test";\ntest("completion: x", () => {});\n'),
+    );
+    assert.ok(!fs.existsSync(path.join(work, "test", "hidden.test.ts")));
+  } finally {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+  }
+});

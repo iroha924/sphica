@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { repoPlaces } from "../cloud/codex-run.ts";
 import { loadReviewCases } from "./fixture.ts";
 
 type Outcome = "violation" | "complies" | "unrelated" | "undetermined";
@@ -311,7 +312,8 @@ const unfinished = (name: string): RunGrade => ({
 
 export function gradeAll(runs: string): RunGrade[] {
   const diffs = new Map(loadReviewCases().diffs.map((d) => [d.id, d.expect]));
-  const forbidden = [path.resolve(import.meta.dirname, "..", "..", "..")];
+  // The repository wherever its files or history are: every worktree and the shared git directory hold the expected verdicts
+  const forbidden = repoPlaces();
   // A precedent run's directory, as runLane names it: rules runs, M2, the preflight, and the fixture share the output root
   const lane = new RegExp(`^(?:${[...diffs.keys()].join("|")})-(?:claude|codex)-\\d{4}-`);
   const names = fs

@@ -1060,10 +1060,13 @@ test("the fenced PATH holds only absolute entries that still find node, bun, and
 });
 
 test("external volumes are denied, a link to the root volume is not, and the fence does not change with a per-run copy's path", () => {
+  // Each mount root is denied whole, so a volume mounted during a run is denied too; a root that is a link or is missing is left out
   const volumes = fs.realpathSync(tempDir("volumes-"));
-  fs.mkdirSync(path.join(volumes, "Backup"));
-  fs.symlinkSync("/", path.join(volumes, "Macintosh HD"));
-  assert.deepEqual(volumeDenies(volumes), [path.join(volumes, "Backup")]);
+  fs.mkdirSync(path.join(volumes, "Volumes"));
+  fs.symlinkSync("/", path.join(volumes, "Volumes", "Macintosh HD"));
+  fs.symlinkSync(path.join(volumes, "Volumes"), path.join(volumes, "linked"));
+  const roots = ["Volumes", "linked", "missing"].map((r) => path.join(volumes, r));
+  assert.deepEqual(volumeDenies(roots), [path.join(volumes, "Volumes")]);
   const home = fs.realpathSync(tempDir("fence-biome-home-"));
   const cache = evalCache(home);
   const codexHome = path.join(cache, "r", "codex-home");

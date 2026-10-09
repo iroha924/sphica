@@ -436,6 +436,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="never from the model's text|a run that changed its copy is excluded" test/review-eval.test.ts` → 直す前の本体で 2 件失敗した（モデルの文字列で立つ、集計が止まらない）
   - 結果: `cd server && node --test test/review-eval.test.ts` → 27 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T39: GitHub の Codex のレビュー（d94fc58d）の 4 件を直す（run の途中で mount された外部ボリュームが読める、`check_unloaded` が check を含む複合コマンドでも立つ、review の採点が他の worktree の名を見ない、隠しテストを書いた直後の例外でテストが残る）
+  - 種別: 修正
+  - 計画: S2, S9
+  - 依存: T38（直す対象の M2 の判定が要る）
+  - 変更: `server/evals/cloud/codex-home.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/hidden-test.ts`, `server/evals/cloud/probe.ts`, `server/evals/review/grade.ts`, `server/evals/review/m2.ts`, `server/evals/review/rules-grade.ts`, `server/test/eval-codex.test.ts`, `server/test/hidden-runner.test.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="never from the model's text|external volumes are denied|scratch directory cannot be made" test/review-eval.test.ts test/eval-codex.test.ts test/hidden-runner.test.ts` → 直す前の本体（`checkScript` だけ仮に置いた状態）で 3 件失敗する
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 全件 pass
+  - コミット: `fix(eval): deny mount roots whole and match the M2 check exactly (T39)`
+  - 結果: `cd server && node --test --test-name-pattern="never from the model's text|external volumes are denied|scratch directory cannot be made" test/review-eval.test.ts test/eval-codex.test.ts test/hidden-runner.test.ts` → 直す前の本体で 3 件失敗した
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 188 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった。review の採点が他の worktree の名を見る直しは、実際のリポジトリに worktree を足さないと確かめられないため、テストを足していない
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -476,3 +487,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T36 / GitHub に出す前に、手元の Codex（high）に全差分をもう一度レビューさせた。P1 が 6 件、P2 が 2 件。7 件を T36 で直した。残る 1 件はプロダクト側の問題で、評価の側では塞げない。SECURITY.md に従い、非公開の報告で扱う（持ち主が別の PR で直すと決めた）
 - 2026-10-09 / T37 / GitHub の Codex のレビュー（dcd08217）。P1 が 2 件、P2 が 1 件。3 件とも直した。driver の world は、呼ぶ側すべてにロックを持たせる代わりに、一時ディレクトリを deny して塞いだ
 - 2026-10-09 / T38 / GitHub の Codex のセキュリティレビュー（push のたびに自動で走る）の P2。直した。run を外す判定はほかにも（リポジトリへの到達など）モデルの行動から立つが、それは違反として外す方針どおりで、`check_unloaded` は環境の故障を表すので集計を止める側に移した
+- 2026-10-09 / T39 / GitHub の Codex のレビュー（d94fc58d）。P1 が 1 件、P2 が 3 件。4 件とも直した。`/Volumes` を丸ごと deny しても Codex が動き、`/etc/hosts` が読めることを実機で確かめた

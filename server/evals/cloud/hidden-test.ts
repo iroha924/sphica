@@ -108,6 +108,20 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
   const file = path.join(testDir, "hidden.test.ts");
   fs.rmSync(file, { force: true });
   fs.writeFileSync(file, test, { flag: "wx" });
+  // From the write on, whatever throws: the hidden test does not stay in the run's checkout, where a later fenced Codex could find it
+  try {
+    return runWritten(work, test, timeoutMs, unparted);
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+}
+
+function runWritten(
+  work: string,
+  test: string,
+  timeoutMs: number,
+  unparted: (tests: string) => HiddenResult,
+): HiddenResult {
   const inside = fs.realpathSync(work);
   const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-hidden-")));
   liveScratch.add(scratch);
@@ -139,8 +153,6 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
   } finally {
     removeScratch(scratch);
     liveScratch.delete(scratch);
-    // The hidden test does not stay in the run's checkout, where a later fenced Codex reading old runs could find it
-    fs.rmSync(file, { force: true });
   }
 }
 

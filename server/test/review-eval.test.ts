@@ -21,6 +21,7 @@ import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/rev
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
 import {
   biomeChanged,
+  checkScript,
   checkUnloaded,
   copyBiome,
   judge,
@@ -1027,6 +1028,10 @@ test("M2's check runs a Biome copy of the run's own, and a run that changed its 
 
 test("a check that could not load Biome is read only from the check's own output, never from the model's text", () => {
   const missing = "Error: Cannot find module '/x/@biomejs/biome/bin/biome'";
+  const script = path.join(fs.realpathSync(tempDir("m2-check-script-")), "check.mjs");
+  const given = checkScript("/x/@biomejs/biome/bin/biome");
+  fs.writeFileSync(script, given);
+  const unloaded = (events: string) => checkUnloaded(events, script, given);
   const codex = (command: string, output: string) =>
     JSON.stringify({
       type: "item.completed",
@@ -1043,17 +1048,29 @@ test("a check that could not load Biome is read only from the check's own output
         message: { content: [{ type: "tool_result", tool_use_id: "t1", content: output }] },
       }),
     ].join("\n");
-  assert.equal(checkUnloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", missing)), true);
-  assert.equal(checkUnloaded(claude("node scripts/check.mjs", missing)), true);
+  assert.equal(unloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", missing)), true);
+  assert.equal(unloaded(claude("node scripts/check.mjs", missing)), true);
   // The same words in another command's output, in the final answer, or in a message do not count
-  assert.equal(checkUnloaded(codex("/bin/zsh -lc 'echo hi'", missing)), false);
-  assert.equal(checkUnloaded(claude("echo hi", missing)), false);
+  assert.equal(unloaded(codex("/bin/zsh -lc 'echo hi'", missing)), false);
+  assert.equal(unloaded(claude("echo hi", missing)), false);
   assert.equal(
-    checkUnloaded(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: missing } })),
+    unloaded(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: missing } })),
     false,
   );
-  assert.equal(checkUnloaded(JSON.stringify({ type: "result", result: missing })), false);
-  assert.equal(checkUnloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", "Checked 18 files")), false);
+  assert.equal(unloaded(JSON.stringify({ type: "result", result: missing })), false);
+  assert.equal(unloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", "Checked 18 files")), false);
+  // A compound command that also runs the check is not the check's own output
+  assert.equal(
+    unloaded(codex("/bin/zsh -lc \"printf 'Cannot find module @biomejs'; node scripts/check.mjs\"", missing)),
+    false,
+  );
+  assert.equal(
+    unloaded(claude("echo 'Cannot find module @biomejs' && node scripts/check.mjs", missing)),
+    false,
+  );
+  // A script the model rewrote prints what the model chose
+  fs.writeFileSync(script, `console.log(${JSON.stringify(missing)});\n`);
+  assert.equal(unloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", missing)), false);
 });
 
 test("a lane that throws does not end the run while another lane still has its temp tree, and a deleted Biome copy counts as changed", async () => {
