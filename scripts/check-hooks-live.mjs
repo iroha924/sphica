@@ -304,6 +304,29 @@ await withTempDir(async (dir) => {
   if (/wait(s)? to be traced/.test(fire("SessionStart", { source: "compact" }, "smoke-2", interactive)))
     fail("the automatic trace notice came twice in one session");
 
+  // ---- After a shell call that rewrites src/a.ts without naming it, its decision arrives only with the plugin option on ----
+  {
+    const on = { CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY: "true" };
+    let n = 0;
+    const shellCall = (session, post, extra) => {
+      const call = {
+        tool_name: "Bash",
+        tool_input: { command: "node gen.mjs" },
+        tool_use_id: `toolu_shell_${++n}`,
+      };
+      fire("PreToolUse", call, session, extra);
+      fs.writeFileSync(path.join(repo, "src", "a.ts"), `export const store = new Map(); // ${n}\n`);
+      return fire(post, call, session, extra);
+    };
+    if (/\/map /.test(shellCall("smoke-off", "PostToolUse", {})))
+      fail("a shell write delivered a decision with the option off");
+    for (const post of ["PostToolUse", "PostToolUseFailure"]) {
+      const out = shellCall(`smoke-${post}`, post, on);
+      if (!/\/map /.test(out) || !/files whose content changed/.test(out))
+        fail(`${post} after a shell call that rewrote src/a.ts got no decision`, out);
+    }
+  }
+
   // ---- Codex: every codex.json entry, through each shell Codex can run hooks with, from plugin roots a shell might mangle ----
   // Codex 0.160.0 picks commandWindows on Windows (else command), replaces ${PLUGIN_ROOT} and its siblings as text, sets them in the
   // environment too, and runs the line through the session's shell
@@ -492,5 +515,5 @@ if (failures.length) {
   process.exitCode = 1;
 } else
   console.log(
-    `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
+    `hooks: launched ${source === path.join(root, "plugin") ? "plugin/" : source} as hooks.json defines (capture, PowerShell delivery, delivery after a shell write, detached send), and codex.json through ${windows ? "PowerShell, pwsh, cmd, COMSPEC, and Git Bash" : "sh"}`,
   );

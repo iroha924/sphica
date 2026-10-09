@@ -79,6 +79,19 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Stop": [
@@ -125,6 +138,21 @@
     ],
     "UserPromptExpansion": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/deliver.js"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",

@@ -53,13 +53,14 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → オフなら Pre は控えを取らず Post は何も返さない。オンなら変わったパスのまだ届いていない記録だけを 5 件・1,500 字まで返し、読みの予算を使わない。compact の後は数え直し、subagent は別の会話。PostToolUseFailure でも届く。並行の 2 つの Post で同じ記録が 2 回出ない。ログを書けなくても本文は返り、試用のログは配信の有無によらず 1 呼び出し 1 行
   - コミット: `feat(deliver): deliver records on files a shell call changed, behind an option`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 --test-name-pattern="shell call" test/deliver.test.ts` → 2 pass（既定オフで控えを取らない、環境変数の off が plugin の設定に勝ち、plugin の設定だけでもオン、何も変えない呼び出しは何も出さない、名指さないスクリプトの書き換えで記録が届き pre_edit＋reason shell_write で記録される、同じ会話には 2 回出さない、subagent と別の会話・PostToolUseFailure・compact の後・Codex の Bash で届く、控えの無い Post は何も出さず snapshot_missing を残す、ロック中はログなしで本文を返す、試用のログは 1 呼び出し 1 行、並行の 2 つの Post でログに残る記録は 1 回）。読みの配信の「restart の後に届いた記録」を sinceRestart にくくり出して共有した。`bun run verify` → exit 0
-- [ ] T03: 両ホストの hook の登録と、userConfig の shell_write_delivery
+- [x] T03: 両ホストの hook の登録と、userConfig の shell_write_delivery
   - 種別: 追加
   - 計画: S2
   - 依存: T02（Post の処理が要る）
-  - 変更: `plugin/hooks/hooks.json`, `plugin/hooks/codex.json`, `server/test/plugin.test.ts`, `scripts/check-hooks-live.mjs`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`
+  - 変更: `plugin/hooks/hooks.json`, `plugin/hooks/codex.json`, `scripts/check-ai-config.mjs`, `scripts/check-hooks-live.mjs`, `server/test/codex-trust.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/plugin.test.ts test/codex-trust.test.ts` → Claude Code の同期の PostToolUse と PostToolUseFailure（Bash|PowerShell）と Codex の PostToolUse（^Bash$、Windows は -EncodedCommand）の配信の entry があり、userConfig に既定 false の shell_write_delivery がある。`bun run hooks:live` → 足した entry を出荷する形で起動できる
   - コミット: `feat(plugin): register post-shell delivery hooks and the shell_write_delivery option`
+  - 結果: `node scripts/check-ai-config.mjs` → 通る（Claude Code の PostToolUse に同期の Bash|PowerShell の配信、PostToolUseFailure に同じ配信、Codex の PostToolUse に同期の ^Bash$ の配信と encoded の commandWindows があることを固定した）。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/plugin.test.ts test/codex-trust.test.ts` → 48 pass（0.6.30 にあった hook の hash は Windows 以外で変わらず、増えた key は post_tool_use:1:0 だけ）。`bun run hooks:live` → 出荷する hooks.json の形で、設定オフでは何も届かず、plugin の設定オンでは PostToolUse と PostToolUseFailure の両方で名指さない書き換えの決定が届く。Codex は全 entry を sh で起動した。PostToolUseFailure の entry を外すと hooks:live が 2 件で落ちることを確かめた。`bun run verify` → exit 0
 
 ## P3: 正しさの harness と時間
 
@@ -115,3 +116,4 @@ base: main
 - 2026-10-10 / T01 / SQL の呼び出し箇所は namedInCommand のものを deliverablePaths に移しただけで数が変わらず、台帳の変更は要らなかった / 変更欄から `scripts/lib/sql-call-sites.mjs` を外した
 - 2026-10-10 / T02, T03 / `bun run pairs` が、コードで読む plugin の設定が plugin.json に宣言されていることを求めた。Codex の形は deliver.test.ts の中で確かめた / userConfig の shell_write_delivery の宣言を T03 から T02 に移し（T03 の変更欄から plugin.json を外した）、T02 の変更欄を `deliver-codex.test.ts` から `plugin/.claude-plugin/plugin.json` に変えた
 - 2026-10-10 / T01 のレビュー / F1〜F8 は採用して T09 で直した。期限を守るため、読み取りをファイル全体の一括から 1 MB ずつに変えた
+- 2026-10-10 / T03 / entry の形を固定しているのは plugin.test.ts ではなく check-ai-config.mjs だった。codex-trust.ts は hook を数で持たず変更が要らなかった。codex-trust.test.ts は 0.6.30 と hook の数が同じことを前提にしていた / 変更欄を実際に変えたファイルに直し、codex-trust.test.ts は key ごとに比べる形にした
