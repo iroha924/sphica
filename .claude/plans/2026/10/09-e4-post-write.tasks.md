@@ -47,6 +47,15 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 消えた worktree の cwd が本体のプロジェクトと worktree の根に解決され、ほかの消えたディレクトリは外のまま
   - コミット: `fix(eval): count writes from removed worktrees in their checkout's project`
   - 結果: red を直す前のコードで実測（outside 486、うち 153 件が消えた worktree）。直した後の同じコマンド → outside 333（scratchpad 278、~/.claude/projects 22、別のクローン 17 ほか、どれもこのプロジェクトのチェックアウトの外）、配信が起きる書き込み 247。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 4 pass。`bun run verify` → exit 0
+- [x] T17: 再生の時刻・上限・壊れた行を直す（T02 のレビューの F1・F2・F4・F5）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T02（直す対象の再生スクリプト）
+  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test --test-name-pattern="counts from its result" test/post-write-replay.test.ts` → null の行で TypeError、書き込みの時刻が tool_use の `2026-10-01T00:00:00Z` のまま、900 字に入らない 3 件目も shown
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの時刻が結果の時刻（DB と同じ形）で、同じ呼び出しの pre_edit が配った記録が除かれ、900 字に入らない行は shown にならず、壊れた行は数えて残りを再生する
+  - コミット: `fix(eval): time replayed writes by their result and fit deliveries in 900 characters`
+  - 結果: red は直す前のコードで 3 段に分けて実測（TypeError → 時刻の不一致 → third が shown）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 5 pass。`bun run verify` → exit 0
 - [ ] T03: M0 を持ち主のデータで流し、持ち主のラベルで作るかどうかを決める
   - 種別: 追加
   - 計画: S1
@@ -161,3 +170,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-09 / T02 / Codex のセッションの記録は sphica で 489 件あるが、対話のものは 1 件で、apply_patch の書き込みは 0 件（残りは codex exec のレビューと計画の議論）。再生できる過去の書き込みは Claude Code だけ / replay.ts は Claude Code の会話記録だけを読む形にし、変更欄の「apply_patch」を外した。M0 の結果は Claude Code だけの数字として書く
 - 2026-10-09 / T02 / 何で当たったか（symbol・path・option）を文字列から推すのはもろい / namedRecords が hit を返すようにした（変更欄に `server/src/deliver.ts` を足した）
 - 2026-10-09 / T16 / 実データで再生すると、消えた worktree の書き込み 153 件が outside に数えられていた / 修正タスク T16 を足した
+- 2026-10-09 / T02 のレビュー / F1（P1、書き込みの時刻が tool_use の時刻で、同じ呼び出しの pre_edit を除けない）・F2（900 字の上限が無い）・F4（時刻の文字列比較）・F5（JSON として読めるが中身の無い行で止まる）は採用して T17 で直した。F3（消えた worktree）は T16 で直し済み

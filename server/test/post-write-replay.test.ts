@@ -237,6 +237,86 @@ test("a write from a removed worktree belongs to its checkout's project, with pa
   }
 });
 
+test("a write counts from its result, so what its own pre-edit delivery showed is left out, and a delivery shows only what fits", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-replay-logs-"));
+  try {
+    const p = project(db);
+    const long = "Keep this part of the system exactly as it is, because the reason is long. ".repeat(4);
+    const m = message(db, p, { id: "m1", text: `Shown before. ${long}` });
+    const slug = (s: string) => `${s}-a-rather-long-record-slug-like-the-real-ones-have`;
+    await save(db, p, {
+      units: [
+        decided("pre", m, "Shown before.", {
+          anchors: [{ path: "src/pre.ts", symbol: "preSymbol", role: "applies_to" }],
+        }),
+        ...["first", "second", "third"].map((s) =>
+          decided(slug(s), m, long.trim(), {
+            anchors: [{ path: `src/${s}.ts`, symbol: `${s}LongSymbolName`, role: "applies_to" }],
+          }),
+        ),
+      ],
+    });
+    const sid = sessionId(p, "claude-code", "ext-a");
+    insert(db, "session", {
+      id: sid,
+      project_id: p,
+      host: "claude-code",
+      external_id: "ext-a",
+      started_at: "2026-10-01T00:00:00.000Z",
+    });
+    const pre = Number(db.owner.prepare("select id from unit where key = ?").get("trace:ext-s1/pre")?.id);
+    const d = insert(db, "delivery", {
+      session_id: sid,
+      event: "pre_edit",
+      outcome: "emitted",
+      at: "2026-10-01T00:00:00.500Z",
+    });
+    insert(db, "delivery_unit", { delivery_id: d, unit_id: pre });
+    const lines = [
+      "null",
+      JSON.stringify({ type: "user", message: { content: [null] } }),
+      // The call's own time has no fraction; its pre-edit delivery came before the tool returned
+      call("w1", "2026-10-01T00:00:00Z", repo, "Write", {
+        file_path: path.join(repo, "docs/plan.md"),
+        content: "preSymbol firstLongSymbolName secondLongSymbolName thirdLongSymbolName",
+      }),
+      JSON.stringify({
+        type: "user",
+        timestamp: "2026-10-01T00:00:01Z",
+        message: { content: [{ type: "tool_result", tool_use_id: "w1", is_error: false }] },
+      }),
+    ];
+    fs.writeFileSync(path.join(dir, "a.jsonl"), `${lines.join("\n")}\n`);
+    const { writes, inputs } = readTranscripts([path.join(dir, "a.jsonl")]);
+    assert.equal(
+      inputs.unreadable,
+      2,
+      "a line that parses but holds no record is unreadable, and the rest still replays",
+    );
+    assert.equal(
+      writes[0]?.at,
+      "2026-10-01T00:00:01.000Z",
+      "a write's time is its result's, in the database's form",
+    );
+    const r = await replay(db.file, writes, inputs);
+    assert.deepEqual(
+      r.pairs.map((x) => [x.key.replace(/^trace:ext-s1\/|-a-rather.*$/g, ""), x.shown]),
+      [
+        ["first", true],
+        ["second", true],
+        ["third", false],
+      ],
+      "the record its own pre-edit delivery showed is left out, and the third line does not fit in 900 characters",
+    );
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the text of a write is what it put in the file", () => {
   assert.equal(writtenText("Edit", { old_string: "a", new_string: "b" }), "b");
   assert.equal(writtenText("Write", { content: "c" }), "c");

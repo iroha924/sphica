@@ -11,10 +11,13 @@ import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { namedRecords } from "../../src/deliver.ts";
 import { sessionId } from "../../src/knowledge.ts";
+import { inline } from "../../src/panel.ts";
 import { identify, projectId } from "../../src/project.ts";
+import { head } from "../../src/text.ts";
 
-/** What one delivery would show, as the plan fixes it for post_write */
+/** What one delivery would show, as the plan fixes it for post_write: 3 records within 900 characters, each in its shortest line */
 const PER_WRITE = 3;
+const CHARS = 900;
 const WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const DOCUMENT = /\.(md|mdx|markdown|txt|rst)$/i;
 
@@ -67,6 +70,12 @@ export function writtenText(name: string, input: Record<string, unknown>): strin
   return null;
 }
 
+/** A transcript time in the form the database stores (milliseconds, UTC), so the two compare as strings; null when it is not a time */
+function isoOf(t: string): string | null {
+  const ms = Date.parse(t);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
 /**
  * The successful writes in Claude Code transcript files. A write whose result is an error, or that has no result, is left out (the host
  * runs PostToolUse only after a tool succeeds), and counted.
@@ -76,7 +85,8 @@ export function readTranscripts(files: string[]): { writes: Write[]; inputs: Rep
   const writes: Write[] = [];
   for (const file of files) {
     const calls = new Map<string, Write>();
-    const ok = new Set<string>();
+    // The host runs PostToolUse when the tool returns, after its own pre-edit delivery: a write's time is its result's
+    const ok = new Map<string, string | null>();
     for (const raw of fs.readFileSync(file, "utf8").split("\n")) {
       if (!raw.trim()) continue;
       inputs.lines++;
@@ -87,9 +97,15 @@ export function readTranscripts(files: string[]): { writes: Write[]; inputs: Rep
         inputs.unreadable++;
         continue;
       }
-      const content = (d.message as { content?: unknown } | undefined)?.content;
+      // A line that parses but holds no record (null, a list) or a content item that is not an object is unreadable; the rest still replays
+      if (!d || typeof d !== "object" || Array.isArray(d)) {
+        inputs.unreadable++;
+        continue;
+      }
+      const content = (d.message as { content?: unknown } | null | undefined)?.content;
       if (!Array.isArray(content)) continue;
-      for (const c of content as Record<string, unknown>[]) {
+      if (content.some((c) => !c || typeof c !== "object")) inputs.unreadable++;
+      for (const c of content.filter((c) => c && typeof c === "object") as Record<string, unknown>[]) {
         if (d.type === "assistant" && c.type === "tool_use" && WRITE_TOOLS.has(String(c.name))) {
           const input = (c.input ?? {}) as Record<string, unknown>;
           const text = writtenText(String(c.name), input);
@@ -111,11 +127,12 @@ export function readTranscripts(files: string[]): { writes: Write[]; inputs: Rep
           typeof c.tool_use_id === "string" &&
           c.is_error !== true
         )
-          ok.add(c.tool_use_id);
+          ok.set(c.tool_use_id, typeof d.timestamp === "string" ? d.timestamp : null);
       }
     }
     for (const [id, w] of calls) {
-      if (ok.has(id)) writes.push(w);
+      const at = isoOf(ok.get(id) ?? w.at);
+      if (ok.has(id) && at) writes.push({ ...w, at });
       else inputs.failed++;
     }
   }
@@ -180,7 +197,8 @@ export function placeOf(cwd: string): { key: string; root: string } | null {
 
 /**
  * Each write matched as post_write would match it: records it names, less those emitted to the conversation since its last restart (by
- * the hooks that ran then, or by this replay's own earlier deliveries), the first PER_WRITE of them shown.
+ * the hooks that ran then, or by this replay's own earlier deliveries). Of the first PER_WRITE, those whose shortest lines fit in CHARS
+ * are shown, a line that does not fit skipped as delivery fitting skips it.
  */
 export async function replay(file: string, writes: Write[], inputs: Replay["inputs"]): Promise<Replay> {
   const db = openReader(file);
@@ -215,8 +233,16 @@ export async function replay(file: string, writes: Write[], inputs: Replay["inpu
         (h) => !before.has(h.u.id) && !sent.has(h.u.id),
       );
       if (hits.length) tally.fires++;
-      for (const [i, h] of hits.entries()) {
-        if (i < PER_WRITE) sent.add(h.u.id);
+      let used = 0;
+      const shown = new Set<number>();
+      for (const h of hits.slice(0, PER_WRITE)) {
+        const cost = shortLine(h).length + 1;
+        if (used + cost > CHARS) continue;
+        used += cost;
+        shown.add(h.u.id);
+        sent.add(h.u.id);
+      }
+      for (const h of hits) {
         pairs.push({
           session: w.session,
           agent: w.agent,
@@ -227,7 +253,7 @@ export async function replay(file: string, writes: Write[], inputs: Replay["inpu
           key: h.u.key,
           hit: h.hit,
           why: h.why.trim(),
-          shown: i < PER_WRITE,
+          shown: shown.has(h.u.id),
         });
       }
     }
@@ -236,6 +262,10 @@ export async function replay(file: string, writes: Write[], inputs: Replay["inpu
     await db.destroy();
   }
 }
+
+/** A record's line without its reason, the form delivery fitting starts from */
+const shortLine = (h: Awaited<ReturnType<typeof namedRecords>>[number]) =>
+  `- ${inline(h.u.key)} (${h.u.kind}${h.u.stance ? ` ${h.u.stance}` : ""}): ${head(inline(h.u.text), 240)}${h.why}`;
 
 /** A seeded generator (mulberry32), so a sample is fixed before anyone labels it */
 function seeded(seed: number): () => number {
