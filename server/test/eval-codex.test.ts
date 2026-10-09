@@ -17,7 +17,14 @@ import {
   requireInside,
   volumeDenies,
 } from "../evals/cloud/codex-home.ts";
-import { codexDenies, codexFence, REPO, repoPlaces, unquoteGit } from "../evals/cloud/codex-run.ts";
+import {
+  codexDenies,
+  codexFence,
+  REPO,
+  reachableTools,
+  repoPlaces,
+  unquoteGit,
+} from "../evals/cloud/codex-run.ts";
 import {
   anchoredTarget,
   deliveredOnRead,
@@ -761,6 +768,18 @@ test("HOME is denied whole with only a mise or Bun install root read back, and a
     /not a known install/,
   );
   assert.throws(() => homeFence({ home, path: path.join(node, "bin") }), /bun is not on PATH/);
+  // A mise install of another package that holds a file named like the tool is not that tool's install root
+  file(".local/share/mise/installs/private/1/bin/node");
+  assert.throws(
+    () =>
+      homeFence({
+        home,
+        path: [path.join(home, ".local/share/mise/installs/private/1/bin"), path.join(home, ".bun/bin")].join(
+          path.delimiter,
+        ),
+      }),
+    /not a known install/,
+  );
   // The roots are part of the fence: another Node version is another fence, another unrelated entry is not
   const cache = evalCache(home);
   const codexHome = path.join(cache, "r", "codex-home");
@@ -778,6 +797,33 @@ test("HOME is denied whole with only a mise or Bun install root read back, and a
   assert.equal(fence(homeFence({ home, path: toolPath.join(path.delimiter) })), before);
   const older = [path.join(home, ".local/share/mise/installs/node/22.0.0/bin"), path.join(home, ".bun/bin")];
   assert.notEqual(fence(homeFence({ home, path: older.join(path.delimiter) })), before);
+});
+
+test("a tool the run starts by name under a denied temp or mount root refuses before the run", () => {
+  const home = fs.realpathSync(tempDir("reach-home-"));
+  const tools = fs.realpathSync(tempDir("reach-tools-"));
+  const link = fs.realpathSync(tempDir("reach-link-"));
+  fs.mkdirSync(path.join(tools, "bin"));
+  for (const t of ["node", "bun"]) fs.writeFileSync(path.join(tools, "bin", t), "x", { mode: 0o755 });
+  fs.symlinkSync(path.join(tools, "bin"), path.join(link, "bin"));
+  const shield = (dirs: string[], deny: { temp?: string[]; volumes?: string[] }) => ({
+    places: [REPO],
+    home: homeFence({ home, path: [...dirs, "/usr/bin"].join(path.delimiter) }),
+    ...deny,
+  });
+  const bin = path.join(tools, "bin");
+  assert.throws(
+    () => reachableTools(shield([bin], { temp: [tools] })),
+    /node is found at .* the fence denies/,
+  );
+  assert.throws(() => reachableTools(shield([bin], { volumes: [tools] })), /the fence denies/);
+  // A PATH entry outside the denied roots that links into one is reached there
+  assert.throws(
+    () => reachableTools(shield([path.join(link, "bin")], { temp: [tools] })),
+    /the fence denies/,
+  );
+  const kept = shield([path.join(link, "bin")], { temp: [link] });
+  assert.equal(reachableTools(kept), kept);
 });
 
 test("the probe reads HOME as the run's fence sees it: a token at its root and a denied directory denied, a kept tool readable", () => {

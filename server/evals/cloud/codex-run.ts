@@ -113,12 +113,34 @@ export const tempRoots = (): string[] => [
   ),
 ];
 
-export const shieldNow = (): Shield => ({
-  places: repoPlaces(),
-  home: homeFence(),
-  volumes: volumeDenies(),
-  temp: tempRoots(),
-});
+/**
+ * The shield, once the tools the run starts by name lie outside what it denies past HOME: a deny follows the path, so a tool under a
+ * denied temp or mount root (`/tmp/toolcache/bin/node`) would fail to start inside the run after it began
+ */
+export function reachableTools(s: Shield): Shield {
+  const denied = [...s.places, ...(s.volumes ?? []), ...(s.temp ?? [])];
+  const dirs = s.home.path.split(path.delimiter);
+  for (const name of ["node", "bun"]) {
+    const found = dirs.map((d) => path.join(d, name)).find((f) => fs.existsSync(f));
+    if (!found) continue;
+    for (const p of [path.join(fs.realpathSync(path.dirname(found)), name), fs.realpathSync(found)]) {
+      const root = denied.find((d) => isInside(d, p));
+      if (root)
+        throw new Error(
+          `${name} is found at ${p}, under ${root}, which the fence denies; install it elsewhere`,
+        );
+    }
+  }
+  return s;
+}
+
+export const shieldNow = (): Shield =>
+  reachableTools({
+    places: repoPlaces(),
+    home: homeFence(),
+    volumes: volumeDenies(),
+    temp: tempRoots(),
+  });
 
 /** What the model may reach in its own temp tree: read all of it, and write only the checkout and TMPDIR where it may write at all */
 export function treeAccess(

@@ -129,7 +129,7 @@ export type HomeFence = {
 const TOOLS = ["node", "bun"];
 
 /**
- * The install root a tool under HOME is kept by, by its exact shape: mise's `.local/share/mise/installs/<name>/<version>` or Bun's
+ * The install root a tool under HOME is kept by, by its exact shape: mise's `.local/share/mise/installs/<tool>/<version>` or Bun's
  * own `.bun`. Any other place under HOME (`~/.local/bin`, `~/bin`) would keep a directory that holds more than the tool, so it refuses.
  */
 function installRoot(home: string, real: string, tool: string): string {
@@ -137,6 +137,7 @@ function installRoot(home: string, real: string, tool: string): string {
   if (
     parts.length === 8 &&
     parts.slice(0, 4).join("/") === ".local/share/mise/installs" &&
+    parts[4] === tool &&
     parts[6] === "bin" &&
     parts[7] === tool
   )

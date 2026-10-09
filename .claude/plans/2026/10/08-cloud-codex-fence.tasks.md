@@ -469,6 +469,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="a run that changed its copy is excluded" test/review-eval.test.ts` → 直す前の本体で 1 件失敗した（集計が止まった）
   - 結果: `cd server && node --test test/review-eval.test.ts` → 27 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T42: GitHub の Codex のレビュー（5f7493f5）の P1 と P2 を直す。P1: 拒否する temp やマウントの下に入った `node`・`bun` を、囲いを作る時点で止める（run の中で起動できずに失敗する）。P2: mise の install は、そのツール自身の名前のパッケージだけを読み戻す
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T37（temp とマウントの拒否が要る）
+  - 変更: `server/evals/cloud/codex-run.ts`, `server/evals/cloud/codex-home.ts`, `server/test/eval-codex.test.ts`, `.claude/skills/eval-loop/SKILL.md`
+  - red: `cd server && node --test --test-name-pattern="HOME is denied whole with only|a tool the run starts by name" test/eval-codex.test.ts` → 直す前の本体で 2 件失敗する（どちらも例外が出ない）
+  - 完了条件: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 全件 pass
+  - コミット: `fix(eval): refuse tools under denied roots and other mise packages (T42)`
+  - 結果: `cd server && node --test --test-name-pattern="HOME is denied whole with only|a tool the run starts by name" test/eval-codex.test.ts` → 直す前の本体で 2 件失敗した（どちらも Missing expected exception）
+  - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts` → 155 件 pass
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -512,3 +523,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T39 / GitHub の Codex のレビュー（d94fc58d）。P1 が 1 件、P2 が 3 件。4 件とも直した。`/Volumes` を丸ごと deny しても Codex が動き、`/etc/hosts` が読めることを実機で確かめた
 - 2026-10-09 / T40 / GitHub の Codex のレビュー（9f121528）。P1 が 3 件、P2 が 3 件。6 件とも直した。CI の `check (26)` の失敗（seed 528）は、ブランチの前のコミットでも再現し、main でもそのテストを単独で流すと落ちる、前からある順番の依存だった。テストだけの直しなので、この PR で一緒に直した
 - 2026-10-09 / T41 / GitHub の Codex のセキュリティレビュー（20bbbf1d）の P2。モデルが出力を作れる限り、この判定で run を外す・集計を止める形は塞ぐたびに抜け道が出るので、数字を動かさない形に変えた（T38 と T39 の「集計を止める」を取り下げた）
+- 2026-10-09 / T42 / GitHub の Codex のレビュー（5f7493f5）の P1・P2。検査に codex 本体も入れたら、偽の codex を temp に置く既存のテスト 15 件が落ちた。指摘の範囲の `node` と `bun` に絞った
