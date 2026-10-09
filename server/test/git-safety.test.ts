@@ -24,6 +24,9 @@ const FIXTURE_ENV: NodeJS.ProcessEnv = (() => {
   return { ...env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
 })();
 
+/** One word for a POSIX shell (git runs config commands and hooks through one), quoted so nothing in it is expanded */
+const shellWord = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
 /** A path git can put in a shell command or an ext:: URL on every platform */
 const slash = (p: string) => p.split(path.sep).join("/");
 
@@ -50,7 +53,7 @@ function trap() {
   git("commit", "-qm", "init");
   /** The shell command git runs for a planted key */
   const command = (name: string, ...rest: string[]) =>
-    [process.execPath, mark, name, ...rest].map((p) => JSON.stringify(slash(p))).join(" ");
+    [process.execPath, mark, name, ...rest].map((p) => shellWord(slash(p))).join(" ");
   const read = () => (fs.existsSync(marks) ? fs.readFileSync(marks, "utf8").split("\n").filter(Boolean) : []);
   const clear = () => fs.rmSync(marks, { force: true });
   /** Plain git as an owner's shell would run it: the positive control */
@@ -272,7 +275,7 @@ test("hooks, a submodule's config, per-worktree config, and the owner's global f
     fs.copyFileSync(t.mark, path.join(t.repo, ".git", "hooks", "post-index-change.cjs"));
     fs.writeFileSync(
       path.join(t.repo, ".git", "hooks", "post-index-change"),
-      `#!/bin/sh\nexec ${JSON.stringify(slash(process.execPath))} ${JSON.stringify(slash(t.mark))} hook\n`,
+      `#!/bin/sh\nexec ${shellWord(slash(process.execPath))} ${shellWord(slash(t.mark))} hook\n`,
       { mode: 0o755 },
     );
     // The fixture git that rewrites the entry runs the hook too, so the marks are cleared after it

@@ -9,6 +9,9 @@ import { configGet, inIsolation, repoFiles } from "../src/git.ts";
 import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import { tempDir } from "./temp-dir.ts";
 
+/** One word for a POSIX shell (git runs config commands and hooks through one), quoted so nothing in it is expanded */
+const shellWord = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
 const FIXTURE_ENV: NodeJS.ProcessEnv = (() => {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k)));
   delete env.SPHICA_DB;
@@ -154,7 +157,7 @@ test("git and the worker start in HOME, not in the caller's directory, where Win
   const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
   fs.writeFileSync(
     path.join(bin, "git"),
-    `#!/bin/sh\npwd >> ${JSON.stringify(log)}\nexec ${JSON.stringify(real)} "$@"\n`,
+    `#!/bin/sh\npwd >> ${shellWord(log)}\nexec ${shellWord(real)} "$@"\n`,
     {
       mode: 0o755,
     },
@@ -235,7 +238,7 @@ test("a git that stalls is killed with the worker at the deadline, and nothing o
   const marker = `sphica-stall-${process.pid}`;
   fs.writeFileSync(
     path.join(bin, "git"),
-    `#!/bin/sh\ncase " $* " in *" status "*) exec ${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 30000)" ${marker};; esac\nexec ${JSON.stringify(real)} "$@"\n`,
+    `#!/bin/sh\ncase " $* " in *" status "*) exec ${shellWord(process.execPath)} -e "setTimeout(() => {}, 30000)" ${marker};; esac\nexec ${shellWord(real)} "$@"\n`,
     { mode: 0o755 },
   );
   const { root } = repo();

@@ -247,6 +247,17 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `gh run view 37926502170 --log-failed` → 30389ff0 の CI の Windows の job で `git init` が `fatal: unable to access '\\.\nul': Invalid argument`（os.devNull を GIT_CONFIG_GLOBAL に渡していた。worker も同じ値を渡していたので、Windows では作業ツリーの比較がすべて失敗していた）。check（24.15・26）と dry run: prepare で `the default global ignore file hides u.txt`（ランナーの XDG_CONFIG_HOME）
   - 結果: `XDG_CONFIG_HOME=<一時> node --test --test-name-pattern="excludesFile set empty" test/git-worker.test.ts` → T20 のテストで 1 件失敗、直した後は `test/git-worker.test.ts test/git-safety.test.ts` が 17 件 pass。Windows は push の後の CI で確かめる
 
+- [x] T22: PR #307 の CodeQL の警告（js/bad-code-sanitization）を直す（テストが組み立てるシェルスクリプトと git の設定のコマンドで、パスを JSON.stringify ではなくシェルの単一引用符でクォートする）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T21（警告が出た版）
+  - 変更: `server/test/git-worker.test.ts`, `server/test/git-safety.test.ts`
+  - red: `gh api repos/iroha924/sphica/code-scanning/alerts/22 --jq .rule.id` → `js/bad-code-sanitization`（git-worker.test.ts の偽の git の行）
+  - 完了条件: `cd server && node --test test/git-worker.test.ts test/git-safety.test.ts` → 全件 pass。push の後の CodeQL で警告 22 が閉じる
+  - コミット: `test(git): quote shell words in the attack test fixtures (T22)`
+  - 結果: `gh api repos/iroha924/sphica/code-scanning/alerts/22 --jq .rule.id` → `js/bad-code-sanitization`（server/test/git-worker.test.ts:238、`$` やバッククォートを含むパスがシェルに解釈される）
+  - 結果: `cd server && node --test test/git-worker.test.ts test/git-safety.test.ts` → 17 件 pass
+
 ## P4: リリース
 
 - [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
