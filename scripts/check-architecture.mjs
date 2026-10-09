@@ -69,11 +69,22 @@ for (const f of sources)
   if (!SPARED.has(f) && JUDGED.test(fs.readFileSync(path.join(root, f), "utf8")))
     fail.push(`${f} writes unit_state or unit_replacement; only ${RECONCILE} may`);
 
+// git runs outside the agent's sandbox in a repository whose config the agent writes: only these modules start it, with the options and
+// environment that keep that config from running a command. A call whose first argument is the string "git" counts as starting it.
+const GIT_STARTERS = new Set(["server/src/git.ts", "server/src/git-worker.ts"]);
+const STARTS_GIT = /\(\s*["'`]git["'`]\s*[,)]/;
+for (const f of sources)
+  if (!GIT_STARTERS.has(f) && STARTS_GIT.test(fs.readFileSync(path.join(root, f), "utf8")))
+    fail.push(`${f} starts git; only ${[...GIT_STARTERS].join(" and ")} may`);
+if (!sources.some((f) => GIT_STARTERS.has(f) && STARTS_GIT.test(fs.readFileSync(path.join(root, f), "utf8"))))
+  fail.push("no module starts git where check-architecture.mjs looks; fix GIT_STARTERS or STARTS_GIT");
+
 if (fail.length) {
-  console.error(`reader boundary:\n${fail.map((f) => `  ${f}`).join("\n")}`);
+  console.error(`architecture:\n${fail.map((f) => `  ${f}`).join("\n")}`);
   process.exit(1);
 }
 console.log(`lifecycle writers: only ${RECONCILE} writes unit_state and unit_replacement`);
+console.log(`git starters: only ${[...GIT_STARTERS].join(" and ")} start git`);
 const count = new Set(READERS.flatMap((e) => [...reach(e).keys()])).size;
 console.log(
   `reader boundary: none of the ${count} modules reachable from ${READERS.join(" / ")} import the write connection`,

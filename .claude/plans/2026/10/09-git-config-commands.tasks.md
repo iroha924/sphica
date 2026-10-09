@@ -44,13 +44,15 @@ base: main
   - 結果: `cd server && node --test --test-name-pattern="gh starts outside the repository" test/github.test.ts` → 直す前の本体で 1 件失敗した（偽の gh の cwd が `/Users/shunichi/Projects/sphica/server`）
   - 結果: `cd server && node --test test/github.test.ts` → 16 件 pass
 
-- [ ] T03: check-architecture.mjs で、git を起動するのが git.ts と git-worker.ts だけであることを検査する
+- [x] T03: check-architecture.mjs で、git を起動するのが git.ts と git-worker.ts だけであることを検査する
   - 種別: 追加
   - 計画: S5
   - 依存: T01（ほかのモジュールの直接の起動が消えていないと検査が通らない）
   - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
   - 完了条件: `bun run architecture` → exit 0。`cd server && node --test test/architecture.test.ts` → `server/src` に `execFileSync("git", …)` を足した写しで検査が exit 1 になるテストが pass
   - コミット: `test(architecture): allow git to start only from git.ts and the git worker (T03)`
+  - 結果: `bun run architecture` → exit 0（git starters: only server/src/git.ts and server/src/git-worker.ts start git）
+  - 結果: `cd server && node --test test/architecture.test.ts` → 1 件 pass（execFileSync・spawn・exec の 3 形で `stray.ts starts git` の exit 1、git.ts を空にすると `no module starts git` の exit 1）
 
 ## P2: 作業ツリーの比較を別の git ディレクトリと子プロセスへ移す
 
