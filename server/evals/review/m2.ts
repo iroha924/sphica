@@ -17,19 +17,26 @@ import {
   checkoutGit,
   claimRunDir,
   codexModelOf,
-  isolatedCodexHome,
+  codexOf,
+  evalCache,
+  fencedCodexHome,
+  holdingLock,
   pinCheckout,
+  requireInside,
 } from "../cloud/codex-home.ts";
-import { linksOutside, runHiddenTest } from "../cloud/hidden-test.ts";
+import { codexFence, repoPlaces, shieldNow, treeAccess } from "../cloud/codex-run.ts";
+import { linksOutside, liveScratch, runHiddenTest } from "../cloud/hidden-test.ts";
+import { bare } from "../cloud/probe.ts";
 import { restrictedImports } from "./biome.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { lookedOutside, oneConfiguration } from "./grade.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
-  codexProfile,
+  codexLaneDenies,
+  drainLanes,
   evalDenies,
   keepCheckout,
-  managedCodexSettings,
+  type LaneEnv,
   outsideCheckout,
   runnerDigest,
 } from "./runner.ts";
@@ -69,29 +76,66 @@ const git = (work: string, ...args: string[]) =>
       "commit.gpgsign=false",
       ...args,
     ],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: ownGit },
   );
+
+/** Git with none of the owner's own config: a global hooks path or template would run the owner's code on the fixture */
+const ownGit = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: os.devNull };
 
 /**
  * The checkout a run starts from: the fixture, the rule lines in CLAUDE.md and AGENTS.md, a check script that runs the pinned Biome, and,
  * under check, the drafted check as biome.jsonc in place of the project's biome.json. Committed, so the patch is what the agent changed,
  * and its git directory copied to `gitDir` before the run starts: the run can write the checkout's own, and its config would run on the host.
  */
+/**
+ * The pinned Biome a run's check script runs: a copy beside the checkout in the run's temp tree, since the repository it is installed in
+ * is denied. Each run gets its own, and `digest` (every file, by path) shows whether the run changed it.
+ */
+export function copyBiome(tree: string): { bin: string; digest: () => string } {
+  const scope = path.dirname(path.dirname(path.dirname(BIOME)));
+  const dest = path.join(tree, "biome", "node_modules", path.basename(scope));
+  fs.cpSync(scope, dest, { recursive: true, verbatimSymlinks: true });
+  const digest = () => {
+    const hash = crypto.createHash("sha256");
+    const files = (fs.readdirSync(dest, { recursive: true, withFileTypes: true }) as fs.Dirent[])
+      .filter((e) => !e.isDirectory())
+      .map((e) => path.join(e.parentPath, e.name))
+      .sort();
+    for (const f of files)
+      hash
+        .update(`${path.relative(dest, f)}\0`)
+        .update(fs.lstatSync(f).isSymbolicLink() ? fs.readlinkSync(f) : fs.readFileSync(f));
+    return hash.digest("hex");
+  };
+  return { bin: path.join(dest, path.relative(scope, BIOME)), digest };
+}
+
+/** Whether the run's Biome copy differs from what it was given; a copy it removed or made unreadable has changed too */
+export function biomeChanged(copy: { digest: () => string }, pinned: string): boolean {
+  try {
+    return copy.digest() !== pinned;
+  } catch {
+    return true;
+  }
+}
+
+/** The check script a run is given: it runs the pinned Biome and fails on what it reports */
+export const checkScript = (biome: string) =>
+  `// Lints the project with Biome and fails on what it reports\nimport { spawnSync } from "node:child_process";\nconst r = spawnSync(process.execPath, [${JSON.stringify(biome)}, "lint", "."], { stdio: "inherit" });\nprocess.exit(r.status ?? 1);\n`;
+
 export function prepare(
   repo: string,
   work: string,
   condition: string,
   gitDir: string,
+  biome = BIOME,
 ): { start: string; checkout: Checkout } {
-  execFileSync("git", ["clone", "-q", repo, work]);
+  execFileSync("git", ["clone", "-q", repo, work], { env: ownGit });
   git(work, "remote", "set-url", "origin", ORIGIN);
   fs.writeFileSync(path.join(work, "CLAUDE.md"), cases.rules);
   fs.writeFileSync(path.join(work, "AGENTS.md"), cases.rules);
   fs.mkdirSync(path.join(work, "scripts"), { recursive: true });
-  fs.writeFileSync(
-    path.join(work, "scripts", "check.mjs"),
-    `// Lints the project with Biome and fails on what it reports\nimport { spawnSync } from "node:child_process";\nconst r = spawnSync(process.execPath, [${JSON.stringify(BIOME)}, "lint", "."], { stdio: "inherit" });\nprocess.exit(r.status ?? 1);\n`,
-  );
+  fs.writeFileSync(path.join(work, "scripts", "check.mjs"), checkScript(biome));
   if (condition === "check") {
     fs.rmSync(path.join(work, "biome.json"));
     fs.writeFileSync(path.join(work, "biome.jsonc"), cases.check);
@@ -183,7 +227,7 @@ function runChild(command: string, args: string[], cwd: string, env: Record<stri
 }
 
 /** Claude may edit its checkout and run commands inside the sandbox; nothing outside the checkout is readable to its file tools. */
-const claudeSettings = (denies: string[]) => ({
+const claudeSettings = (denies: string[], biome: string) => ({
   permissions: {
     blockReadsOutsideWorkingDirectories: true,
     deny: [
@@ -199,7 +243,8 @@ const claudeSettings = (denies: string[]) => ({
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: false,
     failIfUnavailable: true,
-    filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES, ...denies] },
+    // The sandbox reads nothing under HOME by default: the run's Biome copy in the cache is read back, and stays unwritable
+    filesystem: { denyRead: [...DENY_DIRS, ...DENY_FILES, ...denies], allowRead: [biome] },
   },
   hooks: {},
 });
@@ -211,10 +256,12 @@ async function runOne(o: {
   task: Task;
   out: string;
   model: string;
+  env: LaneEnv;
 }) {
   const { run, dir } = claimRunDir(o.out, `${o.task.id}-${o.condition}-${o.host}`);
   const started = Date.now();
-  const work = outsideCheckout("m2-work-");
+  const denies = o.host === "codex" ? codexLaneDenies(o.out, o.env.cache, o.env.shield) : evalDenies(o.out);
+  const work = outsideCheckout("m2-work-", denies);
   const result: Record<string, unknown> = {
     run,
     host: o.host,
@@ -225,12 +272,16 @@ async function runOne(o: {
     cases_sha256: crypto.createHash("sha256").update(fs.readFileSync(CASES)).digest("hex"),
   };
   try {
-    const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"));
+    // Under the evaluation cache, which neither host can write; Codex reads it back like a kept install
+    const biomeDir = path.join(o.env.cache, "m2-biome", run);
+    const biome = copyBiome(biomeDir);
+    const pinned = biome.digest();
+    const { start, checkout } = prepare(o.fixture.repo, work, o.condition, path.join(dir, "git"), biome.bin);
     let r: Awaited<ReturnType<typeof runChild>>;
     if (o.host === "claude") {
       const settings = path.join(dir, "settings.json");
       const mcp = path.join(dir, "mcp.json");
-      fs.writeFileSync(settings, JSON.stringify(claudeSettings(evalDenies(o.out)), null, 2));
+      fs.writeFileSync(settings, JSON.stringify(claudeSettings(evalDenies(o.out), biomeDir), null, 2));
       fs.writeFileSync(mcp, JSON.stringify({ mcpServers: {} }));
       result.model = o.model;
       result.cli = claudeVersion();
@@ -260,24 +311,27 @@ async function runOne(o: {
       );
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
-      const managed = managedCodexSettings();
-      if (managed.length)
-        throw new Error(
-          `administrator settings for Codex can replace the lane's profile: ${managed.join(", ")}`,
-        );
       const codexHome = path.join(dir, "codex-home");
-      isolatedCodexHome(
-        codexHome,
-        codexProfile(":workspace", [...evalDenies(o.out), path.join(codexHome, "auth.json")]),
-      );
+      const access = treeAccess(":workspace", path.dirname(work));
+      const fence = fencedCodexHome(codexHome, {
+        base: ":workspace",
+        deny: denies,
+        read: [...o.env.shield.home.roots, biomeDir, ...access.read],
+        write: access.write,
+      });
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield, {
+        "<biome>": biomeDir,
+        "<tree>": path.dirname(work),
+      });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
-      const home = path.join(dir, "home");
-      const tmp = path.join(dir, "tmp");
+      // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied
+      const home = path.join(path.dirname(work), "home");
+      const tmp = path.join(path.dirname(work), "tmp");
       fs.mkdirSync(home);
       fs.mkdirSync(tmp);
       r = await runChild(
-        "codex",
+        codexOf(o.env.shield.home),
         [
           "exec",
           "--json",
@@ -291,7 +345,7 @@ async function runOne(o: {
         ],
         work,
         {
-          PATH: process.env.PATH ?? "",
+          PATH: o.env.shield.home.path,
           HOME: home,
           CODEX_HOME: codexHome,
           TMPDIR: tmp,
@@ -304,11 +358,22 @@ async function runOne(o: {
     fs.writeFileSync(path.join(dir, "stderr.log"), r.stderr);
     result.status = r.status;
     result.reason = r.error ?? (r.status === 0 ? null : `${o.host} exited ${r.status}`);
+    // The run could write its copy: a check it changed says nothing about the rule lines or the check given
+    result.biome_changed = biomeChanged(biome, pinned);
+    // A check that could not load its Biome never ran: the lane had no check, whatever it reported
+    result.check_unloaded = checkUnloaded(
+      r.stdout,
+      path.join(work, "scripts", "check.mjs"),
+      checkScript(biome.bin),
+    );
     result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
-    keepCheckout(work, dir);
+    if (!keepCheckout(work, dir)) o.env.leave(path.dirname(work));
+    // A hidden test's scratch that could not be removed holds what the next lane's shell must not read
+    for (const s of liveScratch) o.env.leave(s);
+    fs.rmSync(path.join(o.env.cache, "m2-biome", run), { recursive: true, force: true });
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -322,16 +387,77 @@ type Row = {
   violations: number;
   falseFailures: number;
   completed: number;
+  /** Runs whose check, by its own output, could not load Biome: shown, never acted on, since the model can forge that output */
+  unloaded: number;
 };
+
+const CHECK_COMMANDS = ["node scripts/check.mjs", "node ./scripts/check.mjs"];
+
+/**
+ * Whether a run of the check script itself failed to load Biome, read only from what each host recorded as the output of the check run
+ * exactly as the rule lines give it, and only while the script is still the one given: text the model wrote in its answer, printed from
+ * another command, or put in the script does not count
+ */
+export function checkUnloaded(events: string, script: string, given: string): boolean {
+  try {
+    if (fs.readFileSync(script, "utf8") !== given) return false;
+  } catch {
+    return false;
+  }
+  const unloaded = (text: string) => /Cannot find module[^\n]*@biomejs/.test(text);
+  const runsCheck = (command: unknown) =>
+    typeof command === "string" && CHECK_COMMANDS.includes(bare(command).trim());
+  const claudeCalls = new Set<string>();
+  for (const line of events.split("\n")) {
+    let e: {
+      type?: string;
+      item?: { type?: string; command?: string; aggregated_output?: string };
+      message?: {
+        content?: {
+          type?: string;
+          id?: string;
+          name?: string;
+          input?: { command?: unknown };
+          tool_use_id?: string;
+          content?: unknown;
+        }[];
+      };
+    };
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    // Codex
+    if (e.type === "item.completed" && e.item?.type === "command_execution" && runsCheck(e.item.command))
+      if (unloaded(e.item.aggregated_output ?? "")) return true;
+    // Claude: a Bash call that ran the check, then the result of that call
+    for (const c of Array.isArray(e.message?.content) ? e.message.content : []) {
+      if (c.type === "tool_use" && c.name === "Bash" && c.id && runsCheck(c.input?.command))
+        claudeCalls.add(c.id);
+      if (c.type === "tool_result" && claudeCalls.has(c.tool_use_id ?? "")) {
+        const text =
+          typeof c.content === "string"
+            ? c.content
+            : Array.isArray(c.content)
+              ? c.content.map((p: { text?: string }) => p.text ?? "").join("\n")
+              : "";
+        if (unloaded(text)) return true;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * Counts per host and condition, and per task too. A run without its result, or that did not exit 0, is failed; a run whose events name
- * the repository holding the hidden tests and the reference check, or another run, is excluded (Codex has no read fence).
+ * the repository (which holds the hidden tests and the reference check), or another run, or whose Biome copy changed, is excluded. Runs
+ * whose check could not load Biome are counted apart and change nothing else: a broken environment shows there for the owner to stop on.
  */
 export function m2Rows(runs: string): Map<string, Row> {
   const rows = new Map<string, Row>();
-  // The evaluations, not the whole repository: a run's check script names the Biome installed under server/node_modules
-  const forbidden = [path.resolve(import.meta.dirname, "..")];
+  // The whole repository wherever it lives: a run's check script names its own Biome copy, outside it
+  const forbidden = repoPlaces();
   oneConfiguration(
     runs,
     fs.readdirSync(runs).filter((n) => /^\w+-(rules|check)-(claude|codex)-\d{4}-/.test(n)),
@@ -345,7 +471,15 @@ export function m2Rows(runs: string): Map<string, Row> {
       fs.existsSync(file)
         ? JSON.parse(fs.readFileSync(file, "utf8"))
         : { host, condition, task, status: null }
-    ) as { host: string; condition: string; task: string; status: number | null; judgement?: M2Judgement };
+    ) as {
+      host: string;
+      condition: string;
+      task: string;
+      status: number | null;
+      judgement?: M2Judgement;
+      biome_changed?: boolean;
+      check_unloaded?: boolean;
+    };
     const events = path.join(runs, name, "events.jsonl");
     const outside = fs.existsSync(events)
       ? lookedOutside(fs.readFileSync(events, "utf8"), { forbidden, runs, run: name })
@@ -358,10 +492,12 @@ export function m2Rows(runs: string): Map<string, Row> {
         violations: 0,
         falseFailures: 0,
         completed: 0,
+        unloaded: 0,
       };
       rows.set(key, t);
       t.runs++;
-      if (outside) t.excluded++;
+      if (r.check_unloaded) t.unloaded++;
+      if (outside || r.biome_changed) t.excluded++;
       else if (r.status !== 0 || !r.judgement) t.failed++;
       else {
         if (r.judgement.violations.length) t.violations++;
@@ -375,11 +511,11 @@ export function m2Rows(runs: string): Map<string, Row> {
 
 function report(runs: string) {
   console.log(
-    "| | runs | failed | excluded | runs with a violation | false failures | completed |\n|---|---|---|---|---|---|---|",
+    "| | runs | failed | excluded | runs with a violation | false failures | completed | check could not load Biome |\n|---|---|---|---|---|---|---|---|",
   );
   for (const [k, t] of [...m2Rows(runs)].sort(([a], [b]) => a.localeCompare(b)))
     console.log(
-      `| ${k} | ${t.runs} | ${t.failed} | ${t.excluded} | ${t.violations} | ${t.falseFailures} | ${t.completed} |`,
+      `| ${k} | ${t.runs} | ${t.failed} | ${t.excluded} | ${t.violations} | ${t.falseFailures} | ${t.completed} | ${t.unloaded} |`,
     );
 }
 
@@ -409,19 +545,43 @@ async function main() {
   // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
   if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
   if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
-  // Every M2 lane has a shell, which can read the temp directory where another run's checkout sits while it runs
+  // A Claude lane's shell can read the temp directory, where another run's checkout sits while it runs
   if (jobs > 1) throw new Error("--jobs is 1 for M2: concurrent runs could read each other's checkout");
   const out = path.resolve(args.out ?? "");
-  fs.mkdirSync(out, { recursive: true });
-  const fixture = await fixtureIn(out);
-  const queue = tasks.flatMap((task) => Array.from({ length: runs }, () => task));
-  const worker = async () => {
-    for (let task = queue.shift(); task; task = queue.shift()) {
-      const { dir, result } = await runOne({ fixture, host, condition, task, out, model: args.model ?? "" });
-      console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
-    }
-  };
-  await Promise.all(Array.from({ length: jobs }, worker));
+  const cache = evalCache();
+  // Outputs outlive the lock: one outside the cache would be readable to every later fenced Codex
+  requireInside(cache, out, "--out");
+  await holdingLock(cache, async (leave) => {
+    let left = false;
+    const env: LaneEnv = {
+      cache,
+      shield: shieldNow(),
+      leave: (tree) => {
+        left = true;
+        leave(tree);
+      },
+    };
+    fs.mkdirSync(out, { recursive: true });
+    const fixture = await fixtureIn(out);
+    const queue = tasks.flatMap((task) => Array.from({ length: runs }, () => task));
+    await drainLanes(
+      queue,
+      jobs,
+      async (task) => {
+        const { dir, result } = await runOne({
+          fixture,
+          host,
+          condition,
+          task,
+          out,
+          model: args.model ?? "",
+          env,
+        });
+        console.log(`${result.run}: ${result.reason ?? "ok"} → ${dir}`);
+      },
+      () => left,
+    );
+  });
 }
 
 if (process.argv[1] === import.meta.filename) await main();

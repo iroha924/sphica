@@ -1,69 +1,98 @@
 // How one precedent lane of the review evaluation is started on each host: the reviewer gets the aspect body as its prompt, Read / Grep /
 // Glob and Sphica's read MCP server on the run's copy of the fixture database, and nothing else of the owner's (settings, hooks, plugins,
-// MCP servers). Claude's reads are fenced to the checkout; Codex has no read fence, so its runs are graded on what they named instead.
+// MCP servers). Claude's reads are fenced to the checkout; Codex's commands are fenced by a permission profile's denies.
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { DENY_DIRS, DENY_FILES } from "../cloud/claude-run.ts";
+import { codexDenies, outsideTree, repoPlaces, type Shield } from "../cloud/codex-run.ts";
+
+/** Where a lane's pieces stay out of reach: the evaluation cache, what the repository and HOME fences are, and a way to report a tree left */
+export type LaneEnv = { cache: string; shield: Shield; leave: (tree: string) => void };
 
 /**
- * What no run may read, whatever it runs: the evaluations (the expected verdicts, the held-out cases, M2's hidden tests and reference
- * check), the output directory (the other runs, and each run's own CODEX_HOME), and the owner's Codex home with its login. Each run works
- * in a checkout outside all of them.
+ * What a Claude lane may not read: the repository wherever its files or history are (the expected verdicts, the held-out cases, M2's
+ * hidden tests and reference check), the output directory (the other runs, each run's own CODEX_HOME), and the owner's credentials.
+ * Claude keeps the owner's HOME for its login; its file tools are fenced to the checkout besides.
  */
-/** A fresh checkout location outside the output directory, so denying the output directory never hides the checkout itself */
-export const outsideCheckout = (prefix: string): string =>
-  path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix))), "work");
-
-export const evalDenies = (out: string): string[] => [
-  path.resolve(import.meta.dirname, ".."),
+export const evalDenies = (out: string, places = repoPlaces()): string[] => [
+  ...places,
   out,
-  // The owner's credentials, Codex's login among them: Codex's own profiles read the whole disk unless told otherwise
   ...DENY_DIRS,
   ...DENY_FILES,
 ];
 
+/** What a Codex lane may not read: what every fenced Codex is denied (all of HOME but the tools), and the output directory */
+export const codexLaneDenies = (out: string, cache: string, shield: Shield): string[] => [
+  ...codexDenies(cache, shield),
+  out,
+];
+
+/** A fresh checkout in a temp tree outside everything denied, so denying the output directory never hides the checkout itself */
+export const outsideCheckout = (prefix: string, denies: string[]): string =>
+  path.join(outsideTree(prefix, denies), "work");
+
 /**
- * Settings an administrator set for every Codex on this machine. They can replace the profile a lane selects, and the lane's denies with
- * it, so a Codex lane does not start while any is present.
+ * Runs every worker to its end before failing with the first error: a run that stopped early while another still had its temp tree
+ * would release the lock under that tree.
  */
-export function managedCodexSettings(
-  roots = { etc: "/etc/codex", prefs: "/Library/Managed Preferences" },
-): string[] {
-  const found: string[] = [];
-  const requirements = path.join(roots.etc, "requirements.toml");
-  if (fs.existsSync(requirements)) found.push(requirements);
-  const visit = (dir: string, depth: number) => {
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.name.startsWith("com.openai.codex")) found.push(full);
-      else if (e.isDirectory() && depth < 2) visit(full, depth + 1);
+export async function settleAll(workers: (() => Promise<void>)[]): Promise<void> {
+  const ends = await Promise.allSettled(workers.map((w) => w()));
+  const failed = ends.find((e): e is PromiseRejectedResult => e.status === "rejected");
+  if (failed) throw failed.reason;
+}
+
+/**
+ * Runs the queued lanes `jobs` at a time, and starts no lane once `stopped` says a temp tree was left behind: the next lane would run
+ * beside it without a deny for it. Every started lane runs to its end before the first failure is thrown.
+ */
+export async function drainLanes<T>(
+  queue: T[],
+  jobs: number,
+  run: (item: T) => Promise<void>,
+  stopped: () => boolean,
+): Promise<void> {
+  const worker = async () => {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
+      if (stopped()) throw new Error("a temp tree was left behind; no further lane starts");
+      await run(item);
+      if (stopped()) throw new Error("a temp tree was left behind; no further lane starts");
     }
   };
-  visit(roots.prefs, 0);
-  return found;
+  await settleAll(Array.from({ length: jobs }, () => worker));
 }
+
+/** The code that starts and fences a run, relative to this directory */
+export const RUNNER_FILES = [
+  "runner.ts",
+  "run.ts",
+  "m2.ts",
+  "fixture.ts",
+  "biome.ts",
+  "../cloud/codex-home.ts",
+  "../cloud/codex-run.ts",
+];
 
 /** The code that starts and fences a run, as one hash: runs made by different runner code are different measurements */
 export function runnerDigest(): string {
   const hash = crypto.createHash("sha256");
-  for (const file of ["runner.ts", "run.ts", "m2.ts", "fixture.ts", "biome.ts"])
+  for (const file of RUNNER_FILES)
     hash.update(`${file}\0`).update(fs.readFileSync(path.join(import.meta.dirname, file)));
   return hash.digest("hex");
 }
 
-/** Moves a finished run's checkout into its run directory, which every later run is denied: a checkout left in the temp directory is not */
-export function keepCheckout(work: string, dir: string): void {
-  if (!fs.existsSync(work)) return;
-  fs.cpSync(path.dirname(work), path.join(dir, "checkout"), { recursive: true, verbatimSymlinks: true });
-  fs.rmSync(path.dirname(work), { recursive: true, force: true });
+/**
+ * Moves a finished run's temp tree into its run directory, which every later run is denied: a tree left in the temp directory is not.
+ * False when the tree could not be removed, so the caller keeps the lock.
+ */
+export function keepCheckout(work: string, dir: string): boolean {
+  const tree = path.dirname(work);
+  if (!fs.existsSync(tree)) return true;
+  try {
+    fs.cpSync(tree, path.join(dir, "checkout"), { recursive: true, verbatimSymlinks: true });
+    fs.rmSync(tree, { recursive: true, force: true });
+  } catch {}
+  return !fs.existsSync(tree);
 }
 
 /** The /sphica:rules body M1 measured, with its Biome check drafting: the shipped Skill does not draft checks */
@@ -184,16 +213,6 @@ export function codexMcp(p: LanePaths): string {
     .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
     .join(", ");
   return `\n[mcp_servers.sphica]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(p.server)}]\nenv = { ${env} }\n`;
-}
-
-/**
- * The permission profile a lane's CODEX_HOME config selects: `:read-only` or `:workspace`, with every path in `deny` unreadable to the
- * commands the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay
- * hidden is denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
- */
-export function codexProfile(base: ":read-only" | ":workspace", deny: string[]): string {
-  const lines = deny.map((d) => `${JSON.stringify(d)} = "deny"`).join("\n");
-  return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
 }
 
 /** codex exec for a lane: ephemeral, the prompt on stdin, the final answer to a file; the sandbox comes from the profile. */

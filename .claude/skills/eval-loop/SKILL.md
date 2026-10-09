@@ -99,11 +99,14 @@ Local loop progress:
 - [ ] 2. node evals/cloud/canary.ts --build <dir> [--model <m>]  (every check ✓; claude.ts refuses a build without it)
 - [ ] 3. Write the local plan: [{ "model": "claude"|"codex", "task": <id>, "condition": <slot condition>, "n": <runs> }, ...], one entry per
         task, condition, and model measured (a subset of plan.json's rows)
-- [ ] 4. Run it: node evals/cloud/claude.ts and node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>, n times per entry, into
-        run directories used by this build only
-- [ ] 5. node evals/cloud/collect.ts --build <dir> --no-cloud --local-plan <plan> (on macOS: hidden tests run only there)
-- [ ] 6. node evals/cloud/grade.ts --loop <dir>/loop.json
-- [ ] 7. node evals/cloud/report.ts --compare <old>/grades.json <new>/grades.json
+- [ ] 4. Before Codex runs, after any Codex update or change to the runner: node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>
+        --probe for each of the four slots (every check ✓)
+- [ ] 5. Run it: node evals/cloud/claude.ts and node evals/cloud/codex.ts --build <dir> --repo <slot> --task <id>, n times per entry, into
+        run directories under ~/.cache/sphica-eval used by this build only, one Codex process at a time
+- [ ] 6. node evals/cloud/collect.ts --build <dir> --no-cloud --local-plan <plan> (on macOS: hidden tests run only there)
+- [ ] 7. node evals/cloud/grade.ts --probe --loop <dir>/loop.json (same cadence as step 4; every check ✓), then
+        node evals/cloud/grade.ts --loop <dir>/loop.json
+- [ ] 8. node evals/cloud/report.ts --compare <old>/grades.json <new>/grades.json
 ```
 
 - The runner fences each run: project setting sources only (the slot's cloud settings file is removed in the clone; hooks come from
@@ -122,8 +125,29 @@ Local loop progress:
 - Hidden tests run only on macOS, under sandbox-exec with no network and no file contents under the home directory but the checkout's and
   Node's; a checkout holding a link that points outside it fails its hidden test unrun. Elsewhere collect stops unless
   `--skip-hidden-tests` records them as not run
-- A Codex run has no read fence: a run whose commands or output name another run, the build, or the evaluation cache, or whose commands
-  climb two steps out of the checkout, is excluded as having looked outside
+- The Codex run under test and the Codex grader start with a permission profile (no `-s`) that denies the repository with every worktree
+  and its git directory (its history holds the gold and hidden tests), `~/.cache/sphica-eval` as a whole, the run's own login, and all
+  of HOME, with only the `node` and `bun` installs read back: a mise install of that tool
+  (`~/.local/share/mise/installs/<tool>/<version>`) or `~/.bun`. A tool found anywhere else under HOME, or a link at HOME's top or on
+  the way to a kept install that leads out of HOME, stops the run. The run's PATH holds only absolute entries: those tools' directories,
+  codex's, and the owner's entries outside HOME. External volumes and the shared temp directories (the system's and `/tmp`, where the
+  acceptance driver and tests build their worlds) are denied too, and a `node` or `bun` found under one stops the run before it starts.
+  So every build, run directory, and log stays under `~/.cache/sphica-eval`: build.ts, codex.ts, and claude.ts refuse `--out` (and
+  codex.ts `--build`) elsewhere, and grade.ts refuses a loop whose build or run roots are elsewhere. The checkout, HOME, and TMPDIR live in the
+  run's own temp tree, the one place in the temp directory read back (only the checkout and TMPDIR writable), and move back into the run
+  directory after it. A Codex process holds `~/.cache/sphica-eval/codex.lock`; one left by a killed process is removed by hand once that
+  process is gone. The probes are the evidence the fence holds on the Codex installed: each fenced target must print DENIED
+- A Codex run made under another fence, or by other runner code or another Codex CLI version (or with either not recorded), is excluded
+  by collect; grade refuses a loop whose Codex rows carry more than one of either, and report refuses to compare Codex results across
+  them, or grades given by a Codex grader under another fence or with other settings, CLI, or grading code. A run
+  whose commands or output name another run, the build, or the evaluation cache is still excluded as having looked outside
+- Known limit: the checkout carries its slot's own `.tools` (the fixture database in search and inject, the gold record in gold), which
+  is what that condition gives the agent anyway
+- The review evaluation (`server/evals/review/run.ts`, `m2.ts`) takes the same lock, and its Codex lanes the same denies plus the output
+  directory, with the checkout, HOME, and TMPDIR in a temp tree. Its Claude lanes keep HOME for the owner's login and are denied the
+  repository. M2's check runs a Biome copy in each run's temp tree; a run that changed its copy is excluded, and a check that could not
+  load Biome is counted in its own column. Run `node evals/review/run.ts --preflight` after a Codex or Claude Code update, or a change
+  to the runner
 - `report.ts --compare` refuses builds with different fixtures or task definitions, or with the same artifacts, and never mixes the two
 - Ordering of deliveries is judged offline: `node evals/order/run.ts --compare <base ref>` shows which records of a crowded file each side
   delivers. No agent run is needed

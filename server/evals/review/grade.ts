@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { repoPlaces } from "../cloud/codex-run.ts";
 import { loadReviewCases } from "./fixture.ts";
 
 type Outcome = "violation" | "complies" | "unrelated" | "undetermined";
@@ -286,7 +287,7 @@ export function oneConfiguration(runs: string, names: string[]): void {
     const file = path.join(runs, n, "result.json");
     if (!fs.existsSync(file)) continue;
     const r = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
-    const config = ["model", "cli", "body_sha256", "server_sha256", "cases_sha256", "runner_sha256"]
+    const config = ["model", "cli", "body_sha256", "server_sha256", "cases_sha256", "runner_sha256", "fence"]
       .map((k) => String(r[k] ?? ""))
       .join(" ");
     const host = String(r.host);
@@ -311,7 +312,8 @@ const unfinished = (name: string): RunGrade => ({
 
 export function gradeAll(runs: string): RunGrade[] {
   const diffs = new Map(loadReviewCases().diffs.map((d) => [d.id, d.expect]));
-  const forbidden = [path.resolve(import.meta.dirname, "..", "..", "..")];
+  // The repository wherever its files or history are: every worktree and the shared git directory hold the expected verdicts
+  const forbidden = repoPlaces();
   // A precedent run's directory, as runLane names it: rules runs, M2, the preflight, and the fixture share the output root
   const lane = new RegExp(`^(?:${[...diffs.keys()].join("|")})-(?:claude|codex)-\\d{4}-`);
   const names = fs

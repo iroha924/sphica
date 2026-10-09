@@ -16,14 +16,331 @@ export function ownerCodexSettings(): string {
     .join("\n");
 }
 
-export function isolatedCodexHome(
-  codexHome: string,
-  extraConfig = "",
-  settings = ownerCodexSettings(),
-): void {
+function isolatedCodexHome(codexHome: string, extraConfig = "", settings = ownerCodexSettings()): void {
   fs.mkdirSync(codexHome, { recursive: true });
   fs.symlinkSync(path.join(os.homedir(), ".codex", "auth.json"), path.join(codexHome, "auth.json"));
   fs.writeFileSync(path.join(codexHome, "config.toml"), `${settings}\n${extraConfig}`);
+}
+
+/**
+ * The permission profile a CODEX_HOME config selects: `:read-only` or `:workspace`, with every path in `deny` unreadable to the commands
+ * the model runs (Codex itself still reads its login). A parent that is denied cannot be read under, so only what must stay hidden is
+ * denied. No `--sandbox` goes with it: that flag would select the old sandbox settings instead.
+ */
+export function codexProfile(
+  base: ":read-only" | ":workspace",
+  deny: string[],
+  read: string[] = [],
+  write: string[] = [],
+): string {
+  // A path given twice (the repository directly under HOME) would be a key written twice, which TOML refuses
+  const lines = [
+    ...[...new Set(deny)].map((d) => `${JSON.stringify(d)} = "deny"`),
+    ...[...new Set(read)].filter((r) => !deny.includes(r)).map((r) => `${JSON.stringify(r)} = "read"`),
+    ...[...new Set(write)]
+      .filter((w) => !deny.includes(w) && !read.includes(w))
+      .map((w) => `${JSON.stringify(w)} = "write"`),
+  ].join("\n");
+  return `\ndefault_permissions = "eval"\n[permissions.eval]\nextends = ${JSON.stringify(base)}\n[permissions.eval.filesystem]\n${lines}\n`;
+}
+
+/**
+ * Settings an administrator set for every Codex on this machine. They can replace the profile a run selects, and its denies with it
+ * (a `sandbox_mode` in any loaded config selects the old sandbox), so a fenced Codex does not start while any is present.
+ */
+export function managedCodexSettings(
+  roots = { etc: "/etc/codex", prefs: "/Library/Managed Preferences" },
+): string[] {
+  const found = ["requirements.toml", "config.toml"]
+    .map((f) => path.join(roots.etc, f))
+    .filter((f) => fs.existsSync(f));
+  const visit = (dir: string, depth: number) => {
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.name.startsWith("com.openai.codex")) found.push(full);
+      else if (e.isDirectory() && depth < 2) visit(full, depth + 1);
+    }
+  };
+  visit(roots.prefs, 0);
+  return found;
+}
+
+/**
+ * An isolated CODEX_HOME whose config selects the profile, with the run's own link to the login denied too. The profile goes before
+ * `extraConfig`: default_permissions is a top-level key, and after a table TOML would read it as part of that table.
+ */
+export function fencedCodexHome(
+  codexHome: string,
+  o: {
+    base: ":read-only" | ":workspace";
+    deny: string[];
+    /** Places under a denied one that stay readable (the tools' installs under a denied HOME, the run's own temp tree) */
+    read?: string[];
+    /** Places under a denied one the model may write (the checkout and TMPDIR in its temp tree) */
+    write?: string[];
+    extraConfig?: string;
+    settings?: string;
+    managed?: string[];
+  },
+): { profile: string; denied: string[] } {
+  const managed = o.managed ?? managedCodexSettings();
+  if (managed.length)
+    throw new Error(`administrator settings for Codex can replace the run's profile: ${managed.join(", ")}`);
+  const denied = [...o.deny, path.join(codexHome, "auth.json")];
+  const profile = codexProfile(o.base, denied, o.read, o.write);
+  isolatedCodexHome(codexHome, `${profile}${o.extraConfig ?? ""}`, o.settings);
+  return { profile, denied };
+}
+
+/**
+ * The profile as one digest that names each denied place by its role, so runs on other machines or in other directories under the same
+ * policy compare equal. `roles` maps a placeholder to the path it stands for; longer paths are replaced first.
+ */
+export function fenceDigest(
+  profile: string,
+  roles: Record<string, string>,
+  normalize: (text: string) => string = (t) => t,
+): string {
+  let text = profile;
+  // The profile holds each path as a TOML string, where a Windows path's backslashes are doubled
+  for (const [role, p] of Object.entries(roles).sort((a, b) => b[1].length - a[1].length))
+    text = text.split(JSON.stringify(p).slice(1, -1)).join(role).split(p).join(role);
+  return crypto.createHash("sha256").update(normalize(text)).digest("hex");
+}
+
+/** What a fenced Codex may reach under the owner's HOME: the tools' install roots, every other entry denied, and the PATH to give it */
+export type HomeFence = {
+  home: string;
+  roots: string[];
+  denies: string[];
+  path: string;
+  tools: string[];
+  /** The codex the runners start, by absolute path (null where none is on PATH): the PATH given to the fenced Codex need not hold it */
+  codex: string | null;
+};
+
+/** The tools an evaluation run uses; nothing else under HOME is kept */
+const TOOLS = ["node", "bun"];
+
+/**
+ * The install root a tool under HOME is kept by, by its exact shape: mise's `.local/share/mise/installs/<tool>/<version>` or Bun's
+ * own `.bun`. Any other place under HOME (`~/.local/bin`, `~/bin`) would keep a directory that holds more than the tool, so it refuses.
+ */
+function installRoot(home: string, real: string, tool: string): string {
+  const parts = path.relative(home, real).split(path.sep);
+  if (
+    parts.length === 8 &&
+    parts.slice(0, 4).join("/") === ".local/share/mise/installs" &&
+    parts[4] === tool &&
+    parts[6] === "bin" &&
+    parts[7] === tool
+  )
+    return path.join(home, ...parts.slice(0, 6));
+  if (parts.join("/") === ".bun/bin/bun" && tool === "bun") return path.join(home, ".bun");
+  throw new Error(
+    `${tool} resolves to ${real}, which is not a known install under HOME; the fence cannot keep it alone`,
+  );
+}
+
+/**
+ * HOME denied as a whole, with only the tools' install roots read back: an entry made in HOME after the run starts is denied too. A
+ * missing tool refuses. A link on the way to a kept root, or at HOME's top, that leads out of HOME or nowhere yet refuses as well: a read
+ * through it is judged where it leads, which the fence does not cover.
+ */
+export function homeFence(o: { home?: string; path?: string } = {}): HomeFence {
+  const home = fs.realpathSync(o.home ?? os.homedir());
+  // Only absolute entries: a relative one (".") would let a hook find a command the model put in its checkout
+  const entries = (o.path ?? process.env.PATH ?? "")
+    .split(path.delimiter)
+    .filter((d) => d && path.isAbsolute(d));
+  const find = (name: string, dirs: string[]) =>
+    dirs.map((d) => path.join(d, name)).find((f) => fs.existsSync(f));
+  const roots: string[] = [];
+  const tools: string[] = [];
+  for (const tool of TOOLS) {
+    const found = find(tool, entries);
+    if (!found) throw new Error(`${tool} is not on PATH`);
+    const real = fs.realpathSync(found);
+    tools.push(real);
+    if (isInside(home, real)) roots.push(installRoot(home, real, tool));
+  }
+  const codex = find("codex", entries) ?? null;
+  // Codex may run its own binary inside the sandbox: one installed under HOME outside the tool installs is read back, the file alone
+  // (its directory may hold the owner's other files)
+  const codexReal = codex && fs.realpathSync(codex);
+  if (codexReal && isInside(home, codexReal) && !roots.some((r) => isInside(r, codexReal)))
+    roots.push(codexReal);
+  const outside = entries.filter(
+    (d) => !isInside(home, fs.existsSync(d) ? fs.realpathSync(d) : path.resolve(d)),
+  );
+  const fenced = [
+    ...new Set([...tools.map((t) => path.dirname(t)), ...(codex ? [path.dirname(codex)] : []), ...outside]),
+  ];
+  // The fenced Codex and its hooks find the tools by name: a shim whose target has another name is not found that way
+  for (const [i, tool] of TOOLS.entries()) {
+    const named = find(tool, fenced);
+    if (!named || fs.realpathSync(named) !== tools[i])
+      throw new Error(`${tool} resolves to ${tools[i]}, which is not found by its name in the fenced PATH`);
+  }
+  const look = (dir: string) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (roots.includes(full)) continue;
+      if (fs.lstatSync(full).isSymbolicLink()) {
+        let real: string;
+        try {
+          real = fs.realpathSync(full);
+        } catch {
+          throw new Error(
+            `${full} is a link that leads nowhere yet; the fence cannot deny what it may lead to`,
+          );
+        }
+        if (!isInside(home, real))
+          throw new Error(
+            `${full} is a link that leads out of HOME (${real}); the fence cannot deny it alone`,
+          );
+      } else if (roots.some((r) => isInside(full, r))) look(full);
+    }
+  };
+  look(home);
+  return {
+    home,
+    roots: [...new Set(roots)].sort(),
+    denies: [home],
+    path: fenced.join(path.delimiter),
+    tools,
+    codex,
+  };
+}
+
+/**
+ * Where external volumes are mounted: private data outside HOME. Each root is denied whole, so a volume mounted during a run is denied
+ * too; the boot volume's entry under `/Volumes` is a link to `/`, which stays readable by its own path. A root that is a link is left out,
+ * since a deny follows a link to what it points at.
+ */
+export function volumeDenies(roots = ["/Volumes", "/media", "/mnt", "/run/media"]): string[] {
+  return roots.filter((p) => {
+    const st = fs.lstatSync(p, { throwIfNoEntry: false });
+    return st?.isDirectory() === true && !st.isSymbolicLink();
+  });
+}
+
+/** The codex a runner starts: a fence made where none is on PATH (collect, report) needs none */
+export function codexOf(home: HomeFence): string {
+  if (!home.codex) throw new Error("codex is not on PATH");
+  return home.codex;
+}
+
+/** Where every evaluation output lives; the fenced Codex runs and graders are denied all of it */
+export function evalCache(home = os.homedir()): string {
+  const cache = path.join(home, ".cache", "sphica-eval");
+  fs.mkdirSync(cache, { recursive: true });
+  return fs.realpathSync(cache);
+}
+
+/** Whether `p` is `root` or under it, by path components: a child named `..build` is inside, a sibling `root-other` is not */
+export function isInside(root: string, p: string): boolean {
+  const rel = path.relative(root, p);
+  return rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+/**
+ * `p` resolved one part at a time, so each link is followed before a `..` after it steps up; the parts that do not exist yet are kept as
+ * written under the last one that does. A link that points nowhere is refused: what it names could be made anywhere later.
+ */
+function resolved(p: string): string {
+  const abs = path.isAbsolute(p) ? p : `${process.cwd()}${path.sep}${p}`;
+  const root = path.parse(abs).root;
+  const parts = abs
+    .slice(root.length)
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  let at = fs.realpathSync(root);
+  for (const [i, part] of parts.entries()) {
+    if (part === ".") continue;
+    if (part === "..") {
+      at = path.dirname(at);
+      continue;
+    }
+    const next = path.join(at, part);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(next);
+    } catch {
+      return path.join(next, ...parts.slice(i + 1));
+    }
+    if (!st.isSymbolicLink()) at = next;
+    else if (fs.existsSync(next)) at = fs.realpathSync(next);
+    else throw new Error(`${next} is a link to nothing`);
+  }
+  return at;
+}
+
+/** `p` resolved through links, or an error when it is not strictly inside `root`. */
+export function requireInside(root: string, p: string, what: string): string {
+  const real = resolved(p);
+  if (real === root || !isInside(root, real))
+    throw new Error(`${what} must be inside ${root}, which fenced Codex runs cannot read: ${real}`);
+  return real;
+}
+
+/**
+ * One lock for every process that starts a fenced Codex or puts hidden material in the temp directory. Each Codex is denied that
+ * directory but its own tree; the lock also keeps one from running beside another's checkout, whatever output directory each was given. A lock left by a process that died is not taken over: whoever removes it checks that it is gone.
+ */
+export function codexLock(cache: string): () => void {
+  const file = path.join(cache, "codex.lock");
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "wx");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    let held = "";
+    try {
+      held = fs.readFileSync(file, "utf8").trim();
+    } catch {}
+    throw new Error(
+      `another fenced Codex evaluation holds ${file} (${held}); remove it only once that process is gone`,
+    );
+  }
+  const held = `${JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token: crypto.randomUUID() })}\n`;
+  fs.writeSync(fd, held);
+  fs.closeSync(fd);
+  // Removes only this holder's lock, once: a second call must not remove whoever took the lock next
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    let now = "";
+    try {
+      now = fs.readFileSync(file, "utf8");
+    } catch {}
+    if (now === held) fs.rmSync(file, { force: true });
+  };
+}
+
+/**
+ * Runs `run` holding the shared lock, and releases it only when no temp tree was left behind: `leave` names one that could not be
+ * removed, which the next fenced Codex could read.
+ */
+export async function holdingLock<T>(
+  cache: string,
+  run: (leave: (tree: string) => void) => Promise<T>,
+): Promise<T> {
+  const release = codexLock(cache);
+  const left: string[] = [];
+  try {
+    return await run((tree) => left.push(tree));
+  } finally {
+    if (!left.length) release();
+    else console.error(`could not remove ${left.join(", ")}; remove it, then codex.lock in ${cache}`);
+  }
 }
 
 /** The model and effort a run's CODEX_HOME starts Codex with, as one label ("gpt-6.1-sol, medium"); null when the config names no model. */

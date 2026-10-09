@@ -10,7 +10,17 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { claudeVersion, finalAnswer, runEnv } from "../cloud/claude-run.ts";
-import { claimRunDir, codexModelOf, isolatedCodexHome } from "../cloud/codex-home.ts";
+import {
+  claimRunDir,
+  codexModelOf,
+  codexOf,
+  evalCache,
+  fencedCodexHome,
+  holdingLock,
+  requireInside,
+} from "../cloud/codex-home.ts";
+import { codexFence, REPO, shieldNow, treeAccess } from "../cloud/codex-run.ts";
+import { homeToken, type ProbeTarget, probeProblems, probeScript, tempToken } from "../cloud/probe.ts";
 import { cachedFixture, loadReviewCases, type ReviewFixture } from "./fixture.ts";
 import { loadRulesCases } from "./rules-grade.ts";
 import {
@@ -18,12 +28,13 @@ import {
   claudeMcp,
   claudeSettings,
   codexArgs,
+  codexLaneDenies,
   codexMcp,
-  codexProfile,
+  drainLanes,
   evalDenies,
   keepCheckout,
+  type LaneEnv,
   type LanePaths,
-  managedCodexSettings,
   outsideCheckout,
   READ_TOOLS,
   RULES_BODY,
@@ -48,6 +59,8 @@ type LaneResult = {
   body_sha256: string;
   server_sha256: string;
   runner_sha256: string;
+  /** Codex lanes only: the read fence the lane ran under */
+  fence?: string;
   status: number | null;
   reason: string | null;
   seconds: number;
@@ -116,12 +129,14 @@ async function runLane(o: {
   tools: string[];
   /** Writes files into the checkout before the host starts, untracked (the preflight's probe) */
   plant?: (work: string) => void;
+  env: LaneEnv;
 }): Promise<{ dir: string; result: LaneResult }> {
   const name = o.diff ?? "rules";
   const { run, dir } = claimRunDir(o.out, `${name}-${o.host}`);
   const started = Date.now();
+  const denies = o.host === "codex" ? codexLaneDenies(o.out, o.env.cache, o.env.shield) : evalDenies(o.out);
   const p: LanePaths = {
-    work: outsideCheckout("review-work-"),
+    work: outsideCheckout("review-work-", denies),
     diff: "",
     db: path.join(dir, "db", "sphica.db"),
     home: path.join(dir, "home"),
@@ -196,26 +211,32 @@ async function runLane(o: {
       });
       fs.writeFileSync(path.join(dir, "final.md"), finalAnswer(r.stdout)?.result ?? "");
     } else {
-      const managed = managedCodexSettings();
-      if (managed.length)
-        throw new Error(
-          `administrator settings for Codex can replace the lane's profile: ${managed.join(", ")}`,
-        );
       const codexHome = path.join(dir, "codex-home");
-      isolatedCodexHome(
-        codexHome,
-        // default_permissions is a top-level key: it goes before the MCP server's table, or TOML reads it as part of that table
-        `${codexProfile(":read-only", [...evalDenies(o.out), path.join(codexHome, "auth.json")])}${codexMcp(p)}`,
-      );
+      const access = treeAccess(":read-only", path.dirname(p.work));
+      const fence = fencedCodexHome(codexHome, {
+        base: ":read-only",
+        deny: denies,
+        read: [...o.env.shield.home.roots, ...access.read],
+        write: access.write,
+        extraConfig: codexMcp(p),
+      });
+      // Runs under another fence (another Node or Bun install kept, another policy) are another measurement
+      result.fence = codexFence(fence.profile, o.env.cache, codexHome, o.env.shield, {
+        "<tree>": path.dirname(p.work),
+      });
       result.model = codexModelOf(codexHome);
       result.cli = execFileSync("codex", ["--version"], { encoding: "utf8" }).trim();
-      const tmp = path.join(dir, "tmp");
+      // The model's HOME and TMPDIR sit in the checkout's temp tree, outside everything denied; Sphica's own home stays in the run
+      const tree = path.dirname(p.work);
+      const tmp = path.join(tree, "tmp");
+      const home = path.join(tree, "home");
       fs.mkdirSync(tmp);
-      r = await runChild("codex", codexArgs(p.work, path.join(dir, "final.md")), {
+      fs.mkdirSync(home);
+      r = await runChild(codexOf(o.env.shield.home), codexArgs(p.work, path.join(dir, "final.md")), {
         cwd: p.work,
         env: {
-          PATH: process.env.PATH ?? "",
-          HOME: p.home,
+          PATH: o.env.shield.home.path,
+          HOME: home,
           CODEX_HOME: codexHome,
           TMPDIR: tmp,
           LANG: process.env.LANG ?? "",
@@ -231,7 +252,7 @@ async function runLane(o: {
   } catch (e) {
     result.reason = (e as Error).message;
   } finally {
-    keepCheckout(p.work, dir);
+    if (!keepCheckout(p.work, dir)) o.env.leave(path.dirname(p.work));
     result.seconds = Math.round((Date.now() - started) / 1000);
     fs.writeFileSync(path.join(dir, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   }
@@ -259,9 +280,16 @@ const everything = (dir: string) => fs.readFileSync(path.join(dir, "events.jsonl
  * read server on the run's database (review_select selects the fixture's record), and Claude starts with no tool, MCP server, or plugin
  * beyond the lane's.
  */
-async function preflight(out: string, model: string): Promise<string[]> {
+async function preflight(
+  out: string,
+  model: string,
+  env: LaneEnv,
+  /** Files planted before the fence where the lane must not reach: the root of HOME, the shared temp directory */
+  planted: ProbeTarget[],
+): Promise<string[]> {
   const fixture = await fixtureIn(out);
   const review = (host: Host, diff: string) => ({
+    env,
     fixture,
     host,
     diff,
@@ -312,17 +340,31 @@ async function preflight(out: string, model: string): Promise<string[]> {
   }
   // Codex reads with its permission profile: a script in the checkout tries what every run must not read, and each must be denied
   const cases = path.join(import.meta.dirname, "cases.json");
-  const probeScript = `#!/bin/sh\nfor pair in "cases|${cases}" "outside|${outside}" "auth|$CODEX_HOME/auth.json"; do\n  label=\${pair%%|*}; file=\${pair#*|}\n  if head -c 1 "$file" >/dev/null 2>&1; then echo "READ $label"; else echo "DENIED $label"; fi\ndone\n`;
+  // The repository's history and a file at the root of HOME made before the fence: both hold what the lane must not reach
+  const gitDir = path.resolve(
+    REPO,
+    execFileSync("git", ["-C", REPO, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim(),
+  );
+  const targets: ProbeTarget[] = [
+    { label: "cases", path: cases, expect: "DENIED" },
+    { label: "outside", path: outside, expect: "DENIED" },
+    { label: "auth", path: "$CODEX_HOME/auth.json", shell: true, expect: "DENIED" },
+    { label: "git", path: path.join(gitDir, "HEAD"), expect: "DENIED" },
+    ...planted,
+  ];
   const codex = await runLane({
     ...review("codex", "postgres"),
-    plant: (work) => fs.writeFileSync(path.join(work, "probe.sh"), probeScript, { mode: 0o755 }),
+    plant: (work) => {
+      fs.writeFileSync(path.join(work, "probe-control.txt"), "control\n");
+      targets.push({ label: "control", path: path.join(work, "probe-control.txt"), expect: "READ" });
+      fs.writeFileSync(path.join(work, "probe.sh"), probeScript(targets, null), { mode: 0o755 });
+    },
     prompt: (body, p) =>
       `${reviewPrompt(body, { ...p, model: "codex" })}\nBefore reviewing, run ./probe.sh once and quote its output in your reply.\n`,
   });
+  // Judged from the run of ./probe.sh itself, never from what the reviewer wrote about it
   const fence = everything(codex.dir);
-  for (const label of ["cases", "outside", "auth"])
-    if (!fence.includes(`DENIED ${label}`))
-      problems.push(`codex: the probe did not show ${label} denied (${codex.dir})`);
+  for (const p of probeProblems(fence, targets)) problems.push(`codex: ${p} (${codex.dir})`);
   if (fence.includes(token)) problems.push(`codex read ${outside}`);
   const lanes = [probe, codex];
   for (const lane of lanes) {
@@ -349,52 +391,77 @@ async function main() {
     },
   });
   const out = path.resolve(args.out ?? "");
-  if (args.preflight) {
-    if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
-    // Its probe runs go apart from the measured ones, which the grader counts by directory name
-    const problems = await preflight(path.join(out, "preflight"), args.model ?? "");
-    for (const p of problems) console.log(`✗ ${p}`);
-    if (problems.length) process.exitCode = 1;
-    else console.log("✓ preflight passed");
-    return;
-  }
   const host = args.host;
-  if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
   const known = loadReviewCases().diffs.map((d) => d.id);
-  if (!args.rules && args.diff !== "all" && !known.includes(args.diff ?? ""))
-    throw new Error(`--diff is all or one of ${known.join(", ")}`);
   const runs = Number(args.runs);
   const jobs = Number(args.jobs);
-  // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
-  if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
-  if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
-  // A Codex command can read the temp directory, where another run's checkout sits while it runs; Claude's lanes here have no shell
-  if (host === "codex" && jobs > 1)
-    throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
+  if (!args.preflight) {
+    if (host !== "claude" && host !== "codex") throw new Error("--host is claude or codex");
+    if (!args.rules && args.diff !== "all" && !known.includes(args.diff ?? ""))
+      throw new Error(`--diff is all or one of ${known.join(", ")}`);
+    // A mistyped count would start no run and still exit 0, reading as an experiment with nothing in it
+    if (!Number.isInteger(runs) || runs < 1) throw new Error("--runs is a whole number of 1 or more");
+    if (!Number.isInteger(jobs) || jobs < 1) throw new Error("--jobs is a whole number of 1 or more");
+    // Codex lanes run one at a time, so no other run's checkout sits beside one should its temp directory deny miss; Claude's have no shell
+    if (host === "codex" && jobs > 1)
+      throw new Error("--jobs is 1 for Codex: concurrent runs could read each other's checkout");
+  }
+  const cache = evalCache();
+  // Outputs outlive the lock: one outside the cache would be readable to every later fenced Codex
+  requireInside(cache, out, "--out");
   if (!fs.existsSync(SERVER)) throw new Error(`${SERVER} is missing: run bun run bundle first`);
-  fs.mkdirSync(out, { recursive: true });
-  const fixture = await fixtureIn(out, args.rules);
-  const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
-  const ids = args.rules ? ["rules"] : args.diff === "all" ? known : [args.diff ?? ""];
-  const queue = ids.flatMap((diff) => Array.from({ length: runs }, () => diff));
-  const worker = async () => {
-    for (let diff = queue.shift(); diff; diff = queue.shift()) {
-      const { dir, result } = await runLane({
-        fixture,
-        host,
-        diff: args.rules ? null : diff,
-        body,
-        out,
-        model: args.model ?? "",
-        prompt: args.rules
-          ? (b) => rulesPrompt(b, loadRulesCases().picks)
-          : (b, p) => reviewPrompt(b, { ...p, model: host }),
-        tools: args.rules ? RULES_TOOLS : READ_TOOLS,
-      });
-      console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
-    }
-  };
-  await Promise.all(Array.from({ length: jobs }, worker));
+  // The preflight's HOME token is made before the run's HOME fence, which must deny it
+  const planted = args.preflight ? [homeToken(), tempToken()] : null;
+  try {
+    await holdingLock(cache, async (leave) => {
+      let left = false;
+      const env: LaneEnv = {
+        cache,
+        shield: shieldNow(),
+        leave: (tree) => {
+          left = true;
+          leave(tree);
+        },
+      };
+      if (planted) {
+        // Its probe runs go apart from the measured ones, which the grader counts by directory name
+        const problems = await preflight(path.join(out, "preflight"), args.model ?? "", env, planted);
+        for (const p of problems) console.log(`✗ ${p}`);
+        if (problems.length) process.exitCode = 1;
+        else console.log("✓ preflight passed");
+        return;
+      }
+      if (host !== "claude" && host !== "codex") return;
+      fs.mkdirSync(out, { recursive: true });
+      const fixture = await fixtureIn(out, args.rules);
+      const body = path.resolve(args.body ?? (args.rules ? RULES_BODY : BODY));
+      const ids = args.rules ? ["rules"] : args.diff === "all" ? known : [args.diff ?? ""];
+      const queue = ids.flatMap((diff) => Array.from({ length: runs }, () => diff));
+      await drainLanes(
+        queue,
+        jobs,
+        async (diff) => {
+          const { dir, result } = await runLane({
+            fixture,
+            host,
+            diff: args.rules ? null : diff,
+            body,
+            out,
+            model: args.model ?? "",
+            prompt: args.rules
+              ? (b) => rulesPrompt(b, loadRulesCases().picks)
+              : (b, p) => reviewPrompt(b, { ...p, model: host }),
+            tools: args.rules ? RULES_TOOLS : READ_TOOLS,
+            env,
+          });
+          console.log(`${result.run}: ${result.reason ?? "ok"} (${result.seconds}s) → ${dir}`);
+        },
+        () => left,
+      );
+    });
+  } finally {
+    for (const t of planted ?? []) fs.rmSync(t.path, { force: true });
+  }
 }
 
 await main();

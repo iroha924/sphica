@@ -95,6 +95,8 @@ export function partsOf(source: string, stdout: string): Parts {
 export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): HiddenResult {
   const unparted = (tests: string): HiddenResult => ({ tests, parts: NO_PARTS, scratch: null });
   if (!fs.existsSync(work)) return unparted("not run (no checkout)");
+  // The test is written into the checkout: a checkout that is a link would send it, and the hidden test with it, elsewhere
+  if (fs.lstatSync(work).isSymbolicLink()) return unparted("0 passed, 1 failed (the checkout is a link)");
   // A link the patch made can point the task module at a file outside the checkout: such a run fails its hidden test without running it
   if (linksOutside(work)) return unparted("0 passed, 1 failed (a link in the checkout points outside it)");
   // The write happens before the sandbox: a test/ or hidden.test.ts the branch made a symlink would send it outside the checkout
@@ -106,8 +108,23 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
   const file = path.join(testDir, "hidden.test.ts");
   fs.rmSync(file, { force: true });
   fs.writeFileSync(file, test, { flag: "wx" });
+  // From the write on, whatever throws: the hidden test does not stay in the run's checkout, where a later fenced Codex could find it
+  try {
+    return runWritten(work, test, timeoutMs, unparted);
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+}
+
+function runWritten(
+  work: string,
+  test: string,
+  timeoutMs: number,
+  unparted: (tests: string) => HiddenResult,
+): HiddenResult {
   const inside = fs.realpathSync(work);
   const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-hidden-")));
+  liveScratch.add(scratch);
   try {
     const under = (a: string, b: string) => a === b || a.startsWith(b + path.sep);
     if (under(scratch, inside) || under(inside, scratch))
@@ -135,8 +152,12 @@ export function runHiddenTest(work: string, test: string, timeoutMs = 300_000): 
     return { tests: `${pass} passed, ${fail} failed`, parts: partsOf(test, r.stdout), scratch };
   } finally {
     removeScratch(scratch);
+    liveScratch.delete(scratch);
   }
 }
+
+/** Scratch directories made and not yet removed: the caller holding the evaluation lock keeps it while any stays */
+export const liveScratch = new Set<string>();
 
 /** The test may lock directories it made, or the scratch itself: open each one again (links are never followed), then remove it all */
 function removeScratch(dir: string): void {

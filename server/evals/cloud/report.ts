@@ -23,8 +23,20 @@ type Graded = GradeRow & {
   ungraded?: string;
   second?: { grade: Grade } | { ungraded: string };
   gold_signals?: Record<string, GoldSignal>;
+  /** Codex runs only: the read fence the run was made under, and the runner code and Codex CLI that made it */
+  fence?: string;
+  harness?: string;
 };
-export type Build = { build?: string | null; variant: string; bundle?: string; rows: Graded[] };
+export type Build = {
+  build?: string | null;
+  variant: string;
+  bundle?: string;
+  /** The read fence the Codex grader ran under */
+  grader_fence?: string;
+  /** The Codex grader's settings, CLI, and grading code */
+  grader_harness?: string;
+  rows: Graded[];
+};
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const fmt = (x: number | null) => (x === null ? "n/a" : x.toFixed(2));
@@ -229,6 +241,47 @@ export function report(builds: Build[], tasks: TaskInfo[], counterfactual: strin
   return lines;
 }
 
+/**
+ * Results read through another fence, or none, may have seen what the others could not, results by other runner code or another Codex
+ * CLI are another measurement, and every grade counted is the Codex grader's, whatever model ran: builds shown or compared together must
+ * share one run fence, one harness, one grader fence, and one grader harness.
+ */
+function sameFences(sides: { label: string; build: Build }[]): void {
+  for (const [field, what, many] of [
+    ["fence", "read fence", "read fences"],
+    ["harness", "harness (runner code and Codex CLI)", "harnesses"],
+  ] as const) {
+    const each = sides.map((s) => {
+      const f = [
+        ...new Set(
+          s.build.rows.filter((r) => r.model === "codex" && !r.excluded).map((r) => r[field] ?? null),
+        ),
+      ];
+      if (f.includes(null))
+        throw new Error(`the ${s.label} build has Codex results with no ${what} recorded`);
+      if (f.length > 1)
+        throw new Error(`the ${s.label} build mixes Codex results made under ${f.length} ${many}`);
+      return f[0];
+    });
+    if (new Set(each.filter(Boolean)).size > 1)
+      throw new Error(`the builds ran Codex under different ${many}; use results made under the same one`);
+  }
+  for (const s of sides)
+    if (!s.build.grader_fence)
+      throw new Error(`the ${s.label} build records no grader fence; grade it again`);
+  if (new Set(sides.map((s) => s.build.grader_fence)).size > 1)
+    throw new Error(
+      "the builds were graded by Codex graders under different read fences; grade them under the same one",
+    );
+  for (const s of sides)
+    if (!s.build.grader_harness)
+      throw new Error(`the ${s.label} build records no grader harness; grade it again`);
+  if (new Set(sides.map((s) => s.build.grader_harness)).size > 1)
+    throw new Error(
+      "the builds were graded under different grader harnesses (Codex settings, CLI, or grading code); grade them with the same one",
+    );
+}
+
 type Side = { label: string; build: Build; fixture: string | undefined; tasks: string };
 
 /**
@@ -261,6 +314,7 @@ export function compare(old: Side, next: Side, tasks: TaskInfo[], same = false):
   // A swapped build sets up other records and runs only its gold rows: against an original one, it is not run-to-run variation
   if (same && old.build.variant !== next.build.variant)
     throw new Error("an A/A comparison needs the same variant on both sides");
+  sameFences([old, next]);
   // A different model behind "claude" or "codex" in any task and condition would read as a difference in the bundle, so each group the
   // report compares must have run the same models on both sides
   const modelsOf = (b: Build, group: string) =>
@@ -697,6 +751,7 @@ if (process.argv[1] === import.meta.filename && process.argv[2] === "--compare")
     throw new Error(
       `the builds come from different bundles (${[...bundles].join(", ")}); report one loop at a time`,
     );
+  sameFences(builds.map((build, i) => ({ label: files[i] ?? "", build })));
   const defs = files.map((f) => fs.readFileSync(path.join(path.dirname(f), "tasks.json"), "utf8"));
   if (new Set(defs).size > 1)
     throw new Error("the builds were made from different task definitions; report one loop at a time");

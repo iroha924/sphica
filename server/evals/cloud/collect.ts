@@ -9,8 +9,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { codexLock, evalCache } from "./codex-home.ts";
+import { codexHarness, currentFence, shieldNow } from "./codex-run.ts";
 import { type FiringRow, pair, readPlan, readTasks, taskFromReceipts } from "./firing.ts";
-import { NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
+import { liveScratch, NO_PARTS, PARTS, type Parts, runHiddenTest } from "./hidden-test.ts";
 import {
   answerFormat,
   capPatch,
@@ -54,6 +56,20 @@ if (!build)
 const plan = readTasks<{ tasks: Task[]; swapped: { tasks: Record<string, string[]> } }>(build);
 // grade reads tasks.json beside loop.json, so it is always written into the build
 const out = path.join(build, "loop.json");
+// Where the runs came from: grade refuses a loop whose runs sat where the fenced Codex could read them
+const runRoots = [args.codex, args.claude, args.logs].map((p) => path.resolve(p ?? ""));
+// Built only when a Codex run is judged: a Claude-only collection needs no Codex tool layout on this machine
+let runNow: { fence: string; harness: string } | undefined;
+const runNowOf = () => {
+  if (!runNow) {
+    const shield = shieldNow();
+    runNow = {
+      fence: currentFence(":workspace", evalCache(), shield),
+      harness: codexHarness(shield.home.codex),
+    };
+  }
+  return runNow;
+};
 const manifest = JSON.parse(fs.readFileSync(path.join(build, "manifest.json"), "utf8")) as {
   build?: string;
   variant?: string;
@@ -100,6 +116,9 @@ type Row = {
   /** The same, per gold key and kept apart: delivered, in a search result, shown by a read */
   gold_signals: Record<string, GoldSignal>;
   presented: string | null;
+  /** Codex runs only: the read fence the run was made under, and the runner code and Codex CLI that made it */
+  fence?: string;
+  harness?: string;
   /** The concrete model a local run used (Claude's --model, Codex's configured model and effort); null when it was not recorded */
   agent_model: string | null;
   /** Local Claude runs only: whether a Sphica search came before the first change to the work tree */
@@ -317,6 +336,7 @@ function main() {
       const task = taskOf(receipts, firing);
       if (!task) continue;
       const work = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-collect-"));
+      liveWorks.add(work);
       try {
         execFileSync("git", ["-C", dir, "worktree", "add", "-q", "--detach", work, branch]);
         // A reused container keeps an earlier run's database copy: count only deliveries after this session's first receipt
@@ -386,6 +406,7 @@ function main() {
         });
       } finally {
         execFileSync("git", ["-C", dir, "worktree", "remove", "--force", work]);
+        if (!fs.existsSync(work)) liveWorks.delete(work);
       }
     }
   }
@@ -404,6 +425,11 @@ function main() {
     if (!fs.existsSync(runs)) continue;
     for (const name of fs.readdirSync(runs)) {
       const dir = path.join(runs, name);
+      // A run kept through a link sits where the link points, which the fence may not deny
+      if (fs.lstatSync(dir).isSymbolicLink()) {
+        console.log(`${name}: a link, not a run directory, left out`);
+        continue;
+      }
       const read = (file: string) =>
         fs.existsSync(path.join(dir, file)) ? fs.readFileSync(path.join(dir, file), "utf8") : null;
       // started.json is the denominator: a run that started counts even when it left no result
@@ -448,28 +474,39 @@ function main() {
         deliveries?: { outcome: string; units: string[] }[] | null;
         claude_model?: string;
         codex_model?: string | null;
+        fence?: string;
+        harness?: string;
       }>(resultText);
       // Cut off while it was written: the run started, so it stays in the denominator
       if (!result) {
         rows.push(excludedRow(model, head.task, head.condition, name, "unreadable result.json"));
         continue;
       }
+      // An excluded Codex run keeps the fence it recorded, so a later look can tell which fence it ran under
+      const excluded = (task: string, condition: string, reason: string): Row => ({
+        ...excludedRow(model, task, condition, name, reason),
+        ...(model === "codex" && result.fence ? { fence: result.fence } : {}),
+        ...(model === "codex" && result.harness ? { harness: result.harness } : {}),
+      });
       // A run whose agent process failed (a timeout, a login error), or whose patch capture after it failed, says nothing about Sphica
       if (result.status !== 0 || result.reason) {
         rows.push(
-          excludedRow(
-            model,
-            result.task,
-            result.condition,
-            name,
-            result.reason ?? `${model} exited ${result.status}`,
-          ),
+          excluded(result.task, result.condition, result.reason ?? `${model} exited ${result.status}`),
         );
+        continue;
+      }
+      // A Codex run made under another fence, or none, could read what the current fence hides
+      if (model === "codex" && result.fence !== runNowOf().fence) {
+        rows.push(excluded(result.task, result.condition, "run without the current read fence"));
+        continue;
+      }
+      if (model === "codex" && result.harness !== runNowOf().harness) {
+        rows.push(excluded(result.task, result.condition, "run by another runner or Codex CLI"));
         continue;
       }
       // An inject run whose hooks logged nothing at all never had Sphica delivering
       if (result.condition === "inject" && !result.deliveries?.length) {
-        rows.push(excludedRow(model, result.task, result.condition, name, "inject run with no delivery log"));
+        rows.push(excluded(result.task, result.condition, "inject run with no delivery log"));
         continue;
       }
       // A run that reached another run, the build, or the evaluation cache may have read answers or gold records it was not given
@@ -480,11 +517,9 @@ function main() {
       );
       if (lookedOutside(read("events.jsonl"), own, places)) {
         rows.push(
-          excludedRow(
-            model,
+          excluded(
             result.task,
             result.condition,
-            name,
             "looked outside its checkout (other runs, the build, or the evaluation cache)",
           ),
         );
@@ -492,12 +527,12 @@ function main() {
       }
       const task = plan.tasks.find((t) => t.id === result.task);
       if (!task) {
-        rows.push(excludedRow(model, result.task, result.condition, name, "unknown task"));
+        rows.push(excluded(result.task, result.condition, "unknown task"));
         continue;
       }
       const gold = goldOf(task);
       if (goldNotGiven(result.condition, gold, read("gold-receipt.txt"))) {
-        rows.push(excludedRow(model, task.id, result.condition, name, NO_GOLD));
+        rows.push(excluded(task.id, result.condition, NO_GOLD));
         continue;
       }
       const events = read("events.jsonl");
@@ -533,6 +568,7 @@ function main() {
           model === "claude" ? searchedBeforeEdit(events, read("edits.jsonl")) : "not_applicable",
         search_loading: model === "claude" ? searchLoading(events) : "not_applicable",
         agent_model: result.claude_model ?? result.codex_model ?? null,
+        ...(model === "codex" ? { fence: result.fence, harness: result.harness } : {}),
         gold_signals:
           model === "codex"
             ? goldSignalsFromCodex(result.condition, gold, emitted, goldReceipt, events)
@@ -580,7 +616,7 @@ function main() {
   }
   fs.writeFileSync(
     out,
-    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", bundle: `${manifest.commit} ${JSON.stringify({ ...manifest.bundle, ...(manifest.matchers ? { matchers: manifest.matchers } : {}) })}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
+    `${JSON.stringify({ build: manifest.build ?? null, variant: manifest.variant ?? "original", run_roots: runRoots, bundle: `${manifest.commit} ${JSON.stringify({ ...manifest.bundle, ...(manifest.matchers ? { matchers: manifest.matchers } : {}) })}`, collected: new Date().toISOString(), rows }, null, 2)}\n`,
   );
   for (const r of rows)
     console.log(
@@ -602,4 +638,15 @@ function main() {
     );
 }
 
-main();
+// Branches are checked out, and hidden tests written, in the temp directory, which a fenced Codex running meanwhile could read: collect
+// holds the same lock, and keeps it while anything it made there stays
+const liveWorks = new Set<string>();
+const release = codexLock(evalCache());
+try {
+  main();
+} finally {
+  const left = [...liveWorks, ...liveScratch].filter((d) => fs.existsSync(d));
+  if (left.length)
+    console.error(`could not remove ${left.join(", ")}; remove it, then codex.lock in ${evalCache()}`);
+  else release();
+}

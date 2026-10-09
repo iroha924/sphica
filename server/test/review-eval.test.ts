@@ -6,25 +6,46 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import {
+  codexLock,
+  codexProfile,
+  evalCache,
+  holdingLock,
+  homeFence,
+  managedCodexSettings,
+} from "../evals/cloud/codex-home.ts";
+import { REPO, repoPlaces } from "../evals/cloud/codex-run.ts";
 import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/cloud/hidden-test.ts";
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
-import { judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
+import {
+  biomeChanged,
+  checkScript,
+  checkUnloaded,
+  copyBiome,
+  judge,
+  m2Rows,
+  m2Tasks,
+  prepare,
+} from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, gradeRulesRun, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
   claudeMcp,
   claudeSettings,
   codexArgs,
+  codexLaneDenies,
   codexMcp,
-  codexProfile,
+  drainLanes,
   evalDenies,
-  managedCodexSettings,
+  outsideCheckout,
   READ_TOOLS,
   RULES_BODY,
+  RUNNER_FILES,
   reviewPrompt,
   rulesPrompt,
+  settleAll,
 } from "../evals/review/runner.ts";
 import { openReader } from "../src/db.ts";
 import { parseDiff, selectForReview } from "../src/review.ts";
@@ -32,6 +53,8 @@ import { tempDir } from "./temp-dir.ts";
 
 const OUTCOMES = new Set(["violation", "complies", "unrelated", "undetermined"]);
 const cases = loadReviewCases();
+// The home the deny lists were built from: building the fixture swaps HOME while it runs, and another test may run meanwhile
+const HOME = os.homedir();
 const built = buildReviewFixture(tempDir("review-eval-"), cases);
 
 test("each review case expects exactly the records review_select selects for its diff", async () => {
@@ -155,16 +178,16 @@ test("a lane starts with only the read tools, no hooks, its own database, and th
   assert.match(profile, /^default_permissions = "eval"$/m);
   assert.match(profile, /^extends = ":read-only"$/m);
   assert.match(profile, /^"\/evals" = "deny"\n"\/r\/codex-home\/auth\.json" = "deny"$/m);
-  // Every run is denied the evaluations, the output directory, and the owner's Codex home, and works outside them
+  // Every run is denied the repository, the output directory, and the owner's Codex home, and works outside them
   const denies = evalDenies("/out");
-  assert.ok(denies.includes(path.resolve(import.meta.dirname, "..", "evals")) && denies.includes("/out"));
-  assert.ok(denies.includes(path.join(os.homedir(), ".codex")));
+  assert.ok(denies.includes(REPO) && denies.includes("/out"));
+  assert.ok(denies.includes(path.join(HOME, ".codex")));
   const denyRead = (claudeSettings(READ_TOOLS, denies) as { sandbox: { filesystem: { denyRead: string[] } } })
     .sandbox.filesystem.denyRead;
   assert.ok(denies.every((d) => denyRead.includes(d)));
   // Codex's profiles read the whole disk unless told otherwise: the owner's other credentials are denied to it too
   for (const credential of [".aws", ".ssh", ".npmrc"])
-    assert.ok(denies.includes(path.join(os.homedir(), credential)), credential);
+    assert.ok(denies.includes(path.join(HOME, credential)), credential);
   const prompt = reviewPrompt("BODY\n", { ...p, model: "codex" });
   assert.ok(prompt.startsWith("BODY\n"), "the aspect body comes first, in full");
   assert.match(prompt, /Read the file \/w\/\.git\/review\.diff/);
@@ -769,6 +792,8 @@ test("a parent step in a command is no reason to exclude a run: the sandbox stop
 });
 
 test("a cached fixture is reused only for the inputs it was built from", async () => {
+  // Building a fixture swaps HOME while it runs: two at once would each run in the other's
+  await built;
   const cases = loadReviewCases();
   const dir = path.join(tempDir("review-cache-"), "fixture");
   const first = await cachedFixture(dir, cases);
@@ -780,7 +805,7 @@ test("a cached fixture is reused only for the inputs it was built from", async (
   await assert.rejects(cachedFixture(dir, changed), /built from other inputs/);
 });
 
-test("an M2 run that names the repository holding the hidden tests is excluded from the counts", () => {
+test("an M2 run that names the repository, which holds the hidden tests, is excluded from the counts", () => {
   const runs = tempDir("m2-runs-");
   const root = path.resolve(import.meta.dirname, "..", "..");
   const put = (name: string, events: string) => {
@@ -804,9 +829,20 @@ test("an M2 run that names the repository holding the hidden tests is excluded f
       item: { type: "command_execution", command: `cat ${root}/server/evals/review/m2-cases.json` },
     }),
   );
-  // Running the check script the condition installs names the pinned Biome inside the repository: that is not looking at the cases
+  // The check script the condition installs runs the run's own Biome copy beside its checkout: that is not looking at the cases
   put(
     "count-rules-codex-2026-10-08T00-00-01-000Z-bbbbbbbb",
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "node /tmp/m2-work-x/biome/node_modules/@biomejs/biome/bin/biome lint .",
+      },
+    }),
+  );
+  // Reaching into the repository for its Biome is reaching into the repository
+  put(
+    "count-rules-codex-2026-10-08T00-00-02-000Z-cccccccc",
     JSON.stringify({
       type: "item.completed",
       item: {
@@ -816,7 +852,7 @@ test("an M2 run that names the repository holding the hidden tests is excluded f
     }),
   );
   const t = m2Rows(runs).get("codex rules");
-  assert.deepEqual([t?.runs, t?.excluded, t?.completed], [2, 1, 1]);
+  assert.deepEqual([t?.runs, t?.excluded, t?.completed], [3, 2, 1]);
 });
 
 test("the rules lane runs on the body M1 measured, which asks for a Biome check", () => {
@@ -851,6 +887,13 @@ test("a Codex lane does not start where an administrator's settings could replac
   assert.equal(managedCodexSettings({ etc, prefs }).length, 2);
 });
 
+test("a Codex lane does not start where the system config could select the old sandbox", () => {
+  const etc = tempDir("codex-etc-");
+  const prefs = tempDir("codex-prefs-");
+  fs.writeFileSync(path.join(etc, "config.toml"), 'sandbox_mode = "danger-full-access"\n');
+  assert.deepEqual(managedCodexSettings({ etc, prefs }), [path.join(etc, "config.toml")]);
+});
+
 test("runs made by different runner code are not tallied as one measurement, and shell lanes run one at a time", () => {
   const runs = tempDir("review-mixed-");
   const made: [string, string][] = [
@@ -880,4 +923,235 @@ test("runs made by different runner code are not tallied as one measurement, and
     run("m2.ts", "--host", "claude", "--condition", "rules", "--jobs", "2").stderr,
     /--jobs is 1 for M2/,
   );
+});
+
+test("review lanes: both hosts are denied the repository wherever it lives, Codex's lanes all of HOME but the tools, and one lock holds", async () => {
+  // A temporary HOME: the runner's own may hold links out of it, which the fence refuses
+  const shield = { places: repoPlaces(), home: homeFence({ home: tempDir("review-lanes-home-") }) };
+  const out = tempDir("review-out-");
+  const cache = evalCache(tempDir("review-cache-home-"));
+  // Claude keeps the owner's HOME for its login; the repository, not only the evaluations, is what it is denied
+  for (const place of shield.places) assert.ok(evalDenies(out).includes(place), place);
+  const codex = codexLaneDenies(out, cache, shield);
+  assert.ok(codex.includes(out) && codex.includes(cache));
+  for (const d of shield.home.denies) assert.ok(codex.includes(d), d);
+  // A checkout, HOME, and TMPDIR outside everything denied, in one tree
+  const work = outsideCheckout("review-work-", codex);
+  assert.ok(!codex.some((d) => work.startsWith(`${d}${path.sep}`)));
+  // The lock is held for the whole run and kept when a temp tree could not be removed
+  await holdingLock(cache, async () => {
+    assert.throws(() => codexLock(cache), /another fenced Codex evaluation/);
+  });
+  codexLock(cache)();
+  await holdingLock(cache, async (leave) => leave(work));
+  assert.throws(() => codexLock(cache), /another fenced Codex evaluation/);
+  fs.rmSync(path.join(cache, "codex.lock"));
+  fs.rmSync(path.dirname(work), { recursive: true, force: true });
+  assert.ok(RUNNER_FILES.includes("../cloud/codex-run.ts"));
+});
+
+test("M2's check runs a Biome copy of the run's own, and a run that changed its copy is excluded", () => {
+  const tree = fs.realpathSync(tempDir("m2-biome-"));
+  const copy = copyBiome(tree);
+  assert.ok(copy.bin.startsWith(`${tree}${path.sep}`), copy.bin);
+  const version = execFileSync(process.execPath, [copy.bin, "--version"], { encoding: "utf8" });
+  assert.match(version, /\d+\.\d+\.\d+/);
+  const before = copy.digest();
+  fs.appendFileSync(copy.bin, "\n// changed\n");
+  assert.notEqual(copy.digest(), before);
+  // The check script a run gets points at the copy, never into the repository
+  const work = path.join(tree, "work");
+  const fixtureRepo = path.join(tree, "repo");
+  fs.mkdirSync(fixtureRepo);
+  // None of the owner's git config (hooks, templates, signing) and none of the owner's Sphica paths
+  const gitEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: os.devNull,
+  };
+  delete gitEnv.SPHICA_DB;
+  delete gitEnv.SPHICA_HOME;
+  execFileSync("git", ["-C", fixtureRepo, "init", "-q"], { env: gitEnv });
+  fs.writeFileSync(path.join(fixtureRepo, "biome.json"), "{}");
+  execFileSync(
+    "git",
+    ["-C", fixtureRepo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "-A"],
+    { env: gitEnv },
+  );
+  execFileSync(
+    "git",
+    ["-C", fixtureRepo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "c"],
+    { env: gitEnv },
+  );
+  prepare(fixtureRepo, work, "rules", path.join(tree, "git"), copy.bin);
+  assert.ok(
+    fs.readFileSync(path.join(work, "scripts", "check.mjs"), "utf8").includes(JSON.stringify(copy.bin)),
+  );
+  // Counted as excluded, whatever its judgement
+  const runs = tempDir("m2-biome-runs-");
+  const name = "count-check-codex-2026-10-08T00-00-00-000Z-aaaaaaaa";
+  fs.mkdirSync(path.join(runs, name));
+  const judgement = { violations: [], falseFailure: false, completed: true, tests: "" };
+  fs.writeFileSync(
+    path.join(runs, name, "result.json"),
+    JSON.stringify({
+      host: "codex",
+      condition: "check",
+      task: "count",
+      status: 0,
+      judgement,
+      biome_changed: true,
+      runner_sha256: "r",
+      cases_sha256: "c",
+    }),
+  );
+  // And a run whose check could not load its Biome had no check at all
+  const unloaded = "count-check-claude-2026-10-08T00-00-01-000Z-bbbbbbbb";
+  fs.mkdirSync(path.join(runs, unloaded));
+  fs.writeFileSync(
+    path.join(runs, unloaded, "result.json"),
+    JSON.stringify({
+      host: "claude",
+      condition: "check",
+      task: "count",
+      status: 0,
+      judgement,
+      check_unloaded: true,
+      runner_sha256: "r",
+      cases_sha256: "c",
+    }),
+  );
+  // It is counted apart and changes nothing else: the model can forge that output, so it neither leaves the count nor stops it
+  const row = m2Rows(runs).get("codex check");
+  assert.deepEqual([row?.runs, row?.excluded, row?.completed, row?.unloaded], [1, 1, 0, 0]);
+  const claudeRow = m2Rows(runs).get("claude check");
+  assert.deepEqual(
+    [claudeRow?.runs, claudeRow?.excluded, claudeRow?.completed, claudeRow?.unloaded],
+    [1, 0, 1, 1],
+  );
+});
+
+test("a check that could not load Biome is read only from the check's own output, never from the model's text", () => {
+  const missing = "Error: Cannot find module '/x/@biomejs/biome/bin/biome'";
+  const script = path.join(fs.realpathSync(tempDir("m2-check-script-")), "check.mjs");
+  const given = checkScript("/x/@biomejs/biome/bin/biome");
+  fs.writeFileSync(script, given);
+  const unloaded = (events: string) => checkUnloaded(events, script, given);
+  const codex = (command: string, output: string) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "command_execution", command, aggregated_output: output },
+    });
+  const claude = (command: string, output: string) =>
+    [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "t1", content: output }] },
+      }),
+    ].join("\n");
+  assert.equal(unloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", missing)), true);
+  assert.equal(unloaded(claude("node scripts/check.mjs", missing)), true);
+  // The same words in another command's output, in the final answer, or in a message do not count
+  assert.equal(unloaded(codex("/bin/zsh -lc 'echo hi'", missing)), false);
+  assert.equal(unloaded(claude("echo hi", missing)), false);
+  assert.equal(
+    unloaded(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: missing } })),
+    false,
+  );
+  assert.equal(unloaded(JSON.stringify({ type: "result", result: missing })), false);
+  assert.equal(unloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", "Checked 18 files")), false);
+  // A compound command that also runs the check is not the check's own output
+  assert.equal(
+    unloaded(codex("/bin/zsh -lc \"printf 'Cannot find module @biomejs'; node scripts/check.mjs\"", missing)),
+    false,
+  );
+  assert.equal(
+    unloaded(claude("echo 'Cannot find module @biomejs' && node scripts/check.mjs", missing)),
+    false,
+  );
+  // A script the model rewrote prints what the model chose
+  fs.writeFileSync(script, `console.log(${JSON.stringify(missing)});\n`);
+  assert.equal(unloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", missing)), false);
+});
+
+test("a lane that throws does not end the run while another lane still has its temp tree, and a deleted Biome copy counts as changed", async () => {
+  const order: string[] = [];
+  await assert.rejects(
+    settleAll([
+      async () => {
+        throw new Error("first lane failed");
+      },
+      async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        order.push("second lane finished");
+      },
+    ]),
+    /first lane failed/,
+  );
+  assert.deepEqual(order, ["second lane finished"]);
+  const tree = fs.realpathSync(tempDir("m2-biome-gone-"));
+  const copy = copyBiome(tree);
+  const pinned = copy.digest();
+  assert.equal(biomeChanged(copy, pinned), false);
+  fs.rmSync(path.join(tree, "biome"), { recursive: true, force: true });
+  assert.equal(biomeChanged(copy, pinned), true);
+});
+
+test("a queue of lanes starts no lane once a temp tree was left behind", async () => {
+  const started: number[] = [];
+  let left = false;
+  await assert.rejects(
+    drainLanes(
+      [1, 2, 3],
+      1,
+      async (n) => {
+        started.push(n);
+        if (n === 1) left = true;
+      },
+      () => left,
+    ),
+    /left behind/,
+  );
+  assert.deepEqual(started, [1]);
+});
+
+test("review runs made under different read fences are not tallied as one measurement, and outputs stay in the cache", () => {
+  const runs = tempDir("review-fences-");
+  const made: [string, string][] = [
+    ["postgres-codex-2026-10-09T00-00-01-000Z-aaaaaaaa", "f1"],
+    ["postgres-codex-2026-10-09T00-00-02-000Z-bbbbbbbb", "f2"],
+  ];
+  for (const [name, fence] of made) {
+    fs.mkdirSync(path.join(runs, name));
+    fs.writeFileSync(
+      path.join(runs, name, "result.json"),
+      JSON.stringify({ host: "codex", diff: "postgres", runner_sha256: "r", fence }),
+    );
+  }
+  assert.throws(() => gradeAll(runs), /2 settings/);
+  // An output outside the evaluation cache would outlive the lock where later fenced runs are not denied it
+  const home = tempDir("review-out-home-");
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.SPHICA_DB;
+  delete env.SPHICA_HOME;
+  for (const [script, ...rest] of [
+    ["run.ts", "--host", "codex", "--diff", "all"],
+    ["m2.ts", "--host", "codex", "--condition", "rules"],
+  ]) {
+    const r = spawnSync(
+      process.execPath,
+      [
+        path.join(import.meta.dirname, "..", "evals", "review", script ?? ""),
+        ...rest,
+        "--out",
+        tempDir("review-out-"),
+      ],
+      { encoding: "utf8", env },
+    );
+    assert.match(r.stderr, /must be inside/, script);
+  }
 });

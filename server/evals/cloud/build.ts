@@ -16,6 +16,7 @@ import { inline } from "../../src/panel.ts";
 import { createDriver } from "../acceptance/driver.ts";
 import { loadAcceptance, type Step } from "../acceptance/load.ts";
 import { fixtureSteps, rekey, shippedCodexMatcher, shippedMatcher } from "./build-lib.ts";
+import { evalCache, holdingLock, requireInside } from "./codex-home.ts";
 import { planRows, writePlan, writeTasks } from "./firing.ts";
 import { FINISH_SH, GOLD_SH, HOOK_SH, NODE, NODE_SH, SPHICA_SH } from "./slot-scripts.ts";
 
@@ -45,7 +46,9 @@ const runs = Number(args.runs);
 if (!Number.isInteger(runs) || runs < 1)
   throw new Error("--runs takes a whole number of Claude runs per task and condition");
 const buildId = `${args.project}-${variant}-${new Date().toISOString().replace(/[-:.]/g, "")}`;
-const out = path.resolve(args.out ?? path.join(os.homedir(), ".cache", "sphica-eval", "builds", buildId));
+const out = path.resolve(args.out ?? path.join(evalCache(), "builds", buildId));
+// The build holds the gold, the tasks, and the slots' records long after the lock is released: only the cache is denied to every fenced Codex
+requireInside(evalCache(), out, "--out");
 // A build is never rebuilt in place: its firing plan and collected results belong to what was pushed from it
 if (fs.existsSync(out))
   throw new Error(`${out} already exists; give a new --out, or leave it out for a new build id`);
@@ -89,14 +92,18 @@ if (!tasks.length) throw new Error(`no ${args.variant} tasks for ${args.project}
 const sha256 = (buf: Buffer | string) => crypto.createHash("sha256").update(buf).digest("hex");
 
 /** Builds the acceptance world's records once and writes the database to file. */
-async function fixture(file: string): Promise<void> {
+async function fixture(file: string, leave: (tree: string) => void): Promise<void> {
   const { world } = loadAcceptance();
   const driver = await createDriver(world);
   try {
     for (const step of fixtureSteps(plan, args.variant === "swapped")) await driver.run(step);
     await driver.snapshot(file);
   } finally {
-    await driver.done();
+    try {
+      await driver.done();
+    } finally {
+      if (fs.existsSync(driver.dir)) leave(driver.dir);
+    }
   }
 }
 
@@ -186,7 +193,8 @@ function files(dir: string): void {
 
 /** Runs the slot's session start hook as the host would and requires a delivery row, so a hook that never runs fails the build. */
 async function smokeDelivery(dir: string): Promise<void> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-smoke-"));
+  // Under the evaluation cache, which every fenced Codex is denied: in the temp directory a run going on meanwhile could read the copy
+  const tmp = fs.mkdtempSync(path.join(evalCache(), "smoke-"));
   try {
     // A reused container can hold another fixture's copy; the hook must not pick it up
     fs.mkdirSync(path.join(tmp, "eval-sphica"), { recursive: true });
@@ -214,7 +222,7 @@ async function smokeDelivery(dir: string): Promise<void> {
   }
 }
 
-async function main() {
+async function main(leave: (tree: string) => void) {
   const tarball = fs.readFileSync(args.node ?? "");
   if (sha256(tarball) !== NODE.sha256)
     throw new Error(`${args.node} does not match the Node ${NODE.version} sha256`);
@@ -222,7 +230,7 @@ async function main() {
   fs.mkdirSync(out, { recursive: true });
   const base = path.join(out, "fixture.db");
   if (args.fixture) fs.copyFileSync(path.resolve(args.fixture), base);
-  else if (args.project === "tsundoku") await fixture(base);
+  else if (args.project === "tsundoku") await fixture(base, leave);
   else fs.copyFileSync(project?.fixture.split(" ")[0]?.replace(/^~/, os.homedir()) ?? "", base);
   const manifest: Record<string, unknown> = {
     build: buildId,
@@ -355,4 +363,5 @@ async function main() {
   console.log(`built ${CONDITIONS.length} repositories in ${out}`);
 }
 
-await main();
+// The world's records are built in the temp directory, which a fenced Codex running meanwhile could read: the build holds the lock
+await holdingLock(evalCache(), main);
