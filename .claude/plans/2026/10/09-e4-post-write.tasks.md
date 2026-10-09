@@ -90,6 +90,44 @@ base: main
   - コミット: `feat(deliver): decide deliverable records as of a past time for replays`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 53 pass（新しいテスト: 保存より前は 0 件、後で active を外れた記録・後で外した anchor・後で足した anchor・後で採用が付いて効く衝突・後で解決した衝突を時点ごとに確かめ、時点なしは今の状態）。hook は asOf を渡さない。`bun run verify` → exit 0
 
+- [ ] T19: 会話記録を一次資料として読む部分（会話ごとの行の順、成功した呼び出しと結果、人間のプロンプト、compact、Sphica の差し込みの key の解析と不完全の判定）と、入力の固定（未コミットの拒否、DB のスナップショット、会話記録の hash の一覧、forget の検査）
+  - 種別: 追加
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/evals/post-write/transcript.ts`, `server/test/post-write-transcript.test.ts`, `knip.json`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-transcript.test.ts` → 合成の会話記録で、両形式の記録の行の key の完全一致、本文での言及を key にしない、未知の形式の行を含む差し込みを不完全にする、origin が human の行だけを人間のプロンプトにする、compact の後だけを窓にする、subagent を別の会話にする。dirty tree と forget_batch の行で止まる
+  - コミット: `feat(eval): read what reached each conversation from Claude Code transcripts`
+- [ ] T20: M0 を作り直す（時点の資格、会話記録での届いたか、対象の規則、unknown、ラベルの材料、C22 の判定）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T18（時点付きの照合が要る）, T19（会話記録の読み取りが要る）
+  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの後に active になった記録が当たりに入る（新しいテストが落ちる）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの時点で配れなかった記録は当たらず、会話記録の差し込みで届いた記録は除かれ、差し込みが観測されていない会話は別に数え、判定が R・H・N・unknown の境界式どおり
+  - コミット: `fix(eval): replay past writes against the records deliverable then, and what reached the conversation`
+- [ ] T21: M0' を作り直す（重複の無い母集団、呼び出しの列挙からの資格と窓、判定器の検査、ターンを一様に引く原因の内訳）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T18（時点付きの資格が要る）, T19（会話記録の読み取りが要る）
+  - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 編集の後に作られた記録が取りこぼしに入る、missed の無いラベルを配った扱いにする（新しいテストが落ちる）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 資格の無い組・subagent の組・次のプロンプトの無い組が別に数えられ、窓が会話記録で閉じ、判定器が不正なラベルを拒み、原因の内訳がターンを一様に引く
+  - コミット: `fix(eval): measure shell-change misses on records deliverable at the edit, from transcripts`
+- [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
+  - 種別: 追加
+  - 計画: S1, S6
+  - 依存: T21（作り直した M0' が要る）
+  - 変更: `server/evals/post-write/m0-shell.json`
+  - 完了条件: `node server/evals/post-write/shell-miss.ts --decide server/evals/post-write/m0-shell.json` → 保存した判定と同じ。ファイルにコミット・スナップショットの sha256・会話記録の hash・別に数えた件数・両者のラベルと決着が入っている。#219 へのコメントを出した
+  - コミット: `test(eval): remeasure the shell-change misses for #219`
+- [ ] T23: M0 を測り直して #213 を判定し直す（Claude と Codex のラベル）
+  - 種別: 追加
+  - 計画: S1, S2, S4
+  - 依存: T20（作り直した M0 が要る）
+  - 変更: `server/evals/post-write/m0.json`
+  - 完了条件: `cat server/evals/post-write/m0.json` → コミット・スナップショットの sha256・会話記録の hash・集計・40 組の両者のラベルと決着・境界式での判定が入っている。#213 へのコメントを出した
+  - コミット: `test(eval): remeasure the post_write entry check for #213`
+
 ## P2: 今のバンドルでの基準
 
 今の配信では記録が届かない評価タスクと、post_write の hook を流せる runner を用意し、作る前に基準値と揺れを測る。
@@ -186,3 +224,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T03 / 持ち主の指示でラベルを Claude と Codex が付けた / 完了条件の「持ち主のラベル」を「標本とラベル」に読み替え、件名の owner's を外した
 - 2026-10-10 / T03 / S2（M1a）と S4（採否の記録）を担うタスクが取りやめで無くなった / plan の S2・S4 を M0 での打ち切りの形に直し、T03 の計画欄を S1 から S1, S2, S4 にした（T03 で採否を決めたため）
 - 2026-10-10 / T18 / M0' の取りこぼし 20 組のうち 14 組が編集の後に作られた記録で、M0 も今の記録を過去の書き込みに当てていた / 時点付きの配信条件を T18 で足した。M0 と M0' の測り直しは Codex との合意（plan の変更履歴）に沿ってタスクを足す
+- 2026-10-10 / T19〜T23 / M0 と M0' の作り直しと測り直しを plan の変更履歴（Codex と合意）に沿って足した。T03 と T05 の判定は T23 と T22 で置き換える
