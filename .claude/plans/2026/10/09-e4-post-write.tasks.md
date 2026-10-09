@@ -98,14 +98,15 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-transcript.test.ts` → 合成の会話記録で、両形式の記録の行の key の完全一致、本文での言及を key にしない、未知の形式の行を含む差し込みを不完全にする、origin が human の行だけを人間のプロンプトにする、compact の後だけを窓にする、subagent を別の会話にする。dirty tree と forget_batch の行で止まる
   - コミット: `feat(eval): read what reached each conversation from Claude Code transcripts`
   - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-transcript.test.ts` → 3 pass（両形式の記録の行の key、記録の本文にある別の key は key にしない、未知の形式の行で不完全、タスク通知は人間のプロンプトにしない、origin の無い行は unknown、compact の前後、subagent は別の会話でターンの始まりは最初の呼び出し、一時的な git リポジトリで dirty な server/ と forget_batch の行で止まる）。`bun run verify` → exit 0
-- [ ] T20: M0 を作り直す（時点の資格、会話記録での届いたか、対象の規則、unknown、ラベルの材料、C22 の判定）
+- [x] T20: M0 を作り直す（時点の資格、会話記録での届いたか、対象の規則、unknown、ラベルの材料、C22 の判定）
   - 種別: 修正
   - 計画: S1
   - 依存: T18（時点付きの照合が要る）, T19（会話記録の読み取りが要る）
   - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`
   - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの後に active になった記録が当たりに入る（新しいテストが落ちる）
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの時点で配れなかった記録は当たらず、会話記録の差し込みで届いた記録は除かれ、差し込みが観測されていない会話は別に数え、判定が R・H・N・unknown の境界式どおり
-  - コミット: `fix(eval): replay past writes against the records deliverable then, and what reached the conversation`
+  - コミット: `fix(eval): replay writes against records deliverable then and what reached the conversation`
+  - 結果: red は直す前のコードで実測（2020 年の書き込みに、今保存した記録 trace:ext-s1/utc が当たる）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 6 pass（結果の時点で配れない記録は当たらない、その呼び出し自身の pre_edit の差し込みで届いた記録を除く、compact の後は数え直す、失敗・プロジェクトの外・差し込みの未観測・不完全な差し込みの後の書き込みを別に数える、900 字に入る分だけ出る、標本は seed で固定、判定は R・H・N・unknown の境界式どおりで 20 組未満は決まらない）。ラベルの材料を出す `--sheet` は、その時点の権限、書いた本文と old_string、ターンを始めた持ち主のプロンプトを出す。`bun run verify` → exit 0
 - [x] T21: M0' を作り直す（重複の無い母集団、呼び出しの列挙からの資格と窓、判定器の検査、ターンを一様に引く原因の内訳）
   - 種別: 修正
   - 計画: S1

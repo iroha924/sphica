@@ -1,35 +1,36 @@
-// The post_write entry check (M0): past writes from Claude Code transcripts, matched against the current records the way a delivery right
-// after the write would match them, so what it would have delivered can be counted and labelled before it is built. Current records replayed
-// on past inputs, not what past sessions missed.
-// node server/evals/post-write/replay.ts --db <sphica.db> --out <file.json> <transcript dir>...
+// The post_write entry check (M0): past successful writes from Claude Code transcripts, matched against the records deliverable at each
+// write's result, less what had already reached that conversation (read from its transcript, never from the delivery log), so what a
+// delivery right after the write would have shown can be counted and labelled before it is built.
+// node server/evals/post-write/replay.ts --db <sphica.db> --transcripts <dir> --repo <checkout> --snapshot <file> --out <replay.json>
 // node server/evals/post-write/replay.ts --sample <replay.json> --seed <n> --size 40 --out <sample.json>
+// node server/evals/post-write/replay.ts --sheet <sample.json> --db <snapshot> --transcripts <dir> > sheet.md
+// node server/evals/post-write/replay.ts --decide <labels.json>
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { ReadonlyKysely } from "kysely/readonly";
+import { authorityOf } from "../../src/authority.ts";
 import { openReader } from "../../src/db.ts";
 import type { DB } from "../../src/db-types.ts";
 import { namedRecords } from "../../src/deliver.ts";
-import { sessionId } from "../../src/knowledge.ts";
 import { inline } from "../../src/panel.ts";
 import { identify, projectId } from "../../src/project.ts";
 import { head } from "../../src/text.ts";
+import {
+  type Conversation,
+  deliveryObserved,
+  freeze,
+  type Inputs,
+  lastCompact,
+  readConversations,
+  turnStart,
+} from "./transcript.ts";
 
 /** What one delivery would show, as the plan fixes it for post_write: 3 records within 900 characters, each in its shortest line */
 const PER_WRITE = 3;
 const CHARS = 900;
 const WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const DOCUMENT = /\.(md|mdx|markdown|txt|rst)$/i;
-
-export type Write = {
-  session: string;
-  agent: string | null;
-  toolUseId: string;
-  at: string;
-  cwd: string;
-  file: string;
-  text: string;
-};
 
 export type Pair = {
   session: string;
@@ -39,19 +40,23 @@ export type Pair = {
   path: string;
   document: boolean;
   key: string;
+  unit: number;
   hit: "symbol" | "path" | "option";
   why: string;
   shown: boolean;
 };
 
 export type Replay = {
-  inputs: {
-    files: number;
-    lines: number;
+  inputs?: Inputs;
+  counts: {
+    conversations: number;
     unreadable: number;
     writes: number;
     failed: number;
     outside: number;
+    notObserved: number;
+    /** Writes where an earlier delivery in the window could not be read completely, so what was shown is not known */
+    unknown: number;
   };
   pairs: Pair[];
   sessions: { session: string; agent: string | null; writes: number; fires: number }[];
@@ -70,120 +75,6 @@ export function writtenText(name: string, input: Record<string, unknown>): strin
   return null;
 }
 
-/** A transcript time in the form the database stores (milliseconds, UTC), so the two compare as strings; null when it is not a time */
-function isoOf(t: string): string | null {
-  const ms = Date.parse(t);
-  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
-}
-
-/**
- * The successful writes in Claude Code transcript files. A write whose result is an error, or that has no result, is left out (the host
- * runs PostToolUse only after a tool succeeds), and counted.
- */
-export function readTranscripts(files: string[]): { writes: Write[]; inputs: Replay["inputs"] } {
-  const inputs = { files: files.length, lines: 0, unreadable: 0, writes: 0, failed: 0, outside: 0 };
-  const writes: Write[] = [];
-  for (const file of files) {
-    const calls = new Map<string, Write>();
-    // The host runs PostToolUse when the tool returns, after its own pre-edit delivery: a write's time is its result's
-    const ok = new Map<string, string | null>();
-    for (const raw of fs.readFileSync(file, "utf8").split("\n")) {
-      if (!raw.trim()) continue;
-      inputs.lines++;
-      let d: Record<string, unknown>;
-      try {
-        d = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        inputs.unreadable++;
-        continue;
-      }
-      // A line that parses but holds no record (null, a list) or a content item that is not an object is unreadable; the rest still replays
-      if (!d || typeof d !== "object" || Array.isArray(d)) {
-        inputs.unreadable++;
-        continue;
-      }
-      const content = (d.message as { content?: unknown } | null | undefined)?.content;
-      if (!Array.isArray(content)) continue;
-      if (content.some((c) => !c || typeof c !== "object")) inputs.unreadable++;
-      for (const c of content.filter((c) => c && typeof c === "object") as Record<string, unknown>[]) {
-        if (d.type === "assistant" && c.type === "tool_use" && WRITE_TOOLS.has(String(c.name))) {
-          const input = (c.input ?? {}) as Record<string, unknown>;
-          const text = writtenText(String(c.name), input);
-          const target = input.file_path ?? input.notebook_path;
-          if (text === null || typeof target !== "string" || typeof c.id !== "string") continue;
-          calls.set(c.id, {
-            session: String(d.sessionId ?? ""),
-            agent: typeof d.agentId === "string" ? d.agentId : null,
-            toolUseId: c.id,
-            at: String(d.timestamp ?? ""),
-            cwd: String(d.cwd ?? ""),
-            file: target,
-            text,
-          });
-        }
-        if (
-          d.type === "user" &&
-          c.type === "tool_result" &&
-          typeof c.tool_use_id === "string" &&
-          c.is_error !== true
-        )
-          ok.set(c.tool_use_id, typeof d.timestamp === "string" ? d.timestamp : null);
-      }
-    }
-    for (const [id, w] of calls) {
-      const at = isoOf(ok.get(id) ?? w.at);
-      if (ok.has(id) && at) writes.push({ ...w, at });
-      else inputs.failed++;
-    }
-  }
-  inputs.writes = writes.length;
-  writes.sort((a, b) => a.at.localeCompare(b.at) || a.toolUseId.localeCompare(b.toolUseId));
-  return { writes, inputs };
-}
-
-/** Where this conversation's context last restarted before t: the main conversation restarts on compact and clear, a subagent never */
-async function restartBefore(
-  db: ReadonlyKysely<DB>,
-  session: string,
-  agent: string | null,
-  t: string,
-): Promise<string> {
-  if (agent !== null) return "";
-  const r = await db
-    .selectFrom("delivery")
-    .select("at")
-    .where("session_id", "=", session)
-    .where("agent_id", "is", null)
-    .where("event", "=", "session_start")
-    .where("reason", "in", ["compact", "clear"])
-    .where("at", "<=", t)
-    .orderBy("at", "desc")
-    .limit(1)
-    .executeTakeFirst();
-  return r?.at ?? "";
-}
-
-/** The records already emitted to this conversation between its last restart and the write */
-async function emittedBefore(
-  db: ReadonlyKysely<DB>,
-  session: string,
-  agent: string | null,
-  from: string,
-  t: string,
-): Promise<Set<number>> {
-  const rows = await db
-    .selectFrom("delivery as d")
-    .innerJoin("delivery_unit as du", "du.delivery_id", "d.id")
-    .select("du.unit_id")
-    .where("d.session_id", "=", session)
-    .where((eb) => (agent === null ? eb("d.agent_id", "is", null) : eb("d.agent_id", "=", agent)))
-    .where("d.outcome", "=", "emitted")
-    .where("d.at", ">=", from)
-    .where("d.at", "<", t)
-    .execute();
-  return new Set(rows.map((r) => r.unit_id));
-}
-
 /**
  * The project and root of a write's working directory. A Claude Code worktree removed since (`<checkout>/.claude/worktrees/<name>`) is the
  * checkout's project, with paths taken from the worktree's own root.
@@ -195,77 +86,102 @@ export function placeOf(cwd: string): { key: string; root: string } | null {
   return main && m ? { key: main.key, root: m[0] } : null;
 }
 
+/** A record's line without its reason, the form delivery fitting starts from */
+const shortLine = (h: Awaited<ReturnType<typeof namedRecords>>[number]) =>
+  `- ${inline(h.u.key)} (${h.u.kind}${h.u.stance ? ` ${h.u.stance}` : ""}): ${head(inline(h.u.text), 240)}${h.why}`;
+
 /**
- * Each write matched as post_write would match it: records it names, less those emitted to the conversation since its last restart (by
- * the hooks that ran then, or by this replay's own earlier deliveries). Of the first PER_WRITE, those whose shortest lines fit in CHARS
- * are shown, a line that does not fit skipped as delivery fitting skips it.
+ * Each successful write matched as post_write would match it at its result: the records deliverable then that it names, less those that
+ * reached the conversation since its last compaction (its own pre-edit delivery included, and this replay's own earlier deliveries). Of
+ * the first PER_WRITE, those whose shortest lines fit in CHARS are shown. A conversation where Sphica's delivery was not seen before the
+ * write's turn is out of scope, and a write after a delivery that could not be read completely is unknown; both are counted apart.
  */
-export async function replay(file: string, writes: Write[], inputs: Replay["inputs"]): Promise<Replay> {
-  const db = openReader(file);
-  try {
-    const pairs: Pair[] = [];
-    const sessions = new Map<string, Replay["sessions"][number]>();
-    const own = new Map<string, { from: string; units: Set<number> }>();
-    const projects = new Map<string, { id: number; root: string } | null>();
-    for (const w of writes) {
-      if (!projects.has(w.cwd)) {
-        const place = placeOf(w.cwd);
-        const id = place ? await projectId(db, place.key) : null;
-        projects.set(w.cwd, place && id !== null ? { id, root: place.root } : null);
-      }
-      const p = projects.get(w.cwd);
-      const rel = p ? path.relative(p.root, path.resolve(w.cwd, w.file)) : "";
-      if (!p || !rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-        inputs.outside++;
+export async function replay(db: ReadonlyKysely<DB>, conversations: Conversation[]): Promise<Replay> {
+  const counts = {
+    conversations: conversations.length,
+    unreadable: conversations.reduce((n, c) => n + c.unreadable, 0),
+    writes: 0,
+    failed: 0,
+    outside: 0,
+    notObserved: 0,
+    unknown: 0,
+  };
+  const pairs: Pair[] = [];
+  const sessions = new Map<string, Replay["sessions"][number]>();
+  const projects = new Map<string, { id: number; root: string } | null>();
+  for (const c of conversations) {
+    const own = new Map<number, Set<number>>();
+    for (const e of c.events) {
+      if (e.kind !== "call" || !WRITE_TOOLS.has(e.name)) continue;
+      const text = writtenText(e.name, e.input);
+      const target = e.input.file_path ?? e.input.notebook_path;
+      if (text === null || typeof target !== "string") continue;
+      const result = c.events.find((r) => r.kind === "result" && r.id === e.id);
+      if (result?.kind !== "result" || !result.ok || !result.at) {
+        counts.failed++;
         continue;
       }
-      const sid = sessionId(p.id, "claude-code", w.session);
-      const conv = `${w.session}\0${w.agent ?? ""}`;
-      const tally = sessions.get(conv) ?? { session: w.session, agent: w.agent, writes: 0, fires: 0 };
+      counts.writes++;
+      if (!projects.has(e.cwd)) {
+        const place = placeOf(e.cwd);
+        const id = place ? await projectId(db, place.key) : null;
+        projects.set(e.cwd, place && id !== null ? { id, root: place.root } : null);
+      }
+      const p = projects.get(e.cwd);
+      const rel = p ? path.relative(p.root, path.resolve(e.cwd, target)) : "";
+      if (!p || !rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+        counts.outside++;
+        continue;
+      }
+      if (!deliveryObserved(c, result.n)) {
+        counts.notObserved++;
+        continue;
+      }
+      const from = lastCompact(c, result.n);
+      const window = c.events.filter((d) => d.kind === "delivery" && d.n > from && d.n < result.n);
+      const reached = new Set(window.flatMap((d) => (d.kind === "delivery" ? d.keys : [])));
+      const sent = own.get(from) ?? new Set<number>();
+      own.set(from, sent);
+      const named = (await namedRecords(db, p.id, p.root, text, result.at)).filter(
+        (h) => !reached.has(h.u.key) && !sent.has(h.u.id),
+      );
+      // A delivery not read completely may have shown any of these, so what this write would add is not known
+      if (named.length && window.some((d) => d.kind === "delivery" && !d.complete)) {
+        counts.unknown++;
+        continue;
+      }
+      const conv = `${c.session}\0${c.agent ?? ""}`;
+      const tally = sessions.get(conv) ?? { session: c.session, agent: c.agent, writes: 0, fires: 0 };
       sessions.set(conv, tally);
       tally.writes++;
-      const from = await restartBefore(db, sid, w.agent, w.at);
-      const mine = own.get(conv);
-      if (!mine || mine.from !== from) own.set(conv, { from, units: new Set() });
-      const sent = own.get(conv)?.units ?? new Set<number>();
-      const before = await emittedBefore(db, sid, w.agent, from, w.at);
-      const hits = (await namedRecords(db, p.id, p.root, w.text)).filter(
-        (h) => !before.has(h.u.id) && !sent.has(h.u.id),
-      );
-      if (hits.length) tally.fires++;
+      if (named.length) tally.fires++;
       let used = 0;
       const shown = new Set<number>();
-      for (const h of hits.slice(0, PER_WRITE)) {
+      for (const h of named.slice(0, PER_WRITE)) {
         const cost = shortLine(h).length + 1;
         if (used + cost > CHARS) continue;
         used += cost;
         shown.add(h.u.id);
         sent.add(h.u.id);
       }
-      for (const h of hits) {
+      for (const h of named)
         pairs.push({
-          session: w.session,
-          agent: w.agent,
-          toolUseId: w.toolUseId,
-          at: w.at,
+          session: c.session,
+          agent: c.agent,
+          toolUseId: e.id,
+          at: result.at,
           path: rel.split(path.sep).join("/"),
           document: DOCUMENT.test(rel) || rel.split(path.sep).includes("plans"),
           key: h.u.key,
+          unit: h.u.id,
           hit: h.hit,
           why: h.why.trim(),
           shown: shown.has(h.u.id),
         });
-      }
     }
-    return { inputs, pairs, sessions: [...sessions.values()] };
-  } finally {
-    await db.destroy();
   }
+  return { counts, pairs, sessions: [...sessions.values()] };
 }
-
-/** A record's line without its reason, the form delivery fitting starts from */
-const shortLine = (h: Awaited<ReturnType<typeof namedRecords>>[number]) =>
-  `- ${inline(h.u.key)} (${h.u.kind}${h.u.stance ? ` ${h.u.stance}` : ""}): ${head(inline(h.u.text), 240)}${h.why}`;
 
 /** A seeded generator (mulberry32), so a sample is fixed before anyone labels it */
 function seeded(seed: number): () => number {
@@ -303,41 +219,152 @@ export function sample(pairs: Pair[], seed: number, size: number): Pair[] {
   return [...d, ...c];
 }
 
+export type Label = { n: number; label: "R" | "H" | "N" | "unknown" };
+
+/**
+ * The bar fixed before labelling, with U unknown among n labels: build only if 3(N+U) <= n and R >= 1 (every resolution passes), not
+ * built if 3N > n or R + U = 0 (no resolution passes), undecided otherwise. Fewer than 20 labelled pairs decide nothing.
+ */
+export function decide(labels: Label[]): {
+  n: number;
+  R: number;
+  H: number;
+  N: number;
+  U: number;
+  verdict: "build" | "not built" | "undecided";
+} {
+  labels.forEach((l, i) => {
+    if (l.n !== i + 1)
+      throw new Error(`labels must run 1, 2, 3, … without gaps or repeats; found ${l.n} at ${i + 1}`);
+    if (!["R", "H", "N", "unknown"].includes(l.label))
+      throw new Error(`label ${l.n}: ${l.label} is not R, H, N, or unknown`);
+  });
+  const n = labels.length;
+  const count = (k: Label["label"]) => labels.filter((l) => l.label === k).length;
+  const [R, H, N, U] = [count("R"), count("H"), count("N"), count("unknown")];
+  const verdict =
+    n < 20
+      ? "undecided"
+      : 3 * (N + U) <= n && R >= 1
+        ? "build"
+        : 3 * N > n || R + U === 0
+          ? "not built"
+          : "undecided";
+  return { n, R, H, N, U, verdict };
+}
+
+/** The labelling material for one sampled pair: the record as it stood then, the write, and the owner's prompt that opened the turn */
+async function sheetEntry(
+  db: ReadonlyKysely<DB>,
+  n: number,
+  p: Pair,
+  c: Conversation | undefined,
+  dir: string,
+): Promise<string> {
+  const u = await db
+    .selectFrom("unit")
+    .select(["kind", "stance", "text"])
+    .where("id", "=", p.unit)
+    .executeTakeFirst();
+  const options = await db
+    .selectFrom("unit_option")
+    .select(["outcome", "text"])
+    .where("unit_id", "=", p.unit)
+    .orderBy("id")
+    .execute();
+  const authority = (await authorityOf(db, [p.unit], p.at)).get(p.unit);
+  const call = c?.events.find((e) => e.kind === "call" && e.id === p.toolUseId);
+  const written = call?.kind === "call" ? (writtenText(call.name, call.input) ?? "") : "";
+  const old = call?.kind === "call" && typeof call.input.old_string === "string" ? call.input.old_string : "";
+  let prompt = "";
+  if (c && call) {
+    const start = turnStart(c, call.n);
+    if (start !== null) {
+      const line = fs.readFileSync(path.join(dir, c.file), "utf8").split("\n")[start] ?? "";
+      const content = (JSON.parse(line) as { message?: { content?: unknown } }).message?.content;
+      prompt = typeof content === "string" ? content : JSON.stringify(content ?? "");
+    }
+  }
+  return [
+    `## ${n}. ${p.document ? "document" : "code"} ${p.path} (${p.why})`,
+    `record ${p.key}: ${u?.kind}${u?.stance ? ` ${u.stance}` : ""}, ${authority} as of the write`,
+    `  ${u?.text}`,
+    ...options.map((o) => `  - ${o.outcome}: ${o.text}`),
+    "the owner's prompt that opened the turn:",
+    `  ${head(prompt, 1500).replaceAll("\n", "\n  ")}`,
+    ...(old ? ["replaced text (old_string):", `  ${head(old, 1500).replaceAll("\n", "\n  ")}`] : []),
+    "written text:",
+    `  ${head(written, 4000).replaceAll("\n", "\n  ")}`,
+    "label: R (proposes or carries out what the record rejected or rules out) / H (same subject, harmless) / N (unrelated) / unknown",
+    "",
+  ].join("\n");
+}
+
 async function main(): Promise<void> {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
+  const { values } = parseArgs({
     options: {
       db: { type: "string" },
+      transcripts: { type: "string" },
+      repo: { type: "string" },
+      snapshot: { type: "string" },
       out: { type: "string" },
       sample: { type: "string" },
       seed: { type: "string" },
       size: { type: "string", default: "40" },
+      sheet: { type: "string" },
+      decide: { type: "string" },
     },
   });
-  if (!values.out) throw new Error("--out is required");
+  if (values.decide) {
+    const labels = (JSON.parse(fs.readFileSync(values.decide, "utf8")) as { labels: Label[] }).labels;
+    console.log(JSON.stringify(decide(labels), null, 2));
+    return;
+  }
   if (values.sample) {
-    if (!values.seed) throw new Error("--seed is required with --sample");
+    if (!values.seed || !values.out) throw new Error("--seed and --out are required with --sample");
     const r = JSON.parse(fs.readFileSync(values.sample, "utf8")) as Replay;
     const s = sample(r.pairs, Number(values.seed), Number(values.size));
     fs.writeFileSync(values.out, `${JSON.stringify({ seed: Number(values.seed), pairs: s }, null, 2)}\n`);
     console.log(`${s.length} pairs (${s.filter((p) => p.document).length} documents)`);
     return;
   }
-  if (!values.db || !positionals.length)
-    throw new Error("--db and at least one transcript directory are required");
-  const files = positionals.flatMap((dir) =>
-    fs
-      .readdirSync(dir, { recursive: true, encoding: "utf8" })
-      .filter((f) => f.endsWith(".jsonl"))
-      .map((f) => path.join(dir, f)),
-  );
-  const { writes, inputs } = readTranscripts(files);
-  const r = await replay(values.db, writes, inputs);
-  fs.writeFileSync(values.out, `${JSON.stringify(r, null, 2)}\n`);
-  const fired = r.sessions.reduce((n, s) => n + s.fires, 0);
-  console.log(
-    `${r.inputs.writes} writes (${r.inputs.failed} failed, ${r.inputs.outside} outside a project, ${r.inputs.unreadable} unreadable lines); ${fired} would deliver; ${r.pairs.length} pairs`,
-  );
+  if (values.sheet) {
+    if (!values.db || !values.transcripts)
+      throw new Error("--db and --transcripts are required with --sheet");
+    const s = JSON.parse(fs.readFileSync(values.sheet, "utf8")) as { pairs: Pair[] };
+    const dir = values.transcripts;
+    const conversations = readConversations(dir);
+    const db = openReader(values.db);
+    try {
+      for (const [i, p] of s.pairs.entries()) {
+        const c = conversations.find((x) => x.events.some((e) => e.kind === "call" && e.id === p.toolUseId));
+        console.log(await sheetEntry(db, i + 1, p, c, dir));
+      }
+    } finally {
+      await db.destroy();
+    }
+    return;
+  }
+  const { db: file, transcripts: dir, repo, snapshot, out } = values;
+  if (!file || !dir || !repo || !snapshot || !out)
+    throw new Error("--db, --transcripts, --repo, --snapshot, and --out are required");
+  const conversations = readConversations(dir);
+  const reader = openReader(file);
+  const projects = await reader.selectFrom("project").select("id").execute();
+  await reader.destroy();
+  if (projects.length !== 1 || !projects[0]) throw new Error("the database must hold exactly one project");
+  const inputs = await freeze({ repo, db: file, projectId: projects[0].id, out: snapshot, conversations });
+  const db = openReader(inputs.snapshot.path);
+  try {
+    const r = { ...(await replay(db, conversations)), inputs };
+    fs.writeFileSync(out, `${JSON.stringify(r, null, 2)}\n`);
+    const fired = r.sessions.reduce((n, s) => n + s.fires, 0);
+    console.log(
+      `${r.counts.writes} writes (${r.counts.failed} failed, ${r.counts.outside} outside a project, ${r.counts.notObserved} where Sphica's delivery was not seen, ${r.counts.unknown} unknown); ${fired} would deliver; ${r.pairs.length} pairs`,
+    );
+  } finally {
+    await db.destroy();
+  }
 }
 
 if (process.argv[1] && /replay\.(ts|js)$/.test(process.argv[1])) await main();
