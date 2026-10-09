@@ -32,6 +32,8 @@ export type Conversation = {
   agent: string | null;
   events: Event[];
   unreadable: number;
+  /** The lines that could not be read, any of which may have been a delivery */
+  unreadableLines: number[];
   sha256: string;
 };
 
@@ -63,7 +65,7 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 export function readConversation(dir: string, file: string): Conversation {
   const raw = fs.readFileSync(path.join(dir, file));
   const events: Event[] = [];
-  let unreadable = 0;
+  const unreadableLines: number[] = [];
   let session = "";
   let agent: string | null = null;
   raw
@@ -75,11 +77,11 @@ export function readConversation(dir: string, file: string): Conversation {
       try {
         d = JSON.parse(text);
       } catch {
-        unreadable++;
+        unreadableLines.push(n);
         return;
       }
       if (!isObject(d)) {
-        unreadable++;
+        unreadableLines.push(n);
         return;
       }
       if (typeof d.sessionId === "string" && !session) session = d.sessionId;
@@ -131,7 +133,8 @@ export function readConversation(dir: string, file: string): Conversation {
     session,
     agent,
     events,
-    unreadable,
+    unreadable: unreadableLines.length,
+    unreadableLines,
     sha256: createHash("sha256").update(raw).digest("hex"),
   };
 }

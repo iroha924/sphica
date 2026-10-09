@@ -22,8 +22,10 @@ import {
   nextHuman,
   readConversation,
   shown,
+  turnStart,
 } from "./transcript.ts";
 
+const SHELL = new Set(["Bash", "PowerShell"]);
 /** How many pairs are drawn at most, how many measured pairs decide, the miss rate the bar is set at, and the turns of the cause report */
 const MAX_DRAWN = 150;
 const MEASURED = 30;
@@ -65,10 +67,52 @@ async function anchoredAt(db: ReadonlyKysely<DB>, unit: number, file: string, t:
   return r !== undefined;
 }
 
+/** Every time in [start, end] at which what is deliverable can change: state, conflict, and adoption history of the project */
+async function changesBetween(
+  db: ReadonlyKysely<DB>,
+  projectId: number,
+  start: string,
+  end: string,
+): Promise<string[]> {
+  const within = (t: string | null) => t !== null && t >= start && t <= end;
+  const [states, links, adoptions] = await Promise.all([
+    db
+      .selectFrom("unit_state as s")
+      .innerJoin("unit as u", "u.id", "s.unit_id")
+      .select("s.at")
+      .where("u.project_id", "=", projectId)
+      .where("s.at", ">=", start)
+      .where("s.at", "<=", end)
+      .execute(),
+    db
+      .selectFrom("unit_link as l")
+      .innerJoin("unit as u", "u.id", "l.from_unit")
+      .select(["l.added_at", "l.resolved_at"])
+      .where("u.project_id", "=", projectId)
+      .where("l.kind", "=", "conflicts")
+      .execute(),
+    db
+      .selectFrom("unit_adoption as a")
+      .innerJoin("unit as u", "u.id", "a.unit_id")
+      .select(["a.added_at", "a.retracted_at"])
+      .where("u.project_id", "=", projectId)
+      .execute(),
+  ]);
+  return [
+    ...new Set(
+      [
+        ...states.map((r) => r.at),
+        ...links.flatMap((r) => [r.added_at, r.resolved_at]),
+        ...adoptions.flatMap((r) => [r.added_at, r.retracted_at]),
+      ].filter((t): t is string => within(t)),
+    ),
+  ].sort();
+}
+
 /**
  * Every (session, turn, path, record) of a path git status alone saw change in a Claude Code turn, for the decisions and constraints that
- * were deliverable at the turn's start or end with an applies_to anchor on the path in the turn: the candidates. Whether one was
- * deliverable at the edit itself is decided after labelling, at that call.
+ * were deliverable at some time in the turn (its start, its end, or any change in between) with an applies_to anchor on the path in the
+ * turn: the candidates. Whether one was deliverable at the edit itself is decided after labelling, at that call.
  */
 export async function population(db: ReadonlyKysely<DB>, projectId: number): Promise<Candidate[]> {
   const changed = await db
@@ -124,9 +168,10 @@ export async function population(db: ReadonlyKysely<DB>, projectId: number): Pro
       .distinct()
       .orderBy("u.id")
       .execute();
-    const [atStart, atEnd] = await Promise.all([at(start), at(end)]);
+    const times = [start, ...(await changesBetween(db, projectId, start, end)), end];
+    const sets = await Promise.all(times.map((t) => at(t)));
     for (const u of anchored)
-      if (atStart.has(u.id) || atEnd.has(u.id))
+      if (sets.some((d) => d.has(u.id)))
         out.push({
           session: r.session,
           external: r.external,
@@ -148,9 +193,14 @@ export function draw(pairs: Candidate[], seed: number): { order: Candidate[]; tu
     const t = `${p.session}\0${p.turn ?? p.end}`;
     byTurn.set(t, [...(byTurn.get(t) ?? []), p]);
   }
+  // A turn, then a path of it, each drawn evenly: a path with many records is no likelier than one with few
   const turns = shuffled([...byTurn.keys()].sort(), seed + 1)
     .slice(0, TURNS)
-    .map((t, i) => shuffled(byTurn.get(t) ?? [], seed + 2 + i)[0] as Candidate);
+    .map((t, i) => {
+      const inTurn = byTurn.get(t) ?? [];
+      const file = shuffled([...new Set(inTurn.map((p) => p.path))].sort(), seed + 2 + i)[0];
+      return inTurn.find((p) => p.path === file) as Candidate;
+    });
   return { order: shuffled(pairs, seed).slice(0, MAX_DRAWN), turns };
 }
 
@@ -197,10 +247,14 @@ export async function outcome(
     const c = conversations.find((x) => x.events.some((e) => e.kind === "call" && e.id === id));
     const call = c?.events.find((e) => e.kind === "call" && e.id === id);
     const result = c?.events.find((e) => e.kind === "result" && e.id === id);
-    if (!c || !call || result?.kind !== "result" || !result.ok || !result.at)
+    if (!c || call?.kind !== "call" || result?.kind !== "result" || !result.ok || !result.at)
       throw new Error(
         `label for pair ${label.index}: call ${id} has no successful result in the session's transcripts`,
       );
+    if (!SHELL.has(call.name))
+      throw new Error(`label for pair ${label.index}: call ${id} is ${call.name}, not a shell call`);
+    if (!call.at || call.at < pair.start || call.at > pair.end)
+      throw new Error(`label for pair ${label.index}: call ${id} at ${call.at} is outside the pair's turn`);
     return { id, c, call, result, when: result.at as string };
   });
   named.sort((a, b) => a.when.localeCompare(b.when) || a.result.n - b.result.n);
@@ -208,11 +262,17 @@ export async function outcome(
     if (!(await at(when)).has(pair.unit) || !(await anchoredAt(db, pair.unit, pair.path, when))) continue;
     const measured = { call: id, at: when };
     if (c.agent !== null) return { outcome: "subagent", ...measured };
-    if (!deliveryObserved(c, result.n)) return { outcome: "not observed", ...measured };
+    if (!deliveryObserved(c, result.n)) {
+      // A line before the turn that could not be read may have been the delivery that puts it in scope
+      const start = turnStart(c, result.n) ?? 0;
+      return { outcome: c.unreadableLines.some((n) => n < start) ? "unknown" : "not observed", ...measured };
+    }
     const end = nextHuman(c, result.n);
     if (end === "none") return { outcome: "no next prompt", ...measured };
     if (end === "unknown") return { outcome: "unknown", ...measured };
-    const s = shown(c, lastCompact(c, call.n), end, pair.key);
+    const from = lastCompact(c, call.n);
+    if (c.unreadableLines.some((n) => n > from && n < end)) return { outcome: "unknown", ...measured };
+    const s = shown(c, from, end, pair.key);
     return { outcome: s === "shown" ? "shown" : s === "not shown" ? "missed" : "unknown", ...measured };
   }
   return { outcome: "ineligible" };
@@ -234,11 +294,10 @@ const verdictOf = (k: number, n: number) => {
   return n < MEASURED ? "undecided" : w.low >= BAR ? "proceed" : w.high < BAR ? "not adopted" : "undecided";
 };
 
-/**
- * The bar fixed before labelling, on the first MEASURED pairs whose outcome is shown, missed, unknown, or unresolved, within MAX_DRAWN.
- * Unknown and unresolved pairs are counted both ways (as missed, and as shown); the verdict stands only when both agree.
- */
-export function decide(outcomes: Outcome[]): {
+/** At most this many doubtful pairs are resolved every way; past it the verdict is undecided */
+const MAX_DOUBTFUL = 8;
+
+type Decision = {
   drawn: number;
   measured: number;
   missed: number;
@@ -246,33 +305,80 @@ export function decide(outcomes: Outcome[]): {
   apart: Record<string, number>;
   interval: { low: number; high: number };
   verdict: "proceed" | "not adopted" | "undecided";
+};
+
+/** The bar on outcomes with nothing doubtful: the first MEASURED shown or missed pairs within MAX_DRAWN */
+function settled(outcomes: ("shown" | "missed" | "apart")[]): {
+  verdict: Decision["verdict"];
+  drawn: number;
+  measured: number;
+  missed: number;
 } {
   let drawn = 0;
-  let missed = 0;
-  let doubtful = 0;
   let measured = 0;
-  const apart: Record<string, number> = {};
+  let missed = 0;
   for (const o of outcomes.slice(0, MAX_DRAWN)) {
     if (measured === MEASURED) break;
     drawn++;
-    if (o === "missed") missed++;
-    else if (o === "unknown" || o === "unresolved") doubtful++;
-    else if (o !== "shown") {
-      apart[o] = (apart[o] ?? 0) + 1;
-      continue;
-    }
+    if (o === "apart") continue;
     measured++;
+    if (o === "missed") missed++;
   }
-  const high = verdictOf(missed + doubtful, measured);
-  const low = verdictOf(missed, measured);
+  return { verdict: verdictOf(missed, measured), drawn, measured, missed };
+}
+
+/**
+ * The bar fixed before labelling. An unknown or unresolved pair may be missed, shown, or not countable at all, which also moves where
+ * the 30 measured pairs end; every combination is tried, and the verdict stands only when all of them agree.
+ */
+export function decide(outcomes: Outcome[]): Decision {
+  const drawnAll = outcomes.slice(0, MAX_DRAWN);
+  const apart: Record<string, number> = {};
+  const doubtAt: number[] = [];
+  const base = drawnAll.map((o, i): "shown" | "missed" | "apart" => {
+    if (o === "shown" || o === "missed") return o;
+    if (o === "unknown" || o === "unresolved") {
+      doubtAt.push(i);
+      return "apart";
+    }
+    return "apart";
+  });
+  // Only the doubtful pairs that some combination reaches before its 30th measured pair can matter
+  const reach = settled(
+    drawnAll.map((o) =>
+      o === "shown" || o === "missed" || o === "unknown" || o === "unresolved" ? "shown" : "apart",
+    ),
+  );
+  const relevant = doubtAt.filter((i) => i < Math.max(reach.drawn, settled(base).drawn));
+  const verdicts = new Set<Decision["verdict"]>();
+  let headline = settled(base);
+  if (relevant.length > MAX_DOUBTFUL) verdicts.add("undecided");
+  else
+    for (let k = 0; k < 3 ** relevant.length; k++) {
+      const trial = [...base];
+      let code = k;
+      for (const i of relevant) {
+        trial[i] = (["missed", "shown", "apart"] as const)[code % 3] as "missed" | "shown" | "apart";
+        code = Math.floor(code / 3);
+      }
+      const r = settled(trial);
+      verdicts.add(r.verdict);
+      if (k === 0) headline = r;
+    }
+  for (const [i, o] of drawnAll.entries()) {
+    if (i >= headline.drawn) break;
+    if (o !== "shown" && o !== "missed" && o !== "unknown" && o !== "unresolved")
+      apart[o] = (apart[o] ?? 0) + 1;
+  }
+  const certain = settled(base);
   return {
-    drawn,
-    measured,
-    missed,
-    doubtful,
+    drawn: Math.max(headline.drawn, certain.drawn),
+    measured: certain.measured,
+    missed: certain.missed,
+    doubtful: relevant.length,
     apart,
-    interval: wilson(missed, measured),
-    verdict: high === low ? high : "undecided",
+    interval: wilson(certain.missed, certain.measured),
+    verdict: verdicts.size === 1 ? ([...verdicts][0] as Decision["verdict"]) : "undecided",
   };
 }
 

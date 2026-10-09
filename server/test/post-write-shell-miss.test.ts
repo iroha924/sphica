@@ -90,6 +90,7 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
           anchors: [{ path: "src/dates.ts", role: "applies_to" }],
         }),
         unit("sqlite", m, "Keep one SQLite file.", { anchors: [{ path: "src/db.ts", role: "applies_to" }] }),
+        unit("mid", m, "Dates are tricky.", { anchors: [{ path: "src/mid.ts", role: "applies_to" }] }),
         {
           key: "tricky",
           kind: "finding",
@@ -110,6 +111,17 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
     seen("t2", "src/db.ts", "status", "2099-01-01T01:10:00.000Z");
     message(db, p, { id: "o1", text: "fix dates", sent: "2099-01-01T00:00:00Z" });
     message(db, p, { id: "o2", text: "now db", sent: "2099-01-01T01:00:00Z" });
+    // mid is deliverable only inside turn t3, neither at its start nor at its end
+    const mid = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/mid'").get()?.id);
+    const run = Number(db.owner.prepare("select run_id from unit_anchor limit 1").get()?.run_id);
+    const state = db.owner.prepare(
+      "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, ?, ?, ?, 'r', ?)",
+    );
+    state.run(mid, "active", "candidate", "2098-06-01T00:00:00.000Z", run);
+    state.run(mid, "candidate", "active", "2099-01-01T03:04:00.000Z", run);
+    state.run(mid, "active", "candidate", "2099-01-01T03:19:00.000Z", run);
+    message(db, p, { id: "o3", text: "mid", sent: "2099-01-01T03:00:00Z" });
+    seen("t3", "src/mid.ts", "status", "2099-01-01T03:20:00.000Z");
 
     const pairs = await population(db.reader, p);
     assert.deepEqual(
@@ -118,6 +130,7 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
         ["t1", "src/dates.ts", "utc", "2099-01-01T00:00:00.000Z", "2099-01-01T00:10:00.000Z"],
         ["t1b", "src/dates.ts", "utc", "2099-01-01T00:00:00.000Z", "2099-01-01T00:12:00.000Z"],
         ["t2", "src/db.ts", "sqlite", "2099-01-01T01:00:00.000Z", "2099-01-01T01:10:00.000Z"],
+        ["t3", "src/mid.ts", "mid", "2099-01-01T03:00:00.000Z", "2099-01-01T03:20:00.000Z"],
       ],
       "one pair per turn and path; a path an edit tool reported, a finding, and a turn before the record existed are not candidates",
     );
@@ -134,6 +147,14 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       result("2099-01-01T01:06:00.000Z", "b2"),
       call("2099-01-01T01:07:00.000Z", "b3"),
       result("2099-01-01T01:07:30.000Z", "b3", true),
+      line("2099-01-01T01:08:00.000Z", {
+        type: "assistant",
+        cwd: "/r",
+        message: {
+          content: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "src/db.ts" } }],
+        },
+      }),
+      result("2099-01-01T01:08:30.000Z", "r1"),
       call("2020-01-01T00:05:00.000Z", "old"),
       result("2020-01-01T00:06:00.000Z", "old"),
       human("2099-01-01T02:00:00.000Z"),
@@ -155,8 +176,19 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       human("2099-01-01T00:30:00.000Z"),
     ];
     fs.writeFileSync(path.join(dir, "quiet.jsonl"), `${quiet.join("\n")}\n`);
+    const broken = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      call("2099-01-01T00:05:00.000Z", "z1"),
+      result("2099-01-01T00:06:00.000Z", "z1"),
+      "{a delivery that could not be read",
+      human("2099-01-01T00:30:00.000Z"),
+    ];
+    fs.writeFileSync(path.join(dir, "broken.jsonl"), `${broken.join("\n")}\n`);
     const conversations = readConversations(dir);
     const [utc, , sqlite] = pairs as [Candidate, Candidate, Candidate];
+    // The same pair over a turn wide enough for every call above
+    const wide = { ...utc, start: "2020-01-01T00:00:00.000Z", end: "2099-12-31T00:00:00.000Z" };
     const of = async (pair: Candidate, calls: string[] | null, only?: string) =>
       (
         await outcome(
@@ -164,28 +196,41 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
           p,
           pair,
           { index: 0, calls },
-          conversations.filter((c) => (only ? c.file === only : c.file !== "quiet.jsonl")),
+          conversations.filter((c) =>
+            only ? c.file === only : !["quiet.jsonl", "broken.jsonl"].includes(c.file),
+          ),
         )
       ).outcome;
     assert.equal(await of(utc, ["b1"]), "missed", "a delivery for another record does not count");
     assert.equal(await of(sqlite, ["b2"]), "shown");
-    assert.equal(await of(utc, ["old"]), "ineligible", "the record did not exist when that call returned");
+    assert.equal(await of(wide, ["old"]), "ineligible", "the record did not exist when that call returned");
     assert.equal(
-      await of(utc, ["old", "b1"]),
+      await of(wide, ["old", "b1"]),
       "missed",
       "the first call at which the pair is eligible is measured",
     );
     assert.equal(
-      await of(utc, ["b4", "b1"]),
+      await of(wide, ["b4", "b1"]),
       "missed",
       "the earliest eligible call counts, whatever order the label lists",
     );
     assert.equal(await of(utc, ["k1"]), "subagent");
-    assert.equal(await of(utc, ["b4"]), "no next prompt");
+    assert.equal(await of(wide, ["b4"]), "no next prompt");
     assert.equal(await of(utc, ["q1"], "quiet.jsonl"), "not observed");
     assert.equal(await of(utc, null), "unresolved");
     assert.equal(await of(utc, []), "not a shell edit");
-    await assert.rejects(of(utc, ["b3"]), /no successful result/, "a failed call cannot be the edit");
+    await assert.rejects(of(wide, ["b3"]), /no successful result/, "a failed call cannot be the edit");
+    await assert.rejects(of(wide, ["r1"]), /not a shell call/, "only a shell call can be the edit");
+    await assert.rejects(
+      of(sqlite, ["b1"]),
+      /outside the pair's turn/,
+      "a call of another turn cannot be the edit",
+    );
+    assert.equal(
+      await of(utc, ["z1"], "broken.jsonl"),
+      "unknown",
+      "a line that could not be read may have been a delivery",
+    );
   } finally {
     await db.done();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -210,7 +255,16 @@ test("the bar counts doubt both ways, sets apart what it cannot measure, and ref
     "undecided",
     "doubt that could cross the bar leaves it undecided",
   );
-  assert.equal(decide(run(20, 9, 1)).verdict, "proceed", "doubt that cannot cross the bar does not matter");
+  assert.equal(
+    decide(["unknown", ...run(20, 10)]).verdict,
+    "proceed",
+    "doubt that settles the same however it resolves does not matter",
+  );
+  assert.equal(
+    decide(run(20, 9, 1)).verdict,
+    "undecided",
+    "a doubtful 30th pair may not count at all, leaving 29 measured",
+  );
   const d = decide(run(20, 10, 0, ["ineligible", "subagent", "not a shell edit"]));
   assert.deepEqual(
     [d.drawn, d.measured, d.apart],
@@ -220,6 +274,12 @@ test("the bar counts doubt both ways, sets apart what it cannot measure, and ref
     decide(run(30, 0, 0, Array<Outcome>(130).fill("ineligible"))).verdict,
     "undecided",
     "only 150 are drawn",
+  );
+  assert.equal(
+    decide([...Array<Outcome>(29).fill("shown"), "unresolved", ...Array<Outcome>(120).fill("ineligible")])
+      .verdict,
+    "undecided",
+    "a pair that may not count cannot complete the 30 and settle the verdict",
   );
   assert.throws(
     () =>
@@ -258,5 +318,23 @@ test("the cause report draws turns evenly, not turns with many pairs more often"
     `the turn with 100 pairs was drawn ${big} times in 200; about half is even`,
   );
   assert.deepEqual(draw(pairs, 7), draw(pairs, 7), "the same seed draws the same");
+  // In one turn, a path with 100 records and a path with 1 are drawn about equally
+  const one = [
+    ...Array.from({ length: 100 }, (_, i) => ({ ...pair(0, i), path: "many" })),
+    { ...pair(0, 500), path: "few" },
+  ];
+  let many = 0;
+  let few = 0;
+  for (let seed = 0; seed < 400; seed++) {
+    const t = draw([...one, ...Array.from({ length: 59 }, (_, i) => pair(i + 1, 1000 + i))], seed).turns.find(
+      (x) => x.turn === "t0",
+    );
+    if (t?.path === "many") many++;
+    if (t?.path === "few") few++;
+  }
+  assert.ok(
+    few > 0.3 * (many + few) && few < 0.7 * (many + few),
+    `paths drawn ${many} to ${few}; about even`,
+  );
   assert.equal(draw(pairs, 7).order.length, 150);
 });

@@ -125,6 +125,16 @@ base: main
   - コミット: `fix(eval): measure the earliest eligible call whatever order a label lists`
   - 結果: red を直す前のコードで実測（`["b4", "b1"]` で no next prompt）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass。`bun run verify` → exit 0
 
+- [x] T26: M0' の偏りを直す（T21 のレビューの F1・F3・F4・F5・F6）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T21（直す対象の M0' のスクリプト）, T19（読めない行の位置を持たせる）
+  - 変更: `server/evals/post-write/shell-miss.ts`, `server/evals/post-write/transcript.ts`, `server/test/post-write-shell-miss.test.ts`, `server/test/post-write-transcript.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → ターンの途中だけ配れた記録が母集団に無い、決まらない組で 30 組目を埋めて不採用にする、Read の呼び出しを受け取る、原因の内訳で記録の多いパスに偏る
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts test/post-write-transcript.test.ts` → ターン中の変化の時刻でも資格を見る、決まらない組は取りこぼし・届いた・数えないの全組み合わせで判定が一致するときだけ確定、shell でない呼び出しとターンの外の呼び出しを拒む、窓とターンの前の読めない行は unknown、原因の内訳はターン、次にパスを一様に引く
+  - コミット: `fix(eval): keep mid-turn records, resolve doubt every way, and check labelled calls`
+  - 結果: red は直す前のコードで実測（mid が母集団に無い、29 shown＋unresolved＋120 ineligible で not adopted、Read の呼び出しを拒まない、パスの選択が記録数に偏る）。F5 は F4 と同時に直したので、窓の中の読めない行の検査を一時的に外してテストが落ちることを確かめ、戻した。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts test/post-write-transcript.test.ts` → 6 pass。`bun run verify` → exit 0
+
 - [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S6
@@ -251,3 +261,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T18 のレビュー / F1（各時点の条件を個別に確かめるテストが無い）は採用して T24 で直した
 - 2026-10-10 / T21 / 資格の判定に時点付きの deliverable の結果が要った / `deliverableIds` を deliver.ts から出し、変更欄に deliver.ts と deliver.test.ts を足した
 - 2026-10-10 / T25 / ラベル付けの途中で、測る呼び出しをラベルの書き順で選んでいたと気付いた。材料の出力も大きすぎた / 修正タスク T25 を足した
+- 2026-10-10 / T21 のレビュー / F1・F3・F4・F5・F6 は採用して T26 で直した。F2（呼び出しの選ぶ順）は T25 で直し済み

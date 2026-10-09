@@ -165,7 +165,15 @@ test("a saved run is fixed to a clean commit, a database snapshot, and the trans
     git("commit", "-qm", "a");
     const p = project(db);
     const conversations = [
-      { file: "s.jsonl", session: "s", agent: null, events: [], unreadable: 0, sha256: "0".repeat(64) },
+      {
+        file: "s.jsonl",
+        session: "s",
+        agent: null,
+        events: [],
+        unreadable: 0,
+        unreadableLines: [],
+        sha256: "0".repeat(64),
+      },
     ];
     const inputs = await freeze({ repo, db: db.file, projectId: p, out, conversations });
     assert.match(inputs.commit, /^[0-9a-f]{40}$/);
