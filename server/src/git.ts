@@ -282,14 +282,18 @@ export async function renamesSince(
   deadline = 10_000,
 ): Promise<Map<string, string | null> | null> {
   const limit = 1000;
+  // One deadline for resolving the commit and the worker both
+  const until = Date.now() + deadline;
   let oid: string;
   try {
-    oid = commitOf(root, commit);
+    oid = commitOf(root, commit, { timeout: deadline });
   } catch {
     return null;
   }
+  const left = until - Date.now();
+  if (left <= 0) return null;
   const out = await inIsolation(root, [{ kind: "renames", commit: oid }], {
-    deadline,
+    deadline: left,
     max: 32 * 1024 * 1024,
   });
   const names = out?.[0];
@@ -385,7 +389,12 @@ export function inIsolation(
     child.stdin?.on("error", () => finish(null));
     child.stdin?.end(
       // The worker's own deadline comes first, so it kills its git before it is killed (Windows has no group to kill)
-      JSON.stringify({ root, ops, max, until: Date.now() + deadline * 0.8 } satisfies WorkerRequest),
+      JSON.stringify({
+        root,
+        ops,
+        max,
+        until: Date.now() + Math.floor(deadline * 0.8),
+      } satisfies WorkerRequest),
     );
   });
 }

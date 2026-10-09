@@ -263,7 +263,7 @@ function work(request: WorkerRequest): WorkerResult {
     const { git, iso, hooks } = isolatedHome(request.root);
     sweep(git);
     // Each git gets what is left of the deadline, so none outlives the worker the caller stopped waiting for
-    const remaining = () => ({ timeout: Math.max(1, request.until - Date.now()) });
+    const remaining = () => ({ timeout: Math.max(1, Math.floor(request.until - Date.now())) });
     try {
       const { env, options } = prepare(request.root, iso, hooks, remaining);
       const out = request.ops.flatMap((op) => {

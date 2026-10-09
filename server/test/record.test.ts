@@ -1,5 +1,6 @@
 // Checking and saving records against real SQLite: quotes become spans of retained text, adoption follows who spoke, and lifecycle
 // moves only when the schema's activation rules pass.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";

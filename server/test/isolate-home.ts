@@ -5,16 +5,27 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-test-")));
-const home = path.join(base, "home");
-const tmp = path.join(base, "tmp");
-fs.mkdirSync(home);
-fs.mkdirSync(tmp);
-Object.assign(process.env, { HOME: home, USERPROFILE: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp });
-process.on("exit", () => {
-  try {
-    fs.rmSync(base, { recursive: true, force: true });
-  } catch {
-    // a directory a test locked stays; sql:reach then names it
-  }
-});
+// Also imported first by the test files that reach the git worker, so running one file directly is isolated too; the second load in a
+// process does nothing
+if (!process.env.SPHICA_TEST_ISOLATED) {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-test-")));
+  const home = path.join(base, "home");
+  const tmp = path.join(base, "tmp");
+  fs.mkdirSync(home);
+  fs.mkdirSync(tmp);
+  Object.assign(process.env, {
+    HOME: home,
+    USERPROFILE: home,
+    TMPDIR: tmp,
+    TMP: tmp,
+    TEMP: tmp,
+    SPHICA_TEST_ISOLATED: base,
+  });
+  process.on("exit", () => {
+    try {
+      fs.rmSync(base, { recursive: true, force: true });
+    } catch {
+      // a directory a test locked stays; sql:reach then names it
+    }
+  });
+}

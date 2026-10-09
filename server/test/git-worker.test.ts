@@ -1,4 +1,5 @@
 // The git worker's own guards: where its isolated directory may be, which files it reads and how, the config it writes, and the deadline
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

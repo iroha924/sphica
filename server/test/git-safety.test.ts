@@ -1,6 +1,7 @@
 // An agent can write its repository's git config and attributes; Sphica runs git there outside the agent's sandbox. Each path that config
 // could run a command through is planted with a program that leaves a mark, shown to mark when plain git runs, and shown to leave none
 // when Sphica's git runs.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -224,7 +225,19 @@ test("filters, diff drivers, and textconv the repository names run nothing when 
         });
         assert.ok(got.plain.includes(name), `plain git runs the planted ${name} (${what})`);
         assert.deepEqual(got.sphica, [], `${what} runs the planted ${name}`);
-        assert.ok(got.result, `${what} still answers with ${name} planted`);
+        // The answer is the real one, not a failure that ran nothing: a.txt is seen as changed
+        const result = got.result as
+          | Awaited<ReturnType<typeof snapshot>>
+          | Awaited<ReturnType<typeof renamesSince>>
+          | Awaited<ReturnType<typeof localChange>>;
+        if (what === "snapshot")
+          assert.ok(result && "entries" in result && "a.txt" in result.entries, `${what} with ${name}`);
+        else if (what === "renamesSince") assert.ok(result instanceof Map, `${what} with ${name}`);
+        else
+          assert.ok(
+            result && "files" in result && result.files.some((f) => f.path === "a.txt"),
+            `${what} with ${name}: ${JSON.stringify(result).slice(0, 200)}`,
+          );
       }
     }
   });

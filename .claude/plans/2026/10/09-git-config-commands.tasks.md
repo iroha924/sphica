@@ -123,6 +123,18 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --test test/git-worker.test.ts` → T04 の git.ts と git-worker.ts（HEAD から戻して確認）で 7 件失敗した（6 件の指摘と、引数の形を変えた掃除のテスト）
   - 結果: `cd server && node --test test/git-worker.test.ts` → 11 件 pass
 
+- [x] T13: T05・T12 のレビューの指摘を直す（rename の検出で commit の解決と worker が 1 つの締め切りを分ける、テストを 1 ファイルだけ直接流しても HOME を一時ディレクトリへ向ける、攻撃テストで安全側の答えの中身を確かめる）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T05（直す対象）
+  - 変更: `server/src/git.ts`, `server/src/git-worker.ts`, `server/test/isolate-home.ts`, `server/test/read.test.ts`, `server/test/record.test.ts`, `server/test/review-bridge.test.ts`, `server/test/git-safety.test.ts`, `server/test/git-worker.test.ts`
+  - red: `cd server && node --test test/git-safety.test.ts` → T06 の本体で 1 件失敗する（中身を確かめると、clean を仕込んだリポジトリの `renamesSince` が null）
+  - 完了条件: `cd server && node --test test/git-safety.test.ts test/git-worker.test.ts test/read.test.ts test/review-bridge.test.ts` → 全件 pass。`.sphica/git` を通常のファイルにした HOME で read・record・review-bridge のテストを 1 ファイルずつ直接流して全件 pass
+  - コミット: `fix(git): share deadlines, round worker timeouts, and keep direct test runs off HOME (T13)`
+  - 結果: `cd server && node --test --test-name-pattern="filters, diff drivers" test/git-safety.test.ts` → T06 の本体で 3 回とも失敗した（`renamesSince with clean`）。worker が `The value of "timeout" is out of range ... Received 7939.60009765625` を返していた（締め切りの 8 割が小数になる）
+  - 結果: `.sphica/git` を通常のファイルにした HOME で `node --test test/read.test.ts`・`test/record.test.ts`・`test/review-bridge.test.ts` → 直す前は 1・2・12 件失敗、直した後は 0 件
+  - 結果: `cd server && node --test test/git-safety.test.ts test/git-worker.test.ts test/read.test.ts test/review-bridge.test.ts` → 2 回とも 37 件 pass
+
 - [x] T14: T11 のレビューの指摘を直す（node:child_process を読み込めるモジュールを一覧に限り、その中で git を起動するのを git.ts と git-worker.ts に限る。文字列はエスケープを戻し、テンプレートの各部分も見る）
   - 種別: 修正
   - 計画: S5
@@ -185,4 +197,5 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T05 / 締め切りのテストが並行の実行でときどき落ちた（worker と親の締め切りが同じで、親が先に worker を止めると孫の git が残る）。worker の締め切りを親の 8 割にし、POSIX ではプロセスグループごと止める
 - 2026-10-09 / T05 / 変更欄に `server/evals/acceptance/driver.ts` を足した。onHook が非同期になり、driver の呼び出しを lint（noFloatingPromises）が見つけたので await した
 - 2026-10-09 / T06 / hook の陽性対照で、テスト用の素の git（update-index）が hook を走らせて印が付き、Sphica が走らせたように見えた。index を作り直した後に印を消してから測る形にした
+- 2026-10-09 / T05 / Codex のタスクレビュー（9fb9740c）: F1（rename の検出の事前処理が締め切りの外、P2）、F2（テストを直接流すと HOME が隔離されない、P2）、F3（攻撃テストが失敗の答えでも通る、P2）を採用し、T13 を足した。F3 を直したテストが、締め切りの 8 割が小数になって worker が失敗する不具合を見つけた
 - 2026-10-09 / T11 / Codex のタスクレビュー（dac3b908）: F1〜F3（P2）を採用し、T14 を足した。字句の検査では実行時に組み立てる名前まで捕まえられないので、子プロセスを起動できるモジュールを 5 つに絞り、残りはレビューで見る、と検査のコメントに書いた

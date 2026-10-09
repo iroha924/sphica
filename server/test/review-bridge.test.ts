@@ -1,5 +1,6 @@
 // The bridge into the user's own review commands, against real SQLite and a real git checkout: which reviews get the applicable
 // decisions, which stay quiet, and when it says it could not check instead of pretending nothing applies.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
