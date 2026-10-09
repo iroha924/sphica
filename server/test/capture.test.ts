@@ -38,7 +38,7 @@ import { pendingText } from "../src/extract.ts";
 import { nameLocal } from "../src/project.ts";
 import { bytes, mask, sha256 } from "../src/text.ts";
 import { callSession } from "../src/trace.ts";
-import { snapshot } from "../src/worktree.ts";
+import { changed, snapshot } from "../src/worktree.ts";
 import { at, insert, project, session, statements, tempDb } from "./temp-db.ts";
 
 // These tests swap HOME to protect the real queue. Bun's os.homedir() ignores the swap and would delete the real queue.
@@ -482,6 +482,28 @@ test("a self-referential symlink in the tree does not stop the snapshot", () => 
   fs.writeFileSync(path.join(repo, "a.txt"), "a");
   const snap = snapshot(repo);
   assert.deepEqual(Object.keys(snap?.entries ?? {}).sort(), ["a.txt", "loop"]);
+});
+
+// A turn that commits many files still reports them: the commit-to-commit listing is not cut at git's default output size
+test("files committed in a turn are found even when their names fill more than a megabyte", () => {
+  const repo = fs.mkdtempSync(path.join(home, "many-"));
+  const git = (args: string[], input?: string) =>
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+      encoding: "utf8",
+      input,
+      maxBuffer: 64 * 1024 * 1024,
+    }).trim();
+  git(["init", "-q"]);
+  git(["commit", "-q", "--allow-empty", "-m", "start"]);
+  const before = git(["rev-parse", "HEAD"]);
+  // 12,000 paths of 96 characters, all one blob, written to the index without touching the work tree
+  const blob = git(["hash-object", "-w", "--stdin"], "x\n");
+  const names = Array.from({ length: 12_000 }, (_, i) => `d/${String(i).padStart(6, "0")}-${"n".repeat(87)}`);
+  git(["update-index", "--index-info"], names.map((n) => `100644 ${blob}\t${n}`).join("\n"));
+  const tree = git(["write-tree"]);
+  const after = git(["commit-tree", tree, "-p", before, "-m", "many"]);
+  const got = changed(repo, { head: before, entries: {} }, { head: after, entries: {} });
+  assert.equal(got.length, 200, "the turn's cap, not nothing");
 });
 
 // The database refuses a path with a control character: such a file is left out, so it cannot make its turn's record rejected

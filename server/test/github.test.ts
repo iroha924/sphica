@@ -501,34 +501,36 @@ test("gh reads pull requests and the signed-in user from github.com only", async
 });
 
 // gh runs outside the agent's sandbox: started in the agent's repository, or with its GIT_* variables, it could read that repository's config
-test("gh starts outside the repository, without GIT_ variables", async () => {
+test("gh starts at HOME, outside the repository, without GIT_ variables", async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-fake-gh-"));
   const log = path.join(bin, "seen.json");
   const saved = {
     PATH: process.env.PATH,
     GIT_DIR: process.env.GIT_DIR,
     git_work_tree: process.env.git_work_tree,
+    TMPDIR: process.env.TMPDIR,
+    TMP: process.env.TMP,
+    TEMP: process.env.TEMP,
   };
   try {
     fs.writeFileSync(
       path.join(bin, "gh"),
-      `#!${process.execPath}\nconst fs = require("node:fs");\nfs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync(process.cwd()), git: Object.keys(process.env).filter((k) => /^GIT_/i.test(k)) }));\nprocess.stdout.write(process.argv[3] === "user" ? '{"id":42,"login":"hana"}' : "{}");\n`,
+      `#!${process.execPath}\nconst fs = require("node:fs");\nfs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), git: Object.keys(process.env).filter((k) => /^GIT_/i.test(k)) }));\nprocess.stdout.write(process.argv[3] === "user" ? '{"id":42,"login":"hana"}' : "{}");\n`,
       { mode: 0o755 },
     );
     process.env.PATH = `${bin}${path.delimiter}${saved.PATH ?? ""}`;
     process.env.GIT_DIR = path.join(bin, "elsewhere");
     process.env.git_work_tree = bin;
+    // A temp directory that cannot be written plays no part: gh makes nothing there
+    process.env.TMPDIR = path.join(bin, "missing");
+    process.env.TMP = process.env.TMPDIR;
+    process.env.TEMP = process.env.TMPDIR;
+    assert.deepEqual(await ghUser(), { ok: true, id: 42, login: "hana" });
     for (const call of [() => ghUser(), () => gh("o/r")("pulls/1")]) {
       await call();
-      const seen = JSON.parse(fs.readFileSync(log, "utf8")) as {
-        cwd: string;
-        entries: string[];
-        git: string[];
-      };
-      assert.ok(!seen.cwd.startsWith(fs.realpathSync(process.cwd())), seen.cwd);
-      assert.deepEqual(seen.entries, [], "an empty directory");
+      const seen = JSON.parse(fs.readFileSync(log, "utf8")) as { cwd: string; git: string[] };
+      assert.equal(fs.realpathSync(seen.cwd), fs.realpathSync(os.homedir()));
       assert.deepEqual(seen.git, []);
-      assert.equal(fs.existsSync(seen.cwd), false, "removed after the call");
     }
   } finally {
     for (const [k, v] of Object.entries(saved))

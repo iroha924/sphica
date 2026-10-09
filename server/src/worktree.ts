@@ -10,7 +10,7 @@ export type Snapshot = { head: string | null; entries: Record<string, string> };
 /** Paths reported per turn at most. A generated tree or a mass rename is not worth a row per file. */
 const MAX_PATHS = 200;
 
-const LIMITS = { timeout: 5_000 };
+const LIMITS = { timeout: 5_000, max: 16 * 1024 * 1024 };
 
 /**
  * Paths git prints relative to the root. Ones the edit table would refuse (a backslash in a POSIX name, a control character) are

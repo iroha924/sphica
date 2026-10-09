@@ -54,6 +54,28 @@ base: main
   - 結果: `bun run architecture` → exit 0（git starters: only server/src/git.ts and server/src/git-worker.ts start git）
   - 結果: `cd server && node --test test/architecture.test.ts` → 1 件 pass（execFileSync・spawn・exec の 3 形で `stray.ts starts git` の exit 1、git.ts を空にすると `no module starts git` の exit 1）
 
+- [x] T09: T01 のレビューの指摘を直す（commit 間の変更ファイルの取得の上限を 16 MB に戻す、ruleFiles の安全性テストで中身と incomplete を確かめる）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（直す対象）
+  - 変更: `server/src/worktree.ts`, `server/test/capture.test.ts`, `server/test/git-safety.test.ts`
+  - red: `cd server && node --test --test-name-pattern="more than a megabyte" test/capture.test.ts` → T01 の本体で 1 件失敗する（`changed` が 0 件を返す）
+  - 完了条件: `cd server && node --test test/capture.test.ts test/git-safety.test.ts` → 全件 pass
+  - コミット: `fix(git): keep the listing limits and check rule files fully (T09, T10)`
+  - 結果: `cd server && node --test --test-name-pattern="more than a megabyte" test/capture.test.ts` → T01 の本体で 1 件失敗した（actual: 0, expected: 200）
+  - 結果: `cd server && node --test test/capture.test.ts test/git-safety.test.ts test/github.test.ts` → 89 件 pass
+
+- [x] T10: T02 のレビューの指摘を直す（gh の起動場所を一時ディレクトリから HOME に変え、作成と削除の失敗が gh の結果を上書きしないようにする）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T02（直す対象）
+  - 変更: `server/src/github.ts`, `server/test/github.test.ts`
+  - red: `cd server && node --test --test-name-pattern="gh starts at HOME" test/github.test.ts` → T02 の本体で、temp に書けないときに `ghUser()` が `{ ok: false, reason: "missing" }` を返して失敗する
+  - 完了条件: `cd server && node --test test/github.test.ts` → 全件 pass
+  - コミット: `fix(git): keep the listing limits and check rule files fully (T09, T10)`
+  - 結果: `cd server && node --test --test-name-pattern="gh starts at HOME" test/github.test.ts` → T02 の本体（github.ts を stash して確認）で 1 件失敗した（actual: { ok: false, reason: 'missing' }）
+  - 結果: `cd server && node --test test/github.test.ts` → 16 件 pass
+
 ## P2: 作業ツリーの比較を別の git ディレクトリと子プロセスへ移す
 
 status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先で子プロセスから流れ、どの設定のフィルタ・diff ドライバ・hook も走らない。
@@ -112,3 +134,5 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T01 / 変更欄から `server/src/repo-facts.ts` を外した（前: 含む、後: 含まない）。repo-facts.ts は `commitHolds` と `repoFiles` を名前で読むだけで、git.ts の側で同じ名前のまま直したので変える所が無かった
 - 2026-10-09 / T01 / 作業ツリーを比べる操作（status、作業ツリー対 commit の diff、renamesSince）も、T05 までの間は git.ts の関数として固定のキーを打ち消して流す。T05 で子プロセスへ移す
 - 2026-10-09 / T08 / pre-commit の bundle の検査が、出荷物の入力を変えたコミットにバージョンの同期を求めて T01 のコミットを止めた。T08 の依存を「T07」から「なし」に変え、T01 と同じコミットで 0.6.43 に上げた
+- 2026-10-09 / T01 / Codex のタスクレビュー（a3b9c9f2）: F1（commit 間の変更ファイルの上限が 1 MB に下がった、P2）と F2（ruleFiles の失敗をテストが通す、P2）を採用し、T09 を足した。Codex の実走は read-only のため mkdtemp で失敗しており、テストの通過は Claude 側で確かめた
+- 2026-10-09 / T02 / Codex のタスクレビュー（2f578e1b）: F1（一時ディレクトリの削除の失敗が gh の結果を上書きする、P2）と F2（作成の失敗を gh が無いと扱う、P2）を採用し、T10 を足した。一時ディレクトリをやめて HOME で起動する形にした（HOME の git リポジトリは持ち主のもので、エージェントは HOME に書けない前提に収まる）

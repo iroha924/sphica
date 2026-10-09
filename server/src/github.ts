@@ -2,9 +2,7 @@
 // comments, reviews, review comments with their code position, commits, the merge, and the issues the body closes.
 // Each source keeps its author's GitHub association, which decides who can adopt a proposal; the text is someone else's and is never trusted.
 import { execFile } from "node:child_process";
-import fs from "node:fs";
 import os from "node:os";
-import nodePath from "node:path";
 import { promisify } from "node:util";
 import { type Kysely, sql } from "kysely";
 import { fit } from "./capture.ts";
@@ -68,26 +66,27 @@ const plainEnv = () => ({
   CLICOLOR_FORCE: "0",
 });
 
-/** Runs gh in an empty directory of its own, removed after: started in the agent's repository, gh could read that repository's config */
-async function inEmpty<T>(fn: (cwd: string) => Promise<T>): Promise<T> {
-  const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), "sphica-gh-"));
-  try {
-    return await fn(cwd);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-  }
-}
+/**
+ * Where gh starts: HOME, not the agent's repository, whose config gh's git would read. A repository at HOME is the owner's own, which a
+ * sandboxed agent cannot write; nothing is created, so nothing can fail to be made or removed.
+ */
+const ghCwd = () => os.homedir();
 
 export const gh =
   (repo: string, timeout = 60_000): Get =>
   async (path, all = false) => {
-    const { stdout } = await inEmpty((cwd) =>
-      exec(
-        "gh",
-        ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
-        // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
-        { encoding: "utf8", maxBuffer: MAX_RESPONSE, timeout, killSignal: "SIGKILL", env: plainEnv(), cwd },
-      ),
+    const { stdout } = await exec(
+      "gh",
+      ["api", `repos/${repo}/${path}`, ...HOST, ...(all ? ["--paginate", "--slurp"] : [])],
+      // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
+      {
+        encoding: "utf8",
+        maxBuffer: MAX_RESPONSE,
+        timeout,
+        killSignal: "SIGKILL",
+        env: plainEnv(),
+        cwd: ghCwd(),
+      },
     ).catch((e: NodeJS.ErrnoException & { killed?: boolean }) => {
       if (e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
         throw new Error(`${path.split("?")[0]} is too large to read (over ${MAX_RESPONSE / 1024 / 1024} MB)`);
@@ -113,17 +112,15 @@ export async function ghUser(timeout = 15_000): Promise<SignedIn> {
   let stdout: string;
   try {
     // A gh stuck on the network would hold init before it registers the repository; past the limit it is killed (failed)
-    ({ stdout } = await inEmpty((cwd) =>
-      exec("gh", ["api", "user", ...HOST], {
-        encoding: "utf8",
-        maxBuffer: 1024 * 1024,
-        timeout,
-        // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
-        killSignal: "SIGKILL",
-        env: plainEnv(),
-        cwd,
-      }),
-    ));
+    ({ stdout } = await exec("gh", ["api", "user", ...HOST], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+      timeout,
+      // SIGTERM can be ignored (a wrapper script), and execFile waits for the child to exit
+      killSignal: "SIGKILL",
+      env: plainEnv(),
+      cwd: ghCwd(),
+    }));
   } catch (e) {
     // Once gh ran, execFile gives its exit status (null when a signal ended it); when it never started, an error name
     const code: unknown = (e as { code?: unknown }).code;

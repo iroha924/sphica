@@ -82,6 +82,8 @@ test("core.fsmonitor in the repository's config, or in a file it includes, runs 
     assert.ok(got.result, `${what} still answers`);
   }
   assert.deepEqual(repoFiles(t.repo)?.sort(), ["CLAUDE.md", "a.txt"]);
+  const rules = ruleFiles(t.repo);
+  assert.deepEqual([rules.files.map((f) => f.path), rules.incomplete], [["CLAUDE.md"], null]);
   // The same key in a file the config includes
   t.git("config", "--unset", "core.fsmonitor");
   const included = path.join(t.base, "included.cfg");
