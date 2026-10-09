@@ -160,13 +160,14 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --import ./test/isolate-home.ts --test test/git-safety.test.ts` → 5 件 pass。陽性対照: 素の git で clean・process・info/attributes のフィルタ・外部 diff・textconv・diff.external・.git/hooks の post-index-change・submodule の fsmonitor・config.worktree の fsmonitor・持ち主の global のフィルタが印を付けた（config で定義した hook は git 2.54 で印を付けた）。互換: linked worktree・split index・sparse checkout・SHA-256・submodule の commit の変化で、隔離した status が素の git の status と一致
   - 結果: 64 MB の index（42 万エントリー、全部 skip-worktree）で `inIsolation(root, [{ kind: "status" }])` → 259〜313 ms（3 回）。同じリポジトリの素の `git status` は 30 ms。締め切り 5 秒に収まる（手で測った値。CI のテストには入れていない）
 
-- [ ] T07: CI の macOS と Windows の job で git-safety.test.ts を流し、ubuntu:22.04 のコンテナの job を足す
+- [x] T07: CI の macOS と Windows の job で git-safety.test.ts を流し、ubuntu:22.04 のコンテナの job を足す
   - 種別: 追加
   - 計画: S6
   - 依存: T06（流すテストが要る）
   - 変更: `.github/workflows/check.yml`
   - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし。push の後の `gh pr checks <PR 番号>` で、新しい job と macOS・Windows の job が pass し、ubuntu:22.04 の job のログに `git version 2.34`
   - コミット: `ci: run the git safety tests on macOS, Windows, and Git 2.34 (T07)`
+  - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。macOS の job に git-safety と git-worker、Windows の job に git-safety（worker のテストは FIFO・POSIX シェルの偽の git・制御文字のファイル名に頼るので macOS と Linux だけ）、ubuntu:22.04（ダイジェストで固定）の job に両方を足した。CI での実走は、持ち主の決定（全部終えてから push）により push の後に確かめる
 
 ## P4: リリース
 

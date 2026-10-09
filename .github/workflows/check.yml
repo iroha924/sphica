@@ -138,6 +138,14 @@ jobs:
           node --test --test-reporter=tap --test-timeout=120000 test/test-run.test.ts | tee test-run.tap
           grep -qx "# fail 0" test-run.tap
           grep -qE "^# pass [1-9]" test-run.tap
+      # Sphica runs git outside the agent's sandbox: config, attributes, and hooks the agent writes must run nothing, here as on Linux
+      - name: Git config the agent writes runs nothing
+        working-directory: server
+        run: |
+          set -euo pipefail
+          node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/git-safety.test.ts test/git-worker.test.ts | tee git.tap
+          grep -qx "# fail 0" git.tap
+          grep -qE "^# pass [1-9]" git.tap
 
   # **What ships must run on Windows too** (AGENTS.md). Development of this repository assumes macOS / Linux, so verify does not run here;
   # it runs the file lock tests, and checks that the bundled tarball starts without node_modules and can create a database with node:sqlite.
@@ -177,6 +185,15 @@ jobs:
           node --test --test-reporter=tap --test-timeout=60000 --test-name-pattern="rolled-back|record_check waits" test/db.test.ts test/reconcile.test.ts | tee rollback.tap
           # A pattern that matches no test still passes, so count the four this step is for
           grep -qx "# pass 4" rollback.tap
+      # Git for Windows runs the commands config names through its own shell; none of them may run from Sphica's git. The worker's own
+      # guards are tested on macOS and Linux (they plant FIFOs, POSIX shell programs, and control characters in file names)
+      - name: Git config the agent writes runs nothing on Windows
+        working-directory: server
+        run: |
+          set -euo pipefail
+          node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/git-safety.test.ts | tee git.tap
+          grep -qx "# fail 0" git.tap
+          grep -qE "^# pass [1-9]" git.tap
       # Prints how much a shell-form hook pays for starting PowerShell on each call; it never fails on the numbers
       - name: Measure hook launch directly and through PowerShell
         run: node scripts/measure-hook-launch.mjs
@@ -223,3 +240,41 @@ jobs:
           node ../scripts/check-hooks-live.mjs "$out/package"
           # doctor's Codex hooks row from the packed CLI, with npm's codex.cmd on PATH as Windows installs it
           node ../scripts/check-codex-trust-live.mjs "$out/package"
+
+
+  # The oldest git Sphica supports reads core.fsmonitor=false as a hook named "false" and has no GIT_NO_LAZY_FETCH: the attack tests run on
+  # Ubuntu 22.04's own git 2.34, and the job fails if that is not the git it runs
+  git-2-34:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401
+    steps:
+      - name: Install git, ps, and what the setup actions need
+        run: |
+          set -eu
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git procps ca-certificates curl unzip xz-utils
+          git --version | tee git-version
+          grep -q "^git version 2\.34\." git-version
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15"
+      - name: Install dependencies
+        run: bun run setup
+      - name: Git config the agent writes runs nothing on git 2.34
+        working-directory: server
+        shell: bash
+        run: |
+          set -euo pipefail
+          git --version | grep -q "^git version 2\.34\."
+          node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/git-safety.test.ts test/git-worker.test.ts | tee git.tap
+          grep -qx "# fail 0" git.tap
+          grep -qE "^# pass [1-9]" git.tap
+
