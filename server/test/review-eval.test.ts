@@ -1021,11 +1021,14 @@ test("M2's check runs a Biome copy of the run's own, and a run that changed its 
       cases_sha256: "c",
     }),
   );
-  // It stops the count rather than leaving that run out
-  assert.throws(() => m2Rows(runs), /could not load Biome/);
-  fs.rmSync(path.join(runs, unloaded), { recursive: true });
+  // It is counted apart and changes nothing else: the model can forge that output, so it neither leaves the count nor stops it
   const row = m2Rows(runs).get("codex check");
-  assert.deepEqual([row?.runs, row?.excluded, row?.completed], [1, 1, 0]);
+  assert.deepEqual([row?.runs, row?.excluded, row?.completed, row?.unloaded], [1, 1, 0, 0]);
+  const claudeRow = m2Rows(runs).get("claude check");
+  assert.deepEqual(
+    [claudeRow?.runs, claudeRow?.excluded, claudeRow?.completed, claudeRow?.unloaded],
+    [1, 0, 1, 1],
+  );
 });
 
 test("a check that could not load Biome is read only from the check's own output, never from the model's text", () => {

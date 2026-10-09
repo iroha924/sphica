@@ -458,6 +458,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="a slot that links out|collect reads local Claude runs like Codex runs|a checkout that is a link" test/eval-codex.test.ts test/eval-claude.test.ts test/hidden-runner.test.ts` → 直す前の本体で 3 件失敗した。seed 528 の Node 26 で review-eval → 直す前に 23 件失敗した
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 188 件 pass。seed 528 の Node 26 で review-eval → 27 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった。M2 の scratch を消せなかったときのロックは、消せない scratch を作るのが難しいため、テストを足していない
 
+- [x] T41: GitHub の Codex のセキュリティレビュー（20bbbf1d）の P2 を直す（M2 で、モデルが check のスクリプトを書き換えて走らせ、元に戻すと `check_unloaded` を立てて集計全体を止められる）。`check_unloaded` は run を外さず集計も止めず、表の列として数えるだけにする
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T40（直す対象の M2 の集計が要る）
+  - 変更: `server/evals/review/m2.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="a run that changed its copy is excluded" test/review-eval.test.ts` → 直す前の本体で 1 件失敗する（集計が止まる）
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): count unloaded M2 checks apart instead of acting on them (T41)`
+  - 結果: `cd server && node --test --test-name-pattern="a run that changed its copy is excluded" test/review-eval.test.ts` → 直す前の本体で 1 件失敗した（集計が止まった）
+  - 結果: `cd server && node --test test/review-eval.test.ts` → 27 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -500,3 +511,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / T38 / GitHub の Codex のセキュリティレビュー（push のたびに自動で走る）の P2。直した。run を外す判定はほかにも（リポジトリへの到達など）モデルの行動から立つが、それは違反として外す方針どおりで、`check_unloaded` は環境の故障を表すので集計を止める側に移した
 - 2026-10-09 / T39 / GitHub の Codex のレビュー（d94fc58d）。P1 が 1 件、P2 が 3 件。4 件とも直した。`/Volumes` を丸ごと deny しても Codex が動き、`/etc/hosts` が読めることを実機で確かめた
 - 2026-10-09 / T40 / GitHub の Codex のレビュー（9f121528）。P1 が 3 件、P2 が 3 件。6 件とも直した。CI の `check (26)` の失敗（seed 528）は、ブランチの前のコミットでも再現し、main でもそのテストを単独で流すと落ちる、前からある順番の依存だった。テストだけの直しなので、この PR で一緒に直した
+- 2026-10-09 / T41 / GitHub の Codex のセキュリティレビュー（20bbbf1d）の P2。モデルが出力を作れる限り、この判定で run を外す・集計を止める形は塞ぐたびに抜け道が出るので、数字を動かさない形に変えた（T38 と T39 の「集計を止める」を取り下げた）

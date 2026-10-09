@@ -387,6 +387,8 @@ type Row = {
   violations: number;
   falseFailures: number;
   completed: number;
+  /** Runs whose check, by its own output, could not load Biome: shown, never acted on, since the model can forge that output */
+  unloaded: number;
 };
 
 const CHECK_COMMANDS = ["node scripts/check.mjs", "node ./scripts/check.mjs"];
@@ -449,8 +451,8 @@ export function checkUnloaded(events: string, script: string, given: string): bo
 
 /**
  * Counts per host and condition, and per task too. A run without its result, or that did not exit 0, is failed; a run whose events name
- * the repository (which holds the hidden tests and the reference check), or another run, or whose Biome copy changed, is excluded. A run
- * whose check could not load Biome stops the count: the environment is broken, and dropping that run alone would let a run leave the count.
+ * the repository (which holds the hidden tests and the reference check), or another run, or whose Biome copy changed, is excluded. Runs
+ * whose check could not load Biome are counted apart and change nothing else: a broken environment shows there for the owner to stop on.
  */
 export function m2Rows(runs: string): Map<string, Row> {
   const rows = new Map<string, Row>();
@@ -478,10 +480,6 @@ export function m2Rows(runs: string): Map<string, Row> {
       biome_changed?: boolean;
       check_unloaded?: boolean;
     };
-    if (r.check_unloaded)
-      throw new Error(
-        `${name}: its check could not load Biome, so the lane had no check; fix the environment and run M2 again`,
-      );
     const events = path.join(runs, name, "events.jsonl");
     const outside = fs.existsSync(events)
       ? lookedOutside(fs.readFileSync(events, "utf8"), { forbidden, runs, run: name })
@@ -494,9 +492,11 @@ export function m2Rows(runs: string): Map<string, Row> {
         violations: 0,
         falseFailures: 0,
         completed: 0,
+        unloaded: 0,
       };
       rows.set(key, t);
       t.runs++;
+      if (r.check_unloaded) t.unloaded++;
       if (outside || r.biome_changed) t.excluded++;
       else if (r.status !== 0 || !r.judgement) t.failed++;
       else {
@@ -511,11 +511,11 @@ export function m2Rows(runs: string): Map<string, Row> {
 
 function report(runs: string) {
   console.log(
-    "| | runs | failed | excluded | runs with a violation | false failures | completed |\n|---|---|---|---|---|---|---|",
+    "| | runs | failed | excluded | runs with a violation | false failures | completed | check could not load Biome |\n|---|---|---|---|---|---|---|---|",
   );
   for (const [k, t] of [...m2Rows(runs)].sort(([a], [b]) => a.localeCompare(b)))
     console.log(
-      `| ${k} | ${t.runs} | ${t.failed} | ${t.excluded} | ${t.violations} | ${t.falseFailures} | ${t.completed} |`,
+      `| ${k} | ${t.runs} | ${t.failed} | ${t.excluded} | ${t.violations} | ${t.falseFailures} | ${t.completed} | ${t.unloaded} |`,
     );
 }
 
