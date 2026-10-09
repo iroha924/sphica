@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { renamesSince, repoFiles } from "../src/git.ts";
+import { inIsolation, renamesSince, repoFiles } from "../src/git.ts";
 import { prepareGlean } from "../src/glean.ts";
 import { localChange } from "../src/review-bridge.ts";
 import { ruleFiles } from "../src/rule-files.ts";
@@ -193,7 +193,16 @@ test("filters, diff drivers, and textconv the repository names run nothing when 
         t.git("config", "diff.evil.command", t.command("extdiff"));
       },
     ],
+    [
+      "textconv",
+      (t) => {
+        fs.writeFileSync(path.join(t.repo, ".gitattributes"), "*.txt diff=evil\n");
+        t.git("config", "diff.evil.textconv", t.command("textconv"));
+      },
+    ],
+    ["external", (t) => t.git("config", "diff.external", t.command("external"))],
   ];
+  const diffs = new Set(["extdiff", "textconv", "external"]);
   await withHome(async () => {
     for (const [name, plant] of cases) {
       const t = trap();
@@ -208,8 +217,7 @@ test("filters, diff drivers, and textconv the repository names run nothing when 
       ];
       for (const [what, call] of calls) {
         unstat(t);
-        const control = () =>
-          name === "extdiff" ? t.plain("diff", "HEAD") : t.plain("status", "--porcelain");
+        const control = () => (diffs.has(name) ? t.plain("diff", "HEAD") : t.plain("status", "--porcelain"));
         const got = await compare(t, control, () => {
           unstat(t);
           return call();
@@ -219,5 +227,203 @@ test("filters, diff drivers, and textconv the repository names run nothing when 
         assert.ok(got.result, `${what} still answers with ${name} planted`);
       }
     }
+  });
+});
+
+/** The git version as numbers, to tell a control that cannot mark on an older git from a broken one */
+const gitVersion = (): number[] =>
+  (/(\d+)\.(\d+)/.exec(execFileSync("git", ["--version"], { encoding: "utf8" })) ?? []).slice(1).map(Number);
+const atLeast = (v: number[], [a, b]: [number, number]) =>
+  (v[0] ?? 0) > a || ((v[0] ?? 0) === a && (v[1] ?? 0) >= b);
+
+/** a.txt's index entry rewritten with no stat data while the file is unchanged: status refreshes and writes the index */
+function restat(t: ReturnType<typeof trap>) {
+  const blob = t.git("rev-parse", "HEAD:a.txt").trim();
+  fs.writeFileSync(path.join(t.repo, "a.txt"), "hi\n");
+  t.git("update-index", "--cacheinfo", `100644,${blob},a.txt`);
+}
+
+test("hooks, a submodule's config, per-worktree config, and the owner's global filters run nothing", async () => {
+  await withHome(async () => {
+    // A hook in .git/hooks, and one defined in config where git supports that
+    const t = trap();
+    fs.copyFileSync(t.mark, path.join(t.repo, ".git", "hooks", "post-index-change.cjs"));
+    fs.writeFileSync(
+      path.join(t.repo, ".git", "hooks", "post-index-change"),
+      `#!/bin/sh\nexec ${JSON.stringify(slash(process.execPath))} ${JSON.stringify(slash(t.mark))} hook\n`,
+      { mode: 0o755 },
+    );
+    // The fixture git that rewrites the entry runs the hook too, so the marks are cleared after it
+    const marksOf = async (run: () => unknown) => {
+      restat(t);
+      t.clear();
+      await run();
+      return t.read();
+    };
+    const plainStatus = () => t.plain("status", "--porcelain");
+    const sphicaStatus = () => snapshot(t.repo);
+    if (process.platform !== "win32")
+      assert.ok((await marksOf(plainStatus)).includes("hook"), "plain git runs the hook");
+    assert.deepEqual(await marksOf(sphicaStatus), []);
+    fs.rmSync(path.join(t.repo, ".git", "hooks", "post-index-change"));
+    t.git("config", "hook.evil.event", "post-index-change");
+    t.git("config", "hook.evil.command", t.command("config-hook"));
+    // Hooks defined in config came in a later git than the oldest one Sphica supports; 2.54 has them
+    if (!(await marksOf(plainStatus)).includes("config-hook"))
+      assert.ok(!atLeast(gitVersion(), [2, 54]), "plain git runs the config hook");
+    assert.deepEqual(await marksOf(sphicaStatus), []);
+  });
+  await withHome(async () => {
+    // A submodule whose own config names an fsmonitor, with a change inside it
+    const t = trap();
+    const sub = path.join(t.base, "sub");
+    execFileSync("git", ["init", "-q", sub], { env: FIXTURE_ENV });
+    fs.writeFileSync(path.join(sub, "s.txt"), "s\n");
+    execFileSync("git", ["-C", sub, "add", "s.txt"], { env: FIXTURE_ENV });
+    execFileSync(
+      "git",
+      ["-C", sub, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "s"],
+      {
+        env: FIXTURE_ENV,
+      },
+    );
+    t.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "sub");
+    t.git("commit", "-qm", "sub");
+    execFileSync(
+      "git",
+      ["-C", path.join(t.repo, "sub"), "config", "core.fsmonitor", t.command("submodule")],
+      {
+        env: FIXTURE_ENV,
+      },
+    );
+    fs.appendFileSync(path.join(t.repo, "sub", "s.txt"), "more\n");
+    const got = await compare(
+      t,
+      () => t.plain("status", "--porcelain"),
+      () => snapshot(t.repo),
+    );
+    assert.ok(got.plain.includes("submodule"), "plain git runs the submodule's fsmonitor");
+    assert.deepEqual(got.sphica, []);
+  });
+  await withHome(async () => {
+    // core.fsmonitor in the work tree's own config
+    const t = trap();
+    t.git("config", "extensions.worktreeConfig", "true");
+    t.git("config", "--worktree", "core.fsmonitor", t.command("worktree-config"));
+    const got = await compare(
+      t,
+      () => t.plain("ls-files", "-z"),
+      () => repoFiles(t.repo),
+    );
+    assert.ok(got.plain.includes("worktree-config"), "plain git runs the per-worktree fsmonitor");
+    assert.deepEqual(got.sphica, []);
+  });
+  await withHome(async () => {
+    // The owner's global config defines a filter; the agent picks it in .gitattributes, and the command it runs is the agent's
+    const t = trap();
+    const global = path.join(os.homedir(), ".gitconfig");
+    fs.writeFileSync(
+      global,
+      `[filter "owner"]\n\tclean = ${t.command("global").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}\n`,
+    );
+    fs.writeFileSync(path.join(t.repo, ".gitattributes"), "*.txt filter=owner\n");
+    unstat(t);
+    const got = await compare(
+      t,
+      () =>
+        spawnSync("git", ["-C", t.repo, "status", "--porcelain"], {
+          env: { ...FIXTURE_ENV, GIT_CONFIG_GLOBAL: global },
+          stdio: "ignore",
+        }),
+      () => {
+        unstat(t);
+        return snapshot(t.repo);
+      },
+    );
+    assert.ok(got.plain.includes("global"), "plain git runs the owner's global filter");
+    assert.deepEqual(got.sphica, []);
+  });
+});
+
+/** Status as Sphica reads it through the isolated git directory, and as plain git prints it in the repository itself */
+async function bothStatus(root: string): Promise<{ sphica: string | undefined; plain: string }> {
+  const sphica = (await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }))?.[0];
+  const plain = execFileSync(
+    "git",
+    ["-C", root, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=dirty"],
+    { encoding: "utf8", env: FIXTURE_ENV },
+  );
+  return { sphica, plain };
+}
+
+test("the isolated status matches plain git for linked work trees, split and sparse indexes, SHA-256, and submodule commits", async () => {
+  await withHome(async () => {
+    const t = trap();
+    const change = (root: string) => {
+      fs.writeFileSync(path.join(root, "a.txt"), "changed\n");
+      fs.writeFileSync(path.join(root, "new.txt"), "n\n");
+    };
+    // A linked work tree, which has its own index under the shared git directory
+    const linked = path.join(t.base, "linked");
+    t.git("worktree", "add", "-q", linked);
+    change(linked);
+    let got = await bothStatus(linked);
+    assert.equal(got.sphica, got.plain, "linked work tree");
+    assert.match(got.plain, /a\.txt/);
+    // A split index, whose shared part sits beside the index
+    t.git("update-index", "--split-index");
+    change(t.repo);
+    got = await bothStatus(t.repo);
+    assert.equal(got.sphica, got.plain, "split index");
+    t.git("update-index", "--no-split-index");
+    // A sparse checkout that leaves a directory out
+    fs.mkdirSync(path.join(t.repo, "kept"));
+    fs.mkdirSync(path.join(t.repo, "left"));
+    fs.writeFileSync(path.join(t.repo, "kept", "k.txt"), "k\n");
+    fs.writeFileSync(path.join(t.repo, "left", "l.txt"), "l\n");
+    t.git("add", "-A");
+    t.git("commit", "-qm", "dirs");
+    t.git("sparse-checkout", "set", "kept");
+    fs.writeFileSync(path.join(t.repo, "kept", "k.txt"), "changed\n");
+    got = await bothStatus(t.repo);
+    assert.equal(got.sphica, got.plain, "sparse checkout");
+    t.git("sparse-checkout", "disable");
+  });
+  await withHome(async () => {
+    // A SHA-256 repository
+    const root = fs.realpathSync(tempDir("git-safety-sha256-"));
+    execFileSync("git", ["init", "-q", "--object-format=sha256", root], { env: FIXTURE_ENV });
+    const git = (...a: string[]) =>
+      execFileSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
+        encoding: "utf8",
+        env: FIXTURE_ENV,
+      });
+    fs.writeFileSync(path.join(root, "a.txt"), "a\n");
+    git("add", "a.txt");
+    git("commit", "-qm", "one");
+    fs.writeFileSync(path.join(root, "a.txt"), "b\n");
+    const got = await bothStatus(root);
+    assert.equal(got.sphica, got.plain, "SHA-256");
+    assert.match(got.plain, /a\.txt/);
+  });
+  await withHome(async () => {
+    // A submodule moved to a new commit still shows as changed
+    const t = trap();
+    const sub = path.join(t.base, "sub");
+    execFileSync("git", ["init", "-q", sub], { env: FIXTURE_ENV });
+    const subGit = (dir: string, ...a: string[]) =>
+      execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", ...a], {
+        env: FIXTURE_ENV,
+      });
+    fs.writeFileSync(path.join(sub, "s.txt"), "s\n");
+    subGit(sub, "add", "s.txt");
+    subGit(sub, "commit", "-qm", "s");
+    t.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "sub");
+    t.git("commit", "-qm", "sub");
+    fs.writeFileSync(path.join(t.repo, "sub", "s.txt"), "moved\n");
+    subGit(path.join(t.repo, "sub"), "commit", "-qam", "move");
+    const got = await bothStatus(t.repo);
+    assert.equal(got.sphica, got.plain, "submodule commit");
+    assert.match(got.plain, /sub/);
   });
 });

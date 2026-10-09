@@ -127,13 +127,15 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 
 残りの経路と互換の形式をテストに入れ、macOS・Windows・ubuntu:22.04 の job で流す。
 
-- [ ] T06: 残りの経路（submodule、hook、config で定義した hook、持ち主の global のフィルタ、config.worktree）と互換の形式（linked worktree、split index、sparse checkout、SHA-256、submodule のポインタの変化、64 MB の index の時間）をテストに足す
+- [x] T06: 残りの経路（submodule、hook、config で定義した hook、持ち主の global のフィルタ、config.worktree）と互換の形式（linked worktree、split index、sparse checkout、SHA-256、submodule のポインタの変化、64 MB の index の時間）をテストに足す
   - 種別: 追加
   - 計画: S6
   - 依存: T05（全部の公開関数が新しい入口を通っていないと、安全側の出力を比べられない）
   - 変更: `server/test/git-safety.test.ts`
   - 完了条件: `cd server && node --test test/git-safety.test.ts` → 全件 pass。各経路で、陽性対照の素の git が印を付ける
   - コミット: `test(git): cover submodules, hooks, global filters, and repository formats (T06)`
+  - 結果: `cd server && node --import ./test/isolate-home.ts --test test/git-safety.test.ts` → 5 件 pass。陽性対照: 素の git で clean・process・info/attributes のフィルタ・外部 diff・textconv・diff.external・.git/hooks の post-index-change・submodule の fsmonitor・config.worktree の fsmonitor・持ち主の global のフィルタが印を付けた（config で定義した hook は git 2.54 で印を付けた）。互換: linked worktree・split index・sparse checkout・SHA-256・submodule の commit の変化で、隔離した status が素の git の status と一致
+  - 結果: 64 MB の index（42 万エントリー、全部 skip-worktree）で `inIsolation(root, [{ kind: "status" }])` → 259〜313 ms（3 回）。同じリポジトリの素の `git status` は 30 ms。締め切り 5 秒に収まる（手で測った値。CI のテストには入れていない）
 
 - [ ] T07: CI の macOS と Windows の job で git-safety.test.ts を流し、ubuntu:22.04 のコンテナの job を足す
   - 種別: 追加
@@ -171,3 +173,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T05 / HOME が無いテスト（`HOME=/nonexistent`）で git が起動できなくなった。起動場所は HOME が無ければ Node の置き場所にした。gh も同じ起動場所にした
 - 2026-10-09 / T05 / 締め切りのテストが並行の実行でときどき落ちた（worker と親の締め切りが同じで、親が先に worker を止めると孫の git が残る）。worker の締め切りを親の 8 割にし、POSIX ではプロセスグループごと止める
 - 2026-10-09 / T05 / 変更欄に `server/evals/acceptance/driver.ts` を足した。onHook が非同期になり、driver の呼び出しを lint（noFloatingPromises）が見つけたので await した
+- 2026-10-09 / T06 / hook の陽性対照で、テスト用の素の git（update-index）が hook を走らせて印が付き、Sphica が走らせたように見えた。index を作り直した後に印を消してから測る形にした
