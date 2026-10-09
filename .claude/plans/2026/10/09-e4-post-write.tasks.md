@@ -56,13 +56,14 @@ base: main
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 書き込みの時刻が結果の時刻（DB と同じ形）で、同じ呼び出しの pre_edit が配った記録が除かれ、900 字に入らない行は shown にならず、壊れた行は数えて残りを再生する
   - コミット: `fix(eval): time replayed writes by their result and fit deliveries in 900 characters`
   - 結果: red は直す前のコードで 3 段に分けて実測（TypeError → 時刻の不一致 → third が shown）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-replay.test.ts` → 5 pass。`bun run verify` → exit 0
-- [ ] T03: M0 を持ち主のデータで流し、持ち主のラベルで作るかどうかを決める
+- [x] T03: M0 を持ち主のデータで流し、持ち主のラベルで作るかどうかを決める
   - 種別: 追加
-  - 計画: S1
+  - 計画: S1, S2, S4
   - 依存: T02（再生スクリプトが要る）
   - 変更: `server/evals/post-write/m0.json`
-  - 完了条件: `cat server/evals/post-write/m0.json` → seed、標本（session・tool_use_id・記録の key・ラベルだけで本文を含まない）、集計、基準の判定（作る / 作らない）が入っている。会話ごとの予算の値を plan の変更履歴に書いた
-  - コミット: `test(eval): record the post_write entry check and the owner's labels`
+  - 完了条件: `cat server/evals/post-write/m0.json` → seed、標本（session・tool_use_id・記録の key・ラベルだけで本文を含まない）、集計、基準の判定（作る / 作らない）が入っている。作るなら会話ごとの予算の値を plan の変更履歴に書いた
+  - コミット: `test(eval): record the post_write entry check and its labels`
+  - 結果: `node server/evals/post-write/replay.ts --db ~/.sphica/sphica.db --out <file> ~/.claude/projects/-Users-shunichi-Projects-sphica` → プロジェクト内の書き込み 735 件のうち 248 件で配信が起き、出る組は 612（文書の path が 353）。会話あたりの発火は中央値 4・上位 1 割 8・最大 29。標本 40 組（seed 20261009）を Claude と Codex が独立にラベル付け（持ち主の指示。食い違い 2 組は R・N の数を変えず Codex に合わせた）→ R 0・H 10・N 30。基準に届かず、作らない（`server/evals/post-write/m0.json`）。予算の値は作らないので決めない
 - [x] T04: M0' の抽出スクリプト（原因の内訳の 30 ターンと、組の母集団の無作為な並び）
   - 種別: 追加
   - 計画: S1
@@ -84,28 +85,28 @@ base: main
 
 今の配信では記録が届かない評価タスクと、post_write の hook を流せる runner を用意し、作る前に基準値と揺れを測る。
 
-- [ ] T06: M1 の評価タスクと fixture（今の配信経路で届かない記録、docs/ に書く違反のタスク 3 つ、should_not_block と should_stay_quiet、隠しテスト）
+- [-] T06: M1 の評価タスクと fixture（今の配信経路で届かない記録、docs/ に書く違反のタスク 3 つ、should_not_block と should_stay_quiet、隠しテスト）
   - 種別: 追加
   - 計画: S2
   - 依存: T03（M0 で作らないと決まれば M1 も要らない）
   - 変更: `server/evals/cloud/tasks.json`, `server/evals/acceptance/world.json`, `server/test/eval-fixture.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/eval-fixture.test.ts` → 新しいタスクの記録が、プロンプトの照合・pre_edit・pre_read・session_start のどれでも配られない（deliver() を直接呼んで確かめる）
   - コミット: `test(eval): add tasks whose records no current delivery path reaches`
-- [ ] T07: runner の PostToolUse 配信の対応、配信の結果の reason・時刻・tool_use_id、書き込みの本文の記録
+- [-] T07: runner の PostToolUse 配信の対応、配信の結果の reason・時刻・tool_use_id、書き込みの本文の記録
   - 種別: 追加
   - 計画: S2
   - 依存: なし
   - 変更: `server/evals/cloud/build-lib.ts`, `server/evals/cloud/build.ts`, `server/evals/cloud/claude-run.ts`, `server/evals/cloud/codex-run.ts`, `server/evals/cloud/collect.ts`, `server/test/eval-build.test.ts`, `server/test/eval-claude.test.ts`, `server/test/eval-codex.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/eval-build.test.ts test/eval-claude.test.ts test/eval-codex.test.ts` → hooks.json / codex.json に PostToolUse の配信の entry があるときだけ inject に PostToolUse の hook が入り、matcher が manifest に残る。無いとき（main のバンドル）の設定は今と同じ
   - コミット: `feat(eval): wire the shipped post-tool delivery hook into inject runs`
-- [ ] T08: 流す前の確認（docs/ の既知の違反が両ホストで違反と採点される、compare が既知の結果で期待どおり）
+- [-] T08: 流す前の確認（docs/ の既知の違反が両ホストで違反と採点される、compare が既知の結果で期待どおり）
   - 種別: 追加
   - 計画: S2
   - 依存: T06（タスクが要る）, T07（runner が要る）
   - 変更: `server/test/eval-grade.test.ts`, `server/evals/cloud/report.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/eval-grade.test.ts` → 良くなる・悪くなる・同じの既知の grades で compare がそのとおりに出る。両ホストの docs/ の違反の文書が patch に入り implements_rejected=yes と採点される（1 run ずつの実走の結果を結果行に残す）
   - コミット: `test(eval): check grading of plan documents and the compare on known results`
-- [ ] T09: main のバンドルで baseline と A/A（モデル別 k=5 × 2）を流し、測れるモデルと M1 の k・改善幅を決める
+- [-] T09: main のバンドルで baseline と A/A（モデル別 k=5 × 2）を流し、測れるモデルと M1 の k・改善幅を決める
   - 種別: 追加
   - 計画: S2
   - 依存: T08（流す前の確認が要る）
@@ -117,14 +118,14 @@ base: main
 
 M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに入れる。
 
-- [ ] T10: deliver.ts の post_write（本文の取り出し、照合、emitted の除外、予算と上限、lockedPlan、文面、`pre_edit`＋`reason='post_write'` での記録）
+- [-] T10: deliver.ts の post_write（本文の取り出し、照合、emitted の除外、予算と上限、lockedPlan、文面、`pre_edit`＋`reason='post_write'` での記録）
   - 種別: 追加
   - 計画: S3
   - 依存: T01（照合の関数が要る）, T09（M1a で打ち切りなら作らない）
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → 候補 6 件以上、先頭だけ配信済み、ログの失敗、compact の後、別の agent、NotebookEdit の delete、複数ファイルの patch、old_string だけに出る名前で、配る記録と記録した行が期待どおり
   - コミット: `feat(deliver): deliver records that a write names, right after the write`
-- [ ] T11: 両ホストの hook の登録と、scale の計測への post_write の追加
+- [-] T11: 両ホストの hook の登録と、scale の計測への post_write の追加
   - 種別: 追加
   - 計画: S3
   - 依存: T10（配信の処理が要る）
@@ -134,7 +135,7 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 
 ## P4: 本測定と採否
 
-- [ ] T12: M1 の本測定（main と作業ブランチのバンドルの比較）と #213 の採否
+- [-] T12: M1 の本測定（main と作業ブランチのバンドルの比較）と #213 の採否
   - 種別: 追加
   - 計画: S4
   - 依存: T11（作業ブランチのバンドルが要る）
@@ -144,14 +145,14 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 
 ## P5: 出荷か撤去
 
-- [ ] T13: 採用したとき: revision 13（delivery.event に post_write、移行、旧 revision の fixture、型の生成）と、記録する event の切り替え
+- [-] T13: 採用したとき: revision 13（delivery.event に post_write、移行、旧 revision の fixture、型の生成）と、記録する event の切り替え
   - 種別: 変更
   - 計画: S5
   - 依存: T12（採用のときだけ）
   - 変更: `db/schema.sql`, `db/migrations`, `server/src/sqlite.ts`, `server/src/db-types.ts`, `server/src/deliver.ts`, `server/test/migrate.test.ts`, `server/test/schema.test.ts`, `server/test/deliver.test.ts`
   - 完了条件: `bun run verify` → 0 で終わる。`cd server && node --import ./test/isolate-home.ts --test test/migrate.test.ts` → revision 12 の DB の `reason='post_write'` の行が `event='post_write'` に移り、delivery と delivery_unit と採番が保たれる
   - コミット: `feat(schema): log post-write deliveries as their own event (revision 13)`
-- [ ] T14: 採用したとき: バージョンの同期と出荷の準備
+- [-] T14: 採用したとき: バージョンの同期と出荷の準備
   - 種別: 変更
   - 計画: S5
   - 依存: T13（出荷する schema が要る）
@@ -172,3 +173,6 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-09 / T02 / 何で当たったか（symbol・path・option）を文字列から推すのはもろい / namedRecords が hit を返すようにした（変更欄に `server/src/deliver.ts` を足した）
 - 2026-10-09 / T16 / 実データで再生すると、消えた worktree の書き込み 153 件が outside に数えられていた / 修正タスク T16 を足した
 - 2026-10-09 / T02 のレビュー / F1（P1、書き込みの時刻が tool_use の時刻で、同じ呼び出しの pre_edit を除けない）・F2（900 字の上限が無い）・F4（時刻の文字列比較）・F5（JSON として読めるが中身の無い行で止まる）は採用して T17 で直した。F3（消えた worktree）は T16 で直し済み
+- 2026-10-10 / T06, T07, T08, T09, T10, T11, T12, T13, T14 / M0 が基準に届かず post_write を作らない / M1a・M1・実装・出荷のタスクを取りやめた。T15（不採用時の扱い）は T01 の切り出しとバージョンをどうするかを持ち主に聞いてから
+- 2026-10-10 / T03 / 持ち主の指示でラベルを Claude と Codex が付けた / 完了条件の「持ち主のラベル」を「標本とラベル」に読み替え、件名の owner's を外した
+- 2026-10-10 / T03 / S2（M1a）と S4（採否の記録）を担うタスクが取りやめで無くなった / plan の S2・S4 を M0 での打ち切りの形に直し、T03 の計画欄を S1 から S1, S2, S4 にした（T03 で採否を決めたため）

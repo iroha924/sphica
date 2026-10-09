@@ -1,0 +1,446 @@
+{
+  "note": "M0 for #213: past Claude Code writes in this project replayed against the current records (owner database read only, 2026-10-09). Codex has no write history on this machine. Labels by Claude and Codex independently (the owner asked for that instead of labelling); they differed on 2 pairs, neither of which changes R or N, and Codex's label is kept.",
+  "inputs": {
+    "files": 212,
+    "lines": 169533,
+    "unreadable": 0,
+    "writes": 1070,
+    "failed": 8,
+    "outside": 335
+  },
+  "writesInProject": 735,
+  "writesThatWouldDeliver": 248,
+  "shownPairs": {
+    "total": 612,
+    "byDocumentAndHit": {
+      "document path": 353,
+      "code option": 10,
+      "code symbol": 166,
+      "document symbol": 19,
+      "code path": 48,
+      "document option": 16
+    }
+  },
+  "firesPerConversation": {
+    "median": 4,
+    "p90": 8,
+    "max": 29,
+    "conversations": 50
+  },
+  "sample": {
+    "seed": 20261009,
+    "size": 40,
+    "documents": 20
+  },
+  "labels": [
+    {
+      "n": 1,
+      "session": "dd8088c4-efa6-4006-b1a3-947a0610bfb3",
+      "toolUseId": "toolu_01Kqi54bCP8Wk7QSui9fs9Db",
+      "path": ".claude/plans/2026/10/03-issue-210-owner-turns.tasks.md",
+      "document": true,
+      "key": "trace:0e06139f-0c65-4b2c-9cea-d7b57525bb87/search-fixes-plan",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 2,
+      "session": "eda6bd24-a2dc-4d18-b1be-9489edcf3838",
+      "toolUseId": "toolu_01C3YcZSYgbwKQNsc93ymkzP",
+      "path": ".claude/plans/2026/10/06-f6-harvest-sources.tasks.md",
+      "document": true,
+      "key": "trace:81368516-9754-4a75-a655-7e66b2c7a012/capture-revision-declined",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 3,
+      "session": "8a5d7c8e-0c74-4321-b34b-a8731bdab744",
+      "toolUseId": "toolu_014dhJFvRxybpoNNknUfgfvp",
+      "path": ".claude/plans/2026/10/07-e2-g4-remeasure.tasks.md",
+      "document": true,
+      "key": "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/write-lock-delivery-defer",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 4,
+      "session": "913af8a9-e6e3-4165-a76b-38f6a3422f57",
+      "toolUseId": "toolu_0137U5q7mVozhLH1TYEp5LP6",
+      "path": ".claude/plans/2026/10/04-issue-206-eval-base.tasks.md",
+      "document": true,
+      "key": "trace:094a20bb-ac97-49cf-a0f6-dc455e6ef499/gold-by-delivery-line",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 5,
+      "session": "af73d0c3-60b2-4d93-9cf3-3cd7e22fb908",
+      "toolUseId": "toolu_017YhjN5vLZqyCqd7HYp8fDF",
+      "path": ".claude/plans/2026/09/28-github-hardening.plan.md",
+      "document": true,
+      "key": "trace:af73d0c3-60b2-4d93-9cf3-3cd7e22fb908/defer-pr-body-extras",
+      "hit": "path",
+      "label": "H"
+    },
+    {
+      "n": 6,
+      "session": "6ad15fda-e1c5-43cc-8a8a-b7af530a51bb",
+      "toolUseId": "toolu_01NgsrMDKD5sHrt3cdJgwgmZ",
+      "path": ".claude/plans/2026/10/06-r1-release-scan.plan.md",
+      "document": true,
+      "key": "trace:7cd9d482-a207-4e55-bd43-fa93e33dfc99/cache-mode-actionlint-reject",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 7,
+      "session": "09baa1c4-0d4f-46a2-8e7b-03c65c196917",
+      "toolUseId": "toolu_01XJfqZGsDqD73Lx3zdWw27C",
+      "path": ".claude/plans/2026/10/05-f1-windows-hooks.tasks.md",
+      "document": true,
+      "key": "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/userconfig-measured",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 8,
+      "session": "8c8dba6b-9f75-4ccb-b27f-661f99549b19",
+      "toolUseId": "toolu_012PFHd365rwcxRNij9Fwwhi",
+      "path": ".claude/plans/2026/10/09-e4-post-write.tasks.md",
+      "document": true,
+      "key": "trace:58139139-1d29-40b1-be4a-f7e6e4d8a4cc/write-lock-delivery-defer",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 9,
+      "session": "c26c6849-61ee-40a5-90ac-aec92acebda4",
+      "toolUseId": "toolu_01SACVtcWGpxA1xAixdzL6fH",
+      "path": ".claude/plans/2026/09/29-pending-age-and-comments.tasks.md",
+      "document": true,
+      "key": "trace:77f97b60-5970-412b-a043-1b4ac23ea65a/array-scan-not-cause",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 10,
+      "session": "09baa1c4-0d4f-46a2-8e7b-03c65c196917",
+      "toolUseId": "toolu_01USutJAmdEDfTCbGvyirner",
+      "path": ".claude/plans/2026/10/05-f1-windows-hooks.tasks.md",
+      "document": true,
+      "key": "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/release-0-6-30",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 11,
+      "session": "8bdc90ff-42f1-4bac-bfe4-025b363fc083",
+      "toolUseId": "toolu_01Uij58gEbgQW1V1EcDDjmDP",
+      "path": ".claude/plans/2026/09/30-issue-212-eval-base.plan.md",
+      "document": true,
+      "key": "trace:08a87497-a499-4bc8-adcd-828de621cbfa/identifier-split-adopted",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 12,
+      "session": "b65ea0e0-74a8-4710-ab51-b1f5828cf242",
+      "toolUseId": "toolu_01EyXr7KfRG7p8J9JbqieQ5n",
+      "path": ".claude/plans/2026/09/30-issue-208-rest.plan.md",
+      "document": true,
+      "key": "trace:02d1edcd-26b8-4e63-85a8-b10d404cd68d/successor-inference",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 13,
+      "session": "dea5e6cc-0ebb-495f-94a3-21511a3772e2",
+      "toolUseId": "toolu_01NJsLWLr5JXCbUermcN2Ro8",
+      "path": ".claude/plans/2026/10/03-issue-207-hook-runtime.plan.md",
+      "document": true,
+      "key": "trace:dd8088c4-efa6-4006-b1a3-947a0610bfb3/one-baseline-race",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 14,
+      "session": "2b12445e-90b6-46e0-9382-7efc7bd9b9e0",
+      "toolUseId": "toolu_01RnC4ezPnGL9yPR6Lr9fQ4i",
+      "path": ".claude/plans/2026/10/03-issue-211-read-workspace.tasks.md",
+      "document": true,
+      "key": "trace:8f0eeeac-4006-40bc-b7d7-c39373a02d43/h2-userconfig-plan",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 15,
+      "session": "c26c6849-61ee-40a5-90ac-aec92acebda4",
+      "toolUseId": "toolu_01SACVtcWGpxA1xAixdzL6fH",
+      "path": ".claude/plans/2026/09/29-pending-age-and-comments.tasks.md",
+      "document": true,
+      "key": "trace:81368516-9754-4a75-a655-7e66b2c7a012/forget-design",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 16,
+      "session": "8a5d7c8e-0c74-4321-b34b-a8731bdab744",
+      "toolUseId": "toolu_01XF68YQGCZz2GitJdU8LnzA",
+      "path": ".claude/plans/2026/10/07-e2-g4-remeasure.plan.md",
+      "document": true,
+      "key": "trace:8013bfee-812f-49d4-9803-1749e0c3b2df/look-and-overview",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 17,
+      "session": "1506deee-17f8-407f-bf41-ec2f985cb891",
+      "toolUseId": "toolu_01XGsQNrMaJzFZ6WEpfnd2AA",
+      "path": ".claude/plans/2026/09/28-glean-excerpt-mask.tasks.md",
+      "document": true,
+      "key": "trace:08a87497-a499-4bc8-adcd-828de621cbfa/quadratic-regex-hang",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 18,
+      "session": "9f76d32d-a125-4979-bab4-c153c3f1d780",
+      "toolUseId": "toolu_016oVp2J33hzokmZ9kiQ8Ly2",
+      "path": ".claude/plans/2026/10/03-issue-210-turn-boundaries.tasks.md",
+      "document": true,
+      "key": "trace:7cd9d482-a207-4e55-bd43-fa93e33dfc99/agent-approval-norm-only",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 19,
+      "session": "94acb49d-9824-47b0-b4e1-9f77420f4af6",
+      "toolUseId": "toolu_013hXwfgZZ2FiawrWoVAY6dA",
+      "path": ".claude/plans/2026/09/29-capture-drain.tasks.md",
+      "document": true,
+      "key": "trace:dd8088c4-efa6-4006-b1a3-947a0610bfb3/sdk-entrypoint-not-owner",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 20,
+      "session": "c26c6849-61ee-40a5-90ac-aec92acebda4",
+      "toolUseId": "toolu_01SACVtcWGpxA1xAixdzL6fH",
+      "path": ".claude/plans/2026/09/29-pending-age-and-comments.tasks.md",
+      "document": true,
+      "key": "trace:af73d0c3-60b2-4d93-9cf3-3cd7e22fb908/finish-wait-extend",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 21,
+      "session": "4a4adbcb-446d-4e44-b72e-ade112506bea",
+      "toolUseId": "toolu_011fYwPAua1bAeqNALBJN8za",
+      "path": "server/test/git-safety.test.ts",
+      "document": false,
+      "key": "trace:81368516-9754-4a75-a655-7e66b2c7a012/forget-name",
+      "hit": "option",
+      "label": "N"
+    },
+    {
+      "n": 22,
+      "session": "7cd9d482-a207-4e55-bd43-fa93e33dfc99",
+      "toolUseId": "toolu_01DSwLEdTg9Kyuq5JgnRaK5M",
+      "path": "server/test/release-gate-cli.test.ts",
+      "document": false,
+      "key": "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/delivery-retention-90d",
+      "hit": "symbol",
+      "label": "N"
+    },
+    {
+      "n": 23,
+      "session": "6ad15fda-e1c5-43cc-8a8a-b7af530a51bb",
+      "toolUseId": "toolu_01UKGZne2UtTorrqEUwMwK2p",
+      "path": ".github/workflows/release.yml",
+      "document": false,
+      "key": "trace:f30ad30c-d966-4c9a-9719-4b32e51ad33e/npm-slow-to-serve-0614",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 24,
+      "session": "85a3dee0-7e47-40a5-b10a-a3b5c2434727",
+      "toolUseId": "toolu_013F62zChW93sBdN2urQWny6",
+      "path": "server/evals/review/fixture.ts",
+      "document": false,
+      "key": "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/retention-shipped",
+      "hit": "symbol",
+      "label": "N"
+    },
+    {
+      "n": 25,
+      "session": "02d1edcd-26b8-4e63-85a8-b10d404cd68d",
+      "toolUseId": "toolu_01UMWXDgFxL2STxe9WvrYrcw",
+      "path": "server/evals/acceptance/driver.ts",
+      "document": false,
+      "key": "trace:d16a1bbd-95ba-45dd-afc7-1496165c661a/release-0-6-34",
+      "hit": "symbol",
+      "label": "H",
+      "claude": "N"
+    },
+    {
+      "n": 26,
+      "session": "58139139-1d29-40b1-be4a-f7e6e4d8a4cc",
+      "toolUseId": "toolu_01P7ygKp5KmRmbQf2SGiqjNR",
+      "path": "server/src/cli/view.ts",
+      "document": false,
+      "key": "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/retention-shipped",
+      "hit": "symbol",
+      "label": "N"
+    },
+    {
+      "n": 27,
+      "session": "02d1edcd-26b8-4e63-85a8-b10d404cd68d",
+      "toolUseId": "toolu_0196vGwGNp5ygPbw3xRA81JU",
+      "path": "server/src/extract.ts",
+      "document": false,
+      "key": "trace:81368516-9754-4a75-a655-7e66b2c7a012/forget-name",
+      "hit": "option",
+      "label": "N"
+    },
+    {
+      "n": 28,
+      "session": "02d1edcd-26b8-4e63-85a8-b10d404cd68d",
+      "toolUseId": "toolu_01EX4i9gFyNksinSCfhoo65G",
+      "path": "server/evals/acceptance/driver.ts",
+      "document": false,
+      "key": "trace:dd8088c4-efa6-4006-b1a3-947a0610bfb3/one-baseline-race",
+      "hit": "symbol",
+      "label": "N"
+    },
+    {
+      "n": 29,
+      "session": "dd8088c4-efa6-4006-b1a3-947a0610bfb3",
+      "toolUseId": "toolu_01XBsfcaAXy57ZqZYoB4PqEC",
+      "path": "server/test/capture.test.ts",
+      "document": false,
+      "key": "trace:9f76d32d-a125-4979-bab4-c153c3f1d780/hook-turn-facts",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 30,
+      "session": "d16a1bbd-95ba-45dd-afc7-1496165c661a",
+      "toolUseId": "toolu_01KNzjBqiTtNUGWvmzUc7Yvi",
+      "path": "server/src/capture.ts",
+      "document": false,
+      "key": "trace:d16a1bbd-95ba-45dd-afc7-1496165c661a/release-0-6-34",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 31,
+      "session": "dd8088c4-efa6-4006-b1a3-947a0610bfb3",
+      "toolUseId": "toolu_01QUmggkZMi42tQHAXV6UByj",
+      "path": "server/test/capture.test.ts",
+      "document": false,
+      "key": "trace:dd8088c4-efa6-4006-b1a3-947a0610bfb3/owner-turns-shipped",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 32,
+      "session": "a2bb452f-9ad3-4652-bda5-6223fc6d665e",
+      "toolUseId": "toolu_019E6arur6UMxFm3u7EMrvqW",
+      "path": "server/evals/cloud/fixture.ts",
+      "document": false,
+      "key": "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/cut-message-counts-looked",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 33,
+      "session": "81368516-9754-4a75-a655-7e66b2c7a012",
+      "toolUseId": "toolu_018SupXyYjPTkpd69UAF6pDJ",
+      "path": "server/test/migrate.test.ts",
+      "document": false,
+      "key": "trace:81368516-9754-4a75-a655-7e66b2c7a012/forget-design",
+      "hit": "path",
+      "label": "H"
+    },
+    {
+      "n": 34,
+      "session": "4a4adbcb-446d-4e44-b72e-ade112506bea",
+      "toolUseId": "toolu_015TmeJiRL8vE5sQzdxmfV6x",
+      "path": "server/evals/cloud/codex-home.ts",
+      "document": false,
+      "key": "trace:85a3dee0-7e47-40a5-b10a-a3b5c2434727/eval-fence",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 35,
+      "session": "6ad15fda-e1c5-43cc-8a8a-b7af530a51bb",
+      "toolUseId": "toolu_01UKGZne2UtTorrqEUwMwK2p",
+      "path": ".github/workflows/release.yml",
+      "document": false,
+      "key": "trace:7cd9d482-a207-4e55-bd43-fa93e33dfc99/github-token-merge-no-issue-close",
+      "hit": "path",
+      "label": "N"
+    },
+    {
+      "n": 36,
+      "session": "81368516-9754-4a75-a655-7e66b2c7a012",
+      "toolUseId": "toolu_01Dp1kK3M6Pj2cgtasyyx6Vh",
+      "path": "server/src/forget.ts",
+      "document": false,
+      "key": "trace:81368516-9754-4a75-a655-7e66b2c7a012/forget-shipped",
+      "hit": "symbol",
+      "label": "H"
+    },
+    {
+      "n": 37,
+      "session": "58139139-1d29-40b1-be4a-f7e6e4d8a4cc",
+      "toolUseId": "toolu_01SEMLX5RjfjRWFTxyTKET9Z",
+      "path": "server/src/mcp-record.ts",
+      "document": false,
+      "key": "trace:a2bb452f-9ad3-4652-bda5-6223fc6d665e/record-context-pages-shipped",
+      "hit": "symbol",
+      "label": "N"
+    },
+    {
+      "n": 38,
+      "session": "58139139-1d29-40b1-be4a-f7e6e4d8a4cc",
+      "toolUseId": "toolu_017rEnDHkixsh5P3PKxTWz4L",
+      "path": "server/test/text.test.ts",
+      "document": false,
+      "key": "trace:08a87497-a499-4bc8-adcd-828de621cbfa/identifier-split-shipped",
+      "hit": "symbol",
+      "label": "N",
+      "claude": "H"
+    },
+    {
+      "n": 39,
+      "session": "02d1edcd-26b8-4e63-85a8-b10d404cd68d",
+      "toolUseId": "toolu_01Lv2HcivwU4GosKrQSC5b49",
+      "path": "server/evals/acceptance/driver.ts",
+      "document": false,
+      "key": "trace:88e10cd3-817e-41df-a3f4-d53a44e7b83d/keep-warning-merge",
+      "hit": "symbol",
+      "label": "N"
+    },
+    {
+      "n": 40,
+      "session": "58139139-1d29-40b1-be4a-f7e6e4d8a4cc",
+      "toolUseId": "toolu_01P7ygKp5KmRmbQf2SGiqjNR",
+      "path": "server/src/cli/view.ts",
+      "document": false,
+      "key": "trace:676424c0-3596-44af-aa8a-efe8131a3f0c/delivery-retention-90d",
+      "hit": "symbol",
+      "label": "N"
+    }
+  ],
+  "decision": {
+    "R": 0,
+    "H": 10,
+    "N": 30,
+    "bar": "N <= 1/3 of labelled pairs and R >= 1",
+    "verdict": "not built: post_write not adopted"
+  }
+}
