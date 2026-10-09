@@ -22,13 +22,14 @@ base: main
 
 過去の書き込みと shell の変更に今の記録を当てて、post_write を作る価値があるかと、#219 の取りこぼしを数字で決める。
 
-- [ ] T01: onPrompt の照合を関数に切り出す（挙動は変えない）
+- [x] T01: onPrompt の照合を関数に切り出す（挙動は変えない）
   - 種別: 変更
   - 計画: S3
   - 依存: なし
   - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
   - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → 既存のプロンプトの照合のテストが全部 pass し、切り出した関数を任意の本文に当てるテストが pass
   - コミット: `refactor(deliver): match records named in any text with the prompt's rules`
+  - 結果: `namedRecords()` を export し onPrompt はそれを呼ぶだけにした。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 52 pass（コードの本文で toStored・却下した option・`open()` を名指し、`reopen` の中の open は名指さない）。`bun run verify` → exit 0
 - [ ] T02: M0 の再生スクリプト（Claude Code の会話記録と Codex のセッションの書き込みに、今の記録を当てる）
   - 種別: 追加
   - 計画: S1
@@ -145,3 +146,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
   - コミット: `revert(deliver): drop post_write after the measurement`
 
 ## 記録
+- 2026-10-09 / T01 / pre-commit のバージョンの検査が、package の入力（deliver.ts）を変えるコミットにバージョンの同期を求めた / T01 のコミットで npm と 3 つの plugin manifest を 0.6.44 に上げた。不採用で出荷しないときの扱いは T15 で決める

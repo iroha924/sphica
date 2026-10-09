@@ -522,8 +522,18 @@ function once<T>(f: (k: string) => T): (k: string) => T {
   };
 }
 
-/** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
-async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
+/**
+ * The deliverable records a text names by their anchored symbol or path, or one of their options, exactly, with what it named. Aliases never
+ * count. A name is a candidate, not a sign the text goes against the record.
+ */
+export async function namedRecords(
+  db: Reads,
+  projectId: number,
+  root: string,
+  prompt: string,
+): Promise<
+  { u: { id: number; key: string; kind: string; stance: string | null; text: string }; why: string }[]
+> {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
   // Building a Unicode-class pattern costs far more than the match, so only a word the text contains gets one
@@ -579,6 +589,12 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     if (a) hits.push({ u, why: ` [names ${a.symbol && named(a.symbol) ? a.symbol : a.path}]` });
     else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
   }
+  return hits;
+}
+
+/** A prompt brings up a record only by naming it (namedRecords). */
+async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
+  const hits = await namedRecords(db, projectId, root, prompt);
   const shown = hits.slice(0, LIMITS.prompt.units);
   const ai = await aiDecided(
     db,

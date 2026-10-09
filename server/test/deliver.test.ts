@@ -10,7 +10,7 @@ import { after, before, test } from "node:test";
 import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { AUTO_TRACE, CONFIRM, deliver, leadFor, recordLines } from "../src/deliver.ts";
+import { AUTO_TRACE, CONFIRM, deliver, leadFor, namedRecords, recordLines } from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { readUnit } from "../src/read.ts";
@@ -216,6 +216,17 @@ test("delivery brings anchored, named, and broad records, never candidates or co
       "",
       "subagent prompts are not the owner's",
     );
+    // The same matching on any text, such as code an agent writes, answers the records and what each one named
+    const names = async (text: string) =>
+      (await namedRecords(db.reader, p, repo, text)).map((h) => `${h.u.key}${h.why}`);
+    assert.deepEqual(await names("export const toDisplay = (d: Date) => toStored(d);"), [
+      "trace:ext-s1/utc [names toStored]",
+    ]);
+    assert.deepEqual(await names("// keeps telemetry off\nopen();"), [
+      "trace:ext-s1/no-telemetry [names the rejected option telemetry]",
+      "trace:ext-s1/opener [names open]",
+    ]);
+    assert.deepEqual(await names("const opened = reopen;"), [], "a symbol inside a longer word is not named");
 
     const start = await at({ hook_event_name: "SessionStart", source: "startup" });
     assert.match(start, /Work: Rework CSV export \(active\): notes removed; next: add column order/);
