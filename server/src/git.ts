@@ -1,8 +1,10 @@
 // Every git Sphica runs, one function per operation. Sphica runs git outside the agent's sandbox, in a repository whose config the agent
 // can write, so no caller passes git its own arguments: each operation builds them here, and only this file starts git.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { WorkerRequest, WorkerResult, WorktreeOp } from "./git-worker.ts";
 
 /**
  * Where Sphica keeps what git reads from it (the hooks folder, isolated git directories): under HOME, which a sandboxed agent cannot
@@ -14,7 +16,7 @@ const gitHome = (): string => path.join(os.homedir(), ".sphica", "git");
  * The environment git runs with: none of the caller's GIT_* variables (in any letter case, as Windows matches them), no transport at all
  * (a missing object fails instead of fetching from a remote the config names), no prompt, and no replace refs.
  */
-function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+export function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = Object.fromEntries(
     Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k)),
   );
@@ -32,11 +34,11 @@ function gitEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
  * Options before the subcommand that keep config from running a command. core.fsmonitor is emptied, not false: git 2.35.1 and older take
  * false as the name of a hook to run. None of the operations here writes the index, the path a config-defined hook runs on.
  */
-const gitOptions = (): string[] => [
+export const gitOptions = (hooks = path.join(gitHome(), "hooks")): string[] => [
   "-c",
   "core.fsmonitor=",
   "-c",
-  `core.hooksPath=${path.join(gitHome(), "hooks")}`,
+  `core.hooksPath=${hooks}`,
   "-c",
   "core.quotePath=false",
   "--no-pager",
@@ -44,7 +46,7 @@ const gitOptions = (): string[] => [
 ];
 
 /** Options for every diff: no external diff program, no textconv, and submodules compared by their commit only */
-const DIFF_OPTIONS = [
+export const DIFF_OPTIONS = [
   "--no-color",
   "--no-ext-diff",
   "--no-textconv",
@@ -150,6 +152,46 @@ export function listFiles(
   return list(text(root, ["ls-files", "-z", ...which, "--", ...pathspecs], limits));
 }
 
+/** Where a file of the repository's git directory is (`index`, `info/exclude`), as git resolves it for linked work trees */
+export const gitPath = (
+  root: string,
+  name: "index" | "info/exclude" | "info/attributes" | "info/sparse-checkout",
+): string => path.resolve(root, text(root, ["rev-parse", "--git-path", name]).replace(/\n$/, ""));
+
+/** The git directory linked work trees share, which holds the objects */
+export const commonDir = (root: string): string =>
+  path.resolve(root, text(root, ["rev-parse", "--git-common-dir"]).replace(/\n$/, ""));
+
+/** Config keys whose values only change how files are read or listed, never what runs, by the type git checks them as */
+export const SAFE_KEYS = {
+  "core.ignorecase": "bool",
+  "core.precomposeunicode": "bool",
+  "core.filemode": "bool",
+  "core.symlinks": "bool",
+  "core.trustctime": "bool",
+  "core.sparseCheckout": "bool",
+  "core.sparseCheckoutCone": "bool",
+  "index.sparse": "bool",
+  "core.autocrlf": "text",
+  "core.eol": "text",
+  "core.checkStat": "text",
+  "extensions.objectFormat": "text",
+  "core.excludesFile": "path",
+} as const;
+
+/** A config value as git reads it (local, global, and system), typed by git where it can; null when unset or unreadable */
+export function configGet(root: string, key: keyof typeof SAFE_KEYS): string | null {
+  const type = SAFE_KEYS[key];
+  try {
+    return text(root, ["config", ...(type === "text" ? [] : [`--type=${type}`]), "--get", key]).replace(
+      /\n$/,
+      "",
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** The URL of the origin remote; throws when there is none */
 export const originUrl = (root: string, limits?: Limits): string =>
   text(root, ["remote", "get-url", "origin"], limits).trim();
@@ -239,4 +281,68 @@ export function renamesSince(root: string, commit: string): Map<string, string |
   } catch {
     return null;
   }
+}
+
+/** The worker beside this module: the bundle's git-worker.js, or the source when run from the source */
+function workerFile(): string {
+  const js = path.join(import.meta.dirname, "git-worker.js");
+  return fs.existsSync(js) ? js : path.join(import.meta.dirname, "git-worker.ts");
+}
+
+/**
+ * Runs work tree comparisons in the git worker, one isolated git directory for all of them, and gives their outputs in order (a diff
+ * gives two: the patch and the changed paths). Null when the worker fails or misses the deadline; the worker is then killed and not
+ * waited for, since a read stalled in it may never end.
+ */
+export function inIsolation(
+  root: string,
+  ops: WorktreeOp[],
+  { deadline, max }: { deadline: number; max: number },
+): Promise<string[] | null> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(process.execPath, [workerFile()], {
+        stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let done = false;
+    const finish = (out: string[] | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (out === null) {
+        child.kill("SIGKILL");
+        child.stdin?.destroy();
+        child.stdout?.destroy();
+        child.unref();
+      }
+      resolve(out);
+    };
+    const timer = setTimeout(() => finish(null), deadline);
+    // Room for every output at its own limit, plus the JSON around them
+    const cap = max * Math.max(1, ops.length * 2) + 64 * 1024;
+    child.stdout?.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > cap) finish(null);
+      else chunks.push(c);
+    });
+    child.on("error", () => finish(null));
+    child.on("close", () => {
+      try {
+        const result = JSON.parse(Buffer.concat(chunks).toString("utf8")) as WorkerResult;
+        finish(result.ok ? result.out : null);
+      } catch {
+        finish(null);
+      }
+    });
+    child.stdin?.on("error", () => finish(null));
+    child.stdin?.end(JSON.stringify({ root, ops, max } satisfies WorkerRequest));
+  });
 }

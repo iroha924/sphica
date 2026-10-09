@@ -11,6 +11,7 @@
       "entry": [
         "src/capture.ts",
         "src/deliver.ts",
+        "src/git-worker.ts",
         "src/mcp-record.ts",
         "test/*.test.ts",
         "evals/cloud/build.ts",
@@ -30,7 +31,7 @@
       ],
       "project": ["src/**/*.ts", "test/**/*.ts", "evals/**/*.ts"],
       "ignoreDependencies": ["js-tokens", "kysely-codegen", "lefthook", "markdownlint-cli2"],
-      "ignoreBinaries": ["codex"]
+      "ignoreBinaries": ["codex", "mkfifo"]
     }
   },
   "ignoreIssues": {

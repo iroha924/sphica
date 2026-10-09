@@ -80,13 +80,15 @@ base: main
 
 status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先で子プロセスから流れ、どの設定のフィルタ・diff ドライバ・hook も走らない。
 
-- [ ] T04: git-worker.ts と親の非同期の入口を足し、bundle の entry にする
+- [x] T04: git-worker.ts と親の非同期の入口を足し、bundle の entry にする
   - 種別: 追加
   - 計画: S2
   - 依存: T01（共通の起動の引数と環境、`revParse` などの操作が要る）
-  - 変更: `server/src/git-worker.ts`, `server/src/git.ts`, `scripts/bundle.mjs`, `scripts/check-tarball.mjs`, `server/test/git-worker.test.ts`
+  - 変更: `server/src/git-worker.ts`, `server/src/git.ts`, `scripts/bundle.mjs`, `scripts/lib/bundle-budget.mjs`, `knip.json`, `server/test/git-worker.test.ts`, `server/test/architecture.test.ts`
   - 完了条件: `cd server && node --test test/git-worker.test.ts` → 隔離先の検査（HOME の外へのリンク、作業ツリーや temp との重なりで失敗）、入力の読み取り（FIFO・リンク・上限超えで失敗）、config の正規化（型に合わない値を書かない）、unborn HEAD と index 無し、締め切りでの打ち切り、古い残りの掃除が全件 pass。`bun run bundle` → `plugin/dist/git-worker.js` ができる
   - コミット: `feat(git): add a worker that runs worktree comparisons in an isolated git directory (T04)`
+  - 結果: `cd server && node --test test/git-worker.test.ts` → 5 件 pass（隔離先: HOME の外へのリンク・hooks が空でない・作業ツリーや temp との重なりで失敗。読み取り: リンク・ディレクトリ・FIFO・上限超えで失敗。config: 改行で節を足す値と型に合わない値で失敗。unborn HEAD と index 無しで未追跡とステージ済みが出る。締め切り 1 ms で null。1 時間より古い残りだけ消える）
+  - 結果: `bun run bundle` → `plugin/dist/git-worker.js` 10.94 KB。`echo '{"root":…,"ops":[{"kind":"status"}],"max":1048576}' | node plugin/dist/git-worker.js` → `{"ok":true,"out":["? a\u0000"]}`
 
 - [ ] T05: 作業ツリーの比較（snapshot の status、renamesSince、localChange の diff）を子プロセスの入口へ置き換え、capture と read の呼び出しを非同期にする
   - 種別: 修正
@@ -136,3 +138,5 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T08 / pre-commit の bundle の検査が、出荷物の入力を変えたコミットにバージョンの同期を求めて T01 のコミットを止めた。T08 の依存を「T07」から「なし」に変え、T01 と同じコミットで 0.6.43 に上げた
 - 2026-10-09 / T01 / Codex のタスクレビュー（a3b9c9f2）: F1（commit 間の変更ファイルの上限が 1 MB に下がった、P2）と F2（ruleFiles の失敗をテストが通す、P2）を採用し、T09 を足した。Codex の実走は read-only のため mkdtemp で失敗しており、テストの通過は Claude 側で確かめた
 - 2026-10-09 / T02 / Codex のタスクレビュー（2f578e1b）: F1（一時ディレクトリの削除の失敗が gh の結果を上書きする、P2）と F2（作成の失敗を gh が無いと扱う、P2）を採用し、T10 を足した。一時ディレクトリをやめて HOME で起動する形にした（HOME の git リポジトリは持ち主のもので、エージェントは HOME に書けない前提に収まる）
+- 2026-10-09 / T04 / 変更欄の `scripts/check-tarball.mjs` を `scripts/lib/bundle-budget.mjs` に替えた。tarball は dist を丸ごと載せるので一覧の変更は要らず、新しい entry には予算（13,000 バイト）と hook と同じ zod の禁止が要った
+- 2026-10-09 / T04 / 変更欄に `knip.json`（git-worker.ts を entry に、mkfifo をテストの外部コマンドに）と `server/test/architecture.test.ts`（git を起動するのが 2 ファイルになったので、両方を空にして検査が落ちるのを見る）を足した

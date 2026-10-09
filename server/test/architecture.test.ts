@@ -32,7 +32,7 @@ test("only git.ts and the git worker start git", () => {
     assert.match(r.stderr, /server\/src\/stray\.ts starts git/);
   }
   // A check that finds git started nowhere has stopped looking
-  const r = copy({ "git.ts": "export {};\n" });
+  const r = copy({ "git.ts": "export {};\n", "git-worker.ts": "export {};\n" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /no module starts git/);
 });
