@@ -202,10 +202,16 @@ export function codexFence(
   // Which mount roots exist differs by machine: they are one policy line
   for (const v of s.volumes ?? []) text = text.split(`${JSON.stringify(v)} = "deny"\n`).join("");
   const temp = Object.fromEntries((s.temp ?? []).map((t, i) => [`<temp-${i}>`, t]));
+  // A repository place outside every other denied root is denied only by its own line, so how many there are stays in the digest
+  const covers = [cache, ...s.home.denies, ...(s.volumes ?? []), ...(s.temp ?? [])];
+  const alone = s.places.filter((p) => !covers.some((c) => isInside(c, p))).length;
   return fenceDigest(
     text,
     { ...temp, ...roles, "<codex-home>": codexHome, "<repo>": REPO, "<cache>": cache, "<home>": s.home.home },
-    (t) => [...new Set(t.split("\n")), "policy: volumes-denied"].join("\n"),
+    (t) =>
+      [...new Set(t.split("\n")), "policy: volumes-denied", `repository places denied alone: ${alone}`].join(
+        "\n",
+      ),
   );
 }
 

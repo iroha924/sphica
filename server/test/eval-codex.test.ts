@@ -640,6 +640,9 @@ test("the fence denies every worktree of the repository and the git directory th
     );
   assert.equal(fence([REPO, linked]), fence([REPO]));
   assert.ok(codexDenies(cache, shield([REPO, linked])).includes(linked));
+  // One outside every other denied root is a place only its own line denies: a run that did not deny it has another fence
+  const elsewhere = fs.realpathSync(tempDir("fence-elsewhere-"));
+  assert.notEqual(fence([REPO, elsewhere]), fence([REPO]));
 });
 
 test("a run whose files cannot be moved back keeps its temp tree and the lock, so nothing is lost or left readable", () => {
