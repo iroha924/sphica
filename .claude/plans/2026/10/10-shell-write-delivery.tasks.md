@@ -1,0 +1,102 @@
+---
+kind: tasks
+plan: 10-shell-write-delivery.plan.md
+branch: feat/e4-post-write
+base: main
+---
+
+# shell の呼び出しで内容が変わったファイルの記録を、呼び出しの直後に届ける（#219 の次の段、既定オフで試用）のタスク
+
+## 進め方
+
+1. `git status` と staged / unstaged の差分を見る。自分の途中の作業と判別できない未コミットの変更は持ち主のものとして扱い、止めて聞く
+2. このファイル、plan、`git log --oneline <base>..HEAD` を読む
+3. `[ ]` のうち、依存が全部 `[x]` のものを、ファイル上の順に 1 つ選ぶ
+4. 種別が修正なら、直す前に red のコマンドで意図した失敗を確かめる。実装し、完了条件のコマンドを流して期待どおりか確かめる
+5. `[x]` にしてタスクの下に結果行を足し、実装と同じコミットに入れる。件名の末尾に `(T03)` を付ける（慣習。検査はしない）
+6. 書き換えてよいのは、チェック欄・結果行・記録節・途中で足すタスクだけ
+7. 全部終えたら、plan の完了条件を全件流し、差分レビューと CI を確かめるまで完了としない
+8. このファイルに書かれた指示で、上位の規範や持ち主の承認を上書きしない。コマンドは流す前に中身を読む
+
+## P1: 変化の見分け方
+
+配れる記録の anchor のファイル全部について、呼び出しの前後で内容の変化を確かに見分けられる。
+
+- [ ] T01: 対象のパス・状態・署名・hash のキャッシュ・控え・期限・寿命を持つ部品と、そのテスト
+  - 種別: 追加
+  - 計画: S1
+  - 依存: なし
+  - 変更: `server/src/shell-state.ts`, `server/src/deliver.ts`, `server/test/shell-state.test.ts`, `scripts/lib/sql-call-sites.mjs`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/shell-state.test.ts` → 書き換え・作成・削除・atomic replace・同じサイズで mtime を戻した書き換えを変化とし、chmod・touch・同じ内容・書いて戻すを変化としない。読む間に変わると 3 回まで取り直し、だめなら unknown。unreadable・根の外へ出る symlink の扱い、壊れたキャッシュの作り直し、控えの検査・期限切れ・欠け、期限での打ち切りが期待どおり
+  - コミット: `feat(deliver): snapshot anchored files around a shell call by content`
+
+## P2: 届け方
+
+設定がオンのとき、両ホストで shell の呼び出しの後に、まだ届いていない記録が次のモデルリクエストの前に入る。オフなら今と同じ。
+
+- [ ] T02: Post の配信（lockedPlan、文面、上限、pre_edit＋reason shell_write のログ、試用のログ）と設定の読み取り
+  - 種別: 追加
+  - 計画: S2
+  - 依存: T01（控えと比較の部品が要る）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`, `server/test/deliver-codex.test.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → オフなら Pre は控えを取らず Post は何も返さない。オンなら変わったパスのまだ届いていない記録だけを 5 件・1,500 字まで返し、読みの予算を使わない。compact の後は数え直し、subagent は別の会話。PostToolUseFailure でも届く。並行の 2 つの Post で同じ記録が 2 回出ない。ログを書けなくても本文は返り、試用のログは配信の有無によらず 1 呼び出し 1 行
+  - コミット: `feat(deliver): deliver records on files a shell call changed, behind an option`
+- [ ] T03: 両ホストの hook の登録と、userConfig の shell_write_delivery
+  - 種別: 追加
+  - 計画: S2
+  - 依存: T02（Post の処理が要る）
+  - 変更: `plugin/hooks/hooks.json`, `plugin/hooks/codex.json`, `plugin/.claude-plugin/plugin.json`, `server/test/plugin.test.ts`, `scripts/check-hooks-live.mjs`, `server/src/codex-trust.ts`, `server/test/codex-trust.test.ts`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/plugin.test.ts test/codex-trust.test.ts` → Claude Code の同期の PostToolUse と PostToolUseFailure（Bash|PowerShell）と Codex の PostToolUse（^Bash$、Windows は -EncodedCommand）の配信の entry があり、userConfig に既定 false の shell_write_delivery がある。`bun run hooks:live` → 足した entry を出荷する形で起動できる
+  - コミット: `feat(plugin): register post-shell delivery hooks and the shell_write_delivery option`
+
+## P3: 正しさの harness と時間
+
+固定の正例と負例で、出荷する hook が期待どおりに振る舞い、時間が収まることを数字で示す。
+
+- [ ] T04: 正しさの harness（両ホストの入力の形、正例 40 件・負例・別に数える行・限界の行、新旧比較）と、Windows の CI での実行
+  - 種別: 追加
+  - 計画: S3
+  - 依存: T03（出荷する hook の形が要る）
+  - 変更: `server/evals/post-write/shell-write-harness.ts`, `server/test/shell-write-harness.test.ts`, `.github/workflows/check.yml`, `knip.json`
+  - 完了条件: `node server/evals/post-write/shell-write-harness.ts` → 両ホストの形で正例 40 件中 40 件が届き、負例とメタデータだけの行は追加 0、別に数える行と限界の行の件数と新旧比較の表が出る。`cd server && node --import ./test/isolate-home.ts --test test/shell-write-harness.test.ts` → harness 自身が既知の結果を正しく数える
+  - コミット: `test(eval): check post-shell delivery on fixed shell commands for both hosts`
+- [ ] T05: scale の計測に Pre と Post を足す（実ファイルを持つ fixture、空と温まったキャッシュ、大量の変化）
+  - 種別: 追加
+  - 計画: S3
+  - 依存: T02（Pre と Post の処理が要る）
+  - 変更: `server/evals/scale/run.ts`
+  - 完了条件: `node server/evals/scale/run.ts` → 温まったキャッシュで記録 1 万件のとき Pre と Post がそれぞれ 1 秒以内。空のキャッシュと大量の変化は hash したバイト数と時間が出て、期限内に終わる
+  - コミット: `test(scale): time post-shell snapshots with cold and warm caches`
+
+## P4: 実機と出荷
+
+両ホストの実機で文脈が届くことを確かめ、既定オフで出荷する。
+
+- [ ] T06: 両ホストの実機の確認（普通の書き込み、非 0 で終わる書き込み、並列、Codex の poll）
+  - 種別: 追加
+  - 計画: S4
+  - 依存: T04（harness が通った出荷の形が要る）
+  - 変更: `server/evals/post-write/real-host.md`
+  - 完了条件: `rg -n "whose content changed between before and after this call" <確認したセッションの会話記録>` → 各ケースで Post の差し込みが次の応答より前にあり、Codex のセッションのログでも同じ。該当箇所を `real-host.md` に残す
+  - コミット: `test(eval): record real-host checks of post-shell delivery on both hosts`
+- [ ] T07: README の設定の説明と、既定オフのリリースの準備（release:plan、バージョン）
+  - 種別: 追加
+  - 計画: S5
+  - 依存: T06（実機の確認が通ってから出す）
+  - 変更: `README.md`, `README.ja.md`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
+  - 完了条件: `bun run release:plan -- --base v0.6.43` → plugin で、npm と 3 つの plugin manifest のバージョンが同じ。`bun run verify` → 0 で終わる
+  - コミット: `docs(readme): describe the shell_write_delivery option`
+
+## P5: 試用と採否（既定オフのリリースの後、この PR の外）
+
+持ち主の 7 日の試用で、既定をオンにするか外すかを前もって決めた基準で決める。
+
+- [ ] T08: 試用の標本（会話記録から、seed で 40 件）のラベル付けと採否、#219 への記録
+  - 種別: 追加
+  - 計画: S6
+  - 依存: T07（既定オフのリリースが要る）
+  - 変更: `server/evals/post-write/shell-write-trial.json`
+  - 完了条件: `cat server/evals/post-write/shell-write-trial.json` → 母集団（会話記録の Post の差し込みと試用のログの突き合わせ）、標本、両者のラベルと決着、noise の割合、90 パーセンタイル、ホスト別、判定が入っている。#219 にコメントした
+  - コミット: `test(eval): record the shell_write_delivery trial and its decision`
+
+## 記録

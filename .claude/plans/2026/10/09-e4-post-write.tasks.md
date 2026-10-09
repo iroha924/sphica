@@ -271,7 +271,7 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
   - 変更: `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `bun run release:plan -- --base <前の release のコミット>` → `plugin`、npm と 3 つの plugin manifest が同じバージョン
   - コミット: `chore(release): bump to <version>`
-- [ ] T15: 採用しないとき: post_write の実装と hook を外す（照合の切り出しと評価の仕組み・結果は残す）
+- [-] T15: 採用しないとき: post_write の実装と hook を外す（照合の切り出しと評価の仕組み・結果は残す）
   - 種別: 削除
   - 計画: S5
   - 依存: T12（不採用のときだけ）
@@ -299,3 +299,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T25・T26 のレビュー / F1〜F4 は採用して T28 で直した。8 組の上限は列挙をやめて状態をたどる形にしたので無くした
 - 2026-10-10 / T27・T28 のレビュー / F1・F2 は採用して T29 で直した
 - 2026-10-10 / T23 / 先頭 4,000 字のシートでは長い文書の名指した箇所が見えなかった / `--sheet` を名指した語の前後を出す形に直し、そのシートで Codex のラベル付けをやり直した（変更欄に replay.ts を足した）
+- 2026-10-10 / T15 / post_write は作らなかったので外す実装は無く、照合の切り出し（T01）と時点付きの配信条件（T18）は評価と #219 の次の段で使う / 取りやめた。これらは #219 の次の段（`10-shell-write-delivery`）と一緒に 0.6.44 で出す
