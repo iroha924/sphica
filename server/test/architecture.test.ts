@@ -37,6 +37,8 @@ test("only git.ts and the git worker start git, and only a few modules start pro
     'spawn("git" /* the program */, ["status"]);',
     'execFileSync("git.exe", ["status"]);',
     'spawn("\\x67it", []);',
+    'exec("git\\tstatus");',
+    'spawn("g\\\nit", []);',
     // biome-ignore lint/suspicious/noTemplateCurlyInString: the source under check holds a template
     "const prefix = '';\nexec(`${prefix}git status`);",
   ]) {
@@ -49,6 +51,7 @@ test("only git.ts and the git worker start git, and only a few modules start pro
     'import { exec } from "child_process";\nexec("ls");',
     'const { exec } = await import("node:child_process");\nexec("ls");',
     'const cp = require("node:child_process");',
+    'import { exec } from "node:child_\\\nprocess";\nexec("ls");',
   ]) {
     const r = check({ "stray.ts": `${load}\n` });
     assert.equal(r.status, 1, load);

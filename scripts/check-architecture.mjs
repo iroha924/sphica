@@ -88,9 +88,17 @@ const SPAWNERS = new Set([
   "server/src/plugin.ts",
 ]);
 /** A string token's text as the program reads it: quotes removed and escapes decoded */
+const ESCAPES = { b: "\b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v", 0: "\0" };
 const cooked = (raw) =>
-  raw.replace(/\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|([\s\S]))/g, (_, x, u1, u4, c) =>
-    x || u1 || u4 ? String.fromCodePoint(Number.parseInt(x ?? u1 ?? u4, 16)) : c,
+  raw.replace(
+    /\\(?:x([0-9a-fA-F]{2})|u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|(\r\n|[\s\S]))/g,
+    (_, x, u1, u4, c) =>
+      x || u1 || u4
+        ? String.fromCodePoint(Number.parseInt(x ?? u1 ?? u4, 16))
+        : // A backslash before a line break continues the line: both are dropped
+          /^(?:\r\n|[\n\r\u2028\u2029])$/.test(c)
+          ? ""
+          : (ESCAPES[c] ?? c),
   );
 /** Each string and each piece of a template in a source, cooked */
 const strings = (source) =>
