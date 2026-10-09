@@ -1,5 +1,6 @@
 // release-finish as release.yml runs it, with fake git, gh, and npm first on PATH (no network), plus its pure parts.
 
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

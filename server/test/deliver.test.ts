@@ -1,5 +1,6 @@
 // Automatic delivery against real SQLite and a git checkout: which records reach the model before an edit, on a prompt, and at session
 // start, which never do, and that each delivery is logged by unit id without its text.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";

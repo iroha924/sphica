@@ -1,5 +1,6 @@
 // The record server's flows against real SQLite and a real git repository: begin binds a run, context, check, and save take its id,
 // and glean's changes cite owner messages, fetched GitHub sources, or file excerpts read from git.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

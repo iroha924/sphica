@@ -1,3 +1,4 @@
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inline, panel, plain, rule } from "../src/panel.ts";

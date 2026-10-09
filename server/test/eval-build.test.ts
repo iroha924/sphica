@@ -1,4 +1,5 @@
 // The evaluation slots' scripts: where they put the database copy, the receipts, and the gold marker, for the cloud VM and the local runners.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

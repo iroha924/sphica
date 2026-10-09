@@ -1,4 +1,5 @@
 // The fields table against real SQLite: one row per definition with how many records carry a value, and cells that cannot break the table.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fieldsTable, fieldsText } from "../src/fields.ts";

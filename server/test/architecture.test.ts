@@ -1,4 +1,5 @@
 // check-architecture.mjs run on a copy of the sources, so a module that starts git on its own is shown to fail it
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

@@ -1,5 +1,6 @@
 // The decision export against real SQLite: chosen active decisions with their standing quotes and the decisions they replaced, all or
 // nothing, with every outside string fenced so it cannot change the document's structure; and the save path checked where it lands.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

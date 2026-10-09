@@ -1,3 +1,4 @@
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -335,6 +336,7 @@ test("splits AskUserQuestion into the model's questions and the owner's answers"
 
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-capture-home-")));
 const realHome = process.env.HOME;
+const realProfile = process.env.USERPROFILE;
 const realTemp = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
 const repoDir = path.join(home, "repo");
 before(() => {
@@ -342,6 +344,8 @@ before(() => {
   delete process.env.SPHICA_PARENT_SESSION;
   delete process.env.CLAUDE_CODE_ENTRYPOINT;
   process.env.HOME = home;
+  // os.homedir() reads USERPROFILE on Windows
+  process.env.USERPROFILE = home;
   // The work tree comparisons refuse an isolated directory inside the temp directory, which an agent can write: the temp directory
   // moves under this HOME, beside its .sphica, as on a machine where HOME is not in the temp directory
   fs.mkdirSync(path.join(home, "tmp"));
@@ -356,6 +360,8 @@ before(() => {
 });
 after(() => {
   process.env.HOME = realHome;
+  if (realProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = realProfile;
   for (const [k, v] of Object.entries(realTemp))
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

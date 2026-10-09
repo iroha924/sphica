@@ -1,4 +1,5 @@
 // The local Claude runner: what each condition is started with, how its patch and answer are taken, and how its stream is read.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";

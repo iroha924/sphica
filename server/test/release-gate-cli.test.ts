@@ -1,6 +1,7 @@
 // Runs scripts/release-gate.mjs as release.yml does, with fake git, gh, and npm first on PATH (no network).
 // The workflow reads the PR number from GITHUB_OUTPUT, so check what the script actually writes there.
 
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

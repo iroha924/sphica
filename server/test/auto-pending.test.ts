@@ -1,5 +1,6 @@
 // Automatic traces against real SQLite: what waits counts every speaker's untraced messages, sessions come oldest first, and a run
 // that stops at its page limit is resumed by the next one from the first message still waiting, with earlier messages as context.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

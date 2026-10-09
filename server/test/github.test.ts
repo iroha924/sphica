@@ -1,4 +1,5 @@
 // Harvest's read of a pull request and how it is stored: what each source keeps, new revisions for edited text, and the closed issues.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

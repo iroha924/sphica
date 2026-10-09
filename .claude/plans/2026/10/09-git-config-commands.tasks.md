@@ -191,6 +191,18 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `cd server && node --test test/architecture.test.ts` → T14 の検査（HEAD から戻して確認）で 1 件失敗した（`exec("git\tstatus")` で exit 0）
   - 結果: `cd server && node --test test/architecture.test.ts` → 1 件 pass。`bun run architecture` → exit 0
 
+- [x] T17: T13 のレビューの指摘を直す（テストの準備で SPHICA_DB と SPHICA_HOME も消す、どのテストファイルも先頭で準備を読み込む、capture のテストで USERPROFILE も差し替える）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T13（直す対象）
+  - 変更: `server/test/isolate-home.ts`, `server/test/capture.test.ts`
+  - red: `cd server && HOME=<一時> USERPROFILE=<一時> SPHICA_HOME=<一時>/sphica-home SPHICA_DB=<一時>/real.db node --test test/record.test.ts` → T13 の準備では、`<一時>/sphica-home/spool` が作られる
+  - 完了条件: `cd server && HOME=<一時> USERPROFILE=<一時> SPHICA_HOME=<一時>/sphica-home SPHICA_DB=<一時>/real.db node --test test/record.test.ts` → 全件 pass、`<一時>` に何も書かれない（capture・read のテストも同じ）
+  - コミット: `test: isolate every test file from the owner's HOME, database, and queue (T17)`
+  - 結果: HOME・USERPROFILE を `.sphica/git` がファイルの一時ディレクトリ、SPHICA_HOME・SPHICA_DB をその下に向けて `node --test test/capture.test.ts`・`test/record.test.ts`・`test/read.test.ts` → 0 件失敗、一時ディレクトリには `.sphica/git`（仕込んだファイル）しか無い
+  - 結果: 62 のテストファイルの先頭に `import "./isolate-home.ts";` を足した（残りの 5 つは T13 で足し済み）
+  - 結果: `HOME=<一時> USERPROFILE=<一時> SPHICA_HOME=<一時>/sphica-home SPHICA_DB=<一時>/real.db node --test test/record.test.ts` → T13 の準備（HEAD から戻して確認）では 66 件 pass のまま `<一時>/sphica-home/spool` が作られた。直した後は 66 件 pass で何も作られない
+
 ## P4: リリース
 
 - [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
@@ -224,3 +236,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T11 / Codex のタスクレビュー（dac3b908）: F1〜F3（P2）を採用し、T14 を足した。字句の検査では実行時に組み立てる名前まで捕まえられないので、子プロセスを起動できるモジュールを 5 つに絞り、残りはレビューで見る、と検査のコメントに書いた
 - 2026-10-09 / T06 / Codex のタスクレビュー（f91611bc）: F1（足したケースが失敗の答えでも通る、P2）、F2（submodule の中のフィルタが未テスト、P2）、F3（Windows で hook の陽性対照を省く、P2）を採用し、T15 を足した
 - 2026-10-09 / T14 / Codex のタスクレビュー（d5c5a704）: F1（エスケープの戻し方が JavaScript と違う、P2）を採用し T16 を足した。F2（文字列の一致を読み込みとみなす誤検出と、空振り防止が実際の読み込みを確かめない、P2）は見送った。誤検出は子プロセスを起動しない側に倒れるだけで、空振り防止は字句の検査では証明にならない（検査のコメントに限界として書いてある）。この検査への指摘は 3 回目で、字句の検査を詰めるのはここで止める
+- 2026-10-09 / T13 / Codex のタスクレビュー（7c0b0f53）: F1（直接流すと SPHICA_HOME・SPHICA_DB が残り持ち主の DB とキューに届き得る、P1）と F2（capture のテストが準備を読まず、Windows で持ち主のキューを消し得る、P1）を採用し、T17 を足した。red は SPHICA_HOME と SPHICA_DB を一時ディレクトリに向けて測った（持ち主の DB とキューには触れていない）

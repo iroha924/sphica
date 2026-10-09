@@ -1,5 +1,6 @@
 // Automatic delivery in Codex against real SQLite and a git checkout: apply_patch edits bring the records anchored to every patched path at once,
 // and a shell command that names an anchored path brings its decisions once per session, worded as named rather than read.
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

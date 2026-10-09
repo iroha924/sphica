@@ -1,6 +1,7 @@
 // Forgetting chosen sources on a real database: rows and index entries go, units that cited them are judged again, and the bytes
 // do not stay in the file.
 
+import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
