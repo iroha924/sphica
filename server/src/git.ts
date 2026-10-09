@@ -107,17 +107,18 @@ export const commitOf = (root: string, rev: string, limits?: Limits): string =>
   text(root, ["rev-parse", "--verify", "-q", `${revision(rev)}^{commit}`], limits).trim();
 
 /** The short name of origin/HEAD, or of the branch's upstream; throws when there is none */
-export const baseRef = (root: string, which: "origin/HEAD" | "upstream"): string =>
+export const baseRef = (root: string, which: "origin/HEAD" | "upstream", limits?: Limits): string =>
   text(
     root,
     which === "origin/HEAD"
       ? ["rev-parse", "--abbrev-ref", "origin/HEAD"]
       : ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    limits,
   ).trim();
 
 /** The best common ancestor of two revisions; throws when they share none */
-export const mergeBase = (root: string, a: string, b: string): string =>
-  text(root, ["merge-base", revision(a), revision(b)]).trim();
+export const mergeBase = (root: string, a: string, b: string, limits?: Limits): string =>
+  text(root, ["merge-base", revision(a), revision(b)], limits).trim();
 
 /** Whether commit a is an ancestor of commit b; false when git cannot tell */
 export function isAncestor(root: string, a: string, b: string, limits?: Limits): boolean {

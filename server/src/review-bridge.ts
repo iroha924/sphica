@@ -57,10 +57,13 @@ export type Change = { base: string; files: FileDiff[]; digest: string } | { pro
 export async function localChange(root: string, args: string): Promise<Change> {
   if (/^\s*#?\d+\s*$|(^|\s)#\d+\b|\/pull\/\d+/.test(args))
     return { problem: "it names a pull request, and Sphica sees only the local change" };
+  // One deadline for every git the review's change takes, the isolated diff included
+  const until = Date.now() + DIFF_DEADLINE;
+  const left = () => Math.max(1, until - Date.now());
   let base = "";
   for (const which of ["origin/HEAD", "upstream"] as const) {
     try {
-      base = baseRef(root, which);
+      base = baseRef(root, which, { timeout: left() });
       if (base) break;
     } catch {
       // try the next
@@ -69,17 +72,17 @@ export async function localChange(root: string, args: string): Promise<Change> {
   if (!base) return { problem: "there is no default branch (origin/HEAD) or upstream to compare with" };
   let from: string;
   try {
-    from = mergeBase(root, "HEAD", base);
+    from = mergeBase(root, "HEAD", base, { timeout: left() });
   } catch {
     return { problem: `HEAD shares no history with ${base}` };
   }
   // Prefixes and quoting pinned against settings that change what diff prints; names hold every changed path, including binary and
   // empty files that print no ---/+++ lines
-  const got = await worktreeDiff(root, from, { max: MAX_DIFF, deadline: DIFF_DEADLINE });
+  const got = await worktreeDiff(root, from, { max: MAX_DIFF, deadline: left() });
   let untracked: string[];
   try {
     if (!got) throw new Error("no diff");
-    untracked = listFiles(root, "untracked", { max: MAX_DIFF });
+    untracked = listFiles(root, "untracked", { max: MAX_DIFF, timeout: left() });
   } catch {
     return {
       problem:

@@ -99,6 +99,11 @@ test("the isolated config holds only checked values in one fixed form", () => {
     isolatedConfig({ "extensions.objectFormat": "sha256", "index.sparse": "false" }),
     /repositoryformatversion = 1[\s\S]*\[index\]\n\tsparse = false\n\[extensions\]\n\tobjectFormat = sha256\n$/,
   );
+  // Git's own spellings in any letter case are written in one form
+  assert.equal(
+    isolatedConfig({ "core.autocrlf": "YES", "core.eol": "LF", "core.checkStat": "MINIMAL" }),
+    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tquotePath = false\n\tautocrlf = true\n\teol = lf\n\tcheckStat = minimal\n",
+  );
   // A value carrying a new section is refused, not written
   assert.throws(() => isolatedConfig({ "core.eol": 'lf\n[filter "evil"]\n\tclean = x' }), /does not copy/);
   assert.throws(() => isolatedConfig({ "core.filemode": "yes" }), /does not copy/);

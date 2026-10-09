@@ -4,6 +4,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+// First, so the directories tempDir made are removed at exit before what is left in the temp directory is counted below
+import "./temp-dir.ts";
 
 // Also imported first by every test file, so running one file directly is isolated too; the second load in a process does nothing
 if (!process.env.SPHICA_TEST_ISOLATED) {
@@ -23,7 +25,20 @@ if (!process.env.SPHICA_TEST_ISOLATED) {
   // Either would point Sphica past the swapped HOME at the owner's database or queue
   delete process.env.SPHICA_DB;
   delete process.env.SPHICA_HOME;
+  // What a test file leaves in the temp directory fails it by name, as sql:reach would have seen it had the temp directory not moved here
   process.on("exit", () => {
+    let left: string[] = [];
+    try {
+      left = fs.readdirSync(tmp).filter((name) => name !== "node-compile-cache");
+    } catch {
+      // the directory is gone: nothing was left
+    }
+    if (left.length) {
+      process.stderr.write(
+        `the test file left ${left.length} in its temp directory: ${left.slice(0, 20).join(", ")}\n`,
+      );
+      process.exitCode = 1;
+    }
     try {
       fs.rmSync(base, { recursive: true, force: true });
     } catch {

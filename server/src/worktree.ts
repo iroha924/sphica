@@ -25,6 +25,8 @@ const usable = (p: string): boolean => p !== "" && !p.includes("\\") && !/\p{Cc}
  * to a file that was already dirty still counts as a change.
  */
 export async function snapshot(root: string): Promise<Snapshot | null> {
+  // One deadline for the status and the HEAD read after it
+  const until = Date.now() + STATUS_DEADLINE;
   const out = await worktreeStatus(root, STATUS_DEADLINE);
   if (out === null) return null;
   const fields = out.split("\0");
@@ -49,7 +51,8 @@ export async function snapshot(root: string): Promise<Snapshot | null> {
   }
   let head: string | null = null;
   try {
-    head = commitOf(root, "HEAD", LIMITS) || null;
+    const left = until - Date.now();
+    if (left > 0) head = commitOf(root, "HEAD", { ...LIMITS, timeout: left }) || null;
   } catch {
     // no commit yet
   }

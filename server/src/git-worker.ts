@@ -139,6 +139,18 @@ function readStamped(file: string, limit: number): { bytes: Buffer; mtime: Date 
   }
 }
 
+/**
+ * A value in the one spelling the isolated config writes: git reads its words in any letter case, and core.autocrlf takes any of git's
+ * boolean words besides input. Null for a value git itself would not take as one of the allowed ones.
+ */
+function normalized(key: keyof typeof SAFE_KEYS, value: string): string | null {
+  const v = value.trim().toLowerCase();
+  if (key !== "core.autocrlf") return v;
+  if (["true", "yes", "on", "1"].includes(v)) return "true";
+  if (["false", "no", "off", "0", ""].includes(v)) return "false";
+  return v === "input" ? v : null;
+}
+
 /** The config the isolated directory holds: the safe keys, each value checked against what its type allows and written in one fixed form */
 export function isolatedConfig(values: Partial<Record<keyof typeof SAFE_KEYS, string | null>>): string {
   const lines = ["[core]", "\tbare = false", "\tquotePath = false"];
@@ -153,12 +165,13 @@ export function isolatedConfig(values: Partial<Record<keyof typeof SAFE_KEYS, st
   for (const [key, type] of Object.entries(SAFE_KEYS) as [keyof typeof SAFE_KEYS, string][]) {
     const value = values[key];
     if (value === null || value === undefined || type === "path") continue;
+    const normal = normalized(key, value);
     const ok = type === "bool" ? ["true", "false"] : (allowed[key] ?? []);
-    if (!ok.includes(value))
+    if (normal === null || !ok.includes(normal))
       throw new Error(`${key} has a value Sphica does not copy: ${JSON.stringify(value.slice(0, 40))}`);
     const [section, name] = key.split(".") as [string, string];
-    if (section === "extensions") extensions.push(`\t${name} = ${value}`);
-    else sections[section]?.push(`\t${name} = ${value}`);
+    if (section === "extensions") extensions.push(`\t${name} = ${normal}`);
+    else sections[section]?.push(`\t${name} = ${normal}`);
   }
   const sha256 = values["extensions.objectFormat"] === "sha256";
   lines.splice(1, 0, `\trepositoryformatversion = ${sha256 ? 1 : 0}`);

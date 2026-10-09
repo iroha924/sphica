@@ -214,6 +214,17 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 結果: `node --test --test-reporter=tap /dev/null` → `# pass 1`・`# fail 0`（T07 の確かめ方を通る形の再現）
   - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。手元の tap で、確かめる 2 つの名前が `ok 3 - filters, diff drivers, ...` と `ok 7 - the worker reads only ...` として出る
 
+- [x] T19: 全差分のレビューの指摘を直す（git が認める別の書き方の設定値を正規化して写す、temp に残したテストを名前付きで落とす、snapshot と localChange の git が 1 つの締め切りを分ける、check.yml の末尾の空行）
+  - 種別: 修正
+  - 計画: S2, S3, S6
+  - 依存: T18（直す対象を含む全差分）
+  - 変更: `server/src/git-worker.ts`, `server/src/git.ts`, `server/src/worktree.ts`, `server/src/review-bridge.ts`, `server/test/isolate-home.ts`, `server/test/git-worker.test.ts`, `.github/workflows/check.yml`
+  - red: `cd server && node --test --test-name-pattern="isolated config" test/git-worker.test.ts` → T18 の git-worker.ts で失敗する（`core.autocrlf=YES` を拒む）
+  - 完了条件: `cd server && node --test test/git-worker.test.ts` → 全件 pass。`git diff --check main..HEAD` → 何も出ない。`bun run verify` → exit 0
+  - コミット: `fix(git): normalize copied config, share deadlines, and fail tests that leave temp files (T19)`
+  - 結果: `cd server && node --test --test-name-pattern="isolated config" test/git-worker.test.ts` → T18 の git-worker.ts（HEAD から戻して確認）で 1 件失敗、直した後は pass
+  - 結果: `node --test test/zz-leak.test.ts`（temp にディレクトリを残す使い捨てのテスト、コミットしていない）→ `the test file left 1 in its temp directory: leak-RAVqrY` で 1 件失敗。`node --import ./test/isolate-home.ts --test test/*.test.ts` → 1070 件 pass、残しもの無し
+
 ## P4: リリース
 
 - [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
@@ -250,3 +261,4 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T13 / Codex のタスクレビュー（7c0b0f53）: F1（直接流すと SPHICA_HOME・SPHICA_DB が残り持ち主の DB とキューに届き得る、P1）と F2（capture のテストが準備を読まず、Windows で持ち主のキューを消し得る、P1）を採用し、T17 を足した。red は SPHICA_HOME と SPHICA_DB を一時ディレクトリに向けて測った（持ち主の DB とキューには触れていない）
 - 2026-10-09 / T07 / Codex のタスクレビュー（92185015）: F1（テストの無いファイルでも pass が数えられ空振りで通る、P2）を採用し T18 を足した。F2（Windows で hook の陽性対照を省く、P2）は T15 で直し済み
 - 2026-10-09 / T17 / tasks の書式の検査が失敗したまま df727d78 をコミットした（検査の結果でコミットを止めていなかった）。T18 のコミットで書式を直した
+- 2026-10-09 / 全差分 / Codex の全差分のレビュー（main..9cd40961、high）: F1（git が認める別の書き方の値で比較が失敗する、P2）、F2（テストの準備が temp の残しものの検査を空振りさせる、P2）、F3（snapshot と localChange が締め切りを共有しない、P2）を採用し、T19 を足した。T15〜T18 はタスクごとのレビューを別に頼まず、この全差分のレビューで見てもらった（観点に明記した）。コマンドが走る経路の残りは見つからなかった

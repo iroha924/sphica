@@ -282,4 +282,3 @@ jobs:
           # A file with no tests still counts as one pass, so each file must show one of its own tests passing
           grep -qE "^ok [0-9]+ - filters, diff drivers, and textconv" git.tap
           grep -qE "^ok [0-9]+ - the worker reads only regular files" git.tap
-
