@@ -156,6 +156,16 @@ base: main
   - コミット: `fix(eval): require deliverable and anchored at once, and resolve doubt exactly`
   - 結果: red を直す前のコードで実測（late が母集団に入る、9 unknown＋30 missed で undecided）。F1 は他と同時に直したので、結果の後の読めない行の検査を一時的に外してテストが落ちることを確かめ、戻した。F4 はレビューで Codex が再現した（drawn 150・apart {}）。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass。`bun run verify` → exit 0
 
+- [x] T29: 始まりがはっきりしないターンと、呼び出しの後の読めない行を unknown にする（T27・T28 のレビューの F1・F2）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T28（直す対象の M0' のスクリプト）
+  - 変更: `server/evals/post-write/shell-miss.ts`, `server/test/post-write-shell-miss.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → origin の無い行で始まるターンを not observed と確定する
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-shell-miss.test.ts` → 差し込みの後に origin の無い行で始まったかもしれないターンは unknown、呼び出しと結果の間の読めない行も次のプロンプトの候補として unknown
+  - コミット: `fix(eval): keep turns of unclear start and lines after the call as unknown`
+  - 結果: red を直す前のコードで実測（not observed）。F2 は F1 と同時に直したので、`call.n` を `result.n` に一時的に戻してテストが落ちることを確かめ、戻した。直した後 `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/post-write-shell-miss.test.ts` → 3 pass。`bun run verify` → exit 0
+
 - [ ] T22: M0' を測り直して #219 を判定し直す（Claude と Codex のラベル）
   - 種別: 追加
   - 計画: S1, S6
@@ -285,3 +295,4 @@ M0 と M1a を通ったときだけ、書いた直後の配信を両ホストに
 - 2026-10-10 / T21 のレビュー / F1・F3・F4・F5・F6 は採用して T26 で直した。F2（呼び出しの選ぶ順）は T25 で直し済み
 - 2026-10-10 / T27 / Claude のラベルで試算すると決まらない組が 5 組あり、どれも次のプロンプトの前の origin の無い行（ローカルのコマンドなど）が原因だった / 修正タスク T27 を足した
 - 2026-10-10 / T25・T26 のレビュー / F1〜F4 は採用して T28 で直した。8 組の上限は列挙をやめて状態をたどる形にしたので無くした
+- 2026-10-10 / T27・T28 のレビュー / F1・F2 は採用して T29 で直した

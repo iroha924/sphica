@@ -284,15 +284,22 @@ export async function outcome(
     const measured = { call: id, at: when };
     if (c.agent !== null) return { outcome: "subagent", ...measured };
     if (!deliveryObserved(c, result.n)) {
-      // A line before the turn that could not be read may have been the delivery that puts it in scope
+      // The turn may have opened at a later line of no known origin, after a delivery; or a line before it that could not be read may
+      // have been the delivery that puts it in scope
       const start = turnStart(c, result.n) ?? 0;
-      return { outcome: c.unreadableLines.some((n) => n < start) ? "unknown" : "not observed", ...measured };
+      const opened = c.events
+        .filter((x) => x.kind === "unknown prompt" && x.n > start && x.n <= result.n)
+        .at(-1)?.n;
+      const maybe =
+        (opened !== undefined && c.events.some((x) => x.kind === "delivery" && x.n < opened)) ||
+        c.unreadableLines.some((n) => n < (opened ?? start));
+      return { outcome: maybe ? "unknown" : "not observed", ...measured };
     }
     const end = nextHuman(c, result.n);
     // A line after the call that could not be read may have been the owner's next prompt
     if (end === "none")
       return {
-        outcome: c.unreadableLines.some((n) => n > result.n) ? "unknown" : "no next prompt",
+        outcome: c.unreadableLines.some((n) => n > call.n) ? "unknown" : "no next prompt",
         ...measured,
       };
     if (end === "unknown") return { outcome: "unknown", ...measured };

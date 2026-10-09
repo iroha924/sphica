@@ -203,6 +203,24 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       "{the owner's next prompt, perhaps",
     ];
     fs.writeFileSync(path.join(dir, "tail.jsonl"), `${tail.join("\n")}\n`);
+    // The turn opens with a line of no origin that the model answers: it may be the owner's prompt, after Sphica's delivery
+    const nostart = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      line("2099-01-01T00:00:00.000Z", { type: "user", message: { content: "fix dates" } }),
+      call("2099-01-01T00:05:00.000Z", "u1"),
+      result("2099-01-01T00:06:00.000Z", "u1"),
+      human("2099-01-01T00:30:00.000Z"),
+    ];
+    fs.writeFileSync(path.join(dir, "nostart.jsonl"), `${nostart.join("\n")}\n`);
+    // A line that could not be read between the call and its result, with no later prompt
+    const between = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      call("2099-01-01T00:05:00.000Z", "v1"),
+      "{the owner's next prompt, perhaps",
+      result("2099-01-01T00:06:00.000Z", "v1"),
+    ];
+    fs.writeFileSync(path.join(dir, "between.jsonl"), `${between.join("\n")}\n`);
     const conversations = readConversations(dir);
     const [utc, , sqlite] = pairs as [Candidate, Candidate, Candidate];
     // The same pair over a turn wide enough for every call above
@@ -215,7 +233,11 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
           pair,
           { index: 0, calls },
           conversations.filter((c) =>
-            only ? c.file === only : !["quiet.jsonl", "broken.jsonl", "tail.jsonl"].includes(c.file),
+            only
+              ? c.file === only
+              : !["quiet.jsonl", "broken.jsonl", "tail.jsonl", "nostart.jsonl", "between.jsonl"].includes(
+                  c.file,
+                ),
           ),
         )
       ).outcome;
@@ -253,6 +275,16 @@ test("a labelled shell call becomes an outcome from the records deliverable at i
       await of(utc, ["y1"], "tail.jsonl"),
       "unknown",
       "a line that could not be read may have been the next prompt",
+    );
+    assert.equal(
+      await of(utc, ["u1"], "nostart.jsonl"),
+      "unknown",
+      "the turn may have opened after Sphica's delivery",
+    );
+    assert.equal(
+      await of(utc, ["v1"], "between.jsonl"),
+      "unknown",
+      "a line between the call and its result may be the prompt",
     );
   } finally {
     await db.done();
