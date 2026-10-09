@@ -22,14 +22,16 @@ base: main
 
 元のリポジトリで流す git が、エージェントの設定のコマンド（fsmonitor、hook、fetch）を走らせず、git の起動場所が git.ts に限られる。
 
-- [ ] T01: git.ts を操作ごとの関数と共通の起動に作り直し、中身を読まない呼び出しを置き換える
+- [x] T01: git.ts を操作ごとの関数と共通の起動に作り直し、中身を読まない呼び出しを置き換える
   - 種別: 修正
   - 計画: S1
   - 依存: なし
-  - 変更: `server/src/git.ts`, `server/src/project.ts`, `server/src/plugin.ts`, `server/src/glean.ts`, `server/src/rule-files.ts`, `server/src/repo-facts.ts`, `server/src/worktree.ts`, `server/src/review-bridge.ts`, `server/test/git-safety.test.ts`
+  - 変更: `server/src/git.ts`, `server/src/project.ts`, `server/src/plugin.ts`, `server/src/glean.ts`, `server/src/rule-files.ts`, `server/src/worktree.ts`, `server/src/review-bridge.ts`, `server/test/git-safety.test.ts`
   - red: `cd server && node --test test/git-safety.test.ts` → 直す前の本体で、`core.fsmonitor`（`.git/config` と `include.path` 先）を仕込んだリポジトリの `repoFiles`・`identify`・`ruleFiles` が印を付けて失敗する。欠けたオブジェクトと promisor remote を仕込んだ `catFileBlob` 相当（glean の読み取り）が `ext::` の印を付けて失敗する
   - 完了条件: `cd server && node --test test/git-safety.test.ts` → 中身を読まない操作の経路が全件 pass（陽性対照は素の git で印が付く）。`bun run verify` → exit 0
   - コミット: `fix(git): run git for reads with command-running config switched off (T01)`
+  - 結果: `cd server && node --test test/git-safety.test.ts` → 直す前の本体で 2 件失敗した（`repoFiles` が仕込んだ fsmonitor を走らせた、glean の読み取りが promisor remote から fetch した）
+  - 結果: `cd server && node --test test/git-safety.test.ts test/project.test.ts test/capture.test.ts test/review-bridge.test.ts test/rule-files.test.ts test/plugin.test.ts test/read.test.ts test/record.test.ts` → 228 件 pass
 
 - [ ] T02: gh と ghUser を空の一時ディレクトリで、GIT_* を除いた環境で起動する
   - 種別: 修正
@@ -91,12 +93,18 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 
 ## P4: リリース
 
-- [ ] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
+- [x] T08: 0.6.43 にバージョンを上げる（挙動の変化（LFS と replace refs）は PR 本文の Release notes に書く）
   - 種別: 変更
   - 計画: S7
-  - 依存: T07（出荷するコードとテストが揃っている必要がある）
+  - 依存: なし
   - 変更: `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - 完了条件: `bun run release:plan -- --base v0.6.42` → plugin。`bun run verify` → exit 0（バージョンの同期の検査を含む）
   - コミット: `chore(release): 0.6.43 (T08)`
+  - 結果: `bun run release:plan -- --base v0.6.42` → release kind: plugin（inputs: git.ts ほか 7 ファイル）
+  - 結果: `bun run verify` → exit 0（T01 と同じコミットで、4 つのファイルを 0.6.43 にした）
 
 ## 記録
+
+- 2026-10-09 / T01 / 変更欄から `server/src/repo-facts.ts` を外した（前: 含む、後: 含まない）。repo-facts.ts は `commitHolds` と `repoFiles` を名前で読むだけで、git.ts の側で同じ名前のまま直したので変える所が無かった
+- 2026-10-09 / T01 / 作業ツリーを比べる操作（status、作業ツリー対 commit の diff、renamesSince）も、T05 までの間は git.ts の関数として固定のキーを打ち消して流す。T05 で子プロセスへ移す
+- 2026-10-09 / T08 / pre-commit の bundle の検査が、出荷物の入力を変えたコミットにバージョンの同期を求めて T01 のコミットを止めた。T08 の依存を「T07」から「なし」に変え、T01 と同じコミットで 0.6.43 に上げた

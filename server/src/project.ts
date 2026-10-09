@@ -4,13 +4,13 @@
 // Only projects without a remote are mapped to `local:<name>` through a per-machine table (~/.sphica/projects.json).
 // Local paths are not stored in the database: they differ per machine, and the project is identified from the directory a command runs in.
 
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { leaves } from "./anchors.ts";
 import type { Reads } from "./db.ts";
 import { replaceFile, withFileLock } from "./file-lock.ts";
+import { originUrl, topLevel } from "./git.ts";
 import { sphicaHome } from "./sqlite.ts";
 
 export type Place = { key: string; root: string; name: string };
@@ -60,17 +60,15 @@ export function normalizeRemote(url: string | null | undefined): string | null {
   return r === null ? null : normalizeKey(`git:${r}`).slice(4);
 }
 
-const git = (dir: string, ...args: string[]): string | null => {
+/** A git answer, or null when git gives none (outside git, no remote, too slow) */
+const ask = (fn: () => string): string | null => {
   try {
-    return execFileSync("git", ["-C", dir, ...args], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5_000,
-    }).trim();
+    return fn() || null;
   } catch {
     return null;
   }
 };
+const top = (dir: string) => ask(() => topLevel(dir, { timeout: 5_000 }));
 
 /** The table of named projects. **A broken file is not treated as empty** (writing it back empty would drop every other entry). */
 function localMap(): Record<string, string> {
@@ -102,8 +100,7 @@ function localMap(): Record<string, string> {
 }
 
 /** The repository root, or dir itself outside git. */
-const rootOf = (dir: string): string =>
-  git(path.resolve(dir), "rev-parse", "--show-toplevel") || path.resolve(dir);
+const rootOf = (dir: string): string => top(path.resolve(dir)) || path.resolve(dir);
 
 /**
  * The project dir belongs to, or null (nothing is recorded).
@@ -111,9 +108,9 @@ const rootOf = (dir: string): string =>
  */
 export function identify(dir: string): (Place & { legacyKey: string }) | null {
   const given = path.resolve(dir);
-  const top = git(given, "rev-parse", "--show-toplevel");
-  const root = top || given;
-  const legacy = top ? legacyRemote(git(root, "remote", "get-url", "origin")) : null;
+  const found = top(given);
+  const root = found || given;
+  const legacy = found ? legacyRemote(ask(() => originUrl(root, { timeout: 5_000 }))) : null;
   if (legacy) {
     const key = normalizeKey(`git:${legacy}`);
     const remote = key.slice(4);
@@ -125,7 +122,7 @@ export function identify(dir: string): (Place & { legacyKey: string }) | null {
     const local = map[d];
     if (local && LOCAL_KEY.test(local))
       return { key: `local:${local}`, legacyKey: `local:${local}`, root: d, name: local };
-    if (top || path.dirname(d) === d) return null;
+    if (found || path.dirname(d) === d) return null;
   }
 }
 
@@ -164,8 +161,7 @@ export function checkLocalName(name: string): void {
 }
 
 /** The top of the git repository dir is in, or null outside git */
-export const repositoryRoot = (dir: string): string | null =>
-  git(path.resolve(dir), "rev-parse", "--show-toplevel") || null;
+export const repositoryRoot = (dir: string): string | null => top(path.resolve(dir));
 
 /** Names a project without a remote on this machine. */
 export function nameLocal(dir: string, name: string): Place {

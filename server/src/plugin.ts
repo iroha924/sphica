@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CODEX_TRUST_VERIFIED, type HookTrust, hookTrust, readHookStates } from "./codex-trust.ts";
+import { listFiles } from "./git.ts";
 import { caution, faint, type Mark, mark, pad, width } from "./panel.ts";
 
 const MANIFEST = path.join(".claude-plugin", "plugin.json");
@@ -97,12 +98,7 @@ function distributed(root: string, tracked: boolean): Map<string, string> {
   let rels: string[] | undefined;
   if (tracked) {
     try {
-      rels = execFileSync("git", ["-C", root, "ls-files", "-z"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .split("\0")
-        .filter((rel) => rel && fs.existsSync(path.join(root, rel)));
+      rels = listFiles(root, "tracked").filter((rel) => fs.existsSync(path.join(root, rel)));
       // **Generated files are not tracked by git, but npm files ships them** (plugin/dist and plugin/db in .gitignore).
       // Comparing only tracked files would count everything installed but untracked as a difference and make a healthy install look broken.
       rels = [...rels, ...walk(root).filter((rel) => GENERATED.test(rel) && !JUNK.test(path.basename(rel)))];
