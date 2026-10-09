@@ -145,7 +145,9 @@ jobs:
           set -euo pipefail
           node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/git-safety.test.ts test/git-worker.test.ts | tee git.tap
           grep -qx "# fail 0" git.tap
-          grep -qE "^# pass [1-9]" git.tap
+          # A file with no tests still counts as one pass, so each file must show one of its own tests passing
+          grep -qE "^ok [0-9]+ - filters, diff drivers, and textconv" git.tap
+          grep -qE "^ok [0-9]+ - the worker reads only regular files" git.tap
 
   # **What ships must run on Windows too** (AGENTS.md). Development of this repository assumes macOS / Linux, so verify does not run here;
   # it runs the file lock tests, and checks that the bundled tarball starts without node_modules and can create a database with node:sqlite.
@@ -193,7 +195,8 @@ jobs:
           set -euo pipefail
           node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/git-safety.test.ts | tee git.tap
           grep -qx "# fail 0" git.tap
-          grep -qE "^# pass [1-9]" git.tap
+          # A file with no tests still counts as one pass, so one of its own tests must show passing
+          grep -qE "^ok [0-9]+ - filters, diff drivers, and textconv" git.tap
       # Prints how much a shell-form hook pays for starting PowerShell on each call; it never fails on the numbers
       - name: Measure hook launch directly and through PowerShell
         run: node scripts/measure-hook-launch.mjs
@@ -276,5 +279,7 @@ jobs:
           git --version | grep -q "^git version 2\.34\."
           node --import ./test/isolate-home.ts --test --test-reporter=tap --test-timeout=120000 test/git-safety.test.ts test/git-worker.test.ts | tee git.tap
           grep -qx "# fail 0" git.tap
-          grep -qE "^# pass [1-9]" git.tap
+          # A file with no tests still counts as one pass, so each file must show one of its own tests passing
+          grep -qE "^ok [0-9]+ - filters, diff drivers, and textconv" git.tap
+          grep -qE "^ok [0-9]+ - the worker reads only regular files" git.tap
 

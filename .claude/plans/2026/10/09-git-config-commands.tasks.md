@@ -200,8 +200,19 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
   - 完了条件: `cd server && HOME=<一時> USERPROFILE=<一時> SPHICA_HOME=<一時>/sphica-home SPHICA_DB=<一時>/real.db node --test test/record.test.ts` → 全件 pass、`<一時>` に何も書かれない（capture・read のテストも同じ）
   - コミット: `test: isolate every test file from the owner's HOME, database, and queue (T17)`
   - 結果: HOME・USERPROFILE を `.sphica/git` がファイルの一時ディレクトリ、SPHICA_HOME・SPHICA_DB をその下に向けて `node --test test/capture.test.ts`・`test/record.test.ts`・`test/read.test.ts` → 0 件失敗、一時ディレクトリには `.sphica/git`（仕込んだファイル）しか無い
-  - 結果: 62 のテストファイルの先頭に `import "./isolate-home.ts";` を足した（残りの 5 つは T13 で足し済み）
+  - 結果: `grep -L 'import "./isolate-home.ts";' server/test/*.test.ts` → 何も出ない（62 のファイルに足し、残りの 5 つは T13 で足し済み）
   - 結果: `HOME=<一時> USERPROFILE=<一時> SPHICA_HOME=<一時>/sphica-home SPHICA_DB=<一時>/real.db node --test test/record.test.ts` → T13 の準備（HEAD から戻して確認）では 66 件 pass のまま `<一時>/sphica-home/spool` が作られた。直した後は 66 件 pass で何も作られない
+
+- [x] T18: T07 のレビューの指摘を直す（CI で、テストの無いファイルが 1 件の pass に数えられて空振りで通らないよう、ファイルごとに自分のテストの名前が ok で出たことを確かめる）
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T07（直す対象）
+  - 変更: `.github/workflows/check.yml`
+  - red: `node --test --test-reporter=tap /dev/null` → `# pass 1` と `# fail 0` で T07 の確かめ方を通る
+  - 完了条件: `actionlint .github/workflows/check.yml` → 指摘なし。`cd server && node --import ./test/isolate-home.ts --test --test-reporter=tap test/git-safety.test.ts test/git-worker.test.ts | grep -E "^ok [0-9]+ - (filters, diff drivers|the worker reads only)"` → 2 行
+  - コミット: `ci: require each git safety test file's own tests in the tap (T18)`
+  - 結果: `node --test --test-reporter=tap /dev/null` → `# pass 1`・`# fail 0`（T07 の確かめ方を通る形の再現）
+  - 結果: `actionlint .github/workflows/check.yml` → 指摘なし。手元の tap で、確かめる 2 つの名前が `ok 3 - filters, diff drivers, ...` と `ok 7 - the worker reads only ...` として出る
 
 ## P4: リリース
 
@@ -237,3 +248,5 @@ status と作業ツリー対 commit の diff が、`~/.sphica/git/` の隔離先
 - 2026-10-09 / T06 / Codex のタスクレビュー（f91611bc）: F1（足したケースが失敗の答えでも通る、P2）、F2（submodule の中のフィルタが未テスト、P2）、F3（Windows で hook の陽性対照を省く、P2）を採用し、T15 を足した
 - 2026-10-09 / T14 / Codex のタスクレビュー（d5c5a704）: F1（エスケープの戻し方が JavaScript と違う、P2）を採用し T16 を足した。F2（文字列の一致を読み込みとみなす誤検出と、空振り防止が実際の読み込みを確かめない、P2）は見送った。誤検出は子プロセスを起動しない側に倒れるだけで、空振り防止は字句の検査では証明にならない（検査のコメントに限界として書いてある）。この検査への指摘は 3 回目で、字句の検査を詰めるのはここで止める
 - 2026-10-09 / T13 / Codex のタスクレビュー（7c0b0f53）: F1（直接流すと SPHICA_HOME・SPHICA_DB が残り持ち主の DB とキューに届き得る、P1）と F2（capture のテストが準備を読まず、Windows で持ち主のキューを消し得る、P1）を採用し、T17 を足した。red は SPHICA_HOME と SPHICA_DB を一時ディレクトリに向けて測った（持ち主の DB とキューには触れていない）
+- 2026-10-09 / T07 / Codex のタスクレビュー（92185015）: F1（テストの無いファイルでも pass が数えられ空振りで通る、P2）を採用し T18 を足した。F2（Windows で hook の陽性対照を省く、P2）は T15 で直し済み
+- 2026-10-09 / T17 / tasks の書式の検査が失敗したまま df727d78 をコミットした（検査の結果でコミットを止めていなかった）。T18 のコミットで書式を直した
