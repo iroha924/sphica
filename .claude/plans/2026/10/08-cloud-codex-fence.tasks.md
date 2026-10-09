@@ -425,6 +425,17 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
   - 結果: `cd server && node --test --test-name-pattern="the Codex run under test reads through a read fence|the Codex grader reads through the read fence|outside the cache" test/eval-codex.test.ts test/eval-grade.test.ts` → 直す前の本体で 3 件失敗した（一時ディレクトリの deny がない、外の `--out` が通る、採点者の tree の行がない）
   - 結果: `cd server && node --test test/eval-codex.test.ts test/eval-grade.test.ts test/eval-claude.test.ts test/review-eval.test.ts test/hidden-runner.test.ts` → 186 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
 
+- [x] T38: GitHub の Codex のセキュリティレビュー（b85bcca6）の P2 を直す（M2 の `check_unloaded` をモデルが書いた文字列でも立てられ、自分の run を集計から外せる）。判定を check のスクリプトを走らせたコマンドの出力に限り、出たら run を外さずに集計を止める
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T37（直す対象の M2 が要る）
+  - 変更: `server/evals/review/m2.ts`, `server/test/review-eval.test.ts`
+  - red: `cd server && node --test --test-name-pattern="never from the model's text|a run that changed its copy is excluded" test/review-eval.test.ts` → 直す前の本体（`checkUnloaded` に元の正規表現だけを置いた状態）で 2 件失敗する
+  - 完了条件: `cd server && node --test test/review-eval.test.ts` → 全件 pass
+  - コミット: `fix(eval): read an unloaded M2 check only from the check's output and stop the count (T38)`
+  - 結果: `cd server && node --test --test-name-pattern="never from the model's text|a run that changed its copy is excluded" test/review-eval.test.ts` → 直す前の本体で 2 件失敗した（モデルの文字列で立つ、集計が止まらない）
+  - 結果: `cd server && node --test test/review-eval.test.ts` → 27 件 pass。`bun run typecheck`・`bun run lint`・`bun run knip` → 0 で終わった
+
 ## 記録
 
 - 2026-10-08 / T01 / 結果行の書式違反のままコミットした（e9fbe9be。check_plan の出力を tail に通して終了コードを捨てた） / 次のコミット（9ce4ac72）で直した
@@ -464,3 +475,4 @@ codex.ts の run が、資格情報・`server/evals`・`~/.cache/sphica-eval`・
 - 2026-10-09 / 進め方 / 持ち主の指示: 前の `@codex review` が返る前に続けて頼まない。直しを全部 push し終えてから 1 回だけ頼む
 - 2026-10-09 / T36 / GitHub に出す前に、手元の Codex（high）に全差分をもう一度レビューさせた。P1 が 6 件、P2 が 2 件。7 件を T36 で直した。残る 1 件はプロダクト側の問題で、評価の側では塞げない。SECURITY.md に従い、非公開の報告で扱う（持ち主が別の PR で直すと決めた）
 - 2026-10-09 / T37 / GitHub の Codex のレビュー（dcd08217）。P1 が 2 件、P2 が 1 件。3 件とも直した。driver の world は、呼ぶ側すべてにロックを持たせる代わりに、一時ディレクトリを deny して塞いだ
+- 2026-10-09 / T38 / GitHub の Codex のセキュリティレビュー（push のたびに自動で走る）の P2。直した。run を外す判定はほかにも（リポジトリへの到達など）モデルの行動から立つが、それは違反として外す方針どおりで、`check_unloaded` は環境の故障を表すので集計を止める側に移した

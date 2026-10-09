@@ -19,7 +19,15 @@ import { hiddenEnv, hiddenNodeArgs, partsOf, runHiddenTest } from "../evals/clou
 import { restrictedImports } from "../evals/review/biome.ts";
 import { buildReviewFixture, cachedFixture, loadReviewCases } from "../evals/review/fixture.ts";
 import { gradeAll, gradeRun, lookedOutside, tally } from "../evals/review/grade.ts";
-import { biomeChanged, copyBiome, judge, m2Rows, m2Tasks, prepare } from "../evals/review/m2.ts";
+import {
+  biomeChanged,
+  checkUnloaded,
+  copyBiome,
+  judge,
+  m2Rows,
+  m2Tasks,
+  prepare,
+} from "../evals/review/m2.ts";
 import { draftOf, gradeDraft, gradeRulesRun, loadRulesCases } from "../evals/review/rules-grade.ts";
 import {
   claudeArgs,
@@ -1010,10 +1018,42 @@ test("M2's check runs a Biome copy of the run's own, and a run that changed its 
       cases_sha256: "c",
     }),
   );
+  // It stops the count rather than leaving that run out
+  assert.throws(() => m2Rows(runs), /could not load Biome/);
+  fs.rmSync(path.join(runs, unloaded), { recursive: true });
   const row = m2Rows(runs).get("codex check");
   assert.deepEqual([row?.runs, row?.excluded, row?.completed], [1, 1, 0]);
-  const claudeRow = m2Rows(runs).get("claude check");
-  assert.deepEqual([claudeRow?.runs, claudeRow?.excluded, claudeRow?.completed], [1, 1, 0]);
+});
+
+test("a check that could not load Biome is read only from the check's own output, never from the model's text", () => {
+  const missing = "Error: Cannot find module '/x/@biomejs/biome/bin/biome'";
+  const codex = (command: string, output: string) =>
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "command_execution", command, aggregated_output: output },
+    });
+  const claude = (command: string, output: string) =>
+    [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command } }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "t1", content: output }] },
+      }),
+    ].join("\n");
+  assert.equal(checkUnloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", missing)), true);
+  assert.equal(checkUnloaded(claude("node scripts/check.mjs", missing)), true);
+  // The same words in another command's output, in the final answer, or in a message do not count
+  assert.equal(checkUnloaded(codex("/bin/zsh -lc 'echo hi'", missing)), false);
+  assert.equal(checkUnloaded(claude("echo hi", missing)), false);
+  assert.equal(
+    checkUnloaded(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: missing } })),
+    false,
+  );
+  assert.equal(checkUnloaded(JSON.stringify({ type: "result", result: missing })), false);
+  assert.equal(checkUnloaded(codex("/bin/zsh -lc 'node scripts/check.mjs'", "Checked 18 files")), false);
 });
 
 test("a lane that throws does not end the run while another lane still has its temp tree, and a deleted Biome copy counts as changed", async () => {

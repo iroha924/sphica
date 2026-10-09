@@ -359,7 +359,7 @@ async function runOne(o: {
     // The run could write its copy: a check it changed says nothing about the rule lines or the check given
     result.biome_changed = biomeChanged(biome, pinned);
     // A check that could not load its Biome never ran: the lane had no check, whatever it reported
-    result.check_unloaded = /Cannot find module[^\n]*@biomejs/.test(r.stdout);
+    result.check_unloaded = checkUnloaded(r.stdout);
     result.judgement = judge(checkout, start, o.task, path.join(dir, "judged"));
   } catch (e) {
     result.reason = (e as Error).message;
@@ -382,8 +382,59 @@ type Row = {
 };
 
 /**
+ * Whether a run of the check script itself failed to load Biome, read only from what each host recorded as that command's output: text
+ * the model wrote in its answer or printed from another command does not count
+ */
+export function checkUnloaded(events: string): boolean {
+  const unloaded = (text: string) => /Cannot find module[^\n]*@biomejs/.test(text);
+  const runsCheck = (command: unknown) =>
+    typeof command === "string" && command.includes("scripts/check.mjs");
+  const claudeCalls = new Set<string>();
+  for (const line of events.split("\n")) {
+    let e: {
+      type?: string;
+      item?: { type?: string; command?: string; aggregated_output?: string };
+      message?: {
+        content?: {
+          type?: string;
+          id?: string;
+          name?: string;
+          input?: { command?: unknown };
+          tool_use_id?: string;
+          content?: unknown;
+        }[];
+      };
+    };
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    // Codex
+    if (e.type === "item.completed" && e.item?.type === "command_execution" && runsCheck(e.item.command))
+      if (unloaded(e.item.aggregated_output ?? "")) return true;
+    // Claude: a Bash call that ran the check, then the result of that call
+    for (const c of Array.isArray(e.message?.content) ? e.message.content : []) {
+      if (c.type === "tool_use" && c.name === "Bash" && c.id && runsCheck(c.input?.command))
+        claudeCalls.add(c.id);
+      if (c.type === "tool_result" && claudeCalls.has(c.tool_use_id ?? "")) {
+        const text =
+          typeof c.content === "string"
+            ? c.content
+            : Array.isArray(c.content)
+              ? c.content.map((p: { text?: string }) => p.text ?? "").join("\n")
+              : "";
+        if (unloaded(text)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Counts per host and condition, and per task too. A run without its result, or that did not exit 0, is failed; a run whose events name
- * the repository (which holds the hidden tests and the reference check), or another run, or whose Biome copy changed, is excluded.
+ * the repository (which holds the hidden tests and the reference check), or another run, or whose Biome copy changed, is excluded. A run
+ * whose check could not load Biome stops the count: the environment is broken, and dropping that run alone would let a run leave the count.
  */
 export function m2Rows(runs: string): Map<string, Row> {
   const rows = new Map<string, Row>();
@@ -411,6 +462,10 @@ export function m2Rows(runs: string): Map<string, Row> {
       biome_changed?: boolean;
       check_unloaded?: boolean;
     };
+    if (r.check_unloaded)
+      throw new Error(
+        `${name}: its check could not load Biome, so the lane had no check; fix the environment and run M2 again`,
+      );
     const events = path.join(runs, name, "events.jsonl");
     const outside = fs.existsSync(events)
       ? lookedOutside(fs.readFileSync(events, "utf8"), { forbidden, runs, run: name })
@@ -426,7 +481,7 @@ export function m2Rows(runs: string): Map<string, Row> {
       };
       rows.set(key, t);
       t.runs++;
-      if (outside || r.biome_changed || r.check_unloaded) t.excluded++;
+      if (outside || r.biome_changed) t.excluded++;
       else if (r.status !== 0 || !r.judgement) t.failed++;
       else {
         if (r.judgement.violations.length) t.violations++;
