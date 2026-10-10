@@ -134,6 +134,19 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
   - 結果: `rg -c "invariant: fork-pr-as-data" CLAUDE.md AGENTS.md` → どちらも 1。`node scripts/check-ai-config.mjs` → exit 0
   - 結果: `bun run check` → exit 0
 
+- [x] T10: GitHub の Codex のセキュリティレビューの指摘を直す（読む差分を `--text` 付きで作り、binary と分類されたファイル・symlink・submodule を名指しする）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T09（同じスキルの手順を T09 が作り直している）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`
+  - red: `git diff --no-ext-diff --no-textconv <base>...<head> --` → exit 0 で `Binary files a/a.mjs and b/a.mjs differ` だけが出る（一時リポジトリで、a.mjs に NUL を 1 バイトと `console.log("hidden")` を足したコミットに対して。`node a.mjs` は hidden を出力する）
+  - 完了条件: `rg -c "git diff --text --no-ext-diff --no-textconv" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "gh pr diff <N>" .claude/skills/fork-pr/SKILL.md` → 1（使うなと書いた 1 か所だけ）。`node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+  - コミット: `fix(agents): read a fork's diff as text so a NUL byte cannot hide code from the review`
+  - 結果: red: `git diff --no-ext-diff --no-textconv <base>...<head> --` → exit 0、a.mjs は `Binary files a/a.mjs and b/a.mjs differ` の 1 行だけ。`node a.mjs` → hidden
+  - 結果: `git diff --text --no-ext-diff --no-textconv <base>...<head> --` → a.mjs の足した 2 行が出る。`git diff --numstat <base>...<head>` → a.mjs の行が `-` で始まる。`git diff --raw <base>...<head>` → 足した symlink が mode 120000 で出る（同じ一時リポジトリ）
+  - 結果: `rg -c "git diff --text --no-ext-diff --no-textconv" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "gh pr diff <N>" .claude/skills/fork-pr/SKILL.md` → 1
+  - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
@@ -151,3 +164,4 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / T08 / コミット b23fe65a を Codex がレビューした（新しい会話、high）。指摘 2 件: P1（最後の照合と merge の間に PR の作者が base を変えられる。merge の mutation は head しか受け取らない）、P2（base が変わっても head が同じなら、手順 5 が古い GitHub の Codex のレビューを使える）/ どちらも読んで確かめた。照合を足す直しを 2 回重ねても同じ種類の指摘が出たので、PR の作者が変えられるものに依存しない形（直接 merge しない）へ作り直す修正タスク T09 を足した
 - 2026-10-10 / 設定 / 持ち主の選択で、fork の PR の workflow の承認を `all_external_contributors` に変えた（読み戻して確認）。CONTRIBUTING とスキルの「初めての人だけ」を「毎回」に直した（T09 のコミットに含む）
 - 2026-10-10 / T09 / commit 992d45fe was reviewed by Codex (new conversation, high): no findings. It confirmed by reading that later changes to the fork's pull request cannot change the head taken in or where it lands
+- 2026-10-10 / PR #310 / 持ち主の許可で `@codex review` をコメントした。GitHub の Codex の 97e49b2b のコードレビュー: 大きな問題なし。同じ head のセキュリティレビュー: 指摘 1 件（P1、High）。fork の作者がファイルに NUL を 1 バイト入れると、手順の `git diff` は `Binary files differ` だけを exit 0 で出し、隠したコードは読まれないまま実行される / 一時リポジトリで再現して受け、修正タスク T10 を足した。CI は 97e49b2b で全項目 pass
