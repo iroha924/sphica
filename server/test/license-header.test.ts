@@ -3,8 +3,17 @@
 
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { commentMarker, headerLines, headerProblem, withHeader } from "../../scripts/lib/license-header.mjs";
+import {
+  commentMarker,
+  headerLines,
+  headerProblem,
+  sourceFiles,
+  withHeader,
+} from "../../scripts/lib/license-header.mjs";
 
 const [copyright, license] = headerLines("//");
 
@@ -48,4 +57,37 @@ test("only source files take a header", () => {
   assert.equal(commentMarker("db/schema.sql"), "--");
   assert.equal(commentMarker("README.md"), null);
   assert.equal(commentMarker("server/src/terms-golden.json"), null);
+});
+
+test("adding the header to a file with mixed line endings changes no other byte", () => {
+  const mixed = "#!/usr/bin/env node\nconsole.log(1);\r\nconsole.log(2);\n";
+  const added = withHeader(mixed, "//");
+  assert.equal(
+    added,
+    `#!/usr/bin/env node\n${copyright}\n${license}\n\nconsole.log(1);\r\nconsole.log(2);\n`,
+  );
+  assert.equal(headerProblem(added, "//"), null);
+  // A shebang with nothing after it still comes first
+  assert.equal(withHeader("#!/usr/bin/env node", "//"), `#!/usr/bin/env node\n${copyright}\n${license}\n`);
+});
+
+test("source files are found by walking, and a symbolic link is never one", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-headers-"));
+  try {
+    fs.mkdirSync(path.join(root, "src", "deep"), { recursive: true });
+    fs.mkdirSync(path.join(root, "src", "node_modules"));
+    fs.mkdirSync(path.join(root, "outside"));
+    fs.writeFileSync(path.join(root, "src", "a.ts"), "const a = 1;\n");
+    fs.writeFileSync(path.join(root, "src", "deep", "b.sql"), "select 1;\n");
+    fs.writeFileSync(path.join(root, "src", "deep", "frozen.sql"), "select 2;\n");
+    fs.writeFileSync(path.join(root, "src", "notes.md"), "# notes\n");
+    fs.writeFileSync(path.join(root, "src", "node_modules", "dep.ts"), "const d = 1;\n");
+    fs.writeFileSync(path.join(root, "outside", "target.ts"), "const secret = 1;\n");
+    // A link to a file and a link to a directory, both leading out of the walked tree
+    fs.symlinkSync(path.join(root, "outside", "target.ts"), path.join(root, "src", "escape.ts"));
+    fs.symlinkSync(path.join(root, "outside"), path.join(root, "src", "linked"));
+    assert.deepEqual(sourceFiles(root, ["src", "missing"], /frozen\.sql$/), ["src/a.ts", "src/deep/b.sql"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

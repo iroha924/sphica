@@ -21,7 +21,7 @@ import { ALLOWED_UNCOVERED, callSites, LIVE_FILES } from "./lib/sql-call-sites.m
 import { runTestsIsolated } from "./lib/test-run.mjs";
 
 // Source files that hold only types: nothing in them runs, so the coverage report never lists them
-const TYPES_ONLY = ["db-types.ts"];
+const TYPES_ONLY = ["src/db-types.ts"];
 
 // A failure is printed and the process left to end on its own: exiting at once would drop output still waiting in the pipe
 function main() {
@@ -53,10 +53,11 @@ function reach(covDir) {
   for (const s of seeds) console.log(s);
 
   // The test command's thresholds count only the files a test loaded, and pass at 100% when its pattern matches none
+  // Spelled as the report's tree spells them ("src/cli/view.ts"), so two files of one name in different directories stay apart
   const sources = fs
     .readdirSync(path.join(root, "server", "src"), { recursive: true })
     .filter((f) => f.endsWith(".ts"))
-    .map((f) => path.basename(f));
+    .map((f) => `src/${f.split(path.sep).join("/")}`);
   const missing = unmeasured(`${r.stdout}${r.stderr}`, sources, TYPES_ONLY);
   if (missing.length) {
     console.error(

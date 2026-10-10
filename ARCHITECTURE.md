@@ -10,7 +10,7 @@ Everything ships as one npm package. The Claude Code and Codex plugins point at 
 
 | Program | Started by | What it does |
 |---|---|---|
-| `capture.js` | The host's hooks, at session start, each prompt, each edit, each turn's end, and before a call to the record server | Records the owner's prompts, the agent's last reply of a turn, and the paths of changed files |
+| `capture.js` | The host's hooks, at session start, each prompt, each edit made with the host's edit tools, and each turn's end. In Claude Code also before a call to the record server; in Codex the record server notes the call itself | Records the owner's prompts, the agent's last reply of a turn, and the paths of changed files |
 | `deliver.js` | The host's hooks, at session start and when a subagent starts, at each prompt, before a file is read or edited, and before and after a shell command | Finds the records that apply and hands them to the agent as context |
 | `mcp.js` | The host, as an MCP server | The read server: status, search, read, overview, export, fields, and the review tools |
 | `mcp-record.js` | The host, as an MCP server | The record server: the only way records are written, and the only way sources are removed |
