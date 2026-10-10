@@ -50,16 +50,15 @@ Changes to docs that do not ship, tests, and development scripts need no version
 ## Pull requests
 
 - Open the pull request from your fork into `main`, and fill in the template. Delete the sections you cannot fill.
-- In the Verification section, paste the commands you ran and their output, and write `Codex review: pending maintainer review`. The maintainer runs that review and posts the result as a comment.
-- On your first pull request, CI waits for the maintainer to approve the run.
+- In the Verification section, paste the commands you ran and their output, and write `Codex review: pending maintainer review`. The maintainer runs that review when taking your change in.
+- CI on a pull request from a fork waits for the maintainer to approve each run.
 
 ## How review works
 
 1. The maintainer reads the diff. Until then nothing from your branch is run on the maintainer's machine, so expect questions about changes to workflows, hooks, tool versions, dependencies, or agent instructions.
 2. CI runs, and the maintainer has the change reviewed by Codex. You may be asked for changes.
-3. The maintainer accepts it. Only the maintainer merges.
-   - A change that does not ship is merged as soon as it is accepted.
-   - A change that ships is released first: the maintainer takes your commits, unchanged, into a release branch in this repository, and the release run merges that branch after the maintainer approves the release. Releases are not cut from a fork's pull request, so yours may be closed with a link to the release pull request that carries your commits.
+3. The maintainer accepts it. Only the maintainer merges, and not from your pull request directly: your commits are taken, unchanged, into a branch in this repository, and that branch's pull request is the one that is reviewed once more and merged. A change that ships is released from it, after the maintainer approves the release.
+4. Your pull request gets a link to that one. When your commits reach `main`, yours is closed, or shows as merged.
 
 ## Staying around
 

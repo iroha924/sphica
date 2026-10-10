@@ -121,6 +121,19 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
   - 結果: `rg -c "base.ref" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "the base branch, or the base commit moved" .claude/skills/fork-pr/SKILL.md` → 1
   - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
 
+- [x] T09: b23fe65a のレビューの指摘を直す（fork の PR を直接 merge せず、全部を同一リポジトリのブランチへ取り込む。承認の前の Codex レビューは手元の 1 通りにする）
+  - 種別: 修正
+  - 計画: S1, S2, S3, S4
+  - 依存: T08（同じスキルの同じ手順を T08 が直している）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `.github/pull_request_template.md`
+  - red: `rg -c "gh pr merge <N> --merge --match-head-commit" .claude/skills/fork-pr/SKILL.md` → 1（fork の PR を直接 merge する手順がある。merge のコマンドは head しか固定できず、照合の後に PR の作者が base のブランチを変えると、承認したコミットが読んでいない base へ入る）
+  - 完了条件: `rg -c "gh pr merge <N> --merge --match-head-commit" .claude/skills/fork-pr/SKILL.md` → 0 件。`rg -c "is never merged" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "invariant: fork-pr-as-data" CLAUDE.md AGENTS.md` → どちらも 1。`node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+  - コミット: `fix(agents): take every fork pull request in through a branch of this repository`
+  - 結果: red: `rg -c "gh pr merge <N> --merge --match-head-commit" .claude/skills/fork-pr/SKILL.md` → 1
+  - 結果: `rg -c "gh pr merge <N> --merge --match-head-commit" .claude/skills/fork-pr/SKILL.md` → 0 件。`rg -c "is never merged" .claude/skills/fork-pr/SKILL.md` → 1
+  - 結果: `rg -c "invariant: fork-pr-as-data" CLAUDE.md AGENTS.md` → どちらも 1。`node scripts/check-ai-config.mjs` → exit 0
+  - 結果: `bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
@@ -135,3 +148,5 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / plan / 方針の「取り込むときに main が進んでいて番号が重なったら、メンテナーが別コミットで直す」は、承認の後にリリースが入った場合だけに狭めた（T07）。承認の前に重なった場合はコントリビューターが上げ直す。合意した「コントリビューターもバージョンを上げる」の内側
 - 2026-10-10 / T07 / コミット 4a6ae01f を Codex が再レビューした（新しい会話、既定の effort）。指摘なし
 - 2026-10-10 / PR #310 / GitHub の Codex が head 1b302e3f をレビューした。指摘 1 件（P1）: 手順 7・8 の照合と `gh pr merge --match-head-commit` は head しか見ないので、PR の作者が承認の後に base のブランチを変えると、承認した head が読んでいない base へ merge される / 手順を読んで確かめ、修正タスク T08 を足した。CI は 1b302e3f で全項目 pass
+- 2026-10-10 / T08 / コミット b23fe65a を Codex がレビューした（新しい会話、high）。指摘 2 件: P1（最後の照合と merge の間に PR の作者が base を変えられる。merge の mutation は head しか受け取らない）、P2（base が変わっても head が同じなら、手順 5 が古い GitHub の Codex のレビューを使える）/ どちらも読んで確かめた。照合を足す直しを 2 回重ねても同じ種類の指摘が出たので、PR の作者が変えられるものに依存しない形（直接 merge しない）へ作り直す修正タスク T09 を足した
+- 2026-10-10 / 設定 / 持ち主の選択で、fork の PR の workflow の承認を `all_external_contributors` に変えた（読み戻して確認）。CONTRIBUTING とスキルの「初めての人だけ」を「毎回」に直した（T09 のコミットに含む）
