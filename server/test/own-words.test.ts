@@ -237,3 +237,17 @@ test("the writer's own words need no letters when no quotation touches them", ()
   // And digits inside a quotation are quoted like anything else
   assert.equal(verdict('They chose "2" there', "2"), "inline");
 });
+
+// The rule reads marks, line by line. These are the cases it is known to get wrong, kept so that a change to it is made knowingly:
+// each needs a reading of the sentence that marks alone do not give.
+test("known limits: part of a quotation that runs over lines, a closing mark stuck to a word, and an elision before a quotation", () => {
+  // Marks are paired on one line, so one line of a longer quotation looks like the writer's
+  assert.equal(verdict('They said "Use\nPostgres".', "Postgres"), null);
+  // A closing mark with a word right after it reads as an apostrophe, so part of the quotation before it passes
+  assert.equal(verdict("He said 'Drop this decision.'Then left.", "Drop this"), null);
+  // An elision that opens the line reads as an opening mark, and takes the writer's words up to the next closing one
+  assert.equal(
+    verdict("'tis fine. Keep this decision. They said 'Drop it.'", "Keep this decision."),
+    "inline",
+  );
+});

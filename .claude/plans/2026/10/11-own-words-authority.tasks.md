@@ -217,6 +217,18 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts` → 直す前のコードで 20 pass, 2 fail。発言 `2` と絵文字だけの発言を採用に指定した記録が `candidate`（期待は `active`）
   - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/export.test.ts test/reconcile.test.ts` → 全部通る。全体の差分のレビューが挙げた 5 つの入力（複数行にまたがる引用 2 つ、アポストロフィで対が崩れる 3 つ）を拒むテストも入れた（こちらは T14 の時点で通っていた）
 
+- [x] T17: architecture の検査の抜けを塞ぎ、監査の表示をテストし、出荷前レビューの指摘を直す
+  - 種別: 修正
+  - 計画: S5, S6
+  - 依存: T15（直す先の検査を T15 が直している）, T10（直す先の監査の表示を T10 が作る）
+  - 変更: `scripts/check-architecture.mjs`, `server/src/audit-quotes.ts`, `server/src/cli.ts`, `server/src/deliver.ts`, `server/test/architecture.test.ts`, `server/test/audit-quotes.test.ts`, `server/test/own-words.test.ts`
+  - red: `node scripts/check-architecture.mjs --root <server/src の写しに違反のファイルを 1 つ置いたもの>` → 直す前の検査で、`export function` の中のキャスト、コメントを挟んだキャスト、`DELETE FROM`、引用符付きの表の名前、括弧の前に空白のある `insertInto` が終了コード 0 で通り、コメントの中にだけキャストの文字列がある読み取りが終了コード 1 で拒まれる
+  - 完了条件: `bun run architecture` → 通る。`node --import ./test/isolate-home.ts --test test/architecture.test.ts test/audit-quotes.test.ts test/own-words.test.ts` → 通る
+  - コミット: `fix(doctor): close the authority check's gaps and test the audit's report`
+  - 結果: red: `node scripts/check-architecture.mjs --root <写し>` → コミット済みの検査では、`export function` の中のキャスト・コメントを挟んだキャスト・`DELETE FROM unit_adoption`・`INSERT INTO "unit_adoption"`・`insertInto ("unit_adoption")` が 5 つとも exit 0、コメントだけの読み取りが exit 1。直した検査では 5 つが exit 1、読み取りが exit 0
+  - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts test/architecture.test.ts test/own-words.test.ts test/own-words-sites.test.ts test/quarantined-conflict.test.ts test/deliver.test.ts` → 85 pass, 0 fail。監査の表示は、行がある状態で種類・行・位置・理由・効いているか・直し方の 1 行ずつを確かめる。DB から来た名前に改行や制御文字があっても、表示の行は増えない
+  - 結果: `node server/src/cli.ts doctor --help` → `[--audit-quotes]` だけが出て、否定形（`--noAudit-quotes`）は出ない
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -236,3 +248,8 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / T14 / 併用した判定は、開きと閉じを区別しないので、2 つの引用の間や、アポストロフィに挟まれた本人の言葉も拒む（例: `the users' data and the admins' data` の `data and the admins`）。作り直す前の判定も同じ入力を拒んでいたので後退ではない。隣の言葉を含めて引けば通る。テストに両方の形を置いた
 - 2026-10-11 / 全体の差分のレビュー（`8977808f`、high、新しい会話） / F1（P1）複数行にまたがる引用（`They said "Use⏎Postgres".` の中身）を権限の根拠として通す。F2（P1）アポストロフィで引用符の対が崩れ、同じ行の引用の中の文を通す（3 つの入力）。ほかの受け入れ条件（共通の検査の迂回、検査と保存の食い違い、配信と read の一致、監査）に指摘なし / 2 件とも受理。どちらも T14（言葉のすぐ前とすぐ後ろが引用符なら拒む、を併用）で拒むようになっていた。5 つの入力を T16 でテストに足した
 - 2026-10-11 / 全体の差分のレビューの注記 / 引用の外に letter が残ることを条件にしたため、数字や絵文字だけの発言（選択肢への `1`、`👍`）を権限の根拠に指定すると拒まれる（main では通る） / 計画に無い後退なので直した（T16）。letter の条件は、指定した言葉が引用と重なるときにだけ使う。計画の「数字と記号だけが残る場合は拒む」（`1. "…"`）はそのまま成り立つ
+- 2026-10-11 / 引用の判定と検査の絞り込みレビュー（`04f01ed3`、high。約 99 万通りの入力で main の判定と比べさせた） / 「main は拒んでいたのに今は通す」入力（A）は 0 件。私の突き合わせ（約 35 万通り）でも、意図して通す場合を除いて 0 件。指摘は 8 件: 引用の判定 3 件（F1・F2・F7）、architecture の検査 5 件（F3〜F6・F8）
+- 2026-10-11 / 同上、引用の判定 / F1（P1, B）複数行にまたがる引用の一部分だけを指定すると通る。F2（P1, B）閉じの単引用符の直後に空白なしでラテン文字が続くと、引用の一部分が通る。F7（P2, C）文頭の省略（`'tis`、`'90s`）が開きと読まれ、後ろの引用までの本人の言葉を拒む / 3 件とも棄却。F1 と F2 は main の判定も通していた入力で、後退ではない。F1 は計画が決めた「引用符の対は行ごと」の外（行をまたいで対を取ると別の誤検知が増える）。F2 と F7 は稀な書き方で、F7 は拒む側の誤り。引用の判定の直しはここで打ち切る（3 回続けて同じ種類の指摘が出た後、main の判定を併用する形に変えて後退が 0 件になった）。3 つとも「分かっている限界」としてテストに置いた
+- 2026-10-11 / 同上、architecture の検査 / F3（P2）import・export の節を消す正規表現が `export function` の本体まで消し、中のキャストを見逃す（T15 が持ち込んだ）。F4（P2）コメントを挟んだキャスト、`$` を含む別名、山括弧のキャストを見逃す。F5（P2）引用符で囲んだ表の名前、`main.` 付き、括弧の前の空白、テンプレート文字列の書き込みを見逃す。F6（P2）`DELETE` の書き込みを見ていない。F8（P2）コメントや SQL の文字列の中身で、読むだけの処理を拒む / F3・F5・F6 と、F4 のコメントと `$`、F8 のコメントは受理して T17 で直した（コメントを除いてから見る。節は `import`・`export` の直後の波括弧だけ）。F4 の山括弧のキャストと、F8 の「実行されない文字列の中の SQL」は棄却し、検査のコメントに限界として書いた（型検査が主で、この検査は補助。山括弧は型引数と区別できない）
+- 2026-10-11 / 出荷前レビュー（`8977808f`） / パッケージが壊れるところは無い。指摘 5 件: レビューの後にブランチが進んでいる、文字の無い本人の言葉を拒む（T16 で直し済み）、監査の表示を行がある状態で確かめるテストが無い、`deliver.ts` の説明のコメントが別の定数の上にずれている、ヘルプに `--noAudit-quotes` が出る / 受理。後ろの 3 件を T17 で直した。最後のコミットで差分をもう一度見せる
+- 2026-10-11 / T17 / main の判定との突き合わせを常設のテストにする案は採らなかった。相手にする main の判定をテストの中に持ち続ける必要があり、意図して変えた場合を除くと今の判定の写しになる。代わりに、レビューが見つけた入力を 1 件ずつテストに入れた

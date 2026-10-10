@@ -132,30 +132,38 @@ for (const f of GIT_STARTERS) {
 
 // Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords (a cast anywhere else forges one), and only
 // AUTHORITY_WRITERS write the rows that keep such words, so a new place cannot save an adoption or a reason no check saw. The types
-// already ask each writer for an OwnWords; this stops the plain ways around them. A table name held in a variable, or a type alias used for
-// a cast, is beyond what it sees.
+// already ask each writer for an OwnWords; this stops the plain ways around them. Beyond what it sees: a table name held in a variable, a
+// cast through a type alias or written in angle brackets, and SQL that sits in a string and is never run.
 const OWN_WORDS = "server/src/own-words.ts";
 const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
-// A cast to the type, under its own name or one it was imported as. Only an import or export clause renames it, and such a clause is
-// taken out before looking for the cast, since it reads `OwnWords as W` itself
-const CLAUSE = /\b(?:import|export)\b[^;]*?\{[^}]*\}/g;
+/** A source without its comments: a note about a cast or a write is not one */
+const code = (source) =>
+  [...jsTokens(source)]
+    .filter((t) => t.type !== "MultiLineComment" && t.type !== "SingleLineComment")
+    .map((t) => t.value)
+    .join("");
+// A cast to the type, under its own name or one it was imported or exported as. Only a list in braces right after `import` or `export`
+// renames it, and that list is taken out before looking for the cast, since it reads `OwnWords as W` itself
+const CLAUSE = /\b(?:import|export)\s+(?:type\s+)?\{[^}]*\}/g;
 const forged = (text) => {
-  const clauses = text.match(CLAUSE) ?? [];
   const names = [
     "OwnWords",
-    ...clauses.flatMap((c) => [...c.matchAll(/\bOwnWords\s+as\s+(\w+)/g)].map((m) => m[1])),
+    ...(text.match(CLAUSE) ?? []).flatMap((c) =>
+      [...c.matchAll(/\bOwnWords\s+as\s+([\w$]+)/g)].map((m) => m[1].replaceAll("$", "\\$")),
+    ),
   ];
-  return new RegExp(`\\bas\\s+(?:${names.join("|")})\\b`).test(text.replace(CLAUSE, ""));
+  return new RegExp(`\\bas\\s+(?:${names.join("|")})(?![\\w$])`).test(text.replace(CLAUSE, ""));
 };
-// A row written through the query builder or as SQL, in any case and any of SQLite's spellings (insert or ignore, replace into, update or
-// ignore). Evidence is here too: an option's reconsider condition is evidence
+// A row written, changed, or removed through the query builder or as SQL: in any case, with the table's name quoted any way SQLite takes
+// or under its schema's name, and in any of the spellings of a write (insert or ignore, replace into, update or ignore, delete from).
+// Evidence is here too: an option's reconsider condition is evidence
 const TABLES = "(?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)";
 const AUTHORITY = new RegExp(
-  `(?:insertInto|updateTable|replaceInto)\\(\\s*["']${TABLES}["']|\\b(?:(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into|update(?:\\s+or\\s+\\w+)?)\\s+${TABLES}\\b`,
+  `(?:insertInto|updateTable|replaceInto|deleteFrom)\\s*\\(\\s*["'\`]${TABLES}["'\`]|\\b(?:(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into|update(?:\\s+or\\s+\\w+)?|delete\\s+from)\\s+(?:main\\s*\\.\\s*)?\\\\?["'\`[]?${TABLES}\\b`,
   "i",
 );
 for (const f of sources) {
-  const text = fs.readFileSync(path.join(root, f), "utf8");
+  const text = code(fs.readFileSync(path.join(root, f), "utf8"));
   if (f !== OWN_WORDS && forged(text))
     fail.push(
       `${f} casts a value to OwnWords or imports it under another name; only ${OWN_WORDS} makes one, by checking the words`,
@@ -166,10 +174,10 @@ for (const f of sources) {
     );
 }
 // If the patterns stopped matching, the check would pass while looking at nothing
-if (!sources.includes(OWN_WORDS) || !forged(fs.readFileSync(path.join(root, OWN_WORDS), "utf8")))
+if (!sources.includes(OWN_WORDS) || !forged(code(fs.readFileSync(path.join(root, OWN_WORDS), "utf8"))))
   fail.push(`${OWN_WORDS} makes no OwnWords where check-architecture.mjs looks; fix OWN_WORDS`);
 for (const f of AUTHORITY_WRITERS)
-  if (!sources.includes(f) || !AUTHORITY.test(fs.readFileSync(path.join(root, f), "utf8")))
+  if (!sources.includes(f) || !AUTHORITY.test(code(fs.readFileSync(path.join(root, f), "utf8"))))
     fail.push(`${f} writes no authority row where check-architecture.mjs looks; fix AUTHORITY_WRITERS`);
 
 if (fail.length) {

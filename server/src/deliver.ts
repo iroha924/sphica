@@ -99,16 +99,16 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
   return { text: note ? `${text || lead}${note}` : text, note };
 };
 
-/**
- * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. A conflict counts only with a record
- * that is itself supported and sourced. The owner's decision is held back
- * only by a conflict with another record the owner adopted: a proposal nobody adopted, or the AI's own decision, never hides it.
- * With `asOf`, the same as of that time, read from the state, link, and adoption history (extraction and sources never change after a save).
- */
 /** Whether a unit could be delivered at all, whatever its lifecycle: a quarantined or unsourced record never is, so its conflict counts for nothing */
 const sound = (unit: string) =>
   sql<SqlBool>`exists (select 1 from unit o where o.id = ${sql.ref(unit)} and o.extraction = 'supported' and o.unsourced = 0)`;
 
+/**
+ * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. A conflict counts only with a record
+ * that is itself supported and sourced. The owner's decision is held back only by a conflict with another record the owner adopted: a
+ * proposal nobody adopted, or the AI's own decision, never hides it.
+ * With `asOf`, the same as of that time, read from the state, link, and adoption history (extraction and sources never change after a save).
+ */
 const deliverable = (db: Reads, projectId: number, asOf?: string) =>
   db
     .selectFrom("unit as u")

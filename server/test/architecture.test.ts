@@ -96,6 +96,11 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as unknown as OwnWords<"owner_statement">;',
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as\n  OwnWords;',
     'import type { OwnWords as W } from "./own-words.ts";\nexport const w = { source: 1, start: 0, end: 1, route: "owner_statement" } as W;',
+    // A cast inside something exported, with a comment in it, or to a name with a dollar sign
+    'import type { OwnWords } from "./own-words.ts";\nexport function fake(value: unknown) { return value as OwnWords; }',
+    'import type { OwnWords } from "./own-words.ts";\nexport const fake = (value: unknown) => ({ words: value as OwnWords });',
+    'import type { OwnWords } from "./own-words.ts";\nexport const fake = (value: unknown) => value as /* checked */ OwnWords;',
+    'import type { OwnWords as $W } from "./own-words.ts";\nexport const fake = (value: unknown) => value as $W;',
     // A cast written twice is still a cast
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as OwnWords as OwnWords;',
     'import type { OwnWords as W } from "./own-words.ts";\nexport const w = {} as W as W;',
@@ -121,6 +126,17 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     'export const save = (trx: any, source: number) => trx.updateTable("unit_adoption").set({ retraction_source_id: source, retracted_at: "x" }).execute();',
     'export const save = (db: any) => db.exec("INSERT INTO unit_adoption (unit_id) VALUES (1)");',
     'export const save = (db: any) => db.exec("Update unit_evidence set retracted_at = 1");',
+    // The table's name quoted, under its schema's name, after a space, or in a template
+    `export const save = (db: any) => db.exec('INSERT INTO "unit_adoption" (source_id) VALUES (1)');`,
+    'export const save = (db: any) => db.exec("insert into `field_def` (name) values (1)");',
+    'export const save = (db: any) => db.exec("insert into [unit_evidence] (unit_id) values (1)");',
+    'export const save = (db: any) => db.exec("insert into main.unit_anchor_retirement (anchor_id) values (1)");',
+    'export const save = (db: any) => db.exec("insert into \\"unit_adoption\\" (unit_id) values (1)");',
+    'export const save = (trx: any) => trx.insertInto ("unit_adoption").values({}).execute();',
+    "export const save = (trx: any) => trx.insertInto(`unit_adoption`).values({}).execute();",
+    // Removing a row is a write too
+    'export const save = (db: any) => db.exec("DELETE FROM unit_adoption");',
+    'export const save = (trx: any) => trx.deleteFrom("field_def").execute();',
     // Every spelling SQLite takes for a write
     'export const save = (db: any) => db.exec("insert or ignore into unit_adoption (unit_id) values (1)");',
     // The statement's name is put together here: this repository's SQL check refuses it wherever it is spelled out
@@ -137,6 +153,14 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     check({
       "stray.ts":
         'export const shape = async (db: any) => (await db.selectFrom("unit_evidence").selectAll().execute()).map((row: any) => ({ retraction_source_id: row.retraction_source_id, reason: row.retraction_reason }));\n',
+    }).status,
+    0,
+  );
+  // A comment about a cast or a write is neither
+  assert.equal(
+    check({
+      "stray.ts":
+        'import type { OwnWords } from "./own-words.ts";\n// do not cast as OwnWords, and never insert into unit_adoption here\n/* nor delete from field_def */\nexport const read = (db: any, w: OwnWords) => db.selectFrom("unit_adoption").where("source_id", "=", w.source).execute();\n',
     }).status,
     0,
   );

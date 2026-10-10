@@ -5,7 +5,7 @@
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { auditQuotes, KINDS, REPAIR, uncheckedLines } from "../src/audit-quotes.ts";
+import { type Audit, auditClosing, auditQuotes, auditSections } from "../src/audit-quotes.ts";
 import { inTransaction } from "../src/db.ts";
 import { locate } from "../src/own-words.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -130,7 +130,28 @@ test("the audit lists rows resting on quoted words by kind, leaves sound rows ou
     ]);
     // The sound adoption, the quoted one, its retraction's reason, the condition, and the definition
     assert.equal(audit.read, 5);
-    for (const kind of KINDS) assert.ok(REPAIR[kind].length > 0, kind);
+
+    // The report names each finding under its kind, with where it is, why, whether it still has effect, and what can be done
+    const sections = auditSections(audit);
+    assert.deepEqual(
+      sections.map((lines) => lines[0]),
+      [
+        "adoption: 1",
+        "retraction reason: 1",
+        "Not checked, since their words are not kept: no such rows (links from harvest or glean, withdrawals, resolved conflicts)",
+      ],
+    );
+    assert.equal(
+      sections[0]?.[1],
+      `  o/r trace:ext-s1/storage (unit_adoption ${quoted}): s${m} bytes ${inline[0]}-${inline[1]} sit inside quotation marks; retracted, kept as history`,
+    );
+    assert.match(sections[0]?.[2] ?? "", /^ {2}What you can do: .*retract_adoption/);
+    assert.match(sections[1]?.[1] ?? "", /touch a block quote or fenced code; in effect$/);
+    assert.match(sections[1]?.[2] ?? "", /^ {2}What you can do: a retraction cannot be undone/);
+    assert.match(
+      auditClosing(audit),
+      /^2 of 5 rows rest on words the quotation rule refuses\. Nothing was changed\./,
+    );
 
     // A withdrawal is counted with or without its reason's message: forgetting the message sets the source to null and leaves the row
     const note = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/note'").get()?.id);
@@ -155,11 +176,43 @@ test("the audit lists rows resting on quoted words by kind, leaves sound rows ou
 });
 
 test("what cannot be checked is named with what can be done about it, one line per kind that has rows", () => {
-  assert.deepEqual(uncheckedLines({ links: 0, withdrawals: 0, resolutions: 0 }), []);
-  const lines = uncheckedLines({ links: 2, withdrawals: 1, resolutions: 3 });
-  assert.equal(lines.length, 3);
-  assert.match(lines[0] ?? "", /^2 links from harvest or glean: .*Read the record's evidence and adoption/);
-  assert.match(lines[1] ?? "", /^1 withdrawal: .*cannot be undone: .*under a new key/);
-  assert.match(lines[2] ?? "", /^3 resolved conflicts: .*cannot be reopened: .*successor/);
-  assert.deepEqual(uncheckedLines({ links: 0, withdrawals: 0, resolutions: 1 }).length, 1);
+  const audit = (unchecked: Audit["unchecked"]): Audit => ({ findings: [], read: 1, unchecked });
+  const last = (unchecked: Audit["unchecked"]) => auditSections(audit(unchecked)).at(-1) ?? [];
+  assert.equal(last({ links: 0, withdrawals: 0, resolutions: 0 }).length, 1);
+  const lines = last({ links: 2, withdrawals: 1, resolutions: 3 });
+  assert.equal(lines.length, 4);
+  assert.equal(lines[0], "Not checked, since their words are not kept:");
+  assert.match(
+    lines[1] ?? "",
+    /^ {2}2 links from harvest or glean: .*Read the record's evidence and adoption/,
+  );
+  assert.match(lines[2] ?? "", /^ {2}1 withdrawal: .*cannot be undone: .*under a new key/);
+  assert.match(lines[3] ?? "", /^ {2}3 resolved conflicts: .*cannot be reopened: .*successor/);
+  assert.equal(last({ links: 0, withdrawals: 0, resolutions: 1 }).length, 2);
+  assert.match(auditClosing(audit({ links: 0, withdrawals: 0, resolutions: 0 })), /^0 of 1 row rest/);
+});
+
+test("a name from the database cannot start a line of the report", () => {
+  const audit: Audit = {
+    findings: [
+      {
+        project: "o/r\n\u2713 0 of 0 rows",
+        what: "trace:x/\u001b[2Jkey",
+        kind: "field definition",
+        row: "field_def 1",
+        source: 3,
+        start: 0,
+        end: 4,
+        why: "inline",
+        live: true,
+      },
+    ],
+    read: 1,
+    unchecked: { links: 0, withdrawals: 0, resolutions: 0 },
+  };
+  const lines = auditSections(audit).flat();
+  assert.ok(
+    lines.every((l) => !l.includes("\n") && !l.includes("\u001b")),
+    lines.join("|"),
+  );
 });

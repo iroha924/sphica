@@ -5,8 +5,9 @@
 // rule of its day, and the rule reads markup, not meaning, so nothing is changed here.
 import type { Reads } from "./db.ts";
 import { notOwnWords } from "./own-words.ts";
+import { inline } from "./panel.ts";
 
-export const KINDS = [
+const KINDS = [
   "adoption",
   "retraction reason",
   "reconsider condition",
@@ -14,7 +15,7 @@ export const KINDS = [
   "field definition",
 ] as const;
 
-export type Finding = {
+type Finding = {
   project: string;
   /** The record's key, or the field's name */
   what: string;
@@ -38,7 +39,7 @@ export type Audit = {
 };
 
 /** What the owner can do about a finding of each kind, and what cannot be undone */
-export const REPAIR: Record<Finding["kind"], string> = {
+const REPAIR: Record<Finding["kind"], string> = {
   adoption:
     "if it is not your decision, retract it with glean's retract_adoption, giving your own words as the reason. The adoption stays in the history",
   "retraction reason":
@@ -52,7 +53,7 @@ export const REPAIR: Record<Finding["kind"], string> = {
 };
 
 /** What can be said of the rows whose words cannot be checked: what to look at, and what cannot be undone. One line per kind that has rows. */
-export function uncheckedLines(unchecked: Audit["unchecked"]): string[] {
+function uncheckedLines(unchecked: Audit["unchecked"]): string[] {
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   return [
     unchecked.links
@@ -66,6 +67,36 @@ export function uncheckedLines(unchecked: Audit["unchecked"]): string[] {
       : "",
   ].filter(Boolean);
 }
+
+/** The report's sections, each a list of lines: one per kind that has findings, then what could not be checked. A name from the database stays on its line. */
+export function auditSections(audit: Audit): string[][] {
+  const sections: string[][] = [];
+  for (const kind of KINDS) {
+    const found = audit.findings.filter((f) => f.kind === kind);
+    if (!found.length) continue;
+    sections.push([
+      `${kind}: ${found.length}`,
+      ...found.map(
+        (f) =>
+          `  ${inline(f.project)} ${inline(f.what)} (${f.row}): s${f.source} bytes ${f.start}-${f.end} ${f.why === "block" ? "touch a block quote or fenced code" : "sit inside quotation marks"}; ${f.live ? "in effect" : "retracted, kept as history"}`,
+      ),
+      `  What you can do: ${REPAIR[kind]}`,
+    ]);
+  }
+  const unchecked = uncheckedLines(audit.unchecked);
+  sections.push(
+    unchecked.length
+      ? ["Not checked, since their words are not kept:", ...unchecked.map((l) => `  ${l}`)]
+      : [
+          "Not checked, since their words are not kept: no such rows (links from harvest or glean, withdrawals, resolved conflicts)",
+        ],
+  );
+  return sections;
+}
+
+/** The report's last line, without its mark */
+export const auditClosing = (audit: Audit): string =>
+  `${audit.findings.length} of ${audit.read} ${audit.read === 1 ? "row" : "rows"} rest on words the quotation rule refuses. Nothing was changed. The rule reads markup, not meaning: a row it passes may still be wrong, and one it lists may be right`;
 
 export async function auditQuotes(db: Reads): Promise<Audit> {
   const findings: Finding[] = [];
