@@ -111,9 +111,12 @@ export async function replay(db: ReadonlyKysely<DB>, conversations: Conversation
   const projects = new Map<string, { id: number; root: string } | null>();
   for (const c of conversations) {
     const own = new Map<number, Set<number>>();
-    // In the order the results came back: parallel calls can finish out of order, and post_write runs at each result
-    const resultAt = (id: string) =>
-      c.events.find((r) => r.kind === "result" && r.id === id)?.n ?? Number.POSITIVE_INFINITY;
+    // In the order the results came back (their place among the events, so results sharing one line keep their order): parallel calls
+    // can finish out of order, and post_write runs at each result
+    const resultAt = (id: string) => {
+      const i = c.events.findIndex((r) => r.kind === "result" && r.id === id);
+      return i < 0 ? Number.POSITIVE_INFINITY : i;
+    };
     const calls = c.events
       .filter((e) => e.kind === "call" && WRITE_TOOLS.has(e.name))
       .sort(

@@ -174,6 +174,16 @@ base: main
   - コミット: `fix(eval): replay writes in result order and leave writes after an unread line unknown`
   - 結果: 順序と読めない行の両方を、直す前のコード（または条件を外したコード）で落ちることを確かめた。`--test test/post-write-replay.test.ts` → 7 pass。会話記録は 212 件がそのまま、1 件は sha256 の合う先頭の部分で復元し、直したコードで再生した結果は計数・組 2,011 件・見せた組 358 件とも保存した結果と同じ（違う組 0）。標本・ラベル・判定は変わらない。`bun run verify` → exit 0
 
+- [x] T17: 1 つの会話行に入った複数の結果も、その行の中の順で再生する（T15・T16 の再レビュー）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T16（直す対象の並べ方）
+  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 1 行に tool_result(v2) → tool_result(v1) と入った会話で、同じ行番号の同点になり、呼び出し順の v1 を見せた組にする
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 結果の events の中の位置で並べ、v2 を見せた組にする。凍結した入力で再生し直して、保存した組と見せた組が変わらない
+  - コミット: `fix(eval): keep the order of results that share one transcript line`
+  - 結果: red を直す前のコード（dd786297）で確かめた（v1 を見せた組にする）。`--test test/post-write-replay.test.ts` → 7 pass。凍結した入力で再生し直した結果は組 2,011 件・見せた組 358 件とも保存した結果と同じ（違う組 0）。`bun run verify` → exit 0
+
 ## P5: 試用と採否（既定オフのリリースの後、この PR の外）
 
 持ち主の 7 日の試用で、既定をオンにするか外すかを前もって決めた基準で決める。
@@ -196,3 +206,4 @@ base: main
 - 2026-10-10 / T03・T10 のレビュー / F2 は採用して T11 で直した。F1（確かめの合間に link と行き来させると外のファイルを hash できる）は見送った: Node に openat が無く確かめを重ねても隙は消えない、差し替えられるのは同じユーザーのプロセスで外のファイルを自分で読める、Sphica は hash を手元に置くだけで中身を出さず、狂うのはその 1 回の見分けだけ。コメントにこの隙を書いた
 - 2026-10-10 / T04〜T13 のレビュー / F1〜F5 は採用して T14 で直した
 - 2026-10-10 / 全差分のレビュー / P2 の 3 件を採用し、T15・T16 で直した。M0 の 2 件は凍結した入力で再生し直して結果が変わらないことを確かめた
+- 2026-10-10 / T15・T16 の再レビュー / P2 の 1 件（1 行に入った複数の結果の順）を採用し、T17 で直した

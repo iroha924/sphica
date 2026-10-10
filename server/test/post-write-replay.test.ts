@@ -245,6 +245,23 @@ test("parallel writes are replayed in the order their results came back, and an 
       result("2099-01-01T00:01:02.000Z", "w1"),
     ];
     fs.writeFileSync(path.join(dir, "parallel.jsonl"), `${parallel.join("\n")}\n`);
+    // Two results in one line: their order inside the line is the order they came back
+    const oneLine = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      edit("2099-01-01T00:01:00.000Z", "v1", "src/d.ts"),
+      edit("2099-01-01T00:01:00.100Z", "v2", "src/e.ts"),
+      line("2099-01-01T00:01:01.000Z", {
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "v2", is_error: false },
+            { type: "tool_result", tool_use_id: "v1", is_error: false },
+          ],
+        },
+      }),
+    ];
+    fs.writeFileSync(path.join(dir, "one-line.jsonl"), `${oneLine.join("\n")}\n`);
     const broken = [
       delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
       human("2099-01-01T00:00:00.000Z"),
@@ -256,7 +273,10 @@ test("parallel writes are replayed in the order their results came back, and an 
     const r = await replay(db.reader, readConversations(dir));
     assert.deepEqual(
       r.pairs.map((x) => [x.toolUseId, x.shown]),
-      [["w2", true]],
+      [
+        ["v2", true],
+        ["w2", true],
+      ],
       "w2 finished first, so it is the one post_write would have shown the record at",
     );
     assert.equal(r.counts.unknown, 1, "the write after the unread line");
