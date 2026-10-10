@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Every git Sphica runs, one function per operation. Sphica runs git outside the agent's sandbox, in a repository whose config the agent
-// can write, so no caller passes git its own arguments: each operation builds them here, and only this file starts git.
+// can write, so no caller passes git its own arguments: each operation builds them here, and only this file and git-worker.ts start git.
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
