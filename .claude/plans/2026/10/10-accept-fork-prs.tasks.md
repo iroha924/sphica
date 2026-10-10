@@ -147,6 +147,19 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
   - 結果: `rg -c "git diff --text --no-ext-diff --no-textconv" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "gh pr diff <N>" .claude/skills/fork-pr/SKILL.md` → 1
   - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
 
+- [x] T11: f365ff66 のレビューの指摘を直す（差分を `git diff-tree` で作り、rename の本文も出し、読む差分から落ちたパスが無いことを数で確かめる）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T10（同じ手順 2 を T10 が書いている）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`
+  - red: `git diff --text --no-ext-diff --no-textconv <base>...<head> --` → exit 0 で、5 つの変更のうち 1 つのパスしか出ない（一時リポジトリで `diff.relative=true` を設定し、`server/` から流した。`scripts/bundle.mjs` の変更が 3 つの出力のどれにも出ない）
+  - 完了条件: `rg -c "git diff-tree -r -p --text --no-renames --no-relative" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "git diff --text" .claude/skills/fork-pr/SKILL.md` → 0 件。`node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+  - コミット: `fix(agents): build a fork's diff with diff-tree and check that no path was left out`
+  - 結果: red: `git diff --text --no-ext-diff --no-textconv <base>...<head> --` → exit 0、`diff --git` の見出しは 1 つ（server/a.ts だけ）。`git diff --numstat <base>...<head> --` → a.ts の 1 行だけ
+  - 結果: `git diff-tree -r -p --text --no-renames --no-relative --no-ext-diff --no-textconv --ignore-submodules=none --no-color --full-index <merge base> <head>` → exit 0、見出し 5 つ（同じ一時リポジトリ、同じ設定に `diff.renames=true`・`diff.noprefix=true`・`color.ui=always`・`*.mjs -diff` の属性を足し、`server/` から流した）。numstat 5 行、raw 5 行で一致。NUL の後ろの `hidden` の行が出る。rename した先のファイルは本文ごと追加として出る。実行ビットの変更は `old mode` / `new mode` で出る
+  - 結果: `rg -c "git diff-tree -r -p --text --no-renames --no-relative" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "git diff --text" .claude/skills/fork-pr/SKILL.md` → 0 件
+  - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
@@ -165,3 +178,4 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / 設定 / 持ち主の選択で、fork の PR の workflow の承認を `all_external_contributors` に変えた（読み戻して確認）。CONTRIBUTING とスキルの「初めての人だけ」を「毎回」に直した（T09 のコミットに含む）
 - 2026-10-10 / T09 / commit 992d45fe was reviewed by Codex (new conversation, high): no findings. It confirmed by reading that later changes to the fork's pull request cannot change the head taken in or where it lands
 - 2026-10-10 / PR #310 / 持ち主の許可で `@codex review` をコメントした。GitHub の Codex の 97e49b2b のコードレビュー: 大きな問題なし。同じ head のセキュリティレビュー: 指摘 1 件（P1、High）。fork の作者がファイルに NUL を 1 バイト入れると、手順の `git diff` は `Binary files differ` だけを exit 0 で出し、隠したコードは読まれないまま実行される / 一時リポジトリで再現して受け、修正タスク T10 を足した。CI は 97e49b2b で全項目 pass
+- 2026-10-10 / T10 / コミット f365ff66 を Codex がレビューした（新しい会話、high、ほかに中身を隠す手が無いかも依頼）。指摘 2 件: P1（`diff.relative` があるとサブディレクトリの外のパスが 3 つの出力から落ちる。再現済み）、P2（100% の rename は本文が出ない。再現済み）。未検証として、`diff.ignoreSubmodules` と実行ビットだけの変更を挙げた / 一時リポジトリで両方を再現し、修正タスク T11 を足した。未検証の 2 つも同じ一時リポジトリで確かめた（`--ignore-submodules=none` を明示、モードの変更は見出しに出る）
