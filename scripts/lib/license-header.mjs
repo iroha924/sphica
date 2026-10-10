@@ -18,7 +18,8 @@ export const headerLines = (marker) => [`${marker} ${COPYRIGHT}`, `${marker} ${L
 
 /** What is wrong with a file's header, or null. The header is the first two lines, after a shebang line when there is one. */
 export function headerProblem(source, marker) {
-  const lines = source.split("\n");
+  // A checkout with CRLF line endings has the same header
+  const lines = source.split(/\r?\n/);
   const at = lines[0]?.startsWith("#!") ? 1 : 0;
   const [copyright, license] = headerLines(marker);
   if (lines[at] !== copyright) return `line ${at + 1} is not "${copyright}"`;
@@ -29,8 +30,9 @@ export function headerProblem(source, marker) {
 /** The source with the header added, unchanged when it already has it. A blank line separates the header from what follows. */
 export function withHeader(source, marker) {
   if (headerProblem(source, marker) === null) return source;
-  const lines = source.split("\n");
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(eol);
   const shebang = lines[0]?.startsWith("#!") ? [lines.shift()] : [];
   const rest = lines[0] === "" ? lines : ["", ...lines];
-  return [...shebang, ...headerLines(marker), ...rest].join("\n");
+  return [...shebang, ...headerLines(marker), ...rest].join(eol);
 }

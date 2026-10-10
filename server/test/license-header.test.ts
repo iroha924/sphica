@@ -35,6 +35,13 @@ test("adding the header keeps the shebang first and leaves a file that has it un
   assert.equal(withHeader("\nconst a = 1;\n", "//"), `${copyright}\n${license}\n\nconst a = 1;\n`);
 });
 
+test("a file with CRLF line endings has the header, and gets it with CRLF", () => {
+  const crlf = `${copyright}\r\n${license}\r\n\r\nconst a = 1;\r\n`;
+  assert.equal(headerProblem(crlf, "//"), null);
+  assert.equal(withHeader(crlf, "//"), crlf);
+  assert.equal(withHeader("const a = 1;\r\n", "//"), crlf);
+});
+
 test("only source files take a header", () => {
   assert.equal(commentMarker("server/src/cli.ts"), "//");
   assert.equal(commentMarker("scripts/lib/english.d.mts"), "//");

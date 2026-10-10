@@ -15,9 +15,13 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { coveredSites } from "./lib/coverage.mjs";
+import { unmeasured } from "./lib/coverage-report.mjs";
 import { root } from "./lib/live-harness.mjs";
 import { ALLOWED_UNCOVERED, callSites, LIVE_FILES } from "./lib/sql-call-sites.mjs";
 import { runTestsIsolated } from "./lib/test-run.mjs";
+
+// Source files that hold only types: nothing in them runs, so the coverage report never lists them
+const TYPES_ONLY = ["db-types.ts"];
 
 // A failure is printed and the process left to end on its own: exiting at once would drop output still waiting in the pipe
 function main() {
@@ -47,6 +51,23 @@ function reach(covDir) {
   // The test output is hidden on success, so a randomized run shows its seed here to be rerun in the same order
   const seeds = new Set(`${r.stdout}${r.stderr}`.match(/Randomized test order seed: \d+/g));
   for (const s of seeds) console.log(s);
+
+  // The test command's thresholds count only the files a test loaded, and pass at 100% when its pattern matches none
+  const sources = fs
+    .readdirSync(path.join(root, "server", "src"), { recursive: true })
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => path.basename(f));
+  const missing = unmeasured(`${r.stdout}${r.stderr}`, sources, TYPES_ONLY);
+  if (missing.length) {
+    console.error(
+      `the coverage report does not list ${missing.length} of ${sources.length} files in server/src, so the thresholds did not count them:\n  ${missing.join("\n  ")}`,
+    );
+    console.error(
+      "\nHave a test load each file, or add one that holds only types to TYPES_ONLY in scripts/check-sql-reach.mjs.",
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   const sites = callSites(root).filter((s) => !LIVE_FILES.some((f) => s.startsWith(`${f}:`)));
   const covered = coveredSites(covDir, root, sites);
