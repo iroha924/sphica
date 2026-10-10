@@ -33,13 +33,16 @@ base: main
   - 結果: `git add CONTRIBUTING.md && node scripts/check-markdown.mjs` → 35 files、0 issues（CONTRIBUTING.md を含む。この検査は追跡されたファイルだけを見るので、stage の後に流し直した）
   - 結果: `mise exec -- node scripts/check-links.mjs` → 0 Errors（stage の後）
 
-- [ ] T02: PR テンプレートの Verification のコメントに、メンテナーではない人の書き方を 1 文足す
+- [x] T02: PR テンプレートの Verification のコメントに、メンテナーではない人の書き方を 1 文足す
   - 種別: 変更
   - 計画: S2
   - 依存: なし
   - 変更: `.github/pull_request_template.md`
   - 完了条件: `rg -c "pending maintainer review" .github/pull_request_template.md` → 1。`printf '## Verification\n\nCodex review: pending maintainer review\n' | perl -0pe 's/<!--.*?-->//gs' | awk '/^## (Verification|検証)[ \t]*$/{f=1;next} /^## /{f=0} f' | grep -c Codex` → 1（`pr-body.yml` と同じ取り出し方で通る）
   - コミット: `docs(github): tell outside contributors how to fill the Codex review line`
+  - 結果: `rg -c "pending maintainer review" .github/pull_request_template.md` → 1
+  - 結果: `printf '## Verification\n\nCodex review: pending maintainer review\n' | perl -0pe 's/<!--.*?-->//gs' | awk '/^## (Verification|検証)[ \t]*$/{f=1;next} /^## /{f=0} f' | grep -c Codex` → 1
+  - 結果: `perl -0pe 's/<!--.*?-->//gs' .github/pull_request_template.md | awk '/^## (Verification|検証)[ \t]*$/{f=1;next} /^## /{f=0} f' | grep -c Codex` → 0（足した文はコメントの中なので、埋めていないテンプレートは今までどおり落ちる）
 
 - [ ] T03: 不変条件 fork-pr-as-data を CLAUDE.md と AGENTS.md に足し、スキル fork-pr を作る
   - 種別: 追加

@@ -26,6 +26,7 @@ The commands you ran and their output. **Paste output that passed, not "should p
 For a fix, also state that you confirmed the code failed (red) before the fix.
 Mark checks you did not run as "not verified", with the reason.
 Always include the Codex review result (how many findings and how each was handled). Without it, CI (pr-body) fails.
+If you are not the maintainer, write `Codex review: pending maintainer review` instead: the maintainer runs the review and posts the result as a comment.
 -->
 
 ## Release notes
