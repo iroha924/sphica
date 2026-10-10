@@ -165,14 +165,15 @@ const CLOSES = /["”'’`」』]/;
 
 /**
  * Why the byte span [start, end) of a message is not its writer's own words, or null when it is: "block" when it touches a line of a
- * block quote or a fenced code block; "inline" when a quotation mark stands right before it and right after it on its line, or nothing
- * but digits and marks is left of it outside quotation marks and code spans. The first inline test needs no pairing of marks, which an
+ * block quote or a fenced code block; "inline" when a quotation mark stands right before it and right after it on its line, or it runs
+ * into a quotation and nothing but digits and marks is left of it outside. The first inline test needs no pairing of marks, which an
  * apostrophe can throw off; the second catches part of a quotation. A span that mixes the writer's words with a quotation passes.
  */
 export function notOwnWords(body: string, start: number, end: number): "block" | "inline" | null {
   const bytes = Buffer.from(body, "utf8");
   let fence: { mark: string; length: number } | null = null;
   let own = "";
+  let quoting = false;
   let before = "";
   let after = "";
   for (let at = 0; at <= bytes.length; ) {
@@ -207,6 +208,7 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
       let cursor = from;
       for (const [a, b] of inlineRanges(raw)) {
         if (b <= cursor || a >= to) continue;
+        quoting = true;
         own += raw.slice(cursor, Math.max(a, cursor));
         cursor = Math.max(cursor, b);
       }
@@ -216,5 +218,6 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
     at = nl + 1;
   }
   if (OPENS.test(before) && CLOSES.test(after)) return "inline";
-  return /\p{L}/u.test(own) ? null : "inline";
+  // Words no quotation touches are the writer's, a bare number or a symbol included; beside a quotation, only letters count as words
+  return !quoting || /\p{L}/u.test(own) ? null : "inline";
 }

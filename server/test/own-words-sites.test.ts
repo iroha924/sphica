@@ -359,3 +359,21 @@ test("glean: evidence and the quote that picks what to retract are found as they
     await db.done();
   }
 });
+
+test("adoption: an answer of only a number or a symbol is the owner's own word", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const number = message(db, p, { id: "m1", text: "2" });
+    const thumb = message(db, p, { id: "m2", text: "\u{1F44D}" });
+    await save(db, target(p), {
+      units: [adopted("number", number, "2"), adopted("thumb", thumb, "\u{1F44D}")],
+    });
+    assert.deepEqual(
+      ["number", "thumb"].map((k) => lifecycle(db, k)),
+      ["active", "active"],
+    );
+  } finally {
+    await db.done();
+  }
+});

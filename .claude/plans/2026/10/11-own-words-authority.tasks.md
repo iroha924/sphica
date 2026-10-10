@@ -206,6 +206,17 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/architecture.test.ts` → 直す前の検査で、`export const w = {} as OwnWords as OwnWords;` が `actual: 0`（期待は 1）
   - 結果: `node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 2 pass, 0 fail。`bun run architecture` → 通る
 
+- [x] T16: 引用と重ならない本人の言葉は、数字や記号だけでも通す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T14（直す先の判定を T14 が直している）
+  - 変更: `server/src/own-words.ts`, `server/test/own-words.test.ts`, `server/test/own-words-sites.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts` → 直す前のコードで、持ち主の発言が数字だけ・絵文字だけのときに、それを採用に指定した記録が候補に残り、テストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts` → 通る
+  - コミット: `fix(record): take a bare number or symbol as the writer's own word when nothing quotes it`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts` → 直す前のコードで 20 pass, 2 fail。発言 `2` と絵文字だけの発言を採用に指定した記録が `candidate`（期待は `active`）
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/export.test.ts test/reconcile.test.ts` → 全部通る。全体の差分のレビューが挙げた 5 つの入力（複数行にまたがる引用 2 つ、アポストロフィで対が崩れる 3 つ）を拒むテストも入れた（こちらは T14 の時点で通っていた）
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -223,3 +234,5 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / T09〜T11 の再レビュー（`a7658269` high、`92c9b2f7`、`c8884d18`） / T10 は指摘なし。T09: F1（P1）結合アクセントの付いた字の後のアポストロフィを引用の開きと取り違え、後ろの引用の中の文を権限の根拠として通す（T09 の前は拒んでいた）。T11: F1（P2）`insert or ignore into`・`insert or replace into`・`replace into` の書き込みを見逃すようになった。F2（P2）型を別名で import しただけの読み取りを偽造として拒む / 3 件とも受理。T12 と T13 で直した（1 つのコミット）
 - 2026-10-11 / T12・T13 の再レビュー（`0d98212b`、high。作り直す前・T09 の後・今の 3 つの版を同じ入力で比べさせた） / F1（P1）曲がった引用符の中の短縮形（`don\u2019t`）で引用が閉じたと取り違え、引用の中の文を通す。作り直す前は拒んでいた。曲がったアポストロフィの後の本人の言葉を誤って拒む例もある。F2（P1）基本面の外の結合文字（とラテン文字）の後のアポストロフィで、T12 の直しが効かない。F3（P2）別名を消す処理がキャストの中の `OwnWords as OwnWords` まで消し、二重のキャストを見逃す / 3 件とも受理。引用符の対を取る方式だけでは、アポストロフィのたびに同じ種類の抜けが出る（3 回続いた）ので、直し方を変えた: 作り直す前の判定（言葉のすぐ前とすぐ後ろが引用符なら拒む。同じ行に限る）を併用し、どちらかに当たれば拒む。これで、作り直す前に拒んでいた入力は、別の行の引用符の場合を除いて、今も必ず拒む。T14 と T15 で直した（1 つのコミット）
 - 2026-10-11 / T14 / 併用した判定は、開きと閉じを区別しないので、2 つの引用の間や、アポストロフィに挟まれた本人の言葉も拒む（例: `the users' data and the admins' data` の `data and the admins`）。作り直す前の判定も同じ入力を拒んでいたので後退ではない。隣の言葉を含めて引けば通る。テストに両方の形を置いた
+- 2026-10-11 / 全体の差分のレビュー（`8977808f`、high、新しい会話） / F1（P1）複数行にまたがる引用（`They said "Use⏎Postgres".` の中身）を権限の根拠として通す。F2（P1）アポストロフィで引用符の対が崩れ、同じ行の引用の中の文を通す（3 つの入力）。ほかの受け入れ条件（共通の検査の迂回、検査と保存の食い違い、配信と read の一致、監査）に指摘なし / 2 件とも受理。どちらも T14（言葉のすぐ前とすぐ後ろが引用符なら拒む、を併用）で拒むようになっていた。5 つの入力を T16 でテストに足した
+- 2026-10-11 / 全体の差分のレビューの注記 / 引用の外に letter が残ることを条件にしたため、数字や絵文字だけの発言（選択肢への `1`、`👍`）を権限の根拠に指定すると拒まれる（main では通る） / 計画に無い後退なので直した（T16）。letter の条件は、指定した言葉が引用と重なるときにだけ使う。計画の「数字と記号だけが残る場合は拒む」（`1. "…"`）はそのまま成り立つ

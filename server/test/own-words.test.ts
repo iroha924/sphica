@@ -217,3 +217,23 @@ test("words with a quotation mark right before and right after them on their lin
   // Marks on the lines around do not count
   assert.equal(verdict('"\nDrop this decision.\n"', "Drop this decision."), null);
 });
+
+test("a quotation that runs over lines is refused, with the other inputs the whole-branch review found", () => {
+  assert.equal(verdict('They said "Use\nPostgres".', "Use\nPostgres"), "inline");
+  assert.equal(verdict('They wrote "Withdraw\nit".', "Withdraw\nit"), "inline");
+  assert.equal(verdict("They said \u2018Don\u2019t use SQLite.\u2019", "Don\u2019t use SQLite."), "inline");
+  assert.equal(verdict("'tis fine. They said ' Drop this decision.'", "Drop this decision."), "inline");
+  assert.equal(verdict("\u{10780}'s note says ' Drop this decision.'", "Drop this decision."), "inline");
+});
+
+test("the writer's own words need no letters when no quotation touches them", () => {
+  assert.equal(verdict("1", "1"), null);
+  assert.equal(verdict("OK, 2 then", "2"), null);
+  assert.equal(verdict("\u{1F44D}", "\u{1F44D}"), null);
+  assert.equal(verdict("100%", "100%"), null);
+  // With a quotation in the span, digits and marks beside it are not the writer's words about it
+  assert.equal(verdict('1. "Drop this decision."', '1. "Drop this decision."'), "inline");
+  assert.equal(verdict('\u{1F44D} "Drop this decision."', '\u{1F44D} "Drop this decision."'), "inline");
+  // And digits inside a quotation are quoted like anything else
+  assert.equal(verdict('They chose "2" there', "2"), "inline");
+});
