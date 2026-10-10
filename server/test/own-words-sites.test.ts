@@ -308,3 +308,54 @@ test("glean: no operation takes a quotation as its adoption or its reason, check
     await db.done();
   }
 });
+
+test("glean: evidence and the quote that picks what to retract are found as they are written, white space included", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep notes out of CSV.\nDecided. Take the note back." });
+    await save(db, target(p), {
+      units: [
+        {
+          key: "csv",
+          kind: "finding",
+          text: "csv",
+          evidence: [{ source: `s${m}`, quote: "Keep notes out of CSV.", role: "states" }],
+        },
+      ],
+    });
+    const unit = () =>
+      db.owner.prepare("select id, revision from unit where key = 'trace:ext-s1/csv'").get() as {
+        id: number;
+        revision: number;
+      };
+    const glean = async (ops: unknown[]) =>
+      saveText(db.ingest, await beginGlean(db.ingest, p, "s1"), p, null, { ops });
+    const op = (rest: Record<string, unknown>) => ({
+      unit: "trace:ext-s1/csv",
+      revision: unit().revision,
+      ...rest,
+    });
+    // A second piece of evidence from the same message that is only the line break: it exists, so it can be cited and picked
+    await glean([op({ op: "add_evidence", source: `s${m}`, quote: "\n", role: "explains" })]);
+    const live = () =>
+      (
+        db.owner
+          .prepare("select count(*) as n from unit_evidence where unit_id = ? and retracted_at is null")
+          .get(unit().id) as { n: number }
+      ).n;
+    assert.equal(live(), 2);
+    await glean([
+      op({
+        op: "retract_evidence",
+        source: `s${m}`,
+        quote: "\n",
+        reason_source: `s${m}`,
+        reason_quote: "Take the note back.",
+      }),
+    ]);
+    assert.equal(live(), 1);
+  } finally {
+    await db.done();
+  }
+});

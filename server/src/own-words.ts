@@ -43,9 +43,8 @@ export type NotOwn = { refused: "event" | "author" | "missing" | "block" | "inli
 
 export const refused = (words: OwnWords | NotOwn): words is NotOwn => "refused" in words;
 
-/** The byte span of quote in text, or null. The first occurrence is taken. */
+/** The byte span of quote in text, or null. The first occurrence is taken, white space and all: what a quote may be is the caller's rule. */
 export function locate(body: string, quote: string): [number, number] | null {
-  if (!quote.trim()) return null;
   const at = Buffer.from(body, "utf8").indexOf(Buffer.from(quote, "utf8"));
   return at < 0 ? null : [at, at + Buffer.byteLength(quote, "utf8")];
 }
@@ -75,7 +74,8 @@ export function ownWords(s: Said, quote: string, policy: Policy, agent = false):
             ? "session"
             : null;
   if (!route) return { refused: "author" };
-  const at = locate(s.text, quote);
+  // White space alone is in every message and says nothing
+  const at = quote.trim() ? locate(s.text, quote) : null;
   if (!at) return { refused: "missing" };
   const quoted = notOwnWords(s.text, at[0], at[1]);
   if (quoted) return { refused: quoted };
@@ -87,6 +87,9 @@ type Range = [number, number];
 /** Pairs of marks that open and close a quotation on one line. A straight mark closes itself. */
 // english-exempt: Japanese quotation brackets are quotation marks too
 const PAIRS: Record<string, string> = { '"': '"', "“": "”", "‘": "’", "「": "」", "『": "』" };
+
+/** A character an apostrophe can sit against inside a word or a measure: `it's`, `users'`, `5'` */
+const WORD = /[\p{Script=Latin}\p{N}]/u;
 
 /** The ranges of one line, in characters, that sit inside quotation marks or a code span, marks included. */
 function inlineRanges(line: string): Range[] {
@@ -112,10 +115,10 @@ function inlineRanges(line: string): Range[] {
         j += run;
       }
     } else if (c === "'") {
-      // An apostrophe inside a word is not a quotation mark: it opens after a space or an opening bracket, and closes before one
-      if (i === 0 || /[\s([{]/.test(line[i - 1] as string))
+      // An apostrophe inside a Latin word or after a number is not a quotation mark; beside anything else, in any script, it is one
+      if (i === 0 || !WORD.test(line[i - 1] as string))
         for (let j = i + 1; j < line.length; j++)
-          if (line[j] === "'" && (j + 1 === line.length || /[\s.,;:!?)\]}]/.test(line[j + 1] as string))) {
+          if (line[j] === "'" && (j + 1 === line.length || !WORD.test(line[j + 1] as string))) {
             close = j;
             break;
           }
@@ -142,7 +145,8 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
   for (let at = 0; at <= bytes.length; ) {
     const nl = bytes.indexOf(0x0a, at);
     const stop = nl < 0 ? bytes.length : nl;
-    const raw = bytes.subarray(at, stop).toString("utf8");
+    // A CRLF message keeps its carriage return at the end of each line; it is part of the break, not of the line
+    const raw = bytes.subarray(at, stop).toString("utf8").replace(/\r$/, "");
     const line = raw.trimStart();
     let block = fence !== null || line.startsWith(">");
     if (fence) {

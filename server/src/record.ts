@@ -201,6 +201,9 @@ export type Checked = {
   facts: RepoFacts;
 };
 
+/** The byte span of a quote that holds words, or null: a quote of only white space cites nothing */
+const cited = (body: string, quote: string) => (quote.trim() ? locate(body, quote) : null);
+
 /**
  * Why an anchor may point at the wrong place in the working tree, or null. Left unchecked: no working tree, a commit the repository holds
  * (past evidence, where the file may have changed since), and evidence of a file this session deleted.
@@ -436,7 +439,7 @@ export async function checkRecord(
           );
           return [];
         }
-        const span = locate(s.text, e.quote);
+        const span = cited(s.text, e.quote);
         if (!span) {
           quarantine.push(`quote not found in ${e.source}: "${head(e.quote, 80)}"`);
           return [];
@@ -669,7 +672,7 @@ export async function checkRecord(
       const s = sources.get(Number(f.quote.source.slice(1)));
       if (!s) continue;
       cites.add(s.id);
-      const span = locate(s.text, f.quote.quote);
+      const span = cited(s.text, f.quote.quote);
       // Refused rather than quarantined: a value nobody said should not be kept, and should not hold back the record either
       if (!span) {
         errors.push(`${at}: quote not found in ${f.quote.source}: "${head(f.quote.quote, 80)}"`);

@@ -124,6 +124,21 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
   - 完了条件: `bun run release:plan -- --base <前のリリースのタグ>` → `plugin` で、4 つが同じバージョン。`bun run verify` → 通る
   - コミット: `chore(release): bump to the next version`
 
+## P6: タスクごとのレビューの指摘を直す
+
+Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ。
+
+- [x] T09: CRLF のフェンス、単引用符の対、空白だけの quote の扱いを直す
+  - 種別: 修正
+  - 計画: S1, S3
+  - 依存: T01（直す先の規則を T01 が作る）, T03（glean が共通の `locate` を使う形を T03 が作る）
+  - 変更: `server/src/own-words.ts`, `server/src/record.ts`, `server/test/own-words.test.ts`, `server/test/own-words-sites.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts` → 直す前のコードで、CRLF のフェンスの中の文が本人の言葉と判定され、日本語の句読点の前で閉じる単引用符が対にならず、改行だけの根拠を glean が引けずに、テストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts` → 通る
+  - コミット: `fix(record): read CRLF fences and single quotes beside any script, and find quotes as written`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts` → 直す前のコードで 14 pass, 3 fail。CRLF のフェンスの中の文が `null`（期待は `block`）、`'…'。` の中の文が `null`（期待は `inline`）、改行だけの根拠の追加が「The record is not valid」で拒まれる
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/reconcile.test.ts test/export.test.ts` → 145 pass, 0 fail
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -133,3 +148,6 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
 - 2026-10-11 / T03 / `server/test/extract.test.ts` の「glean: the owner's words retire an anchor…」が落ちた。検査を通った結果の入力（`input.source`）を AI の返事にすり替えて保存し、schema のトリガーが拒むことを確かめていたが、保存が入力を読み直さず確かめ済みの言葉を使うようになり、すり替えが保存に届かなくなったため / すり替える対象を確かめ済みの言葉（`said`）に変えた。型を無視して偽造しても schema が拒むことを、今までどおり確かめる。T03 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
 - 2026-10-11 / T04 / テストを既存の `deliver.test.ts` と `read.test.ts` へ足す予定だったが、配信と read の一致を 1 つの場面で確かめるので、独立したファイルにした / T04 の変更欄: 前の値 `server/src/deliver.ts`, `server/src/read.ts`, `server/test/deliver.test.ts`, `server/test/read.test.ts`、新しい値 `server/src/deliver.ts`, `server/src/read.ts`, `server/test/quarantined-conflict.test.ts`。red と完了条件のコマンドも、そのファイルを指す形に直した。出典の無い（unsourced）記録は同じ条件式で扱われるが、テストの場面は隔離（quarantined）だけ
 - 2026-10-11 / T05 / CLI のバンドルが 625,102 バイトになり、上限（625,000）を 102 バイト超えて `bun run verify` の bundle が止まった。増えたのは監査のコマンド（`server/src/audit-quotes.ts` と、その表示）の分で、フックのバンドル（capture 386,696、deliver 441,943、git-worker 12,331）は増えていない / CLI の上限を 632,000 に上げた（前の値 625,000）。T05 の変更欄に `scripts/lib/bundle-budget.mjs` を足した（前の値: 6 ファイル、新しい値: 7 ファイル）
+- 2026-10-11 / T01〜T06 / タスクごとの Codex のレビューを、各タスクの直後ではなく T07 の後にまとめて頼んだ（手順の読み落とし）。6 件を別々の新しい会話で、high で流した / 結果: T02（`e1746b65`）と T04（`e6c8d465`）は指摘なし。ほかは下の行のとおり
+- 2026-10-11 / T01 のレビュー（`50cbb423`） / F1（P1）CRLF の発言でフェンスが開かず、コードブロックの中の文が採用の根拠として通る。F2（P2）ASCII の単引用符が日本語の句読点の直前で閉じると対にならない。どちらも直す前の判定は拒んでいた / 2 件とも受理。テストで再現して T09 で直した。単引用符は「ラテン文字と数字に挟まれないもの」を引用符として数える形にした（計画の「直後が行末・空白・句読点」より広い。日本語は語の間に空白が無いため）
+- 2026-10-11 / T03 のレビュー（`945179c8`） / F1（P2）共通の `locate` が空白だけの quote を拒むので、glean の通常の根拠と撤回の対象選びでも、実在する空白の span を引けなくなった（計画は、そこを変えないとしている） / 受理。T09 で、`locate` は書かれたとおりに探す形に戻し、空白だけを拒むのは権限の検査（`ownWords`）と record 側の根拠だけにした

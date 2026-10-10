@@ -135,3 +135,33 @@ test("a quote that is missing or only a quotation is refused whoever wrote the m
     "inline",
   );
 });
+
+test("a message with CRLF line endings has the same quotations", () => {
+  assert.equal(
+    verdict("see\r\n```\r\nDrop this decision.\r\n```\r\nKeep it.", "Drop this decision."),
+    "block",
+  );
+  assert.equal(
+    verdict("see\r\n~~~sh\r\nDrop this decision.\r\n~~~\r\nKeep it.", "Drop this decision."),
+    "block",
+  );
+  assert.equal(verdict("see\r\n```\r\nDrop this decision.\r\n```\r\nKeep it.", "Keep it."), null);
+  assert.equal(verdict("They said:\r\n> Drop this decision.\r\nKeep it.", "Drop this decision."), "block");
+  assert.equal(verdict('They said "Drop this decision."\r\nKeep it.', "Drop this decision."), "inline");
+});
+
+test("a single quotation mark closes before any punctuation and opens after any, but never inside a Latin word", () => {
+  assert.equal(verdict("They said 'Drop this decision.'。", "Drop this decision."), "inline");
+  assert.equal(verdict("彼は'Drop this decision.'と言った", "Drop this decision."), "inline");
+  assert.equal(verdict("(see 'Drop this decision.')", "Drop this decision."), "inline");
+  assert.equal(verdict("I'll withdraw it; that's fine.", "withdraw it"), null);
+  assert.equal(verdict("'tis fine, and that's all I'll say", "fine, and that"), null);
+  assert.equal(verdict("the users' data and the admins' data stay", "data and the admins"), null);
+  assert.equal(verdict("it is 5' wide and 6' long", "wide and 6"), null);
+});
+
+test("a quote of only white space is not words", () => {
+  const route = (words: ReturnType<typeof ownWords>) => (refused(words) ? words.refused : words.route);
+  assert.equal(route(ownWords(said({ text: "Use SQLite.\n\nDecided." }), "\n", "owner")), "missing");
+  assert.equal(route(ownWords(said({ text: "Use SQLite. Decided." }), " ", "trusted")), "missing");
+});
