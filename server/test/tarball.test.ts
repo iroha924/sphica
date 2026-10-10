@@ -3,19 +3,16 @@
 
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { tarballProblems, trackedDistribution } from "../../scripts/lib/tarball.mjs";
+import { BUNDLE_ENTRIES, tarballProblems, trackedDistribution } from "../../scripts/lib/tarball.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const tracked = trackedDistribution(root);
 const complete = new Set([
-  "dist/cli.js",
-  "dist/mcp.js",
-  "dist/mcp-record.js",
-  "dist/deliver.js",
-  "dist/capture.js",
+  ...BUNDLE_ENTRIES.map((entry) => `dist/${entry}.js`),
   "db/schema.sql",
   ".claude-plugin/plugin.json",
   ".codex-plugin/plugin.json",
@@ -39,6 +36,20 @@ test("passes when everything shipped is present, and finds missing tracked manif
     );
     const missing = new Set([...complete].filter((f) => f !== must));
     assert.ok(tarballProblems(missing, tracked).includes(`tarball is missing ${must}`), must);
+  }
+});
+
+test("every program the build bundles has to be in the tarball", () => {
+  // The build keeps its own list: changing scripts/bundle.mjs ships a release, so the check reads it instead of sharing one
+  const built = /^const ENTRIES = (\[[^\]]*\]);$/m.exec(
+    fs.readFileSync(path.join(root, "scripts", "bundle.mjs"), "utf8"),
+  )?.[1];
+  assert.ok(built, "scripts/bundle.mjs no longer spells its entries as `const ENTRIES = [...]`");
+  assert.deepEqual([...BUNDLE_ENTRIES].sort(), (JSON.parse(built) as string[]).sort());
+  for (const entry of BUNDLE_ENTRIES) {
+    const file = `dist/${entry}.js`;
+    const missing = new Set([...complete].filter((f) => f !== file));
+    assert.deepEqual(tarballProblems(missing, tracked), [`tarball is missing ${file}`]);
   }
 });
 
