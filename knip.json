@@ -26,6 +26,10 @@
         "evals/asked/run.ts",
         "evals/order/run.ts",
         "evals/retrieval/run.ts",
+        "evals/post-write/replay.ts",
+        "evals/post-write/shell-miss.ts",
+        "evals/post-write/shell-write-harness.ts",
+        "evals/post-write/transcript.ts",
         "evals/review/run.ts",
         "evals/scale/run.ts"
       ],

@@ -243,6 +243,8 @@ jobs:
           node ../scripts/check-hooks-live.mjs "$out/package"
           # doctor's Codex hooks row from the packed CLI, with npm's codex.cmd on PATH as Windows installs it
           node ../scripts/check-codex-trust-live.mjs "$out/package"
+          # Post-shell delivery from the packed hooks, with real Git Bash and PowerShell commands between Pre and Post
+          node ../server/evals/post-write/shell-write-harness.ts --no-compare --plugin "$out/package"
 
 
   # The oldest git Sphica supports reads core.fsmonitor=false as a hook named "false" and has no GIT_NO_LAZY_FETCH: the attack tests run on

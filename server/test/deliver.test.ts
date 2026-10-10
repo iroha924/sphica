@@ -10,7 +10,16 @@ import { after, before, test } from "node:test";
 import { AI_DECIDED } from "../src/authority.ts";
 import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
-import { AUTO_TRACE, CONFIRM, deliver, leadFor, recordLines } from "../src/deliver.ts";
+import {
+  AUTO_TRACE,
+  anchoredRules,
+  CONFIRM,
+  deliver,
+  deliverableIds,
+  leadFor,
+  namedRecords,
+  recordLines,
+} from "../src/deliver.ts";
 import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { readUnit } from "../src/read.ts";
@@ -216,6 +225,17 @@ test("delivery brings anchored, named, and broad records, never candidates or co
       "",
       "subagent prompts are not the owner's",
     );
+    // The same matching on any text, such as code an agent writes, answers the records and what each one named
+    const names = async (text: string) =>
+      (await namedRecords(db.reader, p, repo, text)).map((h) => `${h.u.key}${h.why}`);
+    assert.deepEqual(await names("export const toDisplay = (d: Date) => toStored(d);"), [
+      "trace:ext-s1/utc [names toStored]",
+    ]);
+    assert.deepEqual(await names("// keeps telemetry off\nopen();"), [
+      "trace:ext-s1/no-telemetry [names the rejected option telemetry]",
+      "trace:ext-s1/opener [names open]",
+    ]);
+    assert.deepEqual(await names("const opened = reopen;"), [], "a symbol inside a longer word is not named");
 
     const start = await at({ hook_event_name: "SessionStart", source: "startup" });
     assert.match(start, /Work: Rework CSV export \(active\): notes removed; next: add column order/);
@@ -2457,6 +2477,601 @@ test("decided by an AI: the evaluation's gold lines carry the mark and the AI wo
     assert.match(line ?? "", /^- trace:ext-s1\/pool \(decision do, decided by an AI\): /);
     assert.equal(await leadFor(db.reader, [u], "Lead."), `Lead. ${AI_DECIDED}`);
     assert.equal(await leadFor(db.reader, [], "Lead."), "Lead.");
+  } finally {
+    await db.done();
+  }
+});
+
+test("after a shell call, the records on files whose content it changed come once per conversation, behind the option", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  const saved = { home: process.env.SPHICA_HOME, on: process.env.SPHICA_SHELL_WRITE_DELIVERY };
+  process.env.SPHICA_HOME = home;
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "export const a = 1;\n");
+    let n = 0;
+    const call = async (
+      write: (() => void) | null,
+      o: {
+        session?: string;
+        agent?: string;
+        post?: string;
+        host?: "claude-code" | "codex";
+        pre?: boolean;
+      } = {},
+    ) => {
+      const id = `toolu_${++n}`;
+      const base = {
+        session_id: o.session ?? "sess",
+        cwd: repo,
+        tool_name: "Bash",
+        tool_input: { command: "python3 tools/gen.py" },
+        tool_use_id: id,
+        ...(o.agent ? { agent_id: o.agent } : {}),
+      };
+      if (o.pre !== false)
+        await deliver({ ...base, hook_event_name: "PreToolUse" }, o.host ?? "claude-code", db.file);
+      write?.();
+      return deliver({ ...base, hook_event_name: o.post ?? "PostToolUse" }, o.host ?? "claude-code", db.file);
+    };
+    const touch = (text: string) => () => fs.writeFileSync(path.join(repo, "src/dates.ts"), text);
+    const trial = () =>
+      fs
+        .readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    assert.equal(await call(touch("export const a = 2;\n")), "", "off by default");
+    assert.equal(fs.existsSync(path.join(home, "shell-state", "calls")), false, "off takes no snapshot");
+
+    process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY = "true";
+    process.env.SPHICA_SHELL_WRITE_DELIVERY = "off";
+    assert.equal(
+      await call(touch("export const a = 20;\n"), { session: "opt" }),
+      "",
+      "the environment's off wins",
+    );
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    assert.match(
+      await call(touch("export const a = 21;\n"), { session: "opt" }),
+      /trace:ext-s1\/utc/,
+      "the plugin option alone turns it on",
+    );
+    delete process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY;
+
+    process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+    assert.equal(await call(null), "", "a call that changes nothing delivers nothing");
+    const first = await call(touch("export const a = 3;\n"));
+    assert.match(first, /src\/dates\.ts, files whose content changed between before and after this call/);
+    assert.match(first, /trace:ext-s1\/utc/);
+    const row = db.owner
+      .prepare("select event, reason from delivery where reason = 'shell_write' order by id desc limit 1")
+      .get();
+    assert.deepEqual(
+      { ...row },
+      { event: "pre_edit", reason: "shell_write" },
+      "logged as an edit, so it spends no read budget",
+    );
+    assert.equal(
+      await call(touch("export const a = 4;\n")),
+      "",
+      "a record already shown to the conversation is not repeated",
+    );
+    assert.match(
+      await call(touch("export const a = 5;\n"), { agent: "sub1" }),
+      /trace:ext-s1\/utc/,
+      "a subagent is its own conversation",
+    );
+    assert.match(
+      await call(touch("export const a = 6;\n"), { session: "other", post: "PostToolUseFailure" }),
+      /trace:ext-s1\/utc/,
+      "a failed command that wrote before failing still counts",
+    );
+    await deliver(
+      { session_id: "sess", cwd: repo, hook_event_name: "SessionStart", source: "compact" },
+      "claude-code",
+      db.file,
+    );
+    assert.match(
+      await call(touch("export const a = 7;\n")),
+      /trace:ext-s1\/utc/,
+      "after a compaction it counts again",
+    );
+    assert.match(
+      await call(touch("export const a = 8;\n"), { session: "codex-s", host: "codex" }),
+      /trace:ext-s1\/utc/,
+      "Codex's Bash calls the same way",
+    );
+    assert.equal(
+      await call(touch("export const a = 9;\n"), { session: "nopre", pre: false }),
+      "",
+      "no snapshot, no delivery",
+    );
+    // While another connection holds the write lock, the delivery still answers, unlogged
+    db.owner.exec("begin immediate");
+    try {
+      assert.match(await call(touch("export const a = 10;\n"), { session: "locked" }), /trace:ext-s1\/utc/);
+    } finally {
+      db.owner.exec("rollback");
+    }
+    const lines = trial();
+    assert.deepEqual(
+      lines.map((l) => [
+        l.event,
+        l.session,
+        (l.delivered as string[] | undefined)?.length ?? null,
+        l.logged ?? null,
+      ]),
+      [
+        ["post_shell", "opt", 1, true],
+        ["post_shell", "sess", 0, null],
+        ["post_shell", "sess", 1, true],
+        ["post_shell", "sess", 0, null],
+        ["post_shell", "sess", 1, true],
+        ["post_shell", "other", 1, true],
+        ["post_shell", "sess", 1, true],
+        ["post_shell", "codex-s", 1, true],
+        ["snapshot_missing", "nopre", null, null],
+        ["post_shell", "locked", 1, false],
+      ],
+      "one line per call, delivered or not, with whether the delivery log was written",
+    );
+  } finally {
+    if (saved.home === undefined) delete process.env.SPHICA_HOME;
+    else process.env.SPHICA_HOME = saved.home;
+    if (saved.on === undefined) delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    else process.env.SPHICA_SHELL_WRITE_DELIVERY = saved.on;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a shell call's Post still compares when the cache cannot be saved, and reports a snapshot past its life", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    const base = (id: string, session: string) => ({
+      session_id: session,
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "python3 gen.py" },
+      tool_use_id: id,
+    });
+    const trial = () =>
+      fs
+        .readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+    // The cache's directory is a file: saving the cache fails, the comparison does not
+    fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
+    fs.writeFileSync(path.join(home, "shell-state", "cache"), "not a directory");
+    await deliver({ ...base("t1", "nocache"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    assert.match(
+      await deliver({ ...base("t1", "nocache"), hook_event_name: "PostToolUse" }, "claude-code", db.file),
+      /trace:ext-s1\/utc/,
+    );
+    assert.equal(trial().find((l) => l.call === "t1")?.event, "post_shell", "the call has its trial line");
+    fs.rmSync(path.join(home, "shell-state", "cache"));
+    // A snapshot older than its life, with no other Pre to prune it, is reported expired at its own Post
+    await deliver({ ...base("t2", "old"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    const calls = path.join(home, "shell-state", "calls");
+    for (const n of fs.readdirSync(calls)) {
+      const file = path.join(calls, n);
+      const snap = JSON.parse(fs.readFileSync(file, "utf8"));
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ ...snap, at: new Date(Date.now() - 8 * 86_400_000).toISOString() }),
+      );
+    }
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "c\n");
+    assert.equal(
+      await deliver({ ...base("t2", "old"), hook_event_name: "PostToolUse" }, "claude-code", db.file),
+      "",
+    );
+    assert.equal(trial().find((l) => l.call === "t2")?.event, "snapshot_expired");
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a shell call is compared for the project it started in, asks keep or undo, and caps its trial log", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    // A trial log at its cap moves aside before the next line
+    fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
+    fs.writeFileSync(path.join(home, "shell-state", "trial.jsonl"), "x".repeat(10 * 1024 * 1024));
+    // An archive another call made earlier is kept, never replaced
+    fs.writeFileSync(path.join(home, "shell-state", "trial.1000.1.jsonl"), "older\n");
+    const input = {
+      session_id: "s",
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "node tools/gen.cjs" },
+      tool_use_id: "t1",
+    };
+    await deliver({ ...input, hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    // The call rewrites the file and points the checkout at another repository
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    execFileSync("git", ["-C", repo, "remote", "set-url", "origin", "https://github.com/o/other.git"], {
+      stdio: "ignore",
+    });
+    const out = await deliver({ ...input, hook_event_name: "PostToolUse" }, "claude-code", db.file);
+    assert.match(out, /trace:ext-s1\/utc/, "the records of the project the call started in");
+    assert.match(out, /ask whether to keep or undo it/);
+    assert.doesNotMatch(out, /do not make that change yet/, "the change is already made");
+    const archives = fs
+      .readdirSync(path.join(home, "shell-state"))
+      .filter((n) => /^trial\.\d+\.\d+\.jsonl$/.test(n));
+    assert.equal(archives.length, 2, "the full log moved aside under its own name");
+    assert.equal(fs.readFileSync(path.join(home, "shell-state", "trial.1000.1.jsonl"), "utf8"), "older\n");
+    assert.ok(
+      archives.some((n) => fs.statSync(path.join(home, "shell-state", n)).size === 10 * 1024 * 1024),
+      "with all it held",
+    );
+    assert.ok(fs.statSync(path.join(home, "shell-state", "trial.jsonl")).size < 4096, "a fresh log");
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a Codex shell command that only looks like a patch is still compared after it runs", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    const input = {
+      session_id: "codex-s",
+      cwd: repo,
+      tool_name: "Bash",
+      // A patch marker in a heredoc, then a generator that names no file
+      tool_input: { command: "cat <<'EOF'\n*** Begin Patch\nEOF\nnode tools/gen.cjs" },
+      tool_use_id: "t1",
+    };
+    await deliver({ ...input, hook_event_name: "PreToolUse" }, "codex", db.file);
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    assert.match(
+      await deliver({ ...input, hook_event_name: "PostToolUse" }, "codex", db.file),
+      /trace:ext-s1\/utc/,
+    );
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a shell call's Post whose project cannot be told still leaves its trial line", async () => {
+  const db = tempDb();
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-deliver-")));
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    // A checkout with no origin is looked up in the local project map, which cannot be read here
+    fs.mkdirSync(path.join(home, "projects.json"));
+    const input = {
+      session_id: "s",
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "true" },
+      tool_use_id: "t1",
+      hook_event_name: "PostToolUse",
+    };
+    assert.equal(await deliver(input, "claude-code", db.file), "");
+    const line = JSON.parse(fs.readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8").trim());
+    assert.equal(line.call, "t1");
+    assert.match(String(line.error), /EISDIR|illegal operation/);
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("the records on more changed paths than SQLite takes variables are still found", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const rels = [...Array.from({ length: 40_000 }, (_, i) => `gen/f${i}.ts`), "src/dates.ts"];
+    const id = db.owner.prepare("select id from unit where key = 'trace:ext-s1/utc'").get()?.id;
+    assert.deepEqual(await anchoredRules(db.reader, p, rels), [Number(id)]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("two shell calls that change one file at once log the record once", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    const base = (id: string) => ({
+      session_id: "sess",
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "python3 gen.py" },
+      tool_use_id: id,
+    });
+    await deliver({ ...base("t1"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    await deliver({ ...base("t2"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    await Promise.all(
+      ["t1", "t2"].map((id) =>
+        deliver({ ...base(id), hook_event_name: "PostToolUse" }, "claude-code", db.file),
+      ),
+    );
+    const logged = db.owner
+      .prepare(
+        "select count(*) as n from delivery d join delivery_unit x on x.delivery_id = d.id where d.reason = 'shell_write' and d.outcome = 'emitted'",
+      )
+      .get();
+    assert.equal(Number(logged?.n), 1, "the logged deliveries carry the record once");
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("records named as of a past time follow the state, anchor, conflict, and adoption history of that time", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "Keep alpha. Keep beta. Keep gamma. Keep delta. Keep eps. Use phi.",
+    });
+    await save(db, p, {
+      units: [
+        decided("alpha", m, "Keep alpha.", {
+          anchors: [{ path: "src/a.ts", symbol: "alphaFn", role: "applies_to" }],
+        }),
+        decided("beta", m, "Keep beta.", {
+          anchors: [{ path: "src/b.ts", symbol: "betaFn", role: "applies_to" }],
+        }),
+        decided("gamma", m, "Keep gamma.", {
+          anchors: [{ path: "src/g.ts", symbol: "gammaFn", role: "applies_to" }],
+        }),
+        decided("eps", m, "Keep eps.", {
+          anchors: [{ path: "src/e.ts", symbol: "epsFn", role: "applies_to" }],
+        }),
+        {
+          key: "phi",
+          kind: "constraint",
+          stance: "do",
+          text: "Use phi.",
+          evidence: [{ source: `s${m}`, quote: "Use phi.", role: "states" }],
+        },
+      ],
+    });
+    const id = (key: string) =>
+      Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+    const run = Number(db.owner.prepare("select run_id from unit_anchor limit 1").get()?.run_id);
+    const saved = String(db.owner.prepare("select min(at) from unit_state").get()?.["min(at)"]);
+    // alpha leaves active later; beta gains an anchor later; gamma's anchor is retired later
+    db.owner
+      .prepare(
+        "insert into unit_state (unit_id, from_state, to_state, at, reason, run_id) values (?, 'active', 'candidate', ?, 'r', ?)",
+      )
+      .run(id("alpha"), "2099-01-01T00:00:00.000Z", run);
+    db.owner
+      .prepare(
+        "insert into unit_anchor (unit_id, path, symbol, role, run_id, added_at) values (?, 'src/b2.ts', 'betaLater', 'applies_to', ?, ?)",
+      )
+      .run(id("beta"), run, "2099-01-01T00:00:00.000Z");
+    db.owner
+      .prepare("update unit_anchor set retired_at = ? where symbol = 'gammaFn'")
+      .run("2099-01-01T00:00:00.000Z");
+    // eps is the owner's; a conflict with phi counts only once phi is the owner's too, and stops counting once resolved
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'conflicts', ?, ?)",
+      )
+      .run(id("eps"), id("phi"), run, "2099-01-01T00:00:00.000Z");
+    db.owner
+      .prepare(
+        "insert into unit_adoption (unit_id, source_id, span_start, span_end, route, run_id, added_at) values (?, ?, 0, 8, 'owner_statement', ?, ?)",
+      )
+      .run(id("phi"), m, run, "2099-06-01T00:00:00.000Z");
+    db.owner
+      .prepare("update unit_link set resolved_at = ?, resolution = 'settled' where from_unit = ?")
+      .run("2099-12-01T00:00:00.000Z", id("eps"));
+    const names = async (asOf?: string) =>
+      (await namedRecords(db.reader, p, repo, "alphaFn() betaFn() betaLater() gammaFn() epsFn()", asOf))
+        .map((h) => `${h.u.key.replace("trace:ext-s1/", "")}${h.why}`)
+        .sort();
+    assert.deepEqual(await names("2000-01-01T00:00:00.000Z"), [], "nothing was active before it was saved");
+    assert.ok(saved < "2099");
+    assert.deepEqual(await names("2098-01-01T00:00:00.000Z"), [
+      "alpha [names alphaFn]",
+      "beta [names betaFn]",
+      "eps [names epsFn]",
+      "gamma [names gammaFn]",
+    ]);
+    assert.deepEqual(
+      await names("2099-03-01T00:00:00.000Z"),
+      ["beta [names betaFn]", "eps [names epsFn]"],
+      "alpha left active, gamma's anchor is retired, and the conflict does not count while phi is no one's",
+    );
+    assert.deepEqual(
+      await names("2099-07-01T00:00:00.000Z"),
+      ["beta [names betaFn]"],
+      "once phi is the owner's, the unresolved conflict holds eps back",
+    );
+    assert.deepEqual(await names("2100-01-01T00:00:00.000Z"), ["beta [names betaFn]", "eps [names epsFn]"]);
+    assert.deepEqual(
+      await names(),
+      ["beta [names betaFn]", "eps [names epsFn]"],
+      "without a time, the current state: the same as after every change",
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("each as-of condition alone decides: an anchor added later, a conflict added later, and an adoption retracted later", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Keep beta. Keep eps. Keep psi. Keep eta. Keep chi." });
+    await save(db, p, {
+      units: [
+        decided("beta", m, "Keep beta.", {
+          anchors: [{ path: "src/b.ts", symbol: "betaFn", role: "applies_to" }],
+        }),
+        decided("eps", m, "Keep eps.", {
+          anchors: [{ path: "src/e.ts", symbol: "epsFn", role: "applies_to" }],
+        }),
+        decided("psi", m, "Keep psi."),
+        decided("eta", m, "Keep eta.", {
+          anchors: [{ path: "src/h.ts", symbol: "etaFn", role: "applies_to" }],
+        }),
+        decided("chi", m, "Keep chi."),
+      ],
+    });
+    const id = (key: string) =>
+      Number(db.owner.prepare("select id from unit where key = ?").get(`trace:ext-s1/${key}`)?.id);
+    const run = Number(db.owner.prepare("select run_id from unit_anchor limit 1").get()?.run_id);
+    db.owner
+      .prepare(
+        "insert into unit_anchor (unit_id, path, symbol, role, run_id, added_at) values (?, 'src/b2.ts', 'betaLater', 'applies_to', ?, ?)",
+      )
+      .run(id("beta"), run, "2099-01-01T00:00:00.000Z");
+    // Both ends are the owner's from the start: only the link's own time decides
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'conflicts', ?, ?)",
+      )
+      .run(id("eps"), id("psi"), run, "2099-01-01T00:00:00.000Z");
+    // A conflict in place from the start: only chi's adoption being retracted lets eta through
+    db.owner
+      .prepare(
+        "insert into unit_link (from_unit, to_unit, kind, run_id, added_at) values (?, ?, 'conflicts', ?, ?)",
+      )
+      .run(id("eta"), id("chi"), run, "2000-01-01T00:00:00.000Z");
+    db.owner
+      .prepare(
+        "update unit_adoption set retracted_at = ?, retraction_reason = 'changed mind', retraction_source_id = ?, retraction_span_start = 0, retraction_span_end = 4 where unit_id = ?",
+      )
+      .run("2099-05-01T00:00:00.000Z", m, id("chi"));
+    const names = async (text: string, asOf: string) =>
+      (await namedRecords(db.reader, p, repo, text, asOf)).map(
+        (h) => `${h.u.key.replace("trace:ext-s1/", "")}${h.why}`,
+      );
+    assert.deepEqual(
+      await names("betaLater()", "2098-01-01T00:00:00.000Z"),
+      [],
+      "the anchor did not exist yet",
+    );
+    assert.deepEqual(await names("betaLater()", "2099-02-01T00:00:00.000Z"), ["beta [names betaLater]"]);
+    assert.deepEqual(
+      await names("epsFn()", "2098-01-01T00:00:00.000Z"),
+      ["eps [names epsFn]"],
+      "the conflict did not exist yet",
+    );
+    assert.deepEqual(await names("epsFn()", "2099-02-01T00:00:00.000Z"), []);
+    assert.deepEqual(await names("etaFn()", "2099-04-01T00:00:00.000Z"), [], "chi is still the owner's");
+    assert.deepEqual(
+      await names("etaFn()", "2099-06-01T00:00:00.000Z"),
+      ["eta [names etaFn]"],
+      "chi's adoption was retracted",
+    );
+    const ids = async (asOf: string) => (await deliverableIds(db.reader, p, asOf)).has(id("eps"));
+    assert.deepEqual(
+      [await ids("2098-01-01T00:00:00.000Z"), await ids("2099-02-01T00:00:00.000Z")],
+      [true, false],
+    );
   } finally {
     await db.done();
   }

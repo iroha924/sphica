@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExpressionBuilder, Kysely } from "kysely";
+import { type ExpressionBuilder, type Kysely, type SqlBool, sql } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";
 import { leaves } from "./anchors.ts";
 import { AI_DECIDED, authorityOf, ownerAdopted } from "./authority.ts";
@@ -20,7 +20,17 @@ import { inline } from "./panel.ts";
 import { identify, projectId } from "./project.ts";
 import { selectForReview } from "./review.ts";
 import { localChange, type ReviewInput, reviewCall } from "./review-bridge.ts";
-import { RevisionMismatch } from "./sqlite.ts";
+import {
+  compare,
+  loadCache,
+  pruneSnapshots,
+  saveCache,
+  snapshotKey,
+  takeSnapshot,
+  takeStates,
+  writeSnapshot,
+} from "./shell-state.ts";
+import { RevisionMismatch, sphicaHome } from "./sqlite.ts";
 import { pendingCount } from "./status.ts";
 import { head, reason, sha256 } from "./text.ts";
 import { pendingSessions } from "./trace.ts";
@@ -32,6 +42,9 @@ type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
  */
 export const CONFIRM =
   "If, after checking a record below against the current code and its full text (Sphica's read), what you were asked to do is a change it rejected or rules out, do not make that change yet: tell the user which record and reason it conflicts with, and ask whether to go ahead.";
+/** The request after a shell call, when the change is already made: keep or undo is the user's call, not the agent's */
+const AFTER_CHANGE =
+  "If, after checking a record below against the current code and its full text (Sphica's read), what this call changed is a change it rejected or rules out, tell the user which record and reason it conflicts with, and ask whether to keep or undo it.";
 /** The same request for the evaluation's gold slot, which is given the record text but no Sphica tools. */
 export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "the record text given here");
 // The limits add the request's length, so it takes no room from the records
@@ -86,12 +99,20 @@ const noted = (text: string, lead: string, notes: string[]): { text: string; not
 /**
  * Units that may be delivered: active, supported, sourced, and in no unresolved conflict that counts. The owner's decision is held back
  * only by a conflict with another record the owner adopted: a proposal nobody adopted, or the AI's own decision, never hides it.
+ * With `asOf`, the same as of that time, read from the state, link, and adoption history (extraction and sources never change after a save).
  */
-const deliverable = (db: Reads, projectId: number) =>
+const deliverable = (db: Reads, projectId: number, asOf?: string) =>
   db
     .selectFrom("unit as u")
     .where("u.project_id", "=", projectId)
-    .where("u.lifecycle", "=", "active")
+    .$call((q) =>
+      asOf === undefined
+        ? q.where("u.lifecycle", "=", "active")
+        : q.where(
+            sql<SqlBool>`(select s.to_state from unit_state s where s.unit_id = u.id and s.at <= ${asOf}
+              order by s.at desc, s.id desc limit 1) = 'active'`,
+          ),
+    )
     .where("u.extraction", "=", "supported")
     .where("u.unsourced", "=", 0)
     .where(({ not, exists, selectFrom }) =>
@@ -100,22 +121,47 @@ const deliverable = (db: Reads, projectId: number) =>
           selectFrom("unit_link as l")
             .select("l.from_unit")
             .where("l.kind", "=", "conflicts")
-            .where("l.resolved_at", "is", null)
+            .$call((q) =>
+              asOf === undefined
+                ? q.where("l.resolved_at", "is", null)
+                : q
+                    .where("l.added_at", "<=", asOf)
+                    .where((eb) => eb.or([eb("l.resolved_at", "is", null), eb("l.resolved_at", ">", asOf)])),
+            )
             .where((eb) =>
               eb.or([
                 eb.and([
                   eb("l.from_unit", "=", eb.ref("u.id")),
-                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.to_unit")]),
+                  eb.or([eb.not(ownerAdopted("u.id", asOf)), ownerAdopted("l.to_unit", asOf)]),
                 ]),
                 eb.and([
                   eb("l.to_unit", "=", eb.ref("u.id")),
-                  eb.or([eb.not(ownerAdopted("u.id")), ownerAdopted("l.from_unit")]),
+                  eb.or([eb.not(ownerAdopted("u.id", asOf)), ownerAdopted("l.from_unit", asOf)]),
                 ]),
               ]),
             ),
         ),
       ),
     );
+
+/** The applies_to paths of the decisions and constraints deliverable now: what a shell command may name, and what its snapshot watches */
+export async function deliverablePaths(db: Reads, projectId: number): Promise<string[]> {
+  const rows = await deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .where("u.kind", "in", ["decision", "constraint"])
+    .select("a.path")
+    .distinct()
+    .orderBy("a.path")
+    .execute();
+  return rows.map((r) => r.path);
+}
+
+/** The units deliverable now, or as of `asOf`: what a replay of past hook calls may count. The hooks never pass a time */
+export async function deliverableIds(db: Reads, projectId: number, asOf?: string): Promise<Set<number>> {
+  return new Set((await deliverable(db, projectId, asOf).select("u.id").execute()).map((r) => r.id));
+}
 
 const line = (
   u: { key: string; kind: string; stance: string | null; text: string },
@@ -268,6 +314,21 @@ const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
     .groupBy("u.id")
     .orderBy("u.id", "desc");
 
+/** The deliverable decisions and constraints anchored to any of the paths, newest first */
+export async function anchoredRules(db: Reads, projectId: number, rels: string[]): Promise<number[]> {
+  // Every anchor read once and matched here: one call can change more paths than SQLite takes variables, and a query per batch of
+  // paths re-evaluates deliverability each time (16 s for 20,000 paths at 10,000 records against 21 ms for this)
+  const wanted = new Set(rels);
+  const anchors = await deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .where("u.kind", "in", ["decision", "constraint"])
+    .select(["u.id", "a.path"])
+    .execute();
+  return [...new Set(anchors.filter((a) => wanted.has(a.path)).map((a) => a.id))].sort((a, b) => b - a);
+}
+
 /** The paths a delivery names in its lead: all of them up to three, then a count. */
 const named = (rels: string[]) =>
   rels.length <= 3
@@ -323,19 +384,8 @@ const sameAgent = (agent: string | null) => (eb: ExpressionBuilder<{ d: Delivery
 const START_SOURCES = new Set(["startup", "resume", "clear", "compact", "fork"]);
 const RESTARTS = ["compact", "clear"];
 
-/**
- * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
- * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
- * reads can repeat one, and a restart whose start could not be logged is not seen).
- */
-async function beforeRead(
-  db: Reads,
-  projectId: number,
-  rels: string[],
-  session: string,
-  agent: string | null,
-  how: "reading" | "named",
-): Promise<Plan> {
+/** Where this conversation's context last restarted (a delivery id, 0 for none), and the records emitted to it since */
+async function sinceRestart(db: Reads, session: string, agent: string | null) {
   const restart = await db
     .selectFrom("delivery as d")
     .where("d.session_id", "=", session)
@@ -354,6 +404,77 @@ async function beforeRead(
     .where("d.outcome", "=", "emitted")
     .select(["x.unit_id", "d.event"])
     .execute();
+  return { since, sent };
+}
+
+/**
+ * After a shell call: the decisions and constraints anchored to the files whose content the call changed that this conversation has not
+ * been shown since its context last restarted, within an edit's limits. It spends no read budget: a write is not a read.
+ */
+async function afterShellWrite(
+  db: Reads,
+  projectId: number,
+  rels: string[],
+  session: string,
+  agent: string | null,
+): Promise<Plan> {
+  const { sent } = await sinceRestart(db, session, agent);
+  const seen = new Set(sent.map((r) => r.unit_id));
+  const ids = (await anchoredRules(db, projectId, rels)).filter((id) => !seen.has(id));
+  const top = ids.slice(0, LIMITS.pre_edit.units);
+  const shown = top.length
+    ? await db
+        .selectFrom("unit as u")
+        .where("u.id", "in", top)
+        .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+        .orderBy("u.id", "desc")
+        .execute()
+    : [];
+  const why = await reasons(
+    db,
+    shown.map((u) => u.id),
+  );
+  const ai = await aiDecided(
+    db,
+    shown.map((u) => u.id),
+  );
+  const f = fitMarked(
+    shown.map((u) =>
+      why.has(u.id)
+        ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
+        : line(u, "", ai.has(u.id)),
+    ),
+    // The edit's room for records: the limit's room for the request is CONFIRM's, so it is traded for this request's own length
+    LIMITS.pre_edit.chars - ASK + AFTER_CHANGE.length + 1,
+    `Active decisions applying to ${named(rels)}, files whose content changed between before and after this call (current code relevance unverified). ${AFTER_CHANGE} ${NOTE}:`,
+    ai,
+    shown.map((u) => u.id),
+  );
+  const omitted = ids.length - shown.length + f.omitted;
+  return {
+    ...noted(f.text, f.lead, [leftOut(omitted)]),
+    units: f.kept.flatMap((i) => shown[i]?.id ?? []),
+    eligible: ids.length,
+    omitted,
+    path: head(rels.join(" "), 500),
+    reason: SHELL_WRITE,
+  };
+}
+
+/**
+ * Before a read: the decisions and constraints anchored to the path that this conversation has not been shown since its context last
+ * restarted, within the read budget left for it. Deduplication reads the delivery log, so it is best effort (a failed log or concurrent
+ * reads can repeat one, and a restart whose start could not be logged is not seen).
+ */
+async function beforeRead(
+  db: Reads,
+  projectId: number,
+  rels: string[],
+  session: string,
+  agent: string | null,
+  how: "reading" | "named",
+): Promise<Plan> {
+  const { since, sent } = await sinceRestart(db, session, agent);
   // Only reads that delivered records spend the budget; a read that carried only the omission note spends nothing
   const spent = await db
     .selectFrom("delivery as d")
@@ -463,14 +584,7 @@ async function namedInCommand(
   cwd: string,
   command: string,
 ): Promise<string[]> {
-  const paths = await deliverable(db, projectId)
-    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
-    .where("a.role", "=", "applies_to")
-    .where("a.retired_at", "is", null)
-    .where("u.kind", "in", ["decision", "constraint"])
-    .select("a.path")
-    .distinct()
-    .execute();
+  const paths = (await deliverablePaths(db, projectId)).map((p) => ({ path: p }));
   const edge = `\\s'"=(){}<>|;&,`;
   const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const forms = (p: string) => {
@@ -522,8 +636,23 @@ function once<T>(f: (k: string) => T): (k: string) => T {
   };
 }
 
-/** A prompt brings up a record only by naming its anchored symbol or path, or one of its options, exactly. Aliases never count. */
-async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
+/**
+ * The deliverable records a text names by their anchored symbol or path, or one of their options, exactly, with what it named. Aliases never
+ * count. A name is a candidate, not a sign the text goes against the record.
+ */
+export async function namedRecords(
+  db: Reads,
+  projectId: number,
+  root: string,
+  prompt: string,
+  asOf?: string,
+): Promise<
+  {
+    u: { id: number; key: string; kind: string; stance: string | null; text: string };
+    why: string;
+    hit: "symbol" | "path" | "option";
+  }[]
+> {
   const text = prompt.normalize("NFKC");
   const lower = text.toLowerCase();
   // Building a Unicode-class pattern costs far more than the match, so only a word the text contains gets one
@@ -548,19 +677,25 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     (option: string) => option.length >= 3 && word(option.normalize("NFKC").toLowerCase(), lower),
   );
   // Kind, then id: the order prompts show records in, written out rather than left to whichever index the query plan walks
-  const units = await deliverable(db, projectId)
+  const units = await deliverable(db, projectId, asOf)
     .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
     .orderBy("u.kind")
     .orderBy("u.id")
     .execute();
   // The children of the same deliverable set by subquery: a list of every id would pass SQLite's limit on bound values
-  const ids = deliverable(db, projectId).select("u.id");
+  const ids = deliverable(db, projectId, asOf).select("u.id");
   const [anchors, options] = await Promise.all([
     db
       .selectFrom("unit_anchor")
       .select(["unit_id", "path", "symbol"])
       .where("unit_id", "in", ids)
-      .where("retired_at", "is", null)
+      .$call((q) =>
+        asOf === undefined
+          ? q.where("retired_at", "is", null)
+          : q
+              .where("added_at", "<=", asOf)
+              .where((eb) => eb.or([eb("retired_at", "is", null), eb("retired_at", ">", asOf)])),
+      )
       .orderBy("id")
       .execute()
       .then(byUnit),
@@ -572,13 +707,20 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
       .execute()
       .then(byUnit),
   ]);
-  const hits: { u: (typeof units)[number]; why: string }[] = [];
+  const hits: { u: (typeof units)[number]; why: string; hit: "symbol" | "path" | "option" }[] = [];
   for (const u of units) {
     const a = anchors.get(u.id)?.find((x) => (x.symbol && named(x.symbol)) || pathIn(x.path));
     const o = options.get(u.id)?.find((x) => optionIn(x.text));
-    if (a) hits.push({ u, why: ` [names ${a.symbol && named(a.symbol) ? a.symbol : a.path}]` });
-    else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]` });
+    const symbol = a?.symbol && named(a.symbol) ? a.symbol : null;
+    if (a) hits.push({ u, why: ` [names ${symbol ?? a.path}]`, hit: symbol ? "symbol" : "path" });
+    else if (o) hits.push({ u, why: ` [names the ${o.outcome} option ${inline(o.text)}]`, hit: "option" });
   }
+  return hits;
+}
+
+/** A prompt brings up a record only by naming it (namedRecords). */
+async function onPrompt(db: Reads, projectId: number, root: string, prompt: string): Promise<Plan> {
+  const hits = await namedRecords(db, projectId, root, prompt);
   const shown = hits.slice(0, LIMITS.prompt.units);
   const ai = await aiDecided(
     db,
@@ -604,6 +746,61 @@ async function onPrompt(db: Reads, projectId: number, root: string, prompt: stri
     path: null,
     reason: null,
   };
+}
+
+/** The reason a delivery after a shell call is logged with, under the edit event */
+const SHELL_WRITE = "shell_write";
+/** How long a shell call's snapshot may take before the rest of its files are left unknown, inside the host's 5 seconds */
+const SNAPSHOT_MS = 3500;
+const SHELL_WRITE_ON = new Set(["on", "1", "true", "yes"]);
+/** Bytes of the trial log before it moves aside: about 30,000 calls, more than a week of heavy use */
+const TRIAL_CAP = 10 * 1024 * 1024;
+
+/**
+ * Whether records are delivered after shell calls: SPHICA_SHELL_WRITE_DELIVERY turns it on or off for both hosts, and otherwise the
+ * plugin's shell_write_delivery setting (Claude Code) does; off when neither says on.
+ */
+function shellWriteDelivery(): boolean {
+  const env = (process.env.SPHICA_SHELL_WRITE_DELIVERY ?? "").trim().toLowerCase();
+  if (AUTO_TRACE_OFF.has(env)) return false;
+  if (SHELL_WRITE_ON.has(env)) return true;
+  return SHELL_WRITE_ON.has(
+    (process.env.CLAUDE_PLUGIN_OPTION_SHELL_WRITE_DELIVERY ?? "").trim().toLowerCase(),
+  );
+}
+
+/** One line per shell call to the trial log, delivered or not, so the trial can count what the delivery log may miss */
+function trialLog(line: Record<string, unknown>): void {
+  try {
+    const file = path.join(sphicaHome(), "shell-state", "trial.jsonl");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) >= TRIAL_CAP)
+      rotateTrial(path.dirname(file), file);
+    fs.appendFileSync(file, `${JSON.stringify({ at: iso(Date.now()), ...line })}\n`);
+  } catch {
+    // The trial log never stops delivery
+  }
+}
+
+/**
+ * Moves a full trial log aside under a name of its own, so two calls past the cap at once each keep what they moved and neither replaces an
+ * archive; archives past twice the cap, oldest first, are removed. A rotation that fails leaves the line to be appended all the same.
+ */
+function rotateTrial(dir: string, file: string): void {
+  try {
+    fs.renameSync(file, path.join(dir, `trial.${Date.now()}.${process.pid}.jsonl`));
+    const archives = fs
+      .readdirSync(dir)
+      .filter((n) => /^trial\.\d+\.\d+\.jsonl$/.test(n))
+      .sort((a, b) => Number(b.split(".")[1]) - Number(a.split(".")[1]));
+    let kept = 0;
+    for (const n of archives) {
+      kept += fs.statSync(path.join(dir, n), { throwIfNoEntry: false })?.size ?? 0;
+      if (kept > 2 * TRIAL_CAP) fs.rmSync(path.join(dir, n), { force: true });
+    }
+  } catch {
+    // Another call moved or removed it first
+  }
 }
 
 /** auto_trace or SPHICA_AUTO_TRACE values that turn the automatic trace off (capture and the owner's own trace go on); unset or anything else keeps it on */
@@ -880,22 +1077,117 @@ async function lockedPlan(
   e: Entry,
   make: () => Promise<Plan>,
   keep: (plan: Plan) => boolean,
+  logged: (written: boolean) => void = () => {},
 ): Promise<Plan> {
   const cap = openWriter("capture", file, LOG_WAIT_MS);
   let held = false;
+  let wrote = false;
   let plan = null as Plan | null;
   try {
     await inTransaction(cap, async (trx) => {
       held = true;
       plan = await make();
-      if (keep(plan)) await write(trx, e, plan);
+      if (keep(plan)) {
+        await write(trx, e, plan);
+        wrote = true;
+      }
     });
   } catch (err) {
+    wrote = false;
     if (held && !plan) throw err;
   } finally {
     await cap.destroy().catch(() => {});
   }
+  logged(wrote);
   return plan ?? make();
+}
+
+/** Takes a shell call's snapshot of every watched file before it runs; snapshots past their life are removed and logged as expired */
+async function snapshotCall(
+  db: Reads,
+  projectId: number,
+  place: { root: string; key: string },
+  host: Host,
+  input: HookInput,
+  started: number,
+): Promise<void> {
+  const paths = await deliverablePaths(db, projectId);
+  const cache = loadCache(place.root);
+  const states = takeStates(place.root, paths, cache, started + SNAPSHOT_MS);
+  saveCache(place.root, cache, paths);
+  const expired = pruneSnapshots(Date.now(), started + SNAPSHOT_MS);
+  if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
+  const key = snapshotKey(host, String(input.session_id), agentOf(input), String(input.tool_use_id));
+  writeSnapshot({ v: 1, key, at: iso(started), root: place.root, project: place.key, paths: states });
+}
+
+/**
+ * After a shell call (PostToolUse, and PostToolUseFailure in Claude Code: a failed command may have written before it failed): the
+ * records on the watched files whose content changed since its snapshot. Never says Sphica is unavailable: shell calls are frequent.
+ */
+async function afterShell(input: HookInput, host: Host, file: string, started: number): Promise<string> {
+  if (!shellWriteDelivery() || !input.session_id || !input.tool_use_id) return "";
+  const agent = agentOf(input);
+  const base = { host, session: input.session_id, agent, call: input.tool_use_id };
+  let line: Record<string, unknown> = { ...base, event: "post_shell" };
+  let db: ReadonlyKysely<DB> | null = null;
+  try {
+    // The snapshot holds the root and project of Pre, so a call that changes either is still compared for what it was run in
+    const before = takeSnapshot(snapshotKey(host, input.session_id, agent, input.tool_use_id));
+    if (before === "expired" || !before) {
+      // Outside a project no Pre took one, and every shell call there would fill the trial log
+      if (!before && !identify(input.cwd ?? process.cwd())) return "";
+      trialLog({ ...base, event: before ? "snapshot_expired" : "snapshot_missing" });
+      return "";
+    }
+    const cache = loadCache(before.root);
+    for (const [rel, st] of Object.entries(before.paths))
+      if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
+    const after = takeStates(before.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
+    saveCache(before.root, cache, Object.keys(before.paths));
+    const { changed, unknown } = compare(before.paths, after);
+    line = { ...line, paths: Object.keys(before.paths).length, changed, unknown };
+    if (!changed.length) {
+      trialLog({ ...line, delivered: [] });
+      return "";
+    }
+    if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
+    db = openReader(file);
+    const pid = await projectId(db, before.project);
+    if (pid === null) throw new Error("the project is not registered");
+    const reader = db;
+    const entry: Entry = {
+      projectId: pid,
+      host,
+      external: input.session_id,
+      agent,
+      event: "pre_edit",
+      branch: branchOf(before.root),
+    };
+    let logged = false;
+    const plan = await lockedPlan(
+      file,
+      entry,
+      () => afterShellWrite(reader, pid, changed, sessionId(pid, host, input.session_id as string), agent),
+      (p) => Boolean(p.text),
+      (w) => {
+        logged = w;
+      },
+    );
+    const keys = plan.units.length
+      ? (await reader.selectFrom("unit").select("key").where("id", "in", plan.units).execute()).map(
+          (u) => u.key,
+        )
+      : [];
+    // Whether the delivery log has the delivery; nothing to deliver has nothing to log
+    trialLog({ ...line, delivered: keys, logged: plan.text ? logged : null });
+    return plan.text;
+  } catch (e) {
+    trialLog({ ...line, delivered: [], error: head(reason(e), 200) });
+    return "";
+  } finally {
+    await db?.destroy().catch(() => {});
+  }
 }
 
 /** The additional context for one hook call, or "" for nothing. file is the database (tests pass their own). */
@@ -904,7 +1196,16 @@ export async function deliver(
   host: Host = "claude-code",
   file: string = dbFile(),
 ): Promise<string> {
+  const started = Date.now();
   const name = input.hook_event_name;
+  // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
+  if ((name === "PostToolUse" || name === "PostToolUseFailure") && SHELL_TOOLS.has(input.tool_name ?? ""))
+    return afterShell(input, host, file, started);
+  const snap =
+    name === "PreToolUse" &&
+    SHELL_TOOLS.has(input.tool_name ?? "") &&
+    Boolean(input.tool_use_id) &&
+    shellWriteDelivery();
   const call = reviewCall(input);
   const event: Event | null = call
     ? "review"
@@ -943,6 +1244,7 @@ export async function deliver(
   if (
     onPath &&
     !shell &&
+    !snap &&
     (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
   )
     return "";
@@ -952,13 +1254,26 @@ export async function deliver(
     .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
     .filter((r) => r && !leaves(r))
     .map((r) => r.split(path.sep).join("/"));
-  if (onPath && !shell && !rels.length) return "";
+  if (onPath && !shell && !snap && !rels.length) return "";
   let db: ReadonlyKysely<DB> | null = null;
   try {
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
+    if (snap)
+      await snapshotCall(db, pid, place, host, input, started).catch((e) =>
+        trialLog({
+          host,
+          session: input.session_id,
+          agent: agentOf(input),
+          call: input.tool_use_id,
+          event: "snapshot_failed",
+          error: head(reason(e), 200),
+        }),
+      );
+    // A patch run through the shell that names no file had only its snapshot to take
+    if (onPath && !shell && !rels.length) return "";
     if (shell) {
       rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
       if (!rels.length) return "";

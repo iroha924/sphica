@@ -303,6 +303,17 @@ try {
       fail("plugin/hooks/codex.json: the PreToolUse delivery matcher must cover apply_patch and Bash");
     }
   }
+  const postShell = (codexHooks?.PostToolUse ?? []).filter((group) =>
+    (group.hooks ?? []).some((hook) => hook.command?.includes(codexDeliver)),
+  );
+  if (
+    postShell.length !== 1 ||
+    postShell[0].matcher !== "^Bash$" ||
+    postShell[0].hooks.some((hook) => hook.async || hook.commandWindows !== codexDeliverWindows)
+  )
+    fail(
+      "plugin/hooks/codex.json: PostToolUse needs one synchronous ^Bash$ delivery group with its Windows command",
+    );
   const claudeHooks = JSON.parse(read("plugin/hooks/hooks.json")).hooks ?? {};
   // Exec form: Claude Code starts node with the script path as one argument, with no shell (PowerShell on Windows without Git Bash
   // adds about 230 ms per launch). Each event's hooks are pinned, so a lost timeout, async, or matcher fails here too.
@@ -326,7 +337,11 @@ try {
         matcher: "Edit|Write|MultiEdit|NotebookEdit|AskUserQuestion",
         hooks: [hook("capture", { async: true })],
       },
+      // Synchronous, so the records on files a shell call changed are in context before the next model request
+      { matcher: "Bash|PowerShell", hooks: [hook("deliver", { timeout: 5 })] },
     ],
+    // A command that fails may have written before it failed
+    PostToolUseFailure: [{ matcher: "Bash|PowerShell", hooks: [hook("deliver", { timeout: 5 })] }],
     Stop: [{ hooks: [hook("capture", { timeout: 30 })] }],
     // Claude Code reads with Read and, often, shell commands: Bash, or PowerShell on Windows without Git Bash
     PreToolUse: [

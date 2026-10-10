@@ -61,12 +61,21 @@ test("hand-written canonical identities hash the same as the computed ones, on P
   assert.equal(shipped.find((h) => h.key === `${ID}:${REL}:user_prompt_submit:0:0`)?.hash, sha256(windows));
 });
 
-test("only Windows sees a different definition after the Windows hooks changed", () => {
-  const before = (p: NodeJS.Platform) => hooksOf(hookTrust(OLD, ID, REL, p, new Map())).map((h) => h.hash);
-  const after = (p: NodeJS.Platform) => hooksOf(hookTrust(SHIPPED, ID, REL, p, new Map())).map((h) => h.hash);
-  assert.deepEqual(after("darwin"), before("darwin"));
-  assert.deepEqual(after("linux"), before("linux"));
-  assert.ok(after("win32").every((h, i) => h !== before("win32")[i]));
+test("only Windows sees a different definition of the hooks 0.6.30 had after the Windows hooks changed", () => {
+  const byKey = (json: string, p: NodeJS.Platform) =>
+    new Map(hooksOf(hookTrust(json, ID, REL, p, new Map())).map((h) => [h.key, h.hash]));
+  const old = byKey(OLD, "darwin");
+  // Hooks added since keep the old ones' keys: a new group goes after the existing ones
+  assert.deepEqual(
+    [...byKey(SHIPPED, "darwin").keys()].filter((k) => !old.has(k)),
+    [`${ID}:${REL}:post_tool_use:1:0`],
+  );
+  for (const p of ["darwin", "linux"] as const) {
+    const after = byKey(SHIPPED, p);
+    for (const [k, h] of byKey(OLD, p)) assert.equal(after.get(k), h, `${p} ${k}`);
+  }
+  const after = byKey(SHIPPED, "win32");
+  for (const [k, h] of byKey(OLD, "win32")) assert.notEqual(after.get(k), h, `win32 ${k}`);
 });
 
 test("timeouts are normalized as Codex does before hashing", () => {
