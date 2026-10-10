@@ -53,7 +53,7 @@ Changes to docs that do not ship, tests, and development scripts need no version
 ## Pull requests
 
 - Open the pull request from your fork into `main`, and fill in the template. Delete the sections you cannot fill.
-- In the Verification section, paste the commands you ran and their output, and write `Codex review: pending maintainer review`. The maintainer runs that review when taking your change in.
+- In the Verification section, paste the commands you ran and their output, and say what you could not run. The template also asks for a Codex review: leave that out, the maintainer runs it when taking your change in.
 - CI on a pull request from a fork waits for the maintainer to approve each run.
 
 ## How review works
