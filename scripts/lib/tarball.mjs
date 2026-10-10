@@ -5,6 +5,12 @@
 
 import { execFileSync } from "node:child_process";
 
+/**
+ * The programs the build bundles into `plugin/dist/<entry>.js`. The tarball has to hold every one. scripts/bundle.mjs keeps the list it
+ * builds from, and a test fails when the two differ, so an entry added to the build cannot be left out of this check.
+ */
+export const BUNDLE_ENTRIES = ["mcp", "mcp-record", "capture", "deliver", "cli", "git-worker"];
+
 /** Shipped files the repository tracks. All of them must be in the tarball. */
 export function trackedDistribution(root) {
   return execFileSync(
@@ -30,11 +36,7 @@ export function trackedDistribution(root) {
 export function tarballProblems(paths, tracked) {
   const problems = [];
   for (const required of new Set([
-    "dist/cli.js",
-    "dist/mcp.js",
-    "dist/mcp-record.js",
-    "dist/capture.js",
-    "dist/deliver.js",
+    ...BUNDLE_ENTRIES.map((entry) => `dist/${entry}.js`),
     "db/schema.sql",
     ".claude-plugin/plugin.json",
     ".codex-plugin/plugin.json",
