@@ -23,7 +23,7 @@ Nothing listens on a port. The MCP servers talk to the host over standard input 
 ## Data
 
 - **The database** is one SQLite file, `~/.sphica/sphica.db`. `db/schema.sql` is its only definition; there is no ORM schema beside it. A generation number guards the record model and a revision number guards changes within it, and each revision ships with a migration that tests compare against a fresh database.
-- **The queue** is `~/.sphica/spool`: capture writes there first, so recording never waits on the database, and the entries are written to the database afterwards.
+- **The queue** is `~/.sphica/spool`: capture writes messages there first, so recording a message does not wait on the database, and the entries are written to the database afterwards. The one thing capture writes to the database directly is a note that a record tool was called.
 - **Search** is SQLite's FTS5 with Sphica's own word splitting, so Japanese and English text are both found.
 - **Other files** under `~/.sphica`: copies of the whole database made before each migration (`backups/`), the working tree baselines capture compares against (`worktree/`), Sphica's own git directory (`git/`), and, when delivery after shell commands is on, content hashes and its log (`shell-state/`).
 

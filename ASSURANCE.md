@@ -22,7 +22,7 @@ Out of scope: another process running as the same user. It can read and write `~
 ### Outside text is data
 
 - Pull request text, issue text, and recorded conversations are stored as sources and shown to the agent marked as past records, with the instruction that they are not instructions.
-- A decision takes effect only when adopted by someone entitled to decide: the owner in their own words, the repository's owner or a maintainer on GitHub, or the agent itself in an interactive session, marked as the agent's decision. Words the owner quoted or pasted, and a commit's author, which anyone can set, never adopt.
+- A decision takes effect only when adopted by someone entitled to decide: the owner in their own words, the repository's owner or a maintainer on GitHub, or the agent itself in an interactive session, marked as the agent's decision. A commit's author, which anyone can set, never adopts, and neither does a merge.
 - A record that replaces or holds back the owner's decision takes effect only from a record the owner adopted.
 - A record carries quotes from its sources, and the save checks that each quote is in the stored text. That proves the words were said. It does not prove the record's own summary of them is right. A record whose quote is not there is quarantined: it is never delivered on its own, it does not appear in search, and reading it by key shows it as quarantined.
 
@@ -31,7 +31,7 @@ Out of scope: another process running as the same user. It can read and write `~
 - Only the record server writes records, through tools bound to a run. A run fixes the project, and for a trace or a harvest the one session or pull request it may cite; a glean run may cite the project's sources and what it fetched. The record itself cannot name a project, a session, or SQL.
 - Every connection but the owner's has a role enforced by an SQLite authorizer: the read server can only read, the record server can write only the listed tables and columns, and only the forget role can delete sources. Tests try each role's allowed and forbidden operations on real connections. The owner connection, which creates, migrates, and checks the database, has no authorizer.
 - Write connections are opened in one module, `server/src/db-write.ts`, and a check in CI proves the read server's imports cannot reach it.
-- Sources are deleted only after the owner confirms the count in the host's own dialog, with `secure_delete` on so the bytes leave the database file.
+- Sources are deleted only after the owner confirms the count in the host's own dialog, with `secure_delete` on so the bytes are overwritten in the database file. When another session is reading the database at that moment, the cleanup can be left unfinished, and forget says so and asks to be run again.
 
 ### Sphica's programs do not run what the repository says
 
@@ -42,7 +42,7 @@ Out of scope: another process running as the same user. It can read and write `~
 ### What is captured stays local
 
 - Sphica opens no network connection and runs no server that listens. The programs it runs that can reach the network are `gh`, `npm`, `claude`, and `codex`, which the user already trusts with their credentials.
-- Secrets with a recognizable shape are masked before text is stored. Sphica stores no credentials of its own.
+- Secrets with a recognizable shape are masked in captured prompts, pull request text, and cited file lines before they are stored. Sphica stores no credentials of its own.
 
 ### The package is what the source builds to
 
@@ -80,7 +80,7 @@ Out of scope: another process running as the same user. It can read and write `~
 
 - Showing a record does not make the agent follow it, and Sphica does not block the agent.
 - Sphica sends nothing itself, but what it hands to the host (records and the quotes in them) becomes part of the host's context, and goes wherever the host sends that.
-- Masking catches secrets with a known shape only. Anything else is stored as typed.
+- Masking catches secrets with a known shape only, and only in the text Sphica takes in. Anything else is stored as typed, and a record's own text is stored as the agent wrote it.
 - Forgetting removes sources from the database. It does not touch copies outside it: files still waiting in the capture queue, and backups of the database made before a migration. A record that repeated the text keeps its own words.
 - The database roles guard against Sphica's own mistakes, not against another program of the same user.
 - Reviewing a pull request from a fork follows written steps that keep its code from running before the maintainer approves it. The reviewer still reads text a stranger wrote.
