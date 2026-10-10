@@ -22,13 +22,16 @@ base: main
 
 パッケージに入らない文書と規範だけを足す。ここまででは README はまだ「外部の PR は閉じる」のまま。
 
-- [ ] T01: CONTRIBUTING.md を書く
+- [x] T01: CONTRIBUTING.md を書く
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `CONTRIBUTING.md`
   - 完了条件: `bun run check` → exit 0（english、markdown、links を含む）。`rg -c "pending maintainer review" CONTRIBUTING.md` → 1 以上
   - コミット: `docs: add CONTRIBUTING.md for pull requests from forks`
+  - 結果: `bun run check` → exit 0。`rg -c "pending maintainer review" CONTRIBUTING.md` → 1
+  - 結果: `git add CONTRIBUTING.md && node scripts/check-markdown.mjs` → 35 files、0 issues（CONTRIBUTING.md を含む。この検査は追跡されたファイルだけを見るので、stage の後に流し直した）
+  - 結果: `mise exec -- node scripts/check-links.mjs` → 0 Errors（stage の後）
 
 - [ ] T02: PR テンプレートの Verification のコメントに、メンテナーではない人の書き方を 1 文足す
   - 種別: 変更
