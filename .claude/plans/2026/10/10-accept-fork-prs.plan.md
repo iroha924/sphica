@@ -102,7 +102,7 @@ README.ja.md:
 - Setup: `mise trust && mise install`、`bun run setup`
 - Checks: `bun run verify`（pre-push と CI が同じものを流す）、`bun run fix`
 - Commits: 英語、Conventional Commits、本文なしの 1 行、100 文字以内
-- Versions: パッケージに入る変更（hook と CI が教える）は、npm と 3 つの plugin manifest を同じバージョンへ上げる。取り込むときにメンテナーが番号を直すことがある
+- Versions: パッケージに入る変更（hook と CI が教える）は、npm と 3 つの plugin manifest を同じバージョンへ上げる。PR を開いている間に main がリリースしたら、コントリビューターが main を取り込んで上げ直す
 - Pull requests: fork から main へ。テンプレートを埋める。Verification 節には `Codex review: pending maintainer review` と書く（メンテナーがレビューして結果をコメントに残す）。初めての人の workflow はメンテナーの承認の後に走る
 - How review works: メンテナーが差分を読む → CI → Codex レビュー → 受け入れ。パッケージに入らない変更はメンテナーが merge する。パッケージに入る変更は、コミットをそのまま保ってリリースのブランチへ取り込み、メンテナーが承認したリリースの run が merge する（fork の PR から直接はリリースしない）。merged と表示されることは約束しない
 
@@ -128,7 +128,7 @@ README.ja.md:
 6. 記録: 作者がメンテナーではない PR では、`codex-review` スキルと CLAUDE.md の Review 節が PR 本文へ書かせるもの（Codex レビューの結果、棄却した指摘と理由）を、本文ではなく iroha924 のコメントに残し、対象の head SHA を書く。コントリビューターの本文は書き換えない（harvest は本文を作者の発言として取り込む）。文面は送る前に持ち主に見せる
 7. 持ち主が承認する。聞く直前に head を照合し直し、手順 6 のコメントに書いた SHA と同じときだけ、その SHA を名指しして聞く
 8. release kind が none: 固定のコマンドで head を照合し直してから、`gh pr merge <N> --merge --match-head-commit <head SHA>` で merge する（ページのボタンは、その時点の head をそのまま merge するので使わない）
-9. release kind が plugin: 承認した SHA に同一リポジトリのブランチを作る（cherry-pick と squash はしない）→ 必要なら main を merge → バージョンの調整は別コミット → リリース PR の本文に元の PR を `Refs #N` で書く → 以後は今までの手順（`codex-review`、`review-shipping`、`plugin-release`）。リリース PR には今までどおり本文へ記録する
+9. release kind が plugin: 承認した SHA に同一リポジトリのブランチを作る（cherry-pick と squash はしない）→ 必要なら main を merge → 承認の後にリリースが番号を取っていたら、バージョンの調整を別コミットで → リリース PR の本文に元の PR を `Refs #N` で書く → 以後は今までの手順（`codex-review`、`review-shipping`、`plugin-release`）。リリース PR には今までどおり本文へ記録する
 10. 未観測（最初の実際の fork PR で確かめて、このスキルを書き直す）: fork の PR で GitHub の Codex が動くか、取り込みの後に元の PR が merged と表示されるか
 
 ### バージョン
@@ -174,7 +174,7 @@ README.ja.md:
 - fork の PR で GitHub の Codex が動かない → スキルの 5 のローカルの経路を使い、スキルの「未観測」を書き直す
 - 取り込みの後に元の PR が merged と表示されない → 元の PR に取り込み先のリリース PR を書いて閉じる。CONTRIBUTING は merged の表示を約束していない
 - インストール済みの App が write を持っていて merge できる → 持ち主が installations を見て、要らない App を外す。文書は App について何も主張していない
-- コントリビューターの上げたバージョンが、取り込みの時点で main と重なる → メンテナーが別コミットで直す（スキルの 9）
+- コントリビューターの上げたバージョンが main と重なる → 承認の前なら、CI がバージョンの検査で止まるので、コントリビューターが main を取り込んで上げ直す（head が変わるので固定からやり直す）。承認の後にリリースが入った場合だけ、メンテナーが別コミットで直す（スキルの 9）
 
 ## 未解決
 
@@ -186,3 +186,4 @@ README.ja.md:
 - 2026-10-10 / README の「貢献」の文面を、入りやすい調子に書き直した / Go と一緒に持ち主が頼んだ / 文面だけで範囲は同じなので取り直しは不要
 - 2026-10-10 / `fork-pr` の手順を固くした: head の照合を読んだ後・承認の前・merge の前に足す、none の merge を `--match-head-commit` 付きのコマンドにする、GitHub の Codex のレビューは `commit_id` が一致するときだけ使う、名指しする変更を種類で書く / スキルの監査（Claude と Codex）が、承認の後に push されると読んでいないコミットが入る分岐を見つけた / 「承認した SHA だけを取り込む」という合意の内側なので取り直しは不要（持ち主には報告する）
 - 2026-10-10 / README の「貢献」の文面を直した: 「どの PR もメンテナーが読む」「レビューされずに入らない」を「メンテナーが読んで受け入れてから入る」へ、日本語版の誘いの重複を 1 回へ、リンクの説明にコミットの決まりを足す / 独立のレビュー（prose-reviewer と Codex）の指摘。前者は確かめた事実（merge するのはメンテナーだけ）より広い約束だった / 文面だけなので取り直しは不要
+- 2026-10-10 / バージョンが main と重なったときの扱いを分けた: 承認の前はコントリビューターが上げ直し、承認の後だけメンテナーが直す / 全差分の Codex レビューの指摘。fork の PR の CI はバージョンの検査で verify より前に止まるので、メンテナーが取り込みで直すまで待つと、承認の前にテストが走らない / 「コントリビューターもバージョンを上げる」という合意の内側なので取り直しは不要
