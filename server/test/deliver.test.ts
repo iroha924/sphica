@@ -2727,6 +2727,8 @@ test("a shell call is compared for the project it started in, asks keep or undo,
     // A trial log at its cap moves aside before the next line
     fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
     fs.writeFileSync(path.join(home, "shell-state", "trial.jsonl"), "x".repeat(10 * 1024 * 1024));
+    // An archive another call made earlier is kept, never replaced
+    fs.writeFileSync(path.join(home, "shell-state", "trial.1000.1.jsonl"), "older\n");
     const input = {
       session_id: "s",
       cwd: repo,
@@ -2744,7 +2746,15 @@ test("a shell call is compared for the project it started in, asks keep or undo,
     assert.match(out, /trace:ext-s1\/utc/, "the records of the project the call started in");
     assert.match(out, /ask whether to keep or undo it/);
     assert.doesNotMatch(out, /do not make that change yet/, "the change is already made");
-    assert.equal(fs.statSync(path.join(home, "shell-state", "trial.1.jsonl")).size, 10 * 1024 * 1024);
+    const archives = fs
+      .readdirSync(path.join(home, "shell-state"))
+      .filter((n) => /^trial\.\d+\.\d+\.jsonl$/.test(n));
+    assert.equal(archives.length, 2, "the full log moved aside under its own name");
+    assert.equal(fs.readFileSync(path.join(home, "shell-state", "trial.1000.1.jsonl"), "utf8"), "older\n");
+    assert.ok(
+      archives.some((n) => fs.statSync(path.join(home, "shell-state", n)).size === 10 * 1024 * 1024),
+      "with all it held",
+    );
     assert.ok(fs.statSync(path.join(home, "shell-state", "trial.jsonl")).size < 4096, "a fresh log");
   } finally {
     delete process.env.SPHICA_HOME;

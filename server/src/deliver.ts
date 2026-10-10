@@ -774,12 +774,32 @@ function trialLog(line: Record<string, unknown>): void {
   try {
     const file = path.join(sphicaHome(), "shell-state", "trial.jsonl");
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    // Past the cap the log moves to trial.1.jsonl, replacing the one before: two files at most
     if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) >= TRIAL_CAP)
-      fs.renameSync(file, path.join(path.dirname(file), "trial.1.jsonl"));
+      rotateTrial(path.dirname(file), file);
     fs.appendFileSync(file, `${JSON.stringify({ at: iso(Date.now()), ...line })}\n`);
   } catch {
     // The trial log never stops delivery
+  }
+}
+
+/**
+ * Moves a full trial log aside under a name of its own, so two calls past the cap at once each keep what they moved and neither replaces an
+ * archive; archives past twice the cap, oldest first, are removed. A rotation that fails leaves the line to be appended all the same.
+ */
+function rotateTrial(dir: string, file: string): void {
+  try {
+    fs.renameSync(file, path.join(dir, `trial.${Date.now()}.${process.pid}.jsonl`));
+    const archives = fs
+      .readdirSync(dir)
+      .filter((n) => /^trial\.\d+\.\d+\.jsonl$/.test(n))
+      .sort((a, b) => Number(b.split(".")[1]) - Number(a.split(".")[1]));
+    let kept = 0;
+    for (const n of archives) {
+      kept += fs.statSync(path.join(dir, n), { throwIfNoEntry: false })?.size ?? 0;
+      if (kept > 2 * TRIAL_CAP) fs.rmSync(path.join(dir, n), { force: true });
+    }
+  } catch {
+    // Another call moved or removed it first
   }
 }
 
@@ -1094,7 +1114,7 @@ async function snapshotCall(
   const paths = await deliverablePaths(db, projectId);
   const cache = loadCache(place.root);
   const states = takeStates(place.root, paths, cache, started + SNAPSHOT_MS);
-  saveCache(place.root, cache);
+  saveCache(place.root, cache, paths);
   const expired = pruneSnapshots(Date.now(), started + SNAPSHOT_MS);
   if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
   const key = snapshotKey(host, String(input.session_id), agentOf(input), String(input.tool_use_id));
@@ -1124,7 +1144,7 @@ async function afterShell(input: HookInput, host: Host, file: string, started: n
     for (const [rel, st] of Object.entries(before.paths))
       if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
     const after = takeStates(before.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
-    saveCache(before.root, cache);
+    saveCache(before.root, cache, Object.keys(before.paths));
     const { changed, unknown } = compare(before.paths, after);
     line = { ...line, paths: Object.keys(before.paths).length, changed, unknown };
     if (!changed.length) {

@@ -194,6 +194,16 @@ base: main
   - コミット: `fix(deliver): bind Post to Pre's project, follow in-checkout file links, and ask keep or undo`
   - 結果: 4 つの red を直す前のコード（f5aef572）で確かめ、文面と試用のログの上限はそれぞれの直しを外して落ちることを確かめた。shell-state 7 pass、deliver と deliver-codex 61 pass、replay と shell-miss 10 pass。凍結した入力で M0 を再生し直した結果は保存した結果と同じ（違う組 0）。先頭のコメントは 3 行以内にして issue 番号を外し、使い方は足りない引数を名指すスクリプトに任せた。README の英語版と日本語版の自分で見るものの節に、shell の後の配信を足した。期限の後に unknown を割り当てる処理は、3 万件の scale で Pre 3,660 ms・Post 3,615 ms と 5 秒の内に収まったので変えていない（掃除だけ期限で止める）。`bun run verify` → exit 0
 
+- [x] T19: 試用のログの入れ替えを並行でも壊れない形にし、見なくなったパスを hash のキャッシュから外す（GitHub の Codex のレビュー 95dffc4f）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T18（直す対象の入れ替えとキャッシュ）
+  - 変更: `server/src/deliver.ts`, `server/src/shell-state.ts`, `server/test/deliver.test.ts`, `server/test/shell-state.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/shell-state.test.ts` → 上限のログを trial.1.jsonl に移すので、並行の呼び出しが作り直した小さなログで退避を上書きしうる。保存したキャッシュに、もう見ないパスが残る
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts test/shell-state.test.ts` → 上限のログは呼び出しごとの名前で退避し、前の退避を残す。キャッシュは見ているパスだけを保存する（渡さないと型で通らない）
+  - コミット: `fix(deliver): rotate the trial log under names of its own and save only watched paths`
+  - 結果: どちらも直す前のコード（95dffc4f）で落ちることを確かめた。shell-state・deliver・deliver-codex → 68 pass。上限のログを置いて 40 個の Post を同時に流すと、40 行すべてが残り、10 MB のログは 1 つの退避にそのまま移った（`node rot.mjs` を scratchpad で）。`bun run verify` → exit 0
+
 ## P5: 試用と採否（既定オフのリリースの後、この PR の外）
 
 持ち主の 7 日の試用で、既定をオンにするか外すかを前もって決めた基準で決める。
@@ -218,3 +228,4 @@ base: main
 - 2026-10-10 / 全差分のレビュー / P2 の 3 件を採用し、T15・T16 で直した。M0 の 2 件は凍結した入力で再生し直して結果が変わらないことを確かめた
 - 2026-10-10 / T15・T16 の再レビュー / P2 の 1 件（1 行に入った複数の結果の順）を採用し、T17 で直した
 - 2026-10-10 / GitHub の Codex のレビュー（f5aef572） / 9 件のうち 8 件と 1 件の一部を T18 で直した。書き込みの後の文面は計画の「固定の CONFIRM」から変えた: CONFIRM は変更の前の頼み（まだ変更しない）で、Post の時点では変更が済んでいるため。試用の標本を見分ける lead（files whose content changed between before and after this call）は変えていない。見送ったのは、期限の後に残りのパスへ unknown を割り当てる処理（3 万件で 5 秒の内に収まっている）
+- 2026-10-10 / GitHub の Codex のレビュー（95dffc4f） / P2 の 2 件を採用し T19 で直した

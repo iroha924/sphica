@@ -37,7 +37,7 @@ function around(root: string, rels: string[], call: () => void) {
   const before = takeStates(root, rels, cache, FAR());
   call();
   const after = takeStates(root, rels, cache, FAR());
-  saveCache(root, cache);
+  saveCache(root, cache, rels);
   return compare(before, after);
 }
 
@@ -122,7 +122,7 @@ test("the cache spares unchanged files a read, a broken cache is rebuilt, and a 
     fs.writeFileSync(path.join(root, "a.ts"), "a\n");
     const cache = loadCache(root);
     takeStates(root, ["a.ts"], cache, FAR());
-    saveCache(root, cache);
+    saveCache(root, cache, ["a.ts"]);
     const reads = mock.method(fs, "openSync");
     try {
       takeStates(root, ["a.ts"], loadCache(root), FAR());
@@ -315,8 +315,14 @@ test("reads stay inside the checkout and within the deadline on every try, and o
     fs.utimesSync(path.join(root, "old.ts"), new Date(-86_400_000), new Date(-86_400_000));
     const cache = loadCache(root);
     takeStates(root, ["old.ts"], cache, FAR());
-    saveCache(root, cache);
+    saveCache(root, cache, ["old.ts"]);
     assert.equal(loadCache(root).has("old.ts"), true, "a negative time is kept");
+    // A path no longer watched leaves the cache when it is saved
+    fs.writeFileSync(path.join(root, "gone-anchor.ts"), "g");
+    const evict = loadCache(root);
+    takeStates(root, ["old.ts", "gone-anchor.ts"], evict, FAR());
+    saveCache(root, evict, ["old.ts"]);
+    assert.deepEqual([...loadCache(root).keys()], ["old.ts"]);
   } finally {
     delete process.env.SPHICA_HOME;
     for (const d of [root, outside, home]) fs.rmSync(d, { recursive: true, force: true });

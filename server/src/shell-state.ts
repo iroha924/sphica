@@ -106,10 +106,17 @@ function publish(file: string, text: string): void {
   fs.renameSync(tmp, file);
 }
 
-/** Saves the cache when it can: one that cannot be saved only costs the next call its reads */
-export function saveCache(root: string, cache: Cache): void {
+/**
+ * Saves the cache for the watched paths only, when it can: a path no longer watched (its anchor retired or moved) leaves the cache, and a
+ * cache that cannot be saved only costs the next call its reads.
+ */
+export function saveCache(root: string, cache: Cache, watched: string[]): void {
   try {
-    publish(cacheFile(root), JSON.stringify(Object.fromEntries(cache)));
+    const kept = watched.flatMap((rel) => {
+      const e = cache.get(rel);
+      return e ? [[rel, e] as const] : [];
+    });
+    publish(cacheFile(root), JSON.stringify(Object.fromEntries(kept)));
   } catch {
     // Rebuilt by the next call that can save it
   }
