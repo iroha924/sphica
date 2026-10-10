@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The shell-change entry check against a real database and synthetic transcripts: which shell-changed paths are candidates, how a labelled call
 // becomes an outcome (eligible at its result, scope, window, what the transcript shows), and the bar on the outcomes.
 import "./isolate-home.ts";

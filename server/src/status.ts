@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What Sphica holds for one project: current work and coverage (captured, extracted, and still waiting), for MCP status and the CLI.
 import { sql } from "kysely";
 import type { Reads } from "./db.ts";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Does the shipped deliver.js bring a record in after a real shell command changed its file, and only then? Fixed commands run between Pre
 // and Post in fresh processes, in both hosts' input shapes; this checks the hook's output, not where the host puts it.
 // node server/evals/post-write/shell-write-harness.ts [--plugin <package dir>] [--compare <git ref> | --no-compare]

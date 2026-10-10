@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Compares places where the same knowledge is copied into several interfaces.
 //
 // Fixing only one interface goes unnoticed, because the other still works.

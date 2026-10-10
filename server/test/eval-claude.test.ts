@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The local Claude runner: what each condition is started with, how its patch and answer are taken, and how its stream is read.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

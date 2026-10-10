@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Identifies projects.
 //
 // The key is the normalized git remote (`git:github.com/owner/repo`), so it is the same on every machine.

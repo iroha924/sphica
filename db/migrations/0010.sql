@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 9 → 10 of generation 2: AI adoption. Evidence gains the role decides and adoption the route agent; each record tool call is
 -- logged (record_call), Claude Code's PreToolUse hook logs the turn of each (tool_call_observation), and a run names the call that began it.
 -- Triggers and views are dropped first and all created again: rebuilding a table fails while a trigger names it.

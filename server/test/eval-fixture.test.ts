@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The tsundoku fixture the evaluation runs on: each target task's records are saved as the task needs, and today's delivery hook shows them
 // (or, for the conflicting pair, does not), so a measured change has something to change.
 import "./isolate-home.ts";

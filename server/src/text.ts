@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // String preparation: splitting terms, full-text queries, hashes, deterministic ids, and cutting by bytes.
 //
 // **SQLite does not split terms.** FTS5's default tokenizer cannot split Japanese into words, so the index side (sphica_terms,

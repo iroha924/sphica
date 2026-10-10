@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The fields table against real SQLite: one row per definition with how many records carry a value, and cells that cannot break the table.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

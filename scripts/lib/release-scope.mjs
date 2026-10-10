@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Decides whether a change goes into the npm package. If it does, npm and the 3 plugin channel manifests move to the same version (kind plugin).
 // The version gate, the release plan, and manual release preparation all use this decision.
 

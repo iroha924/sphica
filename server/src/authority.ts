@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Whose decision a record is: the owner's (the owner's or a maintainer's adoption), an AI's (only the AI's own adoption), or no one's yet.
 // Read from adoption history alone, so a past time gives the authority a record had then.
 

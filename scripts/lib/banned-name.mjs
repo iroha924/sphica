@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Finds a name that must not appear in the repository or the package. Only its SHA-256 is kept, so this file does not spell it.
 // Every 8-letter window inside a run of Latin letters is hashed, case-insensitively, so the name is found inside longer identifiers too.
 

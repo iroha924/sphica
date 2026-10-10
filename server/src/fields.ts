@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The fields the owner defined for this project, as one Markdown table: what each tracks and how many records carry a value, so the
 // owner can judge whether the trial is worth keeping. Every cell is text people or agents wrote, so it is flattened and its pipes escaped.
 

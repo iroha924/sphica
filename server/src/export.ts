@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Writes the live decisions the owner chose, with their quotes and the older decisions they replaced, as one Markdown document the
 // owner can commit. Every string that came from outside sits inside a fenced code block, so a quote cannot add links, HTML, or headings.
 import fs from "node:fs";

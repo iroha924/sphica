@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // read against real SQLite and a real Git working tree: what one reply carries, and that a record reads the same whatever else is read.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

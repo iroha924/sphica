@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks the relative links, images, and heading anchors of the tracked Markdown with lychee (offline). Usage: node scripts/check-links.mjs
 // Links to this repository's own files on GitHub (README.md uses them, since npm shows it away from the repository) are read as the files
 // in this checkout, so their anchors are checked too.

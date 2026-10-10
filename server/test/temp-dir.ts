@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Temp directories a test file makes and the process removes when it exits, however the tests ended. sql:reach fails a run that leaves
 // anything in its temp directory, so a directory made outside a test's own try/finally comes from here.
 import fs from "node:fs";

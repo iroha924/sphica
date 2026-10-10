@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Decides whether the npm-release environment lets only the owner approve a publish. The owner's approval is the only gate before npm,
 // so any drift (another reviewer, admin bypass, a looser deployment policy) stops the release. Inputs come from the GitHub API.
 

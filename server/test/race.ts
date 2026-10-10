@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 /**
  * Runs a second process at an exact point of this one, for races that a retry loop would only hit by chance. The parent starts the child
  * right before its own publishing step and waits, blocked, until the child says `done` (it published) or `blocked` (it found the lock held).

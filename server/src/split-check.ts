@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The fixed samples terms() is pinned to, checked against this Node. Intl.Segmenter splits by the ICU Node ships, so another Node may
 // split the same text differently from the rules the indexes were written with, and searches then miss rows written the other way.
 

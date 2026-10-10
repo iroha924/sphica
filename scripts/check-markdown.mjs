@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Lints the structure of Markdown with markdownlint-cli2 and the repository's rule set.
 // Usage: node scripts/check-markdown.mjs [file...] (no files: every tracked Markdown file)
 import { execFileSync } from "node:child_process";

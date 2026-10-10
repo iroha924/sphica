@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The decision lane of a code review: which active records a diff touches (review-findings.ts checks the verdicts about them).
 // A record applies when the diff changes a path it is anchored to, or, for a record with no code location that says not to do something
 // (or to defer it), when an added line names one of its options. Candidates and superseded records never apply.

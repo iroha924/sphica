@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Forgetting chosen sources on a real database: rows and index entries go, units that cited them are judged again, and the bytes
 // do not stay in the file.
 

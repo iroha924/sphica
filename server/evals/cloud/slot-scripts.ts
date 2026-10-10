@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 export const NODE = {
   version: "v24.15.0",
   file: "node-v24.15.0-linux-x64.tar.xz",

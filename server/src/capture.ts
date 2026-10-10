@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Conversation recording. Called from hooks, it keeps your messages, the AI's last response, and touched files.
 //
 // **Recording hooks only write to a local queue.** A process detached by Stop sends it to the database in batches.

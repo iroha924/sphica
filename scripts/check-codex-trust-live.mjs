@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs a package's `sphica doctor` against a temporary CODEX_HOME holding that package as the installed Codex plugin, and checks the
 // "Codex hooks" row: all trusted, then one modified and one disabled. The trusted hashes are written from a template of Codex
 // 0.160.0's canonical hook identity, not from doctor's code. On Windows the codex on PATH is npm's codex.cmd with its codex.js.

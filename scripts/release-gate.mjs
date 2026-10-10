@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks whether a tag may be published to npm. release.yml calls it twice, before and after the owner approves.
 // Usage: node scripts/release-gate.mjs --tag v1.2.3 --commit <sha> (needs GH_TOKEN and GITHUB_REPOSITORY)
 

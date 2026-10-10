@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The decision export against real SQLite: chosen active decisions with their standing quotes and the decisions they replaced, all or
 // nothing, with every outside string fenced so it cannot change the document's structure; and the save path checked where it lands.
 import "./isolate-home.ts";

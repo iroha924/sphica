@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks that only the repository owner can approve the npm-release environment. release.yml runs it before and after approval.
 // Usage: node scripts/release-env.mjs (needs GH_TOKEN, GITHUB_REPOSITORY, and GITHUB_REPOSITORY_OWNER_ID)
 

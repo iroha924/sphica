@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Prints the offline retrieval benchmark (bench.ts). Run from server/: node evals/retrieval/run.ts [--compare <git ref>] [--json] [--misses]
 // --compare copies this runner and corpus into a worktree of the ref and runs them there, so the ref's own terms(), index triggers,
 // and search build and read its database; running both versions against one database would compare the wrong tokenizer.

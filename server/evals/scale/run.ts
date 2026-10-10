@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // How long each delivery hook (the bundled deliver.js, a fresh process per call as the hosts run it), capture's drain, and overview's delivery
 // view over a 90-day log take as records grow. Every reply is checked for what it must hold, so one that fails quietly never passes as fast.
 // node server/evals/scale/run.ts [--sizes 359,1000] [--no-stress] [--no-drain] [--no-delivery-view]; timings belong to the machine printed first.

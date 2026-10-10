@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The post_write entry check replays past writes from synthetic transcripts against a real database: records deliverable at the write's
 // result, what had reached the conversation (from its transcript), the scope and doubt counted apart, the labelling sample, and the bar.
 import "./isolate-home.ts";

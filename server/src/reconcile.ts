@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The one writer of lifecycles and replacements. Saves change facts, then call reconcile once: it judges the records the facts reach
 // (server/src/judge.ts), writes only the difference, and judges again to prove nothing is left over, or throws so the save rolls back.
 

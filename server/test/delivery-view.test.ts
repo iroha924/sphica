@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The delivery view against real SQLite: the logged rows of one project and period only, main and subagent told apart as the log allows,
 // the records delivered most, example sessions, and a reply that keeps its limits and closing lines within READ_BUDGET however long the keys.
 import "./isolate-home.ts";

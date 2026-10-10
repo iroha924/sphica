@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // An agent can write its repository's git config and attributes; Sphica runs git there outside the agent's sandbox. Each path that config
 // could run a command through is planted with a program that leaves a mark, shown to mark when plain git runs, and shown to leave none
 // when Sphica's git runs.

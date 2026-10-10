@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Where `sphica init` keeps the copies it makes before migrating. Kept apart from admin.ts so the record server can name them to the owner
 // (forget) without bundling the CLI.
 

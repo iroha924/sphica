@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Whether an anchored file is still there apart from its symbol, and which instruction files a stale-marker check reads: git's tracked and
 // untracked files it does not ignore, or a bounded walk outside git, with every file it could not read counted.
 import "./isolate-home.ts";

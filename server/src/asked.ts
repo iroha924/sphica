@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Earlier owner messages like the current question, on request: what records cite each one, whether a decision was recorded, and
 // the same matter asked across sessions with none. Only direct quotes tie a record to a message; the rest of its turn is context.
 

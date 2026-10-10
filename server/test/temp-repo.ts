@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Creates a temp repository and passes it to fn. git does not read the default config.
 //
 // Document import builds SQL from git contents, so the checks need real commits.

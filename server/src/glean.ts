@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // glean: evidence and corrections added to existing records later, and records written from what the owner points to. Every change cites
 // retained text: an owner message, a pull request or issue source, or a file excerpt the CLI reads from git itself. Nothing is rewritten:
 // evidence and adoption are added or retracted, anchors are replaced or retired, and a correction is a successor.

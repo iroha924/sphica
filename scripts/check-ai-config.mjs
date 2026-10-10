@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";

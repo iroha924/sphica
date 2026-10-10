@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs one evaluation task with Claude on this machine, the local counterpart of the cloud routines (see runClaude in claude-run.ts).
 // Run: node evals/cloud/claude.ts --build <dir> --repo eval-shelf-3 --task pilot-dates [--model <model>] [--out <dir>]
 import fs from "node:fs";

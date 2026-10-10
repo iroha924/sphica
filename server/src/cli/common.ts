@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Opens a connection by role for one CLI command and closes it after.
 import type { Kysely } from "kysely";
 import type { ReadonlyKysely } from "kysely/readonly";

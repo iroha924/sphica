@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The canary a local evaluation must pass before any Claude run of a build: the fence holds (each way of touching a sentinel outside the
 // run is refused), each condition's context is what it should be (checked against a positive control), and every run keeps its own
 // database. Exits non-zero when any check fails.

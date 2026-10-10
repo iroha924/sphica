@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Writes the OSV scan summary to stdout and the job summary, and `status`, `count`, and `line` to the step outputs.
 // Usage: node scripts/osv-summary.mjs <results.json> <scanned sha> <scanner exit code, "" when it did not finish>.
 // Unreadable or untrusted results are reported, not failed on.

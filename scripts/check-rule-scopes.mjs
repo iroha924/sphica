@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks that the `paths` of `.claude/rules/*.md` load a rule for the files it should and not for files it should not.
 //
 // **Do not put expectations in rule frontmatter.** The only documented key is `paths`, and the docs do not say whether

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The probes that show a fenced Codex cannot read what it must not: a script the model runs prints, per target, how the read ended, and
 // the runner judges that from the script's own output in the event log, never from what the model says about it.
 import { execFileSync } from "node:child_process";

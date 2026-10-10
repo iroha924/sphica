@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The loop report over the graded builds of one bundle (an original and a swapped build of one loop), against the task definitions they
 // were built from. Every count keeps n, excluded, and ungraded beside it.
 // Run: node evals/cloud/report.ts <build dir>/grades.json [<build dir>/grades.json ...]

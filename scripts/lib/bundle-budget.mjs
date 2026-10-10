@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks the shipped bundles against bun's metafiles: each entry built, its size within a reviewed budget, and zod kept out of
 // the hooks, which start on every prompt and tool call.
 

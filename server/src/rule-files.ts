@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The instruction files an owner may paste Sphica's draft rule lines into (CLAUDE.md, AGENTS.md, AGENTS.override.md, .claude/rules/**/*.md),
 // read from the working tree with bounds, so a stale-marker check can look at every one it lists and say how many it could not.
 import fs from "node:fs";
