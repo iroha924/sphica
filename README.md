@@ -137,7 +137,7 @@ The agent searches with Sphica's `search` and opens full records with `read`. `s
   - `mysql -p`
 
   **Anything else is stored as typed, so do not paste secrets into a session.** If one got in, remove the source holding it with `/sphica:forget` (Claude Code; the confirmation dialog it needs may not appear in Codex). A record that repeated it keeps its own text.
-- **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, `sphica init` runs `gh api user` to read which GitHub account is yours, and `sphica doctor` runs `npm` and `claude` to check installed versions. `gh api` is always sent to github.com.
+- **Network.** Sphica has no account, no hosted service, and no telemetry, and makes no network connections itself. `/sphica:harvest` and `/sphica:glean` run `gh api` with your credentials to read pull requests and issues, `sphica init` runs `gh api user` to read which GitHub account is yours, and `sphica doctor` runs `npm`, `claude`, and `codex` to check installed versions. `gh api` is always sent to github.com.
 - **Text written by others.** Pull request and issue text may come from anyone. It is kept as a source and passed to the agent as data, never as instructions. A decision is adopted by your words, those of the repository's owner or a maintainer, or what the agent decided itself; what the agent quotes or sums up from someone else's text is not adopted.
 
 ## What Sphica can't do yet
@@ -219,6 +219,10 @@ Each release is built by GitHub Actions from a tag on the head of a pull request
 It is published only after the maintainer approves the release environment on GitHub, and it reaches npm through trusted publishing, with no stored token.
 The [npm page](https://www.npmjs.com/package/sphica#provenance) links to the workflow and the commit each release was built from.
 
+Releases are signed. To check one yourself, run `npm init -y && npm install sphica && npm audit signatures` in an empty directory: it verifies npm's registry signature and the provenance attestation, which is signed through Sigstore, so there is no key to fetch. The attestation of the SBOM (the list of dependencies bundled into the package) for a tarball from `npm pack sphica@<version>` can be checked with `gh attestation verify sphica-<version>.tgz --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom`.
+
+How the parts fit together is in [ARCHITECTURE.md](https://github.com/iroha924/sphica/blob/main/ARCHITECTURE.md), and why the security claims hold is in [ASSURANCE.md](https://github.com/iroha924/sphica/blob/main/ASSURANCE.md).
+
 Dependabot opens weekly pull requests to update the GitHub Actions used in CI, and Renovate opens monthly ones for the npm dependencies bundled into the package.
 
 ## Contributing
@@ -230,6 +234,8 @@ Come build something interesting together. Sphica is still small and there is pl
 - **What happens next?** A pull request goes in once the maintainer has read and accepted it, so expect questions or requests for changes along the way. Only the maintainer merges.
 
 Changes that add or change behavior include automated tests in the same pull request. CI runs them with `bun run verify` on every pull request.
+
+Everyone taking part follows the [code of conduct](https://github.com/iroha924/sphica/blob/main/CODE_OF_CONDUCT.md). Who decides what is in [GOVERNANCE.md](https://github.com/iroha924/sphica/blob/main/GOVERNANCE.md), and where the project is headed is in [ROADMAP.md](https://github.com/iroha924/sphica/blob/main/ROADMAP.md).
 
 ## License
 
