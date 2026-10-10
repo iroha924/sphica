@@ -55,13 +55,16 @@ base: main
   - 結果: `rg -c "invariant: fork-pr-as-data" CLAUDE.md AGENTS.md` → どちらも 1
   - 結果: `bun run check` → exit 0（スキルの監査の指摘を直した後に流し直した）
 
-- [ ] T05: CONTRIBUTING.md に、続けて貢献した人をコラボレーターに招待することがあると 1 節足し、merge の書き方を手順に合わせる
+- [x] T05: CONTRIBUTING.md に、続けて貢献した人をコラボレーターに招待することがあると 1 節足し、merge の書き方を手順に合わせる
   - 種別: 追加
   - 計画: S1
   - 依存: T01（足す先のファイルを T01 が作る）
   - 変更: `CONTRIBUTING.md`
   - 完了条件: `rg -c "invited as collaborators" CONTRIBUTING.md` → 1。`rg -c "from the pull request page" CONTRIBUTING.md` → 0 件。`node scripts/check-markdown.mjs` → 0 issues
   - コミット: `docs: say that regular contributors may be invited as collaborators`
+  - 結果: `rg -c "invited as collaborators" CONTRIBUTING.md` → 1
+  - 結果: `rg -c "from the pull request page" CONTRIBUTING.md` → 0 件
+  - 結果: `node scripts/check-markdown.mjs` → 0 issues（stage の後）。`mise exec -- node scripts/check-links.mjs` → 0 Errors
 
 ## P2: README を歓迎の文面に書き換えてリリースする
 

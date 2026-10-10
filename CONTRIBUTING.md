@@ -58,5 +58,9 @@ Changes to docs that do not ship, tests, and development scripts need no version
 1. The maintainer reads the diff. Until then nothing from your branch is run on the maintainer's machine, so expect questions about changes to workflows, hooks, tool versions, dependencies, or agent instructions.
 2. CI runs, and the maintainer has the change reviewed by Codex. You may be asked for changes.
 3. The maintainer accepts it. Only the maintainer merges.
-   - A change that does not ship is merged from the pull request page.
+   - A change that does not ship is merged as soon as it is accepted.
    - A change that ships is released first: the maintainer takes your commits, unchanged, into a release branch in this repository, and the release run merges that branch after the maintainer approves the release. Releases are not cut from a fork's pull request, so yours may be closed with a link to the release pull request that carries your commits.
+
+## Staying around
+
+People who keep contributing may be invited as collaborators. That is an invitation from the maintainer, made one person at a time, so there is nothing to apply for: the way in is the pull requests themselves.
