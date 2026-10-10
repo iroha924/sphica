@@ -25,8 +25,9 @@ Claude Code resolves the package with the npm client and unpacks the tarball int
 - **No install scripts run, and no dependencies are installed.** The tarball must be self-contained
   (it ships one file each, bundled with `bun build`). The DB is `node:sqlite` (built into Node), so there are no native dependencies
 - `sphica init` reads the bundled `db/schema.sql`. CI checks it by running `init` in a temporary HOME with the CLI from the unpacked tarball
-- `dist/` holds 5 entries: `cli.js` (init, doctor, uninstall), `mcp.js` (the read MCP server), `mcp-record.js` (the record MCP server the
-  trace, harvest, and glean Skills write through), `capture.js` (recording hooks), and `deliver.js` (delivery hooks)
+- `dist/` holds 6 entries: `cli.js` (init, doctor, uninstall), `mcp.js` (the read MCP server), `mcp-record.js` (the record MCP server the
+  trace, harvest, and glean Skills write through), `capture.js` (recording hooks), `deliver.js` (delivery hooks), and `git-worker.js`
+  (the child process that compares a work tree in a git directory Sphica writes; `server/src/git-worker.ts` holds the details)
 - The cache updates only when the version changes. `bun run bundle` or a commit alone does not deliver anything; nothing arrives until publish
 - The CLI reads `dist/cli.js` where it is run, so working in the CLI is no proof that it works in MCP
 - The hooks call `${CLAUDE_PLUGIN_ROOT}/dist/capture.js` and `dist/deliver.js`, so they too run at the cache's version
