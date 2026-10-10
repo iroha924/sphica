@@ -111,8 +111,17 @@ export async function replay(db: ReadonlyKysely<DB>, conversations: Conversation
   const projects = new Map<string, { id: number; root: string } | null>();
   for (const c of conversations) {
     const own = new Map<number, Set<number>>();
-    for (const e of c.events) {
-      if (e.kind !== "call" || !WRITE_TOOLS.has(e.name)) continue;
+    // In the order the results came back: parallel calls can finish out of order, and post_write runs at each result
+    const resultAt = (id: string) =>
+      c.events.find((r) => r.kind === "result" && r.id === id)?.n ?? Number.POSITIVE_INFINITY;
+    const calls = c.events
+      .filter((e) => e.kind === "call" && WRITE_TOOLS.has(e.name))
+      .sort(
+        (a, b) =>
+          resultAt(a.kind === "call" ? a.id : "") - resultAt(b.kind === "call" ? b.id : "") || a.n - b.n,
+      );
+    for (const e of calls) {
+      if (e.kind !== "call") continue;
       const text = writtenText(e.name, e.input);
       const target = e.input.file_path ?? e.input.notebook_path;
       if (text === null || typeof target !== "string") continue;
@@ -145,8 +154,12 @@ export async function replay(db: ReadonlyKysely<DB>, conversations: Conversation
       const named = (await namedRecords(db, p.id, p.root, text, result.at)).filter(
         (h) => !reached.has(h.u.key) && !sent.has(h.u.id),
       );
-      // A delivery not read completely may have shown any of these, so what this write would add is not known
-      if (named.length && window.some((d) => d.kind === "delivery" && !d.complete)) {
+      // A delivery not read completely, or a line not read at all, may have shown any of these: what this write would add is not known
+      if (
+        named.length &&
+        (window.some((d) => d.kind === "delivery" && !d.complete) ||
+          c.unreadableLines.some((n) => n > from && n < result.n))
+      ) {
         counts.unknown++;
         continue;
       }

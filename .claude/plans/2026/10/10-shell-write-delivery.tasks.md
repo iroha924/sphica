@@ -164,7 +164,7 @@ base: main
   - コミット: `fix(deliver): compare every shell call, a patch run through the shell included`
   - 結果: red を直す前のコードで確かめた（Post が空）。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 60 pass。`bun run verify` → exit 0
 
-- [ ] T16: M0 の再生を結果の順にし、読めない行の後の書き込みを unknown にする（全差分のレビューの 2・3 件目）
+- [x] T16: M0 の再生を結果の順にし、読めない行の後の書き込みを unknown にする（全差分のレビューの 2・3 件目）
   - 種別: 修正
   - 計画: S1
   - 依存: T15（同じ全差分のレビューの直し）

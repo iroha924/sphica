@@ -220,6 +220,54 @@ test("a write is matched against the records deliverable at its result, less wha
   }
 });
 
+test("parallel writes are replayed in the order their results came back, and an unread line leaves a write unknown", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-replay-logs-"));
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", symbol: "toStored", role: "applies_to" }],
+        }),
+      ],
+    });
+    const edit = (at: string, id: string, file: string) =>
+      write(at, id, repo, "Edit", { file_path: file, old_string: "a", new_string: "toStored()" });
+    const parallel = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      edit("2099-01-01T00:01:00.000Z", "w1", "src/a.ts"),
+      edit("2099-01-01T00:01:00.100Z", "w2", "src/b.ts"),
+      result("2099-01-01T00:01:01.000Z", "w2"),
+      result("2099-01-01T00:01:02.000Z", "w1"),
+    ];
+    fs.writeFileSync(path.join(dir, "parallel.jsonl"), `${parallel.join("\n")}\n`);
+    const broken = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      "{not json",
+      edit("2099-01-01T00:01:00.000Z", "u1", "src/c.ts"),
+      result("2099-01-01T00:01:01.000Z", "u1"),
+    ];
+    fs.writeFileSync(path.join(dir, "broken.jsonl"), `${broken.join("\n")}\n`);
+    const r = await replay(db.reader, readConversations(dir));
+    assert.deepEqual(
+      r.pairs.map((x) => [x.toolUseId, x.shown]),
+      [["w2", true]],
+      "w2 finished first, so it is the one post_write would have shown the record at",
+    );
+    assert.equal(r.counts.unknown, 1, "the write after the unread line");
+    assert.equal(r.counts.unreadable, 1);
+  } finally {
+    await db.done();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a delivery shows only what fits in 900 characters", async () => {
   const db = tempDb();
   const repo = checkout();
