@@ -223,7 +223,11 @@ Dependabot opens weekly pull requests to update the GitHub Actions used in CI, a
 
 ## Contributing
 
-Issues are welcome. Pull requests from outside contributors are closed without review, because the review tools here run with maintainer credentials and cannot safely check out code written by others.
+Come build something interesting together. Sphica is still small and there is plenty left to make. Ideas, bug reports, questions, and pull requests are all welcome, and small ones count: a typo fix or a "this part confused me" is a fine first contribution.
+
+- **Not sure where to start?** Open an issue and say what you would like to try, or what got in your way. For a larger change, it is also the place to agree on the direction before you write any code.
+- **Have a change ready?** Fork the repository and open a pull request. [CONTRIBUTING.md](https://github.com/iroha924/sphica/blob/main/CONTRIBUTING.md) walks through the setup, the checks, the commit rules, and how review works.
+- **What happens next?** A pull request goes in once the maintainer has read and accepted it, so expect questions or requests for changes along the way. Only the maintainer merges.
 
 Changes that add or change behavior include automated tests in the same pull request. CI runs them with `bun run verify` on every pull request.
 

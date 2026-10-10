@@ -71,11 +71,11 @@ README.md:
 ```markdown
 ## Contributing
 
-Want to build this together? Come on in. Sphica is still small and there is plenty left to make. Ideas, bug reports, questions, and pull requests are all welcome, and small ones count: a typo fix or a "this part confused me" is a fine first contribution.
+Come build something interesting together. Sphica is still small and there is plenty left to make. Ideas, bug reports, questions, and pull requests are all welcome, and small ones count: a typo fix or a "this part confused me" is a fine first contribution.
 
-- **Not sure where to start?** Open an issue and say what you would like to try, or what got in your way. We can work out the direction together before you write any code.
-- **Have a change ready?** Fork the repository and open a pull request. [CONTRIBUTING.md](https://github.com/iroha924/sphica/blob/main/CONTRIBUTING.md) walks through the setup, the checks, and how review works.
-- **What happens next?** The maintainer reads every pull request and is the only one who merges, so nothing goes in unreviewed.
+- **Not sure where to start?** Open an issue and say what you would like to try, or what got in your way. For a larger change, it is also the place to agree on the direction before you write any code.
+- **Have a change ready?** Fork the repository and open a pull request. [CONTRIBUTING.md](https://github.com/iroha924/sphica/blob/main/CONTRIBUTING.md) walks through the setup, the checks, the commit rules, and how review works.
+- **What happens next?** A pull request goes in once the maintainer has read and accepted it, so expect questions or requests for changes along the way. Only the maintainer merges.
 
 Changes that add or change behavior include automated tests in the same pull request. CI runs them with `bun run verify` on every pull request.
 ```
@@ -85,11 +85,11 @@ README.ja.md:
 ```markdown
 ## 貢献
 
-一緒に作りませんか。Sphica はまだ小さく、作りたいものがたくさん残っています。アイデア、バグ報告、質問、PR、どれも歓迎です。誤字の修正や「ここが分かりにくかった」の一言のような小さなものも、うれしい最初の一歩です。一緒に面白いものを作りましょう。
+一緒に面白いものを作りましょう。Sphica はまだ小さく、作りたいものがたくさん残っています。アイデア、バグ報告、質問、PR、どれも歓迎です。誤字の修正や「ここが分かりにくかった」の一言のような小さなものでも、十分な最初の一歩です。
 
-- **どこから始めればいいか分からないとき**: issue で、やってみたいことや困ったことを教えてください。コードを書く前に、一緒に方向を決めましょう。
-- **変更ができたら**: リポジトリを fork して PR を出してください。準備、検査、レビューの流れは [CONTRIBUTING.md](https://github.com/iroha924/sphica/blob/main/CONTRIBUTING.md)（英語）にあります。
-- **そのあと**: どの PR もメンテナーが読みます。マージするのはメンテナーだけなので、レビューされずに入ることはありません。
+- **どこから始めればいいか分からないとき。** issue で、やってみたいことや困ったことを教えてください。大きな変更は、コードを書く前にここで方向を相談してください。
+- **変更ができたら。** リポジトリを fork して PR を出してください。準備、検査、コミットの決まり、レビューの流れは [CONTRIBUTING.md](https://github.com/iroha924/sphica/blob/main/CONTRIBUTING.md)（英語）にあります。
+- **そのあと。** PR は、メンテナーが読んで受け入れてから入ります。途中で質問や修正のお願いをすることがあります。マージするのはメンテナーだけです。
 
 動作を追加・変更する PR には、自動テストも一緒に入れます。CI が PR ごとに `bun run verify` を実行します。
 ```
@@ -185,3 +185,4 @@ README.ja.md:
 - 2026-10-10 / 棄却した案に fork なしの 2 案を足し、未検証に npm 側の設定を足した / 持ち主の提案（fork なしで PR、リリースだけ持ち主）を Codex と 4 往復目で評価した / Go の前なので取り直しは不要
 - 2026-10-10 / README の「貢献」の文面を、入りやすい調子に書き直した / Go と一緒に持ち主が頼んだ / 文面だけで範囲は同じなので取り直しは不要
 - 2026-10-10 / `fork-pr` の手順を固くした: head の照合を読んだ後・承認の前・merge の前に足す、none の merge を `--match-head-commit` 付きのコマンドにする、GitHub の Codex のレビューは `commit_id` が一致するときだけ使う、名指しする変更を種類で書く / スキルの監査（Claude と Codex）が、承認の後に push されると読んでいないコミットが入る分岐を見つけた / 「承認した SHA だけを取り込む」という合意の内側なので取り直しは不要（持ち主には報告する）
+- 2026-10-10 / README の「貢献」の文面を直した: 「どの PR もメンテナーが読む」「レビューされずに入らない」を「メンテナーが読んで受け入れてから入る」へ、日本語版の誘いの重複を 1 回へ、リンクの説明にコミットの決まりを足す / 独立のレビュー（prose-reviewer と Codex）の指摘。前者は確かめた事実（merge するのはメンテナーだけ）より広い約束だった / 文面だけなので取り直しは不要

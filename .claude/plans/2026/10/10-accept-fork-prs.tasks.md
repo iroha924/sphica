@@ -82,13 +82,17 @@ base: main
 
 README.md はパッケージに入るので、バージョンを上げて同じコミットに入れる。merge はリリースの run がする。
 
-- [ ] T04: README.md と README.ja.md の「貢献」を書き換え、npm と 3 つの manifest のバージョンを上げる
+- [x] T04: README.md と README.ja.md の「貢献」を書き換え、npm と 3 つの manifest のバージョンを上げる
   - 種別: 変更
   - 計画: S5, S6, S7
   - 依存: T01（README が CONTRIBUTING.md へリンクし、リンクの検査がそのファイルを読む）
   - 変更: `README.md`, `README.ja.md`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `bun run release:plan -- --base <前のリリースのコミット>` → plugin。`bun run verify` → exit 0。`rg -c "closed without review" README.md` と `rg -c "レビューせずに閉じ" README.ja.md` → どちらも 0 件
+  - 完了条件: `node scripts/check-mcp-version.mjs` → exit 0（stage した状態で、パッケージの入力の変更にバージョンの上げが伴っている）。`bun run verify` → exit 0。`rg -c "closed without review" README.md` と `rg -c "レビューせずに閉じ" README.ja.md` → どちらも 0 件
   - コミット: `docs(readme): welcome contributors and send pull requests through forks`
+  - 結果: `bun run verify` → exit 0（fail 0、skipped 0。README と 4 つのバージョンを変えた作業ツリーで流した）
+  - 結果: `node scripts/check-mcp-version.mjs` → exit 0（stage の後）。4 か所とも 0.6.45
+  - 結果: `rg -c "closed without review" README.md` → 0 件。`rg -c "レビューせずに閉じ" README.ja.md` → 0 件
+  - 結果: `review-shipping` → 出荷を止める指摘なし。pack した 0.6.45 の README.md がルートと同じ内容で、`node scripts/check-tarball.mjs <tgz>` が通ったという報告（plan の完了条件 A3 で自分でも流す）
 
 ## 記録
 
@@ -96,3 +100,7 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / T03 / スキルを `docs-audit` で監査し（Claude と Codex）、直す 4 件を全部受けた: 承認の後の push で読んでいないコミットが入る分岐（none の merge、GitHub の Codex のレビューの対象）、名指しの一覧が不変条件より狭い、plugin の取り込みの前に fetch が無い / 同じコミットの中で直した。plan の手順も合わせた（変更履歴）
 - 2026-10-10 / T05 / 未完了のタスクの欄を変えた。名前: 「…1 節足す」→「…1 節足し、merge の書き方を手順に合わせる」。完了条件: `rg -c "from the pull request page" CONTRIBUTING.md` → 0 件 を足した / none の merge をページのボタンからコマンドに変えたので、CONTRIBUTING の「merged from the pull request page」が事実と合わなくなった
 - 2026-10-10 / T03 / コミット 48df9be1 を Codex がレビューした（新しい会話、high）。指摘 1 件（P2）: 固定した base が手元に無いと差分の作成が exit 128 で失敗し、リダイレクトが空のファイルを残す。未承認の head を checkout・merge する経路は見つからなかった / 再現して受け、修正タスク T06 を足した
+- 2026-10-10 / T04 / 未完了のタスクの欄を変えた。完了条件: `bun run release:plan -- --base <前のリリースのコミット>` → plugin を、`node scripts/check-mcp-version.mjs` → exit 0 に替えた / release:plan はコミット済みの範囲（base..HEAD）を比べるので、このタスクのコミットの前には plugin にならない（流すと none）。コミットの後の結果は PR 本文に書く
+- 2026-10-10 / T04 / `review-shipping` の指摘（低）: README の CONTRIBUTING.md へのリンクは、リリースの run が npm へ公開してから PR を merge するまでの数分、main にファイルが無いので 404 になる。merge で直る / 受け入れて PR 本文に書く（リンクを main 以外へ向けると、merge の後に書き換えが要る）
+- 2026-10-10 / README の文面 / 独立のレビュー（prose-reviewer と Codex、同じ依頼）。Codex: 「どの PR も読む」「レビューされずに入らない」は確かめた事実より広い約束（不合格 1 件）。prose-reviewer: 日本語版の誘いの重複（軽微 1 件）/ どちらも直した。任意の提案のうち、主語を the maintainer に揃える・リンクの説明にコミットの決まりを足す・箇条書きの太字を既存の書き方に揃える、を採った
+- 2026-10-10 / T04 / チェックと結果行を付ける script が失敗したのに気付かずコミットした（コミットの条件に script の成否を入れていなかった）/ push の前だったので、同じコミットを amend してチェックと結果行を入れた
