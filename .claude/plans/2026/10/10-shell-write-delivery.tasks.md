@@ -145,13 +145,14 @@ base: main
   - 完了条件: `rg -n "whose content changed between before and after this call" <確認したセッションの会話記録>` → 各ケースで Post の差し込みが次の応答より前にあり、Codex のセッションのログでも同じ。該当箇所を `real-host.md` に残す
   - コミット: `test(eval): record real-host checks of post-shell delivery on both hosts`
   - 結果: `rg -n "whose content changed between before and after this call" <7 件の会話記録とセッションのログ>` → 7 件すべてで差し込みが次の応答より前にあった。Claude Code 2.1.296（`claude -p --plugin-dir plugin`、入れてある sphica は無効）と codex-cli 0.162.0（一時的な CODEX_HOME にローカルのマーケットプレイスから同じバンドルを入れ、`--dangerously-bypass-hook-trust`）で 7 件を流した。どれも Post の差し込み（Claude Code は PostToolUse / PostToolUseFailure の hook_additional_context、Codex は developer のメッセージ）が次の応答より前にあり、応答は届いた key を引いた。Claude Code: 普通の書き込み、書いてから exit 3（PostToolUseFailure）、1 つのメッセージで 2 つの Bash。Codex: 普通の書き込み、1 つの exec で 2 つのコマンド、20 秒のコマンドを 1 回で待つ形と、2 秒で戻して write_stdin で 3 回 poll する形（差し込みは終わりを見た poll に付く）。セッション id と並びは `server/evals/post-write/real-host.md`。Codex の新しい hook の信頼の手順と、Windows の実機は確かめていない（同じファイルに書いた）
-- [ ] T07: README の設定の説明と、既定オフのリリースの準備（release:plan、バージョン）
+- [x] T07: README の設定の説明と、既定オフのリリースの準備（release:plan、バージョン）
   - 種別: 追加
   - 計画: S5
   - 依存: T06（実機の確認が通ってから出す）
   - 変更: `README.md`, `README.ja.md`, `plugin/package.json`, `.claude-plugin/marketplace.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`
   - 完了条件: `bun run release:plan -- --base v0.6.43` → plugin で、npm と 3 つの plugin manifest のバージョンが同じ。`bun run verify` → 0 で終わる
   - コミット: `docs(readme): describe the shell_write_delivery option`
+  - 結果: `bun run release:plan -- --base v0.6.43` → release kind: plugin、npm / plugin / marketplace / Codex がどれも 0.6.44（T01 で上げた）。README.md と README.ja.md の機能の一覧に、既定オフの試用の設定、オンにする 2 つの経路、`off` が勝つこと、Codex で新しい hook を信頼すること、`~/.sphica/shell-state/` に残すものを足した。`bun run verify` → exit 0
 
 ## P5: 試用と採否（既定オフのリリースの後、この PR の外）
 
