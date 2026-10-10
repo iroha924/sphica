@@ -22,14 +22,17 @@ base: main
 
 新しい記録の採用・項目の定義・見直す条件・置き換えと衝突の根拠が、引用の中だけにある言葉を受け付けなくなる。
 
-- [ ] T01: 引用の規則と `ownWords` を作り、新しい記録の採用を通す
+- [x] T01: 引用の規則と `ownWords` を作り、新しい記録の採用を通す
   - 種別: 修正
-  - 計画: S1, S2
+  - 計画: S1, S2, S8
   - 依存: なし
-  - 変更: `server/src/own-words.ts`, `server/src/record.ts`, `server/test/own-words.test.ts`, `server/test/own-words-sites.test.ts`
+  - 変更: `server/src/own-words.ts`, `server/src/record.ts`, `server/test/own-words.test.ts`, `server/test/own-words-sites.test.ts`, `server/test/export.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
   - red: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts` → 直す前のコードで、引用符の中の一部分と「導入文＋`>` の行」を採用に指定した記録が active になり、テストが失敗する
   - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts` → 通る。`rg -n "quotedSpan|inlineQuoted" server/src` → 0 件
   - コミット: `fix(record): judge quoted spans from the whole message before words adopt`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts` → 直す前のコードで 0 pass, 2 fail。引用符の中の一部分・引用符ごと・「導入文＋`>` の行」を採用に指定した 3 件が active（期待は candidate）、前後の行に引用符がある本人の行が candidate（期待は active）
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts` → 76 pass, 0 fail
+  - 結果: `rg -n "quotedSpan|inlineQuoted" server/src` → 0 件
 
 - [ ] T02: 項目の定義・見直す条件・置き換えと衝突の根拠を `ownWords` に通す
   - 種別: 修正
@@ -92,13 +95,13 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
 
 - [ ] T07: glean・harvest・trace の Skill と ASSURANCE.md の文面を直す
   - 種別: 変更
-  - 計画: S7
+  - 計画: S7, S9
   - 依存: T03（文面が書く拒み方が T01〜T03 で決まる）, T04（衝突の扱いの説明が T04 で決まる）
   - 変更: `plugin/skills/glean/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `plugin/skills/trace/SKILL.md`, `ASSURANCE.md`
   - 完了条件: `bun run verify:ai` → 通る。`bun run pairs` → 通る
   - コミット: `docs(skills): say which quotes carry authority and what the check does not judge`
 
-- [ ] T08: npm と 3 つの plugin manifest のバージョンを上げる
+- [-] T08: npm と 3 つの plugin manifest のバージョンを上げる
   - 種別: 変更
   - 計画: S8, S9
   - 依存: T07（パッケージに入る変更が全部そろってから番号を決める）
@@ -107,3 +110,6 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
   - コミット: `chore(release): bump to the next version`
 
 ## 記録
+
+- 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
+- 2026-10-11 / T01, T07, T08 / コミット前の検査（`check-mcp-version`）が、`server/src` を変えるコミットにはバージョンの引き上げが入っていることを求め、T01 のコミットを止めた（「Bump the npm package and the 3 plugin channel manifests to the same new version」）。バージョンを最後に上げる並びは、このリポジトリでは成り立たない / バージョンの引き上げ（0.6.47 → 0.6.48）を T01 のコミットへ移した。T01 の計画: 前の値 `S1, S2`、新しい値 `S1, S2, S8`。T01 の変更欄に 4 つのバージョンのファイルを足した。T07 の計画: 前の値 `S7`、新しい値 `S7, S9`（リリースは最後のタスクの後）。T08 は取りやめ（やることが T01 と T07 に移った）

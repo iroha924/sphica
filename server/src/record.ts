@@ -16,6 +16,7 @@ import {
   UNIT_KINDS,
   WORK_STATUSES,
 } from "./knowledge.ts";
+import { locate, MAINTAINERS, type OwnWords, ownWords, refused } from "./own-words.ts";
 import { inline } from "./panel.ts";
 import { firstState, type Hint, type Reconciled, reconcile } from "./reconcile.ts";
 import {
@@ -38,7 +39,6 @@ const KEY = /^[a-z0-9][a-z0-9._/-]{0,63}$/;
 const FIELD_NAME = /^[a-z][a-z0-9_]{0,39}$/;
 /** Sources are cited by the refs context prints (`s<id>`), never by URL or position the agent made up. */
 const SOURCE_REF = /^s[1-9][0-9]{0,15}$/;
-const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const Quote = z
@@ -174,7 +174,7 @@ type Planned = {
   unsourced?: boolean;
   evidence: EvidenceSpan[];
   options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[]; reconsider: Span | null }[];
-  adoption: (Span & { route: "owner_statement" | "explicit" | "agent" })[];
+  adoption: OwnWords<"owner_statement" | "explicit" | "agent">[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
   aliases: string[];
   supersedes: number | null;
@@ -196,46 +196,6 @@ export type Checked = {
   /** What the check read from the working tree and git; save reads each file again and judges it anew only when it changed */
   facts: RepoFacts;
 };
-
-/**
- * Whether every line the byte span [start, end) touches is quoted (starts with ">") or inside a fenced code block: words someone pasted, not
- * words their writer chose. A heuristic: a paste with no quote marks is not caught.
- */
-function quotedSpan(body: string, start: number, end: number): boolean {
-  const bytes = Buffer.from(body, "utf8");
-  let fenced = false;
-  let touched = false;
-  for (let at = 0; at <= bytes.length; ) {
-    const nl = bytes.indexOf(0x0a, at);
-    const stop = nl < 0 ? bytes.length : nl;
-    const line = bytes.subarray(at, stop).toString("utf8").trimStart();
-    const fence = /^(```|~~~)/.test(line);
-    if (stop >= start && at < end) {
-      touched = true;
-      if (!(fenced || fence || line.startsWith(">"))) return false;
-    }
-    if (fence) fenced = !fenced;
-    if (nl < 0) break;
-    at = nl + 1;
-  }
-  return touched;
-}
-
-/** Whether the byte span [start, end) sits right inside quotation marks on its line: words the writer reports, not words they chose */
-function inlineQuoted(body: string, start: number, end: number): boolean {
-  const bytes = Buffer.from(body, "utf8");
-  const before = bytes.subarray(0, start).toString("utf8").trimEnd().at(-1) ?? "";
-  const after = bytes.subarray(end).toString("utf8").trimStart()[0] ?? "";
-  // english-exempt: Japanese quotation brackets are quotation marks too
-  return /["“'‘`「『]/.test(before) && /["”'’`」』]/.test(after);
-}
-
-/** The byte span of quote in text, or null. The first occurrence is taken. */
-function locate(body: string, quote: string): [number, number] | null {
-  if (!quote.trim()) return null;
-  const at = Buffer.from(body, "utf8").indexOf(Buffer.from(quote, "utf8"));
-  return at < 0 ? null : [at, at + Buffer.byteLength(quote, "utf8")];
-}
 
 /**
  * Why an anchor may point at the wrong place in the working tree, or null. Left unchecked: no working tree, a commit the repository holds
@@ -553,40 +513,27 @@ export async function checkRecord(
         problems.push(`${key}: adoption applies to decisions and constraints; ${a.source} left out`);
         continue;
       }
-      if (s.kind === "pr_event") {
-        problems.push(
-          `${key}: the merge does not adopt a proposal (it only shows the code went in); cite the owner's or a maintainer's words`,
-        );
-        continue;
-      }
       // The AI's own reply adopts only for the AI, only in a run an interactive session began and saves; checked below with the anchors
-      const route =
-        s.author_kind === "owner"
-          ? "owner_statement"
-          : MAINTAINERS.has(s.author_association ?? "")
-            ? "explicit"
-            : s.author_kind === "assistant" && s.kind === "session_message" && target.agent
-              ? "agent"
-              : null;
-      if (!route) {
-        problems.push(
-          `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt${s.author_kind === "assistant" ? ", and an AI's own decision only in a trace an interactive session runs" : ""}`,
-        );
+      const words = ownWords(s, a.quote, "maintainer", target.agent);
+      if (refused(words)) {
+        if (words.refused === "event")
+          problems.push(
+            `${key}: the merge does not adopt a proposal (it only shows the code went in); cite the owner's or a maintainer's words`,
+          );
+        else if (words.refused === "author")
+          problems.push(
+            `${key}: ${a.source} is by ${s.author_login ?? s.author_kind} (${s.author_association ?? "no association"}); only the owner or a maintainer can adopt${s.author_kind === "assistant" ? ", and an AI's own decision only in a trace an interactive session runs" : ""}`,
+          );
+        else if (words.refused === "missing")
+          quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
+        // Words in quotation marks are reported, whoever writes them: an owner pasting what someone wrote, or the AI repeating it
+        else
+          problems.push(
+            `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
+          );
         continue;
       }
-      const span = locate(s.text, a.quote);
-      if (!span) {
-        quarantine.push(`adoption quote not found in ${a.source}: "${head(a.quote, 80)}"`);
-        continue;
-      }
-      // Words in quotation marks are reported, whoever writes them: an owner pasting what someone wrote, or the AI repeating it
-      if (quotedSpan(s.text, span[0], span[1]) || inlineQuoted(s.text, span[0], span[1])) {
-        problems.push(
-          `${key}: the adoption in ${a.source} is quoted or in a code block, so it is someone else's words pasted in; left out, so it stays a candidate unless other words adopt it`,
-        );
-        continue;
-      }
-      adoption.push({ source: s.id, start: span[0], end: span[1], route });
+      adoption.push(words);
     }
 
     const anchors: Planned["anchors"] = [];
