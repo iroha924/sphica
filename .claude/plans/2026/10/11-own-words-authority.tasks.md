@@ -80,13 +80,16 @@ glean の 7 つの操作が、引用の中だけにある言葉を理由や採�
 
 持ち主が、既に DB にある行のうち新しい規則に通らないものを、DB を変えずに一覧で見られる。権限の表へ書く箇所が限定される。
 
-- [ ] T05: `sphica doctor --audit-quotes` を足す
+- [x] T05: `sphica doctor --audit-quotes` を足す
   - 種別: 追加
   - 計画: S5
   - 依存: T03（監査が使う規則と、確かめる対象の一覧が T01〜T03 で決まる）
-  - 変更: `server/src/audit-quotes.ts`, `server/src/cli.ts`, `server/test/audit-quotes.test.ts`, `server/test/cli.test.ts`, `README.md`, `README.ja.md`
+  - 変更: `server/src/audit-quotes.ts`, `server/src/cli.ts`, `server/test/audit-quotes.test.ts`, `server/test/cli.test.ts`, `README.md`, `README.ja.md`, `scripts/lib/bundle-budget.mjs`
   - 完了条件: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts test/cli.test.ts` → 通る（監査の前後で DB の全行の内容が同じ、列挙と件数が一致、`--reindex` との同時指定は拒まれる）
   - コミット: `feat(doctor): list authority rows that rest on quoted words, without changing them`
+  - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 1 pass, 0 fail。前のバージョンが保存した形の行（引用符の中の採用、`>` の行を理由にした撤回）を 2 件とも種類・行・位置・理由付きで列挙し、正しい行 3 件は列挙しない。監査の前後で DB の全行の内容が同じ（`dump`）
+  - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="audit-quotes" test/cli.test.ts` → 1 pass, 0 fail。子プロセスで `doctor --audit-quotes` が終了コード 0、DB のファイルのバイト列が前後で同じ。`--reindex` との同時指定は終了コードが 0 でなく、DB は変わらない。DB が無いときは「No database at」で失敗
+  - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 最初の実装では `not authorized to use function: like` で失敗した（読み取り専用の接続は `like` を許可していない）。リンクの件数を run の origin で数える形に直して通った
 
 - [ ] T06: 権限の表へ書く箇所と `OwnWords` を作る箇所を architecture の検査に足す
   - 種別: 追加
@@ -124,3 +127,4 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
 - 2026-10-11 / T02 / `server/test/extract.test.ts` の「glean: withdrawing the successor brings back the record it replaced…」が落ちた。発言に無い言葉だけを根拠にした後継（`supersedes` 付き）を保存して隔離を確かめていたが、置き換えの根拠が実在する言葉だけを数えるようになり、保存の前に拒まれるため / テストの 2 つの記録を「根拠は実在し、採用の引用だけが見つからない」形に変えた（隔離されることと、枠を取らないことは今までどおり確かめられる）。拒むときのメッセージに「発言の中にあり、引用だけではない言葉」と足した。T02 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
 - 2026-10-11 / T03 / `server/test/extract.test.ts` の「glean: the owner's words retire an anchor…」が落ちた。検査を通った結果の入力（`input.source`）を AI の返事にすり替えて保存し、schema のトリガーが拒むことを確かめていたが、保存が入力を読み直さず確かめ済みの言葉を使うようになり、すり替えが保存に届かなくなったため / すり替える対象を確かめ済みの言葉（`said`）に変えた。型を無視して偽造しても schema が拒むことを、今までどおり確かめる。T03 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
 - 2026-10-11 / T04 / テストを既存の `deliver.test.ts` と `read.test.ts` へ足す予定だったが、配信と read の一致を 1 つの場面で確かめるので、独立したファイルにした / T04 の変更欄: 前の値 `server/src/deliver.ts`, `server/src/read.ts`, `server/test/deliver.test.ts`, `server/test/read.test.ts`、新しい値 `server/src/deliver.ts`, `server/src/read.ts`, `server/test/quarantined-conflict.test.ts`。red と完了条件のコマンドも、そのファイルを指す形に直した。出典の無い（unsourced）記録は同じ条件式で扱われるが、テストの場面は隔離（quarantined）だけ
+- 2026-10-11 / T05 / CLI のバンドルが 625,102 バイトになり、上限（625,000）を 102 バイト超えて `bun run verify` の bundle が止まった。増えたのは監査のコマンド（`server/src/audit-quotes.ts` と、その表示）の分で、フックのバンドル（capture 386,696、deliver 441,943、git-worker 12,331）は増えていない / CLI の上限を 632,000 に上げた（前の値 625,000）。T05 の変更欄に `scripts/lib/bundle-budget.mjs` を足した（前の値: 6 ファイル、新しい値: 7 ファイル）

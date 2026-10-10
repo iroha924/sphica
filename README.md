@@ -207,6 +207,7 @@ Run `sphica doctor` first. It shows which part is out of date or not working. Co
 |---|---|
 | `sphica init` | Create the database, bind the GitHub account `gh` is signed in to, and register the current repository |
 | `sphica doctor` | Check versions, the database, recording, and each registered project |
+| `sphica doctor --audit-quotes` | List saved adoptions and reasons that rest on quoted words. It only reads: nothing is changed |
 | `sphica uninstall` | Delete `~/.sphica` and show how to remove the plugin and the CLI |
 
 Everything else runs inside Claude Code and Codex, through the `/sphica:*` commands and Sphica's MCP tools.

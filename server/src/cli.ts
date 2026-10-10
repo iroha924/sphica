@@ -26,6 +26,7 @@ import {
 } from "@stricli/core";
 import { bindOwner, dbInit, inspect, reindex } from "./admin.ts";
 import { leaves } from "./anchors.ts";
+import { type Audit, auditQuotes, KINDS, REPAIR } from "./audit-quotes.ts";
 import {
   callsDir,
   callsRejectedDir,
@@ -36,7 +37,17 @@ import {
   unregisteredDir,
 } from "./capture.ts";
 import { withDb } from "./cli/common.ts";
-import { closing, failure, indent, section, steps, stopped, title } from "./cli/view.ts";
+import {
+  type Block,
+  closing,
+  document,
+  failure,
+  indent,
+  section,
+  steps,
+  stopped,
+  title,
+} from "./cli/view.ts";
 import { dbFile, type Reads, SCHEMA_REVISION } from "./db.ts";
 import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
@@ -551,6 +562,52 @@ async function uninstall(yes: boolean): Promise<void> {
   });
 }
 
+/**
+ * doctor --audit-quotes: the saved rows that rest on words the quotation rule refuses. It opens the reader connection alone, so nothing
+ * it finds, and nothing in the database, can make it write.
+ */
+async function auditReport(): Promise<void> {
+  const head = "sphica doctor --audit-quotes";
+  let audit: Audit;
+  try {
+    audit = await withDb("reader", (db) => auditQuotes(db));
+  } catch (e) {
+    console.log(failure(head, plain(reason(e))));
+    process.exitCode = 1;
+    return;
+  }
+  const blocks: Block[] = [];
+  for (const kind of KINDS) {
+    const found = audit.findings.filter((f) => f.kind === kind);
+    if (!found.length) continue;
+    blocks.push({
+      kind: "lines",
+      lines: [
+        `${kind}: ${found.length}`,
+        ...found.map(
+          (f) =>
+            `  ${plain(f.project)} ${plain(f.what)} (${f.row}): s${f.source} bytes ${f.start}-${f.end} ${f.why === "block" ? "touch a block quote or fenced code" : "are only inside quotation marks"}; ${f.live ? "in effect" : "retracted, kept as history"}`,
+        ),
+        `  What you can do: ${REPAIR[kind]}`,
+      ],
+    });
+  }
+  const { links, withdrawals, resolutions } = audit.unchecked;
+  blocks.push({
+    kind: "note",
+    tone: "info",
+    text: `Not checked, since their words are not kept: the grounds of ${plural(links, "link")} from harvest or glean, and the span of the reason for ${plural(withdrawals, "withdrawal")} and ${plural(resolutions, "resolved conflict")}`,
+  });
+  console.log(
+    document(
+      head,
+      undefined,
+      blocks,
+      `${mark(audit.findings.length ? "warn" : "ok")} ${audit.findings.length} of ${plural(audit.read, "row")} rest on words the quotation rule refuses. Nothing was changed. The rule reads markup, not meaning: a row it passes may still be wrong, and one it lists may be right`,
+    ),
+  );
+}
+
 /** Adds a heading and closing to admin.ts output lines. A failure closes the heading already printed (not a second block from stricli) */
 async function boxed(head: string, fn: () => unknown): Promise<void> {
   console.log(title(head));
@@ -608,10 +665,25 @@ const root = buildRouteMap({
             brief: "Rebuild the full-text index when doctor reports it broken",
             optional: true,
           },
+          "audit-quotes": {
+            kind: "boolean",
+            brief: "List saved adoptions and reasons that rest on quoted words, without changing anything",
+            optional: true,
+          },
         },
       },
-      func: (flags: { reindex?: boolean }) =>
-        flags.reindex ? boxed("sphica doctor --reindex", () => reindex()) : doctor(process.cwd()),
+      func: (flags: { reindex?: boolean; "audit-quotes"?: boolean }) => {
+        // The audit promises to write nothing, so it does not share a run with the one flag that writes
+        if (flags.reindex && flags["audit-quotes"]) {
+          console.log(
+            failed("--audit-quotes only reads, so it cannot go with --reindex. Run them one at a time"),
+          );
+          process.exitCode = 1;
+          return;
+        }
+        if (flags["audit-quotes"]) return auditReport();
+        return flags.reindex ? boxed("sphica doctor --reindex", () => reindex()) : doctor(process.cwd());
+      },
     }),
     uninstall: buildCommand({
       docs: { brief: "Delete this machine's Sphica data (~/.sphica) and show how to remove the rest" },
