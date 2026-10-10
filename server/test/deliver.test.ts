@@ -12,6 +12,7 @@ import { branchOf } from "../src/capture.ts";
 import { inTransaction, SCHEMA_REVISION } from "../src/db.ts";
 import {
   AUTO_TRACE,
+  anchoredRules,
   CONFIRM,
   deliver,
   deliverableIds,
@@ -2635,6 +2636,95 @@ test("after a shell call, the records on files whose content it changed come onc
     else process.env.SPHICA_SHELL_WRITE_DELIVERY = saved.on;
     await db.done();
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a shell call's Post still compares when the cache cannot be saved, and reports a snapshot past its life", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    const base = (id: string, session: string) => ({
+      session_id: session,
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "python3 gen.py" },
+      tool_use_id: id,
+    });
+    const trial = () =>
+      fs
+        .readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+    // The cache's directory is a file: saving the cache fails, the comparison does not
+    fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
+    fs.writeFileSync(path.join(home, "shell-state", "cache"), "not a directory");
+    await deliver({ ...base("t1", "nocache"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    assert.match(
+      await deliver({ ...base("t1", "nocache"), hook_event_name: "PostToolUse" }, "claude-code", db.file),
+      /trace:ext-s1\/utc/,
+    );
+    assert.equal(trial().find((l) => l.call === "t1")?.event, "post_shell", "the call has its trial line");
+    fs.rmSync(path.join(home, "shell-state", "cache"));
+    // A snapshot older than its life, with no other Pre to prune it, is reported expired at its own Post
+    await deliver({ ...base("t2", "old"), hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    const calls = path.join(home, "shell-state", "calls");
+    for (const n of fs.readdirSync(calls)) {
+      const file = path.join(calls, n);
+      const snap = JSON.parse(fs.readFileSync(file, "utf8"));
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ ...snap, at: new Date(Date.now() - 8 * 86_400_000).toISOString() }),
+      );
+    }
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "c\n");
+    assert.equal(
+      await deliver({ ...base("t2", "old"), hook_event_name: "PostToolUse" }, "claude-code", db.file),
+      "",
+    );
+    assert.equal(trial().find((l) => l.call === "t2")?.event, "snapshot_expired");
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the records on more changed paths than SQLite takes variables are still found", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    const rels = [...Array.from({ length: 40_000 }, (_, i) => `gen/f${i}.ts`), "src/dates.ts"];
+    assert.deepEqual(
+      (await anchoredRules(db.reader, p, rels)).map((u) => u.key),
+      ["trace:ext-s1/utc"],
+    );
+  } finally {
+    await db.done();
   }
 });
 

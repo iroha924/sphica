@@ -225,6 +225,30 @@ test("reads stay inside the checkout and within the deadline on every try, and o
     } finally {
       swap.mock.restore();
     }
+    // The directory swapped for a link out right after the boundary check, before the file is even looked at
+    fs.rmSync(path.join(root, "d"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(root, "d"));
+    fs.writeFileSync(path.join(root, "d", "a.ts"), "inside\n");
+    const realLstat = fs.lstatSync;
+    let early = false;
+    const swapEarly = mock.method(fs, "lstatSync", (p: fs.PathLike, ...rest: unknown[]) => {
+      if (!early && String(p).endsWith(path.join("d", "a.ts"))) {
+        early = true;
+        fs.rmSync(path.join(root, "d"), { recursive: true });
+        fs.symlinkSync(outside, path.join(root, "d"), process.platform === "win32" ? "junction" : "dir");
+      }
+      return (realLstat as (...a: unknown[]) => fs.Stats)(p, ...rest);
+    });
+    try {
+      const st = takeStates(root, ["d/a.ts"], new Map(), FAR())["d/a.ts"];
+      assert.notEqual(
+        st?.kind,
+        "ok",
+        "a file opened through a link swapped in after the boundary check is never hashed",
+      );
+    } finally {
+      swapEarly.mock.restore();
+    }
     // A read that changes once is read again and succeeds: two reads in all
     fs.writeFileSync(path.join(root, "b.ts"), "b\n");
     let once = false;
@@ -322,6 +346,11 @@ test("a snapshot is taken once, checked as it is read, and removed when it outli
     assert.equal(takeSnapshot(key), null, "taken once");
     writeSnapshot({ ...s, paths: { "a.ts": { kind: "ok", sig: { dev: "x" }, hash: "h" } as never } });
     assert.equal(takeSnapshot(key), null, "a snapshot that does not hold together is refused");
+    writeSnapshot({ ...s, at: new Date(Date.now() - SNAPSHOT_LIFE_MS - 1000).toISOString() });
+    assert.equal(takeSnapshot(key), "expired", "a snapshot past its life is reported, never compared");
+    assert.equal(takeSnapshot(key), null, "and removed");
+    writeSnapshot({ ...s, at: "not a time" });
+    assert.equal(takeSnapshot(key), null, "a snapshot without a readable time is refused");
     writeSnapshot({ ...s, paths: true as never });
     assert.equal(
       takeSnapshot(key),

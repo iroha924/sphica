@@ -311,6 +311,19 @@ const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
     .groupBy("u.id")
     .orderBy("u.id", "desc");
 
+/** The deliverable decisions and constraints anchored to any of the paths, newest first */
+export async function anchoredRules(db: Reads, projectId: number, rels: string[]) {
+  // In chunks: one shell call can change more paths than SQLite takes bound variables
+  const rows = new Map<number, Awaited<ReturnType<ReturnType<typeof anchoredTo>["execute"]>>[number]>();
+  for (let i = 0; i < rels.length; i += PATH_CHUNK)
+    for (const u of await anchoredTo(db, projectId, rels.slice(i, i + PATH_CHUNK))
+      .where("u.kind", "in", ["decision", "constraint"])
+      .execute())
+      rows.set(u.id, u);
+  return [...rows.values()].sort((a, b) => b.id - a.id);
+}
+const PATH_CHUNK = 500;
+
 /** The paths a delivery names in its lead: all of them up to three, then a count. */
 const named = (rels: string[]) =>
   rels.length <= 3
@@ -402,9 +415,7 @@ async function afterShellWrite(
 ): Promise<Plan> {
   const { sent } = await sinceRestart(db, session, agent);
   const seen = new Set(sent.map((r) => r.unit_id));
-  const rows = (
-    await anchoredTo(db, projectId, rels).where("u.kind", "in", ["decision", "constraint"]).execute()
-  ).filter((u) => !seen.has(u.id));
+  const rows = (await anchoredRules(db, projectId, rels)).filter((u) => !seen.has(u.id));
   const shown = rows.slice(0, LIMITS.pre_edit.units);
   const why = await reasons(
     db,
@@ -1082,28 +1093,29 @@ async function afterShell(input: HookInput, host: Host, file: string, started: n
   const agent = agentOf(input);
   const key = snapshotKey(host, place.root, input.session_id, agent, input.tool_use_id);
   const base = { host, session: input.session_id, agent, call: input.tool_use_id };
-  const before = takeSnapshot(key);
-  if (!before) {
-    trialLog({ ...base, event: "snapshot_missing" });
-    return "";
-  }
-  const cache = loadCache(place.root);
-  for (const [rel, st] of Object.entries(before.paths))
-    if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
-  const after = takeStates(place.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
-  saveCache(place.root, cache);
-  const { changed, unknown } = compare(before.paths, after);
-  const line = { ...base, event: "post_shell", paths: Object.keys(before.paths).length, changed, unknown };
-  if (!changed.length) {
-    trialLog({ ...line, delivered: [] });
-    return "";
-  }
+  let line: Record<string, unknown> = { ...base, event: "post_shell" };
   let db: ReadonlyKysely<DB> | null = null;
   try {
+    const before = takeSnapshot(key);
+    if (before === "expired" || !before) {
+      trialLog({ ...base, event: before ? "snapshot_expired" : "snapshot_missing" });
+      return "";
+    }
+    const cache = loadCache(place.root);
+    for (const [rel, st] of Object.entries(before.paths))
+      if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
+    const after = takeStates(place.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
+    saveCache(place.root, cache);
+    const { changed, unknown } = compare(before.paths, after);
+    line = { ...line, paths: Object.keys(before.paths).length, changed, unknown };
+    if (!changed.length) {
+      trialLog({ ...line, delivered: [] });
+      return "";
+    }
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);
     const pid = await projectId(db, place.key);
-    if (pid === null) return "";
+    if (pid === null) throw new Error("the project is not registered");
     const reader = db;
     const entry: Entry = {
       projectId: pid,
@@ -1209,7 +1221,16 @@ export async function deliver(
     if (pid === null) return "";
     if (shell) {
       if (shellWriteDelivery() && input.tool_use_id && event === "pre_read")
-        await snapshotCall(db, pid, place.root, host, input, started).catch(() => {});
+        await snapshotCall(db, pid, place.root, host, input, started).catch((e) =>
+          trialLog({
+            host,
+            session: input.session_id,
+            agent: agentOf(input),
+            call: input.tool_use_id,
+            event: "snapshot_failed",
+            error: head(reason(e), 200),
+          }),
+        );
       rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
       if (!rels.length) return "";
     }

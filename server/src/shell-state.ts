@@ -97,28 +97,28 @@ function publish(file: string, text: string): void {
   fs.renameSync(tmp, file);
 }
 
+/** Saves the cache when it can: one that cannot be saved only costs the next call its reads */
 export function saveCache(root: string, cache: Cache): void {
-  publish(cacheFile(root), JSON.stringify(Object.fromEntries(cache)));
+  try {
+    publish(cacheFile(root), JSON.stringify(Object.fromEntries(cache)));
+  } catch {
+    // Rebuilt by the next call that can save it
+  }
 }
 
 /** The sha256 of a file read in chunks, or "deadline" when the deadline passes before it is read through */
-function readHash(file: string, deadline: number): string | "deadline" {
-  const fd = fs.openSync(file, "r");
-  try {
-    const h = createHash("sha256");
-    const buf = Buffer.allocUnsafe(1 << 20);
-    for (
-      let n = fs.readSync(fd, buf, 0, buf.length, null);
-      n > 0;
-      n = fs.readSync(fd, buf, 0, buf.length, null)
-    ) {
-      h.update(buf.subarray(0, n));
-      if (Date.now() >= deadline) return "deadline";
-    }
-    return h.digest("hex");
-  } finally {
-    fs.closeSync(fd);
+function readHash(fd: number, deadline: number): string | "deadline" {
+  const h = createHash("sha256");
+  const buf = Buffer.allocUnsafe(1 << 20);
+  for (
+    let n = fs.readSync(fd, buf, 0, buf.length, null);
+    n > 0;
+    n = fs.readSync(fd, buf, 0, buf.length, null)
+  ) {
+    h.update(buf.subarray(0, n));
+    if (Date.now() >= deadline) return "deadline";
   }
+  return h.digest("hex");
 }
 
 const failed = (e: unknown): State => {
@@ -127,6 +127,31 @@ const failed = (e: unknown): State => {
     ? { kind: "missing" }
     : { kind: "unreadable", reason: String(code) };
 };
+
+/**
+ * The state of a file opened at path, or "again" when it changed meanwhile. A path can be swapped for a link out between any two calls,
+ * so the opened file must be the one the path now resolves to inside the checkout, with the signature it had before it was opened.
+ */
+function readOpened(
+  root: string,
+  file: string,
+  fd: number,
+  sig: Signature,
+  deadline: number,
+): State | "again" {
+  const opened = fs.fstatSync(fd, { bigint: true });
+  if (!same(sig, signature(opened))) return "again";
+  const real = fs.realpathSync.native(file);
+  if (leaves(path.relative(fs.realpathSync.native(root), real)))
+    return { kind: "unreadable", reason: "outside the checkout" };
+  const there = fs.lstatSync(real, { bigint: true });
+  if (there.dev !== opened.dev || there.ino !== opened.ino) return "again";
+  const hash = readHash(fd, deadline);
+  if (hash === "deadline") return { kind: "unknown", reason: "deadline" };
+  if (!same(sig, signature(fs.fstatSync(fd, { bigint: true })))) return "again";
+  if (!same(sig, signature(fs.lstatSync(file, { bigint: true })))) return "again";
+  return { kind: "ok", sig, hash };
+}
 
 /**
  * One file's state. The hash comes from the cache when the signature is unchanged; otherwise the file is read between two lstats, and
@@ -149,19 +174,24 @@ function stateOf(root: string, rel: string, cache: Cache, deadline: number): Sta
     const sig = signature(before);
     const cached = cache.get(rel);
     if (cached && same(cached.sig, sig)) return { kind: "ok", sig, hash: cached.hash };
-    let hash: string;
-    let after: fs.BigIntStats;
+    let fd: number;
     try {
-      hash = readHash(file, deadline);
-      if (hash === "deadline") return { kind: "unknown", reason: "deadline" };
-      after = fs.lstatSync(file, { bigint: true });
+      fd = fs.openSync(file, "r");
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
       return failed(e);
     }
-    if (!same(sig, signature(after))) continue;
-    cache.set(rel, { sig, hash });
-    return { kind: "ok", sig, hash };
+    let outcome: State | "again";
+    try {
+      outcome = readOpened(root, file, fd, sig, deadline);
+    } catch (e) {
+      outcome = (e as NodeJS.ErrnoException).code === "ENOENT" ? "again" : failed(e);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (outcome === "again") continue;
+    if (outcome.kind === "ok") cache.set(rel, { sig, hash: outcome.hash });
+    return outcome;
   }
   return { kind: "unknown", reason: "changed while read" };
 }
@@ -224,10 +254,10 @@ export function writeSnapshot(s: Snapshot): void {
 }
 
 /**
- * The snapshot a call's Pre took, removed as it is read; null when there is none or it does not hold together. Before reading, snapshots
- * past their life are removed and counted, so an expired one is reported rather than taken for "nothing changed".
+ * The snapshot a call's Pre took, removed as it is read; "expired" when it is past its life (reported, never taken for "nothing
+ * changed"), and null when there is none or it does not hold together.
  */
-export function takeSnapshot(key: string): Snapshot | null {
+export function takeSnapshot(key: string): Snapshot | "expired" | null {
   const file = snapshotFile(key);
   let raw: unknown;
   try {
@@ -244,9 +274,11 @@ export function takeSnapshot(key: string): Snapshot | null {
     typeof s.at !== "string" ||
     !s.paths ||
     typeof s.paths !== "object" ||
-    Array.isArray(s.paths)
+    Array.isArray(s.paths) ||
+    Number.isNaN(Date.parse(s.at))
   )
     return null;
+  if (Date.now() - Date.parse(s.at) > SNAPSHOT_LIFE_MS) return "expired";
   for (const v of Object.values(s.paths)) {
     const st = v as State;
     if (!st || !["ok", "missing", "unreadable", "unknown"].includes(st.kind)) return null;

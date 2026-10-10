@@ -41,6 +41,16 @@ base: main
   - コミット: `fix(deliver): keep shell snapshots inside the checkout and the deadline on every read`
   - 結果: red を直す前のコードで実測（F1 の外の hash、F4 の paths: true の受理）。ほかは同じテストの後ろにあったので、直した後に各直しを 1 つずつ戻してテストが落ちることを確かめた（F2・F3・F5・F6・F7・F8 すべて）。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-state.test.ts` → 6 pass。`bun run verify` → exit 0
 
+- [x] T10: 控えと Post の穴を直す（T02・T09 のレビューの F1〜F4）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T09（直す対象の読み方）
+  - 変更: `server/src/shell-state.ts`, `server/src/deliver.ts`, `server/test/shell-state.test.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/shell-state.test.ts test/deliver.test.ts` → 境界の確かめの直後にディレクトリが外への link に替わると外のファイルを ok として hash する、7 日を過ぎた控えを受け取る、キャッシュを保存できないと Post が空を返し試用のログも残らない、4 万パスを渡すと too many SQL variables
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/shell-state.test.ts test/deliver.test.ts` → 開いたファイルが checkout の中で今そのパスが指すものと同じ（dev・ino）ときだけ hash し、期限を過ぎた控えは Post で snapshot_expired として残り、キャッシュを保存できなくても比べて届け、4 万パスでも記録が見つかる
+  - コミット: `fix(deliver): check the opened file, expire snapshots at Post, and chunk changed paths`
+  - 結果: 4 件とも直す前のコードで意図した理由の失敗を確かめた。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-state.test.ts` → 6 pass、`--test-name-pattern="shell call|more changed paths" test/deliver.test.ts` → 4 pass。Pre で控えを取れなかったときも試用のログに snapshot_failed を残すようにした。`bun run verify` → exit 0
+
 ## P2: 届け方
 
 設定がオンのとき、両ホストで shell の呼び出しの後に、まだ届いていない記録が次のモデルリクエストの前に入る。オフなら今と同じ。
@@ -117,3 +127,4 @@ base: main
 - 2026-10-10 / T02, T03 / `bun run pairs` が、コードで読む plugin の設定が plugin.json に宣言されていることを求めた。Codex の形は deliver.test.ts の中で確かめた / userConfig の shell_write_delivery の宣言を T03 から T02 に移し（T03 の変更欄から plugin.json を外した）、T02 の変更欄を `deliver-codex.test.ts` から `plugin/.claude-plugin/plugin.json` に変えた
 - 2026-10-10 / T01 のレビュー / F1〜F8 は採用して T09 で直した。期限を守るため、読み取りをファイル全体の一括から 1 MB ずつに変えた
 - 2026-10-10 / T03 / entry の形を固定しているのは plugin.test.ts ではなく check-ai-config.mjs だった。codex-trust.ts は hook を数で持たず変更が要らなかった。codex-trust.test.ts は 0.6.30 と hook の数が同じことを前提にしていた / 変更欄を実際に変えたファイルに直し、codex-trust.test.ts は key ごとに比べる形にした
+- 2026-10-10 / T02・T09 のレビュー / F1〜F4 は採用して T10 で直した
