@@ -154,6 +154,26 @@ base: main
   - コミット: `docs(readme): describe the shell_write_delivery option`
   - 結果: `bun run release:plan -- --base v0.6.43` → release kind: plugin、npm / plugin / marketplace / Codex がどれも 0.6.44（T01 で上げた）。README.md と README.ja.md の機能の一覧に、既定オフの試用の設定、オンにする 2 つの経路、`off` が勝つこと、Codex で新しい hook を信頼すること、`~/.sphica/shell-state/` に残すものを足した。`bun run verify` → exit 0
 
+- [x] T15: Codex でパッチの目印を含む shell のコマンドも前後で比べる（全差分のレビューの 1 件目）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T07（全差分のレビューの対象）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → heredoc に `*** Begin Patch` の行を含み、生成スクリプトでファイルを変える Codex の Bash で、Pre が控えを取らず Post も比べないので記録が届かない
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts` → shell の PreToolUse はパッチかどうかによらず控えを取り、Post はどれも比べる。shell で流した本物のパッチは今までどおり Pre で届き、Post は重複を避ける
+  - コミット: `fix(deliver): compare every shell call, a patch run through the shell included`
+  - 結果: red を直す前のコードで確かめた（Post が空）。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/deliver.test.ts test/deliver-codex.test.ts` → 60 pass。`bun run verify` → exit 0
+
+- [ ] T16: M0 の再生を結果の順にし、読めない行の後の書き込みを unknown にする（全差分のレビューの 2・3 件目）
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T15（同じ全差分のレビューの直し）
+  - 変更: `server/evals/post-write/replay.ts`, `server/test/post-write-replay.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 結果が w2 → w1 の順に返った並列の Write で、後に終わった w1 を見せた組にする。読めない行の後の Write を見せた組にする
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/post-write-replay.test.ts` → 結果の順に再生し、最後の compact から結果までに読めない行があれば unknown。凍結した入力（スナップショットの sha256 a5c82713…、会話記録 213 件を一覧の sha256 どおりに復元）で再生し直して、保存した組と見せた組が変わらない
+  - コミット: `fix(eval): replay writes in result order and leave writes after an unread line unknown`
+  - 結果: 順序と読めない行の両方を、直す前のコード（または条件を外したコード）で落ちることを確かめた。`--test test/post-write-replay.test.ts` → 7 pass。会話記録は 212 件がそのまま、1 件は sha256 の合う先頭の部分で復元し、直したコードで再生した結果は計数・組 2,011 件・見せた組 358 件とも保存した結果と同じ（違う組 0）。標本・ラベル・判定は変わらない。`bun run verify` → exit 0
+
 ## P5: 試用と採否（既定オフのリリースの後、この PR の外）
 
 持ち主の 7 日の試用で、既定をオンにするか外すかを前もって決めた基準で決める。
@@ -175,3 +195,4 @@ base: main
 - 2026-10-10 / T04 / 正例のコマンドの多くはファイルを名指すので、Pre の読みの配信で先に届き、同じ会話で Post は繰り返さない。計画の「Post で届く」を、その呼び出しの中で届くことと、Post が全件を変化として見ること（試用のログの changed）の 2 つで確かめる形にした / harness の正例の判定に changed を加え、届いた経路を表に出した
 - 2026-10-10 / T03・T10 のレビュー / F2 は採用して T11 で直した。F1（確かめの合間に link と行き来させると外のファイルを hash できる）は見送った: Node に openat が無く確かめを重ねても隙は消えない、差し替えられるのは同じユーザーのプロセスで外のファイルを自分で読める、Sphica は hash を手元に置くだけで中身を出さず、狂うのはその 1 回の見分けだけ。コメントにこの隙を書いた
 - 2026-10-10 / T04〜T13 のレビュー / F1〜F5 は採用して T14 で直した
+- 2026-10-10 / 全差分のレビュー / P2 の 3 件を採用し、T15・T16 で直した。M0 の 2 件は凍結した入力で再生し直して結果が変わらないことを確かめた

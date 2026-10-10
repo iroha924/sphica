@@ -1169,12 +1169,14 @@ export async function deliver(
 ): Promise<string> {
   const started = Date.now();
   const name = input.hook_event_name;
-  if (
-    (name === "PostToolUse" || name === "PostToolUseFailure") &&
-    SHELL_TOOLS.has(input.tool_name ?? "") &&
-    !(host === "codex" && shellPatch(input))
-  )
+  // Every shell call is compared by content, a patch run through the shell included: a marker alone does not make a command a patch
+  if ((name === "PostToolUse" || name === "PostToolUseFailure") && SHELL_TOOLS.has(input.tool_name ?? ""))
     return afterShell(input, host, file, started);
+  const snap =
+    name === "PreToolUse" &&
+    SHELL_TOOLS.has(input.tool_name ?? "") &&
+    Boolean(input.tool_use_id) &&
+    shellWriteDelivery();
   const call = reviewCall(input);
   const event: Event | null = call
     ? "review"
@@ -1213,6 +1215,7 @@ export async function deliver(
   if (
     onPath &&
     !shell &&
+    !snap &&
     (!(event === "pre_read" || patch || EDIT_TOOLS.has(input.tool_name ?? "")) || !targets.length)
   )
     return "";
@@ -1222,25 +1225,27 @@ export async function deliver(
     .map((t) => path.relative(place.root, path.resolve(input.cwd ?? place.root, t)))
     .filter((r) => r && !leaves(r))
     .map((r) => r.split(path.sep).join("/"));
-  if (onPath && !shell && !rels.length) return "";
+  if (onPath && !shell && !snap && !rels.length) return "";
   let db: ReadonlyKysely<DB> | null = null;
   try {
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
+    if (snap)
+      await snapshotCall(db, pid, place.root, host, input, started).catch((e) =>
+        trialLog({
+          host,
+          session: input.session_id,
+          agent: agentOf(input),
+          call: input.tool_use_id,
+          event: "snapshot_failed",
+          error: head(reason(e), 200),
+        }),
+      );
+    // A patch run through the shell that names no file had only its snapshot to take
+    if (onPath && !shell && !rels.length) return "";
     if (shell) {
-      if (shellWriteDelivery() && input.tool_use_id && event === "pre_read")
-        await snapshotCall(db, pid, place.root, host, input, started).catch((e) =>
-          trialLog({
-            host,
-            session: input.session_id,
-            agent: agentOf(input),
-            call: input.tool_use_id,
-            event: "snapshot_failed",
-            error: head(reason(e), 200),
-          }),
-        );
       rels = await namedInCommand(db, pid, place.root, input.cwd ?? place.root, shell);
       if (!rels.length) return "";
     }

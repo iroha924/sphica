@@ -2706,6 +2706,46 @@ test("a shell call's Post still compares when the cache cannot be saved, and rep
   }
 });
 
+test("a Codex shell command that only looks like a patch is still compared after it runs", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    const input = {
+      session_id: "codex-s",
+      cwd: repo,
+      tool_name: "Bash",
+      // A patch marker in a heredoc, then a generator that names no file
+      tool_input: { command: "cat <<'EOF'\n*** Begin Patch\nEOF\nnode tools/gen.cjs" },
+      tool_use_id: "t1",
+    };
+    await deliver({ ...input, hook_event_name: "PreToolUse" }, "codex", db.file);
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    assert.match(
+      await deliver({ ...input, hook_event_name: "PostToolUse" }, "codex", db.file),
+      /trace:ext-s1\/utc/,
+    );
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("a shell call's Post whose project cannot be told still leaves its trial line", async () => {
   const db = tempDb();
   const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-deliver-")));
