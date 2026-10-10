@@ -1,11 +1,6 @@
-// The #219 entry check (M0'): when the agent changed a file through the shell, and a decision or constraint on that file was deliverable
-// at that moment, did it reach the conversation by the owner's next prompt? Eligibility is decided as of the call's result (records as
-// they were then), and what reached the conversation is read from its transcript, never from the delivery log. Labellers only name the
-// calls that changed the path; everything else is computed here.
-// node server/evals/post-write/shell-miss.ts --db <sphica.db> --seed <n> --out <draw.json>
-// node server/evals/post-write/shell-miss.ts --evidence <draw.json> --transcripts <dir> [--from <i>] [--to <j>]
-// node server/evals/post-write/shell-miss.ts --measure <labels.json> --draw <draw.json> --db <sphica.db> --transcripts <dir>
-//   --repo <checkout> --snapshot <file> --out <result.json>
+// The shell-change entry check (M0'): when the agent changed a file through the shell while a record on it was deliverable, did that record
+// reach the conversation by the owner's next prompt? Eligibility is as of the call's result, and arrival is read from the transcript.
+// Modes: the draw (--db), --evidence, and --measure; labellers only name the calls that changed the path, and the rest is computed here.
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";

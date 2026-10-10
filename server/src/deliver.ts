@@ -42,6 +42,9 @@ type Event = "session_start" | "pre_edit" | "pre_read" | "prompt" | "review";
  */
 export const CONFIRM =
   "If, after checking a record below against the current code and its full text (Sphica's read), what you were asked to do is a change it rejected or rules out, do not make that change yet: tell the user which record and reason it conflicts with, and ask whether to go ahead.";
+/** The request after a shell call, when the change is already made: keep or undo is the user's call, not the agent's */
+const AFTER_CHANGE =
+  "If, after checking a record below against the current code and its full text (Sphica's read), what this call changed is a change it rejected or rules out, tell the user which record and reason it conflicts with, and ask whether to keep or undo it.";
 /** The same request for the evaluation's gold slot, which is given the record text but no Sphica tools. */
 export const CONFIRM_GOLD = CONFIRM.replace("its full text (Sphica's read)", "the record text given here");
 // The limits add the request's length, so it takes no room from the records
@@ -441,8 +444,9 @@ async function afterShellWrite(
         ? [line(u, why.get(u.id), ai.has(u.id)), line(u, "", ai.has(u.id))]
         : line(u, "", ai.has(u.id)),
     ),
-    LIMITS.pre_edit.chars,
-    `Active decisions applying to ${named(rels)}, files whose content changed between before and after this call (current code relevance unverified). ${CONFIRM} ${NOTE}:`,
+    // The edit's room for records: the limit's room for the request is CONFIRM's, so it is traded for this request's own length
+    LIMITS.pre_edit.chars - ASK + AFTER_CHANGE.length + 1,
+    `Active decisions applying to ${named(rels)}, files whose content changed between before and after this call (current code relevance unverified). ${AFTER_CHANGE} ${NOTE}:`,
     ai,
     shown.map((u) => u.id),
   );
@@ -749,6 +753,8 @@ const SHELL_WRITE = "shell_write";
 /** How long a shell call's snapshot may take before the rest of its files are left unknown, inside the host's 5 seconds */
 const SNAPSHOT_MS = 3500;
 const SHELL_WRITE_ON = new Set(["on", "1", "true", "yes"]);
+/** Bytes of the trial log before it moves aside: about 30,000 calls, more than a week of heavy use */
+const TRIAL_CAP = 10 * 1024 * 1024;
 
 /**
  * Whether records are delivered after shell calls: SPHICA_SHELL_WRITE_DELIVERY turns it on or off for both hosts, and otherwise the
@@ -768,6 +774,9 @@ function trialLog(line: Record<string, unknown>): void {
   try {
     const file = path.join(sphicaHome(), "shell-state", "trial.jsonl");
     fs.mkdirSync(path.dirname(file), { recursive: true });
+    // Past the cap the log moves to trial.1.jsonl, replacing the one before: two files at most
+    if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) >= TRIAL_CAP)
+      fs.renameSync(file, path.join(path.dirname(file), "trial.1.jsonl"));
     fs.appendFileSync(file, `${JSON.stringify({ at: iso(Date.now()), ...line })}\n`);
   } catch {
     // The trial log never stops delivery
@@ -1077,19 +1086,19 @@ async function lockedPlan(
 async function snapshotCall(
   db: Reads,
   projectId: number,
-  root: string,
+  place: { root: string; key: string },
   host: Host,
   input: HookInput,
   started: number,
 ): Promise<void> {
   const paths = await deliverablePaths(db, projectId);
-  const cache = loadCache(root);
-  const states = takeStates(root, paths, cache, started + SNAPSHOT_MS);
-  saveCache(root, cache);
-  const expired = pruneSnapshots();
+  const cache = loadCache(place.root);
+  const states = takeStates(place.root, paths, cache, started + SNAPSHOT_MS);
+  saveCache(place.root, cache);
+  const expired = pruneSnapshots(Date.now(), started + SNAPSHOT_MS);
   if (expired) trialLog({ host, event: "snapshot_expired", count: expired });
-  const key = snapshotKey(host, root, String(input.session_id), agentOf(input), String(input.tool_use_id));
-  writeSnapshot({ v: 1, key, at: iso(started), root, paths: states });
+  const key = snapshotKey(host, String(input.session_id), agentOf(input), String(input.tool_use_id));
+  writeSnapshot({ v: 1, key, at: iso(started), root: place.root, project: place.key, paths: states });
 }
 
 /**
@@ -1103,19 +1112,19 @@ async function afterShell(input: HookInput, host: Host, file: string, started: n
   let line: Record<string, unknown> = { ...base, event: "post_shell" };
   let db: ReadonlyKysely<DB> | null = null;
   try {
-    const place = identify(input.cwd ?? process.cwd());
-    // Outside a project no Pre took a snapshot, and every shell call there would fill the trial log
-    if (!place) return "";
-    const before = takeSnapshot(snapshotKey(host, place.root, input.session_id, agent, input.tool_use_id));
+    // The snapshot holds the root and project of Pre, so a call that changes either is still compared for what it was run in
+    const before = takeSnapshot(snapshotKey(host, input.session_id, agent, input.tool_use_id));
     if (before === "expired" || !before) {
+      // Outside a project no Pre took one, and every shell call there would fill the trial log
+      if (!before && !identify(input.cwd ?? process.cwd())) return "";
       trialLog({ ...base, event: before ? "snapshot_expired" : "snapshot_missing" });
       return "";
     }
-    const cache = loadCache(place.root);
+    const cache = loadCache(before.root);
     for (const [rel, st] of Object.entries(before.paths))
       if (st.kind === "ok") cache.set(rel, { sig: st.sig, hash: st.hash });
-    const after = takeStates(place.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
-    saveCache(place.root, cache);
+    const after = takeStates(before.root, Object.keys(before.paths), cache, started + SNAPSHOT_MS);
+    saveCache(before.root, cache);
     const { changed, unknown } = compare(before.paths, after);
     line = { ...line, paths: Object.keys(before.paths).length, changed, unknown };
     if (!changed.length) {
@@ -1124,7 +1133,7 @@ async function afterShell(input: HookInput, host: Host, file: string, started: n
     }
     if (!fs.existsSync(file)) throw new Error(`no database at ${file}`);
     db = openReader(file);
-    const pid = await projectId(db, place.key);
+    const pid = await projectId(db, before.project);
     if (pid === null) throw new Error("the project is not registered");
     const reader = db;
     const entry: Entry = {
@@ -1133,7 +1142,7 @@ async function afterShell(input: HookInput, host: Host, file: string, started: n
       external: input.session_id,
       agent,
       event: "pre_edit",
-      branch: branchOf(place.root),
+      branch: branchOf(before.root),
     };
     let logged = false;
     const plan = await lockedPlan(
@@ -1233,7 +1242,7 @@ export async function deliver(
     const pid = await projectId(db, place.key);
     if (pid === null) return "";
     if (snap)
-      await snapshotCall(db, pid, place.root, host, input, started).catch((e) =>
+      await snapshotCall(db, pid, place, host, input, started).catch((e) =>
         trialLog({
           host,
           session: input.session_id,

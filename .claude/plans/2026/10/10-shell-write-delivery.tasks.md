@@ -184,6 +184,16 @@ base: main
   - コミット: `fix(eval): keep the order of results that share one transcript line`
   - 結果: red を直す前のコード（dd786297）で確かめた（v1 を見せた組にする）。`--test test/post-write-replay.test.ts` → 7 pass。凍結した入力で再生し直した結果は組 2,011 件・見せた組 358 件とも保存した結果と同じ（違う組 0）。`bun run verify` → exit 0
 
+- [x] T18: GitHub の Codex のレビュー（9 件）を直す: 計測のファイルのコメント、README の自分で見るものの節、試用のログの上限、書き込みの後の文面、期限の後の掃除、M0 の `..` で始まる名前、Post のプロジェクト、checkout の中のファイルの symlink
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T17（レビューの対象の head）
+  - 変更: `server/src/deliver.ts`, `server/src/shell-state.ts`, `server/test/deliver.test.ts`, `server/test/shell-state.test.ts`, `server/evals/post-write/replay.ts`, `server/evals/post-write/shell-miss.ts`, `server/evals/post-write/shell-write-harness.ts`, `server/test/post-write-replay.test.ts`, `server/test/post-write-shell-miss.test.ts`, `README.md`, `README.ja.md`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/shell-state.test.ts test/post-write-replay.test.ts` → 呼び出しの中で origin が変わると Pre のプロジェクトの記録が届かない、checkout の中を指すファイルの symlink の中身の変更と付け替えが変化にならない、期限を過ぎても古い控えを消し続ける、`..settings/rule.ts` への書き込みを checkout の外と数える
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts test/deliver-codex.test.ts test/shell-state.test.ts test/post-write-replay.test.ts test/post-write-shell-miss.test.ts` → 上の 4 つがどれも期待どおりで、Post の文面は「keep or undo」を聞き「do not make that change yet」を含まず、試用のログは 10 MB で trial.1.jsonl に移る
+  - コミット: `fix(deliver): bind Post to Pre's project, follow in-checkout file links, and ask keep or undo`
+  - 結果: 4 つの red を直す前のコード（f5aef572）で確かめ、文面と試用のログの上限はそれぞれの直しを外して落ちることを確かめた。shell-state 7 pass、deliver と deliver-codex 61 pass、replay と shell-miss 10 pass。凍結した入力で M0 を再生し直した結果は保存した結果と同じ（違う組 0）。先頭のコメントは 3 行以内にして issue 番号を外し、使い方は足りない引数を名指すスクリプトに任せた。README の英語版と日本語版の自分で見るものの節に、shell の後の配信を足した。期限の後に unknown を割り当てる処理は、3 万件の scale で Pre 3,660 ms・Post 3,615 ms と 5 秒の内に収まったので変えていない（掃除だけ期限で止める）。`bun run verify` → exit 0
+
 ## P5: 試用と採否（既定オフのリリースの後、この PR の外）
 
 持ち主の 7 日の試用で、既定をオンにするか外すかを前もって決めた基準で決める。
@@ -207,3 +217,4 @@ base: main
 - 2026-10-10 / T04〜T13 のレビュー / F1〜F5 は採用して T14 で直した
 - 2026-10-10 / 全差分のレビュー / P2 の 3 件を採用し、T15・T16 で直した。M0 の 2 件は凍結した入力で再生し直して結果が変わらないことを確かめた
 - 2026-10-10 / T15・T16 の再レビュー / P2 の 1 件（1 行に入った複数の結果の順）を採用し、T17 で直した
+- 2026-10-10 / GitHub の Codex のレビュー（f5aef572） / 9 件のうち 8 件と 1 件の一部を T18 で直した。書き込みの後の文面は計画の「固定の CONFIRM」から変えた: CONFIRM は変更の前の頼み（まだ変更しない）で、Post の時点では変更が済んでいるため。試用の標本を見分ける lead（files whose content changed between before and after this call）は変えていない。見送ったのは、期限の後に残りのパスへ unknown を割り当てる処理（3 万件で 5 秒の内に収まっている）

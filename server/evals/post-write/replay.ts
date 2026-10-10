@@ -1,10 +1,6 @@
-// The post_write entry check (M0): past successful writes from Claude Code transcripts, matched against the records deliverable at each
-// write's result, less what had already reached that conversation (read from its transcript, never from the delivery log), so what a
-// delivery right after the write would have shown can be counted and labelled before it is built.
-// node server/evals/post-write/replay.ts --db <sphica.db> --transcripts <dir> --repo <checkout> --snapshot <file> --out <replay.json>
-// node server/evals/post-write/replay.ts --sample <replay.json> --seed <n> --size 40 --out <sample.json>
-// node server/evals/post-write/replay.ts --sheet <sample.json> --db <snapshot> --transcripts <dir> > sheet.md
-// node server/evals/post-write/replay.ts --decide <labels.json>
+// The post_write entry check (M0): past writes from Claude Code transcripts matched against the records deliverable at each write's result,
+// less what had reached that conversation per its transcript (never the delivery log), so what a delivery after the write shows is counted.
+// Modes: the replay (--db), --sample, --sheet, and --decide; each names the arguments it is missing.
 import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -141,7 +137,8 @@ export async function replay(db: ReadonlyKysely<DB>, conversations: Conversation
       }
       const p = projects.get(e.cwd);
       const rel = p ? path.relative(p.root, path.resolve(e.cwd, target)) : "";
-      if (!p || !rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+      // A name that only starts with two dots (..settings) is inside: only a whole `..` step leaves
+      if (!p || !rel || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
         counts.outside++;
         continue;
       }

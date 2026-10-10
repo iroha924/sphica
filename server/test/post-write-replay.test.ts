@@ -262,6 +262,14 @@ test("parallel writes are replayed in the order their results came back, and an 
       }),
     ];
     fs.writeFileSync(path.join(dir, "one-line.jsonl"), `${oneLine.join("\n")}\n`);
+    // A directory whose name only starts with two dots is inside the checkout
+    const dots = [
+      delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
+      human("2099-01-01T00:00:00.000Z"),
+      edit("2099-01-01T00:01:00.000Z", "d1", path.join(repo, "..settings", "rule.ts")),
+      result("2099-01-01T00:01:01.000Z", "d1"),
+    ];
+    fs.writeFileSync(path.join(dir, "dots.jsonl"), `${dots.join("\n")}\n`);
     const broken = [
       delivery("2098-12-31T23:59:00.000Z", "Sphica: current work."),
       human("2099-01-01T00:00:00.000Z"),
@@ -274,6 +282,7 @@ test("parallel writes are replayed in the order their results came back, and an 
     assert.deepEqual(
       r.pairs.map((x) => [x.toolUseId, x.shown]),
       [
+        ["d1", true],
         ["v2", true],
         ["w2", true],
       ],

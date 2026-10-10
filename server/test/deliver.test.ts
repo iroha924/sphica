@@ -2706,6 +2706,54 @@ test("a shell call's Post still compares when the cache cannot be saved, and rep
   }
 });
 
+test("a shell call is compared for the project it started in, asks keep or undo, and caps its trial log", async () => {
+  const db = tempDb();
+  const repo = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    const p = project(db);
+    const m = message(db, p, { id: "m1", text: "Store every timestamp in UTC." });
+    await save(db, p, {
+      units: [
+        decided("utc", m, "Store every timestamp in UTC.", {
+          anchors: [{ path: "src/dates.ts", role: "applies_to" }],
+        }),
+      ],
+    });
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "a\n");
+    // A trial log at its cap moves aside before the next line
+    fs.mkdirSync(path.join(home, "shell-state"), { recursive: true });
+    fs.writeFileSync(path.join(home, "shell-state", "trial.jsonl"), "x".repeat(10 * 1024 * 1024));
+    const input = {
+      session_id: "s",
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "node tools/gen.cjs" },
+      tool_use_id: "t1",
+    };
+    await deliver({ ...input, hook_event_name: "PreToolUse" }, "claude-code", db.file);
+    // The call rewrites the file and points the checkout at another repository
+    fs.writeFileSync(path.join(repo, "src/dates.ts"), "b\n");
+    execFileSync("git", ["-C", repo, "remote", "set-url", "origin", "https://github.com/o/other.git"], {
+      stdio: "ignore",
+    });
+    const out = await deliver({ ...input, hook_event_name: "PostToolUse" }, "claude-code", db.file);
+    assert.match(out, /trace:ext-s1\/utc/, "the records of the project the call started in");
+    assert.match(out, /ask whether to keep or undo it/);
+    assert.doesNotMatch(out, /do not make that change yet/, "the change is already made");
+    assert.equal(fs.statSync(path.join(home, "shell-state", "trial.1.jsonl")).size, 10 * 1024 * 1024);
+    assert.ok(fs.statSync(path.join(home, "shell-state", "trial.jsonl")).size < 4096, "a fresh log");
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("a Codex shell command that only looks like a patch is still compared after it runs", async () => {
   const db = tempDb();
   const repo = checkout();

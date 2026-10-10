@@ -323,22 +323,55 @@ test("reads stay inside the checkout and within the deadline on every try, and o
   }
 });
 
+test("a file link inside the checkout is compared by its target, and pruning stops at the deadline", () => {
+  const root = checkout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
+  process.env.SPHICA_HOME = home;
+  try {
+    fs.writeFileSync(path.join(root, "real.ts"), "one\n");
+    fs.writeFileSync(path.join(root, "other.ts"), "two\n");
+    fs.symlinkSync("real.ts", path.join(root, "link.ts"), "file");
+    const cache = new Map();
+    const before = takeStates(root, ["link.ts"], cache, FAR());
+    assert.equal(before["link.ts"]?.kind, "ok", "a link to a file inside is read through it");
+    fs.writeFileSync(path.join(root, "real.ts"), "one, rewritten\n");
+    assert.deepEqual(compare(before, takeStates(root, ["link.ts"], cache, FAR())).changed, ["link.ts"]);
+    const mid = takeStates(root, ["link.ts"], cache, FAR());
+    fs.rmSync(path.join(root, "link.ts"));
+    fs.symlinkSync("other.ts", path.join(root, "link.ts"), "file");
+    assert.deepEqual(
+      compare(mid, takeStates(root, ["link.ts"], cache, FAR())).changed,
+      ["link.ts"],
+      "a retarget counts",
+    );
+    // An expired snapshot is left for a later call once the deadline has passed
+    const calls = path.join(home, "shell-state", "calls");
+    fs.mkdirSync(calls, { recursive: true });
+    fs.writeFileSync(path.join(calls, "old.json"), "{}");
+    const old = new Date(Date.now() - SNAPSHOT_LIFE_MS - 60_000);
+    fs.utimesSync(path.join(calls, "old.json"), old, old);
+    assert.equal(pruneSnapshots(Date.now(), Date.now() - 1), 0, "past the deadline nothing is removed");
+    assert.equal(pruneSnapshots(), 1);
+  } finally {
+    delete process.env.SPHICA_HOME;
+    for (const d of [root, home]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test("a snapshot is taken once, checked as it is read, and removed when it outlives its call", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-home-"));
   process.env.SPHICA_HOME = home;
   try {
-    const key = snapshotKey("claude-code", "/r", "s", null, "toolu_1");
-    assert.notEqual(
-      key,
-      snapshotKey("claude-code", "/r", "s", "agent", "toolu_1"),
-      "a subagent's call is its own",
-    );
+    const key = snapshotKey("claude-code", "s", null, "toolu_1");
+    assert.notEqual(key, snapshotKey("claude-code", "s", "agent", "toolu_1"), "a subagent's call is its own");
+    assert.notEqual(key, snapshotKey("codex", "s", null, "toolu_1"), "and so is another host's");
     assert.match(key, /^[0-9a-f]{64}$/, "the file name never carries a host-given id");
     const s: Snapshot = {
       v: 1,
       key,
       at: new Date().toISOString(),
       root: "/r",
+      project: "git:github.com/o/r",
       paths: { "a.ts": { kind: "missing" } },
     };
     writeSnapshot(s);
@@ -346,6 +379,8 @@ test("a snapshot is taken once, checked as it is read, and removed when it outli
     assert.equal(takeSnapshot(key), null, "taken once");
     writeSnapshot({ ...s, paths: { "a.ts": { kind: "ok", sig: { dev: "x" }, hash: "h" } as never } });
     assert.equal(takeSnapshot(key), null, "a snapshot that does not hold together is refused");
+    writeSnapshot({ ...s, project: undefined as never });
+    assert.equal(takeSnapshot(key), null, "a snapshot without the project it was taken for is refused");
     writeSnapshot({ ...s, at: new Date(Date.now() - SNAPSHOT_LIFE_MS - 1000).toISOString() });
     assert.equal(takeSnapshot(key), "expired", "a snapshot past its life is reported, never compared");
     assert.equal(takeSnapshot(key), null, "and removed");

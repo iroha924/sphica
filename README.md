@@ -113,11 +113,12 @@ Without being asked, Sphica adds a few past records to what the agent sees, each
 - At session start: the current work and project-wide constraints, and in Claude Code, when earlier sessions wait to be traced, a request to trace them after your request is done.
 - On a prompt that names a recorded code symbol, file path, or option.
 - Before the agent reads or edits a file a decision applies to, and before a shell command that names such a file (naming it is not proof the command reads it). A read shows each record once per session.
+- After a shell command that changed the content of such a file, when the `shell_write_delivery` option is on (off by default): the decisions on it the agent has not seen in this conversation.
 - Before a review (Claude Code only). When you run your own review command (any name containing `review`, or a name listed, comma-separated, in the plugin's
   `review_commands` option in `/config` (Claude Code 2.1.269 or later) or the `SPHICA_REVIEW_COMMANDS` environment variable), it gets the decisions your local
   change touches. When `review_commands` names any command, `SPHICA_REVIEW_COMMANDS` is not read. `/sphica:review` checks them itself.
 
-In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, and before a shell command that names such a file (Codex reads files through shell commands, so this covers reads).
+In Codex the same happens at session start, on a prompt, before an `apply_patch` edit, before a shell command that names such a file (Codex reads files through shell commands, so this covers reads), and, with the option on, after a shell command that changed one.
 There is no review hook in Codex: run `$sphica:review`.
 
 The agent searches with Sphica's `search` and opens full records with `read`. `status` tells it how much of the history has been traced, so an empty search is less likely to be mistaken for "never decided".

@@ -1,6 +1,5 @@
-// Does the shipped deliver.js bring a record in after a real shell command changed its file, and only then? Each case runs a fixed
-// command between the hook's Pre and Post, in fresh processes, in the input shapes of both hosts, against a temporary checkout and
-// database. It checks hook output only: whether the host put that output before its next model request is the real-host check's job.
+// Does the shipped deliver.js bring a record in after a real shell command changed its file, and only then? Fixed commands run between Pre
+// and Post in fresh processes, in both hosts' input shapes; this checks the hook's output, not where the host puts it.
 // node server/evals/post-write/shell-write-harness.ts [--plugin <package dir>] [--compare <git ref> | --no-compare]
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";

@@ -17,7 +17,15 @@ export type State =
   /** Not looked at before the deadline, or kept changing while it was read */
   | { kind: "unknown"; reason: string };
 
-export type Snapshot = { v: 1; key: string; at: string; root: string; paths: Record<string, State> };
+/** project is the key the call's project had at Pre, so Post compares and delivers for that project even if the call changed it */
+export type Snapshot = {
+  v: 1;
+  key: string;
+  at: string;
+  root: string;
+  project: string;
+  paths: Record<string, State>;
+};
 
 /** How many times a file that changes while it is read is read again before it counts as unknown */
 const READS = 3;
@@ -168,6 +176,13 @@ function stateOf(root: string, rel: string, cache: Cache, deadline: number): Sta
       file = inside(root, rel);
       if (!file) return { kind: "unreadable", reason: "outside the checkout" };
       before = fs.lstatSync(file, { bigint: true });
+      // A link to a file inside the checkout is that file: its target's signature and content, so a retarget counts too
+      if (before.isSymbolicLink()) {
+        file = fs.realpathSync.native(file);
+        if (leaves(path.relative(fs.realpathSync.native(root), file)))
+          return { kind: "unreadable", reason: "outside the checkout" };
+        before = fs.lstatSync(file, { bigint: true });
+      }
     } catch (e) {
       return failed(e);
     }
@@ -241,13 +256,8 @@ export function compare(
 }
 
 /** The snapshot file of one call, named by a hash of who made it so no host-given id becomes a file name */
-export const snapshotKey = (
-  host: string,
-  root: string,
-  session: string,
-  agent: string | null,
-  call: string,
-) => sha(JSON.stringify([host, root, session, agent ?? "", call]));
+export const snapshotKey = (host: string, session: string, agent: string | null, call: string) =>
+  sha(JSON.stringify([host, session, agent ?? "", call]));
 const snapshotFile = (key: string) => dir("calls", `${key}.json`);
 
 export function writeSnapshot(s: Snapshot): void {
@@ -272,6 +282,7 @@ export function takeSnapshot(key: string): Snapshot | "expired" | null {
     s?.v !== 1 ||
     s.key !== key ||
     typeof s.root !== "string" ||
+    typeof s.project !== "string" ||
     typeof s.at !== "string" ||
     !s.paths ||
     typeof s.paths !== "object" ||
@@ -289,7 +300,7 @@ export function takeSnapshot(key: string): Snapshot | "expired" | null {
 }
 
 /** Removes the snapshots older than their life and returns how many */
-export function pruneSnapshots(now: number = Date.now()): number {
+export function pruneSnapshots(now: number = Date.now(), deadline = Number.POSITIVE_INFINITY): number {
   let removed = 0;
   let names: string[];
   try {
@@ -298,6 +309,8 @@ export function pruneSnapshots(now: number = Date.now()): number {
     return 0;
   }
   for (const n of names) {
+    // The rest wait for a later call: a backlog never pushes the hook past its time
+    if (Date.now() >= deadline) break;
     const file = dir("calls", n);
     try {
       if (now - fs.statSync(file).mtimeMs > SNAPSHOT_LIFE_MS) {
