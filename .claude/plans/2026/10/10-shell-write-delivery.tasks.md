@@ -123,6 +123,16 @@ base: main
   - コミット: `fix(eval): keep src when the letter-case row cleans up on a case-insensitive file system`
   - 結果: red は PR の Windows の CI のログで確かめた（固定のケースは 96 / 96 で通り、`src\\u0.ts` の ENOENT で落ちた）。区別しないときは `src/Case1.ts` を戻すだけにした。macOS で `node server/evals/post-write/shell-write-harness.ts --no-compare` → exit 0。Windows の CI は push の後に確かめる
 
+- [x] T14: harness と scale の判定を、壊れていると通らない形にする（T04・T05・T11・T12・T13 のレビューの F1〜F5）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T13（直す対象の harness の形）
+  - 変更: `server/evals/post-write/shell-write-harness.ts`, `server/test/shell-write-harness.test.ts`, `server/evals/scale/run.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/shell-write-harness.test.ts` → 新しいバンドルで Post の hook が走らなくても正例が通り、控えの欠け・unknown・error の負例も通る（Codex が judge に入力を与えて再現）。Windows の cwd の 4 行は Pre が名指して届けるので正しく動いても落ちる（`gh run view 38018345301 --job 114113577231 --log-failed` で 4 行とも delivered 0）
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/shell-write-harness.test.ts` → 前のバンドル以外で Post が走らない、比べた記録が無い、error、対象のファイルが unknown のどれも失敗と判定する。`node server/evals/post-write/shell-write-harness.ts` → 0 で終わる。`node server/evals/scale/run.ts` → 空のキャッシュの行が実際に hash したファイル数とバイト数を出し、全部を変える行は記録が 1 件も来なければ問題とする
+  - コミット: `fix(eval): fail the harness and scale rows when the comparison or Post is missing`
+  - 結果: `node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-write-harness.test.ts` → 4 pass。`node server/evals/post-write/shell-write-harness.ts` → exit 0（main との比較は 58 / 80 → 80 / 80、重複 0）。hooks.json から PostToolUseFailure を外して流すと p13 と p35 の Claude Code が「no Post hook ran」で落ちることを確かめた。`node server/evals/scale/run.ts --sizes 359,10000 --no-drain --no-delivery-view` → shell の行は問題なし（1 万件の空のキャッシュは 20,000 of 20,000 ファイル・78 MB を hash して Pre 1,730 ms）。Windows の cwd の行は名指さない helper で Pre 0・Post 1 を求める形にした。Windows の CI は push の後に確かめる。`bun run verify` → exit 0
+
 ## P4: 実機と出荷
 
 両ホストの実機で文脈が届くことを確かめ、既定オフで出荷する。
@@ -163,3 +173,4 @@ base: main
 - 2026-10-10 / T02・T09 のレビュー / F1〜F4 は採用して T10 で直した
 - 2026-10-10 / T04 / 正例のコマンドの多くはファイルを名指すので、Pre の読みの配信で先に届き、同じ会話で Post は繰り返さない。計画の「Post で届く」を、その呼び出しの中で届くことと、Post が全件を変化として見ること（試用のログの changed）の 2 つで確かめる形にした / harness の正例の判定に changed を加え、届いた経路を表に出した
 - 2026-10-10 / T03・T10 のレビュー / F2 は採用して T11 で直した。F1（確かめの合間に link と行き来させると外のファイルを hash できる）は見送った: Node に openat が無く確かめを重ねても隙は消えない、差し替えられるのは同じユーザーのプロセスで外のファイルを自分で読める、Sphica は hash を手元に置くだけで中身を出さず、狂うのはその 1 回の見分けだけ。コメントにこの隙を書いた
+- 2026-10-10 / T04〜T13 のレビュー / F1〜F5 は採用して T14 で直した

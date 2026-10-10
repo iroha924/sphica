@@ -326,8 +326,12 @@ export type Result = {
     delivered?: string[];
     logged?: boolean | null;
     event?: string;
+    error?: string;
   };
 };
+
+/** The name of the bundle from before this feature in a comparison */
+export const OLD = "old";
 
 export const keysIn = (text: string) => [...new Set(text.match(KEY_RE) ?? [])];
 
@@ -341,9 +345,18 @@ export function judge(r: Result, expected: string[], files: string[]): string | 
   const post = keysIn(r.post);
   const changed = r.trial?.changed ?? [];
   if (r.post && !r.post.includes(LEAD)) return "Post replied without the shell-write lead";
+  if (r.kind === "positive" || r.kind === "negative") {
+    // Only the bundle before this feature may run nothing after the call; for the others a comparison must have run and told each file
+    if (!r.posted && r.plugin !== OLD) return "no Post hook ran";
+    if (r.posted) {
+      if (r.trial?.event !== "post_shell")
+        return `no comparison logged (${r.trial?.event ?? "no trial line"})`;
+      if (r.trial.error) return `Post failed: ${r.trial.error}`;
+      const untold = files.filter((f) => r.trial?.unknown?.includes(f));
+      if (untold.length) return `not told: ${untold.join(", ")}`;
+    }
+  }
   if (r.kind === "positive") {
-    if (r.posted && r.trial?.event !== "post_shell")
-      return `no comparison logged (${r.trial?.event ?? "no trial line"})`;
     const unseen = r.posted ? files.filter((f) => !changed.includes(f)) : [];
     if (unseen.length) return `not seen as changed: ${unseen.join(", ")}`;
     const missing = expected.filter((k) => !pre.includes(k) && !post.includes(k));
@@ -862,15 +875,17 @@ async function extraRows(f: Fixture, p: Plugin): Promise<Row[]> {
     for (const [i, [what, cwd]] of forms.entries()) {
       const rel = `src/u${i}.ts`;
       reset(rel);
-      const a = call(`x-win-${i}`, `echo '// u' >> ${rel}`, cwd);
+      // A helper that names no file, so the record can only come from Post
+      gen(f.ctx, `tools/genu${i}.cjs`, rel);
+      const a = call(`x-win-${i}`, `node tools/genu${i}.cjs`, cwd);
       let detail: string;
       let ok = false;
       try {
-        await a.pre();
-        runCommand(f.ctx, "sh", `echo '// u' >> ${rel}`);
+        const pre = await a.pre();
+        runCommand(f.ctx, "sh", `node tools/genu${i}.cjs`);
         const r = await a.post();
-        ok = keysIn(r.text).includes(key(rel));
-        detail = `delivered ${keysIn(r.text).length}`;
+        ok = !keysIn(pre.text).length && keysIn(r.text).includes(key(rel));
+        detail = `Pre ${keysIn(pre.text).length}, Post ${keysIn(r.text).length}`;
       } catch (e) {
         detail = e instanceof Error ? e.message : String(e);
       }
@@ -992,7 +1007,7 @@ async function main(): Promise<void> {
       stdio: "ignore",
     });
   const plugins = [loadPlugin("new", path.resolve(values.plugin ?? path.join(ROOT, "plugin")))];
-  if (!values["no-compare"]) plugins.unshift(loadPlugin("old", buildOld(values.compare)));
+  if (!values["no-compare"]) plugins.unshift(loadPlugin(OLD, buildOld(values.compare)));
 
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
   const db = tempDb();

@@ -6,6 +6,7 @@ import {
   duplicates,
   judge,
   keysIn,
+  OLD,
   type Result,
   tally,
   via,
@@ -59,9 +60,22 @@ test("a positive passes only when Post saw its file change and its record came i
     "no comparison logged (snapshot_missing)",
   );
   assert.equal(
-    judge(result({ pre: `- ${K}`, posted: false, trial: undefined }), [K], ["src/a.ts"]),
+    judge(result({ plugin: OLD, pre: `- ${K}`, posted: false, trial: undefined }), [K], ["src/a.ts"]),
     null,
-    "a bundle with no Post hook is judged on what reached the conversation",
+    "the bundle from before the feature is judged on what reached the conversation",
+  );
+  assert.equal(
+    judge(result({ pre: `- ${K}`, posted: false, trial: undefined }), [K], ["src/a.ts"]),
+    "no Post hook ran",
+    "this bundle must run its Post even when Pre already showed the record",
+  );
+  assert.equal(
+    judge(
+      result({ pre: `- ${K}`, trial: { event: "post_shell", changed: ["src/a.ts"], error: "boom" } }),
+      [K],
+      ["src/a.ts"],
+    ),
+    "Post failed: boom",
   );
   assert.equal(
     judge(result({ post: `- ${K}` }), [K], ["src/a.ts"]),
@@ -82,6 +96,21 @@ test("a negative passes only when its file did not count as changed and Post add
     judge(n({ trial: { event: "post_shell", changed: ["src/a.ts"] } }), [K], ["src/a.ts"]),
     "seen as changed: src/a.ts",
   );
+  // A comparison that did not happen, or could not tell the file, is not "unchanged"
+  assert.equal(judge(n({ trial: undefined }), [K], ["src/a.ts"]), "no comparison logged (no trial line)");
+  assert.equal(
+    judge(n({ trial: { event: "snapshot_missing" } }), [K], ["src/a.ts"]),
+    "no comparison logged (snapshot_missing)",
+  );
+  assert.equal(
+    judge(n({ trial: { event: "post_shell", changed: [], unknown: ["src/a.ts"] } }), [K], ["src/a.ts"]),
+    "not told: src/a.ts",
+  );
+  assert.equal(
+    judge(n({ trial: { event: "post_shell", changed: [], error: "boom" } }), [K], ["src/a.ts"]),
+    "Post failed: boom",
+  );
+  assert.equal(judge(n({ posted: false, trial: undefined }), [K], ["src/a.ts"]), "no Post hook ran");
 });
 
 test("the tally counts each kind apart, and duplicates are counted per conversation", () => {

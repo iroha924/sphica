@@ -450,7 +450,16 @@ async function shellRows(f: Fixture, timeouts: Record<string, number>): Promise<
   const trial = path.join(home, ".sphica", "shell-state", "trial.jsonl");
   const lineOf = (id: string) =>
     (fs.existsSync(trial) ? fs.readFileSync(trial, "utf8").split("\n").filter(Boolean) : [])
-      .map((l) => JSON.parse(l) as { call?: string; changed?: string[]; unknown?: string[] })
+      .map(
+        (l) =>
+          JSON.parse(l) as {
+            call?: string;
+            changed?: string[];
+            unknown?: string[];
+            delivered?: string[];
+            error?: string;
+          },
+      )
       .find((l) => l.call === id);
   const limitPre = timeouts.PreToolUse ?? 5000;
   const limitPost = timeouts.PostToolUse ?? 5000;
@@ -475,6 +484,7 @@ async function shellRows(f: Fixture, timeouts: Record<string, number>): Promise<
     for (const c of [r.pre, r.post]) if (c.problem) out.push(c.problem);
     if (r.pre.text) out.push("Pre delivered for a command that names no file");
     if (!r.line) out.push("no trial line");
+    if (r.line?.error) out.push(`Post failed: ${r.line.error}`);
     if (expect && !r.post.text.includes(expect)) out.push(`missing ${expect}`);
     return out;
   };
@@ -497,14 +507,21 @@ async function shellRows(f: Fixture, timeouts: Record<string, number>): Promise<
   };
 
   fs.rmSync(cache, { recursive: true, force: true });
-  const cold = await once(touch(last));
-  const mb = ((paths.length * FILE_BYTES) / 1024 / 1024).toFixed(0);
+  // What Pre hashed is what its cache holds once it returns: files past the deadline are left out
+  let hashed = 0;
+  const cold = await once(() => {
+    for (const n of fs.existsSync(cache) ? fs.readdirSync(cache) : [])
+      hashed += Object.keys(JSON.parse(fs.readFileSync(path.join(cache, n), "utf8"))).length;
+    touch(last)();
+  });
+  const mb = (n: number) => ((n * FILE_BYTES) / 1024 / 1024).toFixed(0);
+  const lastUnknown = cold.line?.unknown?.includes(last) ?? false;
   row(
-    `cold cache, ${paths.length} files (${mb} MB hashed at Pre), unknown ${cold.line?.unknown?.length ?? "?"}`,
+    `cold cache, ${hashed} of ${paths.length} files hashed at Pre (${mb(hashed)} of ${mb(paths.length)} MB), unknown ${cold.line?.unknown?.length ?? "?"}`,
     [cold.pre.ms],
     [cold.post.ms],
-    // Past the deadline the rest stay unknown, so the record may not come; the hook must still answer in time
-    problemsOf(cold, cold.line?.unknown?.length ? null : (f.keys.last ?? "")),
+    // Only a changed file left unknown by the deadline may go without its record; the hook must still answer in time
+    problemsOf(cold, lastUnknown ? null : (f.keys.last ?? "")),
   );
 
   const warm = { pre: [] as number[], post: [] as number[], problems: [] as string[] };
@@ -530,7 +547,14 @@ async function shellRows(f: Fixture, timeouts: Record<string, number>): Promise<
     `every watched file changed (${all.line?.changed?.length ?? "?"} changed, ${all.line?.unknown?.length ?? "?"} unknown)`,
     [all.pre.ms],
     [all.post.ms],
-    [...problemsOf(all, null), ...(told === paths.length ? [] : [`${told} of ${paths.length} paths told`])],
+    [
+      ...problemsOf(all, null),
+      ...(told === paths.length ? [] : [`${told} of ${paths.length} paths told`]),
+      // Records sit on every changed file, so a Post that compared but brought none failed after the comparison
+      ...((all.line?.changed?.length ?? 0) && !all.line?.delivered?.length
+        ? ["no record brought for the changed files"]
+        : []),
+    ],
   );
   return rows;
 }
