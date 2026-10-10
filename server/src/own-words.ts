@@ -11,7 +11,7 @@
 // The quotation rule reads a message's own markup: block quotes, fenced code, and quotation marks on one line. It is an approximation:
 // a paste with no marks, an indented code block, nested marks, and escapes are not told apart.
 
-export const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 /** As much of a source row as tells whose words it holds. */
 export type Said = {

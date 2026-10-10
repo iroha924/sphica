@@ -16,7 +16,7 @@ import {
   UNIT_KINDS,
   WORK_STATUSES,
 } from "./knowledge.ts";
-import { locate, MAINTAINERS, type OwnWords, ownWords, refused } from "./own-words.ts";
+import { locate, type OwnWords, ownWords, refused } from "./own-words.ts";
 import { inline } from "./panel.ts";
 import { firstState, type Hint, type Reconciled, reconcile } from "./reconcile.ts";
 import {
@@ -173,7 +173,11 @@ type Planned = {
   /** Set by glean when nothing but the owner's present words backs the unit */
   unsourced?: boolean;
   evidence: EvidenceSpan[];
-  options: { input: UnitInput["options"][number]; evidence: EvidenceSpan[]; reconsider: Span | null }[];
+  options: {
+    input: UnitInput["options"][number];
+    evidence: EvidenceSpan[];
+    reconsider: OwnWords<"owner_statement"> | null;
+  }[];
   adoption: OwnWords<"owner_statement" | "explicit" | "agent">[];
   anchors: (UnitInput["anchors"][number] & { path: string; observation: number | null })[];
   aliases: string[];
@@ -183,7 +187,7 @@ type Planned = {
 };
 
 type FieldType = (typeof FIELD_TYPES)[number];
-type PlannedDef = Span & Omit<z.infer<typeof FieldDef>, "quote">;
+type PlannedDef = OwnWords<"owner_statement"> & Omit<z.infer<typeof FieldDef>, "quote">;
 
 /** errors refuse the save; problems name parts left out or units that stay candidates or quarantined, and the save goes ahead. */
 export type Checked = {
@@ -374,21 +378,21 @@ export async function checkRecord(
     if (new Set(d.kinds).size !== d.kinds.length) errors.push(`${at}: kinds appear twice`);
     const s = sources.get(Number(d.quote.source.slice(1)));
     if (!s) continue;
-    // A field is the owner's choice of what to track: the AI proposing one is not a definition
-    if (s.author_kind !== "owner") {
+    // A field is the owner's choice of what to track: the AI proposing one, or words the owner passes on, is not a definition
+    const said = ownWords(s, d.quote.quote, "owner");
+    if (refused(said)) {
       errors.push(
-        `${at}: the quote must be the owner's; ${d.quote.source} is by ${s.author_login ?? s.author_kind}`,
+        said.refused === "author"
+          ? `${at}: the quote must be the owner's; ${d.quote.source} is by ${s.author_login ?? s.author_kind}`
+          : said.refused === "missing"
+            ? `${at}: quote not found in ${d.quote.source}: "${head(d.quote.quote, 80)}"`
+            : `${at}: the quote in ${d.quote.source} is quoted or in a code block, so it is someone else's words; quote the owner's own`,
       );
-      continue;
-    }
-    const span = locate(s.text, d.quote.quote);
-    if (!span) {
-      errors.push(`${at}: quote not found in ${d.quote.source}: "${head(d.quote.quote, 80)}"`);
       continue;
     }
     defined.set(d.name, { type: d.type, enum: d.enum ?? null, kinds: d.kinds });
     const { quote: _, ...rest } = d;
-    fieldDefs.push({ ...rest, source: s.id, start: span[0], end: span[1] });
+    fieldDefs.push({ ...rest, ...said });
   }
   const names = record.field_defs.map((d) => d.name);
   for (const n of new Set(names.filter((n, i) => names.indexOf(n) !== i)))
@@ -452,26 +456,23 @@ export async function checkRecord(
       });
     const evidence = spans(u.evidence);
     // Only the owner states a condition for reconsidering: the AI suggesting one, or someone else's words, is not the owner's condition
-    const reconsider = (o: UnitInput["options"][number]): Span | null => {
+    const reconsider = (o: UnitInput["options"][number]): OwnWords<"owner_statement"> | null => {
       const q = o.reconsider_quote;
       const s = q && sources.get(Number(q.source.slice(1)));
       if (!q || !s || o.reconsider_when === undefined) return null;
       cites.add(s.id);
-      if (s.author_kind !== "owner") {
-        errors.push(
-          `${key}: option "${head(o.text, 60)}": reconsider_quote must quote the owner; ${q.source} is by ${s.author_login ?? s.author_kind}`,
-        );
-        return null;
-      }
-      const span = locate(s.text, q.quote);
+      const said = ownWords(s, q.quote, "owner");
+      if (!refused(said)) return said;
+      const at = `${key}: option "${head(o.text, 60)}": reconsider_quote`;
       // Refused rather than quarantined: an optional condition whose words are not there should not hold back the record it sits on
-      if (!span) {
-        errors.push(
-          `${key}: option "${head(o.text, 60)}": reconsider_quote not found in ${q.source}: "${head(q.quote, 80)}"`,
-        );
-        return null;
-      }
-      return { source: s.id, start: span[0], end: span[1] };
+      errors.push(
+        said.refused === "author"
+          ? `${at} must quote the owner; ${q.source} is by ${s.author_login ?? s.author_kind}`
+          : said.refused === "missing"
+            ? `${at} not found in ${q.source}: "${head(q.quote, 80)}"`
+            : `${at} in ${q.source} is quoted or in a code block, so it is someone else's words; quote the owner's own`,
+      );
+      return null;
     };
     const options = u.options.map((o) => ({
       input: o,
@@ -491,16 +492,11 @@ export async function checkRecord(
     if (target.origin !== "trace" && (u.supersedes || u.conflicts.length)) {
       const trusted = [...u.evidence, ...u.adoption].some((q) => {
         const s = sources.get(Number(q.source.slice(1)));
-        return (
-          s &&
-          (s.kind === "session_message" ||
-            s.author_kind === "owner" ||
-            MAINTAINERS.has(s.author_association ?? ""))
-        );
+        return s !== undefined && !refused(ownWords(s, q.quote, "trusted"));
       });
       if (!trusted)
         errors.push(
-          `${key}: supersedes and conflicts from ${target.origin} need the owner's or a maintainer's words, or the owner's session`,
+          `${key}: supersedes and conflicts from ${target.origin} need the owner's or a maintainer's words, or the owner's session: words that are in the source, and not only a quotation there`,
         );
     }
 

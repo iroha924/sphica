@@ -34,14 +34,16 @@ base: main
   - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts` → 76 pass, 0 fail
   - 結果: `rg -n "quotedSpan|inlineQuoted" server/src` → 0 件
 
-- [ ] T02: 項目の定義・見直す条件・置き換えと衝突の根拠を `ownWords` に通す
+- [x] T02: 項目の定義・見直す条件・置き換えと衝突の根拠を `ownWords` に通す
   - 種別: 修正
   - 計画: S2
   - 依存: T01（`ownWords` と policy を T01 が作る）
-  - 変更: `server/src/record.ts`, `server/test/own-words-sites.test.ts`
+  - 変更: `server/src/record.ts`, `server/test/own-words-sites.test.ts`, `server/src/own-words.ts`, `server/test/extract.test.ts`
   - red: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts` → 直す前のコードで、引用の中の文による項目の定義と見直す条件が保存され、実在しない quote で trusted を通った衝突が計画に残り、テストが失敗する
   - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts test/record.test.ts` → 通る
-  - コミット: `fix(record): take field definitions, reconsider conditions, and link grounds only from own words`
+  - コミット: `fix(record): take field definitions, reconsider conditions, and link grounds from own words`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts` → 直す前のコードで 2 pass, 2 fail。「」の中の文による項目の定義に errors が出ない（空）、メンテナーが `>` で引用しただけの文を根拠にした harvest の `supersedes` に errors が出ない（空）
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts test/record.test.ts test/own-words.test.ts` → 78 pass, 0 fail（見直す条件の引用、実在しない quote による trusted も拒まれる）
 
 ## P2: glean の操作を通す
 
@@ -113,3 +115,5 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
 - 2026-10-11 / T01, T07, T08 / コミット前の検査（`check-mcp-version`）が、`server/src` を変えるコミットにはバージョンの引き上げが入っていることを求め、T01 のコミットを止めた（「Bump the npm package and the 3 plugin channel manifests to the same new version」）。バージョンを最後に上げる並びは、このリポジトリでは成り立たない / バージョンの引き上げ（0.6.47 → 0.6.48）を T01 のコミットへ移した。T01 の計画: 前の値 `S1, S2`、新しい値 `S1, S2, S8`。T01 の変更欄に 4 つのバージョンのファイルを足した。T07 の計画: 前の値 `S7`、新しい値 `S7, S9`（リリースは最後のタスクの後）。T08 は取りやめ（やることが T01 と T07 に移った）
+- 2026-10-11 / T02 / コミットの件名が、末尾の `(T02)` を足すと 102 文字になり、件名の上限（100 文字）を超える / T02 のコミット欄: 前の値 `…and link grounds only from own words`、新しい値 `…and link grounds from own words`。あわせて、`server/src/own-words.ts` の `MAINTAINERS` を外へ公開しない形にした（record.ts が使わなくなり、knip が未使用の公開として止めたため）。T02 の変更欄に `server/src/own-words.ts` を足した（前の値: 2 ファイル、新しい値: 3 ファイル）
+- 2026-10-11 / T02 / `server/test/extract.test.ts` の「glean: withdrawing the successor brings back the record it replaced…」が落ちた。発言に無い言葉だけを根拠にした後継（`supersedes` 付き）を保存して隔離を確かめていたが、置き換えの根拠が実在する言葉だけを数えるようになり、保存の前に拒まれるため / テストの 2 つの記録を「根拠は実在し、採用の引用だけが見つからない」形に変えた（隔離されることと、枠を取らないことは今までどおり確かめられる）。拒むときのメッセージに「発言の中にあり、引用だけではない言葉」と足した。T02 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）

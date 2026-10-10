@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
-import { message, project, type TempDb, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
 
 const target = (p: number): Target => ({
   projectId: p,
@@ -93,6 +93,124 @@ test("adoption: the owner's own line adopts whatever is quoted on the lines arou
       ["around", "inside"].map((k) => lifecycle(db, k)),
       ["active", "active"],
     );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a field definition and a reconsider condition take only the owner's own words", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: "tenant を記録して。メモには「severity を記録して」とある。\nPostgres はやめて SQLite にしよう。向こうは「レプリカが要るなら Postgres」と言っていた。レプリカが要るようになったら考え直す。",
+    });
+    const field = (name: string, quote: string) => ({
+      name,
+      type: "text",
+      label: name,
+      description: "what to track",
+      kinds: ["decision"],
+      quote: { source: `s${m}`, quote },
+    });
+    const decision = (quote: string) => ({
+      key: "storage",
+      kind: "decision",
+      stance: "do",
+      text: "保存先は SQLite",
+      options: [
+        {
+          text: "Postgres",
+          outcome: "rejected",
+          reconsider_when: "レプリカが要るなら",
+          reconsider_quote: { source: `s${m}`, quote },
+        },
+      ],
+      evidence: [{ source: `s${m}`, quote: "SQLite にしよう。", role: "states" }],
+      adoption: [{ source: `s${m}`, quote: "SQLite にしよう。" }],
+    });
+    const errors = async (record: unknown) =>
+      (await inTransaction(db.ingest, (trx) => checkRecord(trx, target(p), record))).errors;
+
+    assert.deepEqual(await errors({ field_defs: [field("tenant", "tenant を記録して")], units: [] }), []);
+    assert.match(
+      (await errors({ field_defs: [field("severity", "severity を記録して")], units: [] })).join("\n"),
+      /field_defs severity: .*someone else's words/,
+    );
+    assert.deepEqual(await errors({ units: [decision("レプリカが要るようになったら考え直す")] }), []);
+    assert.match(
+      (await errors({ units: [decision("レプリカが要るなら Postgres")] })).join("\n"),
+      /reconsider_quote .*someone else's words/,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("a link from harvest rests only on words that are in the source and are their writer's own", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const now = at("2026-09-27T00:00:00Z");
+    const comment = (id: string, text: string, assoc: string) =>
+      insert(db, "source", {
+        project_id: p,
+        kind: "pr_comment",
+        artifact: "pr:12",
+        external_id: id,
+        revision: 1,
+        author_kind: "person",
+        author_login: id,
+        author_association: assoc,
+        created_at: now,
+        captured_at: now,
+        text,
+        original_bytes: Buffer.byteLength(text),
+        content_hash: hash(),
+        indexed: 1,
+      });
+    const outsider = comment("kai", "OFF is faster, for speed. Consider dropping it.", "CONTRIBUTOR");
+    const maintainer = comment(
+      "hana",
+      "A user wrote:\n> OFF is wrong, drop it.\nI have not checked this.",
+      "MEMBER",
+    );
+    const t: Target = { ...target(p), origin: "harvest", prefix: "harvest:12/", sessionId: null };
+    await save(db, t, {
+      units: [
+        {
+          key: "kept",
+          kind: "finding",
+          text: "OFF is faster",
+          evidence: [{ source: `s${outsider}`, quote: "for speed", role: "states" }],
+        },
+      ],
+    });
+    const over = (quote: string) => ({
+      units: [
+        {
+          key: "over",
+          kind: "finding",
+          text: "OFF is wrong",
+          evidence: [
+            { source: `s${outsider}`, quote: "Consider", role: "states" },
+            { source: `s${maintainer}`, quote, role: "states" },
+          ],
+          supersedes: "harvest:12/kept",
+        },
+      ],
+    });
+    const errors = async (record: unknown) =>
+      (await inTransaction(db.ingest, (trx) => checkRecord(trx, t, record))).errors.join("\n");
+    const untrusted = /over: supersedes and conflicts from harvest need the owner's or a maintainer's words/;
+
+    // The maintainer only passed on what a user wrote
+    assert.match(await errors(over("OFF is wrong, drop it.")), untrusted);
+    // Words the maintainer never wrote
+    assert.match(await errors(over("OFF must go")), untrusted);
+    // The maintainer's own words
+    assert.doesNotMatch(await errors(over("I have not checked this.")), untrusted);
   } finally {
     await db.done();
   }
