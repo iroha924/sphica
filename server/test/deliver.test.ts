@@ -2750,10 +2750,8 @@ test("the records on more changed paths than SQLite takes variables are still fo
       ],
     });
     const rels = [...Array.from({ length: 40_000 }, (_, i) => `gen/f${i}.ts`), "src/dates.ts"];
-    assert.deepEqual(
-      (await anchoredRules(db.reader, p, rels)).map((u) => u.key),
-      ["trace:ext-s1/utc"],
-    );
+    const id = db.owner.prepare("select id from unit where key = 'trace:ext-s1/utc'").get()?.id;
+    assert.deepEqual(await anchoredRules(db.reader, p, rels), [Number(id)]);
   } finally {
     await db.done();
   }

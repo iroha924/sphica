@@ -312,17 +312,19 @@ const anchoredTo = (db: Reads, projectId: number, rels: string[]) =>
     .orderBy("u.id", "desc");
 
 /** The deliverable decisions and constraints anchored to any of the paths, newest first */
-export async function anchoredRules(db: Reads, projectId: number, rels: string[]) {
-  // In chunks: one shell call can change more paths than SQLite takes bound variables
-  const rows = new Map<number, Awaited<ReturnType<ReturnType<typeof anchoredTo>["execute"]>>[number]>();
-  for (let i = 0; i < rels.length; i += PATH_CHUNK)
-    for (const u of await anchoredTo(db, projectId, rels.slice(i, i + PATH_CHUNK))
-      .where("u.kind", "in", ["decision", "constraint"])
-      .execute())
-      rows.set(u.id, u);
-  return [...rows.values()].sort((a, b) => b.id - a.id);
+export async function anchoredRules(db: Reads, projectId: number, rels: string[]): Promise<number[]> {
+  // Every anchor read once and matched here: one call can change more paths than SQLite takes variables, and a query per batch of
+  // paths re-evaluates deliverability each time (16 s for 20,000 paths at 10,000 records against 21 ms for this)
+  const wanted = new Set(rels);
+  const anchors = await deliverable(db, projectId)
+    .innerJoin("unit_anchor as a", "a.unit_id", "u.id")
+    .where("a.role", "=", "applies_to")
+    .where("a.retired_at", "is", null)
+    .where("u.kind", "in", ["decision", "constraint"])
+    .select(["u.id", "a.path"])
+    .execute();
+  return [...new Set(anchors.filter((a) => wanted.has(a.path)).map((a) => a.id))].sort((a, b) => b - a);
 }
-const PATH_CHUNK = 500;
 
 /** The paths a delivery names in its lead: all of them up to three, then a count. */
 const named = (rels: string[]) =>
@@ -415,8 +417,16 @@ async function afterShellWrite(
 ): Promise<Plan> {
   const { sent } = await sinceRestart(db, session, agent);
   const seen = new Set(sent.map((r) => r.unit_id));
-  const rows = (await anchoredRules(db, projectId, rels)).filter((u) => !seen.has(u.id));
-  const shown = rows.slice(0, LIMITS.pre_edit.units);
+  const ids = (await anchoredRules(db, projectId, rels)).filter((id) => !seen.has(id));
+  const top = ids.slice(0, LIMITS.pre_edit.units);
+  const shown = top.length
+    ? await db
+        .selectFrom("unit as u")
+        .where("u.id", "in", top)
+        .select(["u.id", "u.key", "u.kind", "u.stance", "u.text"])
+        .orderBy("u.id", "desc")
+        .execute()
+    : [];
   const why = await reasons(
     db,
     shown.map((u) => u.id),
@@ -436,11 +446,11 @@ async function afterShellWrite(
     ai,
     shown.map((u) => u.id),
   );
-  const omitted = rows.length - shown.length + f.omitted;
+  const omitted = ids.length - shown.length + f.omitted;
   return {
     ...noted(f.text, f.lead, [leftOut(omitted)]),
     units: f.kept.flatMap((i) => shown[i]?.id ?? []),
-    eligible: rows.length,
+    eligible: ids.length,
     omitted,
     path: head(rels.join(" "), 500),
     reason: SHELL_WRITE,

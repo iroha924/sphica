@@ -101,6 +101,27 @@ base: main
   - 変更: `server/evals/scale/run.ts`
   - 完了条件: `node server/evals/scale/run.ts` → 温まったキャッシュで記録 1 万件のとき Pre と Post がそれぞれ 1 秒以内。空のキャッシュと大量の変化は hash したバイト数と時間が出て、期限内に終わる
   - コミット: `test(scale): time post-shell snapshots with cold and warm caches`
+  - 結果: `node server/evals/scale/run.ts` → shell の行は全サイズで問題なし（Apple M4 Pro）。記録 1 万件（20,000 ファイル）の温まったキャッシュで Pre 最大 556 ms・Post 最大 582 ms（1 秒以内）、stress 1 万件で Pre 494 ms・Post 505 ms。空のキャッシュは 1 万件で 78 MB を hash して Pre 1,674 ms、3 万件（234 MB）は期限で 16,872 件を unknown にして Pre 3,657 ms・Post 3,595 ms。全部を変える呼び出しの Post は 1 万件で 2,685 ms、3 万件で 3,678 ms（14,872 changed・45,128 unknown）で、どれも 5 秒の内に答えた。最初の計測で Post が 5 秒で打ち切られたのを T12 で直した。終了コードは 1 で、原因は review の 2 行（typed と Skill）が全 fixture で記録を出さないこと。origin/main（5d412029）でも同じく失敗するので、この PR の変更によるものではない
+
+- [x] T12: 変わったパスの記録を 1 回の問い合わせで突き合わせる（T05 の計測で見つけた時間の問題）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T10（直す対象の分割の問い合わせ）
+  - 変更: `server/src/deliver.ts`, `server/test/deliver.test.ts`
+  - red: `node server/evals/scale/run.ts` → 記録 1 万件で全部を変える呼び出しの Post が 5,006 ms で打ち切られる（変わったパス 2 万件を 500 件ずつ配れる記録の条件付きで問い合わせ、それだけで 16.6 秒）
+  - 完了条件: `node server/evals/scale/run.ts` → 記録 1 万件で全部を変える呼び出しの Post が 5 秒の内に答え、変わったパスの数が watched のパスの数と合う
+  - コミット: `fix(deliver): match changed paths against deliverable anchors in one query`
+  - 結果: red を直す前のコードで実測した（Post 5,006 ms で打ち切り、問い合わせだけで 2 万パス 16,640 ms・500 パス 418 ms）。直した後は 2 万パス 22 ms・500 パス 20 ms、scale の Post は 2,685 ms。本文の行は表示する 5 件分だけ読む。`--test-name-pattern=\"shell call|more changed paths\" test/deliver.test.ts` → 5 pass。`bun run verify` → exit 0
+
+- [ ] T13: harness の大文字小文字の行が、区別しないファイルシステムで src を消す不具合を直す（Windows の CI で見つけた）
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（直す対象の harness）
+  - 変更: `server/evals/post-write/shell-write-harness.ts`
+  - red: `gh run view 38016800986 --job 114108761687 --log-failed` → 大文字小文字の行の後始末で `SRC` を消すと、区別しないファイルシステムでは `src` そのものが消え、後の Windows のパスの形の行が ENOENT で落ちる
+  - 完了条件: `gh pr checks 308` → windows が pass（harness が最後まで流れて 0 で終わる）
+  - コミット: `fix(eval): keep src when the letter-case row cleans up on a case-insensitive file system`
+  - 結果: red は PR の Windows の CI のログで確かめた（固定のケースは 96 / 96 で通り、`src\\u0.ts` の ENOENT で落ちた）。区別しないときは `src/Case1.ts` を戻すだけにした。macOS で `node server/evals/post-write/shell-write-harness.ts --no-compare` → exit 0。Windows の CI は push の後に確かめる
 
 ## P4: 実機と出荷
 
