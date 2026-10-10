@@ -59,6 +59,13 @@ function reach(covDir) {
     .filter((f) => f.endsWith(".ts"))
     .map((f) => `src/${f.split(path.sep).join("/")}`);
   const missing = unmeasured(`${r.stdout}${r.stderr}`, sources, TYPES_ONLY);
+  if (!missing) {
+    console.error(
+      "the test output does not hold exactly one coverage report, so which files the thresholds counted cannot be told. A test may have printed one.",
+    );
+    process.exitCode = 1;
+    return;
+  }
   if (missing.length) {
     console.error(
       `the coverage report does not list ${missing.length} of ${sources.length} files in server/src, so the thresholds did not count them:\n  ${missing.join("\n  ")}`,

@@ -11,7 +11,7 @@ const LICENSE_ID = "SPDX-License-Identifier: MIT";
 
 /** The comment marker of a source file by its path, or null when the file is not one the header goes in. */
 export function commentMarker(file) {
-  if (/\.(?:ts|mts|mjs|js)$/.test(file)) return "//";
+  if (/\.(?:[cm]?[jt]s|[jt]sx)$/.test(file)) return "//";
   if (/\.sql$/.test(file)) return "--";
   return null;
 }
@@ -47,19 +47,21 @@ export function withHeader(source, marker) {
 }
 
 /**
- * The source files under the given directories of root, as repository paths. Symbolic links are left out, files and directories alike:
- * a link is not a source file, and writing a header through one would change whatever it points at.
+ * The source files of the checkout at root, as repository paths: every one, wherever it sits, so a new directory cannot go unchecked.
+ * Symbolic links are left out, files and directories alike (a link is not a source file), and so is what `skip` matches: a
+ * directory's path with a trailing slash, or a file's path.
  */
-export function sourceFiles(root, dirs, skip) {
+export function sourceFiles(root, skip) {
   const found = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
-      const rel = `${dir}/${entry.name}`;
-      if (entry.isSymbolicLink() || entry.name === "node_modules") continue;
-      if (entry.isDirectory()) walk(rel);
-      else if (entry.isFile() && commentMarker(rel) && !skip.test(rel)) found.push(rel);
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink() || entry.name === ".git" || entry.name === "node_modules") continue;
+      if (entry.isDirectory()) {
+        if (!skip.test(`${rel}/`)) walk(rel);
+      } else if (entry.isFile() && commentMarker(rel) && !skip.test(rel)) found.push(rel);
     }
   };
-  for (const dir of dirs) if (fs.existsSync(path.join(root, dir))) walk(dir);
+  walk("");
   return found.sort();
 }

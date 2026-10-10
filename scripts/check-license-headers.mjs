@@ -2,21 +2,22 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Checks that every source file starts with the copyright and license lines. `--fix` adds them where they are missing.
-// The files are found by walking the source directories, not by asking git: git would run commands the repository's configuration names.
-// server/test/fixtures/*.sql are frozen copies of old schemas that the migration tests compare against, so they are left as they are.
+// Checks that every source file starts with the copyright and license lines. It only reads: nothing here writes a file, so nothing a
+// checkout holds (a link, a file swapped in while it runs) can make it change one.
+// The files are found by walking the checkout, not by asking git: git would run commands the repository's configuration names.
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { commentMarker, headerProblem, sourceFiles, withHeader } from "./lib/license-header.mjs";
+import { commentMarker, headerLines, headerProblem, sourceFiles } from "./lib/license-header.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const fix = process.argv.includes("--fix");
-const DIRS = ["server/src", "server/test", "server/evals", "scripts", "db"];
-const FROZEN = /^server\/test\/fixtures\/.*\.sql$/;
+// What .gitignore keeps out of the repository (build output and tool state), and the frozen copies of old schemas that the migration
+// tests compare against, which stay as they are.
+const SKIP =
+  /^(?:plugin\/dist\/|plugin\/db\/|\.build\/|\.review-tmp\/|\.serena\/|server\/migrate-[^/]*\.ts$|server\/test\/fixtures\/[^/]*\.sql$)/;
 
-const files = sourceFiles(root, DIRS, FROZEN);
+const files = sourceFiles(root, SKIP);
 if (files.length === 0) {
   console.error("license headers: no source files found. Run this from a checkout of the repository");
   process.exit(1);
@@ -24,19 +25,15 @@ if (files.length === 0) {
 
 let count = 0;
 for (const file of files) {
-  const full = path.join(root, file);
-  const source = fs.readFileSync(full, "utf8");
-  const marker = commentMarker(file);
-  const problem = headerProblem(source, marker);
+  const problem = headerProblem(fs.readFileSync(path.join(root, file), "utf8"), commentMarker(file));
   if (!problem) continue;
-  if (fix) fs.writeFileSync(full, withHeader(source, marker));
-  else console.error(`${file}: ${problem}`);
+  console.error(`${file}: ${problem}`);
   count++;
 }
-if (fix) console.log(`license headers: added to ${count} of ${files.length} source files`);
-else if (count) {
+if (count) {
   console.error(
-    `\n${count} file(s) lack the header. Add it with \`node scripts/check-license-headers.mjs --fix\``,
+    `\n${count} file(s) lack the header. Start each with these two lines, after the shebang line when there is one (\`--\` in place of \`//\` in SQL):\n  ${headerLines("//").join("\n  ")}`,
   );
   process.exit(1);
-} else console.log(`license headers: ${files.length} source files`);
+}
+console.log(`license headers: ${files.length} source files`);
