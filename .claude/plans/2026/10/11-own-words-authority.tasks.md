@@ -65,14 +65,16 @@ glean の 7 つの操作が、引用の中だけにある言葉を理由や採�
 
 引用が見つからない記録や出典の無い記録が持つ衝突のリンクで、正常な記録の自動配信が止まらなくなる。
 
-- [ ] T04: 配信の衝突の検索と read の説明で、隔離された記録のリンクを効かせない
+- [x] T04: 配信の衝突の検索と read の説明で、隔離された記録のリンクを効かせない
   - 種別: 修正
   - 計画: S4
   - 依存: なし
-  - 変更: `server/src/deliver.ts`, `server/src/read.ts`, `server/test/deliver.test.ts`, `server/test/read.test.ts`
-  - red: `node --import ./test/isolate-home.ts --test test/deliver.test.ts` → 直す前のコードで、隔離された記録から衝突のリンクを張られた正常な記録が配信の対象から外れ、テストが失敗する
-  - 完了条件: `node --import ./test/isolate-home.ts --test test/deliver.test.ts test/read.test.ts` → 通る
+  - 変更: `server/src/deliver.ts`, `server/src/read.ts`, `server/test/quarantined-conflict.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/quarantined-conflict.test.ts` → 直す前のコードで、隔離された記録から衝突のリンクを張られた正常な記録が配信の対象から外れ、テストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/quarantined-conflict.test.ts test/deliver.test.ts test/read.test.ts` → 通る
   - コミット: `fix(deliver): let a conflict from a quarantined record hold nothing back`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/quarantined-conflict.test.ts` → 直す前のコードで 0 pass, 1 fail。隔離された記録と衝突のリンクがある正常な記録 3 件（finding、持ち主が採用した decision、隔離された記録を名指しした側）が、どれも配信の対象から外れている（actual `[false, false, false, true]`）
+  - 結果: `node --import ./test/isolate-home.ts --test test/quarantined-conflict.test.ts test/deliver.test.ts test/read.test.ts test/deliver-codex.test.ts test/delivery-view.test.ts` → 82 pass, 0 fail（現在と asOf の両方、両方向。正常な記録どうしの衝突は今までどおり両方を止める。read の説明は配信の結果と一致）
 
 ## P4: 既存の行の監査と、付け忘れを止める検査
 
@@ -121,3 +123,4 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
 - 2026-10-11 / T02 / コミットの件名が、末尾の `(T02)` を足すと 102 文字になり、件名の上限（100 文字）を超える / T02 のコミット欄: 前の値 `…and link grounds only from own words`、新しい値 `…and link grounds from own words`。あわせて、`server/src/own-words.ts` の `MAINTAINERS` を外へ公開しない形にした（record.ts が使わなくなり、knip が未使用の公開として止めたため）。T02 の変更欄に `server/src/own-words.ts` を足した（前の値: 2 ファイル、新しい値: 3 ファイル）
 - 2026-10-11 / T02 / `server/test/extract.test.ts` の「glean: withdrawing the successor brings back the record it replaced…」が落ちた。発言に無い言葉だけを根拠にした後継（`supersedes` 付き）を保存して隔離を確かめていたが、置き換えの根拠が実在する言葉だけを数えるようになり、保存の前に拒まれるため / テストの 2 つの記録を「根拠は実在し、採用の引用だけが見つからない」形に変えた（隔離されることと、枠を取らないことは今までどおり確かめられる）。拒むときのメッセージに「発言の中にあり、引用だけではない言葉」と足した。T02 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
 - 2026-10-11 / T03 / `server/test/extract.test.ts` の「glean: the owner's words retire an anchor…」が落ちた。検査を通った結果の入力（`input.source`）を AI の返事にすり替えて保存し、schema のトリガーが拒むことを確かめていたが、保存が入力を読み直さず確かめ済みの言葉を使うようになり、すり替えが保存に届かなくなったため / すり替える対象を確かめ済みの言葉（`said`）に変えた。型を無視して偽造しても schema が拒むことを、今までどおり確かめる。T03 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
+- 2026-10-11 / T04 / テストを既存の `deliver.test.ts` と `read.test.ts` へ足す予定だったが、配信と read の一致を 1 つの場面で確かめるので、独立したファイルにした / T04 の変更欄: 前の値 `server/src/deliver.ts`, `server/src/read.ts`, `server/test/deliver.test.ts`, `server/test/read.test.ts`、新しい値 `server/src/deliver.ts`, `server/src/read.ts`, `server/test/quarantined-conflict.test.ts`。red と完了条件のコマンドも、そのファイルを指す形に直した。出典の無い（unsourced）記録は同じ条件式で扱われるが、テストの場面は隔離（quarantined）だけ
