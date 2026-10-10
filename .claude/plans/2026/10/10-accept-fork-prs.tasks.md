@@ -150,3 +150,4 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / PR #310 / GitHub の Codex が head 1b302e3f をレビューした。指摘 1 件（P1）: 手順 7・8 の照合と `gh pr merge --match-head-commit` は head しか見ないので、PR の作者が承認の後に base のブランチを変えると、承認した head が読んでいない base へ merge される / 手順を読んで確かめ、修正タスク T08 を足した。CI は 1b302e3f で全項目 pass
 - 2026-10-10 / T08 / コミット b23fe65a を Codex がレビューした（新しい会話、high）。指摘 2 件: P1（最後の照合と merge の間に PR の作者が base を変えられる。merge の mutation は head しか受け取らない）、P2（base が変わっても head が同じなら、手順 5 が古い GitHub の Codex のレビューを使える）/ どちらも読んで確かめた。照合を足す直しを 2 回重ねても同じ種類の指摘が出たので、PR の作者が変えられるものに依存しない形（直接 merge しない）へ作り直す修正タスク T09 を足した
 - 2026-10-10 / 設定 / 持ち主の選択で、fork の PR の workflow の承認を `all_external_contributors` に変えた（読み戻して確認）。CONTRIBUTING とスキルの「初めての人だけ」を「毎回」に直した（T09 のコミットに含む）
+- 2026-10-10 / T09 / commit 992d45fe was reviewed by Codex (new conversation, high): no findings. It confirmed by reading that later changes to the fork's pull request cannot change the head taken in or where it lands
