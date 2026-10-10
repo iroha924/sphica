@@ -94,7 +94,7 @@ base: main
   - 完了条件: `node server/evals/post-write/shell-write-harness.ts` → 両ホストの形で正例 40 件中 40 件が届き、負例とメタデータだけの行は追加 0、別に数える行と限界の行の件数と新旧比較の表が出る。`cd server && node --import ./test/isolate-home.ts --test test/shell-write-harness.test.ts` → harness 自身が既知の結果を正しく数える
   - コミット: `test(eval): check post-shell delivery on fixed shell commands for both hosts`
   - 結果: `node server/evals/post-write/shell-write-harness.ts` → exit 0（macOS）。正例 80 / 80（shell の 40 件 × 両ホスト。届いた経路は Pre が名指して先に届けたものと Post のものがあり、全件で Post が変化として見た）、負例 20 / 20（変化として見ず、Post は何も足さない）、別に数える行（git checkout・stash・restore、Biome）は 8 / 8 が変化として見え、Post で届いたのは 2。限界の行は background の書き込みが次の呼び出しでも見えないことと、署名を変えない変化はユーザー空間から再現できない（書けば ctime が動く）ことを出す。並行 3 行、控えの欠けと期限切れ、ロック中（ログなしで届く）、試用のログを書けない、サブディレクトリの cwd、大文字小文字、外へ出る symlink がすべて期待どおり。1,000 ファイル・63 MB の空のキャッシュで Pre 163 ms・Post 92 ms、全部を変える呼び出しで Post 235 ms（期限に当たらず unknown 0）。main との比較: 正例に届いたのは main 58 / 80、作業ブランチ 80 / 80、会話内の重複はどちらも 0、表示した記録 76 → 99、文字数 39,508 → 52,666。`cd server && node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-write-harness.test.ts` → 4 pass。Windows のパスの形と PowerShell の正例は Windows の CI で流す（このコミットの時点では未実行）。`bun run verify` → exit 0
-- [ ] T05: scale の計測に Pre と Post を足す（実ファイルを持つ fixture、空と温まったキャッシュ、大量の変化）
+- [x] T05: scale の計測に Pre と Post を足す（実ファイルを持つ fixture、空と温まったキャッシュ、大量の変化）
   - 種別: 追加
   - 計画: S3
   - 依存: T02（Pre と Post の処理が要る）
