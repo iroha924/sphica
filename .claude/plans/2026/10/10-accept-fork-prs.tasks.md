@@ -94,6 +94,21 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
   - 結果: `rg -c "closed without review" README.md` → 0 件。`rg -c "レビューせずに閉じ" README.ja.md` → 0 件
   - 結果: `review-shipping` → 出荷を止める指摘なし。pack した 0.6.45 の README.md がルートと同じ内容で、`node scripts/check-tarball.mjs <tgz>` が通ったという報告（plan の完了条件 A3 で自分でも流す）
 
+## P3: 全差分のレビューの指摘を直す
+
+- [x] T07: 全差分のレビューの指摘を直す（main が先にリリースしたときは、承認の前にコントリビューターが main を取り込んでバージョンを上げ直す）
+  - 種別: 修正
+  - 計画: S1, S4
+  - 依存: T04（レビューの対象が T04 までの全差分）
+  - 変更: `CONTRIBUTING.md`, `.claude/skills/fork-pr/SKILL.md`
+  - red: `rg -c "the maintainer adjusts the number when taking your change in" CONTRIBUTING.md` → 1（待てばメンテナーが直すと案内している）。`node scripts/check-mcp-version.mjs --base HEAD`（README.md を 1 行変えて stage し、バージョンは base と同じ）→ exit 1（この検査は verify より前にあるので、案内どおり待つと fork の PR ではテストが一度も走らない）
+  - 完了条件: `rg -c "the maintainer adjusts the number when taking your change in" CONTRIBUTING.md` → 0 件。`rg -c "merge .main. into your branch and raise the four again" CONTRIBUTING.md` → 1。`rg -c "whose .check. jobs have not passed" .claude/skills/fork-pr/SKILL.md` → 1。`bun run check` → exit 0
+  - コミット: `fix(docs): have the contributor re-bump when main releases before approval`
+  - 結果: red: `rg -c "the maintainer adjusts the number when taking your change in" CONTRIBUTING.md` → 1
+  - 結果: red: `node scripts/check-mcp-version.mjs --base HEAD` → exit 1（README.md に 1 行足して stage し、バージョンは据え置いた状態で流した。確かめた後に stage と変更を戻した）
+  - 結果: `rg -c "the maintainer adjusts the number when taking your change in" CONTRIBUTING.md` → 0 件。`rg -c "merge .main. into your branch and raise the four again" CONTRIBUTING.md` → 1。`rg -c "whose .check. jobs have not passed" .claude/skills/fork-pr/SKILL.md` → 1
+  - 結果: `bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
@@ -104,3 +119,5 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / T04 / `review-shipping` の指摘（低）: README の CONTRIBUTING.md へのリンクは、リリースの run が npm へ公開してから PR を merge するまでの数分、main にファイルが無いので 404 になる。merge で直る / 受け入れて PR 本文に書く（リンクを main 以外へ向けると、merge の後に書き換えが要る）
 - 2026-10-10 / README の文面 / 独立のレビュー（prose-reviewer と Codex、同じ依頼）。Codex: 「どの PR も読む」「レビューされずに入らない」は確かめた事実より広い約束（不合格 1 件）。prose-reviewer: 日本語版の誘いの重複（軽微 1 件）/ どちらも直した。任意の提案のうち、主語を the maintainer に揃える・リンクの説明にコミットの決まりを足す・箇条書きの太字を既存の書き方に揃える、を採った
 - 2026-10-10 / T04 / チェックと結果行を付ける script が失敗したのに気付かずコミットした（コミットの条件に script の成否を入れていなかった）/ push の前だったので、同じコミットを amend してチェックと結果行を入れた
+- 2026-10-10 / 全差分 / `main..3d70fec6` を Codex がレビューした（新しい会話、high）。指摘 1 件（P2）: main が同じバージョンを先にリリースすると、fork の PR の CI はバージョンの検査で verify より前に止まる。CONTRIBUTING は「取り込むときにメンテナーが直す」と案内し、スキルは承認の後で直す手順だったので、承認の前にテストが走らない / 再現して受け、修正タスク T07 を足した。README の英語版と日本語版の一致、4 か所のバージョンの一致は指摘なし
+- 2026-10-10 / plan / 方針の「取り込むときに main が進んでいて番号が重なったら、メンテナーが別コミットで直す」は、承認の後にリリースが入った場合だけに狭めた（T07）。承認の前に重なった場合はコントリビューターが上げ直す。合意した「コントリビューターもバージョンを上げる」の内側

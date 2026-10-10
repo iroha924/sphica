@@ -43,7 +43,7 @@ A change to what ships (the MCP servers, the CLI, the hooks, the plugin Skills, 
 - `plugin/.codex-plugin/plugin.json`
 - the `version` of the npm source in `.claude-plugin/marketplace.json`
 
-The commit hook and CI tell you when a change needs this. If `main` has released in the meantime, the maintainer adjusts the number when taking your change in.
+The commit hook and CI tell you when a change needs this. If `main` releases while your pull request is open, CI stops at the version check: merge `main` into your branch and raise the four again, one patch above the new release.
 
 Changes to docs that do not ship, tests, and development scripts need no version change.
 

@@ -39,7 +39,7 @@ gh api repos/iroha924/sphica/pulls/<N> --jq '.head.sha, .base.sha, .head.repo.fu
    - dependencies and how they are fetched: `package.json`, `server/package.json`, `server/bun.lock`, `bunfig.toml` at any depth, `.npmrc`, `renovate.json`
 
    The paths are examples of each kind, not the whole list: a new file that does the same job counts.
-4. **CI.** The owner approves the workflow run of a first-time contributor after step 3. A red check on a fork's pull request means not verified yet.
+4. **CI.** The owner approves the workflow run of a first-time contributor after step 3. A red check on a fork's pull request means not verified yet. When `main` released after the fork branched, CI stops at the version check before it runs the tests: ask the contributor to merge `main` and raise the version again, then start over from step 1 with the new head. Do not ask for the owner's approval on a head whose `check` jobs have not passed.
 5. **Codex review.** Use GitHub's Codex review only if it reviewed the pinned head: `gh api repos/iroha924/sphica/pulls/<N>/reviews --jq '.[] | {user: .user.login, commit_id}'` must show its `commit_id` equal to the pinned head. Otherwise review the pinned diff locally, without a checkout:
 
    ```bash
@@ -55,7 +55,7 @@ gh api repos/iroha924/sphica/pulls/<N> --jq '.head.sha, .base.sha, .head.repo.fu
 7. **The owner approves.** Run the pin command first. Ask only if the head is still the one in the step 6 comment, and name that commit in the question.
 8. **Land it.** Run the pin command once more; go back to step 1 if the head moved. Then, by the release kind of the changed paths (`scripts/lib/release-scope.mjs`):
    - `none`: merge with `gh pr merge <N> --merge --match-head-commit <head sha>`, which refuses when the head is no longer the approved one. Do not merge from the pull request page: the button merges whatever the head is at that moment.
-   - `plugin`: releases are not cut from a fork's pull request. Run `git fetch origin pull/<N>/head`, check `git rev-parse FETCH_HEAD` against the pinned head, and create a branch in this repository at it (`git switch -c <branch> <head sha>`), with no cherry-pick and no squash, so the contributor's commits stay as they are. Merge `main` into it if `main` has moved, adjust the version in a separate commit if the number is taken, and open the release pull request with `Refs #<N>` in its body. From here the usual steps apply (the `codex-review` and `plugin-release` Skills, the `review-shipping` reviewer), and the body carries the review record as usual.
+   - `plugin`: releases are not cut from a fork's pull request. Run `git fetch origin pull/<N>/head`, check `git rev-parse FETCH_HEAD` against the pinned head, and create a branch in this repository at it (`git switch -c <branch> <head sha>`), with no cherry-pick and no squash, so the contributor's commits stay as they are. Merge `main` into it if `main` has moved, adjust the version in a separate commit if a release took the number after the approval, and open the release pull request with `Refs #<N>` in its body. From here the usual steps apply (the `codex-review` and `plugin-release` Skills, the `review-shipping` reviewer), and the body carries the review record as usual.
 
 ## Not yet observed
 
