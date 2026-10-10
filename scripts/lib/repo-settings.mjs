@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Repository settings a release relies on that only an admin can read, so release.yml's GITHUB_TOKEN cannot check them.
 // release:plan and release:status read them locally with the owner's gh and report each one as on, off, or unknown.
 

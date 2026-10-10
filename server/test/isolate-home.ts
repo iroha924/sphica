@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Loaded before every test file (the test script's --import): HOME and the temp directory move to a fresh directory of this process, so
 // no test reaches the owner's ~/.sphica (Sphica keeps its isolated git directories there), and HOME's .sphica is apart from the temp
 // directory, as Sphica requires before it compares a work tree.

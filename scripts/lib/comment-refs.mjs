@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Finds comments that point at issues, pull requests, or plan files instead of stating the reason.
 
 import { commentLines } from "./english.mjs";

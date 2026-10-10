@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What reached each Claude Code conversation, read from its transcript rather than Sphica's delivery log (which is pruned, and misses a
 // delivery whose log could not be written): the hook contexts Sphica added, parsed to exact record keys, with the calls, results, human
 // prompts, and compactions around them in line order. Also fixes the inputs a saved result was computed from.

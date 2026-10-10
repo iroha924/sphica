@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Rows revision 5 cannot take and the migration must not change on its own. `sphica init` runs this first, inside the same transaction,
 -- and stops with every row listed when there is any; nothing is changed.
 

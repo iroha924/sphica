@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Ledger of call sites that run SQL. Names the ones the checks do not reach as `file:line`.
 //
 // **Line numbers are never stored.** Both the static scan and the observation come from the same working tree at run time. Only

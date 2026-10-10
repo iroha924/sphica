@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Earlier owner messages against real SQLite: what records quote each one, whether a decision was recorded, the same turn as context,
 // and a matter asked across sessions with no recorded decision.
 import "./isolate-home.ts";

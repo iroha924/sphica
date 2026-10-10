@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Finds Japanese text in the source of files that must be written in English.
 // Tokens come from js-tokens, so a `//` inside a string or a multi-line template is read correctly.
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What status reports: captured and extracted counts, sessions still waiting for trace, and work in progress.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

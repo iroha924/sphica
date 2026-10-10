@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Grades one evaluation loop blind: each row goes to Codex with only the task, answer, and patch, through grade.schema.json; finished
 // calls are kept in grades.checkpoint.json so a rerun grades only what it lacks. --probe instead shows what the grader cannot read.
 // Run: node evals/cloud/grade.ts --loop <build dir>/loop.json [--second claude|none] [--probe]

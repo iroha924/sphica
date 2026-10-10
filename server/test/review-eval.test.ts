@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The review evaluation's fixture and expected verdicts: every record a case expects is the set review_select selects for its diff, so a
 // run is graded on the records it was asked about. The pinned Biome is checked on the fixture's files before any drafted check is judged by it.
 import "./isolate-home.ts";

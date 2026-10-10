@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 11 → 12 of generation 2: glean keeps the owner's words that retired or moved an anchor (unit_anchor_retirement). Anchors
 -- retired before it have no reason row; nothing is inferred for them. Every statement is the same as in the schema at revision 12.
 

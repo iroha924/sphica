@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks a merged release and creates its GitHub Release from the notes recorded before approval (release.yml's finish job).
 // --notes-digest --pull <N> prints that record in prepare; --dry-run checks the latest published release and writes nothing.
 // The arguments and checks are in .agents/skills/plugin-release/SKILL.md (Shipping steps 5 and 8). Needs GH_TOKEN and GITHUB_REPOSITORY.

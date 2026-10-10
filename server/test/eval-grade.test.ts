@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The evaluation's structured grading: grades and Codex answers are counted only when they match their fixed shapes exactly,
 // and anything else is kept apart with the reason rather than read as a score or as "nothing found".
 import "./isolate-home.ts";

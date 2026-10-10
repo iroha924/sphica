@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checking a reviewer's verdicts. Kept apart from review.ts so the delivery hook, which selects records for review, does not
 // bundle zod.
 

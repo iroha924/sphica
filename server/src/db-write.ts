@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Writing connections (owner, ingest, capture, forget). **Never imported from MCP or search** (scripts/check-architecture.mjs).
 // Connection setup order is fixed: open → defensive and pragmas → the tokenizer function → authorizer.
 

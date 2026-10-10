@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Measures how long the hook bundles take to start: run directly (as an exec-form hook does) and through the shell a shell-form
 // hook uses (PowerShell on Windows without Git Bash, sh elsewhere). Prints medians; it never fails on the numbers.
 //

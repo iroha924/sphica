@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The read fence every evaluation Codex starts with: the profile its CODEX_HOME selects, what it denies, the digest that tells one policy
 // from another across machines, and the lock that keeps two fenced Codex processes from reading each other's checkout.
 import "./isolate-home.ts";

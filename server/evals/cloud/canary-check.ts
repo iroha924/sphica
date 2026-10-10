@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // How the canary's runs are judged before any evaluation run starts. Every check needs evidence in the stream or the receipts: an attempt
 // that was not made, or a log that is missing, fails the canary rather than passing it.
 import path from "node:path";

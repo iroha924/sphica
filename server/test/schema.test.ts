@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Whether the constraints and triggers in db/schema.sql refuse what they should and accept what they should.
 // Writes use the owner connection (testing the schema itself, not the authorizer); the capture views are tested through their triggers.
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What a shell call changed among the files records are anchored to: each file's content hash before and after the call. Hashes are
 // cached per checkout under the lstat signature they were read with, so a call re-reads only files whose signature moved. Changes that
 // keep the whole signature are not seen, and neither are writes a background command makes after its hook ran.

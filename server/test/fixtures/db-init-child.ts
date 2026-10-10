@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // A second `sphica init` for the race test, on a file system without hard links: creates the database at file, tells the parent when
 // the install lock is held, and on success writes its own project row so the test can see whose database survived.
 import fs from "node:fs";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The successor rules as pure cases: each names the review finding or design point whose input it replays.
 
 import "./isolate-home.ts";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Harvest's read of a pull request and how it is stored: what each source keeps, new revisions for edited text, and the closed issues.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

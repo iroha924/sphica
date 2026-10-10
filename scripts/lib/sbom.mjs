@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks that the SBOM (CycloneDX) lists every bundled dependency. The source of truth is the table in THIRD_PARTY_NOTICES.md
 // (built from node_modules by scripts/third-party-notices.mjs). Missing or extra entries both misstate what ships.
 

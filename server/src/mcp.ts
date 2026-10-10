@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
 
 // MCP server that lets Claude Code and Codex look up past implementation and decisions. **The database is read only** (the reader connection, sqlite.ts).
 // **Responses are text content only.** With structuredContent, neither host passes the text to the model,

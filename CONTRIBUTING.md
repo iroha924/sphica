@@ -2,9 +2,12 @@
 
 Thanks for wanting to help. Small changes are as welcome as large ones, and you do not need to ask before fixing a typo or a broken example.
 
+Everyone taking part follows the [code of conduct](https://github.com/iroha924/sphica/blob/main/CODE_OF_CONDUCT.md).
+
 ## Before you start
 
 - For a larger change, or one that changes behavior, open an issue first and say what you have in mind. Agreeing on the direction early saves you from writing code that cannot go in.
+- Looking for somewhere to start? Issues labeled [good first issue](https://github.com/iroha924/sphica/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) are small and self-contained.
 - Report vulnerabilities privately, as [SECURITY.md](https://github.com/iroha924/sphica/blob/main/SECURITY.md) describes, not in an issue or a pull request.
 
 ## Setup

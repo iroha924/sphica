@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 7 → 8 of generation 2: project keys are normalized, and triggers refuse a key that is not. Projects whose keys become one
 -- merge only when at most one holds rows: the one with rows, or the oldest, keeps its id and takes the key, and the empty others go.
 -- Every statement that stays is the same as in the schema at revision 8.

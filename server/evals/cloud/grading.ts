@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Blind grading of one evaluation loop: what the grader sees, how its output is accepted, the table by model and condition, and the
 // checkpoint that keeps each finished grader call. A grade counts only from a zero exit and an exact shape; anything else stays apart as
 // ungraded, and excluded runs stay in the denominator.

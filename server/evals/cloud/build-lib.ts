@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Pieces of building a slot that the builder and the local runner share, kept apart from build.ts so tests can reach them.
 import fs from "node:fs";
 import path from "node:path";

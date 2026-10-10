@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The offline order benchmark: a file crowded with more records than one delivery shows, delivered by this tree's hooks, and which of
 // them land inside the limits. The records differ in kind, stance, who adopted them, and age, so an ordering rule shows what it brings in
 // and what it pushes out.

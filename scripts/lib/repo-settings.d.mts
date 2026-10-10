@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 type Observed = { status: number | null; body: unknown };
 export function settingsState(input: { immutable: Observed; actions: Observed }): {
   name: string;

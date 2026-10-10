@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

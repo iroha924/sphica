@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Keeps issue numbers, pull request numbers, and plan paths out of comments: a comment states the reason itself.
 // server/test/fixtures/*.sql are frozen copies of old schemas that the migration tests compare against, so they are left as they are.
 

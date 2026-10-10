@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // A second `sphica init --name` for the race tests: names dir, telling the parent when the name map's lock is held and when it is done.
 // With "die", it exits the moment it would publish the new name map, as a killed init would.
 import fs from "node:fs";

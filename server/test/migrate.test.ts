@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Whether db/migrations/ moves an older database to the current revision without losing rows, ending with the same definitions as a
 // fresh db/schema.sql. fixtures/schema-revN.sql is db/schema.sql as the last release at revision N shipped it.
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Saves that reconcile lifecycles and replacements, on real connections: a broken state is repaired or the whole save goes back, the order
 // of saves does not change where they settle, and one save into a crowded place holds the write lock only briefly.
 import "./isolate-home.ts";

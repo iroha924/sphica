@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Builds kysely types from db/schema.sql and writes them to server/src/db-types.ts.
 //
 // The source is an in-memory SQLite database with only db/schema.sql applied, not a local database.
@@ -10,6 +13,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { withHeader } from "./lib/license-header.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // kysely and kysely-codegen are server dependencies. Resolve them from there instead of adding root dependencies for a check.
@@ -40,7 +44,7 @@ const raw = new DatabaseSync(":memory:");
 raw.function("sphica_terms", (_text) => "");
 raw.exec(fs.readFileSync(path.join(root, "db/schema.sql"), "utf8"));
 const db = new Kysely({ dialect: new SqliteDialect({ database: adapt(raw) }) });
-const text = await generate({
+const generated = await generate({
   db,
   dialect: new GenSqlite(),
   outFile: null,
@@ -50,6 +54,7 @@ const text = await generate({
   logger: { info() {}, warn() {}, error: console.error, debug() {}, success() {}, log() {} },
 });
 await db.destroy();
+const text = withHeader(generated, "//");
 
 const rel = path.relative(root, OUT);
 if (check) {

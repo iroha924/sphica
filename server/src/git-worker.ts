@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Compares a work tree with git in a git directory Sphica writes, started as a child process so a stalled read can be cut off. The
 // agent writes the repository's config, attributes, and hooks; here git reads none of them, nor the owner's global or system config, so
 // no filter, diff driver, or hook any of them names can run. Request on stdin, result on stdout, both JSON.

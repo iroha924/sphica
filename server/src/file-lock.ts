@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 /**
  * A lock file only its holder removes, and a file replace that never leaves a half-written file. Guaranteed on local file systems only:
  * a network file system may not honor exclusive create.

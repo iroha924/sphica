@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The overview views against real SQLite: live lists every active decision and constraint once, grouped by directory, page by page
 // without skipping any; nothing superseded, withdrawn, or still a candidate shows. look names gone files, lost symbols, conditions to
 // reconsider, and marked instruction lines whose record changed, and says what it could not check.

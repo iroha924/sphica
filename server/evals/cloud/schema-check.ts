@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The two fixed shapes the evaluation reads from Codex: a grade (grade.schema.json) and an evaluation run's answer (answer.schema.json).
 // The zod schemas here are the one source: the JSON files Codex gets through --output-schema are written from them
 // (node evals/cloud/schema-check.ts --write), and a value that does not match is kept apart with the reason, never counted.

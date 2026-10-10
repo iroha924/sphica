@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What a save learns from the working tree and git, gathered before it takes the write lock: capture and delivery wait on that lock,
 // and masking a large file or asking git takes far longer than reading it. Inside the lock a file is only read again and compared.
 import { locateIn, masksSymbolIn, type PathKind, pathKind, type RepoText, readRepoText } from "./anchors.ts";

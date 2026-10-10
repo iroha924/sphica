@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What changed in the working tree during a turn, from git status at the turn's start and end. Catches edits the edit-tool hooks
 // never see (shell commands, formatters) and files committed within the turn. An observation only: it never says who changed a file.
 import fs from "node:fs";

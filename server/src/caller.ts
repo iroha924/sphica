@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 /**
  * Who called a record tool, read only from what the host passes to the MCP server, never from arguments the model writes.
  * Claude Code puts no turn in a call (only its tool use id, which the PreToolUse hook also sees); Codex puts its turn in x-codex-turn-metadata.

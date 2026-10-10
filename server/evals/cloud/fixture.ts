@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Builds a real project's fixture database through the same functions the record MCP server runs (harvest, glean), so extraction on real
 // pull requests and issues is itself part of the evaluation loop. The agent reads the context this prints and writes the record file.
 // Run: node evals/cloud/fixture.ts new <db> <owner/repo>

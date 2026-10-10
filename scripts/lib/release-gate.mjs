@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Decides whether a tag may be published to npm. prepare and publish in release.yml go through the same decision.
 // The inputs are gathered from git and the GitHub API; this module only decides (tests cover every branch).
 

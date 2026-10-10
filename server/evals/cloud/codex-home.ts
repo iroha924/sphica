@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The CODEX_HOME the evaluation starts Codex with, for a run under test and for the grader alike: a link to the owner's login and the
 // owner's model and effort, nothing else, so the owner's hooks, plugins, rules, and MCP servers reach neither. Also each run's directory
 // and the git directory the runners read its checkout through.

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks that SQL is still written in the form chosen during the migration.
 //
 // **Types stop neither.** Handwritten result types are never checked against the SQL, and deprecated kysely

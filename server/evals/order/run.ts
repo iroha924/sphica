@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Prints the offline order benchmark (bench.ts). Run from server/: node evals/order/run.ts [--compare <git ref>] [--json]
 // --compare copies this runner into a worktree of the ref and runs it there, so the ref's own delivery hooks choose what is shown.
 import { execFileSync, spawnSync } from "node:child_process";

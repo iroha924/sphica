@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Pure parts of release-finish: reading the Release notes out of a PR body and finding the merge commit of a released tag.
 
 /** The body of the PR's `## Release notes` section without HTML comments, or null when it is missing or empty. */

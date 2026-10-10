@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Grades precedent lanes against the expected verdicts, by machine: each record's verdict is the one the last review_check that backed its
 // batch accepted, and the run counts only when every batch was backed and the report ends with a completion line that matches. A run that
 // cannot be graded is a failure, never zero findings.

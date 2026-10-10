@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Collects the copyright notices and license texts of bundled dependencies.
 //
 // **Bundling into one file does not remove the obligation to include them.** MIT requires the copyright notice and permission notice,

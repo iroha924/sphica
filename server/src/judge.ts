@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 /**
  * Lifecycles and replacements judged from facts alone (intents to replace, support, adoption, withdrawals), so the result never depends on
  * the order facts were written in. Pure and synchronous: saves and the migration fetch a snapshot and write back only the difference.
