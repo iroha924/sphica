@@ -63,7 +63,12 @@ test("the writer's words pass, with or without a quotation among them", () => {
   assert.equal(verdict('"A third party example."\nWithdraw it.\n"Another example."', "Withdraw it."), null);
   // Apostrophes inside words are not quotation marks
   assert.equal(verdict("I'll withdraw it; that's fine.", "withdraw it"), null);
-  assert.equal(verdict("the users' data and the admins' data stay", "data and the admins"), null);
+  // Marks directly around the words refuse them, apostrophes too: the same words with a neighbor are the writer's
+  assert.equal(verdict("the users' data and the admins' data stay", "data and the admins"), "inline");
+  assert.equal(
+    verdict("the users' data and the admins' data stay", "users' data and the admins' data"),
+    null,
+  );
   // A mark with no partner on its line quotes nothing
   assert.equal(verdict('He said "stop and never finished. Keep it.', "Keep it."), null);
   assert.equal(verdict("Keep `this open. Use SQLite.", "Use SQLite."), null);
@@ -156,8 +161,14 @@ test("a single quotation mark closes before any punctuation and opens after any,
   assert.equal(verdict("(see 'Drop this decision.')", "Drop this decision."), "inline");
   assert.equal(verdict("I'll withdraw it; that's fine.", "withdraw it"), null);
   assert.equal(verdict("'tis fine, and that's all I'll say", "fine, and that"), null);
-  assert.equal(verdict("the users' data and the admins' data stay", "data and the admins"), null);
-  assert.equal(verdict("it is 5' wide and 6' long", "wide and 6"), null);
+  // Marks directly around the words refuse them, apostrophes too: the same words with a neighbor are the writer's
+  assert.equal(verdict("the users' data and the admins' data stay", "data and the admins"), "inline");
+  assert.equal(
+    verdict("the users' data and the admins' data stay", "users' data and the admins' data"),
+    null,
+  );
+  assert.equal(verdict("it is 5' wide and 6' long", "wide and 6"), "inline");
+  assert.equal(verdict("it is 5' wide and 6' long", "5' wide and 6' long"), null);
 });
 
 test("a quote of only white space is not words", () => {
@@ -176,4 +187,33 @@ test("an apostrophe after a letter written with a combining mark is still inside
   );
   // A kana written with a combining voiced mark is not a Latin letter: a mark after it is a quotation mark
   assert.equal(verdict("これか\u3099'Drop this decision.'だ", "Drop this decision."), "inline");
+});
+
+test("words with a quotation mark right before and right after them on their line are quoted, however the marks pair up", () => {
+  // A curly apostrophe inside curly quotation marks does not close them
+  const curly = "They said \u2018don\u2019t Drop this decision.\u2019";
+  assert.equal(verdict(curly, "don\u2019t Drop this decision."), "inline");
+  assert.equal(verdict(curly, "Drop this decision."), "inline");
+  // A curly apostrophe in a word is not a closing mark either, so the writer's own words after it stay theirs
+  assert.equal(verdict("\u2018tis fine. I\u2019ll keep it.", "fine."), null);
+  // A combining mark outside the basic plane, and a Latin letter outside it, before an apostrophe
+  for (const name of ["Jose\u{1E944}", "Jos\u{10780}"]) {
+    assert.equal(
+      verdict(`${name}'s note says ' Drop this decision.'`, "Drop this decision."),
+      "inline",
+      name,
+    );
+    assert.equal(
+      verdict(`${name}'s choice is SQLite, and the users' choice is too.`, "choice is SQLite"),
+      null,
+      name,
+    );
+  }
+  // Whatever the pairing makes of the line, marks directly around the words settle it
+  assert.equal(verdict("it's 'Drop this decision.' they'd said", "Drop this decision."), "inline");
+  // Even between two quotations: the test cannot tell a closing mark from an opening one, and takes the safe side
+  assert.equal(verdict('a "b" Drop this decision. "c" d', "Drop this decision."), "inline");
+  assert.equal(verdict('a "b" Drop this decision. "c" d', 'a "b" Drop this decision.'), null);
+  // Marks on the lines around do not count
+  assert.equal(verdict('"\nDrop this decision.\n"', "Drop this decision."), null);
 });

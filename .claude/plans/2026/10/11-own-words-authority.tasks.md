@@ -184,6 +184,28 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/architecture.test.ts` → 直す前の検査で、`insert or ignore into unit_adoption …` を置いた入力が `actual: 0`（期待は 1）
   - 結果: `node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 2 pass, 0 fail（`insert or ignore`・`insert or replace`・`replace into`・`update or ignore` を止め、別名で型を読み込むだけの読み取りは通す）。`bun run architecture` → 通る
 
+- [x] T14: 引用符が言葉のすぐ前とすぐ後ろにあれば拒む判定を併用し、曲がったアポストロフィと 2 単位の文字を正しく扱う
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T12（直す先の単引用符の規則を T12 が直している）
+  - 変更: `server/src/own-words.ts`, `server/test/own-words.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts` → 直す前のコードで、曲がった引用符の中に短縮形がある文と、基本面の外の結合文字の後のアポストロフィで、引用の中の文が本人の言葉と判定されて、テストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts` → 通る
+  - コミット: `fix(record): refuse words with a quotation mark right before and after, however they pair`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/architecture.test.ts` → 直す前のコードで 13 pass, 2 fail（新しい引用のテストと、二重キャストの検査のテスト）
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/architecture.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/export.test.ts test/reconcile.test.ts` → 149 pass, 0 fail
+
+- [x] T15: architecture の検査が、import と export の節でだけ別名を読み、二重のキャストを見逃さない
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T13（直す先の別名の扱いを T13 が作る）
+  - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 直す前の検査で、`{} as OwnWords as OwnWords` を置いた入力が終了コード 0 で通り、テストが失敗する
+  - 完了条件: `bun run architecture` → 通る。`node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 通る
+  - コミット: `fix(record): refuse words with a quotation mark right before and after, however they pair`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/architecture.test.ts` → 直す前の検査で、`export const w = {} as OwnWords as OwnWords;` が `actual: 0`（期待は 1）
+  - 結果: `node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 2 pass, 0 fail。`bun run architecture` → 通る
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -199,3 +221,5 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / T05 のレビュー（`78348926`） / F1（P2）理由の発言を forget した取り下げは `unit_state.source_id` が null になり、確かめられない件数から漏れる。F2（P2）取り下げと衝突の解決について、計画が求める直し方と限界が表示されない / 2 件とも受理。T10 で、取り下げは run が書いたものを全部数え、確かめられない 3 種類に 1 行ずつ「何を見るか・何が戻せないか」を出す形にした
 - 2026-10-11 / T06 のレビュー（`021e776d`） / F1（P2）型を別名で import すると偽造のキャストを見逃す。F2（P2）見直す条件の根拠（`unit_evidence`）への書き込みを見ていない。F3（P2）`retraction_source_id` を最後に置いて末尾のカンマを省くと撤回の書き込みを見逃す。F4（P2）大文字の生の SQL を見逃す。F5（P2）読んだ行を整形するだけの処理を書き込みとして拒む / 5 件とも受理。T11 で、別名の import を偽造として数え、書き込みは `insertInto`・`updateTable`・生の SQL（大文字小文字を問わない）で `unit_adoption`・`unit_evidence`・`unit_anchor_retirement`・`field_def` を名指すものに改め、プロパティ名での判定をやめた。表の名前を変数で渡す書き込みと、型の別名を使ったキャストは見えない、と検査のコメントに書いた（型検査が主で、この検査は補助）
 - 2026-10-11 / T09〜T11 の再レビュー（`a7658269` high、`92c9b2f7`、`c8884d18`） / T10 は指摘なし。T09: F1（P1）結合アクセントの付いた字の後のアポストロフィを引用の開きと取り違え、後ろの引用の中の文を権限の根拠として通す（T09 の前は拒んでいた）。T11: F1（P2）`insert or ignore into`・`insert or replace into`・`replace into` の書き込みを見逃すようになった。F2（P2）型を別名で import しただけの読み取りを偽造として拒む / 3 件とも受理。T12 と T13 で直した（1 つのコミット）
+- 2026-10-11 / T12・T13 の再レビュー（`0d98212b`、high。作り直す前・T09 の後・今の 3 つの版を同じ入力で比べさせた） / F1（P1）曲がった引用符の中の短縮形（`don\u2019t`）で引用が閉じたと取り違え、引用の中の文を通す。作り直す前は拒んでいた。曲がったアポストロフィの後の本人の言葉を誤って拒む例もある。F2（P1）基本面の外の結合文字（とラテン文字）の後のアポストロフィで、T12 の直しが効かない。F3（P2）別名を消す処理がキャストの中の `OwnWords as OwnWords` まで消し、二重のキャストを見逃す / 3 件とも受理。引用符の対を取る方式だけでは、アポストロフィのたびに同じ種類の抜けが出る（3 回続いた）ので、直し方を変えた: 作り直す前の判定（言葉のすぐ前とすぐ後ろが引用符なら拒む。同じ行に限る）を併用し、どちらかに当たれば拒む。これで、作り直す前に拒んでいた入力は、別の行の引用符の場合を除いて、今も必ず拒む。T14 と T15 で直した（1 つのコミット）
+- 2026-10-11 / T14 / 併用した判定は、開きと閉じを区別しないので、2 つの引用の間や、アポストロフィに挟まれた本人の言葉も拒む（例: `the users' data and the admins' data` の `data and the admins`）。作り直す前の判定も同じ入力を拒んでいたので後退ではない。隣の言葉を含めて引けば通る。テストに両方の形を置いた

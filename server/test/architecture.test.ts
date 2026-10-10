@@ -96,6 +96,9 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as unknown as OwnWords<"owner_statement">;',
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as\n  OwnWords;',
     'import type { OwnWords as W } from "./own-words.ts";\nexport const w = { source: 1, start: 0, end: 1, route: "owner_statement" } as W;',
+    // A cast written twice is still a cast
+    'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as OwnWords as OwnWords;',
+    'import type { OwnWords as W } from "./own-words.ts";\nexport const w = {} as W as W;',
   ]) {
     const r = check({ "stray.ts": `${cast}\n` });
     assert.equal(r.status, 1, cast);

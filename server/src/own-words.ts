@@ -91,12 +91,24 @@ const PAIRS: Record<string, string> = { '"': '"', "“": "”", "‘": "’", "�
 /** A character an apostrophe can sit against inside a word or a measure: `it's`, `users'`, `5'` */
 const WORD = /[\p{Script=Latin}\p{N}]/u;
 
-/** Whether the character at `at` ends a Latin word or a number. Combining marks belong to the letter before them, so they are stepped over. */
-function inWord(line: string, at: number): boolean {
-  let i = at;
-  while (i > 0 && /\p{M}/u.test(line[i] as string)) i--;
-  return i >= 0 && WORD.test(line[i] as string);
+/** The character that starts at index `at`, whole even when it takes two code units, or "" past the end */
+const charAt = (line: string, at: number): string =>
+  at < line.length ? String.fromCodePoint(line.codePointAt(at) as number) : "";
+
+/** Whether the text before index `end` ends in a Latin word or a number. Combining marks belong to the letter before them, so they are stepped over. */
+function endsWord(line: string, end: number): boolean {
+  for (let i = end; i > 0; ) {
+    const low = line.charCodeAt(i - 1);
+    const from = low >= 0xdc00 && low <= 0xdfff && i > 1 ? i - 2 : i - 1;
+    const c = charAt(line, from);
+    if (!/\p{M}/u.test(c)) return WORD.test(c);
+    i = from;
+  }
+  return false;
 }
+
+/** Whether a mark at index `at` has a Latin word or a number right after it: then it is an apostrophe, not the end of a quotation */
+const startsWord = (line: string, at: number): boolean => WORD.test(charAt(line, at + 1));
 
 /** The ranges of one line, in characters, that sit inside quotation marks or a code span, marks included. */
 function inlineRanges(line: string): Range[] {
@@ -123,13 +135,18 @@ function inlineRanges(line: string): Range[] {
       }
     } else if (c === "'") {
       // An apostrophe inside a Latin word or after a number is not a quotation mark; beside anything else, in any script, it is one
-      if (!inWord(line, i - 1))
+      if (!endsWord(line, i))
         for (let j = i + 1; j < line.length; j++)
-          if (line[j] === "'" && (j + 1 === line.length || !WORD.test(line[j + 1] as string))) {
+          if (line[j] === "'" && !startsWord(line, j)) {
             close = j;
             break;
           }
-    } else if (PAIRS[c]) close = line.indexOf(PAIRS[c], i + 1);
+    } else if (PAIRS[c]) {
+      close = line.indexOf(PAIRS[c], i + 1);
+      // The closing single mark is also the typographic apostrophe: inside a word it closes nothing
+      while (c === "\u2018" && close >= 0 && startsWord(line, close))
+        close = line.indexOf(PAIRS[c], close + 1);
+    }
     if (close < 0) {
       i += width;
       continue;
@@ -140,15 +157,24 @@ function inlineRanges(line: string): Range[] {
   return found;
 }
 
+/** A quotation mark as the character right before a span, and right after one */
+// english-exempt: Japanese quotation brackets are quotation marks too
+const OPENS = /["“'‘`「『]/;
+// english-exempt: Japanese quotation brackets are quotation marks too
+const CLOSES = /["”'’`」』]/;
+
 /**
  * Why the byte span [start, end) of a message is not its writer's own words, or null when it is: "block" when it touches a line of a
- * block quote or a fenced code block, "inline" when nothing but digits and marks is left of it outside quotation marks and code spans.
- * A span that mixes the writer's words with a quotation passes: what the words mean is not judged here.
+ * block quote or a fenced code block; "inline" when a quotation mark stands right before it and right after it on its line, or nothing
+ * but digits and marks is left of it outside quotation marks and code spans. The first inline test needs no pairing of marks, which an
+ * apostrophe can throw off; the second catches part of a quotation. A span that mixes the writer's words with a quotation passes.
  */
 export function notOwnWords(body: string, start: number, end: number): "block" | "inline" | null {
   const bytes = Buffer.from(body, "utf8");
   let fence: { mark: string; length: number } | null = null;
   let own = "";
+  let before = "";
+  let after = "";
   for (let at = 0; at <= bytes.length; ) {
     const nl = bytes.indexOf(0x0a, at);
     const stop = nl < 0 ? bytes.length : nl;
@@ -176,6 +202,8 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
       const to = Buffer.from(raw, "utf8")
         .subarray(0, Math.min(end, stop) - at)
         .toString("utf8").length;
+      if (start >= at) before = raw.slice(0, from).trimEnd().slice(-1);
+      if (end <= stop) after = raw.slice(to).trimStart().slice(0, 1);
       let cursor = from;
       for (const [a, b] of inlineRanges(raw)) {
         if (b <= cursor || a >= to) continue;
@@ -187,5 +215,6 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
     if (nl < 0) break;
     at = nl + 1;
   }
+  if (OPENS.test(before) && CLOSES.test(after)) return "inline";
   return /\p{L}/u.test(own) ? null : "inline";
 }

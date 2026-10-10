@@ -136,12 +136,16 @@ for (const f of GIT_STARTERS) {
 // a cast, is beyond what it sees.
 const OWN_WORDS = "server/src/own-words.ts";
 const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
-// A cast to the type, under its own name or one it was imported as. The import clause itself reads `OwnWords as W`, so it is taken out
-// before looking for the cast
-const RENAMED = /\bOwnWords\s+as\s+(\w+)/g;
+// A cast to the type, under its own name or one it was imported as. Only an import or export clause renames it, and such a clause is
+// taken out before looking for the cast, since it reads `OwnWords as W` itself
+const CLAUSE = /\b(?:import|export)\b[^;]*?\{[^}]*\}/g;
 const forged = (text) => {
-  const names = ["OwnWords", ...[...text.matchAll(RENAMED)].map((m) => m[1])];
-  return new RegExp(`\\bas\\s+(?:${names.join("|")})\\b`).test(text.replace(RENAMED, ""));
+  const clauses = text.match(CLAUSE) ?? [];
+  const names = [
+    "OwnWords",
+    ...clauses.flatMap((c) => [...c.matchAll(/\bOwnWords\s+as\s+(\w+)/g)].map((m) => m[1])),
+  ];
+  return new RegExp(`\\bas\\s+(?:${names.join("|")})\\b`).test(text.replace(CLAUSE, ""));
 };
 // A row written through the query builder or as SQL, in any case and any of SQLite's spellings (insert or ignore, replace into, update or
 // ignore). Evidence is here too: an option's reconsider condition is evidence
