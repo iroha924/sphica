@@ -6,6 +6,7 @@ import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inTransaction } from "../src/db.ts";
+import { beginGlean, checkText, saveText } from "../src/extract.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { openRun } from "../src/trace.ts";
 import { at, hash, insert, message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -211,6 +212,98 @@ test("a link from harvest rests only on words that are in the source and are the
     assert.match(await errors(over("OFF must go")), untrusted);
     // The maintainer's own words
     assert.doesNotMatch(await errors(over("I have not checked this.")), untrusted);
+  } finally {
+    await db.done();
+  }
+});
+
+test("glean: no operation takes a quotation as its adoption or its reason, checked or saved straight", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const m = message(db, p, {
+      id: "m1",
+      text: 'Keep notes out of CSV. Decided. Use the old path. Rows are capped.\nThe vendor wrote "Make that final." and then:\n> Take that back.',
+    });
+    const unit = (key: string, extra: Record<string, unknown> = {}) => ({
+      key,
+      kind: "decision",
+      stance: "do",
+      text: key,
+      evidence: [{ source: `s${m}`, quote: "Keep notes out of CSV.", role: "states" }],
+      ...extra,
+    });
+    const own = [{ source: `s${m}`, quote: "Decided." }];
+    await save(db, target(p), {
+      units: [
+        unit("open"),
+        unit("live", { adoption: own, anchors: [{ path: "src/csv.ts", role: "applies_to" }] }),
+        unit("capped", { adoption: own }),
+      ],
+    });
+    await save(db, target(p), {
+      units: [unit("rival", { adoption: own, conflicts: ["trace:ext-s1/capped"] })],
+    });
+    const revision = (key: string) =>
+      (
+        db.owner.prepare("select revision from unit where key = ?").get(`trace:ext-s1/${key}`) as {
+          revision: number;
+        }
+      ).revision;
+    const op = (name: string, key: string, rest: Record<string, unknown>) => ({
+      op: name,
+      unit: `trace:ext-s1/${key}`,
+      revision: revision(key),
+      ...rest,
+    });
+    const because = (quote: string) => ({ reason_source: `s${m}`, reason_quote: quote });
+    /** Each operation with the words that give it authority, built from the quote those words are */
+    const each = (quote: string) => [
+      op("adopt", "open", { source: `s${m}`, quote }),
+      op("replace_anchor", "live", {
+        from: { path: "src/csv.ts" },
+        to: { path: "src/export.ts", role: "applies_to" },
+        source: `s${m}`,
+        quote,
+      }),
+      op("retire_anchor", "live", { from: { path: "src/csv.ts" }, source: `s${m}`, quote }),
+      op("retract_evidence", "live", { source: `s${m}`, ...because(quote) }),
+      op("retract_adoption", "live", { source: `s${m}`, ...because(quote) }),
+      op("withdraw", "capped", because(quote)),
+      op("resolve_conflict", "rival", { with: "trace:ext-s1/capped", ...because(quote) }),
+    ];
+    const check = async (ops: unknown[]) =>
+      checkText(db.ingest, await beginGlean(db.ingest, p, "s1"), p, null, { ops });
+
+    for (const quoted of ["Make that final.", "Take that back."])
+      for (const one of each(quoted)) {
+        const c = await check([one]);
+        assert.equal(c.ok, false, `${one.op} with ${quoted}: ${c.text}`);
+        assert.match(c.text, /someone else's words/, `${one.op} with ${quoted}`);
+      }
+    // The same operations with the owner's own words are not refused for their words
+    for (const one of each("Decided."))
+      assert.doesNotMatch((await check([one])).text, /someone else's words/, one.op);
+
+    // A save that was never checked first, and a batch that mixes a sound operation with one resting on a quotation
+    const before = () =>
+      JSON.stringify(
+        db.owner
+          .prepare(
+            "select (select count(*) from unit_adoption) as adoptions, (select count(*) from unit_adoption where retracted_at is not null) as retracted, (select group_concat(lifecycle) from (select lifecycle from unit order by id)) as lifecycles",
+          )
+          .get(),
+      );
+    const was = before();
+    const batch = [each("Decided.")[0], each("Make that final.")[5]];
+    await assert.rejects(
+      async () => saveText(db.ingest, await beginGlean(db.ingest, p, "s1"), p, null, { ops: batch }),
+      /someone else's words/,
+    );
+    assert.equal(before(), was);
+    // The sound operation alone goes through
+    await saveText(db.ingest, await beginGlean(db.ingest, p, "s1"), p, null, { ops: [each("Decided.")[0]] });
+    assert.equal(lifecycle(db, "open"), "active");
   } finally {
     await db.done();
   }

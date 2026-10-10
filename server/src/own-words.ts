@@ -1,15 +1,9 @@
 // Copyright (c) 2026 iroha924 and contributors
 // SPDX-License-Identifier: MIT
 
-// Whose words a quotation is, wherever those words carry authority: an adoption, the reason for a glean operation, a field definition, a
-// reconsider condition, the grounds of a link. Every such place takes an OwnWords, and only ownWords makes one, so a new place cannot
-// leave the checks out.
-//
-// What is checked is where the words sit, not what they mean: that they are in the message, that its writer may speak there, and that
-// they are not only a quotation. Whether the words say what the record says is the agent's judgment and the reader's.
-//
-// The quotation rule reads a message's own markup: block quotes, fenced code, and quotation marks on one line. It is an approximation:
-// a paste with no marks, an indented code block, nested marks, and escapes are not told apart.
+// Whose words a quotation is, wherever those words carry authority. Every such place takes an OwnWords, and only ownWords makes one.
+// It checks where the words sit (in the message, by a writer who may speak there, not only inside a quotation), never what they mean.
+// The quotation rule reads the message's own markup and is an approximation: unmarked pastes, indented code, nesting, and escapes pass.
 
 const MAINTAINERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 

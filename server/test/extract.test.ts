@@ -2290,7 +2290,8 @@ test("glean: the owner's words retire an anchor with nothing in its place, keep 
     };
     const c = await checkGlean(db.ingest, target, { ops: [retire({ path: "docs/note.md" })] });
     assert.deepEqual(c.errors, []);
-    Object.assign(c.ops[0]?.input ?? {}, { source: `s${reply}` });
+    // The save writes the words the check passed, not the input: forging those words past the types still meets the schema
+    Object.assign(c.ops[0] ?? {}, { said: { ...c.ops[0]?.said, source: reply } });
     await assert.rejects(
       inTransaction(db.ingest, (trx) => saveGlean(trx, target, runId, c)),
       /only the owner's words retire an anchor/,

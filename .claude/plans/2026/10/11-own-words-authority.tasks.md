@@ -49,14 +49,17 @@ base: main
 
 glean の 7 つの操作が、引用の中だけにある言葉を理由や採用に受け付けなくなり、確かめた位置がそのまま保存される。
 
-- [ ] T03: glean の 7 つの操作を `ownWords` に通し、保存が確かめ済みの span を使う
+- [x] T03: glean の 7 つの操作を `ownWords` に通し、保存が確かめ済みの span を使う
   - 種別: 修正
   - 計画: S3
   - 依存: T01（`ownWords` と `OwnWords` の型を T01 が作る）
-  - 変更: `server/src/glean.ts`, `server/src/own-words.ts`, `server/test/own-words-sites.test.ts`
+  - 変更: `server/src/glean.ts`, `server/src/own-words.ts`, `server/test/own-words-sites.test.ts`, `server/test/extract.test.ts`
   - red: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts` → 直す前のコードで、引用の中の文を指定した adopt・replace_anchor・retire_anchor・retract_evidence・retract_adoption・withdraw・resolve_conflict が保存され、テストが失敗する
   - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts test/extract.test.ts test/reconcile.test.ts` → 通る。`rg -n "spanOf" server/src` → 0 件。`rg -n "MAINTAINERS = " server/src` → `server/src/own-words.ts` の 1 件
   - コミット: `fix(glean): refuse quoted words as the reason or adoption of an operation`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts` → 直す前のコードで 4 pass, 1 fail。引用符の中の文を指定した adopt が「✓ would: trace:ext-s1/open: adopted」と通る
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words-sites.test.ts test/own-words.test.ts test/extract.test.ts test/reconcile.test.ts test/record.test.ts` → 126 pass, 0 fail（7 つの操作を、引用符の中の文と `>` の行の文の両方で拒む。検査を呼ばない保存と、正常な操作と混ざるバッチも拒み、DB は変わらない）
+  - 結果: `rg -n "spanOf" server/src` → 0 件。`rg -n "MAINTAINERS = " server/src` → `server/src/own-words.ts` の 1 件
 
 ## P3: 隔離された記録の衝突を配信に効かせない
 
@@ -117,3 +120,4 @@ Skill と保証の説明が、機械が確かめる範囲（引用の位置）�
 - 2026-10-11 / T01, T07, T08 / コミット前の検査（`check-mcp-version`）が、`server/src` を変えるコミットにはバージョンの引き上げが入っていることを求め、T01 のコミットを止めた（「Bump the npm package and the 3 plugin channel manifests to the same new version」）。バージョンを最後に上げる並びは、このリポジトリでは成り立たない / バージョンの引き上げ（0.6.47 → 0.6.48）を T01 のコミットへ移した。T01 の計画: 前の値 `S1, S2`、新しい値 `S1, S2, S8`。T01 の変更欄に 4 つのバージョンのファイルを足した。T07 の計画: 前の値 `S7`、新しい値 `S7, S9`（リリースは最後のタスクの後）。T08 は取りやめ（やることが T01 と T07 に移った）
 - 2026-10-11 / T02 / コミットの件名が、末尾の `(T02)` を足すと 102 文字になり、件名の上限（100 文字）を超える / T02 のコミット欄: 前の値 `…and link grounds only from own words`、新しい値 `…and link grounds from own words`。あわせて、`server/src/own-words.ts` の `MAINTAINERS` を外へ公開しない形にした（record.ts が使わなくなり、knip が未使用の公開として止めたため）。T02 の変更欄に `server/src/own-words.ts` を足した（前の値: 2 ファイル、新しい値: 3 ファイル）
 - 2026-10-11 / T02 / `server/test/extract.test.ts` の「glean: withdrawing the successor brings back the record it replaced…」が落ちた。発言に無い言葉だけを根拠にした後継（`supersedes` 付き）を保存して隔離を確かめていたが、置き換えの根拠が実在する言葉だけを数えるようになり、保存の前に拒まれるため / テストの 2 つの記録を「根拠は実在し、採用の引用だけが見つからない」形に変えた（隔離されることと、枠を取らないことは今までどおり確かめられる）。拒むときのメッセージに「発言の中にあり、引用だけではない言葉」と足した。T02 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
+- 2026-10-11 / T03 / `server/test/extract.test.ts` の「glean: the owner's words retire an anchor…」が落ちた。検査を通った結果の入力（`input.source`）を AI の返事にすり替えて保存し、schema のトリガーが拒むことを確かめていたが、保存が入力を読み直さず確かめ済みの言葉を使うようになり、すり替えが保存に届かなくなったため / すり替える対象を確かめ済みの言葉（`said`）に変えた。型を無視して偽造しても schema が拒むことを、今までどおり確かめる。T03 の変更欄に `server/test/extract.test.ts` を足した（前の値: 3 ファイル、新しい値: 4 ファイル）
