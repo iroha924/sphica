@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Marks the next unfired row of a build's firing plan (only --condition's rows when given) and prints its slot and prompt; fire that
 // slot's routine (~/.cache/sphica-eval/routines.json) right after, since a marked row never fired shows as a run with no result.
 // Run: node evals/cloud/fire.ts <build dir> [--condition <condition>]

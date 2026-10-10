@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Where the bundled runtime files (the database schema and migrations) live.
 //
 // **Never search from cwd.** Hooks start with the project being edited as cwd, and the CLI runs from anywhere.

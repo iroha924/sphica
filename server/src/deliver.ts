@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Automatic delivery of past records into Claude Code and Codex: at session and subagent start (current work and a few broad constraints), before an edit or a read
 // (the active records anchored to that path; a read shows each once per session), and on a prompt (only when it names a record's code
 // symbol, path, or option exactly), and before the user's own review command (the records its local change touches; review-bridge.ts).

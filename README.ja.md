@@ -136,7 +136,7 @@ Codex にはレビューのフックがありません。`$sphica:review` を流
   - `mysql -p`
 
   **それ以外は打ったとおりに残るので、セッションに秘密情報を貼らないでください。** 入ってしまったら、それを含む出典を `/sphica:forget` で消せます（Claude Code で。確認のダイアログが Codex では出ないことがあります）。記録がその言葉を繰り返していれば、記録の本文には残ります。
-- **ネットワーク。** Sphica にはアカウント登録も外部のサービスもテレメトリもなく、Sphica 自身はネットワークに接続しません。`/sphica:harvest` と `/sphica:glean` は PR と issue を読むため、あなたの認証情報で `gh api` を流します。`sphica init` はあなたの GitHub アカウントを知るため `gh api user` を流します。`sphica doctor` は入っているバージョンを確かめるため `npm` と `claude` を流します。`gh api` の送り先は常に github.com です。
+- **ネットワーク。** Sphica にはアカウント登録も外部のサービスもテレメトリもなく、Sphica 自身はネットワークに接続しません。`/sphica:harvest` と `/sphica:glean` は PR と issue を読むため、あなたの認証情報で `gh api` を流します。`sphica init` はあなたの GitHub アカウントを知るため `gh api user` を流します。`sphica doctor` は入っているバージョンを確かめるため `npm`・`claude`・`codex` を流します。`gh api` の送り先は常に github.com です。
 - **ほかの人が書いた文章。** PR と issue の文章は誰でも書けます。原文として残し、エージェントには指示ではなくデータとして渡します。決定を採用にできるのは、あなた自身・リポジトリのオーナー・メンテナーの言葉と、エージェントが自分で決めたことです。エージェントがほかの人の文章を引用したりまとめたりしたものは、採用になりません。
 
 ## まだできないこと
@@ -218,6 +218,10 @@ npm uninstall -g sphica
 メンテナーが GitHub でリリースの環境を承認してから公開し、npm へはトークンを置かない trusted publishing で届けます。
 [npm のページ](https://www.npmjs.com/package/sphica#provenance)から、ビルドしたワークフローとコミットを辿れます。
 
+リリースには署名が付いています。自分で確かめるには、空のディレクトリで `npm init -y && npm install sphica && npm audit signatures` を流してください。npm のレジストリの署名と、Sigstore で署名された来歴の証明を検証するので、鍵を取りに行く必要はありません。`npm pack sphica@<バージョン>` で取った tarball について、SBOM（パッケージにバンドルした依存の一覧）の証明は、`gh attestation verify sphica-<バージョン>.tgz --repo iroha924/sphica --predicate-type https://cyclonedx.org/bom` で確かめられます。
+
+全体の作りは [ARCHITECTURE.md](https://github.com/iroha924/sphica/blob/main/ARCHITECTURE.md)、セキュリティの主張が成り立つ理由は [ASSURANCE.md](https://github.com/iroha924/sphica/blob/main/ASSURANCE.md) にあります（どちらも英語）。
+
 依存の更新は、CI で使う GitHub Actions を Dependabot が毎週、パッケージにバンドルした npm の依存を Renovate が毎月、PR にします。
 
 ## 貢献
@@ -229,6 +233,8 @@ npm uninstall -g sphica
 - **そのあと。** PR は、メンテナーが読んで受け入れてから入ります。途中で質問や修正のお願いをすることがあります。マージするのはメンテナーだけです。
 
 動作を追加・変更する PR には、自動テストも一緒に入れます。CI が PR ごとに `bun run verify` を実行します。
+
+参加する人はみな、[行動規範](https://github.com/iroha924/sphica/blob/main/CODE_OF_CONDUCT.md)に従います。誰が何を決めるかは [GOVERNANCE.md](https://github.com/iroha924/sphica/blob/main/GOVERNANCE.md)、これから何をするかは [ROADMAP.md](https://github.com/iroha924/sphica/blob/main/ROADMAP.md) にあります（どれも英語）。
 
 ## ライセンス
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Keeps English-only files free of Japanese. sphica is moving to English one area at a time,
 // and a file that was translated drifts back unless something stops it.
 //

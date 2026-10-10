@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The bridge into the user's own review commands (Claude Code, a prototype): which hook calls are a review, and the local change to check.
 // A typed /name reaches UserPromptExpansion; a skill the model calls reaches PreToolUse on Skill, which typing /name bypasses.
 import fs from "node:fs";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The delivery view of MCP overview: what the delivery hooks logged for one project over a period, for the owner to judge each record shown.
 // The log keeps record ids, never the text delivered then, so records are named by key and read as they are now.
 import type { ExpressionBuilder } from "kysely";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs the test suite with a fresh temp directory of its own as TMPDIR, TMP, and TEMP, and reports what the run left there. A run that
 // fails, is stopped, or overflows its output is a problem like a leftover, and the directory is removed whatever happened.
 import { spawnSync } from "node:child_process";

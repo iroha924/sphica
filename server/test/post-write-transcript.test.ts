@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What reached a conversation, read from synthetic Claude Code transcripts: exact keys from Sphica's record lines, doubt when a line is
 // not understood, human prompts told from notifications, compactions, subagents, and the inputs a saved result is fixed to.
 import "./isolate-home.ts";

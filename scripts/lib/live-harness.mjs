@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Plumbing for running the shipped entry points as child processes against a real database.
 //
 // The parent owns the timeout and termination. Tests connecting to a database, which `.claude/rules/verification.md` forbids,

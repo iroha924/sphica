@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The full view of one record or source for MCP read: a record's text, options, the exact words cited as evidence and adoption with who
 // said them, its links and state history, and each anchor checked against the working tree now.
 import type { Selectable } from "kysely";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The shell-change entry check (M0'): when the agent changed a file through the shell while a record on it was deliverable, did that record
 // reach the conversation by the owner's next prompt? Eligibility is as of the call's result, and arrival is read from the transcript.
 // Modes: the draw (--db), --evidence, and --measure; labellers only name the calls that changed the path, and the rest is computed here.

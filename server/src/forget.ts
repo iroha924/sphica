@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Forgets sources the owner chose: the rows, their index entries, and the bytes left in the file, while the records that cited
 // them are judged again with the same activation rules as saving. Runs only on the forget connection, only after the owner
 // confirmed a preview.

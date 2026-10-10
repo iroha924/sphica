@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Codex runs a plugin hook only while the hash of its current definition equals `[hooks.state."<key>"] trusted_hash` in config.toml.
 // The hash rule here is Codex 0.160.0's hook_hash. Another version may hash differently while an old stored hash still matches this
 // rule, so only verified versions are compared.

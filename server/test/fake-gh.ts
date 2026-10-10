@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // A gh first on PATH for child processes that run sphica init: init reads the signed-in account, and a test must never reach
 // api.github.com with the owner's own login. POSIX only (a shebang script); verify does not run on Windows.
 import fs from "node:fs";

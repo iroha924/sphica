@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 10 → 11 of generation 2: a harvest run keeps the sources it may cite, chosen when it begins (harvest_run_source). A running
 -- harvest has none, so it is removed and its session gets "Begin again"; nothing cites a running run (a save also finishes it).
 -- Every statement that stays is the same as in the schema at revision 11.

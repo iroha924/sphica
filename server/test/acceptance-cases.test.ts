@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Keeps the acceptance cases for the 0.5.0 rebuild well formed: counts per layer, unique ids, references that resolve, and quotes that
 // really occur in the synthetic world. Only the cases listed in DELIBERATE_MISSING quote text that is not there, on purpose.
 import "./isolate-home.ts";

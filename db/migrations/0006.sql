@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 5 → 6 of generation 2: the subagent a delivery ran in (existing rows keep null, the main conversation), and a capture view
 -- that writes it while capture_delivery keeps its columns. `sphica init` runs this in one transaction with foreign keys off, then checks
 -- foreign_key_check. Every statement matches db/schema.sql at revision 6; server/test/migrate.test.ts compares the two.

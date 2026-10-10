@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Measures `search` with `asked` on a fixed corpus: of the earlier owner messages it returns, how many a person would call unrelated,
 // and how many related ones it misses. Relatedness comes from the corpus, never from a model. Run: node evals/asked/run.ts (from server/)
 import fs from "node:fs";

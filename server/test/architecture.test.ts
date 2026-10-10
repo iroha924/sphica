@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // check-architecture.mjs run on a copy of the sources, so a module that starts git on its own is shown to fail it
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Builds the bootstrap repositories of the cloud evaluation (plan step 9): one per condition (none, search, inject, gold), each holding the same
 // project files and hooks, and differing only in what Sphica gives the agent. The four repositories are slots reused for each project.
 // Run: node evals/cloud/build.ts --project tsundoku|sphica [--variant original|swapped] [--runs <n>] [--out <dir>] [--owner <github owner>]

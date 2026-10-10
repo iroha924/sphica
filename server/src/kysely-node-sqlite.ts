@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // kysely's SqliteDialect expects the better-sqlite3 shape, and there is no official `node:sqlite` dialect (0.29.6). A thin wrapper adapts it.
 // Rows come back as objects without a prototype, so they become plain objects (assert.deepStrictEqual compares prototypes).
 // BLOBs come back as Uint8Array. The generated types (db-types.ts) say Buffer, so convert to Buffer (hashes are compared with `.equals`).

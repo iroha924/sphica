@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The full-text indexes hold terms() output from when each row was written. A change to its rules leaves every existing row indexed the old way,
 // so a search with the new rules misses them until the index is rebuilt. This pins the output for fixed inputs, so the change is noticed.
 

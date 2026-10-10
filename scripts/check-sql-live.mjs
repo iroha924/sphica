@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs the shipped entry points (the CLI and the capture hook) as child processes against SQLite in a temp HOME, checking
 // SQL, connection roles (the authorizer), and cleanup together.
 //

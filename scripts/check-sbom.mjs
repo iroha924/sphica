@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks that the SBOM a release built lists every bundled dependency. Usage: node scripts/check-sbom.mjs <sbom.cdx.json>
 
 import fs from "node:fs";

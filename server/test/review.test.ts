@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The decision lane of a review against real SQLite: which records a diff touches, and which verdicts are backed.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

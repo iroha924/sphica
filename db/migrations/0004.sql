@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 3 → 4 of generation 2: project-defined fields (field_def) and quoted field values (unit_field).
 -- `sphica init` runs this in one transaction with foreign keys off (set outside the transaction), then checks foreign_key_check before
 -- committing. Every statement matches db/schema.sql at revision 4; server/test/migrate.test.ts compares a migrated database with a fresh one.

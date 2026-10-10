@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The bridge into the user's own review commands, against real SQLite and a real git checkout: which reviews get the applicable
 // decisions, which stay quiet, and when it says it could not check instead of pretending nothing applies.
 import "./isolate-home.ts";

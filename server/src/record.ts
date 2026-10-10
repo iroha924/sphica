@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks and saves the record an agent wrote for one extraction run (trace or harvest). Every quote is located in retained source text,
 // so a unit carries byte spans of what was actually said, never the agent's paraphrase. The activation rules live in db/schema.sql triggers.
 import type { Kysely } from "kysely";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks commit messages: one Conventional Commits line in English.
 // The commit-msg hook sees the message before Git strips comments, so in hook mode an editor template (a blank line
 // followed only by comment lines) and the `git commit -v` diff are ignored. Stored messages (CI) are checked as they are.

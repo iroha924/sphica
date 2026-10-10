@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The offline retrieval benchmark: corpus.json's records (with their anchors and save times, checked as stored) go through the real save
 // path into one database and every question to searchUnits, giving recall@k and MRR, and for questions with no gold how often anything came
 // back. No model is called, so two versions of search can be compared on the same corpus (run.ts --compare).

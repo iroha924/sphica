@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Settings a release relies on that only an admin can read: each is on, off, or unknown, and a failed read is never taken as off.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

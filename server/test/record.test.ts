@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checking and saving records against real SQLite: quotes become spans of retained text, adoption follows who spoke, and lifecycle
 // moves only when the schema's activation rules pass.
 import "./isolate-home.ts";

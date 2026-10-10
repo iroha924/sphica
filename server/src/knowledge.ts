@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The vocabulary of the record model. The CHECKs in db/schema.sql are the source of truth; this is the copy code uses
 // (scripts/check-pairs.mjs compares them).
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks that no old names remain. **A rename is not a one-time job.** Spellings you thought were gone
 // come back in code and documents written later.
 //

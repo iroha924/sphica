@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The post_write entry check (M0): past writes from Claude Code transcripts matched against the records deliverable at each write's result,
 // less what had reached that conversation per its transcript (never the delivery log), so what a delivery after the write shows is counted.
 // Modes: the replay (--db), --sample, --sheet, and --decide; each names the arguments it is missing.

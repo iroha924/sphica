@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The review evaluation's fixture: the tsundoku fixture database with the records cases.json adds, the project's files as a git
 // repository, and each case's diff against it, written where a run can read them and the expected verdicts cannot be.
 import { execFileSync } from "node:child_process";

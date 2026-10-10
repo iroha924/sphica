@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Finds the links in a lychee report that resolve to a local file outside a root. lychee resolves `../` and checks the target exists,
 // but never confines it (--root-dir only resolves absolute links), so a packed document can point at a file the package does not have.
 import fs from "node:fs";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Where a record sits in the code, checked against the working tree each time it is served (never cached in the database).
 // A located symbol only says the code is still there; it never proves the decision still holds.
 import crypto from "node:crypto";

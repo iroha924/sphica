@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";

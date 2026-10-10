@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Summarizes osv-scanner's JSON output (`--format=json`) for the release run. A scan that left no readable results is
 // `unavailable`, never `none`: only a well-formed result with no vulnerabilities says there are none.
 

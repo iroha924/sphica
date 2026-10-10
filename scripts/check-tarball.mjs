@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Checks an npm pack tarball the way users receive it (run by CI check and release). Usage: node scripts/check-tarball.mjs <tgz>
 // It checks the file list, the version, that the CLI starts outside the repository and creates a database in a temp HOME, that the hook names
 // the version for an older database that init then backs up and migrates, that the hook delivers quickly under a write lock, and answers SubagentStart

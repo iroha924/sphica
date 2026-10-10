@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 2 → 3 of generation 2: a rejected option can carry a reconsider condition the owner stated, quoted as `reconsiders` evidence.
 -- `sphica init` runs this in one transaction with foreign keys off (set outside the transaction), then checks foreign_key_check before
 -- committing. Every statement matches db/schema.sql at revision 3; server/test/migrate.test.ts compares a migrated database with a fresh one.

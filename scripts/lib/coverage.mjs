@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Reads the lines a child process actually ran from V8 coverage.
 //
 // SQL that runs inside a child process cannot be counted from the parent, so read

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Launches a package's capture and delivery hooks the way Claude Code would from its hooks/hooks.json: node with the entry's
 // `args` (exec form, no shell), for the entries whose matcher matches; then every hooks/codex.json entry the way Codex would,
 // through each shell Codex can use here and from plugin roots holding characters a shell might mangle.

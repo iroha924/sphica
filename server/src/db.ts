@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Uses the database (one SQLite file) through kysely. **There are no credentials.** Connection roles split permissions (sqlite.ts and db-write.ts).
 // Only what readers also use lives here. openWriter, which opens writing connections, is in db-write.ts.
 

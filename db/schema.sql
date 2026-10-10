@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- The source of truth for Sphica's database (SQLite, `node:sqlite`): the memory of past implementation and decisions for one owner on one machine.
 -- Generation 2. `sphica_generation` holds the generation; `pragma user_version` is the revision within it.
 -- A database of another generation is refused without being changed.
