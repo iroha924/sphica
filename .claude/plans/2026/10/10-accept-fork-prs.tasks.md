@@ -66,6 +66,18 @@ base: main
   - 結果: `rg -c "from the pull request page" CONTRIBUTING.md` → 0 件
   - 結果: `node scripts/check-markdown.mjs` → 0 issues（stage の後）。`mise exec -- node scripts/check-links.mjs` → 0 Errors
 
+- [x] T06: T03 のレビューの指摘を直す（手元のレビューの差分を作る前に固定した base を取得して確かめ、差分の作成が失敗したら進まない）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T03（直す先のスキルを T03 が作る）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`
+  - red: `git diff --no-ext-diff --no-textconv 0123456789abcdef0123456789abcdef01234567...HEAD -- > <一時ファイル>` → exit 128 で、0 バイトのファイルが残る（手元に無い base を渡したときの、直す前の手順の動き）
+  - 完了条件: `rg -c "git cat-file -e" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "not empty" .claude/skills/fork-pr/SKILL.md` → 1。`node scripts/check-ai-config.mjs` → exit 0
+  - コミット: `fix(agents): fetch the pinned base and stop on a failed diff before the local review`
+  - 結果: red: `git diff --no-ext-diff --no-textconv 0123456789abcdef0123456789abcdef01234567...HEAD -- > x.diff` → exit 128、x.diff は 0 バイト
+  - 結果: `git cat-file -e '0123456789abcdef0123456789abcdef01234567^{commit}'` → exit 128（手元に無い base を、差分を作る前に見分ける）。`git cat-file -e "$(git rev-parse origin/main)^{commit}"` → exit 0
+  - 結果: `rg -c "git cat-file -e" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "not empty" .claude/skills/fork-pr/SKILL.md` → 1。`node scripts/check-ai-config.mjs` → exit 0
+
 ## P2: README を歓迎の文面に書き換えてリリースする
 
 README.md はパッケージに入るので、バージョンを上げて同じコミットに入れる。merge はリリースの run がする。
@@ -83,3 +95,4 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
 - 2026-10-10 / T03 / スキルを `docs-audit` で監査し（Claude と Codex）、直す 4 件を全部受けた: 承認の後の push で読んでいないコミットが入る分岐（none の merge、GitHub の Codex のレビューの対象）、名指しの一覧が不変条件より狭い、plugin の取り込みの前に fetch が無い / 同じコミットの中で直した。plan の手順も合わせた（変更履歴）
 - 2026-10-10 / T05 / 未完了のタスクの欄を変えた。名前: 「…1 節足す」→「…1 節足し、merge の書き方を手順に合わせる」。完了条件: `rg -c "from the pull request page" CONTRIBUTING.md` → 0 件 を足した / none の merge をページのボタンからコマンドに変えたので、CONTRIBUTING の「merged from the pull request page」が事実と合わなくなった
+- 2026-10-10 / T03 / コミット 48df9be1 を Codex がレビューした（新しい会話、high）。指摘 1 件（P2）: 固定した base が手元に無いと差分の作成が exit 128 で失敗し、リダイレクトが空のファイルを残す。未承認の head を checkout・merge する経路は見つからなかった / 再現して受け、修正タスク T06 を足した
