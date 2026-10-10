@@ -109,6 +109,18 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
   - 結果: `rg -c "the maintainer adjusts the number when taking your change in" CONTRIBUTING.md` → 0 件。`rg -c "merge .main. into your branch and raise the four again" CONTRIBUTING.md` → 1。`rg -c "whose .check. jobs have not passed" .claude/skills/fork-pr/SKILL.md` → 1
   - 結果: `bun run check` → exit 0
 
+- [x] T08: GitHub の Codex のレビューの指摘を直す（head だけでなく base のブランチと base のコミットも固定し、承認の前と merge の前に照合する）
+  - 種別: 修正
+  - 計画: S4
+  - 依存: T07（同じスキルの同じ手順を T07 が直している）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`
+  - red: `rg -c "base.ref" .claude/skills/fork-pr/SKILL.md` → 0 件（固定のコマンドが base のブランチを見ていない。PR の作者が承認の後に base を別のブランチへ変えても、head が同じなら手順 7・8 の照合と `--match-head-commit` を通る）
+  - 完了条件: `rg -c "base.ref" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "the base branch, or the base commit moved" .claude/skills/fork-pr/SKILL.md` → 1。`node scripts/check-ai-config.mjs` → exit 0
+  - コミット: `fix(agents): pin the base branch and commit of a fork's pull request, not only its head`
+  - 結果: red: `rg -c "base.ref" .claude/skills/fork-pr/SKILL.md` → 0 件
+  - 結果: `rg -c "base.ref" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "the base branch, or the base commit moved" .claude/skills/fork-pr/SKILL.md` → 1
+  - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
@@ -121,3 +133,5 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / T04 / チェックと結果行を付ける script が失敗したのに気付かずコミットした（コミットの条件に script の成否を入れていなかった）/ push の前だったので、同じコミットを amend してチェックと結果行を入れた
 - 2026-10-10 / 全差分 / `main..3d70fec6` を Codex がレビューした（新しい会話、high）。指摘 1 件（P2）: main が同じバージョンを先にリリースすると、fork の PR の CI はバージョンの検査で verify より前に止まる。CONTRIBUTING は「取り込むときにメンテナーが直す」と案内し、スキルは承認の後で直す手順だったので、承認の前にテストが走らない / 再現して受け、修正タスク T07 を足した。README の英語版と日本語版の一致、4 か所のバージョンの一致は指摘なし
 - 2026-10-10 / plan / 方針の「取り込むときに main が進んでいて番号が重なったら、メンテナーが別コミットで直す」は、承認の後にリリースが入った場合だけに狭めた（T07）。承認の前に重なった場合はコントリビューターが上げ直す。合意した「コントリビューターもバージョンを上げる」の内側
+- 2026-10-10 / T07 / コミット 4a6ae01f を Codex が再レビューした（新しい会話、既定の effort）。指摘なし
+- 2026-10-10 / PR #310 / GitHub の Codex が head 1b302e3f をレビューした。指摘 1 件（P1）: 手順 7・8 の照合と `gh pr merge --match-head-commit` は head しか見ないので、PR の作者が承認の後に base のブランチを変えると、承認した head が読んでいない base へ merge される / 手順を読んで確かめ、修正タスク T08 を足した。CI は 1b302e3f で全項目 pass
