@@ -43,7 +43,8 @@ const same = (a: Signature, b: Signature) =>
 
 /**
  * The file a repository-relative path names, or null when it would leave the checkout: the path itself, or for a missing one its nearest
- * existing parent, must resolve inside the root (a symlink or junction pointing out is never followed).
+ * existing parent, must resolve inside the root. Node has no openat, so a process that swaps a directory for a link out and back between
+ * these checks can still make one call hash a file outside; it reads nothing that process could not, and only that call is misjudged.
  */
 export function inside(root: string, rel: string): string | null {
   const real = fs.realpathSync.native(root);

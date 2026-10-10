@@ -1088,15 +1088,15 @@ async function snapshotCall(
  */
 async function afterShell(input: HookInput, host: Host, file: string, started: number): Promise<string> {
   if (!shellWriteDelivery() || !input.session_id || !input.tool_use_id) return "";
-  const place = identify(input.cwd ?? process.cwd());
-  if (!place) return "";
   const agent = agentOf(input);
-  const key = snapshotKey(host, place.root, input.session_id, agent, input.tool_use_id);
   const base = { host, session: input.session_id, agent, call: input.tool_use_id };
   let line: Record<string, unknown> = { ...base, event: "post_shell" };
   let db: ReadonlyKysely<DB> | null = null;
   try {
-    const before = takeSnapshot(key);
+    const place = identify(input.cwd ?? process.cwd());
+    // Outside a project no Pre took a snapshot, and every shell call there would fill the trial log
+    if (!place) return "";
+    const before = takeSnapshot(snapshotKey(host, place.root, input.session_id, agent, input.tool_use_id));
     if (before === "expired" || !before) {
       trialLog({ ...base, event: before ? "snapshot_expired" : "snapshot_missing" });
       return "";

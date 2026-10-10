@@ -2706,6 +2706,37 @@ test("a shell call's Post still compares when the cache cannot be saved, and rep
   }
 });
 
+test("a shell call's Post whose project cannot be told still leaves its trial line", async () => {
+  const db = tempDb();
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-deliver-")));
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-home-"));
+  process.env.SPHICA_HOME = home;
+  process.env.SPHICA_SHELL_WRITE_DELIVERY = "on";
+  try {
+    // A checkout with no origin is looked up in the local project map, which cannot be read here
+    fs.mkdirSync(path.join(home, "projects.json"));
+    const input = {
+      session_id: "s",
+      cwd: repo,
+      tool_name: "Bash",
+      tool_input: { command: "true" },
+      tool_use_id: "t1",
+      hook_event_name: "PostToolUse",
+    };
+    assert.equal(await deliver(input, "claude-code", db.file), "");
+    const line = JSON.parse(fs.readFileSync(path.join(home, "shell-state", "trial.jsonl"), "utf8").trim());
+    assert.equal(line.call, "t1");
+    assert.match(String(line.error), /EISDIR|illegal operation/);
+  } finally {
+    delete process.env.SPHICA_HOME;
+    delete process.env.SPHICA_SHELL_WRITE_DELIVERY;
+    await db.done();
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("the records on more changed paths than SQLite takes variables are still found", async () => {
   const db = tempDb();
   try {

@@ -51,6 +51,16 @@ base: main
   - コミット: `fix(deliver): check the opened file, expire snapshots at Post, and chunk changed paths`
   - 結果: 4 件とも直す前のコードで意図した理由の失敗を確かめた。`node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-state.test.ts` → 6 pass、`--test-name-pattern="shell call|more changed paths" test/deliver.test.ts` → 4 pass。Pre で控えを取れなかったときも試用のログに snapshot_failed を残すようにした。`bun run verify` → exit 0
 
+- [x] T11: プロジェクトの識別の失敗も試用のログに残す（T03・T10 のレビューの F2）
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T10（直す対象の Post の形）
+  - 変更: `server/src/deliver.ts`, `server/src/shell-state.ts`, `server/test/deliver.test.ts`
+  - red: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → origin の無い checkout でローカルのプロジェクト表が読めないと、Post が EISDIR で reject し、試用のログに何も残らない
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test test/deliver.test.ts` → 識別に失敗した Post は空を返し、試用のログに error 付きの 1 行を残す
+  - コミット: `fix(deliver): log a shell call's Post whose project cannot be told`
+  - 結果: red を直す前のコードで確かめた（EISDIR で reject）。`--test-name-pattern="shell call|more changed paths" test/deliver.test.ts` → 5 pass。境界のコメントを、残る隙（確かめの合間に link と行き来させる差し替え）を書く形に直した。`bun run verify` → exit 0
+
 ## P2: 届け方
 
 設定がオンのとき、両ホストで shell の呼び出しの後に、まだ届いていない記録が次のモデルリクエストの前に入る。オフなら今と同じ。
@@ -130,3 +140,4 @@ base: main
 - 2026-10-10 / T03 / entry の形を固定しているのは plugin.test.ts ではなく check-ai-config.mjs だった。codex-trust.ts は hook を数で持たず変更が要らなかった。codex-trust.test.ts は 0.6.30 と hook の数が同じことを前提にしていた / 変更欄を実際に変えたファイルに直し、codex-trust.test.ts は key ごとに比べる形にした
 - 2026-10-10 / T02・T09 のレビュー / F1〜F4 は採用して T10 で直した
 - 2026-10-10 / T04 / 正例のコマンドの多くはファイルを名指すので、Pre の読みの配信で先に届き、同じ会話で Post は繰り返さない。計画の「Post で届く」を、その呼び出しの中で届くことと、Post が全件を変化として見ること（試用のログの changed）の 2 つで確かめる形にした / harness の正例の判定に changed を加え、届いた経路を表に出した
+- 2026-10-10 / T03・T10 のレビュー / F2 は採用して T11 で直した。F1（確かめの合間に link と行き来させると外のファイルを hash できる）は見送った: Node に openat が無く確かめを重ねても隙は消えない、差し替えられるのは同じユーザーのプロセスで外のファイルを自分で読める、Sphica は hash を手元に置くだけで中身を出さず、狂うのはその 1 回の見分けだけ。コメントにこの隙を書いた
