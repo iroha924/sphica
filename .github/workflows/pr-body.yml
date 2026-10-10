@@ -1,6 +1,8 @@
 # Checks that the Verification section of the PR body mentions the Codex review (only that the word is there). The body is written by the author whose work
 # was reviewed, so this checks the record, not the review: the owner reads the Codex review before approving a release.
 # The body is untrusted, so it is passed through an environment variable and only read (never expanded into shell expressions).
+# A pull request from a fork is skipped: it is never merged itself, its author cannot run the review, and the pull request of this
+# repository that carries the change in holds the record.
 name: pr-body
 
 on:
@@ -13,7 +15,7 @@ jobs:
   verification-section:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.actor != 'dependabot[bot]'
+    if: github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
