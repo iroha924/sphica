@@ -92,10 +92,15 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     'import type { OwnWords } from "./own-words.ts";\nexport const w = { source: 1, start: 0, end: 1, route: "owner_statement" } as OwnWords;',
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as unknown as OwnWords<"owner_statement">;',
     'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as\n  OwnWords;',
+    'import type { OwnWords as W } from "./own-words.ts";\nexport const w = { source: 1, start: 0, end: 1, route: "owner_statement" } as W;',
   ]) {
     const r = check({ "stray.ts": `${cast}\n` });
     assert.equal(r.status, 1, cast);
-    assert.match(r.stderr, /server\/src\/stray\.ts casts a value to OwnWords/, cast);
+    assert.match(
+      r.stderr,
+      /server\/src\/stray\.ts casts a value to OwnWords or imports it under another name/,
+      cast,
+    );
   }
   // A module outside the two writers saving an adoption, a reason, or a definition
   for (const write of [
@@ -103,12 +108,26 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     "export const save = (trx: any) => trx.insertInto('unit_anchor_retirement').values({}).execute();",
     'export const save = (trx: any) => trx.insertInto(\n  "field_def",\n).values({}).execute();',
     'export const sql = "insert into unit_adoption (unit_id) values (1)";',
-    "export const retraction = (reason: { source: number }) => ({ retraction_source_id: reason.source, x: 1 });",
+    // A reconsider condition is evidence of an option
+    'export const save = (trx: any) => trx.insertInto("unit_evidence").values({ role: "reconsiders" }).execute();',
+    // A retraction, whatever order its fields come in
+    'export const save = (trx: any, source: number) => trx.updateTable("unit_evidence").set({ retracted_at: "x", retraction_source_id: source }).execute();',
+    'export const save = (trx: any, source: number) => trx.updateTable("unit_adoption").set({ retraction_source_id: source, retracted_at: "x" }).execute();',
+    'export const save = (db: any) => db.exec("INSERT INTO unit_adoption (unit_id) VALUES (1)");',
+    'export const save = (db: any) => db.exec("Update unit_evidence set retracted_at = 1");',
   ]) {
     const r = check({ "stray.ts": `${write}\n` });
     assert.equal(r.status, 1, write);
-    assert.match(r.stderr, /server\/src\/stray\.ts writes an adoption/, write);
+    assert.match(r.stderr, /server\/src\/stray\.ts writes evidence, an adoption/, write);
   }
+  // Shaping rows that were read is not a write, whatever the fields are called
+  assert.equal(
+    check({
+      "stray.ts":
+        'export const shape = async (db: any) => (await db.selectFrom("unit_evidence").selectAll().execute()).map((row: any) => ({ retraction_source_id: row.retraction_source_id, reason: row.retraction_reason }));\n',
+    }).status,
+    0,
+  );
   // Reading those tables, and naming the type, is anyone's
   assert.equal(
     check({

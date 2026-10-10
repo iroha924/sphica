@@ -151,6 +151,17 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 2 pass, 0 fail（件数、種類ごとの 1 行に「cannot be undone」「cannot be reopened」の直し方と限界）
   - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="audit-quotes" test/cli.test.ts` → 1 pass, 0 fail
 
+- [x] T11: architecture の検査が、別名での偽造・根拠の表への書き込み・書き方違いを見つけ、読むだけの処理を拒まない
+  - 種別: 修正
+  - 計画: S6
+  - 依存: T06（直す先の検査を T06 が作る）
+  - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
+  - red: `node scripts/check-architecture.mjs --root <server/src の写しに違反のファイルを 1 つ置いたもの>` → 直す前の検査で、別名のキャスト・見直す条件の書き込み・末尾が `retraction_source_id` の撤回・大文字の SQL が終了コード 0 で通り、読んだ行を整形するだけの処理が終了コード 1 で拒まれる
+  - 完了条件: `bun run architecture` → 通る。`node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 通る
+  - コミット: `test(architecture): catch aliased casts and every way authority rows are written`
+  - 結果: red: `node scripts/check-architecture.mjs --root <写し>` → コミット済みの検査では、別名のキャスト・見直す条件の `insertInto("unit_evidence")`・`retraction_source_id` が最後の撤回・大文字の `INSERT INTO unit_adoption` が 4 つとも exit 0、読んだ行の整形が exit 1。直した検査では 4 つが exit 1、整形が exit 0
+  - 結果: `node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 2 pass, 0 fail。`bun run architecture` → 通る
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -164,3 +175,4 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / T01 のレビュー（`50cbb423`） / F1（P1）CRLF の発言でフェンスが開かず、コードブロックの中の文が採用の根拠として通る。F2（P2）ASCII の単引用符が日本語の句読点の直前で閉じると対にならない。どちらも直す前の判定は拒んでいた / 2 件とも受理。テストで再現して T09 で直した。単引用符は「ラテン文字と数字に挟まれないもの」を引用符として数える形にした（計画の「直後が行末・空白・句読点」より広い。日本語は語の間に空白が無いため）
 - 2026-10-11 / T03 のレビュー（`945179c8`） / F1（P2）共通の `locate` が空白だけの quote を拒むので、glean の通常の根拠と撤回の対象選びでも、実在する空白の span を引けなくなった（計画は、そこを変えないとしている） / 受理。T09 で、`locate` は書かれたとおりに探す形に戻し、空白だけを拒むのは権限の検査（`ownWords`）と record 側の根拠だけにした
 - 2026-10-11 / T05 のレビュー（`78348926`） / F1（P2）理由の発言を forget した取り下げは `unit_state.source_id` が null になり、確かめられない件数から漏れる。F2（P2）取り下げと衝突の解決について、計画が求める直し方と限界が表示されない / 2 件とも受理。T10 で、取り下げは run が書いたものを全部数え、確かめられない 3 種類に 1 行ずつ「何を見るか・何が戻せないか」を出す形にした
+- 2026-10-11 / T06 のレビュー（`021e776d`） / F1（P2）型を別名で import すると偽造のキャストを見逃す。F2（P2）見直す条件の根拠（`unit_evidence`）への書き込みを見ていない。F3（P2）`retraction_source_id` を最後に置いて末尾のカンマを省くと撤回の書き込みを見逃す。F4（P2）大文字の生の SQL を見逃す。F5（P2）読んだ行を整形するだけの処理を書き込みとして拒む / 5 件とも受理。T11 で、別名の import を偽造として数え、書き込みは `insertInto`・`updateTable`・生の SQL（大文字小文字を問わない）で `unit_adoption`・`unit_evidence`・`unit_anchor_retirement`・`field_def` を名指すものに改め、プロパティ名での判定をやめた。表の名前を変数で渡す書き込みと、型の別名を使ったキャストは見えない、と検査のコメントに書いた（型検査が主で、この検査は補助）

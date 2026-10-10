@@ -132,19 +132,24 @@ for (const f of GIT_STARTERS) {
 
 // Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords (a cast anywhere else forges one), and only
 // AUTHORITY_WRITERS write the rows that keep such words, so a new place cannot save an adoption or a reason no check saw. The types
-// already ask each writer for an OwnWords; this stops the two ways around them.
+// already ask each writer for an OwnWords; this stops the plain ways around them. A table name held in a variable, or a type alias used for
+// a cast, is beyond what it sees.
 const OWN_WORDS = "server/src/own-words.ts";
 const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
-const FORGED = /\bas\s+OwnWords\b/;
+// A cast to the type, or the type imported under another name (which a cast could then use)
+const FORGED = /\bas\s+OwnWords\b|\bOwnWords\s+as\s+\w/;
+// A row written through the query builder or as SQL in any case. Evidence is here too: an option's reconsider condition is evidence
 const AUTHORITY =
-  /insertInto\(\s*["'](unit_adoption|unit_anchor_retirement|field_def)["']|into\s+(unit_adoption|unit_anchor_retirement|field_def)\b|\bretraction_source_id:\s*[\w.]+\s*,/;
+  /(?:insertInto|updateTable)\(\s*["'](?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)["']|\b(?:insert\s+into|update)\s+(?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)\b/i;
 for (const f of sources) {
   const text = fs.readFileSync(path.join(root, f), "utf8");
   if (f !== OWN_WORDS && FORGED.test(text))
-    fail.push(`${f} casts a value to OwnWords; only ${OWN_WORDS} makes one, by checking the words`);
+    fail.push(
+      `${f} casts a value to OwnWords or imports it under another name; only ${OWN_WORDS} makes one, by checking the words`,
+    );
   if (!AUTHORITY_WRITERS.has(f) && AUTHORITY.test(text))
     fail.push(
-      `${f} writes an adoption, a retraction's reason, an anchor's reason, or a field definition; only ${[...AUTHORITY_WRITERS].join(" and ")} may, from an OwnWords`,
+      `${f} writes evidence, an adoption, a retraction, an anchor's reason, or a field definition; only ${[...AUTHORITY_WRITERS].join(" and ")} may, from an OwnWords`,
     );
 }
 // If the patterns stopped matching, the check would pass while looking at nothing
