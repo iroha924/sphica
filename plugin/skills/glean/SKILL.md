@@ -79,8 +79,15 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 | `resolve_conflict` | Ends an unresolved conflict between `unit` and `with`, citing the owner's words (`reason_source`, `reason_quote`). Until then each is held back from being shown on its own, except the owner's decision, which only another record the owner adopted holds back |
 | `withdraw` | Withdraws a record the owner says no longer holds, citing the owner's words. A superseded record is refused: withdraw the record that replaced it |
 
+Words that give an op its authority have to be their writer's own: the `quote` of `adopt`, `replace_anchor`, and `retire_anchor`, and the
+`reason_quote` of `retract_evidence`, `retract_adoption`, `resolve_conflict`, and `withdraw`. Check refuses a quote that touches a `>` line
+or a fenced code block, or that sits wholly inside quotation marks on its line (straight or curly quotes, Japanese corner brackets, backticks): quote the owner's own words
+beside the quotation instead. Evidence (`add_evidence`) and the `quote` that says which piece to retract may still be quoted text.
+Check reads where the words sit, not what they mean: whether they settle this record is yours to judge.
+
 Every op carries the `revision` read printed; a record changed since is refused, so read it again. To correct what a record says, write a new
-record in `units` (trace's shape, keys saved as `glean:<key>`) with `supersedes` naming the old one (citing the owner's words, a maintainer's, or the owner's session, not other people's text); records are never rewritten.
+record in `units` (trace's shape, keys saved as `glean:<key>`) with `supersedes` naming the old one (citing the owner's words, a maintainer's, or the owner's session, not other people's text: words that are in the source, and not only a
+quotation there); records are never rewritten.
 
 ## When a source turns up for an unsourced record
 

@@ -54,7 +54,9 @@ and only by saying so: "we rejected yarn", "let's keep SQLite". check refuses th
   `sphica init` bound. It adopts like the owner's words anywhere, even where their association is CONTRIBUTOR
 - The merge only shows the code went in. It is evidence for an `implementation` (with the commit message, `role: "implements"`), never adoption
 - A resolved review thread is not agreement either
-- `supersedes` and `conflicts` retire or dispute a saved record, so they need the owner's or a maintainer's words among the unit's evidence or adoption
+- `supersedes` and `conflicts` retire or dispute a saved record, so they need the owner's or a maintainer's words among the unit's evidence or adoption.
+  Those words have to be in the source and be the writer's own: a maintainer quoting someone else (a `>` line, a code block, words wholly
+  inside quotation marks) does not count, and neither does a quote that is not there
 
 ## What to record
 

@@ -105,13 +105,16 @@ glean の 7 つの操作が、引用の中だけにある言葉を理由や採�
 
 Skill と保証の説明が、機械が確かめる範囲（引用の位置）と確かめない範囲（採用の意味）を分けて書く。npm に出る。
 
-- [ ] T07: glean・harvest・trace の Skill と ASSURANCE.md の文面を直す
+- [x] T07: glean・harvest・trace の Skill と ASSURANCE.md の文面を直す
   - 種別: 変更
   - 計画: S7, S9
   - 依存: T03（文面が書く拒み方が T01〜T03 で決まる）, T04（衝突の扱いの説明が T04 で決まる）
   - 変更: `plugin/skills/glean/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `plugin/skills/trace/SKILL.md`, `ASSURANCE.md`
   - 完了条件: `bun run verify:ai` → 通る。`bun run pairs` → 通る
   - コミット: `docs(skills): say which quotes carry authority and what the check does not judge`
+  - 結果: `bun run verify:ai` → exit 0（AI config: 8 plugin Skills、リンク 0 errors）
+  - 結果: `bun run pairs` → exit 0
+  - 結果: `bun run english` → 最初は exit 1（Skill に書いた日本語のかぎ括弧の例を、英語だけのファイルの検査が止めた）。記号を言葉（Japanese corner brackets）に置き換えて exit 0
 
 - [-] T08: npm と 3 つの plugin manifest のバージョンを上げる
   - 種別: 変更
