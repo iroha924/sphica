@@ -826,7 +826,9 @@ async function extraRows(f: Fixture, p: Plugin): Promise<Row[]> {
       ok: got === insensitive,
       detail: `delivered ${got}, expected ${insensitive}`,
     });
-    fs.rmSync(path.join(f.ctx.repo, "SRC"), { recursive: true, force: true });
+    // On a case-insensitive file system SRC is src itself
+    if (!insensitive) fs.rmSync(path.join(f.ctx.repo, "SRC"), { recursive: true, force: true });
+    else reset("src/Case1.ts");
   }
   {
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-shell-out-"));

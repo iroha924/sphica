@@ -113,7 +113,7 @@ base: main
   - コミット: `fix(deliver): match changed paths against deliverable anchors in one query`
   - 結果: red を直す前のコードで実測した（Post 5,006 ms で打ち切り、問い合わせだけで 2 万パス 16,640 ms・500 パス 418 ms）。直した後は 2 万パス 22 ms・500 パス 20 ms、scale の Post は 2,685 ms。本文の行は表示する 5 件分だけ読む。`--test-name-pattern=\"shell call|more changed paths\" test/deliver.test.ts` → 5 pass。`bun run verify` → exit 0
 
-- [ ] T13: harness の大文字小文字の行が、区別しないファイルシステムで src を消す不具合を直す（Windows の CI で見つけた）
+- [x] T13: harness の大文字小文字の行が、区別しないファイルシステムで src を消す不具合を直す（Windows の CI で見つけた）
   - 種別: 修正
   - 計画: S3
   - 依存: T04（直す対象の harness）
