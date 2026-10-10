@@ -26,7 +26,7 @@ import {
 } from "@stricli/core";
 import { bindOwner, dbInit, inspect, reindex } from "./admin.ts";
 import { leaves } from "./anchors.ts";
-import { type Audit, auditQuotes, KINDS, REPAIR } from "./audit-quotes.ts";
+import { type Audit, auditQuotes, KINDS, REPAIR, uncheckedLines } from "./audit-quotes.ts";
 import {
   callsDir,
   callsRejectedDir,
@@ -592,11 +592,14 @@ async function auditReport(): Promise<void> {
       ],
     });
   }
-  const { links, withdrawals, resolutions } = audit.unchecked;
+  const unchecked = uncheckedLines(audit.unchecked);
   blocks.push({
-    kind: "note",
-    tone: "info",
-    text: `Not checked, since their words are not kept: the grounds of ${plural(links, "link")} from harvest or glean, and the span of the reason for ${plural(withdrawals, "withdrawal")} and ${plural(resolutions, "resolved conflict")}`,
+    kind: "lines",
+    lines: unchecked.length
+      ? ["Not checked, since their words are not kept:", ...unchecked.map((l) => `  ${l}`)]
+      : [
+          "Not checked, since their words are not kept: no such rows (links from harvest or glean, withdrawals, resolved conflicts)",
+        ],
   });
   console.log(
     document(

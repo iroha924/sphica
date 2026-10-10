@@ -139,6 +139,18 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts` → 直す前のコードで 14 pass, 3 fail。CRLF のフェンスの中の文が `null`（期待は `block`）、`'…'。` の中の文が `null`（期待は `inline`）、改行だけの根拠の追加が「The record is not valid」で拒まれる
   - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/reconcile.test.ts test/export.test.ts` → 145 pass, 0 fail
 
+- [x] T10: 監査が、理由の発言を forget した取り下げも数え、確かめられない行の直し方と限界を表示する
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T05（直す先の監査を T05 が作る）
+  - 変更: `server/src/audit-quotes.ts`, `server/src/cli.ts`, `server/test/audit-quotes.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 直す前の数え方で、理由の source が null の取り下げが件数から漏れ、テストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 通る
+  - コミット: `fix(doctor): count every withdrawal in the audit and say what cannot be undone`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 数え方を直す前の条件（`source_id is not null`）に戻すと 1 pass, 1 fail。取り下げ 2 件（理由の source あり・null）のうち `withdrawals: 1`（期待は 2）
+  - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 2 pass, 0 fail（件数、種類ごとの 1 行に「cannot be undone」「cannot be reopened」の直し方と限界）
+  - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="audit-quotes" test/cli.test.ts` → 1 pass, 0 fail
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -151,3 +163,4 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / T01〜T06 / タスクごとの Codex のレビューを、各タスクの直後ではなく T07 の後にまとめて頼んだ（手順の読み落とし）。6 件を別々の新しい会話で、high で流した / 結果: T02（`e1746b65`）と T04（`e6c8d465`）は指摘なし。ほかは下の行のとおり
 - 2026-10-11 / T01 のレビュー（`50cbb423`） / F1（P1）CRLF の発言でフェンスが開かず、コードブロックの中の文が採用の根拠として通る。F2（P2）ASCII の単引用符が日本語の句読点の直前で閉じると対にならない。どちらも直す前の判定は拒んでいた / 2 件とも受理。テストで再現して T09 で直した。単引用符は「ラテン文字と数字に挟まれないもの」を引用符として数える形にした（計画の「直後が行末・空白・句読点」より広い。日本語は語の間に空白が無いため）
 - 2026-10-11 / T03 のレビュー（`945179c8`） / F1（P2）共通の `locate` が空白だけの quote を拒むので、glean の通常の根拠と撤回の対象選びでも、実在する空白の span を引けなくなった（計画は、そこを変えないとしている） / 受理。T09 で、`locate` は書かれたとおりに探す形に戻し、空白だけを拒むのは権限の検査（`ownWords`）と record 側の根拠だけにした
+- 2026-10-11 / T05 のレビュー（`78348926`） / F1（P2）理由の発言を forget した取り下げは `unit_state.source_id` が null になり、確かめられない件数から漏れる。F2（P2）取り下げと衝突の解決について、計画が求める直し方と限界が表示されない / 2 件とも受理。T10 で、取り下げは run が書いたものを全部数え、確かめられない 3 種類に 1 行ずつ「何を見るか・何が戻せないか」を出す形にした

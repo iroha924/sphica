@@ -51,6 +51,22 @@ export const REPAIR: Record<Finding["kind"], string> = {
     "a definition cannot be changed or withdrawn: define the field again under another name, or forget the message, which removes the message and everything that quotes it",
 };
 
+/** What can be said of the rows whose words cannot be checked: what to look at, and what cannot be undone. One line per kind that has rows. */
+export function uncheckedLines(unchecked: Audit["unchecked"]): string[] {
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return [
+    unchecked.links
+      ? `${count(unchecked.links, "link", "links")} from harvest or glean: the words a supersedes or conflicts link rested on are not kept. Read the record's evidence and adoption to judge it`
+      : "",
+    unchecked.withdrawals
+      ? `${count(unchecked.withdrawals, "withdrawal", "withdrawals")}: the reason's message is kept, not its span. A withdrawal cannot be undone: if one was wrong, save the record again under a new key`
+      : "",
+    unchecked.resolutions
+      ? `${count(unchecked.resolutions, "resolved conflict", "resolved conflicts")}: the reason's message is kept, not its span. A resolved conflict cannot be reopened: save a successor of one side that names the other in conflicts`
+      : "",
+  ].filter(Boolean);
+}
+
 export async function auditQuotes(db: Reads): Promise<Audit> {
   const findings: Finding[] = [];
   let read = 0;
@@ -250,8 +266,9 @@ export async function auditQuotes(db: Reads): Promise<Audit> {
     db
       .selectFrom("unit_state")
       .select((eb) => eb.fn.countAll().as("n"))
+      // Counted whether or not the reason's message is still there: forgetting it leaves the withdrawal
       .where("to_state", "=", "withdrawn")
-      .where("source_id", "is not", null),
+      .where("run_id", "is not", null),
   );
   const resolutions = await count(
     db

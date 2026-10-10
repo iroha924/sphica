@@ -5,7 +5,7 @@
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { auditQuotes, KINDS, REPAIR } from "../src/audit-quotes.ts";
+import { auditQuotes, KINDS, REPAIR, uncheckedLines } from "../src/audit-quotes.ts";
 import { inTransaction } from "../src/db.ts";
 import { locate } from "../src/own-words.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
@@ -63,6 +63,12 @@ test("the audit lists rows resting on quoted words by kind, leaves sound rows ou
             ],
             evidence: [{ source: `s${m}`, quote: "Use SQLite.", role: "states" }],
             adoption: [{ source: `s${m}`, quote: "Decided." }],
+          },
+          {
+            key: "note",
+            kind: "finding",
+            text: "A note",
+            evidence: [{ source: `s${m}`, quote: "Use SQLite.", role: "states" }],
           },
         ],
       });
@@ -125,7 +131,35 @@ test("the audit lists rows resting on quoted words by kind, leaves sound rows ou
     // The sound adoption, the quoted one, its retraction's reason, the condition, and the definition
     assert.equal(audit.read, 5);
     for (const kind of KINDS) assert.ok(REPAIR[kind].length > 0, kind);
+
+    // A withdrawal is counted with or without its reason's message: forgetting the message sets the source to null and leaves the row
+    const note = Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/note'").get()?.id);
+    for (const [id, source] of [
+      [unit, m],
+      [note, null],
+    ] as const)
+      insert(db, "unit_state", {
+        unit_id: id,
+        from_state: "active",
+        to_state: "withdrawn",
+        // A state comes after its unit was created, which was just now
+        at: new Date(Date.now() + 1000).toISOString(),
+        reason: "withdrawn: no longer holds",
+        source_id: source,
+        run_id: run(db, p),
+      });
+    assert.deepEqual((await auditQuotes(db.reader)).unchecked, { links: 0, withdrawals: 2, resolutions: 0 });
   } finally {
     await db.done();
   }
+});
+
+test("what cannot be checked is named with what can be done about it, one line per kind that has rows", () => {
+  assert.deepEqual(uncheckedLines({ links: 0, withdrawals: 0, resolutions: 0 }), []);
+  const lines = uncheckedLines({ links: 2, withdrawals: 1, resolutions: 3 });
+  assert.equal(lines.length, 3);
+  assert.match(lines[0] ?? "", /^2 links from harvest or glean: .*Read the record's evidence and adoption/);
+  assert.match(lines[1] ?? "", /^1 withdrawal: .*cannot be undone: .*under a new key/);
+  assert.match(lines[2] ?? "", /^3 resolved conflicts: .*cannot be reopened: .*successor/);
+  assert.deepEqual(uncheckedLines({ links: 0, withdrawals: 0, resolutions: 1 }).length, 1);
 });
