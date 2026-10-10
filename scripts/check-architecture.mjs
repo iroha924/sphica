@@ -130,11 +130,38 @@ for (const f of GIT_STARTERS) {
     fail.push(`${f} names no git to start where check-architecture.mjs looks; fix GIT_STARTERS`);
 }
 
+// Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords (a cast anywhere else forges one), and only
+// AUTHORITY_WRITERS write the rows that keep such words, so a new place cannot save an adoption or a reason no check saw. The types
+// already ask each writer for an OwnWords; this stops the two ways around them.
+const OWN_WORDS = "server/src/own-words.ts";
+const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
+const FORGED = /\bas\s+OwnWords\b/;
+const AUTHORITY =
+  /insertInto\(\s*["'](unit_adoption|unit_anchor_retirement|field_def)["']|into\s+(unit_adoption|unit_anchor_retirement|field_def)\b|\bretraction_source_id:\s*[\w.]+\s*,/;
+for (const f of sources) {
+  const text = fs.readFileSync(path.join(root, f), "utf8");
+  if (f !== OWN_WORDS && FORGED.test(text))
+    fail.push(`${f} casts a value to OwnWords; only ${OWN_WORDS} makes one, by checking the words`);
+  if (!AUTHORITY_WRITERS.has(f) && AUTHORITY.test(text))
+    fail.push(
+      `${f} writes an adoption, a retraction's reason, an anchor's reason, or a field definition; only ${[...AUTHORITY_WRITERS].join(" and ")} may, from an OwnWords`,
+    );
+}
+// If the patterns stopped matching, the check would pass while looking at nothing
+if (!sources.includes(OWN_WORDS) || !FORGED.test(fs.readFileSync(path.join(root, OWN_WORDS), "utf8")))
+  fail.push(`${OWN_WORDS} makes no OwnWords where check-architecture.mjs looks; fix OWN_WORDS`);
+for (const f of AUTHORITY_WRITERS)
+  if (!sources.includes(f) || !AUTHORITY.test(fs.readFileSync(path.join(root, f), "utf8")))
+    fail.push(`${f} writes no authority row where check-architecture.mjs looks; fix AUTHORITY_WRITERS`);
+
 if (fail.length) {
   console.error(`architecture:\n${fail.map((f) => `  ${f}`).join("\n")}`);
   process.exit(1);
 }
 console.log(`lifecycle writers: only ${RECONCILE} writes unit_state and unit_replacement`);
+console.log(
+  `authority rows: only ${[...AUTHORITY_WRITERS].join(" and ")} write them, from words ${OWN_WORDS} checked`,
+);
 console.log(
   `git starters: only ${[...GIT_STARTERS].join(" and ")} start git, among the ${SPAWNERS.size} modules that start processes`,
 );

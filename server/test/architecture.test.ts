@@ -79,3 +79,49 @@ test("only git.ts and the git worker start git, and only a few modules start pro
     assert.match(r.stderr, /server\/src\/git\.ts names no git to start/);
   }
 });
+
+test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write the rows that keep such words", () => {
+  const ok = check({});
+  assert.equal(ok.status, 0);
+  assert.match(
+    ok.stdout,
+    /authority rows: only server\/src\/record\.ts and server\/src\/glean\.ts write them/,
+  );
+  // A cast forges the checked words, however it is spelled
+  for (const cast of [
+    'import type { OwnWords } from "./own-words.ts";\nexport const w = { source: 1, start: 0, end: 1, route: "owner_statement" } as OwnWords;',
+    'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as unknown as OwnWords<"owner_statement">;',
+    'import type { OwnWords } from "./own-words.ts";\nexport const w = {} as\n  OwnWords;',
+  ]) {
+    const r = check({ "stray.ts": `${cast}\n` });
+    assert.equal(r.status, 1, cast);
+    assert.match(r.stderr, /server\/src\/stray\.ts casts a value to OwnWords/, cast);
+  }
+  // A module outside the two writers saving an adoption, a reason, or a definition
+  for (const write of [
+    'export const save = (trx: any) => trx.insertInto("unit_adoption").values({}).execute();',
+    "export const save = (trx: any) => trx.insertInto('unit_anchor_retirement').values({}).execute();",
+    'export const save = (trx: any) => trx.insertInto(\n  "field_def",\n).values({}).execute();',
+    'export const sql = "insert into unit_adoption (unit_id) values (1)";',
+    "export const retraction = (reason: { source: number }) => ({ retraction_source_id: reason.source, x: 1 });",
+  ]) {
+    const r = check({ "stray.ts": `${write}\n` });
+    assert.equal(r.status, 1, write);
+    assert.match(r.stderr, /server\/src\/stray\.ts writes an adoption/, write);
+  }
+  // Reading those tables, and naming the type, is anyone's
+  assert.equal(
+    check({
+      "stray.ts":
+        'import type { OwnWords } from "./own-words.ts";\nexport const read = (db: any, w: OwnWords) => db.selectFrom("unit_adoption").where("retraction_source_id", "=", w.source).execute();\n',
+    }).status,
+    0,
+  );
+  // A writer or the maker that the patterns no longer see has stopped being looked at
+  const blank = check({ "own-words.ts": "export {};\n" });
+  assert.equal(blank.status, 1);
+  assert.match(blank.stderr, /own-words\.ts makes no OwnWords where check-architecture\.mjs looks/);
+  const moved = check({ "glean.ts": "export {};\n" });
+  assert.equal(moved.status, 1);
+  assert.match(moved.stderr, /glean\.ts writes no authority row where check-architecture\.mjs looks/);
+});

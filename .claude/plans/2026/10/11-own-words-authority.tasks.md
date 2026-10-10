@@ -91,13 +91,15 @@ glean の 7 つの操作が、引用の中だけにある言葉を理由や採�
   - 結果: `node --import ./test/isolate-home.ts --test --test-name-pattern="audit-quotes" test/cli.test.ts` → 1 pass, 0 fail。子プロセスで `doctor --audit-quotes` が終了コード 0、DB のファイルのバイト列が前後で同じ。`--reindex` との同時指定は終了コードが 0 でなく、DB は変わらない。DB が無いときは「No database at」で失敗
   - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts` → 最初の実装では `not authorized to use function: like` で失敗した（読み取り専用の接続は `like` を許可していない）。リンクの件数を run の origin で数える形に直して通った
 
-- [ ] T06: 権限の表へ書く箇所と `OwnWords` を作る箇所を architecture の検査に足す
+- [x] T06: 権限の表へ書く箇所と `OwnWords` を作る箇所を architecture の検査に足す
   - 種別: 追加
   - 計画: S6
   - 依存: T02（record 側の書き込みが `OwnWords` を通っている）, T03（glean 側の書き込みが `OwnWords` を通っている）
   - 変更: `scripts/check-architecture.mjs`, `server/test/architecture.test.ts`
   - 完了条件: `bun run architecture` → 通る。`node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 通る（`OwnWords` を通さない書き込みを置いた入力で検査が落ちる）
   - コミット: `test(architecture): limit where authority rows are written and own words are made`
+  - 結果: `bun run architecture` → 通る（「authority rows: only server/src/record.ts and server/src/glean.ts write them, from words server/src/own-words.ts checked」）
+  - 結果: `node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 2 pass, 0 fail。`OwnWords` へのキャスト 3 通り（改行を挟むものを含む）と、2 つのモジュールの外からの書き込み 5 通り（`insertInto` 3 つ、生の SQL、撤回の理由）を置くと検査が落ちる。表を読むだけ・型を名指すだけは通る。`own-words.ts` や `glean.ts` を空にすると「見ている場所に無い」で落ちる
 
 ## P5: 文面を直してリリースする
 
