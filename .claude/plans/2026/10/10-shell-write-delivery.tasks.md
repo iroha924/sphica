@@ -76,13 +76,14 @@ base: main
 
 固定の正例と負例で、出荷する hook が期待どおりに振る舞い、時間が収まることを数字で示す。
 
-- [ ] T04: 正しさの harness（両ホストの入力の形、正例 40 件・負例・別に数える行・限界の行、新旧比較）と、Windows の CI での実行
+- [x] T04: 正しさの harness（両ホストの入力の形、正例 40 件・負例・別に数える行・限界の行、新旧比較）と、Windows の CI での実行
   - 種別: 追加
   - 計画: S3
   - 依存: T03（出荷する hook の形が要る）
   - 変更: `server/evals/post-write/shell-write-harness.ts`, `server/test/shell-write-harness.test.ts`, `.github/workflows/check.yml`, `knip.json`
   - 完了条件: `node server/evals/post-write/shell-write-harness.ts` → 両ホストの形で正例 40 件中 40 件が届き、負例とメタデータだけの行は追加 0、別に数える行と限界の行の件数と新旧比較の表が出る。`cd server && node --import ./test/isolate-home.ts --test test/shell-write-harness.test.ts` → harness 自身が既知の結果を正しく数える
   - コミット: `test(eval): check post-shell delivery on fixed shell commands for both hosts`
+  - 結果: `node server/evals/post-write/shell-write-harness.ts` → exit 0（macOS）。正例 80 / 80（shell の 40 件 × 両ホスト。届いた経路は Pre が名指して先に届けたものと Post のものがあり、全件で Post が変化として見た）、負例 20 / 20（変化として見ず、Post は何も足さない）、別に数える行（git checkout・stash・restore、Biome）は 8 / 8 が変化として見え、Post で届いたのは 2。限界の行は background の書き込みが次の呼び出しでも見えないことと、署名を変えない変化はユーザー空間から再現できない（書けば ctime が動く）ことを出す。並行 3 行、控えの欠けと期限切れ、ロック中（ログなしで届く）、試用のログを書けない、サブディレクトリの cwd、大文字小文字、外へ出る symlink がすべて期待どおり。1,000 ファイル・63 MB の空のキャッシュで Pre 163 ms・Post 92 ms、全部を変える呼び出しで Post 235 ms（期限に当たらず unknown 0）。main との比較: 正例に届いたのは main 58 / 80、作業ブランチ 80 / 80、会話内の重複はどちらも 0、表示した記録 76 → 99、文字数 39,508 → 52,666。`cd server && node --import ./test/isolate-home.ts --test --test-timeout=120000 test/shell-write-harness.test.ts` → 4 pass。Windows のパスの形と PowerShell の正例は Windows の CI で流す（このコミットの時点では未実行）。`bun run verify` → exit 0
 - [ ] T05: scale の計測に Pre と Post を足す（実ファイルを持つ fixture、空と温まったキャッシュ、大量の変化）
   - 種別: 追加
   - 計画: S3
@@ -128,3 +129,4 @@ base: main
 - 2026-10-10 / T01 のレビュー / F1〜F8 は採用して T09 で直した。期限を守るため、読み取りをファイル全体の一括から 1 MB ずつに変えた
 - 2026-10-10 / T03 / entry の形を固定しているのは plugin.test.ts ではなく check-ai-config.mjs だった。codex-trust.ts は hook を数で持たず変更が要らなかった。codex-trust.test.ts は 0.6.30 と hook の数が同じことを前提にしていた / 変更欄を実際に変えたファイルに直し、codex-trust.test.ts は key ごとに比べる形にした
 - 2026-10-10 / T02・T09 のレビュー / F1〜F4 は採用して T10 で直した
+- 2026-10-10 / T04 / 正例のコマンドの多くはファイルを名指すので、Pre の読みの配信で先に届き、同じ会話で Post は繰り返さない。計画の「Post で届く」を、その呼び出しの中で届くことと、Post が全件を変化として見ること（試用のログの changed）の 2 つで確かめる形にした / harness の正例の判定に changed を加え、届いた経路を表に出した
