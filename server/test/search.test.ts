@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Search and read against real SQLite: a hit must hold most of the question's subject words, a superseded hit brings its successor,
 // and read shows the exact cited words with who said them and each anchor checked in a working tree.
 import "./isolate-home.ts";

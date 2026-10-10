@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // M2 of the E3 plan: a change task run with the rule lines only, or with the rule lines and the drafted Biome check installed, on Claude or
 // Codex, then judged by machine: whether the final patch still holds a forbidden import (the violation that reached the commit), whether
 // the installed check failed on the allowed exception, and whether the task's hidden test passes.

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What a shell call changed among anchored files, on real files: content changes, creation, deletion, and replacement count; metadata,
 // same-content rewrites, and writes undone within the call do not; the cache, snapshots, deadline, and paths leaving the checkout.
 import "./isolate-home.ts";

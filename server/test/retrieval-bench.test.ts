@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The offline retrieval benchmark must run in verify: experiments on search are judged with it, so one that cannot run, or runs with
 // fewer questions, fails here. Its numbers are compared by the experiment's own pull request, never gated here.
 import "./isolate-home.ts";

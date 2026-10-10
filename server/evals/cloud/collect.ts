@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Collects one loop of the evaluation (plan step 9): every claude/eval-* branch of the bootstrap repositories, matched to its task by the
 // prompt the hooks received, plus the local Codex runs. For each run it records the hidden tests, what was delivered, and the failure signals
 // in the run log (searches that found nothing, reads that found nothing, tool errors, Sphica calls, turns, time), and writes one table.

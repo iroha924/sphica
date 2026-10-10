@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Replays one evaluation task with Codex on this machine (see runCodex in codex-run.ts). With --probe, it instead shows that the run's
 // commands cannot read what the fence hides, on the same slot, before any measured run.
 // Run: node evals/cloud/codex.ts --build <dir> --repo eval-shelf-2 --task pilot-dates [--out <dir>] [--probe]

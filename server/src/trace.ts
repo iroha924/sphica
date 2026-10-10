@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What trace reads: sessions not traced yet (the owner's messages for an explicit trace, every speaker's for an automatic one), the run a draft is bound to, and a session's sources, edits, and the project's live records.
 import { type ExpressionBuilder, type Kysely, sql } from "kysely";
 import type { Caller } from "./caller.ts";

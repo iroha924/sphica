@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The record MCP server: the trace, harvest, and glean Skills write through it (the ingest connection). The read server (mcp.ts) stays
 // reader-only. Every record write is bound to a run begin issued for one project and target; the record never names them. The forget
 // Skill's forget_apply is the one exception: it removes sources on the forget connection, only after the owner confirms in the host.

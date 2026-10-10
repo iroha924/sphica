@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The git worker's own guards: where its isolated directory may be, which files it reads and how, the config it writes, and the deadline
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

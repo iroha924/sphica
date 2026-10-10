@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The offline order benchmark: the crowded file holds more records than one delivery shows, so the ordering rule decides what lands
 // inside the limits, and the bench reads that from what the hooks really returned.
 import "./isolate-home.ts";

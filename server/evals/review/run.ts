@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs precedent lanes of the review evaluation on this machine, and the preflight that vouches for how they are fenced.
 // Run from server/ after `bun run bundle`:
 //   node evals/review/run.ts --preflight [--out <dir>]

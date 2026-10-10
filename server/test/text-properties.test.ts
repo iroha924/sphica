@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Properties of the string code search and records rely on, over generated input (fast-check, fixed seed so a failure reruns the same),
 // and the growth of mask()'s time, which must stay linear: it runs on every captured message.
 import "./isolate-home.ts";

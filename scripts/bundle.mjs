@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Assembles the shipped files under plugin/. **plugin/ itself is the npm package root**:
 // Claude Code installs it from the marketplace npm source, and Codex from the same tarball.
 //

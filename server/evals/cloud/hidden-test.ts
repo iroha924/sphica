@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs one task's hidden test against a checkout the way collect counts it: the agent's code runs inside sandbox-exec with a fresh scratch
 // directory it may write and nothing else outside, under Node's permission model too. collect and the tests use this one runner.
 import { spawnSync } from "node:child_process";

@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Both full-text indexes must hold terms() output as of revision 9, which includes the parts of camelCase and snake_case names, so they
 -- are rebuilt as `sphica doctor --reindex` does. Tables, views, and triggers are the same as at revision 8.
 

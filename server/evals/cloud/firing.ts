@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The firing plan of one build: every Claude run the loop asks for, one row per task, condition, and try. build.ts writes it, fire.ts marks a
 // row when its routine is fired, and collect.ts counts the fired rows as the denominator, so a run that pushed no branch still has its task.
 import fs from "node:fs";

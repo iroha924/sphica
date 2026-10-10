@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs scripts/release-gate.mjs as release.yml does, with fake git, gh, and npm first on PATH (no network).
 // The workflow reads the PR number from GITHUB_OUTPUT, so check what the script actually writes there.
 

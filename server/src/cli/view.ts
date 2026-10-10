@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // CLI output: Clack in a terminal, plain indented text in pipes (an AI reading through Bash, the harvest log). Parts return strings for console.log.
 // **Only the heading and the closing line start a line**, so outside text cannot forge a status line (test/view.test.ts, test/cli.test.ts check).
 // The recording hooks do not load Clack and keep the server/src/panel.ts format.

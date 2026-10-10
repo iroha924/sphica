@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The shape of what the capture hook shows people (✦ for the title, │ at the start of content lines, ╰─ for the closing line), plus marks and text cleanup shared with the CLI.
 // CLI output is drawn with Clack (server/src/cli/view.ts). The hook does not load Clack, so strings are built here.
 // MCP results, which only AIs read, use neither shape.

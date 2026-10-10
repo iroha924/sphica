@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Commit message check. `node scripts/check-commit-msg.mjs <file>` for the commit-msg hook,
 // `--range <base>..<head>` for CI (hooks can be skipped, so CI checks what was actually committed),
 // `--pre-push` with Git's pre-push lines on stdin (checks the stored messages of the refs being pushed).

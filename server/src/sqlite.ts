@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Where the database file lives, and the read-only connection. **Writing connections live only in db-write.ts.**
 // The modules are split so that interfaces reading untrusted text (MCP, search) cannot reach a
 // writing connection, and scripts/check-architecture.mjs enforces the import direction.

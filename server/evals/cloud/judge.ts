@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The per-run signals the evaluation reports, kept apart so "could not tell" never reads as "no": whether the gold record was delivered,
 // whether the run found it through Sphica, what shape Codex's answer came in, and how much of the patch the grader sees.
 import { checkAnswer, parseOutput } from "./schema-check.ts";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // A CODEX_HOME holding an installed Sphica 0.6.30 and the config.toml Codex 0.160.0 wrote after trusting its hooks, and a codex first
 // on PATH that prints a version and records the CODEX_HOME it was given. POSIX only (a shebang script); verify does not run on Windows.
 import fs from "node:fs";

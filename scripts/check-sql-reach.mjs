@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Counts whether the SQL call sites in server/src ran against a real SQLite database in tests.
 //
 // **Type checks and unit tests let SQL that never runs pass.** Tests really run SQL against SQLite in a temp directory,

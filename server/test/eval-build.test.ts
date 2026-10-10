@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The evaluation slots' scripts: where they put the database copy, the receipts, and the gold marker, for the cloud VM and the local runners.
 import "./isolate-home.ts";
 import assert from "node:assert/strict";

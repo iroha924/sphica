@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Versions of the npm package and the distributed plugin, and where each one runs from.
 //
 // Claude Code and Codex both copy the plugin to `<cache>/<marketplace>/sphica/<version>/`

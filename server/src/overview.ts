@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // On-request overviews for MCP overview: every live decision and constraint by directory (live), and records that need a look (look).
 // Both read the database and the working tree only, and name records by key so the agent reads each before relying on it.
 import path from "node:path";

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Grades /sphica:rules runs for M1: the Biome config a run drafts goes into a copy of the fixture with held-out files it never saw, and the
 // pinned Biome decides which of them fail. Biome itself reads the draft, comments and all, so no JSONC parsing happens here.
 // Run from server/: node evals/review/rules-grade.ts --report <runs dir>

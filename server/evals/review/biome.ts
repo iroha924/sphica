@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Runs the Biome the server pins on a fixture directory with that directory's own biome.json, so a drafted import check is judged by the
 // linter the owner would paste it into.
 import { spawnSync } from "node:child_process";

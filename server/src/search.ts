@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Search over records (units) and retained sources. Ranked word search (FTS5 bm25) finds candidates; a candidate counts as a hit only
 // when it holds more than half of the question's content terms (text.ts queryTerms). Weaker matches are counted, not shown, so a question
 // with no answer comes back empty instead of returning whatever shares one word with it.

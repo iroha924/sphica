@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Automatic delivery against real SQLite and a git checkout: which records reach the model before an edit, on a prompt, and at session
 // start, which never do, and that each delivery is logged by unit id without its text.
 import "./isolate-home.ts";

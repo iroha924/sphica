@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // The trace, harvest, and glean flows behind the record MCP server: begin binds a run to one project and target (a session, a pull request,
 // or the owner's current session for glean), context prints what the run may cite, and check and save take the run id and the record.
 // The record never names its project, session, or pull request; the run does.

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Reads one pull request through `gh api` (read only) and stores what people wrote as sources: the body (a new revision when edited),
 // comments, reviews, review comments with their code position, commits, the merge, and the issues the body closes.
 // Each source keeps its author's GitHub association, which decides who can adopt a proposal; the text is someone else's and is never trusted.

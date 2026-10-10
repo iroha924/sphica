@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Fails when shipped plugin files changed without a version bump. pre-commit checks the whole work branch including the commit
 // being made (on main, against the previous commit), and CI checks everything from the `--base` commit to HEAD.
 //

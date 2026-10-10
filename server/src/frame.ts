@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // Past text handed to a model: inside a tag with a random id, so text inside cannot close it and a quote that says
 // "ignore the above" stays a quote. Control and invisible characters are dropped (panel.ts plain).
 import crypto from "node:crypto";

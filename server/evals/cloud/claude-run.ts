@@ -1,3 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
 // What a local Claude run is started with: the settings file (sandbox, permissions, hooks) and the MCP config for one condition. The run
 // uses the owner's login, so everything else of the owner's (settings, CLAUDE.md, plugins, MCP servers) is kept out by the command line
 // (project sources only, strict MCP config) and what is left is fenced by the sandbox and acceptEdits.

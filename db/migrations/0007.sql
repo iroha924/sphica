@@ -1,3 +1,6 @@
+-- Copyright (c) 2026 iroha924 and contributors
+-- SPDX-License-Identifier: MIT
+
 -- Revision 6 → 7 of generation 2: capture prunes the deliveries of sessions idle past a cutoff, so delivery_unit loses its cascade from
 -- delivery (capture may not delete through one) and delivery_ad removes the units. Runs in one transaction with foreign keys off; every
 -- statement matches db/schema.sql at revision 7, and server/test/migrate.test.ts compares the two.
