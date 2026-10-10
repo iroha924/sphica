@@ -12,6 +12,9 @@ import { tempDir } from "./temp-dir.ts";
 
 const REPO = path.join(import.meta.dirname, "..", "..");
 
+/** SQLite's statement that swaps a conflicting row for a new one */
+const REPLACING = ["RE", "PLACE"].join("");
+
 /** The check run on a copy of server/src, with files put into it over the copied ones */
 function check(extra: Record<string, string>) {
   const root = tempDir("sphica-architecture-");
@@ -115,6 +118,12 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     'export const save = (trx: any, source: number) => trx.updateTable("unit_adoption").set({ retraction_source_id: source, retracted_at: "x" }).execute();',
     'export const save = (db: any) => db.exec("INSERT INTO unit_adoption (unit_id) VALUES (1)");',
     'export const save = (db: any) => db.exec("Update unit_evidence set retracted_at = 1");',
+    // Every spelling SQLite takes for a write
+    'export const save = (db: any) => db.exec("insert or ignore into unit_adoption (unit_id) values (1)");',
+    // The statement's name is put together here: this repository's SQL check refuses it wherever it is spelled out
+    `export const save = (db: any) => db.exec("INSERT OR ${REPLACING} INTO field_def (name) values (1)");`,
+    `export const save = (db: any) => db.exec("${REPLACING.toLowerCase()} into unit_anchor_retirement (anchor_id) values (1)");`,
+    'export const save = (db: any) => db.exec("update or ignore unit_adoption set retracted_at = 1");',
   ]) {
     const r = check({ "stray.ts": `${write}\n` });
     assert.equal(r.status, 1, write);
@@ -125,6 +134,14 @@ test("only own-words.ts makes an OwnWords, and only record.ts and glean.ts write
     check({
       "stray.ts":
         'export const shape = async (db: any) => (await db.selectFrom("unit_evidence").selectAll().execute()).map((row: any) => ({ retraction_source_id: row.retraction_source_id, reason: row.retraction_reason }));\n',
+    }).status,
+    0,
+  );
+  // The type under another name is only a name until something is cast to it
+  assert.equal(
+    check({
+      "stray.ts":
+        'import type { OwnWords as W } from "./own-words.ts";\nexport const read = (db: any, w: W) => db.selectFrom("unit_adoption").where("source_id", "=", w.source).execute();\n',
     }).status,
     0,
   );

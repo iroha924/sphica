@@ -165,3 +165,15 @@ test("a quote of only white space is not words", () => {
   assert.equal(route(ownWords(said({ text: "Use SQLite.\n\nDecided." }), "\n", "owner")), "missing");
   assert.equal(route(ownWords(said({ text: "Use SQLite. Decided." }), " ", "trusted")), "missing");
 });
+
+test("an apostrophe after a letter written with a combining mark is still inside its word", () => {
+  // The name's last letter is e followed by a combining acute accent
+  const name = "Jose\u0301";
+  assert.equal(verdict(`${name}'s note says ' Drop this decision.'`, "Drop this decision."), "inline");
+  assert.equal(
+    verdict(`${name}'s choice is SQLite, and the users' choice is too.`, "choice is SQLite"),
+    null,
+  );
+  // A kana written with a combining voiced mark is not a Latin letter: a mark after it is a quotation mark
+  assert.equal(verdict("これか\u3099'Drop this decision.'だ", "Drop this decision."), "inline");
+});

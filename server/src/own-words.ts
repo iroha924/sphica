@@ -91,6 +91,13 @@ const PAIRS: Record<string, string> = { '"': '"', "“": "”", "‘": "’", "�
 /** A character an apostrophe can sit against inside a word or a measure: `it's`, `users'`, `5'` */
 const WORD = /[\p{Script=Latin}\p{N}]/u;
 
+/** Whether the character at `at` ends a Latin word or a number. Combining marks belong to the letter before them, so they are stepped over. */
+function inWord(line: string, at: number): boolean {
+  let i = at;
+  while (i > 0 && /\p{M}/u.test(line[i] as string)) i--;
+  return i >= 0 && WORD.test(line[i] as string);
+}
+
 /** The ranges of one line, in characters, that sit inside quotation marks or a code span, marks included. */
 function inlineRanges(line: string): Range[] {
   const found: Range[] = [];
@@ -116,7 +123,7 @@ function inlineRanges(line: string): Range[] {
       }
     } else if (c === "'") {
       // An apostrophe inside a Latin word or after a number is not a quotation mark; beside anything else, in any script, it is one
-      if (i === 0 || !WORD.test(line[i - 1] as string))
+      if (!inWord(line, i - 1))
         for (let j = i + 1; j < line.length; j++)
           if (line[j] === "'" && (j + 1 === line.length || !WORD.test(line[j + 1] as string))) {
             close = j;

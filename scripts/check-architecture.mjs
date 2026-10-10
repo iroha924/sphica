@@ -136,14 +136,23 @@ for (const f of GIT_STARTERS) {
 // a cast, is beyond what it sees.
 const OWN_WORDS = "server/src/own-words.ts";
 const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
-// A cast to the type, or the type imported under another name (which a cast could then use)
-const FORGED = /\bas\s+OwnWords\b|\bOwnWords\s+as\s+\w/;
-// A row written through the query builder or as SQL in any case. Evidence is here too: an option's reconsider condition is evidence
-const AUTHORITY =
-  /(?:insertInto|updateTable)\(\s*["'](?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)["']|\b(?:insert\s+into|update)\s+(?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)\b/i;
+// A cast to the type, under its own name or one it was imported as. The import clause itself reads `OwnWords as W`, so it is taken out
+// before looking for the cast
+const RENAMED = /\bOwnWords\s+as\s+(\w+)/g;
+const forged = (text) => {
+  const names = ["OwnWords", ...[...text.matchAll(RENAMED)].map((m) => m[1])];
+  return new RegExp(`\\bas\\s+(?:${names.join("|")})\\b`).test(text.replace(RENAMED, ""));
+};
+// A row written through the query builder or as SQL, in any case and any of SQLite's spellings (insert or ignore, replace into, update or
+// ignore). Evidence is here too: an option's reconsider condition is evidence
+const TABLES = "(?:unit_adoption|unit_evidence|unit_anchor_retirement|field_def)";
+const AUTHORITY = new RegExp(
+  `(?:insertInto|updateTable|replaceInto)\\(\\s*["']${TABLES}["']|\\b(?:(?:insert(?:\\s+or\\s+\\w+)?|replace)\\s+into|update(?:\\s+or\\s+\\w+)?)\\s+${TABLES}\\b`,
+  "i",
+);
 for (const f of sources) {
   const text = fs.readFileSync(path.join(root, f), "utf8");
-  if (f !== OWN_WORDS && FORGED.test(text))
+  if (f !== OWN_WORDS && forged(text))
     fail.push(
       `${f} casts a value to OwnWords or imports it under another name; only ${OWN_WORDS} makes one, by checking the words`,
     );
@@ -153,7 +162,7 @@ for (const f of sources) {
     );
 }
 // If the patterns stopped matching, the check would pass while looking at nothing
-if (!sources.includes(OWN_WORDS) || !FORGED.test(fs.readFileSync(path.join(root, OWN_WORDS), "utf8")))
+if (!sources.includes(OWN_WORDS) || !forged(fs.readFileSync(path.join(root, OWN_WORDS), "utf8")))
   fail.push(`${OWN_WORDS} makes no OwnWords where check-architecture.mjs looks; fix OWN_WORDS`);
 for (const f of AUTHORITY_WRITERS)
   if (!sources.includes(f) || !AUTHORITY.test(fs.readFileSync(path.join(root, f), "utf8")))
