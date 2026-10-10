@@ -32,7 +32,7 @@ The commit hook checks every message, and CI checks them again:
 - English, in [Conventional Commits](https://www.conventionalcommits.org/) form, such as `fix(capture): keep the last reply of a turn`
 - One line with no body, at most 100 characters
 
-Keep them tidy from the start. Your commits go into `main` as they are, with your name on them.
+Your change goes into `main` as one new commit, with your GitHub account as its author.
 
 ## Versions
 
@@ -57,8 +57,8 @@ Changes to docs that do not ship, tests, and development scripts need no version
 
 1. The maintainer reads the diff. Until then nothing from your branch is run on the maintainer's machine, so expect questions about changes to workflows, hooks, tool versions, dependencies, or agent instructions.
 2. CI runs, and the maintainer has the change reviewed by Codex. You may be asked for changes.
-3. The maintainer accepts it. Only the maintainer merges, and not from your pull request directly: your commits are taken, unchanged, into a branch in this repository, and that branch's pull request is the one that is reviewed once more and merged. A change that ships is released from it, after the maintainer approves the release.
-4. Your pull request gets a link to that one. When your commits reach `main`, yours is closed, or shows as merged.
+3. The maintainer accepts it. Only the maintainer merges, and not from your pull request directly: the files as your branch has them are taken, as one new commit with your GitHub account as its author, onto a branch in this repository, and that branch's pull request is the one that is reviewed once more and merged. A change that ships is released from it, after the maintainer approves the release.
+4. Your pull request gets a link to that one, and is closed when the change reaches `main`.
 
 ## Staying around
 

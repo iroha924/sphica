@@ -160,6 +160,19 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
   - 結果: `rg -c "git diff-tree -r -p --text --no-renames --no-relative" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "git diff --text" .claude/skills/fork-pr/SKILL.md` → 0 件
   - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
 
+- [x] T12: GitHub の Codex の 93c5125d のレビューの指摘を直す（読んだ tree だけを新しい 1 コミットとして取り込み、取り込んだブランチは何も足さずに push し、バージョンの調整は plugin-release の手順で行う）
+  - 種別: 修正
+  - 計画: S1, S3, S4
+  - 依存: T11（手順 2 の分岐点と差分を T11 が決めている）
+  - 変更: `.claude/skills/fork-pr/SKILL.md`, `CLAUDE.md`, `CONTRIBUTING.md`
+  - red: `git rev-list --objects <merge base>..<head> | grep -c -E 'hidden.bin|evil.yml'` → 2（一時リポジトリで、1 つ目のコミットが 64 KiB の hidden.bin と workflow を足し、2 つ目が消す。`git diff-tree -r <merge base> <head>` に出るパスは 1 つだけで、どちらも出ない）
+  - 完了条件: `rg -c "git commit-tree" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "no cherry-pick and no squash" .claude/skills/fork-pr/SKILL.md` → 0 件。`rg -c "as they are" CONTRIBUTING.md` → 0 件。`node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+  - コミット: `fix(agents): land only the reviewed tree of a fork's pull request, as one new commit`
+  - 結果: red: `git rev-list --objects <merge base>..<head> | grep -c -E 'hidden.bin|evil.yml'` → 2。`git diff-tree -r --no-renames <merge base> <head> | wc -l` → 1
+  - 結果: `git commit-tree '<head>^{tree}' -p <merge base> -m 'feat: add b (#7)'` → 新しいコミットの tree は head の tree と同じ、作者は環境変数で渡した GitHub のアカウント、committer は持ち主、親は分岐点（同じ一時リポジトリ）。`git rev-list --objects <merge base>..<new commit> | grep -c -E 'hidden.bin|evil.yml'` → 0。`git rev-list --count <merge base>..<new commit>` → 1
+  - 結果: `rg -c "git commit-tree" .claude/skills/fork-pr/SKILL.md` → 1。`rg -c "no cherry-pick and no squash" .claude/skills/fork-pr/SKILL.md` → 0 件。`rg -c "as they are" CONTRIBUTING.md` → 0 件
+  - 結果: `node scripts/check-ai-config.mjs` → exit 0。`bun run check` → exit 0
+
 ## 記録
 
 - 2026-10-10 / T05 / 持ち主がコラボレーターも募集したいと言い、公募ではなく「続けて貢献した人を招待することがある」と道だけ示す形を勧めて了解を得た / T05 を足した（権限の中身は約束しない。招待するときの設定は別の計画）
@@ -180,3 +193,4 @@ README.md はパッケージに入るので、バージョンを上げて同じ�
 - 2026-10-10 / PR #310 / 持ち主の許可で `@codex review` をコメントした。GitHub の Codex の 97e49b2b のコードレビュー: 大きな問題なし。同じ head のセキュリティレビュー: 指摘 1 件（P1、High）。fork の作者がファイルに NUL を 1 バイト入れると、手順の `git diff` は `Binary files differ` だけを exit 0 で出し、隠したコードは読まれないまま実行される / 一時リポジトリで再現して受け、修正タスク T10 を足した。CI は 97e49b2b で全項目 pass
 - 2026-10-10 / T10 / コミット f365ff66 を Codex がレビューした（新しい会話、high、ほかに中身を隠す手が無いかも依頼）。指摘 2 件: P1（`diff.relative` があるとサブディレクトリの外のパスが 3 つの出力から落ちる。再現済み）、P2（100% の rename は本文が出ない。再現済み）。未検証として、`diff.ignoreSubmodules` と実行ビットだけの変更を挙げた / 一時リポジトリで両方を再現し、修正タスク T11 を足した。未検証の 2 つも同じ一時リポジトリで確かめた（`--ignore-submodules=none` を明示、モードの変更は見出しに出る）
 - 2026-10-10 / T11 / commit b1caa9ab was reviewed by Codex (new conversation, high, asked to defeat the count check): no findings. It ran the three diff-tree forms from two directories with conflicting configuration and read Git 2.54's source for config handling, header spoofing, and filename quoting. Not reproduced by it: the throwaway fixtures for NUL, rename, and mode-only changes (measured here in T11)
+- 2026-10-10 / PR #310 / `@codex review` をコメントした（93c5125d）。CI は全項目 pass。GitHub の Codex のコードレビュー: 指摘 3 件。P1（途中のコミットに隠した blob や設定が、分岐点と head の差分に出ないまま取り込まれる。再現あり）、P1（main を merge してから push すると、レビューしていない組み合わせの tree で pre-push の verify が走る）、P2（重なったバージョンの調整が `release:plan` と `plugin-release` を飛ばす）。セキュリティレビュー: 指摘 1 件（P2、fork の文章を、認証情報を持つエージェントが隔離なしで読む）/ 1 件目を一時リポジトリで再現した。コードレビューの 3 件は修正タスク T12 で直す。セキュリティレビューの 1 件は見送る（plan の変更履歴に理由）
