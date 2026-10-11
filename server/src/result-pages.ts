@@ -31,7 +31,7 @@ const KEPT = 20;
 const PIECE = 4096;
 
 /** frame is the id of the frame around every page, drawn when the lines are kept: null for lines that are Sphica's own */
-type Result = { projectId: number; frame: string | null; lines: string[] };
+type Result = { projectId: number; frame: string | null; lines: string[]; given: Set<number> };
 const pools = { redo: new Map<string, Result>(), committed: new Map<string, Result>() };
 
 export const CURSOR = /^([crsfpa][0-9a-f]{12})\.(\d{1,15})$/;
@@ -64,7 +64,10 @@ function page(r: Result, id: string, from: number, lead: string[]): { text: stri
     ].join("\n");
   };
   const kept = fitCount(r.lines.slice(from), READ_BUDGET, reply);
-  return { text: reply(kept), left: r.lines.length - from - kept };
+  const left = r.lines.length - from - kept;
+  // Only a position a reply named is read from later: a cursor edited to another would skip lines without a word
+  if (left > 0) r.given.add(from + kept);
+  return { text: reply(kept), left };
 }
 
 /**
@@ -82,6 +85,7 @@ export function firstPage(o: {
     projectId: o.projectId,
     frame: o.framed ? frameId() : null,
     lines: o.lines.flatMap(pieces),
+    given: new Set(),
   };
   const pool = COMMITTED.includes(o.kind) ? pools.committed : pools.redo;
   let id = "";
@@ -119,7 +123,7 @@ export function morePage(cursor: string, projectId: number): string {
     );
   if (r.projectId !== projectId) throw new Error("This result belongs to another project");
   const from = Number(at);
-  if (from >= r.lines.length)
-    throw new Error("This result has no line there; pass the cursor as the reply wrote it");
+  if (!r.given.has(from))
+    throw new Error("That is not a cursor a reply gave; pass the cursor as the reply wrote it");
   return page(r, id, from, []).text;
 }

@@ -215,6 +215,10 @@ test("record_more: a result is read again as it was, and after the server restar
     const page = await w.reply("record_more", { cursor: saved });
     assert.ok(!page.isError);
     assert.equal((await w.reply("record_more", { cursor: saved })).text, page.text);
+    // A cursor with its position changed names a place no reply gave, and is refused
+    const edited = await w.reply("record_more", { cursor: saved.replace(/\.\d+$/, ".1") });
+    assert.ok(edited.isError);
+    assert.match(edited.text, /not a cursor a reply gave/);
     assert.deepEqual(rows(), before);
     await w.restart();
     const gone = await w.reply("record_more", { cursor: saved });

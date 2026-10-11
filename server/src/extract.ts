@@ -65,10 +65,9 @@ const PAGE_BYTES = READ_BUDGET - bytes(framed(""));
 /** Bytes kept on every page for what it says after its sources: where to read on, or that an automatic run stops here */
 const NOTE_BYTES = 500;
 /**
- * The sources each run was shown, the page cursors it was given (with the number of the page each opens), whether it reads as an
- * automatic trace, and the lines of its closing part once made (kept so its pages do not change between calls), by run id. Saving marks only these sources (and what the record cites) as looked at, and a page starts only after a
- * cursor this run was given, so no source is skipped. It lives in the record server's process: after a restart nothing counts as
- * shown, so unread messages stay pending rather than being marked traced.
+ * By run id: the sources it was shown, the cursors it was given, whether it reads as an automatic trace, and its closing part once
+ * made. Saving marks only these sources (and what the record cites), and a page starts only at a cursor the run was given. Kept in
+ * this process: after a restart nothing counts as shown, so unread messages stay pending rather than being marked traced.
  */
 type Shown = {
   sources: Set<number>;
@@ -401,11 +400,9 @@ async function scopeOf(
 }
 
 /**
- * One page of what the run may cite, starting where `after` (the cursor the previous page named) points: after a source (`s<id>`), or
- * at a line of the closing part (`t<id>.<line>`: the edits, fields, and live records, which follow the last source and may take pages
- * of their own). A page's body ends within PAGE_BYTES, and the last page names no cursor, so an agent reads on until then. With
- * `auto` (trace runs only), the messages start at the first one waiting, after a few earlier ones as context, and end after AUTO_PAGES
- * pages.
+ * One page of what the run may cite, from where `after` points: past a source (`s<id>`), or at a line of the closing part
+ * (`t<id>.<line>`: the edits, fields, and live records). Its body ends within PAGE_BYTES, and the last page names no cursor. With
+ * `auto` (trace runs only), the messages start at the first one waiting, after a few as context, and end after AUTO_PAGES pages.
  */
 export async function contextText(
   db: Reads,

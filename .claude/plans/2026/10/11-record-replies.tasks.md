@@ -150,6 +150,17 @@ trace・harvest・glean・forget の Skill が、新しい返答の形とカー�
   - 結果: `node --import ./test/isolate-home.ts --test test/extract.test.ts test/record-state.test.ts` → 直す前は 2 件 fail、直した後は pass（MCP 経由でキャンセルした 5 回の呼び出しの後の保存は何も見た扱いにせず、答えた呼び出しは 400 件を見た扱いにする）
   - 結果: `bun run verify` → 終了コード 0
 
+- [x] T11: PR のレビューの指摘 4 件を直す（`record_more` は返答が出した位置だけ受ける、テスト用サーバーに一時の HOME、長いコメントを 3 行に、評価用スクリプトが `t` のカーソルも追う）
+  - 種別: 修正
+  - 計画: S2, S4
+  - 依存: T10（同じ箇所の後に足す）
+  - 変更: `server/src/result-pages.ts`, `server/src/extract.ts`, `server/test/result-pages.test.ts`, `server/test/record-world.ts`, `server/evals/cloud/fixture.ts`, `server/evals/acceptance/driver.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/result-pages.test.ts` → 直す前（`20cd9483`）は、カーソルの位置を返答が出していない値に書き換えても読めてしまい、足した検査が「Missing expected exception」で落ちる
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(record): take only cursor positions a reply named, and follow both cursors in the eval walkers`
+  - 結果: `node --import ./test/isolate-home.ts --test test/result-pages.test.ts` → 直す前は 1 件 fail、直した後は 7 件 pass
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 - 2026-10-11 / T01・T02 / 1 回目の `bun run verify` が 1 件 fail: `plugin.test.ts` の「全ツールが未知の引数を名前で断る」が、新しい `record_more` の正しい引数を持っていなかった / テストの一覧に `record_more` を足した（ツールの一覧を固定するテストにも足した）
 - 2026-10-11 / T02 / コミットの前の Codex のレビュー（作業ツリーと `2dab50c9` の差分、新しい会話）が 3 件指摘、どれも再現: (1) P2: 行位置が 7 桁になると、サーバー自身が出した続きのカーソルを断る (2) P2: 枠付きの結果は、同じカーソルで枠の id が毎回変わり同じページにならない (3) P3: 分割した最後の断片が 4,096 バイトを 4 バイト超える / 3 件とも採用。先に落ちるテストを書いた。(1) は位置を 15 桁まで、(2) は枠の id を結果を持つときに 1 回だけ引く（`frame.ts` の `framed` が id を受け取れるようにした。`frame.ts` は変更欄に無いが、この直しに要る）、(3) は印の 4 バイトを数える
@@ -169,3 +180,5 @@ trace・harvest・glean・forget の Skill が、新しい返答の形とカー�
 - 2026-10-11 / 全体 / Codex の全差分レビュー（`main..b48a17b7`、新しい会話、指摘 1 件、P2、実 SQLite と SDK 1.31.0 で再現）: `record_context` の呼び出しをホストがキャンセルすると、SDK は返答を送らないのに、発言が見せた扱いに入り、その後の保存で見た扱いになる。main にも同じ穴がある / 採用。T10 を足した。`contextText` が呼び出しの signal を受け取り、見せた発言を記録する直前にキャンセルを確かめる。記録してから返答を送るまでの間にキャンセルが届く場合は残る（返答を送るのは SDK で、送ったかどうかをサーバーは知れない）
 - 2026-10-11 / T10 / コミットの前の review-shipping が、最初の直し（記録する直前に signal を見るだけ）は実際のキャンセルでは効かないと指摘。実際の record サーバーで、クライアントがキャンセルした 12 回の呼び出しのうち 12 回、その後の保存が全部の発言を見た扱いにした（直す前と同じ）。原因: handler は始まってから記録の箇所までイベントループを一度も回さないので、stdin に届いたキャンセルの通知を読めない。効くのは、要求とキャンセルが同じ読み込みで届いた場合だけ / 採用。signal を見る前にイベントループを 2 回回す（`setImmediate` を 2 回待つ）。1 回だと stdin の読み込みが間に入らず落ち、2 回だと通ることを確かめた。MCP 経由のテスト（400 件の発言、キャンセルを 5 回）を足し、6 回流して全部 pass。review-shipping のほかの確認: 通常の呼び出しは今までどおり、`t` のカーソルの経路と「待ちが無い」の早期の return は見せた発言を記録しない、bundle は `mcp-record.js` だけが 126 バイト増え、ほかの 5 つは同じバイト列
 - 2026-10-11 / T10 / 残る場合（PR の本文にも書く）: キャンセルが、イベントループを回した後・返答を送る前に届くと、記録は済んでいて返答は送られない。返答を送るのは SDK で、送ったかどうかをサーバーは知れない
+- 2026-10-11 / 全体 / PR #328 を作り、`20cd9483` の CI は全ジョブ成功。GitHub 側の Codex が 4 件指摘（どれも P1 の表示）: (1) `record_more` は結果の id と範囲しか見ず、位置を書き換えたカーソルで行を飛ばせる (2) `record-world.ts` が子プロセスに `HOME=/nonexistent` を渡す（一時の HOME にすべき。Windows でも使えない） (3) `contextText` の上のコメントが 5 行で、3 行までの規則を超える (4) 評価用の 2 つのスクリプト（`evals/cloud/fixture.ts`、`evals/acceptance/driver.ts`）が `s<id>` のカーソルしか追わず、`t` のカーソルで止まる / 4 件とも採用。T11 を足した。(1) は結果ごとに「返答が出した位置」を持ち、それ以外を断る（先に落ちるテストを書いた）。(2) は一時の HOME を作って `HOME` と `USERPROFILE` に渡す。(3) は 3 行にし、同じ変更で触った `shownTo` のコメントも 3 行にした。(4) は 2 つとも両方の形を追うようにした
+- 2026-10-11 / T11 / コミットの前の review-shipping は指摘なし（出荷可の判定）。実際の record サーバーで、6 ページの check と save を最後まで読み、同じカーソルは 3 回とも同じページ、位置を書き換えた 13 通りは全部「not a cursor a reply gave」で断られた。正しいカーソルが断られる場合は見つからなかった（最初のページ、読み直し、並行、先頭が長くて 1 行も載らない最初のページ、押し出しの後の新しい結果）。`mcp-record.js` は 84 バイト増、ほかの 5 つは同じバイト列。2 つのテストファイルを流す前後で、本物の `~/.sphica` の更新時刻は変わらない。気づき: 位置の検査を外しても、実際のサーバーを通すテストは落ちない / `record-state.test.ts` に、位置を書き換えたカーソルが断られる検査を足した

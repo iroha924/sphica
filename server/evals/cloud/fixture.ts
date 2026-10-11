@@ -28,7 +28,8 @@ async function everyPage(db: Kysely<DB>, run: string, projectId: number): Promis
     pages.push(await contextText(db, run, projectId, null, next));
   return pages;
 }
-const cursor = (page = "") => /call record_context with after: "(s\d+)"[^\n]*$/.exec(page)?.[1];
+const cursor = (page = "") =>
+  /call record_context with after: "(s\d+|t[0-9a-f]{8}\.\d+)"[^\n]*$/.exec(page)?.[1];
 
 async function main() {
   if (command === "new") {

@@ -438,7 +438,7 @@ export async function createDriver(world: World): Promise<Driver> {
     // The cursor is taken from the page's last line only: source text above it may hold the same words
     await call?.("record_context");
     for (let page = await contextText(writer(), run, pid, repo), read = 1; ; read++) {
-      const next = /call record_context with after: "(s\d+)"[^\n]*$/.exec(page)?.[1];
+      const next = /call record_context with after: "(s\d+|t[0-9a-f]{8}\.\d+)"[^\n]*$/.exec(page)?.[1];
       if (!next || (pages !== undefined && read >= pages)) break;
       await call?.("record_context");
       page = await contextText(writer(), run, pid, repo, next);

@@ -26,6 +26,7 @@ export async function recordWorld(
 ) {
   const db = tempDb();
   const repo = tempDir(`sphica-${name}-`);
+  const home = tempDir(`sphica-${name}-home-`);
   execFileSync("git", ["init", "-q"], { cwd: repo });
   execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: repo });
   const p = project(db, `git:github.com/o/${name}`, `o/${name}`);
@@ -43,7 +44,9 @@ export async function recordWorld(
         env: {
           ...tmpEnv(),
           PATH: process.env.PATH ?? "",
-          HOME: "/nonexistent",
+          // A home of its own: nothing the server reads or writes under HOME is the owner's, on any platform
+          HOME: home,
+          USERPROFILE: home,
           SPHICA_DB: db.file,
           CLAUDE_PROJECT_DIR: repo,
           ...env,

@@ -118,11 +118,9 @@ test("a result of any length is read to its end: a position has as many digits a
     lead: ["lead"],
     lines: Array(1_001_000).fill("x".repeat(100)),
   });
-  const id = (next(first) ?? "").replace(/\.\d+$/, "");
-  const late = morePage(`${id}.999999`, 1);
-  const after = next(late) ?? "";
-  assert.match(after, /\.\d{7}$/);
-  assert.match(morePage(after, 1), /^x{100}\n/);
+  const pages = all(first, 1);
+  assert.match(next(pages.at(-2) ?? "") ?? "", /\.\d{7}$/);
+  assert.equal(pages.join("\n").match(/^x{100}$/gm)?.length, 1_001_000);
 });
 
 test("a cursor is refused for another project, when it is not one a reply gave, and past the end", () => {
@@ -130,7 +128,11 @@ test("a cursor is refused for another project, when it is not one a reply gave, 
   const c = next(firstPage({ kind: "save", projectId: 1, lead: ["✓ saved"], lines })) ?? "";
   assert.throws(() => morePage(c, 2), /belongs to another project/);
   assert.throws(() => morePage("x", 1), /not a cursor a reply gave/);
-  assert.throws(() => morePage(c.replace(/\.\d+$/, ".5000"), 1), /no line there/);
+  // A position is good only if a reply named it: an edited cursor would skip lines without a word
+  const at = Number(c.split(".")[1]);
+  for (const position of [1, at - 1, at + 1, 5000])
+    assert.throws(() => morePage(c.replace(/\.\d+$/, `.${position}`), 1), /not a cursor a reply gave/);
+  assert.match(morePage(c, 1), /^line \d+ /);
 });
 
 test("checks push out only other results that can be run again, and a cursor whose result is gone says what to do next", () => {
