@@ -10,7 +10,7 @@ import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
 import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { liveSuccessors, type SourceHit, type Successor, searchSources } from "./search.ts";
-import { head } from "./text.ts";
+import { bytes, head } from "./text.ts";
 
 /** Kinds that record a decision the owner made. A candidate is not adopted yet, so it never counts. */
 const DECIDED_KINDS = new Set(["decision", "constraint"]);
@@ -212,13 +212,19 @@ const untraced = (session: string): string => {
     : `Not traced yet: its session id is too long to show whole here (${id} [id cut]); /sphica:trace pending lists the sessions that wait.`;
 };
 
+/**
+ * How many ids the line of a message left out names, tried in this order: every one, since read on the message itself does not lead to
+ * its records, and fewer only when the ids alone would pass the budget
+ */
+const BRIEF_IDS = [Number.POSITIVE_INFINITY, 1000, 300, 100, 30, PER_MESSAGE];
+
 /** A message left out of the reply, as one line of ids: what it led to stays reachable, record by record, with read */
-const brief = (e: Earlier): string => {
+const brief = (e: Earlier, cap: number): string => {
   const ids = (us: { id: number }[]) =>
     `${us
-      .slice(0, PER_MESSAGE)
+      .slice(0, cap)
       .map((u) => `u${u.id}`)
-      .join(", ")}${us.length > PER_MESSAGE ? `, and ${us.length - PER_MESSAGE} more` : ""}`;
+      .join(", ")}${us.length > cap ? `, and ${us.length - cap} more` : ""}`;
   return [
     `- s${e.message.id}: ${e.led.length ? `led to ${ids(e.led)}` : "led to no record"}`,
     ...(e.hidden ? [`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters`] : []),
@@ -294,7 +300,7 @@ export function askedText(r: Asked, known = true): string {
   const lead = `${known ? "Earlier owner" : "Owner"} messages matching: ${head(r.terms.join(", "), 400)}`;
   // What is said about the whole result (the sessions, where the search stopped) is kept; the messages give way. The messages
   // left out are named after the frame's closing line, where only Sphica writes
-  const reply = (kept: number) => {
+  const reply = (kept: number, cap: number) => {
     const left = r.messages.slice(kept);
     return [
       framed([lead, ...parts.slice(0, kept), ...after].join("\n\n")),
@@ -303,10 +309,18 @@ export function askedText(r: Asked, known = true): string {
         "messages",
       ),
       // Only ids and counts, so nothing a record or a message says is outside the frame
-      ...(left.length ? ["What each of them led to (read a record by its u<id>):", ...left.map(brief)] : []),
+      ...(left.length
+        ? ["What each of them led to (read a record by its u<id>):", ...left.map((e) => brief(e, cap))]
+        : []),
     ]
       .filter(Boolean)
       .join("\n");
   };
-  return reply(fitCount(parts, READ_BUDGET, reply));
+  // Reaching every record comes first: the cap is the largest with which the reply fits when no message is shown in full, and the
+  // messages shown in full take the room that leaves
+  const cap = BRIEF_IDS.find((c) => bytes(reply(0, c)) <= READ_BUDGET) ?? PER_MESSAGE;
+  return reply(
+    fitCount(parts, READ_BUDGET, (n) => reply(n, cap)),
+    cap,
+  );
 }

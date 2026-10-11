@@ -204,6 +204,17 @@ base: main
   - 結果: `node --import ./test/isolate-home.ts --test test/asked.test.ts test/git-worker.test.ts test/plugin.test.ts` → 直す前は 3 件 fail、直した後は全部 pass
   - 結果: `bun run verify` → 終了コード 0
 
+- [x] T17: asked で省いた発言の id の行に、ひも付く記録の id を全部出す（id だけで上限を超えるときだけ減らして数える）
+  - 種別: 修正
+  - 計画: S9
+  - 依存: T16（id の行が要る）
+  - 変更: `server/src/asked.ts`, `server/test/asked.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/asked.test.ts` → 直す前（`784048c2`）は、11 件にひも付く発言の行に 11 件目の id が出ず、テストが落ちる
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(asked): name every record a left-out message led to`
+  - 結果: `node --import ./test/isolate-home.ts --test test/asked.test.ts` → 直す前は 1 件 fail、直した後は 6 件 pass
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 
 - 2026-10-11 / T01 / 未完了の T01 の変更欄を変えた。前: `server/src/worktree.ts` あり、`server/test/git-safety.test.ts`・`server/test/record.test.ts` なし。後: 逆 / `snapshot` は `worktreeStatus` が今までどおり文字列か `null` を返すので変更が要らなかった。既存のテスト 2 ファイルが新しい戻り値に追従し、rename の注記のテストは `record.test.ts` にあった
@@ -236,3 +247,5 @@ base: main
 - 2026-10-11 / 全体 / Codex のレビューはここで区切る（コミットごと 3 回、全差分 1 回、修正の再レビュー 2 回）。最後の 2 回の指摘は、直しで自分が足した行の中に収まっていて、受け入れ条件の外に広がっていない。T15 の後は、PR を作ったときに走る GitHub 側の Codex のレビューで最終の head を見る
 - 2026-10-11 / 全体 / PR #326 に GitHub 側の Codex が 4 件指摘（どれも P2、head は `3c0bc791`）: (1) SDK が作るエラーを切るとき、端末の制御の列の途中で切ると列が開いたままになる (2) `not_plain_dir` は `.sphica`・`.sphica/git`・`.sphica/git/hooks` のどれでも出るのに、文は `.sphica/git` だと言い切る (3) asked で省いた発言は `read s<id>` で本文しか読めず、ひも付く記録・同じターンの記録・返答が分からない (4) 100 バイトを超えるセッション id を切ったまま `/sphica:trace` の引数として出す / 4 件とも採用。T16 を足した。(1) は切る前に `plain` にかける（上限以下のエラーはそのまま）。(2) は文が 3 つのフォルダを挙げる形にした。worker がどれかを返す案は採らない: worker の bundle の残りが 112 バイトで、やり取りの形を広げると古い worker との組み合わせも増える。(3) は引数を足さず、省いた発言ごとに id だけの 1 行（ひも付く記録の `u<id>`、同じターン、返答、決定の有無）を枠の後ろに出す。検索に続きの位置を渡す引数を足す案は採らない: 公開インターフェースが増え、承認した計画の範囲を出る。上限 20 件なら id の行は全部で約 10 KB に収まる。(4) は切った id をコマンドに出さず、`/sphica:trace pending` を案内する
 - 2026-10-11 / T16 / コミットの前のレビュー: Codex（作業ツリーと `3c0bc791` の差分、新しい会話）は指摘なし。review-shipping は出荷は可の判定で 4 件: (1) 上限以下のエラーに `plain` をかけてもテストが通る (2) id の行の「reply s<id>」と「hidden by the filters」を消してもテストが通る (3) 閉じていないタイトルの列（40,000 バイト）を含む未知のツール名のエラーは、`plain` が列の後ろを全部落とすので「MCP error -32602: Tool 」だけになる (4) `withinBudget` と `not_plain_dir` のコメントが実際と合わない / 4 件とも採用。(1)(2) はテストを足した。(3) は、上限を超えたエラーを整えただけで収まったときにも「制御の列を除いた」と 1 行添える。(4) はコメントを直した。review-shipping の実測: bundle は 6 つとも予算内（`cli.js` の残り 2,470、`deliver.js` 1,609、`git-worker.js` 112 バイト）、asked は 20 件・16 桁の id・5,000 件ずつのひも付けでも 31,606 バイト
+- 2026-10-11 / T16 / PR #326 の `784048c2` に GitHub 側の Codex が 1 件指摘（P2）: 省いた発言の id の行は先頭 10 件しか出さず、11 件目の記録にたどり着く方法が無い / 採用。持ち主が「これだけ修正して push したらリリースに進める」と指示。T17 を足した。上限の候補（全部、1000、300、100、30、10）のうち、全部の発言を 1 行にしても返答が収まる最大のものを選び、その上で全文で出せる発言の数を決める（記録にたどり着けることを、全文で出す数より優先する）。続きの位置を渡す引数は足さない（T16 と同じ理由）
+- 2026-10-11 / T17 / コミットの前のレビュー: Codex（作業ツリーと `784048c2` の差分、新しい会話）は指摘なし。review-shipping も指摘なしで出荷は可の判定。`askedText` を手で組んだ入力と乱数の入力で 3,312 回呼び、最大は 32,763 バイトで上限超えは 0 回。上限を 10 に戻す・`fitCount` と最後の返答で別の上限を使う・常に全部出す、の 3 通りの弱め方は `asked.test.ts` が落とす。`mcp.js` は 1,679,875 バイト（予算まで 99,125）、ほかの bundle は大きさが変わらない

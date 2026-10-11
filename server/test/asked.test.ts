@@ -514,9 +514,15 @@ test("an asked reply keeps what it says about the whole result when messages giv
     reply: 12,
     message: { ...message(9).message, text: "t".repeat(2000) },
   };
+  // More records than a full entry lists: the line of a message left out names every one, since nothing else leads to the eleventh
+  const eleven = {
+    ...message(8),
+    led: Array.from({ length: 11 }, (_, i) => led(i)),
+    context: Array.from({ length: 12 }, (_, i) => ({ ...message(8).context[0], id: 200 + i })),
+  };
   const crowded = askedText(
     {
-      messages: [...Array.from({ length: 19 }, (_, i) => message(20 + i)), one],
+      messages: [...Array.from({ length: 19 }, (_, i) => message(20 + i)), one, eleven],
       repeats: null,
       terms: ["word"],
       weaker: 0,
@@ -529,6 +535,34 @@ test("an asked reply keeps what it says about the whole result when messages giv
     crowded.split(/^<\/past-records id="[0-9a-f]+">$/m)[1] ?? "",
     /^- s9: led to no record; 2 tied records hidden by the filters; reply s12; no recorded decision, not traced yet$/m,
   );
+  assert.match(
+    crowded.split(/^<\/past-records id="[0-9a-f]+">$/m)[1] ?? "",
+    new RegExp(
+      `^- s8: led to ${Array.from({ length: 11 }, (_, i) => `u${100 + i}`).join(", ")}; same turn ${Array.from({ length: 12 }, (_, i) => `u${200 + i}`).join(", ")}$`,
+      "m",
+    ),
+  );
+  // Only when the ids alone would pass the budget are they capped and the rest counted: every message still has its line
+  const many = (id: number) => ({
+    ...message(id),
+    led: Array.from({ length: 5000 }, (_, i) => ({ ...led(0), id: 1_000_000_000_000_000 + i })),
+  });
+  const flood = askedText(
+    {
+      messages: Array.from({ length: 20 }, (_, i) => many(40 + i)),
+      repeats: null,
+      terms: ["word"],
+      weaker: 0,
+      stopped: false,
+      read: 20,
+    } as never,
+    true,
+  );
+  assert.ok(Buffer.byteLength(flood) <= 32 * 1024, `${Buffer.byteLength(flood)} bytes`);
+  const capped = [...flood.matchAll(/^- s\d+: led to (?:u\d+, )+and (\d+) more; same turn u77$/gm)];
+  assert.equal(capped.length + [...flood.matchAll(/^## s\d+: /gm)].length, 20);
+  assert.ok(capped.length >= 10, `${capped.length} lines`);
+  for (const c of capped) assert.ok(Number(c[1]) < 5000 - 10, `${c[1]} more`);
   // A message of a session whose id is too long to show does not offer a command with the cut id
   const untraced = askedText(
     {
