@@ -37,7 +37,8 @@ export type OwnWords<Route extends string = "owner_statement" | "explicit" | "ag
 
 /**
  * Why words do not carry authority: `event` the source is an event, `author` its writer may not speak here, `missing` the quote is not
- * in it, `block` the quote touches a block quote or fenced code, `inline` nothing of it is outside quotation marks.
+ * in it, `block` the quote touches a block quote or fenced code, `inline` it stands right between two quotation marks, or runs into a
+ * quotation with no word of the writer's left outside.
  */
 export type NotOwn = { refused: "event" | "author" | "missing" | "block" | "inline" };
 
@@ -113,13 +114,21 @@ const startsWord = (line: string, at: number): boolean => WORD.test(charAt(line,
 /** The ranges of one line, in characters, that sit inside quotation marks or a code span, marks included. */
 function inlineRanges(line: string): Range[] {
   const found: Range[] = [];
+  // A mark that found no partner from where it stood finds none from further on either: it is not looked for again, so a long line of
+  // marks that never pair is read once, not once per mark
+  const unpaired = new Set<string>();
   for (let i = 0; i < line.length; ) {
     const c = line[i] as string;
     let close = -1;
     let width = 1;
+    if (c === "`") while (line[i + width] === "`") width++;
+    const mark = c === "`" ? c.repeat(width) : c;
+    if (unpaired.has(mark)) {
+      i += width;
+      continue;
+    }
     if (c === "`") {
       // A run of backticks is one delimiter, closed by the next run of the same length
-      while (line[i + width] === "`") width++;
       for (let j = i + width; j < line.length; ) {
         if (line[j] !== "`") {
           j++;
@@ -135,19 +144,26 @@ function inlineRanges(line: string): Range[] {
       }
     } else if (c === "'") {
       // An apostrophe inside a Latin word or after a number is not a quotation mark; beside anything else, in any script, it is one
-      if (!endsWord(line, i))
-        for (let j = i + 1; j < line.length; j++)
-          if (line[j] === "'" && !startsWord(line, j)) {
-            close = j;
-            break;
-          }
+      if (endsWord(line, i)) {
+        i++;
+        continue;
+      }
+      for (let j = i + 1; j < line.length; j++)
+        if (line[j] === "'" && !startsWord(line, j)) {
+          close = j;
+          break;
+        }
     } else if (PAIRS[c]) {
       close = line.indexOf(PAIRS[c], i + 1);
       // The closing single mark is also the typographic apostrophe: inside a word it closes nothing
       while (c === "\u2018" && close >= 0 && startsWord(line, close))
         close = line.indexOf(PAIRS[c], close + 1);
+    } else {
+      i++;
+      continue;
     }
     if (close < 0) {
+      unpaired.add(mark);
       i += width;
       continue;
     }

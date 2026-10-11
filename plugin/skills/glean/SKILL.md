@@ -81,8 +81,8 @@ read tools `search` and `read`. Pass the repository root as `cwd` to every tool.
 
 Words that give an op its authority have to be their writer's own: the `quote` of `adopt`, `replace_anchor`, and `retire_anchor`, and the
 `reason_quote` of `retract_evidence`, `retract_adoption`, `resolve_conflict`, and `withdraw`. Check refuses a quote that touches a `>` line
-or a fenced code block, or that sits wholly inside quotation marks on its line (straight or curly quotes, Japanese corner brackets, backticks): quote the owner's own words
-beside the quotation instead. Evidence (`add_evidence`) and the `quote` that says which piece to retract may still be quoted text.
+or a fenced code block, or that sits wholly inside quotation marks on its line or right between two of them (straight or curly quotes,
+Japanese corner brackets, backticks, apostrophes): quote more of the owner's own words around it instead. Evidence (`add_evidence`) and the `quote` that says which piece to retract may still be quoted text.
 Check reads where the words sit, not what they mean: whether they settle this record is yours to judge.
 
 Every op carries the `revision` read printed; a record changed since is refused, so read it again. To correct what a record says, write a new

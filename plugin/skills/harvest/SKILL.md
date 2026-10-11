@@ -56,7 +56,7 @@ and only by saying so: "we rejected yarn", "let's keep SQLite". check refuses th
 - A resolved review thread is not agreement either
 - `supersedes` and `conflicts` retire or dispute a saved record, so they need the owner's or a maintainer's words among the unit's evidence or adoption.
   Those words have to be in the source and be the writer's own: a maintainer quoting someone else (a `>` line, a code block, words wholly
-  inside quotation marks) does not count, and neither does a quote that is not there
+  inside quotation marks or right between two of them) does not count, and neither does a quote that is not there
 
 ## What to record
 

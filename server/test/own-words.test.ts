@@ -251,3 +251,14 @@ test("known limits: part of a quotation that runs over lines, a closing mark stu
     "inline",
   );
 });
+
+test("a long line of marks that never pair is read in time that grows with its length", () => {
+  // A mark that finds no partner is not looked for again: without that, each of these lines takes time by the square of its length
+  for (const piece of [" \u2018a\u2019b", " 'a'b", ' "a', " `a ``b"]) {
+    const line = `${piece.repeat(40000)} Keep this.`;
+    const began = performance.now();
+    assert.equal(verdict(line, "Keep this."), null, piece);
+    const took = performance.now() - began;
+    assert.ok(took < 2000, `${JSON.stringify(piece)} took ${Math.round(took)} ms`);
+  }
+});

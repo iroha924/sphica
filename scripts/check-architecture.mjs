@@ -136,11 +136,10 @@ for (const f of GIT_STARTERS) {
 // cast through a type alias or written in angle brackets, and SQL that sits in a string and is never run.
 const OWN_WORDS = "server/src/own-words.ts";
 const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
-/** A source without its comments: a note about a cast or a write is not one */
+/** A source with each comment turned into a space: a note about a cast or a write is not one, and it still parts the words around it */
 const code = (source) =>
   [...jsTokens(source)]
-    .filter((t) => t.type !== "MultiLineComment" && t.type !== "SingleLineComment")
-    .map((t) => t.value)
+    .map((t) => (t.type === "MultiLineComment" || t.type === "SingleLineComment" ? " " : t.value))
     .join("");
 // A cast to the type, under its own name or one it was imported or exported as. Only a list in braces right after `import` or `export`
 // renames it, and that list is taken out before looking for the cast, since it reads `OwnWords as W` itself

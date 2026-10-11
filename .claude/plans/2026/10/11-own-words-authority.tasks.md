@@ -229,6 +229,18 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: `node --import ./test/isolate-home.ts --test test/audit-quotes.test.ts test/architecture.test.ts test/own-words.test.ts test/own-words-sites.test.ts test/quarantined-conflict.test.ts test/deliver.test.ts` → 85 pass, 0 fail。監査の表示は、行がある状態で種類・行・位置・理由・効いているか・直し方の 1 行ずつを確かめる。DB から来た名前に改行や制御文字があっても、表示の行は増えない
   - 結果: `node server/src/cli.ts doctor --help` → `[--audit-quotes]` だけが出て、否定形（`--noAudit-quotes`）は出ない
 
+- [x] T18: 対にならない引用符の探し直しをやめ、コメントを空白に置き換えて検査し、文面を判定に合わせる
+  - 種別: 修正
+  - 計画: S1, S6, S7
+  - 依存: T17（直す先の検査と判定を T17 までが作る）
+  - 変更: `server/src/own-words.ts`, `scripts/check-architecture.mjs`, `server/test/own-words.test.ts`, `server/test/architecture.test.ts`, `plugin/skills/glean/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `plugin/skills/trace/SKILL.md`
+  - red: `node --import ./test/isolate-home.ts --test --test-name-pattern="never pair" test/own-words.test.ts` → 直す前のコードで、対にならない曲がった引用符が並ぶ 24 万文字の 1 行の判定に 20 秒かかり、2 秒の上限でテストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/architecture.test.ts` → 通る。`bun run architecture` → 通る
+  - コミット: `fix(record): read a long line of unpaired marks once, and keep a comment's place in the check`
+  - 結果: red: `node --import ./test/isolate-home.ts --test --test-name-pattern="never pair" test/own-words.test.ts` → 直す前のコードで 0 pass, 1 fail（「took 20111 ms」）。`node --import ./test/isolate-home.ts --test test/architecture.test.ts` → 直す前の検査で 1 pass, 1 fail（`value as/* checked */OwnWords` が通る）
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/export.test.ts test/reconcile.test.ts test/architecture.test.ts test/audit-quotes.test.ts` → 157 pass, 0 fail
+  - 結果: `node run2.ts` → 一時ディレクトリに置いた比較で、直す前後の `notOwnWords` を 60 万通りの入力にかけて `{"total":600000,"differ":0}`。探し方を変えても判定は 1 件も変わらない
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -253,3 +265,5 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / 同上、architecture の検査 / F3（P2）import・export の節を消す正規表現が `export function` の本体まで消し、中のキャストを見逃す（T15 が持ち込んだ）。F4（P2）コメントを挟んだキャスト、`$` を含む別名、山括弧のキャストを見逃す。F5（P2）引用符で囲んだ表の名前、`main.` 付き、括弧の前の空白、テンプレート文字列の書き込みを見逃す。F6（P2）`DELETE` の書き込みを見ていない。F8（P2）コメントや SQL の文字列の中身で、読むだけの処理を拒む / F3・F5・F6 と、F4 のコメントと `$`、F8 のコメントは受理して T17 で直した（コメントを除いてから見る。節は `import`・`export` の直後の波括弧だけ）。F4 の山括弧のキャストと、F8 の「実行されない文字列の中の SQL」は棄却し、検査のコメントに限界として書いた（型検査が主で、この検査は補助。山括弧は型引数と区別できない）
 - 2026-10-11 / 出荷前レビュー（`8977808f`） / パッケージが壊れるところは無い。指摘 5 件: レビューの後にブランチが進んでいる、文字の無い本人の言葉を拒む（T16 で直し済み）、監査の表示を行がある状態で確かめるテストが無い、`deliver.ts` の説明のコメントが別の定数の上にずれている、ヘルプに `--noAudit-quotes` が出る / 受理。後ろの 3 件を T17 で直した。最後のコミットで差分をもう一度見せる
 - 2026-10-11 / T17 / main の判定との突き合わせを常設のテストにする案は採らなかった。相手にする main の判定をテストの中に持ち続ける必要があり、意図して変えた場合を除くと今の判定の写しになる。代わりに、レビューが見つけた入力を 1 件ずつテストに入れた
+- 2026-10-11 / T17 のレビュー（`14ef530e`） / F1（P2）コメントを取り除くと前後の語がつながり、`as/* … */OwnWords` と `OwnWords/* … */as` を見逃す（T17 が受理した「コメントを挟んだキャスト」の直しが不完全） / 受理。T18 で、コメントを空白に置き換える形にした。ほかに指摘なし
+- 2026-10-11 / 出荷前レビューの差分（`8977808f..14ef530e`） / パッケージが壊れるところは無い。指摘: 上と同じコメントの穴、`NotOwn` の説明が `inline` の今の意味と合わない、Skill の「引用符の中だけ」が、引用符に挟まれた本人の言葉も拒む今の動きに追いついていない、曲がった引用符と単引用符が対にならないまま並ぶ長い 1 行で、判定の時間が長さの 2 乗で伸びる（288 KB で 39 秒。0.6.47 は数ミリ秒） / 4 件とも受理して T18 で直した。対にならなかった引用符は、その行では探し直さない。確かめてくれたこと: 14ef530e のパッケージは 53 ファイル、`deliver.js`・`capture.js`・`mcp.js`・`git-worker.js` は 8977808f の版と同じ、db・hooks・mcp は 0.6.47 と同じ、数字だけ・`+1`・絵文字だけの採用は通り、引用符の中・曲がった引用符の中の短縮形・`>` の行・CRLF のフェンスは拒む、監査は行がある DB でも前後でファイルが変わらない
