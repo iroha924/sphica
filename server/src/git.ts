@@ -359,6 +359,12 @@ export function refusalText(code: Refusal): string {
   }[code];
 }
 
+/** Whether the git worker can use its directory for this work tree. It makes the directory, checks it, and removes it; git does not run */
+export async function workerPlace(root: string, deadline = 5_000): Promise<"ready" | Unread> {
+  const out = await inIsolation(root, [{ kind: "place" }], { deadline, max: 1024 });
+  return Array.isArray(out) ? "ready" : out;
+}
+
 /**
  * Runs work tree comparisons in the git worker, one isolated git directory for all of them, and gives their outputs in order (a diff
  * gives two: the patch and the changed paths), or why there are none. A worker past the deadline is killed and not waited for, since a

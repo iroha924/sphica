@@ -34,13 +34,26 @@ base: main
   - 結果: `bun run verify` → 終了コード 0
   - 結果: `node --import ./test/isolate-home.ts --test test/git-worker.test.ts test/review-bridge.test.ts` → 28 件 pass
 
-- [ ] T02: worker に置き場だけを確かめる操作を足し、`sphica doctor` がその結果を 1 行で出す
+- [x] T02: worker に置き場だけを確かめる操作を足し、`sphica doctor` がその結果を 1 行で出す
   - 種別: 追加
   - 計画: S3
   - 依存: T01（断りのコードと説明文の関数が要る）
   - 変更: `server/src/git-worker.ts`, `server/src/git.ts`, `server/src/cli.ts`, `server/test/git-worker.test.ts`, `server/test/cli.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `feat(doctor): report whether the git worker can use its directory`
+  - 結果: `bun run verify` → 終了コード 0
+  - 結果: `node --import ./test/isolate-home.ts --test test/cli.test.ts test/git-worker.test.ts` → 28 件 pass
+  - 結果: `node plugin/dist/cli.js doctor` → HOME が一時ディレクトリの外なら「✓ Git worker ready」、中なら「△ Git worker would not start: … overlaps the temp directory …」、git の外では行が出ない。どの場合も `.sphica/git` には `hooks` だけが残る
+
+- [x] T10: リンク先の無いリンクを、git の失敗ではなく「リンクである」という断りとして返す
+  - 種別: 修正
+  - 計画: S1
+  - 依存: T01（断りのコードが要る）
+  - 変更: `server/src/git-worker.ts`, `server/test/git-worker.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/git-worker.test.ts` → `.sphica` をリンク先の無いリンクにすると、直す前の `ownDir` は `EEXIST` を投げ、断りにならない
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/git-worker.test.ts` → 全件 pass
+  - コミット: `feat(doctor): report whether the git worker can use its directory`
+  - 結果: `node --import ./test/isolate-home.ts --test test/git-worker.test.ts` → 直す前の `ownDir` に戻すと `Error: EEXIST: file already exists, mkdir …/.sphica` で 1 件 fail、直した後は pass
 
 ## P2: 読み取りサーバーの返答を 32 KiB に収める（#303）
 
@@ -119,3 +132,5 @@ base: main
 - 2026-10-11 / T01 / コミットの前の review-shipping が 6 件指摘（出荷は可の判定。40 通りの弱め方のうち 25 をテストが落とす）: (1) worker から `renamesSince` を通る経路のテストが無い (2) `listFiles` の失敗の分け方（`unreadOf`）のテストが無い (3) `localChange` の timeout の文面を固定するテストが無い (4) 3 つの断りの文面と、まれな失敗の経路の分け方が固定されていない (5) 存在しない TMPDIR では git を動かす前に失敗するのに「git failed」と言う (6) `unreadText` が `localChange` の doc コメントと宣言の間に入っていた / (1)(2)(5)(6) と (4) の文面を直した。(5) は文面を「git failed or could not be started」にした。採らない: (3) は timeout と too_large が同じ 1 行を返すので、弱めるには枝を足す必要がある。(4) の残り（spawn の失敗や壊れた返答を `failed` にする経路）は、起こすのにプロセスの失敗を作る必要があり、分け方は `inIsolation` の 3 種類のテストで固定している
 - 2026-10-11 / T01 / review-shipping が確かめたこと: 古い worker（0.6.48）と新しい呼び出し側が混ざっても落ちず、0.6.48 と同じ文面になる。`ETIMEDOUT` と `ENOBUFS` は Node 24.15・24.18・26.10 の macOS で実測（Windows は未実測）。断るときの `rmSync` は、リンクならリンクだけを消す
 - 2026-10-11 / T01 / tasks を直すスクリプトが文字コードのエラーで動かず、チェックの無いままコミットされた（push の前） / 同じコミットを amend してチェックと結果を入れた。以後、tasks の更新は成功を確かめてからコミットする
+- 2026-10-11 / T01 / Codex のレビュー（`e0107a6e`、指摘 1 件、P2）: `.sphica`・`.sphica/git`・`hooks` がリンク先の無いリンクだと、`existsSync` が false を返して `mkdirSync` が `EEXIST` で落ち、断りではなく失敗として報告される（自分でも再現） / 採用。T10 を足し、`ownDir` が先に `lstat` で見るようにした
+- 2026-10-11 / T02 / コミットの前の review-shipping が 3 件指摘（出荷は可の判定）: (1) doctor が作業ツリーの root ではなく cwd を試すように弱めても、テストが通る (2) `sphica init` をしたことのない HOME で doctor を流すと、`.sphica`・`.sphica/git`・`.sphica/git/hooks` を作る（0.6.48 の doctor は何も作らなかった） (3) bundle の余裕が少ない（`git-worker.js` は 13,000 のうち 12,845、`cli.js` は 632,000 のうち 629,328） / (1) は、HOME 自体が作業ツリーのときに、その下のフォルダから流すケースを足した。(2) は、HOME に `.sphica` が無いとき（まだ使っていない環境）は試さず、行も出さないようにした。(3) は直さず記録だけ（今は `git-worker.js` 12,888、`cli.js` 629,419 で予算内。次に worker を触るときに予算を見直す）

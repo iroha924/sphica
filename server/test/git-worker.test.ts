@@ -8,7 +8,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { configGet, inIsolation, refusalText, renamesSince, repoFiles, unreadOf } from "../src/git.ts";
+import {
+  configGet,
+  inIsolation,
+  refusalText,
+  renamesSince,
+  repoFiles,
+  unreadOf,
+  workerPlace,
+} from "../src/git.ts";
 import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import { tempDir } from "./temp-dir.ts";
 
@@ -77,6 +85,15 @@ test("the isolated directory sits under HOME's real path, in plain directories, 
     // .sphica leading elsewhere through a link
     const elsewhere = fs.realpathSync(tempDir("git-worker-elsewhere-"));
     fs.symlinkSync(elsewhere, path.join(home, ".sphica"));
+    assert.throws(() => isolatedHome(root), /^Error: not_plain_dir$/);
+  });
+  await withHome((home) => {
+    // A link that leads nowhere is refused as a link, not taken for a git that failed
+    fs.symlinkSync(path.join(home, "nowhere"), path.join(home, ".sphica"));
+    assert.throws(() => isolatedHome(root), /^Error: not_plain_dir$/);
+    fs.rmSync(path.join(home, ".sphica"));
+    fs.mkdirSync(path.join(home, ".sphica", "git"), { recursive: true });
+    fs.symlinkSync(path.join(home, "nowhere"), path.join(home, ".sphica", "git", "hooks"));
     assert.throws(() => isolatedHome(root), /^Error: not_plain_dir$/);
   });
   await withHome((home) => {
@@ -332,4 +349,28 @@ test("a git run Node cut off is told apart by why: the deadline, the output limi
   });
   assert.deepEqual(unreadOf(new Error("Command failed: git")), { unread: "failed" });
   assert.deepEqual(unreadOf(null), { unread: "failed" });
+});
+
+test("trying the worker's directory runs no git and leaves nothing, and a refusal comes back with its code", async () => {
+  const { root } = repo();
+  // A git that would leave a mark if the worker started it
+  const bin = fs.realpathSync(tempDir("git-worker-nogit-"));
+  const mark = path.join(bin, "ran");
+  fs.writeFileSync(path.join(bin, "git"), `#!/bin/sh\necho ran > ${shellWord(mark)}\nexit 1\n`, {
+    mode: 0o755,
+  });
+  const saved = process.env.PATH;
+  await withHome(async (home) => {
+    process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
+    try {
+      assert.equal(await workerPlace(root), "ready");
+      assert.ok(!fs.existsSync(mark), "git was not started");
+      assert.deepEqual(fs.readdirSync(path.join(home, ".sphica", "git")), ["hooks"]);
+      fs.writeFileSync(path.join(home, ".sphica", "git", "hooks", "post-index-change"), "");
+      assert.deepEqual(await workerPlace(root), { unread: "refused", code: "hooks_not_empty" });
+      assert.ok(!fs.existsSync(mark));
+    } finally {
+      process.env.PATH = saved;
+    }
+  });
 });
