@@ -3,3 +3,4 @@
 
 export function settingsProblems(text: string): string[];
 export function readerProblems(source: string): string[];
+export function reviewCommandProblems(source: string): string[];

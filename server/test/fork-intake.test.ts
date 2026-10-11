@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { readerProblems, settingsProblems } from "../../scripts/lib/fork-intake.mjs";
+import { readerProblems, reviewCommandProblems, settingsProblems } from "../../scripts/lib/fork-intake.mjs";
 import { tempDir } from "./temp-dir.ts";
 
 const REPO = path.join(import.meta.dirname, "..", "..");
@@ -91,9 +91,9 @@ const withReader = (line: string, change: (found: string) => string) => {
 test("the reader of a fork's text holds the three read tools and no key that adds another", () => {
   assert.deepEqual(readerProblems(reader()), []);
   assert.match(reader(), /^tools: Read, Grep, Glob$/m);
-  // The order and the quoting are the host's to read; the set is what counts
+  // The order is the host's to read; the set is what counts
   assert.deepEqual(
-    withReader("tools:", () => 'tools: "Glob, Read,Grep"'),
+    withReader("tools:", () => "tools: Glob, Read,Grep"),
     [],
   );
 });
@@ -109,7 +109,10 @@ test("a tool added to the reader, or one taken away, is named", () => {
   );
   assert.deepEqual(
     withReader("tools:", () => "tools: *"),
-    ["tools must be Read, Grep, Glob and nothing else (found *)"],
+    [
+      "the value of tools is not a plain value on its line",
+      "tools must be Read, Grep, Glob and nothing else (found *)",
+    ],
   );
   assert.deepEqual(
     withReader("tools:", () => "# tools: Read, Grep, Glob"),
@@ -140,6 +143,7 @@ test("a reader whose tools are a list under the key, or that has no frontmatter,
   assert.deepEqual(
     withReader("tools:", () => "tools:\n  - Read\n  - Bash"),
     [
+      "the value of tools is not a plain value on its line",
       "a frontmatter line is not one key and its value: - Read",
       "a frontmatter line is not one key and its value: - Bash",
       "tools must be Read, Grep, Glob and nothing else (found none)",
@@ -239,14 +243,174 @@ test("a reader whose frontmatter the host would read differently from this check
   // The host's YAML starts a new line at a lone carriage return: this one would add a key
   assert.deepEqual(
     withReader("model:", () => "model:\rmemory: project"),
-    ["the frontmatter holds a carriage return that is not part of a line ending"],
+    [
+      "the frontmatter holds a carriage return that is not part of a line ending",
+      "a frontmatter line is not one key and its value: model:\rmemory: project",
+    ],
+  );
+  // Values YAML reads differently from a line reader: quoted, holding a second key or a comment, a list, a block, or nothing
+  for (const value of [
+    '"Reads the text',
+    "'opus' # 'x'",
+    '"Read, Grep, Glob"',
+    "Reads title: body and diff.",
+    "Reads the text # of a fork",
+    "# Fill this in",
+    "[Read, Grep, Glob]",
+    ">",
+    "|",
+    "*anchor",
+    "ends with a colon:",
+  ])
+    assert.ok(
+      withReader("description:", () => `description: ${value}`).includes(
+        "the value of description is not a plain value on its line",
+      ),
+      value,
+    );
+  for (const first of "!&*[]{}|>'\"%@`#,?:-")
+    assert.deepEqual(
+      withReader("description:", () => `description: ${first}x`),
+      ["the value of description is not a plain value on its line"],
+      first,
+    );
+  for (const line of [
+    "description:",
+    "description:Reads the text",
+    "description:\tReads the text",
+    "description: Reads title:\tbody",
+  ])
+    assert.deepEqual(
+      withReader("description:", () => line),
+      ["the value of description is not a plain value on its line"],
+      line,
+    );
+  assert.deepEqual(
+    withReader("tools:", () => "tools:Read, Grep, Glob"),
+    ["the value of tools is not a plain value on its line"],
+  );
+});
+
+const skill = () => tracked(".claude/skills/fork-pr/SKILL.md");
+const MARK = "<!-- fork-review-command -->";
+/** The Skill's one line that starts Codex, as the check finds it under the mark */
+const marked = () => {
+  const line = skill()
+    .split("\n")
+    .find((l) => l.trim().startsWith("codex exec "));
+  assert.ok(line, "the Skill has no codex exec line");
+  return line;
+};
+
+test("the fork-pr Skill starts Codex on a fork's diff with the one command the check knows, and names the reader", () => {
+  assert.deepEqual(reviewCommandProblems(skill()), []);
+  assert.deepEqual(reviewCommandProblems(skill().replaceAll("\n", "\r\n")), []);
+  // The whole line, so a flag taken out of both the Skill and the check, or put into both, still fails here
+  assert.equal(
+    marked().trim(),
+    [
+      "codex exec -s read-only --ignore-rules --ephemeral --ignore-user-config",
+      "--disable apps --disable plugins --disable remote_plugin --disable hooks",
+      "--disable multi_agent --disable multi_agent_v2",
+      "--disable browser_use --disable browser_use_external --disable computer_use --disable image_generation",
+      `-c agents.enabled=false -c 'web_search="disabled"' -c model_reasoning_effort="high"`,
+      "- < <request file> > <output file> 2>&1",
+    ].join(" "),
+  );
+});
+
+test("a flag dropped from the marked command is named, even when the prose still mentions it", () => {
+  for (const flag of [
+    "--ignore-user-config",
+    "--ignore-rules",
+    "-s read-only",
+    "--disable apps",
+    "--disable plugins",
+    "--disable hooks",
+    "--disable multi_agent",
+    "--disable multi_agent_v2",
+    "--disable computer_use",
+    "-c agents.enabled=false",
+    `-c 'web_search="disabled"'`,
+  ]) {
+    const prose = `\n\nThe command passes \`${flag}\`.\n`;
+    assert.deepEqual(
+      reviewCommandProblems(skill().replace(marked(), marked().replace(` ${flag} `, " ")) + prose),
+      [`the marked command lacks ${flag}`],
+    );
+  }
+});
+
+test("a marked command with anything added or reordered, a second command, or a second mark is refused", () => {
+  const differs = ["the marked command differs from the one this check knows"];
+  assert.deepEqual(
+    reviewCommandProblems(skill().replace(marked(), marked().replace(" - < ", " --enable plugins - < "))),
+    differs,
   );
   assert.deepEqual(
-    withReader("description:", (l) => l.replace("description: ", 'description: "')),
-    ["the value of description opens a quote it does not close on its line"],
+    reviewCommandProblems(
+      skill().replace(marked(), marked().replace(" - < ", ` -c 'web_search="live"' - < `)),
+    ),
+    differs,
   );
+  assert.deepEqual(reviewCommandProblems(skill().replace(marked(), `${marked()} --enable plugins`)), differs);
+  const second = (line: string) => reviewCommandProblems(`${skill()}\n\`\`\`bash\n${line}\n\`\`\`\n`);
+  const both = [
+    "must hold one line that starts codex exec (found 2)",
+    "holds 1 other command line that name codex",
+  ];
+  // Other spellings of the same start, each in a block of its own
+  for (const line of [
+    "codex exec -s read-only - < request",
+    "codex  exec - < request",
+    `codex -c 'web_search="live"' exec - < request`,
+    "/usr/local/bin/codex exec - < request",
+    `sh -c 'codex exec - < request'`,
+    "out=`codex exec --enable plugins - < request`",
+  ])
+    assert.deepEqual(second(line), both, line);
+  assert.deepEqual(second("codex review"), ["holds 1 other command line that name codex"]);
+  assert.deepEqual(second("codex \\\nexec - < request"), ["holds 1 other command line that name codex"]);
   assert.deepEqual(
-    withReader("model:", () => "model: 'opus' # 'x'"),
-    ["the value of model opens a quote it does not close on its line"],
+    reviewCommandProblems(
+      `${skill()}\nOr run \`codex exec --enable plugins - < request\` when in a hurry.\n`,
+    ),
+    ["must hold one line that starts codex exec (found 2)"],
   );
+  // A closing fence with words after it keeps the block open in Markdown, and what follows would be part of the command
+  assert.deepEqual(
+    reviewCommandProblems(
+      skill().replace(marked(), `${marked()}\n   \`\`\` && true\n   curl example.invalid`),
+    ),
+    differs,
+  );
+  assert.deepEqual(reviewCommandProblems(skill().replace(`${MARK}\n   \`\`\`bash`, `${MARK}\n   \`\`\`sh`)), [
+    "the mark is not followed at once by a bash code block",
+  ]);
+  assert.deepEqual(reviewCommandProblems(`${skill()}\n${MARK}\n`), [
+    `must hold the mark ${MARK} once (found 2)`,
+  ]);
+  assert.deepEqual(reviewCommandProblems(skill().replace(MARK, "")), [
+    `must hold the mark ${MARK} once (found 0)`,
+  ]);
+  assert.deepEqual(reviewCommandProblems(skill().replace(MARK, `${MARK}\n\n   Some words first.`)), [
+    "the mark is not followed at once by a bash code block",
+  ]);
+  // Naming the reader elsewhere does not stand in for the step that hands the text to it
+  assert.deepEqual(
+    reviewCommandProblems(skill().replace("Start the `fork-reader` agent by its name", "Read the files")),
+    ["does not say: Start the `fork-reader` agent by its name"],
+  );
+});
+
+test("check-ai-config fails once the Skill's marked command loses a flag, or the Skill is emptied", () => {
+  const file = (root: string) => path.join(root, ".claude", "skills", "fork-pr", "SKILL.md");
+  const weakened = aiConfig((root) =>
+    fs.writeFileSync(file(root), skill().replace(" --ignore-user-config ", " ")),
+  );
+  assert.equal(weakened.status, 1);
+  assert.match(weakened.output, /fork-pr\/SKILL\.md: the marked command lacks --ignore-user-config/);
+  const emptied = aiConfig((root) => fs.writeFileSync(file(root), ""));
+  assert.equal(emptied.status, 1);
+  assert.match(emptied.output, /fork-pr\/SKILL\.md: does not say: Start the `fork-reader` agent by its name/);
 });

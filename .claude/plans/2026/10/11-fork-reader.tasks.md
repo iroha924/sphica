@@ -58,13 +58,26 @@ base: main
 
 `fork-pr` Skill が、承認の前の読み取りを `fork-reader` に渡し、Codex を外へつながる道具なしで起動する手順になる。
 
-- [ ] T03: `fork-pr` Skill と `CLAUDE.md` を書き直し、Codex のコマンドのブロックを検査する
+- [x] T05: 読み手の frontmatter の値を、YAML が同じに読む 1 行の素の値だけに絞る
+  - 種別: 修正
+  - 計画: S2
+  - 依存: T02（直す対象の検査が要る）
+  - 変更: `scripts/lib/fork-intake.mjs`, `server/test/fork-intake.test.ts`
+  - red: `node -e 'readerProblems(<description を "Reads title: body and diff." にした定義>)'` → 直す前（`3b35f925`）は `[]` を返す
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 全件 pass
+  - コミット: `docs(fork-pr): hand fork text to the reader and start Codex without outside tools`
+  - 結果: `node -e 'readerProblems(<description を "Reads title: body and diff." にした定義>)'` → `3b35f925` の関数は `[]`、直した関数は `["the value of description is not a plain value on its line"]`
+  - 結果: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 15 件 pass
+
+- [x] T03: `fork-pr` Skill と `CLAUDE.md` を書き直し、Codex のコマンドのブロックを検査する
   - 種別: 変更
   - 計画: S3, S4
   - 依存: T02（Skill が名指しする `fork-reader` の定義と、検査を足す先のファイルが要る）
-  - 変更: `.claude/skills/fork-pr/SKILL.md`, `CLAUDE.md`, `scripts/lib/fork-intake.mjs`, `scripts/lib/fork-intake.d.mts`, `scripts/check-ai-config.mjs`, `server/test/fork-intake.test.ts`
+  - 変更: `.claude/skills/fork-pr/SKILL.md`, `CLAUDE.md`, `.claude/agents/fork-reader.md`, `scripts/lib/fork-intake.mjs`, `scripts/lib/fork-intake.d.mts`, `scripts/check-ai-config.mjs`, `server/test/fork-intake.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `docs(fork-pr): hand fork text to the reader and start Codex without outside tools`
+  - 結果: `bun run verify` → 終了コード 0（最後のスイートは pass 132、fail 0）
+  - 結果: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 15 件 pass
 
 ## 記録
 
@@ -72,3 +85,9 @@ base: main
 - 2026-10-11 / T01 / Codex のレビュー（`cff85b18`、指摘 1 件、P2）: テストが関数だけを呼ぶので、`check-ai-config.mjs` の呼び出しの条件を弱めても通る（Codex が再現、自分でも再現） / 採用。T04 を足し、検査が読むファイルを一時ディレクトリに写して、壊した状態でスクリプトそのものを流すテストにした
 - 2026-10-11 / T02 / コミットの前の review-shipping が 4 件指摘（どれも写しで再現済み）: (1) Claude Code は frontmatter を最初の `---` で閉じるので、説明文やコメントに `---` があると検査は通るのにホストは `tools` を読まない (2) 単独の CR で行が割れ、キーを足せる (3) 閉じていない引用符 (4) テストをすり抜ける弱め方が 2 つ / 全部直した。(1) は入っているバイナリに同じ式があることを自分で確かめた。frontmatter の中の `---`・単独の CR・行内で閉じない引用符を拒否し、テストを足した
 - 2026-10-11 / T02 / review-shipping の指摘: Markdown とリンクの検査は `git ls-files` で一覧を取るので、追跡する前の新しいファイルを見ない / 新しいファイルを stage してから `verify` を流す
+- 2026-10-11 / T02 / Codex のレビュー（`3b35f925`、指摘 1 件、P2）: 値に `: ` を含む行（`description: Reads title: body and diff.`）は YAML として不正なのに検査を通る（Codex が再現、自分でも再現） / 採用。T05 を足した。YAML の解析器を依存に足す代わりに、値を「1 行の素の値」（引用符・`: `・` #`・先頭の記号・タブ・コロンの直後の空白なしを拒否）に絞った。実ファイルは `yaml` 2.9.1 でも同じ 6 キーに読めることを 1 回確かめた
+- 2026-10-11 / T03 / 未完了の T03 の変更欄を変えた。前: `.claude/agents/fork-reader.md` なし。後: あり / 閉じた fork の PR #314 で読み手を通したら、(4) に持ち主やコントリビューター宛ての普通の文まで `present` として並んだ。(4) を「PR を読むプログラムに向けた文」に絞り、通し直して `absent` を確認した
+- 2026-10-11 / T03 / plan の方針 3 のコマンドから形を変えた（`--output-schema`・`-o` をやめ、`codex-review` Skill と同じ `--ephemeral` と出力ファイルの形）。切るフラグは同じ。plan の変更履歴に書いた
+- 2026-10-11 / T03 / コミットの前の review-shipping が 6 件指摘（写しで再現済み）: (1) Codex を起動する別の書き方（空白 2 つ、`codex -c … exec`、絶対パス、`sh -c`、インラインコード）が検査を通る (2) 閉じる fence の後ろに文字がある行で検査だけがブロックを閉じる (3) `tools:Read`（空白なし）とコロンの後のタブが通る (4) 60 通りの弱め方のうち 21 がテストをすり抜ける (5) `fork-reader` の名前がどこかに 1 回あれば通る (6) `model:` の行を写す先の PR が決まらない / 全部直した。コマンド全体をテストに書き写して固定し、Skill のどこかに `codex … exec` の行がもう 1 つあれば落とし、手順 3 の文を名指しで求め、値の規則の各記号をテストに足した
+- 2026-10-11 / T03 / 文章のレビュー（prose-reviewer と Codex に同じ依頼）: prose-reviewer 8 件、Codex 4 件（うち 3 件は同じ指摘） / 採用: 測り方に未知の機能名の項目が無い、不備のある報告を何にも使わないと書いていない、誰がどのファイルを開くかの列挙が場所ごとに違う、`model:` を写す先、Codex への依頼の「何をする変更か」の書き方、pin コマンドを使う手順の番号、一覧に無いときの原因の断定、読み手がコマンドと URL を「写さない」だけだった点。計画のコマンドとの違いは plan の変更履歴に書いた。任意の提案のうち、JSON の位置に id を足す・binary と link の見分け方・CI のログを新しいディレクトリに書く、を入れた
+- 2026-10-11 / T03 / 予定外の発見: 定義をコミットした直後は、このセッションの Agent ツールの一覧に `fork-reader` が出なかった（`Agent type 'fork-reader' not found`）。会話が要約された後に出た。それまでの実測は `claude --agent fork-reader -p` で流し、出てからセッションの中の委任でも #314 を通した

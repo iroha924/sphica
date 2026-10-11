@@ -68,19 +68,24 @@ export function readerProblems(source) {
   const seen = new Map();
   for (const line of block.split("\n")) {
     if (line.trim() === "" || line.trim().startsWith("#")) continue;
-    const match = /^([A-Za-z][A-Za-z0-9-]*):\s*(.*)$/.exec(line);
+    const match = /^([A-Za-z][A-Za-z0-9-]*):(.*)$/.exec(line);
     if (!match) {
       problems.push(`a frontmatter line is not one key and its value: ${line.trim()}`);
       continue;
     }
-    const [, key, value] = match;
-    // A quote left open would carry the value over the lines below it
-    const quote = /^['"]/.exec(value)?.[0];
-    if (quote && (value.length < 2 || !value.endsWith(quote) || value.slice(1, -1).includes(quote)))
-      problems.push(`the value of ${key} opens a quote it does not close on its line`);
+    const [, key, raw] = match;
+    const value = raw.trim();
+    // Only values YAML reads the way this line reader does: one line, no quoting, nothing YAML would take as a key, a comment, or a list
+    if (
+      !/^ \S/.test(raw) ||
+      /\t/.test(raw) ||
+      /^[!&*[\]{}|>'"%@`#,?:-]/.test(value) ||
+      /: | #|:$/.test(value)
+    )
+      problems.push(`the value of ${key} is not a plain value on its line`);
     if (seen.has(key)) problems.push(`the key ${key} is written twice`);
     else if (!READER_KEYS.includes(key)) problems.push(`the key ${key} is not one the reader may carry`);
-    seen.set(key, value.replace(/^(['"])(.*)\1$/, "$2"));
+    seen.set(key, value);
   }
   const tools = (seen.get("tools") ?? "")
     .split(",")
@@ -90,4 +95,73 @@ export function readerProblems(source) {
   if (tools.join(", ") !== READER_TOOLS.join(", "))
     problems.push(`tools must be Read, Grep, Glob and nothing else (found ${named(tools)})`);
   return problems;
+}
+
+const REVIEW_MARK = "<!-- fork-review-command -->";
+/** The sentence of step 3 that hands the text to the reader: naming the agent somewhere else in the Skill does not stand in for it */
+const READER_STEP = "Start the `fork-reader` agent by its name";
+/** Codex features that act outside its sandbox or hand work on. `multi_agent` alone leaves the kind of delegation the model's catalog entry picks */
+const REVIEW_OFF = [
+  "apps",
+  "plugins",
+  "remote_plugin",
+  "hooks",
+  "multi_agent",
+  "multi_agent_v2",
+  "browser_use",
+  "browser_use_external",
+  "computer_use",
+  "image_generation",
+];
+const REVIEW_FLAGS = [
+  "-s read-only",
+  "--ignore-rules",
+  "--ephemeral",
+  "--ignore-user-config",
+  ...REVIEW_OFF.map((name) => `--disable ${name}`),
+  "-c agents.enabled=false",
+  "-c 'web_search=\"disabled\"'",
+  '-c model_reasoning_effort="high"',
+];
+const REVIEW_COMMAND = `codex exec ${REVIEW_FLAGS.join(" ")} - < <request file> > <output file> 2>&1`;
+
+/**
+ * The fork-pr Skill starts Codex on a fork's diff with one command, written once under a mark, and that command is the one above
+ * word for word: a flag kept in the prose but dropped from the command, or one added to it, changes what Codex holds.
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function reviewCommandProblems(source) {
+  const text = source.replaceAll("\r\n", "\n");
+  const problems = [];
+  if (!text.includes(READER_STEP)) problems.push(`does not say: ${READER_STEP}`);
+  const marks = text.split(REVIEW_MARK).length - 1;
+  if (marks !== 1) return [...problems, `must hold the mark ${REVIEW_MARK} once (found ${marks})`];
+  const block = /^\n[ \t]*```bash\n([\s\S]*?)\n[ \t]*```[ \t]*(?:\n|$)/.exec(
+    text.slice(text.indexOf(REVIEW_MARK) + REVIEW_MARK.length),
+  );
+  if (!block) return [...problems, "the mark is not followed at once by a bash code block"];
+  // Any other way of starting Codex written into the Skill, in a block or in the prose, would be followed as readily as the marked one
+  const lines = text.split("\n");
+  const starts = lines.filter((line) => /\bcodex\b.*\bexec\b/.test(line));
+  if (starts.length !== 1)
+    problems.push(`must hold one line that starts codex exec (found ${starts.length})`);
+  const marked = new Set((block[1] ?? "").split("\n").map((line) => line.trim()));
+  let fenced = false;
+  let others = 0;
+  for (const line of lines) {
+    // A fence closes only on a line of its own, as the marked block's does
+    if (fenced ? /^[ \t]*(```|~~~)[ \t]*$/.test(line) : /^[ \t]*(```|~~~)/.test(line)) fenced = !fenced;
+    else if (fenced && /\bcodex\b/.test(line) && !marked.has(line.trim())) others++;
+  }
+  if (others) problems.push(`holds ${others} other command line${others === 1 ? "" : "s"} that name codex`);
+  const command = (block[1] ?? "").trim();
+  if (command === REVIEW_COMMAND) return problems;
+  const missing = REVIEW_FLAGS.filter((flag) => !` ${command} `.includes(` ${flag} `));
+  return [
+    ...problems,
+    missing.length
+      ? `the marked command lacks ${missing.join(", ")}`
+      : "the marked command differs from the one this check knows",
+  ];
 }
