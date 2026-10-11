@@ -4,7 +4,7 @@ description: Reads one GitHub pull request of the current repository (its body, 
 argument-hint: "<PR number>"
 disable-model-invocation: true
 context: fork
-allowed-tools: mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
+allowed-tools: mcp__plugin_sphica_record__harvest_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_record__record_more, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status
 ---
 
 # harvest — keep what a pull request decided and implemented
@@ -26,7 +26,7 @@ each record quoting the words it came from.** No template is assumed; decide fro
 
 ## Flow
 
-Everything goes through Sphica's `record` MCP server (`harvest_begin`, `record_context`, `record_check`, `record_save`). Pass the repository root
+Everything goes through Sphica's `record` MCP server (`harvest_begin`, `record_context`, `record_check`, `record_save`, `record_more`). Pass the repository root
 as `cwd` to every tool.
 
 1. **Pick the pull request**: the number in the target. Without one, do nothing and reply that harvest needs a pull request number
@@ -35,14 +35,17 @@ as `cwd` to every tool.
 3. **Read**: `record_context` with the run. Each source is printed as `## s<N> <kind> <artifact> by <login> (<association>) <time>` followed by
    its text (`, the owner` follows the association for the owner's own account), then the project's live records. `(harvested before)` marks
    sources an earlier harvest already looked at: what they decided may already be saved, so search before recording it again. Read all of it before writing:
-   when a page ends with `call record_context with after: "s<N>"`, call it again with that `after`, until the last page
+   when a page's last line says `call record_context with after: "..."`, call it again with that `after`, exactly as written, until a page names none
+   (a source too long for a page says where `read` goes on)
 4. **Check**: `record_check` with the run and the record as `record`. The shape and fields are trace's ([../trace/SKILL.md](../trace/SKILL.md),
    "The record"), with `work` left out. Keys are saved as `harvest:<number>/<key>`. As in trace, check runs the save in a transaction that
-   rolls back and says what would become of each record (`would be active`, ...). Fix and check again until there are no errors.
+   rolls back and says what would become of each record (`would be active`, ...), the verdict and the counts first; when a reply ends with
+   `call record_more with cursor: "..."`, read the rest with `record_more`. Fix and check again until there are no errors.
    A file the pull request touched may have moved since: on a warning that a path is not in the working tree, give the commit that holds it,
    or anchor where the code is now
-5. **Save**: `record_save` with the same run and record
-6. **Report** to the owner what was saved, copying save's lines
+5. **Save**: `record_save` with the same run and record. A reply that starts with `✗` saved nothing: fix the record, check it, and save
+   with the same run
+6. **Report** to the owner what was saved, copying save's lines (all of them: read on with `record_more` when the reply names a cursor)
 
 ## Who adopts
 

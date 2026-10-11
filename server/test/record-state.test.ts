@@ -182,3 +182,53 @@ test("record_context: two calls for the same run at once both get cursors that w
     await w.done();
   }
 });
+
+test("record_more: a result is read again as it was, and after the server restarts its cursor says the result is gone and what to do", async () => {
+  const w = await recordWorld("more-restart");
+  try {
+    const said = message(w.db, w.p, { id: "m1", text: "Keep the retry in the client." });
+    const run = await w.trace();
+    await w.context(run);
+    // Twenty findings, each warned about twenty times: more lines than one reply carries
+    const record = {
+      units: Array.from({ length: 20 }, (_, u) => ({
+        key: `finding-${u}`,
+        kind: "finding",
+        text: `Finding ${u}`,
+        evidence: [{ source: `s${said}`, quote: "Keep the retry in the client.", role: "states" }],
+        anchors: Array.from({ length: 20 }, (_, a) => ({
+          path: `src/${"d".repeat(300)}/missing-${u}-${a}.ts`,
+          role: "applies_to",
+        })),
+      })),
+    };
+    const cursor = (text: string) => /call record_more with cursor: "([^"]+)"$/.exec(text)?.[1] ?? "";
+    const checked = cursor((await w.reply("record_check", { run, record })).text);
+    const saved = cursor((await w.reply("record_save", { run, record })).text);
+    assert.match(checked, /^c[0-9a-f]{12}\.\d+$/);
+    assert.match(saved, /^s[0-9a-f]{12}\.\d+$/);
+    const rows = () =>
+      ["unit", "unit_anchor", "source_processing", "extraction_run"].map((t) =>
+        Number(w.db.owner.prepare(`select count(*) as n from ${t}`).get()?.n),
+      );
+    const before = rows();
+    const page = await w.reply("record_more", { cursor: saved });
+    assert.ok(!page.isError);
+    assert.equal((await w.reply("record_more", { cursor: saved })).text, page.text);
+    assert.deepEqual(rows(), before);
+    await w.restart();
+    const gone = await w.reply("record_more", { cursor: saved });
+    assert.ok(gone.isError);
+    assert.match(
+      gone.text,
+      /no longer kept .*The record was saved; do not save it again\. Find what it saved with search and read\.$/,
+    );
+    assert.match(
+      (await w.reply("record_more", { cursor: checked })).text,
+      /no longer kept .*Run record_check again: it gives the same result\.$/,
+    );
+    assert.deepEqual(rows(), before);
+  } finally {
+    await w.done();
+  }
+});

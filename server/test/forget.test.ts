@@ -10,11 +10,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { beginGlean, checkText } from "../src/extract.ts";
-import { applyForget, type ForgetOutcome, forgetText, previewForget } from "../src/forget.ts";
+import { applyForget, type ForgetOutcome, forgetWords, previewForget } from "../src/forget.ts";
 import { lookOverview } from "../src/overview.ts";
 import { readUnit } from "../src/read.ts";
 import { sha256 } from "../src/text.ts";
 import { at, insert, message, plan, project, run, statements, type TempDb, tempDb } from "./temp-db.ts";
+
+/** Everything forget says about an outcome, as one text: what is always shown, then the line for each record */
+const words = (o: ForgetOutcome, file: string) => {
+  const w = forgetWords(o, file);
+  return [...w.must, ...w.records].join("\n");
+};
 
 let db: TempDb;
 let p: number;
@@ -123,7 +129,10 @@ test("forgetting the only source of an active decision removes the row and its i
   assert.equal(exists(src), false);
   assert.equal(indexed("sqlite"), 0);
   assert.equal(lifecycle(u), "candidate");
-  assert.deepEqual(outcome.units, [{ key: "u1", before: "active", after: "candidate", removed: 2 }]);
+  assert.deepEqual(
+    outcome.units.map(({ id: _, ...u }) => u),
+    [{ key: "u1", before: "active", after: "candidate", removed: 2 }],
+  );
   assert.equal(cleanup, "done");
   // The state history keeps its rows; the one that cited the source no longer points at it
   assert.deepEqual(
@@ -151,7 +160,10 @@ test("a decision with another source for its evidence and adoption stays active"
   activate(u, b);
   const { outcome } = await forget(a);
   assert.equal(lifecycle(u), "active");
-  assert.deepEqual(outcome.units, [{ key: "u1", before: "active", after: "active", removed: 1 }]);
+  assert.deepEqual(
+    outcome.units.map(({ id: _, ...u }) => u),
+    [{ key: "u1", before: "active", after: "active", removed: 1 }],
+  );
 });
 
 test("an implementation stays active on its commit anchor, and leaves active when the forgotten commit was its only support", async () => {
@@ -245,7 +257,10 @@ test("forgetting a retraction's reason removes the retracted row it explained", 
   );
   const { outcome } = await forget(reason);
   // Judged from what is left, as a save would: its live evidence makes the finding active
-  assert.deepEqual(outcome.units, [{ key: "u1", before: "candidate", after: "active", removed: 1 }]);
+  assert.deepEqual(
+    outcome.units.map(({ id: _, ...u }) => u),
+    [{ key: "u1", before: "candidate", after: "active", removed: 1 }],
+  );
   assert.deepEqual(
     db.owner
       .prepare("select role from unit_evidence where unit_id = ?")
@@ -354,7 +369,10 @@ test("forgetting only a reconsider condition's quote leaves the decision active,
   activate(u, said);
   const { outcome } = await forget(cond);
   assert.equal(lifecycle(u), "active");
-  assert.deepEqual(outcome.units, [{ key: "u1", before: "active", after: "active", removed: 1 }]);
+  assert.deepEqual(
+    outcome.units.map(({ id: _, ...u }) => u),
+    [{ key: "u1", before: "active", after: "active", removed: 1 }],
+  );
   assert.match(
     (await readUnit(db.reader, p, "u1", null)) ?? "",
     /Reconsider when: if replicas are needed \[unsupported/,
@@ -408,7 +426,7 @@ test("forgetting a field definition's source removes the definition and every va
   assert.equal(units("acme"), 2);
   const seen = await previewForget(db.file, p, [defined]);
   assert.deepEqual(seen.fields, { definitions: 1, values: 2 });
-  assert.match(forgetText(seen, db.file), /1 field definition and 2 field values go with them/);
+  assert.match(words(seen, db.file), /1 field definition and 2 field values go with them/);
   assert.equal(values(), 2, "the preview rolls back");
   const [r1, r2] = [revision(u1), revision(u2)];
   const { outcome, cleanup } = await applyForget(db.file, p, [defined], seen);
@@ -476,7 +494,9 @@ test("a value's words leave no bytes once its quoted source is forgotten, and th
   assert.equal(inFiles(), true);
   const seen = await previewForget(db.file, p, [said]);
   assert.deepEqual(seen.units, []);
-  assert.match(forgetText(seen, db.file), /Records keep their own text/);
+  assert.match(words(seen, db.file), /Records keep their own text/);
+  // With no record affected, that is said: the count is never left out
+  assert.match(words(seen, db.file), /^No record is affected\.$/m);
   const { cleanup } = await applyForget(db.file, p, [said], seen);
   assert.equal(cleanup, "done");
   assert.equal(inFiles(), false);
@@ -486,7 +506,7 @@ test("a value's words leave no bytes once its quoted source is forgotten, and th
 test("the preview and the result name the backups made before migrating, and say nothing of them when there are none", async () => {
   const src = message(db, p, { id: "m1", text: "a secret" });
   const seen = await previewForget(db.file, p, [src]);
-  assert.doesNotMatch(forgetText(seen, db.file), /backup/);
+  assert.doesNotMatch(words(seen, db.file), /backup/);
   const dir = path.join(path.dirname(db.file), "backups");
   fs.mkdirSync(dir);
   for (const name of [
@@ -495,15 +515,13 @@ test("the preview and the result name the backups made before migrating, and say
     "sphica.rev3.20260903T000000000Z.12.db.partial",
   ])
     fs.writeFileSync(path.join(dir, name), "");
-  const told = forgetText(seen, db.file);
+  const told = words(seen, db.file);
   assert.ok(told.includes(`2 backups made before migrating, in ${dir}`), told);
   assert.match(told, /Delete those backups yourself/);
   // A directory that cannot be listed does not stop forgetting; the owner is told to look there
   fs.chmodSync(dir, 0o300);
   try {
-    assert.ok(
-      forgetText(seen, db.file).includes(`Backups made before migrating in ${dir} could not be listed`),
-    );
+    assert.ok(words(seen, db.file).includes(`Backups made before migrating in ${dir} could not be listed`));
   } finally {
     fs.chmodSync(dir, 0o700);
   }
@@ -537,7 +555,7 @@ test("forgetting the words that moved an anchor removes only that reason: the ch
   const seen = await previewForget(db.file, p, [moved]);
   assert.equal(seen.anchorReasons, 1);
   assert.match(
-    forgetText(seen, db.file),
+    words(seen, db.file),
     /1 reason for retiring or moving an anchor goes with them; the anchors stay retired/,
   );
   const before = revision(u);

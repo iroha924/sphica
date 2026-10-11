@@ -73,7 +73,7 @@ base: main
 
 check・save・fetch・forget の返答が、結論と件数を先頭に出して 32 KiB に収まり、続きを `record_more` で読める。
 
-- [ ] T05: `record_check`・`record_save` の返答を、結論と件数が先頭・拒否も固定・続きは `record_more` にする
+- [x] T05: `record_check`・`record_save` の返答を、結論と件数が先頭・拒否も固定・続きは `record_more` にする
   - 種別: 修正
   - 計画: S5
   - 依存: T02（結果の置き場と `record_more` が要る）
@@ -81,8 +81,10 @@ check・save・fetch・forget の返答が、結論と件数を先頭に出し�
   - red: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前は、エラーの多い record の check と、40,000 文字の未知のキーの check が 32,768 バイトを超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(record): lead check and save replies with the verdict, and page the rest`
+  - 結果: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前（`89be7daa`）は `record_check` の返答が 190,192 バイトで fail（20 件の unit に 20 個ずつ、作業ツリーに無い 300 文字の path の anchor）。直した後は pass: 結論と件数が先頭、`record_more` で最後まで読める
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T06: `glean_fetch` の返答を、件数が先頭・続きは `record_more` にする
+- [x] T06: `glean_fetch` の返答を、件数が先頭・続きは `record_more` にする
   - 種別: 修正
   - 計画: S6
   - 依存: T02（結果の置き場と `record_more` が要る）
@@ -90,8 +92,10 @@ check・save・fetch・forget の返答が、結論と件数を先頭に出し�
   - red: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前は、コメント 300 件の issue の fetch が 32,768 バイトを超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(glean): lead the fetch reply with the count, and page the list of sources`
+  - 結果: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前は、コメント 300 件の issue の `glean_fetch` が 116,229 バイトで fail。直した後は pass: 301 件を保存、件数が先頭、一覧は枠付きでページになり、読み直しで gh を呼ばない
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T07: `forget_preview`・確認ダイアログ・`forget_apply` が、全 source・件数・注意書きを必ず出し、記録は 4 種類の件数とページにする
+- [x] T07: `forget_preview`・確認ダイアログ・`forget_apply` が、全 source・件数・注意書きを必ず出し、記録は 4 種類の件数とページにする
   - 種別: 修正
   - 計画: S7
   - 依存: T02（結果の置き場と `record_more` が要る）
@@ -99,12 +103,14 @@ check・save・fetch・forget の返答が、結論と件数を先頭に出し�
   - red: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前は、数百件の記録が引用する source の preview が 32,768 バイトを超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(forget): always show every source and the count, and page the affected records`
+  - 結果: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前は、300 件の記録が引用する source を含む 50 件の `forget_preview` が 59,089 バイトで fail。直した後は pass: 50 件の source・4 種類の件数・注意書きが preview・確認ダイアログ・結果の全部に出て、記録の行は `record_more` で 300 件に届く
+  - 結果: `bun run verify` → 終了コード 0
 
 ## P4: 受信バッファの上限
 
 受信バッファが 10 MiB を超えたとき、両サーバーが黙って終わらず、stderr の 1 行と終了コード 1 で終わる。
 
-- [ ] T08: 受信バッファの上限超過のときだけ、stderr に 1 行を書いて終了コード 1 で終わる（両サーバー）
+- [x] T08: 受信バッファの上限超過のときだけ、stderr に 1 行を書いて終了コード 1 で終わる（両サーバー）
   - 種別: 修正
   - 計画: S8
   - 依存: なし
@@ -112,18 +118,22 @@ check・save・fetch・forget の返答が、結論と件数を先頭に出し�
   - red: `node --import ./test/isolate-home.ts --test test/stdio-limit.test.ts` → 直す前は、10 MiB を超える要求で両サーバーが終了コード 0・stderr 空で終わって落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(mcp): exit with an error when the receive buffer passes its limit`
+  - 結果: `node --import ./test/isolate-home.ts --test test/stdio-limit.test.ts` → 直す前は、12 MiB を改行なしで送ると両サーバーとも終了コード 0 で 2 件 fail。直した後は 5 件 pass（上限超えは終了コード 1 と stderr の 1 行、上限ちょうどの要求と不正な JSON の後の要求は通り、入力が閉じれば 0）
+  - 結果: `bun run verify` → 終了コード 0
 
 ## P5: Skill と文書
 
 trace・harvest・glean・forget の Skill が、新しい返答の形とカーソルに沿って最後まで進める。
 
-- [ ] T09: 4 つの Skill の allowed-tools に `record_more` を足し、結論が先頭の形・`t` のカーソル・続きの読み方に合わせる。README も合わせる
+- [x] T09: 4 つの Skill の allowed-tools に `record_more` を足し、結論が先頭の形・`t` のカーソル・続きの読み方に合わせる。README も合わせる
   - 種別: 変更
   - 計画: S9
   - 依存: T04（`t` のカーソルの形が要る）, T05（check と save の返答の形が要る）, T06（fetch の返答の形が要る）, T07（forget の返答の形が要る）
   - 変更: `plugin/skills/trace/SKILL.md`, `plugin/skills/harvest/SKILL.md`, `plugin/skills/glean/SKILL.md`, `plugin/skills/forget/SKILL.md`, `README.md`, `README.ja.md`
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `docs(skills): follow the record server's paged replies and record_more`
+  - 結果: `bun run verify:ai` → 終了コード 0（plugin Skills 8 件）
+  - 結果: `bun run verify` → 終了コード 0
 
 ## 記録
 - 2026-10-11 / T01・T02 / 1 回目の `bun run verify` が 1 件 fail: `plugin.test.ts` の「全ツールが未知の引数を名前で断る」が、新しい `record_more` の正しい引数を持っていなかった / テストの一覧に `record_more` を足した（ツールの一覧を固定するテストにも足した）
@@ -133,3 +143,10 @@ trace・harvest・glean・forget の Skill が、新しい返答の形とカー�
 - 2026-10-11 / T03 / 計画の説明と違った点: 英数字が中心のセッションでは 1 ページがむしろ大きくなる（UTF-16 で 20,000 文字 ≒ 20 KB から 32 KiB へ）。自動の trace が 1 回に読む量は、日本語では減り、英語では増える。PR の本文に両方向として書く
 - 2026-10-11 / T03・T04 / コミットの前の Codex のレビュー（作業ツリーと `5a1f4904` の差分、新しい会話）が 2 件指摘、どちらも再現: (1) P1: 発言の中の端末の制御の列（閉じていないもの、切れ目にかかるもの）で、枠の `plain` が後ろをまとめて消し、切った位置の案内・カーソル・次の発言が消える。見せていない発言まで見た扱いになる (2) P2: 同じ run の最初のページを並行で読むと、先に返したカーソルが無効になる / 両方採用。先に落ちるテストを書いた。(1) は発言ごとに `plain` にかけ、切る位置は `read` と同じ規則（列の中で切らない）にした（`read.ts` に `shownStart` を足し、`readRefs` と同じ `cutEnd` を使う。`read.ts` は変更欄に無いが、この直しに要る）。(2) は、await の後で `shownTo` の今の値を取り直して同じ run の状態を共有する。(1) は直す前のコードでも起きる（review-shipping が HEAD で再現）
 - 2026-10-11 / T03・T04 / コミットの前の review-shipping（手数の上限で一度止まり、報告を頼み直した。最初の写しと、上の直しの後の写しの両方を見たとのこと。後のほうは出荷可の判定）: 実際の record サーバーに 4 通りの大きな入力（trace: 45 KB の session id・4,000 件の編集・200 件のフィールド、harvest: 24 KB の artifact、glean、自動の trace を 16 回）を流し、最大のページは 32,536 バイト、上限超えは 0、全 source と最後の部分の全行に届く。同じ入力で直す前は最大 110,746 バイト。`read s<id>@<byte>` の続きは 15 通りで `plain(保存された本文)` と一致。指摘 3 件: (1) 列の中で切るケースを通すテストが無い（`cutEnd` に列の範囲を渡さなくても全部通る） (2) 最後の部分を毎回作り直す・`t` のページでページ数を増やす、の 2 通りの弱め方を落とすテストが無い (3) `contextText` の上のコメントが古い / 3 件とも採用。(1) は `shownStart` を全部の room の値で確かめるテストを足し、弱めると落ちることを自分で確かめた。(2) は、最後の部分を読んだ後に編集を足しても同じページが返ること、最後の部分を読んだ後も対象のページが同じことを確かめるテストを足した。Skill の古くなった文の一覧は T09 で使う
+- 2026-10-11 / T05〜T09 / 1 つのコミットにした（P1・P2 と同じく、検査とレビューを 1 回にまとめるため）。README と README.ja.md には record サーバーのツールの記述が無かったので変えていない（T09 の変更欄には挙げていた）。`server/evals/acceptance/cases.json` も変えていない
+- 2026-10-11 / T05 / save の拒否は `saveText` が `RecordRefused` を投げる形にした（計画では「`{ ok, text }` を返す」と書いた）。拒否は `Invalid` か `SaveRefused` として `inTransaction` の外まで出てロールバックされ、その後で返答に変える、という合意の中身は同じ。変えた理由: `saveText` を呼ぶテストが 97 か所あり、戻り値の形を変えると「失敗しても気づかない呼び出し」になる。`mcp-record.ts` の `tool()` が `RecordRefused` を `isError` の返答にする
+- 2026-10-11 / T05 / schema のエラー（未知のキーの名前を繰り返す）は、行を作る時点で path を 300 バイト、message を 600 バイトに `preview` で切る（`record.ts`・`glean.ts`）。40,000 文字の未知のキーのエラーは 1 ページに収まる
+- 2026-10-11 / T07 / `ForgetOutcome` の units に `id` を足した（切ったキーに `read u<id>` を添えるため）。照合は今までどおり outcome 全体の `JSON.stringify` で、両側が同じ関数で作る
+- 2026-10-11 / T05〜T09 / コミットの前の Codex のレビュー（作業ツリーと `89be7daa` の差分、新しい会話）が 1 件指摘（P2、読んで確認）: glean の変更だけの保存では、先頭の件数に変更の数が入らず、件数の行そのものが出ない / 採用。件数に「N changes」を足し、変更が 3 件の glean の保存で先頭が「In all: 3 changes」になるテストを足した
+- 2026-10-11 / T05〜T09 / コミットの前の review-shipping（出荷可の判定。pack した 0.6.50 をリポジトリの外で起動して確認）: `record_check` は 6 ページで最大 32,679 バイト、断られた save（4,200 件のエラー）は 7 ページで最大 32,758 バイト・DB の差は呼び出しの記録だけ、成功した save は 6 ページで読み直しても unit は 20 件のまま。12 MiB を改行なしで送ると両サーバーとも終了コード 1 と stderr の 1 行、通常の終了は 0。確認ダイアログは 32,669 バイトで 50 件の source が全部入り、違う件数・拒否・キャンセルでは何も消えない。bundle は 6 つとも予算内で、`capture.js`・`deliver.js`・`cli.js`・`git-worker.js` は直す前と同じバイト列。指摘 5 件: (1) 「上限超過のときだけ」の条件を外してもテストが通る（SDK 1.31.0 は上限超過か明示の close でしか onclose を呼ばないので、サーバーのプロセスでは見分けられない） (2) 断られた save を commit する弱め方を落とすテストは 1 件だけ (3) 影響を受ける記録が 0 件のとき件数の行が出ない (4) glean と harvest の Skill に、save が断られたときと save の続きの読み方が無い (5) 「ページが…で終わる」は実際の最後の行と字面が違う / (1) は transport を模した単体テストを足した。(2) は 1 件で落ちるのでそのまま。(3) は「No record is affected.」を出す。(4)(5) は Skill を直した
+- 2026-10-11 / 全体 / review-shipping が見つけた、この変更によらない事実: `SPHICA_DB` を指定しても、record サーバーが一時の HOME に `.sphica` ディレクトリを作る場面があった（どの呼び出しかは未確認） / この PR では扱わない。再現できたら issue にする

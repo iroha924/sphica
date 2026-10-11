@@ -7,9 +7,11 @@
 
 import "./isolate-home.ts";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { test } from "node:test";
+import { fakeIssueGh } from "./fake-gh.ts";
 import { recordWorld } from "./record-world.ts";
-import { insert, message } from "./temp-db.ts";
+import { insert, manyAdopted, message } from "./temp-db.ts";
 
 test("an error the SDK builds itself, repeating what the caller sent, stays within the reply budget and stays an error", async () => {
   const w = await recordWorld("record-error");
@@ -180,6 +182,242 @@ test("record_context: a terminal sequence in a message, cut or left open, hides 
     if (at !== undefined) assert.ok(Number(at) > 0);
     else assert.match(all, /Visible beginningVisible end/);
     assert.ok(!all.includes("\u001b"));
+  } finally {
+    await w.done();
+  }
+});
+
+/** Every page of a result, from its first reply through record_more, each within the budget and each further on than the last */
+async function result(w: Awaited<ReturnType<typeof recordWorld>>, first: { text: string; isError: boolean }) {
+  const pages = [first.text];
+  let at = -1;
+  for (;;) {
+    const cursor = /call record_more with cursor: "([^"]+)"$/.exec(pages.at(-1) ?? "")?.[1];
+    if (!cursor) return pages;
+    const position = Number(cursor.split(".")[1]);
+    assert.ok(position > at, `the cursor went from ${at} to ${position}`);
+    at = position;
+    const next = await w.reply("record_more", { cursor });
+    assert.ok(!next.isError, next.text.slice(0, 300));
+    pages.push(next.text);
+  }
+}
+
+/** Twenty findings, each quoting the message and anchored to twenty paths that are not in the working tree */
+const anchored = (source: number) => ({
+  units: Array.from({ length: 20 }, (_, u) => ({
+    key: `finding-${u}`,
+    kind: "finding",
+    text: `Finding ${u}`,
+    evidence: [{ source: `s${source}`, quote: "Keep the retry in the client.", role: "states" }],
+    anchors: Array.from({ length: 20 }, (_, a) => ({
+      path: `src/${"d".repeat(300)}/missing-${u}-${a}.ts`,
+      role: "applies_to",
+    })),
+  })),
+});
+
+test("record_check and record_save: the verdict and the counts come first, and warnings that do not fit are read on without saving again", async () => {
+  const w = await recordWorld("results-saved");
+  try {
+    const said = message(w.db, w.p, { id: "m1", text: "Keep the retry in the client." });
+    const run = await w.trace();
+    await w.context(run);
+    const checked = await result(w, await w.reply("record_check", { run, record: anchored(said) }));
+    assert.match(checked[0] ?? "", /^✓ 20 records can be saved\nIn all: 20 active, \d+ warnings\n/);
+    assert.ok(checked.length >= 3, `${checked.length} pages`);
+    const count = Number(/, (\d+) warnings\n/.exec(checked[0] ?? "")?.[1]);
+    assert.equal(checked.join("\n").match(/^△ /gm)?.length, count);
+    assert.equal(checked.join("\n").match(/^✓ would be active: /gm)?.length, 20);
+    // Nothing was written by the check or by reading its pages
+    const units = () => Number(w.db.owner.prepare("select count(*) as n from unit").get()?.n);
+    assert.equal(units(), 0);
+    const first = await w.reply("record_save", { run, record: anchored(said) });
+    assert.ok(!first.isError, first.text.slice(0, 300));
+    const saved = await result(w, first);
+    assert.match(saved[0] ?? "", /^✓ saved\nIn all: 20 active, \d+ warnings\n/);
+    assert.equal(saved.join("\n").match(/^✓ trace:\S+ active$/gm)?.length, 20);
+    assert.equal(saved.join("\n").match(/^△ /gm)?.length, count);
+    // Reading the pages again saves nothing again, and the run stays saved
+    assert.equal(units(), 20);
+    assert.deepEqual(await result(w, first), saved);
+    assert.equal(units(), 20);
+    const again = await w.reply("record_save", { run, record: anchored(said) });
+    assert.ok(again.isError);
+    assert.match(again.text, /This run was already saved/);
+  } finally {
+    await w.done();
+  }
+});
+
+test("record_check and record_save: a record with many errors is refused with the count first, nothing is written, and the run can save again", async () => {
+  const w = await recordWorld("results-refused");
+  try {
+    const said = message(w.db, w.p, { id: "m1", text: "Keep the retry in the client." });
+    const run = await w.trace();
+    await w.context(run);
+    // Every unit, and every option of it, cites sources the project does not have: thousands of errors
+    let n = 0;
+    const missing = (count: number) =>
+      Array.from({ length: count }, () => ({
+        source: `s9${String(n++).padStart(14, "0")}`,
+        quote: "nothing",
+        role: "states",
+      }));
+    const record = {
+      units: Array.from({ length: 30 }, (_, u) => ({
+        key: `${"k".repeat(50)}-${u}`,
+        kind: "finding",
+        text: `Finding ${u}`,
+        evidence: missing(20),
+        options: Array.from({ length: 12 }, (_, o) => ({
+          text: `Option ${o}`,
+          outcome: "proposed",
+          evidence: missing(10),
+        })),
+      })),
+    };
+    const checked = await result(w, await w.reply("record_check", { run, record }));
+    const errors = Number(/^✗ (\d+) errors; fix the record and check again\n/.exec(checked[0] ?? "")?.[1]);
+    assert.ok(errors >= 4000, `${errors} errors`);
+    assert.ok(checked.length >= 3, `${checked.length} pages`);
+    assert.equal(checked.join("\n").match(/^✗ .*not a source of this project/gm)?.length, errors);
+    const refused = await w.reply("record_save", { run, record });
+    assert.ok(refused.isError);
+    assert.match(
+      refused.text,
+      new RegExp(`^✗ ${errors} errors; nothing was saved\\. Fix the record, check it, and save again\\n✗ `),
+    );
+    const pages = await result(w, refused);
+    assert.equal(pages.join("\n").match(/^✗ .*not a source of this project/gm)?.length, errors);
+    assert.equal(Number(w.db.owner.prepare("select count(*) as n from unit").get()?.n), 0);
+    assert.equal(Number(w.db.owner.prepare("select count(*) as n from source_processing").get()?.n), 0);
+    // One unknown key of 40 KB is an error that fits a page
+    const key = await w.reply("record_check", { run, record: { units: [], ["z".repeat(40_000)]: 1 } });
+    assert.match(key.text, /^✗ 1 error; fix the record and check again\n✗ /);
+    // The same run saves once the record is right
+    const ok = await w.reply("record_save", {
+      run,
+      record: {
+        units: [
+          {
+            key: "retry",
+            kind: "finding",
+            text: "Retry in the client",
+            evidence: [{ source: `s${said}`, quote: "Keep the retry in the client.", role: "states" }],
+          },
+        ],
+      },
+    });
+    assert.ok(!ok.isError, ok.text);
+    assert.match(ok.text, /^✓ saved\nIn all: 1 active\n✓ trace:ext-s1\/retry active$/);
+  } finally {
+    await w.done();
+  }
+});
+
+test("glean_fetch: everything is kept, the count comes first, and the list of sources is read on without fetching again", async () => {
+  const gh = fakeIssueGh(9, 300, "の".repeat(120));
+  const w = await recordWorld("fetch-pages", { PATH: gh.path });
+  try {
+    message(w.db, w.p, { id: "m1", text: "Look at issue 9." });
+    const run = /^run: (\S+)/.exec((await w.reply("glean_begin", { session: "s1" })).text)?.[1] ?? "";
+    const first = await w.reply("glean_fetch", { run, url: "https://github.com/o/fetch-pages/issues/9" });
+    assert.ok(!first.isError, first.text.slice(0, 300));
+    assert.match(
+      first.text,
+      /^301 sources kept\. Read them with read s<id>, then cite the refs:\n<past-records id="[0-9a-f]+">\n/,
+    );
+    const pages = await result(w, first);
+    assert.ok(pages.length >= 2, `${pages.length} pages`);
+    // Every source kept is listed once, by the id read takes, and each page frames what the commenters wrote
+    const listed = pages.flatMap((p) =>
+      [...p.matchAll(/^- s(\d+) (issue_body|issue_comment) by someone: /gm)].map((m) => Number(m[1])),
+    );
+    assert.equal(new Set(listed).size, 301);
+    assert.equal(
+      Number(w.db.owner.prepare("select count(*) as n from source where kind like 'issue%'").get()?.n),
+      301,
+    );
+    for (const p of pages)
+      assert.match(p, /<past-records id="[0-9a-f]+">\n[\s\S]*\n<\/past-records id="[0-9a-f]+">/);
+    // Reading the pages asked gh for nothing more
+    const calls = fs.readFileSync(gh.calls, "utf8").trim().split("\n").length;
+    assert.deepEqual(await result(w, first), pages);
+    assert.equal(fs.readFileSync(gh.calls, "utf8").trim().split("\n").length, calls);
+  } finally {
+    await w.done();
+  }
+});
+
+test("forget: every source and the count are always shown, and the records affected are counted by what becomes of them and read on", async () => {
+  let asked = "";
+  const w = await recordWorld("forget-pages", {}, (m) => {
+    asked = m;
+    return { action: "accept", content: { confirm: "50" } };
+  });
+  try {
+    // One message 300 decisions rest on, and 49 more sources with long names
+    manyAdopted(w.db, w.p, 300, (i) => ({
+      key: `trace:${"k".repeat(150)}/decision-${i}`,
+      kind: "decision",
+      stance: "do",
+    }));
+    const cited = Number(
+      w.db.owner.prepare("select id from source where external_id = 'many-300'").get()?.id,
+    );
+    const others = Array.from({ length: 49 }, (_, i) =>
+      insert(w.db, "source", {
+        project_id: w.p,
+        kind: "issue_comment",
+        artifact: `issue:${"9".repeat(300)}${i}`,
+        external_id: `comment:${i}`,
+        revision: 1,
+        author_kind: "person",
+        created_at: "2026-09-10T00:00:00.000Z",
+        available_at: "2026-09-10T00:00:00.000Z",
+        captured_at: "2026-09-10T00:00:00.000Z",
+        text: `comment ${i}`,
+        original_bytes: Buffer.byteLength(`comment ${i}`),
+        content_hash: Buffer.alloc(32, i),
+        indexed: 0,
+      }),
+    );
+    const sources = [cited, ...others].map((id) => `s${id}`);
+    const must = (text: string) => {
+      for (const ref of sources)
+        assert.match(text, new RegExp(`^- ${ref} (session_message|issue_comment) in `, "m"));
+      assert.match(
+        text,
+        /^300 records affected: 300 leave active, 0 become active, 0 change state otherwise, 0 keep their state$/m,
+      );
+      assert.match(text, /^Records keep their own text: /m);
+      assert.match(text, /^Copies outside the database /m);
+    };
+    const records = (pages: string[]) =>
+      pages.flatMap((p) =>
+        [
+          ...p.matchAll(/^- record trace:k{150}\/decision-(\d+): active → candidate, loses 2 citations$/gm),
+        ].map((m) => Number(m[1])),
+      );
+    const preview = await w.reply("forget_preview", { sources });
+    assert.ok(!preview.isError, preview.text.slice(0, 300));
+    must(preview.text);
+    const previewed = await result(w, preview);
+    assert.ok(previewed.length >= 2, `${previewed.length} pages`);
+    assert.equal(new Set(records(previewed)).size, 300);
+    // The owner confirms against every source and the count, within a size a dialog can show
+    const applied = await w.reply("forget_apply", { sources });
+    assert.ok(!applied.isError, applied.text.slice(0, 300));
+    assert.ok(Buffer.byteLength(asked) <= 32 * 1024, `${Buffer.byteLength(asked)} bytes in the dialog`);
+    assert.match(asked, /^Forget 50 sources for good\?\n/);
+    must(asked);
+    assert.match(asked, /^and \d+ more records: forget_preview lists every one$/m);
+    assert.match(applied.text, /^Forgot 50 sources\.\n/);
+    must(applied.text);
+    assert.match(applied.text, /^The deleted text was cleared from the database file\.$/m);
+    assert.equal(new Set(records(await result(w, applied))).size, 300);
+    assert.equal(Number(w.db.owner.prepare("select count(*) as n from source").get()?.n), 0);
   } finally {
     await w.done();
   }

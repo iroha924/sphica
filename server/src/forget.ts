@@ -10,8 +10,8 @@ import { backupDir, backups } from "./backups.ts";
 import { iso } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { openWriter } from "./db-write.ts";
-import { inline } from "./panel.ts";
 import { reconcile } from "./reconcile.ts";
+import { fitCount, keyShown, preview, READ_BUDGET } from "./reply-budget.ts";
 import { plural } from "./text.ts";
 
 export type ForgetOutcome = {
@@ -20,7 +20,7 @@ export type ForgetOutcome = {
   /** Ids forgotten earlier: only the cleanup runs again for them */
   already: number[];
   /** Units whose evidence, adoption, or retraction reasons are removed, and their lifecycle before and after */
-  units: { key: string; before: string; after: string; removed: number }[];
+  units: { id: number; key: string; before: string; after: string; removed: number }[];
   /** Field definitions quoting a forgotten source, and field values removed with them or quoting one themselves */
   fields: { definitions: number; values: number };
   /** Reasons quoting a forgotten source for retiring or moving an anchor; the anchors stay retired */
@@ -203,6 +203,7 @@ async function forgetIn(
   const after = new Map(settled.changes.map((c) => [c.id, c.after]));
   for (const u of touched)
     outcome.units.push({
+      id: u.id,
       key: u.key,
       before: u.lifecycle,
       after: after.get(u.id) ?? u.lifecycle,
@@ -210,7 +211,7 @@ async function forgetIn(
     });
   for (const c of settled.changes)
     if (!touched.some((u) => u.id === c.id))
-      outcome.units.push({ key: c.key, before: c.before, after: c.after, removed: 0 });
+      outcome.units.push({ id: c.id, key: c.key, before: c.before, after: c.after, removed: 0 });
   return outcome;
 }
 
@@ -282,41 +283,77 @@ export async function applyForget(
   }
 }
 
-/** The preview and the result in words, without the forgotten text (it would be copied into the session the owner wants it gone from). */
-export function forgetText(o: ForgetOutcome, file: string): string {
-  const lines = o.sources.map(
-    (s) => `- s${s.id} ${s.kind} in ${inline(s.artifact).slice(0, 120)} (${plural(s.bytes, "byte")})`,
+/**
+ * The preview and the result in words, without the forgotten text (it would be copied into the session the owner wants it gone from).
+ * `must` is what the owner confirms against and is always shown whole: every source, what was removed before, how many records
+ * change and how, and what stays. `records` is one line for each record affected, those leaving active first, for a reply to page.
+ */
+export function forgetWords(o: ForgetOutcome, file: string): { must: string[]; records: string[] } {
+  const must = o.sources.map(
+    (s) => `- s${s.id} ${s.kind} in ${preview(s.artifact, 80)} (${plural(s.bytes, "byte")})`,
   );
   if (o.already.length)
-    lines.push(
+    must.push(
       `- already forgotten: ${o.already.map((id) => `s${id}`).join(", ")} (only the cleanup runs again)`,
     );
-  for (const u of o.units) {
-    const change = u.before === u.after ? `stays ${u.after}` : `${u.before} → ${u.after}`;
-    lines.push(`- record ${inline(u.key).slice(0, 120)}: ${change}, loses ${plural(u.removed, "citation")}`);
-  }
+  // What becomes of each record, most worth the owner's eye first. The order is for showing only: what is confirmed is the outcome
+  const rank = (u: ForgetOutcome["units"][number]) =>
+    u.before === u.after ? 3 : u.before === "active" ? 0 : u.after === "active" ? 1 : 2;
+  const units = [...o.units].sort((a, b) => rank(a) - rank(b));
+  const count = (r: number) => o.units.filter((u) => rank(u) === r).length;
+  // Said either way: the owner confirms knowing how many records change, also when none does
+  if (!o.units.length) must.push("No record is affected.");
+  else
+    must.push(
+      `${plural(o.units.length, "record")} affected: ${count(0)} leave active, ${count(1)} become active, ${count(2)} change state otherwise, ${count(3)} keep their state`,
+    );
   if (o.fields.definitions || o.fields.values)
-    lines.push(
+    must.push(
       `- ${plural(o.fields.definitions, "field definition")} and ${plural(o.fields.values, "field value")} go with them`,
     );
   if (o.anchorReasons)
-    lines.push(
+    must.push(
       `- ${plural(o.anchorReasons, "reason")} for retiring or moving an anchor ${o.anchorReasons === 1 ? "goes" : "go"} with them; the anchors stay retired`,
     );
   if (o.units.length || o.fields.values)
-    lines.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
+    must.push("Records keep their own text: if one repeats the forgotten words, they stay in it.");
   let copies: number | null;
   try {
     copies = backups(file).length;
   } catch {
     copies = null;
   }
-  lines.push(
+  const dir = preview(backupDir(file), 400);
+  must.push(
     copies === null
-      ? `Copies outside the database are not touched: capture's waiting and set-aside files. Backups made before migrating in ${backupDir(file)} could not be listed; look there yourself if the words must go from every copy.`
+      ? `Copies outside the database are not touched: capture's waiting and set-aside files. Backups made before migrating in ${dir} could not be listed; look there yourself if the words must go from every copy.`
       : copies
-        ? `Copies outside the database are not touched: capture's waiting and set-aside files, and ${plural(copies, "backup")} made before migrating, in ${backupDir(file)}. Delete those backups yourself if the words must go from them too.`
+        ? `Copies outside the database are not touched: capture's waiting and set-aside files, and ${plural(copies, "backup")} made before migrating, in ${dir}. Delete those backups yourself if the words must go from every copy.`
         : "Copies outside the database (capture's waiting and set-aside files) are not touched.",
   );
-  return lines.join("\n");
+  return {
+    must,
+    records: units.map((u) => {
+      const change = u.before === u.after ? `stays ${u.after}` : `${u.before} → ${u.after}`;
+      return `- record ${keyShown(u.key, u.id)}: ${change}, loses ${plural(u.removed, "citation")}`;
+    }),
+  };
+}
+
+/**
+ * What the owner reads at the confirmation: every source and what stays, whole, and as many of the affected records as a dialog of
+ * READ_BUDGET bytes holds, with the count of the rest. What is forgotten is checked against the whole outcome, not against this text.
+ */
+export function forgetQuestion(o: ForgetOutcome, file: string): string {
+  const w = forgetWords(o, file);
+  const text = (kept: number) =>
+    [
+      `Forget ${plural(o.sources.length, "source")} for good?`,
+      ...w.must,
+      ...w.records.slice(0, kept),
+      ...(kept < w.records.length
+        ? [`and ${plural(w.records.length - kept, "more record")}: forget_preview lists every one`]
+        : []),
+    ].join("\n");
+  return text(fitCount(w.records, READ_BUDGET, text));
 }

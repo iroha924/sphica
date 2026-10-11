@@ -24,6 +24,7 @@ import {
   settleSaved,
   type Target,
 } from "./record.ts";
+import { preview } from "./reply-budget.ts";
 import {
   commitHeld,
   listFilesIfGone,
@@ -288,7 +289,10 @@ export async function checkGlean(
   const parsed = Glean.safeParse(raw);
   if (!parsed.success)
     return {
-      errors: parsed.error.issues.map((i) => `${i.path.join(".") || "record"}: ${i.message}`),
+      // What the caller sent is repeated in a schema error (an unknown key's name), so each part is shown within a size
+      errors: parsed.error.issues.map(
+        (i) => `${preview(i.path.join(".") || "record", 300)}: ${preview(i.message, 600)}`,
+      ),
       problems: [],
       units: {
         errors: [],

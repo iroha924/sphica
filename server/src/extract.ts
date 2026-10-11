@@ -40,7 +40,7 @@ import {
 } from "./record.ts";
 import { keyShown, preview, READ_BUDGET } from "./reply-budget.ts";
 import type { Probe, RepoFacts } from "./repo-facts.ts";
-import { pieces } from "./result-pages.ts";
+import { firstPage, pieces } from "./result-pages.ts";
 import { bytes, plural } from "./text.ts";
 import {
   callSession,
@@ -251,7 +251,10 @@ async function sameCaller(db: Reads, begin: number, call: number): Promise<void>
     throw new Error("This run was begun in another session; begin a run in this one");
 }
 
-/** Keeps a GitHub issue or pull request of this repository the owner named as sources for a glean run, and lists their refs. */
+/**
+ * Keeps a GitHub issue or pull request of this repository the owner named as sources for a glean run, and lists their refs: the
+ * reply, framed where it carries their text, with a cursor for the refs that did not fit.
+ */
 export async function gleanFetch(
   db: Kysely<DB>,
   id: string,
@@ -275,13 +278,17 @@ export async function gleanFetch(
     return stored;
   });
   const kept = items.flatMap((it, i) => (ids[i] == null ? [] : [{ it, id: ids[i] }]));
-  return [
-    `${plural(kept.length, "source")} kept. Read them with read s<id>, then cite the refs:`,
-    ...kept.map(
+  // Everything is kept whatever the reply carries. The lines hold what others wrote, so they are framed on every page
+  return firstPage({
+    kind: "fetch",
+    projectId: place.projectId,
+    lead: [`${plural(kept.length, "source")} kept. Read them with read s<id>, then cite the refs:`],
+    lines: kept.map(
       ({ it, id }) =>
-        `- s${id} ${it.kind} by ${it.author?.login ?? "unknown"}: ${inline(it.text).slice(0, 120)}`,
+        `- s${id} ${it.kind} by ${preview(it.author?.login ?? "unknown", 100)}: ${preview(it.text, 120)}`,
     ),
-  ].join("\n");
+    framed: true,
+  });
 }
 
 /**
@@ -796,10 +803,54 @@ export async function checkText(
   const summary = errors.length
     ? `✗ ${plural(errors.length, "error")}; fix the record and check again`
     : `✓ ${plural(v.units, "record")}${v.ops === null ? "" : ` and ${plural(v.ops, "change")}`} can be saved`;
-  return { ok: errors.length === 0, text: [...lines, summary].join("\n") };
+  return {
+    ok: errors.length === 0,
+    text: firstPage({
+      kind: "check",
+      projectId,
+      lead: [summary, ...tally(done?.saved, done?.changed.length ?? 0, lines)],
+      lines,
+    }),
+  };
 }
 
-/** Saves a record for the run in one transaction and reports what became of each unit. */
+/** What a result's lines hold, by what became of the records and how many lines warn, so a reply that carries only some says it all */
+function tally(saved: Saved | undefined, changes: number, lines: string[]): string[] {
+  const counts = [
+    ...(saved
+      ? ([
+          [saved.active.length, "active"],
+          [saved.superseded.length, "superseded"],
+          [saved.candidates.length, "candidate"],
+          [saved.quarantined.length, "quarantined"],
+        ] as const)
+      : []),
+    [lines.filter((l) => l.startsWith("△ ")).length, "warning"] as const,
+    [changes, "change"] as const,
+  ].filter(([n]) => n > 0);
+  return counts.length
+    ? [
+        `In all: ${counts.map(([n, what]) => (what === "warning" || what === "change" ? plural(n, what) : `${n} ${what}`)).join(", ")}`,
+      ]
+    : [];
+}
+
+/** A save the record itself made impossible, after its transaction rolled back. The message is the reply, within the budget */
+export class RecordRefused extends Error {}
+
+/** Thrown inside the save's transaction to roll it back when validation found errors; never leaves this file */
+class Invalid extends Error {
+  readonly errors: string[];
+  constructor(errors: string[]) {
+    super("invalid");
+    this.errors = errors;
+  }
+}
+
+/**
+ * Saves a record for the run in one transaction and reports what became of each unit. A record the save turns down throws
+ * RecordRefused, whose message is the reply.
+ */
 export async function saveText(
   db: Kysely<DB>,
   id: string,
@@ -810,10 +861,9 @@ export async function saveText(
   call?: number,
 ): Promise<string> {
   const prepared = await prepare(db, id, projectId, root, record, probe, call);
-  const text = await inTransaction(db, async (trx) => {
+  const done = await inTransaction(db, async (trx) => {
     const v = await validate(trx, id, projectId, root, record, prepared, call);
-    if (v.errors.length)
-      throw new Error(`The record is not valid:\n${v.errors.map((e) => `  ${e}`).join("\n")}`);
+    if (v.errors.length) throw new Invalid(v.errors);
     const { saved, changed } = await v.write(trx);
     await finishRun(trx, v.run.id);
     // A warning check gave and the save found again is one line; each change stays its own line, even when two read the same
@@ -824,15 +874,38 @@ export async function saveText(
         ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
       ]),
     ];
-    return [
-      ...saved.active.map((k) => `✓ ${k} active`),
-      ...saved.superseded.map((k) => `✓ ${k} superseded`),
-      ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
-      ...saved.quarantined.map((q) => `△ ${q} quarantined`),
-      ...warnings,
-      ...changed.map((c) => `✓ ${c}`),
-      "✓ saved",
-    ].join("\n");
+    return {
+      saved,
+      changes: changed.length,
+      lines: [
+        ...saved.active.map((k) => `✓ ${k} active`),
+        ...saved.superseded.map((k) => `✓ ${k} superseded`),
+        ...saved.candidates.map((c) => `△ ${c.key} candidate: ${c.why}`),
+        ...saved.quarantined.map((q) => `△ ${q} quarantined`),
+        ...warnings,
+        ...changed.map((c) => `✓ ${c}`),
+      ],
+    };
+  }).catch((e: unknown) => {
+    // Turned into a reply only here, once the transaction has rolled back: nothing of a refused save stays written
+    const errors = e instanceof Invalid ? e.errors : e instanceof SaveRefused ? [e.message] : null;
+    if (!errors) throw e;
+    throw new RecordRefused(
+      firstPage({
+        kind: "refused",
+        projectId,
+        lead: [
+          `✗ ${plural(errors.length, "error")}; nothing was saved. Fix the record, check it, and save again`,
+        ],
+        lines: errors.map((x) => `✗ ${x}`),
+      }),
+    );
+  });
+  const text = firstPage({
+    kind: "save",
+    projectId,
+    lead: ["✓ saved", ...tally(done.saved, done.changes, done.lines)],
+    lines: done.lines,
   });
   // Forgotten only once the save committed: a failed commit leaves the run retryable with what it was shown
   shownTo.delete(id);

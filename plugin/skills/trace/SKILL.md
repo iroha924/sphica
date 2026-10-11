@@ -2,7 +2,7 @@
 name: trace
 description: Extracts what a coding session decided and implemented (decisions and rejected options, constraints, implementations, findings, dead ends, open questions) into records whose every claim quotes the captured conversation, so a later session can find them. With "pending", lists this project's sessions not traced yet. Use when the user asks, or on your own when Sphica's session-start notice says earlier sessions wait to be traced, after the user's request is done.
 argument-hint: "[pending]"
-allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status, mcp__plugin_sphica_sphica__fields
+allowed-tools: AskUserQuestion, mcp__plugin_sphica_record__trace_pending, mcp__plugin_sphica_record__trace_begin, mcp__plugin_sphica_record__record_context, mcp__plugin_sphica_record__record_check, mcp__plugin_sphica_record__record_save, mcp__plugin_sphica_record__record_more, mcp__plugin_sphica_sphica__search, mcp__plugin_sphica_sphica__read, mcp__plugin_sphica_sphica__status, mcp__plugin_sphica_sphica__fields
 ---
 
 # trace — keep what a session decided and implemented
@@ -28,7 +28,7 @@ replacing the owner's).
 ## Flow
 
 Everything goes through Sphica's `record` MCP server (its tools are `trace_pending`, `trace_begin`, `record_context`, `record_check`,
-`record_save`). Pass the repository root as `cwd` to every tool.
+`record_save`, `record_more`). Pass the repository root as `cwd` to every tool.
 
 1. **Pick the session.** Without a target, it is this session: its id is `${CLAUDE_SESSION_ID}` in Claude Code; in Codex, read `CODEX_THREAD_ID`
    from your shell environment. With `pending`, call `trace_pending`, show the owner the list, and ask which to trace (AskUserQuestion in
@@ -37,17 +37,22 @@ Everything goes through Sphica's `record` MCP server (its tools are `trace_pendi
 2. **Begin**: `trace_begin` with that `session`. It returns a `run` id bound to that session and this project; the record never names them
 3. **Read**: `record_context` with the run. It prints each captured message as `## s<N> owner|assistant <turn> <time>` followed by its text,
    the edits observed, and the project's live records. `(traced before)` marks messages an earlier trace already looked at.
-   A long session comes in pages: when a page ends with `call record_context with after: "s<N>"`, call it again with that `after`, until
-   the last page (the one with the live records). Saving marks as looked at only the messages you were shown and those you quote; the
-   rest stay pending.
+   It comes in pages: when a page's last line says `call record_context with after: "..."`, call it again with that `after`, exactly as written
+   (`s<N>` while messages follow, then `t<id>.<line>` while the edits, fields, and live records go on), until a page names no `after`.
+   A message too long for a page ends with `(cut here; read s<N>@<byte> for the rest)`: read on with `read` when what it says matters.
+   Saving marks as looked at only the messages you were shown and those you quote; the rest stay pending.
    Use `search` and `read` to look at older records this session may replace
 4. **Check**: `record_check` with the run and the record below as `record`. It runs the save in a transaction that rolls back, so nothing is
    written: it refuses what the save would refuse, and says what would become of each record (`would be active`, `would stay a candidate` with
-   the reason, `would be superseded`, `would be quarantined`). Errors refuse the save; fix and check again. Warnings say what will be
+   the reason, `would be superseded`, `would be quarantined`). Its first lines are the verdict and the counts. When a reply ends with
+   `call record_more with cursor: "..."`, the rest of its lines are read with `record_more` and that cursor, until a reply names none
+   (the same goes for `record_save`; nothing is checked or saved again by reading on). Errors refuse the save; fix and check again. Warnings say what will be
    left out, quarantined, or kept as a candidate, and why. An anchor warning (a path not in the working tree, with near paths; a directory; a
    symbol not in the file) means fix the anchor and check again; keep it only when you know it is right
-5. **Save**: `record_save` with the same run and record. A run saves once
-6. **Report** to the owner what was saved, copying save's lines (active, candidate with the reason, quarantined, superseded)
+5. **Save**: `record_save` with the same run and record. A run saves once. A reply that starts with `✗` saved nothing: fix the record,
+   check it, and save with the same run
+6. **Report** to the owner what was saved, copying save's lines (active, candidate with the reason, quarantined, superseded), all of them:
+   read on with `record_more` when the reply names a cursor
 
 A session with nothing worth keeping is saved with `"units": []`: it is marked as looked at, so pending stops listing it.
 

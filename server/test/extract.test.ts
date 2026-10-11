@@ -21,6 +21,7 @@ import {
   contextText,
   gleanFetch,
   pendingText,
+  RecordRefused,
   saveText,
 } from "../src/extract.ts";
 import { applyForget, previewForget } from "../src/forget.ts";
@@ -3200,9 +3201,15 @@ test("glean: a new record the owner adopts and an adopted proposal racing for on
           },
         ],
       }),
-      /glean:duck: another record in this save already supersedes trace:ext-s1\/storage/,
+      // Turned down while writing, after part of it was written: the refusal is the reply, and the transaction took all of it back
+      (e: unknown) =>
+        e instanceof RecordRefused &&
+        /^✗ 1 error; nothing was saved\. Fix the record, check it, and save again\n✗ glean:duck: another record in this save already supersedes trace:ext-s1\/storage/.test(
+          e.message,
+        ),
     );
     assert.deepEqual([state("trace:ext-s1/storage"), state("glean:pg")], ["active", "candidate"]);
+    assert.equal(state("glean:duck"), undefined);
   } finally {
     await db.done();
   }
@@ -3262,6 +3269,8 @@ test("glean: two operations that report the same line are both reported in the s
       })),
     });
     assert.equal(out.match(/✓ glean:notes: anchor added/g)?.length, 2, out);
+    // A save that only changes records still says, first, how many changes it made
+    assert.match(out, /^✓ saved\nIn all: 3 changes\n/);
   } finally {
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });

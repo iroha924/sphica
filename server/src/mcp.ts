@@ -27,6 +27,7 @@ import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsReply, searchSources, searchUnits, sourcesReply } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
+import { stopOnOverflow } from "./stdio-limit.ts";
 import { head, reason } from "./text.ts";
 
 requireRuntime();
@@ -491,3 +492,4 @@ const transport = new StdioServerTransport();
 const send = transport.send.bind(transport);
 transport.send = (message) => send(withinBudget(message));
 await server.connect(transport);
+stopOnOverflow(transport);
