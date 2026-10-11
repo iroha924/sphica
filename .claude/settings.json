@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "deny": ["Bash(gh pr checkout *)", "Bash(gh pr co *)", "Bash(gh co *)"]
+  }
+}

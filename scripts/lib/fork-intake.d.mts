@@ -1,0 +1,6 @@
+// Copyright (c) 2026 iroha924 and contributors
+// SPDX-License-Identifier: MIT
+
+export function settingsProblems(text: string): string[];
+export function readerProblems(source: string): string[];
+export function reviewCommandProblems(source: string): string[];

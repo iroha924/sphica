@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { withoutComments } from "./lib/english.mjs";
+import { readerProblems, reviewCommandProblems, settingsProblems } from "./lib/fork-intake.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -493,7 +494,23 @@ for (const name of pluginSkills) {
 // The choices from claude --help. An invalid value only warns and falls back to the session default.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
-// Checks the repository-only reviewers (.claude/agents). Shipped reviewers are not Agent definitions but
+// Checks what guards a fork's pull request before the owner approves it. The project settings reach every session started in this
+// repository, cloud ones included, so they hold the checkout deny and nothing else.
+const forkIntake = [
+  [".claude/settings.json", settingsProblems],
+  // The agent that reads a fork's text for this session holds read tools only
+  [".claude/agents/fork-reader.md", readerProblems],
+  // Codex reads a fork's diff without the tools that reach outside its sandbox
+  [".claude/skills/fork-pr/SKILL.md", reviewCommandProblems],
+];
+for (const [file, problemsOf] of forkIntake) {
+  const text = read(file);
+  // A missing file was already reported by the read; an empty one still has to be judged
+  if (fs.existsSync(path.join(root, file)))
+    for (const problem of problemsOf(text)) fail(`${file}: ${problem}`);
+}
+
+// Checks the repository-only agents (.claude/agents). Shipped reviewers are not Agent definitions but
 // the bodies in plugin/skills/review/reviewers/, which have no frontmatter
 // (check-pairs.mjs checks those).
 const agentDirectories = [".claude/agents"];
