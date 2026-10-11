@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { configGet, inIsolation, repoFiles } from "../src/git.ts";
+import { configGet, inIsolation, refusalText, renamesSince, repoFiles, unreadOf } from "../src/git.ts";
 import { isolatedConfig, isolatedHome, readLimited, sweep } from "../src/git-worker.ts";
 import { tempDir } from "./temp-dir.ts";
 
@@ -58,6 +58,12 @@ function repo(): { root: string; git: (...a: string[]) => string } {
   return { root, git };
 }
 
+/** The worker's outputs for a status of root, or none when it could not read */
+async function statusOf(root: string, max = 1024 * 1024): Promise<string[]> {
+  const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max });
+  return Array.isArray(out) ? out : [];
+}
+
 test("the isolated directory sits under HOME's real path, in plain directories, apart from the work tree and the temp directory", async () => {
   const { root } = repo();
   await withHome((home) => {
@@ -65,24 +71,26 @@ test("the isolated directory sits under HOME's real path, in plain directories, 
     assert.equal(path.dirname(iso), path.join(home, ".sphica", "git"));
     assert.equal(hooks, path.join(home, ".sphica", "git", "hooks"));
     // A work tree that holds HOME's .sphica, or is the temp directory's neighbor inside it, is refused
-    assert.throws(() => isolatedHome(home), /overlaps/);
+    assert.throws(() => isolatedHome(home), /^Error: overlaps_worktree$/);
   });
   await withHome((home) => {
     // .sphica leading elsewhere through a link
     const elsewhere = fs.realpathSync(tempDir("git-worker-elsewhere-"));
     fs.symlinkSync(elsewhere, path.join(home, ".sphica"));
-    assert.throws(() => isolatedHome(root), /not a plain directory/);
+    assert.throws(() => isolatedHome(root), /^Error: not_plain_dir$/);
   });
   await withHome((home) => {
     fs.mkdirSync(path.join(home, ".sphica", "git", "hooks"), { recursive: true });
     fs.writeFileSync(path.join(home, ".sphica", "git", "hooks", "post-index-change"), "");
-    assert.throws(() => isolatedHome(root), /not empty/);
+    assert.throws(() => isolatedHome(root), /^Error: hooks_not_empty$/);
   });
   await withHome((home) => {
     process.env.TMPDIR = home;
     process.env.TMP = home;
     process.env.TEMP = home;
-    assert.throws(() => isolatedHome(root), /overlaps/);
+    assert.throws(() => isolatedHome(root), /^Error: overlaps_tmp$/);
+    // A directory made for a run that is then refused is not left behind
+    assert.deepEqual(fs.readdirSync(path.join(home, ".sphica", "git")), ["hooks"]);
   });
 });
 
@@ -123,20 +131,20 @@ test("the isolated config holds only checked values in one fixed form", () => {
   assert.throws(() => isolatedConfig({ "core.filemode": "yes" }), /does not copy/);
 });
 
-test("a repository with no commit or no index still shows its files, and a missed deadline gives null", async () => {
+test("a repository with no commit or no index still shows its files, and a missed deadline is named", async () => {
   const { root, git } = repo();
   await withHome(async (home) => {
     fs.writeFileSync(path.join(root, "u.txt"), "u");
-    const [none] =
-      (await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 })) ?? [];
+    const [none] = await statusOf(root);
     assert.equal(none, "? u.txt\0");
     git("add", "u.txt");
-    const [staged] =
-      (await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 })) ?? [];
+    const [staged] = await statusOf(root);
     assert.match(staged ?? "", /^1 A\. N\.\.\. 000000 100644 100644 0{40} [0-9a-f]{40} u\.txt\0$/);
     // The isolated directory is gone after each call
     assert.deepEqual(fs.readdirSync(path.join(home, ".sphica", "git")), ["hooks"]);
-    assert.equal(await inIsolation(root, [{ kind: "status" }], { deadline: 1, max: 1024 * 1024 }), null);
+    assert.deepEqual(await inIsolation(root, [{ kind: "status" }], { deadline: 1, max: 1024 * 1024 }), {
+      unread: "timeout",
+    });
   });
 });
 
@@ -172,7 +180,9 @@ test("git and the worker start in HOME, not in the caller's directory, where Win
     process.chdir(root);
     try {
       assert.ok(repoFiles(root));
-      assert.ok(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }));
+      assert.ok(
+        Array.isArray(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 })),
+      );
     } finally {
       process.chdir(saved.cwd);
       process.env.PATH = saved.PATH;
@@ -192,7 +202,10 @@ test("a cut-off worker's leftovers are swept only from a checked directory, neve
     const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
     fs.utimesSync(owned, old, old);
     fs.symlinkSync(elsewhere, path.join(home, ".sphica"));
-    assert.equal(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }), null);
+    assert.deepEqual(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }), {
+      unread: "refused",
+      code: "not_plain_dir",
+    });
     assert.ok(fs.existsSync(owned), "the directory behind the link is left alone");
   });
 });
@@ -205,7 +218,9 @@ test("a HEAD that names a missing commit fails instead of passing for a new repo
   const head = git("rev-parse", "HEAD").trim();
   fs.rmSync(path.join(root, ".git", "objects", head.slice(0, 2), head.slice(2)));
   await withHome(async () => {
-    assert.equal(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }), null);
+    assert.deepEqual(await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }), {
+      unread: "failed",
+    });
   });
 });
 
@@ -215,8 +230,7 @@ test("core.excludesFile set empty reads no global ignore file, as git does", asy
   await withHome(async (home) => {
     fs.mkdirSync(path.join(home, ".config", "git"), { recursive: true });
     fs.writeFileSync(path.join(home, ".config", "git", "ignore"), "u.txt\n");
-    const status = async () =>
-      ((await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 })) ?? [])[0];
+    const status = async () => (await statusOf(root))[0];
     assert.equal(await status(), "", "the default global ignore file hides u.txt");
     git("config", "core.excludesFile", "");
     assert.equal(await status(), "? u.txt\0");
@@ -229,8 +243,8 @@ test("names whose control characters JSON writes six times longer still come bac
   for (let i = 0; i < 400; i++)
     fs.writeFileSync(path.join(root, `${String(i).padStart(4, "0")}${"\u0001".repeat(96)}`), "");
   await withHome(async () => {
-    const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 64 * 1024 });
-    assert.equal(out?.[0]?.split("\0").filter(Boolean).length, 400);
+    const out = await statusOf(root, 64 * 1024);
+    assert.equal(out[0]?.split("\0").filter(Boolean).length, 400);
   });
 });
 
@@ -250,10 +264,9 @@ test("a git that stalls is killed with the worker at the deadline, and nothing o
     process.env.PATH = `${bin}${path.delimiter}${saved ?? ""}`;
     try {
       const started = Date.now();
-      assert.equal(
-        await inIsolation(root, [{ kind: "status" }], { deadline: 1_500, max: 1024 * 1024 }),
-        null,
-      );
+      assert.deepEqual(await inIsolation(root, [{ kind: "status" }], { deadline: 1_500, max: 1024 * 1024 }), {
+        unread: "timeout",
+      });
       assert.ok(Date.now() - started < 3_000);
     } finally {
       process.env.PATH = saved;
@@ -272,14 +285,51 @@ test("core.autocrlf in any of git's spellings, a bare key included, is read as g
   await withHome(async () => {
     for (const spelling of ["YES", "2", "00", "Input"]) {
       git("config", "core.autocrlf", spelling);
-      const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 });
-      assert.equal(out?.[0], "? u.txt\0", spelling);
+      assert.equal((await statusOf(root))[0], "? u.txt\0", spelling);
     }
     // A key with no value is true to git
     git("config", "--unset", "core.autocrlf");
     fs.appendFileSync(path.join(root, ".git", "config"), "[core]\n\tautocrlf\n");
     assert.equal(configGet(root, "core.autocrlf"), "true");
-    const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 });
-    assert.equal(out?.[0], "? u.txt\0");
+    assert.equal((await statusOf(root))[0], "? u.txt\0");
   });
+});
+
+test("a refusal reaches the callers of the worker with its code, and each code has its own words", async () => {
+  const { root, git } = repo();
+  fs.writeFileSync(path.join(root, "a.txt"), "a");
+  git("add", "a.txt");
+  git("commit", "-qm", "one");
+  const head = git("rev-parse", "HEAD").trim();
+  await withHome(async (home) => {
+    assert.ok((await renamesSince(root, head)) instanceof Map);
+    process.env.TMPDIR = home;
+    process.env.TMP = home;
+    process.env.TEMP = home;
+    assert.deepEqual(await renamesSince(root, head), { unread: "refused", code: "overlaps_tmp" });
+  });
+  const folder = "Sphica's git folder (.sphica/git under your home directory)";
+  assert.deepEqual(
+    (["hooks_not_empty", "not_plain_dir", "outside_home", "overlaps_worktree", "overlaps_tmp"] as const).map(
+      refusalText,
+    ),
+    [
+      `the hooks folder inside ${folder}, which Sphica keeps empty, holds files`,
+      `${folder} is a link or not a directory`,
+      `${folder} leads out of your home directory`,
+      `${folder} overlaps this work tree, which an agent can write`,
+      `${folder} overlaps the temp directory, which an agent can write`,
+    ],
+  );
+});
+
+test("a git run Node cut off is told apart by why: the deadline, the output limit, or anything else", () => {
+  assert.deepEqual(unreadOf(Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" })), {
+    unread: "timeout",
+  });
+  assert.deepEqual(unreadOf(Object.assign(new Error("spawnSync git ENOBUFS"), { code: "ENOBUFS" })), {
+    unread: "too_large",
+  });
+  assert.deepEqual(unreadOf(new Error("Command failed: git")), { unread: "failed" });
+  assert.deepEqual(unreadOf(null), { unread: "failed" });
 });

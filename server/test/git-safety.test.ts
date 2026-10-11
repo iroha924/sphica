@@ -385,7 +385,8 @@ test("hooks, a submodule's config, per-worktree config, and the owner's global f
 
 /** Status as Sphica reads it through the isolated git directory, and as plain git prints it in the repository itself */
 async function bothStatus(root: string): Promise<{ sphica: string | undefined; plain: string }> {
-  const sphica = (await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 }))?.[0];
+  const out = await inIsolation(root, [{ kind: "status" }], { deadline: 10_000, max: 1024 * 1024 });
+  const sphica = Array.isArray(out) ? out[0] : undefined;
   const plain = execFileSync(
     "git",
     ["-C", root, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=dirty"],

@@ -9,7 +9,7 @@ import { AI_DECIDED, AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { framed } from "./frame.ts";
-import { renamesSince } from "./git.ts";
+import { refusalText, renamesSince } from "./git.ts";
 import { inline, plain, STRING_SEQUENCE } from "./panel.ts";
 import { bytes, head, sha256 } from "./text.ts";
 
@@ -83,7 +83,7 @@ async function unitView(
   return { id: bare.id, text: await describe(db, bare, root, asOf, renames) };
 }
 
-type Renames = Map<string, Map<string, string | null> | null>;
+type Renames = Map<string, Awaited<ReturnType<typeof renamesSince>> | null>;
 
 /** Commits one record asks git about for renames. Each record counts its own, so what it shows does not depend on what else is read. */
 const RENAME_LOOKUPS = 5;
@@ -464,6 +464,10 @@ async function movedTo(
   if (!renames.has(a.commit_sha)) renames.set(a.commit_sha, await renamesSince(root, a.commit_sha));
   const seen = renames.get(a.commit_sha);
   if (!seen) return "; rename not checked";
+  if (!(seen instanceof Map))
+    return seen.unread === "refused"
+      ? `; rename not checked (${refusalText(seen.code)}; run sphica doctor in this work tree)`
+      : "; rename not checked";
   const to = seen.get(a.path);
   if (to === null) return "; rename not checked";
   return to

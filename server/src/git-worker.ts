@@ -27,7 +27,25 @@ export type WorktreeOp =
   | { kind: "renames"; commit: string };
 /** until: the time (ms since the epoch) by which every git the worker starts has ended or been killed */
 export type WorkerRequest = { root: string; ops: WorktreeOp[]; max: number; until: number };
-export type WorkerResult = { ok: true; out: string[] } | { ok: false; error: string };
+/** Why the worker would not use its directory: each is a state of the owner's machine, not a failure of git */
+export type Refusal =
+  | "hooks_not_empty"
+  | "not_plain_dir"
+  | "outside_home"
+  | "overlaps_worktree"
+  | "overlaps_tmp";
+export type WorkerResult =
+  | { ok: true; out: string[] }
+  | { ok: false; refused: Refusal }
+  | { ok: false; failed: "timeout" | "too_large" | "failed" };
+
+class Refused extends Error {
+  readonly code: Refusal;
+  constructor(code: Refusal) {
+    super(code);
+    this.code = code;
+  }
+}
 
 const INDEX_LIMIT = 256 * 1024 * 1024;
 const FILE_LIMIT = 1024 * 1024;
@@ -45,7 +63,7 @@ function ownDir(parent: string, name: string): string {
   const dir = path.join(parent, name);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { mode: 0o700 });
   const st = fs.lstatSync(dir);
-  if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`${dir} is not a plain directory`);
+  if (!st.isDirectory() || st.isSymbolicLink()) throw new Refused("not_plain_dir");
   return dir;
 }
 
@@ -57,16 +75,24 @@ export function isolatedHome(root: string): { git: string; iso: string; hooks: s
   const home = fs.realpathSync(os.homedir());
   const git = ownDir(ownDir(home, ".sphica"), "git");
   const hooks = ownDir(git, "hooks");
-  if (fs.readdirSync(hooks).length) throw new Error(`${hooks} is not empty`);
+  if (fs.readdirSync(hooks).length) throw new Refused("hooks_not_empty");
   const iso = fs.mkdtempSync(path.join(git, "iso-"));
-  const st = fs.lstatSync(iso);
-  if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`${iso} is not a plain directory`);
-  const real = fs.realpathSync(iso);
-  if (!inside(home, real) || real !== iso) throw new Error(`${iso} leads out of HOME`);
-  for (const other of [root, os.tmpdir()]) {
-    const otherReal = fs.realpathSync(other);
-    if (overlap(real, otherReal) || overlap(git, otherReal))
-      throw new Error(`${git} overlaps ${otherReal}, which an agent can write`);
+  try {
+    const st = fs.lstatSync(iso);
+    if (!st.isDirectory() || st.isSymbolicLink()) throw new Refused("not_plain_dir");
+    const real = fs.realpathSync(iso);
+    if (!inside(home, real) || real !== iso) throw new Refused("outside_home");
+    for (const [other, code] of [
+      [root, "overlaps_worktree"],
+      [os.tmpdir(), "overlaps_tmp"],
+    ] as const) {
+      const otherReal = fs.realpathSync(other);
+      if (overlap(real, otherReal) || overlap(git, otherReal)) throw new Refused(code);
+    }
+  } catch (e) {
+    // A directory that will not be used is not left for the next worker to sweep
+    fs.rmSync(iso, { recursive: true, force: true });
+    throw e;
   }
   return { git, iso, hooks };
 }
@@ -301,7 +327,13 @@ function work(request: WorkerRequest): WorkerResult {
       fs.rmSync(iso, { recursive: true, force: true });
     }
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    if (e instanceof Refused) return { ok: false, refused: e.code };
+    // execFileSync names a git it killed at the deadline, and one that printed more than max
+    const code = (e as NodeJS.ErrnoException).code;
+    return {
+      ok: false,
+      failed: code === "ETIMEDOUT" ? "timeout" : code === "ENOBUFS" ? "too_large" : "failed",
+    };
   }
 }
 
@@ -313,7 +345,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     try {
       request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as WorkerRequest;
     } catch {
-      process.stdout.write(JSON.stringify({ ok: false, error: "the request is not JSON" }));
+      process.stdout.write(JSON.stringify({ ok: false, failed: "failed" } satisfies WorkerResult));
       return;
     }
     process.stdout.write(JSON.stringify(work(request)));
