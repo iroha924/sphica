@@ -8,7 +8,7 @@ import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
-import { fitCount, leftOut, preview, READ_BUDGET } from "./read.ts";
+import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { liveSuccessors, type SourceHit, type Successor, searchSources } from "./search.ts";
 import { head } from "./text.ts";
 
@@ -19,7 +19,7 @@ const DECIDED_LIFECYCLES = new Set(["active", "superseded", "withdrawn"]);
 const PER_MESSAGE = 10;
 
 type Tied = { id: number; key: string; kind: string; lifecycle: string; now: Successor[] };
-type Context = { key: string; kind: string; lifecycle: string; speaker: string; role: string };
+type Context = { id: number; key: string; kind: string; lifecycle: string; speaker: string; role: string };
 
 type Earlier = {
   message: SourceHit;
@@ -181,6 +181,7 @@ async function sameTurn(
     if (e.direct.has(c.id) || !kept(c) || seen.has(k)) continue;
     seen.add(k);
     e.context.push({
+      id: c.id,
       key: c.key,
       kind: c.kind,
       lifecycle: c.lifecycle,
@@ -217,11 +218,11 @@ export function askedText(r: Asked, known = true): string {
       lines.push("Led to:");
       for (const u of e.led.slice(0, PER_MESSAGE))
         lines.push(
-          `- ${shown(u.key)} (${u.kind}, ${u.lifecycle}${
+          `- ${keyShown(u.key, u.id)} (${u.kind}, ${u.lifecycle}${
             u.now.length
               ? `; now ${u.now
                   .slice(0, NOW)
-                  .map((n) => `${shown(n.key)} (${n.lifecycle})`)
+                  .map((n) => `${keyShown(n.key, n.id)} (${n.lifecycle})`)
                   .join(", ")}${u.now.length > NOW ? `, and ${u.now.length - NOW} more` : ""}`
               : ""
           })`,
@@ -236,7 +237,9 @@ export function askedText(r: Asked, known = true): string {
     if (e.context.length) {
       lines.push("Same turn (context, not necessarily the answer):");
       for (const c of e.context.slice(0, PER_MESSAGE))
-        lines.push(`- ${shown(c.key)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`);
+        lines.push(
+          `- ${keyShown(c.key, c.id)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`,
+        );
       if (e.context.length > PER_MESSAGE)
         lines.push(`and ${e.context.length - PER_MESSAGE} more in the same turn`);
     }

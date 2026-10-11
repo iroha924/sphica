@@ -490,6 +490,6 @@ test("an asked reply keeps what it says about the whole result when messages giv
   // A tied record names three of its live successors and counts the rest
   assert.match(
     inside,
-    /^- trace:k{194}… \(finding, active; now trace:n{194}… \(active\), trace:n{194}… \(active\), trace:n{194}… \(active\), and 2 more\)$/m,
+    /^- trace:k{194}… \[key cut: read u\d\] \(finding, active; now trace:n{194}… \[key cut: read u1000\] \(active\), trace:n{194}… \[key cut: read u1001\] \(active\), trace:n{194}… \[key cut: read u1002\] \(active\), and 2 more\)$/m,
   );
 });

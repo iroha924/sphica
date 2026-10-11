@@ -7,7 +7,7 @@
 import { z } from "zod";
 import type { Reads } from "./db.ts";
 import { inline } from "./panel.ts";
-import { fitCount, preview, READ_BUDGET } from "./read.ts";
+import { fitCount, keyShown, preview, READ_BUDGET } from "./read.ts";
 import { type Batch, type FileDiff, REVIEW_BATCH, reviewBatch } from "./review.ts";
 import { head } from "./text.ts";
 
@@ -121,11 +121,11 @@ export async function checkFindings(
     const n = given[i]?.findings ?? 0;
     if (!n)
       problems.push(
-        `${shown(u.key)}: no verdict; give one (unrelated or undetermined when it does not apply)`,
+        `${keyShown(u.key, u.id)}: no verdict; give one (unrelated or undetermined when it does not apply)`,
       );
     else if (n > 1)
       problems.push(
-        `${shown(u.key)}: ${n} findings; give one per record, with every place it is violated in its evidence`,
+        `${keyShown(u.key, u.id)}: ${n} findings; give one per record, with every place it is violated in its evidence`,
       );
   }
   return { problems, batch, given };

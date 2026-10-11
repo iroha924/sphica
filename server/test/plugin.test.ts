@@ -1541,7 +1541,10 @@ test("review_check keeps its reply within the reply budget and still says, recor
       perRecord(none.text),
       units.map((u) => `u${u.id} no finding`),
     );
-    assert.equal([...none.text.matchAll(/^- trace:e{190,200}…: no verdict; /gm)].length, 50);
+    assert.equal(
+      [...none.text.matchAll(/^- trace:e{190,200}… \[key cut: read u\d+\]: no verdict; /gm)].length,
+      50,
+    );
 
     // Fifty findings with fifty wrong places each: far more problem lines than fit
     const wrong = await check(
@@ -1743,7 +1746,7 @@ test("an asked search keeps its reply within the reply budget, with every messag
       ),
     );
     assert.equal(
-      [...tied.text.matchAll(/^- trace:e{190,200}… \(finding, active\)$/gm)].length,
+      [...tied.text.matchAll(/^- trace:e{190,200}… \[key cut: read u\d+\] \(finding, active\)$/gm)].length,
       shown.length * 10,
     );
     const first = await w.reply("read", { refs: readCallsIn(tied.text)[0] });

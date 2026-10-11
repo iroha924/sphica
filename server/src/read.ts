@@ -515,6 +515,12 @@ export const leftOut = (refs: string[], what: string): string =>
     ? `${refs.length} more ${what} left out to keep this reply within ${READ_BUDGET / 1024} KiB: ${readCalls(refs)}.`
     : "";
 
+/** A record's key as a line shows it: whole, or cut with the id read takes in its place, so a record a reply names can always be opened */
+export function keyShown(key: string, id: number, n = 200): string {
+  const shown = preview(key, n);
+  return shown === inline(key) ? shown : `${shown} [key cut: read u${id}]`;
+}
+
 /**
  * Text from a record or from the caller as a reply shows it, within n bytes and marked when cut. It is made plain before it is cut: a cut
  * that drops the end of a terminal control sequence would leave the frame stripping everything after it. lines keeps line breaks.

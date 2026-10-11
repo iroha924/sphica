@@ -10,7 +10,7 @@ import { AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
-import { cut, fitCount, preview, READ_BUDGET, speaker } from "./read.ts";
+import { cut, fitCount, keyShown, preview, READ_BUDGET, speaker } from "./read.ts";
 import { instructionFile } from "./rule-files.ts";
 
 /**
@@ -202,7 +202,7 @@ export async function exportDecisions(
   const chains: { newer: string; unit: Unit }[][] = [];
   for (const u of units) {
     const chain = await replaced(db, u);
-    if (typeof chain === "string") problems.push(`- ${preview(u.key, 200)}: ${preview(chain, 400)}`);
+    if (typeof chain === "string") problems.push(`- ${keyShown(u.key, u.id)}: ${preview(chain, 400)}`);
     else chains.push(chain);
   }
   if (problems.length) {

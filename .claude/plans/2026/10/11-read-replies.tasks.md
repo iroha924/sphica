@@ -160,6 +160,17 @@ base: main
   - 結果: `node probe/codex-f123.ts` → 直す前は「F1 names u2: false」「F3 cut option is marked: false」、直した後はどちらも true
   - 結果: `node --import ./test/isolate-home.ts --test test/search.test.ts` → 24 件 pass
 
+- [x] T13: 切ったキーの横に、`read` に渡せる `u<id>` を出す（asked・review_check・export）
+  - 種別: 修正
+  - 計画: S6, S7, S9
+  - 依存: T12（キーを切って表示する形が要る）
+  - 変更: `server/src/read.ts`, `server/src/asked.ts`, `server/src/review-findings.ts`, `server/src/export.ts`, `server/test/asked.test.ts`, `server/test/plugin.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/asked.test.ts` → 切ったキーの横に `[key cut: read u<id>]` を期待するテストが、直す前（`3516aa72`）は失敗する
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(read): name the id read takes beside every key a reply cuts`
+  - 結果: `node --import ./test/isolate-home.ts --test test/asked.test.ts` → 直す前は 1 件 fail（`plugin.test.ts` の asked と review_check のテストも fail）、直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 
 - 2026-10-11 / T01 / 未完了の T01 の変更欄を変えた。前: `server/src/worktree.ts` あり、`server/test/git-safety.test.ts`・`server/test/record.test.ts` なし。後: 逆 / `snapshot` は `worktreeStatus` が今までどおり文字列か `null` を返すので変更が要らなかった。既存のテスト 2 ファイルが新しい戻り値に追従し、rename の注記のテストは `record.test.ts` にあった
@@ -183,3 +194,5 @@ base: main
 - 2026-10-11 / T04〜T09・T12 / コミットの前の review-shipping（出荷は可の判定。読み取りサーバーで 32,768 バイトを超える返答は作れず、最大は `review_check` の 32,682 バイト。bundle した `mcp.js` でも、40 KB の未知のツール名のエラーがちょうど 32,768 バイトに収まる。名指しした 7 通りの弱め方は全部テストが落とす）が 7 件指摘: (1) asked で、1 件の発言の部品だけで上限を超えると、その発言は表示されない（ひも付く記録それぞれに後継が 30 件、キー 300 文字のとき。関数を直接呼んで再現） (2) `[id cut]` の印を外してもテストが通る (3) 記録の検索が途中で止まったときの案内を、サーバー経由で通すテストが無い (4) 発言を省略するときに、セッションの一覧や注意書きを落としてもテストが通る (5) エラーでない返答まで切るようにしてもテストが通る (6) export の拒否の一覧の 2 つの守りは、片方ずつ外してもテストが通る (7) sources の省略の案内は通らない（T03 と同じ） / (1) は、ひも付く記録が名指しする後継を 3 件までにして残りを数える形にした（1 件の発言の部品が上限を超えなくなる）。(2)(4) は、手で組んだ結果を `askedText` に渡すテストを足した。採らない: (3) は 2,000 件を超える候補が要り、案内そのものは `hitsReply` のテストで固定している。(5) は、上限を超える成功の返答が存在しないので、切っても切らなくても同じ結果になる。(6) の 2 つ目は、参照を 200 バイトに切った後は 50 件で約 12 KB にしかならず、スキーマの範囲では届かない念のための守り。(7) は T03 と同じ
 - 2026-10-11 / 全体 / review-shipping が見つけた、この変更によらない事実: 10 MiB を超える 1 行の JSON-RPC の要求で、サーバーが返答なしに終了コード 0 で終わる（SDK の stdio の上限。main の `mcp.ts`・bundle した `mcp.js`・`mcp-record.js` で再現） / この PR では直さない。record サーバーの計画（issue #324）に足す
 - 2026-10-11 / T05 / review-shipping が持ち主の DB の写しで測った大きさ: 有効な決定 190 件、1 件の文書は 897〜4,519 バイト（中央値 1,568）。新しい上限では 1 ファイルに 14〜23 件入る。1 件だけで拒否されるものは無い
+- 2026-10-11 / 全体 / Codex の全差分レビュー（`main..3516aa72`、指摘 1 件、P2、Codex が実 DB で再現）: asked がキーを 200 バイトで切るのに `u<id>` を出さないので、表示された記録を `read` で開けない。後継と Same turn のキーも同じ / 採用。T13 を足した。キーを切ったときだけ「[key cut: read u<id>]」を付ける関数（`keyShown`）を `read.ts` に置き、asked の 3 か所、`review_check` の「no verdict」と重複の行、export の置換の連なりの行に使った。短いキーの表示は変わらない
+- 2026-10-11 / 全体 / 完了条件の実測（`3516aa72` を pack してリポジトリの外で展開）: `sphica doctor` は「✓ Git worker ready」、HOME を一時ディレクトリの下にすると「△ Git worker would not start: … overlaps the temp directory …」。pack した `deliver.js` のレビューの hook は、通常は「Sphica checked 1 changed path against origin/main: no active recorded decision applies.」、HOME が一時ディレクトリの下だと断りの理由を返す。pack した `mcp.js` は 0.6.49 を名乗り、`search`・`fields`（`after` 付きも）が答え、40 KB の未知のツール名のエラーは 32,768 バイト
