@@ -332,7 +332,7 @@ test("a refusal reaches the callers of the worker with its code, and each code h
     ),
     [
       `the hooks folder inside ${folder}, which Sphica keeps empty, holds files`,
-      `${folder} is a link or not a directory`,
+      "one of Sphica's folders under your home directory (.sphica, .sphica/git, or .sphica/git/hooks) is a link or not a directory",
       `${folder} leads out of your home directory`,
       `${folder} overlaps this work tree, which an agent can write`,
       `${folder} overlaps the temp directory, which an agent can write`,

@@ -193,6 +193,17 @@ base: main
   - 結果: `node --import ./test/isolate-home.ts --test test/search.test.ts` → 直す前は `successorOfId` が型に無く型検査で落ちる（表示も hit の id）、直した後は 24 件 pass
   - 結果: `bun run verify` → 終了コード 0
 
+- [x] T16: PR のレビューの指摘 4 件を直す（エラーを切る前に plain にする、断りの文が 3 つのフォルダを挙げる、asked の省いた発言に id の行を出す、切ったセッション id をコマンドに出さない）
+  - 種別: 修正
+  - 計画: S1, S9, S11
+  - 依存: T15（同じ返答の形の上に足す）
+  - 変更: `server/src/mcp.ts`, `server/src/git.ts`, `server/src/asked.ts`, `server/test/plugin.test.ts`, `server/test/asked.test.ts`, `server/test/git-worker.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/asked.test.ts test/git-worker.test.ts test/plugin.test.ts` → 直す前（`3c0bc791`）は、先に書いたテストが 3 件落ちる（切ったエラーに ESC が残る、断りの文が `.sphica/git` だけを指す、切ったセッション id がコマンドの引数に出る）
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(read): act on four review findings about cut errors, refusals, and asked`
+  - 結果: `node --import ./test/isolate-home.ts --test test/asked.test.ts test/git-worker.test.ts test/plugin.test.ts` → 直す前は 3 件 fail、直した後は全部 pass
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 
 - 2026-10-11 / T01 / 未完了の T01 の変更欄を変えた。前: `server/src/worktree.ts` あり、`server/test/git-safety.test.ts`・`server/test/record.test.ts` なし。後: 逆 / `snapshot` は `worktreeStatus` が今までどおり文字列か `null` を返すので変更が要らなかった。既存のテスト 2 ファイルが新しい戻り値に追従し、rename の注記のテストは `record.test.ts` にあった
@@ -223,3 +234,5 @@ base: main
 - 2026-10-11 / 全体 / 同じ種類の指摘（切ったキーに id が無い）が 2 回続いたので、変えた 6 つの module を `rg 'preview\([^)]*[kK]ey|shown\([^)]*[kK]ey|head\([^)]*\.key'` で洗い、残りが無いことを確かめた（残るのは `keyShown` 自身と、id を必ず横に出す検索結果の見出しだけ）
 - 2026-10-11 / T14 / Codex の再レビュー（`1f7c6d43..d40ec6e4`、前の 2 件は解消。新しい指摘 2 件、どちらも T14 で自分が足した 1 行について）: (1) P2: 置き換えが A → B → C と続くとき、案内した hit（C）の `read` には直前の B しか出ず、切った A のキーに届かない (2) P3: タブなどを整えただけの短いキーにも [key cut] が付く / 両方採用。T15 を足した。hit が、置き換えられた記録（一致した記録そのもの）の id を持つようにし、`keyShown` でその id を出す
 - 2026-10-11 / 全体 / Codex のレビューはここで区切る（コミットごと 3 回、全差分 1 回、修正の再レビュー 2 回）。最後の 2 回の指摘は、直しで自分が足した行の中に収まっていて、受け入れ条件の外に広がっていない。T15 の後は、PR を作ったときに走る GitHub 側の Codex のレビューで最終の head を見る
+- 2026-10-11 / 全体 / PR #326 に GitHub 側の Codex が 4 件指摘（どれも P2、head は `3c0bc791`）: (1) SDK が作るエラーを切るとき、端末の制御の列の途中で切ると列が開いたままになる (2) `not_plain_dir` は `.sphica`・`.sphica/git`・`.sphica/git/hooks` のどれでも出るのに、文は `.sphica/git` だと言い切る (3) asked で省いた発言は `read s<id>` で本文しか読めず、ひも付く記録・同じターンの記録・返答が分からない (4) 100 バイトを超えるセッション id を切ったまま `/sphica:trace` の引数として出す / 4 件とも採用。T16 を足した。(1) は切る前に `plain` にかける（上限以下のエラーはそのまま）。(2) は文が 3 つのフォルダを挙げる形にした。worker がどれかを返す案は採らない: worker の bundle の残りが 112 バイトで、やり取りの形を広げると古い worker との組み合わせも増える。(3) は引数を足さず、省いた発言ごとに id だけの 1 行（ひも付く記録の `u<id>`、同じターン、返答、決定の有無）を枠の後ろに出す。検索に続きの位置を渡す引数を足す案は採らない: 公開インターフェースが増え、承認した計画の範囲を出る。上限 20 件なら id の行は全部で約 10 KB に収まる。(4) は切った id をコマンドに出さず、`/sphica:trace pending` を案内する
+- 2026-10-11 / T16 / コミットの前のレビュー: Codex（作業ツリーと `3c0bc791` の差分、新しい会話）は指摘なし。review-shipping は出荷は可の判定で 4 件: (1) 上限以下のエラーに `plain` をかけてもテストが通る (2) id の行の「reply s<id>」と「hidden by the filters」を消してもテストが通る (3) 閉じていないタイトルの列（40,000 バイト）を含む未知のツール名のエラーは、`plain` が列の後ろを全部落とすので「MCP error -32602: Tool 」だけになる (4) `withinBudget` と `not_plain_dir` のコメントが実際と合わない / 4 件とも採用。(1)(2) はテストを足した。(3) は、上限を超えたエラーを整えただけで収まったときにも「制御の列を除いた」と 1 行添える。(4) はコメントを直した。review-shipping の実測: bundle は 6 つとも予算内（`cli.js` の残り 2,470、`deliver.js` 1,609、`git-worker.js` 112 バイト）、asked は 20 件・16 桁の id・5,000 件ずつのひも付けでも 31,606 バイト

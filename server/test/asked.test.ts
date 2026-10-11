@@ -488,12 +488,73 @@ test("an asked reply keeps what it says about the whole result when messages giv
     outside,
     /^\n\d+ more messages left out to keep this reply within 32 KiB: read with refs \["s\d+"/,
   );
+  // Each one left out still says, by id, what it led to: read on the message alone would not
+  const briefs = [
+    ...outside.matchAll(
+      /^- s\d+: led to u100, u101, u102, u103, u104, u105, u106, u107, u108, u109; same turn u77$/gm,
+    ),
+  ];
+  assert.equal(briefs.length, Number(/^\n(\d+) more messages/.exec(outside)?.[1]));
+  assert.ok(briefs.length > 0);
+  assert.match(outside, /\nWhat each of them led to \(read a record by its u<id>\):\n- s/);
   assert.match(
     inside,
     /\nMatching messages in 3 sessions with no recorded decision \(current session may be included\) \(within the first 600 candidates by rank\):\n/,
   );
   assert.match(inside, /\nStopped after 600 candidates by rank; more may match\.\n/);
   assert.match(inside, /\nCurrent session unknown; /);
+  // A message left out says the rest by id and count too: what the filters hid, the reply, whether a trace looked at it
+  const one = {
+    ...message(9),
+    led: [],
+    hidden: 2,
+    context: [],
+    decided: false,
+    traced: false,
+    reply: 12,
+    message: { ...message(9).message, text: "t".repeat(2000) },
+  };
+  const crowded = askedText(
+    {
+      messages: [...Array.from({ length: 19 }, (_, i) => message(20 + i)), one],
+      repeats: null,
+      terms: ["word"],
+      weaker: 0,
+      stopped: false,
+      read: 20,
+    } as never,
+    true,
+  );
+  assert.match(
+    crowded.split(/^<\/past-records id="[0-9a-f]+">$/m)[1] ?? "",
+    /^- s9: led to no record; 2 tied records hidden by the filters; reply s12; no recorded decision, not traced yet$/m,
+  );
+  // A message of a session whose id is too long to show does not offer a command with the cut id
+  const untraced = askedText(
+    {
+      messages: [
+        {
+          ...message(1),
+          led: [],
+          context: [],
+          decided: false,
+          traced: false,
+          message: { ...message(1).message, session: longId },
+        },
+      ],
+      repeats: null,
+      terms: ["word"],
+      weaker: 0,
+      stopped: false,
+      read: 1,
+    } as never,
+    true,
+  );
+  assert.match(
+    untraced,
+    /\nNo recorded decision\. Not traced yet: its session id is too long to show whole here \(i{100}… \[id cut\]\); \/sphica:trace pending lists the sessions that wait\.\n/,
+  );
+  assert.doesNotMatch(untraced, /run \/sphica:trace i/);
   // An id too long to show whole is not passed off as one trace takes; a short one is shown as it is
   assert.match(inside, /\n- not traced yet: i{100}… \[id cut\], short-id \(run \/sphica:trace with each\)\n/);
   // A tied record names three of its live successors and counts the rest

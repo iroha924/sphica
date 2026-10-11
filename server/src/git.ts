@@ -352,7 +352,9 @@ export function refusalText(code: Refusal): string {
   const folder = "Sphica's git folder (.sphica/git under your home directory)";
   return {
     hooks_not_empty: `the hooks folder inside ${folder}, which Sphica keeps empty, holds files`,
-    not_plain_dir: `${folder} is a link or not a directory`,
+    // The worker tells no more than the kind, so the line names the folders it can be about (the isolated one is made anew each time)
+    not_plain_dir:
+      "one of Sphica's folders under your home directory (.sphica, .sphica/git, or .sphica/git/hooks) is a link or not a directory",
     outside_home: `${folder} leads out of your home directory`,
     overlaps_worktree: `${folder} overlaps this work tree, which an agent can write`,
     overlaps_tmp: `${folder} overlaps the temp directory, which an agent can write`,

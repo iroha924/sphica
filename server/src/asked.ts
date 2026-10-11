@@ -204,6 +204,30 @@ const SESSIONS = 20;
 /** A key, artifact, or session id from the database as a line shows it: one line, marked when cut. The whole value is one read away */
 const shown = (s: string, n = 200) => preview(s, n);
 
+/** What to do about a message no trace looked at. An id too long to show whole is not offered as the command's argument */
+const untraced = (session: string): string => {
+  const id = shown(session, 100);
+  return id === inline(session)
+    ? `Not traced yet: run /sphica:trace ${id}.`
+    : `Not traced yet: its session id is too long to show whole here (${id} [id cut]); /sphica:trace pending lists the sessions that wait.`;
+};
+
+/** A message left out of the reply, as one line of ids: what it led to stays reachable, record by record, with read */
+const brief = (e: Earlier): string => {
+  const ids = (us: { id: number }[]) =>
+    `${us
+      .slice(0, PER_MESSAGE)
+      .map((u) => `u${u.id}`)
+      .join(", ")}${us.length > PER_MESSAGE ? `, and ${us.length - PER_MESSAGE} more` : ""}`;
+  return [
+    `- s${e.message.id}: ${e.led.length ? `led to ${ids(e.led)}` : "led to no record"}`,
+    ...(e.hidden ? [`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters`] : []),
+    ...(e.context.length ? [`same turn ${ids(e.context)}`] : []),
+    ...(e.reply !== null ? [`reply s${e.reply}`] : []),
+    ...(e.decided ? [] : [`no recorded decision${e.traced ? "" : ", not traced yet"}`]),
+  ].join("; ");
+};
+
 /**
  * The result as the read MCP server returns it, framed, within READ_BUDGET. Record keys and message text are data from the database, kept
  * on single lines. Messages that do not fit are named by s<id> for read. `known` says whether the current session was left out; if not,
@@ -230,10 +254,7 @@ export function askedText(r: Asked, known = true): string {
     }
     if (e.led.length > PER_MESSAGE) lines.push(`and ${e.led.length - PER_MESSAGE} more tied records`);
     if (e.hidden) lines.push(`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters.`);
-    if (!e.decided)
-      lines.push(
-        `No recorded decision.${e.traced ? "" : ` Not traced yet: run /sphica:trace ${shown(m.session ?? "", 100)}.`}`,
-      );
+    if (!e.decided) lines.push(`No recorded decision.${e.traced ? "" : ` ${untraced(m.session ?? "")}`}`);
     if (e.context.length) {
       lines.push("Same turn (context, not necessarily the answer):");
       for (const c of e.context.slice(0, PER_MESSAGE))
@@ -273,15 +294,19 @@ export function askedText(r: Asked, known = true): string {
   const lead = `${known ? "Earlier owner" : "Owner"} messages matching: ${head(r.terms.join(", "), 400)}`;
   // What is said about the whole result (the sessions, where the search stopped) is kept; the messages give way. The messages
   // left out are named after the frame's closing line, where only Sphica writes
-  const reply = (kept: number) =>
-    [
+  const reply = (kept: number) => {
+    const left = r.messages.slice(kept);
+    return [
       framed([lead, ...parts.slice(0, kept), ...after].join("\n\n")),
       leftOut(
-        r.messages.slice(kept).map((e) => `s${e.message.id}`),
+        left.map((e) => `s${e.message.id}`),
         "messages",
       ),
+      // Only ids and counts, so nothing a record or a message says is outside the frame
+      ...(left.length ? ["What each of them led to (read a record by its u<id>):", ...left.map(brief)] : []),
     ]
       .filter(Boolean)
       .join("\n");
+  };
   return reply(fitCount(parts, READ_BUDGET, reply));
 }

@@ -1771,6 +1771,18 @@ test("an asked search keeps its reply within the reply budget, with every messag
       [...tied.text.matchAll(/^- trace:e{190,200}… \[key cut: read u\d+\] \(finding, active\)$/gm)].length,
       shown.length * 10,
     );
+    // A message left out names the records it led to by id, and read opens one of them
+    const briefs = [
+      ...tied.text.matchAll(
+        /^- s(\d+): led to ((?:u\d+, ){9}u\d+); no recorded decision(?:, not traced yet)?$/gm,
+      ),
+    ];
+    assert.deepEqual(
+      briefs.map((x) => `s${x[1]}`),
+      left,
+    );
+    const led = await w.reply("read", { refs: [briefs[0]?.[2]?.split(", ")[0] ?? ""] });
+    assert.match(led.text, /^trace:e{300,}/m);
     const first = await w.reply("read", { refs: readCallsIn(tied.text)[0] });
     assert.match(first.text, /ledword/);
   } finally {
@@ -1786,6 +1798,21 @@ test("an error the SDK builds itself, repeating what the caller sent, stays with
     const unknownTool = await w.reply("x".repeat(40_000), {});
     assert.ok(unknownTool.isError);
     assert.match(unknownTool.text, /x{1000}/);
+    // A title sequence in what the caller sent, cut before its end, would leave a terminal reading the rest of the reply as the title
+    const title = await w.reply(`\u001b]0;${"t".repeat(40_000)}\u0007 tail`, {});
+    assert.ok(title.isError);
+    assert.ok(
+      !title.text.includes("\u001b"),
+      "no escape character is left in an error that was over the budget",
+    );
+    assert.ok(Buffer.byteLength(title.text) <= 32 * 1024, `${Buffer.byteLength(title.text)} bytes`);
+    assert.match(
+      title.text,
+      / tail not found\n\(Terminal control sequences were removed from this error, which was over 32 KiB\.\)$/,
+    );
+    // Within the budget, an error is what the SDK built, byte for byte: nothing is tidied
+    const small = "\u001b]0;t\u0007\u001b[31m tail";
+    assert.equal((await w.reply(small, {})).text, `MCP error -32602: Tool ${small} not found`);
     assert.match(unknownTool.text, /\n\(This error was cut to keep the reply within 32 KiB\.\)$/);
     const unknownKey = await w.reply("search", { query: "a", ["k".repeat(40_000)]: 1 });
     assert.ok(unknownKey.isError);
