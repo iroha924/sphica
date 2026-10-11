@@ -102,6 +102,7 @@ const Unit = z
     aliases: z.array(z.string()).max(12).default([]),
     supersedes: z.string().min(1).optional(),
     conflicts: z.array(z.string().min(1)).max(5).default([]),
+    answers: z.array(z.string().min(1)).max(5).default([]),
     fields: z
       .array(
         z
@@ -184,6 +185,10 @@ type Planned = {
   aliases: string[];
   supersedes: number | null;
   conflicts: number[];
+  /** The questions this unit answers */
+  answers: number[];
+  /** The source an answer closes a question on: the owner's or a maintainer's adoption of a decision or constraint, else its first evidence */
+  grounds: number | null;
   fields: (Span & { name: string; value: string })[];
 };
 
@@ -406,7 +411,9 @@ export async function checkRecord(
     errors.push(`field_defs ${n}: defined twice in this record`);
 
   const linked = [
-    ...new Set(record.units.flatMap((u) => [...(u.supersedes ? [u.supersedes] : []), ...u.conflicts])),
+    ...new Set(
+      record.units.flatMap((u) => [...(u.supersedes ? [u.supersedes] : []), ...u.conflicts, ...u.answers]),
+    ),
   ];
   const others = new Map(
     (linked.length
@@ -644,6 +651,16 @@ export async function checkRecord(
       if (!other) errors.push(`${key}: conflicts with ${k}, which is not a record of this project`);
       return other ? [other.id] : [];
     });
+    // One question takes another's place by supersedes; what closes a question is the record that answers it
+    if (u.answers.length && u.kind === "question")
+      errors.push(`${key}: a question does not answer another; one that replaces it supersedes it`);
+    const answers = [...new Set(u.answers)].flatMap((k) => {
+      const other = others.get(k);
+      if (!other) errors.push(`${key}: answers ${k}, which is not a record of this project`);
+      else if (other.kind !== "question")
+        errors.push(`${key}: answers ${k}, a ${other.kind}; only a question is answered`);
+      return other?.kind === "question" ? [other.id] : [];
+    });
 
     for (const x of adoption.filter((x) => x.route === "agent")) {
       const why = await agentRefusal(db, u, x, sources.get(x.source), evidence, anchors);
@@ -651,6 +668,10 @@ export async function checkRecord(
       problems.push(`${key}: the AI's adoption in s${x.source} left out, so it stays a candidate: ${why}`);
       adoption.splice(adoption.indexOf(x), 1);
     }
+    // An AI's own adoption closes no question: of a decision or constraint, only the owner's or a maintainer's words do
+    const grounds =
+      (["decision", "constraint"].includes(u.kind) ? adoption.find((x) => x.route !== "agent") : evidence[0])
+        ?.source ?? null;
 
     const fields: Planned["fields"] = [];
     for (const f of u.fields) {
@@ -701,9 +722,14 @@ export async function checkRecord(
       aliases: aliases.filter((a) => !bad.includes(a)),
       supersedes,
       conflicts,
+      answers,
+      grounds,
       fields,
     });
   }
+  // A question closes on what the traced session shows: a harvest or glean reads text others wrote, and glean withdraws on the owner's words
+  if (target.origin !== "trace" && record.units.some((u) => u.answers.length))
+    errors.push("answers: only trace closes a question");
   // Work is the traced session's own state, shown at session start: a harvest or glean cannot set it from text it read
   if (record.work && target.origin !== "trace") errors.push("work: only trace records work");
   return { errors, problems, units, work: record.work ?? null, fieldDefs, facts };
@@ -762,6 +788,10 @@ export type Saved = {
   superseded: string[];
   /** Anchors judged again under the lock that may point at the wrong place */
   anchorProblems: string[];
+  /** What answering did to records already saved: each question it closed, and any other record that moved with it */
+  closed: string[];
+  /** Each question an answer named and did not close, and why */
+  notes: string[];
   /** The units this save wrote, for a caller that reconciles them with its own changes */
   written: { id: number; key: string; hint: Hint }[];
 };
@@ -883,6 +913,58 @@ export async function settleSaved(
 }
 
 /**
+ * Closes the questions the save's records answer, once the judge has said which of those records stand: an open question is withdrawn on
+ * the first answer that is active and, for a decision or constraint, adopted by the owner or a maintainer. The judge writes the
+ * withdrawal like any other, and a question already closed is left as it is.
+ */
+async function closeAnswered(trx: Kysely<DB>, runId: number, units: Planned[], saved: Saved): Promise<void> {
+  const answering = units.filter((p) => p.answers.length);
+  if (!answering.length) return;
+  const questions = new Map(
+    (
+      await trx
+        .selectFrom("unit")
+        .select(["id", "key", "lifecycle"])
+        .where("id", "in", [...new Set(answering.flatMap((p) => p.answers))])
+        .execute()
+    ).map((q) => [q.id, q]),
+  );
+  const withdraw = new Map<number, Hint>();
+  const by = new Map<number, string>();
+  const left = new Map<number, string>();
+  for (const p of answering) {
+    const why = !saved.active.includes(p.key)
+      ? `${p.key} did not become active`
+      : p.grounds !== null
+        ? null
+        : `${p.key} is an AI's decision, and a question closes only on the owner's or a maintainer's adoption`;
+    for (const id of p.answers) {
+      const q = questions.get(id);
+      if (!q || withdraw.has(id)) continue;
+      if (q.lifecycle !== "active" && q.lifecycle !== "candidate")
+        left.set(id, `${q.key}: already ${q.lifecycle}, so ${p.key} closes nothing there`);
+      else if (why !== null || p.grounds === null)
+        left.set(id, left.get(id) ?? `${q.key}: left open: ${why}`);
+      else {
+        // The answer's key and its source only: state history outlives a forgotten source, so the reason copies none of its words
+        withdraw.set(id, { reason: `answered by ${p.key}`, source: p.grounds });
+        by.set(id, p.key);
+      }
+    }
+  }
+  if (withdraw.size) {
+    const settled = await reconcile(trx, [...withdraw.keys()], { runId }, { withdraw });
+    for (const c of settled.changes)
+      saved.closed.push(
+        c.after === "withdrawn" && by.has(c.id)
+          ? `${c.key}: withdrawn, answered by ${by.get(c.id)}`
+          : `${c.key}: now ${c.after} (was ${c.before})`,
+      );
+  }
+  for (const [id, note] of left) if (!withdraw.has(id)) saved.notes.push(note);
+}
+
+/**
  * Writes a checked record inside the caller's transaction. looked lists the sources the run read: each gets a processing outcome, so
  * coverage counts what was examined even when nothing came of it.
  */
@@ -903,6 +985,8 @@ export async function saveRecord(
     quarantined: [],
     superseded: [],
     anchorProblems: [],
+    closed: [],
+    notes: [],
     written: [],
   };
   const cited = new Set<number>();
@@ -1097,7 +1181,10 @@ export async function saveRecord(
       },
     });
   }
-  if (settle) await settleSaved(trx, runId, saved);
+  if (settle) {
+    await settleSaved(trx, runId, saved);
+    await closeAnswered(trx, runId, checked.units, saved);
+  }
   if (checked.work) {
     const w = checked.work;
     const traced = target.sessionId

@@ -751,7 +751,7 @@ async function validate(
         checked,
         scope.looked.filter((s) => shown.has(s) || cited.has(s)),
       );
-      return { saved, changed: [] };
+      return { saved, changed: saved.closed };
     },
   };
 }
@@ -792,6 +792,7 @@ export async function checkText(
           ...done.saved.superseded.map((k) => `✓ would be superseded: ${k}`),
           ...done.saved.candidates.map((c) => `△ would stay a candidate: ${c.key}: ${c.why}`),
           ...done.saved.quarantined.map((q) => `△ would be quarantined: ${q}`),
+          ...done.saved.notes.map((n) => `△ ${n}`),
           // Judged again under the lock, once per place; glean's validation names the operation before the record, so match the end
           ...[...new Set(done.saved.anchorProblems)]
             .filter((a) => !v.problems.some((p) => p === a || p.endsWith(` ${a}`)))
@@ -870,6 +871,7 @@ export async function saveText(
     const warnings = [
       ...new Set([
         ...saved.anchorProblems.map((a) => `△ ${a}`),
+        ...saved.notes.map((n) => `△ ${n}`),
         // What check would warn about is said at save too: what was left out, and why a record stays a candidate
         ...(v.ops === null ? v.problems.map((n) => `△ ${n}`) : []),
       ]),

@@ -3022,3 +3022,338 @@ test("check and save agree: two successors of a quarantined record both wait, an
     await db.done();
   }
 });
+
+// answers: a record that answers a question closes it in the same save, as a withdrawal the judge writes
+const asked = (key: string, source: number, quote: string, extra = {}) => ({
+  key,
+  kind: "question",
+  text: quote,
+  evidence: [{ source: `s${source}`, quote, role: "proposes" }],
+  ...extra,
+});
+const found = (key: string, source: number, quote: string, extra = {}) => ({
+  key,
+  kind: "finding",
+  text: quote,
+  evidence: [{ source: `s${source}`, quote, role: "states" }],
+  ...extra,
+});
+const lastState = (db: TempDb, key: string) =>
+  db.owner
+    .prepare(
+      "select to_state, reason, source_id from unit_state where unit_id = (select id from unit where key = ?) order by id desc",
+    )
+    .get(key) as { to_state: string; reason: string; source_id: number | null } | undefined;
+const lives = (db: TempDb, ...keys: string[]) => keys.map((k) => lifecycle(db, `trace:ext-s1/${k}`));
+
+test("answers: the owner's decision and a supported finding each close an open question, and the reason names the answer", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ask = message(db, p, {
+      id: "a1",
+      speaker: "assistant",
+      text: "issue にしておきますか。計測もしますか。",
+    });
+    const said = message(db, p, { id: "o1", text: "issue にはしない。計測は 90 KB だった。" });
+    await save(db, target(p), {
+      units: [
+        asked("issue-open", ask, "issue にしておきますか。"),
+        asked("size-open", ask, "計測もしますか。"),
+      ],
+    });
+    assert.deepEqual(lives(db, "issue-open", "size-open"), ["active", "active"]);
+    const { saved } = await save(db, target(p), {
+      units: [
+        ownerDecided("no-issue", said, "issue にはしない。", true, {
+          stance: "dont",
+          answers: ["trace:ext-s1/issue-open"],
+        }),
+        found("size", said, "計測は 90 KB だった。", { answers: ["trace:ext-s1/size-open"] }),
+      ],
+    });
+    assert.deepEqual(lives(db, "issue-open", "size-open", "no-issue", "size"), [
+      "withdrawn",
+      "withdrawn",
+      "active",
+      "active",
+    ]);
+    assert.deepEqual(saved.closed, [
+      "trace:ext-s1/issue-open: withdrawn, answered by trace:ext-s1/no-issue",
+      "trace:ext-s1/size-open: withdrawn, answered by trace:ext-s1/size",
+    ]);
+    assert.deepEqual(saved.notes, []);
+    assert.deepEqual(
+      { ...lastState(db, "trace:ext-s1/issue-open") },
+      {
+        to_state: "withdrawn",
+        reason: "answered by trace:ext-s1/no-issue",
+        source_id: said,
+      },
+    );
+    assert.equal(lastState(db, "trace:ext-s1/size-open")?.reason, "answered by trace:ext-s1/size");
+    // Closed for good: a later save that reaches the answer leaves the question withdrawn
+    const more = message(db, p, { id: "o2", text: "やっぱり issue にする。" });
+    await save(db, target(p), {
+      units: [
+        ownerDecided("issue-after-all", more, "やっぱり issue にする。", true, {
+          supersedes: "trace:ext-s1/no-issue",
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "issue-open", "no-issue", "issue-after-all"), [
+      "withdrawn",
+      "superseded",
+      "active",
+    ]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("answers: an answer that stays a candidate, or an AI's own decision, leaves the question open and says why", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ask = message(db, p, {
+      id: "a1",
+      speaker: "assistant",
+      text: "Should the export stay one function?",
+    });
+    const maybe = message(db, p, { id: "o0", text: "Maybe split it later." });
+    await save(db, target(p), { units: [asked("split-open", ask, "Should the export stay one function?")] });
+    const { saved } = await save(db, target(p), {
+      units: [
+        ownerDecided("split-later", maybe, "Maybe split it later.", false, {
+          answers: ["trace:ext-s1/split-open"],
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "split-open", "split-later"), ["active", "candidate"]);
+    assert.deepEqual(saved.closed, []);
+    assert.deepEqual(saved.notes, [
+      "trace:ext-s1/split-open: left open: trace:ext-s1/split-later did not become active",
+    ]);
+    const { reply, save: saveAsAgent } = await agentBench(db, p);
+    const r = reply("t1:assistant", "t1", "I keep the export as one function.");
+    const out = await saveAsAgent({
+      units: [
+        aiDecision("one-function", r, "I keep the export as one function.", {
+          answers: ["trace:ext-s1/split-open"],
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "split-open", "one-function"), ["active", "active"]);
+    assert.match(
+      out,
+      /△ trace:ext-s1\/split-open: left open: trace:ext-s1\/one-function is an AI's decision, and a question closes only on the owner's or a maintainer's adoption/,
+    );
+  } finally {
+    await db.done();
+  }
+});
+
+test("answers: a closed question is left as it is, the first answer that stands gives the reason, and one answer closes two questions beside a supersedes", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ask = message(db, p, {
+      id: "a1",
+      speaker: "assistant",
+      text: "A にしますか。B にしますか。C はどうしますか。",
+    });
+    const first = message(db, p, { id: "o1", text: "A と B は両方やる。C は保留。" });
+    const then = message(db, p, { id: "o2", text: "C はやめる。保留は取り消す。" });
+    await save(db, target(p), {
+      units: [
+        asked("a-open", ask, "A にしますか。"),
+        asked("b-open", ask, "B にしますか。"),
+        asked("c-open", ask, "C はどうしますか。"),
+        ownerDecided("c-hold", first, "C は保留。", true, { stance: "defer" }),
+      ],
+    });
+    const both = await save(db, target(p), {
+      units: [
+        ownerDecided("both", first, "A と B は両方やる。", true, {
+          answers: ["trace:ext-s1/a-open", "trace:ext-s1/b-open", "trace:ext-s1/a-open"],
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "a-open", "b-open", "c-open"), ["withdrawn", "withdrawn", "active"]);
+    assert.equal(both.saved.closed.length, 2);
+    // The unadopted answer comes first in the record and cannot close; the adopted one after it does, while replacing the older decision
+    const c = await save(db, target(p), {
+      units: [
+        ownerDecided("c-maybe", then, "保留は取り消す。", false, { answers: ["trace:ext-s1/c-open"] }),
+        ownerDecided("c-no", then, "C はやめる。", true, {
+          stance: "dont",
+          answers: ["trace:ext-s1/c-open"],
+          supersedes: "trace:ext-s1/c-hold",
+        }),
+      ],
+    });
+    assert.deepEqual(lives(db, "c-open", "c-hold", "c-no", "c-maybe"), [
+      "withdrawn",
+      "superseded",
+      "active",
+      "candidate",
+    ]);
+    assert.deepEqual(c.saved.closed, ["trace:ext-s1/c-open: withdrawn, answered by trace:ext-s1/c-no"]);
+    assert.deepEqual(c.saved.notes, []);
+    assert.equal(lastState(db, "trace:ext-s1/c-open")?.reason, "answered by trace:ext-s1/c-no");
+    const states = () =>
+      Number(
+        db.owner
+          .prepare(
+            "select count(*) as n from unit_state where unit_id = (select id from unit where key = 'trace:ext-s1/a-open')",
+          )
+          .get()?.n,
+      );
+    const before = states();
+    const again = await save(db, target(p), {
+      units: [found("a-note", first, "A と B は両方やる。", { answers: ["trace:ext-s1/a-open"] })],
+    });
+    assert.equal(lifecycle(db, "trace:ext-s1/a-note"), "active");
+    assert.equal(states(), before);
+    assert.deepEqual(again.saved.closed, []);
+    assert.deepEqual(again.saved.notes, [
+      "trace:ext-s1/a-open: already withdrawn, so trace:ext-s1/a-note closes nothing there",
+    ]);
+  } finally {
+    await db.done();
+  }
+});
+
+test("answers: check refuses a target that is no question or no record, an answer on a question, and answers from harvest or glean, and nothing is written", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ask = message(db, p, { id: "a1", speaker: "assistant", text: "SQLite にしますか。" });
+    const said = message(db, p, { id: "o1", text: "SQLite にする。" });
+    await save(db, target(p), {
+      units: [
+        asked("db-open", ask, "SQLite にしますか。"),
+        ownerDecided("old", said, "SQLite にする。", true),
+      ],
+    });
+    const other = project(db, "git:github.com/o/other", "o/other");
+    const theirs = message(db, other, {
+      id: "x1",
+      speaker: "assistant",
+      text: "別のリポジトリの質問。",
+      session: "s9",
+    });
+    await save(
+      db,
+      { ...target(other, "s9"), prefix: "trace:ext-s9/" },
+      {
+        units: [asked("theirs", theirs, "別のリポジトリの質問。")],
+      },
+    );
+    const errorsOf = async (unit: Record<string, unknown>, t: Target = target(p)) =>
+      (await checkRecord(db.ingest, t, { units: [unit] })).errors.join("\n");
+    assert.match(
+      await errorsOf(found("f1", said, "SQLite にする。", { answers: ["trace:ext-s1/old"] })),
+      /trace:ext-s1\/f1: answers trace:ext-s1\/old, a decision; only a question is answered/,
+    );
+    for (const key of ["trace:ext-s1/nope", "trace:ext-s9/theirs"])
+      assert.match(
+        await errorsOf(found("f2", said, "SQLite にする。", { answers: [key] })),
+        new RegExp(`trace:ext-s1/f2: answers ${key}, which is not a record of this project`),
+      );
+    assert.match(
+      await errorsOf(asked("q2", ask, "SQLite にしますか。", { answers: ["trace:ext-s1/db-open"] })),
+      /trace:ext-s1\/q2: a question does not answer another/,
+    );
+    // No record both replaces and answers one question: only a question replaces a question, and a question answers none
+    assert.match(
+      await errorsOf(
+        found("f3", said, "SQLite にする。", {
+          answers: ["trace:ext-s1/db-open"],
+          supersedes: "trace:ext-s1/db-open",
+        }),
+      ),
+      /a finding cannot supersede trace:ext-s1\/db-open, a question/,
+    );
+    for (const origin of ["harvest", "glean"] as const)
+      assert.match(
+        await errorsOf(found("f4", said, "SQLite にする。", { answers: ["trace:ext-s1/db-open"] }), {
+          ...target(p),
+          origin,
+        }),
+        /answers: only trace closes a question/,
+        origin,
+      );
+    assert.match(
+      await errorsOf(
+        found("f5", said, "SQLite にする。", { answers: Array(6).fill("trace:ext-s1/db-open") }),
+      ),
+      /answers/,
+    );
+    const before = dump(db);
+    await assert.rejects(
+      save(db, target(p), {
+        units: [
+          found("fine", said, "SQLite にする。", { answers: ["trace:ext-s1/db-open"] }),
+          found("bad", said, "SQLite にする。", { answers: ["trace:ext-s1/old"] }),
+        ],
+      }),
+      /only a question is answered/,
+    );
+    assert.deepEqual(dump(db), before);
+    assert.equal(lifecycle(db, "trace:ext-s1/db-open"), "active");
+  } finally {
+    await db.done();
+  }
+});
+
+test("answers: check says what save then does, and leaves the question as it was", async () => {
+  const db = tempDb();
+  try {
+    const p = project(db);
+    const ask = message(db, p, {
+      id: "a1",
+      speaker: "assistant",
+      text: "issue にしておきますか。計測もしますか。",
+    });
+    const said = message(db, p, { id: "o1", text: "issue にはしない。計測は後で考える。" });
+    await save(db, target(p), {
+      units: [
+        asked("issue-open", ask, "issue にしておきますか。"),
+        asked("size-open", ask, "計測もしますか。"),
+      ],
+    });
+    const run = await beginTrace(db.ingest, p, "s1");
+    const record = {
+      units: [
+        ownerDecided("no-issue", said, "issue にはしない。", true, {
+          stance: "dont",
+          answers: ["trace:ext-s1/issue-open"],
+        }),
+        ownerDecided("size-later", said, "計測は後で考える。", false, {
+          stance: "defer",
+          answers: ["trace:ext-s1/size-open"],
+        }),
+      ],
+    };
+    const { checked, saved } = await checkThenSave(db, run, p, record);
+    assert.equal(checked.ok, true, checked.text);
+    assert.match(
+      checked.text,
+      /✓ would: trace:ext-s1\/issue-open: withdrawn, answered by trace:ext-s1\/no-issue/,
+    );
+    assert.match(
+      checked.text,
+      /△ trace:ext-s1\/size-open: left open: trace:ext-s1\/size-later did not become active/,
+    );
+    assert.equal(saved.ok, true, saved.text);
+    assert.match(saved.text, /✓ trace:ext-s1\/issue-open: withdrawn, answered by trace:ext-s1\/no-issue/);
+    assert.match(
+      saved.text,
+      /△ trace:ext-s1\/size-open: left open: trace:ext-s1\/size-later did not become active/,
+    );
+    assert.deepEqual(lives(db, "issue-open", "size-open"), ["withdrawn", "active"]);
+  } finally {
+    await db.done();
+  }
+});

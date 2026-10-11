@@ -70,7 +70,7 @@ approved_at: 2026-10-12
   3. その changes から、superseded から active か candidate に戻った質問のうち、この保存で取り下げた質問から `supersedes` の from → to の向きでたどれるもの（祖先）を拾い、同じ答えで取り下げる。戻る祖先が無くなるまで繰り返す
   4. 3 の繰り返しは最大 10 回。使い切っても残れば保存全体を断る
 - 祖先でない記録（同じ質問を置き換えようとしていた別の後継など）が動いても閉じない。結果に出すだけ
-- 取り下げの理由: `answered by <答えのキー>: <引用の先頭 200 字>`。祖先は `answered by <答えのキー> (through <取り下げた質問のキー>): …`。引用と source は、decision / constraint なら資格の根拠になった採用、ほかは unit の最初の根拠
+- 取り下げの理由: `answered by <答えのキー>`。祖先は `answered by <答えのキー> (through <取り下げた質問のキー>)`。引用の言葉は理由に写さない（状態の履歴は追記だけで、source を forget しても消えないため）。source は、decision / constraint なら資格の根拠になった採用、ほかは unit の最初の根拠
 - 状態を書くのは `reconcile` だけ。`unit_state` を直接書かない
 - check は同じ経路を rollback で走らせる。check と save の返答に、質問ごとの行（閉じた / 既に閉じている / 開いたままの理由）と、繰り返しの中で動いたほかの記録を出す。一覧は全部の繰り返しが終わった後の状態から作る
 
@@ -166,3 +166,5 @@ approved_at: 2026-10-12
 なし
 
 ## 変更履歴
+
+- 2026-10-12 / 取り下げの理由から引用の先頭 200 字を外し、`answered by <答えのキー>` だけにした / `unit_state.reason` は追記だけで、forget は `source_id` を空にするだけなので、引用を写すと忘れたはずの言葉が質問の履歴に残る（T01 の review-shipping の指摘を `db/schema.sql` の `unit_state_append_only` で確かめた） / Go は不要（保存する言葉が減るだけで、範囲・入力の形・依存は変わらない）

@@ -22,20 +22,21 @@ base: main
 
 trace の保存の中で、答えの記録が質問を取り下げる。持ち主が glean を打たなくてよくなる。
 
-- [ ] T01: バージョンを上げ、`answers` の入力・検証と、資格のある答えによる質問の取り下げを入れる
+- [x] T01: バージョンを上げ、`answers` の入力・検証と、資格のある答えによる質問の取り下げを入れる
   - 種別: 追加
   - 計画: S1, S2, S3
   - 依存: なし
-  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/test/record.test.ts`, `server/test/extract.test.ts`, `server/evals/acceptance/cases.json`, `server/evals/acceptance/driver.ts`, `server/test/acceptance-cases.test.ts`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
-  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/extract.test.ts test/acceptance-cases.test.ts` → 持ち主の採用のある決定と根拠のある finding が開いた質問を withdrawn にし、理由が `answered by <キー>: …` になる。agent の採用だけの決定と candidate に留まった答えは閉じず、理由が返る。既に閉じた質問は変えずに答えを保存する。同じ保存の 2 つの答えは最初の資格のあるものが理由になる。1 つの答えで質問 2 件、`supersedes` との併用が通る。質問でない対象・別プロジェクト・`question` の unit・harvest と glean・`supersedes` と同じキーは保存を断る。断られた保存は何も残さない。check と save の返答に質問ごとの行が出て、check の予測と save の結果が同じ。足した受け入れケース（質問を閉じる）は、実装の前は `answers` が未知の欄という理由で落ちる
+  - 変更: `server/src/record.ts`, `server/src/extract.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`, `plugin/skills/trace/SKILL.md`, `plugin/package.json`, `plugin/.claude-plugin/plugin.json`, `plugin/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/extract.test.ts test/acceptance-cases.test.ts` → 持ち主の採用のある決定と根拠のある finding が開いた質問を withdrawn にし、理由が `answered by <キー>` になる。agent の採用だけの決定と candidate に留まった答えは閉じず、理由が返る。既に閉じた質問は変えずに答えを保存する。同じ保存の 2 つの答えは最初の資格のあるものが理由になる。1 つの答えで質問 2 件、`supersedes` との併用が通る。質問でない対象・別プロジェクト・`question` の unit・harvest と glean・`supersedes` と同じキーは保存を断る。断られた保存は何も残さない。check と save の返答に質問ごとの行が出て、check の予測と save の結果が同じ。足した受け入れケース（質問を閉じる）は、実装の前は `answers` が未知の欄という理由で落ちる
   - コミット: `feat(record): close a question from the record that answers it`
+  - 結果: 実装の前に `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 --test-name-pattern="^answers:" test/record.test.ts` → 5 件とも `Unrecognized key: "answers"` で失敗。受け入れケース reconcile-11 も、`record.ts` と `extract.ts` を戻した状態で同じ理由の失敗を確かめた。実装の後に同じコマンド → 5 pass（持ち主の採用のある決定と finding が質問を withdrawn にし、理由が `answered by <キー>` で source が答えの発言、agent の採用だけの決定と candidate の答えは閉じずに理由が出る、既に閉じた質問は変えずに答えを保存する、同じ保存の 2 つの答えは資格のある方が理由になる、1 つの答えで質問 2 件と `supersedes` の併用、質問でない対象・別プロジェクト・`question` の unit・harvest と glean・6 件は断る、断られた保存は何も残さない、check の予測と save の結果が同じ行で出る）。`node --import ./test/isolate-home.ts --test test/acceptance-cases.test.ts` → 4 pass。`bun run verify` → exit 0（受け入れケース 134 件）。`bun run release:plan -- --base 6a4d91c6` はコミットの前なので none と出た。コミットの後に流し直す
 
 - [ ] T02: 取り下げで戻った祖先の質問も同じ答えで閉じる
   - 種別: 追加
   - 計画: S3
   - 依存: T01（`answers` の取り下げの経路と結果の行が要る）
   - 変更: `server/src/record.ts`, `server/test/record.test.ts`, `server/evals/acceptance/cases.json`, `server/test/acceptance-cases.test.ts`
-  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/acceptance-cases.test.ts` → 質問の鎖 2 件と 11 件が全部 withdrawn になり、祖先の理由が `answered by <キー> (through <質問のキー>): …` で、答えは active のまま。12 件の鎖は保存全体が rollback する。candidate に戻った祖先も閉じる。祖先でない後継は閉じず、結果に出る。閉じた後に質問か答えに届く別の保存をしても withdrawn のまま。足した受け入れケース（質問の鎖）は、実装の前は元の質問が active に戻るという理由で落ちる
+  - 完了条件: `cd server && node --import ./test/isolate-home.ts --test --test-timeout=60000 test/record.test.ts test/acceptance-cases.test.ts` → 質問の鎖 2 件と 11 件が全部 withdrawn になり、祖先の理由が `answered by <キー> (through <質問のキー>)` で、答えは active のまま。12 件の鎖は保存全体が rollback する。candidate に戻った祖先も閉じる。祖先でない後継は閉じず、結果に出る。閉じた後に質問か答えに届く別の保存をしても withdrawn のまま。足した受け入れケース（質問の鎖）は、実装の前は元の質問が active に戻るという理由で落ちる
   - コミット: `feat(record): close the older questions an answered one had replaced`
 
 ## P2: 作業状況
@@ -79,3 +80,9 @@ trace をする AI が、新しい欄の使い方と、古いサーバーに断�
   - コミット: `docs(trace): describe answers and partial work updates`
 
 ## 記録
+
+- 2026-10-12 / T01・T02 / 完了条件の理由の形を変えた。前: `answered by <キー>: …`（引用の先頭つき）。後: `answered by <キー>`。理由: review-shipping の指摘（状態の履歴は forget で消えないので、引用を写すと忘れた言葉が残る）を確かめて、plan の方針を直した（plan の変更履歴）。glean の `withdraw` の理由は今も引用の先頭 200 字を写していて、同じ残り方をする。この PR の外なので持ち主に報告する
+- 2026-10-12 / T01 / review-shipping の結果: 止める指摘は無し。`npm pack` の中身（53 ファイル）と起動、4 か所のバージョン、直す前のコードでの red を確かめたと報告があった。もう 1 件の指摘（trace の context の見出しが「supersedes and conflicts take these keys」のままで `answers` を挙げていない）は T05 で context を直すときに合わせる
+
+- 2026-10-12 / T01 / 変更欄を直した。前: `server/test/extract.test.ts` と `server/evals/acceptance/driver.ts` を含み、`plugin/skills/trace/SKILL.md` を含まない。後: その 2 つを外し、Skill を足した。理由: 返答の行は `record.test.ts` の check / save のテストで確かめられ、受け入れケースは既にある expectation（`lifecycle`・`save_notes_contain`・`unit_read`）で書けた。`bun run pairs` が、保存が受ける欄を trace の Skill の表に書くことを求めるので、`answers` の行は T01 で足した（文面の残りは T06）
+- 2026-10-12 / T01 / 計画の「同じ unit の `supersedes` と同じキーは断る」に専用のコードは要らなかった。質問を置き換えられるのは質問だけで、質問は `answers` を持てないので、どちらの組み合わせも既にある検査が断る。テストで確かめた

@@ -5741,6 +5741,111 @@
       ]
     },
     {
+      "id": "reconcile-11",
+      "layer": "reconcile",
+      "lang": "ja",
+      "summary": "The owner's decision that answers an open question closes it in the same trace, and the question's history names the answer",
+      "given": [
+        {
+          "session": {
+            "id": "s-ja-ask",
+            "host": "claude-code",
+            "at": "2026-05-03T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "書き出しの上限を調べて。",
+                "assistant": "上限は 60 KiB です。issue にしておきますか。",
+                "edits": []
+              }
+            ]
+          }
+        },
+        {
+          "trace": {
+            "session": "s-ja-ask",
+            "record": {
+              "units": [
+                {
+                  "key": "limit-issue-open",
+                  "kind": "question",
+                  "text": "書き出しの上限を issue にするかは、持ち主の返事待ち",
+                  "evidence": [
+                    {
+                      "source": "session:s-ja-ask#1.assistant",
+                      "quote": "issue にしておきますか。",
+                      "role": "proposes"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "session": {
+            "id": "s-ja-answer",
+            "host": "claude-code",
+            "at": "2026-05-04T10:00:00+09:00",
+            "turns": [
+              {
+                "owner": "上限の件は issue にしない。困ってからでいい。",
+                "assistant": "",
+                "edits": []
+              }
+            ]
+          }
+        }
+      ],
+      "when": {
+        "trace": {
+          "session": "s-ja-answer",
+          "record": {
+            "units": [
+              {
+                "key": "limit-no-issue",
+                "kind": "decision",
+                "stance": "dont",
+                "text": "書き出しの上限は issue にしない",
+                "answers": ["trace:s-ja-ask/limit-issue-open"],
+                "evidence": [
+                  {
+                    "source": "session:s-ja-answer#1.owner",
+                    "quote": "上限の件は issue にしない。",
+                    "role": "states"
+                  }
+                ],
+                "adoption": [
+                  {
+                    "source": "session:s-ja-answer#1.owner",
+                    "quote": "上限の件は issue にしない。"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "then": [
+        {
+          "unit": "trace:s-ja-ask/limit-issue-open",
+          "lifecycle": "withdrawn"
+        },
+        {
+          "unit": "trace:s-ja-answer/limit-no-issue",
+          "lifecycle": "active"
+        },
+        {
+          "save_notes_contain": "trace:s-ja-ask/limit-issue-open: withdrawn, answered by trace:s-ja-answer/limit-no-issue"
+        },
+        {
+          "unit_read": {
+            "of": "trace:s-ja-ask/limit-issue-open",
+            "contains": ["answered by trace:s-ja-answer/limit-no-issue"]
+          }
+        }
+      ]
+    },
+    {
       "id": "agent-01",
       "layer": "agent",
       "lang": "ja",
