@@ -8,7 +8,7 @@ import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
-import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./read.ts";
+import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./reply-budget.ts";
 import { liveSuccessors, type SourceHit, type Successor, searchSources } from "./search.ts";
 import { bytes, head } from "./text.ts";
 

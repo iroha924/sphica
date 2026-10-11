@@ -10,7 +10,8 @@ import { AUTHORITY, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
 import type { DB } from "./db-types.ts";
 import { inline, plain } from "./panel.ts";
-import { cut, fitCount, keyShown, preview, READ_BUDGET, speaker } from "./read.ts";
+import { cut, speaker } from "./read.ts";
+import { fitCount, keyShown, preview, READ_BUDGET } from "./reply-budget.ts";
 import { instructionFile } from "./rule-files.ts";
 
 /**

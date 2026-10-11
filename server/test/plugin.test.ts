@@ -30,8 +30,8 @@ import {
   type Seen,
   versionAt,
 } from "../src/plugin.ts";
-import { READ_BUDGET } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
+import { READ_BUDGET } from "../src/reply-budget.ts";
 import { checkedText } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
 import { fakeCodex } from "./fake-codex.ts";
@@ -701,6 +701,7 @@ test("the record MCP server starts without a database and lists the trace, harve
       "harvest_begin",
       "record_check",
       "record_context",
+      "record_more",
       "record_save",
       "trace_begin",
       "trace_pending",
@@ -1316,6 +1317,7 @@ test("every tool of both MCP servers refuses an unknown argument by name", async
     record_context: { run: "r" },
     record_check: { run: "r", record: {} },
     record_save: { run: "r", record: {} },
+    record_more: { cursor: "c0123456789ab.0" },
     forget_preview: { sources: ["s1"] },
     forget_apply: { sources: ["s1"] },
   };

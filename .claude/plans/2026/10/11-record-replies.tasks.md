@@ -22,7 +22,7 @@ base: main
 
 両サーバーが同じ予算の部品を使い、record サーバーのエラーが 32 KiB に収まり、収まらなかった結果の続きを読むツールができる。
 
-- [ ] T01: 予算の部品を `reply-budget.ts` に移し、record サーバーの SDK のエラーを予算に収める。バージョンを 0.6.50 に上げる
+- [x] T01: 予算の部品を `reply-budget.ts` に移し、record サーバーの SDK のエラーを予算に収める。バージョンを 0.6.50 に上げる
   - 種別: 修正
   - 計画: S1, S10
   - 依存: なし
@@ -30,14 +30,18 @@ base: main
   - red: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前は、record サーバーへの 40 KB の未知のツール名のエラーが 32,768 バイトを超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(record): keep the record server's SDK errors within the reply budget, and bump to 0.6.50`
+  - 結果: `node --import ./test/isolate-home.ts --test test/record-replies.test.ts` → 直す前（部品を移しただけで、record サーバーの送信を包む前）は 1 件 fail（40 KB の未知のツール名のエラーが 40,033 バイト）、包んだ後は pass
+  - 結果: `bun run verify` → 終了コード 0
 
-- [ ] T02: 結果の置き場（2 枠、行を分割して固定）と、続きを読む `record_more` を足す
+- [x] T02: 結果の置き場（2 枠、行を分割して固定）と、続きを読む `record_more` を足す
   - 種別: 追加
   - 計画: S2
   - 依存: T01（`reply-budget.ts` の予算と `preview` が要る）
   - 変更: `server/src/result-pages.ts`, `server/src/mcp-record.ts`, `server/test/result-pages.test.ts`, `server/test/record-state.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `feat(record): add record_more to read the rest of a result`
+  - 結果: `node --import ./test/isolate-home.ts --test test/result-pages.test.ts test/record-state.test.ts` → 8 件 pass（置き場 7 件、MCP 経由の `record_more` 1 件）
+  - 結果: `bun run verify` → 終了コード 0
 
 ## P2: record_context
 
@@ -118,3 +122,6 @@ trace・harvest・glean・forget の Skill が、新しい返答の形とカー�
   - コミット: `docs(skills): follow the record server's paged replies and record_more`
 
 ## 記録
+- 2026-10-11 / T01・T02 / 1 回目の `bun run verify` が 1 件 fail: `plugin.test.ts` の「全ツールが未知の引数を名前で断る」が、新しい `record_more` の正しい引数を持っていなかった / テストの一覧に `record_more` を足した（ツールの一覧を固定するテストにも足した）
+- 2026-10-11 / T02 / コミットの前の Codex のレビュー（作業ツリーと `2dab50c9` の差分、新しい会話）が 3 件指摘、どれも再現: (1) P2: 行位置が 7 桁になると、サーバー自身が出した続きのカーソルを断る (2) P2: 枠付きの結果は、同じカーソルで枠の id が毎回変わり同じページにならない (3) P3: 分割した最後の断片が 4,096 バイトを 4 バイト超える / 3 件とも採用。先に落ちるテストを書いた。(1) は位置を 15 桁まで、(2) は枠の id を結果を持つときに 1 回だけ引く（`frame.ts` の `framed` が id を受け取れるようにした。`frame.ts` は変更欄に無いが、この直しに要る）、(3) は印の 4 バイトを数える
+- 2026-10-11 / T01・T02 / コミットの前の review-shipping（出荷は可の判定）が 4 件: (1) レビュー中に作業ツリーが動いた（上の Codex の直し。取り直して全部やり直したとのこと） (2) `pieces` が分割しないように弱めると、テストが落ちずに終わらなくなる (3) `deliver.js` が 64 バイト増えた（`withinBudget` の注意書きの文字列が hook の bundle に入る。残り 1,545 バイト） (4) 4 つの Skill の allowed-tools に `record_more` が無い / (2) はテストの読み進めに「カーソルが必ず前へ進む」の検査を足した。(3) は注意書きの文字列を関数の中で作る形にした。(4) は T09 で入れる（同じ PR・同じリリース）。review-shipping の実測: pack した `mcp-record.js` はツール 11 個、40 KB の未知のツール名のエラーは 32,768 バイトで `isError`、`mcp.js` の出力はバージョン以外 main と同じ

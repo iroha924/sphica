@@ -8,7 +8,6 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { askedBefore, askedText, UNKNOWN_SESSION } from "./asked.ts";
 import { openReader } from "./db.ts";
@@ -18,16 +17,17 @@ import { fieldsText } from "./fields.ts";
 import { framed } from "./frame.ts";
 import { HOSTS, LIFECYCLES, sessionId, UNIT_KINDS } from "./knowledge.ts";
 import { liveOverview, lookCursor, lookOverview } from "./overview.ts";
-import { inline, plain } from "./panel.ts";
+import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, identify, projectId } from "./project.ts";
-import { READ_BUDGET, readRefs } from "./read.ts";
+import { readRefs } from "./read.ts";
+import { READ_BUDGET, withinBudget } from "./reply-budget.ts";
 import { parseDiff, REVIEW_BATCH, reviewBatch, selectReply } from "./review.ts";
 import { checkedText, checkFindings } from "./review-findings.ts";
 import { hitsReply, searchSources, searchUnits, sourcesReply } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
-import { bytes, head, reason } from "./text.ts";
+import { head, reason } from "./text.ts";
 
 requireRuntime();
 const db = openReader();
@@ -486,34 +486,6 @@ server.registerTool(
     }
   },
 );
-
-const CUT = `\n(This error was cut to keep the reply within ${READ_BUDGET / 1024} KiB.)`;
-const TIDIED = `\n(Terminal control sequences were removed from this error, which was over ${READ_BUDGET / 1024} KiB.)`;
-
-/**
- * An error reply whose text is over READ_BUDGET, made plain and then cut if it is still over, with a note saying which. The SDK builds
- * some errors itself, before any tool runs (a tool name it does not know, input its schema refuses), and they repeat what the caller
- * sent. An error within the budget, and a reply that is not an error, pass as they are: each tool completes its own within the budget.
- */
-function withinBudget(message: JSONRPCMessage): JSONRPCMessage {
-  if (!("result" in message)) return message;
-  const result = message.result as { isError?: unknown; content?: unknown };
-  if (result.isError !== true || !Array.isArray(result.content)) return message;
-  const whole = (result.content as { type?: unknown; text?: unknown }[])
-    .flatMap((c) => (c.type === "text" && typeof c.text === "string" ? [c.text] : []))
-    .join("\n");
-  if (bytes(whole) <= READ_BUDGET) return message;
-  // Plain first: a cut inside a terminal sequence would leave it open, and the terminal would read what follows as part of it
-  const clean = plain(whole);
-  const note = bytes(clean) + bytes(TIDIED) <= READ_BUDGET ? TIDIED : CUT;
-  return {
-    ...message,
-    result: {
-      ...message.result,
-      content: [{ type: "text", text: `${head(clean, READ_BUDGET - bytes(note))}${note}` }],
-    },
-  };
-}
 
 const transport = new StdioServerTransport();
 const send = transport.send.bind(transport);

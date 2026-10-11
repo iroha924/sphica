@@ -32,6 +32,8 @@ import { gh, repoOf } from "./github.ts";
 import { inline } from "./panel.ts";
 import { ROOT, versionAt } from "./plugin.ts";
 import { hostWorkspace, type Place, projectId, writePlace } from "./project.ts";
+import { withinBudget } from "./reply-budget.ts";
+import { CURSOR, morePage } from "./result-pages.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { head, plural, reason } from "./text.ts";
 import { callSession, logCall } from "./trace.ts";
@@ -342,4 +344,30 @@ server.registerTool(
     }),
 );
 
-await server.connect(new StdioServerTransport());
+server.registerTool(
+  "record_more",
+  {
+    title: "The rest of a result",
+    description:
+      "Reads on from where a reply of this server stopped to stay within its size: pass the cursor that reply named. Nothing is " +
+      "checked, saved, fetched, or forgotten again. The same cursor gives the same page.",
+    inputSchema: z
+      .object({
+        cursor: z.string().regex(CURSOR, "the cursor a reply named").describe("The cursor the reply named"),
+        cwd: CWD,
+      })
+      .strict(),
+    annotations: READ,
+  },
+  async (a, extra) =>
+    tool(async () => {
+      const { p } = await called("record_more", a.cwd, extra._meta);
+      return morePage(a.cursor, p.projectId);
+    }),
+);
+
+// An error the SDK builds itself repeats what the caller sent, so it is cut where the server sends
+const transport = new StdioServerTransport();
+const send = transport.send.bind(transport);
+transport.send = (message) => send(withinBudget(message));
+await server.connect(transport);

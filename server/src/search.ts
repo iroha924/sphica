@@ -10,8 +10,8 @@ import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
-import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { repoPath } from "./record.ts";
+import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./reply-budget.ts";
 import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
 
 /** Candidates are read from the index in rank order, a page at a time, up to a cap; a search that hits the cap says it stopped. */
