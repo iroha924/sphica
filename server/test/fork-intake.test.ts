@@ -244,7 +244,7 @@ test("a reader whose frontmatter the host would read differently from this check
   assert.deepEqual(
     withReader("model:", () => "model:\rmemory: project"),
     [
-      "the frontmatter holds a carriage return that is not part of a line ending",
+      "the frontmatter holds a control character (U+000D)",
       "a frontmatter line is not one key and its value: model:\rmemory: project",
     ],
   );
@@ -274,12 +274,7 @@ test("a reader whose frontmatter the host would read differently from this check
       ["the value of description is not a plain value on its line"],
       first,
     );
-  for (const line of [
-    "description:",
-    "description:Reads the text",
-    "description:\tReads the text",
-    "description: Reads title:\tbody",
-  ])
+  for (const line of ["description:", "description:Reads the text"])
     assert.deepEqual(
       withReader("description:", () => line),
       ["the value of description is not a plain value on its line"],
@@ -289,6 +284,25 @@ test("a reader whose frontmatter the host would read differently from this check
     withReader("tools:", () => "tools:Read, Grep, Glob"),
     ["the value of tools is not a plain value on its line"],
   );
+  // Characters the host's YAML stops at or breaks a line on, which a line reader passes over
+  for (const [ch, code] of [
+    ["\0", "0000"],
+    ["\t", "0009"],
+    ["\u0085", "0085"],
+    ["\u2028", "2028"],
+    ["\u2029", "2029"],
+    ["\ufeff", "FEFF"],
+    ["\u00ad", "00AD"],
+    ["\u200b", "200B"],
+    ["\u001b", "001B"],
+    ["\u007f", "007F"],
+  ])
+    assert.ok(
+      withReader("description:", (l) => l.replace("Reads the text", `Reads${ch} the text`)).includes(
+        `the frontmatter holds a control character (U+${code})`,
+      ),
+      code,
+    );
 });
 
 const skill = () => tracked(".claude/skills/fork-pr/SKILL.md");
@@ -355,11 +369,10 @@ test("a marked command with anything added or reordered, a second command, or a 
   );
   assert.deepEqual(reviewCommandProblems(skill().replace(marked(), `${marked()} --enable plugins`)), differs);
   const second = (line: string) => reviewCommandProblems(`${skill()}\n\`\`\`bash\n${line}\n\`\`\`\n`);
-  const both = [
-    "must hold one line that starts codex exec (found 2)",
-    "holds 1 other command line that name codex",
+  const unknown = (line: string) => [
+    `names the codex command outside the marked block in a way this check does not know: ${line}`,
   ];
-  // Other spellings of the same start, each in a block of its own
+  // Other ways to start Codex, each in a block of its own
   for (const line of [
     "codex exec -s read-only - < request",
     "codex  exec - < request",
@@ -367,16 +380,25 @@ test("a marked command with anything added or reordered, a second command, or a 
     "/usr/local/bin/codex exec - < request",
     `sh -c 'codex exec - < request'`,
     "out=`codex exec --enable plugins - < request`",
+    "codex review",
   ])
-    assert.deepEqual(second(line), both, line);
-  assert.deepEqual(second("codex review"), ["holds 1 other command line that name codex"]);
-  assert.deepEqual(second("codex \\\nexec - < request"), ["holds 1 other command line that name codex"]);
-  assert.deepEqual(
-    reviewCommandProblems(
-      `${skill()}\nOr run \`codex exec --enable plugins - < request\` when in a hurry.\n`,
-    ),
-    ["must hold one line that starts codex exec (found 2)"],
-  );
+    assert.deepEqual(second(line), unknown(line), line);
+  assert.deepEqual(second("codex \\\nexec - < request"), unknown("codex \\"));
+  // And in the prose, where no fence marks them as commands
+  for (const line of [
+    "Or run `codex exec --enable plugins - < request` when in a hurry.",
+    "Use `codex review` instead.",
+    "Then codex can be started again with the owner's settings.",
+    // A known spelling on the line does not cover what stands beside it
+    "Check `codex --version` && codex exec - < request",
+    "cat ~/.codex/config.toml; codex exec - < request",
+  ])
+    assert.deepEqual(reviewCommandProblems(`${skill()}\n${line}\n`), unknown(line), line);
+  // The marked command written a second time, in a block or in the prose, is one command too many
+  assert.deepEqual(second(marked().trim()), ["the marked command is written 2 times"]);
+  assert.deepEqual(reviewCommandProblems(`${marked()}\n${skill()}`), [
+    "the marked command is written 2 times",
+  ]);
   // A closing fence with words after it keeps the block open in Markdown, and what follows would be part of the command
   assert.deepEqual(
     reviewCommandProblems(

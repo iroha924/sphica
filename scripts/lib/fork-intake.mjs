@@ -60,11 +60,14 @@ export function readerProblems(source) {
   if (!text.startsWith("---\n") || end === -1) return ["no closed YAML frontmatter"];
   const block = text.slice(4, end);
   const problems = [];
-  // Claude Code ends the frontmatter at the first three dashes anywhere, and its YAML breaks a line at a lone carriage return
+  // Claude Code ends the frontmatter at the first three dashes anywhere, and its YAML breaks a line or stops at characters a line reader passes over
   if (block.includes("---"))
     problems.push("the frontmatter holds --- before its closing line, where the host stops reading");
-  if (block.includes("\r"))
-    problems.push("the frontmatter holds a carriage return that is not part of a line ending");
+  const control = [...block].find((ch) => ch !== "\n" && /\p{Cc}|\p{Cf}|\p{Zl}|\p{Zp}/u.test(ch));
+  if (control !== undefined) {
+    const code = (control.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
+    problems.push(`the frontmatter holds a control character (U+${code})`);
+  }
   const seen = new Map();
   for (const line of block.split("\n")) {
     if (line.trim() === "" || line.trim().startsWith("#")) continue;
@@ -123,6 +126,16 @@ const REVIEW_FLAGS = [
   "-c 'web_search=\"disabled\"'",
   '-c model_reasoning_effort="high"',
 ];
+/** Where the Skill may name the command besides the marked line: another Skill's name, the places that configure Codex, and two commands that only print */
+const REVIEW_NAMED = [
+  "codex-review",
+  "~/.codex/config.toml",
+  "~/.codex/hooks.json",
+  "/etc/codex",
+  " .codex ",
+  "`codex --version`",
+  "`codex features list`",
+];
 const REVIEW_COMMAND = `codex exec ${REVIEW_FLAGS.join(" ")} - < <request file> > <output file> 2>&1`;
 
 /**
@@ -141,21 +154,23 @@ export function reviewCommandProblems(source) {
     text.slice(text.indexOf(REVIEW_MARK) + REVIEW_MARK.length),
   );
   if (!block) return [...problems, "the mark is not followed at once by a bash code block"];
-  // Any other way of starting Codex written into the Skill, in a block or in the prose, would be followed as readily as the marked one
-  const lines = text.split("\n");
-  const starts = lines.filter((line) => /\bcodex\b.*\bexec\b/.test(line));
-  if (starts.length !== 1)
-    problems.push(`must hold one line that starts codex exec (found ${starts.length})`);
+  // Any other way of starting Codex written into the Skill, in a block or in the prose, would be followed as readily as the marked one.
+  // So outside the marked block the command's name may stand only in the spellings REVIEW_NAMED lists
   const marked = new Set((block[1] ?? "").split("\n").map((line) => line.trim()));
-  let fenced = false;
-  let others = 0;
-  for (const line of lines) {
-    // A fence closes only on a line of its own, as the marked block's does
-    if (fenced ? /^[ \t]*(```|~~~)[ \t]*$/.test(line) : /^[ \t]*(```|~~~)/.test(line)) fenced = !fenced;
-    else if (fenced && /\bcodex\b/.test(line) && !marked.has(line.trim())) others++;
-  }
-  if (others) problems.push(`holds ${others} other command line${others === 1 ? "" : "s"} that name codex`);
+  const others = text
+    .split("\n")
+    .filter((line) => !marked.has(line.trim()))
+    .filter((line) =>
+      /\bcodex\b/.test(REVIEW_NAMED.reduce((rest, known) => rest.replaceAll(known, ""), line)),
+    );
+  if (others.length)
+    problems.push(
+      `names the codex command outside the marked block in a way this check does not know: ${(others[0] ?? "").trim().slice(0, 80)}`,
+    );
   const command = (block[1] ?? "").trim();
+  // The marked line is left out of the search above wherever it stands, so a second copy has to be counted here
+  const copies = text.split("\n").filter((line) => line.trim() === command).length;
+  if (copies > 1) problems.push(`the marked command is written ${copies} times`);
   if (command === REVIEW_COMMAND) return problems;
   const missing = REVIEW_FLAGS.filter((flag) => !` ${command} `.includes(` ${flag} `));
   return [

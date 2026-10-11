@@ -79,6 +79,18 @@ base: main
   - 結果: `bun run verify` → 終了コード 0（最後のスイートは pass 132、fail 0）
   - 結果: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 15 件 pass
 
+- [x] T06: Skill の本文にある別の Codex の起動と、frontmatter の制御文字を検査で拒否する
+  - 種別: 修正
+  - 計画: S2, S3
+  - 依存: T03（直す対象のコマンドの検査が要る）, T05（直す対象の値の検査が要る）
+  - 変更: `scripts/lib/fork-intake.mjs`, `server/test/fork-intake.test.ts`
+  - red: `node -e 'reviewCommandProblems(<Skill の末尾に Use \`codex review\` instead. を足したもの>); readerProblems(<description に NUL を入れた定義>)'` → 直す前（`5b2f6861`）はどちらも `[]` を返す
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(agents): refuse other Codex launches in the fork Skill and control characters in the reader`
+  - 結果: `node -e 'reviewCommandProblems(…); readerProblems(…)'` → `5b2f6861` の関数はどちらも `[]`、直した関数は `names the codex command outside the marked block …` と `the frontmatter holds a control character (U+0000)`
+  - 結果: `bun run verify` → 終了コード 0（最後のスイートは pass 132、fail 0）
+  - 結果: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 15 件 pass
+
 ## 記録
 
 - 2026-10-11 / T01 / コミットの前の review-shipping が 1 件指摘: 設定ファイルが 0 バイトだと `check-ai-config.mjs` が検査を飛ばして通る（再現した。終了コード 0） / 読めた文字列の有無ではなく、ファイルの有無で検査に入るように直した。ほかの指摘は無し（検査を 11 通りに弱めるとテストが全部落ちること、評価・tarball・Biome・knip に影響が無いことをレビュアーが確認）
@@ -91,3 +103,5 @@ base: main
 - 2026-10-11 / T03 / コミットの前の review-shipping が 6 件指摘（写しで再現済み）: (1) Codex を起動する別の書き方（空白 2 つ、`codex -c … exec`、絶対パス、`sh -c`、インラインコード）が検査を通る (2) 閉じる fence の後ろに文字がある行で検査だけがブロックを閉じる (3) `tools:Read`（空白なし）とコロンの後のタブが通る (4) 60 通りの弱め方のうち 21 がテストをすり抜ける (5) `fork-reader` の名前がどこかに 1 回あれば通る (6) `model:` の行を写す先の PR が決まらない / 全部直した。コマンド全体をテストに書き写して固定し、Skill のどこかに `codex … exec` の行がもう 1 つあれば落とし、手順 3 の文を名指しで求め、値の規則の各記号をテストに足した
 - 2026-10-11 / T03 / 文章のレビュー（prose-reviewer と Codex に同じ依頼）: prose-reviewer 8 件、Codex 4 件（うち 3 件は同じ指摘） / 採用: 測り方に未知の機能名の項目が無い、不備のある報告を何にも使わないと書いていない、誰がどのファイルを開くかの列挙が場所ごとに違う、`model:` を写す先、Codex への依頼の「何をする変更か」の書き方、pin コマンドを使う手順の番号、一覧に無いときの原因の断定、読み手がコマンドと URL を「写さない」だけだった点。計画のコマンドとの違いは plan の変更履歴に書いた。任意の提案のうち、JSON の位置に id を足す・binary と link の見分け方・CI のログを新しいディレクトリに書く、を入れた
 - 2026-10-11 / T03 / 予定外の発見: 定義をコミットした直後は、このセッションの Agent ツールの一覧に `fork-reader` が出なかった（`Agent type 'fork-reader' not found`）。会話が要約された後に出た。それまでの実測は `claude --agent fork-reader -p` で流し、出てからセッションの中の委任でも #314 を通した
+- 2026-10-11 / 全体 / Codex の全差分レビュー（`main..5b2f6861`、指摘 2 件、どちらも P2、どちらも自分で再現）: (1) fence の外の文（``Use `codex review` instead.``）で別の起動を書いても検査を通る (2) frontmatter の値に NUL があると、ホストの YAML は失敗するのに検査を通る / 両方採用。T06 を足した。(1) は、目印のブロックの外に `codex` というコマンド名が、知っている書き方（別の Skill の名前、設定の場所、表示だけの 2 コマンド）以外で出たら落とす。(2) は、frontmatter の中の制御文字（Cc・Cf・行と段落の区切り）を落とす
+- 2026-10-11 / T06 / コミットの前の review-shipping が 4 件指摘（写しで再現済み）: (1) 目印のコマンドと同じ行をもう 1 回書いても通る（前の規則は拒否していた） (2) 知っている書き方と起動が同じ行にある場合のテストが無い (3) 一部の制御文字のテストが無い (4) `codex-review exec` のように、知っている書き方の中に `codex` が収まる行は通る / (1)〜(3) を直した。(4) は採らない: どれも Codex を起動する行ではなく、起動の形（`codex … exec`）が隣にあれば落ちることをレビュアーが確認している
