@@ -23,7 +23,7 @@ import { hostWorkspace, identify, projectId } from "./project.ts";
 import { READ_BUDGET, readRefs } from "./read.ts";
 import { parseDiff, REVIEW_BATCH, reviewBatch, selectReply } from "./review.ts";
 import { checkedText, checkFindings } from "./review-findings.ts";
-import { hitsText, searchSources, searchUnits } from "./search.ts";
+import { hitsReply, searchSources, searchUnits, sourcesReply } from "./search.ts";
 import { requireRuntime } from "./sqlite.ts";
 import { status } from "./status.ts";
 import { head, reason } from "./text.ts";
@@ -186,17 +186,7 @@ server.registerTool(
           return text(
             `No source ${among(r)}holds most of: ${r.terms.join(", ") || "(no searchable words)"}. ${r.weaker} weaker matches left out.${r.stopped ? " Search with more specific words." : ""}`,
           );
-        return text(
-          framed(
-            r.hits
-              .map(
-                (h) =>
-                  `## s${h.id}: ${h.kind} ${h.artifact}, ${h.author}, ${h.created_at}\n${head(h.text, 800)}\nMatched: ${h.matched.join(", ")}`,
-              )
-              .join("\n\n")
-              .concat(stoppedAfter(r)),
-          ),
-        );
+        return text(sourcesReply(r.hits, stoppedAfter(r)));
       }
       const r = await searchUnits(db, p.id, {
         question: a.query,
@@ -212,9 +202,7 @@ server.registerTool(
             (r.stopped ? "Search with more specific words. " : "") +
             "Search again with other words or the other language, or search sources; status says whether sessions are still untraced.",
         );
-      return text(
-        framed(`${hitsText(r.hits)}${stoppedAfter(r)}\n\nRead a record by its key before relying on it.`),
-      );
+      return text(hitsReply(r.hits, stoppedAfter(r)));
     } catch (e) {
       return text(`Sphica unavailable: ${head(reason(e), 300)}`, true);
     }

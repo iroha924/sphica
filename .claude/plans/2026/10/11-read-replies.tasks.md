@@ -59,14 +59,26 @@ base: main
 
 `search`・`review_check`・`export`・`fields`・`asked` と、SDK が作るエラーの返答が、どんな入力でも 32 KiB に収まり、止めたときは続きの読み方を言う。
 
-- [ ] T03: 予算の計算を共有する関数を置き、`search`（通常と sources）の返答を収める
+- [x] T03: 予算の計算を共有する関数を置き、`search`（通常と sources）の返答を収める
   - 種別: 修正
   - 計画: S4, S5
   - 依存: T01（バージョンが上がっていないと、パッケージに入るファイルのコミットが拒否される）
-  - 変更: `server/src/text.ts`, `server/src/search.ts`, `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/test/search.test.ts`
+  - 変更: `server/src/read.ts`, `server/src/search.ts`, `server/src/mcp.ts`, `server/test/plugin.test.ts`, `server/test/search.test.ts`, `server/test/deliver.test.ts`
   - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 長い option を持つ記録と、長い artifact の発言 20 件で、`search` の返答が 32 KiB を超えて落ちる
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `fix(search): keep search replies within the reply budget`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前のコード（`server/src` を stash）では、足した search のテストが「search: 429308 bytes」で失敗。直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
+
+- [x] T11: doctor が、リンク先の無い `.sphica` も Sphica のものとして git worker を確かめる
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T02（直す対象の doctor の行が要る）
+  - 変更: `server/src/cli.ts`, `server/test/cli.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/cli.test.ts` → `.sphica` をリンク先の無いリンクにすると、直す前は Git worker の行が出ずにテストが落ちる
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/cli.test.ts` → 全件 pass
+  - コミット: `fix(search): keep search replies within the reply budget`
+  - 結果: `node --import ./test/isolate-home.ts --test test/cli.test.ts` → `existsSync` に戻すと足したケースが失敗、`lstat` で見る形では pass
 
 - [ ] T04: `review_check` の返答を収め、バッチの全記録の状況を先頭に必ず出す
   - 種別: 修正
@@ -134,3 +146,9 @@ base: main
 - 2026-10-11 / T01 / tasks を直すスクリプトが文字コードのエラーで動かず、チェックの無いままコミットされた（push の前） / 同じコミットを amend してチェックと結果を入れた。以後、tasks の更新は成功を確かめてからコミットする
 - 2026-10-11 / T01 / Codex のレビュー（`e0107a6e`、指摘 1 件、P2）: `.sphica`・`.sphica/git`・`hooks` がリンク先の無いリンクだと、`existsSync` が false を返して `mkdirSync` が `EEXIST` で落ち、断りではなく失敗として報告される（自分でも再現） / 採用。T10 を足し、`ownDir` が先に `lstat` で見るようにした
 - 2026-10-11 / T02 / コミットの前の review-shipping が 3 件指摘（出荷は可の判定）: (1) doctor が作業ツリーの root ではなく cwd を試すように弱めても、テストが通る (2) `sphica init` をしたことのない HOME で doctor を流すと、`.sphica`・`.sphica/git`・`.sphica/git/hooks` を作る（0.6.48 の doctor は何も作らなかった） (3) bundle の余裕が少ない（`git-worker.js` は 13,000 のうち 12,845、`cli.js` は 632,000 のうち 629,328） / (1) は、HOME 自体が作業ツリーのときに、その下のフォルダから流すケースを足した。(2) は、HOME に `.sphica` が無いとき（まだ使っていない環境）は試さず、行も出さないようにした。(3) は直さず記録だけ（今は `git-worker.js` 12,888、`cli.js` 629,419 で予算内。次に worker を触るときに予算を見直す）
+- 2026-10-11 / T02 / Codex のレビュー（`5d87d383`、指摘 1 件、P2）: doctor が `.sphica` の有無を `existsSync` で見るので、リンク先の無いリンクだと未使用の HOME として扱い、worker が断る理由を出さない / 採用。T11 を足し、`lstat` で見るようにした
+- 2026-10-11 / T03 / 未完了の T03 の変更欄を変えた。前: `server/src/text.ts`。後: `server/src/read.ts` と `server/test/deliver.test.ts` / 予算の計算の関数は `READ_BUDGET` の隣（`read.ts`）に置いた。`deliver.test.ts` は、無くなった `hitsText` を使っていたので新しい関数に合わせた
+- 2026-10-11 / T03 / 予定外の発見: 部品の大きさを足すだけでは、枠（`framed` が通す `plain`）と省略の案内の分がずれる / 返答全体を作る関数を渡し、できあがった返答のバイト数で決める形にした（`fitCount`）
+- 2026-10-11 / T03 / 予定外の発見: `sources: true` は、artifact と作者を切ると 20 件でも収まる（1 件あたり約 1.5 KB） / 省略の案内は残すが、テストは「20 件が全部出て、省略なし」を見る
+- 2026-10-11 / T03 / コミットの前の review-shipping が 4 件指摘（出荷は可の判定。32,768 バイトを超える search の返答は作れなかった。最大は実 DB 経由で 32,442 バイト）: (1) option の本文などの切り詰めを外しても、テストが通る（収まるが、出る件数が減るだけ） (2) `fitCount` の最初の見積もりは枠が落とす文字（ゼロ幅や制御文字）を数えるので、そういう本文だと早く止まる (3) 0 件の返答自体が上限を超えるときは 0 を返し、呼ぶ側が上限を超えた返答を送る（search では起きないが、次のタスクで同じ関数を使う） (4) sources の省略の案内は、20 件が必ず収まるので通らない / (1) は「6 件以上が表示される」をテストに足した。(2) は見積もりから増やす方向にも試すようにした。(3) は関数の説明に「0 件の返答は呼ぶ側の上限で収める」と書き、次のタスクで各ツールの 0 件の返答を固定の長さにする。(4) は直さない
+- 2026-10-11 / T03 / review-shipping が測った bundle の余裕: `deliver.js` 1,694、`cli.js` 2,555、`git-worker.js` 112 バイト。`mcp.js` は 104,652 / 残りのタスクで `deliver.js` と `git-worker.js` は触らない

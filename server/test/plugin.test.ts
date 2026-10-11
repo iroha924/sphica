@@ -35,7 +35,7 @@ import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { checkedText } from "../src/review-findings.ts";
 import { openRun } from "../src/trace.ts";
 import { fakeCodex } from "./fake-codex.ts";
-import { message, project, tempDb } from "./temp-db.ts";
+import { at, hash, insert, message, project, tempDb } from "./temp-db.ts";
 import { tempDir, tmpEnv } from "./temp-dir.ts";
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -1349,5 +1349,152 @@ test("every tool of both MCP servers refuses an unknown argument by name", async
     } finally {
       await client.close();
     }
+  }
+});
+
+/** A project of its own with a read server started on it, for the tests that measure what a reply weighs */
+async function budgetWorld(name: string) {
+  const db = tempDb();
+  const repo = tempDir(`sphica-${name}-`);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["remote", "add", "origin", `https://github.com/o/${name}.git`], { cwd: repo });
+  const p = project(db, `git:github.com/o/${name}`, `o/${name}`);
+  const save = (prefix: string, units: unknown[]) => {
+    const t: Target = { projectId: p, origin: "trace", prefix, sessionId: "s1", root: null, sources: null };
+    return inTransaction(db.ingest, async (trx) => {
+      const runId = await openRun(trx, {
+        projectId: p,
+        origin: "trace",
+        target: "session:s1",
+        sessionId: "s1",
+        draftId: `d${Math.random()}`,
+      });
+      await saveRecord(trx, t, runId, await checkRecord(trx, t, { units }), []);
+    });
+  };
+  const client = new Client({ name: "test", version: "0" });
+  const connect = () =>
+    client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(SRC, "mcp.ts")],
+        env: { ...tmpEnv(), PATH: process.env.PATH ?? "", HOME: "/nonexistent", SPHICA_DB: db.file },
+        stderr: "ignore",
+      }),
+    );
+  /** A tool's reply text, which must stay within the reply budget whatever was asked */
+  const reply = async (tool: string, args: Record<string, unknown>) => {
+    const r = await client.callTool({ name: tool, arguments: { cwd: repo, ...args } });
+    const text = (r.content as { text: string }[]).map((c) => c.text).join("");
+    assert.ok(Buffer.byteLength(text) <= READ_BUDGET, `${tool}: ${Buffer.byteLength(text)} bytes`);
+    return { text, isError: r.isError === true };
+  };
+  return {
+    db,
+    p,
+    repo,
+    save,
+    connect,
+    reply,
+    done: async () => {
+      await client.close();
+      await db.done();
+    },
+  };
+}
+
+/** The refs a reply names for read, call by call */
+const readCallsIn = (text: string): string[][] =>
+  [...text.matchAll(/read with refs (\[[^\]]*\])/g)].map((m) => JSON.parse(m[1] ?? "[]") as string[]);
+
+// Codex drops the middle of a reply past about 40,000 bytes without a word, so a search that finds much says what it left out instead
+test("search keeps its reply within the reply budget, and every hit it leaves out can be read from what it says", async () => {
+  const w = await budgetWorld("search-budget");
+  const quote = "Not this one.";
+  const m = message(w.db, w.p, { id: "m1", text: quote });
+  // english-exempt: multibyte text, as Japanese records hold, at the lengths a record may have
+  const jp = (n: number) => "選択肢の説明".repeat(Math.ceil(n / 6)).slice(0, n);
+  const unit = (key: string) => ({
+    key,
+    kind: "decision",
+    stance: "dont",
+    text: `${quote} budgetword ${jp(600)}`,
+    why: jp(400),
+    evidence: [{ source: `s${m}`, quote, role: "states" }],
+    adoption: [{ source: `s${m}`, quote }],
+    options: Array.from({ length: 12 }, (_, i) => ({
+      text: `${jp(490)}${i}`,
+      outcome: "rejected",
+      why: jp(300),
+    })),
+  });
+  // A key's session part comes from the host and has no length limit
+  for (let i = 0; i < 20; i += 10)
+    await w.save(
+      `trace:${"e".repeat(600)}/`,
+      Array.from({ length: 10 }, (_, k) => unit(`hit${String(i + k).padStart(2, "0")}`)),
+    );
+  // A source's artifact has no length limit either: a long path of a file, say
+  for (let i = 0; i < 20; i++) {
+    const text = `budgetword ${jp(900)}`;
+    insert(w.db, "source", {
+      project_id: w.p,
+      kind: "session_message",
+      artifact: `session:${jp(500)}`,
+      external_id: `long${i}`,
+      revision: 1,
+      session_id: "s1",
+      author_kind: "owner",
+      created_at: at("2026-09-10T00:00:00Z"),
+      available_at: at("2026-09-10T00:00:00Z"),
+      captured_at: at("2026-09-10T00:00:00Z"),
+      text,
+      original_bytes: Buffer.byteLength(text),
+      content_hash: hash(),
+      indexed: 1,
+    });
+  }
+  await w.connect();
+  try {
+    const found = await w.reply("search", { query: "budgetword", limit: 20 });
+    const shown = [
+      ...found.text.matchAll(/^## trace:e+\.\.\. \[key cut\] \(u(\d+)\): decision dont, active/gm),
+    ].map((x) => x[1]);
+    const calls = readCallsIn(found.text);
+    const left = calls.flat();
+    assert.ok(shown.length > 0 && left.length > 10, `${shown.length} shown, ${left.length} left out`);
+    assert.equal(shown.length + left.length, 20);
+    // Each hit is a preview: with options and reasons shown whole, one hit alone would take most of the reply
+    assert.ok(shown.length >= 6, `${shown.length} shown`);
+    assert.equal(
+      new Set([...shown.map((id) => `u${id}`), ...left]).size,
+      20,
+      "no hit is named twice or dropped",
+    );
+    assert.ok(
+      calls.every((c) => c.length <= 10),
+      "read takes ten refs a call",
+    );
+    assert.match(
+      found.text,
+      new RegExp(
+        `\\n\\n${left.length} more hits left out to keep this reply within 32 KiB: read with refs \\[`,
+      ),
+    );
+    // Options past the eighth are counted, with the ref that shows them
+    assert.match(found.text, new RegExp(`/ and 4 more options \\(read u${shown[0]}\\)\\n`));
+    assert.match(found.text, /Read a record by its key before relying on it\.\n<\/past-records/);
+    // What it says is enough to reach a hit it left out
+    const first = await w.reply("read", { refs: calls[0] });
+    assert.match(first.text, /^trace:e+\/hit\d{2}\b/m);
+    assert.doesNotMatch(first.text, /not found/i);
+
+    const sources = await w.reply("search", { query: "budgetword", limit: 20, sources: true });
+    const seen = [...sources.text.matchAll(/^## s(\d+): session_message session:/gm)].map((x) => `s${x[1]}`);
+    // Twenty sources fit once each one's artifact and author are clipped
+    assert.equal(seen.length, 20);
+    assert.deepEqual(readCallsIn(sources.text), []);
+  } finally {
+    await w.done();
   }
 });

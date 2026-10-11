@@ -231,7 +231,9 @@ async function doctor(cwd: string): Promise<void> {
   }
   // Reviews and rename notes read the work tree through the git worker, which refuses some places for its own directory.
   // Trying it makes that directory, so a home Sphica has never been set up in is left as it is
-  const tree = fs.existsSync(path.join(os.homedir(), ".sphica")) ? repositoryRoot(cwd) : null;
+  const tree = fs.lstatSync(path.join(os.homedir(), ".sphica"), { throwIfNoEntry: false })
+    ? repositoryRoot(cwd)
+    : null;
   if (tree) {
     const place = await workerPlace(tree);
     if (place === "ready") say("ok", "Git worker", "ready");

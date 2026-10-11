@@ -543,6 +543,10 @@ test("doctor says whether the git worker can use its directory for the work tree
     // A home Sphica was never set up in gets no line, and nothing is made in it
     assert.doesNotMatch(doctor(sub), /Git worker/);
     assert.ok(!fs.existsSync(path.join(home, ".sphica")));
+    // A .sphica that is a link to nowhere is still Sphica's: the worker refuses it, and doctor says so
+    fs.symlinkSync(path.join(base, "nowhere"), path.join(home, ".sphica"));
+    assert.match(doctor(sub), /△ Git worker\s+would not start: .* is a link or not a directory\./);
+    fs.rmSync(path.join(home, ".sphica"));
     fs.mkdirSync(path.join(home, ".sphica"));
     // From a subdirectory: the work tree's root is what is tried, and nothing is left behind
     assert.match(doctor(sub), /✓ Git worker\s+ready\n/);

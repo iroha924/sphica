@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { checkAnchor, locate } from "../src/anchors.ts";
 import { askedBefore } from "../src/asked.ts";
 import { inTransaction } from "../src/db.ts";
-import { readRefs, readUnit } from "../src/read.ts";
+import { fitCount, leftOut, readCalls, readRefs, readUnit } from "../src/read.ts";
 import { reconcile } from "../src/reconcile.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { searchSources, searchUnits } from "../src/search.ts";
@@ -1136,4 +1136,42 @@ test("read says whether an unresolved conflict holds the record back from delive
   } finally {
     await db.done();
   }
+});
+
+test("a reply keeps the parts that fit, measured as it is sent, and names the rest for read ten refs a call", () => {
+  // Multibyte parts, three bytes a character
+  const parts = ["あ".repeat(100), "い".repeat(100), "う".repeat(100)];
+  const reply = (kept: number) =>
+    parts.slice(0, kept).join("\n\n") +
+    leftOut(
+      parts.slice(kept).map((_, i) => `u${kept + i}`),
+      "hits",
+    );
+  // At the byte the whole reply ends on it still fits; one byte less and a part goes, with the note on it counted in
+  const [three, two] = [Buffer.byteLength(reply(3)), Buffer.byteLength(reply(2))];
+  assert.equal(fitCount(parts, three, reply), 3);
+  assert.equal(fitCount(parts, three - 1, reply), 2);
+  assert.equal(fitCount(parts, two, reply), 2);
+  assert.equal(fitCount(parts, two - 1, reply), 1);
+  assert.match(
+    reply(1),
+    /\n\n2 more hits left out to keep this reply within 32 KiB: read with refs \["u1","u2"\]\.$/,
+  );
+  // Characters the frame drops are not counted against the parts: all three still fit where their raw size would not
+  const framedReply = (kept: number) => parts.slice(0, kept).join("\n\n").replaceAll("あ", "");
+  assert.equal(fitCount(parts, 700, framedReply), 3);
+  // Not even the first part
+  assert.equal(fitCount(parts, 10, reply), 0);
+  assert.equal(
+    fitCount([], 10, () => ""),
+    0,
+  );
+  const refs = Array.from({ length: 23 }, (_, i) => `u${i}`);
+  assert.equal(
+    readCalls(refs),
+    [refs.slice(0, 10), refs.slice(10, 20), refs.slice(20)]
+      .map((g) => `read with refs ${JSON.stringify(g)}`)
+      .join(", then "),
+  );
+  assert.equal(leftOut([], "hits"), "");
 });

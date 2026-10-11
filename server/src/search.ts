@@ -8,7 +8,9 @@
 import { sql } from "kysely";
 import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.ts";
 import type { Reads } from "./db.ts";
+import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
+import { fitCount, leftOut, READ_BUDGET } from "./read.ts";
 import { repoPath } from "./record.ts";
 import { ftsQuery, head, identTerm, queryTerms, terms } from "./text.ts";
 
@@ -436,25 +438,90 @@ export async function searchSources(
   return { hits, weaker, terms: wanted, stopped, read };
 }
 
-const hitText = (h: UnitHit) =>
-  [
-    `## ${h.key} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
-    head(h.text, 600),
-    ...(h.why ? [`Why: ${head(h.why, 400)}`] : []),
-    ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, 200)}`] : []),
-    ...(h.options.length
-      ? [
-          `Options: ${h.options.map((o) => `${o.text} (${o.outcome}${o.why ? `: ${head(o.why, 160)}` : ""})`).join(" / ")}`,
-        ]
-      : []),
-    ...(h.anchors.length
-      ? [`Code: ${h.anchors.map((a) => `${a.path}${a.symbol ? ` ${a.symbol}` : ""} (${a.role})`).join(", ")}`]
-      : []),
-    h.successorOf
-      ? `Replaces ${h.successorOf}, which matched`
-      : `Matched: ${h.matched.join(", ")}${h.aliasOnly ? " (search aliases only)" : ""}`,
-  ].join("\n");
+/** How much of each part of a hit search shows, in UTF-8 bytes and counts: a preview, with the whole record one read away */
+const SHOWN = {
+  key: 200,
+  text: 600,
+  why: 400,
+  revisit: 200,
+  options: 8,
+  option: 160,
+  anchors: 8,
+  path: 200,
+  symbol: 100,
+  matched: 300,
+} as const;
 
-/** Hits as the search tool prints them, with Sphica's words for an AI's decision when one is among them */
-export const hitsText = (hits: UnitHit[]) =>
-  [...hits.map(hitText), ...(hits.some((h) => h.authority === "agent") ? [AI_DECIDED] : [])].join("\n\n");
+/** s within n bytes, and whether it was cut */
+const clip = (s: string, n: number): [string, boolean] => {
+  const cut = head(s, n);
+  return [cut, cut !== s];
+};
+
+function hitText(h: UnitHit): string {
+  const [key, keyCut] = clip(h.key, SHOWN.key);
+  const more = (n: number, what: string) => `and ${n} more ${what} (read u${h.id})`;
+  const options = h.options
+    .slice(0, SHOWN.options)
+    .map(
+      (o) => `${head(o.text, SHOWN.option)} (${o.outcome}${o.why ? `: ${head(o.why, SHOWN.option)}` : ""})`,
+    );
+  if (h.options.length > SHOWN.options) options.push(more(h.options.length - SHOWN.options, "options"));
+  const anchors = h.anchors
+    .slice(0, SHOWN.anchors)
+    .map(
+      (a) => `${head(a.path, SHOWN.path)}${a.symbol ? ` ${head(a.symbol, SHOWN.symbol)}` : ""} (${a.role})`,
+    );
+  if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
+  return [
+    // A key cut for display is not one read takes: the id beside it is
+    `## ${key}${keyCut ? "... [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
+    head(h.text, SHOWN.text),
+    ...(h.why ? [`Why: ${head(h.why, SHOWN.why)}`] : []),
+    ...(h.revisit_when ? [`Revisit when: ${head(h.revisit_when, SHOWN.revisit)}`] : []),
+    ...(options.length ? [`Options: ${options.join(" / ")}`] : []),
+    ...(anchors.length ? [`Code: ${anchors.join(", ")}`] : []),
+    h.successorOf
+      ? `Replaces ${head(h.successorOf, SHOWN.key)}, which matched`
+      : `Matched: ${head(h.matched.join(", "), SHOWN.matched)}${h.aliasOnly ? " (search aliases only)" : ""}`,
+  ].join("\n");
+}
+
+/**
+ * search's whole reply for record hits, framed, within READ_BUDGET, with Sphica's words for an AI's decision when one is shown. Hits
+ * that do not fit are named by u<id> for read; after is what follows them (where the search stopped).
+ */
+export function hitsReply(hits: UnitHit[], after: string): string {
+  const parts = hits.map(hitText);
+  const reply = (kept: number) =>
+    framed(
+      [
+        ...parts.slice(0, kept),
+        ...(hits.slice(0, kept).some((h) => h.authority === "agent") ? [AI_DECIDED] : []),
+      ].join("\n\n") +
+        leftOut(
+          hits.slice(kept).map((h) => `u${h.id}`),
+          "hits",
+        ) +
+        `${after}\n\nRead a record by its key before relying on it.`,
+    );
+  return reply(fitCount(parts, READ_BUDGET, reply));
+}
+
+/** search's whole reply for source hits, framed, within READ_BUDGET; hits that do not fit are named by s<id> for read */
+export function sourcesReply(hits: SourceHit[], after: string): string {
+  const parts = hits.map(
+    (h) =>
+      `## s${h.id}: ${h.kind} ${head(h.artifact, SHOWN.path)}, ${head(h.author, SHOWN.symbol)}, ${h.created_at}\n${head(h.text, 800)}\nMatched: ${head(h.matched.join(", "), SHOWN.matched)}`,
+  );
+  const reply = (kept: number) =>
+    framed(
+      parts.slice(0, kept).join("\n\n") +
+        leftOut(
+          hits.slice(kept).map((h) => `s${h.id}`),
+          "hits",
+        ) +
+        after,
+    );
+  return reply(fitCount(parts, READ_BUDGET, reply));
+}
