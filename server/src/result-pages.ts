@@ -66,7 +66,9 @@ function page(r: Result, id: string, from: number, lead: string[]): { text: stri
         : []),
     ].join("\n");
   };
-  const kept = fitCount(r.lines.slice(from), READ_BUDGET, reply);
+  // A page holds at most one line more than the budget has bytes (each line after the first costs its newline), so only that many
+  // are looked at: a long result is not copied whole
+  const kept = fitCount(r.lines.slice(from, from + READ_BUDGET + 1), READ_BUDGET, reply);
   const left = r.lines.length - from - kept;
   // Only a position a reply named is read from later: a cursor edited to another would skip lines without a word
   if (left > 0) r.given.add(from + kept);
