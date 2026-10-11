@@ -180,10 +180,9 @@ const OPENS = /["“'‘`「『]/;
 const CLOSES = /["”'’`」』]/;
 
 /**
- * Why the byte span [start, end) of a message is not its writer's own words, or null when it is: "block" when it touches a line of a
- * block quote or a fenced code block; "inline" when a quotation mark stands right before it and right after it on its line, or it runs
- * into a quotation and nothing but digits and marks is left of it outside. The first inline test needs no pairing of marks, which an
- * apostrophe can throw off; the second catches part of a quotation. A span that mixes the writer's words with a quotation passes.
+ * Why the byte span [start, end) of a message is not its writer's own words, or null when it is: "block" when it touches a block quote
+ * or fenced code; "inline" when quotation marks stand right around it, when it is one quotation with its marks, or when it runs into a
+ * quotation with no letter of the writer's left outside. A span that mixes the writer's words with a quotation passes.
  */
 export function notOwnWords(body: string, start: number, end: number): "block" | "inline" | null {
   const bytes = Buffer.from(body, "utf8");
@@ -234,6 +233,12 @@ export function notOwnWords(body: string, start: number, end: number): "block" |
     at = nl + 1;
   }
   if (OPENS.test(before) && CLOSES.test(after)) return "inline";
+  // One quotation with its marks, over lines too: it opens the span, its partner closes it, and that partner is nowhere in between
+  const span = bytes.subarray(start, end).toString("utf8").trim();
+  const opens = span.slice(0, 1);
+  const closes = PAIRS[opens] ?? (opens === "'" || opens === "`" ? opens : "");
+  if (closes && span.length > 1 && span.endsWith(closes) && !span.slice(1, -1).includes(closes))
+    return "inline";
   // Words no quotation touches are the writer's, a bare number or a symbol included; beside a quotation, only letters count as words
   return !quoting || /\p{L}/u.test(own) ? null : "inline";
 }

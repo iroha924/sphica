@@ -241,6 +241,18 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
   - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/export.test.ts test/reconcile.test.ts test/architecture.test.ts test/audit-quotes.test.ts` → 157 pass, 0 fail
   - 結果: `node run2.ts` → 一時ディレクトリに置いた比較で、直す前後の `notOwnWords` を 60 万通りの入力にかけて `{"total":600000,"differ":0}`。探し方を変えても判定は 1 件も変わらない
 
+- [x] T19: 引用符ごと指定した 1 つの引用を行をまたいでも拒み、監査の案内に撤回の広がりを書く
+  - 種別: 修正
+  - 計画: S1, S5
+  - 依存: T18（直す先の判定と監査を T18 までが作る）
+  - 変更: `server/src/own-words.ts`, `server/src/audit-quotes.ts`, `server/src/deliver.ts`, `scripts/check-architecture.mjs`, `server/test/own-words.test.ts`, `server/test/audit-quotes.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/audit-quotes.test.ts` → 直す前のコードで、複数行にまたがる引用を引用符ごと指定した span が本人の言葉と判定され、見直す条件の案内に撤回の広がりの注意が無く、テストが失敗する
+  - 完了条件: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/audit-quotes.test.ts test/own-words-sites.test.ts test/record.test.ts` → 通る
+  - コミット: `fix(record): refuse a span that is one whole quotation, and warn what a retraction takes`
+  - 結果: red: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/audit-quotes.test.ts` → 直す前のコードで 20 pass, 2 fail
+  - 結果: `node --import ./test/isolate-home.ts --test test/own-words.test.ts test/audit-quotes.test.ts test/own-words-sites.test.ts test/record.test.ts test/extract.test.ts test/export.test.ts test/reconcile.test.ts test/architecture.test.ts` → 159 pass, 0 fail
+  - 結果: `node run3.ts` → 一時ディレクトリに置いた比較で、T18 の前の `notOwnWords` と 50 万通りの入力で比べて `{"total":500000,"same":493968,"nowStricter":6032,"nowLooser":0}`。緩くなった入力は無い
+
 ## 記録
 
 - 2026-10-11 / T01 / `server/test/export.test.ts` の「a quote spanning lines keeps its line breaks inside the fence」が落ちた。閉じていないフェンスにかかる発言の全体を採用に指定していて、新しい規則（ブロックの引用に 1 行でも触れたら拒む）で候補に残るため / テストの採用を、フェンスの前の本人の行（`Use:`）に変えた。根拠は全体のままで、テストが見ている出力の形は変わらない。変更欄に `server/test/export.test.ts` を足した（前の値: 4 ファイル、新しい値: 5 ファイル）
@@ -269,3 +281,4 @@ Codex がタスクごとのコミットで見つけた抜けと後退を塞ぐ�
 - 2026-10-11 / 出荷前レビューの差分（`8977808f..14ef530e`） / パッケージが壊れるところは無い。指摘: 上と同じコメントの穴、`NotOwn` の説明が `inline` の今の意味と合わない、Skill の「引用符の中だけ」が、引用符に挟まれた本人の言葉も拒む今の動きに追いついていない、曲がった引用符と単引用符が対にならないまま並ぶ長い 1 行で、判定の時間が長さの 2 乗で伸びる（288 KB で 39 秒。0.6.47 は数ミリ秒） / 4 件とも受理して T18 で直した。対にならなかった引用符は、その行では探し直さない。確かめてくれたこと: 14ef530e のパッケージは 53 ファイル、`deliver.js`・`capture.js`・`mcp.js`・`git-worker.js` は 8977808f の版と同じ、db・hooks・mcp は 0.6.47 と同じ、数字だけ・`+1`・絵文字だけの採用は通り、引用符の中・曲がった引用符の中の短縮形・`>` の行・CRLF のフェンスは拒む、監査は行がある DB でも前後でファイルが変わらない
 - 2026-10-11 / T18 のレビュー（`ef706397`。1 つ前のコミットと判定を比べさせた） / 指摘なし。探し直しをやめても範囲と判定は変わらず、コメントを空白に置き換えたことによる見逃しも無く、3 つの Skill の文は判定と合っている / タスクごとのレビューの指摘は 10 → 3 → 3 → 8 → 1 → 0 件で閉じた
 - 2026-10-11 / 配信の速さの計測（`node server/evals/scale/run.ts`。main は `cd490938` を新しく clone して依存を入れ直したもの、ブランチは `ef706397`。同じ機械で続けて流した） / 102 の場面の中央値は、main とブランチで計測の揺れの範囲で同じ（1 万件の記録で、プロンプト 136〜179 ms と 137〜178 ms、読み取りと編集 64 ms 前後）。どちらの計測も終了コード 1 で終わる: レビュー用の 2 つの場面が、6 つの大きさと stress の全部で「missing trace:…/k<最後の番号>」を報告する（各 12 件）。main でも同じなので、この変更が原因ではない。今回は直さず、持ち主に別の問題として報告する
+- 2026-10-11 / GitHub の Codex のレビュー（PR #320、`97ecae2b`。コード 6 件、セキュリティのレビューは完了） / (1) P1: 複数行にまたがる引用を引用符ごと指定すると、行ごとの対が取れず、すぐ前後の判定にも当たらずに通る。(2) P1: 監査の「見直す条件」の案内どおりに `retract_evidence` を使うと、同じ source・span を引く記録本体の根拠も一緒に撤回される（`server/src/glean.ts` の撤回は role と option で絞らない）。(3)〜(5) P1: 4 行のコメントが 3 か所（`scripts/check-architecture.mjs`、`server/src/deliver.ts`、`server/src/own-words.ts`）。(6) P2: record 側が空白だけの根拠の引用を見つからない扱いにする / (1)〜(5) は受理して T19 で直した。(1) は、span そのものが 1 つの引用（開きで始まり、その相手で終わり、間に相手が無い）なら拒む。main でも通っていた入力。(2) は案内の文に、その場合は後継の記録で直すと書いた。(6) は棄却: 指摘は「直す前は見つけていた」と言うが、main の `server/src/record.ts` の `locate` も `quote.trim()` が空なら null を返していて、この変更で変わっていない。glean との違いは前からある

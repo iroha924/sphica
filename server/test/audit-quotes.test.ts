@@ -192,6 +192,30 @@ test("what cannot be checked is named with what can be done about it, one line p
   assert.match(auditClosing(audit({ links: 0, withdrawals: 0, resolutions: 0 })), /^0 of 1 row rest/);
 });
 
+test("the advice on a reconsider condition warns that a retraction takes the record's own evidence of the same words", () => {
+  const audit: Audit = {
+    findings: [
+      {
+        project: "o/r",
+        what: "trace:x/storage",
+        kind: "reconsider condition",
+        row: "unit_evidence 4",
+        source: 3,
+        start: 0,
+        end: 4,
+        why: "inline",
+        live: true,
+      },
+    ],
+    read: 1,
+    unchecked: { links: 0, withdrawals: 0, resolutions: 0 },
+  };
+  const advice = auditSections(audit)[0]?.at(-1) ?? "";
+  assert.match(advice, /retract_evidence/);
+  assert.match(advice, /every piece of the record's evidence that cites the same words/);
+  assert.match(advice, /save a successor/);
+});
+
 test("a name from the database cannot start a line of the report", () => {
   const audit: Audit = {
     findings: [

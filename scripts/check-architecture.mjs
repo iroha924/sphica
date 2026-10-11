@@ -130,10 +130,9 @@ for (const f of GIT_STARTERS) {
     fail.push(`${f} names no git to start where check-architecture.mjs looks; fix GIT_STARTERS`);
 }
 
-// Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords (a cast anywhere else forges one), and only
-// AUTHORITY_WRITERS write the rows that keep such words, so a new place cannot save an adoption or a reason no check saw. The types
-// already ask each writer for an OwnWords; this stops the plain ways around them. Beyond what it sees: a table name held in a variable, a
-// cast through a type alias or written in angle brackets, and SQL that sits in a string and is never run.
+// Words that carry authority are checked in one place: only OWN_WORDS makes an OwnWords, and only AUTHORITY_WRITERS write the rows that
+// keep such words. The types ask each writer for one; this stops the plain ways around them. It does not see a table name held in a
+// variable, a cast through a type alias or in angle brackets, or SQL in a string that is never run.
 const OWN_WORDS = "server/src/own-words.ts";
 const AUTHORITY_WRITERS = new Set(["server/src/record.ts", "server/src/glean.ts"]);
 /** A source with each comment turned into a space: a note about a cast or a write is not one, and it still parts the words around it */

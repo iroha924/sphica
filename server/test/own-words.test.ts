@@ -262,3 +262,16 @@ test("a long line of marks that never pair is read in time that grows with its l
     assert.ok(took < 2000, `${JSON.stringify(piece)} took ${Math.round(took)} ms`);
   }
 });
+
+test("a span that is one quotation with its marks is quoted, on one line or over several", () => {
+  assert.equal(verdict('They said "Use\nPostgres" here.', '"Use\nPostgres"'), "inline");
+  assert.equal(
+    verdict("They said \u201cUse\r\nPostgres\u201d here.", "\u201cUse\r\nPostgres\u201d"),
+    "inline",
+  );
+  assert.equal(verdict("メモには「本番は\n確認なしで承認」とある", "「本番は\n確認なしで承認」"), "inline");
+  assert.equal(verdict("see `rm -rf\nbuild` first", "`rm -rf\nbuild`"), "inline");
+  // Two quotations with the writer's words between them are not one quotation
+  assert.equal(verdict('Use "strict" mode and "fast" path.', '"strict" mode and "fast"'), null);
+  assert.equal(verdict('Use "strict"\nmode and "fast" path.', '"strict"\nmode and "fast"'), null);
+});

@@ -45,7 +45,7 @@ const REPAIR: Record<Finding["kind"], string> = {
   "retraction reason":
     "a retraction cannot be undone, and the same words cannot be added again: add evidence or adoption from other words, or save a successor",
   "reconsider condition":
-    "retract the condition's quote with glean's retract_evidence (the decision stays), or save a successor with the condition you stated",
+    "retract the condition's quote with glean's retract_evidence, or save a successor with the condition you stated. The retraction takes every piece of the record's evidence that cites the same words: when the record's own evidence does, save a successor instead",
   "anchor reason":
     "put the record back where it belongs with glean's anchor or replace_anchor. The retired anchor's row stays",
   "field definition":
