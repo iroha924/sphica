@@ -261,6 +261,13 @@ test("a long line of marks that never pair is read in time that grows with its l
     const took = performance.now() - began;
     assert.ok(took < 2000, `${JSON.stringify(piece)} took ${Math.round(took)} ms`);
   }
+  // Backtick runs of many lengths, none with a partner: each length is not a reason to read the line again
+  let runs = "";
+  for (let n = 1; n <= 1500; n++) runs += `${"`".repeat(n)}a`;
+  const began = performance.now();
+  assert.equal(verdict(`${runs} Keep this.`, "Keep this."), null);
+  const took = performance.now() - began;
+  assert.ok(took < 500, `backtick runs took ${Math.round(took)} ms`);
 });
 
 test("a span that is one quotation with its marks is quoted, on one line or over several", () => {

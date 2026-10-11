@@ -114,6 +114,21 @@ const startsWord = (line: string, at: number): boolean => WORD.test(charAt(line,
 /** The ranges of one line, in characters, that sit inside quotation marks or a code span, marks included. */
 function inlineRanges(line: string): Range[] {
   const found: Range[] = [];
+  // Where each run of backticks closes: the next run of its own length, found for every run in one pass from the end of the line
+  const closing = new Map<number, number>();
+  const last = new Map<number, number>();
+  for (let end = line.length; end > 0; ) {
+    if (line[end - 1] !== "`") {
+      end--;
+      continue;
+    }
+    let from = end - 1;
+    while (from > 0 && line[from - 1] === "`") from--;
+    const partner = last.get(end - from);
+    if (partner !== undefined) closing.set(from, partner);
+    last.set(end - from, from);
+    end = from;
+  }
   // A mark that found no partner from where it stood finds none from further on either: it is not looked for again, so a long line of
   // marks that never pair is read once, not once per mark
   const unpaired = new Set<string>();
@@ -127,22 +142,9 @@ function inlineRanges(line: string): Range[] {
       i += width;
       continue;
     }
-    if (c === "`") {
-      // A run of backticks is one delimiter, closed by the next run of the same length
-      for (let j = i + width; j < line.length; ) {
-        if (line[j] !== "`") {
-          j++;
-          continue;
-        }
-        let run = 1;
-        while (line[j + run] === "`") run++;
-        if (run === width) {
-          close = j;
-          break;
-        }
-        j += run;
-      }
-    } else if (c === "'") {
+    // A run of backticks is one delimiter, closed by the next run of the same length
+    if (c === "`") close = closing.get(i) ?? -1;
+    else if (c === "'") {
       // An apostrophe inside a Latin word or after a number is not a quotation mark; beside anything else, in any script, it is one
       if (endsWord(line, i)) {
         i++;
