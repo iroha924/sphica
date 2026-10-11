@@ -135,6 +135,21 @@ trace・harvest・glean・forget の Skill が、新しい返答の形とカー�
   - 結果: `bun run verify:ai` → 終了コード 0（plugin Skills 8 件）
   - 結果: `bun run verify` → 終了コード 0
 
+## P6: レビューで見つかった直し
+
+ブランチ全体のレビューで見つかった、完了条件に当たる問題を直す。
+
+- [x] T10: ホストがキャンセルした `record_context` の呼び出しは、何も「見せた」ことにしない
+  - 種別: 修正
+  - 計画: S3
+  - 依存: T04（見せた発言を記録する箇所が要る）
+  - 変更: `server/src/extract.ts`, `server/src/mcp-record.ts`, `server/test/extract.test.ts`, `server/test/record-state.test.ts`, `server/test/record-world.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/extract.test.ts test/record-state.test.ts` → 直す前（`b48a17b7`）は、キャンセル済みの signal を渡しても呼び出しが成功し（Missing expected rejection）、MCP 経由でキャンセルした呼び出しの後の保存が発言を見た扱いにして落ちる
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(record): count nothing as shown for a context call the host cancelled`
+  - 結果: `node --import ./test/isolate-home.ts --test test/extract.test.ts test/record-state.test.ts` → 直す前は 2 件 fail、直した後は pass（MCP 経由でキャンセルした 5 回の呼び出しの後の保存は何も見た扱いにせず、答えた呼び出しは 400 件を見た扱いにする）
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 - 2026-10-11 / T01・T02 / 1 回目の `bun run verify` が 1 件 fail: `plugin.test.ts` の「全ツールが未知の引数を名前で断る」が、新しい `record_more` の正しい引数を持っていなかった / テストの一覧に `record_more` を足した（ツールの一覧を固定するテストにも足した）
 - 2026-10-11 / T02 / コミットの前の Codex のレビュー（作業ツリーと `2dab50c9` の差分、新しい会話）が 3 件指摘、どれも再現: (1) P2: 行位置が 7 桁になると、サーバー自身が出した続きのカーソルを断る (2) P2: 枠付きの結果は、同じカーソルで枠の id が毎回変わり同じページにならない (3) P3: 分割した最後の断片が 4,096 バイトを 4 バイト超える / 3 件とも採用。先に落ちるテストを書いた。(1) は位置を 15 桁まで、(2) は枠の id を結果を持つときに 1 回だけ引く（`frame.ts` の `framed` が id を受け取れるようにした。`frame.ts` は変更欄に無いが、この直しに要る）、(3) は印の 4 バイトを数える
@@ -150,3 +165,7 @@ trace・harvest・glean・forget の Skill が、新しい返答の形とカー�
 - 2026-10-11 / T05〜T09 / コミットの前の Codex のレビュー（作業ツリーと `89be7daa` の差分、新しい会話）が 1 件指摘（P2、読んで確認）: glean の変更だけの保存では、先頭の件数に変更の数が入らず、件数の行そのものが出ない / 採用。件数に「N changes」を足し、変更が 3 件の glean の保存で先頭が「In all: 3 changes」になるテストを足した
 - 2026-10-11 / T05〜T09 / コミットの前の review-shipping（出荷可の判定。pack した 0.6.50 をリポジトリの外で起動して確認）: `record_check` は 6 ページで最大 32,679 バイト、断られた save（4,200 件のエラー）は 7 ページで最大 32,758 バイト・DB の差は呼び出しの記録だけ、成功した save は 6 ページで読み直しても unit は 20 件のまま。12 MiB を改行なしで送ると両サーバーとも終了コード 1 と stderr の 1 行、通常の終了は 0。確認ダイアログは 32,669 バイトで 50 件の source が全部入り、違う件数・拒否・キャンセルでは何も消えない。bundle は 6 つとも予算内で、`capture.js`・`deliver.js`・`cli.js`・`git-worker.js` は直す前と同じバイト列。指摘 5 件: (1) 「上限超過のときだけ」の条件を外してもテストが通る（SDK 1.31.0 は上限超過か明示の close でしか onclose を呼ばないので、サーバーのプロセスでは見分けられない） (2) 断られた save を commit する弱め方を落とすテストは 1 件だけ (3) 影響を受ける記録が 0 件のとき件数の行が出ない (4) glean と harvest の Skill に、save が断られたときと save の続きの読み方が無い (5) 「ページが…で終わる」は実際の最後の行と字面が違う / (1) は transport を模した単体テストを足した。(2) は 1 件で落ちるのでそのまま。(3) は「No record is affected.」を出す。(4)(5) は Skill を直した
 - 2026-10-11 / 全体 / review-shipping が見つけた、この変更によらない事実: `SPHICA_DB` を指定しても、record サーバーが一時の HOME に `.sphica` ディレクトリを作る場面があった（どの呼び出しかは未確認） / この PR では扱わない。再現できたら issue にする
+- 2026-10-11 / 全体 / 完了条件の実測（`b48a17b7`）: `bun run release:plan -- --base v0.6.49` は `plugin`、4 か所とも 0.6.50。`record-replies.test.ts` 10 件・`record-state.test.ts` 6 件・`stdio-limit.test.ts` 5 件が pass。pack した 0.6.50 をリポジトリの外で展開し、pack した CLI で一時の HOME に登録してから `mcp-record.js` を起動: 0.6.50 を名乗り、ツールは 11 個、`record_more` が答え、40 KB の未知のツール名のエラーは 32,768 バイトで `isError`
+- 2026-10-11 / 全体 / Codex の全差分レビュー（`main..b48a17b7`、新しい会話、指摘 1 件、P2、実 SQLite と SDK 1.31.0 で再現）: `record_context` の呼び出しをホストがキャンセルすると、SDK は返答を送らないのに、発言が見せた扱いに入り、その後の保存で見た扱いになる。main にも同じ穴がある / 採用。T10 を足した。`contextText` が呼び出しの signal を受け取り、見せた発言を記録する直前にキャンセルを確かめる。記録してから返答を送るまでの間にキャンセルが届く場合は残る（返答を送るのは SDK で、送ったかどうかをサーバーは知れない）
+- 2026-10-11 / T10 / コミットの前の review-shipping が、最初の直し（記録する直前に signal を見るだけ）は実際のキャンセルでは効かないと指摘。実際の record サーバーで、クライアントがキャンセルした 12 回の呼び出しのうち 12 回、その後の保存が全部の発言を見た扱いにした（直す前と同じ）。原因: handler は始まってから記録の箇所までイベントループを一度も回さないので、stdin に届いたキャンセルの通知を読めない。効くのは、要求とキャンセルが同じ読み込みで届いた場合だけ / 採用。signal を見る前にイベントループを 2 回回す（`setImmediate` を 2 回待つ）。1 回だと stdin の読み込みが間に入らず落ち、2 回だと通ることを確かめた。MCP 経由のテスト（400 件の発言、キャンセルを 5 回）を足し、6 回流して全部 pass。review-shipping のほかの確認: 通常の呼び出しは今までどおり、`t` のカーソルの経路と「待ちが無い」の早期の return は見せた発言を記録しない、bundle は `mcp-record.js` だけが 126 バイト増え、ほかの 5 つは同じバイト列
+- 2026-10-11 / T10 / 残る場合（PR の本文にも書く）: キャンセルが、イベントループを回した後・返答を送る前に届くと、記録は済んでいて返答は送られない。返答を送るのは SDK で、送ったかどうかをサーバーは知れない

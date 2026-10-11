@@ -227,7 +227,7 @@ server.registerTool(
   async (a, extra) =>
     tool(async () => {
       const { p } = await called("record_context", a.cwd, extra._meta);
-      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto));
+      return framed(await contextText(conn(), a.run, p.projectId, p.root, a.after, a.auto, extra.signal));
     }),
 );
 

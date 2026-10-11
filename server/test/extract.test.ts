@@ -3095,6 +3095,38 @@ test("trace: two reads of a run's first page at once both get cursors the run go
   }
 });
 
+test("trace: a context call the host cancelled counts nothing as shown, so a save marks no message its reply never carried", async () => {
+  const db: TempDb = tempDb();
+  try {
+    const p = project(db);
+    const ids = Array.from({ length: 3 }, (_, i) =>
+      message(db, p, { id: `m${i}`, text: `Message ${i}`, sent: `2026-09-10T00:0${i}:00Z` }),
+    );
+    const run = await beginTrace(db.ingest, p, "s1");
+    // The host gave up on the call while it was reading: the SDK sends no reply for it
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await assert.rejects(
+      contextText(db.ingest, run, p, null, undefined, false, cancelled.signal),
+      /The call was cancelled, so nothing in it counts as shown/,
+    );
+    await saveText(db.ingest, run, p, null, { units: [] });
+    const looked = () =>
+      db.owner
+        .prepare("select distinct source_id from source_processing order by source_id")
+        .all()
+        .map((r) => Number(r.source_id));
+    assert.deepEqual(looked(), []);
+    // A call that is answered counts as before
+    const next = await beginTrace(db.ingest, p, "s1");
+    await contextText(db.ingest, next, p, null, undefined, false, new AbortController().signal);
+    await saveText(db.ingest, next, p, null, { units: [] });
+    assert.deepEqual(looked(), ids);
+  } finally {
+    await db.done();
+  }
+});
+
 // One glean on the owner's decision O and A, a proposal to replace it: what the batch asks for together, judged together
 const gleanBench = async () => {
   const db = tempDb();

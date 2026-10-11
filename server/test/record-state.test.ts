@@ -232,3 +232,30 @@ test("record_more: a result is read again as it was, and after the server restar
     await w.done();
   }
 });
+
+test("record_context: a call the host gave up on shows nothing, so the save after it marks no message", async () => {
+  const w = await recordWorld("context-cancelled");
+  try {
+    const ids = Array.from({ length: 400 }, (_, i) =>
+      message(w.db, w.p, {
+        id: `m${i}`,
+        text: `Message ${i}`,
+        sent: `2026-09-10T00:00:${String(i % 60).padStart(2, "0")}Z`,
+      }),
+    );
+    // Several times over: when the cancellation reaches the server, against the call's own work, is not in the test's hands
+    for (let i = 0; i < 5; i++) {
+      const run = await w.trace();
+      await w.cancelled("record_context", { run });
+      assert.ok(!(await w.reply("record_save", { run, record: { units: [] } })).isError);
+      assert.deepEqual(looked(w), [], `after cancelled call ${i}`);
+    }
+    // A call that is answered counts, as before
+    const run = await w.trace();
+    await w.context(run);
+    assert.ok(!(await w.reply("record_save", { run, record: { units: [] } })).isError);
+    assert.deepEqual(looked(w), ids);
+  } finally {
+    await w.done();
+  }
+});

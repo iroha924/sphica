@@ -64,6 +64,15 @@ export async function recordWorld(
     );
     return { text, isError: r.isError === true };
   };
+  /** Calls a tool and gives up on the call at once, as a host does when the user interrupts: the client hears no reply */
+  const cancelled = async (tool: string, args: Record<string, unknown> = {}) => {
+    const gone = new AbortController();
+    const call = client.callTool({ name: tool, arguments: { cwd: repo, ...args } }, undefined, {
+      signal: gone.signal,
+    });
+    gone.abort();
+    await assert.rejects(call);
+  };
   /** Begins a trace of a session and returns the run */
   const trace = async (session = "s1") =>
     /^run: (\S+)/.exec((await reply("trace_begin", { session })).text)?.[1] ?? "";
@@ -90,6 +99,7 @@ export async function recordWorld(
     p,
     repo,
     reply,
+    cancelled,
     trace,
     context,
     /** Ends the server process and starts a new one against the same database: what the first kept in memory is gone */

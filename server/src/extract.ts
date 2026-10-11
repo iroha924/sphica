@@ -414,6 +414,7 @@ export async function contextText(
   root: string | null,
   after?: string,
   auto = false,
+  signal?: AbortSignal,
 ): Promise<string> {
   const before = shownTo.get(id);
   if (before && before.auto !== auto)
@@ -596,6 +597,10 @@ export async function contextText(
       ].flatMap(pieces),
     };
   }
+  // The host sends no reply for a call it cancelled, so such a call shows nothing. The cancellation comes on stdin, which is read only
+  // when this call lets the event loop turn: twice, so that a read falls between the two
+  if (signal) for (let i = 0; i < 2; i++) await new Promise((turn) => setImmediate(turn));
+  if (signal?.aborted) throw new Error("The call was cancelled, so nothing in it counts as shown");
   // Recorded only now, after every await: a save running meanwhile never counts a source this reply has not returned yet. The entry
   // is read again here, since another call for this run may have made it while this one waited
   const shown: Shown = shownTo.get(id) ?? {
