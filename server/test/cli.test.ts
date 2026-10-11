@@ -505,3 +505,79 @@ test("doctor --audit-quotes reads the database without changing a byte of it, an
   assert.notEqual(none.code, 0);
   assert.match(none.out, /No database at/, none.out);
 });
+
+// The review check and rename notes read a work tree through the git worker; doctor is where a refusal can be looked up
+test("doctor says whether the git worker can use its directory for the work tree it is run in", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-cli-worker-")));
+  const [home, tmp, repo] = ["home", "tmp", "repo"].map((name) => path.join(base, name)) as [
+    string,
+    string,
+    string,
+  ];
+  const sub = path.join(repo, "src", "deep");
+  for (const dir of [home, tmp, sub]) fs.mkdirSync(dir, { recursive: true });
+  execFileSync("git", ["init", "-q", repo], { stdio: "ignore" });
+  const doctor = (cwd: string, temp = tmp): string => {
+    try {
+      return execFileSync(process.execPath, [CLI, "doctor"], {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          PATH: `${signedOut}${path.delimiter}${process.env.PATH ?? ""}`,
+          HOME: home,
+          USERPROFILE: home,
+          TMPDIR: temp,
+          TMP: temp,
+          TEMP: temp,
+        },
+        timeout: 30_000,
+      });
+    } catch (e) {
+      // No database here, so doctor exits 1; its report is what is read
+      const err = e as { stdout?: string; stderr?: string };
+      return `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    }
+  };
+  try {
+    // A home Sphica was never set up in gets no line, and nothing is made in it
+    assert.doesNotMatch(doctor(sub), /Git worker/);
+    assert.ok(!fs.existsSync(path.join(home, ".sphica")));
+    // A .sphica that is a link to nowhere is still Sphica's: the worker refuses it, and doctor says so
+    fs.symlinkSync(path.join(base, "nowhere"), path.join(home, ".sphica"));
+    assert.match(doctor(sub), /△ Git worker\s+would not start: .* is a link or not a directory\./);
+    fs.rmSync(path.join(home, ".sphica"));
+    fs.mkdirSync(path.join(home, ".sphica"));
+    // From a subdirectory: the work tree's root is what is tried, and nothing is left behind
+    assert.match(doctor(sub), /✓ Git worker\s+ready\n/);
+    assert.deepEqual(fs.readdirSync(path.join(home, ".sphica", "git")), ["hooks"]);
+    // A temp directory that holds the home
+    const inTmp = doctor(sub, base);
+    assert.match(
+      inTmp,
+      /△ Git worker\s+would not start: Sphica's git folder \(\.sphica\/git under your home directory\) overlaps the temp directory, which an agent can write\. Reviews cannot read this work tree until that changes\n/,
+    );
+    assert.ok(
+      !(inTmp.split("\n").find((l) => l.includes("Git worker")) ?? base).includes(base),
+      "no path of the machine in the reason",
+    );
+    assert.deepEqual(fs.readdirSync(path.join(home, ".sphica", "git")), ["hooks"]);
+    // Something put into the hooks folder Sphica keeps empty
+    const planted = path.join(home, ".sphica", "git", "hooks", "post-checkout");
+    fs.writeFileSync(planted, "");
+    assert.match(doctor(sub), /△ Git worker\s+would not start: the hooks folder inside .* holds files\./);
+    fs.rmSync(planted);
+    // The home itself as the work tree, asked from a folder below it: the root is what overlaps, not where doctor was run
+    execFileSync("git", ["init", "-q", home], { stdio: "ignore" });
+    const below = path.join(home, "proj", "sub");
+    fs.mkdirSync(below, { recursive: true });
+    assert.match(
+      doctor(below),
+      /△ Git worker\s+would not start: .* overlaps this work tree, which an agent can write\./,
+    );
+    // Outside git there is no work tree to read
+    assert.doesNotMatch(doctor(tmp), /Git worker/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

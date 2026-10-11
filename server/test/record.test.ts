@@ -1365,6 +1365,18 @@ test("rename: read shows where a missing anchor's file may have moved since its 
     await readUnit(db.reader, p, "trace:ext-s1/files", root, undefined, renames);
     assert.equal(renames.sets, 1, "another record in the same read reuses it");
 
+    // A git worker that would not start is named, with where to look next
+    const refused = new Map([[commit, { unread: "refused", code: "overlaps_tmp" } as const]]);
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/files", root, undefined, refused)) ?? "",
+      /dates\.ts toStored \(evidence, commit [0-9a-f]{12}\): missing[^\n]*; rename not checked \(Sphica's git folder \(\.sphica\/git under your home directory\) overlaps the temp directory, which an agent can write; run sphica doctor in this work tree\)/,
+    );
+    const slow = new Map([[commit, { unread: "timeout" } as const]]);
+    assert.match(
+      (await readUnit(db.reader, p, "trace:ext-s1/files", root, undefined, slow)) ?? "",
+      /dates\.ts toStored \(evidence, commit [0-9a-f]{12}\): missing[^\n]*; rename not checked\n/,
+    );
+
     // A commit git cannot read: the rename is not checked
     insert(db, "unit_anchor", {
       unit_id: Number(db.owner.prepare("select id from unit where key = 'trace:ext-s1/files'").get()?.id),

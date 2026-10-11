@@ -178,7 +178,7 @@ test("earlier owner messages show what quotes them, the live record after replac
     assert.equal(d?.reply, w.ids.d2);
     assert.equal(r.repeats, null, "session A recorded a decision");
     const text = askedText(r);
-    assert.match(text, /^Earlier owner messages matching: /);
+    assert.match(text, /^<past-records id="[0-9a-f]+">\n[^\n]+\nEarlier owner messages matching: /);
     assert.doesNotMatch(text, /question/i);
     assert.match(text, /- trace:A\/pnpm \(decision, superseded; now trace:A\/bun \(active\)\)/);
     const block = (id: number) => text.split("\n\n").find((b) => b.startsWith(`## s${id}:`)) ?? "";
@@ -224,14 +224,14 @@ test("a matter asked in several sessions with no recorded decision lists them, c
     );
     // Without the current session known, nothing is called earlier and the count may include it
     const unknown = askedText(r, false);
-    assert.match(unknown, /^Owner messages matching: /);
+    assert.match(unknown, /^<past-records id="[0-9a-f]+">\n[^\n]+\nOwner messages matching: /);
     assert.match(
       unknown,
       /Matching messages in 2 sessions with no recorded decision \(current session may be included\):/,
     );
     assert.match(
       unknown,
-      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\.$/,
+      /Current session unknown; results and session counts may include its messages\. Pass session to exclude it\.\n<\/past-records id="[0-9a-f]+">$/,
     );
     // The current session is left out
     assert.ok(r.messages.every((e) => !["A", "D"].includes(e.message.session ?? "")));
@@ -426,4 +426,178 @@ test("the reply is the turn's last assistant message, and tied records are bound
   } finally {
     await db.done();
   }
+});
+
+test("an asked reply keeps what it says about the whole result when messages give way, and marks an id it had to cut", () => {
+  const led = (i: number) => ({
+    id: 100 + i,
+    key: `trace:${"k".repeat(400)}/${i}`,
+    kind: "finding",
+    lifecycle: "active",
+    now: Array.from({ length: 5 }, (_, n) => ({
+      id: 1000 + n,
+      key: `trace:${"n".repeat(400)}/${n}`,
+      lifecycle: "active",
+    })),
+  });
+  const message = (id: number) => ({
+    message: {
+      id,
+      kind: "session_message",
+      artifact: "session:A",
+      author: "owner",
+      created_at: "2026-09-10T00:00:00.000Z",
+      text: "t".repeat(2000),
+      matched: ["word"],
+      session: "A",
+      turn: null,
+    },
+    led: Array.from({ length: 10 }, (_, i) => led(i)),
+    hidden: 0,
+    context: [
+      {
+        id: 77,
+        key: `trace:${"c".repeat(400)}/x`,
+        kind: "finding",
+        lifecycle: "active",
+        speaker: "owner",
+        role: "states",
+      },
+    ],
+    direct: new Set<number>(),
+    decided: true,
+    traced: true,
+    reply: null,
+  });
+  const longId = "i".repeat(150);
+  const text = askedText(
+    {
+      messages: Array.from({ length: 20 }, (_, i) => message(i + 1)),
+      repeats: { untraced: [longId, "short-id"], traced: ["B"] },
+      terms: ["word"],
+      weaker: 0,
+      stopped: true,
+      read: 600,
+    } as never,
+    false,
+  );
+  assert.ok(Buffer.byteLength(text) <= 32 * 1024, `${Buffer.byteLength(text)} bytes`);
+  const [inside, outside] = text.split(/^<\/past-records id="[0-9a-f]+">$/m) as [string, string];
+  // Messages were left out, and what covers the whole result is still there
+  assert.match(
+    outside,
+    /^\n\d+ more messages left out to keep this reply within 32 KiB: read with refs \["s\d+"/,
+  );
+  // Each one left out still says, by id, what it led to: read on the message alone would not
+  const briefs = [
+    ...outside.matchAll(
+      /^- s\d+: led to u100, u101, u102, u103, u104, u105, u106, u107, u108, u109; same turn u77$/gm,
+    ),
+  ];
+  assert.equal(briefs.length, Number(/^\n(\d+) more messages/.exec(outside)?.[1]));
+  assert.ok(briefs.length > 0);
+  assert.match(outside, /\nWhat each of them led to \(read a record by its u<id>\):\n- s/);
+  assert.match(
+    inside,
+    /\nMatching messages in 3 sessions with no recorded decision \(current session may be included\) \(within the first 600 candidates by rank\):\n/,
+  );
+  assert.match(inside, /\nStopped after 600 candidates by rank; more may match\.\n/);
+  assert.match(inside, /\nCurrent session unknown; /);
+  // A message left out says the rest by id and count too: what the filters hid, the reply, whether a trace looked at it
+  const one = {
+    ...message(9),
+    led: [],
+    hidden: 2,
+    context: [],
+    decided: false,
+    traced: false,
+    reply: 12,
+    message: { ...message(9).message, text: "t".repeat(2000) },
+  };
+  // More records than a full entry lists: the line of a message left out names every one, since nothing else leads to the eleventh
+  const eleven = {
+    ...message(8),
+    led: Array.from({ length: 11 }, (_, i) => led(i)),
+    context: Array.from({ length: 12 }, (_, i) => ({ ...message(8).context[0], id: 200 + i })),
+  };
+  const crowded = askedText(
+    {
+      messages: [...Array.from({ length: 19 }, (_, i) => message(20 + i)), one, eleven],
+      repeats: null,
+      terms: ["word"],
+      weaker: 0,
+      stopped: false,
+      read: 20,
+    } as never,
+    true,
+  );
+  assert.match(
+    crowded.split(/^<\/past-records id="[0-9a-f]+">$/m)[1] ?? "",
+    /^- s9: led to no record; 2 tied records hidden by the filters; reply s12; no recorded decision, not traced yet$/m,
+  );
+  assert.match(
+    crowded.split(/^<\/past-records id="[0-9a-f]+">$/m)[1] ?? "",
+    new RegExp(
+      `^- s8: led to ${Array.from({ length: 11 }, (_, i) => `u${100 + i}`).join(", ")}; same turn ${Array.from({ length: 12 }, (_, i) => `u${200 + i}`).join(", ")}$`,
+      "m",
+    ),
+  );
+  // Only when the ids alone would pass the budget are they capped and the rest counted: every message still has its line
+  const many = (id: number) => ({
+    ...message(id),
+    led: Array.from({ length: 5000 }, (_, i) => ({ ...led(0), id: 1_000_000_000_000_000 + i })),
+  });
+  const flood = askedText(
+    {
+      messages: Array.from({ length: 20 }, (_, i) => many(40 + i)),
+      repeats: null,
+      terms: ["word"],
+      weaker: 0,
+      stopped: false,
+      read: 20,
+    } as never,
+    true,
+  );
+  assert.ok(Buffer.byteLength(flood) <= 32 * 1024, `${Buffer.byteLength(flood)} bytes`);
+  const capped = [...flood.matchAll(/^- s\d+: led to (?:u\d+, )+and (\d+) more; same turn u77$/gm)];
+  assert.equal(capped.length + [...flood.matchAll(/^## s\d+: /gm)].length, 20);
+  assert.ok(capped.length >= 10, `${capped.length} lines`);
+  for (const c of capped) assert.ok(Number(c[1]) < 5000 - 10, `${c[1]} more`);
+  // A message of a session whose id is too long to show does not offer a command with the cut id
+  const untraced = askedText(
+    {
+      messages: [
+        {
+          ...message(1),
+          led: [],
+          context: [],
+          decided: false,
+          traced: false,
+          message: { ...message(1).message, session: longId },
+        },
+      ],
+      repeats: null,
+      terms: ["word"],
+      weaker: 0,
+      stopped: false,
+      read: 1,
+    } as never,
+    true,
+  );
+  assert.match(
+    untraced,
+    /\nNo recorded decision\. Not traced yet: its session id is too long to show whole here \(i{100}… \[id cut\]\); \/sphica:trace pending lists the sessions that wait\.\n/,
+  );
+  assert.doesNotMatch(untraced, /run \/sphica:trace i/);
+  // An id too long to show whole is not passed off as one trace takes; a short one is shown as it is
+  assert.match(inside, /\n- not traced yet: i{100}… \[id cut\], short-id \(run \/sphica:trace with each\)\n/);
+  // A tied record names three of its live successors and counts the rest
+  assert.match(
+    inside,
+    /^- trace:k{194}… \[key cut: read u100\] \(finding, active; now trace:n{194}… \[key cut: read u1000\] \(active\), trace:n{194}… \[key cut: read u1001\] \(active\), trace:n{194}… \[key cut: read u1002\] \(active\), and 2 more\)$/m,
+  );
+  assert.match(
+    inside,
+    /^- trace:c{194}… \[key cut: read u77\] \(finding, active\): quotes the owner \(states\)$/m,
+  );
 });

@@ -9,6 +9,7 @@
 // fails at parse time. Usage text is built from these declarations and never written separately.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { confirm, isCancel } from "@clack/prompts";
 import {
@@ -49,6 +50,7 @@ import {
   title,
 } from "./cli/view.ts";
 import { dbFile, type Reads, SCHEMA_REVISION } from "./db.ts";
+import { refusalText, workerPlace } from "./git.ts";
 import { ghUser } from "./github.ts";
 import { inline, type Mark, mark, pad, plain, width } from "./panel.ts";
 import { observe, packageVersionAt, ROOT, report, UPDATE_NOTE } from "./plugin.ts";
@@ -226,6 +228,27 @@ async function doctor(cwd: string): Promise<void> {
   } catch (e) {
     runtime = false;
     say("fail", "Node", plain(reason(e)));
+  }
+  // Reviews and rename notes read the work tree through the git worker, which refuses some places for its own directory.
+  // Trying it makes that directory, so a home Sphica has never been set up in is left as it is
+  const tree = fs.lstatSync(path.join(os.homedir(), ".sphica"), { throwIfNoEntry: false })
+    ? repositoryRoot(cwd)
+    : null;
+  if (tree) {
+    const place = await workerPlace(tree);
+    if (place === "ready") say("ok", "Git worker", "ready");
+    else if (place.unread === "refused")
+      say(
+        "warn",
+        "Git worker",
+        `would not start: ${refusalText(place.code)}. Reviews cannot read this work tree until that changes`,
+      );
+    else
+      say(
+        "warn",
+        "Git worker",
+        place.unread === "timeout" ? "did not answer in time" : "could not be started",
+      );
   }
   const file = dbFile();
   let usable = false;

@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { HookInput } from "./capture.ts";
-import { baseRef, listFiles, mergeBase, worktreeDiff } from "./git.ts";
+import { baseRef, listFiles, mergeBase, refusalText, type Unread, unreadOf, worktreeDiff } from "./git.ts";
 import { type FileDiff, parseDiff } from "./review.ts";
 import { sha256 } from "./text.ts";
 
@@ -53,6 +53,14 @@ export function reviewCall(input: ReviewInput): { name: string; args: string } |
 /** A local change, with a digest of what was read so a review of the same change is told once */
 export type Change = { base: string; files: FileDiff[]; digest: string } | { problem: string };
 
+/** Why the local change could not be read, as the review's reply puts it: a slow or large change is not blamed for a refusal or a failure */
+function unreadText(why: Unread): string {
+  if (why.unread === "refused")
+    return `Sphica's git worker would not start, because ${refusalText(why.code)} (run sphica doctor in this work tree)`;
+  if (why.unread === "failed") return "the change could not be read (git failed or could not be started)";
+  return "the change could not be read in time, or is too large to read (over 4 MB of diff or file names)";
+}
+
 /**
  * The local change a review covers: the working tree against the merge base with the default branch (origin/HEAD, else the upstream),
  * plus untracked files. When the base or the whole change cannot be read, says why instead of checking a smaller range.
@@ -82,15 +90,12 @@ export async function localChange(root: string, args: string): Promise<Change> {
   // Prefixes and quoting pinned against settings that change what diff prints; names hold every changed path, including binary and
   // empty files that print no ---/+++ lines
   const got = await worktreeDiff(root, from, { max: MAX_DIFF, deadline: left() });
+  if ("unread" in got) return { problem: unreadText(got) };
   let untracked: string[];
   try {
-    if (!got) throw new Error("no diff");
     untracked = listFiles(root, "untracked", { max: MAX_DIFF, timeout: left() });
-  } catch {
-    return {
-      problem:
-        "the change could not be read in time, or is too large to read (over 4 MB of diff or file names)",
-    };
+  } catch (e) {
+    return { problem: unreadText(unreadOf(e)) };
   }
   const { patch: diff, names } = got;
   const files = parseDiff(diff);

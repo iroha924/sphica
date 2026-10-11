@@ -24,10 +24,30 @@ import {
 export type WorktreeOp =
   | { kind: "status" }
   | { kind: "diff"; from: string }
-  | { kind: "renames"; commit: string };
+  | { kind: "renames"; commit: string }
+  // Only tries the worker's directory for this work tree: nothing is prepared and git does not run
+  | { kind: "place" };
 /** until: the time (ms since the epoch) by which every git the worker starts has ended or been killed */
 export type WorkerRequest = { root: string; ops: WorktreeOp[]; max: number; until: number };
-export type WorkerResult = { ok: true; out: string[] } | { ok: false; error: string };
+/** Why the worker would not use its directory: each is a state of the owner's machine, not a failure of git */
+export type Refusal =
+  | "hooks_not_empty"
+  | "not_plain_dir"
+  | "outside_home"
+  | "overlaps_worktree"
+  | "overlaps_tmp";
+export type WorkerResult =
+  | { ok: true; out: string[] }
+  | { ok: false; refused: Refusal }
+  | { ok: false; failed: "timeout" | "too_large" | "failed" };
+
+class Refused extends Error {
+  readonly code: Refusal;
+  constructor(code: Refusal) {
+    super(code);
+    this.code = code;
+  }
+}
 
 const INDEX_LIMIT = 256 * 1024 * 1024;
 const FILE_LIMIT = 1024 * 1024;
@@ -43,9 +63,13 @@ const overlap = (a: string, b: string) => inside(a, b) || inside(b, a);
 /** A directory under parent that is a real directory, made when missing; a link there is refused, since git would follow it */
 function ownDir(parent: string, name: string): string {
   const dir = path.join(parent, name);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { mode: 0o700 });
-  const st = fs.lstatSync(dir);
-  if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`${dir} is not a plain directory`);
+  // lstat, not existsSync: a link that leads nowhere is still there, and mkdir over it fails as if git had
+  let st = fs.lstatSync(dir, { throwIfNoEntry: false });
+  if (!st) {
+    fs.mkdirSync(dir, { mode: 0o700 });
+    st = fs.lstatSync(dir);
+  }
+  if (!st.isDirectory() || st.isSymbolicLink()) throw new Refused("not_plain_dir");
   return dir;
 }
 
@@ -57,16 +81,24 @@ export function isolatedHome(root: string): { git: string; iso: string; hooks: s
   const home = fs.realpathSync(os.homedir());
   const git = ownDir(ownDir(home, ".sphica"), "git");
   const hooks = ownDir(git, "hooks");
-  if (fs.readdirSync(hooks).length) throw new Error(`${hooks} is not empty`);
+  if (fs.readdirSync(hooks).length) throw new Refused("hooks_not_empty");
   const iso = fs.mkdtempSync(path.join(git, "iso-"));
-  const st = fs.lstatSync(iso);
-  if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`${iso} is not a plain directory`);
-  const real = fs.realpathSync(iso);
-  if (!inside(home, real) || real !== iso) throw new Error(`${iso} leads out of HOME`);
-  for (const other of [root, os.tmpdir()]) {
-    const otherReal = fs.realpathSync(other);
-    if (overlap(real, otherReal) || overlap(git, otherReal))
-      throw new Error(`${git} overlaps ${otherReal}, which an agent can write`);
+  try {
+    const st = fs.lstatSync(iso);
+    if (!st.isDirectory() || st.isSymbolicLink()) throw new Refused("not_plain_dir");
+    const real = fs.realpathSync(iso);
+    if (!inside(home, real) || real !== iso) throw new Refused("outside_home");
+    for (const [other, code] of [
+      [root, "overlaps_worktree"],
+      [os.tmpdir(), "overlaps_tmp"],
+    ] as const) {
+      const otherReal = fs.realpathSync(other);
+      if (overlap(real, otherReal) || overlap(git, otherReal)) throw new Refused(code);
+    }
+  } catch (e) {
+    // A directory that will not be used is not left for the next worker to sweep
+    fs.rmSync(iso, { recursive: true, force: true });
+    throw e;
   }
   return { git, iso, hooks };
 }
@@ -248,7 +280,7 @@ function prepare(
 }
 
 /** The git arguments for one operation */
-function argsOf(op: WorktreeOp): string[] {
+function argsOf(op: Exclude<WorktreeOp, { kind: "place" }>): string[] {
   const oid = (s: string) => {
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(s)) throw new Error(`not an object id: ${JSON.stringify(s)}`);
     return s;
@@ -276,8 +308,10 @@ function work(request: WorkerRequest): WorkerResult {
     // Each git gets what is left of the deadline, so none outlives the worker the caller stopped waiting for
     const remaining = () => ({ timeout: Math.max(1, Math.floor(request.until - Date.now())) });
     try {
+      if (request.ops.every((op) => op.kind === "place")) return { ok: true, out: [] };
       const { env, options } = prepare(request.root, iso, hooks, remaining);
       const out = request.ops.flatMap((op) => {
+        if (op.kind === "place") return [];
         const run = (args: string[]) =>
           execFileSync("git", ["-C", request.root, ...options, ...args], {
             cwd: startDir(),
@@ -301,7 +335,13 @@ function work(request: WorkerRequest): WorkerResult {
       fs.rmSync(iso, { recursive: true, force: true });
     }
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    if (e instanceof Refused) return { ok: false, refused: e.code };
+    // execFileSync names a git it killed at the deadline, and one that printed more than max
+    const code = (e as NodeJS.ErrnoException).code;
+    return {
+      ok: false,
+      failed: code === "ETIMEDOUT" ? "timeout" : code === "ENOBUFS" ? "too_large" : "failed",
+    };
   }
 }
 
@@ -313,7 +353,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     try {
       request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as WorkerRequest;
     } catch {
-      process.stdout.write(JSON.stringify({ ok: false, error: "the request is not JSON" }));
+      process.stdout.write(JSON.stringify({ ok: false, failed: "failed" } satisfies WorkerResult));
       return;
     }
     process.stdout.write(JSON.stringify(work(request)));

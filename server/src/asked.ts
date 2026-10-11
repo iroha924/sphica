@@ -5,10 +5,12 @@
 // the same matter asked across sessions with none. Only direct quotes tie a record to a message; the rest of its turn is context.
 
 import type { Reads } from "./db.ts";
+import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
 import { inline } from "./panel.ts";
+import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { liveSuccessors, type SourceHit, type Successor, searchSources } from "./search.ts";
-import { head } from "./text.ts";
+import { bytes, head } from "./text.ts";
 
 /** Kinds that record a decision the owner made. A candidate is not adopted yet, so it never counts. */
 const DECIDED_KINDS = new Set(["decision", "constraint"]);
@@ -17,7 +19,7 @@ const DECIDED_LIFECYCLES = new Set(["active", "superseded", "withdrawn"]);
 const PER_MESSAGE = 10;
 
 type Tied = { id: number; key: string; kind: string; lifecycle: string; now: Successor[] };
-type Context = { key: string; kind: string; lifecycle: string; speaker: string; role: string };
+type Context = { id: number; key: string; kind: string; lifecycle: string; speaker: string; role: string };
 
 type Earlier = {
   message: SourceHit;
@@ -179,6 +181,7 @@ async function sameTurn(
     if (e.direct.has(c.id) || !kept(c) || seen.has(k)) continue;
     seen.add(k);
     e.context.push({
+      id: c.id,
       key: c.key,
       kind: c.kind,
       lifecycle: c.lifecycle,
@@ -192,55 +195,132 @@ async function sameTurn(
 export const UNKNOWN_SESSION =
   "Current session unknown; results and session counts may include its messages. Pass session to exclude it.";
 
+/** How many live successors a tied record names: one message's part then has a size it cannot pass, and fits a reply alone */
+const NOW = 3;
+
+/** How many sessions a list names before it counts the rest: a matter raised in hundreds of sessions is still one line */
+const SESSIONS = 20;
+
+/** A key, artifact, or session id from the database as a line shows it: one line, marked when cut. The whole value is one read away */
+const shown = (s: string, n = 200) => preview(s, n);
+
+/** What to do about a message no trace looked at. An id too long to show whole is not offered as the command's argument */
+const untraced = (session: string): string => {
+  const id = shown(session, 100);
+  return id === inline(session)
+    ? `Not traced yet: run /sphica:trace ${id}.`
+    : `Not traced yet: its session id is too long to show whole here (${id} [id cut]); /sphica:trace pending lists the sessions that wait.`;
+};
+
 /**
- * The result as the read MCP server returns it. Record keys and message text are data from the database, kept on single lines.
- * `known` says whether the current session was left out; if not, nothing is called earlier.
+ * How many ids the line of a message left out names, tried in this order: every one, since read on the message itself does not lead to
+ * its records, and fewer only when the ids alone would pass the budget
+ */
+const BRIEF_IDS = [Number.POSITIVE_INFINITY, 1000, 300, 100, 30, PER_MESSAGE];
+
+/** A message left out of the reply, as one line of ids: what it led to stays reachable, record by record, with read */
+const brief = (e: Earlier, cap: number): string => {
+  const ids = (us: { id: number }[]) =>
+    `${us
+      .slice(0, cap)
+      .map((u) => `u${u.id}`)
+      .join(", ")}${us.length > cap ? `, and ${us.length - cap} more` : ""}`;
+  return [
+    `- s${e.message.id}: ${e.led.length ? `led to ${ids(e.led)}` : "led to no record"}`,
+    ...(e.hidden ? [`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters`] : []),
+    ...(e.context.length ? [`same turn ${ids(e.context)}`] : []),
+    ...(e.reply !== null ? [`reply s${e.reply}`] : []),
+    ...(e.decided ? [] : [`no recorded decision${e.traced ? "" : ", not traced yet"}`]),
+  ].join("; ");
+};
+
+/**
+ * The result as the read MCP server returns it, framed, within READ_BUDGET. Record keys and message text are data from the database, kept
+ * on single lines. Messages that do not fit are named by s<id> for read. `known` says whether the current session was left out; if not,
+ * nothing is called earlier.
  */
 export function askedText(r: Asked, known = true): string {
   const parts = r.messages.map((e) => {
     const m = e.message;
     // The message is kept on one line, so its own words cannot pass for a heading or a verdict
-    const lines = [`## s${m.id}: ${inline(m.artifact)}, ${m.created_at}`, inline(head(m.text, 600))];
+    const lines = [`## s${m.id}: ${shown(m.artifact)}, ${m.created_at}`, preview(m.text, 600)];
     if (e.led.length) {
       lines.push("Led to:");
       for (const u of e.led.slice(0, PER_MESSAGE))
         lines.push(
-          `- ${inline(u.key)} (${u.kind}, ${u.lifecycle}${u.now.length ? `; now ${u.now.map((n) => `${inline(n.key)} (${n.lifecycle})`).join(", ")}` : ""})`,
+          `- ${keyShown(u.key, u.id)} (${u.kind}, ${u.lifecycle}${
+            u.now.length
+              ? `; now ${u.now
+                  .slice(0, NOW)
+                  .map((n) => `${keyShown(n.key, n.id)} (${n.lifecycle})`)
+                  .join(", ")}${u.now.length > NOW ? `, and ${u.now.length - NOW} more` : ""}`
+              : ""
+          })`,
         );
     }
     if (e.led.length > PER_MESSAGE) lines.push(`and ${e.led.length - PER_MESSAGE} more tied records`);
     if (e.hidden) lines.push(`${e.hidden} tied record${e.hidden === 1 ? "" : "s"} hidden by the filters.`);
-    if (!e.decided)
-      lines.push(
-        `No recorded decision.${e.traced ? "" : ` Not traced yet: run /sphica:trace ${inline(m.session ?? "")}.`}`,
-      );
+    if (!e.decided) lines.push(`No recorded decision.${e.traced ? "" : ` ${untraced(m.session ?? "")}`}`);
     if (e.context.length) {
       lines.push("Same turn (context, not necessarily the answer):");
       for (const c of e.context.slice(0, PER_MESSAGE))
-        lines.push(`- ${inline(c.key)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`);
+        lines.push(
+          `- ${keyShown(c.key, c.id)} (${c.kind}, ${c.lifecycle}): quotes the ${c.speaker} (${c.role})`,
+        );
       if (e.context.length > PER_MESSAGE)
         lines.push(`and ${e.context.length - PER_MESSAGE} more in the same turn`);
     }
     if (e.reply !== null) lines.push(`Reply: s${e.reply} (read it with read)`);
     return lines.join("\n");
   });
-  const out = [`${known ? "Earlier owner" : "Owner"} messages matching: ${r.terms.join(", ")}`, ...parts];
+  const sessions = (ids: string[]) =>
+    `${ids
+      .slice(0, SESSIONS)
+      // An id is what /sphica:trace takes, so one too long to show whole is marked, not passed off as usable
+      .map((id) => (shown(id, 100) === inline(id) ? inline(id) : `${shown(id, 100)} [id cut]`))
+      .join(", ")}${ids.length > SESSIONS ? `, and ${ids.length - SESSIONS} more` : ""}`;
+  const after: string[] = [];
   if (r.repeats) {
     const n = r.repeats.untraced.length + r.repeats.traced.length;
     const within = r.stopped ? ` (within the first ${r.read} candidates by rank)` : "";
-    out.push(
+    after.push(
       [
         known
           ? `Asked in ${n} sessions with no recorded decision${within}:`
           : `Matching messages in ${n} sessions with no recorded decision (current session may be included)${within}:`,
         ...(r.repeats.untraced.length
-          ? [`- not traced yet: ${r.repeats.untraced.map(inline).join(", ")} (run /sphica:trace with each)`]
+          ? [`- not traced yet: ${sessions(r.repeats.untraced)} (run /sphica:trace with each)`]
           : []),
-        ...(r.repeats.traced.length ? [`- traced: ${r.repeats.traced.map(inline).join(", ")}`] : []),
+        ...(r.repeats.traced.length ? [`- traced: ${sessions(r.repeats.traced)}`] : []),
       ].join("\n"),
     );
   }
-  if (r.stopped) out.push(`Stopped after ${r.read} candidates by rank; more may match.`);
-  if (!known) out.push(UNKNOWN_SESSION);
-  return out.join("\n\n");
+  if (r.stopped) after.push(`Stopped after ${r.read} candidates by rank; more may match.`);
+  if (!known) after.push(UNKNOWN_SESSION);
+  const lead = `${known ? "Earlier owner" : "Owner"} messages matching: ${head(r.terms.join(", "), 400)}`;
+  // What is said about the whole result (the sessions, where the search stopped) is kept; the messages give way. The messages
+  // left out are named after the frame's closing line, where only Sphica writes
+  const reply = (kept: number, cap: number) => {
+    const left = r.messages.slice(kept);
+    return [
+      framed([lead, ...parts.slice(0, kept), ...after].join("\n\n")),
+      leftOut(
+        left.map((e) => `s${e.message.id}`),
+        "messages",
+      ),
+      // Only ids and counts, so nothing a record or a message says is outside the frame
+      ...(left.length
+        ? ["What each of them led to (read a record by its u<id>):", ...left.map((e) => brief(e, cap))]
+        : []),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
+  // Reaching every record comes first: the cap is the largest with which the reply fits when no message is shown in full, and the
+  // messages shown in full take the room that leaves
+  const cap = BRIEF_IDS.find((c) => bytes(reply(0, c)) <= READ_BUDGET) ?? PER_MESSAGE;
+  return reply(
+    fitCount(parts, READ_BUDGET, (n) => reply(n, cap)),
+    cap,
+  );
 }

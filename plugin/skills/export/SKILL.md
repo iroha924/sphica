@@ -38,7 +38,9 @@ Pass the repository root as `cwd` to every tool.
    (CLAUDE.md, AGENTS.md, `.github/copilot-instructions.md`, a `SKILL.md`, anything under `.claude`, `.agents`, `.codex`, `.cursor`, a `skills` directory, or a plugin manifest directory) and Git's
    own folder are refused
 4. **Call `export`** with the chosen keys and the path. When it answers that nothing was exported, tell the owner the reasons it gives and
-   stop; write nothing. Otherwise its first line names the path and says whether it is a new file or replaces an existing one, and every line
+   stop; write nothing. A document has to fit one reply (about 29 KB): when it says the document would be over that, the owner picks
+   fewer decisions for this file, or several files; when it says one decision is over that on its own, that decision cannot be
+   exported, and `read` shows it. Otherwise its first line names the path and says whether it is a new file or replaces an existing one, and every line
    after it is the document
 5. **Show the owner the whole document**, and when it replaces a file, that file's current content too. Say that the quoted words, which may
    include other people's comments, go into a file others can read. Ask whether to write it (AskUserQuestion in Claude Code). Without a clear

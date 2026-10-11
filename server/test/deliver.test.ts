@@ -27,7 +27,7 @@ import { sessionId } from "../src/knowledge.ts";
 import { packageVersionAt, ROOT } from "../src/plugin.ts";
 import { readUnit } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
-import { hitsText, searchUnits } from "../src/search.ts";
+import { hitsReply, searchUnits } from "../src/search.ts";
 import { openRun } from "../src/trace.ts";
 import {
   aiDecided,
@@ -2311,7 +2311,7 @@ test("decided by an AI: search and read say whose each decision is, with the AI 
       ],
     });
     const r = await searchUnits(db.reader, p, { question: "connection pool", limit: 10 });
-    const text = hitsText(r.hits);
+    const text = hitsReply(r.hits, "");
     assert.match(text, /trace:ext-s1\/pool \(u\d+\): decision do, active, decided by an AI/);
     assert.match(text, /trace:ext-s1\/bigger \(u\d+\): decision do, candidate, adopted by no one/);
     assert.ok(text.includes(AI_DECIDED));

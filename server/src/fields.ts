@@ -7,6 +7,7 @@
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import { inline } from "./panel.ts";
+import { fitCount, READ_BUDGET } from "./read.ts";
 
 /**
  * One table cell: a single line cut to 200 characters, then backslashes doubled and pipes escaped. GFM splits a row at a pipe after an
@@ -15,13 +16,19 @@ import { inline } from "./panel.ts";
 const cell = (s: string) =>
   [...inline(s)].slice(0, 200).join("").replaceAll("\\", "\\\\").replaceAll("|", "\\|");
 
-export async function fieldsTable(db: Reads, projectId: number): Promise<string> {
+/**
+ * The fields table as the read server returns it: wrapped as past records, since every cell is text someone wrote, and one page of it,
+ * the rows after the definition `after` that fit READ_BUDGET, with the call that gives the next page.
+ */
+export async function fieldsText(db: Reads, projectId: number, after = 0): Promise<string> {
   const defs = await db
     .selectFrom("field_def as d")
     .innerJoin("source as s", "s.id", "d.source_id")
     .leftJoin("unit_field as f", "f.field_def_id", "d.id")
     .where("d.project_id", "=", projectId)
+    .where("d.id", ">", after)
     .select((eb) => [
+      "d.id",
       "d.name",
       "d.type",
       "d.label",
@@ -39,7 +46,11 @@ export async function fieldsTable(db: Reads, projectId: number): Promise<string>
     .orderBy("d.id")
     .execute();
   if (!defs.length)
-    return 'No fields are defined in this project. The owner defines one in a session (for example, "record the affected tenant as tenant"), and trace saves it with the owner\'s words.';
+    return framed(
+      after
+        ? `No field is defined after ${after}.`
+        : 'No fields are defined in this project. The owner defines one in a session (for example, "record the affected tenant as tenant"), and trace saves it with the owner\'s words.',
+    );
   const rows = defs.map((d) => {
     const values = d.enum_values === null ? "" : (JSON.parse(d.enum_values) as string[]).join(", ");
     const kinds = JSON.parse(d.kinds) as string[];
@@ -55,14 +66,18 @@ export async function fieldsTable(db: Reads, projectId: number): Promise<string>
       `s${d.source}, ${d.created_at}: "${quote}"`,
     ].map(cell);
   });
-  return [
+  const header = [
     "| Name | Type | Label | Description | Values | Applies to | Records with a value | Defined by the owner |",
     "| --- | --- | --- | --- | --- | --- | --- | --- |",
-    ...rows.map((r) => `| ${r.join(" | ")} |`),
-  ].join("\n");
-}
-
-/** The table as the read server returns it: wrapped as past records, since every cell is text someone wrote. */
-export async function fieldsText(db: Reads, projectId: number): Promise<string> {
-  return framed(await fieldsTable(db, projectId));
+  ];
+  const lines = rows.map((r) => `| ${r.join(" | ")} |`);
+  // The call for the next page goes after the frame's closing line, where only Sphica writes
+  const reply = (kept: number) =>
+    [
+      framed([...header, ...lines.slice(0, kept)].join("\n")),
+      ...(kept < lines.length
+        ? [`${lines.length - kept} more fields: call fields with after: ${defs[kept - 1]?.id ?? after}.`]
+        : []),
+    ].join("\n");
+  return reply(fitCount(lines, READ_BUDGET, reply));
 }

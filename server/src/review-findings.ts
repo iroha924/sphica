@@ -6,9 +6,8 @@
 
 import { z } from "zod";
 import type { Reads } from "./db.ts";
-import { inline } from "./panel.ts";
+import { fitCount, keyShown, preview, READ_BUDGET } from "./read.ts";
 import { type Batch, type FileDiff, REVIEW_BATCH, reviewBatch } from "./review.ts";
-import { head } from "./text.ts";
 
 /** A place in the changed code: a path in the diff and a line added there (the path alone for a file that is gone) */
 const Place = z.object({ path: z.string().min(1), line: z.number().int().positive().optional() }).strict();
@@ -23,8 +22,14 @@ const Finding = z
   .strict();
 const Findings = z.array(Finding).max(REVIEW_BATCH);
 
-/** The problems with one batch's verdicts, and the batch they were checked against (null when the verdicts could not be read against one) */
-export type Checked = { problems: string[]; batch: Batch | null };
+/**
+ * The problems with one batch's verdicts, and the batch they were checked against (null when the verdicts could not be read against one).
+ * given counts the findings each record of the batch got: the reply always carries it, however many problems it has room for.
+ */
+export type Checked = { problems: string[]; batch: Batch | null; given?: { id: number; findings: number }[] };
+
+/** A key, path, or message from the caller's input as a problem line shows it: one line, clipped. Matching uses the whole value */
+const shown = (s: string) => preview(s, 200);
 
 /**
  * Problems with a reviewer's verdicts on one batch: a violation or compliance must name an applicable record, give a reason, and point at
@@ -41,7 +46,7 @@ export async function checkFindings(
   const parsed = Findings.safeParse(raw);
   if (!parsed.success)
     return {
-      problems: parsed.error.issues.map((i) => `findings.${i.path.join(".")}: ${i.message}`),
+      problems: parsed.error.issues.map((i) => `findings.${shown(i.path.join("."))}: ${shown(i.message)}`),
       batch: null,
     };
   const batch = await reviewBatch(db, projectId, files, at.after, at.diff);
@@ -73,7 +78,9 @@ export async function checkFindings(
   const places = files.reduce((n, f) => n + (f.gone ? 1 : f.lines.length), 0);
   const problems: string[] = [];
   for (const [i, f] of parsed.data.entries()) {
-    const at = `findings.${i} (${f.outcome} ${f.unit})`;
+    // The key is the caller's own input; when it names a record this diff touches, a cut key carries that record's id
+    const named = batch.all.find((u) => u.key === f.unit);
+    const at = `findings.${i} (${f.outcome} ${named ? keyShown(f.unit, named.id) : shown(f.unit)})`;
     if (applicable.has(f.unit) && !here.has(f.unit)) {
       problems.push(`${at}: not in this batch; judge it with the batch review_select returns it in`);
       continue;
@@ -96,36 +103,51 @@ export async function checkFindings(
     }
     for (const e of distinct) {
       const file = files.find((x) => x.path === e.path);
-      if (!file) problems.push(`${at}: evidence path ${e.path} is not in the diff`);
+      if (!file) problems.push(`${at}: evidence path ${shown(e.path)} is not in the diff`);
       else if (file.gone) {
         // A deleted or renamed-away file has no added lines: its path is the evidence
-      } else if (e.line === undefined) problems.push(`${at}: evidence in ${file.path} needs an added line`);
+      } else if (e.line === undefined)
+        problems.push(`${at}: evidence in ${shown(file.path)} needs an added line`);
       else if (!file.lines.includes(e.line))
-        problems.push(`${at}: evidence line ${e.line} is not an added line of ${file.path}`);
+        problems.push(`${at}: evidence line ${e.line} is not an added line of ${shown(file.path)}`);
     }
   }
   // Every record of the batch is judged once: the places of several violations go in one finding's evidence
-  for (const key of here) {
-    const given = parsed.data.filter((f) => f.unit === key).length;
-    if (!given)
-      problems.push(`${key}: no verdict; give one (unrelated or undetermined when it does not apply)`);
-    else if (given > 1)
+  const given = batch.records.map((u) => ({
+    id: u.id,
+    findings: parsed.data.filter((f) => f.unit === u.key).length,
+  }));
+  for (const [i, u] of batch.records.entries()) {
+    const n = given[i]?.findings ?? 0;
+    if (!n)
       problems.push(
-        `${key}: ${given} findings; give one per record, with every place it is violated in its evidence`,
+        `${keyShown(u.key, u.id)}: no verdict; give one (unrelated or undetermined when it does not apply)`,
+      );
+    else if (n > 1)
+      problems.push(
+        `${keyShown(u.key, u.id)}: ${n} findings; give one per record, with every place it is violated in its evidence`,
       );
   }
-  return { problems, batch };
+  return { problems, batch, given };
 }
 
 /** review_check's reply: success speaks for this batch only, and names the records later batches still have to judge. */
 export function checkedText(c: Checked): string {
-  if (c.problems.length || !c.batch)
-    return `${c.problems.length} problems:\n${c.problems.map((x) => `- ${x}`).join("\n")}`;
+  if (c.problems.length || !c.batch) {
+    // Which records still lack their one finding is said first and whole, by id: the problem lines after it are cut to fit
+    const status = c.given?.length
+      ? `Findings per record of this batch: ${c.given.map((g) => `u${g.id} ${g.findings === 1 ? "1 finding" : g.findings ? `${g.findings} findings` : "no finding"}`).join(", ")}.\n`
+      : "";
+    const lines = c.problems.map((x) => `- ${preview(x, 700)}`);
+    const reply = (kept: number) =>
+      `${lines.length} problems:\n${status}${lines.slice(0, kept).join("\n")}${kept < lines.length ? `\nand ${lines.length - kept} more problems; fix these and check again` : ""}`;
+    return reply(fitCount(lines, READ_BUDGET, reply));
+  }
   const b = c.batch;
   const done = `Batch ${b.k} of ${b.n} backed (selection ${b.selection}).`;
   if (b.next === null) return `${done} This was the last batch (${b.all.length} records in all).`;
   const next = b.next;
   const left = b.all.filter((u) => u.id > next);
-  const names = left.slice(0, REVIEW_BATCH).map((u) => inline(head(u.key, 200)));
+  const names = left.slice(0, REVIEW_BATCH).map((u) => keyShown(u.key, u.id));
   return `${done} Not judged in this call: ${left.length} records (next batch: ${names.join(", ")}${left.length > names.length ? ", ..." : ""}); call review_select with after: ${next}, then review_check with the same after.`;
 }

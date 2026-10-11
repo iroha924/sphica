@@ -444,12 +444,19 @@ test("a document over the byte cap is refused, not cut", async () => {
       await save(db, p, [decision(m, long, `big${i}`)]);
       keys.push(`trace:ext-s1/big${i}`);
     }
-    assert.match(await refused(db, p, keys), /over 61440 bytes\. Choose fewer decisions\./);
+    assert.match(
+      await refused(db, p, keys),
+      new RegExp(`over ${EXPORT_LIMITS.bytes} bytes\\. Choose fewer decisions\\.`),
+    );
     // A quote full of backticks is refused for its size too, not by a crash on the way
     const ticks = `${"`a".repeat(200_000)} Decided.`;
     const mt = message(db, p, { id: "mt", text: ticks });
     await save(db, p, [decision(mt, ticks, "ticks")]);
-    assert.match(await refused(db, p, ["trace:ext-s1/ticks"]), /Choose fewer decisions\./);
+    // One decision too large on its own: choosing fewer cannot help, so the reply says where to read it
+    assert.match(
+      await refused(db, p, ["trace:ext-s1/ticks"]),
+      /this one decision, with the decisions it replaced, would be over \d+ bytes, so choosing fewer does not help\. Read it with read\./,
+    );
   } finally {
     await db.done();
   }

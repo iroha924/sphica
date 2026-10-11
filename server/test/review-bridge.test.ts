@@ -494,3 +494,82 @@ test("review selection keeps delivery's own rule: a location-free record in a co
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+/** Runs fn with HOME moved to dir, and puts it back */
+async function withHomeAt<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  process.env.HOME = dir;
+  process.env.USERPROFILE = dir;
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+  }
+}
+
+test("a review says why the git worker would not start, and keeps the slow-or-large wording for those two", async () => {
+  const w = await world();
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    // A home inside the temp directory: the worker refuses to keep its git folder where an agent can write
+    const inTmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-bridge-home-")));
+    try {
+      const why =
+        "Sphica's git worker would not start, because Sphica's git folder (.sphica/git under your home directory) overlaps the temp directory, which an agent can write (run sphica doctor in this work tree)";
+      await withHomeAt(inTmp, async () => {
+        assert.deepEqual(await localChange(w.repo, ""), { problem: why });
+        for (const reply of [
+          await w.typed("my-review"),
+          await w.called({ skill: "code-review", args: "" }),
+        ]) {
+          assert.ok(
+            reply.includes(`Sphica could not check this review against past decisions: ${why}.`),
+            reply,
+          );
+          assert.doesNotMatch(reply, /in time|too large/);
+          // The places are named by what they are, never by their paths
+          assert.ok(!reply.includes(inTmp), reply);
+        }
+      });
+    } finally {
+      fs.rmSync(inTmp, { recursive: true, force: true });
+    }
+    // The work tree as the home: the git folder would sit inside what the agent edits
+    await withHomeAt(w.repo, async () => {
+      const got = await localChange(w.repo, "");
+      assert.ok(
+        "problem" in got && got.problem.includes("overlaps this work tree, which an agent can write"),
+        JSON.stringify(got),
+      );
+    });
+    fs.rmSync(path.join(w.repo, ".sphica"), { recursive: true, force: true });
+    // A change past the size limit still gets the wording that names time and size
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), `${"x".repeat(5 * 1024 * 1024)}\n`);
+    assert.deepEqual(await localChange(w.repo, ""), {
+      problem:
+        "the change could not be read in time, or is too large to read (over 4 MB of diff or file names)",
+    });
+  } finally {
+    await w.done();
+  }
+});
+
+test("a change git cannot read is called a failure of git, not a slow or large change", async () => {
+  const w = await world();
+  try {
+    fs.writeFileSync(path.join(w.repo, "src", "db.ts"), "export const open = () => 2;\n");
+    // The commit HEAD names is gone: git fails at once
+    const head = git(w.repo, "rev-parse", "HEAD").trim();
+    const base = git(w.repo, "merge-base", "HEAD", "origin/main").trim();
+    assert.equal(head, base);
+    const tree = git(w.repo, "rev-parse", "HEAD^{tree}").trim();
+    fs.rmSync(path.join(w.repo, ".git", "objects", tree.slice(0, 2), tree.slice(2)));
+    assert.deepEqual(await localChange(w.repo, ""), {
+      problem: "the change could not be read (git failed or could not be started)",
+    });
+  } finally {
+    await w.done();
+  }
+});

@@ -7,7 +7,7 @@ import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { WorkerRequest, WorkerResult, WorktreeOp } from "./git-worker.ts";
+import type { Refusal, WorkerRequest, WorkerResult, WorktreeOp } from "./git-worker.ts";
 
 /**
  * Where Sphica keeps what git reads from it (the hooks folder, isolated git directories): under HOME, which a sandboxed agent cannot
@@ -266,49 +266,51 @@ export function repoFiles(root: string): string[] | null {
  */
 export async function worktreeStatus(root: string, deadline: number): Promise<string | null> {
   const out = await inIsolation(root, [{ kind: "status" }], { deadline, max: 16 * 1024 * 1024 });
-  return out?.[0] ?? null;
+  return Array.isArray(out) ? (out[0] ?? null) : null;
 }
 
 /**
  * The work tree's diff against a commit, read in the git worker: the patch text (no renames, a/ and b/ prefixes) and every changed
- * path. Null when it fails, misses the deadline, or an output is over max.
+ * path, or why it could not be read.
  */
 export async function worktreeDiff(
   root: string,
   from: string,
   { max, deadline }: { max: number; deadline: number },
-): Promise<{ patch: string; names: string[] } | null> {
+): Promise<{ patch: string; names: string[] } | Unread> {
   const out = await inIsolation(root, [{ kind: "diff", from: objectId(from) }], { deadline, max });
-  return out && out.length === 2 ? { patch: out[0] ?? "", names: list(out[1] ?? "") } : null;
+  if (!Array.isArray(out)) return out;
+  return out.length === 2 ? { patch: out[0] ?? "", names: list(out[1] ?? "") } : { unread: "failed" };
 }
 
 /**
  * Files git sees as renamed between the commit and the working tree, old path to new; a deleted path maps to null when git skipped
- * looking for its rename (too many files). Null when git cannot tell at all (no such commit, too slow, too much output). A move to a file
- * git does not track is not seen.
+ * looking for its rename (too many files). When git cannot tell at all (no such commit, too slow, too much output, a worker that would
+ * not start), why. A move to a file git does not track is not seen.
  */
 export async function renamesSince(
   root: string,
   commit: string,
   deadline = 10_000,
-): Promise<Map<string, string | null> | null> {
+): Promise<Map<string, string | null> | Unread> {
   const limit = 1000;
   // One deadline for resolving the commit and the worker both
   const until = Date.now() + deadline;
   let oid: string;
   try {
     oid = commitOf(root, commit, { timeout: deadline });
-  } catch {
-    return null;
+  } catch (e) {
+    return unreadOf(e);
   }
   const left = until - Date.now();
-  if (left <= 0) return null;
+  if (left <= 0) return { unread: "timeout" };
   const out = await inIsolation(root, [{ kind: "renames", commit: oid }], {
     deadline: left,
     max: 32 * 1024 * 1024,
   });
-  const names = out?.[0];
-  if (names === undefined) return null;
+  if (!Array.isArray(out)) return out;
+  const names = out[0];
+  if (names === undefined) return { unread: "failed" };
   const parts = names.split("\0");
   const renames = new Map<string, string | null>();
   const deleted: string[] = [];
@@ -336,16 +338,45 @@ function workerFile(): string {
   return fs.existsSync(js) ? js : path.join(import.meta.dirname, "git-worker.ts");
 }
 
+/** Why git's output is not there: the worker refused its directory, a deadline passed, the output was over its limit, or git failed */
+export type Unread = { unread: "refused"; code: Refusal } | { unread: "timeout" | "too_large" | "failed" };
+
+/** What a failed git run started here says about itself: Node names a run it killed at the timeout and one that printed past maxBuffer */
+export function unreadOf(e: unknown): Unread {
+  const code = (e as NodeJS.ErrnoException | null)?.code;
+  return { unread: code === "ETIMEDOUT" ? "timeout" : code === "ENOBUFS" ? "too_large" : "failed" };
+}
+
+/** A refusal in words for the person at this machine: places are named by what they are, never by their paths */
+export function refusalText(code: Refusal): string {
+  const folder = "Sphica's git folder (.sphica/git under your home directory)";
+  return {
+    hooks_not_empty: `the hooks folder inside ${folder}, which Sphica keeps empty, holds files`,
+    // The worker tells no more than the kind, so the line names the folders it can be about (the isolated one is made anew each time)
+    not_plain_dir:
+      "one of Sphica's folders under your home directory (.sphica, .sphica/git, or .sphica/git/hooks) is a link or not a directory",
+    outside_home: `${folder} leads out of your home directory`,
+    overlaps_worktree: `${folder} overlaps this work tree, which an agent can write`,
+    overlaps_tmp: `${folder} overlaps the temp directory, which an agent can write`,
+  }[code];
+}
+
+/** Whether the git worker can use its directory for this work tree. It makes the directory, checks it, and removes it; git does not run */
+export async function workerPlace(root: string, deadline = 5_000): Promise<"ready" | Unread> {
+  const out = await inIsolation(root, [{ kind: "place" }], { deadline, max: 1024 });
+  return Array.isArray(out) ? "ready" : out;
+}
+
 /**
  * Runs work tree comparisons in the git worker, one isolated git directory for all of them, and gives their outputs in order (a diff
- * gives two: the patch and the changed paths). Null when the worker fails or misses the deadline; the worker is then killed and not
- * waited for, since a read stalled in it may never end.
+ * gives two: the patch and the changed paths), or why there are none. A worker past the deadline is killed and not waited for, since a
+ * read stalled in it may never end.
  */
 export function inIsolation(
   root: string,
   ops: WorktreeOp[],
   { deadline, max }: { deadline: number; max: number },
-): Promise<string[] | null> {
+): Promise<string[] | Unread> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
@@ -357,17 +388,17 @@ export function inIsolation(
         detached: process.platform !== "win32",
       });
     } catch {
-      resolve(null);
+      resolve({ unread: "failed" });
       return;
     }
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
-    const finish = (out: string[] | null) => {
+    const finish = (out: string[] | Unread) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      if (out === null) {
+      if (!Array.isArray(out)) {
         try {
           if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
           else child.kill("SIGKILL");
@@ -380,24 +411,26 @@ export function inIsolation(
       }
       resolve(out);
     };
-    const timer = setTimeout(() => finish(null), deadline);
+    const timer = setTimeout(() => finish({ unread: "timeout" }), deadline);
     // Room for every output at its own limit, as JSON may write each byte as six (\u0001), plus the JSON around them
     const cap = 6 * max * Math.max(1, ops.length * 2) + 64 * 1024;
     child.stdout?.on("data", (c: Buffer) => {
       size += c.length;
-      if (size > cap) finish(null);
+      if (size > cap) finish({ unread: "too_large" });
       else chunks.push(c);
     });
-    child.on("error", () => finish(null));
+    child.on("error", () => finish({ unread: "failed" }));
     child.on("close", () => {
       try {
         const result = JSON.parse(Buffer.concat(chunks).toString("utf8")) as WorkerResult;
-        finish(result.ok ? result.out : null);
+        if (result.ok) finish(result.out);
+        else if ("refused" in result) finish({ unread: "refused", code: result.refused });
+        else finish({ unread: result.failed });
       } catch {
-        finish(null);
+        finish({ unread: "failed" });
       }
     });
-    child.stdin?.on("error", () => finish(null));
+    child.stdin?.on("error", () => finish({ unread: "failed" }));
     child.stdin?.end(
       // The worker's own deadline comes first, so it kills its git before it is killed (Windows has no group to kill)
       JSON.stringify({
