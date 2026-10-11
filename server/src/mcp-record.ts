@@ -210,9 +210,12 @@ server.registerTool(
         run: RUN,
         after: z
           .string()
-          .regex(/^s[1-9][0-9]{0,15}$/, "the ref the previous page named, such as s12")
+          .regex(
+            /^(s[1-9][0-9]{0,15}|t[0-9a-f]{8}\.[0-9]{1,15})$/,
+            "the after the previous page named, such as s12",
+          )
           .optional()
-          .describe("The ref the previous page named, to read the next page"),
+          .describe("The after the previous page named, to read the next page"),
         auto: AUTO,
         cwd: CWD,
       })

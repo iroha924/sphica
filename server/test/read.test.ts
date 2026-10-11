@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { inTransaction } from "../src/db.ts";
-import { readRefs, readUnit } from "../src/read.ts";
+import { plain } from "../src/panel.ts";
+import { readRefs, readUnit, shownStart } from "../src/read.ts";
 import { checkRecord, saveRecord, type Target } from "../src/record.ts";
 import { READ_BUDGET } from "../src/reply-budget.ts";
 import { openRun } from "../src/trace.ts";
@@ -514,4 +515,21 @@ test("read shows retired anchors with the words that retired them, a move's new 
     await db.done();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the start of a stored text that fits is cut between characters and never inside a sequence the frame drops whole", () => {
+  // Visible text between title and color sequences, so most byte positions fall inside one
+  const unit = `見\u001b]0;${"t".repeat(40)}\u0007え\u001b[38;5;196mる`;
+  const text = unit.repeat(40);
+  const all = Buffer.from(text, "utf8");
+  for (let room = 0; room <= Buffer.byteLength(plain(text)) + 3; room++) {
+    const s = shownStart(text, room);
+    assert.ok(Buffer.byteLength(s.text) <= room, `${Buffer.byteLength(s.text)} bytes for a room of ${room}`);
+    // What is shown and what read goes on from there are, together, the whole text made plain: nothing of a sequence shows
+    const rest = plain(all.subarray(s.end).toString("utf8"));
+    assert.equal(`${s.text}${rest}`, plain(text), `room ${room}, end ${s.end}`);
+    assert.equal(s.whole, s.end === all.length && s.text === plain(text));
+  }
+  // A sequence left open swallows the rest of this text only, and the text still counts as shown whole
+  assert.deepEqual(shownStart("before\u001b]open", 100), { text: "before", end: 12, whole: true });
 });

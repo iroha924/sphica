@@ -46,11 +46,34 @@ export async function recordWorld(name: string) {
     );
     return { text, isError: r.isError === true };
   };
+  /** Begins a trace of a session and returns the run */
+  const trace = async (session = "s1") =>
+    /^run: (\S+)/.exec((await reply("trace_begin", { session })).text)?.[1] ?? "";
+  /** Every page of a run's context, following the cursor each page names, each within the budget */
+  const context = async (run: string, auto = false) => {
+    const pages: string[] = [];
+    const cursors: string[] = [];
+    for (let after: string | undefined; ; ) {
+      const page = await reply("record_context", {
+        run,
+        ...(after ? { after } : {}),
+        ...(auto ? { auto } : {}),
+      });
+      assert.ok(!page.isError, page.text.slice(0, 300));
+      pages.push(page.text);
+      after = /call record_context with after: "([^"]+)"/.exec(page.text)?.[1];
+      if (!after) return { pages, cursors };
+      assert.ok(!cursors.includes(after), `the cursor ${after} came twice`);
+      cursors.push(after);
+    }
+  };
   return {
     db,
     p,
     repo,
     reply,
+    trace,
+    context,
     done: async () => {
       await client.close();
       await db.done();

@@ -10,6 +10,8 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { beginGlean, beginTrace, checkText, contextText, pendingText, saveText } from "../src/extract.ts";
+import { framed } from "../src/frame.ts";
+import { READ_BUDGET } from "../src/reply-budget.ts";
 import { pendingCount } from "../src/status.ts";
 import { pendingSessions, runOf } from "../src/trace.ts";
 import { at, message, project, type TempDb, tempDb } from "./temp-db.ts";
@@ -35,10 +37,12 @@ after(() => {
 
 const clock = new Date("2026-09-20T00:00:00Z");
 
+const AFTER = /after: "([st][^"]+)"/;
+
 /** Reads every page a run is given, following each page's after. */
 async function pages(db: TempDb, run: string, p: number, auto: boolean): Promise<string[]> {
   const out = [await contextText(db.ingest, run, p, null, undefined, auto)];
-  for (let m = /after: "(s\d+)"/.exec(out.at(-1) ?? ""); m; m = /after: "(s\d+)"/.exec(out.at(-1) ?? ""))
+  for (let m = AFTER.exec(out.at(-1) ?? ""); m; m = AFTER.exec(out.at(-1) ?? ""))
     out.push(await contextText(db.ingest, run, p, null, m[1], auto));
   return out;
 }
@@ -145,11 +149,11 @@ test("auto pending: a run stopped at the page limit is followed by one that star
   try {
     const p = project(db);
     // Enough for two runs: the first stops at its page limit, the second reads the rest
-    const N = 40;
+    const N = 36;
     const ids = Array.from({ length: N }, (_, i) =>
       message(db, p, {
         id: `m${i}`,
-        text: `Message ${i}: ${"a".repeat(1500)}`,
+        text: `Message ${i}: ${"a".repeat(2500)}`,
         speaker: i % 2 ? "assistant" : "owner",
         sent: `2026-09-10T00:${String(i).padStart(2, "0")}:00Z`,
       }),
@@ -170,8 +174,8 @@ test("auto pending: a run stopped at the page limit is followed by one that star
       new RegExp(`This automatic run stops here: ${N - shown.length} later messages are not shown`),
     );
     assert.ok(
-      read.every((page) => page.length < 21_000),
-      read.map((page) => page.length).join(", "),
+      read.every((page) => Buffer.byteLength(framed(page)) <= READ_BUDGET),
+      read.map((page) => Buffer.byteLength(page)).join(", "),
     );
     // A page past the limit is never given, so the run cannot read on
     assert.doesNotMatch(last, /after: "s\d+"/);
@@ -281,7 +285,7 @@ test("auto pending: a page of context alone does not use up the run's pages of t
     const waiting = Array.from({ length: 4 }, (_, i) =>
       message(db, p, {
         id: `w${i}`,
-        text: `Later ${i}: ${"b".repeat(15_000)}`,
+        text: `Later ${i}: ${"b".repeat(20_000)}`,
         sent: `2026-09-10T01:0${i}:00Z`,
       }),
     );

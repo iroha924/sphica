@@ -566,6 +566,29 @@ async function piece(
  * read's reply for refs, framed: whole while they fit in READ_BUDGET; then the ref that does not fit is cut at a character and the reply
  * names the refs to call read with for the rest, its continuation first. Every reply after the first shows at least one character more.
  */
+/**
+ * Where showing a stored text from `from` stops so that it fits room bytes: between characters, and not inside a sequence plain drops
+ * whole. A cut inside one moves before it, or past it when the text shown starts there (the sequence then shows nothing).
+ */
+function cutEnd(all: Buffer, hide: [number, number][], from: number, room: number): number {
+  const cut = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
+  const inside = hide.find(([a, b]) => a < cut && cut < b);
+  const end = inside ? (inside[0] > from ? inside[0] : inside[1]) : cut;
+  return bytes(plain(all.subarray(from, end).toString("utf8"))) > Math.max(room, 0) ? cut : end;
+}
+
+/**
+ * The start of a stored text that fits room bytes once made plain, and the byte of the stored text it ends at (the place read takes
+ * to go on). It is plain on its own, so a terminal sequence left open in it swallows nothing that comes after.
+ */
+export function shownStart(text: string, room: number): { text: string; end: number; whole: boolean } {
+  const whole = plain(text);
+  if (bytes(whole) <= room) return { text: whole, end: bytes(text), whole: true };
+  const all = Buffer.from(text, "utf8");
+  const end = cutEnd(all, sequences(all), 0, room);
+  return { text: plain(all.subarray(0, end).toString("utf8")), end, whole: false };
+}
+
 export async function readRefs(
   db: Reads,
   projectId: number,
@@ -610,11 +633,7 @@ export async function readRefs(
       bytes(p.head) -
       bytes(note(all.length, all.length)) -
       bytes(tail([p.resume(all.length), ...rest]));
-    const cut = from + bytes(head(all.subarray(from).toString("utf8"), Math.max(room, 0)));
-    // A cut inside a sequence moves before it, or past it when the page starts there (the sequence then shows nothing)
-    const inside = hide.find(([a, b]) => a < cut && cut < b);
-    let end = inside ? (inside[0] > from ? inside[0] : inside[1]) : cut;
-    if (bytes(plain(all.subarray(from, end).toString("utf8"))) > Math.max(room, 0)) end = cut;
+    const end = cutEnd(all, hide, from, room);
     const text = all.subarray(from, end).toString("utf8");
     if (!text) {
       next = refs.slice(i);
