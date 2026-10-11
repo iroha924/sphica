@@ -182,6 +182,17 @@ base: main
   - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前は review_check と export のテストが fail、直した後は pass
   - 結果: `bun run verify` → 終了コード 0
 
+- [x] T15: 検索結果の「Replaces <キー>」に、置き換えられた記録そのものの id を出す
+  - 種別: 修正
+  - 計画: S5
+  - 依存: T14（直す対象の行が要る）
+  - 変更: `server/src/search.ts`, `server/test/search.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/search.test.ts` → 直す前（`d40ec6e4`）は、切ったキーの横が「read u<hit の id> for it」で、タブを含む短いキーにも [key cut] が付く
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(search): name the replaced record's own id beside its cut key`
+  - 結果: `node --import ./test/isolate-home.ts --test test/search.test.ts` → 直す前は `successorOfId` が型に無く型検査で落ちる（表示も hit の id）、直した後は 24 件 pass
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 
 - 2026-10-11 / T01 / 未完了の T01 の変更欄を変えた。前: `server/src/worktree.ts` あり、`server/test/git-safety.test.ts`・`server/test/record.test.ts` なし。後: 逆 / `snapshot` は `worktreeStatus` が今までどおり文字列か `null` を返すので変更が要らなかった。既存のテスト 2 ファイルが新しい戻り値に追従し、rename の注記のテストは `record.test.ts` にあった
@@ -210,3 +221,5 @@ base: main
 - 2026-10-11 / T13 / Codex の再レビュー（`3516aa72..1f7c6d43`、指摘 2 件、どちらも P2、実 DB で再現）: (1) `review_check` の「次のバッチ」の案内と、finding 自身の問題行は、キーを切って id を出さない (2) export の種類・状態による拒否の行も、キーを切って id を出さない / 両方採用。T14 を足した。(1) は `keyShown` を使う（finding の問題行は、そのキーがこの差分に当たる記録のときだけ id を付ける）。(2) は、参照が呼び出し側の入力でスキーマが 300 文字に限るので、切らずにそのまま出す（これで拒否の一覧を予算で止める守りにも実際に届き、テストで通る）。あわせて、検索結果の「Replaces <キー>」が切れたときは、その hit の `u<id>` を読めば分かると書く
 - 2026-10-11 / T13 / review-shipping（`1f7c6d43`、出荷は可の判定）が 2 件指摘: 切ったキーの横の id を 0 にしても、4 か所のうち 3 か所でテストが通る（テストが数字なら何でも受け入れていた） / asked は id を 100 番台と 77 にして値まで比べ、`review_check` は全 50 件の id を記録の id と比べる形にした。export の置換の連なりの行は、起こすのに 20 段を超える連なりが要るのでテストを足していない
 - 2026-10-11 / 全体 / 同じ種類の指摘（切ったキーに id が無い）が 2 回続いたので、変えた 6 つの module を `rg 'preview\([^)]*[kK]ey|shown\([^)]*[kK]ey|head\([^)]*\.key'` で洗い、残りが無いことを確かめた（残るのは `keyShown` 自身と、id を必ず横に出す検索結果の見出しだけ）
+- 2026-10-11 / T14 / Codex の再レビュー（`1f7c6d43..d40ec6e4`、前の 2 件は解消。新しい指摘 2 件、どちらも T14 で自分が足した 1 行について）: (1) P2: 置き換えが A → B → C と続くとき、案内した hit（C）の `read` には直前の B しか出ず、切った A のキーに届かない (2) P3: タブなどを整えただけの短いキーにも [key cut] が付く / 両方採用。T15 を足した。hit が、置き換えられた記録（一致した記録そのもの）の id を持つようにし、`keyShown` でその id を出す
+- 2026-10-11 / 全体 / Codex のレビューはここで区切る（コミットごと 3 回、全差分 1 回、修正の再レビュー 2 回）。最後の 2 回の指摘は、直しで自分が足した行の中に収まっていて、受け入れ条件の外に広がっていない。T15 の後は、PR を作ったときに走る GitHub 側の Codex のレビューで最終の head を見る

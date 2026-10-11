@@ -10,7 +10,7 @@ import { AI_DECIDED, AUTHORITY, type Authority, authorityOf } from "./authority.
 import type { Reads } from "./db.ts";
 import { framed } from "./frame.ts";
 import type { LIFECYCLES, UNIT_KINDS } from "./knowledge.ts";
-import { fitCount, leftOut, preview, READ_BUDGET } from "./read.ts";
+import { fitCount, keyShown, leftOut, preview, READ_BUDGET } from "./read.ts";
 import { repoPath } from "./record.ts";
 import { ftsQuery, identTerm, queryTerms, terms } from "./text.ts";
 
@@ -39,6 +39,8 @@ export type UnitHit = {
   aliasOnly: boolean;
   /** Set when the unit is here because it replaced a hit */
   successorOf?: string;
+  /** The id of that replaced unit: what read takes when its key is too long to show whole */
+  successorOfId?: number;
   /** Whose decision a decision or constraint is now */
   authority?: Authority;
 };
@@ -162,6 +164,7 @@ export async function searchUnits(
           matched: [],
           aliasOnly: false,
           successorOf: h.key,
+          successorOfId: h.id,
           rank: h.rank,
         });
       }
@@ -469,9 +472,6 @@ function hitText(h: UnitHit): string {
         `${preview(a.path, SHOWN.path)}${a.symbol ? ` ${preview(a.symbol, SHOWN.symbol)}` : ""} (${a.role})`,
     );
   if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
-  // The replaced record has no id here; cut, its key is reached by reading this hit, which shows what it replaced
-  const was = preview(h.successorOf ?? "", SHOWN.key);
-  const replaced = was === (h.successorOf ?? "") ? was : `${was} [key cut: read u${h.id} for it]`;
   return [
     // A key cut for display is not one read takes: the id beside it is
     `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
@@ -481,7 +481,7 @@ function hitText(h: UnitHit): string {
     ...(options.length ? [`Options: ${options.join(" / ")}`] : []),
     ...(anchors.length ? [`Code: ${anchors.join(", ")}`] : []),
     h.successorOf
-      ? `Replaces ${replaced}, which matched`
+      ? `Replaces ${h.successorOfId === undefined ? preview(h.successorOf, SHOWN.key) : keyShown(h.successorOf, h.successorOfId)}, which matched`
       : `Matched: ${preview(h.matched.join(", "), SHOWN.matched)}${h.aliasOnly ? " (search aliases only)" : ""}`,
   ].join("\n");
 }
