@@ -58,7 +58,8 @@ Everything else, and any change whose impact you cannot state right away, goes t
 ## Before implementing
 
 For a change in behavior, work out the plan with Codex using the `grill-codex` Skill before implementing, and get the owner's Go on the plan in `.claude/plans/`.
-The plan records the implementation plan as agreed (do not append progress to it); progress goes in its task list beside it. Both are tracked in git.
+The plan records the implementation plan as agreed (do not append progress to it); progress goes in its task list beside it. Both are tracked in git while the work goes on.
+When the work is done and its reviews are over, remove both in the pull request's last commit, name the removed files in the PR body, and carry the decisions, declined options, and verification there.
 
 ## Review
 
