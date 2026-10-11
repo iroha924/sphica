@@ -6,10 +6,8 @@
 
 import { z } from "zod";
 import type { Reads } from "./db.ts";
-import { inline } from "./panel.ts";
 import { fitCount, keyShown, preview, READ_BUDGET } from "./read.ts";
 import { type Batch, type FileDiff, REVIEW_BATCH, reviewBatch } from "./review.ts";
-import { head } from "./text.ts";
 
 /** A place in the changed code: a path in the diff and a line added there (the path alone for a file that is gone) */
 const Place = z.object({ path: z.string().min(1), line: z.number().int().positive().optional() }).strict();
@@ -80,7 +78,9 @@ export async function checkFindings(
   const places = files.reduce((n, f) => n + (f.gone ? 1 : f.lines.length), 0);
   const problems: string[] = [];
   for (const [i, f] of parsed.data.entries()) {
-    const at = `findings.${i} (${f.outcome} ${shown(f.unit)})`;
+    // The key is the caller's own input; when it names a record this diff touches, a cut key carries that record's id
+    const named = batch.all.find((u) => u.key === f.unit);
+    const at = `findings.${i} (${f.outcome} ${named ? keyShown(f.unit, named.id) : shown(f.unit)})`;
     if (applicable.has(f.unit) && !here.has(f.unit)) {
       problems.push(`${at}: not in this batch; judge it with the batch review_select returns it in`);
       continue;
@@ -148,6 +148,6 @@ export function checkedText(c: Checked): string {
   if (b.next === null) return `${done} This was the last batch (${b.all.length} records in all).`;
   const next = b.next;
   const left = b.all.filter((u) => u.id > next);
-  const names = left.slice(0, REVIEW_BATCH).map((u) => inline(head(u.key, 200)));
+  const names = left.slice(0, REVIEW_BATCH).map((u) => keyShown(u.key, u.id));
   return `${done} Not judged in this call: ${left.length} records (next batch: ${names.join(", ")}${left.length > names.length ? ", ..." : ""}); call review_select with after: ${next}, then review_check with the same after.`;
 }

@@ -1541,9 +1541,28 @@ test("review_check keeps its reply within the reply budget and still says, recor
       perRecord(none.text),
       units.map((u) => `u${u.id} no finding`),
     );
-    assert.equal(
-      [...none.text.matchAll(/^- trace:e{190,200}… \[key cut: read u\d+\]: no verdict; /gm)].length,
-      50,
+    // The id beside each cut key is that record's own, the one read takes
+    assert.deepEqual(
+      [...none.text.matchAll(/^- trace:e{190,200}… \[key cut: read u(\d+)\]: no verdict; /gm)].map((x) =>
+        Number(x[1]),
+      ),
+      units.map((u) => u.id),
+    );
+    // A record judged twice is named the same way
+    const one = { outcome: "unrelated", unit: units[0]?.key ?? "", reason: "a test" };
+    const twice = await check([one, one]);
+    assert.match(
+      twice.text,
+      new RegExp(`^- trace:e{190,200}… \\[key cut: read u${units[0]?.id}\\]: 2 findings; `, "m"),
+    );
+    // A finding with a problem of its own names the record by the same id
+    const bare = await check([{ outcome: "violation", unit: units[0]?.key ?? "", reason: "a test" }]);
+    assert.match(
+      bare.text,
+      new RegExp(
+        `^- findings\\.0 \\(violation trace:e{190,200}… \\[key cut: read u${units[0]?.id}\\]\\): needs evidence`,
+        "m",
+      ),
     );
 
     // Fifty findings with fifty wrong places each: far more problem lines than fit
@@ -1563,7 +1582,7 @@ test("review_check keeps its reply within the reply budget and still says, recor
     const left = Number(/\nand (\d+) more problems; fix these and check again$/.exec(wrong.text)?.[1]);
     const listed = [
       ...wrong.text.matchAll(
-        /^- findings\.\d+ \(violation trace:e+…\): evidence path p+… is not in the diff$/gm,
+        /^- findings\.\d+ \(violation trace:e+… \[key cut: read u\d+\]\): evidence path p+… is not in the diff$/gm,
       ),
     ].length;
     assert.ok(listed > 0 && left > 0 && listed + left === 2500, `${listed} listed, ${left} left`);
@@ -1613,16 +1632,19 @@ test("export hands over a document only when one reply can carry it whole, and i
     assert.ok(!few.isError, few.text.slice(0, 200));
     assert.match(few.text, /^Write to docs\/d+\.md, a new file\./);
     assert.equal([...few.text.matchAll(/^## Decision \d+$/gm)].length, 4);
-    // Fifty refs that are not records, each as long as the tool takes
-    const unknown = await w.reply("export", {
-      records: Array.from({ length: 50 }, (_, i) => `trace:${"x".repeat(280)}/${i}`),
-      path: "docs/decisions.md",
-    });
-    assert.ok(unknown.isError);
-    assert.match(
-      unknown.text,
-      /^Nothing was exported\. Only active decisions of this project can be:\n- trace:x+/,
+    // Fifty refs that are not records, each as long as the tool takes and multibyte: shown whole, as the caller sent them,
+    // until the reply is full, then counted
+    const refs = Array.from(
+      { length: 50 },
+      (_, i) => `trace:${"€".repeat(280)}/${String(i).padStart(2, "0")}`,
     );
+    const unknown = await w.reply("export", { records: refs, path: "docs/decisions.md" });
+    assert.ok(unknown.isError);
+    const listed = [...unknown.text.matchAll(/^- (trace:€{280}\/\d\d): /gm)].map((x) => x[1]);
+    const more = Number(/\nand (\d+) more that cannot be exported$/.exec(unknown.text)?.[1]);
+    assert.ok(listed.length > 0 && more > 0, `${listed.length} listed, ${more} more`);
+    assert.deepEqual(listed, refs.slice(0, listed.length));
+    assert.equal(listed.length + more, 50);
   } finally {
     await w.done();
   }

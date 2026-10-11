@@ -469,6 +469,9 @@ function hitText(h: UnitHit): string {
         `${preview(a.path, SHOWN.path)}${a.symbol ? ` ${preview(a.symbol, SHOWN.symbol)}` : ""} (${a.role})`,
     );
   if (h.anchors.length > SHOWN.anchors) anchors.push(more(h.anchors.length - SHOWN.anchors, "anchors"));
+  // The replaced record has no id here; cut, its key is reached by reading this hit, which shows what it replaced
+  const was = preview(h.successorOf ?? "", SHOWN.key);
+  const replaced = was === (h.successorOf ?? "") ? was : `${was} [key cut: read u${h.id} for it]`;
   return [
     // A key cut for display is not one read takes: the id beside it is
     `## ${key}${key.endsWith("…") && key !== h.key ? " [key cut]" : ""} (u${h.id}): ${h.kind}${h.stance ? ` ${h.stance}` : ""}, ${h.lifecycle}${h.authority ? `, ${AUTHORITY[h.authority]}` : ""}`,
@@ -478,7 +481,7 @@ function hitText(h: UnitHit): string {
     ...(options.length ? [`Options: ${options.join(" / ")}`] : []),
     ...(anchors.length ? [`Code: ${anchors.join(", ")}`] : []),
     h.successorOf
-      ? `Replaces ${preview(h.successorOf, SHOWN.key)}, which matched`
+      ? `Replaces ${replaced}, which matched`
       : `Matched: ${preview(h.matched.join(", "), SHOWN.matched)}${h.aliasOnly ? " (search aliases only)" : ""}`,
   ].join("\n");
 }

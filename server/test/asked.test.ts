@@ -430,7 +430,7 @@ test("the reply is the turn's last assistant message, and tied records are bound
 
 test("an asked reply keeps what it says about the whole result when messages give way, and marks an id it had to cut", () => {
   const led = (i: number) => ({
-    id: i,
+    id: 100 + i,
     key: `trace:${"k".repeat(400)}/${i}`,
     kind: "finding",
     lifecycle: "active",
@@ -454,7 +454,16 @@ test("an asked reply keeps what it says about the whole result when messages giv
     },
     led: Array.from({ length: 10 }, (_, i) => led(i)),
     hidden: 0,
-    context: [],
+    context: [
+      {
+        id: 77,
+        key: `trace:${"c".repeat(400)}/x`,
+        kind: "finding",
+        lifecycle: "active",
+        speaker: "owner",
+        role: "states",
+      },
+    ],
     direct: new Set<number>(),
     decided: true,
     traced: true,
@@ -490,6 +499,10 @@ test("an asked reply keeps what it says about the whole result when messages giv
   // A tied record names three of its live successors and counts the rest
   assert.match(
     inside,
-    /^- trace:k{194}… \[key cut: read u\d\] \(finding, active; now trace:n{194}… \[key cut: read u1000\] \(active\), trace:n{194}… \[key cut: read u1001\] \(active\), trace:n{194}… \[key cut: read u1002\] \(active\), and 2 more\)$/m,
+    /^- trace:k{194}… \[key cut: read u100\] \(finding, active; now trace:n{194}… \[key cut: read u1000\] \(active\), trace:n{194}… \[key cut: read u1001\] \(active\), trace:n{194}… \[key cut: read u1002\] \(active\), and 2 more\)$/m,
+  );
+  assert.match(
+    inside,
+    /^- trace:c{194}… \[key cut: read u77\] \(finding, active\): quotes the owner \(states\)$/m,
   );
 });

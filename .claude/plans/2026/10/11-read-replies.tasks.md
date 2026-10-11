@@ -171,6 +171,17 @@ base: main
   - 結果: `node --import ./test/isolate-home.ts --test test/asked.test.ts` → 直す前は 1 件 fail（`plugin.test.ts` の asked と review_check のテストも fail）、直した後は pass
   - 結果: `bun run verify` → 終了コード 0
 
+- [x] T14: キーを切る残りの場所にも `u<id>` を出し、export の拒否の行は渡された参照をそのまま出す
+  - 種別: 修正
+  - 計画: S5, S6, S7
+  - 依存: T13（`keyShown` が要る）
+  - 変更: `server/src/review-findings.ts`, `server/src/export.ts`, `server/src/search.ts`, `server/test/plugin.test.ts`, `server/test/asked.test.ts`, `server/test/search.test.ts`
+  - red: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前（`1f7c6d43`）は、finding 自身の問題行に id が無く、export の拒否の行が参照を 200 バイトで切るので、厳しくしたテストが 2 件落ちる
+  - 完了条件: `bun run verify` → 終了コード 0
+  - コミット: `fix(read): carry the record id on the remaining lines that cut a key`
+  - 結果: `node --import ./test/isolate-home.ts --test test/plugin.test.ts` → 直す前は review_check と export のテストが fail、直した後は pass
+  - 結果: `bun run verify` → 終了コード 0
+
 ## 記録
 
 - 2026-10-11 / T01 / 未完了の T01 の変更欄を変えた。前: `server/src/worktree.ts` あり、`server/test/git-safety.test.ts`・`server/test/record.test.ts` なし。後: 逆 / `snapshot` は `worktreeStatus` が今までどおり文字列か `null` を返すので変更が要らなかった。既存のテスト 2 ファイルが新しい戻り値に追従し、rename の注記のテストは `record.test.ts` にあった
@@ -196,3 +207,6 @@ base: main
 - 2026-10-11 / T05 / review-shipping が持ち主の DB の写しで測った大きさ: 有効な決定 190 件、1 件の文書は 897〜4,519 バイト（中央値 1,568）。新しい上限では 1 ファイルに 14〜23 件入る。1 件だけで拒否されるものは無い
 - 2026-10-11 / 全体 / Codex の全差分レビュー（`main..3516aa72`、指摘 1 件、P2、Codex が実 DB で再現）: asked がキーを 200 バイトで切るのに `u<id>` を出さないので、表示された記録を `read` で開けない。後継と Same turn のキーも同じ / 採用。T13 を足した。キーを切ったときだけ「[key cut: read u<id>]」を付ける関数（`keyShown`）を `read.ts` に置き、asked の 3 か所、`review_check` の「no verdict」と重複の行、export の置換の連なりの行に使った。短いキーの表示は変わらない
 - 2026-10-11 / 全体 / 完了条件の実測（`3516aa72` を pack してリポジトリの外で展開）: `sphica doctor` は「✓ Git worker ready」、HOME を一時ディレクトリの下にすると「△ Git worker would not start: … overlaps the temp directory …」。pack した `deliver.js` のレビューの hook は、通常は「Sphica checked 1 changed path against origin/main: no active recorded decision applies.」、HOME が一時ディレクトリの下だと断りの理由を返す。pack した `mcp.js` は 0.6.49 を名乗り、`search`・`fields`（`after` 付きも）が答え、40 KB の未知のツール名のエラーは 32,768 バイト
+- 2026-10-11 / T13 / Codex の再レビュー（`3516aa72..1f7c6d43`、指摘 2 件、どちらも P2、実 DB で再現）: (1) `review_check` の「次のバッチ」の案内と、finding 自身の問題行は、キーを切って id を出さない (2) export の種類・状態による拒否の行も、キーを切って id を出さない / 両方採用。T14 を足した。(1) は `keyShown` を使う（finding の問題行は、そのキーがこの差分に当たる記録のときだけ id を付ける）。(2) は、参照が呼び出し側の入力でスキーマが 300 文字に限るので、切らずにそのまま出す（これで拒否の一覧を予算で止める守りにも実際に届き、テストで通る）。あわせて、検索結果の「Replaces <キー>」が切れたときは、その hit の `u<id>` を読めば分かると書く
+- 2026-10-11 / T13 / review-shipping（`1f7c6d43`、出荷は可の判定）が 2 件指摘: 切ったキーの横の id を 0 にしても、4 か所のうち 3 か所でテストが通る（テストが数字なら何でも受け入れていた） / asked は id を 100 番台と 77 にして値まで比べ、`review_check` は全 50 件の id を記録の id と比べる形にした。export の置換の連なりの行は、起こすのに 20 段を超える連なりが要るのでテストを足していない
+- 2026-10-11 / 全体 / 同じ種類の指摘（切ったキーに id が無い）が 2 回続いたので、変えた 6 つの module を `rg 'preview\([^)]*[kK]ey|shown\([^)]*[kK]ey|head\([^)]*\.key'` で洗い、残りが無いことを確かめた（残るのは `keyShown` 自身と、id を必ず横に出す検索結果の見出しだけ）

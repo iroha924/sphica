@@ -196,7 +196,8 @@ export async function exportDecisions(
   const problems: string[] = [];
   for (const ref of wanted) {
     const u = await chosen(db, projectId, ref);
-    if (typeof u === "string") problems.push(`- ${preview(ref, 200)}: ${preview(u, 400)}`);
+    // A ref is the caller's own input, bounded by the tool's schema: shown whole, so it is still the ref to read by
+    if (typeof u === "string") problems.push(`- ${inline(ref)}: ${preview(u, 400)}`);
     else if (!units.some((x) => x.id === u.id)) units.push(u);
   }
   const chains: { newer: string; unit: Unit }[][] = [];
