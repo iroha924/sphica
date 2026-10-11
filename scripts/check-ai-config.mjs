@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { withoutComments } from "./lib/english.mjs";
+import { settingsProblems } from "./lib/fork-intake.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
@@ -492,6 +493,14 @@ for (const name of pluginSkills) {
 
 // The choices from claude --help. An invalid value only warns and falls back to the session default.
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+// Checks what guards a fork's pull request before the owner approves it. The project settings reach every session started in this
+// repository, cloud ones included, so they hold the checkout deny and nothing else.
+const settingsFile = ".claude/settings.json";
+const settingsText = read(settingsFile);
+// A missing file was already reported by the read; an empty one still has to be judged
+if (fs.existsSync(path.join(root, settingsFile)))
+  for (const problem of settingsProblems(settingsText)) fail(`${settingsFile}: ${problem}`);
 
 // Checks the repository-only reviewers (.claude/agents). Shipped reviewers are not Agent definitions but
 // the bodies in plugin/skills/review/reviewers/, which have no frontmatter

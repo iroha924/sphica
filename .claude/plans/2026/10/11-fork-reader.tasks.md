@@ -22,13 +22,16 @@ base: main
 
 `gh pr checkout` とその別名を設定が断り、読む道具しか持たない `fork-reader` が使えるようになる。どちらも、形が崩れると検査が落ちる。
 
-- [ ] T01: `.claude/settings.json` に deny の 3 行を置き、その形を検査する
+- [x] T01: `.claude/settings.json` に deny の 3 行を置き、その形を検査する
   - 種別: 追加
   - 計画: S1
   - 依存: なし
   - 変更: `.claude/settings.json`, `scripts/lib/fork-intake.mjs`, `scripts/lib/fork-intake.d.mts`, `scripts/check-ai-config.mjs`, `server/test/fork-intake.test.ts`
   - 完了条件: `bun run verify` → 終了コード 0
   - コミット: `chore(agents): deny gh pr checkout and its aliases in the project settings`
+  - 結果: `bun run verify` → 終了コード 0（最後のスイートは pass 132、fail 0）
+  - 結果: `node --import ./test/isolate-home.ts --test test/fork-intake.test.ts` → 4 件 pass
+  - 結果: `node scripts/check-ai-config.mjs` → 設定ファイルが空のとき終了コード 1（`not JSON`）、無いとき終了コード 1（ENOENT）、元に戻すと 0
 
 - [ ] T02: 読む道具しか持たないエージェント `fork-reader` を置き、その frontmatter を検査する
   - 種別: 追加
@@ -51,3 +54,5 @@ base: main
   - コミット: `docs(fork-pr): hand fork text to the reader and start Codex without outside tools`
 
 ## 記録
+
+- 2026-10-11 / T01 / コミットの前の review-shipping が 1 件指摘: 設定ファイルが 0 バイトだと `check-ai-config.mjs` が検査を飛ばして通る（再現した。終了コード 0） / 読めた文字列の有無ではなく、ファイルの有無で検査に入るように直した。ほかの指摘は無し（検査を 11 通りに弱めるとテストが全部落ちること、評価・tarball・Biome・knip に影響が無いことをレビュアーが確認）
