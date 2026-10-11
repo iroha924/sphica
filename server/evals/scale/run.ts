@@ -40,7 +40,11 @@ const PER_SAVE = 50;
 const KEY = "git:github.com/o/r";
 
 // Never the owner's ~/.sphica: the drain below and everything this process opens use a home of its own
-const home = fs.mkdtempSync(path.join(os.tmpdir(), "sphica-scale-"));
+const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "sphica-scale-")));
+const home = path.join(base, "home");
+// The children's temp directory sits beside their home: the git worker refuses a home inside the temp directory
+const tmp = path.join(base, "tmp");
+for (const dir of [home, tmp]) fs.mkdirSync(dir);
 process.env.SPHICA_HOME = path.join(home, ".sphica");
 const { flush, spoolDir } = await import("../../src/capture.ts");
 
@@ -346,6 +350,9 @@ function env(f: Fixture, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...out,
     HOME: home,
     USERPROFILE: home,
+    TMPDIR: tmp,
+    TMP: tmp,
+    TEMP: tmp,
     SPHICA_HOME: path.join(home, ".sphica"),
     SPHICA_DB: f.db.file,
     ...extra,
@@ -823,5 +830,5 @@ if (!values["no-drain"]) {
     if (d.sent !== k || d.left !== 0 || d.rows !== k) failed = true;
   }
 }
-fs.rmSync(home, { recursive: true, force: true });
+fs.rmSync(base, { recursive: true, force: true });
 process.exitCode = failed ? 1 : 0;
