@@ -24,7 +24,6 @@ What Sphica intends to do, and not do, over the next twelve months. It is a dire
 
 - Take pull requests from outside contributors, and make the way they are taken in safer against text written to mislead the reviewer.
 - Keep working in both Claude Code and Codex, on macOS, Linux, and Windows.
-- Reach the silver level of the OpenSSF Best Practices badge.
 
 ## Does not intend to do
 
